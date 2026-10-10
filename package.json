@@ -1,7 +1,7 @@
 {
   "name": "xenonet",
   "productName": "XenoNet",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "The network for SI. SI (super intelligence) on your machine can see and message each other, claim files before editing, and wake SI running elsewhere.",
   "author": "willctl",
