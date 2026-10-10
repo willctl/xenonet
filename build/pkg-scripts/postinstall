@@ -1,0 +1,20 @@
+#!/bin/sh
+# Opens XenoNet for the person at the screen after an install in Installer.app,
+# like the Windows installer's "Run XenoNet" box. Command-line installs (the
+# equivalent of Setup /S) don't start it.
+[ "$COMMAND_LINE_INSTALL" = "1" ] && exit 0
+# $2 is the install folder for package scripts and the bundle itself for
+# bundle scripts; electron-builder registers this file as both.
+case "$2" in
+  *.app) app="$2" ;;
+  *) app="$2/XenoNet.app" ;;
+esac
+[ -d "$app" ] || exit 0
+if [ "$(id -u)" -ne 0 ]; then
+  /usr/bin/open "$app" >/dev/null 2>&1
+  exit 0
+fi
+user=$(/usr/bin/stat -f %Su /dev/console)
+[ -n "$user" ] && [ "$user" != "root" ] || exit 0
+/bin/launchctl asuser "$(/usr/bin/id -u "$user")" /usr/bin/sudo -u "$user" /usr/bin/open "$app" >/dev/null 2>&1
+exit 0

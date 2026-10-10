@@ -1,0 +1,428 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/actor/snapshot/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "An actor",
+  "description": "An actor as the console draws it: who or what it is, how XenoNet knows of it, whether it's there and what it's doing, and what it's acting on.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "actor/snapshot/v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^(@[a-z][a-z0-9-]{1,31}:)?actor:[a-z0-9][a-z0-9-]{0,31}$",
+      "description": "actor:<slug>, or @<host>:actor:<slug> from another host; the person at the console is actor:you"
+    },
+    "kind": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "agent",
+            "human"
+          ]
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "product": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+              "description": "A slug: hermes-agent, grok-bot, muse, dots"
+            },
+            "vendor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "version": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "vendor",
+            "version"
+          ],
+          "additionalProperties": {}
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What it is; null for a custom actor"
+    },
+    "host": {
+      "description": "Null on this machine, else the host id, and the id is then qualified",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "via": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": [
+              "observed",
+              "attributed",
+              "registered",
+              "remote",
+              "demo"
+            ]
+          },
+          {
+            "type": "string"
+          }
+        ],
+        "description": "observed: XenoNet reads its state; attributed: XenoNet traces work here back to it; registered: it reports itself; remote: it reads through a connection you approved; demo: made up"
+      },
+      "description": "How XenoNet knows of it"
+    },
+    "presence": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "working",
+            "idle",
+            "away",
+            "offline",
+            "unknown"
+          ]
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "away: it missed two heartbeats"
+    },
+    "presenceSince": {
+      "anyOf": [
+        {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "lastSeen": {
+      "anyOf": [
+        {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "heartbeatMs": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "status": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 140
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What it says, or XenoNet infers, it's doing"
+    },
+    "needsYou": {
+      "description": "When it waits on you, for the alert strip; null or left out otherwise",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "question",
+                    "permission",
+                    "review"
+                  ]
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 140
+            },
+            "since": {
+              "type": "number",
+              "description": "Epoch milliseconds"
+            }
+          },
+          "required": [
+            "kind",
+            "text",
+            "since"
+          ],
+          "additionalProperties": {}
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": [
+              "spawn-sessions",
+              "edit-repos",
+              "run-commands",
+              "message-people",
+              "message-agents",
+              "schedule",
+              "browse",
+              "use-computer"
+            ]
+          },
+          {
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "A graph node id"
+          },
+          "relation": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "works-on",
+                  "spawned",
+                  "edited",
+                  "messaged",
+                  "watches",
+                  "reviews"
+                ]
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "since": {
+            "type": "number",
+            "description": "Epoch milliseconds"
+          },
+          "lastAt": {
+            "type": "number",
+            "description": "Epoch milliseconds"
+          }
+        },
+        "required": [
+          "id",
+          "relation",
+          "since",
+          "lastAt"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "What it's acting on"
+    },
+    "recent": {
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "$ref": "https://xenonet.dev/schemas/actor/event/v1.json"
+      },
+      "description": "Its last events, newest last"
+    },
+    "counts": {
+      "type": "object",
+      "properties": {
+        "events24h": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "spawned24h": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "messages24h": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "events24h",
+        "spawned24h",
+        "messages24h"
+      ],
+      "additionalProperties": {}
+    },
+    "identity": {
+      "description": "The identity it acts as (claude:…, chatgpt:…, github:…), if XenoNet knows it",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "remote": {
+      "description": "Left out for an actor with no remote connection",
+      "type": "object",
+      "properties": {
+        "connections": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Its remote connections, active or not"
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Whether one is active: approved, not revoked or expired"
+        },
+        "bridge": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "connected",
+                "not_connected"
+              ]
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Whether an adapter is connected through one now; it says nothing of whether the actor itself is at work"
+        },
+        "accountLink": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "verified",
+                "owner_asserted",
+                "unverified"
+              ]
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "How sure XenoNet is of the account it acts as: verified by its provider, your word only, or neither"
+        },
+        "permissions": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "read"
+                ]
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "description": "What it may do through them, apart from its capabilities elsewhere"
+        },
+        "transports": {
+          "description": "The routes its active connections take: a tunnel such as OpenAI's Secure MCP Tunnel, or a local MCP client",
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "openai-secure-mcp-tunnel",
+                  "local-stdio"
+                ]
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "connections",
+        "active",
+        "bridge",
+        "accountLink",
+        "permissions"
+      ],
+      "additionalProperties": {}
+    }
+  },
+  "required": [
+    "schema",
+    "id",
+    "kind",
+    "name",
+    "product",
+    "host",
+    "via",
+    "presence",
+    "presenceSince",
+    "lastSeen",
+    "heartbeatMs",
+    "status",
+    "capabilities",
+    "targets",
+    "recent",
+    "counts",
+    "identity"
+  ],
+  "additionalProperties": {}
+}

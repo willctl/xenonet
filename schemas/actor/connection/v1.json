@@ -1,0 +1,301 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/actor/connection/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A remote connection",
+  "description": "One way a remote actor reaches XenoNet, as the owner sees it in XenoNet's window: who may call it, what it may read, until when, and whether it's in use. Never its credential.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "actor/connection/v1"
+    },
+    "connection_id": {
+      "type": "string",
+      "pattern": "^cn_[0-9a-f]{24}$"
+    },
+    "grant_id": {
+      "type": "string",
+      "pattern": "^gr_[0-9a-f]{24}$"
+    },
+    "actor_id": {
+      "type": "string",
+      "pattern": "^actor:[a-z0-9][a-z0-9-]{0,31}$"
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "The name you gave it"
+    },
+    "adapter_id": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "provider": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "transport_kind": {
+      "type": "string",
+      "maxLength": 48
+    },
+    "audience": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Who can call the endpoint, in your words"
+        },
+        "verification": {
+          "type": "string",
+          "enum": [
+            "owner_verified",
+            "unverified"
+          ]
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "owner_endpoint",
+            "authenticated_user",
+            "other_approved_scope"
+          ]
+        }
+      },
+      "required": [
+        "description",
+        "verification",
+        "scope"
+      ],
+      "additionalProperties": false
+    },
+    "account_link": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "verified",
+            "owner_asserted",
+            "unverified"
+          ]
+        },
+        "identity": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "identity"
+      ],
+      "additionalProperties": false
+    },
+    "device": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^dev_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "alias": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "alias"
+      ],
+      "additionalProperties": false
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "const": "read"
+      }
+    },
+    "data_mode": {
+      "type": "string",
+      "enum": [
+        "fixture",
+        "real"
+      ]
+    },
+    "projects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "place": {
+            "description": "The project's node id on your map, for this window only",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "project_id",
+          "place",
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "labels": {
+      "type": "boolean"
+    },
+    "lookback_days": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 30
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "active",
+        "expired",
+        "revoked",
+        "disabled"
+      ]
+    },
+    "bridge": {
+      "type": "string",
+      "enum": [
+        "connected",
+        "not_connected"
+      ],
+      "description": "Whether an adapter is connected now; it says nothing about whether the actor itself is working"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+      "description": "ISO 8601, UTC"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+      "description": "ISO 8601, UTC"
+    },
+    "revoked_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+          "description": "ISO 8601, UTC"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "revoked_reason": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 32
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "last_used_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+          "description": "ISO 8601, UTC"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "launch": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "command",
+        "args"
+      ],
+      "additionalProperties": false,
+      "description": "What the tunnel client runs: the adapter for this grant, holding no secret"
+    }
+  },
+  "required": [
+    "schema",
+    "connection_id",
+    "grant_id",
+    "actor_id",
+    "label",
+    "adapter_id",
+    "provider",
+    "transport_kind",
+    "audience",
+    "account_link",
+    "device",
+    "permissions",
+    "data_mode",
+    "projects",
+    "labels",
+    "lookback_days",
+    "revision",
+    "state",
+    "bridge",
+    "created_at",
+    "expires_at",
+    "revoked_at",
+    "revoked_reason",
+    "last_used_at",
+    "launch"
+  ],
+  "additionalProperties": false
+}

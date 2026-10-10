@@ -1,0 +1,239 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/actor/report/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "An actor's report",
+  "description": "What a registered actor posts with its token: a heartbeat (POST /api/actors/heartbeat), what it did (POST /api/actors/events) or what it's acting on (POST /api/actors/targets).",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "actor/report/v1"
+    },
+    "instance": {
+      "description": "Which of its processes this is: main when left out",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,31}$"
+    },
+    "presence": {
+      "description": "offline says goodbye; only XenoNet decides away and unknown",
+      "type": "string",
+      "enum": [
+        "working",
+        "idle",
+        "offline"
+      ]
+    },
+    "status": {
+      "description": "What it's doing: cut to 140 characters on one line, and an empty string clears it",
+      "type": "string"
+    },
+    "cwd": {
+      "description": "Where it's working, an absolute path",
+      "type": "string"
+    },
+    "pid": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "events": {
+      "maxItems": 50,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "spawned",
+                  "edited",
+                  "ran",
+                  "messaged",
+                  "finished",
+                  "failed"
+                ]
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "target": {
+            "description": "A graph node id",
+            "type": "string"
+          },
+          "path": {
+            "description": "An absolute path, mapped to the project or folder holding it",
+            "type": "string"
+          },
+          "at": {
+            "description": "When it happened; now when left out",
+            "type": "number"
+          },
+          "ref": {
+            "description": "Its own id for the event, so a retry never counts twice",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,64}$"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "paths": {
+            "description": "For edited: absolute paths",
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "app": {
+            "description": "For spawned, with a session not on the map yet",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "claude",
+                  "codex",
+                  "other"
+                ]
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "platform": {
+            "description": "For messaged",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "telegram",
+                  "discord",
+                  "slack",
+                  "whatsapp",
+                  "signal",
+                  "matrix",
+                  "mattermost",
+                  "email",
+                  "sms",
+                  "imessage",
+                  "teams",
+                  "other"
+                ]
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "subject": {
+            "description": "For finished and failed",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "session",
+                  "task",
+                  "job",
+                  "turn",
+                  "command"
+                ]
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": {},
+        "description": "Something it did, as facts: XenoNet writes the detail"
+      }
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "A graph node id",
+            "type": "string"
+          },
+          "path": {
+            "description": "An absolute path, mapped to the project or folder holding it",
+            "type": "string"
+          },
+          "relation": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "works-on",
+                  "spawned",
+                  "edited",
+                  "messaged",
+                  "watches",
+                  "reviews"
+                ]
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "additionalProperties": {},
+        "description": "Something it's acting on"
+      }
+    },
+    "remove": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "A graph node id",
+            "type": "string"
+          },
+          "path": {
+            "description": "An absolute path, mapped to the project or folder holding it",
+            "type": "string"
+          },
+          "relation": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "works-on",
+                  "spawned",
+                  "edited",
+                  "messaged",
+                  "watches",
+                  "reviews"
+                ]
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "additionalProperties": {},
+        "description": "Something it's acting on"
+      }
+    },
+    "replace": {
+      "description": "targets is the whole list",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": {}
+}

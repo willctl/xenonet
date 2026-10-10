@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/actor/list/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "The actors",
+  "description": "Every actor XenoNet knows of, as GET /api/actors and the actors event send them.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "actor/list/v1"
+    },
+    "at": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "actors": {
+      "type": "array",
+      "items": {
+        "$ref": "https://xenonet.dev/schemas/actor/snapshot/v1.json"
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "at",
+    "actors"
+  ],
+  "additionalProperties": {}
+}

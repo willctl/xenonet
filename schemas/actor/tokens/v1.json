@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/actor/tokens/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Registered actors' tokens",
+  "description": "What GET /api/actors/tokens answers XenoNet's own window, with its key: for each actor that reports itself, whether its token works, when it expires unless it's used, and when it was last used. Never a token, nor its hash.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "actor/tokens/v1"
+    },
+    "at": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "tokens": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "actor": {
+            "type": "string",
+            "pattern": "^(@[a-z][a-z0-9-]{1,31}:)?actor:[a-z0-9][a-z0-9-]{0,31}$",
+            "description": "An actor that reports itself"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "works",
+                  "expired",
+                  "none"
+                ]
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "works; expired: 30 days unused, until you give it a new token; none: the demo's made-up actor has none"
+          },
+          "expiresAt": {
+            "anyOf": [
+              {
+                "type": "number",
+                "description": "Epoch milliseconds"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it stops working unless it's used before then; null unless it works"
+          },
+          "usedAt": {
+            "anyOf": [
+              {
+                "type": "number",
+                "description": "Epoch milliseconds"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it was last used: exactly the first time, and to within the hour after that; null for a token never used, or none"
+          },
+          "gateway": {
+            "description": "Its gateway token, while it has one that works (server/actor-gateway.js)",
+            "type": "object",
+            "properties": {
+              "state": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "works"
+                    ]
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "expiresAt": {
+                "type": "number",
+                "description": "When it stops working unless it's used before then"
+              },
+              "usedAt": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "description": "Epoch milliseconds"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "When it was last used, to within the hour; null for one never used"
+              }
+            },
+            "required": [
+              "state",
+              "expiresAt",
+              "usedAt"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "actor",
+          "state",
+          "expiresAt",
+          "usedAt"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "Oldest actor first"
+    }
+  },
+  "required": [
+    "schema",
+    "at",
+    "tokens"
+  ],
+  "additionalProperties": {}
+}

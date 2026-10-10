@@ -1,0 +1,1895 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/graph/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Graph",
+  "description": "The map: the projects folder, its groups and projects, Codex desktop projects, the folders outside it where sessions ran, the sessions, Agent Wiki and the MCP servers sessions share, with the identities work ran as.",
+  "type": "object",
+  "properties": {
+    "generatedAt": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "allOf": [
+              {
+                "$ref": "https://xenonet.dev/schemas/session/v1.json"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "session"
+                  },
+                  "activity": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "recent",
+                      "idle"
+                    ],
+                    "description": "By its last write; an archived session is at most recent"
+                  },
+                  "ranAs": {
+                    "description": "Who it ran as; left out when identities are off",
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "confidence": {
+                            "type": "string",
+                            "enum": [
+                              "yours",
+                              "exact",
+                              "likely",
+                              "assumed"
+                            ],
+                            "description": "yours: you pinned it; exact: the app recorded it; likely: signed in at the time; assumed: the only account XenoNet has seen"
+                          },
+                          "via": {
+                            "type": "string",
+                            "description": "How XenoNet knows, in words"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "confidence",
+                          "via"
+                        ],
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "fx": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "fy": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "fz": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "pinned": {
+                    "type": "boolean"
+                  },
+                  "actions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "enum": [
+                            "open-app",
+                            "preview",
+                            "stats",
+                            "handoff",
+                            "open-folder",
+                            "open-file",
+                            "open-vscode",
+                            "new-claude"
+                          ]
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "client": {
+                          "description": "The page handles it itself, rather than asking the server to open something",
+                          "type": "boolean",
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "label"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "host": {
+                    "description": "The host it's from, for a node from another machine; its id is then @<host>:…",
+                    "type": "string"
+                  },
+                  "stale": {
+                    "description": "Its host isn't live, so it shows what was true when the host last was",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "activity",
+                  "fx",
+                  "fy",
+                  "fz",
+                  "pinned",
+                  "actions"
+                ],
+                "additionalProperties": {}
+              }
+            ],
+            "description": "A session (session/v1) where it lives on the map"
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "https://xenonet.dev/schemas/project/v1.json"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^(?:@[a-z][a-z0-9-]{1,31}:)?project:"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "project"
+                  },
+                  "group": {
+                    "type": "boolean"
+                  },
+                  "satelliteOf": {
+                    "description": "The key of the project it orbits: its repo for a worktree, or the project it's named after",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "repo": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "branch": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "ahead": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "behind": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "staged": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "modified": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "untracked": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "dirty": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991,
+                            "description": "Lines git status reports: files changed, staged or new"
+                          },
+                          "checkedAt": {
+                            "type": "number",
+                            "description": "Epoch milliseconds"
+                          }
+                        },
+                        "required": [
+                          "branch",
+                          "ahead",
+                          "behind",
+                          "staged",
+                          "modified",
+                          "untracked",
+                          "dirty",
+                          "checkedAt"
+                        ],
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "identities": {
+                    "description": "Left out when identities are off",
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "role": {
+                          "type": "string",
+                          "enum": [
+                            "owner",
+                            "pushes-as",
+                            "commits-as"
+                          ]
+                        },
+                        "confidence": {
+                          "type": "string",
+                          "enum": [
+                            "yours",
+                            "exact",
+                            "likely",
+                            "assumed"
+                          ]
+                        },
+                        "via": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "role",
+                        "confidence",
+                        "via"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "repoKey": {
+                    "description": "Its remote as its own host resolves it (repoKey in core/schema/ids.js): checkouts of one repo on different machines share it. With hosts on",
+                    "type": "string"
+                  },
+                  "fx": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "fy": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "fz": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "pinned": {
+                    "type": "boolean"
+                  },
+                  "actions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "enum": [
+                            "open-app",
+                            "preview",
+                            "stats",
+                            "handoff",
+                            "open-folder",
+                            "open-file",
+                            "open-vscode",
+                            "new-claude"
+                          ]
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "client": {
+                          "description": "The page handles it itself, rather than asking the server to open something",
+                          "type": "boolean",
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "label"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "sessionCount": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "activeCount": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "lastActivity": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "description": "Epoch milliseconds"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "lastSessionAt": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "description": "Epoch milliseconds"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "active": {
+                    "type": "boolean"
+                  },
+                  "host": {
+                    "description": "The host it's from, for a node from another machine; its id is then @<host>:…",
+                    "type": "string"
+                  },
+                  "stale": {
+                    "description": "Its host isn't live, so it shows what was true when the host last was",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind",
+                  "group",
+                  "satelliteOf",
+                  "repo",
+                  "fx",
+                  "fy",
+                  "fz",
+                  "pinned",
+                  "actions",
+                  "sessionCount",
+                  "activeCount",
+                  "lastActivity",
+                  "lastSessionAt",
+                  "active"
+                ],
+                "additionalProperties": {}
+              }
+            ],
+            "description": "A project or group (project/v1) on the map"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "const": "core"
+              },
+              "kind": {
+                "type": "string",
+                "const": "core"
+              },
+              "name": {
+                "type": "string",
+                "description": "~/ and the projects folder's name"
+              },
+              "path": {
+                "type": "string"
+              },
+              "home": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "fx": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "fy": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "fz": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "pinned": {
+                "type": "boolean"
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "enum": [
+                        "open-app",
+                        "preview",
+                        "stats",
+                        "handoff",
+                        "open-folder",
+                        "open-file",
+                        "open-vscode",
+                        "new-claude"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "client": {
+                      "description": "The page handles it itself, rather than asking the server to open something",
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label"
+                  ],
+                  "additionalProperties": {}
+                }
+              },
+              "sessionCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "activeCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "lastActivity": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "description": "Epoch milliseconds"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "lastSessionAt": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "description": "Epoch milliseconds"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "name",
+              "path",
+              "home",
+              "fx",
+              "fy",
+              "fz",
+              "pinned",
+              "actions",
+              "sessionCount",
+              "activeCount",
+              "lastActivity",
+              "lastSessionAt"
+            ],
+            "additionalProperties": {},
+            "description": "The projects folder, at the center"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^(?:@[a-z][a-z0-9-]{1,31}:)?native:codex:"
+              },
+              "kind": {
+                "type": "string",
+                "const": "native"
+              },
+              "app": {
+                "type": "string",
+                "const": "codex"
+              },
+              "name": {
+                "type": "string"
+              },
+              "roots": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "fx": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "fy": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "fz": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "pinned": {
+                "type": "boolean"
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "enum": [
+                        "open-app",
+                        "preview",
+                        "stats",
+                        "handoff",
+                        "open-folder",
+                        "open-file",
+                        "open-vscode",
+                        "new-claude"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "client": {
+                      "description": "The page handles it itself, rather than asking the server to open something",
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label"
+                  ],
+                  "additionalProperties": {}
+                }
+              },
+              "sessionCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "activeCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "lastActivity": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "description": "Epoch milliseconds"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "lastSessionAt": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "description": "Epoch milliseconds"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "active": {
+                "type": "boolean"
+              },
+              "host": {
+                "description": "The host it's from, for a node from another machine; its id is then @<host>:…",
+                "type": "string"
+              },
+              "stale": {
+                "description": "Its host isn't live, so it shows what was true when the host last was",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "app",
+              "name",
+              "roots",
+              "fx",
+              "fy",
+              "fz",
+              "pinned",
+              "actions",
+              "sessionCount",
+              "activeCount",
+              "lastActivity",
+              "lastSessionAt",
+              "active"
+            ],
+            "additionalProperties": {},
+            "description": "A Codex desktop project"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^(?:@[a-z][a-z0-9-]{1,31}:)?zone:"
+              },
+              "kind": {
+                "type": "string",
+                "const": "zone"
+              },
+              "name": {
+                "type": "string"
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "app": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "claude",
+                      "codex"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "external": {
+                "type": "boolean",
+                "const": true
+              },
+              "fx": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "fy": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "fz": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "pinned": {
+                "type": "boolean"
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "enum": [
+                        "open-app",
+                        "preview",
+                        "stats",
+                        "handoff",
+                        "open-folder",
+                        "open-file",
+                        "open-vscode",
+                        "new-claude"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "client": {
+                      "description": "The page handles it itself, rather than asking the server to open something",
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label"
+                  ],
+                  "additionalProperties": {}
+                }
+              },
+              "sessionCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "activeCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "lastActivity": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "description": "Epoch milliseconds"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "lastSessionAt": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "description": "Epoch milliseconds"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "active": {
+                "type": "boolean"
+              },
+              "host": {
+                "description": "The host it's from, for a node from another machine; its id is then @<host>:…",
+                "type": "string"
+              },
+              "stale": {
+                "description": "Its host isn't live, so it shows what was true when the host last was",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "name",
+              "path",
+              "app",
+              "external",
+              "fx",
+              "fy",
+              "fz",
+              "pinned",
+              "actions",
+              "sessionCount",
+              "activeCount",
+              "lastActivity",
+              "lastSessionAt",
+              "active"
+            ],
+            "additionalProperties": {},
+            "description": "A folder outside the projects folder where sessions ran: the home folder, scratch folders, temp, or one folder"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^(?:@[a-z][a-z0-9-]{1,31}:)?resource:agent-wiki$"
+              },
+              "kind": {
+                "type": "string",
+                "const": "wiki"
+              },
+              "name": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "pageCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "inbox": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "app": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "title",
+                    "app"
+                  ],
+                  "additionalProperties": {}
+                }
+              },
+              "fx": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "fy": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "fz": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "pinned": {
+                "type": "boolean"
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "enum": [
+                        "open-app",
+                        "preview",
+                        "stats",
+                        "handoff",
+                        "open-folder",
+                        "open-file",
+                        "open-vscode",
+                        "new-claude"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "client": {
+                      "description": "The page handles it itself, rather than asking the server to open something",
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label"
+                  ],
+                  "additionalProperties": {}
+                }
+              },
+              "sessionCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "activeCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "lastActivity": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "description": "Epoch milliseconds"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "lastSessionAt": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "description": "Epoch milliseconds"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "host": {
+                "description": "The host it's from, for a node from another machine; its id is then @<host>:…",
+                "type": "string"
+              },
+              "stale": {
+                "description": "Its host isn't live, so it shows what was true when the host last was",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "name",
+              "path",
+              "pageCount",
+              "inbox",
+              "fx",
+              "fy",
+              "fz",
+              "pinned",
+              "actions",
+              "sessionCount",
+              "activeCount",
+              "lastActivity",
+              "lastSessionAt"
+            ],
+            "additionalProperties": {},
+            "description": "Agent Wiki, the agents' shared memory"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^(?:@[a-z][a-z0-9-]{1,31}:)?wiki:"
+              },
+              "kind": {
+                "type": "string",
+                "const": "page"
+              },
+              "name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {}
+                  }
+                ],
+                "description": "A front matter value: text, or a JSON list when it starts with ["
+              },
+              "slug": {
+                "type": "string"
+              },
+              "type": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {}
+                  }
+                ],
+                "description": "A front matter value: text, or a JSON list when it starts with ["
+              },
+              "summary": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {}
+                  }
+                ],
+                "description": "A front matter value: text, or a JSON list when it starts with ["
+              },
+              "tags": {
+                "type": "array",
+                "items": {}
+              },
+              "updated": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "description": "Epoch milliseconds"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "updatedBy": {
+                "anyOf": [
+                  {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "array",
+                        "items": {}
+                      }
+                    ],
+                    "description": "A front matter value: text, or a JSON list when it starts with ["
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "path": {
+                "type": "string"
+              },
+              "writes": {
+                "maxItems": 6,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "ts": {
+                      "type": "number",
+                      "description": "Epoch milliseconds"
+                    },
+                    "app": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "pages": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ts",
+                    "app",
+                    "title",
+                    "pages"
+                  ],
+                  "additionalProperties": {}
+                }
+              },
+              "fx": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "fy": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "fz": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "pinned": {
+                "type": "boolean"
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "enum": [
+                        "open-app",
+                        "preview",
+                        "stats",
+                        "handoff",
+                        "open-folder",
+                        "open-file",
+                        "open-vscode",
+                        "new-claude"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "client": {
+                      "description": "The page handles it itself, rather than asking the server to open something",
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label"
+                  ],
+                  "additionalProperties": {}
+                }
+              },
+              "sessionCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "activeCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "lastActivity": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "description": "Epoch milliseconds"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "lastSessionAt": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "description": "Epoch milliseconds"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "host": {
+                "description": "The host it's from, for a node from another machine; its id is then @<host>:…",
+                "type": "string"
+              },
+              "stale": {
+                "description": "Its host isn't live, so it shows what was true when the host last was",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "name",
+              "slug",
+              "type",
+              "summary",
+              "tags",
+              "updated",
+              "updatedBy",
+              "path",
+              "writes",
+              "fx",
+              "fy",
+              "fz",
+              "pinned",
+              "actions",
+              "sessionCount",
+              "activeCount",
+              "lastActivity",
+              "lastSessionAt"
+            ],
+            "additionalProperties": {},
+            "description": "An Agent Wiki page"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^(?:@[a-z][a-z0-9-]{1,31}:)?resource:"
+              },
+              "kind": {
+                "type": "string",
+                "const": "resource"
+              },
+              "name": {
+                "type": "string",
+                "description": "The MCP server"
+              },
+              "fx": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "fy": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "fz": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "pinned": {
+                "type": "boolean"
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "enum": [
+                        "open-app",
+                        "preview",
+                        "stats",
+                        "handoff",
+                        "open-folder",
+                        "open-file",
+                        "open-vscode",
+                        "new-claude"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "client": {
+                      "description": "The page handles it itself, rather than asking the server to open something",
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label"
+                  ],
+                  "additionalProperties": {}
+                }
+              },
+              "sessionCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "activeCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "lastActivity": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "description": "Epoch milliseconds"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "lastSessionAt": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "description": "Epoch milliseconds"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "host": {
+                "description": "The host it's from, for a node from another machine; its id is then @<host>:…",
+                "type": "string"
+              },
+              "stale": {
+                "description": "Its host isn't live, so it shows what was true when the host last was",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "name",
+              "fx",
+              "fy",
+              "fz",
+              "pinned",
+              "actions",
+              "sessionCount",
+              "activeCount",
+              "lastActivity",
+              "lastSessionAt"
+            ],
+            "additionalProperties": {},
+            "description": "A shared system sessions reach through MCP"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^@[a-z][a-z0-9-]{1,31}:core$"
+              },
+              "kind": {
+                "type": "string",
+                "const": "host"
+              },
+              "host": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string",
+                "description": "Its id here"
+              },
+              "path": {
+                "description": "Its projects folder, as it names it (~/Projects)",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "calls": {
+                "description": "What it calls itself, when that isn't its id here",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "connecting",
+                  "live",
+                  "stale",
+                  "offline",
+                  "error"
+                ],
+                "description": "connecting; live; stale (no word for 45 seconds); offline (the connection ended, and XenoNet tries again); error (it needs you)"
+              },
+              "since": {
+                "type": "number",
+                "description": "Epoch milliseconds"
+              },
+              "lastHeard": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "description": "Epoch milliseconds"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "offsetMs": {
+                "description": "Its clock minus this one's, once known",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "version": {
+                "description": "Its XenoNet",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "platform": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "demo": {
+                "description": "It shows made-up data",
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "error": {
+                "description": "Why it isn't live, in words",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "cached": {
+                "type": "boolean",
+                "description": "What's shown is its last snapshot, kept from before this XenoNet started"
+              },
+              "truncated": {
+                "type": "boolean",
+                "description": "It sent more than the 5,000 nodes a host may have on the map, so its oldest sessions are left out"
+              },
+              "stale": {
+                "type": "boolean"
+              },
+              "fx": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "fy": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "fz": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "pinned": {
+                "type": "boolean"
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "enum": [
+                        "open-app",
+                        "preview",
+                        "stats",
+                        "handoff",
+                        "open-folder",
+                        "open-file",
+                        "open-vscode",
+                        "new-claude"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "client": {
+                      "description": "The page handles it itself, rather than asking the server to open something",
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label"
+                  ],
+                  "additionalProperties": {}
+                }
+              },
+              "sessionCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "activeCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "lastActivity": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "description": "Epoch milliseconds"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "lastSessionAt": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "description": "Epoch milliseconds"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "host",
+              "name",
+              "path",
+              "calls",
+              "state",
+              "since",
+              "lastHeard",
+              "offsetMs",
+              "version",
+              "platform",
+              "demo",
+              "error",
+              "cached",
+              "truncated",
+              "stale",
+              "fx",
+              "fy",
+              "fz",
+              "pinned",
+              "actions",
+              "sessionCount",
+              "activeCount",
+              "lastActivity",
+              "lastSessionAt"
+            ],
+            "additionalProperties": {},
+            "description": "Another machine's XenoNet, at the center of its constellation (with hosts on)"
+          }
+        ]
+      }
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "contains",
+              "nested",
+              "satellite",
+              "native",
+              "zone",
+              "session",
+              "lineage",
+              "lineage-cross",
+              "wiki",
+              "page",
+              "resource",
+              "host"
+            ]
+          }
+        },
+        "required": [
+          "source",
+          "target",
+          "kind"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "The tree, by node ids; lineage-cross ties a session to its parent in another place, and host ties another machine's node to this one's core"
+    },
+    "relations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "string"
+          },
+          "b": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "wikilink",
+              "mentions",
+              "same-repo"
+            ]
+          }
+        },
+        "required": [
+          "a",
+          "b",
+          "kind"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "Ties outside the tree: wiki pages that link, pages that mention a project, and checkouts of one repo on different machines"
+    },
+    "stats": {
+      "type": "object",
+      "properties": {
+        "wikiPages": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "dirtyRepos": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "projects": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "groups": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sessions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "claude": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "codex": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "active": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "archived": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "wikiPages",
+        "dirtyRepos",
+        "projects",
+        "groups",
+        "sessions",
+        "claude",
+        "codex",
+        "active",
+        "archived"
+      ],
+      "additionalProperties": {}
+    },
+    "identities": {
+      "type": "array",
+      "items": {
+        "$ref": "https://xenonet.dev/schemas/identity/v1.json"
+      }
+    },
+    "hideIdentities": {
+      "type": "boolean",
+      "description": "Start with identities masked (XENONET_HIDE_IDENTITIES=1)"
+    },
+    "demo": {
+      "description": "The demo's made-up map, whose sessions exist only in XenoNet",
+      "type": "boolean"
+    },
+    "hosts": {
+      "description": "The other machines on the map and how each is, with hosts on",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "connecting",
+              "live",
+              "stale",
+              "offline",
+              "error"
+            ]
+          },
+          "since": {
+            "type": "number",
+            "description": "Epoch milliseconds"
+          },
+          "lastHeard": {
+            "anyOf": [
+              {
+                "type": "number",
+                "description": "Epoch milliseconds"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "offsetMs": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "platform": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "demo": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cached": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "nodes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "sessions": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "since",
+          "lastHeard",
+          "offsetMs",
+          "version",
+          "platform",
+          "demo",
+          "error",
+          "cached",
+          "truncated",
+          "nodes",
+          "sessions"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "self": {
+      "description": "This XenoNet's own host id, if it named itself, with hosts on",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "projects, codex, codex-projects, claude, live, wiki, search, identities"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "count": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "error": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "ok"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "Where the map came from, and how each source went this time"
+    }
+  },
+  "required": [
+    "generatedAt",
+    "nodes",
+    "links",
+    "relations",
+    "stats",
+    "identities",
+    "hideIdentities",
+    "sources"
+  ],
+  "additionalProperties": {}
+}

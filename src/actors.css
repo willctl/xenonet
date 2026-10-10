@@ -1,0 +1,539 @@
+/* An actor in the inspector (src/actor-inspector.js). The inspector's
+   --accent is the actor's own color in the theme. */
+
+.presence {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+.presence::before { content: "◉ "; }
+.presence.working,
+.actor-presence.working { color: var(--accent); text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent); }
+.presence.idle,
+.actor-presence.idle { color: var(--text); }
+.presence.away,
+.actor-presence.away { color: var(--muted); }
+.presence.offline,
+.presence.unknown,
+.actor-presence.offline,
+.actor-presence.unknown { color: var(--dim); }
+
+.actor-via {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  font-size: 12px;
+  color: var(--text);
+}
+.actor-via li {
+  padding: 2px 0 2px 14px;
+  position: relative;
+}
+.actor-via li::before {
+  content: "◇";
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+  font-size: 9px;
+  top: 4px;
+}
+
+ol.actor-targets li.live .feed-time { color: var(--accent); }
+ol.actor-targets li.live .feed-title::after {
+  content: " ●";
+  color: var(--accent);
+  font-size: 9px;
+  text-shadow: 0 0 6px var(--accent);
+}
+ol.actor-targets li.gone { cursor: default; opacity: 0.6; }
+ol.actor-targets li.gone:hover { background: none; }
+ol.actor-targets .sw:not(.claude, .codex, .project, .native, .zone) { background: var(--dim); color: var(--dim); }
+
+ol.actor-events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+ol.actor-events li {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  align-items: start;
+  gap: 8px;
+  padding: 5px 4px;
+  font-size: 11.5px;
+  border-bottom: 1px solid rgb(var(--accent-rgb) / 0.07);
+}
+ol.actor-events .ev-glyph { --c: var(--accent); }
+ol.actor-events li.failed .ev-glyph { --c: var(--danger); }
+ol.actor-events .ev-body { display: block; overflow-wrap: anywhere; }
+ol.actor-events a { color: var(--accent); text-decoration: none; }
+
+/* The Actors panel (src/actors-panel.js). Each row's --c is its actor's
+   color in the theme; the panel's --accent is the actors' own. */
+
+.ac ol.ac-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ac .ac-row {
+  --c: var(--actor);
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 9px 4px;
+  border-bottom: 1px solid rgb(var(--accent-rgb) / 0.07);
+}
+.ac .ac-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: 0 0 9px var(--c);
+  justify-self: center;
+}
+.ac .ac-main { min-width: 0; }
+.ac .ac-name {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  min-width: 0;
+}
+.ac .ac-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ac .ac-what {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ac .ac-left {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.ac .ac-live,
+.ac .ac-ask {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.ac .ac-live .presence { --accent: var(--c); }
+.ac .ac-status { color: var(--text); }
+.ac .ac-need { color: var(--attention); }
+.ac .ac-via,
+.ac .ac-asker,
+.ac .ac-token-state {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+/* A token that expired stops the actor reporting until New token. */
+.ac .ac-token-state.expired { color: var(--text); }
+.ac .ac-asker code,
+.ac .ac-ask code,
+.ac .ac-lead code,
+.ac .pj-note code {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+}
+.ac .ac-acts {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.ac .ac-acts .act { padding: 5px 10px; font-size: 10.5px; }
+.ac .ac-acts .toggle { white-space: nowrap; }
+/* A program asking to be an actor waits on you: in the attention color, as
+   its card in the strip is, Allow included, in every theme. */
+.ac .ac-request {
+  background: linear-gradient(90deg, rgb(var(--attention-rgb) / 0.1), transparent 70%);
+  border-bottom-color: rgb(var(--attention-rgb) / 0.25);
+}
+.ac .act.primary:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--bright);
+  background: rgb(var(--actor-rgb) / 0.16);
+}
+.ac .ac-request .act.primary:not(:disabled) {
+  border-color: var(--attention);
+  background: rgb(var(--attention-rgb) / 0.16);
+}
+.ac .act.primary.ac-danger:not(:disabled) {
+  border-color: var(--danger);
+  background: rgb(var(--danger-rgb) / 0.14);
+}
+.ac .act:disabled,
+.ac .toggle:disabled {
+  opacity: 0.4;
+  cursor: default;
+  box-shadow: none;
+}
+.ac .ac-observer .ac-title { font-weight: 500; }
+
+/* The footer stays in view at the bottom of the panel, Add an actor and
+   all, however long the list grows in a theme with larger type. */
+.ac .m-body { scroll-padding-bottom: 72px; }
+.ac .m-foot {
+  position: sticky;
+  bottom: -18px;
+  z-index: 1;
+  margin: 12px -22px -18px;
+  padding: 10px 22px 16px;
+  background: linear-gradient(180deg, rgb(var(--surface-low-rgb) / 0.92), rgb(var(--surface-low-rgb) / 0.99));
+  border-top: 1px solid var(--line);
+}
+
+/* Adding one: the form, and its token, shown once. */
+.ac .ac-form {
+  display: grid;
+  gap: 12px;
+  margin: 6px 0 4px;
+}
+.ac .ac-field {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 12px;
+}
+.ac .ac-field small { grid-column: 2; font-size: 10.5px; }
+.ac .ac-k {
+  font-size: 9.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ac .ac-input {
+  min-width: 0;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 7px 10px;
+  outline: none;
+}
+.ac .ac-input:focus { border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.ac .ac-input::placeholder { color: var(--dim); }
+.ac .ac-beat { width: 96px; }
+.ac .ac-caps {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px;
+}
+.ac .ac-error { margin-top: 10px; font-size: 12px; }
+.ac .ac-lead { margin: 2px 0 8px; font-size: 14px; }
+.ac .ac-token {
+  display: block;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--bright);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* Switches (Show me on the map, the observers, what an actor may do): a
+   dot that lights in the actors' color when on. */
+.ac .toggle::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1px solid var(--muted);
+}
+.ac .toggle.on {
+  color: var(--bright);
+  border-color: color-mix(in srgb, var(--actor) 55%, transparent);
+  background: rgb(var(--actor-rgb) / 0.1);
+}
+.ac .toggle.on::before {
+  background: var(--actor);
+  border-color: var(--actor);
+  box-shadow: 0 0 6px var(--actor);
+}
+
+/* Remote connections (src/remote-panel.js): the switch beside their
+   heading, and the preview of what would leave. */
+.ac .ac-remote-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ac .ac-remote-head .toggle { font-size: 10px; letter-spacing: 0.08em; padding: 4px 9px; }
+.ac .ac-places { max-height: 180px; overflow-y: auto; }
+/* A long project name wraps inside its button rather than past it. */
+.ac .ac-places .toggle { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+/* A tunnel XenoNet runs, under its connection: how it stands, and Start or
+   Stop. */
+.ac .ac-tunnel { margin-top: 3px; overflow-wrap: anywhere; }
+.ac .ac-tunnel .act { margin-left: 6px; padding: 2px 8px; font-size: 10px; }
+.ac .ac-tnote { font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.ac .ac-tnote a, .ac .pj-note a { color: var(--actor); }
+.ac .ac-keyrow { display: flex; gap: 8px; align-items: center; }
+.ac .ac-keyrow .ac-input { flex: 1; min-width: 0; }
+.ac .ac-tlog { margin: 6px 0 0; padding-left: 16px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); overflow-wrap: anywhere; }
+.ac .ac-preview {
+  max-height: 220px;
+  overflow: auto;
+  margin: 4px 0 10px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* What needs you, in the panel's notes. */
+.ac .pj-note.bad,
+.ac .pj-note .bad { color: var(--attention); }
+
+/* A text button, for a fix beside what it fixes. */
+.ac .ac-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgb(var(--accent-rgb) / 0.35);
+  text-underline-offset: 3px;
+}
+.ac .ac-link:hover { text-decoration-color: var(--accent); }
+.ac .ac-link:disabled { opacity: 0.4; cursor: default; }
+
+/* An actor's name shows it on the map. */
+.ac .ac-show {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ac .ac-show:hover,
+.ac .ac-show:focus-visible { color: var(--bright); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: rgb(var(--accent-rgb) / 0.4); }
+
+/* The gateway at a glance: a dot, a word, its address, what to do next. */
+.ac .ac-gw { --s: var(--dim); padding: 6px 4px 10px; }
+.ac .ac-gw[data-state="ok"] { --s: var(--codex); }
+.ac .ac-gw[data-state="wait"] { --s: var(--attention); }
+.ac .ac-gw[data-state="bad"] { --s: var(--danger); }
+.ac .ac-gw-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.ac .ac-gw-line .grow { flex: 1; }
+.ac .ac-gw-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--s);
+  box-shadow: 0 0 9px var(--s);
+  margin: 0 2px;
+}
+.ac .ac-gw[data-state="wait"] .ac-gw-dot { animation: ac-pulse 1.2s ease-in-out infinite; }
+@keyframes ac-pulse { 50% { opacity: 0.3; } }
+.ac .ac-gw-word { font-size: 13.5px; font-weight: 600; white-space: nowrap; }
+.ac .ac-gw[data-state="bad"] .ac-gw-word { color: var(--danger); }
+.ac .ac-gw-addr { font-family: var(--mono); font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
+.ac .ac-gw-sub {
+  margin: 4px 0 0 25px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.ac .ac-gw-sub .warn,
+.ac .ac-gw-why { color: var(--attention); }
+
+/* How XenoNet knows an actor, its token and its gateway connection: one line,
+   with what needs you on a line of its own. */
+.ac .ac-meta { margin-top: 2px; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.ac .ac-meta > * { display: inline; margin: 0; }
+.ac .ac-meta > * + *::before { content: " · "; color: var(--dim); }
+.ac .ac-meta > .ac-gate.warn { display: block; margin-top: 2px; color: var(--attention); }
+.ac .ac-meta > .ac-gate.warn::before { content: none; }
+
+/* Picking the gateway's tunnel: one line each, more once picked. */
+.ac .ac-picks {
+  list-style: none;
+  margin: 2px 0 8px;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.ac .ac-pick { border: 1px solid var(--line); transition: border-color 0.15s, background 0.15s; }
+.ac .ac-pick.on { border-color: rgb(var(--accent-rgb) / 0.55); background: rgb(var(--accent-rgb) / 0.05); }
+.ac .ac-pick-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  background: none;
+  border: 0;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ac .ac-pick-head:hover { background: rgb(var(--accent-rgb) / 0.06); }
+.ac .ac-radio {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+}
+.ac .ac-pick.on .ac-radio { border-color: var(--accent); box-shadow: inset 0 0 0 3px rgb(var(--surface-low-rgb)), inset 0 0 0 6px var(--accent); }
+.ac .ac-pick-name { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.ac .ac-pick-short { font-size: 11.5px; color: var(--muted); flex: 1; min-width: 0; }
+.ac .ac-badge {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.ac .ac-badge.on { color: var(--codex); }
+.ac .ac-pick-more { padding: 0 12px 12px 34px; font-size: 12px; color: var(--text); }
+.ac .ac-pick-more p { margin: 0 0 6px; line-height: 1.5; }
+.ac .ac-pick-more .dim { color: var(--muted); }
+.ac .ac-pick-more .ac-form { margin-top: 10px; gap: 8px; }
+.ac .ac-pick-more .ac-field { grid-template-columns: 64px minmax(0, 1fr); }
+
+/* Details folded away until asked for. */
+.ac .ac-more { margin: 4px 0 8px; }
+.ac .ac-more > summary {
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--muted);
+  list-style: none;
+  padding: 4px 0;
+}
+.ac .ac-more > summary::-webkit-details-marker { display: none; }
+.ac .ac-more > summary::before { content: "▸ "; color: var(--dim); }
+.ac .ac-more[open] > summary::before { content: "▾ "; }
+.ac .ac-more > summary:hover { color: var(--text); }
+.ac .ac-more .ac-form { margin: 8px 0; }
+
+/* Numbered steps, each with its Copy, and a last one that waits. */
+.ac .ac-steps {
+  list-style: none;
+  counter-reset: step;
+  margin: 2px 0 8px;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+.ac .ac-steps > li { counter-increment: step; position: relative; padding-left: 30px; }
+.ac .ac-steps > li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 1px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 18px;
+  text-align: center;
+  color: var(--muted);
+}
+.ac .ac-step-head { display: flex; align-items: center; gap: 12px; min-height: 22px; }
+.ac .ac-step-text { flex: 1; font-size: 13px; color: var(--text); line-height: 1.45; }
+.ac .ac-step-head .act { flex: none; padding: 5px 10px; font-size: 10.5px; }
+.ac .ac-steps .secret,
+.ac .ac-steps .ac-message,
+.ac .ac-steps .ac-url { margin-top: 8px; }
+.ac .ac-steps > li.ac-wait::before { content: ""; border-color: var(--attention); border-top-color: transparent; animation: ac-spin 1s linear infinite; }
+.ac .ac-steps > li.ac-wait .ac-step-text { color: var(--muted); }
+.ac .ac-steps > li.ac-wait[data-ac-wait="done"]::before { content: "✓"; color: var(--codex); border-color: var(--codex); animation: none; }
+.ac .ac-steps > li.ac-wait[data-ac-wait="done"] .ac-step-text { color: var(--codex); }
+@keyframes ac-spin { to { transform: rotate(360deg); } }
+.ac .ac-url,
+.ac .ac-message {
+  display: block;
+  padding: 9px 12px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+
+/* A secret, masked until Show (secret.js); masked again while identities
+   are hidden or the page is held still for a screenshot. */
+.ac .secret {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 12px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--line);
+}
+.ac .secret.block { padding: 11px 12px; }
+.ac .secret-text {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ac .secret.shown .secret-text { color: var(--bright); user-select: all; }
+.ac .secret-show {
+  flex: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+}
+.ac .secret-show:hover { color: var(--text); }
+.secret .secret-masked { display: none; }
+body.still .secret.shown .secret-plain,
+body.ids-masked .secret.shown .secret-plain { display: none; }
+body.still .secret.shown .secret-masked,
+body.ids-masked .secret.shown .secret-masked { display: inline; }
+body.ids-masked .secret-show { display: none; }
+/* Addresses go with identities when those are hidden. */
+.addr-masked { display: none; }
+body.ids-masked .addr-real { display: none; }
+body.ids-masked .addr-masked { display: inline; }

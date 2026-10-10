@@ -1,0 +1,98 @@
+/* Other machines on the map (hosts.js): the chips under Filters, where a
+   node lives in the inspector, and the marks in the feed, the active
+   sessions and the alert strip. How a host stands takes the colors the
+   page already uses: live as "connected", stale in amber, offline greyed,
+   and a host that needs you as a problem. */
+.host-dot {
+  --c: var(--muted);
+  display: inline-block;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: 0 0 6px var(--c);
+}
+.host-dot.live { --c: var(--codex); }
+.host-dot.stale { --c: var(--attention); }
+.host-dot.error { --c: var(--danger); }
+.host-dot.offline,
+.host-dot.connecting { --c: var(--muted); box-shadow: none; }
+.host-dot.connecting { animation: blink 1.6s infinite; }
+
+.host-filters { margin: -2px 0 12px; }
+.host-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.host-head .sub-k { margin: 0; flex: 1; }
+.host-head .mini { padding: 1px 7px; }
+.host-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.host-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--line);
+  padding: 4px 7px;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.host-chip .host-label { min-width: 0; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.host-chip .count { font-family: var(--mono); font-size: 10px; color: var(--dim); }
+.host-chip:hover { color: var(--text); border-color: var(--line-strong); }
+.host-chip.on { color: var(--text); border-color: var(--line-strong); background: rgb(var(--accent-rgb) / 0.07); box-shadow: inset 0 -2px 0 var(--accent); }
+.host-chip.on .count { color: var(--muted); }
+.host-chips.filtering .host-chip:not(.on) { opacity: 0.45; }
+.host-chips.filtering .host-chip:not(.on):hover { opacity: 0.8; }
+
+.insp-where {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: -8px 0 12px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text);
+}
+.host-state { display: inline-flex; align-items: center; gap: 7px; }
+
+.host-tag {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  padding: 0 5px;
+  margin-right: 6px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.ev-title .host-tag { margin-right: 0; }
+
+.al-host {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--c) 40%, transparent);
+  color: var(--muted);
+}
+.al-host.stale { color: var(--attention); border-color: rgb(var(--attention-rgb) / 0.4); }
+
+/* Plan limits of accounts signed in only on other machines (telemetry.js). */
+.gauge-host {
+  margin: 8px 0 2px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}

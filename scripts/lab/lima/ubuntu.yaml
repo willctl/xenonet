@@ -1,0 +1,7 @@
+# The XenoNet lab's Ubuntu host: Ubuntu 24.04 LTS, from the image Lima pins,
+# with the lab's settings (lab.yaml). lab.mjs builds the golden copy
+# xenonet-base-ubuntu from this and clones xenonet-vm1 from that.
+minimumLimaVersion: 2.1.0
+base:
+- template:_images/ubuntu-24.04
+- ./lab.yaml

@@ -1,0 +1,12 @@
+#!/bin/sh
+# Installer.app closes a running XenoNet itself (the package's must-close
+# list). `installer` on the command line doesn't, so ask XenoNet to quit here,
+# then insist after five seconds.
+pkill -TERM -x XenoNet 2>/dev/null || exit 0
+i=0
+while pgrep -x XenoNet >/dev/null 2>&1 && [ "$i" -lt 50 ]; do
+  sleep 0.1
+  i=$((i + 1))
+done
+pkill -KILL -x XenoNet 2>/dev/null
+exit 0

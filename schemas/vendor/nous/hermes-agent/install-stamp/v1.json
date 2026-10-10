@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/nous/hermes-agent/install-stamp/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Hermes Agent's build stamp",
+  "description": "~/.hermes/hermes-agent/install-stamp.json, rewritten on every update. The version is the stamp's own format, its schemaVersion.",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "baseVersion": {
+      "type": "string",
+      "description": "The release this build is of, such as 0.21.5: the version every other Hermes source is read against"
+    },
+    "displayVersion": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "payload": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "branch": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "baseVersion"
+  ],
+  "additionalProperties": {},
+  "x-xenonet": {
+    "vendorVersions": "<=2",
+    "lenient": true
+  }
+}

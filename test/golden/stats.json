@@ -1,0 +1,2109 @@
+{
+ "claude:0190d3e0-0000-7000-8000-000000000001": {
+  "id": "claude:0190d3e0-0000-7000-8000-000000000001",
+  "app": "claude",
+  "from": 1791027740000,
+  "to": 1791028804000,
+  "activeMs": 803000,
+  "totals": {
+   "calls": 18,
+   "input": 720,
+   "cacheRead": 771156,
+   "cacheWrite": 0,
+   "output": 12456,
+   "tokens": 784332,
+   "cost": 0.4203468,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 720,
+    "cost": 0.0021600000000000005
+   },
+   "cacheRead": {
+    "tokens": 771156,
+    "cost": 0.2313468
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": 0
+   },
+   "output": {
+    "tokens": 12456,
+    "cost": 0.18684000000000003
+   }
+  },
+  "models": [
+   {
+    "model": "claude-sonnet-4-5",
+    "calls": 18,
+    "tokens": 784332,
+    "cost": 0.4203468,
+    "priced": true,
+    "from": 1791027790000,
+    "to": 1791028804000,
+    "efforts": []
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791027740000,
+    "end": 1791027990000,
+    "prompt": "Add partial refunds to the orders API. Keep the existing full-refund path working.",
+    "tokens": 137765,
+    "cost": 0.09802350000000001,
+    "byModel": {
+     "claude-sonnet-4-5": {
+      "tokens": 137765,
+      "cost": 0.09802350000000001
+     }
+    },
+    "tools": 4,
+    "errors": 0
+   },
+   {
+    "n": 2,
+    "start": 1791028040000,
+    "end": 1791028190000,
+    "prompt": "Log the refund rules in the wiki.",
+    "tokens": 113950,
+    "cost": 0.0674223,
+    "byModel": {
+     "claude-sonnet-4-5": {
+      "tokens": 113950,
+      "cost": 0.0674223
+     }
+    },
+    "tools": 2,
+    "errors": 0
+   },
+   {
+    "n": 3,
+    "start": 1791028240000,
+    "end": 1791028490000,
+    "prompt": "Add partial refunds to the orders API. Keep the existing full-refund path working.",
+    "tokens": 248335,
+    "cost": 0.13891199999999998,
+    "byModel": {
+     "claude-sonnet-4-5": {
+      "tokens": 248335,
+      "cost": 0.13891199999999998
+     }
+    },
+    "tools": 4,
+    "errors": 0
+   },
+   {
+    "n": 4,
+    "start": 1791028540000,
+    "end": 1791028690000,
+    "prompt": "Log the refund rules in the wiki.",
+    "tokens": 178782,
+    "cost": 0.07794899999999999,
+    "byModel": {
+     "claude-sonnet-4-5": {
+      "tokens": 178782,
+      "cost": 0.07794899999999999
+     }
+    },
+    "tools": 2,
+    "errors": 0
+   },
+   {
+    "n": 5,
+    "start": 1791028801000,
+    "end": 1791028804000,
+    "prompt": "Now add a refund reason field.",
+    "tokens": 105500,
+    "cost": 0.03804,
+    "byModel": {
+     "claude-sonnet-4-5": {
+      "tokens": 105500,
+      "cost": 0.03804
+     }
+    },
+    "tools": 1,
+    "errors": 1
+   }
+  ],
+  "tools": [
+   {
+    "name": "Bash",
+    "category": "shell",
+    "server": null,
+    "calls": 5,
+    "errors": 1,
+    "ms": 17000
+   },
+   {
+    "name": "Edit",
+    "category": "edit",
+    "server": null,
+    "calls": 4,
+    "errors": 0,
+    "ms": 16000
+   },
+   {
+    "name": "Read",
+    "category": "read",
+    "server": null,
+    "calls": 2,
+    "errors": 0,
+    "ms": 8000
+   },
+   {
+    "name": "mcp__agent-wiki__wiki_log",
+    "category": "mcp",
+    "server": "agent-wiki",
+    "calls": 2,
+    "errors": 0,
+    "ms": 8000
+   }
+  ],
+  "subagents": [],
+  "context": [
+   {
+    "t": 1791027790000,
+    "used": 22371,
+    "window": 200000
+   },
+   {
+    "t": 1791027840000,
+    "used": 24920,
+    "window": 200000
+   },
+   {
+    "t": 1791027890000,
+    "used": 27518,
+    "window": 200000
+   },
+   {
+    "t": 1791027940000,
+    "used": 29820,
+    "window": 200000
+   },
+   {
+    "t": 1791027990000,
+    "used": 33136,
+    "window": 200000
+   },
+   {
+    "t": 1791028090000,
+    "used": 35166,
+    "window": 200000
+   },
+   {
+    "t": 1791028140000,
+    "used": 37384,
+    "window": 200000
+   },
+   {
+    "t": 1791028190000,
+    "used": 41400,
+    "window": 200000
+   },
+   {
+    "t": 1791028290000,
+    "used": 43165,
+    "window": 200000
+   },
+   {
+    "t": 1791028340000,
+    "used": 47546,
+    "window": 200000
+   },
+   {
+    "t": 1791028390000,
+    "used": 50547,
+    "window": 200000
+   },
+   {
+    "t": 1791028440000,
+    "used": 52287,
+    "window": 200000
+   },
+   {
+    "t": 1791028490000,
+    "used": 54790,
+    "window": 200000
+   },
+   {
+    "t": 1791028590000,
+    "used": 56946,
+    "window": 200000
+   },
+   {
+    "t": 1791028640000,
+    "used": 60191,
+    "window": 200000
+   },
+   {
+    "t": 1791028690000,
+    "used": 61645,
+    "window": 200000
+   },
+   {
+    "t": 1791028802000,
+    "used": 52340,
+    "window": 200000
+   },
+   {
+    "t": 1791028804000,
+    "used": 53160,
+    "window": 200000
+   }
+  ],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ },
+ "codex:0190d3e0-0000-7000-8000-000000000002": {
+  "id": "codex:0190d3e0-0000-7000-8000-000000000002",
+  "app": "codex",
+  "from": 1791028240000,
+  "to": 1791028690000,
+  "activeMs": 400000,
+  "totals": {
+   "calls": 6,
+   "input": 240,
+   "cacheRead": 194445,
+   "cacheWrite": 0,
+   "output": 4020,
+   "tokens": 198705,
+   "cost": 0.06480562499999999,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 240,
+    "cost": 0.00030000000000000003
+   },
+   "cacheRead": {
+    "tokens": 194445,
+    "cost": 0.024305625
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": 0
+   },
+   "output": {
+    "tokens": 4020,
+    "cost": 0.0402
+   }
+  },
+  "models": [
+   {
+    "model": "gpt-5-codex",
+    "calls": 6,
+    "tokens": 198705,
+    "cost": 0.06480562499999999,
+    "priced": true,
+    "from": 1791028290000,
+    "to": 1791028690000,
+    "efforts": []
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791028240000,
+    "end": 1791028440000,
+    "prompt": "Rate-limit GET /orders to 60 requests a minute per API key.",
+    "tokens": 82075,
+    "cost": 0.0270535,
+    "byModel": {
+     "gpt-5-codex": {
+      "tokens": 82075,
+      "cost": 0.0270535
+     }
+    },
+    "tools": 0,
+    "errors": 0
+   },
+   {
+    "n": 2,
+    "start": 1791028490000,
+    "end": 1791028690000,
+    "prompt": "Rate-limit GET /orders to 60 requests a minute per API key.",
+    "tokens": 116630,
+    "cost": 0.037752125,
+    "byModel": {
+     "gpt-5-codex": {
+      "tokens": 116630,
+      "cost": 0.037752125
+     }
+    },
+    "tools": 0,
+    "errors": 0
+   }
+  ],
+  "tools": [],
+  "subagents": [],
+  "context": [
+   {
+    "t": 1791028290000,
+    "used": 22965,
+    "window": 258400
+   },
+   {
+    "t": 1791028390000,
+    "used": 26823,
+    "window": 258400
+   },
+   {
+    "t": 1791028440000,
+    "used": 30600,
+    "window": 258400
+   },
+   {
+    "t": 1791028540000,
+    "used": 34583,
+    "window": 258400
+   },
+   {
+    "t": 1791028640000,
+    "used": 38684,
+    "window": 258400
+   },
+   {
+    "t": 1791028690000,
+    "used": 41030,
+    "window": 258400
+   }
+  ],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ },
+ "claude:0190d3e0-0000-7000-8000-000000000003": {
+  "id": "claude:0190d3e0-0000-7000-8000-000000000003",
+  "app": "claude",
+  "from": 1791028440000,
+  "to": 1791028640000,
+  "activeMs": 200000,
+  "totals": {
+   "calls": 4,
+   "input": 160,
+   "cacheRead": 126575,
+   "cacheWrite": 0,
+   "output": 3407,
+   "tokens": 130142,
+   "cost": 0.0895575,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 160,
+    "cost": 0.00048
+   },
+   "cacheRead": {
+    "tokens": 126575,
+    "cost": 0.0379725
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": 0
+   },
+   "output": {
+    "tokens": 3407,
+    "cost": 0.051105
+   }
+  },
+  "models": [
+   {
+    "model": "claude-sonnet-4-5",
+    "calls": 4,
+    "tokens": 130142,
+    "cost": 0.0895575,
+    "priced": true,
+    "from": 1791028490000,
+    "to": 1791028640000,
+    "efforts": []
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791028440000,
+    "end": 1791028640000,
+    "prompt": "Move checkout to version 3 of the payments SDK.",
+    "tokens": 130142,
+    "cost": 0.0895575,
+    "byModel": {
+     "claude-sonnet-4-5": {
+      "tokens": 130142,
+      "cost": 0.0895575
+     }
+    },
+    "tools": 4,
+    "errors": 0
+   }
+  ],
+  "tools": [
+   {
+    "name": "Read",
+    "category": "read",
+    "server": null,
+    "calls": 1,
+    "errors": 0,
+    "ms": 4000
+   },
+   {
+    "name": "Edit",
+    "category": "edit",
+    "server": null,
+    "calls": 1,
+    "errors": 0,
+    "ms": 4000
+   },
+   {
+    "name": "Bash",
+    "category": "shell",
+    "server": null,
+    "calls": 1,
+    "errors": 0,
+    "ms": 4000
+   },
+   {
+    "name": "AskUserQuestion",
+    "category": "other",
+    "server": null,
+    "calls": 1,
+    "errors": 0,
+    "ms": null
+   }
+  ],
+  "subagents": [],
+  "context": [
+   {
+    "t": 1791028490000,
+    "used": 26241,
+    "window": 200000
+   },
+   {
+    "t": 1791028540000,
+    "used": 30691,
+    "window": 200000
+   },
+   {
+    "t": 1791028590000,
+    "used": 34408,
+    "window": 200000
+   },
+   {
+    "t": 1791028640000,
+    "used": 38802,
+    "window": 200000
+   }
+  ],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ },
+ "codex:0190d3e0-0000-7000-8000-000000000004": {
+  "id": "codex:0190d3e0-0000-7000-8000-000000000004",
+  "app": "codex",
+  "from": 1791028040000,
+  "to": 1791028690000,
+  "activeMs": 650000,
+  "totals": {
+   "calls": 12,
+   "input": 480,
+   "cacheRead": 549655,
+   "cacheWrite": 0,
+   "output": 9064,
+   "tokens": 559199,
+   "cost": 0.15994687500000002,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 480,
+    "cost": 0.0006000000000000002
+   },
+   "cacheRead": {
+    "tokens": 549655,
+    "cost": 0.068706875
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": 0
+   },
+   "output": {
+    "tokens": 9064,
+    "cost": 0.09064
+   }
+  },
+  "models": [
+   {
+    "model": "gpt-5-codex",
+    "calls": 12,
+    "tokens": 559199,
+    "cost": 0.15994687500000002,
+    "priced": true,
+    "from": 1791028090000,
+    "to": 1791028690000,
+    "efforts": []
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791028040000,
+    "end": 1791028690000,
+    "prompt": "Reconciliation is off by a cent on some months. Find out why and fix it.",
+    "tokens": 559199,
+    "cost": 0.15994687500000002,
+    "byModel": {
+     "gpt-5-codex": {
+      "tokens": 559199,
+      "cost": 0.15994687500000002
+     }
+    },
+    "tools": 0,
+    "errors": 0
+   }
+  ],
+  "tools": [],
+  "subagents": [],
+  "context": [
+   {
+    "t": 1791028090000,
+    "used": 28157,
+    "window": 258400
+   },
+   {
+    "t": 1791028190000,
+    "used": 30403,
+    "window": 258400
+   },
+   {
+    "t": 1791028240000,
+    "used": 33343,
+    "window": 258400
+   },
+   {
+    "t": 1791028290000,
+    "used": 36296,
+    "window": 258400
+   },
+   {
+    "t": 1791028340000,
+    "used": 39499,
+    "window": 258400
+   },
+   {
+    "t": 1791028390000,
+    "used": 43246,
+    "window": 258400
+   },
+   {
+    "t": 1791028440000,
+    "used": 46600,
+    "window": 258400
+   },
+   {
+    "t": 1791028490000,
+    "used": 50151,
+    "window": 258400
+   },
+   {
+    "t": 1791028540000,
+    "used": 54374,
+    "window": 258400
+   },
+   {
+    "t": 1791028590000,
+    "used": 58593,
+    "window": 258400
+   },
+   {
+    "t": 1791028640000,
+    "used": 62747,
+    "window": 258400
+   },
+   {
+    "t": 1791028690000,
+    "used": 66726,
+    "window": 258400
+   }
+  ],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ },
+ "claude:0190d3e0-0000-7000-8000-000000000005": {
+  "id": "claude:0190d3e0-0000-7000-8000-000000000005",
+  "app": "claude",
+  "from": 1791028140000,
+  "to": 1791028690000,
+  "activeMs": 500000,
+  "totals": {
+   "calls": 12,
+   "input": 460,
+   "cacheRead": 482205,
+   "cacheWrite": 0,
+   "output": 8546,
+   "tokens": 491211,
+   "cost": 0.2742315,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 460,
+    "cost": 0.0013800000000000004
+   },
+   "cacheRead": {
+    "tokens": 482205,
+    "cost": 0.14466149999999997
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": 0
+   },
+   "output": {
+    "tokens": 8546,
+    "cost": 0.12819000000000003
+   }
+  },
+  "models": [
+   {
+    "model": "claude-sonnet-4-5",
+    "calls": 12,
+    "tokens": 491211,
+    "cost": 0.2742315,
+    "priced": true,
+    "from": 1791028190000,
+    "to": 1791028690000,
+    "efforts": []
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791028140000,
+    "end": 1791028390000,
+    "prompt": "The solver takes 40 seconds for 500 stops. Get it under 5.",
+    "tokens": 199814,
+    "cost": 0.12117330000000001,
+    "byModel": {
+     "claude-sonnet-4-5": {
+      "tokens": 199814,
+      "cost": 0.12117330000000001
+     }
+    },
+    "tools": 5,
+    "errors": 0
+   },
+   {
+    "n": 2,
+    "start": 1791028440000,
+    "end": 1791028690000,
+    "prompt": "The solver takes 40 seconds for 500 stops. Get it under 5.",
+    "tokens": 291397,
+    "cost": 0.15305819999999998,
+    "byModel": {
+     "claude-sonnet-4-5": {
+      "tokens": 291397,
+      "cost": 0.15305819999999998
+     }
+    },
+    "tools": 5,
+    "errors": 0
+   }
+  ],
+  "tools": [
+   {
+    "name": "Bash",
+    "category": "shell",
+    "server": null,
+    "calls": 4,
+    "errors": 0,
+    "ms": 8000
+   },
+   {
+    "name": "Task",
+    "category": "agent",
+    "server": null,
+    "calls": 2,
+    "errors": 0,
+    "ms": 8000
+   },
+   {
+    "name": "Read",
+    "category": "read",
+    "server": null,
+    "calls": 2,
+    "errors": 0,
+    "ms": 8000
+   },
+   {
+    "name": "Edit",
+    "category": "edit",
+    "server": null,
+    "calls": 2,
+    "errors": 0,
+    "ms": 8000
+   }
+  ],
+  "subagents": [
+   {
+    "id": "2ede1091",
+    "calls": 1,
+    "tokens": 9430,
+    "cost": 0.00879,
+    "model": "claude-sonnet-4-5",
+    "from": 1791028192000,
+    "to": 1791028192000,
+    "label": "Profile the solver on the 500-stop fixture"
+   },
+   {
+    "id": "9c981375",
+    "calls": 1,
+    "tokens": 9430,
+    "cost": 0.00879,
+    "model": "claude-sonnet-4-5",
+    "from": 1791028492000,
+    "to": 1791028492000,
+    "label": "Profile the solver on the 500-stop fixture"
+   }
+  ],
+  "context": [
+   {
+    "t": 1791028190000,
+    "used": 31340,
+    "window": 200000
+   },
+   {
+    "t": 1791028240000,
+    "used": 34811,
+    "window": 200000
+   },
+   {
+    "t": 1791028290000,
+    "used": 37711,
+    "window": 200000
+   },
+   {
+    "t": 1791028340000,
+    "used": 41570,
+    "window": 200000
+   },
+   {
+    "t": 1791028390000,
+    "used": 44952,
+    "window": 200000
+   },
+   {
+    "t": 1791028490000,
+    "used": 49448,
+    "window": 200000
+   },
+   {
+    "t": 1791028540000,
+    "used": 52761,
+    "window": 200000
+   },
+   {
+    "t": 1791028590000,
+    "used": 56494,
+    "window": 200000
+   },
+   {
+    "t": 1791028640000,
+    "used": 59900,
+    "window": 200000
+   },
+   {
+    "t": 1791028690000,
+    "used": 63364,
+    "window": 200000
+   }
+  ],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ },
+ "codex:0190d3e0-0000-7000-8000-000000000006": {
+  "id": "codex:0190d3e0-0000-7000-8000-000000000006",
+  "app": "codex",
+  "from": 1791028060000,
+  "to": 1791028210000,
+  "activeMs": 150000,
+  "totals": {
+   "calls": 2,
+   "input": 80,
+   "cacheRead": 67014,
+   "cacheWrite": 0,
+   "output": 964,
+   "tokens": 68058,
+   "cost": 0.01811675,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 80,
+    "cost": 0.0001
+   },
+   "cacheRead": {
+    "tokens": 67014,
+    "cost": 0.00837675
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": 0
+   },
+   "output": {
+    "tokens": 964,
+    "cost": 0.009640000000000001
+   }
+  },
+  "models": [
+   {
+    "model": "gpt-5-codex",
+    "calls": 2,
+    "tokens": 68058,
+    "cost": 0.01811675,
+    "priced": true,
+    "from": 1791028110000,
+    "to": 1791028210000,
+    "efforts": []
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791028060000,
+    "end": 1791028210000,
+    "prompt": "Write a guide for the new partial refunds.",
+    "tokens": 68058,
+    "cost": 0.01811675,
+    "byModel": {
+     "gpt-5-codex": {
+      "tokens": 68058,
+      "cost": 0.01811675
+     }
+    },
+    "tools": 0,
+    "errors": 0
+   }
+  ],
+  "tools": [],
+  "subagents": [],
+  "context": [
+   {
+    "t": 1791028110000,
+    "used": 32326,
+    "window": 258400
+   },
+   {
+    "t": 1791028210000,
+    "used": 34768,
+    "window": 258400
+   }
+  ],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ },
+ "claude:0190d3e0-0000-7000-8000-000000000007": {
+  "id": "claude:0190d3e0-0000-7000-8000-000000000007",
+  "app": "claude",
+  "from": 1791017250000,
+  "to": 1791017350000,
+  "activeMs": 100000,
+  "totals": {
+   "calls": 2,
+   "input": 80,
+   "cacheRead": 71048,
+   "cacheWrite": 0,
+   "output": 1363,
+   "tokens": 72491,
+   "cost": 0.0419994,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 80,
+    "cost": 0.00024
+   },
+   "cacheRead": {
+    "tokens": 71048,
+    "cost": 0.021314399999999997
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": 0
+   },
+   "output": {
+    "tokens": 1363,
+    "cost": 0.020444999999999998
+   }
+  },
+  "models": [
+   {
+    "model": "claude-sonnet-4-5",
+    "calls": 2,
+    "tokens": 72491,
+    "cost": 0.0419994,
+    "priced": true,
+    "from": 1791017300000,
+    "to": 1791017350000,
+    "efforts": []
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791017250000,
+    "end": 1791017350000,
+    "prompt": "Move staging to the new cluster.",
+    "tokens": 72491,
+    "cost": 0.0419994,
+    "byModel": {
+     "claude-sonnet-4-5": {
+      "tokens": 72491,
+      "cost": 0.0419994
+     }
+    },
+    "tools": 1,
+    "errors": 0
+   }
+  ],
+  "tools": [
+   {
+    "name": "Bash",
+    "category": "shell",
+    "server": null,
+    "calls": 1,
+    "errors": 0,
+    "ms": 4000
+   }
+  ],
+  "subagents": [],
+  "context": [
+   {
+    "t": 1791017300000,
+    "used": 34293,
+    "window": 200000
+   },
+   {
+    "t": 1791017350000,
+    "used": 38198,
+    "window": 200000
+   }
+  ],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ },
+ "codex:0190d3e0-0000-7000-8000-000000000008": {
+  "id": "codex:0190d3e0-0000-7000-8000-000000000008",
+  "app": "codex",
+  "from": 1791010650000,
+  "to": 1791010750000,
+  "activeMs": 100000,
+  "totals": {
+   "calls": 1,
+   "input": 40,
+   "cacheRead": 35979,
+   "cacheWrite": 0,
+   "output": 639,
+   "tokens": 36658,
+   "cost": 0.010937375,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 40,
+    "cost": 0.00005
+   },
+   "cacheRead": {
+    "tokens": 35979,
+    "cost": 0.004497375
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": 0
+   },
+   "output": {
+    "tokens": 639,
+    "cost": 0.00639
+   }
+  },
+  "models": [
+   {
+    "model": "gpt-5-codex",
+    "calls": 1,
+    "tokens": 36658,
+    "cost": 0.010937375,
+    "priced": true,
+    "from": 1791010750000,
+    "to": 1791010750000,
+    "efforts": []
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791010650000,
+    "end": 1791010750000,
+    "prompt": "Add zoom on product images.",
+    "tokens": 36658,
+    "cost": 0.010937375,
+    "byModel": {
+     "gpt-5-codex": {
+      "tokens": 36658,
+      "cost": 0.010937375
+     }
+    },
+    "tools": 0,
+    "errors": 0
+   }
+  ],
+  "tools": [],
+  "subagents": [],
+  "context": [
+   {
+    "t": 1791010750000,
+    "used": 36019,
+    "window": 258400
+   }
+  ],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ },
+ "claude:0190d3e0-0000-7000-8000-000000000009": {
+  "id": "claude:0190d3e0-0000-7000-8000-000000000009",
+  "app": "claude",
+  "from": 1791003450000,
+  "to": 1791003550000,
+  "activeMs": 100000,
+  "totals": {
+   "calls": 2,
+   "input": 80,
+   "cacheRead": 79256,
+   "cacheWrite": 0,
+   "output": 1274,
+   "tokens": 80610,
+   "cost": 0.0431268,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 80,
+    "cost": 0.00024
+   },
+   "cacheRead": {
+    "tokens": 79256,
+    "cost": 0.0237768
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": 0
+   },
+   "output": {
+    "tokens": 1274,
+    "cost": 0.019110000000000002
+   }
+  },
+  "models": [
+   {
+    "model": "claude-sonnet-4-5",
+    "calls": 2,
+    "tokens": 80610,
+    "cost": 0.0431268,
+    "priced": true,
+    "from": 1791003500000,
+    "to": 1791003550000,
+    "efforts": []
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791003450000,
+    "end": 1791003550000,
+    "prompt": "Draft a checklist for the Q4 close.",
+    "tokens": 80610,
+    "cost": 0.0431268,
+    "byModel": {
+     "claude-sonnet-4-5": {
+      "tokens": 80610,
+      "cost": 0.0431268
+     }
+    },
+    "tools": 1,
+    "errors": 0
+   }
+  ],
+  "tools": [
+   {
+    "name": "Read",
+    "category": "read",
+    "server": null,
+    "calls": 1,
+    "errors": 0,
+    "ms": 4000
+   }
+  ],
+  "subagents": [],
+  "context": [
+   {
+    "t": 1791003500000,
+    "used": 38323,
+    "window": 200000
+   },
+   {
+    "t": 1791003550000,
+    "used": 42287,
+    "window": 200000
+   }
+  ],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ },
+ "codex:0190d3e0-0000-7000-8000-000000000010": {
+  "id": "codex:0190d3e0-0000-7000-8000-000000000010",
+  "app": "codex",
+  "from": 1791020300000,
+  "to": 1791020350000,
+  "activeMs": 50000,
+  "totals": {
+   "calls": 1,
+   "input": 40,
+   "cacheRead": 40489,
+   "cacheWrite": 0,
+   "output": 966,
+   "tokens": 41495,
+   "cost": 0.014771125,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 40,
+    "cost": 0.00005
+   },
+   "cacheRead": {
+    "tokens": 40489,
+    "cost": 0.005061125
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": 0
+   },
+   "output": {
+    "tokens": 966,
+    "cost": 0.00966
+   }
+  },
+  "models": [
+   {
+    "model": "gpt-5-codex",
+    "calls": 1,
+    "tokens": 41495,
+    "cost": 0.014771125,
+    "priced": true,
+    "from": 1791020350000,
+    "to": 1791020350000,
+    "efforts": []
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791020300000,
+    "end": 1791020350000,
+    "prompt": "What does ^(?=.*\\d)(?=.*[a-z]).{8,}$ match?",
+    "tokens": 41495,
+    "cost": 0.014771125,
+    "byModel": {
+     "gpt-5-codex": {
+      "tokens": 41495,
+      "cost": 0.014771125
+     }
+    },
+    "tools": 0,
+    "errors": 0
+   }
+  ],
+  "tools": [],
+  "subagents": [],
+  "context": [
+   {
+    "t": 1791020350000,
+    "used": 40529,
+    "window": 258400
+   }
+  ],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ },
+ "claude:0190d3e0-0000-7000-8000-000000000011": {
+  "id": "claude:0190d3e0-0000-7000-8000-000000000011",
+  "app": "claude",
+  "from": 1791027150000,
+  "to": 1791027250000,
+  "activeMs": 100000,
+  "totals": {
+   "calls": 2,
+   "input": 80,
+   "cacheRead": 86517,
+   "cacheWrite": 0,
+   "output": 1623,
+   "tokens": 88220,
+   "cost": 0.0505401,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 80,
+    "cost": 0.00024
+   },
+   "cacheRead": {
+    "tokens": 86517,
+    "cost": 0.0259551
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": 0
+   },
+   "output": {
+    "tokens": 1623,
+    "cost": 0.024345
+   }
+  },
+  "models": [
+   {
+    "model": "claude-sonnet-4-5",
+    "calls": 2,
+    "tokens": 88220,
+    "cost": 0.0505401,
+    "priced": true,
+    "from": 1791027200000,
+    "to": 1791027250000,
+    "efforts": []
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791027150000,
+    "end": 1791027250000,
+    "prompt": "Review the partial refunds change before I open a PR.",
+    "tokens": 88220,
+    "cost": 0.0505401,
+    "byModel": {
+     "claude-sonnet-4-5": {
+      "tokens": 88220,
+      "cost": 0.0505401
+     }
+    },
+    "tools": 1,
+    "errors": 0
+   }
+  ],
+  "tools": [
+   {
+    "name": "Read",
+    "category": "read",
+    "server": null,
+    "calls": 1,
+    "errors": 0,
+    "ms": 4000
+   }
+  ],
+  "subagents": [],
+  "context": [
+   {
+    "t": 1791027200000,
+    "used": 42879,
+    "window": 200000
+   },
+   {
+    "t": 1791027250000,
+    "used": 45341,
+    "window": 200000
+   }
+  ],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ },
+ "codex:0190d3e0-0000-7000-8000-000000000012": {
+  "id": "codex:0190d3e0-0000-7000-8000-000000000012",
+  "app": "codex",
+  "from": 1791025050000,
+  "to": 1791025150000,
+  "activeMs": 100000,
+  "totals": {
+   "calls": 2,
+   "input": 80,
+   "cacheRead": 89244,
+   "cacheWrite": 0,
+   "output": 1094,
+   "tokens": 90418,
+   "cost": 0.0221955,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 80,
+    "cost": 0.0001
+   },
+   "cacheRead": {
+    "tokens": 89244,
+    "cost": 0.0111555
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": 0
+   },
+   "output": {
+    "tokens": 1094,
+    "cost": 0.01094
+   }
+  },
+  "models": [
+   {
+    "model": "gpt-5-codex",
+    "calls": 2,
+    "tokens": 90418,
+    "cost": 0.0221955,
+    "priced": true,
+    "from": 1791025100000,
+    "to": 1791025150000,
+    "efforts": []
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791025050000,
+    "end": 1791025150000,
+    "prompt": "Benchmark the cached solver against the old one.",
+    "tokens": 90418,
+    "cost": 0.0221955,
+    "byModel": {
+     "gpt-5-codex": {
+      "tokens": 90418,
+      "cost": 0.0221955
+     }
+    },
+    "tools": 0,
+    "errors": 0
+   }
+  ],
+  "tools": [],
+  "subagents": [],
+  "context": [
+   {
+    "t": 1791025100000,
+    "used": 43197,
+    "window": 258400
+   },
+   {
+    "t": 1791025150000,
+    "used": 46127,
+    "window": 258400
+   }
+  ],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ },
+ "codex:0190d3e0-0000-7000-8000-000000000013": {
+  "id": "codex:0190d3e0-0000-7000-8000-000000000013",
+  "app": "codex",
+  "from": 1791026450000,
+  "to": 1791026650000,
+  "activeMs": 200000,
+  "totals": {
+   "calls": 3,
+   "input": 120,
+   "cacheRead": 152085,
+   "cacheWrite": 0,
+   "output": 2248,
+   "tokens": 154453,
+   "cost": 0.041640625,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 120,
+    "cost": 0.00015000000000000001
+   },
+   "cacheRead": {
+    "tokens": 152085,
+    "cost": 0.019010625
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": 0
+   },
+   "output": {
+    "tokens": 2248,
+    "cost": 0.02248
+   }
+  },
+  "models": [
+   {
+    "model": "gpt-5-codex",
+    "calls": 3,
+    "tokens": 154453,
+    "cost": 0.041640625,
+    "priced": true,
+    "from": 1791026500000,
+    "to": 1791026650000,
+    "efforts": []
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791026450000,
+    "end": 1791026650000,
+    "prompt": "Turn the postcode list into delivery zones.",
+    "tokens": 154453,
+    "cost": 0.041640625,
+    "byModel": {
+     "gpt-5-codex": {
+      "tokens": 154453,
+      "cost": 0.041640625
+     }
+    },
+    "tools": 0,
+    "errors": 0
+   }
+  ],
+  "tools": [],
+  "subagents": [],
+  "context": [
+   {
+    "t": 1791026500000,
+    "used": 46765,
+    "window": 258400
+   },
+   {
+    "t": 1791026600000,
+    "used": 50537,
+    "window": 258400
+   },
+   {
+    "t": 1791026650000,
+    "used": 54903,
+    "window": 258400
+   }
+  ],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ },
+ "claude:0190d3e0-0000-7000-8000-000000000014": {
+  "id": "claude:0190d3e0-0000-7000-8000-000000000014",
+  "app": "claude",
+  "from": 1791014250000,
+  "to": 1791014350000,
+  "activeMs": 100000,
+  "totals": {
+   "calls": 2,
+   "input": 80,
+   "cacheRead": 99503,
+   "cacheWrite": 0,
+   "output": 1569,
+   "tokens": 101152,
+   "cost": 0.053625900000000004,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 80,
+    "cost": 0.00024
+   },
+   "cacheRead": {
+    "tokens": 99503,
+    "cost": 0.0298509
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": 0
+   },
+   "output": {
+    "tokens": 1569,
+    "cost": 0.023535
+   }
+  },
+  "models": [
+   {
+    "model": "claude-sonnet-4-5",
+    "calls": 2,
+    "tokens": 101152,
+    "cost": 0.053625900000000004,
+    "priced": true,
+    "from": 1791014300000,
+    "to": 1791014350000,
+    "efforts": []
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791014250000,
+    "end": 1791014350000,
+    "prompt": "Which of these experiments are worth keeping?",
+    "tokens": 101152,
+    "cost": 0.053625900000000004,
+    "byModel": {
+     "claude-sonnet-4-5": {
+      "tokens": 101152,
+      "cost": 0.053625900000000004
+     }
+    },
+    "tools": 1,
+    "errors": 0
+   }
+  ],
+  "tools": [
+   {
+    "name": "Read",
+    "category": "read",
+    "server": null,
+    "calls": 1,
+    "errors": 0,
+    "ms": 4000
+   }
+  ],
+  "subagents": [],
+  "context": [
+   {
+    "t": 1791014300000,
+    "used": 49158,
+    "window": 200000
+   },
+   {
+    "t": 1791014350000,
+    "used": 51994,
+    "window": 200000
+   }
+  ],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ },
+ "claude:0190d3e0-0000-7000-8000-0000000000e1": {
+  "id": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+  "app": "claude",
+  "from": 1791027000000,
+  "to": 1791027540000,
+  "activeMs": 360000,
+  "totals": {
+   "calls": 4,
+   "input": 46,
+   "cacheRead": 50000,
+   "cacheWrite": 3000,
+   "output": 851,
+   "tokens": 53897,
+   "cost": 0.06825400000000001,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 46,
+    "cost": 0.000134
+   },
+   "cacheRead": {
+    "tokens": 50000,
+    "cost": 0.0131
+   },
+   "cacheWrite": {
+    "tokens": 3000,
+    "cost": 0.036000000000000004
+   },
+   "output": {
+    "tokens": 851,
+    "cost": 0.019020000000000002
+   }
+  },
+  "models": [
+   {
+    "model": "claude-opus-5-5",
+    "calls": 3,
+    "tokens": 44467,
+    "cost": 0.06532400000000001,
+    "priced": true,
+    "from": 1791027060000,
+    "to": 1791027540000,
+    "efforts": [
+     "high"
+    ]
+   },
+   {
+    "model": "claude-haiku-4-5",
+    "calls": 1,
+    "tokens": 9430,
+    "cost": 0.00293,
+    "priced": true,
+    "from": 1791027062000,
+    "to": 1791027062000,
+    "efforts": []
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791027000000,
+    "end": 1791027300000,
+    "prompt": "/review the rounding change",
+    "tokens": 53895,
+    "cost": 0.06823000000000001,
+    "byModel": {
+     "claude-opus-5-5": {
+      "tokens": 44465,
+      "cost": 0.06530000000000001
+     },
+     "claude-haiku-4-5": {
+      "tokens": 9430,
+      "cost": 0.00293
+     }
+    },
+    "tools": 3,
+    "errors": 1
+   },
+   {
+    "n": 2,
+    "start": 1791027480000,
+    "end": 1791027540000,
+    "prompt": "# AGENTS.md instructions for the ledger",
+    "tokens": 2,
+    "cost": 0.000024,
+    "byModel": {
+     "claude-opus-5-5": {
+      "tokens": 2,
+      "cost": 0.000024
+     }
+    },
+    "tools": 2,
+    "errors": 0
+   }
+  ],
+  "tools": [
+   {
+    "name": "Task",
+    "category": "agent",
+    "server": null,
+    "calls": 1,
+    "errors": 0,
+    "ms": 120000
+   },
+   {
+    "name": "Bash",
+    "category": "shell",
+    "server": null,
+    "calls": 1,
+    "errors": 1,
+    "ms": 60000
+   },
+   {
+    "name": "Grep",
+    "category": "read",
+    "server": null,
+    "calls": 1,
+    "errors": 0,
+    "ms": null
+   },
+   {
+    "name": "Edit",
+    "category": "edit",
+    "server": null,
+    "calls": 1,
+    "errors": 0,
+    "ms": null
+   },
+   {
+    "name": "AskUserQuestion",
+    "category": "other",
+    "server": null,
+    "calls": 1,
+    "errors": 0,
+    "ms": null
+   }
+  ],
+  "subagents": [
+   {
+    "id": "e1",
+    "calls": 1,
+    "tokens": 9430,
+    "cost": 0.00293,
+    "model": "claude-haiku-4-5",
+    "from": 1791027062000,
+    "to": 1791027062000,
+    "label": "Find rounding bugs"
+   }
+  ],
+  "context": [
+   {
+    "t": 1791027060000,
+    "used": 23410,
+    "window": 200000
+   },
+   {
+    "t": 1791027300000,
+    "used": 21055,
+    "window": 200000
+   },
+   {
+    "t": 1791027540000,
+    "used": 2,
+    "window": 200000
+   }
+  ],
+  "compactions": [
+   1791027240000
+  ],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ },
+ "claude:0190d3e0-0000-7000-8000-0000000000e5": {
+  "id": "claude:0190d3e0-0000-7000-8000-0000000000e5",
+  "app": "claude",
+  "from": 1791027600000,
+  "to": 1791027660000,
+  "activeMs": 0,
+  "totals": {
+   "calls": 0,
+   "input": 0,
+   "cacheRead": 0,
+   "cacheWrite": 0,
+   "output": 0,
+   "tokens": 0,
+   "cost": null,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 0,
+    "cost": null
+   },
+   "cacheRead": {
+    "tokens": 0,
+    "cost": null
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": null
+   },
+   "output": {
+    "tokens": 0,
+    "cost": null
+   }
+  },
+  "models": [],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791027600000,
+    "end": 1791027600000,
+    "prompt": "Before the odd lines",
+    "tokens": 0,
+    "cost": 0,
+    "byModel": {},
+    "tools": 0,
+    "errors": 0
+   },
+   {
+    "n": 2,
+    "start": 1791027660000,
+    "end": 1791027660000,
+    "prompt": "After them",
+    "tokens": 0,
+    "cost": 0,
+    "byModel": {},
+    "tools": 0,
+    "errors": 0
+   }
+  ],
+  "tools": [],
+  "subagents": [],
+  "context": [],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ },
+ "codex:0190d3e0-0000-7000-8000-0000000000e2": {
+  "id": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+  "app": "codex",
+  "from": 1791027030000,
+  "to": 1791028806000,
+  "activeMs": 1776000,
+  "totals": {
+   "calls": 2,
+   "input": 6000,
+   "cacheRead": 8000,
+   "cacheWrite": 0,
+   "output": 1000,
+   "tokens": 15000,
+   "cost": null,
+   "unpricedCalls": 2
+  },
+  "kinds": {
+   "input": {
+    "tokens": 6000,
+    "cost": null
+   },
+   "cacheRead": {
+    "tokens": 8000,
+    "cost": null
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": null
+   },
+   "output": {
+    "tokens": 1000,
+    "cost": null
+   }
+  },
+  "models": [
+   {
+    "model": "ollama/gpt-oss-20b",
+    "calls": 2,
+    "tokens": 15000,
+    "cost": null,
+    "priced": false,
+    "from": 1791027240000,
+    "to": 1791028806000,
+    "efforts": [
+     "medium"
+    ]
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791027030000,
+    "end": 1791028806000,
+    "prompt": "Why is the build slow?",
+    "tokens": 15000,
+    "cost": 0,
+    "byModel": {
+     "ollama/gpt-oss-20b": {
+      "tokens": 15000,
+      "cost": 0
+     }
+    },
+    "tools": 3,
+    "errors": 0
+   }
+  ],
+  "tools": [
+   {
+    "name": "local_shell_call",
+    "category": "shell",
+    "server": null,
+    "calls": 2,
+    "errors": 0,
+    "ms": 60000
+   },
+   {
+    "name": "apply_patch",
+    "category": "edit",
+    "server": null,
+    "calls": 1,
+    "errors": 0,
+    "ms": 60000
+   }
+  ],
+  "subagents": [],
+  "context": [
+   {
+    "t": 1791027240000,
+    "used": 11000,
+    "window": 131072
+   },
+   {
+    "t": 1791028806000,
+    "used": 3000,
+    "window": 131072
+   }
+  ],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": [
+    "ollama/gpt-oss-20b"
+   ]
+  }
+ },
+ "codex:0190d3e0-0000-7000-8000-0000000000e3": {
+  "id": "codex:0190d3e0-0000-7000-8000-0000000000e3",
+  "app": "codex",
+  "from": 1790758801000,
+  "to": 1790758803000,
+  "activeMs": 2000,
+  "totals": {
+   "calls": 1,
+   "input": 400,
+   "cacheRead": 0,
+   "cacheWrite": 0,
+   "output": 100,
+   "tokens": 500,
+   "cost": 0.0015,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 400,
+    "cost": 0.0005
+   },
+   "cacheRead": {
+    "tokens": 0,
+    "cost": 0
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": 0
+   },
+   "output": {
+    "tokens": 100,
+    "cost": 0.001
+   }
+  },
+  "models": [
+   {
+    "model": "gpt-5-codex",
+    "calls": 1,
+    "tokens": 500,
+    "cost": 0.0015,
+    "priced": true,
+    "from": 1790758802000,
+    "to": 1790758802000,
+    "efforts": []
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1790758801000,
+    "end": 1790758803000,
+    "prompt": "An archived question about invoices",
+    "tokens": 500,
+    "cost": 0.0015,
+    "byModel": {
+     "gpt-5-codex": {
+      "tokens": 500,
+      "cost": 0.0015
+     }
+    },
+    "tools": 0,
+    "errors": 0
+   }
+  ],
+  "tools": [],
+  "subagents": [],
+  "context": [
+   {
+    "t": 1790758802000,
+    "used": 400,
+    "window": 200000
+   }
+  ],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ },
+ "codex:0190d3e0-0000-7000-8000-0000000000e6": {
+  "id": "codex:0190d3e0-0000-7000-8000-0000000000e6",
+  "app": "codex",
+  "from": 1791027600000,
+  "to": 1791027600000,
+  "activeMs": 0,
+  "totals": {
+   "calls": 0,
+   "input": 0,
+   "cacheRead": 0,
+   "cacheWrite": 0,
+   "output": 0,
+   "tokens": 0,
+   "cost": null,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 0,
+    "cost": null
+   },
+   "cacheRead": {
+    "tokens": 0,
+    "cost": null
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": null
+   },
+   "output": {
+    "tokens": 0,
+    "cost": null
+   }
+  },
+  "models": [],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791027600000,
+    "end": 1791027600000,
+    "prompt": "Before the odd lines",
+    "tokens": 0,
+    "cost": 0,
+    "byModel": {},
+    "tools": 0,
+    "errors": 0
+   }
+  ],
+  "tools": [],
+  "subagents": [],
+  "context": [],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ }
+}

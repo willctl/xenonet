@@ -1,0 +1,393 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/live/session/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A live session",
+  "description": "One session as the tailer sees it: what it's doing, its tokens and context, its tools, files and subagents, and whether it needs you or seems stuck.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "app": {
+      "type": "string",
+      "enum": [
+        "claude",
+        "codex"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "tool",
+        "thinking",
+        "idle"
+      ],
+      "description": "A tool call in flight, a turn under way, or neither"
+    },
+    "tokens": {
+      "type": "object",
+      "properties": {
+        "processed": {
+          "type": "number"
+        },
+        "output": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "processed",
+        "output"
+      ],
+      "additionalProperties": {},
+      "description": "Over the last 24 hours of its transcript"
+    },
+    "tokensToday": {
+      "type": "number"
+    },
+    "tpm": {
+      "type": "number",
+      "description": "Tokens in the last minute"
+    },
+    "context": {
+      "type": "object",
+      "properties": {
+        "used": {
+          "type": "number"
+        },
+        "window": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "used",
+        "window"
+      ],
+      "additionalProperties": {}
+    },
+    "forecast": {
+      "type": "object",
+      "properties": {
+        "pct": {
+          "type": "number",
+          "description": "How full the context is, 0 to 1"
+        },
+        "growthPerTurn": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "turnsLeft": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Turns until 90% full, at its usual growth"
+        }
+      },
+      "required": [
+        "pct",
+        "growthPerTurn",
+        "turnsLeft"
+      ],
+      "additionalProperties": {}
+    },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "turnStartedAt": {
+      "anyOf": [
+        {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "lastTool": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "mcp",
+                "shell",
+                "edit",
+                "read",
+                "web",
+                "agent",
+                "code",
+                "other"
+              ]
+            },
+            "detail": {
+              "type": "string"
+            },
+            "ts": {
+              "type": "number",
+              "description": "Epoch milliseconds"
+            }
+          },
+          "required": [
+            "name",
+            "category",
+            "detail",
+            "ts"
+          ],
+          "additionalProperties": {}
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "toolCounts": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "description": "Tool calls by category"
+    },
+    "subagents": {
+      "maxItems": 12,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "number",
+            "description": "Epoch milliseconds"
+          },
+          "lastAt": {
+            "type": "number",
+            "description": "Epoch milliseconds"
+          },
+          "tools": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "done": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "startedAt",
+          "lastAt",
+          "tools",
+          "done",
+          "active"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "files": {
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "ts": {
+            "type": "number",
+            "description": "Epoch milliseconds"
+          }
+        },
+        "required": [
+          "path",
+          "ts"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "Files it touched in the last 20 minutes, newest first"
+    },
+    "mcp": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "server": {
+            "type": "string"
+          },
+          "ts": {
+            "type": "number",
+            "description": "Epoch milliseconds"
+          }
+        },
+        "required": [
+          "server",
+          "ts"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "needsYou": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "permission",
+                "question",
+                "review"
+              ]
+            },
+            "text": {
+              "type": "string"
+            },
+            "since": {
+              "type": "number",
+              "description": "Epoch milliseconds"
+            },
+            "asOf": {
+              "description": "From a host that isn't live: when it last was",
+              "anyOf": [
+                {
+                  "type": "number",
+                  "description": "Epoch milliseconds"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "text",
+            "since"
+          ],
+          "additionalProperties": {}
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Waiting on you; left out once you've seen it, and for archived and background sessions"
+    },
+    "stuck": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "reasons": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "reasons"
+          ],
+          "additionalProperties": {}
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "lastMessage": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "lastTurnEndAt": {
+      "anyOf": [
+        {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "interruptedAt": {
+      "description": "When you stopped its last turn (a Claude interruption, or a Codex turn you aborted), until its next prompt: it waits on you, but isn't ready for review",
+      "anyOf": [
+        {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "lastEventAt": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "host": {
+      "description": "The host it's from, for a session on another machine",
+      "type": "string"
+    },
+    "stale": {
+      "description": "Its host isn't live: it's shown idle, as of when the host last was",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "id",
+    "app",
+    "status",
+    "tokens",
+    "tokensToday",
+    "tpm",
+    "context",
+    "forecast",
+    "model",
+    "turnStartedAt",
+    "lastTool",
+    "toolCounts",
+    "subagents",
+    "files",
+    "mcp",
+    "needsYou",
+    "stuck",
+    "lastMessage",
+    "lastTurnEndAt",
+    "lastEventAt"
+  ],
+  "additionalProperties": {}
+}

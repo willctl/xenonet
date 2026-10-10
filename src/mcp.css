@@ -1,0 +1,29 @@
+.mcp-summary { padding: 10px 0; }
+.mcp-summary .kv { grid-template-columns: 130px minmax(0, 1fr); }
+.mcp-status { font: 11px var(--mono); color: var(--muted); }
+.mcp-status.attention { color: var(--attention); }
+.mcp-counts { display: flex; gap: 24px; margin: 16px 0; font: 11px var(--mono); color: var(--muted); }
+.mcp-counts b { display: block; font: 22px var(--display); color: var(--text); }
+.mcp-head-actions { display: flex; gap: 8px; align-self: flex-start; }
+.mcp-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); padding: 0 24px; }
+.mcp-tabs button { border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font: 11px var(--mono); text-transform: uppercase; padding: 14px 12px; cursor: pointer; }
+.mcp-tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--resource); }
+.mcp-tabs button:focus-visible, .mcp-session:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
+.mcp-panel .m-body { min-height: 280px; }
+.mcp-panel .kv { grid-template-columns: 130px minmax(0, 1fr); }
+.mcp-panel .v { overflow-wrap: anywhere; }
+.mcp-about { line-height: 1.6; margin-top: 0; }
+.mcp-connection, .mcp-resource, .mcp-tool { padding: 14px 0; border-bottom: 1px solid var(--line); }
+.mcp-connection > .tag { margin-left: 8px; }
+.mcp-note { color: var(--dim); font: 11px/1.7 var(--mono); margin-top: 24px; }
+.mcp-search { display: grid; gap: 8px; color: var(--muted); font: 11px var(--mono); }
+.mcp-search input { color: var(--text); background: var(--panel); border: 1px solid var(--line); padding: 10px; font: 13px var(--mono); width: 100%; }
+.mcp-search input:focus { outline: 1px solid var(--accent); }
+.mcp-tool summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.mcp-tool summary::before { content: "+"; color: var(--resource); }
+.mcp-tool[open] summary::before { content: "−"; }
+.mcp-tool p, .mcp-resource p { line-height: 1.6; white-space: pre-wrap; }
+.mcp-tool pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; background: var(--panel); padding: 16px; font: 11px/1.7 var(--mono); }
+.mcp-resource h3 { margin: 0; font-size: 15px; }
+.mcp-resource code { overflow-wrap: anywhere; }
+.mcp-session { display: flex; align-items: center; gap: 12px; background: transparent; border: 0; border-bottom: 1px solid var(--line); color: var(--text); padding: 14px 0; width: 100%; text-align: left; cursor: pointer; font: 13px var(--body); }

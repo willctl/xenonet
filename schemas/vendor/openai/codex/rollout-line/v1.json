@@ -1,0 +1,1283 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/openai/codex/rollout-line/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A line of a Codex rollout",
+  "description": "A line of ~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<time>-<thread>.jsonl (and of archived, zstd-compressed ones), as the live tailer, a session's stats and search read it, and a thread shown from its rollout when the app-server can't list its items. The version is the rollout's first line's, session_meta's cli_version.",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "description": "ISO 8601"
+        },
+        "type": {
+          "type": "string",
+          "const": "session_meta"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "cli_version": {
+              "type": "string",
+              "description": "The Codex that wrote the rollout"
+            },
+            "model_provider": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "cli_version"
+          ],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "timestamp",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {},
+      "x-xenonet": {
+        "closed": true
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "description": "ISO 8601"
+        },
+        "type": {
+          "type": "string",
+          "const": "turn_context"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "effort": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "service_tier": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "model"
+          ],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "timestamp",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {},
+      "x-xenonet": {
+        "closed": true
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "description": "ISO 8601"
+        },
+        "type": {
+          "type": "string",
+          "const": "event_msg"
+        },
+        "payload": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_started"
+                },
+                "model_context_window": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_complete"
+                },
+                "last_agent_message": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "duration_ms": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "token_count"
+                },
+                "info": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "total_token_usage": {
+                          "type": "object",
+                          "properties": {
+                            "input_tokens": {
+                              "type": "number"
+                            },
+                            "cached_input_tokens": {
+                              "type": "number"
+                            },
+                            "cache_write_input_tokens": {
+                              "type": "number"
+                            },
+                            "output_tokens": {
+                              "type": "number"
+                            },
+                            "reasoning_output_tokens": {
+                              "type": "number"
+                            },
+                            "total_tokens": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "total_tokens"
+                          ],
+                          "additionalProperties": {},
+                          "x-xenonet": {
+                            "closed": true
+                          }
+                        },
+                        "last_token_usage": {
+                          "type": "object",
+                          "properties": {
+                            "input_tokens": {
+                              "type": "number"
+                            },
+                            "cached_input_tokens": {
+                              "type": "number"
+                            },
+                            "cache_write_input_tokens": {
+                              "type": "number"
+                            },
+                            "output_tokens": {
+                              "type": "number"
+                            },
+                            "reasoning_output_tokens": {
+                              "type": "number"
+                            },
+                            "total_tokens": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "total_tokens"
+                          ],
+                          "additionalProperties": {},
+                          "x-xenonet": {
+                            "closed": true
+                          }
+                        },
+                        "model_context_window": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        }
+                      },
+                      "additionalProperties": {},
+                      "x-xenonet": {
+                        "closed": true
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "rate_limits": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "primary": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "used_percent": {
+                                  "type": "number"
+                                },
+                                "window_minutes": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                },
+                                "resets_at": {
+                                  "description": "Epoch seconds",
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "used_percent"
+                              ],
+                              "additionalProperties": {},
+                              "x-xenonet": {
+                                "closed": true,
+                                "known": [
+                                  "resets_in_seconds"
+                                ]
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "secondary": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "used_percent": {
+                                  "type": "number"
+                                },
+                                "window_minutes": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                },
+                                "resets_at": {
+                                  "description": "Epoch seconds",
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "used_percent"
+                              ],
+                              "additionalProperties": {},
+                              "x-xenonet": {
+                                "closed": true,
+                                "known": [
+                                  "resets_in_seconds"
+                                ]
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "type",
+                "info"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "item_completed"
+                },
+                "item": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "UserMessage"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "content": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "text": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": {}
+                          }
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "content"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "AgentMessage"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "content": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "text": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": {}
+                          }
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "content"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "Reasoning"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "summary_text": {
+                          "type": "array",
+                          "items": {}
+                        },
+                        "raw_content": {
+                          "type": "array",
+                          "items": {}
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "CommandExecution"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "command": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            {
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "exit_code": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "aggregated_output": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "command"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "McpToolCall"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "server": {
+                          "type": "string"
+                        },
+                        "tool": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "error": {},
+                        "arguments": {},
+                        "result": {}
+                      },
+                      "required": [
+                        "type",
+                        "server",
+                        "tool"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "FileChange"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "changes": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string"
+                              },
+                              "unified_diff": {
+                                "type": "string"
+                              },
+                              "content": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": {},
+                            "x-xenonet": {
+                              "closed": true,
+                              "known": [
+                                "move_path"
+                              ]
+                            }
+                          },
+                          "description": "By path"
+                        },
+                        "status": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "changes"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "WebSearch"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "query": {
+                          "type": "string"
+                        },
+                        "action": {
+                          "type": "object",
+                          "properties": {
+                            "query": {
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": {},
+                          "x-xenonet": {
+                            "closed": true,
+                            "known": [
+                              "type",
+                              "queries",
+                              "url",
+                              "pattern"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "ImageView"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "path": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "path"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "ContextCompaction"
+                        },
+                        "id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "CollabAgentToolCall"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "description": "What happened to a subagent: started, interacted, interrupted or completed",
+                          "type": "string"
+                        },
+                        "agent_thread_id": {
+                          "type": "string"
+                        },
+                        "receiver_thread_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "agent_path": {
+                          "type": "string"
+                        },
+                        "prompt": {
+                          "type": "string"
+                        },
+                        "agentThreadId": {
+                          "description": "Read as well as agent_thread_id",
+                          "type": "string"
+                        },
+                        "receiverThreadIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "agentPath": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ],
+                      "additionalProperties": {},
+                      "description": "A subagent: the thread it runs in, its path or prompt for a label, and what happened to it"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "SubAgentActivity"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "description": "What happened to a subagent: started, interacted, interrupted or completed",
+                          "type": "string"
+                        },
+                        "agent_thread_id": {
+                          "type": "string"
+                        },
+                        "receiver_thread_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "agent_path": {
+                          "type": "string"
+                        },
+                        "prompt": {
+                          "type": "string"
+                        },
+                        "agentThreadId": {
+                          "description": "Read as well as agent_thread_id",
+                          "type": "string"
+                        },
+                        "receiverThreadIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "agentPath": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ],
+                      "additionalProperties": {},
+                      "description": "A subagent: the thread it runs in, its path or prompt for a label, and what happened to it"
+                    }
+                  ],
+                  "x-xenonet": {
+                    "discriminator": "type"
+                  }
+                },
+                "started_at_ms": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "completed_at_ms": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "type",
+                "item"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "user_message"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "message"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_message"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "message"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "thread_settings_applied"
+                },
+                "thread_settings": {
+                  "type": "object",
+                  "properties": {
+                    "service_tier": {
+                      "description": "priority, or default; not said is default",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "additionalProperties": {},
+                  "description": "All of the thread's settings, as of the turn after it"
+                }
+              },
+              "required": [
+                "type",
+                "thread_settings"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "turn_aborted"
+                },
+                "reason": {
+                  "description": "interrupted (you stopped it), replaced (the next turn took its place) or review_ended; older rollouts leave it out",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {},
+              "description": "A turn that ended without finishing: one you stopped (interrupted, or no reason) ends there, and the live view says so"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_reasoning"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "mcp_tool_call_end"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {}
+            }
+          ],
+          "x-xenonet": {
+            "discriminator": "type"
+          }
+        }
+      },
+      "required": [
+        "timestamp",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {},
+      "x-xenonet": {
+        "closed": true
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "description": "ISO 8601"
+        },
+        "type": {
+          "type": "string",
+          "const": "response_item"
+        },
+        "payload": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "message"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "content": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": {}
+                      }
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "type",
+                "role",
+                "content"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "function_call"
+                },
+                "call_id": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "input": {},
+                "arguments": {},
+                "action": {}
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {},
+              "x-xenonet": {
+                "closed": true,
+                "known": [
+                  "namespace",
+                  "encrypted_function_args",
+                  "internal_chat_message_metadata_passthrough"
+                ]
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "custom_tool_call"
+                },
+                "call_id": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "input": {},
+                "arguments": {},
+                "action": {}
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {},
+              "x-xenonet": {
+                "closed": true,
+                "known": [
+                  "status",
+                  "namespace",
+                  "internal_chat_message_metadata_passthrough"
+                ]
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "local_shell_call"
+                },
+                "call_id": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "input": {},
+                "arguments": {},
+                "action": {}
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {},
+              "x-xenonet": {
+                "closed": true,
+                "known": [
+                  "status",
+                  "internal_chat_message_metadata_passthrough"
+                ]
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "function_call_output"
+                },
+                "call_id": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "output": {}
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {},
+              "x-xenonet": {
+                "closed": true,
+                "known": [
+                  "name",
+                  "namespace",
+                  "internal_chat_message_metadata_passthrough"
+                ]
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "custom_tool_call_output"
+                },
+                "call_id": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "output": {}
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {},
+              "x-xenonet": {
+                "closed": true,
+                "known": [
+                  "name",
+                  "internal_chat_message_metadata_passthrough"
+                ]
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "local_shell_call_output"
+                },
+                "call_id": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "output": {}
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "reasoning"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "web_search_call"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_message"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_search_call"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_search_output"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "image_generation_call"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "compaction"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "configuration_update"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "compaction_trigger"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "context_compaction"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {}
+            }
+          ],
+          "x-xenonet": {
+            "discriminator": "type"
+          }
+        }
+      },
+      "required": [
+        "timestamp",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {},
+      "x-xenonet": {
+        "closed": true
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "description": "ISO 8601"
+        },
+        "type": {
+          "type": "string",
+          "const": "compacted"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "timestamp",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {},
+      "x-xenonet": {
+        "closed": true
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "world_state"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    }
+  ],
+  "x-xenonet": {
+    "discriminator": "type",
+    "vendorVersions": "<1.0.0",
+    "lenient": true
+  }
+}

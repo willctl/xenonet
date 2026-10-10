@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/anthropic/oauth/usage/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Anthropic's plan usage answer",
+  "description": "The body of GET https://api.anthropic.com/api/oauth/usage (asked with anthropic-beta: oauth-2025-04-20): the five-hour and seven-day windows XenoNet shows. The answer carries no version, so the newest schema reads it.",
+  "type": "object",
+  "properties": {
+    "five_hour": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "utilization": {
+              "description": "Used, in percent",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "resets_at": {
+              "description": "ISO 8601",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": {},
+          "x-xenonet": {
+            "closed": true
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "seven_day": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "utilization": {
+              "description": "Used, in percent",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "resets_at": {
+              "description": "ISO 8601",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": {},
+          "x-xenonet": {
+            "closed": true
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "additionalProperties": {},
+  "x-xenonet": {
+    "vendorVersions": "*",
+    "lenient": true
+  }
+}

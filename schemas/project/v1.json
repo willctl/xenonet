@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/project/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Project",
+  "description": "A project, or a group of projects, in the projects folder, as XenoNet's scan finds it.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string",
+      "description": "The folder, spelled as on disk"
+    },
+    "key": {
+      "type": "string",
+      "description": "The folder's path key (core/paths.js): forward slashes, lowercase, no trailing slash"
+    },
+    "rel": {
+      "type": "string",
+      "description": "The folder inside the projects folder, with forward slashes"
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "project",
+        "group"
+      ]
+    },
+    "detected": {
+      "type": "string",
+      "enum": [
+        "repo",
+        "rule",
+        "submodule",
+        "workspace",
+        "sessions",
+        "folder",
+        "contains"
+      ],
+      "description": "What made it one: a project's own repo, a rule, being a submodule, a workspace file, sessions run in it, or being a plain top-level folder; a group's projects (contains) or a rule"
+    },
+    "marker": {
+      "description": "The file that marks it: a version control folder (.git, .hg, …) or a workspace file",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "parent": {
+      "description": "The key of the group or project it's inside",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "git": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "branch": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "origin": {
+              "description": "The origin remote's URL",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "worktreeOf": {
+              "description": "For a linked worktree, the folder of the repo it belongs to",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "submoduleOf": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "branch",
+            "origin",
+            "worktreeOf",
+            "submoduleOf"
+          ],
+          "additionalProperties": {}
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "stack": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "What it's built with, from marker files: node, typescript, python…"
+    },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "modifiedAt": {
+      "anyOf": [
+        {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "rule": {
+      "description": "The rule that applies to its folder: yours, or one of Codex's picks",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "as": {
+              "type": "string",
+              "enum": [
+                "project",
+                "group",
+                "ignore"
+              ]
+            },
+            "by": {
+              "type": "string",
+              "enum": [
+                "you",
+                "codex"
+              ]
+            },
+            "at": {
+              "description": "When you set it; yours only",
+              "type": "number"
+            },
+            "reason": {
+              "description": "Why Codex picked it; Codex's only",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "as",
+            "by"
+          ],
+          "additionalProperties": {}
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "name",
+    "path",
+    "key",
+    "rel",
+    "role",
+    "detected",
+    "marker",
+    "parent",
+    "git",
+    "stack",
+    "description",
+    "modifiedAt"
+  ],
+  "additionalProperties": {}
+}

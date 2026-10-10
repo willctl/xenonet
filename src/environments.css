@@ -1,0 +1,19 @@
+.modal:has(.environment-panel) { align-items: end; justify-content: end; padding: 24px; }
+.modal:has(.environment-panel) .m-backdrop { backdrop-filter: none; background: rgb(var(--bg-rgb) / 0.18); }
+.environment-panel { width: min(620px, calc(100vw - 32px)); }
+.environment-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.environment-card { display: flex; flex-direction: column; min-width: 0; padding: 0; border: 1px solid var(--line); color: var(--text); background: var(--panel); cursor: pointer; text-align: left; }
+.environment-card:hover, .environment-card[aria-checked="true"] { border-color: var(--accent); background: rgb(var(--accent-rgb) / 0.06); }
+.environment-card:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }
+.environment-art { display: block; height: 74px; width: 100%; position: relative; overflow: hidden; background: var(--bg); border-bottom: 1px solid var(--line); }
+.environment-name { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 10px 12px 0; font: 16px var(--display); }
+.environment-about { padding: 6px 12px 12px; font: 11px/1.6 var(--mono); color: var(--muted); }
+.environment-art.clouds { background: radial-gradient(ellipse at 20% 50%, rgb(var(--codex-rgb) / 0.15), transparent 60%), radial-gradient(ellipse at 75% 40%, rgb(var(--accent-rgb) / 0.26), transparent 70%), var(--bg); }
+.environment-art.clouds i { position: absolute; width: 2px; height: 2px; background: var(--text); left: calc(15% * sibling-index()); top: calc(12px * sibling-index()); }
+.environment-art.curtains i { position: absolute; width: 55%; height: 100%; left: calc(12% * sibling-index()); top: -40%; border-radius: 50%; border-bottom: 14px solid rgb(var(--accent-rgb) / 0.25); box-shadow: 0 10px 14px rgb(var(--codex-rgb) / 0.14); transform: rotate(-15deg); }
+.environment-art.water { background: repeating-radial-gradient(ellipse at 40% 0%, transparent 0 12px, rgb(var(--accent-rgb) / 0.17) 14px, transparent 17px 30px), linear-gradient(180deg, rgb(var(--codex-rgb) / 0.12), var(--bg)); }
+.environment-art.water i { position: absolute; width: 14px; height: 120px; top: -15px; left: calc(16% * sibling-index()); background: linear-gradient(rgb(var(--accent-rgb) / 0.2), transparent); transform: rotate(18deg); }
+.environment-art.arches i { position: absolute; inset: calc(5px * sibling-index()) calc(14px * sibling-index()) -25px; border: 1px solid rgb(var(--accent-rgb) / 0.45); border-radius: 50% 50% 0 0; box-shadow: 0 0 8px rgb(var(--accent-rgb) / 0.08); }
+.environment-footer { display: flex; gap: 20px; align-items: center; justify-content: space-between; margin-top: 18px; }
+.environment-footer .dim { font: 10px/1.6 var(--mono); }
+@media (max-width: 600px) { .modal:has(.environment-panel) { padding: 16px; } .environment-footer { align-items: start; } }

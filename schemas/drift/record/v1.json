@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/drift/record/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A drift record",
+  "description": "Vendor data that differs from XenoNet's schema for it: a new or missing field, a field of another type, a new variant, a new version, or a line that isn't JSON.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "drift/record/v1"
+    },
+    "source": {
+      "type": "string",
+      "description": "<vendor>/<product>/<source>, the vendor schema's path without vendor/: anthropic/claude-code/transcript-line"
+    },
+    "vendorVersion": {
+      "description": "The version of the vendor's app that wrote the data, if it says",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "new-field",
+        "missing-field",
+        "type-change",
+        "new-variant",
+        "new-version",
+        "unparsable"
+      ]
+    },
+    "path": {
+      "description": "Where in the record: message.content[].citations; null where there's no field, as for a line that isn't JSON",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "variant": {
+      "description": "The kind of record it's in: the values of the discriminators around it, outermost first, such as [\"assistant\", \"text\"] for a text block in a reply; only values the schema lists. Left out where there's none",
+      "minItems": 1,
+      "maxItems": 8,
+      "type": "array",
+      "items": {
+        "type": [
+          "string",
+          "number",
+          "boolean"
+        ]
+      }
+    },
+    "shape": {
+      "description": "Types only, at most four levels deep: object keys and their value types, array element types. Never a value, except a declared discriminator's (a line's type) and vendor versions",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "firstSeen": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "lastSeen": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "schema",
+    "source",
+    "vendorVersion",
+    "kind",
+    "path",
+    "shape",
+    "firstSeen",
+    "lastSeen",
+    "count"
+  ],
+  "additionalProperties": {}
+}

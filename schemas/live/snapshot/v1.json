@@ -1,0 +1,746 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/live/snapshot/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Live state",
+  "description": "What the agents are doing now: each session's live state, token rates, plan usage and its forecast, and the sessions working on the same files.",
+  "type": "object",
+  "properties": {
+    "at": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "sessions": {
+      "type": "array",
+      "items": {
+        "$ref": "https://xenonet.dev/schemas/live/session/v1.json"
+      },
+      "description": "Sessions with anything in the last 24 hours"
+    },
+    "series": {
+      "type": "object",
+      "properties": {
+        "claude": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "codex": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        }
+      },
+      "required": [
+        "claude",
+        "codex"
+      ],
+      "additionalProperties": {},
+      "description": "Tokens a second over the last five minutes, oldest first"
+    },
+    "tpm": {
+      "type": "number"
+    },
+    "total24h": {
+      "type": "number"
+    },
+    "today": {
+      "type": "number"
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "codex": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "primary": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "pct": {
+                          "description": "Used, 0 to 100",
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "windowMinutes": {
+                          "description": "How long the window is",
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "resetsAt": {
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "description": "Epoch milliseconds"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "When it resets"
+                        }
+                      },
+                      "required": [
+                        "pct",
+                        "windowMinutes",
+                        "resetsAt"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "secondary": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "pct": {
+                          "description": "Used, 0 to 100",
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "windowMinutes": {
+                          "description": "How long the window is",
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "resetsAt": {
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "description": "Epoch milliseconds"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "When it resets"
+                        }
+                      },
+                      "required": [
+                        "pct",
+                        "windowMinutes",
+                        "resetsAt"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "observedAt": {
+                  "type": "number",
+                  "description": "Epoch milliseconds"
+                },
+                "identity": {
+                  "description": "The identity it was read for (claude:…, chatgpt:…, openai:api-key), the one signed in now; null when XenoNet doesn't know it",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "host": {
+                  "description": "The host it was read on, when that's another machine",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "primary",
+                "secondary",
+                "observedAt"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Codex's rate limits, as its last token count reported them, and when"
+        },
+        "claude": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "fiveHour": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "sevenDay": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "resets": {
+                      "type": "object",
+                      "properties": {
+                        "fiveHour": {
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "description": "Epoch milliseconds"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "sevenDay": {
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "description": "Epoch milliseconds"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    "observedAt": {
+                      "type": "number",
+                      "description": "Epoch milliseconds"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "anthropic",
+                        "claude-desktop"
+                      ]
+                    },
+                    "identity": {
+                      "description": "The identity it was read for (claude:…, chatgpt:…, openai:api-key), the one signed in now; null when XenoNet doesn't know it",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "host": {
+                      "description": "The host it was read on, when that's another machine",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "fiveHour",
+                    "sevenDay",
+                    "resets",
+                    "observedAt",
+                    "source"
+                  ],
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "fiveHour": {
+                      "type": "null"
+                    },
+                    "sevenDay": {
+                      "type": "null"
+                    },
+                    "observedAt": {
+                      "anyOf": [
+                        {
+                          "type": "number",
+                          "description": "Epoch milliseconds"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "stale": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "identity": {
+                      "description": "The identity it was read for (claude:…, chatgpt:…, openai:api-key), the one signed in now; null when XenoNet doesn't know it",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "host": {
+                      "description": "The host it was read on, when that's another machine",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "fiveHour",
+                    "sevenDay",
+                    "observedAt",
+                    "stale",
+                    "reason"
+                  ],
+                  "additionalProperties": {},
+                  "description": "No reading recent enough: when the last one was, and why there's none since"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Claude plan usage, in percent"
+        },
+        "others": {
+          "description": "With hosts on: readings of accounts signed in only on other machines, the newest of each, as limits.claude and limits.codex have them",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "app": {
+                "type": "string",
+                "enum": [
+                  "claude",
+                  "codex"
+                ]
+              },
+              "identity": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "host": {
+                "type": "string"
+              },
+              "reading": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "app",
+              "identity",
+              "host",
+              "reading"
+            ],
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": [
+        "codex",
+        "claude"
+      ],
+      "additionalProperties": {}
+    },
+    "limitForecast": {
+      "type": "object",
+      "properties": {
+        "codex": {
+          "type": "object",
+          "properties": {
+            "pct": {
+              "type": "number",
+              "description": "Used, 0 to 100"
+            },
+            "perHour": {
+              "type": "number"
+            },
+            "eta": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "description": "Epoch milliseconds"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "When it runs out at this pace"
+            },
+            "resetsAt": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "description": "Epoch milliseconds"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "hitsBeforeReset": {
+              "type": "boolean"
+            },
+            "windowMinutes": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": {}
+        },
+        "claudeFiveHour": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "pct": {
+                  "type": "number",
+                  "description": "Used, 0 to 100"
+                },
+                "perHour": {
+                  "type": "number"
+                },
+                "eta": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "description": "Epoch milliseconds"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "When it runs out at this pace"
+                },
+                "resetsAt": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "description": "Epoch milliseconds"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "hitsBeforeReset": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "pct",
+                "perHour",
+                "eta",
+                "resetsAt",
+                "hitsBeforeReset"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "claudeSevenDay": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "pct": {
+                  "type": "number",
+                  "description": "Used, 0 to 100"
+                },
+                "perHour": {
+                  "type": "number"
+                },
+                "eta": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "description": "Epoch milliseconds"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "When it runs out at this pace"
+                },
+                "resetsAt": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "description": "Epoch milliseconds"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "hitsBeforeReset": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "pct",
+                "perHour",
+                "eta",
+                "resetsAt",
+                "hitsBeforeReset"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": {}
+    },
+    "costs": {
+      "description": "What today's calls would cost at API prices (core/pricing.js), in dollars",
+      "type": "object",
+      "properties": {
+        "today": {
+          "type": "number",
+          "description": "Dollars"
+        },
+        "byApp": {
+          "type": "object",
+          "properties": {
+            "claude": {
+              "type": "number"
+            },
+            "codex": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "claude",
+            "codex"
+          ],
+          "additionalProperties": {}
+        },
+        "perHour": {
+          "type": "number",
+          "description": "Dollars an hour at this minute's pace"
+        },
+        "unpriced": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Models used today that XenoNet has no price for"
+        },
+        "checked": {
+          "type": "string",
+          "description": "When the prices were last checked against the providers' (YYYY-MM-DD)"
+        }
+      },
+      "required": [
+        "today",
+        "byApp",
+        "perHour",
+        "unpriced",
+        "checked"
+      ],
+      "additionalProperties": {}
+    },
+    "collab": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "string"
+          },
+          "b": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "const": "file"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "a",
+          "b",
+          "kind",
+          "files"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "Sessions that touched the same files lately"
+    },
+    "collisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "string"
+          },
+          "b": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ts": {
+            "type": "number",
+            "description": "Epoch milliseconds"
+          },
+          "branches": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ],
+            "items": false,
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "sameBranch": {
+            "type": "boolean"
+          },
+          "titles": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "items": false,
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "required": [
+          "a",
+          "b",
+          "files",
+          "paths",
+          "ts",
+          "branches",
+          "sameBranch",
+          "titles"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "Sessions on the map that both edited a file in the last ten minutes"
+    },
+    "resources": {
+      "maxItems": 8,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "server": {
+            "type": "string"
+          },
+          "ts": {
+            "type": "number",
+            "description": "Epoch milliseconds"
+          }
+        },
+        "required": [
+          "server",
+          "ts"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "status": {
+      "type": "object",
+      "properties": {
+        "watching": {
+          "type": "boolean"
+        },
+        "files": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "lines": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "errors": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "watching",
+        "files",
+        "lines",
+        "errors"
+      ],
+      "additionalProperties": {}
+    }
+  },
+  "required": [
+    "at",
+    "sessions",
+    "series",
+    "tpm",
+    "total24h",
+    "today",
+    "limits",
+    "limitForecast",
+    "collab",
+    "collisions",
+    "resources",
+    "status"
+  ],
+  "additionalProperties": {}
+}

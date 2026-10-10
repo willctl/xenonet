@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/identity/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Identity",
+  "description": "An account work happens under: a Claude account in an organization, a ChatGPT workspace, an OpenAI API key, a GitHub account, or the email git commits with.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "claude:<account>:<organization>, chatgpt:<workspace>, openai:api-key, github:<host>/<login> or git:<hash of the email>. Identities have no host: the ids are already global"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "claude",
+        "chatgpt",
+        "openai",
+        "github",
+        "git"
+      ]
+    },
+    "handle": {
+      "description": "The email or login it shows as",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "detail": {
+      "type": "object",
+      "properties": {
+        "plan": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "org": {
+          "description": "A Claude team's or enterprise's name",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "host": {
+          "description": "A GitHub account's host",
+          "type": "string"
+        },
+        "name": {
+          "description": "The name git commits carry",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": {}
+    },
+    "signedIn": {
+      "type": "boolean"
+    },
+    "active": {
+      "type": "boolean",
+      "description": "gh's active account for its host"
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Where XenoNet found it, with the home folder as ~"
+    },
+    "firstSeen": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "seenAt": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "name": {
+      "description": "The name you gave it; identities with the same name show as one",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "hidden": {
+      "type": "boolean"
+    },
+    "sessions": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "projects": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "hosts": {
+      "description": "With hosts on: the machines it was seen on, null for this one",
+      "type": "array",
+      "items": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "signedInOn": {
+      "description": "With hosts on: the machines it's signed in on, null for this one",
+      "type": "array",
+      "items": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    }
+  },
+  "required": [
+    "id",
+    "kind",
+    "handle",
+    "detail",
+    "signedIn",
+    "active",
+    "sources",
+    "firstSeen",
+    "name",
+    "hidden",
+    "sessions",
+    "projects"
+  ],
+  "additionalProperties": {}
+}

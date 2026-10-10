@@ -1,0 +1,147 @@
+# Checks the newest Claude Code, Agent SDK and Codex releases (and the
+# versions XenoNet pins) against XenoNet's vendor schemas, every day. It needs
+# no secrets: each CLI runs one turn against a stand-in model API, in a
+# made-up home. docs/guide/provider-drift.md says how to act on the report.
+name: Provider drift
+on:
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+    inputs:
+      providers:
+        description: Providers to inspect, comma-separated, such as openai/codex (all when empty; a partial run leaves the issue and fixes alone)
+        required: false
+        default: ""
+      latest-only:
+        description: Only each provider's latest version, not the versions XenoNet pins
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: provider-drift
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      attention: ${{ steps.check.outputs.attention }}
+      fixable: ${{ steps.check.outputs.fixable }}
+    steps:
+      # The check needs only Node and XenoNet's own modules, so it installs
+      # none of XenoNet's dependencies, only the providers' packages.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - id: check
+        name: Inspect the providers
+        env:
+          PROVIDERS: ${{ inputs.providers }}
+          LATEST_ONLY: ${{ inputs.latest-only }}
+          # Read-only, for looking up GitHub releases without the
+          # anonymous rate limit. The providers' CLIs never see it.
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=(--out provider-drift --work "$RUNNER_TEMP/provider-drift")
+          if [ -n "$PROVIDERS" ]; then args+=(--providers "$PROVIDERS"); fi
+          if [ "$LATEST_ONLY" = "true" ]; then args+=(--latest-only); fi
+          node scripts/provider-drift.mjs "${args[@]}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: provider-drift
+          path: provider-drift/
+          if-no-files-found: warn
+          retention-days: 30
+
+  # Opens, updates or closes the one tracking issue (label provider-drift).
+  issue:
+    needs: inspect
+    if: github.event_name == 'schedule' || inputs.providers == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: provider-drift
+          path: provider-drift
+      - name: Update the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/provider-drift.mjs issue --report provider-drift/report.json
+
+  # Widens the version ranges the report allows, on the provider-drift/ranges
+  # branch, and opens or updates a pull request for review. Nothing else is
+  # changed by the workflow: additions and changes are a person's to decide.
+  fix:
+    needs: inspect
+    if: needs.inspect.outputs.fixable == 'true' && (github.event_name == 'schedule' || inputs.providers == '')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: provider-drift
+          path: provider-drift
+      - id: fix
+        name: Widen the ranges
+        run: node scripts/provider-drift.mjs fix --report provider-drift/report.json --out provider-drift
+      - if: steps.fix.outputs.changed == 'true'
+        run: npm run schemas
+      - id: test
+        if: steps.fix.outputs.changed == 'true'
+        continue-on-error: true
+        run: npm test
+      - name: Push the branch and open or update the pull request
+        if: steps.fix.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.fix.outputs.branch }}
+          BASE: ${{ github.event.repository.default_branch }}
+          TESTS: ${{ steps.test.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          draft=()
+          if [ "$TESTS" != "success" ]; then
+            printf '\n**npm test fails on this branch** ([run](%s)): a test may pin the old range. Fix it here before merging.\n' "$RUN_URL" >> provider-drift/fix.md
+            draft=(--draft)
+          fi
+          git switch -C "$BRANCH"
+          git add core/schema/vendor schemas docs/design/schemas.md
+          git commit -q -F - <<EOF
+          fix(schema): widen vendor version ranges for new provider releases
+
+          $(cat provider-drift/fix.md)
+          EOF
+          git push --force origin "$BRANCH"
+          number=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --body-file provider-drift/fix.md
+          else
+            gh pr create --base "$BASE" --head "$BRANCH" --title "fix(schema): widen vendor version ranges for new provider releases" --body-file provider-drift/fix.md "${draft[@]}" \
+              || echo "::warning::Pushed $BRANCH, but couldn't open a pull request. Allow GitHub Actions to create pull requests in the repository's settings, or open one from the branch."
+          fi

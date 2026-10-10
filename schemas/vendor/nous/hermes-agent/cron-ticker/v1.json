@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/nous/hermes-agent/cron-ticker/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Hermes Agent's scheduler ticker",
+  "description": "The scheduler's two heartbeat files in ~/.hermes/cron (and each profile's), rewritten on every 60 s tick by the gateway or a desktop backend. They aren't JSON: XenoNet reads each line into this shape, and a line that doesn't read is unparsable.",
+  "type": "object",
+  "properties": {
+    "heartbeat": {
+      "description": "ticker_heartbeat: one line, <epoch seconds> <pid>",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "at": {
+              "type": "number",
+              "description": "Epoch seconds"
+            },
+            "pid": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "at"
+          ],
+          "additionalProperties": {}
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "last_success": {
+      "description": "ticker_last_success: one line, <epoch seconds>",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "at": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "at"
+          ],
+          "additionalProperties": {}
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "additionalProperties": {},
+  "x-xenonet": {
+    "vendorVersions": "<1.0.0",
+    "lenient": true
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/openai/codex/state-db/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Codex's state database",
+  "description": "The tables and columns XenoNet queries in ~/.codex/state_5.sqlite, opened read only, for Codex desktop's projects. The version is the file's number (state_5); a state database of another number is drift.",
+  "type": "object",
+  "properties": {
+    "projects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "select id, name from projects"
+    },
+    "project_roots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "path"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "select project_id, path from project_roots order by position"
+    }
+  },
+  "required": [
+    "projects",
+    "project_roots"
+  ],
+  "additionalProperties": {},
+  "x-xenonet": {
+    "vendorVersions": "5",
+    "lenient": true
+  }
+}

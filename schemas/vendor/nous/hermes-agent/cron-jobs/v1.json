@@ -1,0 +1,385 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/nous/hermes-agent/cron-jobs/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Hermes Agent's scheduled jobs",
+  "description": "cron/jobs.json in ~/.hermes (and each profile's): when each job runs and how its last run went, and the folder it works in. Names, prompts, scripts, skills, destinations and error texts are never read.",
+  "type": "object",
+  "properties": {
+    "jobs": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "last_status": {
+                "type": "string",
+                "const": "ok",
+                "description": "null until a job first runs"
+              },
+              "state": {
+                "description": "scheduled, paused, completed or error",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "enabled": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "schedule": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "next_run_at": {
+                "type": [
+                  "number",
+                  "string",
+                  "null"
+                ]
+              },
+              "last_run_at": {
+                "type": [
+                  "number",
+                  "string",
+                  "null"
+                ]
+              },
+              "workdir": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "last_status"
+            ],
+            "additionalProperties": {}
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "last_status": {
+                "type": "string",
+                "const": "error",
+                "description": "null until a job first runs"
+              },
+              "state": {
+                "description": "scheduled, paused, completed or error",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "enabled": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "schedule": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "next_run_at": {
+                "type": [
+                  "number",
+                  "string",
+                  "null"
+                ]
+              },
+              "last_run_at": {
+                "type": [
+                  "number",
+                  "string",
+                  "null"
+                ]
+              },
+              "workdir": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "last_status"
+            ],
+            "additionalProperties": {}
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "last_status": {
+                "type": "string",
+                "const": "delivery_failed",
+                "description": "null until a job first runs"
+              },
+              "state": {
+                "description": "scheduled, paused, completed or error",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "enabled": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "schedule": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "next_run_at": {
+                "type": [
+                  "number",
+                  "string",
+                  "null"
+                ]
+              },
+              "last_run_at": {
+                "type": [
+                  "number",
+                  "string",
+                  "null"
+                ]
+              },
+              "workdir": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "last_status"
+            ],
+            "additionalProperties": {}
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "last_status": {
+                "type": "string",
+                "const": "blocked_config",
+                "description": "null until a job first runs"
+              },
+              "state": {
+                "description": "scheduled, paused, completed or error",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "enabled": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "schedule": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "next_run_at": {
+                "type": [
+                  "number",
+                  "string",
+                  "null"
+                ]
+              },
+              "last_run_at": {
+                "type": [
+                  "number",
+                  "string",
+                  "null"
+                ]
+              },
+              "workdir": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "last_status"
+            ],
+            "additionalProperties": {}
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "last_status": {
+                "type": "null",
+                "const": null,
+                "description": "null until a job first runs"
+              },
+              "state": {
+                "description": "scheduled, paused, completed or error",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "enabled": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "schedule": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "next_run_at": {
+                "type": [
+                  "number",
+                  "string",
+                  "null"
+                ]
+              },
+              "last_run_at": {
+                "type": [
+                  "number",
+                  "string",
+                  "null"
+                ]
+              },
+              "workdir": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "last_status"
+            ],
+            "additionalProperties": {}
+          }
+        ],
+        "x-xenonet": {
+          "discriminator": "last_status"
+        }
+      }
+    },
+    "updated_at": {
+      "type": [
+        "number",
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "jobs"
+  ],
+  "additionalProperties": {},
+  "x-xenonet": {
+    "vendorVersions": "<1.0.0",
+    "lenient": true
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/anthropic/claude-desktop/plan-usage/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Claude desktop's plan usage samples",
+  "description": "Claude desktop's plan-usage-history.json: samples of plan usage it takes while its usage view has been open lately. The version is the file's own `version`.",
+  "type": "object",
+  "properties": {
+    "version": {
+      "description": "The file's own format version, which picks the schema",
+      "type": "number"
+    },
+    "samples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "t": {
+            "type": "number",
+            "description": "Epoch milliseconds"
+          },
+          "u": {
+            "type": "object",
+            "properties": {
+              "fh": {
+                "description": "The five-hour window, in percent",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "sd": {
+                "description": "The seven-day window, in percent",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": {},
+            "x-xenonet": {
+              "closed": true
+            }
+          }
+        },
+        "required": [
+          "t"
+        ],
+        "additionalProperties": {}
+      }
+    }
+  },
+  "required": [
+    "samples"
+  ],
+  "additionalProperties": {},
+  "x-xenonet": {
+    "vendorVersions": "2",
+    "lenient": true
+  }
+}

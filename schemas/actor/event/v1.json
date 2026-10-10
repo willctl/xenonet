@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/actor/event/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "An actor's event",
+  "description": "Something an actor did: came or went, changed what it's doing, spawned a session, edited, ran a command, messaged someone, said something, finished or failed.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "actor/event/v1"
+    },
+    "id": {
+      "type": "string",
+      "description": "Unique for the actor, such as wren:41"
+    },
+    "actor": {
+      "type": "string",
+      "pattern": "^(@[a-z][a-z0-9-]{1,31}:)?actor:[a-z0-9][a-z0-9-]{0,31}$",
+      "description": "actor:<slug>, or @<host>:actor:<slug> from another host; the person at the console is actor:you"
+    },
+    "at": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "kind": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "presence",
+            "status",
+            "spawned",
+            "edited",
+            "ran",
+            "messaged",
+            "said",
+            "finished",
+            "failed"
+          ]
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "target": {
+      "description": "A graph node id, an actor id, or null",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "detail": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 200
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What and where, written by XenoNet from facts: never the text of a message or a conversation, and never a secret"
+    },
+    "via": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "observed",
+            "attributed",
+            "registered",
+            "remote",
+            "demo"
+          ]
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "observed: XenoNet reads its state; attributed: XenoNet traces work here back to it; registered: it reports itself; remote: it reads through a connection you approved; demo: made up"
+    }
+  },
+  "required": [
+    "schema",
+    "id",
+    "actor",
+    "at",
+    "kind",
+    "target",
+    "detail",
+    "via"
+  ],
+  "additionalProperties": {}
+}

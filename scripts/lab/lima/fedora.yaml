@@ -1,0 +1,7 @@
+# The XenoNet lab's Fedora host: Fedora 44 Cloud, from the image Lima pins,
+# with the lab's settings (lab.yaml). lab.mjs builds the golden copy
+# xenonet-base-fedora from this and clones xenonet-vm2 from that.
+minimumLimaVersion: 2.1.0
+base:
+- template:_images/fedora-44
+- ./lab.yaml

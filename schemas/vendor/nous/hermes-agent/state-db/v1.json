@@ -1,0 +1,235 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/nous/hermes-agent/state-db/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Hermes Agent's session database",
+  "description": "The metadata XenoNet reads from ~/.hermes/state.db (and each profile's), opened read only for a moment, with named columns. The version is the database's own schema_version: 31 now, and the older layouts before it, read by the columns PRAGMA table_info lists.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "select version from schema_version"
+    },
+    "sessions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "source": {
+            "description": "cli, oneshot, desktop, tui, a messaging platform, cron, subagent… an open set",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parent_session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "started_at": {
+            "type": "number",
+            "description": "Epoch seconds"
+          },
+          "ended_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "end_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "git_repo_root": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_activity_at": {
+            "description": "Epoch seconds; the current layout only",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "last_activity_description": {
+            "description": "A machine phrase from fixed templates (executing tool: terminal), matched and put into XenoNet's own words, never shown",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "archived": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "hidden": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "started_at"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "select id, source, parent_session_id, started_at, ended_at, end_reason, cwd, git_repo_root, last_activity_at, last_activity_description, archived, hidden from sessions, the columns that are there; never title, system_prompt, user_id, chat_id, display_name or origin_json"
+    },
+    "messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "tool_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timestamp": {
+            "type": "number"
+          },
+          "active": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "calls": {
+            "description": "1 when the row holds tool calls (so isn't a reply), from tool_calls IS NOT NULL",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "session_id",
+          "role",
+          "timestamp"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "select id, session_id, role, tool_name, timestamp, active, (tool_calls IS NOT NULL) AS calls from messages: what happened and when, never content"
+    },
+    "tool_paths": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "number"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "session_id",
+          "timestamp",
+          "tool"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "The path argument of write_file and patch calls in messages.tool_calls, taken out by SQLite (json_extract), so nothing else in a call leaves the database"
+    },
+    "gateway_heartbeats": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pid": {
+            "type": "number"
+          },
+          "started_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "last_heartbeat": {
+            "type": "number"
+          },
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "pid",
+          "last_heartbeat"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "select pid, started_at, last_heartbeat, profile from gateway_heartbeats; never host, which is the machine's name"
+    }
+  },
+  "required": [
+    "schema_version",
+    "sessions",
+    "messages",
+    "tool_paths",
+    "gateway_heartbeats"
+  ],
+  "additionalProperties": {},
+  "x-xenonet": {
+    "vendorVersions": "<=31",
+    "lenient": true
+  }
+}

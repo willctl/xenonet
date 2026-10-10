@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/engine/contact/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A contact",
+  "description": "When XenoNet last heard from an agent directly, through a hook or a tool call, as engine.sqlite keeps it: how it knows messages reach the agent.",
+  "type": "object",
+  "properties": {
+    "agent": {
+      "type": "string",
+      "description": "An agent: claude:<session id> or codex:<thread id>, or an actor, actor:<slug>"
+    },
+    "app": {
+      "type": "string",
+      "enum": [
+        "claude",
+        "codex",
+        "actor"
+      ]
+    },
+    "cwd": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "via": {
+      "type": "string",
+      "enum": [
+        "hook",
+        "mcp"
+      ]
+    },
+    "at": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "ended_at": {
+      "anyOf": [
+        {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "When its SessionEnd hook said it ended"
+    },
+    "pid": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its process, to tell when it's gone"
+    }
+  },
+  "required": [
+    "agent",
+    "app",
+    "cwd",
+    "via",
+    "at",
+    "ended_at",
+    "pid"
+  ],
+  "additionalProperties": {}
+}

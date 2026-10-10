@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/nous/hermes-agent/processes/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Hermes Agent's background processes",
+  "description": "processes.json in ~/.hermes (and each profile's): the processes Hermes's terminal tool started in the background and still runs, its checkpoint for after a crash. Commands, watch patterns and session keys are never read.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "pid": {
+        "type": "number"
+      },
+      "pid_scope": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "host_start_time": {
+        "type": [
+          "number",
+          "null"
+        ]
+      },
+      "cwd": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "started_at": {
+        "description": "Epoch seconds",
+        "type": [
+          "number",
+          "null"
+        ]
+      },
+      "parent_session_id": {
+        "description": "The Hermes session that started it",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "task_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "pid"
+    ],
+    "additionalProperties": {}
+  },
+  "x-xenonet": {
+    "vendorVersions": "<1.0.0",
+    "lenient": true
+  }
+}

@@ -1,0 +1,586 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/live/activity/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Activity",
+  "description": "One thing that happened in a session, as the activity feed, the replay and the history get it.",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "app": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "const": "tool"
+        },
+        "ts": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "host": {
+          "description": "The host it's from, for a session on another machine",
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "mcp",
+            "shell",
+            "edit",
+            "read",
+            "web",
+            "agent",
+            "code",
+            "other"
+          ]
+        },
+        "detail": {
+          "type": "string"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "server": {
+          "description": "The MCP server, for an MCP tool",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "agentId": {
+          "description": "The subagent that called it",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pages": {
+          "description": "The Agent Wiki pages a wiki write names",
+          "maxItems": 6,
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "sessionId",
+        "app",
+        "kind",
+        "ts",
+        "tool",
+        "category",
+        "detail",
+        "files",
+        "server"
+      ],
+      "additionalProperties": {},
+      "description": "A tool call"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "app": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "const": "prompt"
+        },
+        "ts": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "host": {
+          "description": "The host it's from, for a session on another machine",
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "app",
+        "kind",
+        "ts",
+        "detail"
+      ],
+      "additionalProperties": {},
+      "description": "A prompt, the start of a turn"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "app": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "const": "message"
+        },
+        "ts": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "host": {
+          "description": "The host it's from, for a session on another machine",
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "app",
+        "kind",
+        "ts",
+        "detail"
+      ],
+      "additionalProperties": {},
+      "description": "Something the agent said"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "app": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "const": "turn-start"
+        },
+        "ts": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "host": {
+          "description": "The host it's from, for a session on another machine",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "app",
+        "kind",
+        "ts"
+      ],
+      "additionalProperties": {},
+      "description": "A Codex turn starting"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "app": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "const": "turn-end"
+        },
+        "ts": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "host": {
+          "description": "The host it's from, for a session on another machine",
+          "type": "string"
+        },
+        "duration": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "interrupted": {
+          "description": "You stopped it",
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "sessionId",
+        "app",
+        "kind",
+        "ts",
+        "duration"
+      ],
+      "additionalProperties": {},
+      "description": "A turn ending"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "app": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "const": "needs-you"
+        },
+        "ts": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "host": {
+          "description": "The host it's from, for a session on another machine",
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "app",
+        "kind",
+        "ts",
+        "detail"
+      ],
+      "additionalProperties": {},
+      "description": "A question for you, or a plan to approve"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "app": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "const": "tool-error"
+        },
+        "ts": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "host": {
+          "description": "The host it's from, for a session on another machine",
+          "type": "string"
+        },
+        "agentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "sessionId",
+        "app",
+        "kind",
+        "ts"
+      ],
+      "additionalProperties": {},
+      "description": "A tool call that failed"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "app": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "const": "refusal"
+        },
+        "ts": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "host": {
+          "description": "The host it's from, for a session on another machine",
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "app",
+        "kind",
+        "ts",
+        "detail"
+      ],
+      "additionalProperties": {},
+      "description": "The provider refused the turn (core/refusals); the detail is its own words or category"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "app": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "const": "subagent-start"
+        },
+        "ts": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "host": {
+          "description": "The host it's from, for a session on another machine",
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "app",
+        "kind",
+        "ts",
+        "agentId",
+        "label"
+      ],
+      "additionalProperties": {},
+      "description": "A subagent starting"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "app": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "const": "subagent-stop"
+        },
+        "ts": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "host": {
+          "description": "The host it's from, for a session on another machine",
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "app",
+        "kind",
+        "ts",
+        "agentId",
+        "label"
+      ],
+      "additionalProperties": {},
+      "description": "A subagent finishing"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "app": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "const": "hook"
+        },
+        "ts": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "host": {
+          "description": "The host it's from, for a session on another machine",
+          "type": "string"
+        },
+        "detail": {
+          "type": "string",
+          "description": "The hook's event name"
+        }
+      },
+      "required": [
+        "sessionId",
+        "app",
+        "kind",
+        "ts",
+        "detail"
+      ],
+      "additionalProperties": {},
+      "description": "A Claude Code hook"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "app": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "const": "ship-it"
+        },
+        "ts": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "host": {
+          "description": "The host it's from, for a session on another machine",
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "app",
+        "kind",
+        "ts",
+        "detail",
+        "projectId"
+      ],
+      "additionalProperties": {},
+      "description": "A nudge to commit: a turn ended in a repo with uncommitted work (not kept in the history)"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "identity"
+        },
+        "app": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "chatgpt",
+            "gh"
+          ]
+        },
+        "identity": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "before": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ts": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        }
+      },
+      "required": [
+        "kind",
+        "app",
+        "identity",
+        "before",
+        "ts"
+      ],
+      "additionalProperties": {},
+      "description": "A sign-in that changed (not kept in the history)"
+    }
+  ]
+}

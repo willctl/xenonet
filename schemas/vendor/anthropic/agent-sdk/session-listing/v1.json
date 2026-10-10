@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/anthropic/agent-sdk/session-listing/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A session as the Agent SDK lists it",
+  "description": "One of the sessions listSessions() returns (SDKSessionInfo). The version is the installed SDK's own (its package.json).",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string",
+      "description": "A title: the custom one, a summary, or the first prompt"
+    },
+    "lastModified": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "fileSize": {
+      "type": "number"
+    },
+    "customTitle": {
+      "type": "string"
+    },
+    "firstPrompt": {
+      "type": "string"
+    },
+    "gitBranch": {
+      "type": "string"
+    },
+    "cwd": {
+      "type": "string"
+    },
+    "tag": {
+      "type": "string"
+    },
+    "createdAt": {
+      "description": "Epoch milliseconds",
+      "type": "number"
+    }
+  },
+  "required": [
+    "sessionId",
+    "summary",
+    "lastModified"
+  ],
+  "additionalProperties": {},
+  "x-xenonet": {
+    "closed": true,
+    "vendorVersions": ">=0.3.0 <0.4.0",
+    "lenient": true
+  }
+}

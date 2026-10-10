@@ -1,0 +1,674 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/nous/hermes-agent/gateway-state/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Hermes Agent's gateway state",
+  "description": "gateway_state.json in ~/.hermes (and each profile's): the always-on gateway's state, heartbeat and messaging platforms. argv, hermes_home and each platform's error_message, ingress_url and listener_base are never read.",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "gateway_state": {
+          "type": "string",
+          "const": "starting"
+        },
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pid": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "start_time": {
+          "description": "The process's start: centiseconds of the epoch on macOS",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "updated_at": {
+          "description": "The heartbeat, stamped again every 60 s and stale after 120 s: ISO 8601, or epoch seconds from older gateways",
+          "type": [
+            "number",
+            "string",
+            "null"
+          ]
+        },
+        "exit_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "active_agents": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "served_profiles": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "code_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platforms": {
+          "anyOf": [
+            {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "needs_attention": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "updated_at": {
+                    "type": [
+                      "number",
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": {}
+              },
+              "description": "By platform: its state only, never its error text or addresses"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "gateway_state"
+      ],
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
+        "gateway_state": {
+          "type": "string",
+          "const": "running"
+        },
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pid": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "start_time": {
+          "description": "The process's start: centiseconds of the epoch on macOS",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "updated_at": {
+          "description": "The heartbeat, stamped again every 60 s and stale after 120 s: ISO 8601, or epoch seconds from older gateways",
+          "type": [
+            "number",
+            "string",
+            "null"
+          ]
+        },
+        "exit_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "active_agents": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "served_profiles": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "code_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platforms": {
+          "anyOf": [
+            {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "needs_attention": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "updated_at": {
+                    "type": [
+                      "number",
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": {}
+              },
+              "description": "By platform: its state only, never its error text or addresses"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "gateway_state"
+      ],
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
+        "gateway_state": {
+          "type": "string",
+          "const": "degraded"
+        },
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pid": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "start_time": {
+          "description": "The process's start: centiseconds of the epoch on macOS",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "updated_at": {
+          "description": "The heartbeat, stamped again every 60 s and stale after 120 s: ISO 8601, or epoch seconds from older gateways",
+          "type": [
+            "number",
+            "string",
+            "null"
+          ]
+        },
+        "exit_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "active_agents": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "served_profiles": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "code_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platforms": {
+          "anyOf": [
+            {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "needs_attention": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "updated_at": {
+                    "type": [
+                      "number",
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": {}
+              },
+              "description": "By platform: its state only, never its error text or addresses"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "gateway_state"
+      ],
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
+        "gateway_state": {
+          "type": "string",
+          "const": "draining"
+        },
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pid": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "start_time": {
+          "description": "The process's start: centiseconds of the epoch on macOS",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "updated_at": {
+          "description": "The heartbeat, stamped again every 60 s and stale after 120 s: ISO 8601, or epoch seconds from older gateways",
+          "type": [
+            "number",
+            "string",
+            "null"
+          ]
+        },
+        "exit_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "active_agents": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "served_profiles": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "code_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platforms": {
+          "anyOf": [
+            {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "needs_attention": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "updated_at": {
+                    "type": [
+                      "number",
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": {}
+              },
+              "description": "By platform: its state only, never its error text or addresses"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "gateway_state"
+      ],
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
+        "gateway_state": {
+          "type": "string",
+          "const": "stopped"
+        },
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pid": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "start_time": {
+          "description": "The process's start: centiseconds of the epoch on macOS",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "updated_at": {
+          "description": "The heartbeat, stamped again every 60 s and stale after 120 s: ISO 8601, or epoch seconds from older gateways",
+          "type": [
+            "number",
+            "string",
+            "null"
+          ]
+        },
+        "exit_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "active_agents": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "served_profiles": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "code_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platforms": {
+          "anyOf": [
+            {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "needs_attention": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "updated_at": {
+                    "type": [
+                      "number",
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": {}
+              },
+              "description": "By platform: its state only, never its error text or addresses"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "gateway_state"
+      ],
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
+        "gateway_state": {
+          "type": "string",
+          "const": "startup_failed"
+        },
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pid": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "start_time": {
+          "description": "The process's start: centiseconds of the epoch on macOS",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "updated_at": {
+          "description": "The heartbeat, stamped again every 60 s and stale after 120 s: ISO 8601, or epoch seconds from older gateways",
+          "type": [
+            "number",
+            "string",
+            "null"
+          ]
+        },
+        "exit_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "active_agents": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "served_profiles": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "code_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platforms": {
+          "anyOf": [
+            {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "needs_attention": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "updated_at": {
+                    "type": [
+                      "number",
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": {}
+              },
+              "description": "By platform: its state only, never its error text or addresses"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "gateway_state"
+      ],
+      "additionalProperties": {}
+    }
+  ],
+  "x-xenonet": {
+    "discriminator": "gateway_state",
+    "vendorVersions": "<1.0.0",
+    "lenient": true
+  }
+}

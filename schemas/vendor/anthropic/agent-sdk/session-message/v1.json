@@ -1,0 +1,587 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/anthropic/agent-sdk/session-message/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A message as the Agent SDK reads it from a transcript",
+  "description": "One of the messages getSessionMessages() returns (SessionMessage), as the console's transcript view reads it. The version is the installed SDK's own.",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "user"
+        },
+        "uuid": {
+          "type": "string"
+        },
+        "timestamp": {
+          "description": "ISO 8601; the SDK sends it, though its types don't declare it",
+          "type": "string"
+        },
+        "message": {
+          "type": "object",
+          "properties": {
+            "content": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "text"
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "additionalProperties": {},
+                        "x-xenonet": {
+                          "closed": true,
+                          "known": [
+                            "citations",
+                            "cache_control"
+                          ]
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "thinking"
+                          },
+                          "thinking": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ],
+                        "additionalProperties": {},
+                        "x-xenonet": {
+                          "closed": true,
+                          "known": [
+                            "signature"
+                          ]
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "tool_use"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "input": {}
+                        },
+                        "required": [
+                          "type",
+                          "name",
+                          "input"
+                        ],
+                        "additionalProperties": {},
+                        "x-xenonet": {
+                          "closed": true,
+                          "known": [
+                            "id",
+                            "caller",
+                            "toolset_name"
+                          ]
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "tool_result"
+                          },
+                          "is_error": {
+                            "type": "boolean"
+                          },
+                          "content": {}
+                        },
+                        "required": [
+                          "type",
+                          "content"
+                        ],
+                        "additionalProperties": {},
+                        "x-xenonet": {
+                          "closed": true,
+                          "known": [
+                            "tool_use_id",
+                            "cache_control",
+                            "toolset_name"
+                          ]
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "image"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ],
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "redacted_thinking"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ],
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "document"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ],
+                        "additionalProperties": {}
+                      }
+                    ],
+                    "x-xenonet": {
+                      "discriminator": "type"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "type",
+        "uuid",
+        "message"
+      ],
+      "additionalProperties": {},
+      "x-xenonet": {
+        "closed": true,
+        "known": [
+          "session_id",
+          "parent_tool_use_id",
+          "parent_agent_id"
+        ]
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "assistant"
+        },
+        "uuid": {
+          "type": "string"
+        },
+        "timestamp": {
+          "description": "ISO 8601; the SDK sends it, though its types don't declare it",
+          "type": "string"
+        },
+        "message": {
+          "type": "object",
+          "properties": {
+            "content": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "text"
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "additionalProperties": {},
+                        "x-xenonet": {
+                          "closed": true,
+                          "known": [
+                            "citations",
+                            "cache_control"
+                          ]
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "thinking"
+                          },
+                          "thinking": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ],
+                        "additionalProperties": {},
+                        "x-xenonet": {
+                          "closed": true,
+                          "known": [
+                            "signature"
+                          ]
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "tool_use"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "input": {}
+                        },
+                        "required": [
+                          "type",
+                          "name",
+                          "input"
+                        ],
+                        "additionalProperties": {},
+                        "x-xenonet": {
+                          "closed": true,
+                          "known": [
+                            "id",
+                            "caller",
+                            "toolset_name"
+                          ]
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "tool_result"
+                          },
+                          "is_error": {
+                            "type": "boolean"
+                          },
+                          "content": {}
+                        },
+                        "required": [
+                          "type",
+                          "content"
+                        ],
+                        "additionalProperties": {},
+                        "x-xenonet": {
+                          "closed": true,
+                          "known": [
+                            "tool_use_id",
+                            "cache_control",
+                            "toolset_name"
+                          ]
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "image"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ],
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "redacted_thinking"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ],
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "document"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ],
+                        "additionalProperties": {}
+                      }
+                    ],
+                    "x-xenonet": {
+                      "discriminator": "type"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "type",
+        "uuid",
+        "message"
+      ],
+      "additionalProperties": {},
+      "x-xenonet": {
+        "closed": true,
+        "known": [
+          "session_id",
+          "parent_tool_use_id",
+          "parent_agent_id"
+        ]
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "system"
+        },
+        "uuid": {
+          "type": "string"
+        },
+        "timestamp": {
+          "description": "ISO 8601; the SDK sends it, though its types don't declare it",
+          "type": "string"
+        },
+        "message": {
+          "type": "object",
+          "properties": {
+            "content": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "text"
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "additionalProperties": {},
+                        "x-xenonet": {
+                          "closed": true,
+                          "known": [
+                            "citations",
+                            "cache_control"
+                          ]
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "thinking"
+                          },
+                          "thinking": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ],
+                        "additionalProperties": {},
+                        "x-xenonet": {
+                          "closed": true,
+                          "known": [
+                            "signature"
+                          ]
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "tool_use"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "input": {}
+                        },
+                        "required": [
+                          "type",
+                          "name",
+                          "input"
+                        ],
+                        "additionalProperties": {},
+                        "x-xenonet": {
+                          "closed": true,
+                          "known": [
+                            "id",
+                            "caller",
+                            "toolset_name"
+                          ]
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "tool_result"
+                          },
+                          "is_error": {
+                            "type": "boolean"
+                          },
+                          "content": {}
+                        },
+                        "required": [
+                          "type",
+                          "content"
+                        ],
+                        "additionalProperties": {},
+                        "x-xenonet": {
+                          "closed": true,
+                          "known": [
+                            "tool_use_id",
+                            "cache_control",
+                            "toolset_name"
+                          ]
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "image"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ],
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "redacted_thinking"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ],
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "document"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ],
+                        "additionalProperties": {}
+                      }
+                    ],
+                    "x-xenonet": {
+                      "discriminator": "type"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "type",
+        "uuid",
+        "message"
+      ],
+      "additionalProperties": {},
+      "x-xenonet": {
+        "closed": true,
+        "known": [
+          "session_id",
+          "parent_tool_use_id",
+          "parent_agent_id"
+        ]
+      }
+    }
+  ],
+  "x-xenonet": {
+    "discriminator": "type",
+    "vendorVersions": ">=0.3.0 <0.4.0",
+    "lenient": true
+  }
+}

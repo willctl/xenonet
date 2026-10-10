@@ -1,0 +1,245 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/host/list/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Hosts",
+  "description": "hosts.json in XenoNet's state folder: this XenoNet's own host id and key, and the other machines' XenoNets it shows, with how to reach each.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "host/list/v1"
+    },
+    "self": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{1,31}$",
+                  "description": "A name someone chose, ^[a-z][a-z0-9-]{1,31}$: never the machine's own name, which often holds a person's"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The name this XenoNet gave itself (xenonet hosts self), or null"
+            },
+            "key": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$",
+              "description": "Made once, at random, by the host: it recognizes the host across renames and SSH aliases. It names the host and proves nothing; SSH does that"
+            },
+            "createdAt": {
+              "type": "number",
+              "description": "Epoch milliseconds"
+            }
+          },
+          "required": [
+            "id",
+            "key",
+            "createdAt"
+          ],
+          "additionalProperties": {}
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "This XenoNet as a host; null until hosts are first used"
+    },
+    "hosts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,31}$",
+            "description": "This console's name for the host, which its ids carry: @<id>:…"
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "ssh",
+              "local"
+            ],
+            "description": "ssh: ssh -F <XenoNet's ssh config> <id> xenonet relay; local: the relay of another XenoNet on this machine"
+          },
+          "ssh": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "hostname": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$",
+                    "description": "ssh's HostName: the machine's name or address"
+                  },
+                  "user": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "port": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 65535
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "ssh's port, when it isn't 22"
+                  },
+                  "identity": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^(?:\\/|~\\/)[^\"\\\\%\\u0000-\\u001f\\u007f]{1,1022}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "A key of its own for this host (IdentityFile, with IdentitiesOnly)"
+                  },
+                  "knownHosts": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^(?:\\/|~\\/)[^\"\\\\%\\u0000-\\u001f\\u007f]{1,1022}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "A known_hosts file of its own (UserKnownHostsFile)"
+                  },
+                  "hostKeyAlias": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The name its host key is kept under (HostKeyAlias)"
+                  }
+                },
+                "required": [
+                  "hostname",
+                  "user",
+                  "port",
+                  "identity",
+                  "knownHosts",
+                  "hostKeyAlias"
+                ],
+                "additionalProperties": {},
+                "description": "How ssh reaches the host, as XenoNet writes it into its own ssh config"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null for local"
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "The port of the XenoNet it reads on that machine"
+          },
+          "command": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:xenonet|\\/[A-Za-z0-9._+/-]{1,1023})$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The xenonet command on the host: xenonet, or its absolute path where commands run over SSH don't find it; null for local"
+          },
+          "since": {
+            "type": "string",
+            "pattern": "^\\d{1,4}[mhd]$",
+            "description": "How far back the relay sends sessions: 7d, 12h, 90m"
+          },
+          "detail": {
+            "type": "boolean",
+            "description": "Whether live detail crosses too (a waiting question's text, the last message, tool details, files touched), or only titles, states and counts"
+          },
+          "start": {
+            "description": "The relay starts a XenoNet there, for as long as it runs, when none is running: for a machine with no service set up",
+            "type": "boolean"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{32}$",
+                "description": "Made once, at random, by the host: it recognizes the host across renames and SSH aliases. It names the host and proves nothing; SSH does that"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The host's key, learned the first time it answered"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{1,31}$",
+                "description": "A name someone chose, ^[a-z][a-z0-9-]{1,31}$: never the machine's own name, which often holds a person's"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the host calls itself, when that isn't the id here"
+          },
+          "addedAt": {
+            "type": "number",
+            "description": "Epoch milliseconds"
+          }
+        },
+        "required": [
+          "id",
+          "transport",
+          "ssh",
+          "port",
+          "command",
+          "since",
+          "detail",
+          "key",
+          "name",
+          "addedAt"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "The hosts this XenoNet shows"
+    }
+  },
+  "required": [
+    "schema",
+    "self",
+    "hosts"
+  ],
+  "additionalProperties": {}
+}

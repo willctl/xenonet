@@ -1,0 +1,911 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/theme/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Theme",
+  "description": "How the console looks and sounds: colors, fonts, the sky, stars, floor, sweep and sonar, the glow, the music, and the actors layer. Every field is optional: what a theme leaves out comes from the one it extends.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Lowercase letters, digits and dashes; a file's name is its id",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,40}$"
+    },
+    "name": {
+      "type": "string"
+    },
+    "about": {
+      "type": "string"
+    },
+    "builtIn": {
+      "type": "boolean"
+    },
+    "replacesBuiltIn": {
+      "description": "A theme of yours with a built-in's id: it takes that one's place",
+      "type": "boolean"
+    },
+    "extends": {
+      "description": "The theme it starts from; xenonet when left out",
+      "type": "string"
+    },
+    "colors": {
+      "description": "By role. The page applies only #rrggbb values. actor and human are the actors layer's defaults",
+      "type": "object",
+      "properties": {
+        "bg": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "surface": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "surfaceLow": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "text": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "muted": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "dim": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "bright": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "accent": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "core": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "project": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "satellite": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "native": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "zone": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "resource": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "claude": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "codex": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "lineage": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "collab": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "collision": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "sync": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "message": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "wiki": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "attention": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "review": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "stuck": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "pressure": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "danger": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "gold": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "archived": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "label": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "human": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "identities": {
+      "description": "The rings named identities' projects stand on: five colors that mean nothing else on the map. One a theme brings close to a color with a meaning is swapped for a spare",
+      "minItems": 5,
+      "maxItems": 5,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^#[0-9a-fA-F]{6}$",
+        "description": "A color, #rrggbb"
+      }
+    },
+    "categories": {
+      "description": "What an agent is doing, by tool family",
+      "type": "object",
+      "properties": {
+        "shell": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "edit": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "read": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "web": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "mcp": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "agent": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "other": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "pages": {
+      "description": "Agent Wiki page types",
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "preference": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "reference": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "howto": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "decision": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "person": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "topic": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "fonts": {
+      "description": "CSS font families",
+      "type": "object",
+      "properties": {
+        "display": {
+          "description": "Titles, and the map's labels",
+          "type": "string"
+        },
+        "mono": {
+          "type": "string"
+        },
+        "body": {
+          "description": "Body text in the panels; the display font when left out",
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "sky": {
+      "description": "The sky through the day: deep, primary cloud, secondary cloud, band",
+      "type": "object",
+      "properties": {
+        "night": {
+          "minItems": 4,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$",
+            "description": "A color, #rrggbb"
+          }
+        },
+        "dawn": {
+          "minItems": 4,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$",
+            "description": "A color, #rrggbb"
+          }
+        },
+        "day": {
+          "minItems": 4,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$",
+            "description": "A color, #rrggbb"
+          }
+        },
+        "dusk": {
+          "minItems": 4,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$",
+            "description": "A color, #rrggbb"
+          }
+        }
+      },
+      "additionalProperties": {}
+    },
+    "stars": {
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "tints": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$",
+            "description": "A color, #rrggbb"
+          }
+        },
+        "shape": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "point",
+                "flake",
+                "mote"
+              ]
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "drift": {
+          "description": "Units a second; [0, -0.6, 0] is falling snow",
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "items": false,
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "twinkle": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": {}
+    },
+    "grid": {
+      "type": "object",
+      "properties": {
+        "center": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "lines": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "style": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "polar",
+                "hex",
+                "cells",
+                "none"
+              ]
+            },
+            {
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "additionalProperties": {}
+    },
+    "lattice": {
+      "type": "object",
+      "properties": {
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "additionalProperties": {}
+    },
+    "sweep": {
+      "type": "object",
+      "properties": {
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "speed": {
+          "type": "number"
+        },
+        "shape": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "beam",
+                "aurora",
+                "flare",
+                "hand",
+                "ring",
+                "none"
+              ]
+            },
+            {
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "additionalProperties": {}
+    },
+    "dust": {
+      "type": "object",
+      "properties": {
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "size": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": {}
+    },
+    "glow": {
+      "type": "object",
+      "properties": {
+        "bloom": {
+          "type": "number",
+          "minimum": 0
+        },
+        "radius": {
+          "type": "number",
+          "minimum": 0
+        },
+        "threshold": {
+          "type": "number",
+          "minimum": 0
+        },
+        "exposure": {
+          "type": "number",
+          "minimum": 0
+        },
+        "fog": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": {}
+    },
+    "sonar": {
+      "type": "object",
+      "properties": {
+        "every": {
+          "description": "Seconds between pings",
+          "type": "number",
+          "minimum": 0
+        },
+        "style": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "ring",
+                "ripple",
+                "ping",
+                "tick"
+              ]
+            },
+            {
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "additionalProperties": {}
+    },
+    "charts": {
+      "description": "The stats panel's charts",
+      "type": "object",
+      "properties": {
+        "m1": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "m2": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "m3": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "m4": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "m5": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "other": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "cacheRead": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "input": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "cacheWrite": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "output": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "one": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "bad": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "sound": {
+      "type": "object",
+      "properties": {
+        "chords": {
+          "description": "A cycle of chords, as MIDI notes",
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 127
+            }
+          }
+        },
+        "scale": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 127
+          }
+        },
+        "bpm": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "pad": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "sine",
+                "square",
+                "sawtooth",
+                "triangle"
+              ]
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "lead": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "sine",
+                "square",
+                "sawtooth",
+                "triangle"
+              ]
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "drone": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 127
+        }
+      },
+      "additionalProperties": {}
+    },
+    "motion": {
+      "type": "object",
+      "properties": {
+        "pace": {
+          "description": "A multiplier for ambient motion; 1 is today's",
+          "type": "number",
+          "minimum": 0
+        },
+        "ease": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "smooth",
+                "stepped"
+              ]
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "breathe": {
+          "description": "How much nodes swell and fade at rest",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "additionalProperties": {}
+    },
+    "lines": {
+      "type": "object",
+      "properties": {
+        "style": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "solid",
+                "dashed",
+                "arc",
+                "filament",
+                "seam",
+                "hairline"
+              ]
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "curvature": {
+          "type": "number"
+        },
+        "width": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": {}
+    },
+    "actors": {
+      "type": "object",
+      "properties": {
+        "form": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "orb",
+                "cursor",
+                "crystal",
+                "flame",
+                "swarm",
+                "jelly"
+              ]
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "params": {
+          "description": "Knobs for the form: rings, facets, tendrils",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": [
+              "number",
+              "boolean"
+            ]
+          }
+        },
+        "palette": {
+          "description": "Each agent takes one by a stable hash of its id",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$",
+            "description": "A color, #rrggbb"
+          }
+        },
+        "human": {
+          "description": "The person at the console",
+          "type": "object",
+          "properties": {
+            "form": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "orb",
+                    "cursor",
+                    "crystal",
+                    "flame",
+                    "swarm",
+                    "jelly"
+                  ]
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "additionalProperties": {}
+        },
+        "glow": {
+          "description": "The glow round each actor",
+          "type": "object",
+          "properties": {
+            "opacity": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "scale": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": {}
+        },
+        "breathe": {
+          "type": "object",
+          "properties": {
+            "period": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "depth": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "additionalProperties": {}
+        },
+        "beam": {
+          "type": "object",
+          "properties": {
+            "style": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "pulse",
+                    "stream",
+                    "bolt"
+                  ]
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "width": {
+              "type": "number",
+              "minimum": 0
+            },
+            "speed": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": {}
+        },
+        "react": {
+          "type": "object",
+          "properties": {
+            "flash": {
+              "type": "number",
+              "minimum": 0
+            },
+            "ripple": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": {}
+        }
+      },
+      "additionalProperties": {}
+    }
+  },
+  "additionalProperties": {}
+}

@@ -1,0 +1,242 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/session/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Session",
+  "description": "A Claude Code session or a Codex thread, as XenoNet lists it. The map's session nodes (graph/v1) are these with where they live and what they're doing added.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^(@[a-z][a-z0-9-]{1,31}:)?(claude|codex):.",
+      "description": "<app>:<the app's own id>, the id the rest of XenoNet uses; another host's carry @<host>:"
+    },
+    "app": {
+      "type": "string",
+      "enum": [
+        "claude",
+        "codex"
+      ]
+    },
+    "rawId": {
+      "type": "string",
+      "description": "The app's own id: the Agent SDK's session id, or Codex's thread id"
+    },
+    "title": {
+      "type": "string"
+    },
+    "preview": {
+      "description": "The first prompt, or Codex's preview",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "cwd": {
+      "description": "Where it ran; a Claude desktop worktree session gives the folder it branched from",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "createdAt": {
+      "anyOf": [
+        {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "updatedAt": {
+      "anyOf": [
+        {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "archived": {
+      "type": "boolean"
+    },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "branch": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "parentId": {
+      "description": "The session this one was spawned or forked from",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "parentKind": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "spawn",
+            "fork",
+            "subagent"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "effort": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "desktopId": {
+      "description": "Claude desktop's own id for it, local_…",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "inDesktop": {
+      "type": "boolean"
+    },
+    "worktree": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "starred": {
+      "type": "boolean"
+    },
+    "permissionMode": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tag": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sizeBytes": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "claudeAccount": {
+      "description": "The Claude account and organization Claude desktop filed it under",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "account": {
+              "type": "string"
+            },
+            "org": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "account",
+            "org"
+          ],
+          "additionalProperties": {}
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "status": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "provider": {
+      "description": "The model provider, when it isn't your ChatGPT account's",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "origin": {
+      "description": "The repo's origin remote",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source": {
+      "description": "What started it: cli, vscode, exec, subAgent…",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "originator": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "nativeProjectId": {
+      "description": "The Codex desktop project it belongs to",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "agentNickname": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "agentKind": {
+      "description": "For a sub-agent thread: spawned, or the kind of background work",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "background": {
+      "description": "Background work (codex exec, reviews, compaction) the map leaves out unless asked",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "id",
+    "app",
+    "rawId",
+    "title",
+    "preview",
+    "cwd",
+    "createdAt",
+    "updatedAt",
+    "archived",
+    "model",
+    "branch",
+    "parentId",
+    "parentKind"
+  ],
+  "additionalProperties": {}
+}

@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/assistant/error/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A remote actor's refusal",
+  "description": "Why one of the read-only tools of xenonet mcp assistant answered nothing: a fixed code and sentence, whether trying again could help, and when.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "xenonet.assistant.error.v1"
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^r_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "code": {
+      "type": "string",
+      "enum": [
+        "NOT_AUTHORIZED",
+        "NOT_FOUND",
+        "GRANT_EXPIRED",
+        "GRANT_REVOKED",
+        "DISABLED",
+        "INVALID_ARGUMENT",
+        "CURSOR_EXPIRED",
+        "SOURCE_UNAVAILABLE",
+        "SERVICE_UNAVAILABLE",
+        "RATE_LIMITED",
+        "INCOMPATIBLE_VERSION",
+        "TIMEOUT",
+        "INTERNAL_ERROR"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "A fixed sentence for each code: never a source's error, a path or a stack"
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "retry_after_ms": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema",
+    "request_id",
+    "code",
+    "message",
+    "retryable",
+    "retry_after_ms"
+  ],
+  "additionalProperties": false
+}

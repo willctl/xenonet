@@ -1,0 +1,251 @@
+/* The theme switcher and the gallery (src/theme-switcher.js,
+   src/theme-gallery.js). Both sit at the right, over the right-hand
+   column, and dim nothing, so the map they're showing a theme on stays in
+   full view. The switcher is drawn in the theme on show, as everything is;
+   each gallery card in its own theme's colors (--tg-*). */
+
+/* ---------- the switcher ---------- */
+
+.tswitch {
+  position: fixed;
+  inset: 0;
+  z-index: 12;
+}
+.tswitch[hidden] { display: none; }
+/* Catches a click away, which puts the old theme back; clear, so the map shows. */
+.tsw-catch {
+  position: absolute;
+  inset: 0;
+}
+.tsw {
+  position: absolute;
+  top: 64px;
+  right: 16px;
+  width: min(420px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 96px);
+  background: rgb(var(--surface-low-rgb) / 0.95);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55), 0 0 50px rgb(var(--accent-rgb) / 0.12);
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+  transform: translateX(8px);
+  opacity: 0;
+  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.15s;
+}
+.tswitch.open .tsw {
+  transform: none;
+  opacity: 1;
+}
+.tsw-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.tsw-input span { color: var(--accent); font-size: 15px; }
+.tsw-input input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  outline: none;
+  color: var(--text);
+  font-family: var(--body);
+  font-size: 16px;
+}
+.tsw-input input::placeholder { color: var(--dim); }
+.tsw-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.tsw-item {
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.tsw-item.on {
+  background: linear-gradient(90deg, rgb(var(--accent-rgb) / 0.16), rgb(var(--accent-rgb) / 0.03));
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.tsw-sw {
+  display: flex;
+  height: 22px;
+  border: 1px solid rgb(var(--text-rgb) / 0.18);
+}
+.tsw-sw i { flex: 1; }
+.tsw-sw i:first-child { flex: 1.6; }
+.tsw-text { min-width: 0; display: flex; flex-direction: column; }
+.tsw-name { font-size: 14px; }
+.tsw-name em {
+  font-style: normal;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--accent);
+  margin-left: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.tsw-about {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tsw-none {
+  padding: 12px;
+  color: var(--dim);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.tsw-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--line);
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.tsw-foot kbd { margin-right: 5px; }
+.tsw-more {
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.tsw-more:hover, .tsw-more:focus-visible { color: var(--text); border-color: var(--line-strong); }
+
+/* ---------- the gallery ---------- */
+
+.tgal {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 8;
+  width: min(440px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+  background: rgb(var(--surface-low-rgb) / 0.94);
+  backdrop-filter: blur(12px) saturate(1.2);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5), 0 0 40px rgb(var(--accent-rgb) / 0.1);
+  clip-path: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px);
+  transform: translateX(12px);
+  opacity: 0;
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.18s;
+}
+.tgal[hidden] { display: none; }
+.tgal.open { transform: none; opacity: 1; }
+.tgal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.tgal-chip {
+  font-size: 10.5px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.tgal-head h2 { margin: 3px 0 4px; font-size: 20px; font-weight: 600; font-family: var(--display); }
+.tgal-sub { font-size: 11.5px; color: var(--muted); line-height: 1.45; }
+.tgal-cards {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.tg-card {
+  flex: none;
+  position: relative;
+  background: var(--tg-bg, var(--bg));
+  color: var(--tg-text, var(--text));
+  border: 1px solid rgb(var(--tg-accent-rgb, var(--accent-rgb)) / 0.28);
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.tg-card:hover { border-color: rgb(var(--tg-accent-rgb, var(--accent-rgb)) / 0.6); }
+.tg-card.focused,
+.tg-card:focus-visible {
+  border-color: var(--tg-accent, var(--accent));
+  box-shadow: 0 0 0 1px var(--tg-accent, var(--accent)), 0 0 24px rgb(var(--tg-accent-rgb, var(--accent-rgb)) / 0.3);
+}
+.tg-sky { height: 62px; }
+.tg-actors-svg { display: block; width: 100%; height: 100%; }
+.tg-body { padding: 9px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+.tg-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.tg-name { font-size: 17px; font-weight: 600; letter-spacing: 0.02em; }
+.tg-head em {
+  font-style: normal;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 1px 7px;
+  border: 1px solid currentColor;
+  color: var(--tg-accent, var(--accent));
+}
+.tg-mood { margin: 0; font-size: 12.5px; font-style: italic; color: var(--tg-muted, var(--muted)); line-height: 1.4; }
+.tg-sw { display: flex; gap: 3px; }
+.tg-sw i,
+.tg-pal i {
+  width: 16px;
+  height: 16px;
+  border: 1px solid rgba(127, 127, 127, 0.38);
+}
+.tg-sample {
+  background: var(--tg-surface, var(--surface));
+  padding: 7px 10px;
+  font-size: 14px;
+}
+.tg-sample small { display: block; font-size: 11.5px; margin-top: 2px; }
+.tg-actors { display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--tg-muted, var(--muted)); }
+.tg-pal { display: flex; gap: 3px; flex: none; }
+.tg-pal i { width: 11px; height: 11px; border-radius: 50%; }
+.tg-pal i.you { outline: 1px dashed rgba(127, 127, 127, 0.7); outline-offset: 1px; }
+.tg-make {
+  display: flex;
+  align-items: flex-start;
+  background: transparent;
+  color: var(--text);
+  border-style: dashed;
+  border-color: var(--line-strong);
+}
+.tg-make .tg-body p { margin: 0; font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+.tg-make code { font-family: var(--mono); font-size: 11.5px; color: var(--text); word-break: break-all; }
+.tg-plus {
+  flex: none;
+  width: 52px;
+  align-self: stretch;
+  display: grid;
+  place-items: center;
+  font-size: 28px;
+  color: var(--accent);
+  border-right: 1px dashed var(--line);
+}
+.tg-make-acts { display: flex; gap: 8px; }

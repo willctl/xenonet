@@ -1,0 +1,9 @@
+# xenonet-console, for Codex: launch, drive and screenshot XenoNet Dev while
+# working on XenoNet (see the README's Development section). Codex reads this
+# in trusted projects.
+[mcp_servers.xenonet-console]
+command = "node"
+args = ["mcp/console.js"]
+startup_timeout_sec = 20
+# Launching XenoNet Dev and waiting for it to settle can take a while.
+tool_timeout_sec = 180

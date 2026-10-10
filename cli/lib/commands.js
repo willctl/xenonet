@@ -1,0 +1,38 @@
+// The xenonet command's commands, for its help and its shell completion. Each
+// one's code is in ../commands/<name>.js.
+export const COMMANDS = {
+  setup: { about: "Install a downloaded Service or Tools package for your account" },
+  service: { about: "Manage the background service", args: "[start|status|stop]" },
+  update: { about: "Check or install service and tools updates", args: "[service|tools|all]" },
+  status: { about: "Whether XenoNet is running, what it reads and what needs you" },
+  doctor: { about: "Check sign-ins, folders and connections, with a fix for each problem" },
+  drift: { about: "What's changed in the apps' data XenoNet reads since you last looked" },
+  logs: { about: "What went wrong in XenoNet lately, with a fix for each when there's one" },
+  decide: { about: "The decision model XenoNet can ask instead of Codex: its key, kept in your credential store", args: "[status|key|forget]" },
+  refusals: { about: "Provider refusals XenoNet kept: list, show, export for a dataset, scan", args: "[list|show|export|capture|context|scan]" },
+  diagnose: { about: "A summary of XenoNet's state that's safe to share, or an agent to look at it with you", args: "[--ask]" },
+  agents: { about: "The agents at work, and what each is doing" },
+  actor: { about: "Actors: list them, ask to register one, or report as one", args: "[list|register|…]" },
+  assistant: { about: "Remote actors' connections: list them, revoke one, or turn them all off", args: "[list|audit|revoke|disable]" },
+  gateway: { about: "The actor gateway, for actors outside this machine: its tunnel, address and apps", args: "[tunnels|on|off|check|repair|address|revoke]" },
+  who: { about: "Which agents have a hand in a file", args: "<path>" },
+  session: { about: "A session's models, tokens, estimated cost, turns and tools", args: "[words|id]" },
+  messages: { about: "What agents said to each other today" },
+  root: { about: "The projects folder XenoNet reads, or read another", args: "[folder]" },
+  hosts: { about: "Other machines' XenoNets on this map, over SSH (a prototype, with XENONET_HOSTS=1)", args: "[self|add|remove|test]" },
+  search: { about: "Search every Claude Code and Codex transcript", args: "<words>" },
+  theme: { about: "The console's look and sound: list, switch, or make your own", args: "[id]" },
+  film: { about: "Render a film of today to an MP4, in a hidden window" },
+  script: { about: "Save what you did in XenoNet Dev as a script, and run scripts", args: "<record|run> [file]" },
+  connect: { about: "Let Claude Code and Codex sessions see and message each other", args: "[claude] [codex]" },
+  disconnect: { about: "Take XenoNet out of Claude Code's and Codex's settings" },
+  console: { about: "Control installed XenoNet or a development instance", args: "<steps…>" },
+  install: { about: "Put the xenonet command on your PATH" },
+  uninstall: { about: "Take the xenonet command off your PATH" },
+  completion: { about: "Tab completion for zsh or bash", args: "<zsh|bash>" },
+  mcp: { about: "Run the xenonet MCP server (Claude Code and Codex start it)", hidden: true },
+  hook: { about: "Pass a Claude Code or Codex hook to XenoNet (their settings run it)", args: "<claude|codex>", hidden: true },
+  relay: { about: "Stream this XenoNet's map to a console on another machine (consoles run it over SSH)", hidden: true },
+};
+
+export const ALIASES = { st: "status", peers: "agents", dev: "console", actors: "actor" };

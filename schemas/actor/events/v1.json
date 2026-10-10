@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/actor/events/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Actors' events",
+  "description": "What actors did since a time, at most the last 7 days, for replay and digests: GET /api/actors/events?since=<ms>, which leaves out the person at the console's.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "actor/events/v1"
+    },
+    "at": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "$ref": "https://xenonet.dev/schemas/actor/event/v1.json"
+      },
+      "description": "Oldest first"
+    }
+  },
+  "required": [
+    "schema",
+    "at",
+    "events"
+  ],
+  "additionalProperties": {}
+}

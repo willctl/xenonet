@@ -1,0 +1,46 @@
+import fs from "node:fs";
+import net from "node:net";
+import path from "node:path";
+import { spawn } from "node:child_process";
+import { appDir } from "../dirs.js";
+import { rpc } from "./rpc.js";
+import { SERVICE_API, negotiate } from "./protocol.js";
+
+export const runtimeDir = (env = process.env) => env.XENONET_RUNTIME_DIR || path.join(appDir("state", { env }), "runtime");
+export const descriptorFile = (env = process.env) => path.join(runtimeDir(env), `service-${env.XENONET_PORT || 47840}.json`);
+
+export async function connectService({ env = process.env, role = "tools", handle } = {}) {
+  const descriptor = JSON.parse(fs.readFileSync(descriptorFile(env), "utf8"));
+  if (!Number.isInteger(descriptor.port) || descriptor.port < 1 || descriptor.port > 65535 || !/^[a-f0-9]{64}$/.test(descriptor.token)) throw new Error("Invalid XenoNet service connection file.");
+  const socket = net.connect({ host: "127.0.0.1", port: descriptor.port });
+  const client = rpc(socket, handle, { incomingEvents: role === "desktop" ? ["notification"] : [] });
+  try {
+    client.info = await client.request("hello", { token: descriptor.token, role, api: SERVICE_API }, 5000);
+    negotiate(SERVICE_API, client.info.api);
+    return client;
+  } catch (err) { client.close(); throw err; }
+}
+
+export async function ensureService({ root, exec, env = process.env, timeout = 60000 }) {
+  try { const c = await connectService({ env }); c.close(); return "reused"; } catch (err) {
+    if (/incompatible/.test(err.message)) throw err;
+  }
+  const dir = runtimeDir(env);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const out = fs.openSync(path.join(dir, `service-${env.XENONET_PORT || 47840}.log`), "a", 0o600);
+  const childEnv = { ...env, XENONET_STANDALONE: "1" };
+  delete childEnv.ELECTRON_RUN_AS_NODE;
+  delete childEnv.XENONET_EXEC;
+  const child = spawn(exec, [path.join(root, "server", "index.js")], { cwd: root, env: childEnv, detached: true, windowsHide: true, stdio: ["ignore", out, out] });
+  fs.closeSync(out);
+  child.unref();
+  let failure;
+  child.on("error", (err) => { failure = err; });
+  child.on("exit", (code) => { failure = new Error(`XenoNet Service exited (${code}). See its service log.`); });
+  for (const until = Date.now() + timeout; Date.now() < until;) {
+    try { const c = await connectService({ env }); c.close(); return "started"; } catch {}
+    if (failure) throw failure;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  throw new Error("XenoNet Service did not start. See its service log.");
+}

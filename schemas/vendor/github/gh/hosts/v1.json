@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/github/gh/hosts/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "gh's hosts.yml",
+  "description": "gh's hosts.yml ($GH_CONFIG_DIR, or the XDG or platform config folder), hosts and logins only. The file carries no version, so the newest schema reads it.",
+  "type": "object",
+  "propertyNames": {
+    "type": "string",
+    "description": "A host, such as github.com"
+  },
+  "additionalProperties": {
+    "type": "object",
+    "properties": {
+      "user": {
+        "description": "The active account",
+        "type": "string"
+      },
+      "users": {
+        "description": "Every account signed in on the host (gh 2.40 and later)",
+        "type": "object",
+        "propertyNames": {
+          "type": "string",
+          "description": "An account's login"
+        },
+        "additionalProperties": {}
+      }
+    },
+    "additionalProperties": {}
+  },
+  "x-xenonet": {
+    "vendorVersions": "*",
+    "lenient": true
+  }
+}

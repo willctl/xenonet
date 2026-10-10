@@ -1,0 +1,2764 @@
+{
+ "graph": {
+  "generatedAt": 1791028830000,
+  "nodes": [
+   {
+    "id": "core",
+    "kind": "core",
+    "name": "~/Projects",
+    "path": "<world>/home/Projects",
+    "home": "<world>/home",
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "sessionCount": 14,
+    "activeCount": 5,
+    "lastActivity": 1791028804000,
+    "lastSessionAt": 1791028804000,
+    "actions": []
+   },
+   {
+    "id": "project:<world>/home/projects/atlas-api",
+    "kind": "project",
+    "name": "atlas-api",
+    "path": "<world>/home/Projects/atlas-api",
+    "key": "<world>/home/projects/atlas-api",
+    "rel": "atlas-api",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "https://github.com/atlas-co/atlas-api.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "node",
+     "typescript"
+    ],
+    "description": "Orders, inventory and payments API for the Atlas store.",
+    "modifiedAt": 1791021600000,
+    "rule": null,
+    "group": false,
+    "satelliteOf": null,
+    "repo": {
+     "branch": "main",
+     "ahead": 0,
+     "behind": 0,
+     "staged": 0,
+     "modified": 1,
+     "untracked": 0,
+     "dirty": 1,
+     "checkedAt": 1791028830000
+    },
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "sessionCount": 4,
+    "activeCount": 2,
+    "lastActivity": 1791028804000,
+    "lastSessionAt": 1791028804000,
+    "active": true,
+    "actions": [
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     },
+     {
+      "id": "open-vscode",
+      "label": "Open in VS Code"
+     },
+     {
+      "id": "new-claude",
+      "label": "New Claude Code session here"
+     }
+    ],
+    "identities": [
+     {
+      "id": "github:github.com/atlas-co",
+      "role": "owner",
+      "confidence": "exact",
+      "via": "its origin remote"
+     },
+     {
+      "id": "git:f28de9788483a200",
+      "role": "commits-as",
+      "confidence": "exact",
+      "via": "git config"
+     },
+     {
+      "id": "github:github.com/nova-dev",
+      "role": "pushes-as",
+      "confidence": "likely",
+      "via": "gh's active account"
+     }
+    ]
+   },
+   {
+    "id": "project:<world>/home/projects/atlas-api-local-db",
+    "kind": "project",
+    "name": "atlas-api-local-db",
+    "path": "<world>/home/Projects/atlas-api-local-db",
+    "key": "<world>/home/projects/atlas-api-local-db",
+    "rel": "atlas-api-local-db",
+    "role": "project",
+    "detected": "folder",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [
+     "docker",
+     "supabase"
+    ],
+    "description": "Local Postgres and Supabase for atlas-api.",
+    "modifiedAt": 1791021600000,
+    "rule": null,
+    "group": false,
+    "satelliteOf": "<world>/home/projects/atlas-api",
+    "repo": null,
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "sessionCount": 0,
+    "activeCount": 0,
+    "lastActivity": 1791021600000,
+    "lastSessionAt": null,
+    "active": false,
+    "actions": [
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     },
+     {
+      "id": "open-vscode",
+      "label": "Open in VS Code"
+     },
+     {
+      "id": "new-claude",
+      "label": "New Claude Code session here"
+     }
+    ],
+    "identities": [
+     {
+      "id": "github:github.com/atlas-co",
+      "role": "owner",
+      "confidence": "likely",
+      "via": "the project it's grouped with, atlas-api"
+     }
+    ]
+   },
+   {
+    "id": "project:<world>/home/projects/atlas-web",
+    "kind": "project",
+    "name": "atlas-web",
+    "path": "<world>/home/Projects/atlas-web",
+    "key": "<world>/home/projects/atlas-web",
+    "rel": "atlas-web",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "https://github.com/atlas-co/atlas-web.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "node",
+     "typescript"
+    ],
+    "description": "The Atlas storefront, built with Next.js.",
+    "modifiedAt": 1791021600000,
+    "rule": null,
+    "group": false,
+    "satelliteOf": null,
+    "repo": {
+     "branch": "main",
+     "ahead": 0,
+     "behind": 0,
+     "staged": 0,
+     "modified": 0,
+     "untracked": 0,
+     "dirty": 0,
+     "checkedAt": 1791028830000
+    },
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "sessionCount": 1,
+    "activeCount": 1,
+    "lastActivity": 1791028640000,
+    "lastSessionAt": 1791028640000,
+    "active": true,
+    "actions": [
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     },
+     {
+      "id": "open-vscode",
+      "label": "Open in VS Code"
+     },
+     {
+      "id": "new-claude",
+      "label": "New Claude Code session here"
+     }
+    ],
+    "identities": [
+     {
+      "id": "github:github.com/atlas-co",
+      "role": "owner",
+      "confidence": "exact",
+      "via": "its origin remote"
+     },
+     {
+      "id": "git:f28de9788483a200",
+      "role": "commits-as",
+      "confidence": "exact",
+      "via": "git config"
+     },
+     {
+      "id": "github:github.com/nova-dev",
+      "role": "pushes-as",
+      "confidence": "likely",
+      "via": "gh's active account"
+     }
+    ]
+   },
+   {
+    "id": "project:<world>/home/projects/docs",
+    "kind": "project",
+    "name": "docs",
+    "path": "<world>/home/Projects/docs",
+    "key": "<world>/home/projects/docs",
+    "rel": "docs",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "https://github.com/atlas-co/docs.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "node"
+    ],
+    "description": "Docs site for Atlas and Ledger.",
+    "modifiedAt": 1791021600000,
+    "rule": null,
+    "group": false,
+    "satelliteOf": null,
+    "repo": {
+     "branch": "main",
+     "ahead": 0,
+     "behind": 0,
+     "staged": 0,
+     "modified": 0,
+     "untracked": 0,
+     "dirty": 0,
+     "checkedAt": 1791028830000
+    },
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "sessionCount": 1,
+    "activeCount": 0,
+    "lastActivity": 1791028210000,
+    "lastSessionAt": 1791028210000,
+    "active": true,
+    "actions": [
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     },
+     {
+      "id": "open-vscode",
+      "label": "Open in VS Code"
+     },
+     {
+      "id": "new-claude",
+      "label": "New Claude Code session here"
+     }
+    ],
+    "identities": [
+     {
+      "id": "github:github.com/atlas-co",
+      "role": "owner",
+      "confidence": "exact",
+      "via": "its origin remote"
+     },
+     {
+      "id": "git:f28de9788483a200",
+      "role": "commits-as",
+      "confidence": "exact",
+      "via": "git config"
+     },
+     {
+      "id": "github:github.com/nova-dev",
+      "role": "pushes-as",
+      "confidence": "likely",
+      "via": "gh's active account"
+     }
+    ]
+   },
+   {
+    "id": "project:<world>/home/projects/infra",
+    "kind": "project",
+    "name": "infra",
+    "path": "<world>/home/Projects/infra",
+    "key": "<world>/home/projects/infra",
+    "rel": "infra",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "git@github.com:atlas-co/infra.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "docker"
+    ],
+    "description": "Terraform modules and deploy scripts for every environment.",
+    "modifiedAt": 1791021600000,
+    "rule": null,
+    "group": false,
+    "satelliteOf": null,
+    "repo": {
+     "branch": "main",
+     "ahead": 0,
+     "behind": 0,
+     "staged": 0,
+     "modified": 0,
+     "untracked": 0,
+     "dirty": 0,
+     "checkedAt": 1791028830000
+    },
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "sessionCount": 1,
+    "activeCount": 0,
+    "lastActivity": 1791021600000,
+    "lastSessionAt": 1791017350000,
+    "active": false,
+    "actions": [
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     },
+     {
+      "id": "open-vscode",
+      "label": "Open in VS Code"
+     },
+     {
+      "id": "new-claude",
+      "label": "New Claude Code session here"
+     }
+    ],
+    "identities": [
+     {
+      "id": "github:github.com/atlas-co",
+      "role": "owner",
+      "confidence": "exact",
+      "via": "its origin remote"
+     },
+     {
+      "id": "git:f28de9788483a200",
+      "role": "commits-as",
+      "confidence": "exact",
+      "via": "git config"
+     }
+    ]
+   },
+   {
+    "id": "project:<world>/home/projects/labs",
+    "kind": "project",
+    "name": "labs",
+    "path": "<world>/home/Projects/labs",
+    "key": "<world>/home/projects/labs",
+    "rel": "labs",
+    "role": "group",
+    "detected": "contains",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": "Experiments that aren't projects yet.",
+    "modifiedAt": 1791021600000,
+    "rule": null,
+    "group": true,
+    "satelliteOf": null,
+    "repo": null,
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "sessionCount": 2,
+    "activeCount": 0,
+    "lastActivity": 1791026650000,
+    "lastSessionAt": 1791026650000,
+    "active": true,
+    "actions": [
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     },
+     {
+      "id": "open-vscode",
+      "label": "Open in VS Code"
+     },
+     {
+      "id": "new-claude",
+      "label": "New Claude Code session here"
+     }
+    ],
+    "identities": [
+     {
+      "id": "github:github.com/orbitworks",
+      "role": "owner",
+      "confidence": "likely",
+      "via": "the projects in it"
+     }
+    ]
+   },
+   {
+    "id": "project:<world>/home/projects/labs/geofence",
+    "kind": "project",
+    "name": "geofence",
+    "path": "<world>/home/Projects/labs/geofence",
+    "key": "<world>/home/projects/labs/geofence",
+    "rel": "labs/geofence",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": "<world>/home/projects/labs",
+    "git": {
+     "branch": "main",
+     "origin": "https://github.com/orbitworks/geofence.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "node"
+    ],
+    "description": "Delivery zones drawn from postcodes.",
+    "modifiedAt": 1791021600000,
+    "rule": null,
+    "group": false,
+    "satelliteOf": null,
+    "repo": {
+     "branch": "main",
+     "ahead": 0,
+     "behind": 0,
+     "staged": 0,
+     "modified": 1,
+     "untracked": 0,
+     "dirty": 1,
+     "checkedAt": 1791028830000
+    },
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "sessionCount": 1,
+    "activeCount": 0,
+    "lastActivity": 1791026650000,
+    "lastSessionAt": 1791026650000,
+    "active": true,
+    "actions": [
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     },
+     {
+      "id": "open-vscode",
+      "label": "Open in VS Code"
+     },
+     {
+      "id": "new-claude",
+      "label": "New Claude Code session here"
+     }
+    ],
+    "identities": [
+     {
+      "id": "github:github.com/orbitworks",
+      "role": "owner",
+      "confidence": "exact",
+      "via": "its origin remote"
+     },
+     {
+      "id": "git:8bed4c8b3ce0bd80",
+      "role": "commits-as",
+      "confidence": "exact",
+      "via": "git config"
+     },
+     {
+      "id": "github:github.com/orbitworks",
+      "role": "pushes-as",
+      "confidence": "exact",
+      "via": "git config"
+     }
+    ]
+   },
+   {
+    "id": "project:<world>/home/projects/labs/route-sim",
+    "kind": "project",
+    "name": "route-sim",
+    "path": "<world>/home/Projects/labs/route-sim",
+    "key": "<world>/home/projects/labs/route-sim",
+    "rel": "labs/route-sim",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": "<world>/home/projects/labs",
+    "git": {
+     "branch": "main",
+     "origin": "git@gh-orbit:orbitworks/route-sim.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "python"
+    ],
+    "description": "Simulates a day of van routes against pathfinder.",
+    "modifiedAt": 1791021600000,
+    "rule": null,
+    "group": false,
+    "satelliteOf": null,
+    "repo": {
+     "branch": "main",
+     "ahead": 0,
+     "behind": 0,
+     "staged": 0,
+     "modified": 0,
+     "untracked": 0,
+     "dirty": 0,
+     "checkedAt": 1791028830000
+    },
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "sessionCount": 0,
+    "activeCount": 0,
+    "lastActivity": 1791021600000,
+    "lastSessionAt": null,
+    "active": false,
+    "actions": [
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     },
+     {
+      "id": "open-vscode",
+      "label": "Open in VS Code"
+     },
+     {
+      "id": "new-claude",
+      "label": "New Claude Code session here"
+     }
+    ],
+    "identities": [
+     {
+      "id": "github:github.com/orbitworks",
+      "role": "owner",
+      "confidence": "exact",
+      "via": "its origin remote"
+     },
+     {
+      "id": "git:8bed4c8b3ce0bd80",
+      "role": "commits-as",
+      "confidence": "exact",
+      "via": "git config"
+     }
+    ]
+   },
+   {
+    "id": "project:<world>/home/projects/ledger",
+    "kind": "project",
+    "name": "ledger",
+    "path": "<world>/home/Projects/ledger",
+    "key": "<world>/home/projects/ledger",
+    "rel": "ledger",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "https://github.com/nova-dev/ledger.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "python"
+    ],
+    "description": "Double-entry bookkeeping service with monthly reconciliation.",
+    "modifiedAt": 1791021600000,
+    "rule": null,
+    "group": false,
+    "satelliteOf": null,
+    "repo": {
+     "branch": "main",
+     "ahead": 0,
+     "behind": 0,
+     "staged": 0,
+     "modified": 1,
+     "untracked": 0,
+     "dirty": 1,
+     "checkedAt": 1791028830000
+    },
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "sessionCount": 2,
+    "activeCount": 1,
+    "lastActivity": 1791028690000,
+    "lastSessionAt": 1791028690000,
+    "active": true,
+    "actions": [
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     },
+     {
+      "id": "open-vscode",
+      "label": "Open in VS Code"
+     },
+     {
+      "id": "new-claude",
+      "label": "New Claude Code session here"
+     }
+    ],
+    "identities": [
+     {
+      "id": "github:github.com/nova-dev",
+      "role": "owner",
+      "confidence": "exact",
+      "via": "its origin remote"
+     },
+     {
+      "id": "git:eb61c4d6d94bb5d1",
+      "role": "commits-as",
+      "confidence": "exact",
+      "via": "git config"
+     },
+     {
+      "id": "github:github.com/nova-dev",
+      "role": "pushes-as",
+      "confidence": "likely",
+      "via": "gh's active account"
+     }
+    ]
+   },
+   {
+    "id": "project:<world>/home/projects/pathfinder",
+    "kind": "project",
+    "name": "pathfinder",
+    "path": "<world>/home/Projects/pathfinder",
+    "key": "<world>/home/projects/pathfinder",
+    "rel": "pathfinder",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "https://github.com/orbitworks/pathfinder.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "rust"
+    ],
+    "description": "Route planner for delivery vans.",
+    "modifiedAt": 1791021600000,
+    "rule": null,
+    "group": false,
+    "satelliteOf": null,
+    "repo": {
+     "branch": "main",
+     "ahead": 0,
+     "behind": 0,
+     "staged": 0,
+     "modified": 0,
+     "untracked": 0,
+     "dirty": 0,
+     "checkedAt": 1791028830000
+    },
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "sessionCount": 2,
+    "activeCount": 1,
+    "lastActivity": 1791028690000,
+    "lastSessionAt": 1791028690000,
+    "active": true,
+    "actions": [
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     },
+     {
+      "id": "open-vscode",
+      "label": "Open in VS Code"
+     },
+     {
+      "id": "new-claude",
+      "label": "New Claude Code session here"
+     }
+    ],
+    "identities": [
+     {
+      "id": "github:github.com/orbitworks",
+      "role": "owner",
+      "confidence": "exact",
+      "via": "its origin remote"
+     },
+     {
+      "id": "git:8bed4c8b3ce0bd80",
+      "role": "commits-as",
+      "confidence": "exact",
+      "via": "git config"
+     },
+     {
+      "id": "github:github.com/nova-dev",
+      "role": "pushes-as",
+      "confidence": "likely",
+      "via": "gh's active account"
+     }
+    ]
+   },
+   {
+    "id": "native:codex:demo-atlas",
+    "kind": "native",
+    "app": "codex",
+    "name": "Atlas",
+    "roots": [
+     "<world>/home/Projects/atlas-api",
+     "<world>/home/Projects/atlas-web"
+    ],
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "sessionCount": 2,
+    "activeCount": 1,
+    "lastActivity": 1791028690000,
+    "lastSessionAt": 1791028690000,
+    "active": true,
+    "actions": []
+   },
+   {
+    "id": "codex:0190d3e0-0000-7000-8000-000000000002",
+    "app": "codex",
+    "rawId": "0190d3e0-0000-7000-8000-000000000002",
+    "desktopId": null,
+    "inDesktop": false,
+    "title": "Rate-limit the public orders endpoint",
+    "preview": "Rate-limit GET /orders to 60 requests a minute per API key.",
+    "cwd": "<world>/home/Projects/atlas-api",
+    "worktree": null,
+    "createdAt": 1791017890000,
+    "updatedAt": 1791028690000,
+    "archived": false,
+    "starred": false,
+    "model": "gpt-5-codex",
+    "branch": "feat/rate-limit",
+    "status": null,
+    "source": null,
+    "nativeProjectId": "demo-atlas",
+    "parentId": null,
+    "parentKind": null,
+    "claudeAccount": null,
+    "kind": "session",
+    "activity": "active",
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "actions": [
+     {
+      "id": "open-app",
+      "label": "Open in ChatGPT · Codex"
+     },
+     {
+      "id": "preview",
+      "label": "Preview transcript",
+      "client": true
+     },
+     {
+      "id": "stats",
+      "label": "Stats",
+      "client": true
+     },
+     {
+      "id": "handoff",
+      "label": "Hand off…",
+      "client": true
+     },
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     }
+    ],
+    "ranAs": {
+     "id": "chatgpt:demo-workspace",
+     "confidence": "likely",
+     "via": "signed in when it ran"
+    }
+   },
+   {
+    "id": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "rawId": "0190d3e0-0000-7000-8000-000000000004",
+    "desktopId": null,
+    "inDesktop": false,
+    "title": "Fix rounding in monthly reconciliation",
+    "preview": "Reconciliation is off by a cent on some months. Find out why and fix it.",
+    "cwd": "<world>/home/Projects/ledger",
+    "worktree": null,
+    "createdAt": 1791017890000,
+    "updatedAt": 1791028690000,
+    "archived": false,
+    "starred": false,
+    "model": "gpt-5-codex",
+    "branch": "fix/rounding",
+    "status": null,
+    "source": null,
+    "nativeProjectId": null,
+    "parentId": null,
+    "parentKind": null,
+    "claudeAccount": null,
+    "kind": "session",
+    "activity": "active",
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "actions": [
+     {
+      "id": "open-app",
+      "label": "Open in ChatGPT · Codex"
+     },
+     {
+      "id": "preview",
+      "label": "Preview transcript",
+      "client": true
+     },
+     {
+      "id": "stats",
+      "label": "Stats",
+      "client": true
+     },
+     {
+      "id": "handoff",
+      "label": "Hand off…",
+      "client": true
+     },
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     }
+    ],
+    "ranAs": {
+     "id": "chatgpt:demo-workspace",
+     "confidence": "likely",
+     "via": "signed in when it ran"
+    }
+   },
+   {
+    "id": "codex:0190d3e0-0000-7000-8000-000000000006",
+    "app": "codex",
+    "rawId": "0190d3e0-0000-7000-8000-000000000006",
+    "desktopId": null,
+    "inDesktop": false,
+    "title": "Write the refunds guide",
+    "preview": "Write a guide for the new partial refunds.",
+    "cwd": "<world>/home/Projects/docs",
+    "worktree": null,
+    "createdAt": 1791017410000,
+    "updatedAt": 1791028210000,
+    "archived": false,
+    "starred": false,
+    "model": "gpt-5-codex",
+    "branch": null,
+    "status": null,
+    "source": null,
+    "nativeProjectId": null,
+    "parentId": null,
+    "parentKind": null,
+    "claudeAccount": null,
+    "kind": "session",
+    "activity": "recent",
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "actions": [
+     {
+      "id": "open-app",
+      "label": "Open in ChatGPT · Codex"
+     },
+     {
+      "id": "preview",
+      "label": "Preview transcript",
+      "client": true
+     },
+     {
+      "id": "stats",
+      "label": "Stats",
+      "client": true
+     },
+     {
+      "id": "handoff",
+      "label": "Hand off…",
+      "client": true
+     },
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     }
+    ],
+    "ranAs": {
+     "id": "chatgpt:demo-workspace",
+     "confidence": "likely",
+     "via": "signed in when it ran"
+    }
+   },
+   {
+    "id": "codex:0190d3e0-0000-7000-8000-000000000008",
+    "app": "codex",
+    "rawId": "0190d3e0-0000-7000-8000-000000000008",
+    "desktopId": null,
+    "inDesktop": false,
+    "title": "Add product image zoom",
+    "preview": "Add zoom on product images.",
+    "cwd": "<world>/home/Projects/atlas-web",
+    "worktree": null,
+    "createdAt": 1790999950000,
+    "updatedAt": 1791010750000,
+    "archived": false,
+    "starred": false,
+    "model": "gpt-5-codex",
+    "branch": null,
+    "status": null,
+    "source": null,
+    "nativeProjectId": "demo-atlas",
+    "parentId": null,
+    "parentKind": null,
+    "claudeAccount": null,
+    "kind": "session",
+    "activity": "recent",
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "actions": [
+     {
+      "id": "open-app",
+      "label": "Open in ChatGPT · Codex"
+     },
+     {
+      "id": "preview",
+      "label": "Preview transcript",
+      "client": true
+     },
+     {
+      "id": "stats",
+      "label": "Stats",
+      "client": true
+     },
+     {
+      "id": "handoff",
+      "label": "Hand off…",
+      "client": true
+     },
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     }
+    ],
+    "ranAs": {
+     "id": "chatgpt:demo-workspace",
+     "confidence": "likely",
+     "via": "signed in when it ran"
+    }
+   },
+   {
+    "id": "codex:0190d3e0-0000-7000-8000-000000000010",
+    "app": "codex",
+    "rawId": "0190d3e0-0000-7000-8000-000000000010",
+    "desktopId": null,
+    "inDesktop": false,
+    "title": "Explain this regex",
+    "preview": "What does ^(?=.*\\d)(?=.*[a-z]).{8,}$ match?",
+    "cwd": "<world>/home/Documents/Codex/2026-10-03/regex-help",
+    "worktree": null,
+    "createdAt": 1791009550000,
+    "updatedAt": 1791020350000,
+    "archived": false,
+    "starred": false,
+    "model": "gpt-5-codex",
+    "branch": null,
+    "status": null,
+    "source": null,
+    "nativeProjectId": null,
+    "parentId": null,
+    "parentKind": null,
+    "claudeAccount": null,
+    "kind": "session",
+    "activity": "recent",
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "actions": [
+     {
+      "id": "open-app",
+      "label": "Open in ChatGPT · Codex"
+     },
+     {
+      "id": "preview",
+      "label": "Preview transcript",
+      "client": true
+     },
+     {
+      "id": "stats",
+      "label": "Stats",
+      "client": true
+     },
+     {
+      "id": "handoff",
+      "label": "Hand off…",
+      "client": true
+     },
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     }
+    ],
+    "ranAs": {
+     "id": "chatgpt:demo-workspace",
+     "confidence": "likely",
+     "via": "signed in when it ran"
+    }
+   },
+   {
+    "id": "codex:0190d3e0-0000-7000-8000-000000000012",
+    "app": "codex",
+    "rawId": "0190d3e0-0000-7000-8000-000000000012",
+    "desktopId": null,
+    "inDesktop": false,
+    "title": "Benchmark solver variants",
+    "preview": "Benchmark the cached solver against the old one.",
+    "cwd": "<world>/home/Projects/pathfinder",
+    "worktree": null,
+    "createdAt": 1791014350000,
+    "updatedAt": 1791025150000,
+    "archived": false,
+    "starred": false,
+    "model": "gpt-5-codex",
+    "branch": null,
+    "status": null,
+    "source": "subAgent",
+    "nativeProjectId": null,
+    "parentId": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "parentKind": "subagent",
+    "claudeAccount": null,
+    "kind": "session",
+    "activity": "recent",
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "actions": [
+     {
+      "id": "open-app",
+      "label": "Open in ChatGPT · Codex"
+     },
+     {
+      "id": "preview",
+      "label": "Preview transcript",
+      "client": true
+     },
+     {
+      "id": "stats",
+      "label": "Stats",
+      "client": true
+     },
+     {
+      "id": "handoff",
+      "label": "Hand off…",
+      "client": true
+     },
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     }
+    ],
+    "ranAs": {
+     "id": "chatgpt:demo-workspace",
+     "confidence": "likely",
+     "via": "signed in when it ran"
+    }
+   },
+   {
+    "id": "codex:0190d3e0-0000-7000-8000-000000000013",
+    "app": "codex",
+    "rawId": "0190d3e0-0000-7000-8000-000000000013",
+    "desktopId": null,
+    "inDesktop": false,
+    "title": "Draw delivery zones from postcodes",
+    "preview": "Turn the postcode list into delivery zones.",
+    "cwd": "<world>/home/Projects/labs/geofence",
+    "worktree": null,
+    "createdAt": 1791015850000,
+    "updatedAt": 1791026650000,
+    "archived": false,
+    "starred": false,
+    "model": "gpt-5-codex",
+    "branch": null,
+    "status": null,
+    "source": null,
+    "nativeProjectId": null,
+    "parentId": null,
+    "parentKind": null,
+    "claudeAccount": null,
+    "kind": "session",
+    "activity": "recent",
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "actions": [
+     {
+      "id": "open-app",
+      "label": "Open in ChatGPT · Codex"
+     },
+     {
+      "id": "preview",
+      "label": "Preview transcript",
+      "client": true
+     },
+     {
+      "id": "stats",
+      "label": "Stats",
+      "client": true
+     },
+     {
+      "id": "handoff",
+      "label": "Hand off…",
+      "client": true
+     },
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     }
+    ],
+    "ranAs": {
+     "id": "chatgpt:demo-workspace",
+     "confidence": "likely",
+     "via": "signed in when it ran"
+    }
+   },
+   {
+    "id": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "rawId": "0190d3e0-0000-7000-8000-000000000001",
+    "desktopId": "local_0190d3e0-0000-7000-9000-000000000001",
+    "inDesktop": true,
+    "title": "Add partial refunds to the orders API",
+    "preview": "Add partial refunds to the orders API. Keep the existing full-refund path working.",
+    "cwd": "<world>/home/Projects/atlas-api",
+    "worktree": null,
+    "createdAt": 1791018004000,
+    "updatedAt": 1791028804000,
+    "archived": false,
+    "starred": true,
+    "model": "claude-sonnet-4-5",
+    "branch": "feat/partial-refunds",
+    "status": null,
+    "source": null,
+    "nativeProjectId": null,
+    "parentId": null,
+    "parentKind": null,
+    "claudeAccount": {
+     "account": "0190d3e0-0000-7000-a000-000000000002",
+     "org": "0190d3e0-0000-7000-b000-000000000002"
+    },
+    "kind": "session",
+    "activity": "active",
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "actions": [
+     {
+      "id": "open-app",
+      "label": "Open in Claude desktop"
+     },
+     {
+      "id": "preview",
+      "label": "Preview transcript",
+      "client": true
+     },
+     {
+      "id": "stats",
+      "label": "Stats",
+      "client": true
+     },
+     {
+      "id": "handoff",
+      "label": "Hand off…",
+      "client": true
+     },
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     }
+    ],
+    "ranAs": {
+     "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
+     "confidence": "exact",
+     "via": "Claude desktop's session folder"
+    }
+   },
+   {
+    "id": "claude:0190d3e0-0000-7000-8000-000000000003",
+    "app": "claude",
+    "rawId": "0190d3e0-0000-7000-8000-000000000003",
+    "desktopId": "local_0190d3e0-0000-7000-9000-000000000003",
+    "inDesktop": true,
+    "title": "Move checkout to the new payments SDK",
+    "preview": "Move checkout to version 3 of the payments SDK.",
+    "cwd": "<world>/home/Projects/atlas-web",
+    "worktree": null,
+    "createdAt": 1791017840000,
+    "updatedAt": 1791028640000,
+    "archived": false,
+    "starred": false,
+    "model": "claude-sonnet-4-5",
+    "branch": "feat/payments-v3",
+    "status": null,
+    "source": null,
+    "nativeProjectId": null,
+    "parentId": null,
+    "parentKind": null,
+    "claudeAccount": {
+     "account": "0190d3e0-0000-7000-a000-000000000002",
+     "org": "0190d3e0-0000-7000-b000-000000000002"
+    },
+    "kind": "session",
+    "activity": "active",
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "actions": [
+     {
+      "id": "open-app",
+      "label": "Open in Claude desktop"
+     },
+     {
+      "id": "preview",
+      "label": "Preview transcript",
+      "client": true
+     },
+     {
+      "id": "stats",
+      "label": "Stats",
+      "client": true
+     },
+     {
+      "id": "handoff",
+      "label": "Hand off…",
+      "client": true
+     },
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     }
+    ],
+    "ranAs": {
+     "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
+     "confidence": "exact",
+     "via": "Claude desktop's session folder"
+    }
+   },
+   {
+    "id": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "app": "claude",
+    "rawId": "0190d3e0-0000-7000-8000-000000000005",
+    "desktopId": "local_0190d3e0-0000-7000-9000-000000000005",
+    "inDesktop": true,
+    "title": "Speed up the route solver for 500+ stops",
+    "preview": "The solver takes 40 seconds for 500 stops. Get it under 5.",
+    "cwd": "<world>/home/Projects/pathfinder",
+    "worktree": null,
+    "createdAt": 1791017890000,
+    "updatedAt": 1791028690000,
+    "archived": false,
+    "starred": false,
+    "model": "claude-sonnet-4-5",
+    "branch": "perf/solver",
+    "status": null,
+    "source": null,
+    "nativeProjectId": null,
+    "parentId": null,
+    "parentKind": null,
+    "claudeAccount": {
+     "account": "0190d3e0-0000-7000-a000-000000000001",
+     "org": "0190d3e0-0000-7000-b000-000000000001"
+    },
+    "kind": "session",
+    "activity": "active",
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "actions": [
+     {
+      "id": "open-app",
+      "label": "Open in Claude desktop"
+     },
+     {
+      "id": "preview",
+      "label": "Preview transcript",
+      "client": true
+     },
+     {
+      "id": "stats",
+      "label": "Stats",
+      "client": true
+     },
+     {
+      "id": "handoff",
+      "label": "Hand off…",
+      "client": true
+     },
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     }
+    ],
+    "ranAs": {
+     "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
+     "confidence": "exact",
+     "via": "Claude desktop's session folder"
+    }
+   },
+   {
+    "id": "claude:0190d3e0-0000-7000-8000-000000000007",
+    "app": "claude",
+    "rawId": "0190d3e0-0000-7000-8000-000000000007",
+    "desktopId": "local_0190d3e0-0000-7000-9000-000000000007",
+    "inDesktop": true,
+    "title": "Move staging to the new cluster",
+    "preview": "Move staging to the new cluster.",
+    "cwd": "<world>/home/Projects/infra",
+    "worktree": null,
+    "createdAt": 1791006550000,
+    "updatedAt": 1791017350000,
+    "archived": false,
+    "starred": false,
+    "model": "claude-sonnet-4-5",
+    "branch": null,
+    "status": null,
+    "source": null,
+    "nativeProjectId": null,
+    "parentId": null,
+    "parentKind": null,
+    "claudeAccount": {
+     "account": "0190d3e0-0000-7000-a000-000000000002",
+     "org": "0190d3e0-0000-7000-b000-000000000002"
+    },
+    "kind": "session",
+    "activity": "recent",
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "actions": [
+     {
+      "id": "open-app",
+      "label": "Open in Claude desktop"
+     },
+     {
+      "id": "preview",
+      "label": "Preview transcript",
+      "client": true
+     },
+     {
+      "id": "stats",
+      "label": "Stats",
+      "client": true
+     },
+     {
+      "id": "handoff",
+      "label": "Hand off…",
+      "client": true
+     },
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     }
+    ],
+    "ranAs": {
+     "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
+     "confidence": "exact",
+     "via": "Claude desktop's session folder"
+    }
+   },
+   {
+    "id": "claude:0190d3e0-0000-7000-8000-000000000009",
+    "app": "claude",
+    "rawId": "0190d3e0-0000-7000-8000-000000000009",
+    "desktopId": null,
+    "inDesktop": false,
+    "title": "Draft the Q4 close checklist",
+    "preview": "Draft a checklist for the Q4 close.",
+    "cwd": "<world>/home/Projects/ledger",
+    "worktree": null,
+    "createdAt": 1790992750000,
+    "updatedAt": 1791003550000,
+    "archived": false,
+    "starred": false,
+    "model": "claude-sonnet-4-5",
+    "branch": null,
+    "status": null,
+    "source": null,
+    "nativeProjectId": null,
+    "parentId": null,
+    "parentKind": null,
+    "claudeAccount": null,
+    "kind": "session",
+    "activity": "recent",
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "actions": [
+     {
+      "id": "open-app",
+      "label": "Import into Claude desktop"
+     },
+     {
+      "id": "preview",
+      "label": "Preview transcript",
+      "client": true
+     },
+     {
+      "id": "stats",
+      "label": "Stats",
+      "client": true
+     },
+     {
+      "id": "handoff",
+      "label": "Hand off…",
+      "client": true
+     },
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     }
+    ],
+    "ranAs": {
+     "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
+     "confidence": "likely",
+     "via": "signed in when it ran"
+    }
+   },
+   {
+    "id": "claude:0190d3e0-0000-7000-8000-000000000011",
+    "app": "claude",
+    "rawId": "0190d3e0-0000-7000-8000-000000000011",
+    "desktopId": "local_0190d3e0-0000-7000-9000-000000000011",
+    "inDesktop": true,
+    "title": "Review the partial refunds change",
+    "preview": "Review the partial refunds change before I open a PR.",
+    "cwd": "<world>/home/Projects/atlas-api",
+    "worktree": null,
+    "createdAt": 1791016450000,
+    "updatedAt": 1791027250000,
+    "archived": false,
+    "starred": false,
+    "model": "claude-sonnet-4-5",
+    "branch": null,
+    "status": null,
+    "source": null,
+    "nativeProjectId": null,
+    "parentId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "parentKind": "spawn",
+    "claudeAccount": {
+     "account": "0190d3e0-0000-7000-a000-000000000002",
+     "org": "0190d3e0-0000-7000-b000-000000000002"
+    },
+    "kind": "session",
+    "activity": "recent",
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "actions": [
+     {
+      "id": "open-app",
+      "label": "Open in Claude desktop"
+     },
+     {
+      "id": "preview",
+      "label": "Preview transcript",
+      "client": true
+     },
+     {
+      "id": "stats",
+      "label": "Stats",
+      "client": true
+     },
+     {
+      "id": "handoff",
+      "label": "Hand off…",
+      "client": true
+     },
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     }
+    ],
+    "ranAs": {
+     "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
+     "confidence": "exact",
+     "via": "Claude desktop's session folder"
+    }
+   },
+   {
+    "id": "claude:0190d3e0-0000-7000-8000-000000000014",
+    "app": "claude",
+    "rawId": "0190d3e0-0000-7000-8000-000000000014",
+    "desktopId": null,
+    "inDesktop": false,
+    "title": "Sort out which experiments to keep",
+    "preview": "Which of these experiments are worth keeping?",
+    "cwd": "<world>/home/Projects/labs",
+    "worktree": null,
+    "createdAt": 1791003550000,
+    "updatedAt": 1791014350000,
+    "archived": false,
+    "starred": false,
+    "model": "claude-sonnet-4-5",
+    "branch": null,
+    "status": null,
+    "source": null,
+    "nativeProjectId": null,
+    "parentId": null,
+    "parentKind": null,
+    "claudeAccount": null,
+    "kind": "session",
+    "activity": "recent",
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "actions": [
+     {
+      "id": "open-app",
+      "label": "Import into Claude desktop"
+     },
+     {
+      "id": "preview",
+      "label": "Preview transcript",
+      "client": true
+     },
+     {
+      "id": "stats",
+      "label": "Stats",
+      "client": true
+     },
+     {
+      "id": "handoff",
+      "label": "Hand off…",
+      "client": true
+     },
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     }
+    ],
+    "ranAs": {
+     "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
+     "confidence": "likely",
+     "via": "signed in when it ran"
+    }
+   },
+   {
+    "id": "zone:codex-projectless",
+    "kind": "zone",
+    "name": "Codex without a project",
+    "path": null,
+    "app": "codex",
+    "external": true,
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "sessionCount": 1,
+    "activeCount": 0,
+    "lastActivity": 1791020350000,
+    "lastSessionAt": 1791020350000,
+    "active": false,
+    "actions": []
+   },
+   {
+    "id": "resource:agent-wiki",
+    "kind": "wiki",
+    "name": "Agent Wiki",
+    "path": "<world>/home/wiki",
+    "pageCount": 5,
+    "inbox": [
+     {
+      "id": "note-1",
+      "title": "Solver benchmark results",
+      "app": "codex"
+     }
+    ],
+    "lastActivity": 1791026400000,
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "sessionCount": 0,
+    "activeCount": 0,
+    "lastSessionAt": null,
+    "actions": [
+     {
+      "id": "open-folder",
+      "label": "Open wiki folder"
+     }
+    ]
+   },
+   {
+    "id": "wiki:atlas-api",
+    "kind": "page",
+    "name": "Atlas API",
+    "slug": "atlas-api",
+    "type": "project",
+    "summary": "",
+    "tags": [
+     "atlas-api"
+    ],
+    "updated": 1791027000000,
+    "updatedBy": null,
+    "path": "<world>/home/wiki/pages/atlas-api.md",
+    "writes": [
+     {
+      "ts": 1791026400000,
+      "app": "claude-code",
+      "title": "Recorded the refund rules",
+      "pages": [
+       "refunds",
+       "atlas-api"
+      ]
+     }
+    ],
+    "lastActivity": 1791027000000,
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "sessionCount": 0,
+    "activeCount": 0,
+    "lastSessionAt": null,
+    "actions": [
+     {
+      "id": "open-file",
+      "label": "Open page"
+     }
+    ]
+   },
+   {
+    "id": "wiki:ledger",
+    "kind": "page",
+    "name": "Ledger",
+    "slug": "ledger",
+    "type": "project",
+    "summary": "",
+    "tags": [
+     "ledger"
+    ],
+    "updated": 1791027000000,
+    "updatedBy": null,
+    "path": "<world>/home/wiki/pages/ledger.md",
+    "writes": [],
+    "lastActivity": 1791027000000,
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "sessionCount": 0,
+    "activeCount": 0,
+    "lastSessionAt": null,
+    "actions": [
+     {
+      "id": "open-file",
+      "label": "Open page"
+     }
+    ]
+   },
+   {
+    "id": "wiki:q4-close",
+    "kind": "page",
+    "name": "Q4 close",
+    "slug": "q4-close",
+    "type": "project",
+    "summary": "",
+    "tags": [],
+    "updated": 1791027000000,
+    "updatedBy": null,
+    "path": "<world>/home/wiki/pages/q4-close.md",
+    "writes": [],
+    "lastActivity": 1791027000000,
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "sessionCount": 0,
+    "activeCount": 0,
+    "lastSessionAt": null,
+    "actions": [
+     {
+      "id": "open-file",
+      "label": "Open page"
+     }
+    ]
+   },
+   {
+    "id": "wiki:refunds",
+    "kind": "page",
+    "name": "Refunds",
+    "slug": "refunds",
+    "type": "project",
+    "summary": "",
+    "tags": [],
+    "updated": 1791027000000,
+    "updatedBy": null,
+    "path": "<world>/home/wiki/pages/refunds.md",
+    "writes": [
+     {
+      "ts": 1791026400000,
+      "app": "claude-code",
+      "title": "Recorded the refund rules",
+      "pages": [
+       "refunds",
+       "atlas-api"
+      ]
+     }
+    ],
+    "lastActivity": 1791027000000,
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "sessionCount": 0,
+    "activeCount": 0,
+    "lastSessionAt": null,
+    "actions": [
+     {
+      "id": "open-file",
+      "label": "Open page"
+     }
+    ]
+   },
+   {
+    "id": "wiki:staging-cluster",
+    "kind": "page",
+    "name": "Staging cluster",
+    "slug": "staging-cluster",
+    "type": "project",
+    "summary": "",
+    "tags": [
+     "infra"
+    ],
+    "updated": 1791027000000,
+    "updatedBy": null,
+    "path": "<world>/home/wiki/pages/staging-cluster.md",
+    "writes": [],
+    "lastActivity": 1791027000000,
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "sessionCount": 0,
+    "activeCount": 0,
+    "lastSessionAt": null,
+    "actions": [
+     {
+      "id": "open-file",
+      "label": "Open page"
+     }
+    ]
+   },
+   {
+    "id": "resource:reference-library",
+    "kind": "resource",
+    "name": "reference-library",
+    "lastActivity": null,
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "sessionCount": 0,
+    "activeCount": 0,
+    "lastSessionAt": null,
+    "actions": []
+   }
+  ],
+  "links": [
+   {
+    "source": "core",
+    "target": "project:<world>/home/projects/atlas-api",
+    "kind": "contains"
+   },
+   {
+    "source": "project:<world>/home/projects/atlas-api",
+    "target": "project:<world>/home/projects/atlas-api-local-db",
+    "kind": "satellite"
+   },
+   {
+    "source": "core",
+    "target": "project:<world>/home/projects/atlas-web",
+    "kind": "contains"
+   },
+   {
+    "source": "core",
+    "target": "project:<world>/home/projects/docs",
+    "kind": "contains"
+   },
+   {
+    "source": "core",
+    "target": "project:<world>/home/projects/infra",
+    "kind": "contains"
+   },
+   {
+    "source": "core",
+    "target": "project:<world>/home/projects/labs",
+    "kind": "contains"
+   },
+   {
+    "source": "project:<world>/home/projects/labs",
+    "target": "project:<world>/home/projects/labs/geofence",
+    "kind": "nested"
+   },
+   {
+    "source": "project:<world>/home/projects/labs",
+    "target": "project:<world>/home/projects/labs/route-sim",
+    "kind": "nested"
+   },
+   {
+    "source": "core",
+    "target": "project:<world>/home/projects/ledger",
+    "kind": "contains"
+   },
+   {
+    "source": "core",
+    "target": "project:<world>/home/projects/pathfinder",
+    "kind": "contains"
+   },
+   {
+    "source": "project:<world>/home/projects/atlas-api",
+    "target": "native:codex:demo-atlas",
+    "kind": "native"
+   },
+   {
+    "source": "core",
+    "target": "zone:codex-projectless",
+    "kind": "zone"
+   },
+   {
+    "source": "native:codex:demo-atlas",
+    "target": "codex:0190d3e0-0000-7000-8000-000000000002",
+    "kind": "session"
+   },
+   {
+    "source": "project:<world>/home/projects/ledger",
+    "target": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "kind": "session"
+   },
+   {
+    "source": "project:<world>/home/projects/docs",
+    "target": "codex:0190d3e0-0000-7000-8000-000000000006",
+    "kind": "session"
+   },
+   {
+    "source": "native:codex:demo-atlas",
+    "target": "codex:0190d3e0-0000-7000-8000-000000000008",
+    "kind": "session"
+   },
+   {
+    "source": "zone:codex-projectless",
+    "target": "codex:0190d3e0-0000-7000-8000-000000000010",
+    "kind": "session"
+   },
+   {
+    "source": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "target": "codex:0190d3e0-0000-7000-8000-000000000012",
+    "kind": "lineage"
+   },
+   {
+    "source": "project:<world>/home/projects/labs/geofence",
+    "target": "codex:0190d3e0-0000-7000-8000-000000000013",
+    "kind": "session"
+   },
+   {
+    "source": "project:<world>/home/projects/atlas-api",
+    "target": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "kind": "session"
+   },
+   {
+    "source": "project:<world>/home/projects/atlas-web",
+    "target": "claude:0190d3e0-0000-7000-8000-000000000003",
+    "kind": "session"
+   },
+   {
+    "source": "project:<world>/home/projects/pathfinder",
+    "target": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "kind": "session"
+   },
+   {
+    "source": "project:<world>/home/projects/infra",
+    "target": "claude:0190d3e0-0000-7000-8000-000000000007",
+    "kind": "session"
+   },
+   {
+    "source": "project:<world>/home/projects/ledger",
+    "target": "claude:0190d3e0-0000-7000-8000-000000000009",
+    "kind": "session"
+   },
+   {
+    "source": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "target": "claude:0190d3e0-0000-7000-8000-000000000011",
+    "kind": "lineage"
+   },
+   {
+    "source": "project:<world>/home/projects/labs",
+    "target": "claude:0190d3e0-0000-7000-8000-000000000014",
+    "kind": "session"
+   },
+   {
+    "source": "core",
+    "target": "resource:agent-wiki",
+    "kind": "wiki"
+   },
+   {
+    "source": "resource:agent-wiki",
+    "target": "wiki:atlas-api",
+    "kind": "page"
+   },
+   {
+    "source": "resource:agent-wiki",
+    "target": "wiki:ledger",
+    "kind": "page"
+   },
+   {
+    "source": "resource:agent-wiki",
+    "target": "wiki:q4-close",
+    "kind": "page"
+   },
+   {
+    "source": "resource:agent-wiki",
+    "target": "wiki:refunds",
+    "kind": "page"
+   },
+   {
+    "source": "resource:agent-wiki",
+    "target": "wiki:staging-cluster",
+    "kind": "page"
+   },
+   {
+    "source": "core",
+    "target": "resource:reference-library",
+    "kind": "resource"
+   }
+  ],
+  "relations": [
+   {
+    "a": "wiki:atlas-api",
+    "b": "wiki:refunds",
+    "kind": "wikilink"
+   },
+   {
+    "a": "wiki:atlas-api",
+    "b": "wiki:staging-cluster",
+    "kind": "wikilink"
+   },
+   {
+    "a": "wiki:atlas-api",
+    "b": "project:<world>/home/projects/atlas-api",
+    "kind": "mentions"
+   },
+   {
+    "a": "wiki:ledger",
+    "b": "wiki:q4-close",
+    "kind": "wikilink"
+   },
+   {
+    "a": "wiki:ledger",
+    "b": "project:<world>/home/projects/ledger",
+    "kind": "mentions"
+   },
+   {
+    "a": "wiki:refunds",
+    "b": "project:<world>/home/projects/docs",
+    "kind": "mentions"
+   },
+   {
+    "a": "wiki:staging-cluster",
+    "b": "project:<world>/home/projects/infra",
+    "kind": "mentions"
+   }
+  ],
+  "stats": {
+   "wikiPages": 5,
+   "dirtyRepos": 3,
+   "projects": 9,
+   "groups": 1,
+   "sessions": 14,
+   "claude": 7,
+   "codex": 7,
+   "active": 5,
+   "archived": 0
+  },
+  "identities": [
+   {
+    "id": "github:github.com/nova-dev",
+    "kind": "github",
+    "handle": "nova-dev",
+    "detail": {
+     "host": "github.com"
+    },
+    "signedIn": true,
+    "active": true,
+    "sources": [
+     "gh",
+     "remote URLs"
+    ],
+    "firstSeen": 1791028830000,
+    "seenAt": 1791028830000,
+    "name": null,
+    "hidden": false,
+    "sessions": 10,
+    "projects": 5
+   },
+   {
+    "id": "github:github.com/atlas-co",
+    "kind": "github",
+    "handle": "atlas-co",
+    "detail": {
+     "host": "github.com"
+    },
+    "signedIn": false,
+    "active": false,
+    "sources": [
+     "remote URLs"
+    ],
+    "firstSeen": 1791028830000,
+    "seenAt": 1791028830000,
+    "name": "work",
+    "hidden": false,
+    "sessions": 7,
+    "projects": 5
+   },
+   {
+    "id": "git:f28de9788483a200",
+    "kind": "git",
+    "handle": "nova@atlas.example",
+    "detail": {
+     "name": "Nova"
+    },
+    "signedIn": false,
+    "active": false,
+    "sources": [
+     "git config"
+    ],
+    "firstSeen": 1791028830000,
+    "seenAt": 1791028830000,
+    "name": "work",
+    "hidden": false,
+    "sessions": 7,
+    "projects": 4
+   },
+   {
+    "id": "chatgpt:demo-workspace",
+    "kind": "chatgpt",
+    "handle": "nova@example.com",
+    "detail": {
+     "plan": "plus"
+    },
+    "signedIn": true,
+    "active": false,
+    "sources": [
+     "~/.codex/auth.json"
+    ],
+    "firstSeen": 1791028830000,
+    "seenAt": 1791028830000,
+    "name": null,
+    "hidden": false,
+    "sessions": 7,
+    "projects": 0
+   },
+   {
+    "id": "github:github.com/orbitworks",
+    "kind": "github",
+    "handle": "orbitworks",
+    "detail": {
+     "host": "github.com"
+    },
+    "signedIn": true,
+    "active": false,
+    "sources": [
+     "gh",
+     "remote URLs",
+     "git config"
+    ],
+    "firstSeen": 1791028830000,
+    "seenAt": 1791028830000,
+    "name": "orbit",
+    "hidden": false,
+    "sessions": 4,
+    "projects": 4
+   },
+   {
+    "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
+    "kind": "claude",
+    "handle": "nova@atlas.example",
+    "detail": {
+     "plan": "Team",
+     "org": "Atlas"
+    },
+    "signedIn": false,
+    "active": false,
+    "sources": [
+     "Claude desktop"
+    ],
+    "firstSeen": 1788436800000,
+    "seenAt": 1791028830000,
+    "name": "work",
+    "hidden": false,
+    "sessions": 4,
+    "projects": 0
+   },
+   {
+    "id": "git:8bed4c8b3ce0bd80",
+    "kind": "git",
+    "handle": "hello@orbitworks.example",
+    "detail": {
+     "name": "Orbit"
+    },
+    "signedIn": false,
+    "active": false,
+    "sources": [
+     "git config"
+    ],
+    "firstSeen": 1791028830000,
+    "seenAt": 1791028830000,
+    "name": "orbit",
+    "hidden": false,
+    "sessions": 3,
+    "projects": 3
+   },
+   {
+    "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
+    "kind": "claude",
+    "handle": "nova@example.com",
+    "detail": {
+     "plan": "Max",
+     "org": null
+    },
+    "signedIn": true,
+    "active": false,
+    "sources": [
+     "~/.claude.json",
+     "Claude desktop"
+    ],
+    "firstSeen": 1791028830000,
+    "seenAt": 1791028830000,
+    "name": null,
+    "hidden": false,
+    "sessions": 3,
+    "projects": 0
+   },
+   {
+    "id": "git:eb61c4d6d94bb5d1",
+    "kind": "git",
+    "handle": "nova@example.com",
+    "detail": {
+     "name": "Nova"
+    },
+    "signedIn": false,
+    "active": false,
+    "sources": [
+     "git config"
+    ],
+    "firstSeen": 1791028830000,
+    "seenAt": 1791028830000,
+    "name": null,
+    "hidden": false,
+    "sessions": 2,
+    "projects": 1
+   }
+  ],
+  "hideIdentities": false,
+  "demo": true,
+  "sources": [
+   {
+    "name": "projects",
+    "ok": true,
+    "ms": 0,
+    "count": 9,
+    "note": "9 projects in 1 group, 12 folders read"
+   },
+   {
+    "name": "codex",
+    "ok": true,
+    "ms": 0,
+    "count": 7
+   },
+   {
+    "name": "codex-projects",
+    "ok": true,
+    "ms": 0,
+    "count": 1
+   },
+   {
+    "name": "claude",
+    "ok": true,
+    "ms": 0,
+    "count": 7
+   },
+   {
+    "name": "live",
+    "ok": false,
+    "count": 0
+   },
+   {
+    "name": "wiki",
+    "ok": true,
+    "count": 5
+   },
+   {
+    "name": "search",
+    "ok": true,
+    "count": 0,
+    "ms": 0
+   },
+   {
+    "name": "identities",
+    "ok": true,
+    "ms": 0,
+    "count": 9,
+    "note": "3 github, 3 git, 1 chatgpt, 2 claude"
+   }
+  ]
+ },
+ "identities": {
+  "enabled": true,
+  "at": 1791028830000,
+  "identities": [
+   {
+    "id": "github:github.com/nova-dev",
+    "kind": "github",
+    "handle": "nova-dev",
+    "detail": {
+     "host": "github.com"
+    },
+    "signedIn": true,
+    "active": true,
+    "sources": [
+     "gh",
+     "remote URLs"
+    ],
+    "firstSeen": 1791028830000,
+    "seenAt": 1791028830000,
+    "name": null,
+    "hidden": false,
+    "sessions": 10,
+    "projects": 5
+   },
+   {
+    "id": "github:github.com/atlas-co",
+    "kind": "github",
+    "handle": "atlas-co",
+    "detail": {
+     "host": "github.com"
+    },
+    "signedIn": false,
+    "active": false,
+    "sources": [
+     "remote URLs"
+    ],
+    "firstSeen": 1791028830000,
+    "seenAt": 1791028830000,
+    "name": "work",
+    "hidden": false,
+    "sessions": 7,
+    "projects": 5
+   },
+   {
+    "id": "git:f28de9788483a200",
+    "kind": "git",
+    "handle": "nova@atlas.example",
+    "detail": {
+     "name": "Nova"
+    },
+    "signedIn": false,
+    "active": false,
+    "sources": [
+     "git config"
+    ],
+    "firstSeen": 1791028830000,
+    "seenAt": 1791028830000,
+    "name": "work",
+    "hidden": false,
+    "sessions": 7,
+    "projects": 4
+   },
+   {
+    "id": "chatgpt:demo-workspace",
+    "kind": "chatgpt",
+    "handle": "nova@example.com",
+    "detail": {
+     "plan": "plus"
+    },
+    "signedIn": true,
+    "active": false,
+    "sources": [
+     "~/.codex/auth.json"
+    ],
+    "firstSeen": 1791028830000,
+    "seenAt": 1791028830000,
+    "name": null,
+    "hidden": false,
+    "sessions": 7,
+    "projects": 0
+   },
+   {
+    "id": "github:github.com/orbitworks",
+    "kind": "github",
+    "handle": "orbitworks",
+    "detail": {
+     "host": "github.com"
+    },
+    "signedIn": true,
+    "active": false,
+    "sources": [
+     "gh",
+     "remote URLs",
+     "git config"
+    ],
+    "firstSeen": 1791028830000,
+    "seenAt": 1791028830000,
+    "name": "orbit",
+    "hidden": false,
+    "sessions": 4,
+    "projects": 4
+   },
+   {
+    "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
+    "kind": "claude",
+    "handle": "nova@atlas.example",
+    "detail": {
+     "plan": "Team",
+     "org": "Atlas"
+    },
+    "signedIn": false,
+    "active": false,
+    "sources": [
+     "Claude desktop"
+    ],
+    "firstSeen": 1788436800000,
+    "seenAt": 1791028830000,
+    "name": "work",
+    "hidden": false,
+    "sessions": 4,
+    "projects": 0
+   },
+   {
+    "id": "git:8bed4c8b3ce0bd80",
+    "kind": "git",
+    "handle": "hello@orbitworks.example",
+    "detail": {
+     "name": "Orbit"
+    },
+    "signedIn": false,
+    "active": false,
+    "sources": [
+     "git config"
+    ],
+    "firstSeen": 1791028830000,
+    "seenAt": 1791028830000,
+    "name": "orbit",
+    "hidden": false,
+    "sessions": 3,
+    "projects": 3
+   },
+   {
+    "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
+    "kind": "claude",
+    "handle": "nova@example.com",
+    "detail": {
+     "plan": "Max",
+     "org": null
+    },
+    "signedIn": true,
+    "active": false,
+    "sources": [
+     "~/.claude.json",
+     "Claude desktop"
+    ],
+    "firstSeen": 1791028830000,
+    "seenAt": 1791028830000,
+    "name": null,
+    "hidden": false,
+    "sessions": 3,
+    "projects": 0
+   },
+   {
+    "id": "git:eb61c4d6d94bb5d1",
+    "kind": "git",
+    "handle": "nova@example.com",
+    "detail": {
+     "name": "Nova"
+    },
+    "signedIn": false,
+    "active": false,
+    "sources": [
+     "git config"
+    ],
+    "firstSeen": 1791028830000,
+    "seenAt": 1791028830000,
+    "name": null,
+    "hidden": false,
+    "sessions": 2,
+    "projects": 1
+   }
+  ],
+  "pins": [],
+  "signins": {
+   "claude": [
+    {
+     "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
+     "from": 1788436800000,
+     "to": 1791000000000
+    },
+    {
+     "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
+     "from": 1791000000000,
+     "to": 1791028830000
+    }
+   ],
+   "chatgpt": [
+    {
+     "id": "chatgpt:demo-workspace",
+     "from": 1789300800000,
+     "to": 1791028830000
+    }
+   ]
+  }
+ },
+ "projects": {
+  "root": "<world>/home/Projects",
+  "scan": {
+   "ok": true,
+   "at": 1791028830000,
+   "ms": 0,
+   "dirsRead": 12,
+   "truncated": false,
+   "depth": 3,
+   "maxDirs": 2000,
+   "groups": 1,
+   "projects": 9
+  },
+  "rules": [],
+  "codex": null
+ },
+ "repos": {
+  "<world>/home/projects/atlas-api": {
+   "branch": "main",
+   "ahead": 0,
+   "behind": 0,
+   "staged": 0,
+   "modified": 1,
+   "untracked": 0,
+   "dirty": 1,
+   "checkedAt": 1791028830000
+  },
+  "<world>/home/projects/atlas-web": {
+   "branch": "main",
+   "ahead": 0,
+   "behind": 0,
+   "staged": 0,
+   "modified": 0,
+   "untracked": 0,
+   "dirty": 0,
+   "checkedAt": 1791028830000
+  },
+  "<world>/home/projects/docs": {
+   "branch": "main",
+   "ahead": 0,
+   "behind": 0,
+   "staged": 0,
+   "modified": 0,
+   "untracked": 0,
+   "dirty": 0,
+   "checkedAt": 1791028830000
+  },
+  "<world>/home/projects/infra": {
+   "branch": "main",
+   "ahead": 0,
+   "behind": 0,
+   "staged": 0,
+   "modified": 0,
+   "untracked": 0,
+   "dirty": 0,
+   "checkedAt": 1791028830000
+  },
+  "<world>/home/projects/labs/geofence": {
+   "branch": "main",
+   "ahead": 0,
+   "behind": 0,
+   "staged": 0,
+   "modified": 1,
+   "untracked": 0,
+   "dirty": 1,
+   "checkedAt": 1791028830000
+  },
+  "<world>/home/projects/labs/route-sim": {
+   "branch": "main",
+   "ahead": 0,
+   "behind": 0,
+   "staged": 0,
+   "modified": 0,
+   "untracked": 0,
+   "dirty": 0,
+   "checkedAt": 1791028830000
+  },
+  "<world>/home/projects/ledger": {
+   "branch": "main",
+   "ahead": 0,
+   "behind": 0,
+   "staged": 0,
+   "modified": 1,
+   "untracked": 0,
+   "dirty": 1,
+   "checkedAt": 1791028830000
+  },
+  "<world>/home/projects/pathfinder": {
+   "branch": "main",
+   "ahead": 0,
+   "behind": 0,
+   "staged": 0,
+   "modified": 0,
+   "untracked": 0,
+   "dirty": 0,
+   "checkedAt": 1791028830000
+  }
+ },
+ "stateLoad": {
+  "file": "<world>/state/state.json",
+  "version": 1,
+  "migrated": {
+   "from": 1,
+   "to": 2
+  },
+  "backup": "<world>/state/state.v1.json",
+  "broken": null,
+  "readOnly": false,
+  "problem": null
+ },
+ "stateFile": {
+  "version": 2,
+  "workspace": {
+   "root": null
+  },
+  "identities": {
+   "names": {
+    "github:github.com/atlas-co": "work",
+    "git:f28de9788483a200": "work",
+    "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002": "work",
+    "github:github.com/orbitworks": "orbit",
+    "git:8bed4c8b3ce0bd80": "orbit"
+   },
+   "known": {
+    "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002": {
+     "kind": "claude",
+     "handle": "nova@atlas.example",
+     "detail": {
+      "plan": "Team",
+      "org": "Atlas"
+     },
+     "firstSeen": 1788436800000,
+     "lastSeen": 1791028830000
+    },
+    "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001": {
+     "kind": "claude",
+     "handle": "nova@example.com",
+     "detail": {
+      "plan": "Max",
+      "org": null
+     },
+     "firstSeen": 1791028830000,
+     "lastSeen": 1791028830000
+    },
+    "chatgpt:demo-workspace": {
+     "kind": "chatgpt",
+     "handle": "nova@example.com",
+     "detail": {
+      "plan": "plus"
+     },
+     "firstSeen": 1791028830000,
+     "lastSeen": 1791028830000
+    },
+    "github:github.com/nova-dev": {
+     "kind": "github",
+     "handle": "nova-dev",
+     "detail": {
+      "host": "github.com"
+     },
+     "firstSeen": 1791028830000,
+     "lastSeen": 1791028830000
+    },
+    "github:github.com/orbitworks": {
+     "kind": "github",
+     "handle": "orbitworks",
+     "detail": {
+      "host": "github.com"
+     },
+     "firstSeen": 1791028830000,
+     "lastSeen": 1791028830000
+    },
+    "github:github.com/atlas-co": {
+     "kind": "github",
+     "handle": "atlas-co",
+     "detail": {
+      "host": "github.com"
+     },
+     "firstSeen": 1791028830000,
+     "lastSeen": 1791028830000
+    },
+    "git:f28de9788483a200": {
+     "kind": "git",
+     "handle": "nova@atlas.example",
+     "detail": {
+      "name": "Nova"
+     },
+     "firstSeen": 1791028830000,
+     "lastSeen": 1791028830000
+    },
+    "git:8bed4c8b3ce0bd80": {
+     "kind": "git",
+     "handle": "hello@orbitworks.example",
+     "detail": {
+      "name": "Orbit"
+     },
+     "firstSeen": 1791028830000,
+     "lastSeen": 1791028830000
+    },
+    "git:eb61c4d6d94bb5d1": {
+     "kind": "git",
+     "handle": "nova@example.com",
+     "detail": {
+      "name": "Nova"
+     },
+     "firstSeen": 1791028830000,
+     "lastSeen": 1791028830000
+    }
+   },
+   "signins": {
+    "claude": [
+     {
+      "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
+      "from": 1788436800000,
+      "to": 1791000000000
+     },
+     {
+      "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
+      "from": 1791000000000,
+      "to": 1791028830000
+     }
+    ],
+    "chatgpt": [
+     {
+      "id": "chatgpt:demo-workspace",
+      "from": 1789300800000,
+      "to": 1791028830000
+     }
+    ]
+   },
+   "hidden": {},
+   "pins": {}
+  },
+  "projects": {
+   "codexByRoot": {},
+   "rules": {}
+  },
+  "layout": {},
+  "acks": {},
+  "marks": {}
+ },
+ "stateBackup": {
+  "identities": {
+   "names": {
+    "github:github.com/atlas-co": "work",
+    "git:f28de9788483a200": "work",
+    "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002": "work",
+    "github:github.com/orbitworks": "orbit",
+    "git:8bed4c8b3ce0bd80": "orbit"
+   },
+   "known": {
+    "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002": {
+     "kind": "claude",
+     "handle": "nova@atlas.example",
+     "detail": {
+      "plan": "Team",
+      "org": "Atlas"
+     },
+     "firstSeen": 1788436800000,
+     "lastSeen": 1791000000000
+    }
+   },
+   "signins": {
+    "claude": [
+     {
+      "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
+      "from": 1788436800000,
+      "to": 1791000000000
+     },
+     {
+      "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
+      "from": 1791000000000,
+      "to": 1791025200000
+     }
+    ]
+   }
+  }
+ },
+ "stateFiles": [
+  "state.json",
+  "state.v1.json"
+ ]
+}

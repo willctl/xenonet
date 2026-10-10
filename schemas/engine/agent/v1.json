@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/engine/agent/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "An agent",
+  "description": "A session at work, as the engine sees it. The brief form (id, title, app, project, branch) names an agent in messages and answers; the agents list and peers send the whole view; the console's snapshot sends the brief form with status, focus, claims, reachability and how many files it's editing.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "An agent: claude:<session id> or codex:<thread id>, or an actor, actor:<slug>"
+    },
+    "app": {
+      "type": "string",
+      "enum": [
+        "claude",
+        "codex",
+        "actor"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "maxLength": 90
+    },
+    "project": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "branch": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "projectId": {
+      "description": "The map node it lives in",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "projectKind": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "cwd": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "top": {
+      "description": "Its working tree's top",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "repo": {
+      "description": "Its repo's shared git folder, the same for every worktree",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "working",
+        "idle",
+        "ended"
+      ]
+    },
+    "ended": {
+      "type": "boolean"
+    },
+    "needsYou": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "question",
+            "permission"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "lastActive": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "focus": {
+      "description": "What it says it's doing",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "editing": {
+      "description": "Files it edited in the last half hour; the console's snapshot sends how many",
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "at": {
+                "type": "number",
+                "description": "Epoch milliseconds"
+              },
+              "observed": {
+                "description": "An actor's edit XenoNet inferred from what it observes; the actor didn't report it",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "path",
+              "at"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      ]
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "An absolute path, a folder (ending in /) or a glob"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "until": {
+            "type": "number",
+            "description": "Epoch milliseconds"
+          }
+        },
+        "required": [
+          "pattern",
+          "note",
+          "until"
+        ],
+        "additionalProperties": {},
+        "description": "A claim, as an agent's claims list it"
+      }
+    },
+    "reachable": {
+      "description": "In touch directly lately, so messages reach it",
+      "type": "boolean"
+    },
+    "overlap": {
+      "description": "From peers: files you've both edited lately",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "delivery": {
+      "description": "From send: when it will see the message",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "app",
+    "title",
+    "project",
+    "branch"
+  ],
+  "additionalProperties": {}
+}

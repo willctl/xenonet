@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/anthropic/claude-desktop/session/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A Claude desktop session file",
+  "description": "Claude desktop's claude-code-sessions/<account>/<organization>/local_*.json, which XenoNet reads for what the Agent SDK doesn't say (title, starred, archived, worktree, lineage) and for the account a session ran as. The files carry no version, so the newest schema reads them.",
+  "type": "object",
+  "properties": {
+    "cliSessionId": {
+      "type": "string",
+      "description": "Claude Code's session id, which the Agent SDK lists the session by"
+    },
+    "sessionId": {
+      "type": "string",
+      "description": "Claude desktop's own id for it (local_…)"
+    },
+    "title": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "originCwd": {
+      "description": "The folder it started in; a worktree session's repo",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "worktreePath": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "branch": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "createdAt": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "lastActivityAt": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "isArchived": {
+      "type": "boolean"
+    },
+    "isStarred": {
+      "type": "boolean"
+    },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "effort": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "permissionMode": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "spawnedFrom": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "The local_… id of the session that started it"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "additionalProperties": {}
+    }
+  },
+  "required": [
+    "cliSessionId",
+    "sessionId",
+    "createdAt",
+    "lastActivityAt"
+  ],
+  "additionalProperties": {},
+  "x-xenonet": {
+    "vendorVersions": "*",
+    "lenient": true
+  }
+}

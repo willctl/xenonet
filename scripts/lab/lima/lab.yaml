@@ -1,0 +1,182 @@
+# The XenoNet lab's settings, shared by its Linux templates (ubuntu.yaml and
+# fedora.yaml). docs/design/vm-lab.md has the plan, scripts/lab/README.md
+# how to use it.
+minimumLimaVersion: 2.1.0
+vmType: vz
+cpus: 2
+memory: 4GiB
+disk: 20GiB
+
+# Plain mode: no mounts, no automatic port forwards and no guest agent, so a
+# VM is a machine reached over SSH and nothing else. Nothing in the Mac's
+# home folder is visible in it.
+plain: true
+mounts: []
+# Lima would otherwise copy proxy settings from the environment limactl runs
+# in.
+propagateProxyEnv: false
+
+# Lima copies the Mac's user name and full name into a guest unless told
+# otherwise. The lab user is made up, so no real name reaches a guest.
+user:
+  name: will
+  comment: Will
+  home: /home/will
+
+ssh:
+  # Always 127.0.0.1:<localPort>, which lab.mjs sets per VM.
+  overVsock: false
+  loadDotSSHPubKeys: false
+  forwardAgent: false
+  forwardX11: false
+
+param:
+  # The SHA-512 crypt hash of the VM's sudo password, which lab.mjs gives at
+  # create and clone time. The password itself stays on the Mac.
+  labSudoHash: ""
+  # The VM's time zone, which lab.mjs gives each working VM when it clones
+  # it. Lima's own timezone setting does nothing in plain mode, so the lab's
+  # root setup sets it.
+  labTimezone: UTC
+
+provision:
+- mode: data
+  path: /etc/xenonet-lab/nftables.nft
+  content: |
+    # The XenoNet lab's firewall. Lima maps 192.168.5.2 to the Mac's 127.0.0.1,
+    # where XenoNet's API listens. DNS and DHCP there still work, and so do the
+    # Mac's SSH connections in; nothing in the VM may start a connection to
+    # it. The rules look at TCP's SYN flag rather than conntrack's state: an
+    # SSH connection open before the rules load would look new to conntrack,
+    # and its replies would be dropped. The first two lines make loading this
+    # replace the table, not add to it.
+    table inet xenonet_lab
+    delete table inet xenonet_lab
+    table inet xenonet_lab {
+      chain out {
+        type filter hook output priority 0; policy accept;
+        ip daddr 192.168.5.2 udp dport { 53, 67 } accept
+        ip daddr 192.168.5.2 tcp dport 53 accept
+        ip daddr 192.168.5.2 tcp flags & (syn | ack) == syn drop
+        ip daddr 192.168.5.2 meta l4proto udp drop
+      }
+      chain forward {
+        type filter hook forward priority 0; policy accept;
+        ip daddr 192.168.5.2 tcp flags & (syn | ack) == syn drop
+        ip daddr 192.168.5.2 meta l4proto udp drop
+      }
+    }
+- mode: data
+  path: /etc/systemd/system/xenonet-lab-firewall.service
+  content: |
+    # Loads the lab's firewall before the network comes up, at every boot.
+    [Unit]
+    Description=XenoNet lab firewall: no new connections to the Mac's loopback
+    DefaultDependencies=no
+    Wants=network-pre.target
+    Before=network-pre.target shutdown.target
+    After=local-fs.target
+    Conflicts=shutdown.target
+
+    [Service]
+    Type=oneshot
+    RemainAfterExit=yes
+    ExecStart=/usr/sbin/nft -f /etc/xenonet-lab/nftables.nft
+
+    [Install]
+    WantedBy=sysinit.target
+- mode: data
+  path: /etc/cloud/cloud.cfg.d/99-xenonet-lab.cfg
+  content: |
+    # Lima gives the VM a new instance id at every start, which would have
+    # cloud-init make new SSH host keys every time, and the lab's known_hosts
+    # would never match. Keep them: the lab's own setup makes new ones once
+    # for each VM.
+    ssh_deletekeys: false
+- mode: data
+  path: /etc/ssh/sshd_config.d/10-xenonet-lab.conf
+  content: |
+    # The XenoNet lab: SSH takes keys only, since the lab user's password is
+    # for sudo alone. No agent or X11 forwarding into the VM.
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    PermitRootLogin no
+    AllowAgentForwarding no
+    X11Forwarding no
+- mode: data
+  path: /etc/profile.d/xenonet-lab.sh
+  content: |
+    # The XenoNet lab: Node and the tools in ~/.local for login shells, and
+    # Claude Code kept at the lab's version.
+    case ":$PATH:" in
+      *":$HOME/.local/node/bin:"*) ;;
+      *) PATH="$HOME/.local/bin:$HOME/.local/node/bin:$PATH" ;;
+    esac
+    export PATH
+    export DISABLE_AUTOUPDATER=1
+- mode: system
+  script: |
+    #!/bin/bash
+    # The lab's root setup, at every boot. Lima gives the VM a new instance
+    # id at every start, so cloud-init redoes its per-instance setup each
+    # time, passwordless sudo and a locked password included. This runs
+    # after it, every time.
+    set -eux -o pipefail
+
+    # The firewall, git, and what the tools' downloads need. Only the first
+    # boot installs anything.
+    missing=0
+    for cmd in nft git curl tar xz zstd; do
+      command -v "$cmd" >/dev/null || missing=1
+    done
+    if [ "$missing" = 1 ]; then
+      if command -v apt-get >/dev/null; then
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -q
+        apt-get install -y -q --no-install-recommends nftables git curl ca-certificates tar xz-utils zstd
+      else
+        dnf install -y -q --setopt=install_weak_deps=False nftables git-core curl tar xz zstd
+      fi
+    fi
+
+    # The firewall now; its unit loads it early at every later boot.
+    systemctl daemon-reload
+    systemctl enable xenonet-lab-firewall.service
+    systemctl restart xenonet-lab-firewall.service
+
+    # SSH host keys of its own. A cloned disk brings its golden copy's, so a
+    # VM whose name isn't the one that made them makes new ones, once.
+    mkdir -p /etc/xenonet-lab
+    if [ "$(cat /etc/xenonet-lab/instance 2>/dev/null || true)" != "{{.Name}}" ]; then
+      rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub
+      ssh-keygen -A
+      printf '%s\n' "{{.Name}}" >/etc/xenonet-lab/instance
+    fi
+    if systemctl cat ssh.service >/dev/null 2>&1; then
+      systemctl try-reload-or-restart ssh.service
+    else
+      systemctl try-reload-or-restart sshd.service
+    fi
+
+    # Root needs the VM's password, which only the Mac holds, so an agent in
+    # the VM can't lift the firewall. In sudoers the last matching line
+    # wins: these come after cloud-init's NOPASSWD line, and the two
+    # exceptions after the password line. Lima reads its parameters with
+    # `sudo cat` at every start, and stops macOS guests with shutdown.
+    if [ -n "${PARAM_labSudoHash:-}" ]; then
+      usermod -p "$PARAM_labSudoHash" will
+    fi
+    cat >/etc/sudoers.d/99-xenonet-lab.new <<'EOF'
+    will ALL=(ALL) ALL
+    will ALL=(root) NOPASSWD: /usr/bin/cat /mnt/lima-cidata/param.env, /usr/sbin/cat /mnt/lima-cidata/param.env, /bin/cat /mnt/lima-cidata/param.env, /sbin/cat /mnt/lima-cidata/param.env
+    will ALL=(root) NOPASSWD: /sbin/shutdown -h now
+    EOF
+    visudo -cqf /etc/sudoers.d/99-xenonet-lab.new
+    chmod 0440 /etc/sudoers.d/99-xenonet-lab.new
+    mv /etc/sudoers.d/99-xenonet-lab.new /etc/sudoers.d/99-xenonet-lab
+
+    # The VM's time zone, so the lab's hosts disagree on local time.
+    timedatectl set-timezone "${PARAM_labTimezone:-UTC}"
+
+    # The lab's XenoNet runs as a user service, without anyone logged in.
+    loginctl enable-linger will

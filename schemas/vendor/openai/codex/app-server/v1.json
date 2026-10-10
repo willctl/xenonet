@@ -1,0 +1,567 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/openai/codex/app-server/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "The codex app-server's answers",
+  "description": "The results of the codex app-server methods XenoNet calls over stdio JSON-RPC, by method: initialize (its userAgent), thread/list (the map's Codex threads) and thread/items/list (a thread in the console). XenoNet sends initialize with its name and version, and thread/list with archived, limit, cursor, sourceKinds and useStateDbOnly. Renaming a thread in XenoNet sends thread/name/set with threadId and name, whose answer ({}) isn't read. The version is Codex's, from the userAgent.",
+  "type": "object",
+  "properties": {
+    "initialize": {
+      "type": "object",
+      "properties": {
+        "userAgent": {
+          "type": "string",
+          "description": "<client>/<codex version> (…)"
+        }
+      },
+      "required": [
+        "userAgent"
+      ],
+      "additionalProperties": {}
+    },
+    "thread/list": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "preview": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "cwd": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "createdAt": {
+                "description": "Epoch seconds or milliseconds, or ISO 8601",
+                "type": [
+                  "number",
+                  "string",
+                  "null"
+                ]
+              },
+              "updatedAt": {
+                "description": "Epoch seconds or milliseconds, or ISO 8601",
+                "type": [
+                  "number",
+                  "string",
+                  "null"
+                ]
+              },
+              "recencyAt": {
+                "description": "Epoch seconds or milliseconds, or ISO 8601",
+                "type": [
+                  "number",
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "additionalProperties": {}
+                  }
+                ]
+              },
+              "model": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "modelProvider": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reasoningEffort": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "gitInfo": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "branch": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "originUrl": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "origin_url": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "additionalProperties": {},
+                    "x-xenonet": {
+                      "closed": true,
+                      "known": [
+                        "sha"
+                      ]
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "subAgent": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "thread_spawn": {
+                                "type": "object",
+                                "properties": {
+                                  "parent_thread_id": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "agent_nickname": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "additionalProperties": {}
+                              },
+                              "other": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": {}
+                          }
+                        ]
+                      }
+                    },
+                    "additionalProperties": {}
+                  }
+                ]
+              },
+              "originator": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "projectId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "parentThreadId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "forkedFromId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "agentNickname": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "additionalProperties": {}
+    },
+    "thread/items/list": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "item": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "userMessage"
+                      },
+                      "content": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string"
+                            },
+                            "text": {
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": {}
+                        }
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "agentMessage"
+                      },
+                      "text": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "reasoning"
+                      },
+                      "summary": {
+                        "type": "array",
+                        "items": {}
+                      },
+                      "content": {
+                        "type": "array",
+                        "items": {}
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "plan"
+                      },
+                      "text": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "commandExecution"
+                      },
+                      "command": {},
+                      "status": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "exitCode": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "aggregatedOutput": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "mcpToolCall"
+                      },
+                      "server": {
+                        "type": "string"
+                      },
+                      "tool": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "error": {},
+                      "result": {},
+                      "arguments": {}
+                    },
+                    "required": [
+                      "type",
+                      "server",
+                      "tool"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "dynamicToolCall"
+                      },
+                      "tool": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "arguments": {}
+                    },
+                    "required": [
+                      "type",
+                      "tool"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "fileChange"
+                      },
+                      "changes": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string"
+                            },
+                            "kind": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "type"
+                                  ],
+                                  "additionalProperties": {},
+                                  "x-xenonet": {
+                                    "closed": true,
+                                    "known": [
+                                      "move_path"
+                                    ]
+                                  }
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "path"
+                          ],
+                          "additionalProperties": {},
+                          "x-xenonet": {
+                            "closed": true,
+                            "known": [
+                              "diff"
+                            ]
+                          }
+                        }
+                      },
+                      "status": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "webSearch"
+                      },
+                      "query": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "contextCompaction"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "additionalProperties": {}
+                  }
+                ],
+                "x-xenonet": {
+                  "discriminator": "type"
+                }
+              },
+              "startedAtMs": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "completedAtMs": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "item"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "additionalProperties": {}
+    }
+  },
+  "additionalProperties": {},
+  "x-xenonet": {
+    "vendorVersions": "<1.0.0",
+    "lenient": true
+  }
+}

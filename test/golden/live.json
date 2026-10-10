@@ -1,0 +1,5222 @@
+{
+ "primed": {
+  "snapshot": {
+   "at": 1791028800000,
+   "sessions": [
+    {
+     "id": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+     "app": "claude",
+     "status": "tool",
+     "tokens": {
+      "processed": 53897,
+      "output": 851
+     },
+     "tokensToday": 53897,
+     "tpm": 0,
+     "context": {
+      "used": 2,
+      "window": 200000
+     },
+     "forecast": {
+      "pct": 0.00001,
+      "growthPerTurn": null,
+      "turnsLeft": null
+     },
+     "model": "claude-opus-5-5",
+     "turnStartedAt": 1791028800000,
+     "lastTool": {
+      "name": "Grep",
+      "category": "read",
+      "detail": "round(",
+      "ts": 1791027062000
+     },
+     "toolCounts": {
+      "agent": 1,
+      "shell": 1,
+      "edit": 1,
+      "other": 1,
+      "read": 1
+     },
+     "subagents": [
+      {
+       "id": "e1",
+       "label": "Find rounding bugs",
+       "startedAt": 1791027061000,
+       "lastAt": 1791027062000,
+       "tools": 1,
+       "done": true,
+       "active": false
+      }
+     ],
+     "files": [],
+     "mcp": [],
+     "needsYou": {
+      "kind": "question",
+      "text": "Round half-even or half-up?",
+      "since": 1791027540000
+     },
+     "stuck": null,
+     "lastMessage": "Should I also fix the CSV export?",
+     "lastTurnEndAt": 1791027300000,
+     "interruptedAt": null,
+     "lastEventAt": 1791028800000
+    },
+    {
+     "id": "claude:0190d3e0-0000-7000-8000-0000000000e5",
+     "app": "claude",
+     "status": "idle",
+     "tokens": {
+      "processed": 0,
+      "output": 0
+     },
+     "tokensToday": 0,
+     "tpm": 0,
+     "context": {
+      "used": 0,
+      "window": 200000
+     },
+     "forecast": {
+      "pct": 0,
+      "growthPerTurn": null,
+      "turnsLeft": null
+     },
+     "model": null,
+     "turnStartedAt": 1791027660000,
+     "lastTool": null,
+     "toolCounts": {},
+     "subagents": [],
+     "files": [],
+     "mcp": [],
+     "needsYou": null,
+     "stuck": null,
+     "lastMessage": null,
+     "lastTurnEndAt": null,
+     "interruptedAt": null,
+     "lastEventAt": 1791027660000
+    },
+    {
+     "id": "claude:0190d3e0-0000-7000-8000-000000000001",
+     "app": "claude",
+     "status": "idle",
+     "tokens": {
+      "processed": 784332,
+      "output": 12456
+     },
+     "tokensToday": 678832,
+     "tpm": 0,
+     "context": {
+      "used": 53160,
+      "window": 200000
+     },
+     "forecast": {
+      "pct": 0.308225,
+      "growthPerTurn": 8264,
+      "turnsLeft": 14
+     },
+     "model": "claude-sonnet-4-5",
+     "turnStartedAt": null,
+     "lastTool": {
+      "name": "Bash",
+      "category": "shell",
+      "detail": "npm run lint",
+      "ts": 1791028640000
+     },
+     "toolCounts": {
+      "read": 2,
+      "edit": 4,
+      "shell": 5,
+      "mcp": 2
+     },
+     "subagents": [],
+     "files": [
+      {
+       "path": "<world>/home/Projects/atlas-api/src/orders/refunds.ts",
+       "ts": 1791028440000
+      },
+      {
+       "path": "<world>/home/Projects/atlas-api/src/orders/routes.ts",
+       "ts": 1791028340000
+      }
+     ],
+     "mcp": [
+      {
+       "server": "agent-wiki",
+       "ts": 1791028590000
+      }
+     ],
+     "needsYou": {
+      "kind": "review",
+      "text": "Logged the refund rules on the atlas-api and refunds pages.",
+      "since": 1791028690000
+     },
+     "stuck": null,
+     "lastMessage": "Logged the refund rules on the atlas-api and refunds pages.",
+     "lastTurnEndAt": 1791028690000,
+     "interruptedAt": null,
+     "lastEventAt": 1791028690000
+    },
+    {
+     "id": "claude:0190d3e0-0000-7000-8000-000000000011",
+     "app": "claude",
+     "status": "idle",
+     "tokens": {
+      "processed": 88220,
+      "output": 1623
+     },
+     "tokensToday": 88220,
+     "tpm": 0,
+     "context": {
+      "used": 45341,
+      "window": 200000
+     },
+     "forecast": {
+      "pct": 0.226705,
+      "growthPerTurn": null,
+      "turnsLeft": null
+     },
+     "model": "claude-sonnet-4-5",
+     "turnStartedAt": null,
+     "lastTool": {
+      "name": "Read",
+      "category": "read",
+      "detail": "~/Projects/atlas-api/src/orders/refunds.ts",
+      "ts": 1791027200000
+     },
+     "toolCounts": {
+      "read": 1
+     },
+     "subagents": [],
+     "files": [],
+     "mcp": [],
+     "needsYou": {
+      "kind": "review",
+      "text": "Two notes: refunds over the order total aren't rejected yet, and the tests don't cover a second partial refund.",
+      "since": 1791027250000
+     },
+     "stuck": null,
+     "lastMessage": "Two notes: refunds over the order total aren't rejected yet, and the tests don't cover a second partial refund.",
+     "lastTurnEndAt": 1791027250000,
+     "interruptedAt": null,
+     "lastEventAt": 1791027250000
+    },
+    {
+     "id": "claude:0190d3e0-0000-7000-8000-000000000003",
+     "app": "claude",
+     "status": "tool",
+     "tokens": {
+      "processed": 130142,
+      "output": 3407
+     },
+     "tokensToday": 130142,
+     "tpm": 0,
+     "context": {
+      "used": 38802,
+      "window": 200000
+     },
+     "forecast": {
+      "pct": 0.19401,
+      "growthPerTurn": null,
+      "turnsLeft": null
+     },
+     "model": "claude-sonnet-4-5",
+     "turnStartedAt": 1791028440000,
+     "lastTool": {
+      "name": "AskUserQuestion",
+      "category": "other",
+      "detail": "",
+      "ts": 1791028640000
+     },
+     "toolCounts": {
+      "read": 1,
+      "edit": 1,
+      "shell": 1,
+      "other": 1
+     },
+     "subagents": [],
+     "files": [
+      {
+       "path": "<world>/home/Projects/atlas-web/app/checkout/page.tsx",
+       "ts": 1791028540000
+      }
+     ],
+     "mcp": [],
+     "needsYou": {
+      "kind": "question",
+      "text": "Version 3 drops saved cards from version 2. Should I migrate them, or ask customers to re-enter them?",
+      "since": 1791028640000
+     },
+     "stuck": null,
+     "lastMessage": null,
+     "lastTurnEndAt": null,
+     "interruptedAt": null,
+     "lastEventAt": 1791028640000
+    },
+    {
+     "id": "claude:0190d3e0-0000-7000-8000-000000000007",
+     "app": "claude",
+     "status": "idle",
+     "tokens": {
+      "processed": 72491,
+      "output": 1363
+     },
+     "tokensToday": 72491,
+     "tpm": 0,
+     "context": {
+      "used": 38198,
+      "window": 200000
+     },
+     "forecast": {
+      "pct": 0.19099,
+      "growthPerTurn": null,
+      "turnsLeft": null
+     },
+     "model": "claude-sonnet-4-5",
+     "turnStartedAt": null,
+     "lastTool": {
+      "name": "Bash",
+      "category": "shell",
+      "detail": "terraform plan -var-file=staging.tfvars",
+      "ts": 1791017300000
+     },
+     "toolCounts": {
+      "shell": 1
+     },
+     "subagents": [],
+     "files": [],
+     "mcp": [],
+     "needsYou": null,
+     "stuck": null,
+     "lastMessage": "Staging runs on the new cluster. The old one can go after a week.",
+     "lastTurnEndAt": 1791017350000,
+     "interruptedAt": null,
+     "lastEventAt": 1791017350000
+    },
+    {
+     "id": "claude:0190d3e0-0000-7000-8000-000000000014",
+     "app": "claude",
+     "status": "idle",
+     "tokens": {
+      "processed": 101152,
+      "output": 1569
+     },
+     "tokensToday": 101152,
+     "tpm": 0,
+     "context": {
+      "used": 51994,
+      "window": 200000
+     },
+     "forecast": {
+      "pct": 0.25997,
+      "growthPerTurn": null,
+      "turnsLeft": null
+     },
+     "model": "claude-sonnet-4-5",
+     "turnStartedAt": null,
+     "lastTool": {
+      "name": "Read",
+      "category": "read",
+      "detail": "~/Projects/labs/ideas.md",
+      "ts": 1791014300000
+     },
+     "toolCounts": {
+      "read": 1
+     },
+     "subagents": [],
+     "files": [],
+     "mcp": [],
+     "needsYou": null,
+     "stuck": null,
+     "lastMessage": "Keep geofence and route-sim. Snippets is turning into a tool of its own.",
+     "lastTurnEndAt": 1791014350000,
+     "interruptedAt": null,
+     "lastEventAt": 1791014350000
+    },
+    {
+     "id": "claude:0190d3e0-0000-7000-8000-000000000009",
+     "app": "claude",
+     "status": "idle",
+     "tokens": {
+      "processed": 80610,
+      "output": 1274
+     },
+     "tokensToday": 80610,
+     "tpm": 0,
+     "context": {
+      "used": 42287,
+      "window": 200000
+     },
+     "forecast": {
+      "pct": 0.211435,
+      "growthPerTurn": null,
+      "turnsLeft": null
+     },
+     "model": "claude-sonnet-4-5",
+     "turnStartedAt": null,
+     "lastTool": {
+      "name": "Read",
+      "category": "read",
+      "detail": "~/Projects/ledger/ledger/reconcile.py",
+      "ts": 1791003500000
+     },
+     "toolCounts": {
+      "read": 1
+     },
+     "subagents": [],
+     "files": [],
+     "mcp": [],
+     "needsYou": null,
+     "stuck": null,
+     "lastMessage": "The checklist has 14 steps, grouped by team.",
+     "lastTurnEndAt": 1791003550000,
+     "interruptedAt": null,
+     "lastEventAt": 1791003550000
+    },
+    {
+     "id": "claude:0190d3e0-0000-7000-8000-000000000005",
+     "app": "claude",
+     "status": "tool",
+     "tokens": {
+      "processed": 491211,
+      "output": 8546
+     },
+     "tokensToday": 491211,
+     "tpm": 0,
+     "context": {
+      "used": 63364,
+      "window": 200000
+     },
+     "forecast": {
+      "pct": 0.31682,
+      "growthPerTurn": 18412,
+      "turnsLeft": 6
+     },
+     "model": "claude-sonnet-4-5",
+     "turnStartedAt": null,
+     "lastTool": {
+      "name": "Bash",
+      "category": "shell",
+      "detail": "cargo flamegraph --bench solver",
+      "ts": 1791028492000
+     },
+     "toolCounts": {
+      "agent": 2,
+      "read": 2,
+      "edit": 2,
+      "shell": 4
+     },
+     "subagents": [
+      {
+       "id": "9c981375",
+       "label": "Profile the solver on the 500-stop fixt…",
+       "startedAt": 1791028490000,
+       "lastAt": 1791028492000,
+       "tools": 1,
+       "done": false,
+       "active": false
+      },
+      {
+       "id": "2ede1091",
+       "label": "Profile the solver on the 500-stop fixt…",
+       "startedAt": 1791028190000,
+       "lastAt": 1791028192000,
+       "tools": 1,
+       "done": false,
+       "active": false
+      }
+     ],
+     "files": [
+      {
+       "path": "<world>/home/Projects/pathfinder/src/solver.rs",
+       "ts": 1791028590000
+      }
+     ],
+     "mcp": [],
+     "needsYou": {
+      "kind": "review",
+      "text": "The solver now caches distance lookups. 500 stops take 3.8 seconds, down from 40.",
+      "since": 1791028690000
+     },
+     "stuck": null,
+     "lastMessage": "The solver now caches distance lookups. 500 stops take 3.8 seconds, down from 40.",
+     "lastTurnEndAt": 1791028690000,
+     "interruptedAt": null,
+     "lastEventAt": 1791028690000
+    },
+    {
+     "id": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+     "app": "codex",
+     "status": "idle",
+     "tokens": {
+      "processed": 15000,
+      "output": 1200
+     },
+     "tokensToday": 12000,
+     "tpm": 0,
+     "context": {
+      "used": 3000,
+      "window": 131072
+     },
+     "forecast": {
+      "pct": 0.091552734375,
+      "growthPerTurn": null,
+      "turnsLeft": null
+     },
+     "model": "gpt-oss-20b",
+     "turnStartedAt": null,
+     "lastTool": {
+      "name": "view_image",
+      "category": "read",
+      "detail": "flame.png",
+      "ts": 1791027360000
+     },
+     "toolCounts": {
+      "edit": 1,
+      "mcp": 1,
+      "web": 1,
+      "read": 1,
+      "shell": 1
+     },
+     "subagents": [
+      {
+       "id": "sub-1",
+       "label": "Profile the build",
+       "startedAt": 1791027360000,
+       "lastAt": 1791027390000,
+       "tools": 0,
+       "done": true,
+       "active": false
+      }
+     ],
+     "files": [],
+     "mcp": [
+      {
+       "server": "agent-wiki",
+       "ts": 1791027360000
+      }
+     ],
+     "needsYou": {
+      "kind": "question",
+      "text": "Want me to apply -j8 to CI as well?",
+      "since": 1791027420000
+     },
+     "stuck": null,
+     "lastMessage": "Want me to apply -j8 to CI as well?",
+     "lastTurnEndAt": 1791027420000,
+     "interruptedAt": null,
+     "lastEventAt": 1791027420000
+    },
+    {
+     "id": "codex:0190d3e0-0000-7000-8000-0000000000e6",
+     "app": "codex",
+     "status": "idle",
+     "tokens": {
+      "processed": 0,
+      "output": 0
+     },
+     "tokensToday": 0,
+     "tpm": 0,
+     "context": {
+      "used": 0,
+      "window": 258400
+     },
+     "forecast": {
+      "pct": 0,
+      "growthPerTurn": null,
+      "turnsLeft": null
+     },
+     "model": null,
+     "turnStartedAt": null,
+     "lastTool": null,
+     "toolCounts": {},
+     "subagents": [],
+     "files": [],
+     "mcp": [],
+     "needsYou": null,
+     "stuck": null,
+     "lastMessage": null,
+     "lastTurnEndAt": null,
+     "interruptedAt": null,
+     "lastEventAt": 1791027600000
+    },
+    {
+     "id": "codex:0190d3e0-0000-7000-8000-000000000002",
+     "app": "codex",
+     "status": "idle",
+     "tokens": {
+      "processed": 198705,
+      "output": 468
+     },
+     "tokensToday": 198705,
+     "tpm": 0,
+     "context": {
+      "used": 41498,
+      "window": 258400
+     },
+     "forecast": {
+      "pct": 0.16059597523219815,
+      "growthPerTurn": 10412,
+      "turnsLeft": 18
+     },
+     "model": "gpt-5-codex",
+     "turnStartedAt": null,
+     "lastTool": {
+      "name": "shell",
+      "category": "shell",
+      "detail": "npm test -- rate-limit",
+      "ts": 1791028640000
+     },
+     "toolCounts": {
+      "edit": 2,
+      "shell": 2
+     },
+     "subagents": [],
+     "files": [
+      {
+       "path": "<world>/home/Projects/atlas-api/src/orders/routes.ts",
+       "ts": 1791028590000
+      }
+     ],
+     "mcp": [],
+     "needsYou": {
+      "kind": "review",
+      "text": "Added a token-bucket limiter at 60 requests a minute per key. Over the limit, clients get 429 with a Retry-After header.",
+      "since": 1791028690000
+     },
+     "stuck": null,
+     "lastMessage": "Added a token-bucket limiter at 60 requests a minute per key. Over the limit, clients get 429 with a Retry-After header.",
+     "lastTurnEndAt": 1791028690000,
+     "interruptedAt": null,
+     "lastEventAt": 1791028690000
+    },
+    {
+     "id": "codex:0190d3e0-0000-7000-8000-000000000004",
+     "app": "codex",
+     "status": "thinking",
+     "tokens": {
+      "processed": 559199,
+      "output": 1185
+     },
+     "tokensToday": 559199,
+     "tpm": 0,
+     "context": {
+      "used": 67911,
+      "window": 258400
+     },
+     "forecast": {
+      "pct": 0.2628134674922601,
+      "growthPerTurn": null,
+      "turnsLeft": null
+     },
+     "model": "gpt-5-codex",
+     "turnStartedAt": 1791028040000,
+     "lastTool": {
+      "name": "shell",
+      "category": "shell",
+      "detail": "pytest tests/test_reconcile.py",
+      "ts": 1791028690000
+     },
+     "toolCounts": {
+      "edit": 1,
+      "shell": 11
+     },
+     "subagents": [],
+     "files": [
+      {
+       "path": "<world>/home/Projects/ledger/ledger/reconcile.py",
+       "ts": 1791028140000
+      }
+     ],
+     "mcp": [],
+     "needsYou": null,
+     "stuck": {
+      "reasons": [
+       "ran pytest tests/test_reconcile.py 10 times in a row",
+       "11 failed tool calls in a row"
+      ]
+     },
+     "lastMessage": null,
+     "lastTurnEndAt": null,
+     "interruptedAt": null,
+     "lastEventAt": 1791028690000
+    },
+    {
+     "id": "codex:0190d3e0-0000-7000-8000-000000000006",
+     "app": "codex",
+     "status": "idle",
+     "tokens": {
+      "processed": 68058,
+      "output": 610
+     },
+     "tokensToday": 68058,
+     "tpm": 0,
+     "context": {
+      "used": 35378,
+      "window": 258400
+     },
+     "forecast": {
+      "pct": 0.13691176470588234,
+      "growthPerTurn": null,
+      "turnsLeft": null
+     },
+     "model": "gpt-5-codex",
+     "turnStartedAt": null,
+     "lastTool": {
+      "name": "apply_patch",
+      "category": "edit",
+      "detail": "refunds.md",
+      "ts": 1791028160000
+     },
+     "toolCounts": {
+      "edit": 1
+     },
+     "subagents": [],
+     "files": [
+      {
+       "path": "<world>/home/Projects/docs/guides/refunds.md",
+       "ts": 1791028160000
+      }
+     ],
+     "mcp": [],
+     "needsYou": {
+      "kind": "review",
+      "text": "The refunds guide covers full and partial refunds, with request and response examples.",
+      "since": 1791028210000
+     },
+     "stuck": null,
+     "lastMessage": "The refunds guide covers full and partial refunds, with request and response examples.",
+     "lastTurnEndAt": 1791028210000,
+     "interruptedAt": null,
+     "lastEventAt": 1791028210000
+    },
+    {
+     "id": "codex:0190d3e0-0000-7000-8000-000000000008",
+     "app": "codex",
+     "status": "idle",
+     "tokens": {
+      "processed": 36658,
+      "output": 639
+     },
+     "tokensToday": 36658,
+     "tpm": 0,
+     "context": {
+      "used": 36658,
+      "window": 258400
+     },
+     "forecast": {
+      "pct": 0.14186532507739938,
+      "growthPerTurn": null,
+      "turnsLeft": null
+     },
+     "model": "gpt-5-codex",
+     "turnStartedAt": null,
+     "lastTool": {
+      "name": "apply_patch",
+      "category": "edit",
+      "detail": "zoom.tsx",
+      "ts": 1791010700000
+     },
+     "toolCounts": {
+      "edit": 1
+     },
+     "subagents": [],
+     "files": [],
+     "mcp": [],
+     "needsYou": null,
+     "stuck": null,
+     "lastMessage": "Product images zoom on hover and pinch.",
+     "lastTurnEndAt": 1791010750000,
+     "interruptedAt": null,
+     "lastEventAt": 1791010750000
+    },
+    {
+     "id": "codex:0190d3e0-0000-7000-8000-000000000010",
+     "app": "codex",
+     "status": "idle",
+     "tokens": {
+      "processed": 41495,
+      "output": 966
+     },
+     "tokensToday": 41495,
+     "tpm": 0,
+     "context": {
+      "used": 41495,
+      "window": 258400
+     },
+     "forecast": {
+      "pct": 0.1605843653250774,
+      "growthPerTurn": null,
+      "turnsLeft": null
+     },
+     "model": "gpt-5-codex",
+     "turnStartedAt": null,
+     "lastTool": null,
+     "toolCounts": {},
+     "subagents": [],
+     "files": [],
+     "mcp": [],
+     "needsYou": null,
+     "stuck": null,
+     "lastMessage": "It matches strings of eight or more characters with at least one digit and one lowercase letter.",
+     "lastTurnEndAt": 1791020350000,
+     "interruptedAt": null,
+     "lastEventAt": 1791020350000
+    },
+    {
+     "id": "codex:0190d3e0-0000-7000-8000-000000000012",
+     "app": "codex",
+     "status": "idle",
+     "tokens": {
+      "processed": 90418,
+      "output": 673
+     },
+     "tokensToday": 90418,
+     "tpm": 0,
+     "context": {
+      "used": 46800,
+      "window": 258400
+     },
+     "forecast": {
+      "pct": 0.18111455108359134,
+      "growthPerTurn": null,
+      "turnsLeft": null
+     },
+     "model": "gpt-5-codex",
+     "turnStartedAt": null,
+     "lastTool": {
+      "name": "shell",
+      "category": "shell",
+      "detail": "cargo bench",
+      "ts": 1791025100000
+     },
+     "toolCounts": {
+      "shell": 1
+     },
+     "subagents": [],
+     "files": [],
+     "mcp": [],
+     "needsYou": null,
+     "stuck": null,
+     "lastMessage": "The cached solver is 10.5 times faster on 500 stops.",
+     "lastTurnEndAt": 1791025150000,
+     "interruptedAt": null,
+     "lastEventAt": 1791025150000
+    },
+    {
+     "id": "codex:0190d3e0-0000-7000-8000-000000000013",
+     "app": "codex",
+     "status": "idle",
+     "tokens": {
+      "processed": 154453,
+      "output": 1130
+     },
+     "tokensToday": 154453,
+     "tpm": 0,
+     "context": {
+      "used": 56033,
+      "window": 258400
+     },
+     "forecast": {
+      "pct": 0.21684597523219815,
+      "growthPerTurn": null,
+      "turnsLeft": null
+     },
+     "model": "gpt-5-codex",
+     "turnStartedAt": null,
+     "lastTool": {
+      "name": "shell",
+      "category": "shell",
+      "detail": "npm test",
+      "ts": 1791026600000
+     },
+     "toolCounts": {
+      "edit": 1,
+      "shell": 1
+     },
+     "subagents": [],
+     "files": [],
+     "mcp": [],
+     "needsYou": {
+      "kind": "review",
+      "text": "Zones now load from the postcode list. Each one is the convex hull of its postcodes.",
+      "since": 1791026650000
+     },
+     "stuck": null,
+     "lastMessage": "Zones now load from the postcode list. Each one is the convex hull of its postcodes.",
+     "lastTurnEndAt": 1791026650000,
+     "interruptedAt": null,
+     "lastEventAt": 1791026650000
+    }
+   ],
+   "series": {
+    "claude": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "codex": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "tpm": 0,
+   "total24h": 2857541,
+   "today": 2857541,
+   "limits": {
+    "codex": {
+     "primary": {
+      "pct": 37,
+      "windowMinutes": 300,
+      "resetsAt": 1791035290000
+     },
+     "secondary": {
+      "pct": 58,
+      "windowMinutes": 10080,
+      "resetsAt": 1791294490000
+     },
+     "observedAt": 1791026650000
+    },
+    "claude": {
+     "fiveHour": 72.9,
+     "sevenDay": 55.6,
+     "resets": {
+      "fiveHour": null,
+      "sevenDay": null
+     },
+     "observedAt": 1791028800000,
+     "source": "claude-desktop"
+    }
+   },
+   "limitForecast": {
+    "codex": {
+     "pct": 37,
+     "perHour": 0,
+     "eta": null,
+     "resetsAt": 1791035290000,
+     "hitsBeforeReset": false,
+     "windowMinutes": 300
+    },
+    "claudeFiveHour": {
+     "pct": 72.9,
+     "perHour": 12.600000000015443,
+     "eta": 1791036542857.1428,
+     "resetsAt": null,
+     "hitsBeforeReset": true
+    },
+    "claudeSevenDay": {
+     "pct": 55.6,
+     "perHour": 2.4000000000012434,
+     "eta": 1791095400000,
+     "resetsAt": null,
+     "hitsBeforeReset": true
+    }
+   },
+   "costs": {
+    "today": 1.336055875,
+    "byApp": {
+     "claude": 1.003642,
+     "codex": 0.332413875
+    },
+    "perHour": 0,
+    "unpriced": [
+     "ollama/gpt-oss-20b"
+    ],
+    "checked": "2026-10-03"
+   },
+   "collab": [
+    {
+     "a": "claude:0190d3e0-0000-7000-8000-000000000001",
+     "b": "codex:0190d3e0-0000-7000-8000-000000000002",
+     "kind": "file",
+     "files": [
+      "routes.ts"
+     ]
+    }
+   ],
+   "collisions": [
+    {
+     "a": "claude:0190d3e0-0000-7000-8000-000000000001",
+     "b": "codex:0190d3e0-0000-7000-8000-000000000002",
+     "files": [
+      "routes.ts"
+     ],
+     "paths": [
+      "/private<world>/home/projects/atlas-api/src/orders/routes.ts"
+     ],
+     "ts": 1791028590000
+    }
+   ],
+   "resources": [
+    {
+     "server": "agent-wiki",
+     "ts": 1791028590000
+    }
+   ],
+   "status": {
+    "watching": false,
+    "files": 22,
+    "lines": 219,
+    "errors": 0
+   }
+  },
+  "history": [
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000009",
+    "app": "claude",
+    "kind": "prompt",
+    "detail": "Draft a checklist for the Q4 close.",
+    "ts": 1791003450000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000009",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Read",
+    "category": "read",
+    "detail": "~/Projects/ledger/ledger/reconcile.py",
+    "files": [
+     "<world>/home/Projects/ledger/ledger/reconcile.py"
+    ],
+    "server": null,
+    "agentId": null,
+    "ts": 1791003500000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000009",
+    "app": "claude",
+    "kind": "message",
+    "detail": "The checklist has 14 steps, grouped by team.",
+    "ts": 1791003550000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000009",
+    "app": "claude",
+    "kind": "turn-end",
+    "duration": 100000,
+    "ts": 1791003550000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000008",
+    "app": "codex",
+    "kind": "turn-start",
+    "ts": 1791010650000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000008",
+    "app": "codex",
+    "kind": "prompt",
+    "detail": "Add zoom on product images.",
+    "ts": 1791010650000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000008",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "apply_patch",
+    "category": "edit",
+    "detail": "zoom.tsx",
+    "files": [
+     "<world>/home/Projects/atlas-web/app/product/zoom.tsx"
+    ],
+    "server": null,
+    "ts": 1791010700000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000008",
+    "app": "codex",
+    "kind": "turn-end",
+    "duration": 95000,
+    "ts": 1791010750000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000014",
+    "app": "claude",
+    "kind": "prompt",
+    "detail": "Which of these experiments are worth keeping?",
+    "ts": 1791014250000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000014",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Read",
+    "category": "read",
+    "detail": "~/Projects/labs/ideas.md",
+    "files": [
+     "<world>/home/Projects/labs/ideas.md"
+    ],
+    "server": null,
+    "agentId": null,
+    "ts": 1791014300000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000014",
+    "app": "claude",
+    "kind": "message",
+    "detail": "Keep geofence and route-sim. Snippets is turning into a tool of its own.",
+    "ts": 1791014350000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000014",
+    "app": "claude",
+    "kind": "turn-end",
+    "duration": 100000,
+    "ts": 1791014350000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000007",
+    "app": "claude",
+    "kind": "prompt",
+    "detail": "Move staging to the new cluster.",
+    "ts": 1791017250000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000007",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Bash",
+    "category": "shell",
+    "detail": "terraform plan -var-file=staging.tfvars",
+    "files": [],
+    "server": null,
+    "agentId": null,
+    "ts": 1791017300000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000007",
+    "app": "claude",
+    "kind": "message",
+    "detail": "Staging runs on the new cluster. The old one can go after a week.",
+    "ts": 1791017350000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000007",
+    "app": "claude",
+    "kind": "turn-end",
+    "duration": 100000,
+    "ts": 1791017350000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000010",
+    "app": "codex",
+    "kind": "turn-start",
+    "ts": 1791020300000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000010",
+    "app": "codex",
+    "kind": "prompt",
+    "detail": "What does ^(?=.*\\d)(?=.*[a-z]).{8,}$ match?",
+    "ts": 1791020300000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000010",
+    "app": "codex",
+    "kind": "turn-end",
+    "duration": 95000,
+    "ts": 1791020350000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000012",
+    "app": "codex",
+    "kind": "turn-start",
+    "ts": 1791025050000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000012",
+    "app": "codex",
+    "kind": "prompt",
+    "detail": "Benchmark the cached solver against the old one.",
+    "ts": 1791025050000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000012",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "shell",
+    "category": "shell",
+    "detail": "cargo bench",
+    "files": [],
+    "server": null,
+    "ts": 1791025100000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000012",
+    "app": "codex",
+    "kind": "turn-end",
+    "duration": 95000,
+    "ts": 1791025150000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000013",
+    "app": "codex",
+    "kind": "turn-start",
+    "ts": 1791026450000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000013",
+    "app": "codex",
+    "kind": "prompt",
+    "detail": "Turn the postcode list into delivery zones.",
+    "ts": 1791026450000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000013",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "apply_patch",
+    "category": "edit",
+    "detail": "zones.ts",
+    "files": [
+     "<world>/home/Projects/labs/geofence/src/zones.ts"
+    ],
+    "server": null,
+    "ts": 1791026550000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000013",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "shell",
+    "category": "shell",
+    "detail": "npm test",
+    "files": [],
+    "server": null,
+    "ts": 1791026600000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000013",
+    "app": "codex",
+    "kind": "turn-end",
+    "duration": 95000,
+    "ts": 1791026650000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+    "app": "codex",
+    "kind": "turn-start",
+    "ts": 1791027030000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+    "app": "codex",
+    "kind": "prompt",
+    "detail": "Why is the build slow?",
+    "ts": 1791027030000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+    "app": "claude",
+    "kind": "message",
+    "detail": "Looking at it.",
+    "ts": 1791027060000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Task",
+    "category": "agent",
+    "detail": "Find rounding bugs",
+    "files": [],
+    "server": null,
+    "agentId": null,
+    "ts": 1791027060000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Bash",
+    "category": "shell",
+    "detail": "cd ~/Projects/ledger && npm test",
+    "files": [],
+    "server": null,
+    "agentId": null,
+    "ts": 1791027060000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+    "app": "claude",
+    "kind": "subagent-start",
+    "agentId": "e1",
+    "label": "Find rounding bugs",
+    "ts": 1791027061000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Grep",
+    "category": "read",
+    "detail": "round(",
+    "files": [],
+    "server": null,
+    "agentId": "e1",
+    "ts": 1791027062000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+    "app": "claude",
+    "kind": "subagent-stop",
+    "agentId": "e1",
+    "label": "Find rounding bugs",
+    "ts": 1791027062000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+    "app": "claude",
+    "kind": "tool-error",
+    "ts": 1791027120000,
+    "agentId": null
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "apply_patch",
+    "category": "edit",
+    "detail": "",
+    "files": [
+     "Makefile"
+    ],
+    "server": null,
+    "ts": 1791027120000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000011",
+    "app": "claude",
+    "kind": "prompt",
+    "detail": "Review the partial refunds change before I open a PR.",
+    "ts": 1791027150000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000011",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Read",
+    "category": "read",
+    "detail": "~/Projects/atlas-api/src/orders/refunds.ts",
+    "files": [
+     "<world>/home/Projects/atlas-api/src/orders/refunds.ts"
+    ],
+    "server": null,
+    "agentId": null,
+    "ts": 1791027200000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000011",
+    "app": "claude",
+    "kind": "message",
+    "detail": "Two notes: refunds over the order total aren't rejected yet, and the te…",
+    "ts": 1791027250000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000011",
+    "app": "claude",
+    "kind": "turn-end",
+    "duration": 100000,
+    "ts": 1791027250000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+    "app": "claude",
+    "kind": "message",
+    "detail": "Should I also fix the CSV export?",
+    "ts": 1791027300000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+    "app": "claude",
+    "kind": "turn-end",
+    "duration": null,
+    "ts": 1791027300000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+    "app": "codex",
+    "kind": "message",
+    "detail": "Make runs serially; add -j8.",
+    "ts": 1791027300000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "mcp__agent-wiki__wiki_write",
+    "category": "mcp",
+    "detail": "agent-wiki.wiki_write",
+    "files": [],
+    "server": "agent-wiki",
+    "pages": [
+     "ledger"
+    ],
+    "ts": 1791027360000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+    "app": "codex",
+    "kind": "tool-error",
+    "ts": 1791027360000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "web_search",
+    "category": "web",
+    "detail": "make -j",
+    "files": [],
+    "server": null,
+    "ts": 1791027360000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "view_image",
+    "category": "read",
+    "detail": "flame.png",
+    "files": [],
+    "server": null,
+    "ts": 1791027360000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+    "app": "codex",
+    "kind": "subagent-start",
+    "agentId": "sub-1",
+    "label": "Profile the build",
+    "ts": 1791027360000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+    "app": "codex",
+    "kind": "subagent-stop",
+    "agentId": "sub-1",
+    "label": "Profile the build",
+    "ts": 1791027390000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+    "app": "codex",
+    "kind": "turn-end",
+    "duration": 61000,
+    "ts": 1791027420000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+    "app": "codex",
+    "kind": "needs-you",
+    "detail": "Want me to apply -j8 to CI as well?",
+    "ts": 1791027420000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+    "app": "claude",
+    "kind": "prompt",
+    "detail": "# AGENTS.md instructions for the ledger",
+    "ts": 1791027480000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Edit",
+    "category": "edit",
+    "detail": "~/Projects/ledger/ledger/reconcile.py",
+    "files": [
+     "<world>/home/Projects/ledger/ledger/reconcile.py"
+    ],
+    "server": null,
+    "agentId": null,
+    "ts": 1791027540000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "AskUserQuestion",
+    "category": "other",
+    "detail": "",
+    "files": [],
+    "server": null,
+    "agentId": null,
+    "ts": 1791027540000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+    "app": "claude",
+    "kind": "needs-you",
+    "detail": "Round half-even or half-up?",
+    "ts": 1791027540000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-0000000000e5",
+    "app": "claude",
+    "kind": "prompt",
+    "detail": "Before the odd lines",
+    "ts": 1791027600000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e6",
+    "app": "codex",
+    "kind": "prompt",
+    "detail": "Before the odd lines",
+    "ts": 1791027600000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-0000000000e5",
+    "app": "claude",
+    "kind": "prompt",
+    "detail": "After them",
+    "ts": 1791027660000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "prompt",
+    "detail": "Add partial refunds to the orders API. Keep the existing full-refund path working.",
+    "ts": 1791027740000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Read",
+    "category": "read",
+    "detail": "~/Projects/atlas-api/src/orders/refunds.ts",
+    "files": [
+     "<world>/home/Projects/atlas-api/src/orders/refunds.ts"
+    ],
+    "server": null,
+    "agentId": null,
+    "ts": 1791027790000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Edit",
+    "category": "edit",
+    "detail": "~/Projects/atlas-api/src/orders/routes.ts",
+    "files": [
+     "<world>/home/Projects/atlas-api/src/orders/routes.ts"
+    ],
+    "server": null,
+    "agentId": null,
+    "ts": 1791027840000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Bash",
+    "category": "shell",
+    "detail": "npm test -- orders",
+    "files": [],
+    "server": null,
+    "agentId": null,
+    "ts": 1791027890000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Edit",
+    "category": "edit",
+    "detail": "~/Projects/atlas-api/src/orders/refunds.ts",
+    "files": [
+     "<world>/home/Projects/atlas-api/src/orders/refunds.ts"
+    ],
+    "server": null,
+    "agentId": null,
+    "ts": 1791027940000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "message",
+    "detail": "Partial refunds work. `POST /orders/:id/refunds` takes an optional amou…",
+    "ts": 1791027990000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "turn-end",
+    "duration": 250000,
+    "ts": 1791027990000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "prompt",
+    "detail": "Log the refund rules in the wiki.",
+    "ts": 1791028040000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "turn-start",
+    "ts": 1791028040000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "prompt",
+    "detail": "Reconciliation is off by a cent on some months. Find out why and fix it.",
+    "ts": 1791028040000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000006",
+    "app": "codex",
+    "kind": "turn-start",
+    "ts": 1791028060000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000006",
+    "app": "codex",
+    "kind": "prompt",
+    "detail": "Write a guide for the new partial refunds.",
+    "ts": 1791028060000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "mcp__agent-wiki__wiki_log",
+    "category": "mcp",
+    "detail": "",
+    "files": [],
+    "server": "agent-wiki",
+    "agentId": null,
+    "pages": [
+     "atlas-api",
+     "refunds"
+    ],
+    "ts": 1791028090000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Bash",
+    "category": "shell",
+    "detail": "npm run lint",
+    "files": [],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028140000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "app": "claude",
+    "kind": "prompt",
+    "detail": "The solver takes 40 seconds for 500 stops. Get it under 5.",
+    "ts": 1791028140000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "apply_patch",
+    "category": "edit",
+    "detail": "reconcile.py",
+    "files": [
+     "<world>/home/Projects/ledger/ledger/reconcile.py"
+    ],
+    "server": null,
+    "ts": 1791028140000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000006",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "apply_patch",
+    "category": "edit",
+    "detail": "refunds.md",
+    "files": [
+     "<world>/home/Projects/docs/guides/refunds.md"
+    ],
+    "server": null,
+    "ts": 1791028160000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "message",
+    "detail": "Logged the refund rules on the atlas-api and refunds pages.",
+    "ts": 1791028190000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "turn-end",
+    "duration": 150000,
+    "ts": 1791028190000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Task",
+    "category": "agent",
+    "detail": "Profile the solver on the 500-stop fixture",
+    "files": [],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028190000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "app": "claude",
+    "kind": "subagent-start",
+    "agentId": "2ede1091",
+    "label": "Profile the solver on the 500-stop fixt…",
+    "ts": 1791028190000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "shell",
+    "category": "shell",
+    "detail": "pytest tests/test_reconcile.py",
+    "files": [],
+    "server": null,
+    "ts": 1791028190000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool-error",
+    "ts": 1791028190000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Bash",
+    "category": "shell",
+    "detail": "cargo flamegraph --bench solver",
+    "files": [],
+    "server": null,
+    "agentId": "2ede1091",
+    "ts": 1791028192000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000006",
+    "app": "codex",
+    "kind": "turn-end",
+    "duration": 95000,
+    "ts": 1791028210000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "prompt",
+    "detail": "Add partial refunds to the orders API. Keep the existing full-refund path working.",
+    "ts": 1791028240000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Read",
+    "category": "read",
+    "detail": "~/Projects/pathfinder/src/solver.rs",
+    "files": [
+     "<world>/home/Projects/pathfinder/src/solver.rs"
+    ],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028240000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000002",
+    "app": "codex",
+    "kind": "turn-start",
+    "ts": 1791028240000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000002",
+    "app": "codex",
+    "kind": "prompt",
+    "detail": "Rate-limit GET /orders to 60 requests a minute per API key.",
+    "ts": 1791028240000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "shell",
+    "category": "shell",
+    "detail": "pytest tests/test_reconcile.py",
+    "files": [],
+    "server": null,
+    "ts": 1791028240000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool-error",
+    "ts": 1791028240000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Read",
+    "category": "read",
+    "detail": "~/Projects/atlas-api/src/orders/refunds.ts",
+    "files": [
+     "<world>/home/Projects/atlas-api/src/orders/refunds.ts"
+    ],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028290000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Edit",
+    "category": "edit",
+    "detail": "~/Projects/pathfinder/src/solver.rs",
+    "files": [
+     "<world>/home/Projects/pathfinder/src/solver.rs"
+    ],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028290000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "shell",
+    "category": "shell",
+    "detail": "pytest tests/test_reconcile.py",
+    "files": [],
+    "server": null,
+    "ts": 1791028290000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool-error",
+    "ts": 1791028290000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Edit",
+    "category": "edit",
+    "detail": "~/Projects/atlas-api/src/orders/routes.ts",
+    "files": [
+     "<world>/home/Projects/atlas-api/src/orders/routes.ts"
+    ],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028340000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Bash",
+    "category": "shell",
+    "detail": "cargo bench solver",
+    "files": [],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028340000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000002",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "apply_patch",
+    "category": "edit",
+    "detail": "routes.ts",
+    "files": [
+     "<world>/home/Projects/atlas-api/src/orders/routes.ts"
+    ],
+    "server": null,
+    "ts": 1791028340000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "shell",
+    "category": "shell",
+    "detail": "pytest tests/test_reconcile.py",
+    "files": [],
+    "server": null,
+    "ts": 1791028340000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool-error",
+    "ts": 1791028340000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Bash",
+    "category": "shell",
+    "detail": "npm test -- orders",
+    "files": [],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028390000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "app": "claude",
+    "kind": "message",
+    "detail": "The solver now caches distance lookups. 500 stops take 3.8 seconds, dow…",
+    "ts": 1791028390000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "app": "claude",
+    "kind": "turn-end",
+    "duration": 250000,
+    "ts": 1791028390000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000002",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "shell",
+    "category": "shell",
+    "detail": "npm test -- rate-limit",
+    "files": [],
+    "server": null,
+    "ts": 1791028390000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "shell",
+    "category": "shell",
+    "detail": "pytest tests/test_reconcile.py",
+    "files": [],
+    "server": null,
+    "ts": 1791028390000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool-error",
+    "ts": 1791028390000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Edit",
+    "category": "edit",
+    "detail": "~/Projects/atlas-api/src/orders/refunds.ts",
+    "files": [
+     "<world>/home/Projects/atlas-api/src/orders/refunds.ts"
+    ],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028440000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000003",
+    "app": "claude",
+    "kind": "prompt",
+    "detail": "Move checkout to version 3 of the payments SDK.",
+    "ts": 1791028440000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "app": "claude",
+    "kind": "prompt",
+    "detail": "The solver takes 40 seconds for 500 stops. Get it under 5.",
+    "ts": 1791028440000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000002",
+    "app": "codex",
+    "kind": "turn-end",
+    "duration": 95000,
+    "ts": 1791028440000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "shell",
+    "category": "shell",
+    "detail": "pytest tests/test_reconcile.py",
+    "files": [],
+    "server": null,
+    "ts": 1791028440000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool-error",
+    "ts": 1791028440000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "message",
+    "detail": "Partial refunds work. `POST /orders/:id/refunds` takes an optional amou…",
+    "ts": 1791028490000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "turn-end",
+    "duration": 250000,
+    "ts": 1791028490000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000003",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Read",
+    "category": "read",
+    "detail": "~/Projects/atlas-web/app/checkout/page.tsx",
+    "files": [
+     "<world>/home/Projects/atlas-web/app/checkout/page.tsx"
+    ],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028490000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Task",
+    "category": "agent",
+    "detail": "Profile the solver on the 500-stop fixture",
+    "files": [],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028490000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "app": "claude",
+    "kind": "subagent-start",
+    "agentId": "9c981375",
+    "label": "Profile the solver on the 500-stop fixt…",
+    "ts": 1791028490000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000002",
+    "app": "codex",
+    "kind": "turn-start",
+    "ts": 1791028490000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000002",
+    "app": "codex",
+    "kind": "prompt",
+    "detail": "Rate-limit GET /orders to 60 requests a minute per API key.",
+    "ts": 1791028490000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "shell",
+    "category": "shell",
+    "detail": "pytest tests/test_reconcile.py",
+    "files": [],
+    "server": null,
+    "ts": 1791028490000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool-error",
+    "ts": 1791028490000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Bash",
+    "category": "shell",
+    "detail": "cargo flamegraph --bench solver",
+    "files": [],
+    "server": null,
+    "agentId": "9c981375",
+    "ts": 1791028492000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "prompt",
+    "detail": "Log the refund rules in the wiki.",
+    "ts": 1791028540000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000003",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Edit",
+    "category": "edit",
+    "detail": "~/Projects/atlas-web/app/checkout/page.tsx",
+    "files": [
+     "<world>/home/Projects/atlas-web/app/checkout/page.tsx"
+    ],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028540000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Read",
+    "category": "read",
+    "detail": "~/Projects/pathfinder/src/solver.rs",
+    "files": [
+     "<world>/home/Projects/pathfinder/src/solver.rs"
+    ],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028540000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "shell",
+    "category": "shell",
+    "detail": "pytest tests/test_reconcile.py",
+    "files": [],
+    "server": null,
+    "ts": 1791028540000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool-error",
+    "ts": 1791028540000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "mcp__agent-wiki__wiki_log",
+    "category": "mcp",
+    "detail": "",
+    "files": [],
+    "server": "agent-wiki",
+    "agentId": null,
+    "pages": [
+     "atlas-api",
+     "refunds"
+    ],
+    "ts": 1791028590000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000003",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Bash",
+    "category": "shell",
+    "detail": "npm run build",
+    "files": [],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028590000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Edit",
+    "category": "edit",
+    "detail": "~/Projects/pathfinder/src/solver.rs",
+    "files": [
+     "<world>/home/Projects/pathfinder/src/solver.rs"
+    ],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028590000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000002",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "apply_patch",
+    "category": "edit",
+    "detail": "routes.ts",
+    "files": [
+     "<world>/home/Projects/atlas-api/src/orders/routes.ts"
+    ],
+    "server": null,
+    "ts": 1791028590000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "shell",
+    "category": "shell",
+    "detail": "pytest tests/test_reconcile.py",
+    "files": [],
+    "server": null,
+    "ts": 1791028590000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool-error",
+    "ts": 1791028590000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Bash",
+    "category": "shell",
+    "detail": "npm run lint",
+    "files": [],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028640000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000003",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "AskUserQuestion",
+    "category": "other",
+    "detail": "",
+    "files": [],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028640000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000003",
+    "app": "claude",
+    "kind": "needs-you",
+    "detail": "Version 3 drops saved cards from version 2. Should I migrate them, or ask customers to re-enter them?",
+    "ts": 1791028640000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "app": "claude",
+    "kind": "tool",
+    "tool": "Bash",
+    "category": "shell",
+    "detail": "cargo bench solver",
+    "files": [],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028640000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000002",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "shell",
+    "category": "shell",
+    "detail": "npm test -- rate-limit",
+    "files": [],
+    "server": null,
+    "ts": 1791028640000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "shell",
+    "category": "shell",
+    "detail": "pytest tests/test_reconcile.py",
+    "files": [],
+    "server": null,
+    "ts": 1791028640000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool-error",
+    "ts": 1791028640000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "message",
+    "detail": "Logged the refund rules on the atlas-api and refunds pages.",
+    "ts": 1791028690000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "kind": "turn-end",
+    "duration": 150000,
+    "ts": 1791028690000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "app": "claude",
+    "kind": "message",
+    "detail": "The solver now caches distance lookups. 500 stops take 3.8 seconds, dow…",
+    "ts": 1791028690000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "app": "claude",
+    "kind": "turn-end",
+    "duration": 250000,
+    "ts": 1791028690000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000002",
+    "app": "codex",
+    "kind": "turn-end",
+    "duration": 95000,
+    "ts": 1791028690000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool",
+    "tool": "shell",
+    "category": "shell",
+    "detail": "pytest tests/test_reconcile.py",
+    "files": [],
+    "server": null,
+    "ts": 1791028690000
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "kind": "tool-error",
+    "ts": 1791028690000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+    "app": "claude",
+    "kind": "prompt",
+    "detail": "Fix the refund rounding",
+    "ts": 1791028800000
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+    "app": "claude",
+    "kind": "prompt",
+    "detail": "a numeric timestamp",
+    "ts": 1791028800000
+   }
+  ],
+  "notes": {
+   "claude:0190d3e0-0000-7000-8000-000000000001": {
+    "firstPrompt": {
+     "text": "Add partial refunds to the orders API. Keep the existing full-refund path working.",
+     "ts": 1791027740000
+    },
+    "prompts": [
+     {
+      "text": "Log the refund rules in the wiki.",
+      "ts": 1791028040000
+     },
+     {
+      "text": "Add partial refunds to the orders API. Keep the existing full-refund path working.",
+      "ts": 1791028240000
+     },
+     {
+      "text": "Log the refund rules in the wiki.",
+      "ts": 1791028540000
+     },
+     {
+      "text": "Now add a refund reason field.",
+      "ts": 1791028801000
+     }
+    ],
+    "messages": [
+     {
+      "text": "Logged the refund rules on the atlas-api and refunds pages.",
+      "ts": 1791028190000
+     },
+     {
+      "text": "Partial refunds work. `POST /orders/:id/refunds` takes an optional amount, and the full-refund path is unchanged. All 48 order tests pass.",
+      "ts": 1791028490000
+     },
+     {
+      "text": "Logged the refund rules on the atlas-api and refunds pages.",
+      "ts": 1791028690000
+     },
+     {
+      "text": "The migration already ran. Do you want me to write a new one?",
+      "ts": 1791028804000
+     }
+    ],
+    "files": [
+     "<world>/home/Projects/atlas-api/src/orders/refunds.ts",
+     "<world>/home/Projects/atlas-api/src/orders/routes.ts"
+    ],
+    "edits": [
+     "<world>/home/Projects/atlas-api/src/orders/routes.ts",
+     "<world>/home/Projects/atlas-api/src/orders/routes.ts",
+     "<world>/home/Projects/atlas-api/src/orders/refunds.ts",
+     "<world>/home/Projects/atlas-api/src/orders/refunds.ts"
+    ],
+    "context": {
+     "used": 53160,
+     "window": 200000
+    },
+    "needsYou": {
+     "kind": "review",
+     "text": "Logged the refund rules on the atlas-api and refunds pages.",
+     "since": 1791028690000
+    }
+   },
+   "claude:0190d3e0-0000-7000-8000-000000000003": {
+    "firstPrompt": {
+     "text": "Move checkout to version 3 of the payments SDK.",
+     "ts": 1791028440000
+    },
+    "prompts": [
+     {
+      "text": "Move checkout to version 3 of the payments SDK.",
+      "ts": 1791028440000
+     }
+    ],
+    "messages": [],
+    "files": [
+     "<world>/home/Projects/atlas-web/app/checkout/page.tsx"
+    ],
+    "edits": [
+     "<world>/home/Projects/atlas-web/app/checkout/page.tsx"
+    ],
+    "context": {
+     "used": 38802,
+     "window": 200000
+    },
+    "needsYou": {
+     "kind": "question",
+     "text": "Version 3 drops saved cards from version 2. Should I migrate them, or ask customers to re-enter them?",
+     "since": 1791028640000
+    }
+   },
+   "claude:0190d3e0-0000-7000-8000-000000000005": {
+    "firstPrompt": {
+     "text": "The solver takes 40 seconds for 500 stops. Get it under 5.",
+     "ts": 1791028140000
+    },
+    "prompts": [
+     {
+      "text": "The solver takes 40 seconds for 500 stops. Get it under 5.",
+      "ts": 1791028140000
+     },
+     {
+      "text": "The solver takes 40 seconds for 500 stops. Get it under 5.",
+      "ts": 1791028440000
+     }
+    ],
+    "messages": [
+     {
+      "text": "The solver now caches distance lookups. 500 stops take 3.8 seconds, down from 40.",
+      "ts": 1791028390000
+     },
+     {
+      "text": "The solver now caches distance lookups. 500 stops take 3.8 seconds, down from 40.",
+      "ts": 1791028690000
+     }
+    ],
+    "files": [
+     "<world>/home/Projects/pathfinder/src/solver.rs"
+    ],
+    "edits": [
+     "<world>/home/Projects/pathfinder/src/solver.rs",
+     "<world>/home/Projects/pathfinder/src/solver.rs"
+    ],
+    "context": {
+     "used": 63364,
+     "window": 200000
+    },
+    "needsYou": {
+     "kind": "review",
+     "text": "The solver now caches distance lookups. 500 stops take 3.8 seconds, down from 40.",
+     "since": 1791028690000
+    }
+   },
+   "claude:0190d3e0-0000-7000-8000-000000000007": {
+    "firstPrompt": {
+     "text": "Move staging to the new cluster.",
+     "ts": 1791017250000
+    },
+    "prompts": [
+     {
+      "text": "Move staging to the new cluster.",
+      "ts": 1791017250000
+     }
+    ],
+    "messages": [
+     {
+      "text": "Staging runs on the new cluster. The old one can go after a week.",
+      "ts": 1791017350000
+     }
+    ],
+    "files": [],
+    "edits": [],
+    "context": {
+     "used": 38198,
+     "window": 200000
+    },
+    "needsYou": null
+   },
+   "claude:0190d3e0-0000-7000-8000-000000000009": {
+    "firstPrompt": {
+     "text": "Draft a checklist for the Q4 close.",
+     "ts": 1791003450000
+    },
+    "prompts": [
+     {
+      "text": "Draft a checklist for the Q4 close.",
+      "ts": 1791003450000
+     }
+    ],
+    "messages": [
+     {
+      "text": "The checklist has 14 steps, grouped by team.",
+      "ts": 1791003550000
+     }
+    ],
+    "files": [],
+    "edits": [],
+    "context": {
+     "used": 42287,
+     "window": 200000
+    },
+    "needsYou": null
+   },
+   "claude:0190d3e0-0000-7000-8000-000000000011": {
+    "firstPrompt": {
+     "text": "Review the partial refunds change before I open a PR.",
+     "ts": 1791027150000
+    },
+    "prompts": [
+     {
+      "text": "Review the partial refunds change before I open a PR.",
+      "ts": 1791027150000
+     }
+    ],
+    "messages": [
+     {
+      "text": "Two notes: refunds over the order total aren't rejected yet, and the tests don't cover a second partial refund.",
+      "ts": 1791027250000
+     }
+    ],
+    "files": [],
+    "edits": [],
+    "context": {
+     "used": 45341,
+     "window": 200000
+    },
+    "needsYou": {
+     "kind": "review",
+     "text": "Two notes: refunds over the order total aren't rejected yet, and the tests don't cover a second partial refund.",
+     "since": 1791027250000
+    }
+   },
+   "claude:0190d3e0-0000-7000-8000-000000000014": {
+    "firstPrompt": {
+     "text": "Which of these experiments are worth keeping?",
+     "ts": 1791014250000
+    },
+    "prompts": [
+     {
+      "text": "Which of these experiments are worth keeping?",
+      "ts": 1791014250000
+     }
+    ],
+    "messages": [
+     {
+      "text": "Keep geofence and route-sim. Snippets is turning into a tool of its own.",
+      "ts": 1791014350000
+     }
+    ],
+    "files": [],
+    "edits": [],
+    "context": {
+     "used": 51994,
+     "window": 200000
+    },
+    "needsYou": null
+   },
+   "claude:0190d3e0-0000-7000-8000-0000000000e1": {
+    "firstPrompt": {
+     "text": "Fix the refund rounding",
+     "ts": 1791028800000
+    },
+    "prompts": [
+     {
+      "text": "Fix the refund rounding",
+      "ts": 1791028800000
+     },
+     {
+      "text": "# AGENTS.md instructions for the ledger",
+      "ts": 1791027480000
+     },
+     {
+      "text": "a numeric timestamp",
+      "ts": 1791028800000
+     }
+    ],
+    "messages": [
+     {
+      "text": "Looking at it.",
+      "ts": 1791027060000
+     },
+     {
+      "text": "Should I also fix the CSV export?",
+      "ts": 1791027300000
+     }
+    ],
+    "files": [],
+    "edits": [
+     "<world>/home/Projects/ledger/ledger/reconcile.py"
+    ],
+    "context": {
+     "used": 2,
+     "window": 200000
+    },
+    "needsYou": {
+     "kind": "question",
+     "text": "Round half-even or half-up?",
+     "since": 1791027540000
+    }
+   },
+   "claude:0190d3e0-0000-7000-8000-0000000000e5": {
+    "firstPrompt": {
+     "text": "Before the odd lines",
+     "ts": 1791027600000
+    },
+    "prompts": [
+     {
+      "text": "Before the odd lines",
+      "ts": 1791027600000
+     },
+     {
+      "text": "After them",
+      "ts": 1791027660000
+     }
+    ],
+    "messages": [],
+    "files": [],
+    "edits": [],
+    "context": {
+     "used": 0,
+     "window": 200000
+    },
+    "needsYou": null
+   },
+   "codex:0190d3e0-0000-7000-8000-000000000002": {
+    "firstPrompt": {
+     "text": "Rate-limit GET /orders to 60 requests a minute per API key.",
+     "ts": 1791028240000
+    },
+    "prompts": [
+     {
+      "text": "Rate-limit GET /orders to 60 requests a minute per API key.",
+      "ts": 1791028240000
+     },
+     {
+      "text": "Rate-limit GET /orders to 60 requests a minute per API key.",
+      "ts": 1791028490000
+     }
+    ],
+    "messages": [
+     {
+      "text": "Added a token-bucket limiter at 60 requests a minute per key. Over the limit, clients get 429 with a Retry-After header.",
+      "ts": 1791028440000
+     },
+     {
+      "text": "Added a token-bucket limiter at 60 requests a minute per key. Over the limit, clients get 429 with a Retry-After header.",
+      "ts": 1791028690000
+     }
+    ],
+    "files": [
+     "<world>/home/Projects/atlas-api/src/orders/routes.ts"
+    ],
+    "edits": [
+     "<world>/home/Projects/atlas-api/src/orders/routes.ts",
+     "<world>/home/Projects/atlas-api/src/orders/routes.ts"
+    ],
+    "context": {
+     "used": 41498,
+     "window": 258400
+    },
+    "needsYou": {
+     "kind": "review",
+     "text": "Added a token-bucket limiter at 60 requests a minute per key. Over the limit, clients get 429 with a Retry-After header.",
+     "since": 1791028690000
+    }
+   },
+   "codex:0190d3e0-0000-7000-8000-000000000004": {
+    "firstPrompt": {
+     "text": "Reconciliation is off by a cent on some months. Find out why and fix it.",
+     "ts": 1791028040000
+    },
+    "prompts": [
+     {
+      "text": "Reconciliation is off by a cent on some months. Find out why and fix it.",
+      "ts": 1791028040000
+     }
+    ],
+    "messages": [],
+    "files": [
+     "<world>/home/Projects/ledger/ledger/reconcile.py"
+    ],
+    "edits": [
+     "<world>/home/Projects/ledger/ledger/reconcile.py"
+    ],
+    "context": {
+     "used": 67911,
+     "window": 258400
+    },
+    "needsYou": null
+   },
+   "codex:0190d3e0-0000-7000-8000-000000000006": {
+    "firstPrompt": {
+     "text": "Write a guide for the new partial refunds.",
+     "ts": 1791028060000
+    },
+    "prompts": [
+     {
+      "text": "Write a guide for the new partial refunds.",
+      "ts": 1791028060000
+     }
+    ],
+    "messages": [
+     {
+      "text": "The refunds guide covers full and partial refunds, with request and response examples.",
+      "ts": 1791028210000
+     }
+    ],
+    "files": [
+     "<world>/home/Projects/docs/guides/refunds.md"
+    ],
+    "edits": [
+     "<world>/home/Projects/docs/guides/refunds.md"
+    ],
+    "context": {
+     "used": 35378,
+     "window": 258400
+    },
+    "needsYou": {
+     "kind": "review",
+     "text": "The refunds guide covers full and partial refunds, with request and response examples.",
+     "since": 1791028210000
+    }
+   },
+   "codex:0190d3e0-0000-7000-8000-000000000008": {
+    "firstPrompt": {
+     "text": "Add zoom on product images.",
+     "ts": 1791010650000
+    },
+    "prompts": [
+     {
+      "text": "Add zoom on product images.",
+      "ts": 1791010650000
+     }
+    ],
+    "messages": [
+     {
+      "text": "Product images zoom on hover and pinch.",
+      "ts": 1791010750000
+     }
+    ],
+    "files": [],
+    "edits": [
+     "<world>/home/Projects/atlas-web/app/product/zoom.tsx"
+    ],
+    "context": {
+     "used": 36658,
+     "window": 258400
+    },
+    "needsYou": null
+   },
+   "codex:0190d3e0-0000-7000-8000-000000000010": {
+    "firstPrompt": {
+     "text": "What does ^(?=.*\\d)(?=.*[a-z]).{8,}$ match?",
+     "ts": 1791020300000
+    },
+    "prompts": [
+     {
+      "text": "What does ^(?=.*\\d)(?=.*[a-z]).{8,}$ match?",
+      "ts": 1791020300000
+     }
+    ],
+    "messages": [
+     {
+      "text": "It matches strings of eight or more characters with at least one digit and one lowercase letter.",
+      "ts": 1791020350000
+     }
+    ],
+    "files": [],
+    "edits": [],
+    "context": {
+     "used": 41495,
+     "window": 258400
+    },
+    "needsYou": null
+   },
+   "codex:0190d3e0-0000-7000-8000-000000000012": {
+    "firstPrompt": {
+     "text": "Benchmark the cached solver against the old one.",
+     "ts": 1791025050000
+    },
+    "prompts": [
+     {
+      "text": "Benchmark the cached solver against the old one.",
+      "ts": 1791025050000
+     }
+    ],
+    "messages": [
+     {
+      "text": "The cached solver is 10.5 times faster on 500 stops.",
+      "ts": 1791025150000
+     }
+    ],
+    "files": [],
+    "edits": [],
+    "context": {
+     "used": 46800,
+     "window": 258400
+    },
+    "needsYou": null
+   },
+   "codex:0190d3e0-0000-7000-8000-000000000013": {
+    "firstPrompt": {
+     "text": "Turn the postcode list into delivery zones.",
+     "ts": 1791026450000
+    },
+    "prompts": [
+     {
+      "text": "Turn the postcode list into delivery zones.",
+      "ts": 1791026450000
+     }
+    ],
+    "messages": [
+     {
+      "text": "Zones now load from the postcode list. Each one is the convex hull of its postcodes.",
+      "ts": 1791026650000
+     }
+    ],
+    "files": [],
+    "edits": [
+     "<world>/home/Projects/labs/geofence/src/zones.ts"
+    ],
+    "context": {
+     "used": 56033,
+     "window": 258400
+    },
+    "needsYou": {
+     "kind": "review",
+     "text": "Zones now load from the postcode list. Each one is the convex hull of its postcodes.",
+     "since": 1791026650000
+    }
+   },
+   "codex:0190d3e0-0000-7000-8000-0000000000e2": {
+    "firstPrompt": {
+     "text": "Why is the build slow?",
+     "ts": 1791027030000
+    },
+    "prompts": [
+     {
+      "text": "Why is the build slow?",
+      "ts": 1791027030000
+     }
+    ],
+    "messages": [
+     {
+      "text": "Make runs serially; add -j8.",
+      "ts": 1791027300000
+     },
+     {
+      "text": "Want me to apply -j8 to CI as well?",
+      "ts": 1791027420000
+     }
+    ],
+    "files": [],
+    "edits": [],
+    "context": {
+     "used": 3000,
+     "window": 131072
+    },
+    "needsYou": {
+     "kind": "question",
+     "text": "Want me to apply -j8 to CI as well?",
+     "since": 1791027420000
+    }
+   },
+   "codex:0190d3e0-0000-7000-8000-0000000000e6": {
+    "firstPrompt": {
+     "text": "Before the odd lines",
+     "ts": 1791027600000
+    },
+    "prompts": [
+     {
+      "text": "Before the odd lines",
+      "ts": 1791027600000
+     }
+    ],
+    "messages": [],
+    "files": [],
+    "edits": [],
+    "context": {
+     "used": 0,
+     "window": 258400
+    },
+    "needsYou": null
+   }
+  },
+  "collisions": [
+   {
+    "a": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "b": "codex:0190d3e0-0000-7000-8000-000000000002",
+    "files": [
+     "routes.ts"
+    ],
+    "paths": [
+     "/private<world>/home/projects/atlas-api/src/orders/routes.ts"
+    ],
+    "ts": 1791028590000,
+    "diffs": [
+     {
+      "file": "/private<world>/home/projects/atlas-api/src/orders/routes.ts",
+      "a": [
+       {
+        "path": "<world>/home/Projects/atlas-api/src/orders/routes.ts",
+        "kind": "edit",
+        "diff": "- routes = []\n+ routes = [refundRoute]",
+        "ts": 1791027840000
+       },
+       {
+        "path": "<world>/home/Projects/atlas-api/src/orders/routes.ts",
+        "kind": "edit",
+        "diff": "- routes = []\n+ routes = [refundRoute]",
+        "ts": 1791028340000
+       }
+      ],
+      "b": [
+       {
+        "path": "<world>/home/Projects/atlas-api/src/orders/routes.ts",
+        "kind": "update",
+        "diff": "@@ -1 +1 @@\n-routes = [\n+routes = [rateLimit(60), ",
+        "ts": 1791028340000
+       },
+       {
+        "path": "<world>/home/Projects/atlas-api/src/orders/routes.ts",
+        "kind": "update",
+        "diff": "@@ -1 +1 @@\n-routes = [\n+routes = [rateLimit(60), ",
+        "ts": 1791028590000
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "events": [
+  {
+   "event": "activity",
+   "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+   "app": "claude",
+   "kind": "prompt",
+   "detail": "Now add a refund reason field.",
+   "ts": 1791028801000
+  },
+  {
+   "event": "tokens",
+   "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+   "app": "claude",
+   "n": 52340,
+   "ts": 1791028802000
+  },
+  {
+   "event": "activity",
+   "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+   "app": "claude",
+   "kind": "tool",
+   "tool": "Bash",
+   "category": "shell",
+   "detail": "npm run migrate",
+   "files": [],
+   "server": null,
+   "agentId": null,
+   "ts": 1791028802000
+  },
+  {
+   "event": "activity",
+   "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+   "app": "claude",
+   "kind": "tool-error",
+   "ts": 1791028803000,
+   "agentId": null
+  },
+  {
+   "event": "tokens",
+   "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+   "app": "claude",
+   "n": 53160,
+   "ts": 1791028804000
+  },
+  {
+   "event": "activity",
+   "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+   "app": "claude",
+   "kind": "message",
+   "detail": "The migration already ran. Do you want me to write a new one?",
+   "ts": 1791028804000
+  },
+  {
+   "event": "activity",
+   "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+   "app": "claude",
+   "kind": "turn-end",
+   "duration": 3000,
+   "ts": 1791028804000
+  },
+  {
+   "event": "activity",
+   "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+   "app": "claude",
+   "kind": "needs-you",
+   "detail": "The migration already ran. Do you want me to write a new one?",
+   "ts": 1791028804000
+  },
+  {
+   "event": "activity",
+   "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+   "app": "codex",
+   "kind": "turn-start",
+   "ts": 1791028805000
+  },
+  {
+   "event": "tokens",
+   "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+   "app": "codex",
+   "n": 3000,
+   "ts": 1791028806000
+  },
+  {
+   "event": "activity",
+   "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+   "app": "codex",
+   "kind": "tool",
+   "tool": "shell",
+   "category": "shell",
+   "detail": "make -j8 -C ~/Projects/ledger",
+   "files": [],
+   "server": null,
+   "ts": 1791028807000
+  },
+  {
+   "event": "activity",
+   "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+   "app": "codex",
+   "kind": "tool-error",
+   "ts": 1791028807000
+  },
+  {
+   "event": "new-file",
+   "file": "<world>/home/.claude/projects/-edge/0190d3e0-0000-7000-8000-0000000000e4.jsonl",
+   "sessionId": "claude:0190d3e0-0000-7000-8000-0000000000e4"
+  },
+  {
+   "event": "activity",
+   "sessionId": "claude:0190d3e0-0000-7000-8000-0000000000e4",
+   "app": "claude",
+   "kind": "prompt",
+   "detail": "A brand new session",
+   "ts": 1791028808000
+  }
+ ],
+ "after": {
+  "at": 1791028830000,
+  "sessions": [
+   {
+    "id": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+    "app": "claude",
+    "status": "tool",
+    "tokens": {
+     "processed": 53897,
+     "output": 851
+    },
+    "tokensToday": 53897,
+    "tpm": 0,
+    "context": {
+     "used": 2,
+     "window": 200000
+    },
+    "forecast": {
+     "pct": 0.00001,
+     "growthPerTurn": null,
+     "turnsLeft": null
+    },
+    "model": "claude-opus-5-5",
+    "turnStartedAt": 1791028800000,
+    "lastTool": {
+     "name": "Grep",
+     "category": "read",
+     "detail": "round(",
+     "ts": 1791027062000
+    },
+    "toolCounts": {
+     "agent": 1,
+     "shell": 1,
+     "edit": 1,
+     "other": 1,
+     "read": 1
+    },
+    "subagents": [
+     {
+      "id": "e1",
+      "label": "Find rounding bugs",
+      "startedAt": 1791027061000,
+      "lastAt": 1791027062000,
+      "tools": 1,
+      "done": true,
+      "active": false
+     }
+    ],
+    "files": [],
+    "mcp": [],
+    "needsYou": {
+     "kind": "question",
+     "text": "Round half-even or half-up?",
+     "since": 1791027540000
+    },
+    "stuck": null,
+    "lastMessage": "Should I also fix the CSV export?",
+    "lastTurnEndAt": 1791027300000,
+    "interruptedAt": null,
+    "lastEventAt": 1791028800000
+   },
+   {
+    "id": "claude:0190d3e0-0000-7000-8000-0000000000e5",
+    "app": "claude",
+    "status": "idle",
+    "tokens": {
+     "processed": 0,
+     "output": 0
+    },
+    "tokensToday": 0,
+    "tpm": 0,
+    "context": {
+     "used": 0,
+     "window": 200000
+    },
+    "forecast": {
+     "pct": 0,
+     "growthPerTurn": null,
+     "turnsLeft": null
+    },
+    "model": null,
+    "turnStartedAt": 1791027660000,
+    "lastTool": null,
+    "toolCounts": {},
+    "subagents": [],
+    "files": [],
+    "mcp": [],
+    "needsYou": null,
+    "stuck": null,
+    "lastMessage": null,
+    "lastTurnEndAt": null,
+    "interruptedAt": null,
+    "lastEventAt": 1791027660000
+   },
+   {
+    "id": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "status": "idle",
+    "tokens": {
+     "processed": 784332,
+     "output": 12456
+    },
+    "tokensToday": 784332,
+    "tpm": 105500,
+    "context": {
+     "used": 53160,
+     "window": 200000
+    },
+    "forecast": {
+     "pct": 0.2658,
+     "growthPerTurn": 8264,
+     "turnsLeft": 15
+    },
+    "model": "claude-sonnet-4-5",
+    "turnStartedAt": null,
+    "lastTool": {
+     "name": "Bash",
+     "category": "shell",
+     "detail": "npm run migrate",
+     "ts": 1791028802000
+    },
+    "toolCounts": {
+     "read": 2,
+     "edit": 4,
+     "shell": 5,
+     "mcp": 2
+    },
+    "subagents": [],
+    "files": [
+     {
+      "path": "<world>/home/Projects/atlas-api/src/orders/refunds.ts",
+      "ts": 1791028440000
+     },
+     {
+      "path": "<world>/home/Projects/atlas-api/src/orders/routes.ts",
+      "ts": 1791028340000
+     }
+    ],
+    "mcp": [
+     {
+      "server": "agent-wiki",
+      "ts": 1791028590000
+     }
+    ],
+    "needsYou": {
+     "kind": "question",
+     "text": "The migration already ran. Do you want me to write a new one?",
+     "since": 1791028804000
+    },
+    "stuck": null,
+    "lastMessage": "The migration already ran. Do you want me to write a new one?",
+    "lastTurnEndAt": 1791028804000,
+    "interruptedAt": null,
+    "lastEventAt": 1791028804000
+   },
+   {
+    "id": "claude:0190d3e0-0000-7000-8000-000000000011",
+    "app": "claude",
+    "status": "idle",
+    "tokens": {
+     "processed": 88220,
+     "output": 1623
+    },
+    "tokensToday": 88220,
+    "tpm": 0,
+    "context": {
+     "used": 45341,
+     "window": 200000
+    },
+    "forecast": {
+     "pct": 0.226705,
+     "growthPerTurn": null,
+     "turnsLeft": null
+    },
+    "model": "claude-sonnet-4-5",
+    "turnStartedAt": null,
+    "lastTool": {
+     "name": "Read",
+     "category": "read",
+     "detail": "~/Projects/atlas-api/src/orders/refunds.ts",
+     "ts": 1791027200000
+    },
+    "toolCounts": {
+     "read": 1
+    },
+    "subagents": [],
+    "files": [],
+    "mcp": [],
+    "needsYou": {
+     "kind": "review",
+     "text": "Two notes: refunds over the order total aren't rejected yet, and the tests don't cover a second partial refund.",
+     "since": 1791027250000
+    },
+    "stuck": null,
+    "lastMessage": "Two notes: refunds over the order total aren't rejected yet, and the tests don't cover a second partial refund.",
+    "lastTurnEndAt": 1791027250000,
+    "interruptedAt": null,
+    "lastEventAt": 1791027250000
+   },
+   {
+    "id": "claude:0190d3e0-0000-7000-8000-000000000003",
+    "app": "claude",
+    "status": "tool",
+    "tokens": {
+     "processed": 130142,
+     "output": 3407
+    },
+    "tokensToday": 130142,
+    "tpm": 0,
+    "context": {
+     "used": 38802,
+     "window": 200000
+    },
+    "forecast": {
+     "pct": 0.19401,
+     "growthPerTurn": null,
+     "turnsLeft": null
+    },
+    "model": "claude-sonnet-4-5",
+    "turnStartedAt": 1791028440000,
+    "lastTool": {
+     "name": "AskUserQuestion",
+     "category": "other",
+     "detail": "",
+     "ts": 1791028640000
+    },
+    "toolCounts": {
+     "read": 1,
+     "edit": 1,
+     "shell": 1,
+     "other": 1
+    },
+    "subagents": [],
+    "files": [
+     {
+      "path": "<world>/home/Projects/atlas-web/app/checkout/page.tsx",
+      "ts": 1791028540000
+     }
+    ],
+    "mcp": [],
+    "needsYou": {
+     "kind": "question",
+     "text": "Version 3 drops saved cards from version 2. Should I migrate them, or ask customers to re-enter them?",
+     "since": 1791028640000
+    },
+    "stuck": null,
+    "lastMessage": null,
+    "lastTurnEndAt": null,
+    "interruptedAt": null,
+    "lastEventAt": 1791028640000
+   },
+   {
+    "id": "claude:0190d3e0-0000-7000-8000-000000000007",
+    "app": "claude",
+    "status": "idle",
+    "tokens": {
+     "processed": 72491,
+     "output": 1363
+    },
+    "tokensToday": 72491,
+    "tpm": 0,
+    "context": {
+     "used": 38198,
+     "window": 200000
+    },
+    "forecast": {
+     "pct": 0.19099,
+     "growthPerTurn": null,
+     "turnsLeft": null
+    },
+    "model": "claude-sonnet-4-5",
+    "turnStartedAt": null,
+    "lastTool": {
+     "name": "Bash",
+     "category": "shell",
+     "detail": "terraform plan -var-file=staging.tfvars",
+     "ts": 1791017300000
+    },
+    "toolCounts": {
+     "shell": 1
+    },
+    "subagents": [],
+    "files": [],
+    "mcp": [],
+    "needsYou": null,
+    "stuck": null,
+    "lastMessage": "Staging runs on the new cluster. The old one can go after a week.",
+    "lastTurnEndAt": 1791017350000,
+    "interruptedAt": null,
+    "lastEventAt": 1791017350000
+   },
+   {
+    "id": "claude:0190d3e0-0000-7000-8000-000000000014",
+    "app": "claude",
+    "status": "idle",
+    "tokens": {
+     "processed": 101152,
+     "output": 1569
+    },
+    "tokensToday": 101152,
+    "tpm": 0,
+    "context": {
+     "used": 51994,
+     "window": 200000
+    },
+    "forecast": {
+     "pct": 0.25997,
+     "growthPerTurn": null,
+     "turnsLeft": null
+    },
+    "model": "claude-sonnet-4-5",
+    "turnStartedAt": null,
+    "lastTool": {
+     "name": "Read",
+     "category": "read",
+     "detail": "~/Projects/labs/ideas.md",
+     "ts": 1791014300000
+    },
+    "toolCounts": {
+     "read": 1
+    },
+    "subagents": [],
+    "files": [],
+    "mcp": [],
+    "needsYou": null,
+    "stuck": null,
+    "lastMessage": "Keep geofence and route-sim. Snippets is turning into a tool of its own.",
+    "lastTurnEndAt": 1791014350000,
+    "interruptedAt": null,
+    "lastEventAt": 1791014350000
+   },
+   {
+    "id": "claude:0190d3e0-0000-7000-8000-000000000009",
+    "app": "claude",
+    "status": "idle",
+    "tokens": {
+     "processed": 80610,
+     "output": 1274
+    },
+    "tokensToday": 80610,
+    "tpm": 0,
+    "context": {
+     "used": 42287,
+     "window": 200000
+    },
+    "forecast": {
+     "pct": 0.211435,
+     "growthPerTurn": null,
+     "turnsLeft": null
+    },
+    "model": "claude-sonnet-4-5",
+    "turnStartedAt": null,
+    "lastTool": {
+     "name": "Read",
+     "category": "read",
+     "detail": "~/Projects/ledger/ledger/reconcile.py",
+     "ts": 1791003500000
+    },
+    "toolCounts": {
+     "read": 1
+    },
+    "subagents": [],
+    "files": [],
+    "mcp": [],
+    "needsYou": null,
+    "stuck": null,
+    "lastMessage": "The checklist has 14 steps, grouped by team.",
+    "lastTurnEndAt": 1791003550000,
+    "interruptedAt": null,
+    "lastEventAt": 1791003550000
+   },
+   {
+    "id": "claude:0190d3e0-0000-7000-8000-000000000005",
+    "app": "claude",
+    "status": "tool",
+    "tokens": {
+     "processed": 491211,
+     "output": 8546
+    },
+    "tokensToday": 491211,
+    "tpm": 0,
+    "context": {
+     "used": 63364,
+     "window": 200000
+    },
+    "forecast": {
+     "pct": 0.31682,
+     "growthPerTurn": 18412,
+     "turnsLeft": 6
+    },
+    "model": "claude-sonnet-4-5",
+    "turnStartedAt": null,
+    "lastTool": {
+     "name": "Bash",
+     "category": "shell",
+     "detail": "cargo flamegraph --bench solver",
+     "ts": 1791028492000
+    },
+    "toolCounts": {
+     "agent": 2,
+     "read": 2,
+     "edit": 2,
+     "shell": 4
+    },
+    "subagents": [
+     {
+      "id": "9c981375",
+      "label": "Profile the solver on the 500-stop fixt…",
+      "startedAt": 1791028490000,
+      "lastAt": 1791028492000,
+      "tools": 1,
+      "done": false,
+      "active": false
+     },
+     {
+      "id": "2ede1091",
+      "label": "Profile the solver on the 500-stop fixt…",
+      "startedAt": 1791028190000,
+      "lastAt": 1791028192000,
+      "tools": 1,
+      "done": false,
+      "active": false
+     }
+    ],
+    "files": [
+     {
+      "path": "<world>/home/Projects/pathfinder/src/solver.rs",
+      "ts": 1791028590000
+     }
+    ],
+    "mcp": [],
+    "needsYou": {
+     "kind": "review",
+     "text": "The solver now caches distance lookups. 500 stops take 3.8 seconds, down from 40.",
+     "since": 1791028690000
+    },
+    "stuck": null,
+    "lastMessage": "The solver now caches distance lookups. 500 stops take 3.8 seconds, down from 40.",
+    "lastTurnEndAt": 1791028690000,
+    "interruptedAt": null,
+    "lastEventAt": 1791028690000
+   },
+   {
+    "id": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+    "app": "codex",
+    "status": "thinking",
+    "tokens": {
+     "processed": 15000,
+     "output": 1200
+    },
+    "tokensToday": 15000,
+    "tpm": 3000,
+    "context": {
+     "used": 3000,
+     "window": 131072
+    },
+    "forecast": {
+     "pct": 0.02288818359375,
+     "growthPerTurn": null,
+     "turnsLeft": null
+    },
+    "model": "gpt-oss-20b",
+    "turnStartedAt": 1791028805000,
+    "lastTool": {
+     "name": "shell",
+     "category": "shell",
+     "detail": "make -j8 -C ~/Projects/ledger",
+     "ts": 1791028807000
+    },
+    "toolCounts": {
+     "edit": 1,
+     "mcp": 1,
+     "web": 1,
+     "read": 1,
+     "shell": 1
+    },
+    "subagents": [
+     {
+      "id": "sub-1",
+      "label": "Profile the build",
+      "startedAt": 1791027360000,
+      "lastAt": 1791027390000,
+      "tools": 0,
+      "done": true,
+      "active": false
+     }
+    ],
+    "files": [],
+    "mcp": [
+     {
+      "server": "agent-wiki",
+      "ts": 1791027360000
+     }
+    ],
+    "needsYou": null,
+    "stuck": null,
+    "lastMessage": "Want me to apply -j8 to CI as well?",
+    "lastTurnEndAt": 1791027420000,
+    "interruptedAt": null,
+    "lastEventAt": 1791028807000
+   },
+   {
+    "id": "codex:0190d3e0-0000-7000-8000-0000000000e6",
+    "app": "codex",
+    "status": "idle",
+    "tokens": {
+     "processed": 0,
+     "output": 0
+    },
+    "tokensToday": 0,
+    "tpm": 0,
+    "context": {
+     "used": 0,
+     "window": 258400
+    },
+    "forecast": {
+     "pct": 0,
+     "growthPerTurn": null,
+     "turnsLeft": null
+    },
+    "model": null,
+    "turnStartedAt": null,
+    "lastTool": null,
+    "toolCounts": {},
+    "subagents": [],
+    "files": [],
+    "mcp": [],
+    "needsYou": null,
+    "stuck": null,
+    "lastMessage": null,
+    "lastTurnEndAt": null,
+    "interruptedAt": null,
+    "lastEventAt": 1791027600000
+   },
+   {
+    "id": "codex:0190d3e0-0000-7000-8000-000000000002",
+    "app": "codex",
+    "status": "idle",
+    "tokens": {
+     "processed": 198705,
+     "output": 468
+    },
+    "tokensToday": 198705,
+    "tpm": 0,
+    "context": {
+     "used": 41498,
+     "window": 258400
+    },
+    "forecast": {
+     "pct": 0.16059597523219815,
+     "growthPerTurn": 10412,
+     "turnsLeft": 18
+    },
+    "model": "gpt-5-codex",
+    "turnStartedAt": null,
+    "lastTool": {
+     "name": "shell",
+     "category": "shell",
+     "detail": "npm test -- rate-limit",
+     "ts": 1791028640000
+    },
+    "toolCounts": {
+     "edit": 2,
+     "shell": 2
+    },
+    "subagents": [],
+    "files": [
+     {
+      "path": "<world>/home/Projects/atlas-api/src/orders/routes.ts",
+      "ts": 1791028590000
+     }
+    ],
+    "mcp": [],
+    "needsYou": {
+     "kind": "review",
+     "text": "Added a token-bucket limiter at 60 requests a minute per key. Over the limit, clients get 429 with a Retry-After header.",
+     "since": 1791028690000
+    },
+    "stuck": null,
+    "lastMessage": "Added a token-bucket limiter at 60 requests a minute per key. Over the limit, clients get 429 with a Retry-After header.",
+    "lastTurnEndAt": 1791028690000,
+    "interruptedAt": null,
+    "lastEventAt": 1791028690000
+   },
+   {
+    "id": "codex:0190d3e0-0000-7000-8000-000000000004",
+    "app": "codex",
+    "status": "thinking",
+    "tokens": {
+     "processed": 559199,
+     "output": 1185
+    },
+    "tokensToday": 559199,
+    "tpm": 0,
+    "context": {
+     "used": 67911,
+     "window": 258400
+    },
+    "forecast": {
+     "pct": 0.2628134674922601,
+     "growthPerTurn": null,
+     "turnsLeft": null
+    },
+    "model": "gpt-5-codex",
+    "turnStartedAt": 1791028040000,
+    "lastTool": {
+     "name": "shell",
+     "category": "shell",
+     "detail": "pytest tests/test_reconcile.py",
+     "ts": 1791028690000
+    },
+    "toolCounts": {
+     "edit": 1,
+     "shell": 11
+    },
+    "subagents": [],
+    "files": [
+     {
+      "path": "<world>/home/Projects/ledger/ledger/reconcile.py",
+      "ts": 1791028140000
+     }
+    ],
+    "mcp": [],
+    "needsYou": null,
+    "stuck": {
+     "reasons": [
+      "ran pytest tests/test_reconcile.py 10 times in a row",
+      "11 failed tool calls in a row"
+     ]
+    },
+    "lastMessage": null,
+    "lastTurnEndAt": null,
+    "interruptedAt": null,
+    "lastEventAt": 1791028690000
+   },
+   {
+    "id": "codex:0190d3e0-0000-7000-8000-000000000006",
+    "app": "codex",
+    "status": "idle",
+    "tokens": {
+     "processed": 68058,
+     "output": 610
+    },
+    "tokensToday": 68058,
+    "tpm": 0,
+    "context": {
+     "used": 35378,
+     "window": 258400
+    },
+    "forecast": {
+     "pct": 0.13691176470588234,
+     "growthPerTurn": null,
+     "turnsLeft": null
+    },
+    "model": "gpt-5-codex",
+    "turnStartedAt": null,
+    "lastTool": {
+     "name": "apply_patch",
+     "category": "edit",
+     "detail": "refunds.md",
+     "ts": 1791028160000
+    },
+    "toolCounts": {
+     "edit": 1
+    },
+    "subagents": [],
+    "files": [
+     {
+      "path": "<world>/home/Projects/docs/guides/refunds.md",
+      "ts": 1791028160000
+     }
+    ],
+    "mcp": [],
+    "needsYou": {
+     "kind": "review",
+     "text": "The refunds guide covers full and partial refunds, with request and response examples.",
+     "since": 1791028210000
+    },
+    "stuck": null,
+    "lastMessage": "The refunds guide covers full and partial refunds, with request and response examples.",
+    "lastTurnEndAt": 1791028210000,
+    "interruptedAt": null,
+    "lastEventAt": 1791028210000
+   },
+   {
+    "id": "codex:0190d3e0-0000-7000-8000-000000000008",
+    "app": "codex",
+    "status": "idle",
+    "tokens": {
+     "processed": 36658,
+     "output": 639
+    },
+    "tokensToday": 36658,
+    "tpm": 0,
+    "context": {
+     "used": 36658,
+     "window": 258400
+    },
+    "forecast": {
+     "pct": 0.14186532507739938,
+     "growthPerTurn": null,
+     "turnsLeft": null
+    },
+    "model": "gpt-5-codex",
+    "turnStartedAt": null,
+    "lastTool": {
+     "name": "apply_patch",
+     "category": "edit",
+     "detail": "zoom.tsx",
+     "ts": 1791010700000
+    },
+    "toolCounts": {
+     "edit": 1
+    },
+    "subagents": [],
+    "files": [],
+    "mcp": [],
+    "needsYou": null,
+    "stuck": null,
+    "lastMessage": "Product images zoom on hover and pinch.",
+    "lastTurnEndAt": 1791010750000,
+    "interruptedAt": null,
+    "lastEventAt": 1791010750000
+   },
+   {
+    "id": "codex:0190d3e0-0000-7000-8000-000000000010",
+    "app": "codex",
+    "status": "idle",
+    "tokens": {
+     "processed": 41495,
+     "output": 966
+    },
+    "tokensToday": 41495,
+    "tpm": 0,
+    "context": {
+     "used": 41495,
+     "window": 258400
+    },
+    "forecast": {
+     "pct": 0.1605843653250774,
+     "growthPerTurn": null,
+     "turnsLeft": null
+    },
+    "model": "gpt-5-codex",
+    "turnStartedAt": null,
+    "lastTool": null,
+    "toolCounts": {},
+    "subagents": [],
+    "files": [],
+    "mcp": [],
+    "needsYou": null,
+    "stuck": null,
+    "lastMessage": "It matches strings of eight or more characters with at least one digit and one lowercase letter.",
+    "lastTurnEndAt": 1791020350000,
+    "interruptedAt": null,
+    "lastEventAt": 1791020350000
+   },
+   {
+    "id": "codex:0190d3e0-0000-7000-8000-000000000012",
+    "app": "codex",
+    "status": "idle",
+    "tokens": {
+     "processed": 90418,
+     "output": 673
+    },
+    "tokensToday": 90418,
+    "tpm": 0,
+    "context": {
+     "used": 46800,
+     "window": 258400
+    },
+    "forecast": {
+     "pct": 0.18111455108359134,
+     "growthPerTurn": null,
+     "turnsLeft": null
+    },
+    "model": "gpt-5-codex",
+    "turnStartedAt": null,
+    "lastTool": {
+     "name": "shell",
+     "category": "shell",
+     "detail": "cargo bench",
+     "ts": 1791025100000
+    },
+    "toolCounts": {
+     "shell": 1
+    },
+    "subagents": [],
+    "files": [],
+    "mcp": [],
+    "needsYou": null,
+    "stuck": null,
+    "lastMessage": "The cached solver is 10.5 times faster on 500 stops.",
+    "lastTurnEndAt": 1791025150000,
+    "interruptedAt": null,
+    "lastEventAt": 1791025150000
+   },
+   {
+    "id": "codex:0190d3e0-0000-7000-8000-000000000013",
+    "app": "codex",
+    "status": "idle",
+    "tokens": {
+     "processed": 154453,
+     "output": 1130
+    },
+    "tokensToday": 154453,
+    "tpm": 0,
+    "context": {
+     "used": 56033,
+     "window": 258400
+    },
+    "forecast": {
+     "pct": 0.21684597523219815,
+     "growthPerTurn": null,
+     "turnsLeft": null
+    },
+    "model": "gpt-5-codex",
+    "turnStartedAt": null,
+    "lastTool": {
+     "name": "shell",
+     "category": "shell",
+     "detail": "npm test",
+     "ts": 1791026600000
+    },
+    "toolCounts": {
+     "edit": 1,
+     "shell": 1
+    },
+    "subagents": [],
+    "files": [],
+    "mcp": [],
+    "needsYou": {
+     "kind": "review",
+     "text": "Zones now load from the postcode list. Each one is the convex hull of its postcodes.",
+     "since": 1791026650000
+    },
+    "stuck": null,
+    "lastMessage": "Zones now load from the postcode list. Each one is the convex hull of its postcodes.",
+    "lastTurnEndAt": 1791026650000,
+    "interruptedAt": null,
+    "lastEventAt": 1791026650000
+   },
+   {
+    "id": "claude:0190d3e0-0000-7000-8000-0000000000e4",
+    "app": "claude",
+    "status": "thinking",
+    "tokens": {
+     "processed": 0,
+     "output": 0
+    },
+    "tokensToday": 0,
+    "tpm": 0,
+    "context": {
+     "used": 0,
+     "window": 200000
+    },
+    "forecast": {
+     "pct": 0,
+     "growthPerTurn": null,
+     "turnsLeft": null
+    },
+    "model": null,
+    "turnStartedAt": 1791028808000,
+    "lastTool": null,
+    "toolCounts": {},
+    "subagents": [],
+    "files": [],
+    "mcp": [],
+    "needsYou": null,
+    "stuck": null,
+    "lastMessage": null,
+    "lastTurnEndAt": null,
+    "interruptedAt": null,
+    "lastEventAt": 1791028808000
+   }
+  ],
+  "series": {
+   "claude": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    52340,
+    0,
+    53160,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "codex": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    3000,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  "tpm": 108500,
+  "total24h": 2966041,
+  "today": 2966041,
+  "limits": {
+   "codex": {
+    "primary": {
+     "pct": 44,
+     "windowMinutes": 300,
+     "resetsAt": 1791032400000
+    },
+    "secondary": null,
+    "observedAt": 1791028806000
+   },
+   "claude": {
+    "fiveHour": 72.9,
+    "sevenDay": 55.6,
+    "resets": {
+     "fiveHour": null,
+     "sevenDay": null
+    },
+    "observedAt": 1791028800000,
+    "source": "claude-desktop"
+   }
+  },
+  "limitForecast": {
+   "codex": {
+    "pct": 44,
+    "perHour": 9.195402298899792,
+    "eta": 1791050754000,
+    "resetsAt": 1791032400000,
+    "hitsBeforeReset": false,
+    "windowMinutes": 300
+   },
+   "claudeFiveHour": {
+    "pct": 72.9,
+    "perHour": 12.600000000018165,
+    "eta": 1791036572857.1428,
+    "resetsAt": null,
+    "hitsBeforeReset": true
+   },
+   "claudeSevenDay": {
+    "pct": 55.6,
+    "perHour": 2.4000000000012434,
+    "eta": 1791095430000,
+    "resetsAt": null,
+    "hitsBeforeReset": true
+   }
+  },
+  "costs": {
+   "today": 1.374095875,
+   "byApp": {
+    "claude": 1.041682,
+    "codex": 0.332413875
+   },
+   "perHour": 3.7111468425562038,
+   "unpriced": [
+    "ollama/gpt-oss-20b"
+   ],
+   "checked": "2026-10-03"
+  },
+  "collab": [
+   {
+    "a": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "b": "codex:0190d3e0-0000-7000-8000-000000000002",
+    "kind": "file",
+    "files": [
+     "routes.ts"
+    ]
+   }
+  ],
+  "collisions": [
+   {
+    "a": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "b": "codex:0190d3e0-0000-7000-8000-000000000002",
+    "files": [
+     "routes.ts"
+    ],
+    "paths": [
+     "/private<world>/home/projects/atlas-api/src/orders/routes.ts"
+    ],
+    "ts": 1791028590000
+   }
+  ],
+  "resources": [
+   {
+    "server": "agent-wiki",
+    "ts": 1791028590000
+   }
+  ],
+  "status": {
+   "watching": false,
+   "files": 22,
+   "lines": 219,
+   "errors": 0
+  }
+ }
+}

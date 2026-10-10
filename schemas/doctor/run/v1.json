@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/doctor/run/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A doctor run",
+  "description": "Every check the doctor ran, and how many came out each way.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "description": "In doctor.json",
+      "type": "string",
+      "const": "doctor/run/v1"
+    },
+    "at": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "ms": {
+      "type": "number"
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "$ref": "https://xenonet.dev/schemas/doctor/result/v1.json"
+      }
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "info": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "warn": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "fail": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "skip": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "ok",
+        "info",
+        "warn",
+        "fail",
+        "skip"
+      ],
+      "additionalProperties": {}
+    },
+    "by": {
+      "description": "Which XenoNet ran it, when the xenonet command asked one; null when it ran in the command itself",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "at",
+    "ms",
+    "results",
+    "summary"
+  ],
+  "additionalProperties": {}
+}

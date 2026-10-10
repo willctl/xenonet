@@ -1,0 +1,354 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/nous/hermes-agent/spawn-ledger/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Hermes Agent's spawn ledger",
+  "description": "~/.hermes/spawn-ledger.json: every long-lived Hermes process of the install (the classic CLI, a desktop backend, the dashboard, the gateway, MCP helpers), as Hermes keeps it for itself. Dead entries stay until the next one is added, so each is checked against the process table. argv is never read: it can hold a prompt.",
+  "type": "array",
+  "items": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "purpose": {
+            "type": "string",
+            "const": "cli"
+          },
+          "pid": {
+            "type": "number"
+          },
+          "create_time": {
+            "description": "The process's start, in epoch seconds, to tell a live entry from a pid used again",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "install": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "spawner_pid": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "spawner_create": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "registered_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "port": {
+            "description": "Where a serve or dashboard listens, on 127.0.0.1",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isolated": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "purpose",
+          "pid"
+        ],
+        "additionalProperties": {}
+      },
+      {
+        "type": "object",
+        "properties": {
+          "purpose": {
+            "type": "string",
+            "const": "serve"
+          },
+          "pid": {
+            "type": "number"
+          },
+          "create_time": {
+            "description": "The process's start, in epoch seconds, to tell a live entry from a pid used again",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "install": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "spawner_pid": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "spawner_create": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "registered_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "port": {
+            "description": "Where a serve or dashboard listens, on 127.0.0.1",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isolated": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "purpose",
+          "pid"
+        ],
+        "additionalProperties": {}
+      },
+      {
+        "type": "object",
+        "properties": {
+          "purpose": {
+            "type": "string",
+            "const": "dashboard"
+          },
+          "pid": {
+            "type": "number"
+          },
+          "create_time": {
+            "description": "The process's start, in epoch seconds, to tell a live entry from a pid used again",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "install": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "spawner_pid": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "spawner_create": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "registered_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "port": {
+            "description": "Where a serve or dashboard listens, on 127.0.0.1",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isolated": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "purpose",
+          "pid"
+        ],
+        "additionalProperties": {}
+      },
+      {
+        "type": "object",
+        "properties": {
+          "purpose": {
+            "type": "string",
+            "const": "gateway"
+          },
+          "pid": {
+            "type": "number"
+          },
+          "create_time": {
+            "description": "The process's start, in epoch seconds, to tell a live entry from a pid used again",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "install": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "spawner_pid": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "spawner_create": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "registered_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "port": {
+            "description": "Where a serve or dashboard listens, on 127.0.0.1",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isolated": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "purpose",
+          "pid"
+        ],
+        "additionalProperties": {}
+      },
+      {
+        "type": "object",
+        "properties": {
+          "purpose": {
+            "type": "string",
+            "const": "mcp-helper"
+          },
+          "pid": {
+            "type": "number"
+          },
+          "create_time": {
+            "description": "The process's start, in epoch seconds, to tell a live entry from a pid used again",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "install": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "spawner_pid": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "spawner_create": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "registered_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "port": {
+            "description": "Where a serve or dashboard listens, on 127.0.0.1",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isolated": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "purpose",
+          "pid"
+        ],
+        "additionalProperties": {}
+      }
+    ],
+    "x-xenonet": {
+      "discriminator": "purpose"
+    }
+  },
+  "x-xenonet": {
+    "vendorVersions": "<1.0.0",
+    "lenient": true
+  }
+}

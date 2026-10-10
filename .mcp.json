@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "xenonet-console": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["mcp/console.js"]
+    }
+  }
+}

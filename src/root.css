@@ -1,0 +1,61 @@
+/* The projects folder panel (root.js), and the places the page names the
+   folder (hud.js), which can take a long path. */
+.rt-now {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 2px 0 4px;
+}
+.rt-now code {
+  font-family: var(--mono);
+  font-size: 15px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.rt-now .dim { font-size: 11px; }
+.rt-scan {
+  margin: 0 0 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.rt-pick {
+  display: flex;
+  gap: 8px;
+}
+.rt-field {
+  flex: 1;
+  min-width: 0;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 7px 10px;
+  outline: none;
+}
+.rt-field:focus { border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.rt-field:disabled { opacity: 0.5; }
+.rt-field::placeholder { color: var(--dim); }
+.rt-answer {
+  min-height: 22px;
+  margin: 8px 0 2px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.rt-answer .rt-ok { color: var(--text); }
+.rt-answer .rt-warn { color: var(--attention); }
+.rt .act.primary:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--bright);
+  background: rgb(var(--accent-rgb) / 0.14);
+}
+.rt .act:disabled {
+  opacity: 0.4;
+  cursor: default;
+  box-shadow: none;
+}
+[data-root-label] { overflow-wrap: anywhere; }
+.legend-group span[data-root-label] { white-space: normal; }

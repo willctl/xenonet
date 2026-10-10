@@ -1,0 +1,384 @@
+{
+ "status": {
+  "files": 23,
+  "docs": 38,
+  "errors": 0
+ },
+ "docs": [
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-000000000001",
+   "app": "claude",
+   "role": "user",
+   "ts": 1791027740000,
+   "text": "Add partial refunds to the orders API. Keep the existing full-refund path working."
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-000000000001",
+   "app": "claude",
+   "role": "assistant",
+   "ts": 1791027990000,
+   "text": "Partial refunds work. `POST /orders/:id/refunds` takes an optional amount, and the full-refund path is unchanged. All 48 order tests pass."
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-000000000001",
+   "app": "claude",
+   "role": "user",
+   "ts": 1791028040000,
+   "text": "Log the refund rules in the wiki."
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-000000000001",
+   "app": "claude",
+   "role": "assistant",
+   "ts": 1791028190000,
+   "text": "Logged the refund rules on the atlas-api and refunds pages."
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-000000000001",
+   "app": "claude",
+   "role": "user",
+   "ts": 1791028801000,
+   "text": "Now add a refund reason field."
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-000000000001",
+   "app": "claude",
+   "role": "assistant",
+   "ts": 1791028804000,
+   "text": "The migration already ran. Do you want me to write a new one?"
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-000000000003",
+   "app": "claude",
+   "role": "user",
+   "ts": 1791028440000,
+   "text": "Move checkout to version 3 of the payments SDK."
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-000000000005",
+   "app": "claude",
+   "role": "user",
+   "ts": 1791028140000,
+   "text": "The solver takes 40 seconds for 500 stops. Get it under 5."
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-000000000005",
+   "app": "claude",
+   "role": "subagent",
+   "ts": 1791028190000,
+   "text": "Profile the solver on the 500-stop fixture"
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-000000000005",
+   "app": "claude",
+   "role": "assistant",
+   "ts": 1791028390000,
+   "text": "The solver now caches distance lookups. 500 stops take 3.8 seconds, down from 40."
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-000000000005",
+   "app": "claude",
+   "role": "subagent",
+   "ts": 1791028490000,
+   "text": "Profile the solver on the 500-stop fixture"
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-000000000007",
+   "app": "claude",
+   "role": "user",
+   "ts": 1791017250000,
+   "text": "Move staging to the new cluster."
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-000000000007",
+   "app": "claude",
+   "role": "assistant",
+   "ts": 1791017350000,
+   "text": "Staging runs on the new cluster. The old one can go after a week."
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-000000000009",
+   "app": "claude",
+   "role": "user",
+   "ts": 1791003450000,
+   "text": "Draft a checklist for the Q4 close."
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-000000000009",
+   "app": "claude",
+   "role": "assistant",
+   "ts": 1791003550000,
+   "text": "The checklist has 14 steps, grouped by team."
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-000000000011",
+   "app": "claude",
+   "role": "user",
+   "ts": 1791027150000,
+   "text": "Review the partial refunds change before I open a PR."
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-000000000011",
+   "app": "claude",
+   "role": "assistant",
+   "ts": 1791027250000,
+   "text": "Two notes: refunds over the order total aren't rejected yet, and the tests don't cover a second partial refund."
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-000000000014",
+   "app": "claude",
+   "role": "user",
+   "ts": 1791014250000,
+   "text": "Which of these experiments are worth keeping?"
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-000000000014",
+   "app": "claude",
+   "role": "assistant",
+   "ts": 1791014350000,
+   "text": "Keep geofence and route-sim. Snippets is turning into a tool of its own."
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+   "app": "claude",
+   "role": "assistant",
+   "ts": 1791027060000,
+   "text": "Looking at it."
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+   "app": "claude",
+   "role": "subagent",
+   "ts": 1791027061000,
+   "text": "Find rounding bugs in the ledger"
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+   "app": "claude",
+   "role": "subagent",
+   "ts": 1791027062000,
+   "text": "Found two."
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-0000000000e1",
+   "app": "claude",
+   "role": "assistant",
+   "ts": 1791027300000,
+   "text": "Should I also fix the CSV export?"
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-0000000000e4",
+   "app": "claude",
+   "role": "user",
+   "ts": 1791028808000,
+   "text": "A brand new session"
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-0000000000e5",
+   "app": "claude",
+   "role": "user",
+   "ts": 1791027600000,
+   "text": "Before the odd lines"
+  },
+  {
+   "session_id": "claude:0190d3e0-0000-7000-8000-0000000000e5",
+   "app": "claude",
+   "role": "user",
+   "ts": 1791027660000,
+   "text": "After them"
+  },
+  {
+   "session_id": "codex:0190d3e0-0000-7000-8000-000000000002",
+   "app": "codex",
+   "role": "user",
+   "ts": 1791028240000,
+   "text": "Rate-limit GET /orders to 60 requests a minute per API key."
+  },
+  {
+   "session_id": "codex:0190d3e0-0000-7000-8000-000000000004",
+   "app": "codex",
+   "role": "user",
+   "ts": 1791028040000,
+   "text": "Reconciliation is off by a cent on some months. Find out why and fix it."
+  },
+  {
+   "session_id": "codex:0190d3e0-0000-7000-8000-000000000006",
+   "app": "codex",
+   "role": "user",
+   "ts": 1791028060000,
+   "text": "Write a guide for the new partial refunds."
+  },
+  {
+   "session_id": "codex:0190d3e0-0000-7000-8000-000000000008",
+   "app": "codex",
+   "role": "user",
+   "ts": 1791010650000,
+   "text": "Add zoom on product images."
+  },
+  {
+   "session_id": "codex:0190d3e0-0000-7000-8000-000000000010",
+   "app": "codex",
+   "role": "user",
+   "ts": 1791020300000,
+   "text": "What does ^(?=.*\\d)(?=.*[a-z]).{8,}$ match?"
+  },
+  {
+   "session_id": "codex:0190d3e0-0000-7000-8000-000000000012",
+   "app": "codex",
+   "role": "user",
+   "ts": 1791025050000,
+   "text": "Benchmark the cached solver against the old one."
+  },
+  {
+   "session_id": "codex:0190d3e0-0000-7000-8000-000000000013",
+   "app": "codex",
+   "role": "user",
+   "ts": 1791026450000,
+   "text": "Turn the postcode list into delivery zones."
+  },
+  {
+   "session_id": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+   "app": "codex",
+   "role": "user",
+   "ts": 1791027030000,
+   "text": "Why is the build slow?"
+  },
+  {
+   "session_id": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+   "app": "codex",
+   "role": "assistant",
+   "ts": 1791027300000,
+   "text": "Make runs serially;\nadd -j8."
+  },
+  {
+   "session_id": "codex:0190d3e0-0000-7000-8000-0000000000e3",
+   "app": "codex",
+   "role": "user",
+   "ts": 1790758801000,
+   "text": "An archived question about invoices"
+  },
+  {
+   "session_id": "codex:0190d3e0-0000-7000-8000-0000000000e3",
+   "app": "codex",
+   "role": "assistant",
+   "ts": 1790758802000,
+   "text": "The invoices round in billing.py."
+  },
+  {
+   "session_id": "codex:0190d3e0-0000-7000-8000-0000000000e6",
+   "app": "codex",
+   "role": "user",
+   "ts": 1791027600000,
+   "text": "Before the odd lines"
+  }
+ ],
+ "found": {
+  "refunds": [
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "score": -1.630921336133904,
+    "hits": 5,
+    "snippets": [
+     {
+      "role": "assistant",
+      "ts": 1791028190000,
+      "text": "Logged the ⟦refund⟧ rules on the atlas-api and ⟦refunds⟧ pages."
+     },
+     {
+      "role": "user",
+      "ts": 1791027740000,
+      "text": "Add partial ⟦refunds⟧ to the orders API. Keep the existing full-⟦refund⟧ path working."
+     },
+     {
+      "role": "assistant",
+      "ts": 1791027990000,
+      "text": "Partial ⟦refunds⟧ work. `POST /orders/:id/⟦refunds⟧` takes an optional amount, and the full-⟦refund⟧ path … "
+     }
+    ]
+   },
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-000000000006",
+    "app": "codex",
+    "score": -1.3170854733092798,
+    "hits": 1,
+    "snippets": [
+     {
+      "role": "user",
+      "ts": 1791028060000,
+      "text": "Write a guide for the new partial ⟦refunds⟧."
+     }
+    ]
+   },
+   {
+    "sessionId": "claude:0190d3e0-0000-7000-8000-000000000011",
+    "app": "claude",
+    "score": -1.2521524260715686,
+    "hits": 2,
+    "snippets": [
+     {
+      "role": "assistant",
+      "ts": 1791027250000,
+      "text": " … ⟦refunds⟧ over the order total aren't rejected yet, and the tests don't cover a … "
+     },
+     {
+      "role": "user",
+      "ts": 1791027150000,
+      "text": "Review the partial ⟦refunds⟧ change before I open a PR."
+     }
+    ]
+   }
+  ],
+  "rounding solver": [],
+  "make": [
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+    "app": "codex",
+    "score": -3.8880830184547936,
+    "hits": 1,
+    "snippets": [
+     {
+      "role": "assistant",
+      "ts": 1791027300000,
+      "text": "⟦Make⟧ runs serially;\nadd -j8."
+     }
+    ]
+   }
+  ],
+  "invoices": [
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e3",
+    "app": "codex",
+    "score": -3.2384083279548586,
+    "hits": 2,
+    "snippets": [
+     {
+      "role": "user",
+      "ts": 1790758801000,
+      "text": "An archived question about ⟦invoices⟧"
+     },
+     {
+      "role": "assistant",
+      "ts": 1790758802000,
+      "text": "The ⟦invoices⟧ round in billing.py."
+     }
+    ]
+   }
+  ],
+  "Why is the build": [
+   {
+    "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
+    "app": "codex",
+    "score": -9.586844075421313,
+    "hits": 1,
+    "snippets": [
+     {
+      "role": "user",
+      "ts": 1791027030000,
+      "text": "⟦Why⟧ ⟦is⟧ ⟦the⟧ ⟦build⟧ slow?"
+     }
+    ]
+   }
+  ]
+ }
+}

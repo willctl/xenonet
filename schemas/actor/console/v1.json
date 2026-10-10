@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/actor/console/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "The person at the console",
+  "description": "What XenoNet's own window reports of you to POST /api/actors/you, with the key only the window holds: your presence, and what you did as node ids and action names. Never what you type.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "actor/console/v1"
+    },
+    "presence": {
+      "type": "string",
+      "enum": [
+        "working",
+        "idle",
+        "away"
+      ]
+    },
+    "did": {
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "what": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "looked",
+                  "read",
+                  "opened",
+                  "handed-off",
+                  "started",
+                  "terminal"
+                ]
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "looked: a selection that held 3 s; read: a preview or stats; opened: in its app; handed-off and started: a session; terminal: one opened in a folder"
+          },
+          "node": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "The graph node it was done to"
+          },
+          "at": {
+            "type": "number",
+            "description": "Epoch milliseconds"
+          },
+          "to": {
+            "description": "For handed-off: the app it went to",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "claude",
+                  "codex"
+                ]
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "app": {
+            "description": "For started: the app the session starts in",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "claude",
+                  "codex"
+                ]
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "what",
+          "node"
+        ],
+        "additionalProperties": {},
+        "description": "Something you did, as a node id and an action's name: never text"
+      }
+    }
+  },
+  "additionalProperties": {}
+}

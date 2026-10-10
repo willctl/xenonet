@@ -1,0 +1,461 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/engine/message/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A message between agents",
+  "description": "A message from one agent to another, to everyone in a repo (target repo:<name>) or to all (\"all\"), at most 4,000 characters.",
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "from": {
+          "type": "string",
+          "description": "An agent: claude:<session id> or codex:<thread id>, or an actor, actor:<slug>"
+        },
+        "target": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "at": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "how": {
+          "description": "How XenoNet knows who sent it (its envelope's method); null for one sent before XenoNet kept that",
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "session",
+                    "token",
+                    "window",
+                    "grant",
+                    "gateway"
+                  ]
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "to": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "An agent: claude:<session id> or codex:<thread id>, or an actor, actor:<slug>"
+              },
+              "seen": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "seen"
+            ],
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": [
+        "id",
+        "from",
+        "target",
+        "text",
+        "at",
+        "to"
+      ],
+      "additionalProperties": {},
+      "description": "In the console's snapshot, GET /api/engine/state"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "from": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "An agent: claude:<session id> or codex:<thread id>, or an actor, actor:<slug>"
+            },
+            "title": {
+              "type": "string"
+            },
+            "app": {
+              "type": "string",
+              "enum": [
+                "claude",
+                "codex",
+                "actor"
+              ]
+            },
+            "project": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "branch": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "app",
+            "project",
+            "branch"
+          ],
+          "additionalProperties": {}
+        },
+        "to": {
+          "type": "string",
+          "description": "\"you\", or what it was sent to"
+        },
+        "text": {
+          "type": "string"
+        },
+        "at": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "replyTo": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "envelope": {
+          "description": "How XenoNet knows who sent it; null for one sent before XenoNet kept that",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "schema": {
+                  "type": "string",
+                  "const": "message/envelope/v1"
+                },
+                "mid": {
+                  "type": "string"
+                },
+                "at": {
+                  "type": "number",
+                  "description": "Epoch milliseconds"
+                },
+                "sender": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "agent",
+                            "actor",
+                            "you"
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "product": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "kind",
+                    "name",
+                    "product"
+                  ],
+                  "additionalProperties": {}
+                },
+                "auth": {
+                  "type": "object",
+                  "properties": {
+                    "method": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "session",
+                            "token",
+                            "window",
+                            "grant",
+                            "gateway"
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "description": "How it proved who it is"
+                    },
+                    "process": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "signed",
+                            "checked",
+                            "unchecked",
+                            "n/a"
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "description": "What XenoNet saw of the program that sent it"
+                    },
+                    "strength": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "strong",
+                            "partial",
+                            "weak"
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "method",
+                    "process",
+                    "strength"
+                  ],
+                  "additionalProperties": {}
+                },
+                "client": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "exe": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "exe",
+                        "name"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The program it came from, with the home folder as ~, when XenoNet saw it"
+                },
+                "transport": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": "string",
+                  "description": "The same in a sentence: verified: …"
+                }
+              },
+              "required": [
+                "schema",
+                "mid",
+                "at",
+                "sender",
+                "auth",
+                "client",
+                "transport",
+                "line"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "from",
+        "to",
+        "text",
+        "at",
+        "replyTo"
+      ],
+      "additionalProperties": {},
+      "description": "In an agent's inbox"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "from": {
+          "type": "string",
+          "description": "An agent: claude:<session id> or codex:<thread id>, or an actor, actor:<slug>"
+        },
+        "to": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "An agent: claude:<session id> or codex:<thread id>, or an actor, actor:<slug>"
+          }
+        },
+        "target": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "verified": {
+          "description": "How XenoNet knows who sent it, in a sentence",
+          "type": "string"
+        },
+        "strength": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "strong",
+                "partial",
+                "weak"
+              ]
+            },
+            {
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "from",
+        "to",
+        "target",
+        "text",
+        "ts"
+      ],
+      "additionalProperties": {},
+      "description": "The agent-message event"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sender": {
+          "type": "string",
+          "description": "An agent: claude:<session id> or codex:<thread id>, or an actor, actor:<slug>"
+        },
+        "target": {
+          "type": "string"
+        },
+        "scope": {
+          "description": "For a message to a repo, the repo's git folder or project",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "body": {
+          "type": "string"
+        },
+        "reply_to": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "envelope": {
+          "description": "How XenoNet knew who sent it, as message/envelope/v1 JSON (core/engine/attest.js); null before it kept that",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "sender",
+        "target",
+        "scope",
+        "body",
+        "reply_to",
+        "created_at"
+      ],
+      "additionalProperties": {},
+      "description": "As engine.sqlite keeps it"
+    }
+  ]
+}

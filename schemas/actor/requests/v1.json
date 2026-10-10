@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/actor/requests/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Registrations waiting for you",
+  "description": "What GET /api/actors/requests answers XenoNet's own window, with its key: each program waiting for an Allow, what it asks, who asked and when it lapses.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "actor/requests/v1"
+    },
+    "at": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "requests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The request's own id: POST /api/actors/requests/<id> answers it"
+          },
+          "actor": {
+            "type": "string",
+            "pattern": "^(@[a-z][a-z0-9-]{1,31}:)?actor:[a-z0-9][a-z0-9-]{0,31}$",
+            "description": "The actor it would be"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "product": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+                    "description": "A slug: hermes-agent, grok-bot, muse, dots"
+                  },
+                  "vendor": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "version": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "vendor",
+                  "version"
+                ],
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The product it says it is; null for a program of your own"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "spawn-sessions",
+                    "edit-repos",
+                    "run-commands",
+                    "message-people",
+                    "message-agents",
+                    "schedule",
+                    "browse",
+                    "use-computer"
+                  ]
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "What it asks to be allowed"
+          },
+          "heartbeatMs": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pid": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The process it named, if any"
+          },
+          "asker": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "program": {
+                    "type": "string"
+                  },
+                  "parents": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Its parents, up to the first app or terminal"
+                  },
+                  "folder": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "program",
+                  "parents",
+                  "folder"
+                ],
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who asked, with ~ for the home folder; null where XenoNet couldn't look"
+          },
+          "joins": {
+            "type": "boolean",
+            "description": "It would join an actor XenoNet already knows, such as a product's observed one"
+          },
+          "at": {
+            "type": "number",
+            "description": "When it asked, in epoch milliseconds"
+          },
+          "expiresAt": {
+            "type": "number",
+            "description": "When it lapses unanswered, in epoch milliseconds"
+          }
+        },
+        "required": [
+          "id",
+          "actor",
+          "name",
+          "product",
+          "capabilities",
+          "heartbeatMs",
+          "pid",
+          "asker",
+          "joins",
+          "at",
+          "expiresAt"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "Oldest first"
+    }
+  },
+  "required": [
+    "at",
+    "requests"
+  ],
+  "additionalProperties": {}
+}

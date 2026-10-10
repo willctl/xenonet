@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/drift/log/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "XenoNet's drift log",
+  "description": "drift.json in the cache folder: the drift the lenient readers have found in the other apps' data, merged across the processes that write it (the server, xenonet drift, npm run contracts), and when you last looked.",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "number",
+      "const": 1,
+      "description": "drift.json's own version; its records each say what they are"
+    },
+    "lookedAt": {
+      "anyOf": [
+        {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "When you last looked at the drift (xenonet drift, or the console; never npm run contracts): what's first seen after it is new, and the doctor says so"
+    },
+    "records": {
+      "maxItems": 500,
+      "type": "array",
+      "items": {
+        "$ref": "https://xenonet.dev/schemas/drift/record/v1.json"
+      },
+      "description": "The drift kept, merged across vendor versions, at most 500: the ones seen least lately go first"
+    }
+  },
+  "required": [
+    "version",
+    "lookedAt",
+    "records"
+  ],
+  "additionalProperties": {}
+}

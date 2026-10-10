@@ -1,0 +1,318 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/state/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "XenoNet's state, v1",
+  "description": "state.json before it had a version. Every part is optional: XenoNet filled in what was missing when it read the file.",
+  "type": "object",
+  "properties": {
+    "version": {
+      "description": "Not written: a file without a version is v1",
+      "type": "number",
+      "const": 1
+    },
+    "layout": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "z": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "z"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "Where you dragged nodes, by node id"
+    },
+    "acks": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "number",
+        "description": "Epoch milliseconds"
+      },
+      "description": "When you dismissed a session's \"needs you\", by session id"
+    },
+    "marks": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {},
+      "description": "Once-a-day markers, by name"
+    },
+    "projects": {
+      "type": "object",
+      "properties": {
+        "rules": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "as": {
+                "type": "string",
+                "enum": [
+                  "project",
+                  "group",
+                  "ignore"
+                ]
+              },
+              "at": {
+                "type": "number",
+                "description": "Epoch milliseconds"
+              }
+            },
+            "required": [
+              "path",
+              "as",
+              "at"
+            ],
+            "additionalProperties": {}
+          },
+          "description": "Your rules for folders in the projects folder, by path key"
+        },
+        "codex": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ranAt": {
+                  "type": "number",
+                  "description": "Epoch milliseconds"
+                },
+                "ms": {
+                  "type": "number"
+                },
+                "fingerprint": {
+                  "description": "Of the folders it was sent, to tell when they've changed",
+                  "type": "string"
+                },
+                "sent": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "by": {
+                  "description": "Who made them: codex, or a decision model by its id (core/decide.js)",
+                  "type": "string"
+                },
+                "picks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "Inside the projects folder, with forward slashes"
+                      },
+                      "as": {
+                        "type": "string",
+                        "enum": [
+                          "project",
+                          "group"
+                        ]
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "as"
+                    ],
+                    "additionalProperties": {}
+                  }
+                }
+              },
+              "required": [
+                "ranAt",
+                "picks"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": {}
+    },
+    "identities": {
+      "type": "object",
+      "properties": {
+        "names": {
+          "description": "Names you gave identities, by id",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "hidden": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "pins": {
+          "description": "Sessions and projects you tied to an identity, by node id",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "identity": {
+                "type": "string"
+              },
+              "at": {
+                "type": "number",
+                "description": "Epoch milliseconds"
+              }
+            },
+            "required": [
+              "identity",
+              "at"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "known": {
+          "description": "Every identity XenoNet has seen, by id",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "handle": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "detail": {
+                "type": "object",
+                "properties": {
+                  "plan": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "org": {
+                    "description": "A Claude team's or enterprise's name",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "host": {
+                    "description": "A GitHub account's host",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "The name git commits carry",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": {}
+              },
+              "firstSeen": {
+                "type": "number",
+                "description": "Epoch milliseconds"
+              },
+              "lastSeen": {
+                "type": "number",
+                "description": "Epoch milliseconds"
+              }
+            },
+            "required": [
+              "kind",
+              "handle",
+              "detail",
+              "firstSeen",
+              "lastSeen"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "signins": {
+          "description": "Who each app was signed in as, over time, by app",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "number",
+                  "description": "Epoch milliseconds"
+                },
+                "to": {
+                  "type": "number",
+                  "description": "Epoch milliseconds"
+                }
+              },
+              "required": [
+                "id",
+                "from",
+                "to"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        }
+      },
+      "additionalProperties": {}
+    },
+    "theme": {
+      "description": "The theme in use, by id",
+      "type": "string"
+    }
+  },
+  "additionalProperties": {}
+}

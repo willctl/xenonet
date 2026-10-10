@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/doctor/result/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A check",
+  "description": "One of the doctor's checks: whether something XenoNet needs is in place, and how to fix it when it isn't.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "<group>.<check>: xenonet.server, claude.auth, agents.checked…"
+    },
+    "group": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "ok",
+        "info",
+        "warn",
+        "fail",
+        "skip"
+      ],
+      "description": "info is a fact, not a problem; skip means the check couldn't run here"
+    },
+    "detail": {
+      "type": "string"
+    },
+    "fix": {
+      "type": "string"
+    },
+    "ms": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "group",
+    "title",
+    "status",
+    "detail",
+    "ms"
+  ],
+  "additionalProperties": {}
+}

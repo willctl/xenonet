@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>XenoNet</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <div id="scene"></div>
+    <div class="fx-vignette"></div>
+    <div class="fx-scanlines"></div>
+    <div class="titlebar-drag"></div>
+
+    <div class="alerts" id="alerts" hidden></div>
+
+    <aside class="hud dock hud-left">
+      <header class="panel brand">
+        <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M32 24L40 32L32 40L24 32Z M9 9H19V19H9Z M45 9H55V19H45Z M9 45H19V55H9Z M45 45H55V55H45Z M22.77 19.23L28.77 25.23L25.23 28.77L19.23 22.77Z M44.77 22.77L38.77 28.77L35.23 25.23L41.23 19.23Z M19.23 41.23L25.23 35.23L28.77 38.77L22.77 44.77Z M41.23 44.77L35.23 38.77L38.77 35.23L44.77 41.23Z" />
+        </svg>
+        <div>
+          <div class="brand-name">XenoNet</div>
+          <div class="brand-sub">agent network</div>
+          <div class="brand-root" id="root-name">~/Projects</div>
+        </div>
+      </header>
+      <section class="panel controls" data-sheet="filters">
+        <div class="panel-title"><span>Filters</span><span class="tick">01</span></div>
+        <label class="search">
+          <span class="search-glyph">⌕</span>
+          <input id="search" type="search" placeholder="Search the map" autocomplete="off" spellcheck="false" />
+          <kbd>/</kbd>
+        </label>
+        <div class="search-results" id="search-results"></div>
+        <div class="toggles">
+          <button class="toggle on" data-filter="claude"><i class="sw claude"></i>Claude Code<span class="count" data-count="claude"></span></button>
+          <button class="toggle on" data-filter="codex"><i class="sw codex"></i>Codex<span class="count" data-count="codex"></span></button>
+          <button class="toggle on" data-filter="archived"><i class="sw archived"></i>Archived<span class="count" data-count="archived"></span></button>
+          <button class="toggle on" data-filter="external" data-root-label="outside"><i class="sw zone"></i>Outside ~/Projects</button>
+          <button class="toggle" data-scope-background title="Codex's guardian, review and compaction threads, and codex exec runs"><i class="sw background"></i>Background agents</button>
+        </div>
+        <div class="id-filters" id="id-filters" hidden></div>
+        <div class="session-scope">
+          <div class="segmented" id="session-scope" title="How far back the map goes. Working sessions and ones waiting on you always show.">
+            <button data-scope="24h">24h</button>
+            <button data-scope="7d">7d</button>
+            <button data-scope="30d">30d</button>
+            <button data-scope="all">All</button>
+          </div>
+          <div class="session-scope-note" id="session-scope-note"></div>
+        </div>
+        <div class="segmented" id="layout">
+          <button class="on" data-layout="radialout">Radial</button>
+          <button data-layout="free">Free</button>
+        </div>
+      </section>
+      <section class="panel agents-panel" data-sheet="sessions">
+        <div class="panel-title"><span>Active sessions</span><span class="tick" id="agents-count">00</span></div>
+        <ol id="agents" class="agents"></ol>
+      </section>
+      <section class="panel feed" data-sheet="activity">
+        <div class="panel-title"><span>Activity</span><span class="tick live-tick">● live</span></div>
+        <ol id="feed"></ol>
+      </section>
+    </aside>
+
+    <aside class="hud dock hud-right">
+      <section class="panel status" data-sheet="link">
+        <div class="status-line">
+          <span class="led" id="link-led"><svg class="uplink" viewBox="0 0 32 32" aria-hidden="true"><circle class="ul-ping" cx="16" cy="16" r="6" /><circle class="ul-ring" cx="16" cy="16" r="14" pathLength="100" /><path class="ul-arc" d="M10.3 10.3a8 8 0 0 0 0 11.4M21.7 10.3a8 8 0 0 1 0 11.4" /><path class="ul-arc ul-far" d="M6.8 6.8a13 13 0 0 0 0 18.4M25.2 6.8a13 13 0 0 1 0 18.4" /><circle class="ul-core" cx="16" cy="16" r="2.8" /></svg></span>
+          <span class="status-words"><span id="link-text">connecting</span><span class="status-sub" id="link-sub"></span></span>
+        </div>
+        <div class="clock-wrap"><div class="clock" id="clock">--:--:--</div><div class="clock-date" id="clock-date"></div></div>
+        <svg class="status-stream" viewBox="0 0 300 6" preserveAspectRatio="none" aria-hidden="true"><path class="ss-base" d="M0 3H300" /><path class="ss-flow" d="M0 3H300" /><path class="ss-flow ss-slow" d="M0 3H300" /></svg>
+        <div class="status-sources" id="sources"></div>
+        <div class="status-tools">
+          <button class="audio" id="audio" data-audio title="Sound · press M to mute">
+            <span class="eq"><i></i><i></i><i></i><i></i></span>
+            <span class="audio-label">sound</span>
+          </button>
+          <button class="mini" id="palette-open" title="Commands · Ctrl+K" data-key="Mod+K" data-key-title="Mod+K">Ctrl+K</button>
+          <button class="mini" id="environment-open" title="Choose your surroundings, independently of the theme">environment</button>
+          <button class="mini" id="terminal-toggle" title="Terminal · Ctrl+`" data-key-title="Ctrl+`" hidden>›_ terminal</button>
+        </div>
+        <div class="spotify-chip" id="spotify" hidden></div>
+      </section>
+      <section class="panel sysmon" id="sysmon" data-live data-sheet="load">
+        <div class="panel-title"><span>This computer</span><span class="tick" id="sysmon-tick">--</span></div>
+        <div data-sm-body></div>
+      </section>
+      <section class="panel telemetry" data-sheet="tokens">
+        <div class="panel-title"><span>Token use</span><span class="tick">tokens / min</span></div>
+        <div class="flux">
+          <div class="flux-now"><span id="flux-tpm">0</span><small>/min</small></div>
+          <div class="flux-total"><span id="flux-total">0</span><small>in the last 24 h</small></div>
+        </div>
+        <div class="spend" id="spend" hidden>
+          <svg class="spend-mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 14.5 8 8 14.5 1.5 8Z" /><path class="sp-in" d="M8 4.5 11.5 8 8 11.5 4.5 8Z" /></svg>
+          <span class="spend-today"><small>about</small> <b id="spend-today">$0</b> <small>today</small></span>
+          <span class="spend-pace"><b id="spend-pace">$0</b> <small>an hour at this pace</small></span>
+        </div>
+        <div class="scope-wrap">
+          <canvas id="scope"></canvas>
+          <div class="scope-axis"><span>−5m</span><span>−4m</span><span>−3m</span><span>−2m</span><span>−1m</span><span>now</span></div>
+        </div>
+        <div class="scope-legend"><span><i class="sw claude"></i>claude</span><span><i class="sw codex"></i>codex</span></div>
+        <div class="gauges" id="gauges"></div>
+      </section>
+      <section class="panel inspector" id="inspector" data-sheet="selected" hidden></section>
+      <section class="panel legend" id="legend" data-sheet="legend">
+        <button class="panel-title legend-toggle" data-legend-toggle aria-expanded="true"><span>Legend</span><span class="tick legend-caret">▾</span></button>
+        <div class="legend-body">
+          <div class="legend-group">
+            <div class="sub-k">Places</div>
+            <span data-root-label="name"><i class="glyph core"></i>~/Projects</span>
+            <span><i class="glyph project"></i>Project</span>
+            <span><i class="glyph group"></i>Group of projects</span>
+            <span><i class="glyph native"></i>Codex project</span>
+            <span data-root-label="outside"><i class="glyph zone"></i>Outside ~/Projects</span>
+            <span><i class="glyph resource"></i>Shared system</span>
+            <span><i class="glyph wiki"></i>Wiki</span>
+            <span><i class="glyph pressure"></i>Uncommitted work</span>
+            <span title="Name an identity in Your identities, from the command palette, and its projects stand on a ring in its color"><i class="glyph id-ring"></i>Named identity</span>
+          </div>
+          <div class="legend-group">
+            <div class="sub-k">Sessions</div>
+            <span><i class="glyph claude"></i>Claude Code</span>
+            <span><i class="glyph codex"></i>Codex</span>
+            <span><i class="glyph beacon"></i>Needs you</span>
+          </div>
+          <div class="legend-group">
+            <div class="sub-k">Lines</div>
+            <span><i class="glyph lineage"></i>Spawned</span>
+            <span><i class="glyph collab"></i>Edited the same files</span>
+            <span><i class="glyph collision"></i>Collision</span>
+            <span><i class="glyph sync"></i>Working together</span>
+          </div>
+        </div>
+      </section>
+    </aside>
+
+    <nav class="sheet-tabs" id="sheet-tabs" aria-label="Panels"></nav>
+
+    <footer class="hud hud-bottom">
+      <div class="hints"><span data-key="Mod+K">Ctrl+K</span> commands &nbsp;│&nbsp; drag to turn &nbsp;│&nbsp; <span data-key="Alt">Alt</span>-drag to move &nbsp;│&nbsp; double-click to preview &nbsp;│&nbsp; W wallpaper &nbsp;│&nbsp; R reset &nbsp;│&nbsp; M mute</div>
+    </footer>
+
+    <div class="gather" id="gather" hidden>
+      <span class="gather-k">Gathered</span>
+      <span class="gather-text" data-gather-text></span>
+      <span class="gather-keys"><kbd>↑</kbd><kbd>↓</kbd> step</span>
+      <button class="mini" data-gather-done title="Put them back where they were · Esc">Put back · Esc</button>
+    </div>
+    <div class="replay" id="replay" hidden></div>
+    <div class="wallpaper-hint">Press W or Esc to leave wallpaper mode</div>
+    <section class="tdrawer" id="terminal" hidden></section>
+    <div class="palette" id="palette" hidden></div>
+    <div class="modal" id="modal" hidden></div>
+
+    <div class="tooltip" id="tooltip" hidden></div>
+    <div class="toast" id="toast" hidden></div>
+    <div class="boot" id="boot">
+      <div class="boot-ring"></div>
+      <div class="boot-text">loading your workspace</div>
+    </div>
+
+    <div class="preview" id="preview" hidden></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

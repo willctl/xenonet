@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/anthropic/claude-code/config/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Claude Code's ~/.claude.json",
+  "description": "The parts of Claude Code's ~/.claude.json (or $CLAUDE_CONFIG_DIR/.claude.json) XenoNet reads: the signed-in account, and its own MCP server entry. The file carries no version, so the newest schema reads it.",
+  "type": "object",
+  "properties": {
+    "oauthAccount": {
+      "description": "The account Claude Code is signed in to; never its name fields",
+      "type": "object",
+      "properties": {
+        "accountUuid": {
+          "type": "string"
+        },
+        "organizationUuid": {
+          "type": "string"
+        },
+        "emailAddress": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "organizationType": {
+          "description": "claude_max, claude_pro, claude_team or claude_enterprise",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "organizationName": {
+          "description": "Read for team and enterprise organizations only",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "accountUuid",
+        "organizationUuid"
+      ],
+      "additionalProperties": {}
+    },
+    "mcpServers": {
+      "description": "XenoNet's own entry, which connecting writes and checks",
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "env": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": {}
+      }
+    }
+  },
+  "additionalProperties": {},
+  "x-xenonet": {
+    "vendorVersions": "*",
+    "lenient": true
+  }
+}
