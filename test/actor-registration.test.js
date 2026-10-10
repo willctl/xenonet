@@ -566,7 +566,7 @@ test("each kind needs the capability you allowed", async () => {
     "spawned needs the spawn-sessions capability, which it wasn't allowed",
     "edited needs the edit-repos capability, which it wasn't allowed",
     "ran needs the run-commands capability, which it wasn't allowed",
-    "messaged needs the message-people capability, which it wasn't allowed (messaged is a message to someone outside XenoNet, by email or a chat app; to write to an agent or another actor, use xenonet actor send)",
+    "messaged needs the message-people capability, which it wasn't allowed (messaged is a message to someone outside XenoNet, by email or a chat app; to write to an SI or another actor, use xenonet actor send)",
   ]);
 });
 

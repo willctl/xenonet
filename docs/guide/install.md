@@ -4,11 +4,11 @@
 
 ## Updates
 
-Open **Check for XenoNet updates** in the command palette or **Updates...** in the tray or Mac app menu. XenoNet checks after startup and every six hours. Windows downloads Desktop updates in the background and waits for you to choose **Restart and update**. From 0.6 onward, restarting Desktop keeps the service, terminals and MCP processes running. Finish terminal work before upgrading an older version to 0.6. You can turn off background checks and check manually instead.
+Open **Check for XenoNet updates** in the command palette or **Updates...** in the tray or Mac app menu. XenoNet checks after startup and every six hours. Windows downloads Desktop updates in the background and waits for you to choose **Restart and update**. Restarting Desktop keeps the service, terminals and MCP processes running. You can turn off background checks and check manually instead.
 
 The bundle installs Desktop, Service and Tools on first launch. They update separately after that. If a service update finds running terminals, close them and run the update again. Tools updates apply to new commands and MCP processes. [Components and updates](components.md) covers headless installs and the compatibility checks.
 
-Unsigned Mac builds show that a new release is available and link to its download. Replace XenoNet in Applications to update it. Your settings stay in place. If you use 0.4.0, install a newer release once to get update checks.
+Unsigned Mac builds show that a new release is available and link to its download. Replace XenoNet in Applications to update it. Your settings stay in place.
 
 ## Windows
 

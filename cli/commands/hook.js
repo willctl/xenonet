@@ -4,7 +4,8 @@
 // hear, in the hook output format both read. If XenoNet isn't running, it
 // prints nothing and the agent carries on. XENONET_PORT says which XenoNet.
 export const help = `Passes a Claude Code or Codex hook event (JSON on stdin) to XenoNet and
-prints XenoNet's answer for the agent. Their settings run it; you don't need to.`;
+prints XenoNet's answer for the session. Their settings run it, so you don't
+need to.`;
 
 export async function run([app], flags) {
   app = app === "claude" ? "claude" : "codex";

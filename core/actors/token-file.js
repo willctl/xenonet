@@ -68,8 +68,8 @@ export function tokenFileRefusal(file, { force = false, projectsDir = null } = {
   if (force) return null;
   const full = path.resolve(file);
   const tree = gitTreeOf(path.dirname(full));
-  if (tree) return `${full} is inside a git working tree (${tree}), where agents read freely and tokens get committed; pick a file elsewhere, such as ~/.config/<name>/xenonet.token, or pass --force`;
-  if (projectsDir && isUnder(pathKey(full), pathKey(projectsDir))) return `${full} is inside the projects folder, where agents read freely; pick a file elsewhere, such as ~/.config/<name>/xenonet.token, or pass --force`;
+  if (tree) return `${full} is inside a git working tree (${tree}), where SIs read freely and tokens get committed. Pick a file elsewhere, such as ~/.config/<name>/xenonet.token, or pass --force`;
+  if (projectsDir && isUnder(pathKey(full), pathKey(projectsDir))) return `${full} is inside the projects folder, where SIs read freely. Pick a file elsewhere, such as ~/.config/<name>/xenonet.token, or pass --force`;
   if (fs.existsSync(full)) return `${full} is there already; pass --force to replace it`;
   return null;
 }

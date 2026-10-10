@@ -47,7 +47,7 @@ test("xenonet status counts the actors apart from the agents, and never as sessi
   try {
     const out = await xenonet(["status", "--port", String(s.port)]);
     assert.equal(out.code, 0);
-    assert.match(out.stdout, /Agents\s+1 working, 1 idle\n/, "two sessions, neither connected");
+    assert.match(out.stdout, /SIs\s+1 working, 1 idle\n/, "two sessions, neither connected");
     assert.match(out.stdout, /Actors\s+1 working, 1 idle, 1 offline\n/, "you, a placeholder here, aren't counted");
     const data = JSON.parse((await xenonet(["status", "--json", "--port", String(s.port)])).stdout);
     assert.deepEqual(data.agents.map((a) => a.id), [A.id, B.id]);
@@ -63,7 +63,7 @@ test("xenonet status counts the actors apart from the agents, and never as sessi
   const quiet = await fakeXenoNet({ "GET /api/health": health, "GET /api/summary": summary, "GET /api/engine/agents": [{ ...A, reachable: true }] });
   try {
     const out = await xenonet(["status", "--port", String(quiet.port)]);
-    assert.match(out.stdout, /Agents\s+1 working, 0 idle, 1 connected to XenoNet\n/);
+    assert.match(out.stdout, /SIs\s+1 working, 0 idle, 1 connected to XenoNet\n/);
     assert.doesNotMatch(out.stdout, /Actors/);
   } finally {
     quiet.close();

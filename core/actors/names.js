@@ -104,7 +104,7 @@ export function checkName(raw, product = null) {
   if (NOT_ONE_LINE.test(name)) return { ok: false, reason: "a name is one line of plain text" };
   // Agents read a name quoted ("Wren" (actor, …)), so nothing in it may
   // close the quote or pass for one.
-  if (/["`\\\u201c\u201d]/.test(name)) return { ok: false, reason: "a name can't hold quotation marks or backslashes, since agents read it quoted" };
+  if (/["`\\\u201c\u201d]/.test(name)) return { ok: false, reason: "a name can't hold quotation marks or backslashes, since SIs read it quoted" };
   if (!name || [...name].length > 64) return { ok: false, reason: "a name is 1 to 64 characters" };
   if (INVISIBLE.test(name)) return { ok: false, reason: "a name can't hold characters that draw as nothing" };
   if (!nameKey(name)) return { ok: false, reason: "a name has letters or digits in it" };

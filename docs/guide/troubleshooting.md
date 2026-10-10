@@ -1,6 +1,6 @@
 # When something goes wrong
 
-XenoNet keeps a log of what went wrong, checks its own setup every half hour, and can hand both to an agent on your computer to look at with you.
+XenoNet keeps a log of what went wrong, checks its own setup every half hour, and can hand both to an SI (super intelligence) on your computer to look at with you.
 
 ## See what went wrong
 
@@ -26,9 +26,9 @@ The log lives in XenoNet's state folder, in `logs/`: `service.ndjson`, `desktop.
 xenonet doctor
 ```
 
-This checks sign-ins, the folders XenoNet reads, its own parts, its launcher, whether your agents are connected and recent errors, with a fix for each problem. XenoNet runs the same checks every half hour. When a check finds a new problem, it goes in the log too, so you can see it later even after it clears.
+This checks sign-ins, the folders XenoNet reads, its own parts, its launcher, whether your SIs are connected and recent errors, with a fix for each problem. XenoNet runs the same checks every half hour. When a check finds a new problem, it goes in the log too, so you can see it later even after it clears.
 
-## Get help from an agent
+## Get help from an SI
 
 ```bash
 xenonet diagnose --ask
@@ -41,7 +41,7 @@ XenoNet writes what it can tell (the doctor's findings, its errors by code, wher
 - `--app claude` uses Claude Code instead, in plan mode.
 - `--model <model>` picks the model. `XENONET_DIAGNOSE_APP` and `XENONET_DIAGNOSE_MODEL` set your defaults.
 
-In the window, the doctor's **Ask an agent…** does the same in a terminal tab, and remembers the agent and model you chose.
+In the window, the doctor's **Ask an SI…** does the same in a terminal tab, and remembers the app and model you chose.
 
 ## Share what XenoNet can tell
 
@@ -55,6 +55,6 @@ This prints the same summary as Markdown, ready to paste into an issue (`--json`
 
 **Port 47840 is already in use.** Another program holds XenoNet's port. The log names it when it's another XenoNet, such as XenoNet Dev started on the wrong port. Quit that one, or start XenoNet with another `XENONET_PORT`.
 
-**Agents are "connected, but … is gone".** XenoNet's hooks run files that aren't there any more, often from a checkout that was moved or deleted. Run `xenonet connect`. Each XenoNet on the computer (the installed one, XenoNet Dev) keeps its own hooks and MCP server, so connecting one never removes the other's.
+**SIs are "connected, but … is gone".** XenoNet's hooks run files that aren't there any more, often from a checkout that was moved or deleted. Run `xenonet connect`. Each XenoNet on the computer (the installed one, XenoNet Dev) keeps its own hooks and MCP server, so connecting one never removes the other's.
 
 **The launcher can't find XenoNet's Tools.** The `xenonet` command and the MCP servers can't start, though hooks still reach XenoNet. Open XenoNet, which repairs them, or install XenoNet again.

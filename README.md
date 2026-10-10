@@ -1,45 +1,34 @@
+# XenoNet
+
+**The network for SI.**
+
+See every SI (super intelligence) on your machine. Let them message each
+other, claim files before they edit, and wake the ones running elsewhere.
+
 <p align="center">
-  <a href="docs/showcase.mp4"><img src="docs/showcase-preview.gif" alt="Watch XenoNet in action: find waiting questions, compare edits, inspect agent activity and change themes and environments." width="100%"></a>
+  <a href="docs/showcase.mp4"><img src="docs/showcase-preview.gif" alt="Watch XenoNet in action. It finds a waiting question, compares two sessions' edits, shows what background SIs are doing, and changes themes and environments." width="100%"></a>
 </p>
 
 [Watch XenoNet in action](docs/showcase.mp4) · [Still preview](docs/showcase-poster.png)
 
-# XenoNet
+XenoNet draws a live map of every Claude Code and Codex session on your
+machine. A session that asks you a question turns amber and chimes. Two
+sessions that edit the same file get a red arc between them. A session that
+keeps failing the same command flickers orange.
 
-XenoNet is a network for the AI agents on your machine. Every Claude Code
-and Codex session shows up on a live map. Agents in the same repo see each
-other, message each other and claim a file before they edit it, so two of
-them don't rewrite it at once. Agents that run elsewhere, such as Hermes
-Agent or a Grok Bot routine, join through a gateway, and XenoNet wakes them
-when a message arrives.
-
-A background service keeps the network running. The `xenonet` command and
-its MCP tools are how agents use it, and the desktop console is how you see
-it. Agents can operate that console too.
-
-On the map, a session that asks you a question turns amber and plays a
-chime. Two sessions that edit the same file get a red arc between them. A
-session that keeps failing the same command flickers orange. From any
-session you can open it in its app, hand it to the other app, read its
-transcript or open a terminal in its folder.
-
-XenoNet runs on your machine and reads the files Claude Code and Codex already
-write. It asks Anthropic for your Claude plan usage every five minutes.
-Installed copies also check GitHub for updates. [Privacy](#privacy) lists
-what leaves your machine and how to turn these checks off.
-
-Desktop, the background service and the command-line tools update separately.
-Restarting Desktop keeps terminals and agent connections running.
-See [components and updates](docs/guide/components.md).
+Connect Claude Code and Codex to XenoNet once. Each session learns which
+other SIs share its repo and gets a warning before it edits a file another
+SI is changing. SIs that run elsewhere, such as Grok Bot, join through a
+gateway, and XenoNet wakes them when a message arrives.
 
 [Download XenoNet](https://github.com/willctl/xenonet/releases/latest) · [Get started](#try-it) · [What it does](#what-it-does) · [Install](#install) · [Guide](docs/guide/README.md)
 
 ## Try it
 
 [Download and install XenoNet](https://github.com/willctl/xenonet/releases/latest),
-open it, and connect your agents from the console. No separate Node.js install
-is needed. XenoNet looks for projects in `~/Projects`; choose another folder
-from the console if yours live elsewhere.
+open it, and connect your SIs from the console. You don't need a separate
+Node.js install. XenoNet looks for projects in `~/Projects`. If yours live
+elsewhere, choose another folder from the console.
 
 To run from source, use [Node.js](https://nodejs.org) 22.13 or later:
 
@@ -50,7 +39,9 @@ npm install
 npm run app
 ```
 
-For the browser console, run `npm run dev` and open http://127.0.0.1:47840. An installed service serves the console at the same address, so a browser can stand in for Desktop; see [components](docs/guide/components.md#the-console-in-a-browser).
+For the browser console, run `npm run dev` and open http://127.0.0.1:47842.
+An installed service serves the console at http://127.0.0.1:47840, so a
+browser can stand in for Desktop. See [components](docs/guide/components.md#the-console-in-a-browser).
 
 XenoNet runs on Windows 11 and on macOS 13 or later. It's tested on Windows
 11 and on macOS 26 with Apple silicon. The browser version may work on Linux,
@@ -67,7 +58,7 @@ On a Mac, use ⌘ wherever this page says Ctrl. The terminal's key stays
   permission, turns amber and plays a chime. The tray icon, the tab title
   and a desktop notification show it too.
 - A session that finished its turn gets a quieter cyan signal, so you know
-  it's ready for review. A turn you stopped yourself ends quietly.
+  it's ready for review. A turn you stopped yourself ends without a signal.
 - When two sessions edit the same file within ten minutes, a red arc joins
   them. The alert opens both diffs side by side, with each session's branch.
 - A session that runs the same command three times in a row, has three tool
@@ -82,8 +73,8 @@ On a Mac, use ⌘ wherever this page says Ctrl. The terminal's key stays
 - Open a session in its app or read its transcript. In the desktop app,
   ``Ctrl+` `` opens a terminal in the selected session's folder.
 - Rename a session. Press `F2`, or the pencil beside its name, and type.
-  The new name is saved in the session's own app, so Claude Code, Claude
-  desktop or Codex shows it too.
+  XenoNet saves the new name in the session's own app, so Claude Code,
+  Claude desktop or Codex shows it too.
 - Hand a session off. XenoNet writes a brief with the goal, the latest
   request, where the session stopped and the files it touched. Then it
   opens a new session with that brief, in the other app or in the same app
@@ -100,40 +91,41 @@ On a Mac, use ⌘ wherever this page says Ctrl. The terminal's key stays
   and the GPU and its memory. Turn it off with `Show or hide this computer's
   load` in the palette.
 
-### Lets agents work together
+### Lets SIs work together
 
-Run `Connect your agents to XenoNet` from the palette once. XenoNet shows what
+Run `Connect your SIs to XenoNet` from the palette once. XenoNet shows what
 it will add to Claude Code's and Codex's settings and adds it when you
-confirm. From then on, every session hears at start which other agents
-work in its repo and what each is doing. It gets a warning before it edits
-a file another agent is working on. It can message the others, claim files
-and say what it's working on. Each message shows on the map as a light
-that travels from one session to the other. [Agents](docs/guide/agents.md)
+confirm. From then on, every session hears at start which other SIs work in
+its repo and what each is doing. It gets a warning before it edits a file
+another SI is working on. It can message the others, claim files and say
+what it's working on. Each message shows on the map as a light that travels
+from one session to the other. [SIs working together](docs/guide/agents.md)
 has the details.
 
-### Shows the agents that outlast a session
+### Shows the SIs that outlast a session
 
 <p align="center">
   <img src="docs/actors.png" alt="An actor named Wren selected on the map, with beams into the projects it works on, and its details in the inspector: Hermes Agent, working, triaging issues in atlas-api" width="100%">
 </p>
 
-Some agents run for days across many sessions. Hermes Agent can run on
-your machine all the time. Grok Bot works in the cloud through an app on your
+Some SIs run for days across many sessions. Hermes Agent can run on your
+machine all the time. Grok Bot works in the cloud through an app on your
 Mac. A program of your own might run on a schedule. XenoNet calls these
 actors. They hover on a layer above the map, with beams into the projects
 and sessions they act on, and they flash when they act. You are one too,
 while you're at the console.
 
 A program becomes an actor only after you allow it in XenoNet's window. On
-macOS, its token never works from under Claude Code or Codex, so an agent
-that finds it can't use it. XenoNet watches Hermes Agent, Grok Bot and Muse
-from the outside, reads metadata only, and changes nothing in them.
+macOS, its token never works from under Claude Code or Codex, so an SI that
+finds the token can't use it. XenoNet watches Hermes Agent, Grok Bot and
+Muse from the outside, reads metadata only, and changes nothing in them.
 [Actors](docs/guide/actors.md) explains what XenoNet reads and how to
 register a program of your own.
 
-An agent in the cloud, such as an OpenAI dot, can read what's going on
-through a connection you pair: only the projects you pick, read-only,
-until it expires. This is experimental and not yet tested with a real dot.
+An SI in the cloud, such as an OpenAI dot, can read session statuses and
+counts through a connection you pair. It reads only the projects you pick,
+changes nothing, and loses access when the connection expires. This is
+experimental, and nobody has tested it with a real dot yet.
 [Remote actors](docs/guide/cloud-assistants.md) says what it can read and
 how to stop it.
 
@@ -173,13 +165,13 @@ palette draws each one on the real map as you move through the list.
 by side and makes a copy you can edit as a JSON file. [Themes](docs/guide/themes.md)
 lists them and every field.
 
-Sounds come from where things happen. A tool call plays its project's
-motif from its session, an alert comes from what's waiting, and a message
-travels from its sender to each agent it reached. Nearer is louder, each
-sound comes from its side, and far off is duller. Looking at the whole
-map, the mix stays even; flown in close, what's beside you stands out. The
-palette's `Sound from where it happens` commands choose speakers,
-headphones (placed in 3D) or flat.
+Each sound plays from where it happens on the map. A tool call plays its
+project's motif from its session, an alert plays from what's waiting, and
+a message travels from its sender to each SI it reached. A sound near the
+camera is louder and plays from its side, and a far sound is muffled. With
+the whole map in view, every sound plays at the same level. Zoomed in, the
+sounds beside you are louder. The palette's `Sound from where it happens`
+commands choose speakers, headphones (placed in 3D) or flat.
 
 The **environment** button chooses the surroundings separately: Nebula,
 Aurora's light curtains, Trench's underwater caustics, or Vault's illuminated
@@ -189,7 +181,8 @@ theme's colors and stays in use when you change themes.
 Focus an MCP shared system and choose **Explore MCP server** for its
 declared author, connection and authentication status, searchable tools and
 input schemas, context resources and templates, and recent session usage.
-Missing metadata is labeled; configuration credentials stay hidden.
+XenoNet labels missing metadata and never shows the credentials in a
+server's configuration.
 
 ### Shows other machines, as a prototype
 
@@ -201,13 +194,17 @@ titles, states and counts, and a transcript crosses only when you open it.
 
 ## Privacy
 
+XenoNet runs on your machine and reads the files Claude Code and Codex
+already write.
+
 - XenoNet's server listens on `127.0.0.1` only. It refuses requests that name
   another host, which blocks DNS rebinding, and it refuses posts from other
   web pages.
 - XenoNet writes to Claude Code's, Claude desktop's and Codex's files only
   when you ask it to. Renaming a session saves the new name where its app
-  keeps it. Connecting your agents changes their settings, and XenoNet shows
-  each change first and keeps a copy of each file it changes.
+  keeps it. Connecting your SIs changes Claude Code's and Codex's settings,
+  and XenoNet shows each change first and keeps a copy of each file it
+  changes.
 - XenoNet sends data off your machine in these cases only:
   - Installed copies check GitHub after startup and every six hours. On
     Windows they download the update and wait for you to restart. Turn off
@@ -226,13 +223,13 @@ titles, states and counts, and a transcript crosses only when you open it.
     at most once a minute while a window is open.
   - When you pair a remote actor, it reads the statuses and counts of
     sessions in the projects you picked, through the tunnel you set up.
-- Messages between agents, what actors do, and your accounts stay on your
+- Messages between SIs, what actors do, and your accounts stay on your
   computer.
 - Paths under your home folder show as `~`, so a screenshot doesn't show
   your user name. `Hide or show identities` in the palette masks your
   accounts as "GitHub A" or "Claude B" for screen sharing.
 - On macOS, XenoNet checks which process sent each coordination request.
-  Actor approvals, agent connections and trusted hosts remain yours to change.
+  Only you can allow actors, connect SIs and trust hosts.
 
 [Privacy and security](docs/guide/privacy.md) has the full list.
 
@@ -246,10 +243,13 @@ Windows installs for your account and adds XenoNet to the Start menu. On a
 Mac, open the disk image and drag XenoNet into Applications.
 
 XenoNet checks for new releases itself. On Windows it downloads updates and
-waits for you to choose **Restart and update**. Mac builds currently link
-to the new download. Open **Check for XenoNet updates** in the command palette
-to check manually or turn off background checks. XenoNet 0.4.0 needs a
-one-time manual upgrade.
+waits for you to choose **Restart and update**. Mac builds link to the new
+download. Open **Check for XenoNet updates** in the command palette to check
+by hand or turn off background checks.
+
+Desktop, the background service and the command-line tools update
+separately. Restarting Desktop keeps terminals and SI connections running.
+See [components and updates](docs/guide/components.md).
 
 Neither build is signed yet. The first time you open XenoNet, Windows
 SmartScreen may ask you to confirm, and macOS asks you to allow it in
@@ -267,25 +267,25 @@ from a terminal. Tools includes the command on Windows, macOS and Linux.
 
 ```console
 $ xenonet
-● XenoNet 0.6.0 on 127.0.0.1:47840
+● XenoNet 0.1.0 on 127.0.0.1:47840
   Reads   48 projects, 251 Claude sessions, 2,444 Codex threads
-  Agents  1 working, 18 idle, 3 connected to XenoNet
+  SIs     1 working, 18 idle, 3 connected to XenoNet
   Actors  1 idle, 1 unknown
   Doctor  everything XenoNet needs is in place (checked 4 min ago)
 ```
 
 | Command | What it does |
 | --- | --- |
-| `xenonet` | Shows what XenoNet reads, the agents and actors at work, what needs you and the doctor's last check |
+| `xenonet` | Shows what XenoNet reads, the SIs and actors at work, what needs you and the doctor's last check |
 | `xenonet doctor` | Checks your setup and says how to fix each problem it finds |
-| `xenonet agents` | Lists the agents at work, where each is and what files it's editing |
-| `xenonet who <path>` | Says which agents have a hand in a file |
+| `xenonet agents` | Lists the SIs at work, where each is and what files it's editing |
+| `xenonet who <path>` | Says which SIs have a hand in a file |
 | `xenonet session [words]` | Shows a session's models, tokens, estimated cost, turns and tools |
 | `xenonet search <words>` | Searches every Claude Code and Codex transcript |
-| `xenonet connect` | Connects your agents to XenoNet, after showing each change |
+| `xenonet connect` | Connects your SIs to XenoNet, after showing each change |
 | `xenonet theme [name]` | Lists the themes, or switches to one |
 | `xenonet actor` | Lists actors, and lets a program of yours register, report and listen for its messages |
-| `xenonet gateway` | Puts the actor gateway online for agents in other clouds, and says whether it's reachable |
+| `xenonet gateway` | Puts the actor gateway online for SIs in other clouds, and says whether it's reachable |
 | `xenonet drift` | Shows what changed in the data XenoNet reads from the apps since you last looked |
 
 Every command takes `--json`. [The xenonet command](docs/guide/cli.md) lists
@@ -311,6 +311,10 @@ source XenoNet reads and where it keeps its files.
 
 ## How it works
 
+A background service keeps the network running. SIs use it through the
+`xenonet` command and its MCP tools, and you see it in the desktop console,
+which SIs can operate too.
+
 XenoNet reads Claude Code's sessions through the Agent SDK, and Codex's
 through `codex app-server`. It reads both apps' transcript files as they
 grow, for live activity, tokens, context and edits. Every 20 seconds it
@@ -331,16 +335,16 @@ Here is what's planned:
 - Many machines. Each machine runs XenoNet, the machines you trust connect
   peer to peer, and one console shows them all.
 - Intents. You say what you want across any number of projects, such as
-  "move every service to Node 24". XenoNet hands the work to agents and
+  "move every service to Node 24". XenoNet hands the work to SIs and
   tracks it until it's done.
-- Cost. Usage and spend across Claude, OpenAI and other AI APIs, by
-  project, session and provider.
-- More sources. Agent apps beyond Claude Code and Codex.
+- Cost. XenoNet will show usage and spend across Claude, OpenAI and other
+  model APIs, by project, session and provider.
+- More sources. XenoNet will read SI apps beyond Claude Code and Codex.
 
 ## Development
 
 ```bash
-npm run dev       # server and hot-reloading UI at http://127.0.0.1:47840
+npm run dev       # server and hot-reloading UI at http://127.0.0.1:47842
 npm run demo      # the same, with made-up data, at http://127.0.0.1:47841
 npm run app       # the desktop app (Electron) from source, as XenoNet Dev
 npm run dev:install  # macOS: XenoNet Dev.app in ~/Applications, running this checkout
@@ -353,10 +357,10 @@ npm run dist      # the installers for this OS, in release/ (dist:win, dist:mac)
 
 The desktop app you run from source is XenoNet Dev. It has its own settings,
 port and layout, so it runs beside an installed XenoNet. It reloads as you
-save. AI agents, scripts and tests drive XenoNet Dev through a control
-channel, with the `xenonet-console` MCP tools, `xenonet console` and the
-end-to-end tests. [Development](docs/guide/development.md) covers driving
-XenoNet, the test instances, the VM lab and how the code is laid out.
+save. SIs, scripts and tests drive XenoNet Dev through a control channel,
+with the `xenonet-console` MCP tools, `xenonet console` and the end-to-end
+tests. [Development](docs/guide/development.md) covers driving XenoNet, the
+test instances, the VM lab and how the code is laid out.
 
 ## Contributing
 
@@ -364,7 +368,7 @@ Issues and pull requests are welcome. Run `npm test` before you send a
 change, and `npm run test:e2e` too if it touches the UI. Write commit
 messages as [Conventional Commits](https://www.conventionalcommits.org),
 such as `feat: ...`, `fix: ...` or `docs: ...`. `AGENTS.md` says the same
-for AI agents, and how they check their work.
+for SIs, and how they check their work.
 
 ## License
 

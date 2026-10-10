@@ -102,7 +102,7 @@ export function handoffBrief({ node, notes, target }) {
 // Ask Codex for a short narrative. --ephemeral keeps it out of your thread
 // history; read-only sandbox in a temp folder keeps it from touching anything.
 export function narrate(codexBin, text, opts) {
-  const prompt = `Write a short status note for the person running these AI coding sessions. In 3 to 6 sentences, say what the sessions finished, what needs their attention first, and anything that looks stuck or risky. Refer to sessions by their titles. Write plainly: short sentences, active voice, everyday words, no em dashes. No headings, bullet points or preamble. Do not run any commands.\n\nActivity data:\n${text}`;
+  const prompt = `Write a short status note for the person running these Claude Code and Codex sessions. In 3 to 6 sentences, say what the sessions finished, what needs their attention first, and anything that looks stuck or risky. Refer to sessions by their titles. Write plainly: short sentences, active voice, everyday words, no em dashes. No headings, bullet points or preamble. Do not run any commands.\n\nActivity data:\n${text}`;
   return askCodex(codexBin, prompt, opts);
 }
 

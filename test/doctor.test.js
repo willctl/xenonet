@@ -190,14 +190,14 @@ test("agents passing for each other: checked on macOS, a note elsewhere, a warni
   assert.equal((await check({})).status, "ok");
   const elsewhere = await check({ platform: "linux" });
   assert.equal(elsewhere.status, "info");
-  assert.match(elsewhere.detail, /takes each agent at its word/);
+  assert.match(elsewhere.detail, /takes each SI at its word/);
   // netstat with no line for a request: agents are taken at their word,
   // so their tools keep working.
   const blind = await check({ procs: async () => ({ supported: true, peer: false, chain: false, exe: false }) });
-  assert.deepEqual([blind.status, blind.detail, blind.fix], ["warn", "netstat doesn't say which process sends a request, so XenoNet takes each agent at its word", "netstat answered in a way XenoNet doesn't read; update XenoNet, or report it with xenonet diagnose."]);
+  assert.deepEqual([blind.status, blind.detail, blind.fix], ["warn", "netstat doesn't say which process sends a request, so XenoNet takes each SI at its word", "netstat answered in a way XenoNet doesn't read; update XenoNet, or report it with xenonet diagnose."]);
   // ps that can't trace it: refused.
   const untraced = await check({ procs: async () => ({ supported: true, peer: true, chain: false, exe: false }) });
-  assert.deepEqual([untraced.status, untraced.detail, untraced.fix], ["warn", "ps doesn't say which processes a request comes from, so XenoNet refuses every request in an agent's name, and agents can't use its tools", "ps answered in a way XenoNet doesn't read; update XenoNet, or report it with xenonet diagnose."]);
+  assert.deepEqual([untraced.status, untraced.detail, untraced.fix], ["warn", "ps doesn't say which processes a request comes from, so XenoNet refuses every request in an SI's name, and SIs can't use its tools", "ps answered in a way XenoNet doesn't read; update XenoNet, or report it with xenonet diagnose."]);
   assert.equal((await check({ procs: async () => ({ supported: true, peer: true, chain: true, exe: false }) })).status, "ok", "an agent's check doesn't rest on lsof");
   assert.equal((await check({ exists: () => false })).status, "warn", "no codesign");
 });
@@ -563,7 +563,7 @@ test("actors: their tokens held to processes on macOS, a note elsewhere, and a p
   assert.equal((await check({ procs: async () => ({ supported: true, peer: true, chain: true, exe: true }) })).status, "ok");
   // Requests it refused because it couldn't see who sent them, since it started.
   const refused = await check({ verify: () => ({ checked: 40, refused: 3, unchecked: 0, unseen: 2, lastRefusal: null }) });
-  assert.deepEqual([refused.status, refused.detail], ["info", "an actor's token never works from under an agent or an actor app's own process, and a product's only from under that product; since XenoNet started, it refused 2 requests because it couldn't see which program sent them"]);
+  assert.deepEqual([refused.status, refused.detail], ["info", "an actor's token never works from under an SI or an actor app's own process, and a product's only from under that product; since XenoNet started, it refused 2 requests because it couldn't see which program sent them"]);
   assert.match(refused.fix, /exits before the answer can't be seen/);
   assert.match((await check({ verify: () => ({ unseen: 1 }) })).detail, /refused 1 request because it couldn't see which program sent it$/);
   assert.equal((await check({ verify: () => ({ unseen: 0 }) })).status, "ok");

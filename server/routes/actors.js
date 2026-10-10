@@ -161,7 +161,7 @@ export function createActorCaller({ registration, verify = null, now = Date.now 
     async authenticate(req, { waiting = false } = {}) {
       const token = bearerOf(req.headers);
       if (token == null) return unauthorized("no-token", "this route takes an actor's token, as Authorization: Bearer <token>");
-      if (req.headers["x-xenonet-agent"] !== undefined) return no(400, "bad-request", "a caller is an agent or an actor, never both: send x-xenonet-agent or a token, not both");
+      if (req.headers["x-xenonet-agent"] !== undefined) return no(400, "bad-request", "a caller is an SI or an actor, never both, so send x-xenonet-agent or a token, not both");
       const auth = registration.authenticate(token);
       if (!auth.ok) return (auth.code === "bad-token" && (await badToken(req))) || unauthorized(auth.code, auth.error, auth.reason ? { reason: auth.reason } : {});
       if (auth.state === "waiting" && !waiting) return no(403, "waiting", "this actor is waiting for you to allow it in XenoNet's window; try again later");

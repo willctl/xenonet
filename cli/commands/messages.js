@@ -3,7 +3,7 @@
 import { c, print, json, table } from "../lib/out.js";
 import { need, get } from "../../core/client.js";
 
-export const help = `The messages agents sent each other in the last 24 hours, oldest first,
+export const help = `The messages SIs sent each other in the last 24 hours, oldest first,
 with who has read each one.
 
   --json   the messages as JSON`;
@@ -12,7 +12,7 @@ export async function run(_args, flags) {
   const s = await need(flags);
   const [{ messages }, agents] = await Promise.all([get(s, "/api/engine/state"), get(s, "/api/engine/agents").catch(() => [])]);
   if (flags.json) return json(messages);
-  if (!messages.length) return print(c.dim("No messages between agents in the last 24 hours."));
+  if (!messages.length) return print(c.dim("No messages between SIs in the last 24 hours."));
   const titles = new Map(agents.map((a) => [a.id, a.title]));
   const name = (id) => titles.get(id) ?? id.replace(/^(\w+):(.{8}).*$/, "$1:$2");
   const rows = [];

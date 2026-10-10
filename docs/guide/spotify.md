@@ -21,4 +21,4 @@ In the same window, play something and choose **plays here** for this computer's
 
 ## What reaches Spotify
 
-XenoNet talks to Spotify to sign in and refresh its token, to read what's playing every few seconds while a window is open (every 30 seconds otherwise), and to send the commands you give or turn on. Nothing of your sessions reaches Spotify, though the timing of a dip shows when something waited on you. What's playing never goes to agents, actors or other machines.
+XenoNet talks to Spotify to sign in and refresh its token, to read what's playing every few seconds while a window is open (every 30 seconds otherwise), and to send the commands you give or turn on. Nothing of your sessions reaches Spotify, though the timing of a dip shows when something waited on you. What's playing never goes to an SI (super intelligence), an actor or another machine.

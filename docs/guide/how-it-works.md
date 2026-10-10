@@ -1,6 +1,6 @@
 # How it works
 
-XenoNet reads Claude Code's and Codex's files. It acts only when you ask it to open a session, hand one off, start a terminal or rename a session. Renaming is the one time it writes to the apps' session files, and connecting your agents the one time it changes their settings.
+XenoNet reads Claude Code's and Codex's files. It acts only when you ask it to open a session, hand one off, start a terminal or rename a session. Renaming is the one time it writes to the apps' session files, and connecting your SI (super intelligence) apps is the one time it changes their settings.
 
 ## Where the data comes from
 
@@ -32,7 +32,7 @@ The doctor warns about drift that's new since you last looked. `xenonet drift` l
 
 ## Checking the adapters after an update
 
-In a checkout, run `npm run contracts` after you update Claude Code or Codex. It checks every adapter against your real data, and says which one broke. It reports drift as `xenonet drift` does, but doesn't mark it seen, since agents run it too.
+In a checkout, run `npm run contracts` after you update Claude Code or Codex. It checks every adapter against your real data, and says which one broke. It reports drift as `xenonet drift` does, but doesn't mark it seen, since SIs run it too.
 
 What it finds goes into the `drift.json` of XenoNet Dev, the XenoNet a checkout runs as. There, `xenonet drift` and XenoNet Dev's doctor read it. `npm run contracts` builds its search index in a temporary folder, and deletes the folder after.
 
@@ -47,7 +47,7 @@ XenoNet never adds a dot folder to your home folder. XDG variables win when they
 | The app | `%LOCALAPPDATA%\Programs\XenoNet` | `/Applications/XenoNet.app` | The installer |
 | Layout, dismissed alerts, your rules and Codex's picks for the projects folder, your names and pins for identities, and the theme | `%LOCALAPPDATA%\XenoNet\state.json` | `~/Library/Application Support/XenoNet/state.json` | `XENONET_STATE_DIR`, `XDG_STATE_HOME` |
 | Your [themes](themes.md) | `%LOCALAPPDATA%\XenoNet\themes\` | `~/Library/Application Support/XenoNet/themes/` | `XENONET_STATE_DIR`, `XDG_STATE_HOME` |
-| What agents said to each other and their claims, and [actors'](actors.md) events, targets and token hashes. A copy made before a migration, `engine.v<n>.sqlite`, stays beside it for a week. | `%LOCALAPPDATA%\XenoNet\engine.sqlite` | `~/Library/Application Support/XenoNet/engine.sqlite` | `XENONET_STATE_DIR`, `XDG_STATE_HOME` |
+| What SIs said to each other and their claims, and [actors'](actors.md) events, targets and token hashes. A copy made before a migration, `engine.v<n>.sqlite`, stays beside it for a week. | `%LOCALAPPDATA%\XenoNet\engine.sqlite` | `~/Library/Application Support/XenoNet/engine.sqlite` | `XENONET_STATE_DIR`, `XDG_STATE_HOME` |
 | The search index, which can be rebuilt | `%LOCALAPPDATA%\XenoNet\Cache\search.sqlite` | `~/Library/Caches/XenoNet/search.sqlite` | `XENONET_CACHE_DIR`, `XDG_CACHE_HOME` |
 | [Drift](#drift), which is what differs in the apps' data from what XenoNet expects, kept as shapes | `%LOCALAPPDATA%\XenoNet\Cache\drift.json` | `~/Library/Caches/XenoNet/drift.json` | `XENONET_CACHE_DIR`, `XDG_CACHE_HOME` |
 | This XenoNet's host name and key, the hosts it shows, and its own ssh config for them, for [other machines](other-machines.md) | `%LOCALAPPDATA%\XenoNet\hosts.json`, `ssh_config` | `~/Library/Application Support/XenoNet/hosts.json`, `ssh_config` | `XENONET_STATE_DIR`, `XDG_STATE_HOME` |

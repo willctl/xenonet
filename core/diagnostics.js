@@ -80,7 +80,7 @@ export function agentBrief({ sources = [] } = {}) {
     ``,
     `- Never file an issue, open a pull request, push, post or send anything anywhere, and don't run gh. XenoNet's maintainers want reports a person chose to send.`,
     `- If it looks like a bug in XenoNet rather than something to fix here, write issue-draft.md in this folder: what happened, what the bundle shows, and how to reproduce it, with no personal details. Tell them it's there; sending it is up to them.`,
-    `- Don't change XenoNet's files, its settings or the person's agents' settings without asking first, and say what each change does.`,
+    `- Don't change XenoNet's files, its settings, or Claude Code's or Codex's settings without asking first, and say what each change does.`,
     ``,
   ].join("\n");
 }

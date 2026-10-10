@@ -39,7 +39,7 @@ export function gatewayHtml(g, { canDecide }) {
   const btn = (attr, label, { primary = false, title = "" } = {}) => `<button class="act${primary ? " primary" : ""}" ${attr} data-yours ${yours}${title ? ` title="${h(title)}"` : ""}>${label}</button>`;
   if (!t.kind)
     return `<div class="ac-gw" data-state="none"><div class="ac-gw-line"><span class="ac-gw-dot"></span><span class="ac-gw-word">Not set up</span><span class="grow"></span>${btn("data-ac-gateway-setup", "Set up…", { primary: true })}${g.on ? `<button class="toggle on" data-ac-gateway-on aria-pressed="true" data-yours ${yours}>On</button>` : ""}</div>
-        <div class="ac-gw-sub">Lets agents in other clouds, like Muse or Grok Bot, message the agents here.</div></div>`;
+        <div class="ac-gw-sub">Lets SIs in other clouds, such as Muse or Grok Bot, message the SIs here.</div></div>`;
   const state = !g.on ? "off" : g.problem ? "bad" : r.state === "ok" ? "ok" : "wait";
   const word = { off: "Off", bad: "Not reachable", ok: "Online", wait: "Checking…" }[state];
   const addr = g.url ? `<code class="ac-gw-addr">${addrHtml(g.url, hostIn(g.url))}</code>` : "";
@@ -108,7 +108,7 @@ export function gatewayAskHtml(v, { gateway, a, name: who, again }) {
     return `<p class="ac-lead">Set up the gateway first</p><p class="pj-note">${name}'s app needs an address on the internet to reach.</p>
         <div class="m-foot"><button class="act" data-ac-back>Cancel</button><span class="grow"></span><button class="act primary" data-ac-gateway-setup data-yours>Set up…</button></div>`;
   const joins = a && !a.via?.includes("registered") ? ` ${name} reports itself from then on.` : "";
-  return `<p class="ac-lead">Let ${name} message the agents here from its cloud?</p>
+  return `<p class="ac-lead">Let ${name} message the SIs here from its cloud?</p>
       <p class="pj-note">XenoNet makes a token for ${name}'s app${again ? ", and the old one stops working" : ""}.${joins}</p>
       <div class="m-foot"><button class="act" data-ac-back>Cancel</button><span class="grow"></span><button class="act primary" data-ac-gateway-make="${h(v.id)}" data-yours>${again ? "Make a new token" : "Connect"}</button></div>`;
 }

@@ -5,14 +5,14 @@ XenoNet ships a first-install bundle and a Desktop-only update, plus separate Se
 ## Prepare a version
 
 1. Choose a new version. Use a patch for fixes and a minor version for new behavior while XenoNet is below 1.0.
-2. Run `npm version 0.6.1 --no-git-tag-version`, with the Desktop version you chose. Update `components/versions.json` for each changed Service or Tools package. Keep unchanged component versions unchanged; changing their runtime or shared code requires a new component version. This updates both package files.
-3. Write `docs/releases/0.6.1.md`. Describe what changed for the person using XenoNet, any install limits and anything they must do. Review public copy with the [unslop guidance](https://github.com/cursor/plugins/blob/main/pstack/skills/unslop/SKILL.md).
+2. Run `npm version 0.1.1 --no-git-tag-version`, with the Desktop version you chose. Update `components/versions.json` for each changed Service or Tools package. Keep unchanged component versions unchanged; changing their runtime or shared code requires a new component version. This updates both package files.
+3. Write `docs/releases/0.1.1.md`. Describe what changed for the person using XenoNet, any install limits and anything they must do. Review public copy with the [unslop guidance](https://github.com/cursor/plugins/blob/main/pstack/skills/unslop/SKILL.md).
 4. Run `npm run release:check`, `npm test` and `npm run test:e2e`. Check the desktop UI in the demo instance when it changed.
 5. Commit the changes, push them, then create and push an annotated tag that matches the package version.
 
 ```sh
-git tag -a v0.6.1 -m "XenoNet 0.6.1"
-git push origin v0.6.1
+git tag -a v0.1.1 -m "XenoNet 0.1.1"
+git push origin v0.1.1
 ```
 
 The Release workflow runs unit tests on Windows, macOS and Linux and the updater's desktop UI tests on Windows. Run the full `npm run test:e2e` suite on a machine with a GPU before tagging. The component lifecycle test also runs against an unpacked Windows build by setting `XENONET_TEST_PACKAGED_EXE` to its executable. This verifies a persistent shell and a live console MCP connection across Desktop restarts. Software rendering on standard hosted runners does not reliably meet the 3D interaction tests' settling and screenshot expectations; those tests stay in the local release checklist.
@@ -45,7 +45,7 @@ The current unsigned Windows installer can update, but has no publisher signatur
 
 ## App behavior
 
-Installed copies check 30 seconds after startup and every six hours. Supported builds download in the background. Updates never install just because the app quits. The user chooses Restart and update. Desktop restarts while the independent service, terminals and connected MCP processes continue. The first migration from 0.5 still closes the old version's terminals; reconnect agents through the stable Tools launcher afterward. The installer preserves settings and project data.
+Installed copies check 30 seconds after startup and every six hours. Supported builds download in the background. Updates never install just because the app quits. The user chooses Restart and update. Desktop restarts while the independent service, terminals and connected MCP processes continue. The installer preserves settings and project data.
 
 Updates in the command palette and native menus shows the installed version, check result, download progress and restart action. Turning off automatic checks also stops automatic downloads. Manual checks still work. Service and Tools updates are listed separately and installed on request. If a service update finds running terminals, it stages the download; close them and run the update again. Source, demo and test copies never contact the release feed or install updates.
 

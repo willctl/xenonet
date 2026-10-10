@@ -112,7 +112,7 @@ function art(kind) {
     g.fillStyle = PAPER; g.font = "600 27px Segoe UI, system-ui, sans-serif";
     g.textAlign = "center"; g.fillText("XenoNet", W / 2, 184);
     g.fillStyle = MUTED; g.font = "12px Segoe UI, system-ui, sans-serif";
-    g.fillText("Agent network", W / 2, 210);
+    g.fillText("SI network", W / 2, 210);
     g.fillStyle = LINE; g.fillRect(24, H - 32, W - 48, 1);
   } else {
     mark(g, 98, 6, 44, MARK_GREEN);

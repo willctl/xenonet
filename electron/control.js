@@ -1,4 +1,4 @@
-// XenoNet's control channel: how scripts, tests and AI agents drive Desktop.
+// XenoNet's control channel: how scripts, tests and SIs drive Desktop.
 // Installed copies receive authenticated requests through Service. Source
 // copies use /api/dev/control, relayed through their utility process.
 //

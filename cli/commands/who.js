@@ -5,7 +5,7 @@ import { pathStyle } from "../../core/paths.js";
 import { c, print, json, table, ago, Fail } from "../lib/out.js";
 import { need, get } from "../../core/client.js";
 
-export const help = `Which agents have a hand in a file or folder: editing it (in this working
+export const help = `Which SIs have a hand in a file or folder: editing it (in this working
 tree, or the same file in another worktree of the repo, a merge conflict to
 come) or holding a claim on it. An actor's edit that XenoNet inferred from
 what it observes, rather than heard of from the actor, is marked (observed).
@@ -20,7 +20,7 @@ export async function run([target], flags) {
   const s = await need(flags);
   const hands = await get(s, `/api/engine/who?path=${encodeURIComponent(file)}`);
   if (flags.json) return json(hands);
-  if (!hands.length) return print(c.dim(`No agent has a hand in ${target} right now.`));
+  if (!hands.length) return print(c.dim(`No SI has a hand in ${target} right now.`));
   const rows = hands.map((h) => [
     c.green("●"),
     h.agent.title,

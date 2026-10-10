@@ -98,8 +98,8 @@ export default async function ({ xenonet: s, step }) {
   await step("mask:on");
   await step("reset");
   await step("deselect");
-  await titleCard("intro", "See what your\nagents are doing.", "A local service, tools and desktop console.", 3.5);
-  await clip("overview", "See each session in its project.", "Claude Code and Codex, with background agents beside them.", async () => {}, 5);
+  await titleCard("intro", "See what your\nSIs are doing.", "A local service, tools and desktop console.", 3.5);
+  await clip("overview", "See each session in its project.", "Claude Code and Codex, with background SIs beside them.", async () => {}, 5);
   const waiting = (await s.driver("state")).alerts.find(x => x.kind === "need");
   if (!waiting) throw new Error("The demo needs a session waiting for a question.");
   await clip("question", "Find the question that needs you.", "Read the session's context before you switch apps.", async () => {
@@ -113,9 +113,9 @@ export default async function ({ xenonet: s, step }) {
     await s.input({ click: p });
   }, 7, [1280, 720, 160, 90]);
   await s.input({ keys: "Escape" });
-  await clip("agents", "See what background agents are doing.", "Agents use XenoNet to find peers, claim files and send messages.", () => s.driver("select", "actor:wren"), 6);
+  await clip("agents", "See what background SIs are doing.", "SIs use XenoNet to find peers, claim files and send messages.", () => s.driver("select", "actor:wren"), 6);
   await step("deselect");
-  await clip("control", "Agents can operate the console, too.", "This recording uses the same controls for finding and selecting work.", async () => {
+  await clip("control", "SIs can operate the console too.", "This recording uses the same controls for finding and selecting work.", async () => {
     const { nodes } = await s.driver("find", { query: "atlas-api", kind: "project", limit: 1 });
     await s.driver("select", nodes[0].id);
   }, 5);
@@ -149,7 +149,7 @@ export default async function ({ xenonet: s, step }) {
     appearance.push({ kind: "environment", ...(await s.driver("state")).environment });
   }, 3.2);
   await s.driver("command", "wallpaper");
-  await titleCard("end", "Try XenoNet today.", "github.com/willctl/xenonet", 4);
+  await titleCard("end", "The network for SI.", "github.com/willctl/xenonet", 4);
   const list = path.join(work, "clips.txt");
   fs.writeFileSync(list, clips.map(file => `file '${file.replaceAll("\\", "/").replaceAll("'", "'\\''")}'`).join("\n"));
   const output = path.join(root, "docs", "showcase.mp4");
