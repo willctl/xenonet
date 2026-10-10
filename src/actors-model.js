@@ -285,7 +285,7 @@ export const PRESENCE_WORDS = { working: "working", idle: "idle", away: "away", 
 // has heard from it once, and "out of sight" after: Grok Bot with its app
 // closed, which nothing here can say has stopped.
 export const presenceWord = (s) => (s?.presence === "unknown" || !PRESENCE_WORDS[s?.presence] ? (s?.lastSeen ? "out of sight" : PRESENCE_WORDS.unknown) : PRESENCE_WORDS[s.presence]);
-export const CAPABILITY_WORDS = { "spawn-sessions": "start sessions", "edit-repos": "edit repos", "run-commands": "run commands", "message-people": "message people", "message-agents": "message agents", schedule: "run on a schedule", browse: "browse the web", "use-computer": "use apps" };
+export const CAPABILITY_WORDS = { "spawn-sessions": "start sessions", "edit-repos": "edit repos", "run-commands": "run commands", "message-people": "message people", "message-agents": "message SIs", schedule: "run on a schedule", browse: "browse the web", "use-computer": "use apps" };
 
 // What the Actors panel offers for an actor (an actor/snapshot/v1), in a
 // window that can use its own routes (`canDecide`: it holds the window key)

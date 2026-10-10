@@ -529,8 +529,8 @@ const commandList = [
   ...(desktop ? [] : [{ id: "notify", label: "Enable desktop notifications", keywords: "alerts", run: async () => hud.toast(`Desktop notifications: ${await alerts.enableNotifications()}`) }]),
   { id: "updates", label: "Check for XenoNet updates", keywords: "version release download install restart", run: () => updatesPanel.open() },
   { id: "doctor", label: "Check XenoNet's setup", keywords: "doctor health sign in login auth permissions problems diagnose", run: () => doctorPanel.open() },
-  { id: "connect-agents", label: "Connect your agents to XenoNet", keywords: "claude code codex mcp hooks engine coordinate messages work together", run: () => connectPanel.open() },
-  { id: "actors", label: "Actors", keywords: "agents hermes grok bot muse programs allow deny requests register tokens observers you show me on the map add remove", run: () => openActors() },
+  { id: "connect-agents", label: "Connect your SIs to XenoNet", keywords: "si super intelligence agents claude code codex mcp hooks engine coordinate messages work together", run: () => connectPanel.open() },
+  { id: "actors", label: "Actors", keywords: "si agents hermes grok bot muse programs allow deny requests register tokens observers you show me on the map add remove", run: () => openActors() },
   { id: "install-command", label: "Install the xenonet command", keywords: "cli terminal shell path doctor", run: () => installCommand() },
   { id: "layout", label: "Reset layout and unpin dragged nodes", keywords: "positions", run: async () => (await fetch("/api/layout", { method: "DELETE" }), hud.toast("Layout reset")) },
   { id: "projects", label: "How XenoNet finds your projects", keywords: "projects folder groups nested rules detection scan", run: () => modals.projects() },
@@ -577,7 +577,7 @@ const commandList = [
     run: () => setScope({ window: w.id }),
   })),
   { id: "focus-lighting", label: "Turn focus lighting on or off", keywords: "glare glow bloom dim zoom distance", run: () => setFocusLighting(!focusLighting) },
-  { id: "scope-background", label: "Show or hide background agents", keywords: "codex guardian review compaction exec subagents scope", run: () => setScope({ background: !scope.background }) },
+  { id: "scope-background", label: "Show or hide background SIs", keywords: "codex guardian review compaction exec subagents agents scope", run: () => setScope({ background: !scope.background }) },
   ...(desktop?.terminal
     ? [
         { id: "terminal", label: "Show or hide the terminal", key: "Ctrl+`", keywords: "shell powershell zsh bash console", run: () => terminal.toggle() },
@@ -1009,7 +1009,7 @@ events.addEventListener("agent-message", (e) => {
   // reads as one to the agents it names.
   const target = typeof m.target === "string" ? m.target : "";
   const named = (id) => fullIndex.get(id)?.title ?? (isActorId(id) ? scene.actor(id)?.snapshot.name : null) ?? id;
-  const to = target === "all" ? "everyone" : target.startsWith("repo:") ? `everyone in ${target.slice(5)}` : recipients[0] ? named(recipients[0]) : "another agent";
+  const to = target === "all" ? "everyone" : target.startsWith("repo:") ? `everyone in ${target.slice(5)}` : recipients[0] ? named(recipients[0]) : "another SI";
   const detail = `to ${to} · ${m.text ?? ""}`;
   ambient.cue("message", { id: m.from, to: recipients });
   if (isActorId(m.from)) {

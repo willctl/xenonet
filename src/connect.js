@@ -25,9 +25,9 @@ export function createConnectPanel({ modals, toast, sfx }) {
         .join("")}</ol>
       ${a.notes.map((n) => `<p class="cx-note">${h(n)}</p>`).join("")}`;
     panel.querySelector(".m-body").innerHTML = `
-      <p class="cx-intro">Once connected, each Claude Code and Codex session can see which other agents are working in its repo and on what, gets a warning before it edits a file another agent is working on, and can message the others. XenoNet adds only these entries, and keeps a copy of each settings file the first time it changes one. Sessions already running pick it up when they restart.</p>
+      <p class="cx-intro">Once connected, each Claude Code and Codex session sees which other SIs work in its repo and on what. It gets a warning before it edits a file another SI is working on, and it can message the others. XenoNet adds only these entries, and keeps a copy of each settings file the first time it changes one. Sessions already running pick it up when they restart.</p>
       ${d.apps.map(app).join("")}
-      ${d.demo ? `<p class="cx-note">This is the demo, with made-up sessions. Connect your agents from XenoNet with your own.</p>` : ""}
+      ${d.demo ? `<p class="cx-note">This is the demo, with made-up sessions. Connect your SIs from XenoNet with your own.</p>` : ""}
       <div class="m-foot">
         <button class="act primary" data-cx-apply data-yours ${done || d.demo ? "disabled" : ""}>${done ? "Connected" : any ? "Update" : "Connect"}</button>
         ${any ? `<button class="act" data-cx-remove>Disconnect</button>` : ""}
@@ -44,7 +44,7 @@ export function createConnectPanel({ modals, toast, sfx }) {
 
   async function open() {
     panel = modals.open(
-      `<header class="m-head"><div><div class="m-chip">⬡ agents</div><h2>Connect your agents</h2><div class="m-sub">Let Claude Code and Codex sessions work together through XenoNet</div></div><button class="act" data-mclose>Close ✕</button></header><div class="m-body"><div class="m-empty">Checking Claude Code's and Codex's settings…</div></div>`,
+      `<header class="m-head"><div><div class="m-chip">⬡ SI</div><h2>Connect your SIs</h2><div class="m-sub">Claude Code and Codex sessions reach each other through XenoNet</div></div><button class="act" data-mclose>Close ✕</button></header><div class="m-body"><div class="m-empty">Checking Claude Code's and Codex's settings…</div></div>`,
       { wide: true, cls: "cx" },
     );
     panel.addEventListener("click", async (e) => {
@@ -54,7 +54,7 @@ export function createConnectPanel({ modals, toast, sfx }) {
       try {
         render(await run(apply ? "POST" : "DELETE", apply ? { apps: ["claude", "codex"] } : null));
         sfx("success");
-        toast(apply ? "Connected. Restart running agents to pick it up." : "Disconnected");
+        toast(apply ? "Connected. Restart running sessions to pick it up." : "Disconnected");
       } catch (err) {
         sfx("error");
         toast(`Couldn't change the settings: ${err.message}`, true);
