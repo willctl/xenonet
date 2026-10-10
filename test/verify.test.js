@@ -262,7 +262,7 @@ test("an actor's token never works from under an agent, nor from an actor app's 
   const { verify, from } = actors();
   const agent = await verify.actor(from(220), WREN);
   assert.equal(agent.ok, false);
-  assert.match(agent.reason, /an actor's token can't be used from under an SI, and this came from under a Claude Code process/);
+  assert.match(agent.reason, /an actor's token doesn't work from under SI, and this came from under a Claude Code process/);
   assert.equal((await verify.actor(from(540), WREN)).ok, false, "a claude a Bot started is an agent too");
   for (const [pid, who, why] of [
     [510, WREN, /Grok Bot's own processes can't use an actor's token: they could be relaying for its cloud/],
@@ -354,7 +354,7 @@ test("a verdict on an actor is kept a minute per actor, process and pid, and whe
 
 test("registering: refused from under an agent, an actor app or a product it isn't; the chain and folder of who asked otherwise", async () => {
   const { verify, from } = actors();
-  assert.match((await verify.register(from(220), {})).reason, /an SI can't register an actor, only ask you to, and this came from under a Claude Code process/);
+  assert.match((await verify.register(from(220), {})).reason, /SI can't register an actor, only ask you to, and this came from under a Claude Code process/);
   assert.match((await verify.register(from(510), {})).reason, /Grok Bot's own processes can't register an actor/);
   assert.match((await verify.register(from(730), {})).reason, /a program under Hermes Agent can't register an actor of its own/);
   assert.match((await verify.register(from(430), { product: "hermes-agent" })).reason, /Hermes Agent's actor registers only from under Hermes Agent's own processes/);

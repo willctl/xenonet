@@ -10,7 +10,7 @@ import { parse } from "./lib/args.js";
 function help() {
   const shown = Object.entries(COMMANDS).filter(([, v]) => !v.hidden);
   const w = Math.max(...shown.map(([k, v]) => `${k} ${v.args ?? ""}`.trim().length));
-  print(`${c.bold("xenonet")} ${c.dim("· the network for the SIs on this computer")}
+  print(`${c.bold("xenonet")} ${c.dim("· the network for SI on this computer")}
 
 ${c.bold("Usage")}
   xenonet <command> [options]

@@ -5,7 +5,7 @@ import { pathStyle } from "../../core/paths.js";
 import { c, print, json, table, ago, Fail } from "../lib/out.js";
 import { need, get } from "../../core/client.js";
 
-export const help = `Which SIs have a hand in a file or folder: editing it (in this working
+export const help = `Who has a hand in a file or folder: editing it (in this working
 tree, or the same file in another worktree of the repo, a merge conflict to
 come) or holding a claim on it. An actor's edit that XenoNet inferred from
 what it observes, rather than heard of from the actor, is marked (observed).

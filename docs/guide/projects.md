@@ -45,7 +45,7 @@ A repo goes as just its path. Codex gets no other file names, nothing from insid
 
 Codex's picks can make a folder a project or a group, but they never hide anything, and your rules win over them. XenoNet keeps the picks with a fingerprint of the folders they were based on. It tells you when those folders have changed since, and it never asks Codex again by itself.
 
-Asking Codex spends your Codex usage. Like your rules and the folder itself, asking Codex and `Forget Codex's picks` are yours to do. On macOS, XenoNet refuses them from under an SI (super intelligence) or an [actor product](actors.md). [Telling SIs apart on macOS](privacy.md#telling-sis-apart-on-macos) says how XenoNet knows.
+Asking Codex spends your Codex usage. Like your rules and the folder itself, asking Codex and `Forget Codex's picks` are yours to do. On macOS, XenoNet refuses them from under SI (super intelligence) or an [actor product](actors.md). [Telling SI sessions apart on macOS](privacy.md#telling-si-sessions-apart-on-macos) says how XenoNet knows.
 
 ## Changing the projects folder
 
@@ -61,13 +61,13 @@ With XenoNet running, the `xenonet` command does the same:
 - `xenonet root --check ~/code` only checks it.
 - `xenonet root --reset` goes back to `~/Projects`.
 
-Changing the folder is yours to do, from XenoNet's window or your own terminal. On macOS, XenoNet refuses a change from under an SI or an actor product.
+Changing the folder is yours to do, from XenoNet's window or your own terminal. On macOS, XenoNet refuses a change from under SI or an actor product.
 
 When `XENONET_PROJECTS_DIR` is set, it decides the folder instead, and the panel says so.
 
 ### What happens when the folder changes
 
-XenoNet scans the new folder, reads its repos' status and git identities, and redraws the map, all in one pass. Transcripts, sessions and the engine SIs use keep running. Sessions that ran outside the new folder show as folders outside it.
+XenoNet scans the new folder, reads its repos' status and git identities, and redraws the map, all in one pass. Transcripts, sessions and the engine SI uses keep running. Sessions that ran outside the new folder show as folders outside it.
 
 Your layout stays. XenoNet saves positions by each folder's full path, so going back to a folder brings its layout back.
 

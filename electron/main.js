@@ -606,7 +606,7 @@ function wireIpc() {
     const options = {
       title: "Save the actor's token",
       buttonLabel: "Save",
-      message: "Only you will be able to read this file. Keep it out of your projects and repos, where SIs read freely.",
+      message: "Only you will be able to read this file. Keep it out of your projects and repos, where SI reads freely.",
       defaultPath: path.join(home, ".config", "xenonet", `${name}.token`),
       properties: ["createDirectory", "showOverwriteConfirmation"],
     };
@@ -616,7 +616,7 @@ function wireIpc() {
     // You chose it, and the dialog asked before replacing a file.
     const file = writeTokenFile(res.filePath, token, { force: true });
     const tree = gitTreeOf(path.dirname(file));
-    return { file: tilde(file, home), warning: tree ? `It's inside a git working tree (${tilde(tree, home)}), where SIs read freely and tokens get committed.` : null };
+    return { file: tilde(file, home), warning: tree ? `It's inside a git working tree (${tilde(tree, home)}), where SI reads freely and tokens get committed.` : null };
   });
   // Native notifications for the page's alerts; the page decides what's new.
   // One per alert: a newer one replaces it, and it's withdrawn from the
@@ -849,7 +849,7 @@ if (iconsArg >= 0) {
       const how = await startServer();
       console.log(`[xenonet] server ${how} at ${BASE}`);
       // The control channel comes through a server this app started.
-      if (control && how === "reused") console.log(`[xenonet] the server at ${BASE} was already running, so scripts and SIs can't control this window; stop that server and restart ${app.name}`);
+      if (control && how === "reused") console.log(`[xenonet] the server at ${BASE} was already running, so scripts and SI can't control this window; stop that server and restart ${app.name}`);
     } catch (err) {
       const { dialog } = await import("electron");
       dialog.showErrorBox("XenoNet couldn't start its server", String(err.message ?? err));

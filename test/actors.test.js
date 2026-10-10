@@ -256,7 +256,7 @@ test("an event heard of late says what happened then: it doesn't take presence b
   clock.t += 5000;
   actors.tick();
   assert.deepEqual([actors.presence("actor:moth"), presences()], ["idle", [["Came online", 0]]], "no Started working two hours back, and no Went idle after it");
-  assert.deepEqual(actors.snapshot("actor:moth").recent.filter((e) => e.kind === "said").map((e) => [e.detail, e.at]), [["Said something to an SI in atlas-api", then]], "the event itself is kept, at its own time");
+  assert.deepEqual(actors.snapshot("actor:moth").recent.filter((e) => e.kind === "said").map((e) => [e.detail, e.at]), [["Said something to one SI session in atlas-api", then]], "the event itself is kept, at its own time");
   // One half a minute ago is still within the 90 s: working from now.
   actors.record("actor:moth", { kind: "said", target: S1, count: 1, via: "registered", at: clock.t - 30e3 });
   assert.deepEqual([actors.presence("actor:moth"), actors.presenceSince("actor:moth")], ["working", clock.t]);
@@ -284,7 +284,7 @@ test("after a restart, an actor keeps its last presence while it's within two he
   first.actors.stop();
   const again = cast({ store, t: T + 30e3 });
   const s = again.actors.snapshot("actor:moth");
-  assert.deepEqual([s.presence, s.presenceSince, s.status, s.recent.map((e) => e.detail), s.targets.map((t) => [t.relation, t.id])], ["working", T, "Watching geofence", ["Came online", "Watching geofence", "Said something to an SI in atlas-api"], [["messaged", S1]]]);
+  assert.deepEqual([s.presence, s.presenceSince, s.status, s.recent.map((e) => e.detail), s.targets.map((t) => [t.relation, t.id])], ["working", T, "Watching geofence", ["Came online", "Watching geofence", "Said something to one SI session in atlas-api"], [["messaged", S1]]]);
   again.clock.t = T + 66e3;
   again.actors.tick();
   assert.deepEqual([again.actors.snapshot("actor:moth").presence, lastEvent(again.actors).id], ["away", "moth:4"], "its events go on numbering where they were");
@@ -672,7 +672,7 @@ test("XenoNet Dev's simulations: an actor spawns, edits, says something, comes a
   assert.match(events.find((e) => e.kind === "edited").detail, /^Edited a file in \S+/);
   const atlas = graph.nodes.find((n) => n.kind === "session" && n.title === "Add partial refunds to the orders API").id;
   assert.equal(actors.simulate("actor-message", { a: "actor:moth", b: atlas }).b, atlas);
-  assert.equal(events.find((e) => e.kind === "said").detail, "Said something to an SI in atlas-api");
+  assert.equal(events.find((e) => e.kind === "said").detail, "Said something to one SI session in atlas-api");
   assert.ok(actors.snapshot("actor:moth").targets.some((t) => t.relation === "messaged" && t.id === atlas), "a beam to the session");
   assert.deepEqual(actors.simulate("actor-offline", { a: "actor:moth" }), { ok: true, kind: "actor-offline", a: "actor:moth" });
   assert.equal(actors.snapshot("actor:moth").presence, "offline");

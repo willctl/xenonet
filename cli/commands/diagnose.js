@@ -21,7 +21,7 @@ project names, identities or keys, and home folders show as ~.
 
   --json            as JSON
   --out <file>      write it to a file
-  --ask             have an SI on this computer look at it with you. It's a
+  --ask             have SI on this computer look at it with you. It's a
                     Codex session (or Claude Code, with --app claude) in a
                     folder of its own, read-only, that can read XenoNet's code
                     and never files anything. If it finds a bug in XenoNet, it

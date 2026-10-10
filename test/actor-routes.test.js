@@ -93,7 +93,7 @@ test("registering: 202 with a token that waits, after the process check, never w
   assert.deepEqual(card.asker, { program: "/usr/local/bin/node", parents: ["~/bin/wren", "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal"], folder: "~/Projects/docs-site" });
 
   assert.deepEqual(codeOf(await r.go("POST", "/api/actors/register", { body: { name: "Kite" }, headers: r.bearer(res.body.token) })), [403, "not-allowed"], "an actor can't register actors");
-  r.verdicts.register = { ok: false, checked: true, reason: "an SI can't register an actor, only ask you to, and this came from under a Claude Code process" };
+  r.verdicts.register = { ok: false, checked: true, reason: "SI can't register an actor, only ask you to, and this came from under a Claude Code process" };
   const agent = await r.go("POST", "/api/actors/register", { body: { name: "Kite" } });
   assert.deepEqual([...codeOf(agent), agent.body.error], [403, "wrong-process", r.verdicts.register.reason]);
   delete r.verdicts.register;
@@ -183,7 +183,7 @@ test("allowed: heartbeats, events and targets, each answered with what it is and
 test("the process check holds a token to where it may be used", async () => {
   const r = routes();
   const token = await r.allowed();
-  r.verdicts.actor = { ok: false, checked: true, reason: "an actor's token can't be used from under an SI, and this came from under a Claude Code process" };
+  r.verdicts.actor = { ok: false, checked: true, reason: "an actor's token doesn't work from under SI, and this came from under a Claude Code process" };
   for (const [method, path, body] of [["GET", "/api/actors/me"], ["POST", "/api/actors/heartbeat", {}], ["POST", "/api/actors/events", { events: [] }], ["POST", "/api/actors/targets", {}], ["DELETE", "/api/actors/me"]]) {
     const res = await r.go(method, path, { body, headers: r.bearer(token) });
     assert.deepEqual([...codeOf(res), res.body.error], [403, "wrong-process", r.verdicts.actor.reason], `${method} ${path}`);
@@ -254,7 +254,7 @@ test("a new status is an event: it counts against the actor's events, and the sa
 test("a caller the process check refuses spends none of the actor's rates", async () => {
   const r = routes();
   const headers = r.bearer(await r.allowed());
-  r.verdicts.actor = { ok: false, checked: true, reason: "an actor's token can't be used from under an SI, and this came from under a Claude Code process" };
+  r.verdicts.actor = { ok: false, checked: true, reason: "an actor's token doesn't work from under SI, and this came from under a Claude Code process" };
   const fifty = { events: Array.from({ length: 50 }, () => ({ kind: "ran" })) };
   for (let i = 0; i < 3; i++) assert.deepEqual(codeOf(await r.go("POST", "/api/actors/events", { body: fifty, headers })), [403, "wrong-process"]);
   for (let i = 0; i < 4; i++) assert.deepEqual(codeOf(await r.go("POST", "/api/actors/heartbeat", { body: {}, headers })), [403, "wrong-process"]);

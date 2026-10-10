@@ -117,7 +117,7 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
   }
 
   function viaHtml(s, actions) {
-    if (actions.you) return "Only this window sees what you do. SIs see a placeholder.";
+    if (actions.you) return "Only this window sees what you do. SI sees a placeholder.";
     const via = (s.via ?? []).filter((v) => v !== "demo" || s.via.length === 1);
     const words = via.map((v) => VIA_WORDS[v] ?? v);
     if (s.via?.includes("demo") && s.via.length > 1) words.push(VIA_WORDS.demo);
@@ -223,7 +223,7 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
 
   function listHtml() {
     return `
-      <p class="pj-note">You, always-on SIs and programs of your own. A program joins only after you allow it.</p>
+      <p class="pj-note">Actors are you, always-on SI and programs of your own. A program joins only after you allow it.</p>
       <div class="ac-waiting" data-ac-waiting hidden><div class="d-k need" data-ac-waiting-title>waiting for you</div><ol class="ac-list" data-ac-requests></ol></div>
       <div class="d-k">beside the map</div>
       <ol class="ac-list" data-ac-actors></ol>

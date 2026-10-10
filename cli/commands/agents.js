@@ -12,7 +12,7 @@ files it's editing or has claimed. Connected sessions (xenonet connect) can
 see and message each other. The actors at work (xenonet actors) follow,
 apart from them.
 
-  --repo   only the SIs in the current directory's repo
+  --repo   only the sessions in the current directory's repo
   --json   the full list as JSON, actors (app "actor") included`;
 
 export async function run(_args, flags) {

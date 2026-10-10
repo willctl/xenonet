@@ -77,7 +77,7 @@ export function writeDetail(kind, facts = {}, where = null) {
       return `Sent ${plural(count(facts.count), "a message", "messages")}${how ? ` ${how}` : ""}`;
     }
     case "said":
-      return `Said something to ${plural(count(facts.count), "an SI", "SIs")}${at}`;
+      return `Said something to ${plural(count(facts.count), "one SI session", "SI sessions")}${at}`;
     case "finished":
       return `${FINISHED[facts.subject] ?? "Finished"}${at}`;
     case "failed":
