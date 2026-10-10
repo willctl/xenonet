@@ -4,7 +4,7 @@
 //
 // Under the checks, what went wrong lately (XenoNet's error log, core/log.js)
 // by code, and two ways to get help: Copy diagnostics, a summary safe to
-// share (core/diagnostics.js), and Ask an agent, which starts a Codex or
+// share (core/diagnostics.js), and Ask an SI, which starts a Codex or
 // Claude Code session on this computer, in a terminal here, to look at it
 // with you. That session never files anything; sending an issue stays
 // yours.
@@ -29,7 +29,7 @@ function lastAsk() {
 export function createDoctorPanel({ modals, sfx, toast, onResult = () => {}, terminal = null }) {
   let panel = null;
   let last = null;
-  let asking = null; // the Ask an agent view's choices, while it shows
+  let asking = null; // the Ask an SI view's choices, while it shows
 
   function render(r) {
     last = r;

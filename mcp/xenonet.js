@@ -1,4 +1,4 @@
-// The xenonet MCP server: the engine's tools for the AI agents on this
+// The xenonet MCP server: the engine's tools for the SIs on this
 // machine, so they can see who else is at work and on what, message each
 // other and claim files. Claude Code and Codex start it as `xenonet mcp`
 // (XenoNet adds it to their settings when you connect your agents; see

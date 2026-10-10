@@ -242,7 +242,7 @@ const doctorPanel = createDoctorPanel({
   sfx,
   toast: (m, b) => hud.toast(m, b),
   onResult: (r) => alerts.setDoctor(r),
-  // Ask an agent runs in a terminal tab here, where Desktop has them.
+  // Ask an SI runs in a terminal tab here, where Desktop has them.
   terminal: desktop?.terminal
     ? async (dir, command) => {
         await terminal?.show({ cwd: dir, fresh: true });
@@ -1100,7 +1100,7 @@ if (params.has("daylog")) setTimeout(() => modals.dayLog(), 800);
 // ---------- dev hooks ----------
 
 if (import.meta.env.DEV || desktop) {
-  // How scripts, tests and AI agents drive XenoNet (see driver.js).
+  // How scripts, tests and SIs drive XenoNet (see driver.js).
   const { createDriver } = await import("./driver.js");
   const driver = createDriver({
     scene, alerts, palette, modals, preview, replay, select, back, step, hud,

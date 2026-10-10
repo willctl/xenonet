@@ -1,4 +1,4 @@
-// xenonet-console, the console operator: an MCP server that lets AI agents
+// xenonet-console, the console operator: an MCP server that lets SIs
 // (Claude Code, Codex and any other MCP client) launch, drive and see XenoNet.
 // Installed Tools operate the installed app; this checkout also offers
 // synthetic development instances. Agent coordination lives in mcp/xenonet.js.

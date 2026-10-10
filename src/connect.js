@@ -1,4 +1,4 @@
-// Connect your agents: what XenoNet would add to Claude Code's and Codex's
+// Connect your SIs: what XenoNet would add to Claude Code's and Codex's
 // settings so that every session, in every project, can see the others and
 // message them through XenoNet's engine (core/engine/connect.js does the
 // adding). It shows each change before anything happens, then adds it all,
