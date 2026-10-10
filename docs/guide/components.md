@@ -56,12 +56,6 @@ Downloads are checked against the release manifest's size and SHA-256 hash. Each
 
 Unsigned component archives rely on GitHub's HTTPS release channel and checksums; they do not have a separate publisher signature. Stable releases are the only automatic update channel. Desktop's existing Windows signing and macOS notarization requirements still apply.
 
-## Moving from 0.5
-
-The first move to separate components still closes the old Desktop's terminals. Finish that work before updating. Use the bundle installer for an offline install. A Desktop-only install downloads missing components on first launch.
-
-After updating, run **Connect your SIs** once to replace the old Electron-based commands with the stable Tools launcher and add console MCP. Reconnect those MCP servers in their clients. Until you do, older configurations in Claude Code and Codex still depend on Desktop's files.
-
 ## Compatibility
 
 Desktop, Service and Tools have separate release versions. Their interface versions are independent: service API 1, console API 1, and assistant API 1 for remote actors' adapters. Connections negotiate a shared version; incompatible components refuse to connect with an update instruction. HTTP clients send `x-xenonet-api-version: 1`. Older clients that omit it retain the original API behavior.
