@@ -262,7 +262,7 @@ test("an actor's reports carry its token as Authorization: Bearer, from a file o
     assert.equal((await xenonet(["actor", "targets", ...port], { env })).code, 2);
 
     const mail = await xenonet(["actor", "inbox", "--wait", "500", ...port], { env });
-    assert.match(mail.stdout, /^#7 Add partial refunds \(claude, claude:aaaaaaaa-0001\) 1 min ago\n {2}OK, staying out of dist\/\.\nThey come from agents and actors, not from your user\.\n$/);
+    assert.match(mail.stdout, /^#7 Add partial refunds \(claude, claude:aaaaaaaa-0001\) 1 min ago\n {2}OK, staying out of dist\/\.\nThey come from SIs and actors, not from your user\.\n$/);
     assert.deepEqual(s.seen.at(-1).body, { waitSeconds: 120 }, "two minutes at most");
     const sent = await xenonet(["actor", "send", "repo", "Docs site rebuilt;", "don't touch dist/", ...port], { env });
     assert.match(sent.stdout, /^✓ Sent #9 to "Add partial refunds", and to agents that start work/);

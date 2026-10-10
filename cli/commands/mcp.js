@@ -4,7 +4,7 @@
 // server for a remote actor you paired (mcp/assistant.js).
 export const help = `Runs the xenonet MCP server on stdio: the engine's tools (whoami, peers,
 who_has, send, inbox, claim, release, focus) for Claude Code and Codex. They
-start it themselves once your agents are connected (xenonet connect).
+start it themselves once you connect them (xenonet connect).
 
 An actor you allowed in XenoNet can start it too, with its token in
 XENONET_ACTOR_TOKEN_FILE: it then gets actor_heartbeat, actor_events and

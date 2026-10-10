@@ -42,7 +42,7 @@ so your ~/.ssh/config is never read or changed.
 
 Before the first connection to a machine, accept its host key once in a
 terminal, with the command xenonet hosts add prints. Adding and removing
-hosts are yours to do: XenoNet refuses them from under an agent.`;
+hosts are yours to do. XenoNet refuses them from under an SI.`;
 
 const DOT = { live: c.green("●"), connecting: c.cyan("◌"), stale: c.yellow("◐"), offline: c.dim("○"), error: c.red("✗") };
 const shown = (p) => tilde(p, os.homedir());

@@ -12,7 +12,7 @@ files it's editing or has claimed. Connected sessions (xenonet connect) can
 see and message each other. The actors at work (xenonet actors) follow,
 apart from them.
 
-  --repo   only the agents in the current directory's repo
+  --repo   only the SIs in the current directory's repo
   --json   the full list as JSON, actors (app "actor") included`;
 
 export async function run(_args, flags) {
@@ -23,7 +23,7 @@ export async function run(_args, flags) {
     agents = agents.filter((a) => [a.top, a.cwd].some((d) => d && (here === d || here.startsWith(d + path.sep))));
   }
   if (flags.json) return json(agents);
-  if (!agents.length) return print(c.dim(flags.repo ? "No agent has worked in this repo in the last two hours." : "No agent has worked in the last two hours."));
+  if (!agents.length) return print(c.dim(flags.repo ? "No SI has worked in this repo in the last two hours." : "No SI has worked in the last two hours."));
   const sessions = agents.filter((a) => a.app !== "actor");
   const actors = agents.filter((a) => a.app === "actor");
 

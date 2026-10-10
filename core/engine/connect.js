@@ -210,7 +210,7 @@ export function createConnect({ port, root, demo = false, exec = process.execPat
 
   async function apply(apps = ["claude", "codex"]) {
     // Agents connected to the demo would see only its made-up sessions.
-    if (demo) throw new Error("this is the demo: connect your agents from XenoNet with your own sessions");
+    if (demo) throw new Error("this is the demo, so connect your SIs from XenoNet with your own sessions");
     if (apps.includes("claude")) {
       writeJson(claudeSettings, mergeHooks(readJson(claudeSettings, home), ourClaudeHook, claudeHooks));
       const bin = cli("claude");

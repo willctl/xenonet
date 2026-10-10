@@ -9,8 +9,8 @@ import { need, get, request, nameOf } from "../../core/client.js";
 import { handoff } from "../../core/actors/handoff.js";
 
 export const help = `XenoNet's actor gateway lets actors outside this machine, such as Muse or a
-Grok Bot in their makers' clouds, message the agents here over MCP. It
-listens on this machine alone; a tunnel you pick puts it on the internet,
+Grok Bot in their makers' clouds, message the SIs here over MCP. It
+listens on this machine alone. A tunnel you pick puts it on the internet,
 and XenoNet keeps that tunnel running and checks that the address works.
 
   xenonet gateway                    whether it's on, its tunnel, its address
