@@ -562,7 +562,7 @@ test("programs asking to be actors wait on cards; a real click on Allow lets one
   assert.deepEqual([card.name, card.actor, card.asker.program, card.asker.folder], ["Heron", heron.a, `~/bin/${heron.a.slice(6)}`, `~/Projects/${heron.a.slice(6)}`]);
   assert.equal((await s.driver("state")).counts.requests, waiting.requests.length);
   const text = await s.eval(`return document.querySelector('#alerts [data-al-request="${heron.request}"]').textContent`);
-  for (const words of ["Heron", "asks to join XenoNet", "run commands, edit repos, message SIs", card.asker.program, card.asker.folder]) assert.ok(text.includes(words), `the card says ${words}`);
+  for (const words of ["Heron", "asks to join XenoNet", "run commands, edit repos, message SI", card.asker.program, card.asker.folder]) assert.ok(text.includes(words), `the card says ${words}`);
   assert.equal(await s.eval(`return [...document.querySelectorAll("#alerts .al")].slice(0, ${waiting.requests.length}).every((el) => el.matches(".request"))`), true, "first in the strip");
   assert.equal(await s.eval(`return document.querySelector('#alerts [data-al-allow="${heron.request}"]').hasAttribute("data-yours")`), true, "Allow is yours alone");
   assert.equal(byId(await s.driver("actors"), heron.a), undefined, "not on the map while it waits");
