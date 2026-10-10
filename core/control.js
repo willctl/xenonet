@@ -1,4 +1,4 @@
-// Drives XenoNet Dev from scripts, tests and SIs: starts an instance
+// Drives XenoNet Dev from scripts, tests and SI: starts an instance
 // (see instances.js), talks to its control channel
 // (electron/control.js, reached through POST /api/dev/control on the
 // instance's own server) and quits it. The console MCP server
