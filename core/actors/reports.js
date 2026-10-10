@@ -112,7 +112,7 @@ export async function takeEvents(actors, id, events, { now = actors.now(), own =
     if (need && !actors.can(id, need)) {
       // A message to someone outside XenoNet is easily mistaken for one to an
       // agent, which is the engine's, so the refusal says which is which.
-      const aside = e.kind === "messaged" ? " (messaged is a message to someone outside XenoNet, by email or a chat app; to write to an agent or another actor, use xenonet actor send)" : "";
+      const aside = e.kind === "messaged" ? " (messaged is a message to someone outside XenoNet, by email or a chat app; to write to an SI or another actor, use xenonet actor send)" : "";
       drop(`${e.kind} needs the ${need} capability, which it wasn't allowed${aside}`);
       continue;
     }

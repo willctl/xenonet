@@ -54,7 +54,7 @@ export function fingerprint(outline) {
 }
 
 export function picksPrompt(outline) {
-  return `You are sorting the folders in a developer's projects folder, for a tool that draws a map of the projects their AI coding sessions work in. Every project you add becomes a node on that map, so add one only when the developer would want to see it there.
+  return `You are sorting the folders in a developer's projects folder, for a tool that draws a map of the projects their Claude Code and Codex sessions work in. Every project you add becomes a node on that map, so add one only when the developer would want to see it there.
 
 Each entry below is one folder, by its path inside the projects folder. It lists the well-known files the folder holds (markers), how many files and subfolders it has, its commonest file types, how many coding sessions ran in it or below it, and how the tool sees it now ("xenonet"):
 - "repo": it has its own version control, so it is a project. Don't pick it.

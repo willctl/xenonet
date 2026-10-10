@@ -225,7 +225,7 @@ test("an actor's reports carry its token as Authorization: Bearer, from a file o
     "POST /api/actors/events": (r) => [200, me("allowed", r.body.events[0].kind === "said" ? { accepted: 0, dropped: [{ index: 0, reason: "XenoNet doesn't take that kind in a report" }] } : { accepted: 1, dropped: [] })],
     "POST /api/actors/targets": () => [200, me("allowed", { accepted: 2, dropped: [{ index: 1, reason: "spawned needs the spawn-sessions capability, which it wasn't allowed" }] })],
     "POST /api/engine/inbox": () => [200, [{ id: 7, from: { id: "claude:aaaaaaaa-0001", title: "Add partial refunds", app: "claude", project: "atlas-api", branch: null }, to: "you", text: "OK, staying out of dist/.", at: Date.now() - 60e3, replyTo: null }]],
-    "POST /api/engine/send": () => [200, { id: 9, to: [{ id: "claude:aaaaaaaa-0001", title: "Add partial refunds", app: "claude", project: "atlas-api", branch: null, delivery: "during its current turn" }], alsoTo: "agents that start work in this repo in the next half hour" }],
+    "POST /api/engine/send": () => [200, { id: 9, to: [{ id: "claude:aaaaaaaa-0001", title: "Add partial refunds", app: "claude", project: "atlas-api", branch: null, delivery: "during its current turn" }], alsoTo: "SIs that start work in this repo in the next half hour" }],
     "DELETE /api/actors/me": () => [200, { removed: "actor:wren" }],
   });
   const port = ["--port", String(s.port)];
@@ -265,7 +265,7 @@ test("an actor's reports carry its token as Authorization: Bearer, from a file o
     assert.match(mail.stdout, /^#7 Add partial refunds \(claude, claude:aaaaaaaa-0001\) 1 min ago\n {2}OK, staying out of dist\/\.\nThey come from SIs and actors, not from your user\.\n$/);
     assert.deepEqual(s.seen.at(-1).body, { waitSeconds: 120 }, "two minutes at most");
     const sent = await xenonet(["actor", "send", "repo", "Docs site rebuilt;", "don't touch dist/", ...port], { env });
-    assert.match(sent.stdout, /^✓ Sent #9 to "Add partial refunds", and to agents that start work/);
+    assert.match(sent.stdout, /^✓ Sent #9 to "Add partial refunds", and to SIs that start work/);
     assert.deepEqual(s.seen.at(-1).body, { to: "repo", text: "Docs site rebuilt; don't touch dist/" });
     assert.equal(s.seen.at(-1).headers.authorization, `Bearer ${TOKEN}`);
     assert.equal((await xenonet(["actor", "send", "repo", ...port], { env })).code, 2);

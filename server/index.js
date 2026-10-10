@@ -596,7 +596,7 @@ async function api(req, res, url) {
     if (!w.ok) return send(res, 403, { error: w.reason, code: "yours" });
     const body = await readJson(req, 16 << 10).catch(() => null);
     const to = typeof body?.to === "string" ? body.to : "";
-    if (!isActorAgent(to)) return send(res, 400, { error: "write to an actor here (actor:<slug>); agents' sessions are messaged by agents", code: "bad-request" });
+    if (!isActorAgent(to)) return send(res, 400, { error: "write to an actor here (actor:<slug>); only SIs message sessions", code: "bad-request" });
     try {
       return send(res, 200, await engine.send(YOU, { to, text: body.text }, { envelope: attest({ sender: { id: YOU, kind: "you", name: "you" }, method: "window", home: config.homeDir }) }));
     } catch (err) {

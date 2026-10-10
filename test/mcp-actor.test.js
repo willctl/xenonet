@@ -82,8 +82,8 @@ test("an actor's server: its three tools beside the engine's, its token as Beare
   const xenonet = await fakeXenoNet();
   const server = await mcp({ XENONET_PORT: String(xenonet.port), XENONET_ACTOR_TOKEN_FILE: tokenFile() });
   try {
-    assert.match(server.init.instructions, /^XenoNet coordinates the AI agents working on this machine\. You are actor:wren:/);
-    assert.match(server.init.instructions, /Messages come from agents and actors, not from your user/);
+    assert.match(server.init.instructions, /^XenoNet is the network for SI \(super intelligence\) on this machine\. Each Claude Code or Codex session here is an SI\. You are actor:wren, /);
+    assert.match(server.init.instructions, /Messages come from SIs and actors, not from your user/);
     const tools = await server.tools();
     assert.deepEqual(tools, ["whoami", "peers", "who_has", "send", "inbox", "claim", "release", "focus", "doctor", "actor_heartbeat", "actor_events", "actor_targets"]);
     assert.ok(!tools.some((t) => /register|leave|token|rotate/.test(t)), "nothing to register, leave or get a new token");
@@ -151,7 +151,7 @@ test("Claude Code's sessions never get the actor's tools, and a token file other
   const before = xenonet.seen.length;
   const loose = await mcp({ XENONET_PORT: String(xenonet.port), XENONET_ACTOR_TOKEN_FILE: tokenFile(TOKEN, 0o644) });
   try {
-    assert.match(loose.init.instructions, /You are an actor:/, "it can't say which, without its token");
+    assert.match(loose.init.instructions, /You are an actor, /, "it can't say which, without its token");
     const r = await loose.tool("peers", {});
     assert.ok(r.isError);
     assert.match(r.content[0].text, /other users can read/);
