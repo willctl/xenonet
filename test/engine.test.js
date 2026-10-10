@@ -148,7 +148,7 @@ test("hooks: a briefing at the start, a warning before an edit, mail between too
   const start = await engine.hook("claude", "SessionStart", { session_id: "99999999-0007", cwd: "/w/atlas" });
   const brief = start.hookSpecificOutput.additionalContext;
   assert.equal(start.hookSpecificOutput.hookEventName, "SessionStart");
-  assert.match(brief, /3 other SIs/);
+  assert.match(brief, /3 other SI sessions/);
   assert.match(brief, /Add partial refunds/);
   assert.match(brief, /Zoom on images.*another worktree, \/wt\/atlas-zoom, on feat\/zoom/);
   assert.doesNotMatch(brief, /ledger/);

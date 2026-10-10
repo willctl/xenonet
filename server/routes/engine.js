@@ -103,7 +103,7 @@ export function engineRoutes({ engine, connect, verify, readJson, send, actorCal
         if (req.method === "GET") return send(res, 200, await connect.preview());
         // Changing Claude Code's and Codex's settings is yours to do, not an
         // agent's, and never an actor's.
-        if (bearerOf(req.headers) !== undefined) return send(res, 403, { error: "connecting SIs is yours to do, and an actor can't do it", code: "yours" });
+        if (bearerOf(req.headers) !== undefined) return send(res, 403, { error: "connecting SI is yours to do, and an actor can't do it", code: "yours" });
         const you = await verify.person(req.socket);
         if (!you.ok) return send(res, 403, { error: you.reason });
         if (req.method === "POST") return send(res, 200, await connect.apply((await readJson(req)).apps));
@@ -114,7 +114,7 @@ export function engineRoutes({ engine, connect, verify, readJson, send, actorCal
       if (req.method !== "POST" || !op) return send(res, 404, { error: "not found" });
       if (bearerOf(req.headers) !== undefined) return await asActor(req, res, name, op);
       const me = req.headers["x-xenonet-agent"];
-      if (!isAgentId(me)) return send(res, 400, { error: "say which SI is calling, in x-xenonet-agent (claude:<session id> or codex:<thread id>)" });
+      if (!isAgentId(me)) return send(res, 400, { error: "say which session is calling, in x-xenonet-agent (claude:<session id> or codex:<thread id>)" });
       const ok = await verify.check(req.socket, me);
       if (!ok.ok) return send(res, 403, { error: ok.reason });
       const body = await readJson(req);

@@ -67,7 +67,7 @@ const HOW = { session: "its own session's process", token: "its token", window: 
 
 // "verified: …": what XenoNet checked, in a sentence, and what it couldn't.
 export function verifiedLine(env, { platform = process.platform } = {}) {
-  const who = env.sender.kind === "you" ? "you, at XenoNet's own window" : `${env.sender.kind === "actor" ? "the actor" : "the SI"} "${env.sender.name ?? env.sender.id}" (${env.sender.id})`;
+  const who = env.sender.kind === "you" ? "you, at XenoNet's own window" : `${env.sender.kind === "actor" ? "the actor" : "the SI session"} "${env.sender.name ?? env.sender.id}" (${env.sender.id})`;
   const how = HOW[env.auth.method] ?? env.auth.method;
   const proc =
     env.auth.process === "signed"

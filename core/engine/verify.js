@@ -107,7 +107,7 @@ export function ownOf(chain) {
 // to its own processes, and any other is an actor of your own.
 export function actorRefusal(chain, { product = null, pid = null, registering = false } = {}) {
   const agent = chain.find((p) => p.agent);
-  if (agent) return registering ? `an SI can't register an actor, only ask you to, and this came from under a ${APP[agent.agent]} process` : `an actor's token can't be used from under an SI, and this came from under a ${APP[agent.agent]} process`;
+  if (agent) return registering ? `SI can't register an actor, only ask you to, and this came from under a ${APP[agent.agent]} process` : `an actor's token doesn't work from under SI, and this came from under a ${APP[agent.agent]} process`;
   const own = chain[0]?.product;
   if (own?.role === "app") return `${PRODUCT[own.product]}'s own processes can't ${registering ? "register an actor" : "use an actor's token"}: they could be relaying for its cloud`;
   if (Object.hasOwn(PRODUCT, product ?? "")) {

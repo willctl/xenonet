@@ -376,7 +376,7 @@ export class Engine extends EventEmitter {
     if (!text) throw new Error("the message is empty");
     if (text.length > MAX_TEXT) throw new Error(`keep messages under ${MAX_TEXT} characters`);
     if (!to && replyTo) to = this.store.message(Number(replyTo))?.sender;
-    if (!to) throw new Error('say who it\'s for: an SI\'s id, words from its title, "repo" or "all"');
+    if (!to) throw new Error('say who it\'s for: a session\'s id, words from its title, "repo" or "all"');
     const self = await this.view(me);
     // Actors XenoNet only observes are left out: nothing reads their inbox.
     const active = (await this.agents()).filter((a) => a.id !== me && this.#reads(a.id));
@@ -397,7 +397,7 @@ export class Engine extends EventEmitter {
     const id = this.store.send({ sender: me, target, scope, body: text, replyTo: replyTo ? Number(replyTo) : null, recipients: recipients.map((r) => r.id), envelope }, now);
     for (const r of recipients) for (const wake of this.waiters.get(r.id) ?? []) wake();
     this.emit("message", { id, from: me, to: recipients.map((r) => r.id), target, text, ts: now, ...(envelope ? { verified: envelope.line, strength: envelope.auth.strength } : {}) });
-    return { id, to: recipients.map((r) => ({ ...brief(r), delivery: delivery(r) })), ...(scope ? { alsoTo: "SIs that start work in this repo in the next half hour" } : {}) };
+    return { id, to: recipients.map((r) => ({ ...brief(r), delivery: delivery(r) })), ...(scope ? { alsoTo: "SI sessions that start work in this repo in the next half hour" } : {}) };
   }
 
   // An agent new to a repo gets what was said to everyone there in the last
@@ -556,9 +556,9 @@ export class Engine extends EventEmitter {
     const rest = all.length - Math.min(others.length, 6);
     if (rest > 0) lines.push(`- and ${rest} more ${others.length > 6 ? "" : "that were here earlier "}(the xenonet peers tool lists them)`);
     return [
-      `XenoNet: ${others.length === 1 ? "another SI has" : `${others.length} other SIs have`} been working in this repo in the last half hour. They can't see your conversation.`,
+      `XenoNet: ${others.length === 1 ? "another SI session has" : `${others.length} other SI sessions have`} been working in this repo in the last half hour. They can't see your conversation.`,
       ...lines,
-      `You are ${me}. To coordinate, use the xenonet tools: peers, who_has, send (to an SI, or "repo" for all of them), inbox, claim. Before you edit a file another SI is working on, XenoNet will tell you.`,
+      `You are ${me}. To coordinate, use the xenonet tools: peers, who_has, send (to a session, or "repo" for all of them), inbox, claim. Before you edit a file another session is working on, XenoNet will tell you.`,
     ].join("\n");
   }
 
@@ -585,7 +585,7 @@ export class Engine extends EventEmitter {
     const deaf = fresh.every((c) => !this.#reads(c.agent.id));
     const one = new Set(fresh.map((c) => c.agent.id)).size === 1;
     const advice = deaf ? `${one ? "It" : "They"} can't read messages (XenoNet only observes ${one ? "it" : "them"}), so if it could clash, keep to other files.` : "If it could clash, tell them with the xenonet send tool, or keep to other files.";
-    return [`XenoNet: before you edit ${[...new Set(fresh.map((c) => path.basename(c.file)))].join(", ")}, note that another SI has a hand in it:`, ...lines, `Your edit goes ahead. ${advice}`].join("\n");
+    return [`XenoNet: before you edit ${[...new Set(fresh.map((c) => path.basename(c.file)))].join(", ")}, note that another SI session or actor has a hand in it:`, ...lines, `Your edit goes ahead. ${advice}`].join("\n");
   }
 
   // Messages as an agent reads them, framed as other agents' (and actors'),
@@ -593,7 +593,7 @@ export class Engine extends EventEmitter {
   #mail(messages) {
     if (!messages.length) return "";
     const now = this.now();
-    const who = messages.some((m) => m.from.app === "actor") ? "SIs and actors" : "SIs";
+    const who = messages.some((m) => m.from.app === "actor") ? "SI sessions and actors" : "SI sessions";
     // XenoNet's own lines start at the margin: who it's from and how XenoNet
     // knows (attest.js); the message's own lines are quoted beneath them,
     // so nothing in it can pass for a line of XenoNet's.
