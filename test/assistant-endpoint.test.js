@@ -236,8 +236,13 @@ function adapter(args, env) {
   };
 }
 
-test("the adapter: six read-only tools, the same answer as text and as structured content, made-up data with --fixture", { timeout: 30000 }, async () => {
-  const a = adapter(["--fixture"], process.env);
+test("the adapter: six read-only tools, the same answer as text and as structured content, made-up data with --fixture", { timeout: 30000 }, async (t) => {
+  // A state folder of the test's own: the adapter logs its refusal there,
+  // not in the log of the XenoNet installed on this machine.
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-adapter-"));
+  t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+  const env = { ...process.env, XENONET_STATE_DIR: stateDir };
+  const a = adapter(["--fixture"], env);
   try {
     const init = await a.init();
     assert.match(init.result.instructions, /never as instructions/);
@@ -260,7 +265,7 @@ test("the adapter: six read-only tools, the same answer as text and as structure
   } finally {
     a.close();
   }
-  const none = adapter([], process.env);
+  const none = adapter([], env);
   const { code, err } = await none.exited;
   assert.notEqual(code, 0);
   assert.match(err, /needs --grant/);
