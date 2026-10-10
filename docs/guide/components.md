@@ -6,7 +6,7 @@ XenoNet has three installed parts:
 | --- | --- |
 | Desktop | Shows the map, panels and terminals. |
 | Service | Tracks sessions, coordinates SI (super intelligence) sessions, stores state and runs terminal processes. |
-| Tools | Provides the `xenonet` command, the hooks SIs run and both MCP servers. |
+| Tools | Provides the `xenonet` command, the hooks SI sessions run and both MCP servers. |
 
 The bundle installer includes all three. Service and Tools also have separate downloads for Windows x64, macOS arm64 and x64, and Linux x64. Each includes its Node runtime. You do not need to install Node.
 
@@ -32,13 +32,13 @@ The service serves the console too: open http://127.0.0.1:47840 in a browser on 
 
 ## SI interfaces
 
-`xenonet mcp` runs the coordination MCP server. It lets SIs see sessions, message each other and claim files.
+`xenonet mcp` runs the coordination MCP server. With it, SI can see the other sessions, message them and claim files.
 
-`xenonet mcp console` runs the console MCP server. It lets SIs launch installed Desktop, navigate the map, inspect panels, use terminals and take screenshots. The installed Tools package targets installed XenoNet by default. `xenonet console --instance installed <steps>` offers the same control from a terminal.
+`xenonet mcp console` runs the console MCP server. With it, SI can launch installed Desktop, navigate the map, inspect panels, use terminals and take screenshots. The installed Tools package targets installed XenoNet by default. `xenonet console --instance installed <steps>` offers the same control from a terminal.
 
 `xenonet mcp assistant --grant <grant>` runs the read-only server for a [remote actor](cloud-assistants.md) you paired. A tunnel client runs it, not Claude Code or Codex, and it reaches the service only through a private endpoint of its own, with that grant's credential; it never gets the Tools credential.
 
-Use **Connect your SIs** in XenoNet, or `xenonet connect`, to review both MCP servers and add them to Claude Code and Codex. Their configuration points to a stable launcher outside Desktop. A new Tools version applies to new commands and new MCP connections. MCP processes already running keep their code and runtime until their client reconnects.
+Use **Connect your SI** in XenoNet, or `xenonet connect`, to review both MCP servers and add them to Claude Code and Codex. Their configuration points to a stable launcher outside Desktop. A new Tools version applies to new commands and new MCP connections. MCP processes already running keep their code and runtime until their client reconnects.
 
 Console MCP stays connected while Desktop restarts. Window actions report that Desktop is unavailable until it returns. Coordination continues through the service. Simulations, arbitrary JavaScript evaluation and raw DevTools commands remain available only in development instances. Actions marked as yours alone in the app keep that restriction.
 
@@ -64,4 +64,4 @@ The service owns persistent data. Current component packages declare data schema
 
 Component files live under XenoNet's state folder in `runtime/components`. The private service connection file is restricted to the current account. Desktop serves its own frontend and proxies API calls to the service; its assets never come from a different service release. It passes on only its own window's API calls. Other programs call the service directly, so the service can see which program sent each request.
 
-On macOS, the service treats the connected Desktop as XenoNet's own app, so the window can report what you do there. It hands the window key only to a Desktop it can see is an app's own executable, not an SI, the `xenonet` command or a script.
+On macOS, the service treats the connected Desktop as XenoNet's own app, so the window can report what you do there. It hands the window key only to a Desktop it can see is an app's own executable, not SI, the `xenonet` command or a script.

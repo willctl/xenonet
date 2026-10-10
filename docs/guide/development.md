@@ -44,18 +44,18 @@ The page runs under a Content-Security-Policy, set in `server/static.js`, and in
 
 ## Developing on another computer
 
-Claude Code and Codex can run on one computer while you develop XenoNet on another, such as a VM. The computer the SIs run on keeps an installed XenoNet with every part. The other runs XenoNet Dev from the checkout. Two forwarded ports join them, both opened over SSH from the SIs' computer, so nothing listens on a network. Each port keeps its number on the other side, since XenoNet answers only to its own address:
+Claude Code and Codex can run on one computer while you develop XenoNet on another, such as a VM. The SI computer, where Claude Code and Codex run, keeps an installed XenoNet with every part. The other runs XenoNet Dev from the checkout. Two forwarded ports join them, both opened over SSH from the SI computer, so nothing listens on a network. Each port keeps its number on the other side, since XenoNet answers only to its own address:
 
 ```sh
-# On the SIs' computer, its XenoNet (47840) reaches the other computer as 47840,
+# On the SI computer, its XenoNet (47840) reaches the other computer as 47840,
 # and that computer's XenoNet Dev (47842) answers here as 47842.
 ssh -N -R 127.0.0.1:47840:127.0.0.1:47840 -L 127.0.0.1:47842:127.0.0.1:47842 you@devbox
 ```
 
 - **The page against real sessions.** On the other computer, `XENONET_UPSTREAM=http://127.0.0.1:47840 npm run dev` serves the page from the checkout and passes its reads to the installed XenoNet (`server/upstream.js`). Only reads go through: anything that would change something there is refused, so a page in development can look but never act. Add `--demo` to keep the dev server's own service on made-up data. `XENONET_UPSTREAM` takes only an address on that computer, a forwarded port, and the installed service ignores it.
-- **SIs talking to XenoNet Dev.** On the SIs' computer, `xenonet connect --here --port 47842` adds XenoNet Dev's MCP server and hooks to Claude Code's and Codex's settings beside the installed XenoNet's, through that computer's own launcher. Asking XenoNet Dev itself would write the other computer's settings. While the forward is down, its hooks do nothing. `xenonet disconnect --port 47842` takes them out again.
+- **SI talking to XenoNet Dev.** On the SI computer, `xenonet connect --here --port 47842` adds XenoNet Dev's MCP server and hooks to Claude Code's and Codex's settings beside the installed XenoNet's, through that computer's own launcher. Asking XenoNet Dev itself would write the other computer's settings. While the forward is down, its hooks do nothing. `xenonet disconnect --port 47842` takes them out again.
 
-What acts on the SIs' computer (opening a session in its app, handoffs, terminals in its folders, its credential store) stays with the installed XenoNet there.
+What acts on the SI computer (opening a session in its app, handoffs, terminals in its folders, its credential store) stays with the installed XenoNet there.
 
 ## Building
 
@@ -66,19 +66,19 @@ What acts on the SIs' computer (opening a session in its app, handoffs, terminal
 
 [Install](install.md) says how to install what you build.
 
-## Driving XenoNet from SIs, scripts and tests
+## Driving XenoNet from SI, scripts and tests
 
-Installed XenoNet and XenoNet Dev both have a control channel, so an SI or a script can launch Desktop, act on it and see it the way you would. Development copies also offer simulation and evaluation for tests. Use the demo to check a change to XenoNet, and the installed console for everyday control by SIs. [Components](components.md) explains the production MCP setup.
+Installed XenoNet and XenoNet Dev both have a control channel, so SI or a script can launch Desktop, act on it and see it the way you would. Development copies also offer simulation and evaluation for tests. Use the demo to check a change to XenoNet. SI can operate the installed console for everyday work. [Components](components.md) explains the production MCP setup.
 
-The control channel operates the console. The engine that connects SIs to each other is a separate MCP server, `xenonet`, in `mcp/xenonet.js`. See [SIs working together](agents.md).
+The control channel operates the console. The engine that connects SI sessions to each other is a separate MCP server, `xenonet`, in `mcp/xenonet.js`. See [SI working together](agents.md).
 
-- SIs get the control channel as the `xenonet-console` MCP server's tools, including navigation, search, screenshots, terminals, themes and updates. Installed Tools omit `eval` and `simulate`, which are only for development. `actors` includes the programs waiting for an Allow, and how each token stands. `feed` is the activity feed. `mcp_info` opens a shared system's metadata, tools and context catalog without executing tools. `environment` changes the surroundings independently of the theme.
+- SI can use the control channel through the `xenonet-console` MCP server's tools, including navigation, search, screenshots, terminals, themes and updates. Installed Tools omit `eval` and `simulate`, which are only for development. `actors` includes the programs waiting for an Allow, and how each token stands. `feed` is the activity feed. `mcp_info` opens a shared system's metadata, tools and context catalog without executing tools. `environment` changes the surroundings independently of the theme.
 - `.mcp.json` registers these tools for Claude Code, which asks you once to approve them. `.codex/config.toml` registers them for Codex, in a trusted project. Start Claude Code or Codex in the repo's root folder.
 - From a terminal, `xenonet console <steps>` runs the same actions one after another, for example `xenonet console launch select:atlas-api shot:atlas`. `npm run drive -- <steps>` does the same. `xenonet console --help` lists the steps.
 - XenoNet Dev keeps a log of what you do in it, as the same steps. Selecting a node, a palette command, a session's stats, a theme and a film all go in the log. `xenonet script record --instance dev > tour.json` saves it, and `xenonet script run tour.json` plays it back, in any instance, shown or hidden.
 - A script is a JSON list of steps, written as strings such as `"select:atlas-api"`, or as objects such as `{ "op": "select", "args": [...] }`. Any driver method is a step. For anything else, a script can be a JS module whose default export gets the instance and a `step` function.
 - `npm run test:e2e` drives a hidden XenoNet Dev with the demo's data through the same channel, in about five minutes. Run it before you send a change to the UI. A failing test saves a screenshot of what it saw to `.xenonet/`.
-- `npm run test:real` checks, on a real Mac, that Grok Bot and Muse message each other through XenoNet Dev (the dev instance), through the actor gateway, or with `XENONET_REAL_ROUTE=local` from commands their apps run. It needs both apps signed in, you at XenoNet's window to set up the gateway and connect each, and someone to ask each SI to do what it prints. It only reads XenoNet's state. `XENONET_REAL_PORT`, `XENONET_REAL_WORD` and `XENONET_REAL_MINUTES` change where it looks, the word the messages carry and how long it waits.
+- `npm run test:real` checks, on a real Mac, that Grok Bot and Muse message each other through XenoNet Dev (the dev instance), through the actor gateway, or with `XENONET_REAL_ROUTE=local` from commands their apps run. It needs both apps signed in, you at XenoNet's window to set up the gateway and connect each, and someone to ask Grok Bot and Muse to do what it prints. It only reads XenoNet's state. `XENONET_REAL_PORT`, `XENONET_REAL_WORD` and `XENONET_REAL_MINUTES` change where it looks, the word the messages carry and how long it waits.
 - Scripts import `core/control.js`, which all of the above use.
 
 ### Waiting and screenshots
@@ -91,7 +91,7 @@ A screenshot waits the same way. It also holds every ambient animation still, in
 
 Development instances each have their own settings and port, so they run beside installed XenoNet and each other.
 
-| Instance | Data | Port | Window, when an SI starts it |
+| Instance | Data | Port | Window, when SI starts it |
 | --- | --- | --- | --- |
 | `dev` | Your sessions | 47842 | Shown without taking focus |
 | `demo` | Made-up projects and sessions | 47841 | Shown without taking focus |
@@ -100,7 +100,7 @@ Development instances each have their own settings and port, so they run beside 
 | `installed` | Your sessions | 47840 | The installed Desktop; its service keeps running when the window quits |
 | `showcase` | Made-up projects and sessions | 47845 | Frozen for the [public demo recording](showcase.md) |
 
-SIs and `xenonet console` use `demo` unless told otherwise, so nothing private ends up in their screenshots. Opened from the Dock or with `npm run app`, XenoNet Dev is `dev`. `XENONET_INSTANCE` picks another instance. `XENONET_SHOW=inactive` or `XENONET_SHOW=hidden` starts the window the way SIs do.
+SI and `xenonet console` use `demo` unless told otherwise, so nothing private ends up in their screenshots. Opened from the Dock or with `npm run app`, XenoNet Dev is `dev`. `XENONET_INSTANCE` picks another instance. `XENONET_SHOW=inactive` or `XENONET_SHOW=hidden` starts the window the way SI does.
 
 ### Launching and quitting
 
@@ -159,7 +159,7 @@ The console page imports only the core modules that have no Node in them, `theme
 | `statefile.js`, `migrate.js` | The versions of `state.json` |
 | `blocks/` | The building blocks XenoNet's subsystems are made of: scanners, gatherers, tailers, normalizers and stores |
 | `open.js` | Opening sessions in their apps |
-| `engine/` | The engine that connects SIs to each other |
+| `engine/` | The engine that connects SI sessions to each other |
 | `procs.js` | Which process is on the other end of a connection to the engine |
 | `actors/` | Actors, with the registry, registering and tokens, you, the observers of Hermes Agent, Grok Bot and Muse, and remote actors' connections, account links, provider adapters and presence |
 | `assistant/` | What remote actors read: the projection, the read service, the made-up fixture, page tokens, the log, credentials and tombstones, and the adapter's client (see [Remote actors](../design/cloud-assistants.md)) |
@@ -191,7 +191,7 @@ The console page imports only the core modules that have no Node in them, `theme
 | `hosts.js`, `hosts-draw.js` | Other machines' constellations |
 | `framing.js` | Where the camera stands to frame the map |
 | `hud.js`, `telemetry.js`, `alerts.js`, `modals.js`, `palette.js`, `replay.js`, `poster.js`, `terminal.js`, `identities.js` | The panels around the map |
-| `connect.js` | The panel for connecting your SIs |
+| `connect.js` | The panel for connecting your SI |
 | `doctor.js` | The panel for XenoNet's doctor |
 | `stats.js` | The panel for a session's stats |
 | `film.js` | Films of the day |
