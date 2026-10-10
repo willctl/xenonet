@@ -1,7 +1,7 @@
 {
   "name": "xenonet",
   "productName": "XenoNet",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "The network for SI. See every SI (super intelligence) on your machine through a background service, CLI, MCP tools and a desktop console.",
   "author": "willctl",
