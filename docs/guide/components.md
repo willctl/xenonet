@@ -5,8 +5,8 @@ XenoNet has three installed parts:
 | Component | What it does |
 | --- | --- |
 | Desktop | Shows the map, panels and terminals. |
-| Service | Tracks sessions, coordinates agents, stores state and runs terminal processes. |
-| Tools | Provides the `xenonet` command, agent hooks and both MCP servers. |
+| Service | Tracks sessions, coordinates SI (super intelligence) sessions, stores state and runs terminal processes. |
+| Tools | Provides the `xenonet` command, the hooks SIs run and both MCP servers. |
 
 The bundle installer includes all three. Service and Tools also have separate downloads for Windows x64, macOS arm64 and x64, and Linux x64. Each includes its Node runtime. You do not need to install Node.
 
@@ -30,15 +30,15 @@ The service runs as your account, independently of Desktop. It stays running unt
 
 The service serves the console too: open http://127.0.0.1:47840 in a browser on the same computer. The map, panels, alerts, search and stats work as in Desktop. What only XenoNet's own window may do, such as allowing an actor, storing a key or controlling Spotify, says so in a browser; do it with the `xenonet` command (`xenonet connect`, `xenonet actor`, `xenonet decide key`) or in Desktop. Terminals, tray notifications and Desktop's updater need Desktop; `xenonet update service` and `xenonet update tools` update the rest.
 
-## Agent interfaces
+## SI interfaces
 
-`xenonet mcp` runs the coordination MCP server. It lets agents see sessions, exchange messages and claim files.
+`xenonet mcp` runs the coordination MCP server. It lets SIs see sessions, message each other and claim files.
 
-`xenonet mcp console` runs the console MCP server. It lets agents launch installed Desktop, navigate the map, inspect panels, use terminals and take screenshots. The installed Tools package targets installed XenoNet by default. `xenonet console --instance installed <steps>` offers the same control from a terminal.
+`xenonet mcp console` runs the console MCP server. It lets SIs launch installed Desktop, navigate the map, inspect panels, use terminals and take screenshots. The installed Tools package targets installed XenoNet by default. `xenonet console --instance installed <steps>` offers the same control from a terminal.
 
 `xenonet mcp assistant --grant <grant>` runs the read-only server for a [remote actor](cloud-assistants.md) you paired. A tunnel client runs it, not Claude Code or Codex, and it reaches the service only through a private endpoint of its own, with that grant's credential; it never gets the Tools credential.
 
-Use **Connect your agents** in XenoNet, or `xenonet connect`, to review and register both MCP servers with Claude Code and Codex. Their configuration points to a stable launcher outside Desktop. Changing a Tools version affects new commands and new MCP connections; existing MCP processes keep their original code and runtime until their client reconnects.
+Use **Connect your SIs** in XenoNet, or `xenonet connect`, to review both MCP servers and add them to Claude Code and Codex. Their configuration points to a stable launcher outside Desktop. A new Tools version applies to new commands and new MCP connections. MCP processes already running keep their code and runtime until their client reconnects.
 
 Console MCP stays connected while Desktop restarts. Window actions report that Desktop is unavailable until it returns. Coordination continues through the service. Simulations, arbitrary JavaScript evaluation and raw DevTools commands remain available only in development instances. Actions marked as yours alone in the app keep that restriction.
 
@@ -60,7 +60,7 @@ Unsigned component archives rely on GitHub's HTTPS release channel and checksums
 
 The first move to separate components still closes the old Desktop's terminals. Finish that work before updating. Use the bundle installer for an offline install. A Desktop-only install downloads missing components on first launch.
 
-After updating, run **Connect your agents** once to replace the old Electron-based commands with the stable Tools launcher and add console MCP. Reconnect those MCP servers in their clients. Until you do, older agent configurations still depend on Desktop's files.
+After updating, run **Connect your SIs** once to replace the old Electron-based commands with the stable Tools launcher and add console MCP. Reconnect those MCP servers in their clients. Until you do, older configurations in Claude Code and Codex still depend on Desktop's files.
 
 ## Compatibility
 
@@ -70,4 +70,4 @@ The service owns persistent data. Current component packages declare data schema
 
 Component files live under XenoNet's state folder in `runtime/components`. The private service connection file is restricted to the current account. Desktop serves its own frontend and proxies API calls to the service; its assets never come from a different service release. It passes on only its own window's API calls. Other programs call the service directly, so the service can see which program sent each request.
 
-On macOS, the service treats the connected Desktop as XenoNet's own app, so the window can report what you do there. It hands the window key only to a Desktop it can see is an app's own executable, not an agent, the `xenonet` command or a script.
+On macOS, the service treats the connected Desktop as XenoNet's own app, so the window can report what you do there. It hands the window key only to a Desktop it can see is an app's own executable, not an SI, the `xenonet` command or a script.

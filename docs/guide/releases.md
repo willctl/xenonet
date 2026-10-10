@@ -45,7 +45,7 @@ The current unsigned Windows installer can update, but has no publisher signatur
 
 ## App behavior
 
-Installed copies check 30 seconds after startup and every six hours. Supported builds download in the background. Updates never install just because the app quits. The user chooses Restart and update. Desktop restarts while the independent service, terminals and connected MCP processes continue. The first migration from 0.5 still closes the old version's terminals; reconnect agents through the stable Tools launcher afterward. The installer preserves settings and project data.
+Installed copies check 30 seconds after startup and every six hours. Supported builds download in the background. Updates never install just because the app quits. The user chooses Restart and update. Desktop restarts while the independent service, terminals and connected MCP processes continue. The first migration from 0.5 still closes the old version's terminals. Afterward, run `xenonet connect` so Claude Code and Codex use the stable Tools launcher. The installer preserves settings and project data.
 
 Updates in the command palette and native menus shows the installed version, check result, download progress and restart action. Turning off automatic checks also stops automatic downloads. Manual checks still work. Service and Tools updates are listed separately and installed on request. If a service update finds running terminals, it stages the download; close them and run the update again. Source, demo and test copies never contact the release feed or install updates.
 

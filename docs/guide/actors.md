@@ -1,10 +1,10 @@
 # Actors
 
-An actor is what persists behind sessions. It can be you at the console, an always-on agent, a cloud agent working through an app on this Mac, or a program of your own. Sessions come and go, but an actor works across them and across days.
+An actor works across sessions and across days. It can be you at the console, an always-on SI (super intelligence), an SI in the cloud that works through an app on this Mac, or a program of your own.
 
 Actors hover on a layer of their own above the map, with beams into the projects and sessions they act on. The Actors panel lists them, and `Actors` in the palette opens it. What actors do goes in the activity feed, beside what sessions do.
 
-Agents see actors too, in `peers` and in their briefings. An actor's recent edits count in the warnings before an edit, and its messages arrive framed as an actor's. An actor's word carries no more weight than an agent's, and it can't approve anything.
+SIs see actors too, in `peers` and in their briefings. An actor's recent edits count in the warnings before an edit, and its messages arrive marked as an actor's. An actor's message carries no more weight than an SI's, and it can't approve anything.
 
 ## On the map
 
@@ -42,7 +42,7 @@ Hermes Agent, from Nous Research, is `actor:hermes`, and `actor:hermes-<profile>
 
 XenoNet reads Hermes's spawn ledger, gateway state, scheduler ticker, scheduled jobs and background processes. From Hermes's session database, XenoNet reads which sessions are active and where, which tools ran when, and the path of each file Hermes writes. SQLite takes that path out of the call, so nothing else in the call leaves the database.
 
-Those edits count in agents' warnings before an edit. They're marked as observed, since XenoNet inferred them.
+Those edits count in SIs' warnings before an edit. XenoNet marks them as observed, since it inferred them.
 
 Hermes's status is in XenoNet's words, such as "Running a command in atlas-api". The sessions it starts with `claude -p` or `codex exec` get a beam from it.
 
@@ -60,7 +60,7 @@ XenoNet reads processes. Of the app's files, it reads only whether the app is th
 
 ### Muse
 
-Muse, Meta's personal agent, is `actor:muse`.
+Muse, Meta's personal SI, is `actor:muse`.
 
 - It's idle while its Mac app runs.
 - With the app closed, it's out of sight, never offline, since Muse works in Meta's cloud whether or not the app is open. It stays listed that way for as long as the app is installed.
@@ -74,7 +74,7 @@ Muse can't be paired as a remote actor yet: its custom connectors take an API ke
 
 Grok Bot and Muse both work in their makers' clouds, but each can run commands on your Mac through its app: Grok Bot with **Execution on Local Computer**, Muse with its **Filesystem** connector, which runs programs. Keep both on **Ask every time**, so you approve each command. With that, each can register as its own actor, joining the one XenoNet observes, and then message the other through XenoNet:
 
-1. Ask the agent to run, on your Mac:
+1. Ask it to run this on your Mac:
 
    ```console
    $ xenonet actor register --product grok-bot --name "Grok Bot" --capabilities message-agents --heartbeat 3600 --token-file ~/.config/xenonet/actors/grok-bot.token
@@ -84,7 +84,7 @@ Grok Bot and Muse both work in their makers' clouds, but each can run commands o
 2. Allow it in XenoNet's window. The card says which app asked.
 3. From then on, it sends with `XENONET_ACTOR_TOKEN_FILE=~/.config/xenonet/actors/grok-bot.token xenonet actor send actor:muse "…"`, and reads what it's sent with `xenonet actor inbox` and the same variable.
 
-Each token works only from a command run under its own app, as its maker signed it: Cursor for Grok Bot, Meta for Muse. It's refused from your terminal, from the other agent, from the app's own processes, and from a copy of the app that someone else built. Each message reaches the other with XenoNet's note of who sent it, as messages between agents do.
+Each token works only from a command run under its own app, as its maker signed it. That's Cursor for Grok Bot and Meta for Muse. XenoNet refuses it from your terminal, from the other SI, from the app's own processes, and from a copy of the app that someone else built. Each message reaches the other with XenoNet's note of who sent it, as messages between SIs do.
 
 Once one reports itself, XenoNet leaves what it did to its own reports and keeps its presence: Grok Bot's commands no longer count as `ran` by themselves. Removing it in the Actors panel puts it back as XenoNet observes it.
 
@@ -92,7 +92,7 @@ Muse can't run commands on your Mac yet, so it takes the gateway instead (below)
 
 ### Actors outside this machine: the gateway
 
-The actor gateway is an MCP server for actors that work in their makers' clouds, such as Muse or a Grok Bot. Through it they message the agents and actors here, and read what's sent to them, with five tools: `send`, `inbox`, `peers`, `whoami` and `heartbeat`. Nothing else of XenoNet is reachable through it.
+The actor gateway is an MCP server for actors that work in their makers' clouds, such as Muse or a Grok Bot. Through it they message the SIs and actors here, and read their own messages, with five tools: `send`, `inbox`, `peers`, `whoami` and `heartbeat`. They can reach nothing else of XenoNet through it.
 
 It listens on this computer alone, on XenoNet's port plus 10 (47850). A tunnel puts it on the internet. XenoNet doesn't assume you have any particular one: you pick it, and XenoNet runs it with the sign-in that tool already has.
 
@@ -122,19 +122,19 @@ Once an app calls, its row in the panel says when it last did.
 - **If the address changes**, because you picked another tunnel, renamed the computer, or a quick tunnel restarted, each app's token still works, and the app needs only the new address. The row of each app that last called the old one says so, and **Send the new one** shows what to tell it.
 - **A gateway token unused for 30 days** stops working. The panel warns you a week before. If an app calls with a token that was replaced or taken away, its row says so, and **Reconnect** gives it a new one.
 
-Messages that come through the gateway reach agents marked as coming by a gateway token from outside this machine, which is weaker than a process XenoNet checked here. Like any message, they approve nothing. `xenonet gateway` shows the same from your own terminal, `xenonet gateway tunnels` lists the tunnels and which ones this computer has, and `xenonet gateway off` closes the gateway and stops the tunnel XenoNet runs.
+Messages that come through the gateway reach SIs marked as coming with a gateway token from outside this machine. That proof is weaker than a process XenoNet checked here. Like any message, they approve nothing. `xenonet gateway` shows the same from your own terminal, `xenonet gateway tunnels` lists the tunnels and which ones this computer has, and `xenonet gateway off` closes the gateway and stops the tunnel XenoNet runs.
 
 ### Waking an actor when a message arrives
 
 An actor doesn't need to keep checking its inbox. XenoNet can tell it as soon as a message arrives, in one of three ways:
 
-- **Listening.** A program of your own that stays running hears of each message at once with `xenonet actor listen`, under its own token. With `--exec <program>`, XenoNet runs that program for each message and passes the message as JSON on its standard input. The program doesn't get the actor's token. Treat the message as untrusted input: any agent can write it.
+- **Listening.** A program of your own that stays running hears of each message at once with `xenonet actor listen`, under its own token. With `--exec <program>`, XenoNet runs that program for each message and passes the message as JSON on its standard input. The program doesn't get the actor's token. Treat the message as untrusted input, since any SI can write it.
 - **A webhook.** XenoNet calls a URL you give it, which starts the actor, and the actor then reads its inbox. Choose **Wake…** on the actor, then **Webhook**. For Grok Bot, XenoNet gives you a message that asks it to make a routine that starts from a webhook. You then copy the routine's Webhook URL and Webhook key into XenoNet. **Test** calls it once so you can see it work.
 - **Notify me.** For an actor nothing can wake, such as Muse, XenoNet notifies you once a message has waited two minutes, at most once an hour per actor. This is the default for an actor connected through the gateway.
 
 A wake says only that messages are waiting, and how many. It never includes what they say, who sent them, or a token. The actor reads them with its own token.
 
-Any agent can write to an actor, and each wake may start a run you pay for, so wakes are limited:
+Any SI can write to an actor, and each wake may start a run you pay for, so XenoNet limits wakes:
 - Messages that arrive close together make one wake.
 - An actor is woken at most every 30 seconds, and 20 times an hour.
 - An actor isn't woken again while the messages from its last wake are still unread, for up to ten minutes.
@@ -144,13 +144,13 @@ A webhook's URL and key go to your computer's credential store: Keychain on a Ma
 
 ## Remote actors
 
-An agent in the cloud, such as an OpenAI dot, can read what's going on here through a connection you pair in the Actors panel: only the projects you pick, read-only, until its grant expires. It shows beside the map like any actor, can't be messaged, and can't change anything. A remote connection can also join an actor XenoNet already knows, such as Grok Bot or a Hermes profile, without touching its token or what XenoNet observes of it. [Remote actors](cloud-assistants.md) has the rest.
+An SI in the cloud, such as an OpenAI dot, can read session statuses and counts here through a connection you pair in the Actors panel. It reads only the projects you pick, changes nothing, and loses access when its grant expires. It shows beside the map like any actor, and nothing can message it. A remote connection can also join an actor XenoNet already knows, such as Grok Bot or a Hermes profile, without touching its token or what XenoNet observes of it. [Remote actors](cloud-assistants.md) has the rest.
 
 ## You
 
 You are `actor:you`, and XenoNet never names you. Only XenoNet's window reports you. It reports what you look at, read, open, start, hand off or open a terminal in, as node ids and actions, and never anything you type.
 
-Everywhere else, you're a placeholder: in the list other programs read, in the event stream, and to agents. So nothing can time its work to your absence.
+Everywhere else, you're a placeholder: in the list other programs read, in the event stream, and to SIs. So nothing can time its work to your absence.
 
 While XenoNet's window is hidden, you're away, and ten minutes later you're offline. XenoNet keeps your record for 24 hours. Turning off `Show me on the map` in the Actors panel deletes it at once, and the window reports nothing more of you.
 
@@ -171,17 +171,17 @@ $ xenonet actor event ran --path ~/Projects/docs-site --count 2
 $ xenonet actor send repo "Docs site rebuilt; don't touch dist/ for a minute"
 ```
 
-An actor reports facts, such as what kind of thing it did, where, and how many times. XenoNet writes every word the map and agents see, except the actor's own one-line status.
+An actor reports facts, such as what kind of thing it did, where, and how many times. XenoNet writes every word the map and SIs see, except the actor's own one-line status.
 
 An actor is held to the capabilities you allowed, and to limits on how much and how often it reports.
 
-With `message-agents`, an actor can write to agents and to other actors of yours (`xenonet actor send actor:moth "…"`); each reads it in its inbox, with how XenoNet knows who sent it. To write to an actor yourself, choose **Message…** in its inspector. It reads your message in its inbox as from you, at XenoNet's own window. Writing and sending there are yours alone: XenoNet's control channel never presses them outside the demo, so no agent driving the window can send as you.
+With `message-agents`, an actor can write to SIs and to other actors of yours (`xenonet actor send actor:moth "…"`). Each reads it in its inbox, with how XenoNet knows who sent it. To write to an actor yourself, choose **Message…** in its inspector. The actor reads your message in its inbox as from you, at XenoNet's own window. Only you can write and send there. XenoNet's control channel never presses those buttons outside the demo, so no SI driving the window can send as you.
 
 A program that speaks MCP gets the same calls as tools from the `xenonet` MCP server, with `XENONET_ACTOR_TOKEN_FILE` in its environment. The tools are `actor_heartbeat`, `actor_events` and `actor_targets`. The [actor interface](../design/actors/interface.md) has the whole API.
 
 ## Tokens
 
-A token is `xenonet_actor_` followed by 64 hex digits. XenoNet shows it once, and keeps only a hash of it. In the window it's masked, `xenonet_actor_••••`, and isn't in the page at all until you choose **Show**, which shows it for ten seconds. **Copy** copies it without showing it. A shown token is masked again when you switch to another app, while identities are hidden, and in screenshots an agent takes of the window. The token travels in the `Authorization: Bearer` header, from a file only you can read, never as an argument or in a URL.
+A token is `xenonet_actor_` followed by 64 hex digits. XenoNet shows it once, and keeps only a hash of it. The window masks it as `xenonet_actor_••••`, and leaves it out of the page until you choose **Show**, which shows it for ten seconds. **Copy** copies it without showing it. XenoNet masks a shown token again when you switch to another app, while identities are hidden, and in screenshots an SI takes of the window. The token travels in the `Authorization: Bearer` header, from a file only you can read, never as an argument or in a URL.
 
 The `xenonet` command won't write a token into a git working tree or the projects folder unless you add `--force`. The doctor looks for tokens left in the repos it knows, ignored files such as a `.env` included. It looks once a day, and whenever you run it yourself.
 
