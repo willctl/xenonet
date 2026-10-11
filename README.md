@@ -373,4 +373,4 @@ for SI, and how it can check its work.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). XenoNet is a [willctl](https://willctl.com) project.
