@@ -98,7 +98,7 @@ A theme of your own names the theme it `extends`, and needs only the fields it c
 
 `core/themes.js` has XenoNet's own value for every field, and each built-in theme's values.
 
-- `colors` sets colors by role, such as `bg`, `surface`, `text`, `muted`, `dim`, `accent`, `claude`, `codex`, `attention`, `danger` and `collision`. `actor` and `human` are for actors.
+- `colors` sets colors by role, such as `bg`, `surface`, `text`, `muted`, `dim`, `accent`, `claude`, `codex`, `grok`, `attention`, `danger` and `collision`. `actor` and `human` are for actors.
 - `categories` holds the colors of tool families, and `pages` the colors of the Agent Wiki's page types.
 - `identities` holds five colors for the rings that named identities' projects stand on. If your `colors` bring a ring close to a color with a meaning, such as Codex's or a question's, that ring moves over to a spare color.
 - `fonts` has `display`, `body` and `mono`. `display` is for titles and the map's labels. `body` is for the panels' text, and is the display font when left out. Each is a list of font names, quoted or not, such as `"Avenir Next", "Segoe UI", sans-serif`. A list may hold letters, digits, spaces, quotes, commas and `. _ + & -`. A list that holds anything else, such as `; : { } ( ) < > \ /`, keeps the fonts underneath it.

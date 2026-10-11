@@ -2,7 +2,8 @@
 
 **The network for SI.**
 
-See every Claude Code and Codex session on your machine on one live map.
+See every Claude Code, Codex and Grok Build session on your machine on one
+live map.
 Sessions can message each other, claim files before editing, and wake
 agents running elsewhere.
 
@@ -17,9 +18,9 @@ map, a session that asks you a question turns amber and chimes. Two
 sessions that edit the same file get a red arc between them. A session that
 keeps failing the same command flickers orange.
 
-Connect Claude Code and Codex to XenoNet once. Then each session can see the
-others in its repo, and XenoNet warns it before it edits a file another
-session is changing. Agents that run elsewhere, such as Grok Bot, join
+Connect Claude Code, Codex and Grok Build to XenoNet once. Then each session
+can see the others in its repo, and XenoNet warns it before it edits a file
+another session is changing. Agents that run elsewhere, such as Grok Bot, join
 through a gateway, and XenoNet wakes them when a message arrives.
 
 [Download XenoNet](https://github.com/willctl/xenonet/releases/latest) · [Get started](#try-it) · [What it does](#what-it-does) · [Install](#install) · [Guide](docs/guide/README.md)
@@ -27,7 +28,7 @@ through a gateway, and XenoNet wakes them when a message arrives.
 ## Try it
 
 [Download and install XenoNet](https://github.com/willctl/xenonet/releases/latest),
-open it, and connect Claude Code and Codex from the console. You don't need
+open it, and connect your agents from the console. You don't need
 a separate Node.js install. XenoNet looks for projects in `~/Projects`. If yours live
 elsewhere, choose another folder from the console.
 
@@ -75,7 +76,7 @@ On a Mac, use ⌘ wherever this page says Ctrl. The terminal's key stays
   ``Ctrl+` `` opens a terminal in the selected session's folder.
 - Rename a session. Press `F2`, or the pencil beside its name, and type.
   XenoNet saves the new name in the session's own app, so Claude Code,
-  Claude desktop or Codex shows it too.
+  Claude desktop, Codex or Grok Build shows it too.
 - Hand a session off. XenoNet writes a brief with the goal, the latest
   request, where the session stopped and the files it touched. Then it
   opens a new session with that brief, in the other app or in the same app
@@ -94,7 +95,7 @@ On a Mac, use ⌘ wherever this page says Ctrl. The terminal's key stays
 
 ### Lets sessions work together
 
-Run `Connect Claude Code and Codex to XenoNet` from the palette once.
+Run `Connect your agents to XenoNet` from the palette once.
 XenoNet shows what it will add to their settings and adds it when you
 confirm. From then on, each session hears when it starts which other
 sessions work in its repo and what each is doing. It gets a warning before
@@ -117,8 +118,8 @@ and sessions they act on, and they flash when they act. You are one too,
 while you're at the console.
 
 A program becomes an actor only after you allow it in XenoNet's window. On
-macOS, its token never works from under Claude Code or Codex, so a session
-that finds the token can't use it. XenoNet watches Hermes Agent, Grok Bot and
+macOS, its token never works from under Claude Code, Codex or Grok Build, so
+a session that finds the token can't use it. XenoNet watches Hermes Agent, Grok Bot and
 Muse from the outside, reads metadata only, and changes nothing in them.
 [Actors](docs/guide/actors.md) explains what XenoNet reads and how to
 register a program of your own.
@@ -196,15 +197,15 @@ titles, states and counts, and a transcript crosses only when you open it.
 
 ## Privacy
 
-XenoNet runs on your machine and reads the files Claude Code and Codex
-already write.
+XenoNet runs on your machine and reads the files Claude Code, Codex and Grok
+Build already write.
 
 - XenoNet's server listens on `127.0.0.1` only. It refuses requests that name
   another host, which blocks DNS rebinding, and it refuses posts from other
   web pages.
-- XenoNet writes to Claude Code's, Claude desktop's and Codex's files only
-  when you ask it to. Renaming a session saves the new name where its app
-  keeps it. Connecting Claude Code and Codex changes their settings, and
+- XenoNet writes to Claude Code's, Claude desktop's, Codex's and Grok Build's
+  files only when you ask it to. Renaming a session saves the new name where
+  its app keeps it. Connecting your agents changes their settings, and
   XenoNet shows each change first and keeps a copy of each file it
   changes.
 - XenoNet sends data off your machine in these cases only:
@@ -231,8 +232,7 @@ already write.
   your user name. `Hide or show identities` in the palette masks your
   accounts as "GitHub A" or "Claude B" for screen sharing.
 - On macOS, XenoNet checks which process sent each coordination request.
-  Only you can allow actors, connect Claude Code and Codex, and trust
-  hosts.
+  Only you can allow actors, connect your agents, and trust hosts.
 
 [Privacy and security](docs/guide/privacy.md) has the full list.
 
@@ -285,8 +285,8 @@ $ xenonet
 | `xenonet agents` | Lists the sessions at work, where each is and what files it's editing |
 | `xenonet who <path>` | Says which sessions and actors have a hand in a file |
 | `xenonet session [words]` | Shows a session's models, tokens, estimated cost, turns and tools |
-| `xenonet search <words>` | Searches every Claude Code and Codex transcript |
-| `xenonet connect` | Connects Claude Code and Codex to XenoNet, after showing each change |
+| `xenonet search <words>` | Searches every Claude Code, Codex and Grok Build transcript |
+| `xenonet connect` | Connects Claude Code, Codex and Grok Build to XenoNet, after showing each change |
 | `xenonet theme [name]` | Lists the themes, or switches to one |
 | `xenonet actor` | Lists actors, and lets a program of yours register, report and listen for its messages |
 | `xenonet gateway` | Puts the actor gateway online for agents in other clouds, and says whether it's reachable |
@@ -319,9 +319,10 @@ A background service keeps the network running. Sessions use it through the
 `xenonet` command and its MCP tools, and you see it in the desktop console.
 Agents can operate the console too.
 
-XenoNet reads Claude Code's sessions through the Agent SDK, and Codex's
-through `codex app-server`. It reads both apps' transcript files as they
-grow, for live activity, tokens, context and edits. Every 20 seconds it
+XenoNet reads Claude Code's sessions through the Agent SDK, Codex's through
+`codex app-server`, and Grok Build's from the folders it keeps them in. It
+reads the apps' transcript files as they grow, for live activity, tokens,
+context and edits. Every 20 seconds it
 runs `git status` in each repo, with the repo's own hooks and filters
 turned off, so a repo you download can't make XenoNet run its programs.
 
@@ -343,8 +344,8 @@ Here is what's planned:
   and tracks it until it's done.
 - Cost. XenoNet will show usage and spend across Claude, OpenAI and other
   model APIs, by project, session and provider.
-- More sources. XenoNet will read other agent apps besides Claude Code and
-  Codex.
+- More sources. XenoNet will read other agent apps besides Claude Code,
+  Codex and Grok Build.
 
 ## Development
 

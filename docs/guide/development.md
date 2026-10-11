@@ -18,7 +18,7 @@ npm run dist      # the installers for this OS, in release/ (dist:win, dist:mac)
 
 The desktop app run from source is XenoNet Dev. It has its own settings, port, layout and search index, so it runs beside an installed XenoNet without writing over its files. Its port is 47842. The first run copies the installed XenoNet's layout. `npm run dev`, the server alone, uses XenoNet Dev's port and folders too.
 
-Connecting Claude Code and Codex from XenoNet Dev adds its own entries beside the installed XenoNet's, with its MCP server named `xenonet-dev`, and leaves the installed XenoNet's entries alone. Disconnecting takes away only its own. Whichever XenoNet connects next clears entries that point at a checkout that's gone. Terminals XenoNet opens don't pass on its own `XENONET_*` settings, so `npm run app` started in one runs as XenoNet Dev, not on the installed XenoNet's port.
+Connecting your agents from XenoNet Dev adds its own entries beside the installed XenoNet's, with its MCP server named `xenonet-dev`, and leaves the installed XenoNet's entries alone. Disconnecting takes away only its own. Whichever XenoNet connects next clears entries that point at a checkout that's gone. Terminals XenoNet opens don't pass on its own `XENONET_*` settings, so `npm run app` started in one runs as XenoNet Dev, not on the installed XenoNet's port.
 
 XenoNet Dev picks up edits as you save them:
 
@@ -144,7 +144,7 @@ The console page imports only the core modules that have no Node in them, `theme
 
 | Files | What they cover |
 | --- | --- |
-| `claude.js`, `codex.js`, `git.js`, `wiki.js`, `demo.js` | The sources XenoNet reads |
+| `claude.js`, `codex.js`, `grok.js`, `grok-usage.js`, `git.js`, `wiki.js`, `demo.js` | The sources XenoNet reads |
 | `lines.js` | Transcript lines, as all three of XenoNet's readers take them |
 | `vendor.js`, `drift.js`, `schema/` | The apps' data, read leniently against XenoNet's schemas, and the drift kept from it. The schemas themselves are in `schema/`. |
 | `projects.js` | How the projects folder is read |
@@ -159,7 +159,7 @@ The console page imports only the core modules that have no Node in them, `theme
 | `statefile.js`, `migrate.js` | The versions of `state.json` |
 | `blocks/` | The building blocks XenoNet's subsystems are made of: scanners, gatherers, tailers, normalizers and stores |
 | `open.js` | Opening sessions in their apps |
-| `engine/` | The engine that connects sessions to each other |
+| `engine/` | The engine that connects sessions to each other, and connecting the apps to it (`connect.js`, with `toml.js` for Grok Build's `config.toml`, and `grok-hooks.js` for Grok Build's hook events) |
 | `procs.js` | Which process is on the other end of a connection to the engine |
 | `actors/` | Actors, with the registry, registering and tokens, you, the observers of Hermes Agent, Grok Bot and Muse, and remote actors' connections, account links, provider adapters and presence |
 | `assistant/` | What remote actors read: the projection, the read service, the made-up fixture, page tokens, the log, credentials and tombstones, and the adapter's client (see [Remote actors](../design/cloud-assistants.md)) |
@@ -191,7 +191,7 @@ The console page imports only the core modules that have no Node in them, `theme
 | `hosts.js`, `hosts-draw.js` | Other machines' constellations |
 | `framing.js` | Where the camera stands to frame the map |
 | `hud.js`, `telemetry.js`, `alerts.js`, `modals.js`, `palette.js`, `replay.js`, `poster.js`, `terminal.js`, `identities.js` | The panels around the map |
-| `connect.js` | The panel for connecting Claude Code and Codex |
+| `connect.js` | The panel for connecting Claude Code, Codex and Grok Build |
 | `doctor.js` | The panel for XenoNet's doctor |
 | `stats.js` | The panel for a session's stats |
 | `film.js` | Films of the day |

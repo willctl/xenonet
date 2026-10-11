@@ -6,7 +6,7 @@ XenoNet is the network for SI (super intelligence) on your machine. It has a bac
 - [Components and updates](components.md) explains separate installs, the MCP servers and which processes keep running during an update.
 - [Finding projects](projects.md) says how XenoNet turns your projects folder into projects and groups, and how to read another folder.
 - [Identities](identities.md) says how XenoNet links each session and project to your Claude, ChatGPT, GitHub and git accounts.
-- [Sessions working together](agents.md) says how to connect Claude Code and Codex to XenoNet, so each session can see and message the others on your machine.
+- [Sessions working together](agents.md) says how to connect Claude Code, Codex and Grok Build to XenoNet, so each session can see and message the others on your machine.
 - [Actors](actors.md) covers you at the console, always-on agents and your own programs, which XenoNet shows on a layer of their own.
 - [Remote actors](cloud-assistants.md) covers pairing an agent in the cloud, such as an OpenAI dot, so it can read session statuses here without changing anything, and stopping it.
 - [Other machines](other-machines.md) covers the prototype that shows other machines' XenoNets beside your own.

@@ -1,6 +1,6 @@
 # The xenonet command
 
-`xenonet` does from a terminal what the console does. It says what XenoNet sees, checks your setup and connects Claude Code and Codex. It works on macOS and Linux.
+`xenonet` does from a terminal what the console does. It says what XenoNet sees, checks your setup and connects Claude Code, Codex and Grok Build. It works on macOS and Linux.
 
 `Install the xenonet command` in the palette puts it in `~/.local/bin`, or `%LOCALAPPDATA%/XenoNet/bin` on Windows, as a small script that runs on XenoNet's own runtime. In a checkout, `node cli/xenonet.js install` does the same with your Node. On Windows, XenoNet's first launch installs it, and Setup puts its folder on your user Path. Elsewhere, if that folder isn't on PATH, the command tells you how to add it.
 
@@ -28,12 +28,12 @@ $ xenonet
 | `xenonet who <path>` | Says which sessions and actors have a hand in a file. |
 | `xenonet session [words]` | Shows a session's models, tokens, estimated cost, turns and tools. Without words, it shows the latest session in the current folder. With words, it shows the newest session whose title has them. |
 | `xenonet messages` | Shows what sessions and actors said to each other in the last day. |
-| `xenonet search <words>` | Searches every Claude Code and Codex transcript. |
+| `xenonet search <words>` | Searches every Claude Code, Codex and Grok Build transcript. |
 | `xenonet root [folder]` | Shows the projects folder XenoNet reads and where that comes from, or reads another folder. `--check` only says what XenoNet would find there. `--reset` goes back to `~/Projects`. See [Changing the projects folder](projects.md#changing-the-projects-folder). |
 | `xenonet film` | Renders a film of today in a hidden XenoNet Dev window, and saves the MP4. It takes `--seconds`, `--theme`, `--size` and `--out`. |
 | `xenonet script record`, `xenonet script run <file>` | Saves what you did in XenoNet Dev as a script, and plays scripts back. See [Driving XenoNet](development.md#driving-xenonet-from-agents-scripts-and-tests). |
 | `xenonet theme [name]` | Lists the themes, or switches to one. `xenonet theme copy <theme> <name>` starts one of your own. |
-| `xenonet connect`, `xenonet disconnect` | [Connects Claude Code and Codex](agents.md#connecting-claude-code-and-codex), or takes XenoNet out again, after showing each change. |
+| `xenonet connect`, `xenonet disconnect` | [Connects Claude Code, Codex and Grok Build](agents.md#connecting-your-agents), or takes XenoNet out again, after showing each change. `xenonet connect grok` connects Grok Build alone. |
 | `xenonet actor list`, `xenonet actors` | Lists the [actors](actors.md), with each one's presence and status, what it acts on, and how XenoNet knows it. `xenonet actor show <slug>` adds what one did lately. |
 | `xenonet actor register --name <name>` | Asks to add a program as an actor, and waits for your Allow in XenoNet's window. Then it writes the actor's token to `--token-file`, readable only by you. |
 | `xenonet actor heartbeat`, `event`, `targets`, `status`, `inbox`, `send`, `leave` | These are how an actor reports and acts, with its token from `XENONET_ACTOR_TOKEN_FILE`. |
@@ -54,10 +54,10 @@ Every command takes `--json`, for scripts. A command talks to XenoNet, or to Xen
 
 `xenonet doctor` checks these:
 
-- that Claude Code and Codex are installed and signed in
+- that Claude Code and Codex are installed and signed in, and Grok Build if you use it
 - that XenoNet can read their sessions and your projects folder
 - git, the runtime, XenoNet itself and the command
-- whether Claude Code and Codex are connected
+- whether Claude Code, Codex and Grok Build are connected, and whether Grok Build runs XenoNet's hooks
 - for actors, tokens left in repos or expired, what the observers read, and that tokens are held to their processes
 
 Each problem comes with a fix, and a failed check exits 1. With no XenoNet running, `xenonet doctor` runs the checks itself, and skips the ones that need XenoNet. With [other machines](other-machines.md#checking-on-hosts) turned on, it checks each host too.
