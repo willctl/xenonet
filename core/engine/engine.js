@@ -155,7 +155,7 @@ export class Engine extends EventEmitter {
     this.repos = repos;
     this.now = now;
     this.actors = actors;
-    this.noticed = new Map(); // `${agent}|${file}|${other}` → when it was warned
+    this.noticed = new Map(); // `${agent}[/${subagent}]|${file}|${other}|${how}` → when it was warned
     this.waiters = new Map(); // agent → Set(resolve), inboxes waiting for mail
   }
 
@@ -530,14 +530,22 @@ export class Engine extends EventEmitter {
       this.store.ended(me, this.now());
       return null;
     }
-    this.touch(me, { app, cwd: input.cwd ?? null, via: "hook" });
+    // A subagent's events (Claude Code's Agent tool, Codex's spawned agents)
+    // come under its session's id with agent_id set. They show the session
+    // at work, and the subagent hears edit warnings for the files it edits.
+    // Mail and the briefing wait for the main thread: what a subagent is
+    // told never reaches the main conversation or its user. Its cwd can be
+    // a worktree of its own, so it doesn't move the session.
+    const sub = typeof input.agent_id === "string" && input.agent_id ? input.agent_id : null;
+    this.touch(me, { app, cwd: sub ? null : (input.cwd ?? null), via: "hook" });
     const say = (text) => (text ? { hookSpecificOutput: { hookEventName: event, additionalContext: text } } : null);
-    if (event === "SessionStart") return say([await this.briefing(me), this.#mail(await this.#take(me))].filter(Boolean).join("\n\n"));
-    if (event === "UserPromptSubmit" || event === "PostToolUse") return say(this.#mail(await this.#take(me)));
     if (event === "PreToolUse") {
       const files = editPaths(input.tool_name, input.tool_input, input.cwd);
-      return files.length ? say(await this.#warn(me, files)) : null;
+      return files.length ? say(await this.#warn(me, files, sub)) : null;
     }
+    if (sub) return null;
+    if (event === "SessionStart") return say([await this.briefing(me), this.#mail(await this.#take(me))].filter(Boolean).join("\n\n"));
+    if (event === "UserPromptSubmit" || event === "PostToolUse") return say(this.#mail(await this.#take(me)));
     if (event === "Stop") {
       if (input.stop_hook_active) return null;
       const text = this.#mail(await this.#take(me));
@@ -562,10 +570,12 @@ export class Engine extends EventEmitter {
     ].join("\n");
   }
 
-  async #warn(me, files) {
+  // Each thread hears a warning once: a subagent can't see what the main
+  // thread was told, nor the other way round.
+  async #warn(me, files, sub = null) {
     const now = this.now();
     const fresh = (await this.conflicts(me, files)).filter((c) => {
-      const key = `${me}|${keyOf(c.file)}|${c.agent.id}|${c.how}`;
+      const key = `${me}${sub ? `/${sub}` : ""}|${keyOf(c.file)}|${c.agent.id}|${c.how}`;
       if (now - (this.noticed.get(key) ?? 0) < NOTICE_EVERY_MS) return false;
       this.noticed.set(key, now);
       return true;

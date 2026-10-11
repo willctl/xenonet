@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { Engine, matches, editPaths, parseRepo } from "../core/engine/engine.js";
 import { EngineStore } from "../core/engine/store.js";
 import { createConnect, mergeHooks } from "../core/engine/connect.js";
+import * as hooks from "./fixtures/hook-payloads.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // Temp folders, taken away after the tests.
@@ -177,6 +178,67 @@ test("hooks: a briefing at the start, a warning before an edit, mail between too
   t.now += 10e3;
   assert.ok(!(await engine.peers(A)).some((a) => a.id === B));
   assert.ok(store.contact(B).ended_at);
+});
+
+test("hooks: a subagent's events keep the session's mail for its main thread", async () => {
+  const { engine, store, t } = world(Date.now());
+  const raw = (id) => id.split(":")[1];
+  const unread = (id) => engine.snapshot().then((s) => s.messages.find((m) => m.id === id).to.every((d) => !d.seen));
+  // A Claude session's background subagent runs tools while a message for
+  // the session comes in: the subagent's hooks don't take it, whatever the
+  // event.
+  assert.equal(await engine.hook("claude", "PostToolUse", hooks.claude.postToolUse(raw(A), "/w/atlas")), null);
+  const { id } = await engine.send(B, { to: A, text: "Heads-up: routes.ts is mid-refactor." });
+  t.now += 1000;
+  assert.equal(await engine.hook("claude", "SubagentStart", hooks.claude.subagentStart(raw(A), "/w/atlas")), null);
+  assert.equal(await engine.hook("claude", "PostToolUse", hooks.claude.postToolUse(raw(A), "/w/atlas", hooks.claude.inSubagent)), null);
+  assert.equal(await engine.hook("claude", "SubagentStop", hooks.claude.subagentStop(raw(A), "/w/atlas")), null);
+  assert.ok(await unread(id), "still waiting for the main thread");
+  // They still show the session at work, without moving it to the
+  // subagent's own worktree.
+  assert.equal(store.contact(A).at, t.now);
+  await engine.hook("claude", "PostToolUse", hooks.claude.postToolUse(raw(A), "/wt/atlas-agent-1", hooks.claude.inSubagent));
+  assert.equal(store.contact(A).cwd, "/w/atlas");
+  // The main thread's next tool call gets it, once; a session run with
+  // --agent sends agent_type on its main thread, which is still the main
+  // thread.
+  const mail = await engine.hook("claude", "PostToolUse", hooks.claude.postToolUse(raw(A), "/w/atlas", hooks.claude.withAgent));
+  assert.match(mail.hookSpecificOutput.additionalContext, /routes\.ts is mid-refactor/);
+  assert.equal(await unread(id), false);
+  assert.equal(await engine.hook("claude", "PostToolUse", hooks.claude.postToolUse(raw(A), "/w/atlas")), null);
+  // Mail at Stop is the main thread's too.
+  await engine.send(B, { to: A, text: "One more thing." });
+  assert.equal(await engine.hook("claude", "Stop", { ...hooks.claude.stop(raw(A), "/w/atlas"), ...hooks.claude.inSubagent }), null);
+  const stop = await engine.hook("claude", "Stop", hooks.claude.stop(raw(A), "/w/atlas"));
+  assert.equal(stop.decision, "block");
+  assert.match(stop.reason, /One more thing/);
+
+  // A Codex session's spawned agent: its prompt and tool calls come under
+  // the parent's id with agent_id set, and leave the mail too.
+  const codexMail = await engine.send(A, { to: B, text: "I'm done with refunds.ts." });
+  assert.equal(await engine.hook("codex", "UserPromptSubmit", hooks.codex.userPromptSubmit(raw(B), "/w/atlas", hooks.codex.inSubagent)), null);
+  assert.equal(await engine.hook("codex", "PostToolUse", hooks.codex.postToolUse(raw(B), "/w/atlas", hooks.codex.inSubagent)), null);
+  assert.ok(await unread(codexMail.id));
+  const codexStop = await engine.hook("codex", "Stop", hooks.codex.stop(raw(B), "/w/atlas"));
+  assert.match(codexStop.reason, /done with refunds\.ts/);
+});
+
+test("hooks: a subagent about to edit a file hears the warning, and so does its main thread", async () => {
+  const { engine } = world(Date.now());
+  const raw = (id) => id.split(":")[1];
+  // B edited routes.ts two minutes ago. A's subagent is about to edit it.
+  const file = "/w/atlas/src/routes.ts";
+  const sub = await engine.hook("claude", "PreToolUse", hooks.claude.preToolUse(raw(A), "/w/atlas", file, hooks.claude.inSubagent));
+  assert.match(sub.hookSpecificOutput.additionalContext, /before you edit routes\.ts.*"Rate-limit the API".*edited routes\.ts/s);
+  assert.equal(await engine.hook("claude", "PreToolUse", hooks.claude.preToolUse(raw(A), "/w/atlas", file, hooks.claude.inSubagent)), null, "once for the subagent");
+  // The main thread didn't see that, so it hears it too, once.
+  const main = await engine.hook("claude", "PreToolUse", hooks.claude.preToolUse(raw(A), "/w/atlas", file));
+  assert.match(main.hookSpecificOutput.additionalContext, /edited routes\.ts/);
+  assert.equal(await engine.hook("claude", "PreToolUse", hooks.claude.preToolUse(raw(A), "/w/atlas", file)), null);
+  // A warning before an edit doesn't take mail, from either thread.
+  const { id } = await engine.send(B, { to: A, text: "Go ahead." });
+  await engine.hook("claude", "PreToolUse", hooks.claude.preToolUse(raw(A), "/w/atlas", "/w/atlas/README.md", hooks.claude.inSubagent));
+  assert.ok((await engine.snapshot()).messages.find((m) => m.id === id).to.every((d) => !d.seen));
 });
 
 test("an agent whose process is gone drops out; one joining later still hears the repo", async () => {
