@@ -9,14 +9,18 @@
 // their own. Codex writes a token_count event after each call, with that
 // call's tokens in last_token_usage (cached and written tokens are part of
 // input_tokens), the model in the turn_context before it, and the service
-// tier (the priority tier costs more) in the thread's settings.
+// tier (the priority tier costs more) in the thread's settings. Grok Build's
+// updates say what was asked and which tools ran, and its usage ledger
+// says each turn's tokens, model and cost (grok-usage.js), which are its
+// calls here: Grok's own cost where it gave one.
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { categorize, mcpServerOf, clip } from "./live.js";
 import { costParts, plainModel, priorityTier, PRICES_CHECKED } from "./pricing.js";
 import { listFiles } from "./paths.js";
-import { readLines, isCodexPrompt, hasUserMessages } from "./lines.js";
+import { readLines, isCodexPrompt, hasUserMessages, GrokLine } from "./lines.js";
+import { readGrokUsage } from "./grok-usage.js";
 
 const UUID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
 const CONTEXT_POINTS = 400;
@@ -27,9 +31,10 @@ const CONTEXT_POINTS = 400;
 // id, from a listing of the rollout folders made once and again when an id
 // isn't in it (at most every 10 seconds).
 export class Transcripts {
-  constructor({ claudeRoot, codexRoots = [] }) {
+  constructor({ claudeRoot, codexRoots = [], grokRoot = null }) {
     this.claudeRoot = claudeRoot;
     this.codexRoots = codexRoots;
+    this.grokRoot = grokRoot;
     this.rollouts = new Map();
     this.listedAt = 0;
   }
@@ -52,6 +57,15 @@ export class Transcripts {
       if (!this.rollouts.has(raw) && Date.now() - this.listedAt > 10e3) await this.list();
       const file = this.rollouts.get(raw);
       return file ? [{ file, agentId: null }] : [];
+    }
+    // A Grok Build session's updates, in the folder named for it, in one
+    // of the sessions folder's groups.
+    if (app === "grok") {
+      for (const group of await fsp.readdir(this.grokRoot ?? "", { withFileTypes: true }).catch(() => [])) {
+        if (!group.isDirectory()) continue;
+        const file = path.join(this.grokRoot, group.name, raw, "updates.jsonl");
+        if (fs.existsSync(file)) return [{ file, agentId: null }];
+      }
     }
     return [];
   }
@@ -195,6 +209,58 @@ function codexEvents(lines) {
   return events;
 }
 
+// A Grok Build session's prompts (each run of your chunks), tool calls and
+// their ends from its updates, and its calls from its usage ledger: each
+// turn's tokens as one call when the turn ended, with Grok's cost for it.
+// `window`: the context window its usage updates said last.
+export function grokEvents(lines, usage) {
+  const events = [];
+  let run = null;
+  let window = null;
+  const end = () => {
+    if (run?.text.trim()) events.push({ kind: "prompt", t: run.t, text: run.text.trim() });
+    run = null;
+  };
+  for (const raw of lines) {
+    const o = raw instanceof GrokLine ? raw : new GrokLine(raw);
+    const t = o.ts;
+    if (!Number.isFinite(t)) continue;
+    if (o.kind === "user_message_chunk") {
+      if (run) run.text += o.text;
+      else run = { t, text: o.text };
+      continue;
+    }
+    end();
+    const u = o.update;
+    if (o.kind === "tool_call") {
+      const name = o.toolName ?? (u.title || "tool");
+      events.push({ kind: "tool", t, id: o.toolCallId, name, agentId: null });
+      if (categorize(name) === "agent") events.push({ kind: "spawn", t, text: String(u.rawInput?.description ?? u.title ?? "subagent") });
+      if (u.status === "completed" || u.status === "failed") events.push({ kind: "result", t, id: o.toolCallId, error: u.status === "failed" });
+    } else if (o.kind === "tool_call_update" && (u.status === "completed" || u.status === "failed")) {
+      events.push({ kind: "result", t, id: o.toolCallId, error: u.status === "failed" });
+    } else if (o.kind === "usage_update" && typeof u.size === "number" && u.size > 0) window = u.size;
+  }
+  end();
+  for (const turn of usage?.turns ?? []) {
+    if (!Number.isFinite(turn.at) || !(turn.total > 0)) continue;
+    events.push({ kind: "call", t: turn.at, agentId: null, model: turn.model ?? "unknown", tokens: { input: turn.input, cacheRead: turn.cacheRead, cacheWrite5m: turn.cacheWrite, cacheWrite1h: 0, output: turn.output }, cost: turn.cost, window });
+  }
+  return events.sort((a, b) => a.t - b.t);
+}
+
+// A call's cost by kind of token: XenoNet's prices, or where the app gave
+// the call's cost itself, that cost split as XenoNet's prices split it, or
+// by tokens for a model without a price.
+function partsOf(e) {
+  const parts = costParts(e.model, e.t, e.tokens, { fast: e.fast, priority: e.priority });
+  if (e.cost == null) return parts;
+  const k = e.tokens;
+  const weights = parts && parts.total > 0 ? parts : { input: k.input, cacheRead: k.cacheRead, cacheWrite: k.cacheWrite5m + k.cacheWrite1h, output: k.output, total: k.input + k.cacheRead + k.cacheWrite5m + k.cacheWrite1h + k.output };
+  const share = (x) => (weights.total > 0 ? (e.cost * weights[x]) / weights.total : 0);
+  return { input: share("input"), cacheRead: share("cacheRead"), cacheWrite: share("cacheWrite"), output: share("output"), total: e.cost };
+}
+
 // ---------- adding it up ----------
 
 const KINDS = ["input", "cacheRead", "cacheWrite", "output"];
@@ -243,7 +309,7 @@ export function summarize(events, { app }) {
       // A call after the turn ended (a subagent finishing, a hook) still counts towards it.
       turn.end = Math.max(turn.end, e.t);
       const k = e.tokens;
-      const parts = costParts(e.model, e.t, k, { fast: e.fast, priority: e.priority });
+      const parts = partsOf(e);
       const tokens = { input: k.input, cacheRead: k.cacheRead, cacheWrite: k.cacheWrite5m + k.cacheWrite1h, output: k.output };
       const sum = KINDS.reduce((a, x) => a + tokens[x], 0);
       totals.calls++;
@@ -350,13 +416,15 @@ export function createStats({ transcripts }) {
   return async function stats(sessionId) {
     const files = await transcripts.files(sessionId);
     if (!files.length) return null;
-    const stamps = await Promise.all(files.map((f) => fsp.stat(f.file).then((s) => `${f.file}:${s.size}:${s.mtimeMs}`, () => f.file)));
+    // A Grok Build session's usage ledger changes its stats too.
+    const ledger = sessionId.startsWith("grok:") ? [path.join(path.dirname(files[0].file), "usage.json")] : [];
+    const stamps = await Promise.all([...files.map((f) => f.file), ...ledger].map((file) => fsp.stat(file).then((s) => `${file}:${s.size}:${s.mtimeMs}`, () => file)));
     const key = stamps.join("|");
     const hit = cache.get(sessionId);
     if (hit?.key === key) return hit.stats;
     const app = sessionId.split(":")[0];
     const read = await Promise.all(files.map(async (f) => ({ ...f, lines: await readLines(f.file, app).catch(() => []) })));
-    const events = app === "codex" ? codexEvents(read[0].lines) : claudeEvents(read);
+    const events = app === "codex" ? codexEvents(read[0].lines) : app === "grok" ? grokEvents(read[0].lines, readGrokUsage(path.dirname(read[0].file))) : claudeEvents(read);
     const stats = { id: sessionId, ...summarize(events, { app }) };
     cache.set(sessionId, { key, stats });
     if (cache.size > 40) cache.delete(cache.keys().next().value);

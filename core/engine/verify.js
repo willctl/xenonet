@@ -67,7 +67,7 @@
 // agents' tools keep working should netstat ever answer in a way XenoNet
 // doesn't read (the doctor's self-test says so). `state.unseen` counts the
 // refusals.
-const APP = { claude: "Claude Code", codex: "Codex" };
+const APP = { claude: "Claude Code", codex: "Codex", grok: "Grok Build" };
 const PRODUCT = { "hermes-agent": "Hermes Agent", "grok-bot": "Grok Bot", muse: "Muse", dots: "the ChatGPT app" };
 // The products whose apps their makers sign, by the maker's name (their
 // teams are in core/procs.js): their actors register and report only from

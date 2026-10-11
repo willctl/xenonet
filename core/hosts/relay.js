@@ -252,6 +252,7 @@ export function shapeGraph(input, { sinceMs = DEFAULT_SINCE_MS, now = Date.now()
       sessions: sessions.length,
       claude: sessions.filter((n) => n.app === "claude").length,
       codex: sessions.filter((n) => n.app === "codex").length,
+      grok: sessions.filter((n) => n.app === "grok").length,
       active: sessions.filter((n) => n.activity === "active").length,
       archived: 0,
     });
@@ -306,7 +307,7 @@ export function shapeEvent(name, data, { dropped = new Set(), detail = false, co
 
 // ---------- the console's reads ----------
 
-const SESSION = "(?:claude|codex):[0-9A-Za-z][0-9A-Za-z._-]{0,127}";
+const SESSION = "(?:claude|codex|grok):[0-9A-Za-z][0-9A-Za-z._-]{0,127}";
 const SESSION_ID = new RegExp(`^${SESSION}$`);
 // The GET routes a console may read through the relay, and the query each
 // takes. Anything else is refused here, before it reaches XenoNet.

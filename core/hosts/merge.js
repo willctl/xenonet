@@ -267,6 +267,7 @@ export function qualifyGraph(graph, host, { layout = {}, now = Date.now(), windo
     sessions: sessions.length,
     claude: sessions.filter((n) => n.app === "claude").length,
     codex: sessions.filter((n) => n.app === "codex").length,
+    grok: sessions.filter((n) => n.app === "grok").length,
     active: sessions.filter((n) => n.activity === "active").length,
     archived: sessions.filter((n) => n.archived).length,
   };
@@ -452,7 +453,7 @@ export function qualifyLive(live, host) {
 // both end at their snapshot's moment, and `lag` is how many seconds the
 // host's ends before this one's.
 function addSeries(into, from, lag) {
-  for (const app of ["claude", "codex"]) {
+  for (const app of ["claude", "codex", "grok"]) {
     const a = into[app];
     const b = Array.isArray(from?.[app]) ? from[app] : [];
     if (!Array.isArray(a)) continue;
@@ -559,7 +560,7 @@ export function qualifyEvent(name, data, host) {
     }
     case "tokens": {
       const sessionId = remoteId(h, data.sessionId);
-      return sessionId && Number.isFinite(data.n) ? { sessionId, app: data.app === "codex" ? "codex" : "claude", n: data.n, ts: shift(data.ts), host: h } : null;
+      return sessionId && Number.isFinite(data.n) ? { sessionId, app: data.app === "codex" || data.app === "grok" ? data.app : "claude", n: data.n, ts: shift(data.ts), host: h } : null;
     }
     case "pulse": {
       const nodeId = data.nodeId === "core" ? `@${h}:core` : remoteId(h, data.nodeId);

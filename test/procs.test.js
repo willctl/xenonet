@@ -6,7 +6,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import net from "node:net";
-import { parsePs, parseNetstat, parseCwd, parseCwds, parseCommands, parseTexts, agentOf, productOf, wantsArgs, createProcs, selfTest } from "../core/procs.js";
+import { parsePs, parseNetstat, parseCwd, parseCwds, parseCommands, parseTexts, agentOf, productOf, wantsArgs, needsExe, createProcs, selfTest } from "../core/procs.js";
+import { grokProcesses } from "../core/grok.js";
 import { fakeProcesses } from "./harness/procs.js";
 
 test("agentOf: the agent apps by their program path, and Node by its arguments", () => {
@@ -31,6 +32,37 @@ test("agentOf: the agent apps by their program path, and Node by its arguments",
 const HERMES_PY = "/Users/nova/.hermes/tools/python-3.14.7/bin/python3.14";
 const HERMES_APP = "/Users/nova/.hermes/hermes-agent/apps/desktop/release/mac-arm64/Hermes.app";
 const GROK = "/Applications/Grok Bot.app";
+
+test("agentOf: Grok Build's grok, its agent link and its downloaded binary; not a grok in an app, nor Cursor's agent", () => {
+  assert.equal(agentOf("/Users/me/.grok/bin/grok"), "grok");
+  assert.equal(agentOf("grok"), "grok");
+  assert.equal(agentOf("/Users/me/.grok/bin/agent"), "grok");
+  assert.equal(agentOf("/Users/me/.grok/downloads/grok-macos-aarch64"), "grok");
+  assert.equal(agentOf("C:\\Users\\me\\.grok\\downloads\\grok-windows-x86_64.exe"), "grok");
+  assert.equal(agentOf("/Applications/Grok Bot.app/Contents/Resources/grok"), null, "Grok Bot's, which is an actor");
+  assert.equal(agentOf("/opt/homebrew/bin/ngrok"), null);
+  assert.equal(agentOf("agent"), null, "a bare agent: Grok's or Cursor's, by its executable");
+  assert.equal(needsExe("agent"), true);
+  assert.equal(needsExe("/Users/me/.local/bin/agent"), true);
+  assert.equal(needsExe("/Users/me/.grok/bin/agent"), false, "its path says");
+  assert.equal(needsExe("/Users/me/.local/bin/cursor-agent"), false);
+});
+
+test("chain() and census(): a bare agent is told by its executable, Grok's or Cursor's, and grokProcesses lists Grok's with their folders", async () => {
+  const m = fakeProcesses();
+  const shell = m.add({ ppid: 1, program: "/bin/zsh" });
+  const grok = m.add({ ppid: shell, program: "grok", exe: "/Users/nova/.grok/downloads/grok-macos-aarch64", cwd: "/Users/nova/Projects/atlas" });
+  const linked = m.add({ ppid: shell, program: "agent", exe: "/Users/nova/.grok/downloads/grok-macos-aarch64", cwd: "/Users/nova/Projects/ledger" });
+  const cursor = m.add({ ppid: shell, program: "agent", exe: "/Users/nova/.local/share/cursor-agent/versions/1/cursor-agent" });
+  const mcp = m.add({ ppid: linked, program: "/usr/local/bin/node", args: ["/x/cli/xenonet.js", "mcp"] });
+  const procs = createProcs({ platform: "darwin", exec: m.exec });
+  assert.deepEqual((await procs.chain(mcp)).map((p) => p.agent), [null, "grok", null], "an MCP server under a grok linked as agent");
+  assert.equal((await procs.chain(cursor))[0].agent, null, "Cursor's agent isn't Grok Build");
+  const c = await procs.census();
+  assert.deepEqual([grok, linked, cursor].map((pid) => c.of(c.table.get(pid)).agent), ["grok", "grok", null]);
+  assert.deepEqual((await grokProcesses(procs)).map((p) => [p.pid, p.cwd]).sort(), [[grok, "/Users/nova/Projects/atlas"], [linked, "/Users/nova/Projects/ledger"]].sort());
+  assert.deepEqual(await grokProcesses(createProcs({ platform: "linux", exec: () => assert.fail("no ps here") })), []);
+});
 
 test("productOf: Hermes's agent hosts and terminal UI by path and arguments, and actor apps by their bundle", () => {
   // Hermes's hosts: its own Pythons, running its CLI, its TUI's backend or its agent.

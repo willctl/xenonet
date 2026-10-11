@@ -95,6 +95,8 @@ const engine = new Engine({ state, store: engineStore, actors });
 // the desktop app, the server's parent is XenoNet itself, whose window is
 // yours. The observers read the same process table, shared for a moment.
 const procs = createProcs();
+// The same table says which Grok Build sessions a grok has open (grok.js).
+state.useProcs(procs);
 const verify = createVerifier({ procs, store: engineStore, home: process.parentPort ? process.ppid : null });
 // Registering actors, which wait for your Allow in the window, and the
 // tokens they report with (core/actors/registration.js).

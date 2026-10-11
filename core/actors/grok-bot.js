@@ -53,6 +53,10 @@ const STRAY_MS = 60e3;
 const CAPABILITIES = ["run-commands", "browse", "message-people", "message-agents", "schedule"];
 
 const inBundle = (program) => String(program ?? "").includes(`/${BUNDLE}/`);
+// The sessions it's watched for are Claude Code's and Codex's, as
+// attribution has them (attribution.js); a grok it runs is a command like
+// any other. Undefined, not yet known, stays so.
+const attributed = (agent) => (agent === "claude" || agent === "codex" || agent === undefined ? agent : null);
 
 // Whether a process still runs: signal 0 only checks.
 const running = (pid) => {
@@ -185,7 +189,7 @@ export class GrokBotObserver extends Observer {
           this.appPids.add(c.pid);
           continue;
         }
-        const agent = of(c).agent;
+        const agent = attributed(of(c).agent);
         const e = this.#track(c, q.pid, agent, at);
         if (e) fresh.push([c.pid, e]);
         // One the poll saw first may be a Node or Bun process it couldn't
@@ -264,7 +268,7 @@ export class GrokBotObserver extends Observer {
         // Node and Bun run Claude Code and Codex too (an npm install), which
         // only their arguments say: the look's census reads those, and until
         // then such a process's agent isn't known.
-        const e = this.#track(p, p.ppid, agentOf(p.program) ?? (wantsArgs(p.program) ? undefined : null), at);
+        const e = this.#track(p, p.ppid, attributed(agentOf(p.program)) ?? (wantsArgs(p.program) ? undefined : null), at);
         if (e) fresh.push([p.pid, e]);
       }
       await this.#taken(fresh, at);

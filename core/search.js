@@ -1,7 +1,8 @@
-// Full-text search across both apps' transcripts, in a local SQLite FTS5 index
+// Full-text search across the apps' transcripts, in a local SQLite FTS5 index
 // (search.sqlite in the cache dir; see config.js). Indexing is incremental:
 // appended lines are read from the last offset, and Codex's compressed
-// .jsonl.zst archives are decompressed once.
+// .jsonl.zst archives are decompressed once. Grok Build's messages come in
+// chunks, a run of them one record.
 //
 // The index has a version (PRAGMA user_version). 1: the files table says
 // which Codex rollouts have a completed user message, since one with none
@@ -13,7 +14,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { DatabaseSync } from "node:sqlite";
 import { listFiles } from "./paths.js";
-import { ClaudeLine, CodexLine, linesOf } from "./lines.js";
+import { ClaudeLine, CodexLine, GrokLine, linesOf } from "./lines.js";
 
 const UUID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(\.zst)?$/i;
 const MAX_TEXT = 6000;
@@ -67,6 +68,29 @@ export function docsFromLine(line, app, { userEvents = false } = {}) {
   return [];
 }
 
+// A Grok Build session's records: each run of your chunks or the agent's
+// as one message, at its first chunk's time (see lines.js).
+export function docsFromGrokLines(lines) {
+  const out = [];
+  let run = null;
+  const end = () => {
+    if (run) out.push(...doc(run.role, run.text, run.ts));
+    run = null;
+  };
+  for (const line of lines) {
+    const o = line instanceof GrokLine ? line : new GrokLine(line);
+    const role = o.kind === "user_message_chunk" ? "user" : o.kind === "agent_message_chunk" ? "assistant" : null;
+    if (role && run?.role === role) {
+      run.text += o.text;
+      continue;
+    }
+    end();
+    if (role) run = { role, text: o.text, ts: o.ts };
+  }
+  end();
+  return out;
+}
+
 // A transcript's text: a compressed archive's decompressed.
 async function readWhole(file) {
   const buf = await fsp.readFile(file);
@@ -107,11 +131,12 @@ export function ftsQuery(q) {
 }
 
 export class TranscriptSearch {
-  constructor({ dbFile, claudeRoot, codexRoots }) {
+  constructor({ dbFile, claudeRoot, codexRoots, grokRoot = null }) {
     this.dbFile = dbFile;
     this.roots = [
       ...(claudeRoot ? [{ dir: claudeRoot, app: "claude" }] : []),
       ...(codexRoots ?? []).map((dir) => ({ dir, app: "codex" })),
+      ...(grokRoot ? [{ dir: grokRoot, app: "grok" }] : []),
     ].filter((r) => fs.existsSync(r.dir));
     this.status = { files: 0, docs: 0, indexing: false, lastIndexAt: 0, ms: 0 };
   }
@@ -162,6 +187,13 @@ export class TranscriptSearch {
 
   sessionOf(file, app) {
     const norm = file.replace(/\\/g, "/");
+    // A Grok Build session's updates.jsonl, in the folder named for it,
+    // in its folder's group: <root>/<group>/<id>/updates.jsonl.
+    if (app === "grok") {
+      const root = this.roots.find((r) => r.app === "grok" && norm.startsWith(r.dir.replace(/\\/g, "/") + "/"));
+      const parts = root ? norm.slice(root.dir.length).split("/").filter(Boolean) : [];
+      return parts.length === 3 && parts[2] === "updates.jsonl" ? `grok:${parts[1]}` : null;
+    }
     if (app === "claude") {
       const sub = /\/([0-9a-f-]{36})\/subagents\/[^/]+\.jsonl$/i.exec(norm);
       if (sub) return `claude:${sub[1]}`;
@@ -177,11 +209,8 @@ export class TranscriptSearch {
     const seen = new Set();
     const lines = linesOf(app);
     const where = { file };
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
-      const o = lines.line(line, where);
-      if (!o) continue;
-      for (const d of docsFromLine(o, app, { userEvents })) {
+    const add = (docs) => {
+      for (const d of docs) {
         const body = d.text.slice(0, MAX_TEXT);
         const key = body.slice(0, 200);
         if (seen.has(key)) continue;
@@ -189,9 +218,21 @@ export class TranscriptSearch {
         this.insert.run(body, sessionId, app, d.role, d.ts, file);
         n++;
       }
+    };
+    // Grok Build's chunks make a message only together, so its lines are
+    // read first; the others' are indexed as they're read.
+    const grok = app === "grok" ? [] : null;
+    for (const line of text.split("\n")) {
+      if (!line.trim()) continue;
+      const o = lines.line(line, where);
+      if (!o) continue;
+      if (grok) grok.push(o);
+      else add(docsFromLine(o, app, { userEvents }));
     }
+    if (grok) add(docsFromGrokLines(grok));
     return n;
   }
+
 
   async indexFile(file, app) {
     const sessionId = this.sessionOf(file, app);

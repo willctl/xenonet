@@ -1,6 +1,7 @@
 // What a call to a model cost at API prices on the day it was made: the
-// prices Anthropic and OpenAI published, with the date each took effect, in
-// US dollars per million tokens at the standard tier. Sessions run on a plan
+// prices Anthropic, OpenAI and SpaceXAI (formerly xAI) published, with the
+// date each took effect, in US dollars per million tokens at the standard
+// tier. Sessions run on a plan
 // (Claude Max, ChatGPT Pro…) cost the plan, not this; it's what the same work
 // would cost on the API.
 //
@@ -11,8 +12,12 @@
 //   OpenAI     developers.openai.com/api/docs/pricing, each model's page, the
 //              changelog, and archived copies of the pricing page
 //
-// Not counted: batch (half price), data residency (1.1x), and Codex models
-// OpenAI doesn't price (codex-auto-review, gpt-5.3-codex-spark).
+// and SpaceXAI's checked 2026-10-10 against docs.x.ai/developers/pricing
+// (the Text API table, global endpoint) and each model's page there.
+//
+// Not counted: batch (half price), data residency (1.1x; xAI's US endpoint
+// too), and Codex models OpenAI doesn't price (codex-auto-review,
+// gpt-5.3-codex-spark).
 //
 // A row: [models, from, input, output, cacheWrite5m, cacheWrite1h, cacheRead, extra]
 //   models   ids separated by |; a model matches its own id, or the longest
@@ -82,10 +87,24 @@ const OPENAI = [
   ["gpt-6.1-sol", "2026-09-29", 2, 10, 2.5, null, 0.1, lc(2, 10)],
 ];
 
+// SpaceXAI's Grok models, which Grok Build runs. Above 200K prompt tokens
+// the whole call costs the long-context rates, cached input twice its
+// price; writing the cache costs what input does. xAI's pages don't say
+// when each price took effect, so each row starts on the day it was
+// checked, and a call before it gets the same price (see priceOf).
+const lcx = (input, output) => ({ longContext: { over: 199999, input, output, scaleCache: 2 } });
+const XAI = [
+  ["grok-4.20-0309-reasoning|grok-4.20-0309-non-reasoning|grok-4.20-multi-agent-0309|grok-4.20", "2026-10-10", 1.25, 2.5, 1.25, null, 0.2, lcx(2.5, 5)],
+  ["grok-4.3", "2026-10-10", 1.25, 2.5, 1.25, null, 0.2, lcx(2.5, 5)],
+  ["grok-4.5", "2026-10-10", 2, 6, 2, null, 0.3, lcx(4, 12)],
+  ["grok-4.6", "2026-10-10", 2, 6, 2, null, 0.5, lcx(4, 12)],
+  ["grok-build-0.1|grok-build", "2026-10-10", 1, 2, 1, null, 0.2, lcx(2, 4)],
+];
+
 // OpenAI's priority tier (Fast in Codex): about twice standard.
 const PRIORITY = { "gpt-5.5": 2.5, "gpt-5-mini": 1.8, o3: 1.75, "gpt-4.1": 1.75 };
 
-const rows = [...ANTHROPIC.map((r) => ["anthropic", ...r]), ...OPENAI.map((r) => ["openai", ...r])].map(([provider, ids, from, input, output, write5m, write1h, read, extra = {}]) => ({
+const rows = [...ANTHROPIC.map((r) => ["anthropic", ...r]), ...OPENAI.map((r) => ["openai", ...r]), ...XAI.map((r) => ["xai", ...r])].map(([provider, ids, from, input, output, write5m, write1h, read, extra = {}]) => ({
   provider,
   ids: ids.split("|"),
   from: Date.parse(`${from}T00:00:00Z`),
@@ -114,7 +133,8 @@ const plainIds = new Map(); // model as written → plain id
 const rowsOf = new Map(); // plain id → its price rows, oldest first, or null
 
 // A model id as the transcripts write it, plain: no provider or region
-// prefix (Bedrock's us.anthropic.…-v1:0, Vertex's …@date), no [1m] flag.
+// prefix (Bedrock's us.anthropic.…-v1:0, Vertex's …@date, xai/grok-4.6),
+// no [1m] flag.
 export function plainModel(model) {
   const written = String(model ?? "");
   const id = plainIds.get(written);
@@ -125,7 +145,7 @@ export function plainModel(model) {
     written
       .toLowerCase()
       .replace(/\[[^\]]*\]$/, "")
-      .replace(/^(?:[a-z]{2,4}\.)?(?:anthropic|openai)[./]/, "")
+      .replace(/^(?:[a-z]{2,4}\.)?(?:anthropic|openai|x-?ai|spacexai)[./]/, "")
       .replace(/-v\d+(?::\d+)?$/, "")
       .replace(/@(\d{8})$/, "-$1"),
   );

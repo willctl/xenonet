@@ -29,7 +29,7 @@
 // machine's: hosts are read-only. Returns whether it answered.
 import { parseQualified, isHostId } from "../../core/schema/ids.js";
 
-const SESSION = /^(?:claude|codex):[0-9A-Za-z][0-9A-Za-z._-]{0,127}$/;
+const SESSION = /^(?:claude|codex|grok):[0-9A-Za-z][0-9A-Za-z._-]{0,127}$/;
 const LIMIT = /^\d{1,4}$/;
 const CURSOR = /^[0-9A-Za-z._:-]{1,200}$/;
 const OFF = "hosts are off in this XenoNet: start it with XENONET_HOSTS=1 to show other machines' XenoNets (a prototype)";

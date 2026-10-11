@@ -53,20 +53,33 @@ function run(file, args) {
 
 // The agent app a program is, from its path: Claude Code (the CLI, the
 // native install under ~/.local/share/claude/versions, or the one Claude
-// desktop runs from its claude.app) or Codex (the CLI, or the one the
-// ChatGPT app bundles). Programs run by Node or Bun are told by their
-// arguments, when given.
+// desktop runs from its claude.app), Codex (the CLI, or the one the
+// ChatGPT app bundles) or Grok Build (grok, or the agent command its
+// installer links beside it in ~/.grok/bin, both the binary it downloads
+// to ~/.grok/downloads/grok-<os>-<arch>). Programs run by Node or Bun are
+// told by their arguments, when given. A grok inside an app bundle is that
+// app's (Grok Bot.app's helpers are Grok Bot's), and a bare `agent` is
+// told by its executable (needsExe), since Cursor's CLI is `agent` too.
 export function agentOf(program, args = "") {
   const p = String(program ?? "").replace(/\\/g, "/");
   const base = path.posix.basename(p);
   if (base === "claude" || /\/claude\/versions\/[^/]+$/.test(p)) return "claude";
   if (base === "codex" || /^codex-(aarch64|x86_64)/.test(base)) return "codex";
+  if (!p.includes(".app/") && (base === "grok" || GROK_BINARY.test(base) || (base === "agent" && /\/\.grok\/bin\/agent$/.test(p)))) return "grok";
   if (/^(node|bun)$/.test(base)) {
     if (/@anthropic-ai\/claude-code\/cli\.js/.test(args)) return "claude";
     if (/@openai\/codex\//.test(args)) return "codex";
   }
   return null;
 }
+
+// The binary Grok Build's installer downloads: grok-macos-aarch64 and the like.
+const GROK_BINARY = /^grok-(macos|darwin|linux|windows)-[a-z0-9_]+(\.exe)?$/;
+
+// Whether what a program is can only be told by its executable: one that
+// calls itself `agent`, which Grok Build's installer links to grok and
+// Cursor's CLI also is, when its path doesn't say.
+export const needsExe = (program) => path.posix.basename(String(program ?? "").replace(/\\/g, "/")) === "agent" && !agentOf(program);
 
 // The apps of actors whose own processes could be relaying for a cloud
 // (docs/design/actors/interface.md, section 5), by their bundle's name:
@@ -270,9 +283,13 @@ export function createProcs({ platform = process.platform, exec = run, now = () 
     const rows = [];
     for (let p = get(pid); p && rows.length < 64; p = p.ppid > 1 ? get(p.ppid) : null) rows.push(p);
     const real = exe ? await executablesOf(rows) : null;
+    // A bare `agent` is told by its executable, asked for whether or not
+    // the chain wants them all.
+    const vague = real ? null : rows.filter((p) => needsExe(p.program));
+    const told = vague?.length ? await executablesOf(vague) : null;
     const out = [];
     for (const p of rows) {
-      const file = real ? (real.get(p.pid) ?? null) : p.program;
+      const file = real ? (real.get(p.pid) ?? null) : (told?.get(p.pid) ?? p.program);
       const of = (args) => agentOf(p.program, args) ?? (file ? agentOf(file, args) : null);
       let agent = of("");
       let args = "";
@@ -391,6 +408,17 @@ export function createProcs({ platform = process.platform, exec = run, now = () 
     await Promise.all([...bundles].filter((b) => !bundleReads.has(b)).slice(0, BUNDLES_AT_ONCE).map(bundleId));
     await Promise.all([...bundles].filter((b) => bundleReads.has(b)).map(bundleId));
     const key = (p) => `${p.pid}:${p.start}:${p.program}`;
+    // A bare `agent`: what it is, by its executable, in one lsof for all
+    // the new ones. One lsof couldn't read gets no verdict, and is asked
+    // about again.
+    const vague = [...t.values()].filter((p) => needsExe(p.program) && !verdicts.has(key(p)));
+    if (vague.length) {
+      const exes = await executablesOf(vague);
+      for (const p of vague) {
+        const file = exes.get(p.pid);
+        if (file) verdicts.set(key(p), { agent: agentOf(file), product: null });
+      }
+    }
     const fresh = [...t.values()].filter((p) => wantsArgs(p.program) && !verdicts.has(key(p)));
     if (fresh.length) {
       const lines = parseCommands(await exec("ps", ["-o", "pid=,command=", "-p", fresh.map((p) => p.pid).join(",")]).catch(() => ""));

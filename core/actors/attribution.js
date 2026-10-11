@@ -27,6 +27,11 @@ const SLACK_MS = 2000;
 export const LIVED_MS = 15e3;
 const DONE_MAX = 2048;
 
+// The agents whose sessions products' actors are said to start: Claude
+// Code's and Codex's. Grok Build's processes are told apart too
+// (procs.js), but attribution stays as it was before them.
+const ATTRIBUTED = new Set(["claude", "codex"]);
+
 // The agent processes in a census (procs.census()) that a product's
 // processes started: the nearest process of note above each is one that
 // `isRoot` picks, with no other agent between (a session's own children
@@ -35,10 +40,10 @@ export function startedUnder({ table, of }, isRoot) {
   const out = [];
   for (const p of table.values()) {
     const agent = of(p).agent;
-    if (agent !== "claude" && agent !== "codex") continue;
+    if (!ATTRIBUTED.has(agent)) continue;
     let n = 0;
     for (let q = p.ppid > 1 ? table.get(p.ppid) : null; q && n < 64; q = q.ppid > 1 ? table.get(q.ppid) : null, n++) {
-      if (of(q).agent) break;
+      if (ATTRIBUTED.has(of(q).agent)) break;
       if (isRoot(q)) {
         out.push({ pid: p.pid, start: p.start, agent, root: q.pid });
         break;

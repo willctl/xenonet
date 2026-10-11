@@ -1,7 +1,8 @@
-// Real-time telemetry. Tails the transcript files both apps append to as they
+// Real-time telemetry. Tails the transcript files the apps append to as they
 // work (Claude Code: ~/.claude/projects/**/*.jsonl, Codex: ~/.codex/sessions/**
-// rollout-*.jsonl) and turns new lines into activity events: tool calls,
-// prompts, turns, subagents, token use and context fill. It also derives the
+// rollout-*.jsonl, Grok Build: ~/.grok/sessions/*/*/updates.jsonl) and turns
+// new lines into activity events: tool calls, prompts, turns, subagents,
+// token use and context fill. It also derives the
 // signals the UI acts on: sessions waiting for you, stuck sessions, edit
 // collisions, context and usage-limit forecasts.
 //
@@ -14,7 +15,8 @@ import { EventEmitter } from "node:events";
 import { tilde, baseName } from "./paths.js";
 import { Tailer } from "./blocks/tailer.js";
 import { claudeUsageGatherer, desktopUsageGatherer } from "./claude-usage.js";
-import { ClaudeLine, CodexLine, linesOf, isCodexPrompt } from "./lines.js";
+import { ClaudeLine, CodexLine, GrokLine, linesOf, isCodexPrompt } from "./lines.js";
+import { readGrokUsage, grokCost } from "./grok-usage.js";
 import { claudeSignal, codexSignal } from "./refusals/detect.js";
 import { costParts, plainModel, priorityTier, PRICES_CHECKED } from "./pricing.js";
 
@@ -34,6 +36,14 @@ const HISTORY_MAX = 20000;
 // claude-usage.js); a reading this old says nothing about the windows now.
 const CLAUDE_LIMITS_FRESH_MS = 45 * 60e3;
 const UUID_TAIL = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
+// Grok Build says when a turn ends only in its hooks. Without them, a turn
+// whose last word was the agent's, with no tool call open, has ended once
+// it's this quiet.
+const GROK_QUIET_MS = 30e3;
+// A Grok session's usage ledger is read this often while it works.
+const GROK_USAGE_MS = 30e3;
+// Apps, in the order the series and costs list them.
+const APPS = ["claude", "codex", "grok"];
 const isTranscript = (name) => name.endsWith(".jsonl");
 
 // ---------- helpers ----------
@@ -50,11 +60,13 @@ export function categorize(name) {
   if (mcpServerOf(n)) return "mcp";
   // local_shell_call: a Codex shell call as its rollout names it, with no
   // name of its own (stats lists it by its type).
-  if (/^(Bash|PowerShell|shell|exec_command|local_shell|local_shell_call|unified_exec|write_stdin)$/i.test(n)) return "shell";
-  if (/^(Edit|Write|MultiEdit|NotebookEdit|apply_patch)$/i.test(n)) return "edit";
-  if (/^(Read|Glob|Grep|LS|view_image)$/i.test(n)) return "read";
-  if (/^(WebFetch|WebSearch|web_search)$/i.test(n)) return "web";
-  if (/^(Agent|Task|spawn_agent|collab)/i.test(n)) return "agent";
+  // Grok Build's names too: run_terminal_command, search_replace,
+  // read_file and the rest.
+  if (/^(Bash|PowerShell|shell|exec_command|local_shell|local_shell_call|unified_exec|write_stdin|run_terminal_command|run_terminal_cmd)$/i.test(n)) return "shell";
+  if (/^(Edit|Write|MultiEdit|NotebookEdit|apply_patch|search_replace|write_file|create_file|delete_file|move_file)$/i.test(n)) return "edit";
+  if (/^(Read|Glob|Grep|LS|view_image|read_file|list_dir)$/i.test(n)) return "read";
+  if (/^(WebFetch|WebSearch|web_search|web_fetch)$/i.test(n)) return "web";
+  if (/^(Agent|Task|spawn_agent|collab|spawn_subagent)/i.test(n)) return "agent";
   if (/^exec$/i.test(n)) return "code";
   return "other";
 }
@@ -100,7 +112,7 @@ export function looksLikeQuestion(text) {
 
 function toolDetail(name, input, home) {
   if (!input || typeof input !== "object") return clip(tilde(typeof input === "string" ? input.split("\n")[0] : "", home));
-  return clip(tilde(input.command ?? input.description ?? input.file_path ?? input.pattern ?? input.url ?? input.query ?? input.prompt ?? "", home));
+  return clip(tilde(input.command ?? input.description ?? input.file_path ?? input.target_file ?? input.path ?? input.pattern ?? input.url ?? input.query ?? input.prompt ?? "", home));
 }
 
 // Codex records commands as argv, usually [shell.exe, "-Command", script];
@@ -168,6 +180,12 @@ function slope(points) {
 
 // ---------- per-session state ----------
 
+// What the tailer keeps of a Grok Build session beyond what every session
+// has: the kind of its last update, the message its chunks are making, its
+// tool calls' names, its folder, when a hook last spoke for it (and started
+// a turn), and how much of its usage ledger has been counted.
+const grokOf = (s) => (s.grok ??= { last: null, reply: null, calls: new Map(), dir: null, hookedAt: 0, hookTurnAt: 0, seen: null, turns: 0, readAt: 0 });
+
 class LiveSession {
   constructor(id, app) {
     this.id = id;
@@ -181,7 +199,7 @@ class LiveSession {
     // which prices its calls.
     this.provider = null;
     this.priority = false;
-    this.context = { used: 0, window: app === "codex" ? 258400 : 200000 };
+    this.context = { used: 0, window: app === "codex" ? 258400 : app === "grok" ? 256000 : 200000 };
     this.turnContexts = [];
     this.model = null;
     this.turn = { active: false, startedAt: null };
@@ -232,15 +250,34 @@ class LiveSession {
     }
   }
 
-  // One call at API prices on its day, as the stats panel prices it
-  // (pricing.js, stats.js). Two days are kept.
-  addCall(model, k, ts, opts) {
+  // A day's spend, made when first asked for. Two days are kept.
+  #day(ts) {
     const day = dayKey(ts);
     let d = this.spend.get(day);
     if (!d) {
       this.spend.set(day, (d = { cost: 0, tokens: 0, unpriced: new Set() }));
       while (this.spend.size > 2) this.spend.delete(this.spend.keys().next().value);
     }
+    return d;
+  }
+
+  // Calls whose cost is known already, or null for none (Grok Build's
+  // ledger says its own; see grok-usage.js).
+  addSpend(model, cost, tokens, ts) {
+    if (!(tokens > 0)) return;
+    const d = this.#day(ts);
+    if (cost == null) {
+      d.unpriced.add(plainModel(model) || model || "unknown");
+      return;
+    }
+    d.cost += cost;
+    d.tokens += tokens;
+  }
+
+  // One call at API prices on its day, as the stats panel prices it
+  // (pricing.js, stats.js).
+  addCall(model, k, ts, opts) {
+    const d = this.#day(ts);
     const parts = costParts(model, ts, k, opts);
     if (!parts) {
       d.unpriced.add(plainModel(model) || model || "unknown");
@@ -393,7 +430,7 @@ class LiveSession {
 // the tailer block's (core/blocks/tailer.js); this turns each line into
 // state and events.
 export class LiveTelemetry extends EventEmitter {
-  constructor({ claudeRoot, codexRoot, claudeDesktopDir, claudeUsage = null, home = null }) {
+  constructor({ claudeRoot, codexRoot, grokRoot = null, claudeDesktopDir, claudeUsage = null, home = null }) {
     super();
     this.home = home;
     // Watch canonical long paths: on Windows, libuv aborts the process when a
@@ -401,6 +438,7 @@ export class LiveTelemetry extends EventEmitter {
     this.roots = [
       { dir: claudeRoot, app: "claude" },
       { dir: codexRoot, app: "codex" },
+      { dir: grokRoot, app: "grok" },
     ]
       .filter((r) => r.dir && fs.existsSync(r.dir))
       .map((r) => ({ ...r, dir: fs.realpathSync.native(r.dir) }));
@@ -461,6 +499,13 @@ export class LiveTelemetry extends EventEmitter {
   classify(file) {
     const norm = file.replace(/\\/g, "/");
     if (!norm.endsWith(".jsonl")) return null;
+    // A Grok Build session's updates, in its folder, which is named for it.
+    // Its other files (chat history, rewind points, feedback) aren't read.
+    const grok = this.roots.find((r) => r.app === "grok" && norm.startsWith(r.dir.replace(/\\/g, "/") + "/"));
+    if (grok) {
+      const m = /\/([^/]+)\/updates\.jsonl$/.exec(norm.slice(grok.dir.length));
+      return m && norm.slice(grok.dir.length).split("/").filter(Boolean).length === 3 ? { app: "grok", sessionId: `grok:${m[1]}` } : null;
+    }
     if (norm.includes("/.codex/") || this.roots.find((r) => r.app === "codex" && norm.startsWith(r.dir.replace(/\\/g, "/")))) {
       const m = UUID_TAIL.exec(norm);
       return m && /rollout-/.test(norm) ? { app: "codex", sessionId: `codex:${m[1]}` } : null;
@@ -474,8 +519,12 @@ export class LiveTelemetry extends EventEmitter {
   // Reads the transcripts written lately as history, then follows them.
   async start() {
     await this.tailer.start();
-    this.limitTimer = setInterval(() => this.readClaudeLimits(), 30000);
+    this.limitTimer = setInterval(() => {
+      this.readClaudeLimits();
+      this.readGrokUsage();
+    }, 30000);
     await this.readClaudeLimits();
+    this.readGrokUsage();
   }
 
   stop() {
@@ -510,9 +559,11 @@ export class LiveTelemetry extends EventEmitter {
       this.status.lines++;
       // A provider's refusal, as its line marks it (core/refusals): kept
       // whether read as history or live, told to you only when live.
-      const sig = f.app === "codex" ? codexSignal(rec.raw) : claudeSignal(rec.raw);
+      // Grok Build's refusals aren't told apart yet (docs/design/grok-build.md).
+      const sig = f.app === "codex" ? codexSignal(rec.raw) : f.app === "grok" ? null : claudeSignal(rec.raw);
       if (sig) this.emit("refusal", { signal: sig, sessionId: f.sessionId, app: f.app, agentId: f.agentId ?? null, file: f.file ?? null, cwd: typeof rec.raw?.cwd === "string" ? rec.raw.cwd : null, model: this.sessions.get(f.sessionId)?.model ?? null, live: !prime });
       if (f.app === "codex") this.applyCodex(f, rec, !prime);
+      else if (f.app === "grok") this.applyGrok(f, rec, !prime);
       else this.applyClaude(f, rec, !prime);
     } catch {
       this.status.errors++;
@@ -935,6 +986,242 @@ export class LiveTelemetry extends EventEmitter {
     }
   }
 
+  // ----- Grok Build's session updates -----
+
+  // A line of a Grok Build session's updates.jsonl: an ACP session update
+  // (see lines.js). Messages come in chunks, a run of them one message;
+  // tool calls come with updates that say how they went. The updates don't
+  // say when a turn ends: Grok's hooks do (noteGrokHook), and without them
+  // a quiet turn is taken to have ended (settleGrok).
+  applyGrok(f, line, live) {
+    const o = line instanceof GrokLine ? line : new GrokLine(line);
+    const s = this.session(f.sessionId, "grok");
+    const ts = Number.isFinite(o.ts) ? o.ts : Date.now();
+    const g = grokOf(s);
+    if (f.file) g.dir = path.dirname(f.file);
+    const kind = o.kind;
+    // A run of the agent's chunks is one message, said once it's whole.
+    if (kind !== "agent_message_chunk") this.#grokReply(s, live);
+    const prev = g.last;
+    g.last = kind;
+    switch (kind) {
+      case "user_message_chunk": {
+        const text = o.text;
+        // The prompt so far, as its chunks come (addPrompt trims what it keeps).
+        if (prev === "user_message_chunk" && g.prompt && s.prompts.at(-1) === g.prompt.kept) {
+          g.prompt.text += text;
+          g.prompt.kept.text = tail(g.prompt.text, 1200);
+          return;
+        }
+        if (!text.trim()) return;
+        // A prompt starts a turn, and ends the one before if nothing else
+        // did, unless Grok's own hook started this one a moment ago.
+        const hooked = g.hookTurnAt && ts - g.hookTurnAt < 60e3 && ts >= g.hookTurnAt - 5000;
+        if (s.turn.active && !hooked) s.endTurn(s.lastEventAt);
+        s.turn = { active: true, startedAt: hooked ? Math.min(g.hookTurnAt, ts) : ts };
+        g.hookTurnAt = 0;
+        s.addPrompt(text, ts);
+        g.prompt = { text, kept: s.prompts.at(-1) };
+        this.activity(s, { kind: "prompt", detail: clip(text, 90), ts }, live);
+        return;
+      }
+      case "agent_message_chunk":
+        g.reply = g.reply ? { text: g.reply.text + o.text, ts } : { text: o.text, ts };
+        if (!s.turn.active && !s.lastTurnEndAt) s.turn = { active: true, startedAt: ts };
+        s.lastEventAt = Math.max(s.lastEventAt, ts);
+        return;
+      case "agent_thought_chunk":
+        s.lastEventAt = Math.max(s.lastEventAt, ts);
+        return;
+      case "tool_call":
+        return this.#grokCall(s, g, o, ts, live);
+      case "tool_call_update":
+        return this.#grokCallUpdate(s, g, o, ts, live);
+      case "usage_update": {
+        const u = o.update;
+        if (typeof u.used === "number") s.context.used = u.used;
+        if (typeof u.size === "number" && u.size > 0) s.context.window = u.size;
+        s.lastEventAt = Math.max(s.lastEventAt, ts);
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  // The agent's message put together from its chunks, once whole.
+  #grokReply(s, live) {
+    const r = s.grok?.reply;
+    if (!r) return;
+    s.grok.reply = null;
+    if (!r.text.trim()) return;
+    s.addMessage(r.text, r.ts);
+    this.activity(s, { kind: "message", detail: clip(r.text), ts: r.ts }, live);
+  }
+
+  #grokCall(s, g, o, ts, live) {
+    const u = o.update;
+    const id = o.toolCallId ?? `call-${ts}`;
+    const name = o.toolName ?? (u.title || "tool");
+    g.calls.set(id, name);
+    if (g.calls.size > 200) g.calls.delete(g.calls.keys().next().value);
+    const done = u.status === "completed" || u.status === "failed";
+    if (!done) s.inflight.set(id, { name, ts });
+    const input = u.rawInput && typeof u.rawInput === "object" ? u.rawInput : null;
+    const detail = input ? toolDetail(name, input, this.home) || clip(tilde(u.title ?? "", this.home)) : clip(tilde(u.title ?? (typeof u.rawInput === "string" ? u.rawInput : ""), this.home));
+    const full = typeof input?.command === "string" ? input.command.slice(0, 400) : JSON.stringify(u.rawInput ?? u.title ?? "").slice(0, 400);
+    const server = mcpServerOf(name);
+    const pages = this.wikiPagesOf(server, input);
+    this.noteTool(s, { name, detail, full, files: o.toolFiles, ts, extra: pages ? { pages } : undefined }, live);
+    this.#grokEdits(s, o, ts);
+    if (categorize(name) === "agent") {
+      const label = clip(input?.description ?? input?.prompt ?? u.title ?? "subagent", 40);
+      s.subagents.set(id, { id, label, startedAt: ts, lastAt: ts, tools: 0, done: false, announced: true });
+      this.activity(s, { kind: "subagent-start", agentId: id, label, ts }, live);
+    }
+    // A question for you (Grok's ask_user tools), or a plan to approve.
+    if (/^ask_user|exit_plan_mode/.test(name)) {
+      const q = /exit_plan_mode/.test(name) ? "Plan ready for your approval" : input?.question ?? input?.questions?.[0]?.question ?? u.title ?? "Grok asked a question";
+      s.question = { callId: id, text: clip(String(q), 300), ts };
+      if (!done) this.activity(s, { kind: "needs-you", detail: clip(String(q), 120), ts }, live);
+    }
+    if (done) this.#grokDone(s, id, u.status, ts, live);
+  }
+
+  #grokCallUpdate(s, g, o, ts, live) {
+    const u = o.update;
+    const id = o.toolCallId;
+    for (const f of o.toolFiles) s.files.set(f, ts);
+    this.#grokEdits(s, o, ts);
+    s.lastEventAt = Math.max(s.lastEventAt, ts);
+    if (u.status === "completed" || u.status === "failed") this.#grokDone(s, id, u.status, ts, live);
+    else if (u.status === "in_progress" && id && !s.inflight.has(id)) s.inflight.set(id, { name: g.calls.get(id) ?? "tool", ts });
+  }
+
+  #grokDone(s, id, status, ts, live) {
+    s.inflight.delete(id);
+    s.noteToolResult(status !== "failed", ts);
+    if (status === "failed") this.activity(s, { kind: "tool-error", ts }, live);
+    const sub = s.subagents.get(id);
+    if (sub) sub.lastAt = ts;
+  }
+
+  // What a tool call changed, from its diffs.
+  #grokEdits(s, o, ts) {
+    const edits = o.diffs.map((d) => ({ path: d.path, kind: d.oldText == null ? "write" : "edit", diff: d.oldText == null ? diffLines("+ ", d.newText, 30) : `${diffLines("- ", d.oldText)}\n${diffLines("+ ", d.newText)}` }));
+    if (!edits.length) return;
+    s.addEdits(edits, ts);
+    for (const e of edits) s.files.set(e.path, ts);
+  }
+
+  // Grok Build's hooks (when you connect it; see engine/connect.js) say
+  // what its updates don't: a turn starting and ending, a permission
+  // prompt waiting on you. `body` is the event as Grok sends it.
+  noteGrokHook(sessionId, event, body = {}) {
+    const s = this.session(sessionId, "grok");
+    const g = grokOf(s);
+    const ts = Date.now();
+    g.hookedAt = ts;
+    if (event === "Notification" && (body.notificationType ?? body.notification_type) === "permission_prompt") s.hookNeed = { text: clip(body.message ?? "Grok Build needs your permission", 200), ts };
+    else if (["UserPromptSubmit", "PostToolUse", "PostToolUseFailure", "Stop", "StopCancelled", "StopFailure", "SessionEnd"].includes(event)) s.hookNeed = null;
+    if (event === "UserPromptSubmit" && !body.subagentType) {
+      if (!s.turn.active) s.turn = { active: true, startedAt: ts };
+      g.hookTurnAt = ts;
+      s.lastEventAt = Math.max(s.lastEventAt, ts);
+    }
+    // A turn's end, however it ended: Stop's at the end of a session
+    // (reason channel_closed or shutdown) ends nothing new.
+    const ended = (event === "Stop" && (body.reason == null || body.reason === "end_turn")) || event === "StopCancelled" || event === "StopFailure" || event === "SessionEnd";
+    if (ended && s.turn.active) {
+      this.#grokReply(s, true);
+      const interrupted = event === "StopCancelled" && (body.cancelledBy ?? "user") === "user";
+      const duration = s.turn.startedAt && ts >= s.turn.startedAt ? ts - s.turn.startedAt : null;
+      s.endTurn(ts, { interrupted });
+      this.activity(s, { kind: "turn-end", duration, ...(interrupted ? { interrupted: true } : {}), ts }, true);
+      const need = s.needsYou(ts);
+      if (need?.kind === "question") this.activity(s, { kind: "needs-you", detail: clip(need.text, 120), ts }, true);
+    }
+    this.activity(s, { kind: "hook", detail: event ?? "hook", ts }, true);
+  }
+
+  // Grok Build sessions whose turn has gone quiet: their last word was the
+  // agent's, with no tool call open, and no hook says otherwise. Their
+  // message is said, and their turn ends when its last update was written.
+  settleGrok(now = Date.now()) {
+    for (const s of this.sessions.values()) {
+      const g = s.grok;
+      if (s.app !== "grok" || !g) continue;
+      if (g.reply && now - g.reply.ts > 1500) this.#grokReply(s, now - g.reply.ts < TURN_STALE_MS);
+      // A session whose hooks report its turns waits for them, and only a
+      // turn whose last word was the agent's has ended.
+      const spoke = ["agent_message_chunk", "agent_thought_chunk", "usage_update"].includes(g.last);
+      if (!s.turn.active || s.inflight.size || now - g.hookedAt < 3600e3 || !spoke) continue;
+      const quiet = now - s.lastEventAt;
+      if (quiet < GROK_QUIET_MS) continue;
+      const ts = s.lastEventAt;
+      const duration = s.turn.startedAt && ts >= s.turn.startedAt ? ts - s.turn.startedAt : null;
+      s.endTurn(ts);
+      if (quiet < TURN_STALE_MS) {
+        this.activity(s, { kind: "turn-end", duration, ts }, true);
+        const need = s.needsYou(now);
+        if (need?.kind === "question") this.activity(s, { kind: "needs-you", detail: clip(need.text, 120), ts }, true);
+      }
+    }
+  }
+
+  // Each working Grok Build session's usage ledger (grok-usage.js): its
+  // tokens for the rate and today's count, and what its calls cost, Grok's
+  // own figure where it gave one. The first read of a session counts the
+  // turns of the last day at the times they ended; later ones count
+  // what's new, now.
+  readGrokUsage(now = Date.now()) {
+    for (const s of this.sessions.values()) {
+      const g = s.grok;
+      if (s.app !== "grok" || !g?.dir || (g.seen != null && now - s.lastEventAt > PRIME_WINDOW_MS)) continue;
+      if (g.readAt && now - g.readAt < GROK_USAGE_MS - 1000) continue;
+      g.readAt = now;
+      let u;
+      try {
+        u = readGrokUsage(g.dir);
+      } catch {
+        continue;
+      }
+      const total = u?.totals?.total ?? 0;
+      if (!u || total <= (g.seen ?? 0)) {
+        g.seen ??= total;
+        continue;
+      }
+      const fresh = u.turns.filter((t) => t.n > g.turns);
+      if (g.seen == null) {
+        // The history: each turn of the last day when it ended.
+        for (const t of fresh) if (t.at && now - t.at < PRIME_WINDOW_MS && t.total > 0) {
+          s.addTokens(t.total, t.at, false);
+          s.addSpend(t.model ?? s.model ?? "unknown", grokCost(t.model ?? s.model, t.at, t), t.total, t.at);
+        }
+        // A ledger without turns: its total, on the day the session last worked.
+        if (!u.turns.length) {
+          const at = s.lastEventAt || now;
+          s.addTokens(total, at, false);
+          s.addSpend(s.model ?? "unknown", grokCost(s.model, at, u.totals), total, at);
+        }
+      } else {
+        const delta = total - g.seen;
+        s.addTokens(delta, now, true);
+        const counted = fresh.reduce((a, t) => a + (t.total ?? 0), 0);
+        for (const t of fresh) if (t.total > 0) s.addSpend(t.model ?? s.model ?? "unknown", grokCost(t.model ?? s.model, t.at ?? now, t), t.total, t.at ?? now);
+        // What the turns don't account for (a turn still under way), at the
+        // session's model's prices.
+        if (delta > counted) s.addSpend(s.model ?? "unknown", grokCost(s.model, now, { input: delta - counted }), delta - counted, now);
+        this.emit("tokens", { sessionId: s.id, app: "grok", n: delta, ts: now });
+      }
+      s.tokens.output = u.totals?.output ?? s.tokens.output;
+      const model = u.turns.at(-1)?.model;
+      if (model) s.model = model;
+      g.seen = total;
+      g.turns = u.turns.at(-1)?.n ?? g.turns;
+    }
+  }
+
   // Claude plan usage: Anthropic's answer every 5 minutes (sooner never,
   // later when it asks for a pause), and Claude desktop's own samples (see
   // the gatherers in claude-usage.js). The newer reading wins; both feed
@@ -1075,8 +1362,8 @@ export class LiveTelemetry extends EventEmitter {
   // cost on average today. Models without a price are named, not guessed.
   costs(now, sessions) {
     const day = dayKey(now);
-    const byApp = { claude: 0, codex: 0 };
-    const tokens = { claude: 0, codex: 0 };
+    const byApp = { claude: 0, codex: 0, grok: 0 };
+    const tokens = { claude: 0, codex: 0, grok: 0 };
     const unpriced = new Set();
     for (const s of this.sessions.values()) {
       const d = s.spend.get(day);
@@ -1086,17 +1373,18 @@ export class LiveTelemetry extends EventEmitter {
       for (const m of d.unpriced) unpriced.add(m);
     }
     let perHour = 0;
-    for (const app of ["claude", "codex"]) {
+    for (const app of APPS) {
       const tpm = sessions.filter((s) => s.app === app).reduce((a, s) => a + s.tpm, 0);
       if (tokens[app] > 0) perHour += tpm * 60 * (byApp[app] / tokens[app]);
     }
-    return { today: byApp.claude + byApp.codex, byApp, perHour, unpriced: [...unpriced].sort(), checked: PRICES_CHECKED };
+    return { today: byApp.claude + byApp.codex + byApp.grok, byApp, perHour, unpriced: [...unpriced].sort(), checked: PRICES_CHECKED };
   }
 
   snapshot() {
     const now = Date.now();
+    this.settleGrok(now);
     const sessions = [...this.sessions.values()].filter((s) => now - s.lastEventAt < PRIME_WINDOW_MS).map((s) => s.snapshot(now));
-    const series = { claude: new Array(RATE_WINDOW_S).fill(0), codex: new Array(RATE_WINDOW_S).fill(0) };
+    const series = Object.fromEntries(APPS.map((app) => [app, new Array(RATE_WINDOW_S).fill(0)]));
     const nowS = Math.floor(now / 1000);
     for (const s of this.sessions.values())
       for (const [sec, n] of s.rate) {
