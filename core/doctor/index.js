@@ -140,7 +140,7 @@ export const CHECKS = [
     title: "XenoNet is running",
     async run(ctx) {
       if (ctx.self) return ok(`${ctx.self.name ?? "XenoNet"} on port ${ctx.self.port}`);
-      if (!ctx.base) return warn("XenoNet isn't running, so the map, its alerts and the tools SI uses are off", "Open XenoNet (or XenoNet Dev).");
+      if (!ctx.base) return warn("XenoNet isn't running, so the map, its alerts and the tools sessions use are off", "Open XenoNet (or XenoNet Dev).");
       return ok(`${ctx.baseName ?? "XenoNet"} on ${ctx.base.replace(/^http:\/\//, "")}`);
     },
   },
@@ -250,7 +250,7 @@ export const CHECKS = [
     title: "Claude Code is installed",
     async run(ctx) {
       const bin = ctx.which("claude");
-      if (!bin) return warn("the claude command isn't on your PATH, and handing off to Claude and connecting your SI need it", "Install Claude Code: https://claude.com/claude-code");
+      if (!bin) return warn("the claude command isn't on your PATH, and handing off to Claude and connecting Claude Code need it", "Install Claude Code: https://claude.com/claude-code");
       const v = await ctx.run(bin, ["--version"], 4000);
       const version = (v.stdout.match(/\d+\.\d+\.\d+/) ?? [])[0];
       return ok(`${version ? `version ${version}, ` : ""}${tilde(bin, ctx.home)}`);
@@ -410,7 +410,7 @@ export const CHECKS = [
       const rows = byCode(entries.filter((e) => !String(e.code).startsWith("doctor.")));
       if (!rows.length) return ok("none in the last day");
       const n = rows.reduce((t, r) => t + r.count, 0);
-      return warn(`${plural(n, "error")} in the last day: ${rows.slice(0, 3).map((r) => `${r.code}${r.count > 1 ? ` ×${r.count}` : ""}`).join(", ")}${rows.length > 3 ? `, and ${plural(rows.length - 3, "other kind")}` : ""}`, "xenonet logs --errors shows them, with a fix for each when there's one. xenonet diagnose --ask has SI look at them with you.");
+      return warn(`${plural(n, "error")} in the last day: ${rows.slice(0, 3).map((r) => `${r.code}${r.count > 1 ? ` ×${r.count}` : ""}`).join(", ")}${rows.length > 3 ? `, and ${plural(rows.length - 3, "other kind")}` : ""}`, "xenonet logs --errors shows them, with a fix for each when there's one. xenonet diagnose --ask has a Codex or Claude Code session look at them with you.");
     },
   },
   {
@@ -431,13 +431,13 @@ export const CHECKS = [
   // ---------- agents ----------
   ...["claude", "codex"].map((app) => ({
     id: `agents.${app}`,
-    group: "SI connections",
+    group: "Sessions",
     title: `${app === "claude" ? "Claude Code" : "Codex"} sessions are connected to XenoNet`,
     async run(ctx) {
       const a = ctx.connect?.apps.find((x) => x.app === app);
       if (!a) return skip("needs XenoNet running");
       const states = a.changes.map((c) => c.state);
-      if (states.every((s) => s === "missing")) return info("not connected, so these sessions can't see or message each other through XenoNet", "Connect them from XenoNet's palette (Connect your SI to XenoNet), or run xenonet connect.");
+      if (states.every((s) => s === "missing")) return info("not connected, so these sessions can't see or message each other through XenoNet", "Connect them from XenoNet's palette (Connect Claude Code and Codex to XenoNet), or run xenonet connect.");
       const stale = a.changes.filter((c) => c.state !== "present");
       if (stale.length) return warn(`partly connected (${stale.map((c) => `${c.id} ${c.state}`).join(", ")})`, "Run xenonet connect again.");
       if (a.broken?.length) return fail(`connected, but ${a.broken.join("; ")}`, "Run xenonet connect again.");
@@ -446,16 +446,16 @@ export const CHECKS = [
   })),
   {
     id: "agents.checked",
-    group: "SI connections",
-    title: "SI sessions can't pass for each other",
+    group: "Sessions",
+    title: "Sessions can't pass for each other",
     async run(ctx) {
-      if (ctx.platform !== "darwin") return info("XenoNet can't see yet which process sends a request on this system, so it takes SI at its word");
+      if (ctx.platform !== "darwin") return info("XenoNet can't see yet which process sends a request on this system, so it takes each session at its word");
       const t = await ctx.procs();
       // On macOS an agent's request goes through unchecked only when
       // netstat has no line for it at all, so agents' tools keep working;
       // one whose process ps can't trace is refused (core/engine/verify.js).
-      if (!t.peer) return warn("netstat doesn't say which process sends a request, so XenoNet takes SI at its word", unreadable("netstat"));
-      if (!t.chain) return warn("ps doesn't say which processes a request comes from, so XenoNet refuses every request in a session's name, and SI can't use its tools", unreadable("ps"));
+      if (!t.peer) return warn("netstat doesn't say which process sends a request, so XenoNet takes each session at its word", unreadable("netstat"));
+      if (!t.chain) return warn("ps doesn't say which processes a request comes from, so XenoNet refuses every request in a session's name, and sessions can't use its tools", unreadable("ps"));
       if (!ctx.exists("/usr/bin/codesign")) return warn("codesign is missing, so Claude Code's own hooks can't settle which process holds a session");
       return ok("XenoNet checks each request in a session's name against the process that sent it");
     },
@@ -487,7 +487,7 @@ export const CHECKS = [
         const shown = found.files.slice(0, 3).map((f) => tilde(f, ctx.home)).join(", ");
         return warn(
           `${plural(found.files.length, "file")} in a repo ${found.files.length === 1 ? "holds" : "hold"} an actor's token: ${shown}${found.files.length > 3 ? ` and ${found.files.length - 3} more` : ""}${when}`,
-          "Move each token out of the repo, whether it's in a file of its own or a line of a .env. Keep it in a file only you can read, outside any repo (for example ~/.config/<name>/xenonet.token, named in XENONET_ACTOR_TOKEN_FILE). Give its actor a new token with New token in XenoNet's Actors panel, since SI may have read it. If it was committed, the old token has leaked.",
+          "Move each token out of the repo, whether it's in a file of its own or a line of a .env. Keep it in a file only you can read, outside any repo (for example ~/.config/<name>/xenonet.token, named in XENONET_ACTOR_TOKEN_FILE). Give its actor a new token with New token in XenoNet's Actors panel, since a session may have read it. If it was committed, the old token has leaked.",
         );
       }
       if (found.checked < found.repos) return info(`none in the ${plural(found.checked, "repo")} looked in; the other ${found.repos - found.checked} didn't answer in time${when}`);
@@ -591,7 +591,7 @@ export const CHECKS = [
       // own records list them, are ones the process check knows as its.
       const unknown = (ctx.actors?.observers?.() ?? []).filter((o) => o.on && o.recognized && o.recognized.found < o.recognized.expected);
       if (unknown.length) return warn(unknown.map((o) => `${o.name} runs ${o.recognized.purposes.join(", ")} processes XenoNet doesn't know as ${o.name}'s, so its actor's token would be refused from under them`).join("; "), "The product may have moved where it keeps its programs; update XenoNet, or report it.");
-      const said = "an actor's token never works from under SI or an actor app's own process, and a product's only from under that product";
+      const said = "an actor's token never works from under a session or an actor app's own process, and a product's only from under that product";
       // The requests refused since XenoNet started because it couldn't see
       // which program sent them (verify.state.unseen).
       const unseen = ctx.verify?.()?.unseen ?? 0;

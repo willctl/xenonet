@@ -160,7 +160,7 @@ test("xenonet status, agents, who and doctor: what a running XenoNet says, and t
 
     // A relative path is taken from where the command runs.
     const who = await xenonet(["who", "src/refunds.ts", ...port], { cwd: fs.mkdtempSync(path.join(tmp(), "w")) });
-    assert.match(who.stdout, /No SI has a hand in src\/refunds\.ts/);
+    assert.match(who.stdout, /No session or actor has a hand in src\/refunds\.ts/);
     assert.ok(s.seen.at(-1).query.path.endsWith(`${path.sep}src${path.sep}refunds.ts`) && path.isAbsolute(s.seen.at(-1).query.path));
     const hand = await xenonet(["who", "/w/atlas/src/refunds.ts", ...port]);
     assert.match(hand.stdout, /Add partial refunds\s+claude\s+is editing it, just now/);

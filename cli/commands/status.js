@@ -4,7 +4,7 @@
 import { c, print, json, table, plural, ago } from "../lib/out.js";
 import { find, get, nameOf, candidates } from "../../core/client.js";
 
-export const help = `Which XenoNet is running, what it reads, the SI at work and the actors
+export const help = `Which XenoNet is running, what it reads, the sessions at work and the actors
 apart from them, which sessions need you, and the doctor's last word.
 Exits 1 when no XenoNet answers.`;
 
@@ -31,7 +31,7 @@ export async function run(_args, flags) {
   const working = agents.filter((a) => a.status === "working").length;
   const rows = [
     [c.dim("Reads"), reads.join(", ") || "nothing yet"],
-    [c.dim("SI"), agents.length ? `${working} working, ${agents.length - working} idle${connected ? `, ${connected} connected to XenoNet` : ""}` : "none at work in the last two hours"],
+    [c.dim("Sessions"), agents.length ? `${working} working, ${agents.length - working} idle${connected ? `, ${connected} connected to XenoNet` : ""}` : "none at work in the last two hours"],
   ];
   // Actors only where there are some, or the line would be noise.
   if (actors?.length) rows.push([c.dim("Actors"), PRESENCES.map((p) => [p, actors.filter((a) => a.presence === p).length]).filter(([, n]) => n).map(([p, n]) => `${n} ${p}`).join(", ")]);

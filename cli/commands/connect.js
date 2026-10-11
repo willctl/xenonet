@@ -12,8 +12,8 @@ import { createConnect } from "../../core/engine/connect.js";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 export const help = `Adds XenoNet to Claude Code's and Codex's own settings: the xenonet MCP server
-(tools so SI can see the other sessions, message them and claim files) and
-hooks (XenoNet says who else is working when a session starts, warns before
+(tools so each session can see the others, message them and claim files)
+and hooks (XenoNet says who else is working when a session starts, warns before
 an edit to a file another session has in hand, and passes on messages). It
 shows what will change and asks first. xenonet disconnect takes it all out
 again.
@@ -84,7 +84,7 @@ export async function run(names, flags) {
   const s = await need(flags);
   const preview = await get(s, "/api/engine/connect");
   if (flags.json) return json(preview);
-  if (preview.demo) throw new Fail(`${nameOf(s)} shows made-up data, so it can't connect your SI. Use XenoNet or XenoNet Dev.`);
+  if (preview.demo) throw new Fail(`${nameOf(s)} shows made-up data, so it can't connect Claude Code and Codex. Use XenoNet or XenoNet Dev.`);
   const todo = preview.apps.filter((a) => apps.includes(a.app) && (a.changes.some((ch) => ch.state !== "present") || a.broken?.length));
   if (!todo.length) {
     render(preview, { apps });
