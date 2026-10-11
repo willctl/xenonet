@@ -15,7 +15,7 @@ export function createUpdatesPanel({ modals, desktop, toast }) {
     current: "You're using the latest release.",
     available: "A new version of XenoNet is available.",
     downloading: "Downloading the update...",
-    ready: "Desktop is ready to restart. Your terminals and SI connections keep running.",
+    ready: "Desktop is ready to restart. Your terminals keep running, and sessions stay connected to XenoNet.",
     error: "XenoNet couldn't finish the update. Check your connection and try again.",
   };
   function render(next) {

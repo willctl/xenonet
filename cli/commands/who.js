@@ -20,7 +20,7 @@ export async function run([target], flags) {
   const s = await need(flags);
   const hands = await get(s, `/api/engine/who?path=${encodeURIComponent(file)}`);
   if (flags.json) return json(hands);
-  if (!hands.length) return print(c.dim(`No SI has a hand in ${target} right now.`));
+  if (!hands.length) return print(c.dim(`No session or actor has a hand in ${target} right now.`));
   const rows = hands.map((h) => [
     c.green("●"),
     h.agent.title,

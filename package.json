@@ -3,7 +3,7 @@
   "productName": "XenoNet",
   "version": "0.1.2",
   "private": true,
-  "description": "The network for SI. SI (super intelligence) on your machine can see and message each other, claim files before editing, and wake SI running elsewhere.",
+  "description": "The network for SI. See every Claude Code and Codex session on your machine on one live map. Sessions can message each other, claim files before editing, and wake agents running elsewhere.",
   "author": "willctl",
   "license": "MIT",
   "type": "module",
@@ -91,8 +91,8 @@
         "en"
       ],
       "extendInfo": {
-        "NSDocumentsFolderUsageDescription": "XenoNet reads the projects and SI sessions you keep in Documents, and its terminal can work there.",
-        "NSDesktopFolderUsageDescription": "XenoNet reads the projects and SI sessions you keep on the Desktop, and its terminal can work there.",
+        "NSDocumentsFolderUsageDescription": "XenoNet reads the projects and sessions you keep in Documents, and its terminal can work there.",
+        "NSDesktopFolderUsageDescription": "XenoNet reads the projects and sessions you keep on the Desktop, and its terminal can work there.",
         "NSDownloadsFolderUsageDescription": "XenoNet's terminal can work in your Downloads folder.",
         "NSRemovableVolumesUsageDescription": "XenoNet reads projects you keep on external drives, and its terminal can work there.",
         "NSNetworkVolumesUsageDescription": "XenoNet reads projects you keep on network drives, and its terminal can work there.",

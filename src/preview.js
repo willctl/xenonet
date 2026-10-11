@@ -3,7 +3,7 @@ import { APP_LABEL } from "./theme.js";
 
 const ROLE = {
   user: { tag: "USER", cls: "user" },
-  assistant: { tag: "SI", cls: "agent" },
+  assistant: { tag: "AGENT", cls: "agent" },
   tool: { tag: "TOOL", cls: "tool" },
   reasoning: { tag: "THINK", cls: "think" },
   system: { tag: "SYS", cls: "sys" },

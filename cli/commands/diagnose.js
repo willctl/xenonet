@@ -21,12 +21,12 @@ project names, identities or keys, and home folders show as ~.
 
   --json            as JSON
   --out <file>      write it to a file
-  --ask             have SI on this computer look at it with you. It's a
-                    Codex session (or Claude Code, with --app claude) in a
-                    folder of its own, read-only, that can read XenoNet's code
-                    and never files anything. If it finds a bug in XenoNet, it
-                    writes issue-draft.md there, for you to send if you
-                    choose
+  --ask             have a session on this computer look at it with you.
+                    It's a Codex session (or Claude Code, with --app claude)
+                    in a folder of its own, read-only, that can read XenoNet's
+                    code and never files anything. If it finds a bug in
+                    XenoNet, it writes issue-draft.md there, for you to send
+                    if you choose
   --app <app>       codex (default) or claude; XENONET_DIAGNOSE_APP sets it
   --model <model>   the model it uses; XENONET_DIAGNOSE_MODEL sets it
   --dev             about XenoNet Dev, not the installed XenoNet`;

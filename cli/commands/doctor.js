@@ -4,9 +4,9 @@ import { c, print, json, table, plural } from "../lib/out.js";
 import { checkup } from "../../core/doctor/checkup.js";
 
 export const help = `Checks what XenoNet needs: Claude Code and Codex installed and signed in,
-the folders XenoNet reads, git and the runtime, XenoNet itself, whether your
-SI is connected, and actors: tokens left in repos or expired, and
-what XenoNet's observers read. Each problem comes with a fix.
+the folders XenoNet reads, git and the runtime, XenoNet itself, whether
+Claude Code and Codex are connected, and actors: tokens left in repos or
+expired, and what XenoNet's observers read. Each problem comes with a fix.
 
   --only <groups>  only some checks: xenonet, claude, codex, system, agents,
                    actors (comma-separated)

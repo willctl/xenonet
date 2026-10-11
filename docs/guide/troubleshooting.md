@@ -1,6 +1,6 @@
 # When something goes wrong
 
-XenoNet keeps a log of what went wrong and checks its own setup every half hour. SI (super intelligence) on your computer can look at both with you.
+XenoNet keeps a log of what went wrong and checks its own setup every half hour. Codex or Claude Code on your computer can look at both with you.
 
 ## See what went wrong
 
@@ -26,9 +26,9 @@ The log lives in XenoNet's state folder, in `logs/`: `service.ndjson`, `desktop.
 xenonet doctor
 ```
 
-This checks sign-ins, the folders XenoNet reads, its own parts, its launcher, whether your SI is connected and recent errors, with a fix for each problem. XenoNet runs the same checks every half hour. When a check finds a new problem, it goes in the log too, so you can see it later even after it clears.
+This checks sign-ins, the folders XenoNet reads, its own parts, its launcher, whether Claude Code and Codex are connected and recent errors, with a fix for each problem. XenoNet runs the same checks every half hour. When a check finds a new problem, it goes in the log too, so you can see it later even after it clears.
 
-## Get help from SI
+## Get help from Codex or Claude Code
 
 ```bash
 xenonet diagnose --ask
@@ -41,7 +41,7 @@ XenoNet writes what it can tell (the doctor's findings, its errors by code, wher
 - `--app claude` uses Claude Code instead, in plan mode.
 - `--model <model>` picks the model. `XENONET_DIAGNOSE_APP` and `XENONET_DIAGNOSE_MODEL` set your defaults.
 
-In the window, the doctor's **Ask SI…** does the same in a terminal tab, and remembers the app and model you chose.
+In the window, the doctor's **Ask Codex or Claude Code…** does the same in a terminal tab, and remembers the app and model you chose.
 
 ## Share what XenoNet can tell
 

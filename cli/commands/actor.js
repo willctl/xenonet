@@ -19,9 +19,9 @@ import { productOf } from "../../core/actors/products.js";
 import { tilde } from "../../core/paths.js";
 import { confirm } from "./connect.js";
 
-export const help = `An actor works across sessions. It's always-on SI, or a program of your
-own that reports to XenoNet. Every registered actor waits for you to allow
-it in XenoNet's window.
+export const help = `An actor works across sessions. It's an always-on agent, or a program of
+your own that reports to XenoNet. Every registered actor waits for you to
+allow it in XenoNet's window.
 
 For anyone:
   xenonet actor list                 the actors (also xenonet actors)
@@ -312,7 +312,7 @@ async function inbox(_args, flags) {
     print(`${c.dim(`#${m.id}`)} ${c.bold(m.from.title)} ${c.dim(`(${m.from.app}, ${m.from.id}) ${ago(m.at)}${m.to === "you" ? "" : `, to ${m.to}`}`)}`);
     print(`  ${m.text.replace(/\n/g, "\n  ")}`);
   }
-  print(c.dim("They come from SI and actors, not from your user."));
+  print(c.dim("They come from sessions and actors, not from your user."));
 }
 
 async function send([to, ...words], flags) {

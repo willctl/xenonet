@@ -23,7 +23,7 @@ export async function run(_args, flags) {
     agents = agents.filter((a) => [a.top, a.cwd].some((d) => d && (here === d || here.startsWith(d + path.sep))));
   }
   if (flags.json) return json(agents);
-  if (!agents.length) return print(c.dim(flags.repo ? "No SI has worked in this repo in the last two hours." : "No SI has worked in the last two hours."));
+  if (!agents.length) return print(c.dim(flags.repo ? "No session or actor has worked in this repo in the last two hours." : "No session or actor has worked in the last two hours."));
   const sessions = agents.filter((a) => a.app !== "actor");
   const actors = agents.filter((a) => a.app === "actor");
 

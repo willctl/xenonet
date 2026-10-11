@@ -242,7 +242,7 @@ const doctorPanel = createDoctorPanel({
   sfx,
   toast: (m, b) => hud.toast(m, b),
   onResult: (r) => alerts.setDoctor(r),
-  // Ask SI runs in a terminal tab here, where Desktop has them.
+  // Ask Codex or Claude Code runs in a terminal tab here, where Desktop has them.
   terminal: desktop?.terminal
     ? async (dir, command) => {
         await terminal?.show({ cwd: dir, fresh: true });
@@ -529,7 +529,7 @@ const commandList = [
   ...(desktop ? [] : [{ id: "notify", label: "Enable desktop notifications", keywords: "alerts", run: async () => hud.toast(`Desktop notifications: ${await alerts.enableNotifications()}`) }]),
   { id: "updates", label: "Check for XenoNet updates", keywords: "version release download install restart", run: () => updatesPanel.open() },
   { id: "doctor", label: "Check XenoNet's setup", keywords: "doctor health sign in login auth permissions problems diagnose", run: () => doctorPanel.open() },
-  { id: "connect-agents", label: "Connect your SI to XenoNet", keywords: "si super intelligence agents claude code codex mcp hooks engine coordinate messages work together", run: () => connectPanel.open() },
+  { id: "connect-agents", label: "Connect Claude Code and Codex to XenoNet", keywords: "si super intelligence agents claude code codex mcp hooks engine coordinate messages work together", run: () => connectPanel.open() },
   { id: "actors", label: "Actors", keywords: "si agents hermes grok bot muse programs allow deny requests register tokens observers you show me on the map add remove", run: () => openActors() },
   { id: "install-command", label: "Install the xenonet command", keywords: "cli terminal shell path doctor", run: () => installCommand() },
   { id: "layout", label: "Reset layout and unpin dragged nodes", keywords: "positions", run: async () => (await fetch("/api/layout", { method: "DELETE" }), hud.toast("Layout reset")) },
@@ -577,7 +577,7 @@ const commandList = [
     run: () => setScope({ window: w.id }),
   })),
   { id: "focus-lighting", label: "Turn focus lighting on or off", keywords: "glare glow bloom dim zoom distance", run: () => setFocusLighting(!focusLighting) },
-  { id: "scope-background", label: "Show or hide background SI", keywords: "codex guardian review compaction exec subagents agents scope", run: () => setScope({ background: !scope.background }) },
+  { id: "scope-background", label: "Show or hide background sessions", keywords: "codex guardian review compaction exec subagents agents scope", run: () => setScope({ background: !scope.background }) },
   ...(desktop?.terminal
     ? [
         { id: "terminal", label: "Show or hide the terminal", key: "Ctrl+`", keywords: "shell powershell zsh bash console", run: () => terminal.toggle() },
@@ -1100,7 +1100,7 @@ if (params.has("daylog")) setTimeout(() => modals.dayLog(), 800);
 // ---------- dev hooks ----------
 
 if (import.meta.env.DEV || desktop) {
-  // How scripts, tests and SI drive XenoNet (see driver.js).
+  // How scripts, tests and agents drive XenoNet (see driver.js).
   const { createDriver } = await import("./driver.js");
   const driver = createDriver({
     scene, alerts, palette, modals, preview, replay, select, back, step, hud,

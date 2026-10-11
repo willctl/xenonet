@@ -606,7 +606,7 @@ function wireIpc() {
     const options = {
       title: "Save the actor's token",
       buttonLabel: "Save",
-      message: "Only you will be able to read this file. Keep it out of your projects and repos, where SI reads freely.",
+      message: "Only you will be able to read this file. Keep it out of your projects and repos, where agents read freely.",
       defaultPath: path.join(home, ".config", "xenonet", `${name}.token`),
       properties: ["createDirectory", "showOverwriteConfirmation"],
     };
@@ -616,7 +616,7 @@ function wireIpc() {
     // You chose it, and the dialog asked before replacing a file.
     const file = writeTokenFile(res.filePath, token, { force: true });
     const tree = gitTreeOf(path.dirname(file));
-    return { file: tilde(file, home), warning: tree ? `It's inside a git working tree (${tilde(tree, home)}), where SI reads freely and tokens get committed.` : null };
+    return { file: tilde(file, home), warning: tree ? `It's inside a git working tree (${tilde(tree, home)}), where agents read freely and tokens get committed.` : null };
   });
   // Native notifications for the page's alerts; the page decides what's new.
   // One per alert: a newer one replaces it, and it's withdrawn from the
@@ -837,7 +837,7 @@ if (iconsArg >= 0) {
       openRelease: () => shell.openExternal("https://github.com/willctl/xenonet/releases/latest"),
       confirmRestart: async () => {
         const { dialog } = await import("electron");
-        const result = await dialog.showMessageBox(win, { type: "question", message: "Restart XenoNet and install the update?", detail: "Desktop will restart. Your terminals and SI connections keep running.", buttons: ["Restart and update", "Later"], defaultId: 1, cancelId: 1 });
+        const result = await dialog.showMessageBox(win, { type: "question", message: "Restart XenoNet and install the update?", detail: "Desktop will restart. Your terminals keep running, and sessions stay connected to XenoNet.", buttons: ["Restart and update", "Later"], defaultId: 1, cancelId: 1 });
         return result.response === 0;
       },
     });
@@ -849,7 +849,7 @@ if (iconsArg >= 0) {
       const how = await startServer();
       console.log(`[xenonet] server ${how} at ${BASE}`);
       // The control channel comes through a server this app started.
-      if (control && how === "reused") console.log(`[xenonet] the server at ${BASE} was already running, so scripts and SI can't control this window; stop that server and restart ${app.name}`);
+      if (control && how === "reused") console.log(`[xenonet] the server at ${BASE} was already running, so scripts and agents can't control this window; stop that server and restart ${app.name}`);
     } catch (err) {
       const { dialog } = await import("electron");
       dialog.showErrorBox("XenoNet couldn't start its server", String(err.message ?? err));

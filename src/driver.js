@@ -1,5 +1,5 @@
 // Drives XenoNet by meaning rather than by pixel, for scripts, tests and
-// SI. This is the page's half of the control channel: the desktop app's
+// agents. This is the page's half of the control channel: the desktop app's
 // main process calls it (electron/control.js) on behalf of
 // core/control.js, the console MCP server (mcp/console.js) and
 // the end-to-end tests. Available in installed Desktop and development builds.
