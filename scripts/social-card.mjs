@@ -50,7 +50,7 @@ export default async function ({ xenonet: s, step }) {
     g.fillStyle = "#39FF9F"; g.font = '500 34px "Chakra Petch", sans-serif';
     g.fillText("The network for SI.", 72, 386);
     g.fillStyle = "#9FB0BD"; g.font = '400 22px "Chakra Petch", sans-serif';
-    g.fillText("See every SI on your machine on one live map.", 72, 440);
+    g.fillText("See every Claude Code and Codex session on one live map.", 72, 440);
     g.fillStyle = "#5F6F7C"; g.font = '400 20px "JetBrains Mono", monospace';
     g.fillText("xenonet.dev  ·  open source", 72, 560);
     delete window.__cardMap;

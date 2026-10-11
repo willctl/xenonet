@@ -98,8 +98,8 @@ export default async function ({ xenonet: s, step }) {
   await step("mask:on");
   await step("reset");
   await step("deselect");
-  await titleCard("intro", "See what your\nSI is doing.", "SI can see the other sessions on your machine through XenoNet.", 3.5);
-  await clip("overview", "See each session in its project.", "Claude Code and Codex sessions show up with background SI beside them.", async () => {}, 5);
+  await titleCard("intro", "See what your\nsessions are doing.", "XenoNet maps every Claude Code and Codex session on your machine.", 3.5);
+  await clip("overview", "See each session in its project.", "Claude Code and Codex sessions show up, with always-on agents beside them.", async () => {}, 5);
   const waiting = (await s.driver("state")).alerts.find(x => x.kind === "need");
   if (!waiting) throw new Error("The demo needs a session waiting for a question.");
   await clip("question", "Find the question that needs you.", "Read the session's context before you switch apps.", async () => {
@@ -113,9 +113,9 @@ export default async function ({ xenonet: s, step }) {
     await s.input({ click: p });
   }, 7, [1280, 720, 160, 90]);
   await s.input({ keys: "Escape" });
-  await clip("agents", "See what background SI is doing.", "SI can find peers, claim files and send messages through XenoNet.", () => s.driver("select", "actor:wren"), 6);
+  await clip("agents", "See what an always-on agent is doing.", "Agents can find peers, claim files and send messages through XenoNet.", () => s.driver("select", "actor:wren"), 6);
   await step("deselect");
-  await clip("control", "SI can operate the console too.", "This recording uses the same controls for finding and selecting work.", async () => {
+  await clip("control", "Agents can operate the console too.", "This recording uses the same controls for finding and selecting work.", async () => {
     const { nodes } = await s.driver("find", { query: "atlas-api", kind: "project", limit: 1 });
     await s.driver("select", nodes[0].id);
   }, 5);
