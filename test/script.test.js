@@ -91,7 +91,7 @@ test("every kind of step reaches the instance the way it should", async () => {
   const steps = [
     "launch", "launch:hidden", "launch:restart", "launch:restart:hidden", "launch:front:restart", "status", "state", "deselect", "back", "reset", "next", "prev",
     "stats:claude:s1", "stats:refunds", "command:wallpaper", "commands", "simulate:stuck", "simulate:actor-spawn,actor:wren,claude:s1", "simulate:actor-offline,actor:wren", "simulate:actor-needs-you,actor:wren", "actors", "feed", "feed:5",
-    "identities", "identities:a,b", "identities:all", "mask:on", "mask:off",
+    "identities", "identities:a,b", "identities:all", "mask:on", "mask:off", "filters", "filters:grok=off,archived=on",
     "key:Mod+K", "type:hello", "click:10,20", "click2:@claude:s1", "hover:@project:atlas",
     "drag:1,2,3,4", "alt-drag:1,2,3,4", "scroll:5,6,-120", "size:1600x900@2", "size:window",
     "show", "show:front", "hide", "still:on", "still:off", "settle", "eval:1+1", "logs", "listen:10",
@@ -103,7 +103,7 @@ test("every kind of step reaches the instance the way it should", async () => {
     ["launch", {}], ["launch", { show: "hidden" }], ["launch", { restart: true }], ["launch", { restart: true, show: "hidden" }], ["launch", { show: "front", restart: true }], ["ping"], ["select", null], ["back"], ["reset"], ["step", 1], ["step", -1],
     ["stats", "claude:s1", { settle: false }], ["find", { query: "refunds", kind: "session", limit: 1 }], ["command", "wallpaper"], ["simulate", "stuck"],
     ["simulate", "actor-spawn", { a: "actor:wren", b: "claude:s1" }], ["simulate", "actor-offline", { a: "actor:wren" }], ["simulate", "actor-needs-you", { a: "actor:wren" }], ["actors"], ["feed", { limit: 20 }], ["feed", { limit: 5 }],
-    ["filterIdentities", ["a", "b"]], ["filterIdentities", []], ["maskIdentities", true], ["maskIdentities", false],
+    ["filterIdentities", ["a", "b"]], ["filterIdentities", []], ["maskIdentities", true], ["maskIdentities", false], ["filters", { grok: false, archived: true }],
     ["input", { keys: "Mod+K" }], ["input", { text: "hello" }], ["input", { click: { x: 10, y: 20 }, count: 1 }], ["input", { click: { node: "claude:s1" }, count: 2 }], ["input", { move: { node: "project:atlas" } }],
     ["input", { drag: { from: { x: 1, y: 2 }, to: { x: 3, y: 4 } }, modifiers: [] }], ["input", { drag: { from: { x: 1, y: 2 }, to: { x: 3, y: 4 } }, modifiers: ["Alt"] }], ["input", { scroll: { x: 5, y: 6, dy: -120 } }],
     ["window", { size: "1600x900@2" }], ["window", { size: null }], ["window", { show: "inactive" }], ["window", { show: "front" }], ["window", { hide: true }],

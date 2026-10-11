@@ -198,7 +198,9 @@ export const themeState = () => ({ id: THEME.id, name: THEME.name, builtIn: !!TH
 // What an agent is doing, by tool family.
 export const CATEGORY_LABEL = { shell: "shell", edit: "edit", read: "read", web: "web", mcp: "mcp", agent: "agent", code: "code", other: "other" };
 
-export const APP_LABEL = { claude: "Claude Code", codex: "Codex" };
+export const APP_LABEL = { claude: "Claude Code", codex: "Codex", grok: "Grok Build" };
+// No desktop app hosts Grok Build's sessions yet, so they have no "open in
+// app"; one that does would be named here (and in core/open.js).
 export const APP_DESKTOP = { claude: "Claude desktop", codex: "ChatGPT desktop" };
 
 // Which color a node is drawn in: a role in COLORS, or a page type.

@@ -99,10 +99,15 @@ export function createTelemetry({ onSelect }) {
       ctx.stroke();
     }
     if (!snap) return;
-    const series = { claude: smooth(snap.series.claude), codex: smooth(snap.series.codex) };
-    const max = Math.max(2000, ...series.claude, ...series.codex);
+    // Grok Build's line only while it has tokens to show, and its legend
+    // with it; a snapshot from before it (another machine's) has none.
+    const series = { claude: smooth(snap.series.claude), codex: smooth(snap.series.codex), grok: smooth(snap.series.grok ?? []) };
+    const grok = series.grok.some((v) => v > 0);
+    const legend = document.querySelector("[data-scope-grok]");
+    if (legend) legend.hidden = !grok;
+    const max = Math.max(2000, ...series.claude, ...series.codex, ...series.grok);
     const scale = (v) => H - 4 - (Math.log10(1 + v) / Math.log10(1 + max)) * (H - 10);
-    for (const app of ["codex", "claude"]) {
+    for (const app of grok ? ["grok", "codex", "claude"] : ["codex", "claude"]) {
       const data = series[app];
       const color = COLORS[app];
       ctx.beginPath();
@@ -200,7 +205,8 @@ export function createTelemetry({ onSelect }) {
     if (!c) return;
     setSpend(c.today);
     setPace(c.perHour);
-    el.title = [`About ${money(c.byApp.claude)} for Claude Code and ${money(c.byApp.codex)} for Codex today, at Anthropic's and OpenAI's API prices (checked ${c.checked}).`, c.unpriced.length ? `Not counted, with no price: ${c.unpriced.join(", ")}.` : "", "On a plan, the work costs the plan; this is what it would cost on the API."].filter(Boolean).join(" ");
+    const grok = c.byApp.grok ? `, ${money(c.byApp.claude)} for Claude Code and ${money(c.byApp.grok)} for Grok Build` : ` and ${money(c.byApp.claude)} for Claude Code`;
+    el.title = [`About ${money(c.byApp.codex)} for Codex${grok} today, at the API prices Anthropic, OpenAI and SpaceXAI publish (checked ${c.checked}).`, c.unpriced.length ? `Not counted, with no price: ${c.unpriced.join(", ")}.` : "", "On a plan, the work costs the plan; this is what it would cost on the API."].filter(Boolean).join(" ");
   }
 
   // An account signed in only on another machine (with XENONET_HOSTS=1): its

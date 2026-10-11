@@ -33,6 +33,8 @@ export const STEPS = `  launch[:inactive|front|hidden]  start it unless it's run
   actors                          the actors beside the map: presence, status, beams; and the
                                   programs waiting for an Allow
   feed[:<n>]                      the activity feed's last lines, sessions' and actors'
+  filters[:<name>=on|off,…]        the toggles under Filters (claude, codex, grok, archived,
+                                  external); with names, turn those on or off
   identities[:<keys>|all]         the identity chips; with chip keys (comma-separated), only their work
   mask:on|off                     hide identities (GitHub A, Claude B…) or show them
   hosts[:<ids>|all]               other machines on the map (XENONET_HOSTS=1) and how each
@@ -186,6 +188,12 @@ export async function runStep(s, step, say = () => {}) {
     case "feed":
       for (const l of (await s.driver("feed", { limit: Number(arg) || 20 })).lines) say(`${l.kind}  ${l.title}${l.detail ? ` · ${l.detail}` : ""}`);
       break;
+    case "filters": {
+      const set = arg ? Object.fromEntries(arg.split(",").map((pair) => pair.split("=")).map(([name, v]) => [name.trim(), !/^(off|false|0|no)$/i.test(String(v ?? "on").trim())])) : null;
+      const st = set ? await s.driver("filters", set) : await s.driver("state");
+      say(Object.entries(st.filters ?? {}).map(([k, v]) => `${k} ${v ? "on" : "off"}`).join("  "));
+      break;
+    }
     case "identities":
       if (arg) await show(s.driver("filterIdentities", arg === "all" ? [] : arg.split(",")));
       say(await s.driver("identities"));

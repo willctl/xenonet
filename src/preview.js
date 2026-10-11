@@ -73,7 +73,7 @@ export function createPreview({ onOpenApp }) {
     node = n;
     entries = [];
     cursor = null;
-    root.style.setProperty("--accent", n.app === "claude" ? "var(--claude)" : "var(--codex)");
+    root.style.setProperty("--accent", n.app === "codex" || n.app === "grok" ? `var(--${n.app})` : "var(--claude)");
     root.innerHTML = `
       <div class="p-backdrop" data-pclose></div>
       <section class="p-panel">

@@ -1464,6 +1464,8 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
       graph.nodeVisibility((n) => !visible || visible.has(n.id));
       graph.linkVisibility((l) => !visible || (visible.has(idOf(l.source)) && visible.has(idOf(l.target))));
     },
+    // Whether a node shows, through the filters.
+    shown: (id) => !visible || visible.has(id),
     // Search dimming; the frame loop applies it along with the focus lighting.
     dim(ids) {
       dimmed = ids;

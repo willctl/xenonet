@@ -60,7 +60,8 @@ export function createTray({ baseUrl, showWindow, sendCommand, select, themes = 
       {
         label: need.length ? `Needs you (${need.length})` : "Nothing needs you",
         enabled: need.length > 0,
-        submenu: need.length ? need.map((n) => ({ label: `${n.app === "codex" ? "Codex" : "Claude"} · ${named(n, 48)}`, click: () => (n.host ? (showWindow(), select(n.id)) : post("/api/open", { nodeId: n.id, action: "open-app" })) })) : undefined,
+        // A Grok Build session has no app to open in yet: XenoNet shows it.
+        submenu: need.length ? need.map((n) => ({ label: `${{ codex: "Codex", grok: "Grok Build" }[n.app] ?? "Claude"} · ${named(n, 48)}`, click: () => (n.host || n.app === "grok" ? (showWindow(), select(n.id)) : post("/api/open", { nodeId: n.id, action: "open-app" })) })) : undefined,
       },
       ...(stuck.length ? [{ label: `May be stuck (${stuck.length})`, submenu: stuck.map((n) => ({ label: named(n, 48), click: () => (showWindow(), select(n.id)) })) }] : []),
       { type: "separator" },

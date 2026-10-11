@@ -80,7 +80,7 @@ export function summaryText(sum, label) {
 const clipText = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + "…" : s ?? "");
 
 export function handoffBrief({ node, notes, target }) {
-  const from = node.app === "codex" ? "a Codex session" : "a Claude Code session";
+  const from = `a ${{ codex: "Codex", grok: "Grok Build" }[node.app] ?? "Claude Code"} session`;
   const goal = notes.firstPrompt?.text;
   const latest = notes.prompts?.[notes.prompts.length - 1]?.text;
   const last = notes.messages?.[notes.messages.length - 1]?.text;

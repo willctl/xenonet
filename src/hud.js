@@ -17,6 +17,13 @@ const kindLabel = (n) => (n.kind === "project" && n.group ? "Group" : n.kind ===
 const ACTIVITY_LABEL = { active: "active", recent: "recent", idle: "idle" };
 // Why the scan made a folder a project or a group (see scanProjects).
 const VCS_NAME = { ".git": "git repo", ".hg": "Mercurial repo", ".jj": "Jujutsu repo", ".sl": "Sapling repo", ".svn": "Subversion checkout" };
+// Where a Grok Build session came from: Grok's own word for it (a
+// subagent, with its type; a headless run), else Grok Build.
+function grokOrigin(n) {
+  if (n.parentKind === "subagent") return `Grok Build subagent${n.agentKind && n.agentKind !== "spawned" ? ` · ${n.agentKind}` : ""}`;
+  return n.source ? `Grok Build · ${n.source}` : "Grok Build";
+}
+
 function foundAs(n) {
   if (n.rule?.by === "codex") return `Codex's pick: ${n.rule.reason || n.rule.as}`;
   if (n.rule?.by === "you") return { project: "your rule: one project", group: "your rule: a group" }[n.rule.as] ?? "your rule";
@@ -48,7 +55,7 @@ const SEED_MS = 6 * 3600e3;
 // `onRename(id, title)` saves a session's new name and answers { ok, title,
 // error }; without it, sessions can't be renamed here.
 export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPreview, onStats, onReset, onHandoff, onTerminal, onAck, onOpenApp, onOpened = null, onRename = null, onMessageActor = null, identities = null, actorOf = () => null, actorBeams = () => [], sfx = () => {}, mcp = null }) {
-  const filters = { claude: true, codex: true, archived: true, external: true };
+  const filters = { claude: true, codex: true, grok: true, archived: true, external: true };
   let data = null;
   let index = new Map();
   let children = new Map();
@@ -113,9 +120,14 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     const counts = {
       claude: sessions.filter((n) => n.app === "claude").length,
       codex: sessions.filter((n) => n.app === "codex").length,
+      grok: sessions.filter((n) => n.app === "grok").length,
       archived: sessions.filter((n) => n.archived).length,
     };
     for (const el of document.querySelectorAll("[data-count]")) el.textContent = counts[el.dataset.count];
+    // Grok Build's toggle shows once there's a Grok Build session, or while
+    // it hides them.
+    const grok = document.querySelector('[data-filter="grok"]');
+    if (grok) grok.hidden = !counts.grok && filters.grok;
   }
 
   function renderSources() {
@@ -367,7 +379,7 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
         ? `<div class="forecast ${f.turnsLeft <= 3 ? "crit" : f.turnsLeft <= 8 ? "warn" : ""}">${f.turnsLeft <= 0 ? "compaction due next turn" : `≈ ${h(f.turnsLeft)} turn${f.turnsLeft === 1 ? "" : "s"} until compaction`} <span class="dim">· +${compact(f.growthPerTurn)}/turn</span></div>`
         : `<div class="forecast dim">context isn't growing</div>`;
     return `
-      ${need ? `<div class="need-box ${h(need.kind)}"><div class="need-k">${need.kind === "review" ? "▣ ready for review" : need.kind === "permission" ? "◉ needs permission" : "◉ waiting for you"} · ${timeAgo(need.since)}</div><div class="need-text">${h(alertText({ host: node.host, text: need.text }))}</div>${node.host ? "" : `<div class="need-actions"><button class="act primary ${h(node.app)}" data-need-open>Answer in ${h(APP_DESKTOP[node.app])}</button><button class="act" data-need-ack>Dismiss</button></div>`}</div>` : ""}
+      ${need ? `<div class="need-box ${h(need.kind)}"><div class="need-k">${need.kind === "review" ? "▣ ready for review" : need.kind === "permission" ? "◉ needs permission" : "◉ waiting for you"} · ${timeAgo(need.since)}</div><div class="need-text">${h(alertText({ host: node.host, text: need.text }))}</div>${node.host ? "" : `<div class="need-actions">${APP_DESKTOP[node.app] ? `<button class="act primary ${h(node.app)}" data-need-open>Answer in ${h(APP_DESKTOP[node.app])}</button>` : ""}<button class="act" data-need-ack>Dismiss</button></div>`}</div>` : ""}
       ${s.stuck ? `<div class="stuck-box">⟳ may be stuck · ${s.stuck.reasons.map(h).join(" · ")}</div>` : ""}
       <div class="live-head">
         <span class="live-status ${h(s.status)}">${LIVE_LABEL[s.status]}${s.status === "tool" && s.lastTool ? ` · ${h(s.lastTool.name.replace(/^mcp__/, "").replace(/__/g, "."))}` : ""}${stopped ? ` · ${h(stopped)}` : ""}</span>
@@ -447,14 +459,15 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     if (isSession) {
       const p = node.parentId && index.get(node.parentId);
       grid =
-        row("status", `<span class="activity ${h(node.activity)}">${ACTIVITY_LABEL[node.activity]}</span>${node.archived ? ` <span class="tag">archived</span>` : ""}${node.starred ? ` <span class="tag star">starred</span>` : ""}${node.status && !QUIET_STATUS.has(node.status) ? ` <span class="tag">${h(node.status)}</span>` : ""}`) +
+        row("status", `<span class="activity ${h(node.activity)}">${ACTIVITY_LABEL[node.activity]}</span>${node.archived ? ` <span class="tag">archived</span>` : ""}${node.starred ? ` <span class="tag star">starred</span>` : ""}${node.status && !QUIET_STATUS.has(node.status) ? ` <span class="tag">${h(node.status)}</span>` : ""}${node.running ? ` <span class="tag" title="A grok process works in its folder now">open in Grok Build</span>` : ""}`) +
         row("updated", `${timeAgo(node.updatedAt)} <span class="dim">· ${stamp(node.updatedAt)}</span>`) +
         row("created", stamp(node.createdAt)) +
         row("model", mono(node.model && `${node.model}${node.effort ? ` · ${node.effort}` : ""}`)) +
         row("branch", mono(node.branch)) +
         row("folder", mono(shortPath(node.cwd, 40))) +
         row("worktree", mono(node.worktree && shortPath(node.worktree, 40))) +
-        row("origin", mono(node.originator ?? (node.inDesktop ? "Claude desktop" : node.app === "claude" ? "CLI / SDK" : null))) +
+        row("origin", mono(node.originator ?? (node.inDesktop ? "Claude desktop" : node.app === "claude" ? "CLI / SDK" : node.app === "grok" ? grokOrigin(node) : null))) +
+        row("task", node.app === "grok" && node.agentNickname ? h(node.agentNickname) : null, "wrap") +
         row("parent", p ? `<a href="#" data-goto="${h(p.id)}">${h(p.title)}</a> <span class="dim">${h(node.parentKind ?? "")}</span>` : null) +
         row("id", `<code class="copy" data-copy="${h(node.rawId)}" title="copy">${h(node.rawId)}</code>`);
     } else if (node.kind === "host") {
@@ -586,7 +599,7 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
   // Esc puts the name back. While it's open (`renaming`) the inspector isn't
   // drawn again, so the map's updates don't take what you're typing.
   const renameWhere = (n) =>
-    data?.demo ? "The demo keeps the new name in XenoNet" : n.app === "codex" ? "Codex gets the new name too" : n.inDesktop ? "Claude Code and Claude desktop get it too" : "Claude Code gets the new name too";
+    data?.demo ? "The demo keeps the new name in XenoNet" : n.app === "codex" ? "Codex gets the new name too" : n.app === "grok" ? "Grok Build gets the new name too" : n.inDesktop ? "Claude Code and Claude desktop get it too" : "Claude Code gets the new name too";
 
   // The field grows with the name, as the title it stands in for would (the
   // height takes in its bottom border).
@@ -856,11 +869,8 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     }
     const toggle = e.target.closest("[data-filter]");
     if (toggle) {
-      const f = toggle.dataset.filter;
-      filters[f] = !filters[f];
-      toggle.classList.toggle("on", filters[f]);
+      setFilter(toggle.dataset.filter, !filters[toggle.dataset.filter]);
       sfx("toggle");
-      runSearch();
       return;
     }
     if (e.target.closest("[data-legend-toggle]")) {
@@ -879,6 +889,17 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
       onLayout(layout.dataset.layout);
     }
   });
+
+  // A filter toggle under Filters, on or off: an app's sessions (claude,
+  // codex, grok), archived ones, or the folders outside the projects folder.
+  function setFilter(name, on) {
+    if (!Object.hasOwn(filters, name)) throw new Error(`no filter called ${name}; there are ${Object.keys(filters).join(", ")}`);
+    filters[name] = !!on;
+    const toggle = document.querySelector(`[data-filter="${name}"]`);
+    toggle?.classList.toggle("on", filters[name]);
+    if (name === "grok" && toggle && !on) toggle.hidden = false;
+    runSearch();
+  }
 
   addEventListener("keydown", (e) => {
     if (e.target.matches?.("input, textarea")) return;
@@ -901,6 +922,7 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     setLive,
     computeVisible,
     refreshFilters: runSearch,
+    setFilter,
     // Identities masked or shown: the chips and the inspector again.
     refreshIdentities() {
       identities?.renderFilters();
