@@ -69,6 +69,10 @@ const SOURCES = {
   "nous/hermes-agent/cron-jobs": "Hermes Agent's scheduled jobs",
   "nous/hermes-agent/cron-ticker": "Hermes Agent's scheduler ticker",
   "nous/hermes-agent/install-stamp": "Hermes Agent's build stamp",
+  "spacexai/grok-build/session-summary": "Grok Build's session summaries",
+  "spacexai/grok-build/update-line": "Grok Build's session updates",
+  "spacexai/grok-build/usage": "Grok Build's usage ledgers",
+  "spacexai/grok-build/subagent-meta": "Grok Build's subagent records",
 };
 export const sourceName = (source) => SOURCES[source] ?? source;
 

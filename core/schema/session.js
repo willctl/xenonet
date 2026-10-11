@@ -1,23 +1,23 @@
 // session/v1: a session as the adapters list it (core/claude.js,
-// core/codex.js, and the demo's in core/demo.js), before the map adds where
+// core/codex.js, core/grok.js, and the demo's in core/demo.js), before the map adds where
 // it lives and what it's doing (graph.js).
 //
-// Loose where the adapters are: Claude Code's and Codex's sessions share the
+// Loose where the adapters are: Claude Code's, Codex's and Grok Build's sessions share the
 // first fields and each adds its own, and the demo's sessions carry some of
 // both apps' fields whatever their app, so the app-specific fields are all
 // optional here rather than split by app.
 import { define } from "./registry.js";
 import { z, obj, ms, nstr } from "./common.js";
 
-export const SESSION_ID = /^(@[a-z][a-z0-9-]{1,31}:)?(claude|codex):./;
+export const SESSION_ID = /^(@[a-z][a-z0-9-]{1,31}:)?(claude|codex|grok):./;
 
 export const Session = define(
   "session",
   1,
   obj({
     id: z.string().regex(SESSION_ID).describe("<app>:<the app's own id>, the id the rest of XenoNet uses; another host's carry @<host>:"),
-    app: z.enum(["claude", "codex"]),
-    rawId: z.string().describe("The app's own id: the Agent SDK's session id, or Codex's thread id"),
+    app: z.enum(["claude", "codex", "grok"]),
+    rawId: z.string().describe("The app's own id: the Agent SDK's session id, Codex's thread id or Grok Build's session id"),
     title: z.string(),
     preview: nstr.describe("The first prompt, or Codex's preview"),
     cwd: nstr.describe("Where it ran; a Claude desktop worktree session gives the folder it branched from"),
@@ -53,9 +53,13 @@ export const Session = define(
     agentNickname: nstr.optional(),
     agentKind: nstr.optional().describe("For a sub-agent thread: spawned, or the kind of background work"),
     background: z.boolean().optional().describe("Background work (codex exec, reviews, compaction) the map leaves out unless asked"),
+
+    // Grok Build's.
+    titleManual: z.boolean().optional().describe("Whether the title is one you gave it (/rename)"),
+    running: z.boolean().optional().describe("Whether a grok process works in its folder now, as the process table says"),
   }),
   {
     title: "Session",
-    description: "A Claude Code session or a Codex thread, as XenoNet lists it. The map's session nodes (graph/v1) are these with where they live and what they're doing added.",
+    description: "A Claude Code session, a Codex thread or a Grok Build session, as XenoNet lists it. The map's session nodes (graph/v1) are these with where they live and what they're doing added.",
   },
 );

@@ -162,8 +162,8 @@ test("the report: every source with a schema, what was read of it, and its drift
   log.record({ source: "openai/codex/rollout-line", kind: "new-variant", path: "type", shape: '"world_view"' }, 100);
   log.record({ source: "openai/codex/rollout-line", kind: "new-field", path: "ordinal", shape: "number" }, 200);
   const report = vendorReport({ log, since: 150, readers: [r] });
-  // The contracts' twelve, and Hermes Agent's seven.
-  assert.equal(report.sources.length, 19);
+  // The contracts' twelve, Hermes Agent's seven and Grok Build's four.
+  assert.equal(report.sources.length, 23);
   assert.equal(report.sources.find((s) => s.source === "nous/hermes-agent/state-db").name, "Hermes Agent's session database");
   const codex = report.sources.find((s) => s.source === "openai/codex/rollout-line");
   assert.deepEqual({ ...codex, drift: codex.drift.map((x) => x.path) }, {

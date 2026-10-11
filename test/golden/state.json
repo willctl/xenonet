@@ -2040,6 +2040,7 @@
    "sessions": 14,
    "claude": 7,
    "codex": 7,
+   "grok": 0,
    "active": 5,
    "archived": 0
   },
@@ -2249,6 +2250,12 @@
     "ok": true,
     "ms": 0,
     "count": 7
+   },
+   {
+    "name": "grok",
+    "ok": true,
+    "ms": 0,
+    "count": 0
    },
    {
     "name": "live",

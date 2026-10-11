@@ -4,6 +4,7 @@
 const T = "2026-10-05T12:00:00.000Z";
 const SESSION = "0190d3e0-0000-7000-8000-000000000001";
 const HERMES_SESSION = "20261005_120000_a1b2c3";
+const GROK_SESSION = "019a3b5c-0000-7000-8000-00000000000a";
 
 const usage = { input_tokens: 12, cache_creation_input_tokens: 300, cache_read_input_tokens: 40000, cache_creation: { ephemeral_5m_input_tokens: 200, ephemeral_1h_input_tokens: 100 }, output_tokens: 150, service_tier: "standard" };
 const assistant = (content, extra = {}) => ({ type: "assistant", timestamp: T, version: "2.1.280", sessionId: SESSION, uuid: "u-2", isSidechain: false, message: { id: "msg_01", type: "message", role: "assistant", model: "claude-opus-5-5", stop_reason: "tool_use", stop_sequence: null, usage, content }, ...extra });
@@ -234,5 +235,48 @@ export const VENDOR = {
       { record: { baseVersion: 21 }, drift: [["type-change", "baseVersion"]], strip: [["baseVersion"]] },
       { record: { displayVersion: "0.21.5" }, drift: [["missing-field", "baseVersion"]] },
     ],
+  },
+  // Grok Build's, as core/grok.js and core/lines.js read them (more of
+  // them in test/fixtures/grok.js).
+  "spacexai/grok-build/session-summary": {
+    fits: [
+      { info: { id: GROK_SESSION, cwd: "/Users/ada/atlas" }, session_summary: "Partial refunds", generated_title: "Add partial refunds", title_is_manual: false, created_at: T, updated_at: T, num_messages: 14, num_chat_messages: 6, current_model_id: "grok-4.6", parent_session_id: null, head_branch: "main", hidden: false, chat_format_version: 3 },
+      { info: { id: GROK_SESSION }, created_at: 1791230000, updated_at: 1791230100, session_kind: "subagent", worktree_label: "wt-fix", source_workspace_dir: "/Users/ada/atlas" },
+      {},
+    ],
+    odd: [
+      { record: { generated_title: 7, current_model_id: "grok-4.6" }, drift: [["type-change", "generated_title"]], strip: [["generated_title"]] },
+      { record: { info: "abc" }, drift: [["type-change", "info"]], strip: [["info"]] },
+    ],
+  },
+  "spacexai/grok-build/update-line": {
+    fits: [
+      { timestamp: T, sessionId: GROK_SESSION, update: { sessionUpdate: "user_message_chunk", content: { type: "text", text: "Fix it" } } },
+      { timestamp: T, update: { sessionUpdate: "agent_message_chunk", content: [{ type: "text", text: "Done" }] } },
+      { timestamp: 1791230000, update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "…" } } },
+      { update: { sessionUpdate: "tool_call", toolCallId: "c1", title: "npm test", kind: "execute", status: "pending", rawInput: { command: "npm test" }, locations: [{ path: "/Users/ada/atlas", line: 1 }], _meta: { toolName: "run_terminal_command" } } },
+      { update: { sessionUpdate: "tool_call_update", toolCallId: "c1", status: "completed", content: [{ type: "diff", path: "/Users/ada/atlas/a.ts", oldText: "a", newText: "b" }], rawOutput: "ok" } },
+      { update: { sessionUpdate: "plan", entries: [{ content: "Test it", status: "pending", priority: "high" }] } },
+      { update: { sessionUpdate: "usage_update", used: 41000, size: 500000, cost: { amount: 0.1, currency: "USD" } } },
+      { update: { sessionUpdate: "session_info_update", title: "Refunds", updatedAt: T } },
+      ...["available_commands_update", "current_mode_update", "config_option_update"].map((sessionUpdate) => ({ update: { sessionUpdate } })),
+      { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "a bare update" } },
+    ],
+    odd: [
+      { record: { update: { sessionUpdate: "goal_update", goal: "x" } }, drift: [["new-variant", "update.sessionUpdate"]] },
+      { record: { update: { sessionUpdate: "tool_call", title: "npm test" } }, drift: [["missing-field", "update.toolCallId"]] },
+      { record: { timestamp: { at: 1 }, update: { sessionUpdate: "plan", entries: [] } }, drift: [["type-change", "timestamp"]], strip: [["timestamp"]] },
+    ],
+  },
+  "spacexai/grok-build/usage": {
+    fits: [
+      { sessionId: GROK_SESSION, updatedAt: T, session: { inputTokens: 52000, outputTokens: 3000, totalTokens: 55000, cacheReadTokens: 40000, cacheCreationTokens: 0, reasoningTokens: 800, modelCalls: 3, apiDurationMs: 9000, costUsdTicks: 1234500000, costIsPartial: false }, turns: [{ turnNumber: 1, endedAt: T, turnId: "t1", model: "grok-4.6", inputTokens: 20000, outputTokens: 1000, totalTokens: 21000 }] },
+      { session: {}, turns: [] },
+    ],
+    odd: [{ record: { session: { inputTokens: "many" } }, drift: [["type-change", "session.inputTokens"]], strip: [["session", "inputTokens"]] }],
+  },
+  "spacexai/grok-build/subagent-meta": {
+    fits: [{ child_session_id: GROK_SESSION, subagent_type: "explore", description: "Map the refund code", worktree_path: null, status: "completed" }, {}],
+    odd: [{ record: { child_session_id: 12 }, drift: [["type-change", "child_session_id"]], strip: [["child_session_id"]] }],
   },
 };

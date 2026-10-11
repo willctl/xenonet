@@ -160,6 +160,10 @@ drift record and the rules; this is how they're built.
 | `nous/hermes-agent/cron-jobs` | `cron/jobs.json`: when each job runs, how its last run went, and its folder; never names or prompts | `hermes-files.js` | Hermes's | `<1.0.0` |
 | `nous/hermes-agent/cron-ticker` | `cron/ticker_heartbeat` and `ticker_last_success`, one line each, read into a shape | `hermes-files.js` | Hermes's | `<1.0.0` |
 | `nous/hermes-agent/install-stamp` | `hermes-agent/install-stamp.json`, Hermes's build stamp | `hermes-files.js` | Its own `schemaVersion` | `<=2` |
+| `spacexai/grok-build/session-summary` | A Grok Build session's `summary.json` (`~/.grok/sessions/<encoded cwd>/<id>/`): title, model, times, folder, the session it came from | `grok.js` | None in the file | `*` |
+| `spacexai/grok-build/update-line` | A line of a Grok Build session's `updates.jsonl`: an ACP session update, in an envelope or bare | `live.js`, `stats.js`, `search.js` and `grok.js`, through `lines.js` | None in the lines | `*` |
+| `spacexai/grok-build/usage` | A Grok Build session's `usage.json`: tokens and cost, for the session and each turn, as `grok usage` prints them | `grok.js` | None in the file | `*` |
+| `spacexai/grok-build/subagent-meta` | A Grok Build subagent's `subagents/<id>/meta.json`: the session it runs as, what it was asked | `grok.js` | None in the file | `*` |
 
 Not covered, since the contracts don't list them: the Remote Control
 owner line `identities.js` finds in a transcript's first 64 KB, the

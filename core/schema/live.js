@@ -4,7 +4,7 @@
 import { define } from "./registry.js";
 import { z, obj, ms, count, nstr } from "./common.js";
 
-const App = z.enum(["claude", "codex"]);
+const App = z.enum(["claude", "codex", "grok"]);
 export const CATEGORIES = ["mcp", "shell", "edit", "read", "web", "agent", "code", "other"];
 const Category = z.enum(CATEGORIES);
 
@@ -79,7 +79,7 @@ export const LiveSnapshot = define(
   obj({
     at: ms,
     sessions: z.array(LiveSession).describe("Sessions with anything in the last 24 hours"),
-    series: obj({ claude: z.array(z.number()), codex: z.array(z.number()) }).describe("Tokens a second over the last five minutes, oldest first"),
+    series: obj({ claude: z.array(z.number()), codex: z.array(z.number()), grok: z.array(z.number()).optional() }).describe("Tokens a second over the last five minutes, oldest first"),
     tpm: z.number(),
     total24h: z.number(),
     today: z.number(),
@@ -122,7 +122,7 @@ export const LiveSnapshot = define(
     }),
     costs: obj({
       today: z.number().describe("Dollars"),
-      byApp: obj({ claude: z.number(), codex: z.number() }),
+      byApp: obj({ claude: z.number(), codex: z.number(), grok: z.number().optional() }),
       perHour: z.number().describe("Dollars an hour at this minute's pace"),
       unpriced: z.array(z.string()).describe("Models used today that XenoNet has no price for"),
       checked: z.string().describe("When the prices were last checked against the providers' (YYYY-MM-DD)"),

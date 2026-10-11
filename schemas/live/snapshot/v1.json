@@ -31,6 +31,12 @@
           "items": {
             "type": "number"
           }
+        },
+        "grok": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
         }
       },
       "required": [
@@ -323,7 +329,8 @@
                 "type": "string",
                 "enum": [
                   "claude",
-                  "codex"
+                  "codex",
+                  "grok"
                 ]
               },
               "identity": {
@@ -531,6 +538,9 @@
               "type": "number"
             },
             "codex": {
+              "type": "number"
+            },
+            "grok": {
               "type": "number"
             }
           },

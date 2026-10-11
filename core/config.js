@@ -44,6 +44,9 @@ export const config = {
     maxDirs: Math.max(1, Number(process.env.XENONET_PROJECTS_MAX_DIRS) || 2000),
   },
   codexHome: world?.codexHome ?? path.resolve(process.env.CODEX_HOME ?? path.join(home, ".codex")),
+  // Grok Build's folder (its sessions, config.toml and hooks), which
+  // GROK_HOME moves, as it does for Grok Build itself.
+  grokHome: world?.grokHome ?? path.resolve(process.env.GROK_HOME ?? path.join(home, ".grok")),
   claudeDesktopDir: world ? world.claudeDesktopDir : findClaudeDesktopDir(),
   pollMs: Number(process.env.XENONET_POLL_MS ?? 8000),
   // Ask Anthropic for Claude plan usage (see claude-usage.js). Never in demo

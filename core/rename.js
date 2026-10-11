@@ -1,6 +1,6 @@
 // A session's name as you give it in XenoNet, before it's saved in the
 // session's own app (state.renameSession): Claude Code and Claude desktop
-// (claude.js), or Codex (codex.js).
+// (claude.js), Codex (codex.js) or Grok Build (grok.js).
 
 // Long enough for any title the apps make, short enough to show whole.
 export const MAX_TITLE = 120;
@@ -19,4 +19,4 @@ export function cleanTitle(title) {
 
 // Whether a node is a session XenoNet can rename: one of this machine's.
 // Another machine's are read-only (see hosts/hub.js).
-export const renamable = (n) => n?.kind === "session" && !n.host && (n.app === "claude" || n.app === "codex");
+export const renamable = (n) => n?.kind === "session" && !n.host && (n.app === "claude" || n.app === "codex" || n.app === "grok");

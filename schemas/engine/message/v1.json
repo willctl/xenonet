@@ -15,7 +15,7 @@
         },
         "from": {
           "type": "string",
-          "description": "An agent: claude:<session id> or codex:<thread id>, or an actor, actor:<slug>"
+          "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>"
         },
         "target": {
           "type": "string"
@@ -59,7 +59,7 @@
             "properties": {
               "id": {
                 "type": "string",
-                "description": "An agent: claude:<session id> or codex:<thread id>, or an actor, actor:<slug>"
+                "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>"
               },
               "seen": {
                 "type": "boolean"
@@ -97,7 +97,7 @@
           "properties": {
             "id": {
               "type": "string",
-              "description": "An agent: claude:<session id> or codex:<thread id>, or an actor, actor:<slug>"
+              "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>"
             },
             "title": {
               "type": "string"
@@ -107,6 +107,7 @@
               "enum": [
                 "claude",
                 "codex",
+                "grok",
                 "actor"
               ]
             },
@@ -346,13 +347,13 @@
         },
         "from": {
           "type": "string",
-          "description": "An agent: claude:<session id> or codex:<thread id>, or an actor, actor:<slug>"
+          "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>"
         },
         "to": {
           "type": "array",
           "items": {
             "type": "string",
-            "description": "An agent: claude:<session id> or codex:<thread id>, or an actor, actor:<slug>"
+            "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>"
           }
         },
         "target": {
@@ -406,7 +407,7 @@
         },
         "sender": {
           "type": "string",
-          "description": "An agent: claude:<session id> or codex:<thread id>, or an actor, actor:<slug>"
+          "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>"
         },
         "target": {
           "type": "string"

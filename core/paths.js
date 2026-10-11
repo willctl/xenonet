@@ -46,11 +46,14 @@ export function baseName(p) {
 }
 
 // Both desktop apps create a throwaway folder per session when you start one
-// without picking a project. Group those into one zone each instead of
-// scattering a zone per folder.
+// without picking a project, and Grok Build makes a worktree per session it
+// isolates. Group those into one zone each instead of scattering a zone per
+// folder.
 const SCRATCH_ZONES = [
   { id: "zone:claude-scratch", name: "Claude scratch", app: "claude", test: (k) => k.includes("/claude/scratch-workspaces/") },
   { id: "zone:codex-projectless", name: "Codex without a project", app: "codex", test: (k) => /\/documents\/codex\/\d{4}-\d{2}-\d{2}(\/|$)/.test(k) },
+  // Grok Build's worktrees, when XenoNet can't tell which repo one came from.
+  { id: "zone:grok-worktrees", name: "Grok worktrees", app: "grok", test: (k) => /\/\.grok\/(worktrees|worktree_pool)\//.test(k) },
   // %TEMP% on Windows, $TMPDIR (/var/folders/xx/…/T) on macOS, /tmp anywhere.
   { id: "zone:temp", name: "Temp", app: null, test: (k) => `${k}/`.includes("/appdata/local/temp/") || `${k}/`.startsWith("/tmp/") || /^\/var\/folders\/[^/]+\/[^/]+\/t(\/|$)/.test(k) },
 ];

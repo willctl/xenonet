@@ -9,6 +9,7 @@ import * as workspace from "./workspace.js";
 import { codexThreadsGatherer, codexProjectsGatherer, codexClient, readCodexThread, renameCodexThread } from "./codex.js";
 import { findCodexBinary } from "./dirs.js";
 import { claudeSessionsGatherer, readClaudeSession, renameClaudeSession } from "./claude.js";
+import { grokSessionsGatherer, readGrokSession, renameGrokSession, grokProcesses, markRunning } from "./grok.js";
 import { cleanTitle, renamable } from "./rename.js";
 import { buildGraph } from "./graph.js";
 import { actionsFor } from "./open.js";
@@ -22,7 +23,7 @@ import { Transcripts, createStats } from "./stats.js";
 import { summarize, dayLog, summaryText, handoffBrief, narrate } from "./digest.js";
 import * as store from "./store.js";
 import { Blocks } from "./blocks/lifecycle.js";
-import { claudeLines, codexLines } from "./lines.js";
+import { claudeLines, codexLines, grokLines } from "./lines.js";
 import { demoSessions, demoNativeProjects, demoTranscript, demoNarration, demoPicks, startDriver, clientsReady } from "./demo.js";
 
 const LIVE_THROTTLE_MS = 500;
@@ -95,9 +96,11 @@ export class XenoNetState extends EventEmitter {
     this.codexThreads = this.blocks.add(codexThreadsGatherer({ gather: config.demo ? async () => demoSessions("codex") : undefined }), { source: "codex" });
     this.codexProjects = this.blocks.add(codexProjectsGatherer({ gather: config.demo ? async () => demoNativeProjects() : undefined }), { source: "codex-projects" });
     this.blocks.add(codexClient, { source: "codex" });
+    this.grokSessions = this.blocks.add(grokSessionsGatherer({ gather: config.demo ? async () => demoSessions("grok") : undefined }), { source: "grok" });
     this.live = new LiveTelemetry({
       claudeRoot: config.claudeProjectsDir,
       codexRoot: path.join(config.codexHome, "sessions"),
+      grokRoot: path.join(config.grokHome, "sessions"),
       claudeDesktopDir: config.claudeDesktopDir,
       claudeUsage: config.claudeUsage ? () => fetchClaudeUsage() : null,
       home: config.homeDir,
@@ -105,21 +108,31 @@ export class XenoNetState extends EventEmitter {
     this.blocks.add(this.live.tailer, { source: "live" });
     this.blocks.add(claudeLines);
     this.blocks.add(codexLines);
+    this.blocks.add(grokLines);
     for (const reading of [this.live.usage.anthropic, this.live.usage.desktop]) if (reading) this.blocks.add(reading);
     if (this.identities) this.blocks.add(this.identities, { source: "identities" });
     this.blocks.add(this.repos);
     // The projects scan's walk, for the map's scans (see scanProjects).
     this.projectsScanner = this.blocks.add(projectsScanner(), { source: "projects" });
     const codexRoots = [path.join(config.codexHome, "sessions"), path.join(config.codexHome, "archived_sessions")];
+    const grokRoot = path.join(config.grokHome, "sessions");
     this.search = new TranscriptSearch({
       dbFile: path.join(config.cacheDir, "search.sqlite"),
       claudeRoot: config.claudeProjectsDir,
       codexRoots,
+      grokRoot,
     });
     // Where sessions' transcripts are, for a session's models, tokens,
     // costs and timing (see stats.js), and a Codex thread's rollout.
-    this.transcripts = new Transcripts({ claudeRoot: config.claudeProjectsDir, codexRoots });
+    this.transcripts = new Transcripts({ claudeRoot: config.claudeProjectsDir, codexRoots, grokRoot });
     this.sessionStats = createStats({ transcripts: this.transcripts });
+  }
+
+  // The process table (core/procs.js), which says which Grok Build
+  // sessions have a grok working in their folder now. The server gives it;
+  // the demo's sessions run nowhere.
+  useProcs(procs) {
+    this.procs = config.demo ? null : procs;
   }
 
   // Coalesces concurrent refreshes into one.
@@ -139,16 +152,20 @@ export class XenoNetState extends EventEmitter {
     // The projects folder as this refresh found it, for all of it, should
     // another be chosen meanwhile (see setRoot).
     const root = config.projectsDir;
-    const [codex, native, claude] = await Promise.all([
+    const [codex, native, claude, grok] = await Promise.all([
       gathered("codex", this.codexThreads),
       gathered("codex-projects", this.codexProjects),
       gathered("claude", this.claudeSessions),
+      gathered("grok", this.grokSessions),
     ]);
     // Keep the previous sessions for a source that failed this round, so a
     // transient error doesn't make half the graph vanish.
     const prev = this.graph?.nodes.filter((n) => n.kind === "session") ?? [];
     const keep = (status, app, fresh) => (status.ok ? fresh : prev.filter((n) => n.app === app));
-    const sessions = [...keep(codex.status, "codex", codex.value), ...keep(claude.status, "claude", claude.value)];
+    const sessions = [...keep(codex.status, "codex", codex.value), ...keep(claude.status, "claude", claude.value), ...keep(grok.status, "grok", grok.value)];
+    // Which Grok Build sessions have a grok working in their folder (see
+    // grok.js); none where XenoNet can't read the process table.
+    if (grok.status.ok && grok.value.length && this.procs?.supported) markRunning(grok.value, await grokProcesses(this.procs).catch(() => []));
     for (const s of sessions) if (this.demoTitles.has(s.id)) s.title = this.demoTitles.get(s.id);
     // Where sessions ran is evidence of where the projects are (see
     // scanProjects), so the scan comes after the session lists.
@@ -201,6 +218,7 @@ export class XenoNetState extends EventEmitter {
       codex.status,
       native.status,
       claude.status,
+      grok.status,
       { name: "live", ok: this.live.status.watching, count: this.live.status.files },
       { name: "wiki", ok: !!wiki, count: wiki?.pages.length ?? 0, error: wiki ? undefined : "Agent Wiki folder not found" },
       { name: "search", ok: !this.search.status.errors, count: this.search.status.docs, ms: this.search.status.ms },
@@ -233,7 +251,7 @@ export class XenoNetState extends EventEmitter {
   // so an unchanged one isn't sent again.
   #changed(graph) {
     const signature = JSON.stringify([
-      graph.nodes.map((n) => [n.id, n.updatedAt, n.archived, n.title, n.activity, n.active, n.sessionCount, n.repo?.dirty, n.repo?.branch, n.pinned, n.inbox?.length, n.updated, n.role, n.parent, n.detected, n.rule?.as, n.ranAs?.id, n.ranAs?.confidence, n.identities?.map((l) => `${l.role}:${l.id}:${l.confidence}`).join()]),
+      graph.nodes.map((n) => [n.id, n.updatedAt, n.archived, n.title, n.activity, n.active, n.sessionCount, n.repo?.dirty, n.repo?.branch, n.pinned, n.inbox?.length, n.updated, n.role, n.parent, n.detected, n.rule?.as, n.ranAs?.id, n.ranAs?.confidence, n.running, n.identities?.map((l) => `${l.role}:${l.id}:${l.confidence}`).join()]),
       graph.relations.length,
       graph.identities.map((i) => [i.id, i.handle, i.name, i.hidden, i.signedIn, i.active]),
     ]);
@@ -436,8 +454,8 @@ export class XenoNetState extends EventEmitter {
     return this.identityDetection();
   }
 
-  // Renames a session in its own app, so Claude Code, Claude desktop or
-  // Codex shows the new name too (see rename.js). The demo's sessions exist
+  // Renames a session in its own app, so Claude Code, Claude desktop,
+  // Codex or Grok Build shows the new name too (see rename.js). The demo's sessions exist
   // only in XenoNet, which keeps their new names itself. Says where the name
   // went, and anything you should know about it.
   async renameSession(nodeId, title) {
@@ -451,6 +469,11 @@ export class XenoNetState extends EventEmitter {
     else if (node.app === "codex") {
       await renameCodexThread(node.rawId, name);
       saved.push("Codex");
+    } else if (node.app === "grok") {
+      await renameGrokSession(node.rawId, name);
+      saved.push("Grok Build");
+      // A session open in Grok Build writes its summary again as it works.
+      if (node.running) note = "If this session is open in Grok Build, it may keep its old name until it starts again.";
     } else {
       const done = await renameClaudeSession(node, name);
       saved.push("Claude Code");
@@ -671,6 +694,7 @@ export class XenoNetState extends EventEmitter {
   // the app-server can't list is read from its rollout (see codex.js).
   readTranscript(node, opts) {
     if (config.demo) return demoTranscript(node.rawId);
+    if (node.app === "grok") return readGrokSession(node.rawId, opts);
     if (node.app === "codex") return readCodexThread(node.rawId, { ...opts, rollout: async () => (await this.transcripts.files(node.id))[0]?.file ?? null });
     return readClaudeSession(node.rawId, opts);
   }

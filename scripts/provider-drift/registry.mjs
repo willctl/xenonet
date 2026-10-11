@@ -131,6 +131,16 @@ export const PROVIDERS = [
       "XenoNet reads none of its data, only the processes its app runs, and from its Info.plist its version. Its Bots work in Cursor's cloud. The check records the latest version only.",
   },
   {
+    id: "spacexai/grok-build",
+    name: "Grok Build",
+    sources: ["spacexai/grok-build/session-summary", "spacexai/grok-build/update-line", "spacexai/grok-build/usage", "spacexai/grok-build/subagent-meta"],
+    // Its releases on GitHub (tags like v1.0.50), which the installer
+    // (x.ai/cli/install.sh) downloads.
+    release: { github: "xai-org/grok-build" },
+    notInspected:
+      "Its session files are written by a signed-in grok with a model behind it, and none of them says Grok's version, so there's no range to check. The check records the latest version only (docs/design/grok-build.md).",
+  },
+  {
     id: "github/gh",
     name: "GitHub CLI",
     sources: ["github/gh/hosts"],

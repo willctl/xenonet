@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/spacexai/grok-build/subagent-meta/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A Grok Build subagent's meta.json",
+  "description": "Grok Build's <session>/subagents/<subagent>/meta.json: which session a subagent runs as, and what it was asked to do. Undocumented and without a version, so the newest schema reads it.",
+  "type": "object",
+  "properties": {
+    "child_session_id": {
+      "description": "The subagent's own session, in the sessions folder",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "subagent_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "worktree_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": {},
+  "x-xenonet": {
+    "vendorVersions": "*",
+    "lenient": true
+  }
+}

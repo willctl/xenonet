@@ -11,8 +11,9 @@ import { claudeLines, codexLines } from "../core/lines.js";
 import { drift } from "../core/drift.js";
 import { VENDOR } from "./fixtures/vendor.js";
 
-// Contracts, section 1: the vendor sources, and the ones actors added in
-// Wave 2 (Hermes Agent's, docs/design/actors/hermes.md).
+// Contracts, section 1: the vendor sources, the ones actors added in
+// Wave 2 (Hermes Agent's, docs/design/actors/hermes.md), and Grok Build's
+// (docs/design/grok-build.md).
 const SOURCES = [
   "anthropic/claude-code/transcript-line",
   "anthropic/claude-code/config",
@@ -33,6 +34,10 @@ const SOURCES = [
   "nous/hermes-agent/cron-jobs",
   "nous/hermes-agent/cron-ticker",
   "nous/hermes-agent/install-stamp",
+  "spacexai/grok-build/session-summary",
+  "spacexai/grok-build/update-line",
+  "spacexai/grok-build/usage",
+  "spacexai/grok-build/subagent-meta",
 ];
 
 test("every vendor source the contracts list has a schema, read leniently, with the versions it was made for", () => {

@@ -1,0 +1,255 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/spacexai/grok-build/usage/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A Grok Build session's usage",
+  "description": "Grok Build's usage ledger beside a session's summary.json (usage.json): its tokens and cost, for the session and each turn, in the shape `grok usage <session id>` prints. Undocumented as a file and without a version, so the newest schema reads it.",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "updatedAt": {
+      "type": [
+        "string",
+        "number",
+        "null"
+      ]
+    },
+    "session": {
+      "type": "object",
+      "properties": {
+        "inputTokens": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "outputTokens": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "totalTokens": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cacheReadTokens": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cacheReadInputTokens": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cacheCreationTokens": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "reasoningTokens": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "modelCalls": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "costUsdTicks": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "costIsPartial": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": {}
+    },
+    "turns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "turnNumber": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "endedAt": {
+            "type": [
+              "string",
+              "number",
+              "null"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inputTokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "outputTokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "totalTokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "cacheReadTokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "cacheReadInputTokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "cacheCreationTokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "reasoningTokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "modelCalls": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "costUsdTicks": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "costIsPartial": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": {}
+      }
+    },
+    "modelUsage": {
+      "description": "By model",
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "inputTokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "outputTokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "totalTokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "cacheReadTokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "cacheReadInputTokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "cacheCreationTokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "reasoningTokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "modelCalls": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "costUsdTicks": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "costIsPartial": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": {}
+      }
+    }
+  },
+  "additionalProperties": {},
+  "x-xenonet": {
+    "vendorVersions": "*",
+    "lenient": true
+  }
+}

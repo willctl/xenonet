@@ -190,6 +190,7 @@ export function buildGraph({ projectsDir, homeDir = null, projects, sessions, na
       sessions: sessionNodes.length,
       claude: sessionNodes.filter((n) => n.app === "claude").length,
       codex: sessionNodes.filter((n) => n.app === "codex").length,
+      grok: sessionNodes.filter((n) => n.app === "grok").length,
       active: sessionNodes.filter((n) => n.activity === "active").length,
       archived: sessionNodes.filter((n) => n.archived).length,
     },

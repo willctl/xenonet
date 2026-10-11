@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/spacexai/grok-build/session-summary/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A Grok Build session's summary",
+  "description": "Grok Build's ~/.grok/sessions/<encoded cwd>/<session id>/summary.json, the session's index entry: its title, model, times, folder and the session it came from. The user guide lists the fields; the file carries no version, so the newest schema reads it.",
+  "type": "object",
+  "properties": {
+    "info": {
+      "description": "The session's id and the folder it works in",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cwd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": {}
+    },
+    "session_summary": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "generated_title": {
+      "description": "The title Grok made, or yours after /rename",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "title_is_manual": {
+      "description": "True once you renamed it (/rename)",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "created_at": {
+      "type": [
+        "string",
+        "number",
+        "null"
+      ]
+    },
+    "updated_at": {
+      "type": [
+        "string",
+        "number",
+        "null"
+      ]
+    },
+    "last_active_at": {
+      "type": [
+        "string",
+        "number",
+        "null"
+      ]
+    },
+    "num_messages": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "num_chat_messages": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "current_model_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "parent_session_id": {
+      "description": "The session it was forked or restored from",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "session_kind": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "hidden": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "source_workspace_dir": {
+      "description": "Where a worktree session's work came from",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "git_root_dir": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "head_branch": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "worktree_label": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "agent_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "last_turn_summary": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "last_recap": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": {},
+  "x-xenonet": {
+    "vendorVersions": "*",
+    "lenient": true
+  }
+}

@@ -119,7 +119,7 @@ const ZoneNode = obj({
   kind: z.literal("zone"),
   name: z.string(),
   path: nstr,
-  app: z.enum(["claude", "codex"]).nullable(),
+  app: z.enum(["claude", "codex", "grok"]).nullable(),
   external: z.literal(true),
   ...placed,
   ...rolled,
@@ -223,6 +223,7 @@ export const Graph = define(
       sessions: count,
       claude: count,
       codex: count,
+      grok: count.optional(),
       active: count,
       archived: count,
     }),
@@ -234,7 +235,7 @@ export const Graph = define(
     sources: z
       .array(
         obj({
-          name: z.string().describe("projects, codex, codex-projects, claude, live, wiki, search, identities"),
+          name: z.string().describe("projects, codex, codex-projects, claude, grok, live, wiki, search, identities"),
           ok: z.boolean(),
           ms: z.number().nullable().optional(),
           count: z.number().nullable().optional(),

@@ -3,24 +3,25 @@
   "$id": "https://xenonet.dev/schemas/session/v1.json",
   "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
   "title": "Session",
-  "description": "A Claude Code session or a Codex thread, as XenoNet lists it. The map's session nodes (graph/v1) are these with where they live and what they're doing added.",
+  "description": "A Claude Code session, a Codex thread or a Grok Build session, as XenoNet lists it. The map's session nodes (graph/v1) are these with where they live and what they're doing added.",
   "type": "object",
   "properties": {
     "id": {
       "type": "string",
-      "pattern": "^(@[a-z][a-z0-9-]{1,31}:)?(claude|codex):.",
+      "pattern": "^(@[a-z][a-z0-9-]{1,31}:)?(claude|codex|grok):.",
       "description": "<app>:<the app's own id>, the id the rest of XenoNet uses; another host's carry @<host>:"
     },
     "app": {
       "type": "string",
       "enum": [
         "claude",
-        "codex"
+        "codex",
+        "grok"
       ]
     },
     "rawId": {
       "type": "string",
-      "description": "The app's own id: the Agent SDK's session id, or Codex's thread id"
+      "description": "The app's own id: the Agent SDK's session id, Codex's thread id or Grok Build's session id"
     },
     "title": {
       "type": "string"
@@ -220,6 +221,14 @@
     },
     "background": {
       "description": "Background work (codex exec, reviews, compaction) the map leaves out unless asked",
+      "type": "boolean"
+    },
+    "titleManual": {
+      "description": "Whether the title is one you gave it (/rename)",
+      "type": "boolean"
+    },
+    "running": {
+      "description": "Whether a grok process works in its folder now, as the process table says",
       "type": "boolean"
     }
   },

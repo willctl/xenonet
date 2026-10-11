@@ -703,7 +703,8 @@
                     "type": "string",
                     "enum": [
                       "claude",
-                      "codex"
+                      "codex",
+                      "grok"
                     ]
                   },
                   {
@@ -1697,6 +1698,11 @@
           "minimum": 0,
           "maximum": 9007199254740991
         },
+        "grok": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "active": {
           "type": "integer",
           "minimum": 0,
@@ -1848,7 +1854,7 @@
         "properties": {
           "name": {
             "type": "string",
-            "description": "projects, codex, codex-projects, claude, live, wiki, search, identities"
+            "description": "projects, codex, codex-projects, claude, grok, live, wiki, search, identities"
           },
           "ok": {
             "type": "boolean"

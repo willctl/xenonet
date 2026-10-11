@@ -41,8 +41,13 @@ orchestrator's OK and a note to every lane it touches.
 | `vendor/openai/codex/state-db` | The tables and columns XenoNet queries in `state_5.sqlite` |
 | `vendor/openai/codex/auth-claims` | The ID token claims XenoNet reads from `auth.json` (never the tokens) |
 | `vendor/github/gh/hosts` | gh's `hosts.yml`, hosts and logins only |
+| `vendor/spacexai/grok-build/session-summary` | A Grok Build session's `summary.json` (`~/.grok/sessions/<encoded cwd>/<id>/`) |
+| `vendor/spacexai/grok-build/update-line` | A line of a Grok Build session's `updates.jsonl`: an ACP session update |
+| `vendor/spacexai/grok-build/usage` | A Grok Build session's usage ledger (`usage.json`) |
+| `vendor/spacexai/grok-build/subagent-meta` | A Grok Build subagent's `subagents/<id>/meta.json` |
 
   Actors add their own in Wave 2, such as `vendor/nous/hermes-agent/state-db`.
+  Grok Build's were added with it (2026-10-10, `docs/design/grok-build.md`).
 
 ### Versions
 

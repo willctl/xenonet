@@ -1,5 +1,6 @@
-// Transcript lines as XenoNet reads them: a Claude Code transcript's lines
-// and a Codex rollout's, through one normalizer each (core/blocks/
+// Transcript lines as XenoNet reads them: a Claude Code transcript's lines,
+// a Codex rollout's and a Grok Build session's updates, through one
+// normalizer each (core/blocks/
 // normalizer.js), which the three readers share: the live tailer
 // (live.js), a session's stats (stats.js) and search (search.js). Each
 // line is checked against the vendor's schema on the way (vendor.js's
@@ -161,6 +162,91 @@ export class CodexLine {
   }
 }
 
+// A line of a Grok Build session's updates.jsonl (~/.grok/sessions/<encoded
+// cwd>/<session id>/updates.jsonl): an ACP session update, in an envelope
+// that may say when it was written. Grok Build's guide says each line is
+// "a self-contained ACP session update event" and no more, so a bare update
+// is read too, and a time is looked for where an envelope would keep one
+// (docs/design/grok-build.md).
+export class GrokLine {
+  constructor(raw) {
+    this.raw = raw;
+  }
+
+  // The ACP update: the envelope's, a notification's params', or the line
+  // itself. {} when the line has none.
+  get update() {
+    const r = this.raw;
+    const u = r.update ?? r.params?.update ?? (typeof r.sessionUpdate === "string" ? r : null);
+    return u && typeof u === "object" ? u : {};
+  }
+  // user_message_chunk, agent_message_chunk, tool_call, …
+  get kind() {
+    return this.update.sessionUpdate;
+  }
+  // When it was written; NaN when it doesn't say.
+  get ts() {
+    const r = this.raw, u = this.update;
+    for (const t of [r.timestamp, r.ts, r.time, r.createdAt, r.created_at, r._meta?.timestamp, u._meta?.timestamp]) {
+      const ms = grokTime(t);
+      if (Number.isFinite(ms)) return ms;
+    }
+    return NaN;
+  }
+  // A chunk's text: its content block's, or its blocks' joined.
+  get text() {
+    const c = this.update.content;
+    const one = (b) => (typeof b === "string" ? b : b?.type === "image" ? "[image]" : typeof b?.text === "string" ? b.text : "");
+    return Array.isArray(c) ? c.map(one).join("") : one(c);
+  }
+  get toolCallId() {
+    return this.update.toolCallId ?? null;
+  }
+  // The tool's own name, where Grok gives it (ACP's tool calls have a
+  // title and a kind, and an agent may name the tool in _meta), with an MCP
+  // tool's server__tool written as Claude Code writes it (mcp__server__tool),
+  // which the rest of XenoNet reads; else one for its kind.
+  get toolName() {
+    const u = this.update;
+    const named = [u._meta?.toolName, u._meta?.["x.ai/toolName"], u._meta?.tool_name, u.toolName, u.name].find((n) => typeof n === "string" && n);
+    if (named) return /^[^_].*[^_]__[^_]/.test(named) && !named.startsWith("mcp__") ? `mcp__${named}` : named;
+    return GROK_KINDS[u.kind] ?? null;
+  }
+  // The files a tool call works on: its locations, and the paths in its input.
+  get toolFiles() {
+    const u = this.update;
+    const out = (Array.isArray(u.locations) ? u.locations : []).map((l) => l?.path).filter((p) => typeof p === "string");
+    const input = u.rawInput && typeof u.rawInput === "object" ? u.rawInput : {};
+    for (const k of ["file_path", "target_file", "path", "notebook_path"]) if (typeof input[k] === "string" && /[\\/]/.test(input[k])) out.push(input[k]);
+    return [...new Set(out)];
+  }
+  // What a tool call changed, from its diff content (ACP's { type: "diff",
+  // path, oldText, newText }).
+  get diffs() {
+    const c = this.update.content;
+    return (Array.isArray(c) ? c : []).filter((x) => x?.type === "diff" && typeof x.path === "string").map((x) => ({ path: x.path, oldText: typeof x.oldText === "string" ? x.oldText : null, newText: typeof x.newText === "string" ? x.newText : "" }));
+  }
+  // A tool call's output text, from its content blocks.
+  get toolText() {
+    const c = this.update.content;
+    return (Array.isArray(c) ? c : [])
+      .map((x) => (x?.type === "content" ? x.content?.text : x?.type === "terminal" ? `[terminal ${x.terminalId ?? ""}]` : typeof x?.text === "string" ? x.text : ""))
+      .filter(Boolean)
+      .join("\n");
+  }
+}
+
+// A time as Grok might write it: ISO 8601, or epoch seconds or milliseconds.
+export function grokTime(t) {
+  if (typeof t === "string") return Date.parse(t);
+  if (typeof t === "number" && Number.isFinite(t) && t > 1e9) return t < 1e12 ? t * 1000 : t;
+  return NaN;
+}
+
+// A tool for each of ACP's kinds of tool call, by Grok Build's names for
+// them, for a tool call that doesn't name its tool.
+const GROK_KINDS = { execute: "run_terminal_command", edit: "search_replace", delete: "delete_file", move: "move_file", read: "read_file", search: "grep", fetch: "web_fetch", think: "think" };
+
 // Whether a rollout's lines have a completed user message: when they have
 // none at all, its prompts are its user_message events (userEvent).
 export const hasUserMessages = (lines) => lines.some((o) => o.userMessage != null);
@@ -192,11 +278,18 @@ const codexHooks = {
   versionOf: (o, current) => (o.type === "session_meta" && typeof o.payload?.cli_version === "string" ? o.payload.cli_version : current),
 };
 
+// Grok Build's lines say no version, and sort by their update's kind.
+const grokHooks = {
+  kindOf: (o) => kindPart(o.update?.sessionUpdate ?? o.sessionUpdate),
+  versionOf: (_o, current) => current,
+};
+
 export const claudeLines = new Normalizer({ name: "claude-lines", source: "anthropic/claude-code/transcript-line", normalize: (raw) => new ClaudeLine(raw) }).use(transcriptHooks("anthropic/claude-code/transcript-line", claudeHooks));
 export const codexLines = new Normalizer({ name: "codex-lines", source: "openai/codex/rollout-line", normalize: (raw) => new CodexLine(raw) }).use(transcriptHooks("openai/codex/rollout-line", codexHooks));
+export const grokLines = new Normalizer({ name: "grok-lines", source: "spacexai/grok-build/update-line", normalize: (raw) => new GrokLine(raw) }).use(transcriptHooks("spacexai/grok-build/update-line", grokHooks));
 
 // The normalizer for an app's transcripts.
-export const linesOf = (app) => (app === "codex" ? codexLines : claudeLines);
+export const linesOf = (app) => (app === "codex" ? codexLines : app === "grok" ? grokLines : claudeLines);
 
 const NOTHING = Buffer.alloc(0);
 
