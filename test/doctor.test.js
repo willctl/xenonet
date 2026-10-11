@@ -26,15 +26,16 @@ const OBSERVERS = () => [
 
 // A machine where everything is in place; each test breaks one thing.
 function ctxWith(overrides = {}) {
-  const bins = { claude: `${HOME}/.local/bin/claude`, codex: "/usr/local/bin/codex", git: "/usr/bin/git", codesign: "/usr/bin/codesign", ...overrides.bins };
+  const bins = { claude: `${HOME}/.local/bin/claude`, codex: "/usr/local/bin/codex", grok: `${HOME}/.grok/bin/grok`, git: "/usr/bin/git", codesign: "/usr/bin/codesign", ...overrides.bins };
   const answers = {
     "claude --version": { code: 0, stdout: "2.1.288 (Claude Code)\n", stderr: "" },
     "claude auth status": { code: 0, stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }), stderr: "" },
     "codex --version": { code: 0, stdout: "codex-cli 0.146.0\n", stderr: "" },
     "codex login status": { code: 0, stdout: "", stderr: "Logged in using ChatGPT\n" },
+    "grok --version": { code: 0, stdout: "grok 1.0.50 (c58f321264ba)\n", stderr: "" },
     ...overrides.answers,
   };
-  const dirs = { [`${HOME}/.claude/projects`]: ["-Users-ada-atlas"], [`${HOME}/.codex/sessions`]: ["2026"], [`${HOME}/Projects`]: ["atlas", "ledger"], [`${HOME}/state`]: [], ...overrides.dirs };
+  const dirs = { [`${HOME}/.claude/projects`]: ["-Users-ada-atlas"], [`${HOME}/.codex/sessions`]: ["2026"], [`${HOME}/.grok/sessions`]: ["%2FUsers%2Fada%2Fatlas"], [`${HOME}/.grok/auth.json`]: [], [`${HOME}/Projects`]: ["atlas", "ledger"], [`${HOME}/state`]: [], ...overrides.dirs };
   const denied = new Set(overrides.denied ?? []);
   return machine({
     home: HOME,
@@ -44,18 +45,20 @@ function ctxWith(overrides = {}) {
     env: { PATH: "/usr/bin" },
     which: (cmd) => bins[cmd] ?? null,
     run: async (file, args) => answers[`${file.split("/").pop()} ${args.join(" ")}`] ?? { code: 1, stdout: "", stderr: "unknown" },
-    exists: (p) => p in dirs || Object.values(bins).includes(p),
+    // A folder or file the test took away (set to undefined) isn't there.
+    exists: (p) => dirs[p] !== undefined || Object.values(bins).includes(p),
     readdir: async (p) => {
       if (denied.has(p)) throw Object.assign(new Error("denied"), { code: "EPERM" });
       return dirs[p];
     },
     access: async () => {},
     statfs: async () => ({ bavail: 50e6, bsize: 4096 }),
-    paths: { claudeProjectsDir: `${HOME}/.claude/projects`, codexHome: `${HOME}/.codex`, projectsDir: `${HOME}/Projects`, stateDir: `${HOME}/state` },
+    paths: { claudeProjectsDir: `${HOME}/.claude/projects`, codexHome: `${HOME}/.codex`, grokHome: `${HOME}/.grok`, projectsDir: `${HOME}/Projects`, stateDir: `${HOME}/state` },
+    readText: (p) => overrides.files?.[p] ?? null,
     self: { port: 47840, name: "XenoNet" },
     health: { sources: [{ name: "projects", ok: true, count: 2 }, { name: "claude", ok: true, count: 9 }, { name: "codex", ok: true, count: 4 }, { name: "wiki", ok: false, error: "Agent Wiki folder not found" }], blocks: BLOCKS() },
     live: { limits: { claude: { source: "anthropic" } } },
-    connect: { port: 47840, apps: ["claude", "codex"].map((app) => ({ app, changes: [{ id: "mcp", state: "present" }, { id: "hooks", state: "present" }], broken: [] })) },
+    connect: { port: 47840, apps: ["claude", "codex", "grok"].map((app) => ({ app, installed: true, changes: [{ id: "mcp", state: "present" }, { id: "hooks", state: "present" }], broken: [] })) },
     gitAvailable: () => true,
     procs: async () => ({ supported: true, peer: true, chain: true }),
     launcher: async () => ({ dir: `${HOME}/state/runtime/launcher`, version: 2, ships: 2, said: { launcher: 2, protocol: 1, tools: "0.8.0", node: "v24.19.0" } }),
@@ -87,6 +90,31 @@ test("sign-ins: signed out is a failure with the fix; no Claude Code skips what 
   assert.equal(none["claude.auth"].status, "skip");
 });
 
+test("Grok Build: not installed is a note, and so is no sign-in; its sessions folder, and hooks your organization or you turned off", async () => {
+  const everything = byId(await runDoctor(ctxWith()));
+  assert.equal(everything["grok.cli"].detail, "version 1.0.50, ~/.grok/bin/grok");
+  assert.equal(everything["grok.sessions"].detail, "1 folder of sessions in ~/.grok/sessions");
+  // Off PATH, where its installer puts it.
+  const offPath = byId(await runDoctor(ctxWith({ bins: { grok: undefined }, dirs: { [`${HOME}/.grok/bin/grok`]: [] } })));
+  assert.deepEqual([offPath["grok.cli"].status, offPath["grok.cli"].detail], ["ok", "version 1.0.50, ~/.grok/bin/grok"]);
+  const none = byId(await runDoctor(ctxWith({ bins: { grok: undefined }, ctx: { connect: { port: 47840, apps: [{ app: "grok", installed: false, changes: [{ id: "mcp", state: "missing" }, { id: "hooks", state: "missing" }], broken: [] }] } } })));
+  assert.deepEqual([none["grok.cli"].status, none["grok.cli"].fix], ["info", "To use Grok Build, install it (x.ai/cli), then run grok login."]);
+  assert.deepEqual(["grok.auth", "grok.hooks", "agents.grok"].map((id) => none[id].status), ["skip", "skip", "skip"]);
+  const signedOut = byId(await runDoctor(ctxWith({ dirs: { [`${HOME}/.grok/auth.json`]: undefined } })));
+  assert.deepEqual([signedOut["grok.auth"].status, signedOut["grok.auth"].fix], ["info", "Run grok login."]);
+  const keyed = byId(await runDoctor(ctxWith({ dirs: { [`${HOME}/.grok/auth.json`]: undefined }, ctx: { env: { PATH: "/usr/bin", XAI_API_KEY: "made-up" } } })));
+  assert.equal(keyed["grok.auth"].detail, "with an API key (XAI_API_KEY)");
+  const noSessions = byId(await runDoctor(ctxWith({ dirs: { [`${HOME}/.grok/sessions`]: undefined } })));
+  assert.equal(noSessions["grok.sessions"].status, "info");
+  const denied = byId(await runDoctor(ctxWith({ denied: [`${HOME}/.grok/sessions`] })));
+  assert.match(denied["grok.sessions"].fix, /Privacy & Security/);
+  const managed = byId(await runDoctor(ctxWith({ files: { "/etc/grok/requirements.toml": "allow_managed_hooks_only = true\n" } })));
+  assert.equal(managed["grok.hooks"].status, "warn");
+  assert.match(managed["grok.hooks"].detail, /only the hooks your organization sets/);
+  const off = byId(await runDoctor(ctxWith({ files: { [`${HOME}/.grok/disabled-hooks`]: "global:xenonet.json:PostToolUse\n" } })));
+  assert.deepEqual([off["grok.hooks"].status, off["grok.hooks"].fix], ["warn", "Run /hooks in Grok Build, select XenoNet's hooks and press Space to turn them on."]);
+});
+
 test("folders: missing, or unreadable with the macOS privacy fix", async () => {
   const r = byId(await runDoctor(ctxWith({ dirs: { [`${HOME}/Projects`]: undefined }, denied: [`${HOME}/.claude/projects`] })));
   assert.equal(r["claude.transcripts"].status, "fail");
@@ -105,7 +133,7 @@ test("the runtime, XenoNet's own state and the agents' connection", async () => 
   const low = byId(await runDoctor(ctxWith({ ctx: { statfs: async () => ({ bavail: 100, bsize: 4096 }) } })));
   assert.equal(low["xenonet.state"].status, "warn");
 
-  const apps = (states, broken = []) => ({ connect: { port: 47840, apps: ["claude", "codex"].map((app) => ({ app, changes: states.map((state, i) => ({ id: ["mcp", "hooks"][i], state })), broken })) } });
+  const apps = (states, broken = []) => ({ connect: { port: 47840, apps: ["claude", "codex", "grok"].map((app) => ({ app, installed: true, changes: states.map((state, i) => ({ id: ["mcp", "hooks"][i], state })), broken })) } });
   assert.equal(byId(await runDoctor(ctxWith({ ctx: apps(["missing", "missing"]) })))["agents.claude"].status, "info");
   assert.match(byId(await runDoctor(ctxWith({ ctx: apps(["present", "missing"]) })))["agents.codex"].detail, /partly connected \(hooks missing\)/);
   const gone = byId(await runDoctor(ctxWith({ ctx: apps(["present", "present"], ["~/old/xenonet/cli/xenonet.js is gone"]) })));
