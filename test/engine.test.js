@@ -137,7 +137,7 @@ test("messages: to one agent, to the repo, replies, and an inbox that waits", as
   const [m] = await waiting;
   assert.equal(m.text, "Is the ledger fixture stable now?");
   assert.equal((await engine.inbox(A)).length, 1, "the reply");
-  await assert.rejects(engine.send(A, { to: "nobody here", text: "hi" }), /no SI matches/);
+  await assert.rejects(engine.send(A, { to: "nobody here", text: "hi" }), /no session or actor matches/);
   await assert.rejects(engine.send(A, { to: B, text: "" }), /empty/);
 });
 
@@ -148,7 +148,7 @@ test("hooks: a briefing at the start, a warning before an edit, mail between too
   const start = await engine.hook("claude", "SessionStart", { session_id: "99999999-0007", cwd: "/w/atlas" });
   const brief = start.hookSpecificOutput.additionalContext;
   assert.equal(start.hookSpecificOutput.hookEventName, "SessionStart");
-  assert.match(brief, /3 other SI sessions/);
+  assert.match(brief, /3 other agents/);
   assert.match(brief, /Add partial refunds/);
   assert.match(brief, /Zoom on images.*another worktree, \/wt\/atlas-zoom, on feat\/zoom/);
   assert.doesNotMatch(brief, /ledger/);
