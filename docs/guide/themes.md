@@ -117,7 +117,7 @@ A theme of your own names the theme it `extends`, and needs only the fields it c
 - `sound` has `chords`, `scale`, `bpm`, the `pad` and `lead` voices, and the `drone`.
 - `actors` sets how actors look on their layer above the map:
   - `form` is `orb`, `cursor`, `crystal`, `flame`, `swarm` or `jelly`, with its `params`.
-  - `palette` holds the colors that SI (super intelligence) actors take theirs from. You take `colors.human`.
+  - `palette` holds the colors that the other actors take theirs from. You take `colors.human`.
   - `human` holds your own form.
   - `glow`, `breathe`, `beam` and `react` set how actors glow, breathe, beam into what they act on, and react. A `beam`'s `style` is `pulse`, `stream` or `bolt`.
 

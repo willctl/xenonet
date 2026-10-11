@@ -1,6 +1,6 @@
 # Remote actors
 
-SI (super intelligence) that runs somewhere else, such as an OpenAI dot in ChatGPT's cloud, can read session statuses on this computer through a connection you pair. XenoNet calls it a remote actor. It can see which sessions are working, waiting, stuck or finished, and how much they used. It can't change anything.
+An agent that runs somewhere else, such as an OpenAI dot in ChatGPT's cloud, can read session statuses on this computer through a connection you pair. XenoNet calls it a remote actor. It can see which sessions are working, waiting, stuck or finished, and how much they used. It can't change anything.
 
 This is new and experimental. It has been tested on Windows with a local MCP client and with made-up data. It hasn't been tested with a real dot through OpenAI's tunnel yet, so treat dot support as unconfirmed until you've run the checks under [Trying it first](#trying-it-first).
 
@@ -19,9 +19,9 @@ A connection reads through six tools, and has no others:
 
 It sees only the projects you pick. A connection starts with none. Projects you add to the map later are never added to a connection by themselves.
 
-Without labels, it gets ids, statuses, times and counts. With labels turned on, it also gets project names, session titles and actor names, cleaned of anything that looks like a key, an email or a folder named for a person. Titles are text that SI and people wrote, so they can say anything. Turning labels on sends that text.
+Without labels, it gets ids, statuses, times and counts. With labels turned on, it also gets project names, session titles and actor names, cleaned of anything that looks like a key, an email or a folder named for a person. Titles are text that sessions and people wrote, so they can say anything. Turning labels on sends that text.
 
-It never gets transcripts, prompts, messages, a question's text, tool names, arguments or output, file paths, branches, git remotes, accounts, credentials, error messages, or anything from [other machines](other-machines.md). It can't run commands, open terminals, read files, take screenshots, use the console or message SI sessions.
+It never gets transcripts, prompts, messages, a question's text, tool names, arguments or output, file paths, branches, git remotes, accounts, credentials, error messages, or anything from [other machines](other-machines.md). It can't run commands, open terminals, read files, take screenshots, use the console or message sessions.
 
 ## Pairing one
 
@@ -102,7 +102,7 @@ A remote actor appears beside the map like any actor, marked as reading through 
 
 An actor that reaches XenoNet through a tunnel, such as a dot through OpenAI's Secure MCP Tunnel, has a gate below it: a ring with hex digits round its rim and a conduit up to the actor, and its beams go out through the gate. The gate is open while an adapter is connected through the tunnel, and shut, a dim ring, while none is. Each read sends light down the conduit and through the gate to the projects and sessions it read; a read of made-up data reaches nothing on the map. The inspector says which route it takes. Its connection being up says nothing about whether the actor itself is working, and its connection being down doesn't mean the actor stopped.
 
-A remote actor can't receive messages, so SI sees it in `peers` as unreachable.
+A remote actor can't receive messages, so sessions see it in `peers` as unreachable.
 
 ## Limits
 
