@@ -1,8 +1,9 @@
 // The engine's HTTP API, on XenoNet's own port with its protections
 // (127.0.0.1 only, the Host check, no cross-origin posts). Agents reach it
 // through the MCP server (mcp/xenonet.js), which says who's calling in the
-// x-xenonet-agent header; Codex's hooks post to /api/hook/codex (through
-// xenonet hook), Claude Code's to /api/hook/claude (see server/index.js); the
+// x-xenonet-agent header; Codex's hooks post to /api/hook/codex and Grok
+// Build's to /api/hook/grok (through xenonet hook), Claude Code's to
+// /api/hook/claude (see server/index.js); the
 // console reads /api/engine/state, the xenonet command /api/engine/agents and
 // /api/engine/who; and /api/engine/connect previews, adds and removes XenoNet
 // in Claude Code's and Codex's settings (connect.js). Every request in an
@@ -23,6 +24,7 @@ import { isAgentId } from "../../core/engine/engine.js";
 import { bearerOf, tokenInUrl } from "../../core/actors/tokens.js";
 import { RATES } from "./actors.js";
 import { attest } from "../../core/engine/attest.js";
+import { grokHookInput } from "../../core/engine/grok-hooks.js";
 
 // The capability each operation needs from an actor.
 const NEEDS = { send: "message-agents", claim: "edit-repos" };
@@ -91,6 +93,22 @@ export function engineRoutes({ engine, connect, verify, readJson, send, actorCal
         const out = await engine.hook("codex", body.hook_event_name, body);
         return out ? send(res, 200, out) : (res.writeHead(204).end(), undefined);
       }
+      // Grok Build's hooks, in its own envelope (grok-hooks.js). The tailer
+      // hears them too: they say when a turn starts and ends, and when Grok
+      // waits for a permission (live.js).
+      if (req.method === "POST" && route === "/api/hook/grok") {
+        const body = await readJson(req).catch(() => ({}));
+        const input = grokHookInput(body);
+        if (!input.session_id || !input.event) return (res.writeHead(204).end(), undefined);
+        const me = `grok:${input.session_id}`;
+        if (!isAgentId(me)) return (res.writeHead(204).end(), undefined);
+        const ok = await verify.check(req.socket, me, { hook: true });
+        if (!ok.ok) return send(res, 403, { error: ok.reason });
+        engine.state?.live?.noteGrokHook?.(me, input.event, body);
+        if (input.event === "SessionStart") engine.state?.refresh?.().catch(() => {});
+        const out = await engine.hook("grok", input.event, input);
+        return out ? send(res, 200, out) : (res.writeHead(204).end(), undefined);
+      }
       if (req.method === "GET" && route === "/api/engine/state") return send(res, 200, await engine.snapshot());
       // For people (the xenonet command): every agent at work, and who has a file.
       if (req.method === "GET" && route === "/api/engine/agents") return send(res, 200, await engine.agents());
@@ -113,8 +131,16 @@ export function engineRoutes({ engine, connect, verify, readJson, send, actorCal
       const op = ops[name];
       if (req.method !== "POST" || !op) return send(res, 404, { error: "not found" });
       if (bearerOf(req.headers) !== undefined) return await asActor(req, res, name, op);
-      const me = req.headers["x-xenonet-agent"];
-      if (!isAgentId(me)) return send(res, 400, { error: "say which session is calling, in x-xenonet-agent (claude:<session id> or codex:<thread id>)" });
+      let me = req.headers["x-xenonet-agent"];
+      // A Grok Build session's MCP server may not know its session (its
+      // environment says it only if Grok fills it in): the session is the
+      // one Grok's hooks last spoke for from the grok process it runs under.
+      if (me === "grok") {
+        const found = await verify.holding(req.socket, "grok");
+        if (!found) return send(res, 400, { error: "XenoNet can't tell which Grok Build session is calling: connect Grok Build (xenonet connect grok) so its hooks say, and start the session again" });
+        me = found;
+      }
+      if (!isAgentId(me)) return send(res, 400, { error: "say which session is calling, in x-xenonet-agent (claude:<session id>, codex:<thread id> or grok:<session id>)" });
       const ok = await verify.check(req.socket, me);
       if (!ok.ok) return send(res, 403, { error: ok.reason });
       const body = await readJson(req);

@@ -1122,9 +1122,13 @@ export class LiveTelemetry extends EventEmitter {
     const g = grokOf(s);
     const ts = Date.now();
     g.hookedAt = ts;
-    if (event === "Notification" && (body.notificationType ?? body.notification_type) === "permission_prompt") s.hookNeed = { text: clip(body.message ?? "Grok Build needs your permission", 200), ts };
+    // A subagent's events (Grok marks them with subagentType) say nothing of
+    // the session's turn: only a permission it waits on is yours to see.
+    const permission = event === "Notification" && (body.notificationType ?? body.notification_type) === "permission_prompt";
+    if (body.subagentType && !permission) return;
+    if (permission) s.hookNeed = { text: clip(body.message ?? "Grok Build needs your permission", 200), ts };
     else if (["UserPromptSubmit", "PostToolUse", "PostToolUseFailure", "Stop", "StopCancelled", "StopFailure", "SessionEnd"].includes(event)) s.hookNeed = null;
-    if (event === "UserPromptSubmit" && !body.subagentType) {
+    if (event === "UserPromptSubmit") {
       if (!s.turn.active) s.turn = { active: true, startedAt: ts };
       g.hookTurnAt = ts;
       s.lastEventAt = Math.max(s.lastEventAt, ts);

@@ -9,8 +9,8 @@
 // before they edit a file another live agent is editing, and messages as
 // they arrive.
 //
-// An agent is a session: "claude:<session id>" or "codex:<thread id>", the
-// ids the rest of XenoNet uses. An actor that registered (core/actors) calls
+// An agent is a session: "claude:<session id>", "codex:<thread id>" or
+// "grok:<session id>" (Grok Build's), the ids the rest of XenoNet uses. An actor that registered (core/actors) calls
 // the engine as "actor:<slug>", with its token, and agents see it among
 // them: in peers and briefings, its claims and the files it edited in the
 // warnings, and its messages framed as an actor's. Actors are agents too,
@@ -38,7 +38,10 @@ const RECENT_MS = 30 * 60e3; // a new agent hears about the agents active this r
 const CLAIM_MINUTES = 60;
 const MAX_TEXT = 4000;
 const ACTOR_CLAIMS = 50; // claims an actor may hold at once
-const AGENT = /^(claude|codex):[0-9A-Za-z][0-9A-Za-z-]{6,}$/;
+const AGENT = /^(claude|codex|grok):[0-9A-Za-z][0-9A-Za-z-]{6,}$/;
+// Grok Build sessions not yet told who else is at work: Grok ignores what a
+// SessionStart hook says, so they hear it with their first tool result.
+const UNBRIEFED_MAX = 512;
 
 export const isAgentId = (id) => AGENT.test(String(id ?? ""));
 // An actor of this machine as the engine has it, never you: an actor:<slug>
@@ -74,12 +77,12 @@ export function matches(pattern, file) {
 }
 
 // The files an edit tool is about to change. Claude Code's Edit, Write,
-// MultiEdit and NotebookEdit name one; Codex's apply_patch lists them in its
-// patch.
+// MultiEdit and NotebookEdit name one, as Grok Build's search_replace and
+// write_file do; Codex's apply_patch lists them in its patch.
 export function editPaths(toolName, input, cwd) {
   const out = new Set();
   const abs = (p) => (path.isAbsolute(p) ? p : pathStyle(cwd ?? p).resolve(cwd ?? "/", p));
-  for (const k of ["file_path", "notebook_path", "path"]) if (typeof input?.[k] === "string") out.add(abs(input[k]));
+  for (const k of ["file_path", "notebook_path", "path", "target_file"]) if (typeof input?.[k] === "string") out.add(abs(input[k]));
   const scan = (v) => {
     if (typeof v === "string") for (const m of v.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$/gm)) out.add(abs((m[1] ?? m[2]).trim()));
     else if (Array.isArray(v)) v.forEach(scan);
@@ -157,6 +160,7 @@ export class Engine extends EventEmitter {
     this.actors = actors;
     this.noticed = new Map(); // `${agent}|${file}|${other}` → when it was warned
     this.waiters = new Map(); // agent → Set(resolve), inboxes waiting for mail
+    this.unbriefed = new Set(); // Grok Build sessions that started and haven't been told who's here
   }
 
   // ---------- agents ----------
@@ -526,6 +530,7 @@ export class Engine extends EventEmitter {
     if (!input.session_id) return null;
     const me = `${app}:${input.session_id}`;
     if (!isAgentId(me)) return null;
+    if (app === "grok") return this.#grokHook(me, event, input);
     if (event === "SessionEnd") {
       this.store.ended(me, this.now());
       return null;
@@ -540,6 +545,48 @@ export class Engine extends EventEmitter {
     }
     if (event === "Stop") {
       if (input.stop_hook_active) return null;
+      const text = this.#mail(await this.#take(me));
+      return text ? { decision: "block", reason: text } : null;
+    }
+    return null;
+  }
+
+  // Grok Build's hooks (see grok-hooks.js, which puts its events in these
+  // terms): it reads a hook's answer only after a tool call and at a turn's
+  // end, so a session hears who's here and its messages with its next tool
+  // result, and its messages at the end of a turn, which goes on to read
+  // them.
+  //
+  // A subagent's hooks fire too, and Grok marks each of its events with
+  // subagentType. Nothing is said to it, nothing is marked read, and it
+  // isn't counted in touch: a message for the session waits for one of the
+  // session's own events, so the conversation you're in sees it, not a
+  // subagent that would read it and drop it.
+  async #grokHook(me, event, input) {
+    if (input.subagent) return null;
+    if (event === "SessionEnd") {
+      this.unbriefed.delete(me);
+      this.store.ended(me, this.now());
+      return null;
+    }
+    this.touch(me, { app: "grok", cwd: input.cwd ?? null, via: "hook" });
+    const say = (text) => (text ? { hookSpecificOutput: { hookEventName: event, additionalContext: text } } : null);
+    if (event === "SessionStart") {
+      this.unbriefed.add(me);
+      if (this.unbriefed.size > UNBRIEFED_MAX) this.unbriefed.delete(this.unbriefed.values().next().value);
+      return null;
+    }
+    if (event === "PreToolUse") {
+      const files = editPaths(input.tool_name, input.tool_input, input.cwd);
+      return files.length ? say(await this.#warn(me, files)) : null;
+    }
+    if (event === "PostToolUse" || event === "PostToolUseFailure") {
+      const brief = this.unbriefed.delete(me) ? await this.briefing(me) : "";
+      return say([brief, this.#mail(await this.#take(me))].filter(Boolean).join("\n\n"));
+    }
+    // A Stop at the session's close can't keep anything going.
+    if (event === "Stop") {
+      if (input.stop_hook_active || (input.reason && input.reason !== "end_turn")) return null;
       const text = this.#mail(await this.#take(me));
       return text ? { decision: "block", reason: text } : null;
     }

@@ -1,9 +1,9 @@
-// xenonet search <words>: every Claude Code and Codex transcript, through the
+// xenonet search <words>: every Claude Code, Codex and Grok Build transcript, through the
 // running XenoNet's index (core/search.js).
 import { c, print, json, plural, ago, Fail, width, clip } from "../lib/out.js";
 import { need, get } from "../../core/client.js";
 
-export const help = `Searches every Claude Code and Codex transcript on this machine for the
+export const help = `Searches every Claude Code, Codex and Grok Build transcript on this machine for the
 messages that have every word (or a word that starts with it), grouped by
 session, best matches first.
 

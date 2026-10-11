@@ -214,7 +214,8 @@ test("connect: previews, adds and takes out only XenoNet's entries", async () =>
   const connect = createConnect({ platform: "darwin", port: 47842, root: "/app", exec: "/Apps/XenoNet Dev.app/Contents/MacOS/Electron", runAsNode: true, home, env: { PATH: bin }, run: async (file, args) => (calls.push([path.basename(file), ...args]), args[1] === "get" ? Promise.reject(new Error("not found")) : "") });
 
   const before = await connect.preview();
-  assert.deepEqual(before.apps.map((a) => a.changes.map((c) => c.state)), [["missing", "missing"], ["missing", "missing"]]);
+  assert.deepEqual(before.apps.map((a) => a.changes.map((c) => c.state)), [["missing", "missing"], ["missing", "missing"], ["missing", "missing"]]);
+  assert.equal(before.apps[2].installed, false, "no Grok Build here");
 
   await connect.apply();
   const settings = JSON.parse(fs.readFileSync(path.join(home, ".claude", "settings.json"), "utf8"));
@@ -244,6 +245,60 @@ test("connect: previews, adds and takes out only XenoNet's entries", async () =>
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, ".codex", "hooks.json"), "utf8")), {});
   assert.ok(calls.some((c) => c[0] === "claude" && c[2] === "remove"));
   assert.deepEqual(mergeHooks({ hooks: {} }, () => true), {});
+});
+
+test("connect grok: XenoNet's servers in Grok Build's config.toml with everything else kept as it was, its hooks in a file of their own, and both taken out again", async () => {
+  const home = tmp();
+  const grok = path.join(home, ".grok");
+  fs.mkdirSync(path.join(grok, "bin"), { recursive: true });
+  fs.writeFileSync(path.join(grok, "bin", "grok"), "");
+  // Grok's installer's block, your own settings and comments, and another
+  // server, which must all survive byte for byte.
+  const config = `# my grok settings\n[cli]\ninstaller = "internal"\n\n[mcp_servers.linear]\nurl = "https://mcp.linear.app/mcp" # remote\n\n[ui]\ntheme = "dark"\n`;
+  fs.writeFileSync(path.join(grok, "config.toml"), config, { mode: 0o600 });
+  const connect = createConnect({ platform: "darwin", port: 47842, root: "/app", exec: "/Apps/XenoNet Dev.app/Contents/MacOS/Electron", runAsNode: true, home, env: { PATH: path.join(home, "bin") }, run: async () => "" });
+  const before = (await connect.preview()).apps.find((a) => a.app === "grok");
+  assert.deepEqual([before.installed, before.cli, before.changes.map((c) => c.state)], [true, path.join(grok, "bin", "grok"), ["missing", "missing"]], "found in ~/.grok/bin, off PATH");
+
+  await connect.apply(["grok"]);
+  const text = fs.readFileSync(path.join(grok, "config.toml"), "utf8");
+  assert.ok(text.startsWith(config), "the file as it was, then XenoNet's");
+  assert.equal(text.slice(config.length), `\n[mcp_servers.xenonet-dev]\ncommand = "/Apps/XenoNet Dev.app/Contents/MacOS/Electron"\nargs = ["/app/cli/xenonet.js", "mcp"]\nenv = { XENONET_PORT = "47842", ELECTRON_RUN_AS_NODE = "1", XENONET_GROK_SESSION = "{{session_id}}" }\n`);
+  assert.equal(fs.statSync(path.join(grok, "config.toml")).mode & 0o777, 0o600, "its mode kept");
+  assert.equal(fs.readFileSync(path.join(grok, "config.toml.before-xenonet"), "utf8"), config);
+  const hooks = JSON.parse(fs.readFileSync(path.join(grok, "hooks", "xenonet.json"), "utf8")).hooks;
+  assert.deepEqual(Object.keys(hooks), ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop", "StopCancelled", "StopFailure", "Notification", "SessionEnd"]);
+  assert.equal(hooks.PreToolUse[0].matcher, "Edit|Write|MultiEdit|search_replace|write_file|create_file|delete_file|apply_patch");
+  assert.equal(hooks.Notification[0].matcher, "permission_prompt|idle_prompt");
+  assert.match(hooks.Stop[0].hooks[0].command, /^XENONET_PORT=47842 ELECTRON_RUN_AS_NODE=1 '\/Apps\/XenoNet Dev\.app\/Contents\/MacOS\/Electron' '\/app\/cli\/xenonet\.js' hook grok$/);
+  assert.deepEqual([hooks.SessionEnd[0].hooks[0].timeout, hooks.Stop[0].hooks[0].timeout], [3, 10]);
+  assert.deepEqual((await connect.preview()).apps.find((a) => a.app === "grok").changes.map((c) => c.state), ["present", "present"]);
+
+  // Again: the same bytes, and no second copy.
+  await connect.apply(["grok"]);
+  assert.equal(fs.readFileSync(path.join(grok, "config.toml"), "utf8"), text);
+
+  // Another XenoNet's server and hooks stay when this one goes.
+  const installed = path.join(home, "installed");
+  fs.mkdirSync(path.join(installed, "cli"), { recursive: true });
+  for (const f of ["node", path.join("cli", "xenonet.js")]) fs.writeFileSync(path.join(installed, f), "");
+  const other = createConnect({ platform: "darwin", port: 47840, root: installed, exec: path.join(installed, "node"), home, env: { PATH: "" }, run: async () => "" });
+  await other.apply(["grok"]);
+  await connect.remove();
+  const left = fs.readFileSync(path.join(grok, "config.toml"), "utf8");
+  assert.ok(left.startsWith(config) && left.includes("[mcp_servers.xenonet]") && !left.includes("xenonet-dev"), left);
+  assert.deepEqual(Object.values(JSON.parse(fs.readFileSync(path.join(grok, "hooks", "xenonet.json"), "utf8")).hooks).flat().flatMap((g) => g.hooks).map((h) => /XENONET_PORT=(\d+)/.exec(h.command)[1]).filter((v, i, a) => a.indexOf(v) === i), ["47840"]);
+  await other.remove();
+  assert.equal(fs.readFileSync(path.join(grok, "config.toml"), "utf8"), config, "back to exactly what it was");
+  assert.equal(fs.existsSync(path.join(grok, "hooks", "xenonet.json")), false, "XenoNet's hook file goes with its last hooks");
+
+  // A server written in a form XenoNet doesn't edit: left alone, and said.
+  fs.writeFileSync(path.join(grok, "config.toml"), `[mcp_servers]\nxenonet-dev = { command = "mine" }\n`);
+  const odd = (await connect.preview()).apps.find((a) => a.app === "grok");
+  assert.equal(odd.changes.find((c) => c.id === "mcp").state, "different");
+  assert.ok(odd.notes.some((n) => /in a form XenoNet doesn't edit/.test(n)));
+  await assert.rejects(connect.apply(["grok"]), /form XenoNet doesn't edit/);
+  assert.equal(fs.readFileSync(path.join(grok, "config.toml"), "utf8"), `[mcp_servers]\nxenonet-dev = { command = "mine" }\n`);
 });
 
 test("connect: a settings file that isn't JSON, or can't be read, is left alone, and the error quotes none of it and says ~", async () => {
@@ -294,16 +349,18 @@ async function fakeXenoNet(reply = () => [200, { ok: true }]) {
 // nothing of this computer's. Names are matched in any case, as Windows
 // spells PATH Path.
 const agentHome = tmp();
-const REAL = new Set(["PATH", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "HERMES_HOME", "GH_CONFIG_DIR", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "APPDATA", "LOCALAPPDATA", "XENONET_STATE_DIR", "XENONET_CACHE_DIR", "XENONET_PROJECTS_DIR", "XENONET_WIKI_DIR", "XENONET_CLAUDE_DESKTOP_DIR"]);
+const REAL = new Set(["PATH", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "GROK_HOME", "HERMES_HOME", "GH_CONFIG_DIR", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "APPDATA", "LOCALAPPDATA", "XENONET_STATE_DIR", "XENONET_CACHE_DIR", "XENONET_PROJECTS_DIR", "XENONET_WIKI_DIR", "XENONET_CLAUDE_DESKTOP_DIR"]);
 function stdio(script, args, env, input = null) {
   const own = Object.fromEntries(Object.entries(process.env).filter(([name]) => !REAL.has(name.toUpperCase())));
   Object.assign(own, { HOME: agentHome, USERPROFILE: agentHome, PATH: path.join(agentHome, "bin"), XENONET_CODEX_BIN: path.join(agentHome, "bin", "codex"), CLAUDE_CODE_SESSION_ID: "", CLAUDE_PID: "", CODEX_THREAD_ID: "", XENONET_ACTOR_TOKEN: "", XENONET_ACTOR_TOKEN_FILE: "" });
+  // Nor a Grok Build session's, should the tests run in one.
+  for (const name of ["GROK_SESSION_ID", "GROK_HOOK_EVENT", "XENONET_GROK_SESSION"]) delete own[name];
   const proc = spawn(process.execPath, [script, ...args], { cwd: root, env: { ...own, ...env }, stdio: ["pipe", "pipe", "inherit"] });
   if (input !== null) proc.stdin.end(input);
   return proc;
 }
 
-test("mcp: says which Claude session or Codex thread is calling", async () => {
+test("mcp: says which Claude session, Codex thread or Grok Build session is calling", async () => {
   const xenonet = await fakeXenoNet(() => [200, [{ id: "codex:other" }]]);
   const run = async (env, meta) => {
     const proc = stdio("cli/xenonet.js", ["mcp"], { XENONET_PORT: String(xenonet.port), ...env });
@@ -333,6 +390,16 @@ test("mcp: says which Claude session or Codex thread is calling", async () => {
     await run({}, { threadId: "019a0000-aaaa-bbbb-cccc-000000000001" });
     assert.equal(xenonet.seen.at(-1).agent, "codex:019a0000-aaaa-bbbb-cccc-000000000001");
     assert.equal(xenonet.seen.at(-1).body.pid, process.pid, "Codex: the server's parent");
+    // Grok Build's session, from the environment connect.js asks Grok to
+    // fill in, or from Grok's own; a placeholder Grok left as it was says
+    // only that a grok calls, and XenoNet finds which session.
+    await run({ XENONET_GROK_SESSION: "019a3b5c-0000-7000-8000-00000000000a" }, null);
+    assert.equal(xenonet.seen.at(-1).agent, "grok:019a3b5c-0000-7000-8000-00000000000a");
+    assert.equal(xenonet.seen.at(-1).body.pid, process.pid, "Grok Build: the server's parent");
+    await run({ XENONET_GROK_SESSION: "{{session_id}}", GROK_SESSION_ID: "019a3b5c-0000-7000-8000-00000000000b" }, null);
+    assert.equal(xenonet.seen.at(-1).agent, "grok:019a3b5c-0000-7000-8000-00000000000b");
+    await run({ XENONET_GROK_SESSION: "{{session_id}}" }, null);
+    assert.equal(xenonet.seen.at(-1).agent, "grok");
     const nobody = await run({}, null);
     assert.ok(nobody.call.result.isError);
     assert.match(nobody.call.result.content[0].text, /can't tell which session/);
@@ -385,6 +452,31 @@ test("hook bridge: passes the event to XenoNet and prints its answer; silent whe
   }
   const away = await out(xenonet.port);
   assert.deepEqual(away, { code: 0, text: "" });
+});
+
+test("hook bridge for Grok Build: the session and event from Grok's environment where the event doesn't say, and Claude Code's hook quiet in a Grok session", async () => {
+  const xenonet = await fakeXenoNet(() => [200, { decision: "block", reason: "mail" }]);
+  const run = async (app, env, input) => {
+    const proc = stdio("cli/xenonet.js", ["hook", app], { XENONET_PORT: String(xenonet.port), ...env }, JSON.stringify(input));
+    let text = "";
+    proc.stdout.on("data", (d) => (text += d));
+    const code = await new Promise((r) => proc.on("exit", r));
+    return { code, text };
+  };
+  try {
+    const got = await run("grok", { GROK_SESSION_ID: "019a3b5c-0000-7000-8000-00000000000a", GROK_HOOK_EVENT: "stop" }, { reason: "end_turn" });
+    assert.deepEqual([got.code, JSON.parse(got.text)], [0, { decision: "block", reason: "mail" }]);
+    assert.deepEqual(xenonet.seen.at(-1), { url: "/api/hook/grok", agent: undefined, body: { reason: "end_turn", sessionId: "019a3b5c-0000-7000-8000-00000000000a", hookEventName: "stop" } });
+    // What the event says comes first.
+    await run("grok", { GROK_SESSION_ID: "other" }, { sessionId: "019a3b5c-0000-7000-8000-00000000000c", hookEventName: "post_tool_use" });
+    assert.equal(xenonet.seen.at(-1).body.sessionId, "019a3b5c-0000-7000-8000-00000000000c");
+    const seen = xenonet.seen.length;
+    const quiet = await run("claude", { GROK_HOOK_EVENT: "session_start" }, { session_id: "11111111-2222-3333-4444-555555555555", hook_event_name: "SessionStart" });
+    assert.deepEqual(quiet, { code: 0, text: "" });
+    assert.equal(xenonet.seen.length, seen, "Grok's own hook speaks for its session");
+  } finally {
+    xenonet.close();
+  }
 });
 
 test("a git answer with lines missing is no repo, not a crash", () => {

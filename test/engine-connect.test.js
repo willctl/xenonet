@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createConnect } from "../core/engine/connect.js";
+import { readServer } from "../core/engine/toml.js";
 
 test("installed connections register both MCP interfaces through the stable launcher", async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-connect-"));
@@ -31,9 +32,17 @@ test("installed connections register both MCP interfaces through the stable laun
     return "";
   } });
   const before = await connect.preview();
-  assert.deepEqual(before.apps.map((app) => app.changes.map((change) => change.id)), [["console", "mcp", "hooks"], ["console", "mcp", "hooks"]]);
-  const after = await connect.apply();
+  assert.deepEqual(before.apps.map((app) => app.changes.map((change) => change.id)), [["console", "mcp", "hooks"], ["console", "mcp", "hooks"], ["console", "mcp", "hooks"]]);
+  const after = await connect.apply(["claude", "codex", "grok"]);
   assert.ok(after.apps.every((app) => app.changes.every((change) => change.state === "present")));
+  // Grok Build's, in its config.toml, written by XenoNet.
+  const grokConfig = fs.readFileSync(path.join(home, ".grok", "config.toml"), "utf8");
+  for (const name of ["xenonet", "xenonet-console"]) {
+    const server = readServer(grokConfig, name);
+    assert.equal(server.command, runtime);
+    assert.deepEqual(server.args, [`${root}/cli/xenonet.js`, "mcp", ...(name === "xenonet-console" ? ["console"] : [])]);
+    assert.deepEqual(server.env, { XENONET_PORT: "47840", XENONET_GROK_SESSION: "{{session_id}}" });
+  }
   for (const app of ["claude", "codex"]) for (const name of ["xenonet", "xenonet-console"]) {
     const server = entries[app][name];
     assert.equal(server.command, runtime);
@@ -42,6 +51,8 @@ test("installed connections register both MCP interfaces through the stable laun
   }
   await connect.remove();
   assert.deepEqual(entries, { claude: {}, codex: {} });
+  assert.equal(fs.readFileSync(path.join(home, ".grok", "config.toml"), "utf8"), "", "nothing of XenoNet's left in Grok's config");
+  assert.equal(fs.existsSync(path.join(home, ".grok", "hooks", "xenonet.json")), false);
   for (const app of ["claude", "codex"]) assert.ok(calls.some((call) => call.app === app && call.args[1] === "remove" && call.args[2] === "xenonet-console"));
 });
 
@@ -120,7 +131,7 @@ test("on Windows, a connected hook's quoted port and app aren't files gone, and 
   await installed.apply();
   await dev.apply();
   const preview = await installed.preview();
-  assert.deepEqual(preview.apps.map((a) => a.broken), [[], []], "nothing reported gone");
+  assert.deepEqual(preview.apps.map((a) => a.broken), [[], [], []], "nothing reported gone");
   const codex = JSON.parse(fs.readFileSync(path.join(home, ".codex", "hooks.json"), "utf8"));
   const ports = (hooks) => [...new Set(Object.values(hooks).flat().flatMap((g) => g.hooks).map((h) => /XENONET_PORT='(\d+)'/.exec(Buffer.from(/-EncodedCommand ([A-Za-z0-9+/=]+)$/.exec(h.commandWindows)[1], "base64").toString("utf16le"))[1]))].sort();
   assert.deepEqual(ports(codex.hooks), ["47840", "47842"], "both XenoNets' hooks, side by side");

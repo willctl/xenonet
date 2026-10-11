@@ -26,7 +26,7 @@ export async function run(_args, flags) {
   if (flags.json) return json({ running: true, name: nameOf(s), version: s.health.version ?? null, port: s.port, demo: !!s.health.demo, sources: s.health.sources, summary, agents, actors, doctor: doctor && { at: doctor.at, summary: doctor.summary } });
 
   const count = (name) => s.health.sources?.find((x) => x.name === name && x.ok)?.count;
-  const reads = [count("projects") != null && plural(count("projects"), "project"), count("claude") != null && plural(count("claude"), "Claude session"), count("codex") != null && plural(count("codex"), "Codex thread")].filter(Boolean);
+  const reads = [count("projects") != null && plural(count("projects"), "project"), count("claude") != null && plural(count("claude"), "Claude session"), count("codex") != null && plural(count("codex"), "Codex thread"), count("grok") ? plural(count("grok"), "Grok session") : null].filter(Boolean);
   const connected = agents.filter((a) => a.reachable).length;
   const working = agents.filter((a) => a.status === "working").length;
   const rows = [

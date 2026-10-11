@@ -102,6 +102,9 @@ test("hooks say when a turn starts and ends, and when Grok waits for a permissio
     fs.appendFileSync(f.file(B), up(Date.now() - 60e3, text("agent_message_chunk", "Fixed.")));
     await live.track(f.file(B), { prime: false });
     assert.equal(live.snapshot().sessions.find((x) => x.id === id).status, "thinking");
+    // A subagent's Stop isn't the session's.
+    live.noteGrokHook(id, "Stop", { reason: "end_turn", subagentType: "explore" });
+    assert.equal(live.snapshot().sessions.find((x) => x.id === id).status, "thinking");
     live.noteGrokHook(id, "Stop", { reason: "end_turn", lastAssistantMessage: "Fixed." });
     s = live.snapshot().sessions.find((x) => x.id === id);
     assert.deepEqual([s.status, s.needsYou?.kind], ["idle", "review"]);

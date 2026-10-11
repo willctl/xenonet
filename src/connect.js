@@ -1,4 +1,4 @@
-// Connect Claude Code and Codex: what XenoNet would add to their
+// Connect Claude Code, Codex and Grok Build: what XenoNet would add to their
 // settings so that every session, in every project, can see the others and
 // message them through XenoNet's engine (core/engine/connect.js does the
 // adding). It shows each change before anything happens, then adds it all,
@@ -8,11 +8,18 @@ import { escapeHtml as h } from "./format.js";
 
 const STATE = { present: ["✓", "added"], missing: ["+", "to add"], different: ["↻", "to update"] };
 
+// The apps the panel shows, and connects: Claude Code and Codex, and Grok
+// Build once it's installed or connected.
+export const shownApps = (d) => d.apps.filter((a) => a.app !== "grok" || a.installed || a.changes.some((c) => c.state !== "missing"));
+
 export function createConnectPanel({ modals, toast, sfx }) {
   let panel = null;
+  let shown = ["claude", "codex"];
 
   function render(d) {
-    const changes = d.apps.flatMap((a) => a.changes);
+    const apps = shownApps(d);
+    shown = apps.map((a) => a.app);
+    const changes = apps.flatMap((a) => a.changes);
     const done = changes.every((c) => c.state === "present");
     const any = changes.some((c) => c.state !== "missing");
     const app = (a) => `
@@ -26,8 +33,8 @@ export function createConnectPanel({ modals, toast, sfx }) {
       ${a.notes.map((n) => `<p class="cx-note">${h(n)}</p>`).join("")}`;
     panel.querySelector(".m-body").innerHTML = `
       <p class="cx-intro">Once connected, each session can see which others work in its repo and on what. It gets a warning before it edits a file another session is working on, and it can message the others. XenoNet adds only these entries, and keeps a copy of each settings file the first time it changes one. Sessions already running pick it up when they restart.</p>
-      ${d.apps.map(app).join("")}
-      ${d.demo ? `<p class="cx-note">This is the demo, with made-up sessions. Connect Claude Code and Codex from XenoNet instead.</p>` : ""}
+      ${apps.map(app).join("")}
+      ${d.demo ? `<p class="cx-note">This is the demo, with made-up sessions. Connect your agents from XenoNet instead.</p>` : ""}
       <div class="m-foot">
         <button class="act primary" data-cx-apply data-yours ${done || d.demo ? "disabled" : ""}>${done ? "Connected" : any ? "Update" : "Connect"}</button>
         ${any ? `<button class="act" data-cx-remove>Disconnect</button>` : ""}
@@ -44,7 +51,7 @@ export function createConnectPanel({ modals, toast, sfx }) {
 
   async function open() {
     panel = modals.open(
-      `<header class="m-head"><div><div class="m-chip">⬡ connect</div><h2>Connect Claude Code and Codex</h2><div class="m-sub">Their sessions reach each other through XenoNet</div></div><button class="act" data-mclose>Close ✕</button></header><div class="m-body"><div class="m-empty">Checking Claude Code's and Codex's settings…</div></div>`,
+      `<header class="m-head"><div><div class="m-chip">⬡ connect</div><h2>Connect your agents</h2><div class="m-sub">Claude Code, Codex and Grok Build sessions reach each other through XenoNet</div></div><button class="act" data-mclose>Close ✕</button></header><div class="m-body"><div class="m-empty">Checking their settings…</div></div>`,
       { wide: true, cls: "cx" },
     );
     panel.addEventListener("click", async (e) => {
@@ -52,7 +59,7 @@ export function createConnectPanel({ modals, toast, sfx }) {
       if (!apply && !remove) return;
       e.target.disabled = true;
       try {
-        render(await run(apply ? "POST" : "DELETE", apply ? { apps: ["claude", "codex"] } : null));
+        render(await run(apply ? "POST" : "DELETE", apply ? { apps: shown } : null));
         sfx("success");
         toast(apply ? "Connected. Restart running sessions to pick it up." : "Disconnected");
       } catch (err) {

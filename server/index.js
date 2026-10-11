@@ -11,6 +11,7 @@ import { urlFor, launch, handoffUrl, MAX_BRIEF, NEEDS_INPUT_URL } from "../core/
 import { codexClient } from "../core/codex.js";
 import * as store from "../core/store.js";
 import { Engine, isActorAgent } from "../core/engine/engine.js";
+import { fromGrok } from "../core/engine/grok-hooks.js";
 import { attest } from "../core/engine/attest.js";
 import { bearerOf as bearerHeader } from "../core/actors/tokens.js";
 import { YOU } from "../core/schema/ids.js";
@@ -605,7 +606,7 @@ async function api(req, res, url) {
       return send(res, 400, { error: String(err?.message ?? err), code: "bad-request" });
     }
   }
-  if (route.startsWith("/api/engine/") || route === "/api/hook/codex") return engineRoute(req, res, url);
+  if (route.startsWith("/api/engine/") || route === "/api/hook/codex" || route === "/api/hook/grok") return engineRoute(req, res, url);
   if (route === "/api/actors" || route.startsWith("/api/actors/")) return actorRoute(req, res, url);
   if (route === "/api/assistant" || route.startsWith("/api/assistant/")) return assistantRoute(req, res, url);
   if (await hostRoute(req, res, url)) return;
@@ -1034,6 +1035,9 @@ async function api(req, res, url) {
   // permission prompts and notifications.
   if (req.method === "POST" && route === "/api/hook/claude") {
     const body = await readJson(req).catch(() => ({}));
+    // Grok Build runs Claude Code's hooks too (it reads ~/.claude/settings.json):
+    // its own, to /api/hook/grok, speak for its sessions.
+    if (fromGrok(body)) return (res.writeHead(204).end(), undefined);
     if (typeof body.session_id === "string" && /^[0-9a-f-]{36}$/i.test(body.session_id)) {
       const ok = await verify.check(req.socket, `claude:${body.session_id}`, { hook: true });
       if (!ok.ok) return send(res, 403, { error: ok.reason });

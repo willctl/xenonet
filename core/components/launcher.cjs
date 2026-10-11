@@ -1,8 +1,8 @@
-// xenonet-launcher 2 (protocol 1)
+// xenonet-launcher 3 (protocol 1)
 //
 // XenoNet's stable command launcher, at <state>/runtime/launcher/cli/xenonet.js
-// beside a node of its own. Claude Code's and Codex's hooks and MCP
-// servers, the xenonet command on PATH, other programs' command lines and
+// beside a node of its own. Claude Code's, Codex's and Grok Build's hooks
+// and MCP servers, the xenonet command on PATH, other programs' command lines and
 // OpenAI's tunnel-client all run this path, so it never moves, and what
 // they run doesn't change when XenoNet's components do
 // (docs/design/contracts.md, section 12). XenoNet writes it again only when
@@ -23,7 +23,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 
-const LAUNCHER = 2;
+const LAUNCHER = 3;
 const PROTOCOL = 1;
 const dir = path.resolve(__dirname, "../..");
 const args = process.argv.slice(2);
@@ -40,9 +40,13 @@ function tools() {
 }
 
 // A hook: the event on stdin goes to XenoNet's /api/hook/<app>, and what
-// XenoNet answers goes to stdout, the hook output format both apps read.
+// XenoNet answers goes to stdout, the hook output format the apps read.
+// Grok Build runs Claude Code's hooks too, and says so in GROK_HOOK_EVENT:
+// the Claude Code one stays quiet there, since Grok's own speaks for the
+// session. Grok's own gets its session and event from the environment when
+// the event doesn't say them (cli/commands/hook.js does the same).
 async function hook(app) {
-  app = app === "claude" ? "claude" : "codex";
+  app = app === "claude" || app === "grok" ? app : "codex";
   const flag = args.indexOf("--port");
   const port = Number(flag >= 0 ? args[flag + 1] : process.env.XENONET_PORT) || 47840;
   let input = "";
@@ -50,10 +54,25 @@ async function hook(app) {
   try {
     process.stdin.setEncoding("utf8");
     for await (const chunk of process.stdin) input += chunk;
+    if (app === "claude" && process.env.GROK_HOOK_EVENT) return process.exit(0);
+    if (app === "grok") input = withGrokEnv(input);
     const res = await fetch(`http://127.0.0.1:${port}/api/hook/${app}`, { method: "POST", headers: { "content-type": "application/json" }, body: input || "{}", signal: AbortSignal.timeout(4000) });
     if (res.status === 200) out = await res.text();
   } catch {}
   process.stdout.write(out, () => process.exit(0));
+}
+
+function withGrokEnv(input) {
+  let body;
+  try {
+    body = JSON.parse(input || "{}");
+  } catch {
+    return input;
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return input;
+  if (!body.sessionId && process.env.GROK_SESSION_ID) body.sessionId = process.env.GROK_SESSION_ID;
+  if (!body.hookEventName && process.env.GROK_HOOK_EVENT) body.hookEventName = process.env.GROK_HOOK_EVENT;
+  return JSON.stringify(body);
 }
 
 if (args[0] === "hook" && typeof fetch === "function") {

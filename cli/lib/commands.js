@@ -24,14 +24,14 @@ export const COMMANDS = {
   theme: { about: "The console's look and sound: list, switch, or make your own", args: "[id]" },
   film: { about: "Render a film of today to an MP4, in a hidden window" },
   script: { about: "Save what you did in XenoNet Dev as a script, and run scripts", args: "<record|run> [file]" },
-  connect: { about: "Let Claude Code and Codex sessions see and message each other", args: "[claude] [codex]" },
-  disconnect: { about: "Take XenoNet out of Claude Code's and Codex's settings" },
+  connect: { about: "Let Claude Code, Codex and Grok Build sessions see and message each other", args: "[claude] [codex] [grok]" },
+  disconnect: { about: "Take XenoNet out of Claude Code's, Codex's and Grok Build's settings" },
   console: { about: "Control installed XenoNet or a development instance", args: "<steps…>" },
   install: { about: "Put the xenonet command on your PATH" },
   uninstall: { about: "Take the xenonet command off your PATH" },
   completion: { about: "Tab completion for zsh or bash", args: "<zsh|bash>" },
   mcp: { about: "Run the xenonet MCP server (Claude Code and Codex start it)", hidden: true },
-  hook: { about: "Pass a Claude Code or Codex hook to XenoNet (their settings run it)", args: "<claude|codex>", hidden: true },
+  hook: { about: "Pass a Claude Code, Codex or Grok Build hook to XenoNet (their settings run it)", args: "<claude|codex|grok>", hidden: true },
   relay: { about: "Stream this XenoNet's map to a console on another machine (consoles run it over SSH)", hidden: true },
 };
 

@@ -585,11 +585,17 @@ one is a new version of it beside the old, never an edit:
   `disconnect --yes --port <n>`. Without Tools, any form but `hook`
   exits 1 with one line on stderr.
 - `XENONET_PORT` says which XenoNet; each instance has its own port
-  (`core/instances.js`). Hook routes are `/api/hook/claude` and
-  `/api/hook/codex`; a change to what they take is a new route beside
-  them.
-- Entries in Claude Code's and Codex's settings belong to the XenoNet whose
-  port they name. Connecting or disconnecting one XenoNet changes its own
+  (`core/instances.js`). Hook routes are `/api/hook/claude`,
+  `/api/hook/codex` and `/api/hook/grok` (added 2026-10-10, with launcher
+  3, whose `hook grok` posts there and adds the session and event from
+  Grok's hook environment when the event doesn't say them); a change to
+  what they take is a new route beside them.
+- Entries in Claude Code's, Codex's and Grok Build's settings belong to
+  the XenoNet whose port they name. Grok Build's are XenoNet's own hook
+  file, `~/.grok/hooks/xenonet.json`, shared by every XenoNet as Codex's
+  `hooks.json` is, and `[mcp_servers.<name>]` tables in
+  `~/.grok/config.toml`, written with the rest of the file kept byte for
+  byte (`core/engine/toml.js`). Connecting or disconnecting one XenoNet changes its own
   and those whose files are gone, never another live XenoNet's. MCP
   servers are named by instance: `xenonet` and `xenonet-console` for the
   installed XenoNet, `xenonet-<instance>` (`xenonet-dev`) for the others.

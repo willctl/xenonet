@@ -437,7 +437,7 @@ export const CHECKS = [
       const a = ctx.connect?.apps.find((x) => x.app === app);
       if (!a) return skip("needs XenoNet running");
       const states = a.changes.map((c) => c.state);
-      if (states.every((s) => s === "missing")) return info("not connected, so these sessions can't see or message each other through XenoNet", "Connect them from XenoNet's palette (Connect Claude Code and Codex to XenoNet), or run xenonet connect.");
+      if (states.every((s) => s === "missing")) return info("not connected, so these sessions can't see or message each other through XenoNet", "Connect them from XenoNet's palette (Connect your agents to XenoNet), or run xenonet connect.");
       const stale = a.changes.filter((c) => c.state !== "present");
       if (stale.length) return warn(`partly connected (${stale.map((c) => `${c.id} ${c.state}`).join(", ")})`, "Run xenonet connect again.");
       if (a.broken?.length) return fail(`connected, but ${a.broken.join("; ")}`, "Run xenonet connect again.");

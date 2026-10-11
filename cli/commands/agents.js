@@ -6,7 +6,7 @@ import path from "node:path";
 import { c, print, json, ago, clip, width } from "../lib/out.js";
 import { need, get } from "../../core/client.js";
 
-export const help = `The Claude Code and Codex sessions at work in the last two hours: whether
+export const help = `The Claude Code, Codex and Grok Build sessions at work in the last two hours: whether
 each is working, where (project, branch), what it says it's doing, and the
 files it's editing or has claimed. Connected sessions (xenonet connect) can
 see and message each other. The actors at work (xenonet actors) follow,

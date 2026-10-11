@@ -5,7 +5,8 @@
 //
 //   1. A request in a Claude Code session's name must come from a Claude
 //      Code process or from under one (its MCP server, its hooks, its
-//      shell), and a Codex thread's from a Codex process or from under it.
+//      shell), a Codex thread's from a Codex process or from under it, and
+//      a Grok Build session's from a grok process or from under it.
 //   2. Claude Code sends its HTTP hooks from its own process, which makes
 //      them the word on which process holds which session: when that
 //      process is signed by Anthropic, they pin the session to it (its pid
@@ -188,6 +189,20 @@ export function createVerifier({ procs, store, home = null, now = () => Date.now
     return { ok: true, checked: true, root };
   }
 
+  // The session of `app` the process a request comes from runs under
+  // holds: the one most lately pinned to the nearest process of that app
+  // above it, by the app's hooks (check). Null where XenoNet can't look, or
+  // no such process holds one. For an MCP server that can't say which
+  // session it serves (Grok Build's, when its environment doesn't say).
+  async function holding(socket, app) {
+    if (!APP[app] || !procs.supported) return null;
+    const { chain } = await see(socket);
+    const holder = chain.find((p) => p.agent === app);
+    if (!holder) return null;
+    const pins = store.pinnedTo(holder.pid).filter((p) => p.start === holder.start && String(p.agent).startsWith(`${app}:`));
+    return pins.sort((a, b) => b.at - a.at)[0]?.agent ?? null;
+  }
+
   // Requests only you make (connecting your agents, removing actors): not
   // from any agent, nor from under an actor product's processes. The nearer
   // of one of those and XenoNet's own app decides, so a claude run in XenoNet's
@@ -339,5 +354,5 @@ export function createVerifier({ procs, store, home = null, now = () => Date.now
     return { ...refuse(agent, reason), unseen: true };
   }
 
-  return { check, person, window, desktop, actor, register, peer, lineage, state };
+  return { check, person, window, desktop, actor, register, peer, lineage, holding, state };
 }

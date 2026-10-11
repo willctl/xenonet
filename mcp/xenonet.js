@@ -1,12 +1,18 @@
 // The xenonet MCP server: the engine's tools for the sessions on this
 // machine, so each can see who else is at work and on what, message the
-// others and claim files. Claude Code and Codex start it as `xenonet mcp`
+// others and claim files. Claude Code, Codex and Grok Build start it as `xenonet mcp`
 // (XenoNet adds it to their settings when you connect your agents; see
 // core/engine/connect.js), and it passes each call to the running XenoNet's
 // engine (core/engine/engine.js) over HTTP, saying which agent is calling:
 // Claude Code gives its MCP servers the session's id in
 // CLAUDE_CODE_SESSION_ID, and Codex puts the thread's id in each call's
-// _meta. `node mcp/xenonet.js` runs it too.
+// _meta. Grok Build is asked to put its session's id in
+// XENONET_GROK_SESSION (connect.js writes {{session_id}} there, which Grok
+// fills in for a remote server's headers and may for a local one's
+// environment); when it doesn't, the server says only that a grok is
+// calling, and XenoNet finds the session from the process the call comes
+// from, which Grok's hooks named (core/engine/verify.js's holding). `node
+// mcp/xenonet.js` runs it too.
 //
 // XENONET_PORT says which XenoNet to talk to: 47840 for XenoNet, 47842 for XenoNet
 // Dev.
@@ -33,7 +39,7 @@ const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.ur
 const PORT = Number(process.env.XENONET_PORT) || 47840;
 const XENONET = { base: `http://127.0.0.1:${PORT}` };
 
-const INSTRUCTIONS = `Each Claude Code and Codex session on this machine, you included, can reach the others through XenoNet. Several sessions often work in the same repo at once, sometimes in the same working tree. With these tools you can see who they are and what they're doing (peers, who_has), message them (send, inbox), and claim files before you change them (claim, release, focus). If a tool fails, doctor says what's wrong with XenoNet's setup.
+const INSTRUCTIONS = `Each Claude Code, Codex and Grok Build session on this machine, you included, can reach the others through XenoNet. Several sessions often work in the same repo at once, sometimes in the same working tree. With these tools you can see who they are and what they're doing (peers, who_has), message them (send, inbox), and claim files before you change them (claim, release, focus). If a tool fails, doctor says what's wrong with XenoNet's setup.
 
 XenoNet also tells you things through hooks. When you start, it says who else works in the repo. Before you edit a file another session is working on, it warns you. It passes on messages as they arrive.
 
@@ -78,14 +84,26 @@ async function asActor(method, route, body) {
   }
 }
 
-// Who's calling: Claude Code's session, then Codex's thread, then the
-// actor whose token this server has.
+// A Grok Build session's id, where Grok gives one: in the environment
+// connect.js asked for, a session id Grok puts in its children's, or the
+// call's _meta. A placeholder Grok didn't fill in isn't one.
+export function grokSession(env = process.env, meta = {}) {
+  const ok = (v) => typeof v === "string" && /^[0-9A-Za-z][0-9A-Za-z-]{6,}$/.test(v) && !v.includes("{");
+  return [env.XENONET_GROK_SESSION, env.GROK_SESSION_ID, meta.sessionId, meta["x.ai/sessionId"]].find(ok) ?? null;
+}
+
+// Who's calling: Claude Code's session, then Codex's thread, then Grok
+// Build's session (or a grok that can't say which: XenoNet finds it), then
+// the actor whose token this server has.
 function caller(ctx) {
   const claude = process.env.CLAUDE_CODE_SESSION_ID;
   if (claude) return { id: `claude:${claude}`, app: "claude" };
   const meta = ctx?.mcpReq?._meta ?? {};
   const thread = meta.threadId ?? meta["x-codex-turn-metadata"]?.thread_id ?? process.env.CODEX_THREAD_ID;
   if (thread) return { id: `codex:${thread}`, app: "codex" };
+  const grok = grokSession(process.env, meta);
+  if (grok) return { id: `grok:${grok}`, app: "grok" };
+  if (process.env.XENONET_GROK_SESSION != null) return { id: "grok", app: "grok" };
   if (servesActor()) return { actor: true };
   return null;
 }
@@ -94,11 +112,11 @@ const text = (data) => ({ content: [{ type: "text", text: JSON.stringify(data, n
 
 async function call(op, ctx, body = {}) {
   const me = caller(ctx);
-  if (!me) throw new Error("XenoNet can't tell which session is calling; these tools work from Claude Code and Codex");
+  if (!me) throw new Error("XenoNet can't tell which session is calling; these tools work from Claude Code, Codex and Grok Build");
   if (me.actor) return text(await asActor("POST", `/api/engine/${op}`, body));
   try {
     // The agent's own process, so XenoNet can tell when it's gone: Claude Code
-    // says which in CLAUDE_PID; Codex is this server's parent.
+    // says which in CLAUDE_PID; Codex and Grok Build are this server's parent.
     return text(await post(XENONET, `/api/engine/${op}`, { ...body, cwd: process.env.CLAUDE_PROJECT_DIR ?? process.cwd(), pid: Number(process.env.CLAUDE_PID) || process.ppid }, { "x-xenonet-agent": me.id }));
   } catch (err) {
     if (err.status) throw err;
@@ -141,7 +159,7 @@ const actorTarget = z.object({
 // The actor's own tools answer only the actor: a Codex session that got
 // its environment is still a Codex session.
 async function asActorOnly(ctx, method, route, body) {
-  if (!caller(ctx)?.actor) throw new Error("these tools are an actor's own, and a Claude Code or Codex session isn't one");
+  if (!caller(ctx)?.actor) throw new Error("these tools are an actor's own, and a Claude Code, Codex or Grok Build session isn't one");
   return text(await asActor(method, route, body));
 }
 
@@ -252,7 +270,7 @@ function buildServer(actor = null) {
     "doctor",
     {
       title: "Check XenoNet's setup",
-      description: "Whether what XenoNet needs is in place on this machine: XenoNet itself, Claude Code and Codex installed and signed in, the folders XenoNet reads, git, and whether Claude Code and Codex are connected. Lists only what isn't fine, each with a fix for your user. Use it when XenoNet's other tools fail.",
+      description: "Whether what XenoNet needs is in place on this machine: XenoNet itself, Claude Code, Codex and Grok Build installed and signed in, the folders XenoNet reads, git, and whether they're connected. Lists only what isn't fine, each with a fix for your user. Use it when XenoNet's other tools fail.",
       inputSchema: z.object({}),
       annotations: read,
     },

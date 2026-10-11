@@ -1,5 +1,5 @@
-// xenonet connect: adds XenoNet to Claude Code's and Codex's settings, so their
-// sessions can see and message each other (core/engine/connect.js, through
+// xenonet connect: adds XenoNet to Claude Code's, Codex's and Grok Build's
+// settings, so their sessions can see and message each other (core/engine/connect.js, through
 // the running XenoNet, which knows how its agents' tools should run). It shows
 // what will change and asks first.
 import path from "node:path";
@@ -11,14 +11,16 @@ import { createConnect } from "../../core/engine/connect.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-export const help = `Adds XenoNet to Claude Code's and Codex's own settings: the xenonet MCP server
-(tools so each session can see the others, message them and claim files)
-and hooks (XenoNet says who else is working when a session starts, warns before
-an edit to a file another session has in hand, and passes on messages). It
-shows what will change and asks first. xenonet disconnect takes it all out
-again.
+export const help = `Adds XenoNet to Claude Code's, Codex's and Grok Build's own settings: the
+xenonet MCP server (tools so each session can see the others, message them
+and claim files) and hooks (XenoNet says who else is working when a session
+starts, warns before an edit to a file another session has in hand, and
+passes on messages). It shows what will change and asks first. xenonet
+disconnect takes it all out again.
 
-  xenonet connect [claude] [codex]   both unless you name one
+  xenonet connect [claude] [codex] [grok]
+                                   all three unless you name some; Grok Build
+                                   only once it's installed
   --yes                            don't ask
   --json                           the connection's state as JSON, changing nothing
   --here --port <n>                for a XenoNet whose service runs on another machine
@@ -27,10 +29,13 @@ again.
                                    settings and run through its own launcher, and
                                    only that XenoNet's are changed`;
 
+// Names as a sentence lists them: "Claude Code, Codex and Grok Build".
+export const listed = (names) => (names.length < 3 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
+
 // How each change shows: its mark, color and what happens to it.
 const LOOK = { present: ["✓", "green", "already in place"], missing: ["+", "yellow", "to add"], different: ["~", "yellow", "to update"], remove: ["-", "red", "to take out"] };
 
-export function render(preview, { apps = ["claude", "codex"] } = {}) {
+export function render(preview, { apps = ["claude", "codex", "grok"] } = {}) {
   for (const a of preview.apps.filter((x) => apps.includes(x.app))) {
     print(c.bold(a.name));
     for (const ch of a.changes) {
@@ -59,39 +64,47 @@ export async function confirm(question, flags) {
 // The XenoNet on that port runs elsewhere, so it can't write this computer's
 // settings: they're written here, as disconnect writes them with no XenoNet
 // running, with this computer's launcher and that XenoNet's port.
-async function here(apps, flags) {
+async function here(named, flags) {
   if (!flags.port) throw new Fail("--here needs --port: the port the other XenoNet answers on here", 2);
   const port = candidates(flags)[0];
   const local = createConnect({ port, root: process.env.XENONET_LAUNCHER_ROOT || ROOT, exec: process.env.XENONET_LAUNCHER_EXEC || process.execPath });
   const preview = await local.preview();
+  const apps = named ?? installed(preview);
   if (flags.json) return json(preview);
   const todo = preview.apps.filter((a) => apps.includes(a.app) && (a.changes.some((ch) => ch.state !== "present") || a.broken?.length));
   const who = `the XenoNet on port ${port}`;
   render(preview, { apps });
   if (!todo.length) return print(c.green(`Already connected to ${who}.`));
-  if (!(await confirm(`Connect ${todo.map((a) => a.name).join(" and ")} here to ${who}?`, flags))) return print(c.dim("Nothing changed."));
+  if (!(await confirm(`Connect ${listed(todo.map((a) => a.name))} here to ${who}?`, flags))) return print(c.dim("Nothing changed."));
   const after = await local.apply(todo.map((a) => a.app));
   const left = after.apps.filter((a) => apps.includes(a.app)).flatMap((a) => a.changes.filter((ch) => ch.state !== "present").map((ch) => `${a.name}: ${ch.what}`));
   if (left.length) throw new Fail(`some changes didn't take: ${left.join("; ")}. xenonet doctor says more.`);
-  print(`${c.green("✓")} Connected ${todo.map((a) => a.name).join(" and ")} to ${who}. While nothing answers there, its hooks stay out of the way.`);
+  print(`${c.green("✓")} Connected ${listed(todo.map((a) => a.name))} to ${who}. While nothing answers there, its hooks stay out of the way.`);
 }
 
+// The apps connecting everything takes in: Claude Code and Codex, and
+// Grok Build once it's here.
+export const installed = (preview) => preview.apps.filter((a) => a.app !== "grok" || a.installed).map((a) => a.app);
+
+const NAMES = { "claude-code": "claude", "grok-build": "grok" };
+
 export async function run(names, flags) {
-  const apps = names.length ? names.map((n) => (n === "claude-code" ? "claude" : n)) : ["claude", "codex"];
-  const bad = apps.filter((a) => a !== "claude" && a !== "codex");
-  if (bad.length) throw new Fail(`connect works with claude and codex, not ${bad.join(", ")}`, 2);
-  if (flags.here) return here(apps, flags);
+  const named = names.length ? names.map((n) => NAMES[n] ?? n) : null;
+  const bad = (named ?? []).filter((a) => !["claude", "codex", "grok"].includes(a));
+  if (bad.length) throw new Fail(`connect works with claude, codex and grok, not ${bad.join(", ")}`, 2);
+  if (flags.here) return here(named, flags);
   const s = await need(flags);
   const preview = await get(s, "/api/engine/connect");
   if (flags.json) return json(preview);
-  if (preview.demo) throw new Fail(`${nameOf(s)} shows made-up data, so it can't connect Claude Code and Codex. Use XenoNet or XenoNet Dev.`);
+  if (preview.demo) throw new Fail(`${nameOf(s)} shows made-up data, so it can't connect Claude Code, Codex and Grok Build. Use XenoNet or XenoNet Dev.`);
+  const apps = named ?? installed(preview);
   const todo = preview.apps.filter((a) => apps.includes(a.app) && (a.changes.some((ch) => ch.state !== "present") || a.broken?.length));
   if (!todo.length) {
     render(preview, { apps });
     return print(c.green(`Already connected to ${nameOf(s)}.`));
   }
   render(preview, { apps });
-  const who = todo.map((a) => a.name).join(" and ");
+  const who = listed(todo.map((a) => a.name));
   if (!(await confirm(`Connect ${who} to ${nameOf(s)}?`, flags))) return print(c.dim("Nothing changed."));
   const after = await post(s, "/api/engine/connect", { apps: todo.map((a) => a.app) });
   const left = after.apps.filter((a) => apps.includes(a.app)).flatMap((a) => a.changes.filter((ch) => ch.state !== "present").map((ch) => `${a.name}: ${ch.what}`));

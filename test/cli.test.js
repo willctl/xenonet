@@ -242,7 +242,7 @@ test("xenonet connect --here: a XenoNet answering through a forwarded port is co
     assert.equal(r.code, 0, r.stderr);
     const preview = JSON.parse(r.stdout);
     assert.equal(preview.port, s.port, "that XenoNet's entries, by its port");
-    assert.deepEqual(preview.apps.map((a) => a.app), ["claude", "codex"]);
+    assert.deepEqual(preview.apps.map((a) => a.app), ["claude", "codex", "grok"]);
     assert.ok(preview.apps.every((a) => a.changes.length), "what would be added here");
     assert.deepEqual(s.seen, [], "the XenoNet on that port is never asked: it would write its own computer's settings");
   } finally {
