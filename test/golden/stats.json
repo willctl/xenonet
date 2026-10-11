@@ -1622,6 +1622,334 @@
    "unpriced": []
   }
  },
+ "grok:0190d3e0-0000-7000-8000-000000000015": {
+  "id": "grok:0190d3e0-0000-7000-8000-000000000015",
+  "app": "grok",
+  "from": 1791028140000,
+  "to": 1791028809000,
+  "activeMs": 500000,
+  "totals": {
+   "calls": 2,
+   "input": 80,
+   "cacheRead": 105221,
+   "cacheWrite": 0,
+   "output": 1288,
+   "tokens": 106589,
+   "cost": 0.0604985,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 80,
+    "cost": 0.00016
+   },
+   "cacheRead": {
+    "tokens": 105221,
+    "cost": 0.052610500000000004
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": 0
+   },
+   "output": {
+    "tokens": 1288,
+    "cost": 0.007728
+   }
+  },
+  "models": [
+   {
+    "model": "grok-4.6",
+    "calls": 2,
+    "tokens": 106589,
+    "cost": 0.0604985,
+    "priced": true,
+    "from": 1791028390000,
+    "to": 1791028690000,
+    "efforts": []
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791028140000,
+    "end": 1791028390000,
+    "prompt": "Add a dark mode to the storefront. Follow the system setting, with a toggle in the header.",
+    "tokens": 51643,
+    "cost": 0.030270500000000002,
+    "byModel": {
+     "grok-4.6": {
+      "tokens": 51643,
+      "cost": 0.030270500000000002
+     }
+    },
+    "tools": 4,
+    "errors": 0
+   },
+   {
+    "n": 2,
+    "start": 1791028440000,
+    "end": 1791028690000,
+    "prompt": "Add a dark mode to the storefront. Follow the system setting, with a toggle in the header.",
+    "tokens": 54946,
+    "cost": 0.030227999999999998,
+    "byModel": {
+     "grok-4.6": {
+      "tokens": 54946,
+      "cost": 0.030227999999999998
+     }
+    },
+    "tools": 4,
+    "errors": 0
+   },
+   {
+    "n": 3,
+    "start": 1791028809000,
+    "end": 1791028809000,
+    "prompt": "Now the checkout page.",
+    "tokens": 0,
+    "cost": 0,
+    "byModel": {},
+    "tools": 1,
+    "errors": 0
+   }
+  ],
+  "tools": [
+   {
+    "name": "run_terminal_command",
+    "category": "shell",
+    "server": null,
+    "calls": 3,
+    "errors": 0,
+    "ms": 6000
+   },
+   {
+    "name": "read_file",
+    "category": "read",
+    "server": null,
+    "calls": 2,
+    "errors": 0,
+    "ms": 6000
+   },
+   {
+    "name": "search_replace",
+    "category": "edit",
+    "server": null,
+    "calls": 2,
+    "errors": 0,
+    "ms": 6000
+   },
+   {
+    "name": "spawn_subagent",
+    "category": "agent",
+    "server": null,
+    "calls": 2,
+    "errors": 0,
+    "ms": 6000
+   }
+  ],
+  "subagents": [],
+  "context": [
+   {
+    "t": 1791028390000,
+    "used": 50845,
+    "window": 500000
+   },
+   {
+    "t": 1791028690000,
+    "used": 54456,
+    "window": 500000
+   }
+  ],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ },
+ "grok:0190d3e0-0000-7000-8000-000000000016": {
+  "id": "grok:0190d3e0-0000-7000-8000-000000000016",
+  "app": "grok",
+  "from": 1791024100000,
+  "to": 1791024250000,
+  "activeMs": 150000,
+  "totals": {
+   "calls": 1,
+   "input": 40,
+   "cacheRead": 51602,
+   "cacheWrite": 0,
+   "output": 338,
+   "tokens": 51980,
+   "cost": 0.027909,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 40,
+    "cost": 0.00008
+   },
+   "cacheRead": {
+    "tokens": 51602,
+    "cost": 0.025801
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": 0
+   },
+   "output": {
+    "tokens": 338,
+    "cost": 0.002028
+   }
+  },
+  "models": [
+   {
+    "model": "grok-4.6",
+    "calls": 1,
+    "tokens": 51980,
+    "cost": 0.027909,
+    "priced": true,
+    "from": 1791024250000,
+    "to": 1791024250000,
+    "efforts": []
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791024100000,
+    "end": 1791024250000,
+    "prompt": "Write down the depot's loading rules as constraints the solver can use.",
+    "tokens": 51980,
+    "cost": 0.027909,
+    "byModel": {
+     "grok-4.6": {
+      "tokens": 51980,
+      "cost": 0.027909
+     }
+    },
+    "tools": 2,
+    "errors": 0
+   }
+  ],
+  "tools": [
+   {
+    "name": "read_file",
+    "category": "read",
+    "server": null,
+    "calls": 1,
+    "errors": 0,
+    "ms": 3000
+   },
+   {
+    "name": "mcp__agent-wiki__wiki_log",
+    "category": "mcp",
+    "server": "agent-wiki",
+    "calls": 1,
+    "errors": 0,
+    "ms": 3000
+   }
+  ],
+  "subagents": [],
+  "context": [
+   {
+    "t": 1791024250000,
+    "used": 51642,
+    "window": 500000
+   }
+  ],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ },
+ "grok:0190d3e0-0000-7000-8000-000000000017": {
+  "id": "grok:0190d3e0-0000-7000-8000-000000000017",
+  "app": "grok",
+  "from": 1791028470000,
+  "to": 1791028570000,
+  "activeMs": 100000,
+  "totals": {
+   "calls": 1,
+   "input": 40,
+   "cacheRead": 54438,
+   "cacheWrite": 0,
+   "output": 679,
+   "tokens": 55157,
+   "cost": 0.031373,
+   "unpricedCalls": 0
+  },
+  "kinds": {
+   "input": {
+    "tokens": 40,
+    "cost": 0.00008
+   },
+   "cacheRead": {
+    "tokens": 54438,
+    "cost": 0.027219
+   },
+   "cacheWrite": {
+    "tokens": 0,
+    "cost": 0
+   },
+   "output": {
+    "tokens": 679,
+    "cost": 0.004074
+   }
+  },
+  "models": [
+   {
+    "model": "grok-4.6",
+    "calls": 1,
+    "tokens": 55157,
+    "cost": 0.031373,
+    "priced": true,
+    "from": 1791028570000,
+    "to": 1791028570000,
+    "efforts": []
+   }
+  ],
+  "turns": [
+   {
+    "n": 1,
+    "start": 1791028470000,
+    "end": 1791028570000,
+    "prompt": "Check contrast on every page in dark mode.",
+    "tokens": 55157,
+    "cost": 0.031373,
+    "byModel": {
+     "grok-4.6": {
+      "tokens": 55157,
+      "cost": 0.031373
+     }
+    },
+    "tools": 1,
+    "errors": 0
+   }
+  ],
+  "tools": [
+   {
+    "name": "run_terminal_command",
+    "category": "shell",
+    "server": null,
+    "calls": 1,
+    "errors": 0,
+    "ms": 3000
+   }
+  ],
+  "subagents": [],
+  "context": [
+   {
+    "t": 1791028570000,
+    "used": 54478,
+    "window": 500000
+   }
+  ],
+  "compactions": [],
+  "pricing": {
+   "checked": "2026-10-03",
+   "unpriced": []
+  }
+ },
  "claude:0190d3e0-0000-7000-8000-0000000000e1": {
   "id": "claude:0190d3e0-0000-7000-8000-0000000000e1",
   "app": "claude",

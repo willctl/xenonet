@@ -12,10 +12,10 @@
     "fy": null,
     "fz": null,
     "pinned": false,
-    "sessionCount": 14,
-    "activeCount": 5,
-    "lastActivity": 1791028804000,
-    "lastSessionAt": 1791028804000,
+    "sessionCount": 17,
+    "activeCount": 7,
+    "lastActivity": 1791028809000,
+    "lastSessionAt": 1791028809000,
     "actions": []
    },
    {
@@ -192,10 +192,10 @@
     "fy": null,
     "fz": null,
     "pinned": false,
-    "sessionCount": 1,
-    "activeCount": 1,
-    "lastActivity": 1791028640000,
-    "lastSessionAt": 1791028640000,
+    "sessionCount": 3,
+    "activeCount": 3,
+    "lastActivity": 1791028809000,
+    "lastSessionAt": 1791028809000,
     "active": true,
     "actions": [
      {
@@ -705,7 +705,7 @@
     "fy": null,
     "fz": null,
     "pinned": false,
-    "sessionCount": 2,
+    "sessionCount": 3,
     "activeCount": 1,
     "lastActivity": 1791028690000,
     "lastSessionAt": 1791028690000,
@@ -1607,6 +1607,159 @@
     }
    },
    {
+    "id": "grok:0190d3e0-0000-7000-8000-000000000015",
+    "app": "grok",
+    "rawId": "0190d3e0-0000-7000-8000-000000000015",
+    "desktopId": null,
+    "inDesktop": false,
+    "title": "Add dark mode to the storefront",
+    "preview": "Add a dark mode to the storefront. Follow the system setting, with a toggle in the header.",
+    "cwd": "<world>/home/Projects/atlas-web",
+    "worktree": null,
+    "createdAt": 1791018009000,
+    "updatedAt": 1791028809000,
+    "archived": false,
+    "starred": false,
+    "model": "grok-4.6",
+    "branch": "feat/dark-mode",
+    "status": null,
+    "source": null,
+    "nativeProjectId": null,
+    "parentId": null,
+    "parentKind": null,
+    "claudeAccount": null,
+    "kind": "session",
+    "activity": "active",
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "actions": [
+     {
+      "id": "preview",
+      "label": "Preview transcript",
+      "client": true
+     },
+     {
+      "id": "stats",
+      "label": "Stats",
+      "client": true
+     },
+     {
+      "id": "handoff",
+      "label": "Hand off…",
+      "client": true
+     },
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     }
+    ],
+    "ranAs": null
+   },
+   {
+    "id": "grok:0190d3e0-0000-7000-8000-000000000016",
+    "app": "grok",
+    "rawId": "0190d3e0-0000-7000-8000-000000000016",
+    "desktopId": null,
+    "inDesktop": false,
+    "title": "Map the depot loading rules",
+    "preview": "Write down the depot's loading rules as constraints the solver can use.",
+    "cwd": "<world>/home/Projects/pathfinder",
+    "worktree": null,
+    "createdAt": 1791013450000,
+    "updatedAt": 1791024250000,
+    "archived": false,
+    "starred": false,
+    "model": "grok-4.6",
+    "branch": null,
+    "status": null,
+    "source": null,
+    "nativeProjectId": null,
+    "parentId": null,
+    "parentKind": null,
+    "claudeAccount": null,
+    "kind": "session",
+    "activity": "recent",
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "actions": [
+     {
+      "id": "preview",
+      "label": "Preview transcript",
+      "client": true
+     },
+     {
+      "id": "stats",
+      "label": "Stats",
+      "client": true
+     },
+     {
+      "id": "handoff",
+      "label": "Hand off…",
+      "client": true
+     },
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     }
+    ],
+    "ranAs": null
+   },
+   {
+    "id": "grok:0190d3e0-0000-7000-8000-000000000017",
+    "app": "grok",
+    "rawId": "0190d3e0-0000-7000-8000-000000000017",
+    "desktopId": null,
+    "inDesktop": false,
+    "title": "Check contrast on every page",
+    "preview": "Check contrast on every page in dark mode.",
+    "cwd": "<world>/home/Projects/atlas-web",
+    "worktree": null,
+    "createdAt": 1791017770000,
+    "updatedAt": 1791028570000,
+    "archived": false,
+    "starred": false,
+    "model": "grok-4.6",
+    "branch": null,
+    "status": null,
+    "source": "subagent",
+    "nativeProjectId": null,
+    "parentId": "grok:0190d3e0-0000-7000-8000-000000000015",
+    "parentKind": "subagent",
+    "claudeAccount": null,
+    "kind": "session",
+    "activity": "active",
+    "fx": null,
+    "fy": null,
+    "fz": null,
+    "pinned": false,
+    "actions": [
+     {
+      "id": "preview",
+      "label": "Preview transcript",
+      "client": true
+     },
+     {
+      "id": "stats",
+      "label": "Stats",
+      "client": true
+     },
+     {
+      "id": "handoff",
+      "label": "Hand off…",
+      "client": true
+     },
+     {
+      "id": "open-folder",
+      "label": "Open folder"
+     }
+    ],
+    "ranAs": null
+   },
+   {
     "id": "zone:codex-projectless",
     "kind": "zone",
     "name": "Codex without a project",
@@ -1960,6 +2113,21 @@
     "kind": "session"
    },
    {
+    "source": "project:<world>/home/projects/atlas-web",
+    "target": "grok:0190d3e0-0000-7000-8000-000000000015",
+    "kind": "session"
+   },
+   {
+    "source": "project:<world>/home/projects/pathfinder",
+    "target": "grok:0190d3e0-0000-7000-8000-000000000016",
+    "kind": "session"
+   },
+   {
+    "source": "grok:0190d3e0-0000-7000-8000-000000000015",
+    "target": "grok:0190d3e0-0000-7000-8000-000000000017",
+    "kind": "lineage"
+   },
+   {
     "source": "core",
     "target": "resource:agent-wiki",
     "kind": "wiki"
@@ -2037,11 +2205,11 @@
    "dirtyRepos": 3,
    "projects": 9,
    "groups": 1,
-   "sessions": 14,
+   "sessions": 17,
    "claude": 7,
    "codex": 7,
-   "grok": 0,
-   "active": 5,
+   "grok": 3,
+   "active": 7,
    "archived": 0
   },
   "identities": [
@@ -2062,7 +2230,7 @@
     "seenAt": 1791028830000,
     "name": null,
     "hidden": false,
-    "sessions": 10,
+    "sessions": 13,
     "projects": 5
    },
    {
@@ -2081,7 +2249,7 @@
     "seenAt": 1791028830000,
     "name": "work",
     "hidden": false,
-    "sessions": 7,
+    "sessions": 9,
     "projects": 5
    },
    {
@@ -2100,7 +2268,7 @@
     "seenAt": 1791028830000,
     "name": "work",
     "hidden": false,
-    "sessions": 7,
+    "sessions": 9,
     "projects": 4
    },
    {
@@ -2140,8 +2308,27 @@
     "seenAt": 1791028830000,
     "name": "orbit",
     "hidden": false,
-    "sessions": 4,
+    "sessions": 5,
     "projects": 4
+   },
+   {
+    "id": "git:8bed4c8b3ce0bd80",
+    "kind": "git",
+    "handle": "hello@orbitworks.example",
+    "detail": {
+     "name": "Orbit"
+    },
+    "signedIn": false,
+    "active": false,
+    "sources": [
+     "git config"
+    ],
+    "firstSeen": 1791028830000,
+    "seenAt": 1791028830000,
+    "name": "orbit",
+    "hidden": false,
+    "sessions": 4,
+    "projects": 3
    },
    {
     "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
@@ -2162,25 +2349,6 @@
     "hidden": false,
     "sessions": 4,
     "projects": 0
-   },
-   {
-    "id": "git:8bed4c8b3ce0bd80",
-    "kind": "git",
-    "handle": "hello@orbitworks.example",
-    "detail": {
-     "name": "Orbit"
-    },
-    "signedIn": false,
-    "active": false,
-    "sources": [
-     "git config"
-    ],
-    "firstSeen": 1791028830000,
-    "seenAt": 1791028830000,
-    "name": "orbit",
-    "hidden": false,
-    "sessions": 3,
-    "projects": 3
    },
    {
     "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
@@ -2255,7 +2423,7 @@
     "name": "grok",
     "ok": true,
     "ms": 0,
-    "count": 0
+    "count": 3
    },
    {
     "name": "live",
@@ -2303,7 +2471,7 @@
     "seenAt": 1791028830000,
     "name": null,
     "hidden": false,
-    "sessions": 10,
+    "sessions": 13,
     "projects": 5
    },
    {
@@ -2322,7 +2490,7 @@
     "seenAt": 1791028830000,
     "name": "work",
     "hidden": false,
-    "sessions": 7,
+    "sessions": 9,
     "projects": 5
    },
    {
@@ -2341,7 +2509,7 @@
     "seenAt": 1791028830000,
     "name": "work",
     "hidden": false,
-    "sessions": 7,
+    "sessions": 9,
     "projects": 4
    },
    {
@@ -2381,8 +2549,27 @@
     "seenAt": 1791028830000,
     "name": "orbit",
     "hidden": false,
-    "sessions": 4,
+    "sessions": 5,
     "projects": 4
+   },
+   {
+    "id": "git:8bed4c8b3ce0bd80",
+    "kind": "git",
+    "handle": "hello@orbitworks.example",
+    "detail": {
+     "name": "Orbit"
+    },
+    "signedIn": false,
+    "active": false,
+    "sources": [
+     "git config"
+    ],
+    "firstSeen": 1791028830000,
+    "seenAt": 1791028830000,
+    "name": "orbit",
+    "hidden": false,
+    "sessions": 4,
+    "projects": 3
    },
    {
     "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
@@ -2403,25 +2590,6 @@
     "hidden": false,
     "sessions": 4,
     "projects": 0
-   },
-   {
-    "id": "git:8bed4c8b3ce0bd80",
-    "kind": "git",
-    "handle": "hello@orbitworks.example",
-    "detail": {
-     "name": "Orbit"
-    },
-    "signedIn": false,
-    "active": false,
-    "sources": [
-     "git config"
-    ],
-    "firstSeen": 1791028830000,
-    "seenAt": 1791028830000,
-    "name": "orbit",
-    "hidden": false,
-    "sessions": 3,
-    "projects": 3
    },
    {
     "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
