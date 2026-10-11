@@ -4,9 +4,9 @@
 //
 // Under the checks, what went wrong lately (XenoNet's error log, core/log.js)
 // by code, and two ways to get help: Copy diagnostics, a summary safe to
-// share (core/diagnostics.js), and Ask SI, which starts a Codex or
-// Claude Code session on this computer, in a terminal here, to look at it
-// with you. That session never files anything; sending an issue stays
+// share (core/diagnostics.js), and Ask Codex or Claude Code, which starts a
+// session of the one you pick on this computer, in a terminal here, to look
+// at it with you. That session never files anything; sending an issue stays
 // yours.
 import { escapeHtml as h, timeAgo } from "./format.js";
 
@@ -29,7 +29,7 @@ function lastAsk() {
 export function createDoctorPanel({ modals, sfx, toast, onResult = () => {}, terminal = null }) {
   let panel = null;
   let last = null;
-  let asking = null; // the Ask SI view's choices, while it shows
+  let asking = null; // the Ask Codex or Claude Code view's choices, while it shows
 
   function render(r) {
     last = r;
@@ -49,7 +49,7 @@ export function createDoctorPanel({ modals, sfx, toast, onResult = () => {}, ter
         .join("")}
       <div class="d-k">Lately, in XenoNet's log</div>
       <ol class="d-list dr-list" data-dr-errors><li class="dr-skip"><span class="dr-mark">–</span><span class="dr-what"><span class="dim">Reading…</span></span></li></ol>
-      <div class="m-foot"><button class="act primary" data-dr-run>Check again</button><button class="act" data-dr-copy title="A summary that's safe to share: versions, problems and errors by code, never transcripts, names or keys">Copy diagnostics</button><button class="act" data-dr-ask title="A Codex or Claude Code session here looks at it with you, and never files anything">Ask SI…</button><span class="grow"></span><span class="dim">XenoNet checks every half hour; in a terminal, xenonet doctor checks at once</span></div>`;
+      <div class="m-foot"><button class="act primary" data-dr-run>Check again</button><button class="act" data-dr-copy title="A summary that's safe to share: versions, problems and errors by code, never transcripts, names or keys">Copy diagnostics</button><button class="act" data-dr-ask title="A Codex or Claude Code session here looks at it with you, and never files anything">Ask Codex or Claude Code…</button><span class="grow"></span><span class="dim">XenoNet checks every half hour; in a terminal, xenonet doctor checks at once</span></div>`;
     loadErrors();
   }
 
@@ -88,12 +88,12 @@ export function createDoctorPanel({ modals, sfx, toast, onResult = () => {}, ter
   // Choosing who looks: Codex or Claude Code, and its model.
   function askView() {
     asking ??= lastAsk();
-    panel.querySelector(".m-sub").textContent = "SI on this computer looks at it with you";
+    panel.querySelector(".m-sub").textContent = "A Codex or Claude Code session on this computer looks at it with you";
     const pick = (app, label) => `<button class="toggle ${asking.app === app ? "on" : ""}" data-dr-app="${app}" aria-pressed="${asking.app === app}">${label}</button>`;
     panel.querySelector(".m-body").innerHTML = `
       <p class="pj-note">XenoNet writes what it can tell (the doctor's findings and its errors by code, with no transcripts, names or keys) to a folder of its own, and starts a session there that reads it, with XenoNet's own code, and talks it through with you. It works read-only and asks before changing anything. It never files an issue, opens a pull request or sends anything: if it finds a bug in XenoNet, it writes issue-draft.md in that folder, for you to send if you choose.</p>
       <div class="ac"><div class="ac-form">
-        <div class="ac-field"><span class="ac-k">SI</span><div class="ac-caps">${pick("codex", "Codex")}${pick("claude", "Claude Code")}</div></div>
+        <div class="ac-field"><span class="ac-k">app</span><div class="ac-caps">${pick("codex", "Codex")}${pick("claude", "Claude Code")}</div></div>
         <label class="ac-field"><span class="ac-k">model</span><input class="ac-input" data-dr-model maxlength="80" placeholder="its default, or a model of yours" spellcheck="false" autocomplete="off" value="${h(asking.model)}" /></label>
       </div>
       <div data-dr-command hidden></div></div>
