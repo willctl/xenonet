@@ -561,9 +561,14 @@ function simulate(kind, { a, b, ...more }) {
     sa.files.set(file, now - 90e3);
     sb.files.set(file, now - 20e3);
   } else if (kind === "stuck" && sa) {
+    sa.resetStall();
+    sa.question = sa.hookNeed = null;
+    sa.inflight.clear();
     sa.turn = { active: true, startedAt: now - 120e3 };
     sa.errorStreak = 4;
-    sa.recentTools.push(...[0, 1, 2, 3].map((i) => ({ key: "shell|npm run db:push", label: "npm run db:push", loopable: true, ts: now - (4 - i) * 5e3 })));
+    sa.lastErrorAt = now;
+    sa.errorSince = now - 20e3;
+    sa.recentTools.push(...[0, 1, 2, 3].map((i) => ({ key: "shell|npm run db:push", label: "npm run db:push", loopable: true, ok: false, ts: now - (4 - i) * 5e3 })));
     sa.lastEventAt = now;
   } else if (kind === "turn-end" && sa) {
     live.activity(sa, { kind: "turn-end", duration: 42000, ts: now }, true);
