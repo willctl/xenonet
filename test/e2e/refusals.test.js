@@ -36,8 +36,8 @@ test("the refusal command opens a searchable browser with outcome filters and de
   assert.equal(await s.eval('return document.querySelector("[data-rf-next]").disabled'), true);
   await s.screenshot({ name: "e2e-refusals-empty", inline: false });
   await s.driver("refusals", "filter", { q: "", context: "", sort: "newest" });
-  // A real DOM input event uses the same filter path, including debounce.
-  await s.eval('const input = document.querySelector("[name=q][data-rf-filter]"); input.value = "invalid_prompt"; input.dispatchEvent(new Event("input", { bubbles: true }));');
+  // A DOM input event exercises the form's debounce path.
+  await s.eval('const input = document.querySelector("[name=q][data-rf-filter]"); input.value = "invalid_prompt"; input.dispatchEvent(new Event("input", { bubbles: true })); return true;');
   const end = Date.now() + 5000;
   while (Date.now() < end) {
     const count = await s.eval('return document.querySelectorAll("[data-rf-id]").length');
@@ -45,7 +45,9 @@ test("the refusal command opens a searchable browser with outcome filters and de
     await new Promise((r) => setTimeout(r, 100));
   }
   assert.equal(await s.eval('return document.querySelectorAll("[data-rf-id]").length'), 1);
-  await s.input({ key: "Escape" });
+  await s.input({ keys: "Escape" });
+  const closeDeadline = Date.now() + 5000;
+  while ((await s.driver("state")).overlays.modal && Date.now() < closeDeadline) await new Promise((r) => setTimeout(r, 100));
   assert.equal((await s.driver("state")).overlays.modal, false);
   const logs = await s.logs({ level: "error" });
   assert.deepEqual(logs.entries.filter((e) => e.source === "page"), []);
