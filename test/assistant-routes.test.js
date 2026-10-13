@@ -22,7 +22,7 @@ function setup({ person = true } = {}) {
   ]);
   const state = { index: nodes, homeOf: () => ATLAS, graph: { identities: [{ id: "chatgpt:demo-workspace", kind: "chatgpt", name: null, hidden: false }] } };
   const verify = { person: async () => (person ? { ok: true } : { ok: false, reason: "this is yours to do, and an agent can't" }), window: async () => ({ ok: true }) };
-  const route = assistantRoutes({ connections: w.connections, audit: createAudit({ store: w.store }), source: { view: () => view(w.clock.now()) }, state, windowKey: key, verify, readJson: async (req) => req.body ?? {}, send: (res, status, body) => Object.assign(res, { status, body }), version: "0.7.0-test", now: w.clock.now });
+  const route = assistantRoutes({ connections: w.connections, audit: createAudit({ store: w.store, now: w.clock.now }), source: { view: () => view(w.clock.now()) }, state, windowKey: key, verify, readJson: async (req) => req.body ?? {}, send: (res, status, body) => Object.assign(res, { status, body }), version: "0.7.0-test", now: w.clock.now });
   const call = async (method, path, { body, window = false, token = false } = {}) => {
     const res = {};
     const headers = { ...(window ? { "x-xenonet-window": key.reveal() } : {}), ...(token ? { authorization: "Bearer xenonet_actor_" + "a".repeat(64) } : {}) };
