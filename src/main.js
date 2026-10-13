@@ -14,6 +14,7 @@ import { createModals } from "./modals.js";
 import { createConnectPanel } from "./connect.js";
 import { createDoctorPanel } from "./doctor.js";
 import { createStatsPanel } from "./stats.js";
+import { createRefusalsPanel } from "./refusals.js";
 import { createRootPanel } from "./root.js";
 import { createAlerts } from "./alerts.js";
 import { createPalette } from "./palette.js";
@@ -252,6 +253,7 @@ const doctorPanel = createDoctorPanel({
 });
 // A session's models, tokens, costs and timing (core/stats.js).
 const statsPanel = createStatsPanel({ modals, sfx, toast: (m, b) => hud.toast(m, b) });
+const refusalsPanel = createRefusalsPanel({ modals });
 const openStats = (node) => (note("stats", node.id), you.did("read", node.id), statsPanel.open(node));
 // The OpenRouter key for decision models: into your credential store, by
 // the window's own route; the field is cleared as it's sent.
@@ -550,6 +552,12 @@ const commandList = [
   // Provider refusals XenoNet keeps (core/refusals): whether each new one
   // keeps the transcript up to it too, for a dataset. Off until you turn it
   // on; transcripts can hold secrets.
+  {
+    id: "refusals",
+    label: "Review provider refusals",
+    keywords: "refused records dataset search filter sort safety policy reroute recovered context",
+    run: () => refusalsPanel.open(),
+  },
   {
     id: "refusal-context",
     label: "Keep or stop keeping full context with provider refusals",
@@ -1119,6 +1127,7 @@ if (import.meta.env.DEV || desktop) {
     scene, alerts, palette, modals, preview, replay, select, back, step, hud,
     commands: commandList,
     stats: { open: openStats, get data() { return statsPanel.data; } },
+    refusals: refusalsPanel,
     rename: renameSession,
     film,
     ops,

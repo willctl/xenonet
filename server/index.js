@@ -1,5 +1,7 @@
 import http from "node:http";
 import { componentService } from "./component-service.js";
+import { refusalRoutes } from "./routes/refusals.js";
+import { demoRefusals } from "../core/refusals/demo.js";
 import { SERVICE_API, CONSOLE_API, CAPABILITIES } from "../core/components/protocol.js";
 let components = null;
 import fs from "node:fs";
@@ -53,7 +55,7 @@ import { createSecretStore, createMemorySecrets } from "../core/secret-store.js"
 import { createLog, logDir, readLogs, summarize as summarizeLogs, LEVELS } from "../core/log.js";
 import { makeBundle, bundleMarkdown, writeLook, askCommand } from "../core/diagnostics.js";
 import { tilde } from "../core/paths.js";
-import { createRefusals, contextOn, setContext } from "../core/refusals/store.js";
+import { createRefusals, contextOn } from "../core/refusals/store.js";
 import { createDecider, DecisionError } from "../core/decide.js";
 import { createSpotify, createDemoSpotify, duckPlan, SpotifyError } from "../core/spotify.js";
 import { createSystemStats, createDemoSystemStats } from "../core/system-stats.js";
@@ -222,6 +224,7 @@ async function pollSpotify() {
 // new one seen live is a line in the log and, a few an hour at most, a
 // notification; the activity feed has it from the session already.
 const refusals = createRefusals({ dir: path.join(config.stateDir, "refusals"), home: config.homeDir, context: () => contextOn(path.join(config.stateDir, "refusals")) });
+const demoRefusalRecords = config.demo ? demoRefusals() : null;
 const refusalNotes = { at: [], bySession: new Map() };
 state.on("refusal", (ev) => {
   let rec = null;
@@ -763,22 +766,7 @@ async function api(req, res, url) {
     }
   }
 
-  // Refusals XenoNet kept (core/refusals): GET their records, newest first
-  // (?since=, ?provider=), never their context, which stays in the files;
-  // POST /context {on} turns keeping context on or off. Yours alone.
-  if (route === "/api/refusals" || route === "/api/refusals/context") {
-    if (!(await yours(req, res))) return;
-    const dir = path.join(config.stateDir, "refusals");
-    if (route === "/api/refusals/context" && req.method === "POST") {
-      const body = await readJson(req, 1024);
-      return send(res, 200, { context: setContext(dir, body?.on === true) });
-    }
-    if (route === "/api/refusals" && req.method === "GET") {
-      const q = url.searchParams;
-      const list = refusals.list({ since: Number(q.get("since")) || 0, provider: q.get("provider") || null }).slice(0, 500).map(({ source, key, ...r }) => ({ ...r, source: source ? { file: source.file } : null }));
-      return send(res, 200, { context: contextOn(dir), records: list });
-    }
-  }
+  if (await refusalRoutes({ req, res, url, refusals, yours, readJson, send, demoRecords: demoRefusalRecords })) return;
 
   // What XenoNet can tell someone helping you, safe to share
   // (core/diagnostics.js): GET the bundle, as JSON and Markdown; POST

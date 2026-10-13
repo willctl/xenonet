@@ -2,6 +2,16 @@
 
 When Anthropic or OpenAI refuses a turn in one of your Claude Code or Codex sessions, XenoNet notices, says so in the activity feed, and keeps a record of it on this computer, so you can look back at them or build a dataset from them.
 
+## Browse records
+
+Open the command palette with Ctrl+K (Cmd+K on macOS), then choose **Review provider refusals**. Search by model, provider signal, session or folder. Filter by provider, outcome, model, category, saved context and date range; sort by time or a record field. Results are paged in groups of 50 after searching the whole collection.
+
+Select a record to see its provider signal, session, source transcript and saved-context metadata. **View saved request** loads request JSON only when you ask. Requests larger than 1 MiB stay in the local files; use `xenonet refusals export --with-context` to read them. Browsing does not change context recording settings.
+
+Recovered requests, reroutes and possible refusals have separate outcome filters. A possible refusal is a provider signal that does not confirm a refusal. Demo and test instances show made-up records.
+
+The console driver and console MCP expose the same panel through `refusals`: `open`, `filter`, `select`, `page`, `refresh` and `request`. Pages start at 1. The driver returns record metadata and the selected ID, without saved request content.
+
 ## What counts
 
 XenoNet reads refusals from the lines the apps write, never from what a model happened to say:

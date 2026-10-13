@@ -351,6 +351,10 @@ export function createDriver(app) {
       return action === "status" ? app.updates.state : app.updates.action(action, value);
     },
     commands: () => app.commands.map(({ id, label, key }) => ({ id, label, ...(key ? { key } : {}) })),
+    async refusals(action = "open", value, opts) {
+      const st = await act(() => app.refusals.action(action, value), opts);
+      return { ...st, refusals: app.refusals.state };
+    },
     // Runs a command from the palette (⌘K / Ctrl+K) by id; commands() lists them.
     command(id, opts) {
       const cmd = app.commands.find((c) => c.id === id);

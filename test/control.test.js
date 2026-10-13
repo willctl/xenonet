@@ -99,7 +99,7 @@ function mcpClient() {
   };
 }
 
-const TOOLS = ["terminal", "updates", "status", "launch", "quit", "find", "select", "navigate", "stats", "rename", "command", "identities", "hosts", "root", "simulate", "actors", "feed", "screenshot", "input", "window", "logs", "eval", "theme", "mcp_info", "environment"];
+const TOOLS = ["terminal", "updates", "status", "launch", "quit", "find", "select", "navigate", "stats", "refusals", "rename", "command", "identities", "hosts", "root", "simulate", "actors", "feed", "screenshot", "input", "window", "logs", "eval", "theme", "mcp_info", "environment"];
 
 test("mcp: answers a 2025-era client's handshake and lists the tools", async () => {
   const c = mcpClient();
