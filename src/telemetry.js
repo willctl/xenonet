@@ -3,6 +3,7 @@ import { escapeHtml as h, timeAgo } from "./format.js";
 import { COLORS, THEME, categoryVar, withAlpha } from "./theme.js";
 import { hostTag } from "./hosts.js";
 import { stoppedWords } from "./live-words.js";
+import { openRouterView } from "./openrouter-view.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -36,7 +37,7 @@ function counter(el, format = compact) {
   };
 }
 
-export function createTelemetry({ onSelect }) {
+export function createTelemetry({ onSelect, onDecisionKey = null }) {
   const canvas = $("#scope");
   const ctx = canvas.getContext("2d");
   const setTpm = counter($("#flux-tpm"));
@@ -47,12 +48,15 @@ export function createTelemetry({ onSelect }) {
   // What OpenRouter's key has spent (GET /api/spend), read every minute
   // while the window shows.
   let spend = null;
+  let spendTimer = null;
+  $("#gauges").addEventListener("click", (e) => { if (e.target.closest("[data-openrouter-setup]")) onDecisionKey?.(); });
   async function readSpend() {
     if (!document.hidden) {
       spend = await fetch("/api/spend").then((r) => (r.ok ? r.json() : null)).catch(() => null);
       if (snap) renderGauges();
     }
-    setTimeout(readSpend, 60e3);
+    clearTimeout(spendTimer);
+    spendTimer = setTimeout(readSpend, 60e3);
   }
   readSpend();
   document.addEventListener("visibilitychange", () => {
@@ -134,9 +138,9 @@ export function createTelemetry({ onSelect }) {
   requestAnimationFrame(draw);
 
   // Just the bar and its value; the forecast and reset time are on hover.
-  function gauge(label, pct, sub, forecast, value = null, cls = "") {
+  function gauge(label, pct, sub, forecast, value = null, cls = "", setup = false) {
     const title = h([sub, forecast?.text].filter(Boolean).join(" · "));
-    if (pct == null) return `<div class="gauge off ${cls}" title="${title}"><span class="g-k">${h(label)}</span><span class="g-bar"></span><span class="g-v">${h(value ?? "—")}</span></div>`;
+    if (pct == null) return `<${setup ? 'button type="button" data-openrouter-setup' : "div"} class="gauge off ${cls}${setup ? " setup" : ""}" title="${title}"><span class="g-k">${h(label)}</span><span class="g-bar"></span><span class="g-v">${h(value ?? "—")}</span></${setup ? "button" : "div"}>`;
     const segs = 24;
     const lit = Math.round((Math.min(100, pct) / 100) * segs);
     const tone = pct > 90 ? "crit" : pct > 70 ? "warn" : "";
@@ -179,11 +183,12 @@ export function createTelemetry({ onSelect }) {
   }
 
   // OpenRouter's key: how much of its limit is spent, or with no limit,
-  // this month's spend; the rest on hover. Only once a key is set.
+  // this month's spend; the rest on hover. Missing keys stay visible so
+  // the person can see what needs setting up.
   function openrouterGauge() {
     const o = spend?.openrouter;
-    if (!o || o.key === "missing") return "";
-    if (o.error) return gauge("openrouter", null, o.error, null, null, "or");
+    const view = openRouterView(o);
+    if (view) return gauge("openrouter", null, view.hint, null, view.value, "or", view.setup);
     const spent = [o.today != null && `${money(o.today)} today`, o.week != null && `${money(o.week)} this week`, o.month != null && `${money(o.month)} this month`].filter(Boolean).join(", ");
     if (o.limit) {
       const used = Math.max(0, o.limit - (o.remaining ?? o.limit));
@@ -259,6 +264,7 @@ export function createTelemetry({ onSelect }) {
   }
 
   return {
+    refreshSpend: readSpend,
     update(next, graphIndex) {
       snap = next;
       index = graphIndex;

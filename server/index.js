@@ -1,6 +1,8 @@
 import http from "node:http";
 import { componentService } from "./component-service.js";
 import { refusalRoutes } from "./routes/refusals.js";
+import { integrationRoutes } from "./routes/integrations.js";
+import { createIntegrations } from "../core/integrations/index.js";
 import { demoRefusals } from "../core/refusals/demo.js";
 import { SERVICE_API, CONSOLE_API, CAPABILITIES } from "../core/components/protocol.js";
 let components = null;
@@ -180,6 +182,7 @@ state.on("activity", (a) => broadcast("activity", a));
 // (core/decide.js): its key in your credential store; the demo's in memory.
 const decisionSecrets = config.demo ? createMemorySecrets() : createSecretStore();
 const decider = createDecider({ secrets: decisionSecrets, log });
+const integrations = createIntegrations({ dir: config.demo ? null : path.join(config.stateDir, "integrations"), home: config.homeDir, decider, nodes: () => state.graph?.nodes ?? [], demo: config.demo });
 // What OpenRouter's key has spent, for Token use (core/openrouter-usage.js):
 // read only while a window asks, through GET /api/spend.
 const openrouter = config.demo ? createDemoOpenRouterUsage() : createOpenRouterUsage({ secrets: decisionSecrets, log });
@@ -772,6 +775,12 @@ async function api(req, res, url) {
   }
 
   if (await refusalRoutes({ req, res, url, refusals, yours, readJson, send, demoRecords: demoRefusalRecords })) return;
+  if (await integrationRoutes({ req, res, url, integrations, yours, readJson, send, owner: async (req, res) => {
+    if (!windowKey.matches(req.headers["x-xenonet-window"])) { send(res, 403, { error: "Use XenoNet's own window to send decisions or launch jobs.", code: "yours" }); return false; }
+    const seen = verify.window ? await verify.window(req.socket) : { ok: true };
+    if (!seen.ok) send(res, 403, { error: seen.reason, code: "yours" });
+    return seen.ok;
+  } })) return;
 
   // What XenoNet can tell someone helping you, safe to share
   // (core/diagnostics.js): GET the bundle, as JSON and Markdown; POST

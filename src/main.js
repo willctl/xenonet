@@ -15,6 +15,7 @@ import { createConnectPanel } from "./connect.js";
 import { createDoctorPanel } from "./doctor.js";
 import { createStatsPanel } from "./stats.js";
 import { createRefusalsPanel } from "./refusals.js";
+import { createIntegrationsPanel } from "./integrations.js";
 import { createRootPanel } from "./root.js";
 import { createAlerts } from "./alerts.js";
 import { createPalette } from "./palette.js";
@@ -254,6 +255,7 @@ const doctorPanel = createDoctorPanel({
 // A session's models, tokens, costs and timing (core/stats.js).
 const statsPanel = createStatsPanel({ modals, sfx, toast: (m, b) => hud.toast(m, b) });
 const refusalsPanel = createRefusalsPanel({ modals });
+const integrationsPanel = createIntegrationsPanel({ modals, calls: windowCalls });
 const openStats = (node) => (note("stats", node.id), you.did("read", node.id), statsPanel.open(node));
 // The OpenRouter key for decision models: into your credential store, by
 // the window's own route; the field is cleared as it's sent.
@@ -275,10 +277,12 @@ async function decisionKey() {
     sfx("success");
     modals.close();
     hud.toast("The key is kept; XenoNet won't show it again");
+    telemetry.refreshSpend();
   });
   panel.querySelector("[data-dk-forget]")?.addEventListener("click", async () => {
     await fetch("/api/decide/key", { method: "DELETE" });
     modals.close();
+    telemetry.refreshSpend();
     hud.toast("XenoNet forgot the key");
   });
 }
@@ -341,7 +345,7 @@ const hud = createHud({
   sfx,
 });
 
-const telemetry = createTelemetry({ onSelect: select });
+const telemetry = createTelemetry({ onSelect: select, onDecisionKey: decisionKey });
 
 // On a narrow screen the panels are one sheet at the bottom, picked by
 // tabs (sheets.js).
@@ -549,6 +553,10 @@ const commandList = [
   { id: "system-panel", label: "Show or hide this computer's load", keywords: "system cpu gpu ram memory vram load usage hardware stats monitor panel", run: () => { systemPanel.toggle(); hud.toast(systemPanel.on ? "Showing this computer's load" : "Hid this computer's load. Bring it back from the palette."); } },
   { id: "spotify", label: "Connect Spotify, or change what it does", keywords: "spotify music player play pause skip now playing volume duck", run: () => spotifyChip.open() },
   { id: "decision-key", label: "Set the OpenRouter key for decision models", keywords: "openrouter jev decide decision model key router typesafe", run: () => decisionKey() },
+  { id: "route-task", label: "Route task", keywords: "jevrouter jev decision suggest agent specialist", run: () => integrationsPanel.open("routing") },
+  { id: "decisions", label: "Review decisions", keywords: "jevrouter scores outcomes history routing", run: () => integrationsPanel.open("routing") },
+  { id: "sandbox", label: "Launch sandbox", keywords: "openshell nvidia policy execution wsl", run: () => integrationsPanel.open("sandbox") },
+  { id: "pi-runs", label: "Review Pi runs", keywords: "pi harness sessions exports checkpoints", run: () => integrationsPanel.open("pi") },
   // Provider refusals XenoNet keeps (core/refusals): whether each new one
   // keeps the transcript up to it too, for a dataset. Off until you turn it
   // on; transcripts can hold secrets.
@@ -1128,6 +1136,7 @@ if (import.meta.env.DEV || desktop) {
     commands: commandList,
     stats: { open: openStats, get data() { return statsPanel.data; } },
     refusals: refusalsPanel,
+    integrations: integrationsPanel,
     rename: renameSession,
     film,
     ops,
@@ -1146,6 +1155,7 @@ if (import.meta.env.DEV || desktop) {
     system: () => systemPanel.state,
     sheet: (id) => (id === undefined ? { current: sheets.current, narrow: sheets.narrow } : (sheets.show(id ?? ""), { current: sheets.current, narrow: sheets.narrow })),
     spend: () => ({ costs: telemetry.snapshot?.costs ?? null, openrouter: telemetry.spend?.openrouter ?? null, shown: !document.getElementById("spend").hidden, text: document.getElementById("spend").innerText.replace(/\s+/g, " ").trim(), gauge: document.querySelector("#gauges .gauge.or")?.innerText.replace(/\s+/g, " ").trim() ?? null }),
+    refreshSpend: () => telemetry.refreshSpend(),
     graph: () => fullGraph,
     live: () => lastLive,
     selectedId: () => selectedId,
