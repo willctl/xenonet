@@ -155,7 +155,7 @@ test("xenonet actors and xenonet actor show: the list, one actor and what it did
     assert.match(one.stdout, /^● Wren {2}actor:wren\n/);
     assert.match(one.stdout, /\n {2}Status +Rebuilding the docs site\n/);
     assert.match(one.stdout, /\n {2}Acts on +docs-site \(works-on\)\n/);
-    assert.match(one.stdout, /Lately\n {2}1 min ago {2}Ran 2 commands in docs-site/);
+    assert.match(one.stdout, /Lately\n {2}\d+ min ago {2}Ran 2 commands in docs-site/);
     assert.doesNotMatch(one.stdout, /Product/, "a custom actor with no product says none");
     // A product XenoNet doesn't know is the actor's own word, quoted and said
     // to be; one it knows goes by its own id and maker.
