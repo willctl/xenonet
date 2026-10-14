@@ -11,6 +11,9 @@ export const text = (value, name, max = 2000) => {
   if (typeof value !== "string" || !value.trim() || value.length > max || /\0/.test(value)) fail(`${name} must be text, at most ${max} characters.`);
   return value.trim();
 };
+// A job with no sandbox behind it: deleted, or never made because the
+// command wasn't there. Only the others count toward the limit and survive retention.
+export const sandboxGone = (r) => r.status === "deleted" || r.status === "not-created";
 
 // Tickets contain reviewed inputs only in memory, expire, and can be used once.
 export function createTickets({ now = Date.now } = {}) {
@@ -54,7 +57,7 @@ export function createRecords(dir, { now = Date.now, limit = 1000 } = {}) {
       const record = save({ ...value, id: randomUUID(), at: now() });
       // A saved live job is the owner's way to inspect or delete its remote
       // sandbox. Retention must not orphan it as newer decisions arrive.
-      const completed = list().filter((r) => r.kind !== "sandbox" || r.status === "deleted");
+      const completed = list().filter((r) => r.kind !== "sandbox" || sandboxGone(r));
       for (const old of completed.slice(limit)) { if (dir) fs.unlinkSync(path.join(dir, `${old.id}.json`)); else memory.delete(old.id); }
       return record;
     },

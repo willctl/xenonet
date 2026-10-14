@@ -153,6 +153,32 @@ test("OpenShell failed creation is reconcilable and policy denial is separate fr
   assert.equal((await shell.status({ backend: "native" })).ready, false);
 });
 
+test("OpenShell without its command records no sandbox, and such jobs don't hold a launch slot", async () => {
+  const records = createRecords(null);
+  for (let i = 0; i < 64; i++) records.add({ kind: "sandbox", status: "not-created", name: `xeno-${i}` });
+  const shell = createOpenShell({ records, platform: "linux", run: async () => { throw Object.assign(new Error("spawn openshell ENOENT"), { code: "ENOENT" }); } });
+  const result = await shell.launch((await shell.preview({ agent: "pi", image: "pi:1", request: "Review" })).ticket);
+  assert.equal(result.status, "not-created"); assert.match(result.reason, /no sandbox was made/);
+  assert.equal((await shell.remove(result.id)).status, "not-created");
+  await assert.rejects(shell.inspect(result.id), /No sandbox was made/);
+});
+
+test("OpenShell deletion is settled by the listing, even when delete fails or the gateway is down", async () => {
+  const records = createRecords(null);
+  let gateway = "down";
+  const shell = createOpenShell({ records, platform: "linux", run: async (_, args) => {
+    if (args.includes("create")) return { stdout: "" };
+    if (gateway === "down") throw new Error("connection refused");
+    if (args.includes("delete")) throw new Error("sandbox not found");
+    return { stdout: args.includes("list") ? '{"sandboxes":[]}' : args.includes("--output") ? '{"phase":"Ready"}' : "" };
+  } });
+  const job = await shell.launch((await shell.preview({ agent: "codex", image: "codex:1", request: "Review" })).ticket);
+  assert.equal((await shell.remove(job.id)).status, "deletion-requested");
+  gateway = "up";
+  await shell.inspect(job.id); assert.equal(records.list().find((r) => r.id === job.id).status, "deletion-requested");
+  assert.equal((await shell.remove(job.id)).status, "deleted");
+});
+
 test("OpenShell status, inspection and deletion target only recorded jobs", async () => {
   const records = createRecords(null), calls = [];
   const shell = createOpenShell({ records, platform: "linux", run: async (_, args) => { calls.push(args); return { stdout: args.includes("list") ? '{"sandboxes":[]}' : args.includes("--output") ? '{"phase":"Ready"}' : args.includes("logs") ? "policy_denied api_key=PRIVATE" : "test" }; } });

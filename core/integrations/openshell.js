@@ -3,7 +3,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash, randomUUID } from "node:crypto";
-import { clean, fail, text, createTickets } from "./common.js";
+import { clean, fail, text, createTickets, sandboxGone } from "./common.js";
 
 const execute = promisify(execFile);
 export async function executionProfiles({ platform = process.platform, run = runCommand } = {}) {
@@ -87,7 +87,7 @@ export function createOpenShell({ records, run = runCommand, platform = process.
       return { ...tickets.issue(value), command: openShellCommand(profile, args, platform), policy: policy?.content ?? null, source, note: "The selected image must contain the agent. Existing providers can add network access. Changes stay in the sandbox; XenoNet does not copy them back. Detached jobs can continue after this window closes. Inspect and delete the sandbox when finished." };
     },
     async launch(ticket) {
-      if (records.list().filter((r) => r.kind === "sandbox" && r.status !== "deleted").length >= 64) fail("Delete or reconcile an old sandbox before launching another (64 maximum).", "busy", 409);
+      if (records.list().filter((r) => r.kind === "sandbox" && !sandboxGone(r)).length >= 64) fail("Delete or reconcile an old sandbox before launching another (64 maximum).", "busy", 409);
       const value = tickets.take(ticket);
       if (value.source && sourceDir(value.source) !== value.source) fail("The project folder changed. Preview again.", "changed", 409);
       if (value.policy && policyFile(value.policy.file)?.hash !== value.policy.hash) fail("The policy changed. Preview again.", "changed", 409);
@@ -96,6 +96,9 @@ export function createOpenShell({ records, run = runCommand, platform = process.
         await call(value.profile, value.args, { timeout: 120000 });
         return records.update(record.id, { status: "created", eventKind: "sandbox-created" });
       } catch (err) {
+        // The command itself wasn't found, so nothing reached a gateway and
+        // there's no sandbox to reconcile or delete.
+        if (err.code === "ENOENT") return records.update(record.id, { status: "not-created", eventKind: "runtime-unavailable", reason: "XenoNet couldn't find the openshell command, so no sandbox was made. Install OpenShell where XenoNet's service can run it, then check the gateway." });
         const denied = /\bpolicy_denied\b/.test(err.stderr ?? "");
         // A lost CLI connection can leave a sandbox running. Never retry or
         // delete it implicitly; its unique name lets inspection reconcile it.
@@ -105,18 +108,23 @@ export function createOpenShell({ records, run = runCommand, platform = process.
     async inspect(id) {
       const value = job(id);
       if (value.status === "deleted") fail("This sandbox was deleted.", "missing", 404);
+      if (value.status === "not-created") fail("No sandbox was made for this job.", "missing", 404);
       const { stdout } = await call(value.profile, ["sandbox", "get", value.name, "--output", "json"]);
       const sandbox = JSON.parse(stdout);
       const policy = await call(value.profile, ["policy", "get", value.name, "--full"]);
       const logs = await call(value.profile, ["logs", value.name, "--since", "10m", "--source", "sandbox"]);
-      records.update(id, { status: "observed", checkedAt: now() });
+      // A deletion still pending stays pending: seeing the sandbox doesn't undo the request.
+      records.update(id, { status: value.status === "deletion-requested" ? value.status : "observed", checkedAt: now() });
       // Logs are displayed on request and never copied to the record store.
       return { id, sandbox: { name: value.name, phase: clean(sandbox.phase ?? sandbox.sandbox?.phase ?? sandbox.status?.phase ?? "unknown") }, policy: clean(policy.stdout, 64000), logs: clean(logs.stdout, 64000), audit: "A bounded snapshot of best-effort gateway logs; absence of an event does not establish that an operation was allowed." };
     },
     async remove(id) {
       const value = job(id);
-      if (value.status === "deleted") return value;
-      await call(value.profile, ["sandbox", "delete", value.name], { timeout: 60000 });
+      if (sandboxGone(value)) return value;
+      // The listing decides, not the delete. Delete fails for a sandbox
+      // that's already gone, and such a job must still reach deleted, or it
+      // counts toward the 64-job limit for good.
+      try { await call(value.profile, ["sandbox", "delete", value.name], { timeout: 60000 }); } catch {}
       let gone = false;
       try {
         const { stdout } = await call(value.profile, ["sandbox", "list", "--selector", `xenonet-job=${value.name}`, "-o", "json"]);
