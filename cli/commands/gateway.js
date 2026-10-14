@@ -1,9 +1,10 @@
 // xenonet gateway: the actor gateway (server/actor-gateway.js), from your own
 // terminal: whether it's on, the tunnel that puts it on the internet and
 // whether its address reaches it, each app's connection, picking a tunnel,
-// checking and repairing it, and taking an actor's gateway token away. A
-// gateway token is made in XenoNet's window only (Actors, then Connect… on
-// the actor), where it's shown once.
+// checking and repairing it, asking for an actor's gateway token, and taking
+// one away. A gateway token is made in XenoNet's window only (Actors, then
+// Connect… on the actor, or Allow on an ask), where it's shown once, masked.
+// This command only asks, and never holds one.
 import { c, print, json, ago, pad, Fail } from "../lib/out.js";
 import { need, get, request, nameOf } from "../../core/client.js";
 import { handoff } from "../../core/actors/handoff.js";
@@ -34,10 +35,15 @@ works.
   xenonet gateway check              checks now that the address reaches it
   xenonet gateway repair             sets the tunnel up again, and checks
   xenonet gateway address <slug>     what to tell an app whose address is old
+  xenonet gateway token <slug>       asks for a new gateway token for an actor.
+                                   It makes none and prints none: the ask
+                                   waits as a card in XenoNet's window
   xenonet gateway revoke <slug>      takes an actor's gateway token away
 
-An actor's gateway token is made in XenoNet's window: Actors, then Connect…
-on the actor. It works only at the gateway.
+An actor's gateway token is made in XenoNet's window: Allow on the card an
+ask leaves, or Actors, then Connect… on the actor. There it's masked until
+you choose Show, and Copy copies it without showing it. It works only at the
+gateway.
 
   --json   answers as JSON`;
 
@@ -124,10 +130,17 @@ export async function run([what, slug], flags = {}) {
     if (h.message) print(`\n${h.message}`);
     return;
   }
+  if (what === "token") {
+    if (!slug) throw new Fail("say whose: xenonet gateway token <slug>", 2);
+    const r = await request(s, "POST", `/api/actors/${encodeURIComponent(String(slug).replace(/^actor:/, ""))}/gateway/ask`, {});
+    if (flags.json) return json(r);
+    print(`${c.green("✓")} asked: ${r.id}'s gateway token waits for you to click Allow in XenoNet's window${r.replaces ? ", and replaces the one its app has" : ""}`);
+    return print(c.dim("  The token is made and shown there, masked; this command never sees it."));
+  }
   if (what === "revoke") {
     if (!slug) throw new Fail("say whose: xenonet gateway revoke <slug>", 2);
     const r = await request(s, "DELETE", `/api/actors/${encodeURIComponent(String(slug).replace(/^actor:/, ""))}/gateway`);
     return flags.json ? json(r) : print(`${c.green("✓")} ${r.actor}'s gateway token stopped working`);
   }
-  throw new Fail(`xenonet gateway doesn't know ${what}: tunnels, on, off, check, repair, address or revoke`, 2);
+  throw new Fail(`xenonet gateway doesn't know ${what}: tunnels, on, off, check, repair, address, token or revoke`, 2);
 }

@@ -115,3 +115,21 @@ test("xenonet gateway tunnels lists every kind and which this computer has; addr
   assert.equal(none.code, 1);
   assert.match(none.stderr, /actor:wren has no gateway token/);
 });
+
+test("xenonet gateway token asks for an actor's gateway token and prints none: it waits for Allow in the window", async () => {
+  const ask = { schema: "actor/gateway-ask/v1", id: "actor:muse", state: "waiting", request: "gw-abc", expiresAt: T + 600e3, replaces: true };
+  const s = await fakeXenoNet({ "GET /api/health": () => [200, health], "POST /api/actors/muse/gateway/ask": () => [202, ask] });
+  const port = ["--port", String(s.port)];
+  const said = await xenonet(["gateway", "token", "muse", ...port]);
+  assert.equal(said.code, 0, said.stderr);
+  assert.match(said.stdout, /asked: actor:muse's gateway token waits for you to click Allow in XenoNet's window, and replaces the one its app has/);
+  assert.match(said.stdout, /this command never sees it/);
+  assert.doesNotMatch(said.stdout + said.stderr, /xenonet_gateway_/);
+  assert.deepEqual(s.seen.filter((x) => x.method === "POST").map((x) => [x.path, x.body]), [["/api/actors/muse/gateway/ask", {}]]);
+  const asJson = await xenonet(["gateway", "token", "actor:muse", "--json", ...port]);
+  assert.deepEqual(JSON.parse(asJson.stdout), ask, "the same, for a program, with the actor's id as well as its slug");
+  const none = await xenonet(["gateway", "token", ...port]);
+  s.close();
+  assert.equal(none.code, 2);
+  assert.match(none.stderr, /say whose: xenonet gateway token <slug>/);
+});

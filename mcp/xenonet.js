@@ -28,12 +28,13 @@ import * as z from "zod/v4";
 import { post, request } from "../core/client.js";
 import { checkup } from "../core/doctor/checkup.js";
 import { tokenFromEnv } from "../core/actors/token-file.js";
+import { TOKEN_GREP } from "../core/actors/tokens.js";
 
 const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const PORT = Number(process.env.XENONET_PORT) || 47840;
 const XENONET = { base: `http://127.0.0.1:${PORT}` };
 
-const INSTRUCTIONS = `Each Claude Code and Codex session on this machine, you included, can reach the others through XenoNet. Several sessions often work in the same repo at once, sometimes in the same working tree. With these tools you can see who they are and what they're doing (peers, who_has), message them (send, inbox), and claim files before you change them (claim, release, focus). If a tool fails, doctor says what's wrong with XenoNet's setup.
+const INSTRUCTIONS = `Each Claude Code and Codex session on this machine, you included, can reach the others through XenoNet. Several sessions often work in the same repo at once, sometimes in the same working tree. With these tools you can see who they are and what they're doing (peers, who_has), message them (send, inbox), and claim files before you change them (claim, release, focus). If a tool fails, doctor says what's wrong with XenoNet's setup. To connect an actor's app from outside this machine, such as Muse, ask_gateway_token starts it: the token itself is made and shown only in XenoNet's window, never to you, so don't ask your user to paste one into a chat.
 
 XenoNet also tells you things through hooks. When you start, it says who else works in the repo. Before you edit a file another session is working on, it warns you. It passes on messages as they arrive.
 
@@ -112,6 +113,23 @@ async function doctor() {
   const r = await checkup({ port: PORT });
   const notes = r.results.filter((x) => x.status !== "ok").map(({ title, status, detail, fix }) => ({ title, status, detail, ...(fix ? { fix } : {}) }));
   return text({ by: r.by ?? "this MCP server (XenoNet isn't running)", summary: r.summary, notes });
+}
+
+// A gateway token is never in an agent's context: the ask makes none and
+// answers with none, and a token that ever came back anyway is withheld
+// here, so a change on the server's side can't put one in a transcript.
+const TOKENS = new RegExp(TOKEN_GREP, "g");
+async function askGatewayToken(ctx, actor) {
+  const me = caller(ctx);
+  if (!me || me.actor) throw new Error("XenoNet can't tell which session is calling; this tool works from Claude Code and Codex");
+  const slug = String(actor).replace(/^actor:/, "");
+  try {
+    const answer = await post(XENONET, `/api/actors/${encodeURIComponent(slug)}/gateway/ask`, {}, { "x-xenonet-agent": me.id });
+    return { content: [{ type: "text", text: JSON.stringify(answer, null, 1).replace(TOKENS, "[token withheld]") }] };
+  } catch (err) {
+    if (err.status) throw err;
+    throw new Error("XenoNet isn't running, so it can't show your user the ask. Your user can open it, and the doctor tool says what else is wrong.");
+  }
 }
 
 const scopeArg = z.enum(["repo", "machine"]).optional().describe("repo, the default, is this repo and its worktrees. machine is every session and actor at work.");
@@ -258,6 +276,18 @@ function buildServer(actor = null) {
     },
     () => doctor(),
   );
+  if (!servesActor()) {
+    server.registerTool(
+      "ask_gateway_token",
+      {
+        title: "Ask for an actor's gateway token",
+        description: "Asks your user to let an actor's app (Muse, say) reach XenoNet from outside this machine. It makes no token and returns none: it leaves a card in XenoNet's window, and the token is made, and shown masked, only when your user clicks Allow there. Nothing changes until then, and the actor's old token, if any, keeps working. Never ask your user to paste the token to you or into a chat: tell them to Allow the card and copy the token from the window straight into the app that needs it. The actor must be one XenoNet knows (peers lists them), and an ask lapses after ten minutes.",
+        inputSchema: z.object({ actor: z.string().describe("The actor's slug, such as muse (or its id, actor:muse).") }),
+        annotations: write,
+      },
+      ({ actor }, ctx) => askGatewayToken(ctx, actor),
+    );
+  }
   if (servesActor()) registerActorTools(server, { write });
   return server;
 }

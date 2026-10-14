@@ -253,6 +253,7 @@ actors?.on("actors", (list) => broadcast("actors", list));
 actors?.on("event", (e) => broadcast("actor-event", e));
 registration?.on("requests", (r) => broadcast("actor-requests", r));
 registration?.on("asked", (r) => notifyRequest(r));
+registration?.on("asked-gateway", (r) => notifyGatewayAsk(r));
 state.on("graph", () => actors?.refresh());
 // The key for the routes only XenoNet's own window may use (see
 // core/actors/key.js): made now, and handed to the desktop app once the
@@ -497,6 +498,13 @@ function notifyDoctor(fresh) {
 function notifyRequest({ name }) {
   if (config.demo) return;
   notifyDesktop({ type: "notify", key: "actor-request", command: "actors", title: "An actor asks to join XenoNet", subtitle: `"${name}" waits for you to allow it`, body: "Allow or deny it in XenoNet's Actors panel." });
+}
+
+// A session asked for an actor's gateway token. The notification says whose,
+// never a token: none exists until you allow the ask in the window.
+function notifyGatewayAsk({ actor, name }) {
+  if (config.demo) return;
+  notifyDesktop({ type: "notify", key: `gateway-ask:${actor}`, command: "actors", title: "A session asks for a gateway token", subtitle: `For ${name}'s app`, body: "Allow it in XenoNet's Actors panel. The token is made there and shown masked." });
 }
 
 // Messages waiting for an actor nothing can wake, such as Muse: a

@@ -38,7 +38,7 @@ function tokenFile(token = TOKEN, mode = 0o600) {
 // records what reaches it.
 async function fakeXenoNet() {
   const seen = [];
-  const state = { token: TOKEN };
+  const state = { token: TOKEN, ask: { schema: "actor/gateway-ask/v1", id: "actor:muse", state: "waiting", request: "gw-abc", expiresAt: 1791230600000, replaces: false } };
   const me = { schema: "actor/me/v1", id: "actor:wren", state: "allowed", presence: "working", heartbeatMs: 60000, unread: 1 };
   const server = http.createServer((req, res) => {
     let body = "";
@@ -46,6 +46,7 @@ async function fakeXenoNet() {
     req.on("end", () => {
       seen.push({ method: req.method, url: req.url, authorization: req.headers.authorization, agent: req.headers["x-xenonet-agent"], body: body ? JSON.parse(body) : null });
       const reply = (status, data) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(data));
+      if (req.url.endsWith("/gateway/ask")) return reply(req.headers.authorization ? 403 : 202, req.headers.authorization ? { error: "an actor can't ask for gateway tokens", code: "not-allowed" } : state.ask);
       if (req.headers["x-xenonet-agent"]) return reply(200, [{ id: "codex:other" }]);
       if (req.headers.authorization !== `Bearer ${state.token}`) return reply(401, { error: "that token was replaced by a newer one", code: "revoked", reason: "rotated" });
       if (req.url === "/api/actors/me" || req.url === "/api/actors/heartbeat") return reply(200, me);
@@ -158,6 +159,37 @@ test("Claude Code's sessions never get the actor's tools, and a token file other
     assert.deepEqual(xenonet.seen.slice(before), [], "nothing was sent with it");
   } finally {
     loose.close();
+    xenonet.close();
+  }
+});
+
+test("a session can ask for an actor's gateway token and is told it waits; no token ever reaches it, even one the server sent by mistake, and an actor has no such tool", async () => {
+  const xenonet = await fakeXenoNet();
+  const session = "11111111-2222-3333-4444-555555555555";
+  const claude = await mcp({ XENONET_PORT: String(xenonet.port), CLAUDE_CODE_SESSION_ID: session });
+  try {
+    assert.ok((await claude.tools()).includes("ask_gateway_token"));
+    assert.match(claude.init.instructions, /ask_gateway_token starts it: the token itself is made and shown only in XenoNet's window, never to you/);
+    const asked = await claude.tool("ask_gateway_token", { actor: "actor:muse" });
+    assert.ok(!asked.isError, JSON.stringify(asked));
+    assert.deepEqual(JSON.parse(asked.content[0].text), xenonet.state.ask);
+    assert.deepEqual(xenonet.seen.at(-1), { method: "POST", url: "/api/actors/muse/gateway/ask", authorization: undefined, agent: `claude:${session}`, body: {} }, "as the session, naming the actor by its slug");
+
+    // A server that sent a token back anyway would put it in a transcript: it's withheld here.
+    const leaked = `xenonet_gateway_${"ef".repeat(32)}`;
+    xenonet.state.ask = { ...xenonet.state.ask, token: leaked, note: `copy ${TOKEN}` };
+    const held = await claude.tool("ask_gateway_token", { actor: "muse" });
+    assert.ok(!held.content[0].text.includes(leaked) && !held.content[0].text.includes(TOKEN), held.content[0].text);
+    assert.match(held.content[0].text, /\[token withheld\]/);
+  } finally {
+    claude.close();
+  }
+  const actor = await mcp({ XENONET_PORT: String(xenonet.port), XENONET_ACTOR_TOKEN_FILE: tokenFile() });
+  try {
+    assert.ok(!(await actor.tools()).includes("ask_gateway_token"), "an actor can't ask for its own way in");
+    assert.doesNotMatch(actor.init.instructions, /ask_gateway_token/);
+  } finally {
+    actor.close();
     xenonet.close();
   }
 });

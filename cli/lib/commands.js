@@ -14,7 +14,7 @@ export const COMMANDS = {
   agents: { about: "The sessions at work, and what each is doing" },
   actor: { about: "Actors: list them, ask to register one, or report as one", args: "[list|register|…]" },
   assistant: { about: "Remote actors' connections: list them, revoke one, or turn them all off", args: "[list|audit|revoke|disable]" },
-  gateway: { about: "The actor gateway, for actors outside this machine: its tunnel, address and apps", args: "[tunnels|on|off|check|repair|address|revoke]" },
+  gateway: { about: "The actor gateway, for actors outside this machine: its tunnel, address and apps", args: "[tunnels|on|off|check|repair|address|token|revoke]" },
   who: { about: "Which sessions and actors have a hand in a file", args: "<path>" },
   session: { about: "A session's models, tokens, estimated cost, turns and tools", args: "[words|id]" },
   messages: { about: "What sessions and actors said to each other today" },
