@@ -122,7 +122,7 @@ test("OpenShell reviewed upload, policy hash, provider and command stay bound to
   const shell = createOpenShell({ records, platform: "linux", run: async (file, args, opts) => { calls.push({ file, args, opts }); return { stdout: "{}" }; } });
   const body = { backend: "native", agent: "codex", image: "agent:1.0", provider: "openrouter", source: dir, upload: true, policy, request: "task with $(literal); data" };
   const preview = await shell.preview(body); assert.equal(calls.length, 0);
-  assert.equal(preview.command.args.at(-1), body.request); assert.ok(preview.command.args.includes(`${dir}:/workspace`));
+  assert.equal(preview.command.args.at(-1), body.request); assert.ok(preview.command.args.includes(`${fs.realpathSync(dir)}:/workspace`));
   const result = await shell.launch(preview.ticket); assert.equal(result.status, "created"); assert.equal(calls[0].opts.timeout, 120000);
   assert.equal(JSON.stringify(records.list()).includes(body.request), false);
   assert.equal(result.policyHash.length, 64); assert.ok(result.name.startsWith("xeno-"));
