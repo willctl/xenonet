@@ -237,7 +237,8 @@ test("a session asks for an actor's gateway token: it is told none exists, the c
   const masked = await until(() => s.eval(`return document.querySelector("[data-ac-token-text]")?.innerText ?? null`));
   assert.match(masked ?? "", /^xenonet_gateway_•+$/);
   assert.equal(await s.eval(`return ${TOKEN}.test(document.documentElement.outerHTML)`), false, "out of the page until Show");
-  assert.equal(await s.eval(`return document.querySelectorAll("#alerts [data-al-request]").length`), 0, "answered");
+  // The card leaves the strip as the strip's own transition ends.
+  assert.equal(await until(() => s.eval(`return !document.querySelector('#alerts [data-al-request="${card.id}"]')`)), true, "answered");
   assert.deepEqual((await s.driver("actorRequests")).gatewayAsks, []);
   await click('[data-secret-show="token"]');
   assert.match((await until(() => s.eval(`return document.querySelector('[data-secret="token"] .secret-plain')?.innerText ?? null`))) ?? "", /^xenonet_gateway_[0-9a-f]{64}$/, "Show reveals it, in the window alone");
