@@ -9,6 +9,9 @@
 //     place;
 //   - adding an actor from the window (add) allows it at once, and a new
 //     token (rotate) is made there only;
+//   - a session may ask for an actor's gateway token (askGateway), but the
+//     answer never holds one: the ask waits as a card, and the token is
+//     made, and shown masked, only when you click Allow in the window;
 //   - removing an actor, or its leaving, revokes its token, releases its
 //     claims and takes its record; a product's actor that XenoNet also
 //     observes stays, as observed, and one XenoNet only observes can't be
@@ -87,6 +90,11 @@ export function createRegistration({ actors, now = actors.now, home = os.homedir
   const store = actors.store;
   const events = new EventEmitter();
   let lastSweep = -Infinity;
+  // Asks for a gateway token, by actor's slug (one each): in memory only,
+  // since an ask holds no secret and lapses with the registrations'
+  // ten minutes. { id, slug, asker, at, expiresAt }.
+  const gatewayAsks = new Map();
+  let askTimes = [];
 
   // ---------- what's asked ----------
 
@@ -183,16 +191,17 @@ export function createRegistration({ actors, now = actors.now, home = os.homedir
     if (store.decideActorRequest(r.id, "expired", t)) revoke(r.token_hash, idOf(r.slug), "expired", t);
   }
   function expireLapsed(t) {
+    const gone = [...gatewayAsks.values()].filter((g) => g.expiresAt <= t);
+    for (const g of gone) gatewayAsks.delete(g.slug);
     const lapsed = store.lapsedActorRequests(t);
-    if (!lapsed.length) return;
-    store.transaction(() => lapsed.forEach((r) => lapse(r, t)));
-    changed(t);
+    if (lapsed.length) store.transaction(() => lapsed.forEach((r) => lapse(r, t)));
+    if (lapsed.length || gone.length) changed(t);
   }
 
   // The registrations waiting changed: the window hears how many, and asks
   // for them with its key (GET /api/actors/requests).
   function changed(t = now()) {
-    events.emit("requests", { at: t, waiting: store.waitingActorRequests(t).length });
+    events.emit("requests", { at: t, waiting: store.waitingActorRequests(t).length + gatewayAsks.size });
   }
 
   // A registration, waiting from now: its credentials, and the request's id.
@@ -255,6 +264,9 @@ export function createRegistration({ actors, now = actors.now, home = os.homedir
           const ask = parse(r.ask, {});
           return { id: r.id, actor: idOf(r.slug), name: ask.name, product: ask.product ?? null, capabilities: ask.capabilities ?? [], heartbeatMs: ask.heartbeatMs ?? null, pid: ask.pid ?? null, asker: parse(r.asker), joins: joins(actors.info(idOf(r.slug)), ask.product?.id ?? null), at: r.created_at, expiresAt: r.expires_at };
         }),
+        // Sessions' asks for a gateway token, which Allow makes (never the
+        // token itself, which exists only once it's allowed).
+        gatewayAsks: [...gatewayAsks.values()].map((g) => ({ id: g.id, actor: idOf(g.slug), name: actors.info(idOf(g.slug))?.name ?? g.slug, replaces: !!store.gatewayToken(g.slug), asker: g.asker, at: g.at, expiresAt: g.expiresAt })),
       };
     },
 
@@ -265,6 +277,17 @@ export function createRegistration({ actors, now = actors.now, home = os.homedir
       if (decision !== "allow" && decision !== "deny") fail(400, "bad-request", 'the decision is "allow" or "deny"');
       const t = now();
       expireLapsed(t);
+      // A session's ask for a gateway token: Allow makes it now, and the
+      // answer, for the window alone, holds it once. Deny drops the ask.
+      const gate = [...gatewayAsks.values()].find((g) => g.id === String(requestId));
+      if (gate) {
+        if (decision === "deny") {
+          gatewayAsks.delete(gate.slug);
+          changed(t);
+          return { request: gate.id, decision, actor: idOf(gate.slug) };
+        }
+        return { request: gate.id, decision, actor: idOf(gate.slug), credentials: this.gateway(gate.slug) };
+      }
       const out = store.transaction(() => {
         const r = store.actorRequest(String(requestId));
         if (!r || r.decision) fail(404, "not-found", "no registration with that id is waiting; it may have been answered or have lapsed");
@@ -357,6 +380,7 @@ export function createRegistration({ actors, now = actors.now, home = os.homedir
       }
       const t = now();
       const registered = actors.isRegistered(id);
+      if (gatewayAsks.delete(slug)) changed(t);
       store.transaction(() => {
         const old = store.actorToken(slug);
         if (old) revoke(old.token_hash, id, reason, t);
@@ -438,9 +462,42 @@ export function createRegistration({ actors, now = actors.now, home = os.homedir
         if (old) revoke(old.gateway_hash, id, "rotated", t);
         const { token, hash } = newGatewayToken();
         store.setGatewayToken(slug, hash, t);
+        // Any session's ask for this token is answered by it.
+        gatewayAsks.delete(slug);
         changed(t);
         return { schema: "actor/gateway-credentials/v1", id, token };
       });
+    },
+
+    // A session's ask for an actor's gateway token (POST
+    // /api/actors/<slug>/gateway/ask). It makes no token and answers with
+    // none: it only leaves a card in XenoNet's window, and the token is made,
+    // and shown masked, when you click Allow there (decide). So an agent can
+    // start the job and never hold the secret, and anything that can pose as
+    // an agent can't mint a credential, only ask. The old token keeps
+    // working until you allow. The same actor asked again takes its old
+    // ask's place. `checked`, `chain` and `cwd`: what the process check saw
+    // of who asked (verify.register), for the card.
+    askGateway(slug, { checked = false, chain = null, cwd = null } = {}) {
+      const id = idOf(slug);
+      if (id === YOU) fail(400, "bad-request", "you reach XenoNet through its window, not the gateway");
+      const t = now();
+      expireLapsed(t);
+      const there = actors.info(id);
+      if (!there?.via.includes("registered")) {
+        const product = productOf(there?.product?.id);
+        if (!there || !product?.registers) fail(404, "not-found", "XenoNet has no registered actor by that slug; add or allow it first");
+        if (full(id)) fullError();
+      }
+      if ([...gatewayAsks.keys()].filter((s) => s !== slug).length >= WAITING_MAX) fail(409, "full", `${WAITING_MAX} gateway tokens are asked for already; try again once they're answered or have lapsed`);
+      askTimes = askTimes.filter((at) => at > t - HOUR_MS);
+      if (askTimes.length >= REQUESTS_PER_HOUR) fail(429, "too-many", `XenoNet takes at most ${REQUESTS_PER_HOUR} asks for a gateway token an hour`, { retryAfterMs: askTimes[0] + HOUR_MS - t });
+      askTimes.push(t);
+      const ask = { id: `gw-${crypto.randomBytes(9).toString("base64url")}`, slug, asker: checked && chain?.length ? askerOf(chain, cwd) : null, at: t, expiresAt: t + REQUEST_MS };
+      gatewayAsks.set(slug, ask);
+      changed(t);
+      events.emit("asked-gateway", { id: ask.id, actor: id, name: there?.name ?? slug });
+      return { schema: "actor/gateway-ask/v1", id, state: "waiting", request: ask.id, expiresAt: ask.expiresAt, replaces: !!store.gatewayToken(slug) };
     },
 
     // An actor's gateway token taken away (from the window, or your own

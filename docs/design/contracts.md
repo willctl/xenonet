@@ -21,6 +21,7 @@ orchestrator's OK and a note to every lane it touches.
   `doctor/result`, `doctor/run`, `theme`, `state` (v1 is today's file, v2
   the new one), `actor/snapshot`, `actor/event`, `actor/list`,
   `actor/registration`, `actor/credentials`, `actor/gateway-credentials`,
+  `actor/gateway-ask`,
   `actor/report`, `actor/me`,
   `actor/events`, `actor/console`, `actor/requests`, `actor/tokens`,
   `drift/record`, `drift/log`, and for hosts `host/list` and

@@ -188,6 +188,23 @@ export const ActorGatewayCredentials = define(
   },
 );
 
+export const ActorGatewayAsk = define(
+  "actor/gateway-ask",
+  1,
+  obj({
+    schema: z.literal("actor/gateway-ask/v1"),
+    id: ActorId,
+    state: z.literal("waiting"),
+    request: z.string().min(1).describe("The ask's id, which the window answers with POST /api/actors/requests/<id>"),
+    expiresAt: ms.describe("When the ask lapses unanswered, in epoch milliseconds"),
+    replaces: z.boolean().describe("The actor's app has a gateway token already, which Allow replaces"),
+  }),
+  {
+    title: "A session's ask for a gateway token",
+    description: "The answer to asking for an actor's gateway token: that it waits for an Allow in XenoNet's window. It never holds a token, so whoever asks never sees one: the token is made, and shown masked, only in the window.",
+  },
+);
+
 export const ActorRequests = define(
   "actor/requests",
   1,
@@ -217,10 +234,30 @@ export const ActorRequests = define(
         }),
       )
       .describe("Oldest first"),
+    gatewayAsks: z
+      .array(
+        obj({
+          id: z.string().min(1).describe("The ask's own id: POST /api/actors/requests/<id> answers it, and Allow makes the token"),
+          actor: ActorId.describe("The actor whose app would get the token"),
+          name: z.string().min(1).max(64),
+          replaces: z.boolean().describe("The actor's app has a gateway token already, which Allow replaces"),
+          asker: obj({
+            program: z.string(),
+            parents: z.array(z.string()).describe("Its parents, up to the first app or terminal"),
+            folder: nstr,
+          })
+            .nullable()
+            .describe("Who asked, with ~ for the home folder; null where XenoNet couldn't look"),
+          at: ms.describe("When it asked, in epoch milliseconds"),
+          expiresAt: ms.describe("When it lapses unanswered, in epoch milliseconds"),
+        }),
+      )
+      .optional()
+      .describe("Sessions' asks for an actor's gateway token, oldest first. Never a token: it's made only when you Allow"),
   }),
   {
     title: "Registrations waiting for you",
-    description: "What GET /api/actors/requests answers XenoNet's own window, with its key: each program waiting for an Allow, what it asks, who asked and when it lapses.",
+    description: "What GET /api/actors/requests answers XenoNet's own window, with its key: each program waiting for an Allow, what it asks, who asked and when it lapses, and any session's ask for an actor's gateway token.",
   },
 );
 

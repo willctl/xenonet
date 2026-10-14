@@ -250,6 +250,21 @@ export function createVerifier({ procs, store, home = null, now = () => Date.now
     return { ok: true, checked: true, chain, cwd: (await procs.cwd?.(peer).catch(() => null)) ?? null };
   }
 
+  // A request that asks you for something and holds no secret (a session's
+  // ask for an actor's gateway token): from a session or your own terminal,
+  // but never from under an actor product's processes, which could be
+  // relaying for its cloud. Says who asked, for the card the window shows,
+  // as register does.
+  async function asker(socket) {
+    if (!procs.supported) return pass();
+    const { pid: peer, chain } = await see(socket, { exe: true });
+    if (!chain.length) return unseen(null, "XenoNet couldn't see which program asked, so it can't show you who asked");
+    state.checked++;
+    const near = chain.find((p) => p.product || p.pid === home);
+    if (near?.product) return refuse(null, `a program under ${PRODUCT[near.product.product]} can't ask for a gateway token: it could be relaying for its cloud`);
+    return { ok: true, checked: true, chain, cwd: (await procs.cwd?.(peer).catch(() => null)) ?? null };
+  }
+
   // The process on the other end of a socket, or null where XenoNet can't
   // look: what the limit on bad tokens counts by.
   async function peer(socket) {
@@ -339,5 +354,5 @@ export function createVerifier({ procs, store, home = null, now = () => Date.now
     return { ...refuse(agent, reason), unseen: true };
   }
 
-  return { check, person, window, desktop, actor, register, peer, lineage, state };
+  return { check, person, window, desktop, actor, register, asker, peer, lineage, state };
 }

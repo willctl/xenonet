@@ -23,7 +23,7 @@ const CONTRACT = [
   "theme/v1",
   "state/v1", "state/v2",
   "actor/snapshot/v1", "actor/event/v1", "actor/list/v1", "actor/registration/v1",
-  "actor/credentials/v1", "actor/gateway-credentials/v1", "actor/report/v1", "actor/me/v1", "actor/events/v1", "actor/console/v1", "actor/requests/v1", "actor/tokens/v1",
+  "actor/credentials/v1", "actor/gateway-credentials/v1", "actor/gateway-ask/v1", "actor/report/v1", "actor/me/v1", "actor/events/v1", "actor/console/v1", "actor/requests/v1", "actor/tokens/v1",
   "actor/connection/v1", "assistant/result/v1", "assistant/error/v1",
   "drift/record/v1",
   "host/list/v1", "host/hello/v1",

@@ -16,6 +16,11 @@
 //
 //   POST   /api/actors/register       an actor/registration/v1; 202 with
 //                                     actor/credentials/v1, waiting
+//   POST   /api/actors/<slug>/gateway/ask
+//                                     a session's (or your terminal's) ask
+//                                     for the actor's gateway token; 202
+//                                     with actor/gateway-ask/v1, which holds
+//                                     no token: the ask waits for your Allow
 //   GET    /api/actors/me             actor/me/v1: waiting or allowed, its
 //                                     presence, its unread messages
 //   POST   /api/actors/heartbeat      actor/report/v1: presence, status,
@@ -32,7 +37,10 @@
 // and on macOS from XenoNet's own app with no agent nearer (verify.window):
 //
 //   GET    /api/actors/requests       the registrations waiting for you
-//   POST   /api/actors/requests/<id>  {"decision": "allow" | "deny"}
+//   POST   /api/actors/requests/<id>  {"decision": "allow" | "deny"}; for a
+//                                     session's ask for a gateway token,
+//                                     allow answers with that token, once
+//                                     (credentials: actor/gateway-credentials/v1)
 //   POST   /api/actors                adds an actor at once; 201 with its
 //                                     token, once
 //   POST   /api/actors/<slug>/token   a new token, once; the old one stops
@@ -424,7 +432,11 @@ export function actorRoutes({ actors, registration = null, caller = null, window
       request = decodeURIComponent(id);
     } catch {}
     if (!request) return fail(res, 404, "not-found", "no registration with that id is waiting");
-    return send(res, 200, registration.decide(request, body.decision));
+    const out = registration.decide(request, body.decision);
+    // An allowed ask for a gateway token answers the window with the token,
+    // once, and the gateway's address to go with it.
+    if (out.credentials) out.credentials.url = gateway?.url() ?? null;
+    return send(res, 200, out);
   }
 
   async function rotate(req, res, raw) {
@@ -478,6 +490,22 @@ export function actorRoutes({ actors, registration = null, caller = null, window
     const body = await objectOf(req, SMALL_BODY);
     const creds = registration.gateway(slug, { capabilities: Array.isArray(body.capabilities) ? body.capabilities : undefined });
     return send(res, 201, { ...creds, url: gateway?.url() ?? null });
+  }
+
+  // A session's, or your terminal's, ask for an actor's gateway token. Any
+  // program may ask, as any may register, because the answer holds no
+  // token: it says the ask waits for an Allow in XenoNet's window, where
+  // the token is made and shown masked (src/secret.js). Never an actor's
+  // token (an actor can't ask for its own way in), and never from under an
+  // actor product's processes (verify.asker).
+  async function gatewayAsk(req, res, raw) {
+    if (bearerOf(req.headers) !== undefined) return fail(res, 403, "not-allowed", "an actor can't ask for gateway tokens: a session or you can, and the token is made in XenoNet's window");
+    const slug = slugOf(raw);
+    if (!slug) return fail(res, 404, "not-found", "XenoNet has no such actor");
+    await objectOf(req, SMALL_BODY);
+    const verdict = verify?.asker ? await verify.asker(req.socket) : { ok: true, checked: false };
+    if (!verdict.ok) return fail(res, 403, "wrong-process", verdict.reason);
+    return send(res, 202, registration.askGateway(slug, verdict));
   }
 
   // ---------- waking actors (core/actors/wake.js) ----------
@@ -583,6 +611,8 @@ export function actorRoutes({ actors, registration = null, caller = null, window
       if (woke) return woke[2] ? (m === "POST" ? await wake(req, res, woke[1], { test: true }) : notFound(res)) : ["PUT", "DELETE"].includes(m) ? await wake(req, res, woke[1]) : notFound(res);
       const gate = /^\/api\/actors\/([^/]+)\/gateway$/.exec(p);
       if (gate) return ["POST", "DELETE"].includes(m) ? await gatewayToken(req, res, gate[1]) : notFound(res);
+      const asked = /^\/api\/actors\/([^/]+)\/gateway\/ask$/.exec(p);
+      if (asked) return m === "POST" ? await gatewayAsk(req, res, asked[1]) : notFound(res);
       const decision = /^\/api\/actors\/requests\/([^/]+)$/.exec(p);
       if (decision) return m === "POST" ? await decide(req, res, decision[1]) : notFound(res);
       const token = /^\/api\/actors\/([^/]+)\/token$/.exec(p);

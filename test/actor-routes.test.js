@@ -57,6 +57,7 @@ function routes({ demo = false, off = false } = {}) {
     person: async () => (calls.push(["person"]), verdicts.person ?? { ok: true, checked: true }),
     actor: async (_socket, who, opts) => (calls.push(["actor", who, opts]), verdicts.actor ?? { ok: true, checked: true, chain: CHAIN }),
     register: async (_socket, opts) => (calls.push(["register", opts]), verdicts.register ?? { ok: true, checked: true, chain: CHAIN, cwd: `${HOME}/Projects/docs-site` }),
+    asker: async () => (calls.push(["asker"]), verdicts.asker ?? { ok: true, checked: true, chain: CHAIN, cwd: `${HOME}/Projects/docs-site` }),
     peer: async (socket) => socket.pid ?? 4242,
     lineage: async () => null,
   };
@@ -359,6 +360,58 @@ test("the registrations waiting for you answer an actor/requests/v1: what each a
   valid("actor/requests/v1", (await r.go("GET", "/api/actors/requests", { headers: r.window() })).body, "with none waiting");
 });
 
+test("a session's ask for a gateway token: any program may ask, nothing it gets back holds a token, and only the window's Allow makes one", async () => {
+  const r = routes();
+  await r.allowed({ name: "Wren", capabilities: ALL });
+  const none = (res) => assert.ok(!/xenonet_(gateway|actor)_[0-9a-f]{8}/.test(JSON.stringify(res.body)), "no token in the answer");
+
+  const asked = await r.go("POST", "/api/actors/wren/gateway/ask", { body: {} });
+  assert.equal(asked.status, 202, JSON.stringify(asked.body));
+  valid("actor/gateway-ask/v1", asked.body);
+  assert.deepEqual([asked.body.id, asked.body.state, asked.body.replaces], ["actor:wren", "waiting", false]);
+  none(asked);
+  assert.ok(r.calls.some(([what]) => what === "asker"), "after the process check");
+  assert.equal(r.registration.authenticateGateway("xenonet_gateway_" + "0".repeat(64)).code, "bad-token", "and nothing was made");
+
+  // Never an actor's own token, a stranger, you, or a program the check refuses.
+  const token = (await r.go("POST", "/api/actors/wren/token", { headers: r.window() })).body.token;
+  assert.deepEqual(codeOf(await r.go("POST", "/api/actors/wren/gateway/ask", { body: {}, headers: r.bearer(token) })), [403, "not-allowed"]);
+  assert.deepEqual(codeOf(await r.go("POST", "/api/actors/nobody/gateway/ask", { body: {} })), [404, "not-found"]);
+  assert.deepEqual(codeOf(await r.go("POST", "/api/actors/you/gateway/ask", { body: {} })), [400, "bad-request"]);
+  assert.deepEqual(codeOf(await r.go("POST", "/api/actors/%E0%A4%A/gateway/ask", { body: {} })), [404, "not-found"]);
+  assert.deepEqual(codeOf(await r.go("GET", "/api/actors/wren/gateway/ask")), [404, "not-found"]);
+  r.verdicts.asker = { ok: false, checked: true, reason: "a program under Muse can't ask for a gateway token: it could be relaying for its cloud" };
+  assert.deepEqual(codeOf(await r.go("POST", "/api/actors/wren/gateway/ask", { body: {} })), [403, "wrong-process"]);
+  delete r.verdicts.asker;
+
+  // The window sees the card, with who asked, and no token.
+  assert.deepEqual(codeOf(await r.go("GET", "/api/actors/requests")), [403, "yours"], "only with the window's key");
+  const list = await r.go("GET", "/api/actors/requests", { headers: r.window() });
+  valid("actor/requests/v1", list.body);
+  none(list);
+  const [card] = list.body.gatewayAsks;
+  assert.deepEqual([card.id, card.actor, card.name, card.replaces, card.asker.folder], [asked.body.request, "actor:wren", "Wren", false, "~/Projects/docs-site"]);
+
+  // Only the window answers it, and Allow answers with the token, once.
+  const yours = { body: { decision: "allow" } };
+  assert.deepEqual(codeOf(await r.go("POST", `/api/actors/requests/${card.id}`, yours)), [403, "yours"]);
+  assert.deepEqual(codeOf(await r.go("POST", `/api/actors/requests/${card.id}`, { ...yours, headers: r.window(r.bearer(token)) })), [403, "yours"], "never with an actor's token");
+  const allowed = await r.go("POST", `/api/actors/requests/${card.id}`, { ...yours, headers: r.window() });
+  assert.equal(allowed.status, 200, JSON.stringify(allowed.body));
+  valid("actor/gateway-credentials/v1", allowed.body.credentials);
+  assert.equal(allowed.body.credentials.url, null, "no gateway here to give an address");
+  assert.equal(r.registration.authenticateGateway(allowed.body.credentials.token).id, "actor:wren");
+  assert.deepEqual(codeOf(await r.go("POST", `/api/actors/requests/${card.id}`, { ...yours, headers: r.window() })), [404, "not-found"]);
+  assert.deepEqual((await r.go("GET", "/api/actors/requests", { headers: r.window() })).body.gatewayAsks, []);
+
+  // Asking again: Allow replaces the token, and Deny keeps it.
+  const second = await r.go("POST", "/api/actors/wren/gateway/ask", { body: {} });
+  assert.equal(second.body.replaces, true);
+  const denied = await r.go("POST", `/api/actors/requests/${second.body.request}`, { body: { decision: "deny" }, headers: r.window() });
+  assert.deepEqual(denied.body, { request: second.body.request, decision: "deny", actor: "actor:wren" });
+  assert.equal(r.registration.authenticateGateway(allowed.body.credentials.token).ok, true);
+});
+
 test("the window sees whether each registered actor's token works, when it expires and when it was last used, and never the token", async () => {
   const DAY = 24 * 3600e3;
   const r = routes();
@@ -497,6 +550,8 @@ function checkedRoutes() {
     [420, 410, `${HOME}/bin/wren`],
     [411, 400, "/bin/zsh"],
     [440, 411, `${HOME}/.local/bin/claude`],
+    [500, 1, "/Applications/Muse.app/Contents/MacOS/Muse"],
+    [510, 500, "/bin/zsh"],
   ];
   const table = new Map(rows.map(([pid, ppid, program]) => [pid, { pid, ppid, start: 1000 + pid, program }]));
   const procs = {
@@ -545,6 +600,22 @@ test("with the real process check: a caller that's gone, or that netstat can't p
   assert.equal(r.actors.snapshot("actor:wren").status, "Rebuilding the docs", "nothing it sent was taken");
   assert.deepEqual(codeOf(await r.go("POST", "/api/actors/heartbeat", { body: {}, headers, pid: 220 })), [403, "wrong-process"], "nor from under an agent");
   assert.equal((await r.go("DELETE", "/api/actors/wren", { pid: 410 })).status, 200, "you, from your own terminal");
+  assert.equal(r.verify.state.unchecked, 0);
+});
+
+test("with the real process check: a session or your terminal may ask for a gateway token, a program under a product's app may not", async () => {
+  const r = checkedRoutes();
+  r.registration.add({ name: "Wren", capabilities: ALL });
+  const ask = (pid) => r.go("POST", "/api/actors/wren/gateway/ask", { body: {}, pid });
+  const fromSession = await ask(440);
+  assert.deepEqual([fromSession.status, fromSession.body.state], [202, "waiting"], "a Claude Code session asks");
+  const fromTerminal = await ask(420);
+  assert.equal(fromTerminal.status, 202, "so does a program in your terminal");
+  assert.equal(r.registration.requests().gatewayAsks.length, 1, "the same actor asked again takes its place");
+  assert.deepEqual(r.registration.requests().gatewayAsks[0].asker.parents.at(-1), "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal", "and the card says where it came from");
+  const relayed = await ask(510);
+  assert.deepEqual([...codeOf(relayed), relayed.body.error], [403, "wrong-process", "a program under Muse can't ask for a gateway token: it could be relaying for its cloud"], "Muse's own app could be relaying for its cloud");
+  for (const pid of [4999, undefined]) assert.deepEqual(codeOf(await ask(pid)), [403, "wrong-process"], `${pid}: a caller XenoNet can't place can't say who asked`);
   assert.equal(r.verify.state.unchecked, 0);
 });
 

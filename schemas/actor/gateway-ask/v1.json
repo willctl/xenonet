@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/actor/gateway-ask/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A session's ask for a gateway token",
+  "description": "The answer to asking for an actor's gateway token: that it waits for an Allow in XenoNet's window. It never holds a token, so whoever asks never sees one: the token is made, and shown masked, only in the window.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "actor/gateway-ask/v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^(@[a-z][a-z0-9-]{1,31}:)?actor:[a-z0-9][a-z0-9-]{0,31}$",
+      "description": "actor:<slug>, or @<host>:actor:<slug> from another host; the person at the console is actor:you"
+    },
+    "state": {
+      "type": "string",
+      "const": "waiting"
+    },
+    "request": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The ask's id, which the window answers with POST /api/actors/requests/<id>"
+    },
+    "expiresAt": {
+      "type": "number",
+      "description": "When the ask lapses unanswered, in epoch milliseconds"
+    },
+    "replaces": {
+      "type": "boolean",
+      "description": "The actor's app has a gateway token already, which Allow replaces"
+    }
+  },
+  "required": [
+    "schema",
+    "id",
+    "state",
+    "request",
+    "expiresAt",
+    "replaces"
+  ],
+  "additionalProperties": {}
+}

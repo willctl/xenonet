@@ -3,7 +3,7 @@
   "$id": "https://xenonet.dev/schemas/actor/requests/v1.json",
   "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
   "title": "Registrations waiting for you",
-  "description": "What GET /api/actors/requests answers XenoNet's own window, with its key: each program waiting for an Allow, what it asks, who asked and when it lapses.",
+  "description": "What GET /api/actors/requests answers XenoNet's own window, with its key: each program waiting for an Allow, what it asks, who asked and when it lapses, and any session's ask for an actor's gateway token.",
   "type": "object",
   "properties": {
     "schema": {
@@ -183,6 +183,87 @@
         "additionalProperties": {}
       },
       "description": "Oldest first"
+    },
+    "gatewayAsks": {
+      "description": "Sessions' asks for an actor's gateway token, oldest first. Never a token: it's made only when you Allow",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The ask's own id: POST /api/actors/requests/<id> answers it, and Allow makes the token"
+          },
+          "actor": {
+            "type": "string",
+            "pattern": "^(@[a-z][a-z0-9-]{1,31}:)?actor:[a-z0-9][a-z0-9-]{0,31}$",
+            "description": "The actor whose app would get the token"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "replaces": {
+            "type": "boolean",
+            "description": "The actor's app has a gateway token already, which Allow replaces"
+          },
+          "asker": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "program": {
+                    "type": "string"
+                  },
+                  "parents": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Its parents, up to the first app or terminal"
+                  },
+                  "folder": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "program",
+                  "parents",
+                  "folder"
+                ],
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who asked, with ~ for the home folder; null where XenoNet couldn't look"
+          },
+          "at": {
+            "type": "number",
+            "description": "When it asked, in epoch milliseconds"
+          },
+          "expiresAt": {
+            "type": "number",
+            "description": "When it lapses unanswered, in epoch milliseconds"
+          }
+        },
+        "required": [
+          "id",
+          "actor",
+          "name",
+          "replaces",
+          "asker",
+          "at",
+          "expiresAt"
+        ],
+        "additionalProperties": {}
+      }
     }
   },
   "required": [

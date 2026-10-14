@@ -422,6 +422,98 @@ test("gateway tokens go with their actor when you remove it; a product's actor s
   assert.equal(actors.isRegistered("actor:muse"), false);
 });
 
+test("a session's ask for a gateway token holds none, changes nothing until you allow it, and Allow makes the token once", () => {
+  const { reg, store, actors, clock } = setup();
+  actors.upsert({ id: "actor:muse", name: "Muse", product: { id: "muse", vendor: "Meta", version: "7.0" }, via: ["observed"], heartbeatMs: null });
+  const heard = [];
+  reg.on("requests", (r) => heard.push(r.waiting));
+  const old = reg.gateway("muse");
+
+  const ask = reg.askGateway("muse", SEEN);
+  valid("actor/gateway-ask/v1", ask);
+  assert.deepEqual([ask.id, ask.state, ask.replaces, ask.expiresAt], ["actor:muse", "waiting", true, T + 10 * MIN]);
+  // What the asker holds has no token in it, and XenoNet has made none.
+  assert.ok(!/xenonet_(gateway|actor)_/.test(JSON.stringify(ask)), "the answer holds no token");
+  assert.equal(reg.authenticateGateway(old.token).ok, true, "the old token works until you allow");
+  assert.equal(heard.at(-1), 1, "the window hears one waits");
+
+  // The card: who asked, never a token.
+  const list = reg.requests();
+  valid("actor/requests/v1", list);
+  assert.deepEqual(list.requests, []);
+  assert.deepEqual(list.gatewayAsks, [{ id: ask.request, actor: "actor:muse", name: "Muse", replaces: true, asker: { program: "/usr/local/bin/node", parents: ["~/bin/wren", "/bin/zsh", "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal"], folder: "~/Projects/docs-site" }, at: T, expiresAt: T + 10 * MIN }]);
+  assert.ok(!/xenonet_(gateway|actor)_/.test(JSON.stringify(list)), "nor does the list");
+
+  // Asking again takes the old ask's place, and doesn't add a card.
+  const again = reg.askGateway("muse");
+  assert.notEqual(again.request, ask.request);
+  assert.deepEqual(reg.requests().gatewayAsks.map((g) => g.id), [again.request]);
+  throwsCode(() => reg.decide(ask.request, "allow"), 404, "not-found");
+
+  // Allow: the token is made then, replaces the old, and answers the window.
+  const out = reg.decide(again.request, "allow");
+  valid("actor/gateway-credentials/v1", out.credentials);
+  assert.deepEqual([out.decision, out.actor], ["allow", "actor:muse"]);
+  assert.equal(reg.authenticateGateway(out.credentials.token).ok, true);
+  assert.equal(reg.authenticateGateway(old.token).reason, "rotated");
+  assert.deepEqual(reg.requests().gatewayAsks, [], "answered");
+  assert.ok(!JSON.stringify(store.db.prepare("SELECT * FROM actors").all()).includes(out.credentials.token), "only its hash is kept");
+  throwsCode(() => reg.decide(again.request, "allow"), 404, "not-found", () => true, "an ask is answered once");
+
+  // Deny makes nothing and leaves the old token alone.
+  const denied = reg.askGateway("muse");
+  assert.deepEqual(reg.decide(denied.request, "deny"), { request: denied.request, decision: "deny", actor: "actor:muse" });
+  assert.equal(reg.authenticateGateway(out.credentials.token).ok, true);
+  assert.deepEqual(reg.requests().gatewayAsks, []);
+
+  // An ask lapses with the registrations' ten minutes.
+  const lapsing = reg.askGateway("muse");
+  clock.t += 10 * MIN;
+  assert.deepEqual(reg.requests().gatewayAsks, []);
+  throwsCode(() => reg.decide(lapsing.request, "allow"), 404, "not-found");
+  assert.equal(heard.at(-1), 0);
+
+  // Making the token yourself (Connect…) answers an ask that waits.
+  const waiting = reg.askGateway("muse");
+  const made = reg.gateway("muse");
+  assert.deepEqual(reg.requests().gatewayAsks, []);
+  throwsCode(() => reg.decide(waiting.request, "allow"), 404, "not-found");
+  assert.equal(reg.authenticateGateway(made.token).ok, true);
+
+  // Removing the actor takes its ask with it.
+  const last = reg.askGateway("muse");
+  reg.remove("muse");
+  assert.deepEqual(reg.requests().gatewayAsks, []);
+  throwsCode(() => reg.decide(last.request, "allow"), 404, "not-found");
+});
+
+test("an ask for a gateway token is for an actor XenoNet has: not you, not a stranger; a product's actor only observed gets registered by Allow; and the asks are limited", () => {
+  const { reg, actors } = setup();
+  throwsCode(() => reg.askGateway("you"), 400, "bad-request");
+  throwsCode(() => reg.askGateway("nobody"), 404, "not-found");
+  actors.upsert({ id: "actor:muse", name: "Muse", product: { id: "muse", vendor: "Meta", version: "7.0" }, via: ["observed"], heartbeatMs: null });
+  const ask = reg.askGateway("muse");
+  assert.equal(ask.replaces, false);
+  assert.equal(actors.isRegistered("actor:muse"), false, "asking registers nothing");
+  reg.decide(ask.request, "allow");
+  assert.equal(actors.isRegistered("actor:muse"), true, "Allow does, as Connect… does");
+
+  // Four actors' asks at once, and the fifth waits its turn.
+  for (const n of ["Wren", "Heron", "Ibis", "Kite"]) reg.add({ name: n, capabilities: ["message-agents"] });
+  for (const slug of ["wren", "heron", "ibis", "kite"]) reg.askGateway(slug);
+  throwsCode(() => reg.askGateway("muse"), 409, "full");
+  reg.askGateway("kite");
+  assert.equal(reg.requests().gatewayAsks.length, 4, "the same actor again takes its place");
+
+  // And twenty an hour, counting each ask.
+  const { reg: busy, clock: c2 } = setup();
+  busy.add({ name: "Wren", capabilities: ["message-agents"] });
+  for (let i = 0; i < 20; i++) busy.askGateway("wren");
+  throwsCode(() => busy.askGateway("wren"), 429, "too-many", (e) => e.extra.retryAfterMs === 3600e3);
+  c2.t += 3600e3;
+  assert.equal(busy.askGateway("wren").state, "waiting");
+});
+
 test("observers: on until you turn one off, which hides an actor known only that way, before XenoNet has seen it too", () => {
   const { reg, actors, store, clock } = setup();
   assert.deepEqual(reg.observers().observers.map((o) => [o.product, o.name, o.on, o.actors]), [["hermes-agent", "Hermes Agent", true, []], ["grok-bot", "Grok Bot", true, []], ["muse", "Muse", true, []]]);
