@@ -191,9 +191,9 @@ function buildServer() {
     "refusals",
     {
       title: "Browse provider refusals",
-      description: "Opens the provider refusal browser. Filter the full collection, sort it, select a record from the current page, or view its saved request. Returns result metadata and selected ID, without request content. Browsing does not change recording settings.",
+      description: "Opens the provider refusal browser. Filter the full collection, sort it, or select a record from the current page. Returns result metadata and selected ID. Viewing a saved request is the person's to do, so this tool can't. Browsing does not change recording settings.",
       inputSchema: z.object({
-        action: z.enum(["open", "filter", "select", "page", "refresh", "request"]).optional(),
+        action: z.enum(["open", "filter", "select", "page", "refresh"]).optional(),
         filters: z.object({ q: z.string().optional(), provider: z.string().optional(), kind: z.string().optional(), model: z.string().optional(), category: z.string().optional(), context: z.enum(["", "with", "without"]).optional(), from: z.string().optional().describe("Local date YYYY-MM-DD, inclusive."), to: z.string().optional().describe("Local date YYYY-MM-DD, inclusive."), sort: z.enum(["newest", "oldest", "provider", "model", "category", "kind"]).optional() }).optional(),
         id: z.string().optional(), page: z.number().int().min(1).optional(), settle: settleArg, instance: instanceArg,
       }),

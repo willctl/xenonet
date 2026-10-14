@@ -29,7 +29,14 @@ test("the refusal command opens a searchable browser with outcome filters and de
   st = (await s.driver("refusals", "filter", { provider: "", kind: "", sort: "oldest", context: "with" })).refusals;
   assert.equal(st.matched, 1);
   await s.driver("refusals", "select", st.records[0].id);
-  await s.driver("refusals", "request");
+  // Viewing a saved request is yours: the driver has no action for it and
+  // the button is marked so. The test instance lets a real click through.
+  await assert.rejects(s.driver("refusals", "request"), /Unknown refusal browser action/);
+  assert.equal(await s.eval('return document.querySelector("[data-rf-request]").hasAttribute("data-yours")'), true);
+  const at = await s.eval('const r = document.querySelector("[data-rf-request]"); r.scrollIntoView({ block: "center" }); const b = r.getBoundingClientRect(); return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) };');
+  await s.input({ click: at });
+  const shown = Date.now() + 5000;
+  while (!/made-up demo request/.test(await s.eval('return document.querySelector("[data-rf-request-body]").textContent')) && Date.now() < shown) await new Promise((r) => setTimeout(r, 100));
   assert.match(await s.eval('return document.querySelector("[data-rf-request-body]").textContent'), /made-up demo request/);
   await s.driver("refusals", "filter", { q: "not in any record" });
   assert.match(await s.eval('return document.querySelector("[data-rf-results]").textContent'), /No records match/);

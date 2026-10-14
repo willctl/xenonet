@@ -10,7 +10,7 @@ Select a record to see its provider signal, session, source transcript and saved
 
 Recovered requests, reroutes and possible refusals have separate outcome filters. A possible refusal is a provider signal that does not confirm a refusal. Demo and test instances show made-up records.
 
-The console driver and console MCP expose the same panel through `refusals`: `open`, `filter`, `select`, `page`, `refresh` and `request`. Pages start at 1. The driver returns record metadata and the selected ID, without saved request content.
+The console driver and console MCP expose the same panel through `refusals`: `open`, `filter`, `select`, `page` and `refresh`. Pages start at 1. The driver returns record metadata and the selected ID. **View saved request** is yours alone: the driver has no action for it, and outside the demo and test instances the console refuses to press it.
 
 ## What counts
 

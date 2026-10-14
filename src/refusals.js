@@ -17,7 +17,7 @@ export function refusalDetail(r) {
     <h4>Provider signal</h4><pre>${h(r.signal?.text || r.signal?.explanation || "No message recorded.")}</pre>
     <h4>Saved context</h4><p class="rf-note">${r.context ? `${h(r.context.lines ?? "Unknown")} transcript lines · ${h(r.context.bytes ?? "Unknown")} bytes${r.context.truncated ? " · Trimmed" : ""}` : "No context saved with this record."}</p>
     ${r.missing?.length ? `<p class="rf-note">Not recorded: ${h(r.missing.join("; "))}.</p>` : ""}
-    ${r.context ? '<button class="act" data-rf-request>View saved request</button><p class="rf-note">Saved requests may contain private prompts and tool output.</p><div data-rf-request-body></div>' : ""}
+    ${r.context ? '<button class="act" data-rf-request data-yours>View saved request</button><p class="rf-note">Saved requests may contain private prompts and tool output.</p><div data-rf-request-body></div>' : ""}
     <details><summary>Record JSON</summary><pre>${h(JSON.stringify(r, null, 2))}</pre></details>`;
 }
 
@@ -144,7 +144,8 @@ export function createRefusalsPanel({ modals }) {
     else if (action === "select") select(value);
     else if (action === "page") { page = Math.min(Math.max(1, Math.floor(Number(value) || 1)), Math.max(1, Math.ceil((data?.matched ?? 0) / 50))); await load(); }
     else if (action === "refresh") await load();
-    else if (action === "request") await request();
+    // Viewing a saved request is yours, like the button it would press, so
+    // the driver has no action for it: it would put private prompts on screen.
     else throw new Error(`Unknown refusal browser action: ${action}`);
     return state();
   } };
