@@ -11,6 +11,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { EventEmitter } from "node:events";
+import { createHash } from "node:crypto";
 import { tilde, baseName } from "./paths.js";
 import { Tailer } from "./blocks/tailer.js";
 import { claudeUsageGatherer, desktopUsageGatherer } from "./claude-usage.js";
@@ -87,6 +88,11 @@ export const dayKey = (ts) => {
   return key;
 };
 const fileKey = (p) => String(p).replace(/^\\\\\?\\/, "").replace(/\\/g, "/").toLowerCase();
+
+// Compare the whole input, including pagination and arguments after long
+// prefixes. Keep a digest rather than another copy of private tool inputs.
+const ordered = (v) => Array.isArray(v) ? v.map(ordered) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, ordered(v[k])])) : v;
+const toolKey = (name, input) => `${name}|${createHash("sha256").update(JSON.stringify(ordered(input ?? null))).digest("hex")}`;
 
 // The agent's last words before handing the turn back read like a question.
 export function looksLikeQuestion(text) {
@@ -251,6 +257,7 @@ class LiveSession {
   }
 
   addPrompt(text, ts) {
+    this.resetStall();
     const p = { text: tail(text, 1200), ts };
     this.firstPrompt ??= p;
     this.prompts.push(p);
@@ -269,6 +276,7 @@ class LiveSession {
 
   // A turn's end; `interrupted` when you stopped it.
   endTurn(ts, { interrupted = false } = {}) {
+    this.resetStall();
     this.turnMarks++;
     this.turn.active = false;
     this.inflight.clear();
@@ -292,8 +300,22 @@ class LiveSession {
     }
   }
 
-  noteToolResult(ok, ts) {
+  resetStall() {
+    this.recentTools = [];
+    this.errorStreak = 0;
+    this.errorSince = this.lastErrorAt = this.lastResultAt = 0;
+  }
+
+  noteToolResult(ok, ts, tool = null) {
+    if (tool) {
+      if (tool.ok !== null) return; // A duplicate result isn't another failure.
+      tool.ok = !!ok;
+    }
+    if (ts < (this.lastResultAt ?? 0)) return;
+    this.lastResultAt = ts;
+    if (!ok && !this.errorStreak) this.errorSince = ts;
     this.errorStreak = ok ? 0 : this.errorStreak + 1;
+    if (ok) this.errorSince = 0;
     if (!ok) this.lastErrorAt = ts;
   }
 
@@ -325,19 +347,22 @@ class LiveSession {
   }
 
   stuck(now) {
-    if (!(this.turn.active || now - this.lastEventAt < TURN_STALE_MS)) return null;
+    if (!this.turn.active || (this.question && this.inflight.has(this.question.callId)) || (this.hookNeed && now - this.hookNeed.ts < 30 * 60e3)) return null;
     const reasons = [];
-    // The exact same command (or call) several times in a row is a loop;
-    // editing one file repeatedly is just work, so edits and reads don't count.
+    // Repetition alone is not a stall: searches, pagination and polling
+    // often repeat successfully. A loop needs repeated completed failures.
     let run = 0;
     const lastTool = this.recentTools[this.recentTools.length - 1];
     for (let i = this.recentTools.length - 1; lastTool && i >= 0; i--) {
       const t = this.recentTools[i];
-      if (t.key !== lastTool.key || now - t.ts > 10 * 60e3) break;
+      if (t.key !== lastTool.key || t.ok !== false || now - t.ts > 10 * 60e3) break;
       run++;
     }
-    if (run >= 3 && lastTool?.loopable) reasons.push(`ran ${lastTool.label} ${run} times in a row`);
-    if (this.errorStreak >= 3) reasons.push(`${this.errorStreak} failed tool calls in a row`);
+    const failedLoop = run >= 3 && lastTool?.loopable && this.errorStreak >= 3;
+    if (failedLoop) reasons.push(`ran ${lastTool.label} ${run} times in a row`);
+    // A burst of failed parallel calls can be one recoverable attempt.
+    // Different calls need sustained failure before we ask for attention.
+    if (this.errorStreak >= 3 && now - this.lastErrorAt < 10 * 60e3 && (failedLoop || this.errorStreak >= 5 && this.lastErrorAt - this.errorSince >= 60e3)) reasons.push(`${this.errorStreak} failed tool calls in a row`);
     // Long builds and test runs are quiet by nature: a tool in flight gets 15
     // minutes before silence counts, plain thinking gets 4.
     const quiet = now - this.lastEventAt;
@@ -557,16 +582,18 @@ export class LiveTelemetry extends EventEmitter {
     return lo;
   }
 
-  noteTool(s, { name, detail, full, files = [], ts, agentId, server, extra }, live) {
+  noteTool(s, { name, detail, full, files = [], ts, agentId, server, extra, ok = null }, live) {
     const category = categorize(name);
     s.toolCounts[category] = (s.toolCounts[category] ?? 0) + 1;
     s.lastTool = { name, category, detail, ts };
     for (const file of files) s.files.set(file, ts);
     const srv = server ?? mcpServerOf(name);
     if (srv) s.mcp.set(srv, ts);
-    if (!agentId) s.recentTools.push({ key: `${name}|${full ?? detail ?? ""}`, label: clip(detail || name, 48), loopable: category === "shell" || category === "mcp" || category === "web", ts });
+    const tool = !agentId ? { key: toolKey(name, full ?? detail), label: clip(detail || name, 48), loopable: category === "shell" || category === "mcp" || category === "web", ok, ts } : null;
+    if (tool) s.recentTools.push(tool);
     if (s.recentTools.length > 20) s.recentTools.shift();
     this.activity(s, { kind: "tool", tool: name, category, detail, files, server: srv, agentId, ...extra, ts }, live);
+    return tool;
   }
 
   // Wiki writes name the pages they touch; the UI beams to them.
@@ -672,8 +699,9 @@ export class LiveTelemetry extends EventEmitter {
     if (sub) sub.tools++;
     const server = mcpServerOf(b.name);
     const pages = this.wikiPagesOf(server, b.input);
-    const full = typeof b.input?.command === "string" ? b.input.command.slice(0, 400) : JSON.stringify(b.input ?? {}).slice(0, 400);
-    this.noteTool(s, { name: b.name, detail: toolDetail(b.name, b.input, this.home), full, files: filesOf(b.input), ts, agentId, extra: pages ? { pages } : undefined }, live);
+    const full = typeof b.input?.command === "string" ? b.input.command : b.input ?? {};
+    const tool = this.noteTool(s, { name: b.name, detail: toolDetail(b.name, b.input, this.home), full, files: filesOf(b.input), ts, agentId, extra: pages ? { pages } : undefined }, live);
+    s.inflight.get(b.id).tool = tool;
     const edits = claudeEdits(b.name, b.input);
     if (edits.length) s.addEdits(edits, ts);
     if (categorize(b.name) === "agent" && b.input?.description) this.pendingLabel = { session: s.id, label: clip(b.input.description, 40), ts };
@@ -690,8 +718,9 @@ export class LiveTelemetry extends EventEmitter {
     const results = o.results;
     if (results) {
       for (const r of results) {
+        const tool = s.inflight.get(r.id)?.tool;
         s.inflight.delete(r.id);
-        if (!agentId) s.noteToolResult(!r.error, ts);
+        if (!agentId) s.noteToolResult(!r.error, ts, tool);
         if (r.error) this.activity(s, { kind: "tool-error", ts, agentId }, live);
       }
       s.lastEventAt = Math.max(s.lastEventAt, ts);
@@ -741,6 +770,7 @@ export class LiveTelemetry extends EventEmitter {
     if (type === "event_msg") {
       switch (p.type) {
         case "task_started":
+          s.resetStall();
           s.turnMarks++;
           s.turn = { active: true, startedAt: ts };
           if (p.model_context_window) s.context.window = p.model_context_window;
@@ -820,6 +850,7 @@ export class LiveTelemetry extends EventEmitter {
         // Its output ends a call, a shell call's too, matched as stats
         // match them: by call_id, else id.
         s.inflight.delete(p.call_id ?? p.id);
+        s.lastEventAt = Math.max(s.lastEventAt, ts);
       }
     }
   }
@@ -884,7 +915,7 @@ export class LiveTelemetry extends EventEmitter {
         const ok = it.exit_code == null || Number(it.exit_code) === 0;
         s.noteToolResult(ok && it.status !== "failed", ts);
         const cmd = commandText(it.command);
-        this.noteTool(s, { name: "shell", detail: clip(tilde(cmd, this.home)), full: cmd.slice(0, 400), ts }, live);
+        this.noteTool(s, { name: "shell", detail: clip(tilde(cmd, this.home)), full: cmd, ok: ok && it.status !== "failed", ts }, live);
         if (!ok) this.activity(s, { kind: "tool-error", ts }, live);
         return;
       }
@@ -892,7 +923,7 @@ export class LiveTelemetry extends EventEmitter {
         const ok = it.status === "completed" && !it.error;
         s.noteToolResult(ok, ts);
         const pages = this.wikiPagesOf(it.server, it.arguments);
-        this.noteTool(s, { name: `mcp__${it.server}__${it.tool}`, server: it.server, detail: `${it.server}.${it.tool}`, ts, extra: pages ? { pages } : undefined }, live);
+        this.noteTool(s, { name: `mcp__${it.server}__${it.tool}`, server: it.server, detail: `${it.server}.${it.tool}`, full: it.arguments ?? {}, ok, ts, extra: pages ? { pages } : undefined }, live);
         if (!ok) this.activity(s, { kind: "tool-error", ts }, live);
         return;
       }
@@ -900,7 +931,7 @@ export class LiveTelemetry extends EventEmitter {
         const files = Object.keys(it.changes ?? {});
         s.addEdits(codexEdits(it.changes), ts);
         s.noteToolResult(it.status !== "failed", ts);
-        this.noteTool(s, { name: "apply_patch", detail: files.map((f) => baseName(f)).join(", "), files, ts }, live);
+        this.noteTool(s, { name: "apply_patch", detail: files.map((f) => baseName(f)).join(", "), files, ok: it.status !== "failed", ts }, live);
         return;
       }
       case "WebSearch":

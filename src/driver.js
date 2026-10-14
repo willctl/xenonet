@@ -285,7 +285,9 @@ export function createDriver(app) {
 
     // About what today's work would cost, and what OpenRouter's key has
     // spent, as Token use shows them (telemetry.js). Read-only.
-    spend() {
+    async spend(action = "read") {
+      if (action === "refresh") await app.refreshSpend?.();
+      else if (action !== "read") throw new Error(`Unknown spend action: ${action}`);
       return app.spend?.() ?? null;
     },
 
@@ -351,6 +353,14 @@ export function createDriver(app) {
       return action === "status" ? app.updates.state : app.updates.action(action, value);
     },
     commands: () => app.commands.map(({ id, label, key }) => ({ id, label, ...(key ? { key } : {}) })),
+    async refusals(action = "open", value, opts) {
+      const st = await act(() => app.refusals.action(action, value), opts);
+      return { ...st, refusals: app.refusals.state };
+    },
+    async integrations(action = "open", value, opts) {
+      const st = await act(() => app.integrations.action(action, value), opts);
+      return { ...st, integrations: app.integrations.state };
+    },
     // Runs a command from the palette (⌘K / Ctrl+K) by id; commands() lists them.
     command(id, opts) {
       const cmd = app.commands.find((c) => c.id === id);

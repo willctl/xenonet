@@ -19,7 +19,9 @@ const TOKEN = "ab".repeat(32);
 
 function runtime(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-console-"));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5 }));
+  // The stand-in Desktop can still be exiting after its marker appears.
+  // Async retries let Windows release its cwd before teardown removes it.
+  t.after(async () => fs.promises.rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }));
   return { dir, env: { XENONET_RUNTIME_DIR: dir, XENONET_PORT: "47999" } };
 }
 
@@ -29,7 +31,9 @@ function runtime(t) {
 // request that reached it.
 async function service(env, { desktop = true, ready = true, consoleApi = { min: 1, max: 1 }, answer } = {}) {
   const s = { desktop, ready, seen: [], hellos: 0, sockets: new Set() };
+  let closing = false;
   const server = net.createServer((socket) => {
+    if (closing) { socket.destroy(); return; }
     s.sockets.add(socket);
     socket.on("close", () => s.sockets.delete(socket));
     rpc(socket, async (method, params) => {
@@ -49,6 +53,7 @@ async function service(env, { desktop = true, ready = true, consoleApi = { min: 
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   fs.writeFileSync(descriptorFile(env), JSON.stringify({ port: server.address().port, token: TOKEN }));
   s.close = () => new Promise((r) => {
+    closing = true;
     for (const socket of s.sockets) socket.destroy();
     server.close(r);
   });
@@ -144,7 +149,7 @@ test("launching starts the registered Desktop with how to show it, without ELECT
   // Desktop counts as connected, and its page as ready, once the program has run.
   const up = () => fs.existsSync(marker);
   Object.defineProperties(s, { desktop: { get: up }, ready: { get: up } });
-  const c = installedConsole({ env: { ...env, ELECTRON_RUN_AS_NODE: "1" } });
+  const c = installedConsole({ env: { ...process.env, ...env, ELECTRON_RUN_AS_NODE: "1" } });
   const state = await c.launch({ show: "active", timeout: 15000 });
   assert.equal(state.page.ready, true);
   const started = JSON.parse(fs.readFileSync(marker, "utf8"));

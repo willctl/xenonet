@@ -58,6 +58,8 @@ export async function buildComponents({ app, platform, arch, output = path.join(
     if (platform === process.platform && arch === process.arch) {
       const { checkRuntime } = await import("../core/components/install.js");
       checkRuntime({ root: staging, version: manifest.version });
+      const imported = spawnSync(path.join(staging, platform === "win32" ? "node.exe" : "node"), ["--input-type=module", "-e", "await import('./core/integrations/index.js'); process.stdout.write('ok')"], { cwd: staging, windowsHide: true, encoding: "utf8", timeout: 15000 });
+      if (imported.status !== 0 || imported.stdout !== "ok") throw new Error("The packaged integration adapters could not be imported.");
     }
     const file = `XenoNet-${component}-${manifest.version}-${platform}-${arch}.tar.gz`;
     const full = path.join(output, file);
@@ -80,7 +82,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     const build = spawnSync(process.platform === "win32" ? "npm.cmd" : "npm", ["run", "build"], { cwd: root, stdio: "inherit", shell: process.platform === "win32" });
     if (build.status !== 0) throw new Error("Could not build the page.");
   }
-  for (const name of ["core", "server", "cli", "mcp", "schemas", "dist", "package.json", "package-lock.json"]) fs.cpSync(path.join(root, name), path.join(app, name), { recursive: true });
+  for (const name of ["core", "server", "cli", "mcp", "schemas", "dist", "vendor", "package.json", "package-lock.json"]) fs.cpSync(path.join(root, name), path.join(app, name), { recursive: true });
   const install = spawnSync(process.platform === "win32" ? "npm.cmd" : "npm", ["ci", "--omit=dev", "--ignore-scripts"], { cwd: app, stdio: "inherit", shell: process.platform === "win32" });
   if (install.status !== 0) throw new Error("Could not install component dependencies.");
   await buildComponents({ app, platform: process.platform, arch: process.arch, bundle: path.join(app, "bundle") });

@@ -393,8 +393,11 @@ test("Claude Code's hooks honor the sender's process identity", async () => {
 });
 
 test("XenoNet Dev's simulations, its control channel and captures", async () => {
-  for (const kind of ["needs-you", "collision", "stuck", "turn-end", "wiki-write"]) assert.equal((await post("/api/dev/simulate", { kind })).data.kind, kind, kind);
-  assert.ok((await get("/api/live")).data.sessions.some((s) => s.needsYou?.text?.startsWith("Should I run the migration")));
+  for (const kind of ["needs-you", "collision", "stuck", "turn-end", "wiki-write"]) {
+    assert.equal((await post("/api/dev/simulate", { kind })).data.kind, kind, kind);
+    if (kind === "needs-you") assert.ok((await get("/api/live")).data.sessions.some((s) => s.needsYou?.text?.startsWith("Should I run the migration")));
+    if (kind === "stuck") assert.ok((await get("/api/live")).data.sessions.some((s) => s.stuck?.reasons.includes("4 failed tool calls in a row")));
+  }
   assert.equal((await post("/api/dev/simulate", { kind: "doctor" })).data.kind, "doctor");
   assert.ok((await get("/api/doctor")).data.results.some((r) => r.id === "codex.auth" && r.status === "fail"));
   assert.equal((await post("/api/dev/simulate", { kind: "clear" })).data.kind, "clear");

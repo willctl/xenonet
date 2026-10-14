@@ -188,6 +188,38 @@ function buildServer() {
   );
 
   tool(
+    "refusals",
+    {
+      title: "Browse provider refusals",
+      description: "Opens the provider refusal browser. Filter the full collection, sort it, or select a record from the current page. Returns result metadata and selected ID. Viewing a saved request is the person's to do, so this tool can't. Browsing does not change recording settings.",
+      inputSchema: z.object({
+        action: z.enum(["open", "filter", "select", "page", "refresh"]).optional(),
+        filters: z.object({ q: z.string().optional(), provider: z.string().optional(), kind: z.string().optional(), model: z.string().optional(), category: z.string().optional(), context: z.enum(["", "with", "without"]).optional(), from: z.string().optional().describe("Local date YYYY-MM-DD, inclusive."), to: z.string().optional().describe("Local date YYYY-MM-DD, inclusive."), sort: z.enum(["newest", "oldest", "provider", "model", "category", "kind"]).optional() }).optional(),
+        id: z.string().optional(), page: z.number().int().min(1).optional(), settle: settleArg, instance: instanceArg,
+      }),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async ({ action = "open", filters, id, page, settle, instance }) => reply(await target(instance).driver("refusals", action, action === "filter" ? filters : action === "select" ? id : page, { settle })),
+  );
+
+  tool(
+    "integrations",
+    {
+      title: "Review agent workflows",
+      description: "Browse routing decisions, OpenShell jobs and read-only Pi run metadata. Open a tab, filter, page or select a record. Sending decisions, enabling sources, launching jobs and deletion stay in the owner's window; this tool never executes them.",
+      inputSchema: z.object({ action: z.enum(["open", "filter", "select", "page", "refresh"]).optional(), tab: z.enum(["routing", "sandbox", "pi"]).optional(), filters: z.object({ q: z.string().optional(), status: z.string().optional(), sort: z.enum(["newest", "oldest"]).optional() }).optional(), id: z.string().optional(), page: z.number().int().min(1).optional(), settle: settleArg, instance: instanceArg }),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async ({ action = "open", tab, filters, id, page, settle, instance }) => reply(await target(instance).driver("integrations", action, action === "open" ? tab : action === "filter" ? filters : action === "select" ? id : page, { settle })),
+  );
+
+  tool(
+    "spend",
+    { title: "Read Token use", description: "Reads the Token use panel, including the configured OpenRouter key's spend or its visible setup/error state. Refresh asks for current cached provider usage; it never sends a model request or changes credentials.", inputSchema: z.object({ refresh: z.boolean().optional(), instance: instanceArg }), annotations: { readOnlyHint: true, openWorldHint: false } },
+    async ({ refresh, instance }) => reply(await target(instance).driver("spend", refresh ? "refresh" : "read")),
+  );
+
+  tool(
     "rename",
     {
       title: "Rename a session",

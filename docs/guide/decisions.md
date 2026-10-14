@@ -11,11 +11,13 @@ XenoNet uses Jev by default, TypeSafe's decision model on [OpenRouter](https://o
 
 XenoNet keeps the key in Windows Credential Manager, the macOS keychain or the Secret Service on Linux, and never shows it again. `xenonet decide forget` and the same palette command forget it.
 
+Token use always shows an OpenRouter row. **Set key** opens this setup when no key is stored; **Check key** means the provider rejected it. Usage covers the configured key, not other apps' keys or the whole account. The row refreshes after keeping or forgetting the key.
+
 ## What it decides
 
 - **Which folders are projects.** In the projects panel, **Show what would be sent** now offers **Send to jev** beside **Send to Codex**. Jev gets the same outline you see: each folder's path inside your projects folder, its well-known files, counts and file types, and how many sessions ran there. Each folder is one question (project, a group of projects, or just a folder), and XenoNet keeps a pick only when Jev is at least 75% sure and the pick changes something. Your own rules still win.
 
-More decisions will follow, each with what it sends shown first, and none of them on by default.
+**Route task** and **Review decisions** add opt-in agent suggestions through JevRouter, with scores and recorded outcomes. They use the same credential store and zero-retention request. See [Agent workflows](integrations.md) for the preview, privacy and execution boundaries.
 
 ## What leaves this computer
 

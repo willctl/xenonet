@@ -1,0 +1,29 @@
+.in-panel .in-body { display: grid; gap: 14px; }
+.in-panel nav, .in-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+.in-panel [aria-current] { border-color: var(--gold); color: var(--gold); }
+.in-panel label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+.in-panel input, .in-panel select, .in-panel textarea { width: 100%; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 8px; font: inherit; }
+.in-panel textarea { min-height: 82px; resize: vertical; }
+.in-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.in-panel .in-check { display: flex; align-items: center; margin: 10px 0; }
+.in-check input { width: auto; }
+.in-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.6 var(--mono); max-height: 280px; overflow: auto; }
+.in-panel [data-in-preview-body]:empty { display: none; }
+.in-panel [data-in-preview-body] { border-left: 2px solid var(--gold); padding: 12px; }
+.in-panel [data-in-message] { color: var(--gold); min-height: 1em; margin: 0; }
+.in-columns { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(260px, 1.3fr); gap: 18px; }
+.in-panel [data-in-list] { max-height: 350px; overflow: auto; }
+.in-record { width: 100%; display: grid; gap: 4px; text-align: left; color: var(--text); background: transparent; border: 1px solid var(--line); padding: 10px; margin-bottom: 6px; cursor: pointer; }
+.in-record:hover, .in-record.selected { border-color: var(--gold); }
+.in-record span, .in-record small { color: var(--muted); }
+.in-panel dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 14px; font-size: 12px; }
+.in-panel dt { color: var(--muted); }
+.in-panel dd { margin: 0; overflow-wrap: anywhere; }
+.in-scores { display: grid; gap: 10px; margin: 16px 0; }
+.in-scores > div { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; }
+.in-scores progress, .in-scores small { grid-column: 1 / -1; width: 100%; }
+.in-scores progress { height: 5px; accent-color: var(--gold); }
+.in-scores small { color: var(--muted); }
+.in-panel [data-in-form] > .act { margin: 10px 6px 0 0; }
+.in-panel [data-in-inspection] { white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.6 var(--mono); }
+@media (max-width: 720px) { .in-fields, .in-columns { grid-template-columns: 1fr; } }

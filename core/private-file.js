@@ -5,7 +5,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const runSync = (file, args) => execFileSync(file, args, { encoding: "utf8", windowsHide: true, timeout: 10000 });
+// Endpoint inspection can delay even whoami on a busy Windows workstation.
+// Keep a bounded wait and propagate failures before touching private files.
+export function runPrivateCommand(file, args, { exec = execFileSync } = {}) {
+  return exec(file, args, { encoding: "utf8", windowsHide: true, timeout: 60000 });
+}
+const runSync = runPrivateCommand;
 
 // Your account's SID, from whoami /user: the last field of its CSV line.
 export function userSid({ run = runSync } = {}) {
