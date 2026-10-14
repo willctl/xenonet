@@ -119,6 +119,38 @@ All of the following are owner actions, checked by `fromYou` in
 off, Check, Repair and `revoke`. Making a gateway token is the window's
 alone.
 
+## Asking for a token (2026-10-13)
+
+An agent can start a connection without ever holding its secret. The ask
+(`registration.askGateway`, `POST /api/actors/<slug>/gateway/ask`, the
+`ask_gateway_token` MCP tool and `xenonet gateway token`) is open to any
+program on this machine, as registering is, because it holds nothing:
+
+- It makes no token and the answer (`actor/gateway-ask/v1`) has none. The
+  MCP tool also withholds anything shaped like a token from what it
+  returns, so a change on the server's side can't put one in a transcript.
+- It leaves a card in the window (the attention strip and the Actors
+  panel) with who asked. **Allow**, which only the window can send, makes
+  the token then, as Connect… does, and the answer to the window alone
+  holds it, once. Deny drops the ask.
+- Until Allow, nothing changes: the old token keeps working, so an ask can't
+  break a connection. An ask lapses with a registration's ten minutes, one
+  waits per actor, four at a time and twenty an hour.
+- It's refused from an actor's token, and from under an actor product's own
+  processes (`verify.asker`), which could be relaying for its cloud. A
+  session, or your own terminal, may ask.
+- The token shows masked (`src/secret.js`): out of the page until Show,
+  ten seconds, masked again in a screenshot or when the window loses
+  focus. The driver and the console tools list asks and have no method to
+  allow one.
+
+Why the click stays: `x-xenonet-agent` is a header any local program can
+send, so a route that made tokens for it would let anything that can pose
+as an agent mint a credential that works from the internet. Asking costs
+a card, and the secret still only ever exists where the person is looking.
+A delivery that needs no click would need somewhere safe to put the token
+(a keychain item the agent can't read, say), which this doesn't build.
+
 ## Still open
 
 - **Sign-in instead of tokens.** MCP's authorization (OAuth 2.1 with

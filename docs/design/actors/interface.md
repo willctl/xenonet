@@ -69,7 +69,8 @@ Built, as of Wave 3 (2026-10-06):
   (Tailscale Funnel, Cloudflare, ngrok or their own) puts it on the
   internet; XenoNet runs it, checks the address and says which apps need a
   new one (`gateway.md`). Muse, which runs nothing on the Mac, reports
-  itself only this way.
+  itself only this way. A session may ask for a token (`ask_gateway_token`,
+  `xenonet gateway token`), which holds none: the window makes it on Allow.
 - **Waking actors** (`core/actors/wake.js`, 2026-10-09): when a message
   arrives, a program of an actor's own hears of it over a stream
   (`xenonet actor listen`), a webhook the owner sets is called (a Grok Bot

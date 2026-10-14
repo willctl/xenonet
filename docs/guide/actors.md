@@ -108,7 +108,8 @@ To set it up:
 
 1. In the Actors panel, under **actor gateway**, choose **Set up…** and pick a tunnel. The ones this computer has come first. XenoNet starts the tunnel, then checks that the address reaches the gateway from the internet side, and shows **Online** once it does.
 2. On the actor, choose **Connect…**. XenoNet makes a gateway token, which works only at the gateway. For Muse, which XenoNet only observes until then, this also makes it an actor that reports itself.
-3. Follow the numbered steps XenoNet shows, each with its own Copy button. The last step waits for the app's first call and ticks when it comes:
+   A session can start this step for you, in Claude Code or Codex with the `ask_gateway_token` tool, or from a terminal with `xenonet gateway token <slug>`. That makes no token and returns none. It leaves a card in XenoNet's window, in the attention strip and the Actors panel, saying whose app it's for and who asked. **Allow** makes the token and opens the steps below, with the token masked. **Deny** drops the ask. Until you allow, the actor's old token keeps working, and an ask lapses after ten minutes. The session never sees the token, so don't paste one to it or into a chat.
+3. Follow the numbered steps XenoNet shows, each with its own Copy button. The token stays masked until you choose **Show**, and for ten seconds after, and **Copy token** copies it without showing it. The last step waits for the app's first call and ticks when it comes:
    - **Grok Bot**: copy the message into a new Grok Bot chat. It adds XenoNet as an MCP server by URL with the token in its header. The token stays in that chat, so delete the chat afterwards.
    - **Muse**: copy the message into a Muse chat and approve the connector card. When Muse asks for the key, paste the token into the card's key field, not the chat.
    - **Any other MCP host**: add an MCP server by URL, with the gateway's address and the header `Authorization: Bearer <the token>`.
