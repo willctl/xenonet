@@ -78,9 +78,31 @@ test("requests: read with the key at the start and when the count changes; Allow
   const r = await requests.decide("rq1", "allow");
   assert.equal(r.ok, true);
   assert.deepEqual(srv.sent.map((s) => [s.method, s.url, s.body?.decision]), [["GET", "/api/actors/requests", undefined], ["POST", "/api/actors/requests/rq1", "allow"], ["GET", "/api/actors/requests", undefined]]);
-  assert.deepEqual(requests.view(), { requests: [], waiting: 0, canDecide: true, off: false });
+  assert.deepEqual(requests.view(), { requests: [], gatewayAsks: [], waiting: 0, canDecide: true, off: false });
   // Answered, it's forgotten: one that came back would wait again.
   assert.equal(requests.armed("rq1"), false);
+});
+
+test("requests: a session's ask for a gateway token is counted and armed like a registration, and its Allow answer is handed on and kept nowhere", async () => {
+  const clock = { t: T };
+  const ask = { id: "gw-abc", actor: "actor:muse", name: "Muse", replaces: true, asker: null, at: T, expiresAt: T + 600e3 };
+  const credentials = { schema: "actor/gateway-credentials/v1", id: "actor:muse", token: `xenonet_gateway_${"ab".repeat(32)}`, url: "https://x.example/mcp" };
+  const srv = server([{ status: 200, body: { at: T, requests: [HERON], gatewayAsks: [ask] } }, { status: 200, body: { request: "gw-abc", decision: "allow", actor: "actor:muse", credentials } }, { status: 200, body: { at: T, requests: [HERON], gatewayAsks: [] } }]);
+  const requests = createActorRequests({ calls: createWindowCalls({ desktop: bridge().desktop, request: srv.request }), now: () => clock.t });
+  const v = await requests.refresh();
+  assert.deepEqual([v.waiting, v.requests.map((r) => r.id), v.gatewayAsks.map((g) => g.id)], [2, ["rq1"], ["gw-abc"]], "both wait on you");
+  assert.equal(requests.armed("gw-abc"), false, "not at once");
+  clock.t += ARM_MS;
+  assert.equal(requests.armed("gw-abc"), true);
+  const r = await requests.decide("gw-abc", "allow");
+  assert.equal(r.data.credentials.token, credentials.token, "the one answer that holds it, for the panel");
+  assert.deepEqual([srv.sent[1].method, srv.sent[1].url, srv.sent[1].body], ["POST", "/api/actors/requests/gw-abc", { decision: "allow" }]);
+  assert.ok(!JSON.stringify(requests.view()).includes(credentials.token), "the view holds no token");
+  assert.deepEqual(requests.view().gatewayAsks, []);
+  assert.equal(requests.armed("gw-abc"), false);
+  // An older server sends no list: no asks.
+  const old = createActorRequests({ calls: { call: async () => ({ ok: true, status: 200, data: { requests: [HERON] } }) } });
+  assert.deepEqual((await old.refresh()).gatewayAsks, []);
 });
 
 test("requests: the newest read wins, a window without a key knows only how many wait, and actors off stop it all", async () => {
@@ -101,7 +123,7 @@ test("requests: the newest read wins, a window without a key knows only how many
   const keyless = createActorRequests({ calls: createWindowCalls({ desktop: null }), onChange: (v) => views.push(v) });
   await keyless.refresh();
   keyless.heard({ waiting: 2 });
-  assert.deepEqual(keyless.view(), { requests: [], waiting: 2, canDecide: false, off: false });
+  assert.deepEqual(keyless.view(), { requests: [], gatewayAsks: [], waiting: 2, canDecide: false, off: false });
   keyless.heard({ waiting: "lots" });
   assert.equal(keyless.view().waiting, 0, "a count is a count");
 

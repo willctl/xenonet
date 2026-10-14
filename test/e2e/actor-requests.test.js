@@ -202,6 +202,53 @@ test("the actor gateway: set up in the window with a tunnel of your own, its add
   await fromWindow(`return await call("DELETE", "/api/actors/lark");`);
 }));
 
+test("a session asks for an actor's gateway token: it is told none exists, the card waits in the window, and Allow shows the token masked there alone", { timeout: 90000 }, shoot("actor-gateway-ask", async () => {
+  const click = (sel) => s.eval(`return (() => { const b = document.querySelector(${JSON.stringify(sel)}); if (!b || b.disabled) return false; b.click(); return true; })()`);
+  const until = async (fn, ms = 8000) => {
+    const end = Date.now() + ms;
+    for (;;) {
+      const got = await fn();
+      if (got) return got;
+      if (Date.now() > end) return got;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  };
+  const TOKEN = /xenonet_(gateway|actor)_[0-9a-f]{64}/;
+  // A program on this machine asks, as a session or the xenonet command does.
+  const asked = await fetch(`${s.base}/api/actors/moth/gateway/ask`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  const answer = await asked.text();
+  assert.equal(asked.status, 202, answer);
+  assert.doesNotMatch(answer, TOKEN, "what the asker gets holds no token");
+  const ask = JSON.parse(answer);
+  assert.deepEqual([ask.id, ask.state], ["actor:moth", "waiting"]);
+  // It can't answer its own ask, nor see the card.
+  const own = await fetch(`${s.base}/api/actors/requests/${ask.request}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ decision: "allow" }) });
+  assert.equal(own.status, 403, "only the window allows");
+  assert.equal((await fetch(`${s.base}/api/actors/requests`)).status, 403);
+
+  // The window shows the card; what the driver says of it holds no token.
+  const card = await until(async () => (await s.driver("actorRequests")).gatewayAsks.find((g) => g.actor === "actor:moth" && g.card && g.armed), 15000);
+  assert.ok(card, "the card is up and armed");
+  assert.doesNotMatch(JSON.stringify(await s.driver("actorRequests")), TOKEN);
+  assert.equal((await s.driver("state")).alerts.find((a) => a.gatewayToken)?.actor, "actor:moth");
+
+  // The person clicks Allow: the Actors panel opens on the steps, the token masked.
+  assert.equal(await click('#alerts [data-al-allow]'), true);
+  const masked = await until(() => s.eval(`return document.querySelector("[data-ac-token-text]")?.innerText ?? null`));
+  assert.match(masked ?? "", /^xenonet_gateway_•+$/);
+  assert.equal(await s.eval(`return ${TOKEN}.test(document.documentElement.outerHTML)`), false, "out of the page until Show");
+  assert.equal(await s.eval(`return document.querySelectorAll("#alerts [data-al-request]").length`), 0, "answered");
+  assert.deepEqual((await s.driver("actorRequests")).gatewayAsks, []);
+  await click('[data-secret-show="token"]');
+  assert.match((await until(() => s.eval(`return document.querySelector('[data-secret="token"] .secret-plain')?.innerText ?? null`))) ?? "", /^xenonet_gateway_[0-9a-f]{64}$/, "Show reveals it, in the window alone");
+  // A screenshot holds a shown token masked.
+  const shot = await s.eval(`return document.documentElement.outerHTML.includes("secret-masked")`);
+  assert.equal(shot, true);
+  assert.equal((await s.driver("state")).errors, 0, JSON.stringify(await s.driver("errors")));
+  await click("[data-ac-done]");
+  await s.input({ keys: "Escape" });
+}));
+
 test("waking an actor: a webhook set in the window, its key hidden as it's typed, a test, then a call within seconds of a message, saying only how many wait", { timeout: 90000 }, shoot("actor-wake", async () => {
   const click = (sel) => s.eval(`return (() => { const b = document.querySelector(${JSON.stringify(sel)}); if (!b || b.disabled) return false; b.click(); return true; })()`);
   const text = (sel) => s.eval(`return document.querySelector(${JSON.stringify(sel)})?.innerText ?? null`);

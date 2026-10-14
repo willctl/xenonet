@@ -145,6 +145,19 @@ export function createAlerts({ sfx, select, ack, openApp, collision, doctor = ()
   }
 
   function chip(it) {
+    if (it.kind === "request" && it.request.gateway) {
+      const r = it.request;
+      const who = askedBy(r.asker);
+      const asked = who ? `asked by <code>${h(who.program)}</code>${who.from.length ? ` ← ${h(who.from.join(" ← "))}` : ""}${who.folder ? ` · in <code>${h(who.folder)}</code>` : ""}` : "XenoNet couldn't see which program asked";
+      // The token doesn't exist yet: Allow makes it, and the Actors panel
+      // shows it masked. The session that asked never sees it.
+      return `<div class="al request" data-al-request="${h(r.id)}">
+        <span class="al-icon">◇</span>
+        <div class="al-body"><div class="al-title"><span class="al-name">${h(r.name)}</span> <em>is asked for a gateway token</em><span class="al-time" data-until="${h(r.expiresAt)}">${leftWords(r.expiresAt)}</span></div><div class="al-text">${r.replaces ? "Allow makes a new one, and the old one stops working." : "Allow makes it."} It shows in the Actors panel, masked. The session that asked never sees it.</div><div class="al-text al-asker">${asked}</div></div>
+        <button class="al-btn" data-al-deny="${h(r.id)}" title="Nothing is made, and the old token, if any, keeps working">deny</button>
+        <button class="al-btn al-allow" data-al-allow="${h(r.id)}" data-yours disabled title="Makes the token and shows it masked in the Actors panel">allow</button>
+      </div>`;
+    }
     if (it.kind === "request") {
       const r = it.request;
       const who = askedBy(r.asker);
@@ -364,7 +377,10 @@ export function createAlerts({ sfx, select, ack, openApp, collision, doctor = ()
     // how many wait.
     setRequests(view) {
       const list = view?.off ? [] : (view?.requests ?? []);
-      requestItems = view?.canDecide ? list.map((r) => ({ kind: "request", id: r.id, request: r, since: r.at })) : view?.waiting > 0 && !view.off ? [{ kind: "requests", count: view.waiting }] : [];
+      // A session's ask for a gateway token is a card of the same kind,
+      // marked, which Allow makes the token for.
+      const asks = view?.off ? [] : (view?.gatewayAsks ?? []);
+      requestItems = view?.canDecide ? [...list.map((r) => ({ kind: "request", id: r.id, request: r, since: r.at })), ...asks.map((g) => ({ kind: "request", id: g.id, request: { ...g, gateway: true }, since: g.at }))] : view?.waiting > 0 && !view.off ? [{ kind: "requests", count: view.waiting }] : [];
       if (lastSnap) update(lastSnap, index);
     },
     // The actors' list (actor/list/v1): those waiting on you join the strip.

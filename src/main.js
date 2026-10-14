@@ -858,7 +858,7 @@ function actorsAreOff() {
 }
 
 // The Actors panel (actors-panel.js), loaded the first time it opens.
-async function openActors() {
+async function openActors({ gatewayToken = null } = {}) {
   loadingActorsPanel ??= import("./actors-panel.js").then(({ createActorsPanel }) =>
     (actorsPanel = createActorsPanel({
       modals,
@@ -877,14 +877,27 @@ async function openActors() {
       select,
     })),
   );
-  return (await loadingActorsPanel).open();
+  const panel = await loadingActorsPanel;
+  const opened = await panel.open();
+  // A token Allow just made, shown masked in its steps.
+  if (gatewayToken) await panel.showGatewayToken(gatewayToken);
+  return opened;
 }
 
 // Allow or Deny, from a request's card or the panel: the answer, said.
 async function decideRequest(id, decision) {
-  const asked = actorRequests.view().requests.find((r) => r.id === id);
+  const view = actorRequests.view();
+  const asked = view.requests.find((r) => r.id === id);
+  const ask = view.gatewayAsks.find((g) => g.id === id);
   const res = await actorRequests.decide(id, decision);
   sfx(res.ok ? "success" : "error");
+  // A session's ask for a gateway token: Allow made it, and it's shown
+  // masked in the Actors panel, never in a toast or to the session.
+  if (ask) {
+    hud.toast(res.ok ? (decision === "allow" ? `${ask.name}'s token is made. Copy it from the Actors panel.` : `The ask for ${ask.name}'s token is dropped.`) : (res.error ?? "That didn't work"), !res.ok);
+    if (res.ok && decision === "allow" && res.data?.credentials) await openActors({ gatewayToken: res.data.credentials });
+    return { ok: res.ok, status: res.status, code: res.code, error: res.error };
+  }
   const name = asked?.name ?? "It";
   hud.toast(res.ok ? (decision === "allow" ? `${name} is allowed. It shows as not heard from until it reports.` : `${name} is denied. Its token never works.`) : (res.error ?? "That didn't work"), !res.ok);
   return res;

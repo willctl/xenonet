@@ -183,6 +183,21 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
     return { key: r.id, sig: html.replace(/<span class="ac-left"[^>]*>[^<]*<\/span>/, ""), live: null, html };
   }
 
+  // A session's ask for an actor's gateway token: Allow makes it, and the
+  // steps then show it masked.
+  function gatewayAskRow(g) {
+    const who = askedBy(g.asker);
+    const asker = who
+      ? `asked by <code>${h(who.program)}</code>${who.parents.length ? `, run from ${who.parents.map((p) => `<code>${h(p)}</code>`).join(" ← ")}` : ""}${who.folder ? ` · in <code>${h(who.folder)}</code>` : ""}`
+      : "XenoNet couldn't see which program asked: there's no process check here";
+    const html = `<li class="ac-row ac-request" style="--c:var(--attention)"><span class="ac-dot"></span><div class="ac-main">
+        <div class="ac-name"><span class="ac-title">${h(g.name)}</span><span class="ac-what">is asked for a gateway token</span><span class="ac-left" data-until="${h(g.expiresAt)}">${leftWords(g.expiresAt)}</span></div>
+        <div class="ac-ask">${g.replaces ? "Allow makes a new token, and the old one stops working" : "Allow makes its token"} · it shows here masked, and the session that asked never sees it</div>
+        <div class="ac-asker">${asker}</div>
+      </div><div class="ac-acts"><button class="act" data-ac-deny="${h(g.id)}" title="Nothing is made, and the old token, if any, keeps working">Deny</button><button class="act primary ac-allow" data-ac-allow="${h(g.id)}" data-yours disabled title="Makes the token and shows it masked">Allow</button></div></li>`;
+    return { key: g.id, sig: html.replace(/<span class="ac-left"[^>]*>[^<]*<\/span>/, ""), live: null, html };
+  }
+
   function observerRow(o) {
     const known = o.actors.map((id) => (actorNamed(id) ? nameOf(id) : id)).join(", ");
     const first = o.actors.map(actorNamed).find(Boolean);
@@ -282,10 +297,11 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
     if (!body.querySelector("[data-ac-actors]")) body.innerHTML = listHtml();
     const rv = requests.view();
     const waiting = rv.canDecide ? rv.requests : [];
+    const asks = rv.canDecide ? rv.gatewayAsks ?? [] : [];
     const box = body.querySelector("[data-ac-waiting]");
-    box.hidden = !waiting.length && !(!rv.canDecide && rv.waiting);
+    box.hidden = !waiting.length && !asks.length && !(!rv.canDecide && rv.waiting);
     body.querySelector("[data-ac-waiting-title]").textContent = rv.canDecide ? "waiting for you" : `${plural(rv.waiting, "program asks", "programs ask")} to join: answer in XenoNet's own window`;
-    reconcile(body.querySelector("[data-ac-requests]"), waiting.map(requestRow));
+    reconcile(body.querySelector("[data-ac-requests]"), [...waiting.map(requestRow), ...asks.map(gatewayAskRow)]);
     reconcile(body.querySelector("[data-ac-actors]"), actors().map(actorRow));
     // Tokens read again once the actors that report themselves have changed.
     if (tokens && reporting() !== tokensFor) readTokens().then(() => isOpen() && view.name === "list" && drawList());
@@ -729,5 +745,13 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
       remote?.refresh().then(() => isOpen() && view.name === "list" && render());
     },
     tunnelsChanged,
+    // A gateway token made by Allow on a session's ask (main.js): the
+    // panel opens on the steps that show it masked, as Connect… does.
+    async showGatewayToken({ id, token, url }) {
+      await open();
+      readTokens();
+      loadGateway();
+      go({ name: "gateway-token", id, token, url: url ?? undefined, madeAt: Date.now() });
+    },
   };
 }

@@ -81,7 +81,7 @@ export function createDriver(app) {
     if (it.kind === "collision") return { kind: "collision", sessions: [it.a, it.b], files: it.files };
     // A program asking to be an actor (actorRequests has the rest), or how
     // many ask, in a window without the key; an actor waiting on you.
-    if (it.kind === "request") return { kind: "request", request: it.id, actor: it.request.actor, name: it.request.name };
+    if (it.kind === "request") return { kind: "request", request: it.id, actor: it.request.actor, name: it.request.name, ...(it.request.gateway ? { gatewayToken: true } : {}) };
     if (it.kind === "requests") return { kind: "requests", count: it.count };
     if (it.kind === "actor-need") return { kind: "actor-need", actor: it.id, waits: it.sub, text: it.text };
     return { kind: it.kind, session: it.id, text: it.text };
@@ -217,7 +217,7 @@ export function createDriver(app) {
     // here points at its button. `canDecide` is false in a window without
     // the key, which knows only how many wait.
     actorRequests() {
-      const v = app.actorRequests?.view() ?? { requests: [], waiting: 0, canDecide: false, off: false };
+      const v = app.actorRequests?.view() ?? { requests: [], gatewayAsks: [], waiting: 0, canDecide: false, off: false };
       const requests = v.requests.map((r) => ({
         id: r.id,
         actor: r.actor,
@@ -232,7 +232,20 @@ export function createDriver(app) {
         card: !!document.querySelector(`#alerts [data-al-request="${CSS.escape(r.id)}"]`),
         armed: app.actorRequests.armed(r.id),
       }));
-      return { canDecide: v.canDecide, off: v.off, waiting: v.waiting, requests };
+      // Sessions' asks for an actor's gateway token, which Allow makes: who
+      // asked and when it lapses, never a token, and no method to allow one.
+      const gatewayAsks = v.gatewayAsks.map((g) => ({
+        id: g.id,
+        actor: g.actor,
+        name: g.name,
+        replaces: !!g.replaces,
+        asker: g.asker ?? null,
+        at: g.at,
+        expiresAt: g.expiresAt,
+        card: !!document.querySelector(`#alerts [data-al-request="${CSS.escape(g.id)}"]`),
+        armed: app.actorRequests.armed(g.id),
+      }));
+      return { canDecide: v.canDecide, off: v.off, waiting: v.waiting, requests, gatewayAsks };
     },
 
     // How each registered actor's token stands, as the Actors panel says it

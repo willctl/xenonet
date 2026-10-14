@@ -63,6 +63,9 @@ export function createWindowCalls({ desktop = null, request = (...a) => globalTh
 // gets view() after each change.
 export function createActorRequests({ calls, onChange = () => {}, now = Date.now }) {
   let requests = [];
+  // Sessions' asks for an actor's gateway token, which Allow makes. Never
+  // a token: it doesn't exist until the window allows the ask.
+  let gatewayAsks = [];
   // How many wait, from the event stream: all a window without a key knows.
   let waiting = 0;
   // Whether this window can see and answer them: null until it has asked.
@@ -72,7 +75,7 @@ export function createActorRequests({ calls, onChange = () => {}, now = Date.now
   // When each request's card first showed, for Allow's wait (ARM_MS).
   const seen = new Map();
 
-  const view = () => ({ requests, waiting: canDecide ? requests.length : waiting, canDecide: !!canDecide, off });
+  const view = () => ({ requests, gatewayAsks, waiting: canDecide ? requests.length + gatewayAsks.length : waiting, canDecide: !!canDecide, off });
   const changed = () => onChange(view());
 
   async function refresh() {
@@ -84,15 +87,18 @@ export function createActorRequests({ calls, onChange = () => {}, now = Date.now
     if (r.ok) {
       canDecide = true;
       requests = Array.isArray(r.data.requests) ? r.data.requests : [];
+      gatewayAsks = Array.isArray(r.data.gatewayAsks) ? r.data.gatewayAsks : [];
       const t = now();
-      for (const q of requests) if (!seen.has(q.id)) seen.set(q.id, t);
-      for (const id of seen.keys()) if (!requests.some((q) => q.id === id)) seen.delete(id);
+      for (const q of [...requests, ...gatewayAsks]) if (!seen.has(q.id)) seen.set(q.id, t);
+      for (const id of seen.keys()) if (![...requests, ...gatewayAsks].some((q) => q.id === id)) seen.delete(id);
     } else if (r.status === 503) {
       off = true;
       requests = [];
+      gatewayAsks = [];
     } else if (r.code === "no-key" || r.status === 403) {
       canDecide = false;
       requests = [];
+      gatewayAsks = [];
     }
     changed();
     return view();
@@ -111,6 +117,7 @@ export function createActorRequests({ calls, onChange = () => {}, now = Date.now
     setOff() {
       off = true;
       requests = [];
+      gatewayAsks = [];
       waiting = 0;
       changed();
     },
