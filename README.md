@@ -149,8 +149,12 @@ how to stop it.
   search every transcript of both apps.
 - After ten minutes away, XenoNet sums up the turns, tools, files and errors
   since you left. Codex can write that up as a short note.
-- Replay plays the last 24 hours in one minute. A film of the day saves an
-  MP4 with the day's numbers, and a poster saves a 4K image of the map.
+- Replay plays the last 24 hours in one minute. A poster of the day saves
+  or copies the map with the day's numbers, in four sizes, and a film of
+  the day saves a 15 to 30 second MP4 at 9:16. Both show projects as star
+  names and no clock, unless you reveal more for that export, and both are
+  made on your computer: nothing is uploaded, and the files carry no
+  metadata.
 
 ### Comes in eight themes
 

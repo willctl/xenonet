@@ -32,6 +32,7 @@
 
 - Paths under your home folder show as `~` on the map, in the panels and in the activity feed. So a screenshot of them doesn't show your user name.
 - Identities stay on this computer, and nothing about them goes into a prompt for Codex. Only their colors reach the map, so posters, replay clips and wallpaper mode never show an email or a handle.
+- Posters and films of the day are made to share, so they show no project, repo, session, branch, path, host or prompt names, and no clock or busiest hour. Projects show as star names: each is made from a hash of the project's id under a salt kept in XenoNet's state folder (`poster-salt`, readable by you alone) and the day's date, so the names hold for the day, change the next day, and can't be turned back into a name or checked against a guess without the salt. The export panel shows a preview first, and the projects' names and the token count appear only when you turn them on there, for that one export. Posters and films are made on this computer, upload nothing, need no account and carry no metadata: a poster is the picture alone, and a film's MP4 has no tags.
 - To mask identities in the panels too, for screenshots and screen sharing, use `Hide or show identities` in the palette, `◐ hide` under Filters, `?private` in the page's address, or `XENONET_HIDE_IDENTITIES=1`. Masked identities show as "GitHub A" or "Claude B".
 - Demo mode's identities are made up, and its git reads only the demo's own config.
 
