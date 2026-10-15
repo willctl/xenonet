@@ -215,7 +215,14 @@ export function createReviews({ dir = null, now = Date.now, snapshot = sourceSna
   };
   const scopeNote = "New files use frozen repository .gitignore rules. Existing omitted paths stay excluded. Global and local-only ignore rules are not applied to newly created paths.";
   const describe = (v) => ({ id: v.id, digest: v.digest, at: v.at, bytes: v.bytes, files: v.files.map((f) => ({ path: f.path, bytes: Buffer.byteLength(f.content, "base64") })), excluded: v.excluded, omittedPaths: v.omittedPaths ?? [], scopeNote, limits: REVIEW_LIMITS });
-  const isolatedGit = (folder, args) => ({ args: ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=", "-c", `core.excludesFile=${os.devNull}`, "-C", folder, ...args], options: { env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_"))), GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_SYSTEM: os.devNull }, timeout: 10000, maxBuffer: 256 * 1024 } });
+  const isolatedGit = (folder, args) => {
+    // Git for Windows cannot read Node's device-name spelling of os.devNull.
+    const empty = path.join(path.dirname(folder), "empty-git-config");
+    try { fs.writeFileSync(empty, "", { flag: "wx", mode: 0o600 }); } catch (err) { if (err.code !== "EEXIST") throw err; }
+    const st = fs.lstatSync(empty);
+    if (!st.isFile() || st.isSymbolicLink() || st.size) fail("The isolated Git configuration changed.", "storage-invalid", 409);
+    return { args: ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=", "-c", `core.excludesFile=${empty}`, "-C", folder, ...args], options: { env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_"))), GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: empty, GIT_CONFIG_SYSTEM: empty }, timeout: 10000, maxBuffer: 256 * 1024 } };
+  };
   async function prepareIgnores(v) {
     const folder = path.join(location(v.id), "ignore"); fs.mkdirSync(folder, { mode: 0o700 });
     for (const f of v.files.filter((f) => path.posix.basename(f.path) === ".gitignore")) { const dest = path.join(folder, ...f.path.split("/")); fs.mkdirSync(path.dirname(dest), { recursive: true, mode: 0o700 }); fs.writeFileSync(dest, Buffer.from(f.content, "base64"), { mode: 0o600 }); }
