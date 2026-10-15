@@ -76,7 +76,7 @@ test("production Desktop restarts without losing its service, console connection
     // Hosted runners' software rendering may never settle the camera, and
     // a look is the page's own 3 s timer, so the selection doesn't wait.
     await s.driver("select", atlas.id, { settle: false });
-    const looked = await until(async () => (await s.api("/api/actors/you")).recent?.find((e) => e.target === atlas.id && e.at >= since));
+    const looked = await until(async () => (await s.api("/api/actors/you")).recent?.find((e) => e.kind === "status" && e.target === atlas.id && e.at >= since));
     assert.equal(looked.detail, "Looking at atlas-api");
     // Desktop passes on its page's requests alone; other programs go to the
     // service, which sees who they are.
