@@ -10,7 +10,7 @@ const port = await new Promise((resolve) => {
   const probe = net.createServer().listen(0, "127.0.0.1", () => { const { port } = probe.address(); probe.close(() => resolve(port)); });
 });
 const s = xenonet("test", { port });
-before(async () => { await s.launch({ show: "hidden" }); }, { timeout: 180000 });
+before(async () => { await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" }); }, { timeout: 180000 });
 after(async () => {
   await s.quit().catch(() => {});
   fs.rmSync(path.join(fs.realpathSync.native(os.tmpdir()), `xenonet-demo-${port}`), { recursive: true, force: true, maxRetries: 10 });

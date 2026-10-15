@@ -358,6 +358,8 @@ export function createDriver(app) {
       return { ...st, refusals: app.refusals.state };
     },
     async integrations(action = "open", value, opts) {
+      // Review and file only browse cached text; retrieval and export stay
+      // in the owner's window like sandbox launch and deletion.
       const st = await act(() => app.integrations.action(action, value), opts);
       return { ...st, integrations: app.integrations.state };
     },

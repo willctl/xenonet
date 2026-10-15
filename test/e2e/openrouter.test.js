@@ -10,7 +10,7 @@ const port = await new Promise((resolve) => { const probe = net.createServer((so
 // A separate frozen, synthetic instance keeps this fixture's browser cache
 // apart from the other tests while preserving their existing profiles.
 const s = xenonet("showcase", { port });
-before(async () => { await s.launch({ show: "hidden", restart: true }); }, { timeout: 180000 });
+before(async () => { await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden", restart: true }); }, { timeout: 180000 });
 after(async () => { await s.quit().catch(() => {}); await fs.promises.rm(path.join(fs.realpathSync.native(os.tmpdir()), `xenonet-demo-${port}`), { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); });
 
 test("Token use keeps OpenRouter visible without a key, opens setup, and refreshes error/usage states", { timeout: 60000 }, async () => {

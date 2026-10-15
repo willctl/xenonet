@@ -34,7 +34,10 @@ export function electronCommand() {
   try {
     if (process.platform === "darwin" && fs.readFileSync(pointer, "utf8").includes(pathToFileURL(path.join(root, "electron", "main.js")).href)) return { command: path.join(bundle, "Contents", "MacOS", "Electron"), args: [] };
   } catch {}
-  return { command: createRequire(import.meta.url)("electron"), args: [root] };
+  // Headless Linux/WSL test displays have no hardware WebGL context.
+  const args = [root];
+  if (process.platform === "linux" && process.env.XENONET_SOFTWARE_RENDERING === "1") args.push("--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist");
+  return { command: createRequire(import.meta.url)("electron"), args };
 }
 
 // Where an instance keeps its Electron data, its single-instance lock among
@@ -113,7 +116,7 @@ export function xenonet(id = "demo", { port = INSTANCES[id]?.port, userData, log
   // ends it; dev and film show your own sessions.
   const { name, demo: madeUp } = INSTANCES[id];
   const base = `http://127.0.0.1:${port}`;
-  const lockDir = userData ?? userDataDir(name);
+  const lockDir = userData ?? (id === "test" ? path.join(os.tmpdir(), `xenonet-demo-${port}`, "electron") : userDataDir(name));
 
   // What's on the port: "up" (a XenoNet answers), "down" (nothing listens, so
   // the connection is refused) or "busy" (something listens but doesn't
@@ -209,6 +212,8 @@ export function xenonet(id = "demo", { port = INSTANCES[id]?.port, userData, log
     fs.mkdirSync(logDir, { recursive: true });
     const out = fs.openSync(logFile, "a");
     const env = { ...process.env, XENONET_INSTANCE: id, XENONET_SHOW: show };
+    delete env.XENONET_TEST_PROFILE;
+    if (id === "test") env.XENONET_TEST_PROFILE = lockDir;
     // Set by Electron apps for their child processes; XenoNet Dev would start
     // as plain Node.
     delete env.ELECTRON_RUN_AS_NODE;

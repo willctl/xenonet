@@ -255,7 +255,7 @@ const doctorPanel = createDoctorPanel({
 // A session's models, tokens, costs and timing (core/stats.js).
 const statsPanel = createStatsPanel({ modals, sfx, toast: (m, b) => hud.toast(m, b) });
 const refusalsPanel = createRefusalsPanel({ modals });
-const integrationsPanel = createIntegrationsPanel({ modals, calls: windowCalls });
+const integrationsPanel = createIntegrationsPanel({ modals, calls: windowCalls, savePatch: desktop?.savePatch });
 const openStats = (node) => (note("stats", node.id), you.did("read", node.id), statsPanel.open(node));
 // The OpenRouter key for decision models: into your credential store, by
 // the window's own route; the field is cleared as it's sent.
@@ -556,6 +556,7 @@ const commandList = [
   { id: "route-task", label: "Route task", keywords: "jevrouter jev decision suggest agent specialist", run: () => integrationsPanel.open("routing") },
   { id: "decisions", label: "Review decisions", keywords: "jevrouter scores outcomes history routing", run: () => integrationsPanel.open("routing") },
   { id: "sandbox", label: "Launch sandbox", keywords: "openshell nvidia policy execution wsl", run: () => integrationsPanel.open("sandbox") },
+  { id: "sandbox-results", label: "Review sandbox changes", keywords: "openshell results diff patch export", run: () => integrationsPanel.open("results") },
   { id: "pi-runs", label: "Review Pi runs", keywords: "pi harness sessions exports checkpoints", run: () => integrationsPanel.open("pi") },
   // Provider refusals XenoNet keeps (core/refusals): whether each new one
   // keeps the transcript up to it too, for a dataset. Off until you turn it

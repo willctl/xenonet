@@ -32,6 +32,7 @@ import { createLog, logDir } from "../core/log.js";
 import { isToken } from "../core/actors/tokens.js";
 import { writeTokenFile, gitTreeOf } from "../core/actors/token-file.js";
 import { tilde } from "../core/paths.js";
+import { patchExport } from "./patch-export.js";
 import { iconImage, iconDataUrl, sheetDataUrl, artDataUrl, dmgArtDataUrl, pkgArtDataUrl, bmpFromImage, packIco, packIcns, pngWithDpi, closePainter } from "./icons.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -43,10 +44,15 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // demo, each its own app, so they run side by side too.
 const fromSource = !app.isPackaged;
 const packagedTest = app.isPackaged && process.env.XENONET_DEMO === "1" && process.env.XENONET_INSTANCE === "test";
+if (process.platform === "linux" && process.env.XENONET_SOFTWARE_RENDERING === "1" && (fromSource || packagedTest)) {
+  app.commandLine.appendSwitch("use-angle", "swiftshader");
+  app.commandLine.appendSwitch("enable-unsafe-swiftshader");
+  app.commandLine.appendSwitch("ignore-gpu-blocklist");
+}
 const instance = fromSource || packagedTest ? instanceFrom() : null;
 if (fromSource || packagedTest) {
   app.setName(instance.name);
-  app.setPath("userData", path.join(app.getPath("appData"), instance.name));
+  app.setPath("userData", instance.id === "test" && process.env.XENONET_TEST_PROFILE ? process.env.XENONET_TEST_PROFILE : path.join(app.getPath("appData"), instance.name));
 }
 // XenoNet Dev.app is a renamed Electron whose only code is a pointer here.
 const devBundle = fromSource && path.resolve(app.getAppPath()) !== root;
@@ -592,6 +598,19 @@ function wireIpc() {
   // Whether the window shows, for the same reports: "shown" or "hidden",
   // asked when the page starts and then told (tellWindow).
   ipcMain.handle("app:window-state", (e) => (ownPage(e) ? windowState() : null));
+  ipcMain.handle("app:save-patch", async (e, value = {}) => {
+    if (!ownPage(e)) return null;
+    const exported = patchExport(value); if (!exported) return null;
+    const { dialog } = await import("electron");
+    const parent = win && !win.isDestroyed() ? win : null;
+    const options = { title: "Export the reviewed patch", buttonLabel: "Export", defaultPath: path.join(app.getPath("documents"), exported.filename), filters: [{ name: "Git patch", extensions: ["patch"] }], properties: ["createDirectory", "showOverwriteConfirmation"] };
+    const chosen = parent ? await dialog.showSaveDialog(parent, options) : await dialog.showSaveDialog(options);
+    if (chosen.canceled || !chosen.filePath) return null;
+    // The receipt describes the cached revision. It contains no task text,
+    // source path, or credentials; patch contents are saved exactly as read.
+    fs.writeFileSync(chosen.filePath, exported.content, { mode: 0o600 });
+    return { file: tilde(chosen.filePath, app.getPath("home")) };
+  });
   // An actor's token saved to a file you pick (the Actors panel's "Save to
   // a file…"; docs/design/actors/interface.md, section 2): the save dialog
   // over the window, then the file written so only you can read it (0600),

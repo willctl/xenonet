@@ -18,10 +18,11 @@ export const sandboxGone = (r) => r.status === "deleted" || r.status === "not-cr
 // Tickets contain reviewed inputs only in memory, expire, and can be used once.
 export function createTickets({ now = Date.now } = {}) {
   const tickets = new Map();
+  function check() { for (const [id, t] of tickets) if (t.until <= now()) tickets.delete(id); if (tickets.size >= 32) fail("Close an old preview before making another.", "busy", 429); }
   return {
+    check,
     issue(value) {
-      for (const [id, t] of tickets) if (t.until <= now()) tickets.delete(id);
-      if (tickets.size >= 32) fail("Close an old preview before making another.", "busy", 429);
+      check();
       const ticket = randomUUID(), expires = now() + 10 * 60e3;
       tickets.set(ticket, { value, until: expires });
       return { ticket, expires };
@@ -57,7 +58,7 @@ export function createRecords(dir, { now = Date.now, limit = 1000 } = {}) {
       const record = save({ ...value, id: randomUUID(), at: now() });
       // A saved live job is the owner's way to inspect or delete its remote
       // sandbox. Retention must not orphan it as newer decisions arrive.
-      const completed = list().filter((r) => r.kind !== "sandbox" || sandboxGone(r));
+      const completed = list().filter((r) => !r.reviewId && (r.kind !== "sandbox" || sandboxGone(r)));
       for (const old of completed.slice(limit)) { if (dir) fs.unlinkSync(path.join(dir, `${old.id}.json`)); else memory.delete(old.id); }
       return record;
     },

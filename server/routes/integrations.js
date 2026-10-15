@@ -13,6 +13,7 @@ export async function integrationRoutes({ req, res, url, integrations, yours, ow
     if (req.method === "GET" && !route) value = await integrations.status();
     else if (req.method === "GET" && route === "/history") value = integrations.history(params);
     else if (req.method === "GET" && route === "/pi") value = await integrations.pi(params);
+    else if (req.method === "GET" && route === "/sandbox/review") value = integrations.shell.review(params.id);
     else if (req.method === "POST" && route === "/route/preview") value = await integrations.routing.preview(await readJson(req, 8192));
     else if (req.method === "POST" && route === "/route/send") value = await integrations.routing.route((await readJson(req, 1024))?.ticket);
     else if (req.method === "POST" && route === "/route/outcome") { const body = await readJson(req, 1024); value = integrations.routing.outcome(body?.id, body?.outcome); }
@@ -20,6 +21,9 @@ export async function integrationRoutes({ req, res, url, integrations, yours, ow
     else if (req.method === "POST" && route === "/sandbox/preview") value = await integrations.shell.preview(await readJson(req, 8192));
     else if (req.method === "POST" && route === "/sandbox/launch") value = await integrations.shell.launch((await readJson(req, 1024))?.ticket);
     else if (req.method === "POST" && route === "/sandbox/inspect") value = await integrations.shell.inspect((await readJson(req, 1024))?.id);
+    else if (req.method === "POST" && route === "/sandbox/retrieve") value = await integrations.shell.retrieve((await readJson(req, 1024))?.id);
+    else if (req.method === "POST" && route === "/sandbox/export") { const body = await readJson(req, 1024); value = integrations.shell.exportReview(body?.id, body?.revision); }
+    else if (req.method === "POST" && route === "/sandbox/forget-review") value = integrations.shell.forgetReview((await readJson(req, 1024))?.id);
     else if (req.method === "POST" && route === "/sandbox/delete") value = await integrations.shell.remove((await readJson(req, 1024))?.id);
     else if (req.method === "POST" && route === "/pi/enable") value = integrations.enablePi((await readJson(req, 1024))?.on);
     else if (req.method === "POST" && route === "/pi/import") value = integrations.importPi(await readJson(req, 1024 * 1024));

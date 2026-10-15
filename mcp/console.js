@@ -206,11 +206,11 @@ function buildServer() {
     "integrations",
     {
       title: "Review agent workflows",
-      description: "Browse routing decisions, OpenShell jobs and read-only Pi run metadata. Open a tab, filter, page or select a record. Sending decisions, enabling sources, launching jobs and deletion stay in the owner's window; this tool never executes them.",
-      inputSchema: z.object({ action: z.enum(["open", "filter", "select", "page", "refresh"]).optional(), tab: z.enum(["routing", "sandbox", "pi"]).optional(), filters: z.object({ q: z.string().optional(), status: z.string().optional(), sort: z.enum(["newest", "oldest"]).optional() }).optional(), id: z.string().optional(), page: z.number().int().min(1).optional(), settle: settleArg, instance: instanceArg }),
+      description: "Browse routing decisions, OpenShell jobs and read-only Pi run metadata. Open a tab, filter, page, select a record, open its cached local review or select a reviewed file. Retrieval, export, forgetting, sending decisions, source configuration, launch and deletion stay in the owner's window; this tool never executes them.",
+      inputSchema: z.object({ action: z.enum(["open", "filter", "select", "page", "refresh", "review", "file"]).optional(), tab: z.enum(["routing", "sandbox", "results", "pi"]).optional(), filters: z.object({ q: z.string().optional(), status: z.string().optional(), sort: z.enum(["newest", "oldest"]).optional() }).optional(), id: z.string().optional(), page: z.number().int().min(1).optional(), settle: settleArg, instance: instanceArg }),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async ({ action = "open", tab, filters, id, page, settle, instance }) => reply(await target(instance).driver("integrations", action, action === "open" ? tab : action === "filter" ? filters : action === "select" ? id : page, { settle })),
+    async ({ action = "open", tab, filters, id, page, settle, instance }) => reply(await target(instance).driver("integrations", action, action === "open" ? tab : action === "filter" ? filters : ["select", "file"].includes(action) ? id : page, { settle })),
   );
 
   tool(

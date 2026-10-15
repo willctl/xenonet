@@ -19,7 +19,7 @@ const until = async (fn) => { for (const end = Date.now() + 60000; Date.now() < 
 test("production Desktop restarts without losing its service, console connection or terminal", { timeout: 300000 }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-components-"));
   const port = await freePort();
-  const env = { ...process.env, XENONET_INSTANCE: "test", XENONET_DEMO: "1", XENONET_STANDALONE: "1", XENONET_RUNTIME_DIR: dir, XENONET_RUNTIME_EXEC: process.execPath, XENONET_PORT: String(port), XENONET_DESKTOP_PORT: String(await freePort()), XENONET_SHOW: "hidden" };
+  const env = { ...process.env, XENONET_INSTANCE: "test", XENONET_DEMO: "1", XENONET_STANDALONE: "1", XENONET_RUNTIME_DIR: dir, XENONET_RUNTIME_EXEC: process.execPath, XENONET_PORT: String(port), XENONET_DESKTOP_PORT: String(await freePort()), XENONET_SHOW: process.env.XENONET_E2E_SHOW ?? "hidden" };
   delete env.ELECTRON_RUN_AS_NODE;
   if (process.env.XENONET_TEST_COMPONENT_BUNDLE) await installBundle(process.env.XENONET_TEST_COMPONENT_BUNDLE, { env, command: false });
   const electron = process.env.XENONET_TEST_PACKAGED_EXE || createRequire(import.meta.url)("electron");
@@ -58,7 +58,7 @@ test("production Desktop restarts without losing its service, console connection
     assert.equal((await mcp.call("terminal", { action: "list" })).result.isError, true);
     assert.equal(mcp.proc.exitCode, null);
     await assert.rejects(service.request("console", { op: "ping" }), /closed or restarting/);
-    await s.launch({ show: "hidden" });
+    await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
     assert.notEqual((await s.ping()).pid, desktop.pid);
     assert.equal((await mcp.call("terminal", { action: "list" })).result.isError, undefined);
     assert.equal(mcp.proc.exitCode, null);
