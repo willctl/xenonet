@@ -27,6 +27,7 @@ import { instanceFrom } from "../core/instances.js";
 import { createControl } from "./control.js";
 import { sameOrigin, fromOwnPage, devtoolsPort } from "./trust.js";
 import { createRecorder } from "./recorder.js";
+import { FILM_FRAMES, DEFAULT_FRAME, fitFrame } from "../core/frames.js";
 import { appDir } from "../core/dirs.js";
 import { createLog, logDir } from "../core/log.js";
 import { isToken } from "../core/actors/tokens.js";
@@ -632,8 +633,9 @@ function wireIpc() {
     }
   });
   // Films of the day (src/film.js): the window, recorded to the videos
-  // folder; the page says when to start and stop, never where.
-  ipcMain.handle("app:record", (e, { action } = {}) => (!ownPage(e) ? null : action === "stop" ? recorder.stop() : recorder.start({ file: filmFile() })));
+  // folder in the frame the page names (a story, 9:16, unless it says
+  // wide); the page says when to start and stop, never where.
+  ipcMain.handle("app:record", (e, { action, frame } = {}) => (!ownPage(e) ? null : action === "stop" ? recorder.stop() : recorder.start({ file: filmFile(), ...filmFrame(frame) })));
   // Choosing the projects folder (src/root.js): the native folder picker,
   // over the window. The page gets the folder picked, or null, and the
   // server checks it before XenoNet reads it.
@@ -679,6 +681,16 @@ function wireIpc() {
 // Recording the window (films of the day), shared by the page and the
 // control channel.
 const recorder = createRecorder(() => win);
+// The frame a film records in (core/frames.js): the window takes the
+// largest size in the frame's shape that fits its display, and the film is
+// scaled to the frame's own width.
+function filmFrame(frame) {
+  const f = FILM_FRAMES[frame] ?? FILM_FRAMES[DEFAULT_FRAME];
+  const display = win && !win.isDestroyed() ? screen.getDisplayMatching(win.getBounds()) : screen.getPrimaryDisplay();
+  const scale = display.scaleFactor || 1;
+  const size = fitFrame(f, { width: display.workAreaSize.width * scale, height: display.workAreaSize.height * scale });
+  return { size: [size.width, size.height], width: f.width };
+}
 function filmFile() {
   const day = new Date().toLocaleDateString("en-CA");
   const dir = capturesDir("film.mp4");

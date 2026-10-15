@@ -6,6 +6,7 @@
 // record). A JS module can do anything else (xenonet script run). Steps wait
 // for the view to settle, so a script never sleeps for a fixed time unless
 // it says so.
+import { filmPlaySeconds } from "./frames.js";
 
 export const STEPS = `  launch[:inactive|front|hidden]  start it unless it's running, and wait until it's ready
   launch:restart[:…]              quit it if it's running, or end a copy stuck holding its
@@ -67,7 +68,8 @@ export const STEPS = `  launch[:inactive|front|hidden]  start it unless it's run
                                   revertTheme after, as Enter and Esc do)
   themeGallery[:<name>|off]       the gallery of themes; focusTheme:<name> looks
                                   at a card, makeTheme makes your own from it
-  film[:<seconds>]                play a film of the day and wait for its end
+  film[:<seconds>]                play a film of the day (the day plays for
+                                  <seconds>, 12 unless said) and wait for its end
   sleep:<ms>
   <method>[:<arg>]                any other driver method (src/driver.js), such as ops or clearOps`;
 
@@ -107,7 +109,7 @@ export async function runStep(s, step, say = () => {}) {
     const { op, args = [] } = step;
     if (op === "wait") return new Promise((r) => setTimeout(r, Number(args[0]) || 0));
     if (op === "shot") return runStep(s, `shot:${args[0] ?? "shot"}`, say);
-    if (op === "film") return say(brief(await film(s, args[0]?.seconds ?? args[0] ?? 45)));
+    if (op === "film") return say(brief(await film(s, args[0]?.seconds ?? args[0] ?? filmPlaySeconds())));
     if (op === "theme") return runStep(s, `theme:${args[0]}`, say);
     return say(brief(await s.driver(op, ...args)));
   }
@@ -271,7 +273,7 @@ export async function runStep(s, step, say = () => {}) {
       say(`theme ${arg}`);
       break;
     case "film":
-      say(brief(await film(s, Number(arg) || 45)));
+      say(brief(await film(s, Number(arg) || filmPlaySeconds())));
       break;
     case "sleep":
       await new Promise((r) => setTimeout(r, Number(arg)));

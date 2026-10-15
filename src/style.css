@@ -3516,6 +3516,7 @@ body.filming .alerts,
 body.filming .replay,
 body.filming .hints,
 body.filming .gather,
+body.filming .sheet-tabs,
 body.filming .fx-scanlines {
   opacity: 0;
   pointer-events: none;
@@ -3523,21 +3524,40 @@ body.filming .fx-scanlines {
 .film { position: fixed; inset: 0; z-index: 40; pointer-events: none; color: var(--text); font-family: var(--display); }
 .film[hidden] { display: none; }
 .fl-card { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(90vw, 1100px); padding: 64px 48px; text-align: center; background: radial-gradient(ellipse at center, rgb(var(--bg-rgb) / 0.88) 0%, rgb(var(--bg-rgb) / 0.6) 50%, transparent 72%); animation: fl-in 0.9s ease both; }
-/* While the day plays, the clock and the counts stand on a shade of the
+/* While the day plays, the headline and the counts stand on a shade of the
    background. */
-.film:has(.fl-clock)::after { content: ""; position: absolute; inset: auto 0 0; height: 34%; background: linear-gradient(to top, rgb(var(--bg-rgb) / 0.78), transparent); z-index: -1; }
+.film:has(.fl-counts)::after { content: ""; position: absolute; inset: auto 0 0; height: 34%; background: linear-gradient(to top, rgb(var(--bg-rgb) / 0.78), transparent); z-index: -1; }
 .fl-card h1 { margin: 10px 0 12px; font-size: clamp(40px, 6vw, 92px); font-weight: 600; letter-spacing: 0.02em; text-shadow: 0 0 40px rgb(var(--accent-rgb) / 0.35); }
 .fl-card p { margin: 0; font-size: clamp(16px, 1.6vw, 26px); color: var(--muted); }
-.fl-card ol { display: flex; justify-content: center; gap: 48px; margin: 34px 0 0; padding: 0; list-style: none; }
+.fl-card .fl-date { margin: 0 0 10px; color: var(--text); }
+.fl-card .fl-label { margin: 34px 0 0; font-size: 12px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--accent); }
+.fl-card ol { display: flex; justify-content: center; gap: 48px; margin: 10px 0 0; padding: 0; list-style: none; }
 .fl-card li { font-size: clamp(18px, 1.8vw, 28px); }
 .fl-card li span { display: block; margin-top: 4px; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
-.fl-mark { font-size: 14px; letter-spacing: 0.6em; color: var(--accent); }
+/* The mark: the band top left, the node-X and the site top right. */
+.fl-mark { font-size: 13px; letter-spacing: 0.4em; color: var(--accent); white-space: nowrap; }
 .fl-top { position: absolute; top: 40px; left: 48px; display: flex; align-items: baseline; gap: 18px; animation: fl-fade 0.8s ease both; }
-.fl-date { font-size: 18px; color: var(--muted); }
+.fl-site { position: absolute; top: 36px; right: 48px; display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 13px; color: var(--label); animation: fl-fade 0.8s ease both; }
+.fl-x { width: 20px; height: 20px; color: var(--accent); }
+/* The day's archetype and a line that fills as the day plays. */
+.fl-day { position: absolute; left: 48px; bottom: 44px; display: flex; flex-direction: column; gap: 14px; animation: fl-fade 0.8s ease both; }
+.fl-headline { font-size: clamp(36px, 5vw, 84px); font-weight: 600; line-height: 1; text-shadow: 0 0 28px rgb(var(--accent-rgb) / 0.45); }
+.fl-progress { display: block; width: min(260px, 40vw); height: 2px; background: rgb(var(--accent-rgb) / 0.2); }
+.fl-progress::after { content: ""; display: block; height: 100%; width: calc(var(--p, 0) * 100%); background: var(--accent); box-shadow: 0 0 10px rgb(var(--accent-rgb) / 0.6); }
 /* Numbers that change many times a second keep their width. */
-.fl-clock { position: absolute; left: 48px; bottom: 40px; font-size: clamp(48px, 7vw, 112px); font-weight: 600; font-variant-numeric: tabular-nums; text-shadow: 0 0 28px rgb(var(--accent-rgb) / 0.45); animation: fl-fade 0.8s ease both; }
 .fl-counts { position: absolute; right: 48px; bottom: 50px; display: flex; gap: 40px; text-align: right; animation: fl-fade 0.8s ease both; }
 .fl-counts b { display: block; font-size: clamp(28px, 3vw, 46px); font-weight: 600; font-variant-numeric: tabular-nums; }
 .fl-counts span { font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+/* A story (9:16): the frame is narrow, so the mark's two halves stack and
+   the counts sit above the headline. */
+@media (max-width: 640px) {
+  .fl-top { left: 28px; top: 32px; }
+  .fl-mark { font-size: 11px; letter-spacing: 0.3em; }
+  .fl-site { left: 28px; right: auto; top: 58px; }
+  .fl-card { padding: 48px 24px; }
+  .fl-card ol { flex-direction: column; gap: 18px; }
+  .fl-day { left: 28px; bottom: 36px; }
+  .fl-counts { left: 28px; right: 28px; bottom: 150px; justify-content: space-between; gap: 12px; text-align: left; }
+}
 @keyframes fl-in { from { opacity: 0; transform: translate(-50%, -46%); } to { opacity: 1; transform: translate(-50%, -50%); } }
 @keyframes fl-fade { from { opacity: 0; } to { opacity: 1; } }
