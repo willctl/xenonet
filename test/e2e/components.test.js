@@ -16,7 +16,17 @@ const freePort = () => new Promise((r) => { const s = net.createServer().listen(
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const until = async (fn) => { for (const end = Date.now() + 60000; Date.now() < end;) { const v = await fn(); if (v) return v; await new Promise((r) => setTimeout(r, 100)); } throw new Error("The expected terminal state did not arrive."); };
 
-test("production Desktop restarts without losing its service, console connection or terminal", { timeout: 300000 }, async () => {
+// On hosted runners this test has failed 2 of its 19 Windows runs since
+// 2026-10-10, each time differently: the service's hello went unanswered for
+// 5 s (run 38506902762), and Desktop was reported closed while the test
+// expected it up (run 38104211834). Each passed again on the next run with
+// the same code, and the test passes on a developer machine, so hosted
+// runners skip it until the restart path can wait out a starved runner. It
+// stays in the release checklist (docs/guide/releases.md), and
+// XENONET_E2E_RESTART=1 runs it on a hosted runner anyway.
+const hosted = process.env.CI === "true" && process.env.XENONET_E2E_RESTART !== "1";
+
+test("production Desktop restarts without losing its service, console connection or terminal", { timeout: 300000, skip: hosted && "hosted runners have lost the service or Desktop part way through this test (see the note above); XENONET_E2E_RESTART=1 runs it anyway" }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-components-"));
   const port = await freePort();
   const env = { ...process.env, XENONET_INSTANCE: "test", XENONET_DEMO: "1", XENONET_STANDALONE: "1", XENONET_RUNTIME_DIR: dir, XENONET_RUNTIME_EXEC: process.execPath, XENONET_PORT: String(port), XENONET_DESKTOP_PORT: String(await freePort()), XENONET_SHOW: "hidden" };
