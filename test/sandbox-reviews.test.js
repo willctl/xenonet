@@ -19,8 +19,17 @@ function tree(t, files = {}) {
   return dir;
 }
 function repo(t, files = { "file.txt": "original\n" }) {
-  const dir = tree(t, files); execFileSync("git", ["init", "-q", dir]); execFileSync("git", ["-C", dir, "add", "."]); return dir;
+  const dir = tree(t, files); execFileSync("git", ["init", "-q", dir]);
+  // The fixture checks raw patch bytes without runner-level newline conversion.
+  execFileSync("git", ["-C", dir, "config", "core.autocrlf", "false"]);
+  execFileSync("git", ["-C", dir, "add", "."]); return dir;
 }
+
+test("source roots are canonicalized while project subdirectories stay outside the selection", async (t) => {
+  const source = repo(t, { "file.txt": "original\n", "nested/file.txt": "nested\n" });
+  assert.equal((await sourceSnapshot(`${source}${path.sep}.`)).files.length, 2);
+  await assert.rejects(sourceSnapshot(path.join(source, "nested")), /root of a Git working tree/);
+});
 
 test("frozen upload includes dirty working bytes and excludes ignored, sensitive and binary files", async (t) => {
   const source = repo(t, { "a.txt": "original\n", ".env": "PRIVATE_VALUE", ".gitignore": "ignored.txt\n", "binary": Buffer.from([0, 1]) });
@@ -168,10 +177,10 @@ test("native patch export rejects malformed filenames, modified bytes and unboun
 });
 
 test("collector preserves exact text and refuses symlinks and binary files without following them", (t) => {
+  if (process.platform !== "linux") return t.skip("The declared review collector runs in a Linux image and checks /proc file descriptors.");
   const dir = tree(t, { "text.txt": "exact\r\n", "binary": Buffer.from([0]), ".env": "secret" });
-  if (process.platform !== "win32") fs.symlinkSync("/etc/passwd", path.join(dir, "link"));
+  fs.symlinkSync("/etc/passwd", path.join(dir, "link"));
   const script = COLLECT_TEXT.replace('"/workspace/project"', JSON.stringify(dir));
-  if (process.platform === "win32") return t.skip("The declared review collector runs in a Linux image.");
   const value = JSON.parse(execFileSync(process.execPath, ["-e", script], { encoding: "utf8" }));
   assert.equal(value.files.length, 1); assert.deepEqual(Buffer.from(value.files[0].content, "base64"), Buffer.from("exact\r\n"));
   assert.ok(value.problems.some((p) => p.path === "link")); assert.ok(value.problems.some((p) => p.path === "binary"));

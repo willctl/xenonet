@@ -46,10 +46,12 @@ function portableSet(names) {
 }
 
 export async function sourceSnapshot(source, { git = execute } = {}) {
+  // Windows can spell one directory with either short or long names.
+  source = fs.realpathSync.native(source);
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")));
   const args = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=", "-C", source];
   const { stdout: root } = await git("git", [...args, "rev-parse", "--show-toplevel"], { env, timeout: 10000, maxBuffer: 4096 });
-  if (fs.realpathSync(String(root).trim()) !== source) fail("Change review needs the root of a Git working tree.");
+  if (fs.realpathSync.native(String(root).trim()) !== source) fail("Change review needs the root of a Git working tree.");
   const { stdout } = await git("git", [...args, "ls-files", "--cached", "--others", "--exclude-standard", "-z"], { env, timeout: 10000, maxBuffer: 1024 * 1024 });
   const names = [...new Set(String(stdout).split("\0").filter(Boolean))].sort();
   if (names.length > 10000) fail("This project has too many files to prepare a bounded review. Choose a smaller project.");
