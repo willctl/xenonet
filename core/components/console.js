@@ -7,6 +7,7 @@ import { CONSOLE_API, negotiate } from "./protocol.js";
 // An MCP process survives a Desktop restart. Each action finds the service
 // again, and an interrupted action is never automatically sent twice.
 export function installedConsole({ env = process.env } = {}) {
+  const noDesktop = () => ({ instance: "installed", name: "XenoNet", controlled: false, service: true, page: { ready: false }, error: "XenoNet Desktop is closed or restarting." });
   async function call(body) {
     const client = await connectService({ env });
     try {
@@ -18,9 +19,11 @@ export function installedConsole({ env = process.env } = {}) {
     let client;
     try {
       client = await connectService({ env });
-      if (!client.info.desktop) return { instance: "installed", name: "XenoNet", controlled: false, service: true, page: { ready: false }, error: "XenoNet Desktop is closed or restarting." };
+      if (!client.info.desktop) return noDesktop();
       return await client.request("console", { op: "ping" });
     } catch (err) {
+      // Desktop may disconnect between the hello response and this read-only probe.
+      if (/^XenoNet Desktop is closed or restarting\./.test(err.message)) return noDesktop();
       if (err.code === "ENOENT" || /disconnect/.test(err.message)) return null;
       throw err;
     } finally { client?.close(); }

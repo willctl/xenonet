@@ -124,6 +124,19 @@ test("quit asks Desktop to close and waits until it has, leaving the service run
   assert.equal(s.desktop, false);
 });
 
+test("readiness tolerates Desktop disconnecting after hello without retrying actions", async (t) => {
+  const { env } = runtime(t); let probes = 0;
+  const s = await service(env, { answer: ({ op }) => {
+    if (op === "ping" && ++probes > 1) return { page: { ready: true } };
+    throw new Error("XenoNet Desktop is closed or restarting. The service is still running.");
+  } });
+  t.after(s.close);
+  const c = installedConsole({ env });
+  assert.equal((await c.ready({ timeout: 2000 })).page.ready, true);
+  await assert.rejects(c.driver("select", "project:/users/nova/projects/atlas"), /closed or restarting/);
+  assert.equal(s.seen.filter((request) => request.op === "driver").length, 1);
+});
+
 test("launching a Desktop that's already up brings its window forward, or leaves it hidden, and waits for its page", async (t) => {
   const { env } = runtime(t);
   const s = await service(env);
