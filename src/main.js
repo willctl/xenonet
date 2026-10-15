@@ -22,7 +22,7 @@ import { createPalette } from "./palette.js";
 import { createReplay } from "./replay.js";
 import { createFilm } from "./film.js";
 import { note, ops, clearOps } from "./oplog.js";
-import { makePoster } from "./poster.js";
+import { createExportPanel } from "./export-panel.js";
 import { filmPlaySeconds } from "../core/frames.js";
 import { createIdentities } from "./identities.js";
 import { keyLabel } from "./platform.js";
@@ -237,7 +237,7 @@ identities.wire(document.getElementById("id-filters"));
 // host is on the map.
 const hostFilters = createHostFilters({ sfx, onFilter: () => hud.refreshFilters() });
 
-const modals = createModals({ sfx, toast: (m, b) => hud.toast(m, b), select, onPoster: () => poster(), identities, onChangeRoot: () => rootPanel.open(), onHandoff: (node, target) => you.did("handed-off", node.id, { to: target }) });
+const modals = createModals({ sfx, toast: (m, b) => hud.toast(m, b), select, onPoster: () => exportPanel.open(), identities, onChangeRoot: () => rootPanel.open(), onHandoff: (node, target) => you.did("handed-off", node.id, { to: target }) });
 const connectPanel = createConnectPanel({ modals, sfx, toast: (m, b) => hud.toast(m, b) });
 // XenoNet's doctor (core/doctor): its panel, and its problems in the strip.
 const doctorPanel = createDoctorPanel({
@@ -513,22 +513,19 @@ async function makeFilm({ seconds, reveal = {} } = {}) {
   }
 }
 
-async function poster() {
-  hud.toast("Rendering the poster…");
-  await new Promise((r) => setTimeout(r, 60));
-  const p = await makePoster({ scene });
-  sfx("shutter");
-  hud.toast(`Saved a ${p.width}×${p.height} poster`);
-  return p;
-}
+// Posters and films of the day (export-panel.js): a preview, the size,
+// what to reveal, then save, copy or record. The panel opens for both
+// palette commands.
+const exportPanel = createExportPanel({ modals, scene, sfx, toast: (m, b) => hud.toast(m, b), onFilm: (opts) => makeFilm(opts), canFilm: !!desktop?.record });
+const poster = () => exportPanel.open();
 
 // ---------- commands (palette) ----------
 
 const commandList = [
   { id: "wallpaper", label: "Wallpaper mode", key: "W", keywords: "ambient screensaver", run: () => setWallpaper(!wallpaperOn) },
   { id: "replay", label: "Replay the last 24 hours", keywords: "timelapse time-lapse history", run: () => replay.enter() },
-  { id: "film", label: "Make a film of today", keywords: "video movie mp4 share recap day timelapse render record story", logs: true, run: () => makeFilm() },
-  { id: "poster", label: "Make a poster of today", keywords: "image png export constellation", run: () => poster() },
+  { id: "film", label: "Make a film of today", keywords: "video movie mp4 share recap day timelapse render record story", run: () => exportPanel.open() },
+  { id: "poster", label: "Make a poster of today", keywords: "image png export constellation share copy", run: () => exportPanel.open() },
   { id: "daylog", label: "Show the day's log", keywords: "summary today end of day", run: () => modals.dayLog() },
   { id: "away2", label: "What happened in the last 2 hours", keywords: "away digest", run: () => modals.away(Date.now() - 2 * 3600e3) },
   { id: "away8", label: "What happened in the last 8 hours", keywords: "away digest", run: () => modals.away(Date.now() - 8 * 3600e3) },
@@ -1142,6 +1139,7 @@ if (import.meta.env.DEV || desktop) {
     integrations: integrationsPanel,
     rename: renameSession,
     film,
+    exportPanel,
     ops,
     clearOps,
     identities,

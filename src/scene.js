@@ -1626,21 +1626,51 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
       restTarget = on ? 1 : 0;
     },
 
-    // One frame at poster resolution. Lines keep their on-screen width; the
-    // pixel ratio is raised so everything else renders at `width` pixels.
-    renderHighRes(width = 3840) {
+    // One frame at poster resolution. At the window's shape, the pixel
+    // ratio is raised so everything renders at `width` pixels, and lines
+    // keep their on-screen width. With a `height`, the frame has a shape
+    // of its own (a poster's, core/frames.js): the camera takes that shape
+    // and backs off when it's narrower than the window, so what the window
+    // shows across still fits, then gets its own view back.
+    renderHighRes(width = 3840, height = null) {
       const pr0 = renderer.getPixelRatio();
-      const pr = width / innerWidth;
       const ret = reticle.visible;
       reticle.visible = false;
-      renderer.setPixelRatio(pr);
-      composer.setPixelRatio(pr);
-      composer.render();
-      const url = renderer.domElement.toDataURL("image/png");
-      renderer.setPixelRatio(pr0);
-      composer.setPixelRatio(pr0);
+      let url, W, H;
+      if (height) {
+        const aspect0 = camera.aspect;
+        const pos0 = camera.position.clone();
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+        camera.position.copy(controls.target).addScaledVector(pos0.clone().sub(controls.target), Math.max(1, aspect0 / camera.aspect));
+        camera.updateMatrixWorld();
+        renderer.setPixelRatio(1);
+        renderer.setSize(width, height, false);
+        composer.setPixelRatio(1);
+        composer.setSize(width, height);
+        composer.render();
+        url = renderer.domElement.toDataURL("image/png");
+        [W, H] = [width, height];
+        renderer.setPixelRatio(pr0);
+        renderer.setSize(innerWidth, innerHeight, false);
+        composer.setPixelRatio(pr0);
+        composer.setSize(innerWidth, innerHeight);
+        camera.aspect = aspect0;
+        camera.updateProjectionMatrix();
+        camera.position.copy(pos0);
+        camera.updateMatrixWorld();
+      } else {
+        const pr = width / innerWidth;
+        renderer.setPixelRatio(pr);
+        composer.setPixelRatio(pr);
+        composer.render();
+        url = renderer.domElement.toDataURL("image/png");
+        renderer.setPixelRatio(pr0);
+        composer.setPixelRatio(pr0);
+        [W, H] = [Math.round(innerWidth * pr), Math.round(innerHeight * pr)];
+      }
       reticle.visible = ret;
-      return { url, width: Math.round(innerWidth * pr), height: Math.round(innerHeight * pr) };
+      return { url, width: W, height: H };
     },
   };
   onTheme(retheme);

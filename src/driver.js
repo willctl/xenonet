@@ -97,7 +97,7 @@ export function createDriver(app) {
       selection: selected ? brief(nodeOf(selected)) : null,
       gathered: scene.gathering(),
       identities: { filter: app.identities?.selected ?? [], masked: !!app.identities?.masked },
-      overlays: { palette: palette.isOpen, modal: modals.isOpen, preview: preview.isOpen, rename: !!app.hud?.renaming, terminal: !!app.terminal()?.isOpen, wallpaper: app.wallpaper(), replay: replay.active, film: app.film && app.film.state !== "idle" ? app.film.state : false, switcher: !!app.themes?.switcher.isOpen, gallery: !!app.themes?.gallery.isOpen },
+      overlays: { palette: palette.isOpen, modal: modals.isOpen, preview: preview.isOpen, rename: !!app.hud?.renaming, terminal: !!app.terminal()?.isOpen, wallpaper: app.wallpaper(), replay: replay.active, film: app.film && app.film.state !== "idle" ? app.film.state : false, export: !!app.exportPanel?.isOpen, switcher: !!app.themes?.switcher.isOpen, gallery: !!app.themes?.gallery.isOpen },
       alerts: alerts.items.map(alertBrief),
       counts: {
         nodes: graph?.nodes.length ?? 0,
@@ -394,12 +394,22 @@ export function createDriver(app) {
     clearOps: () => (app.clearOps(), { cleared: true }),
     // A film of the day (film.js): starts it and returns at once; state()
     // says how far it has got (overlays.film: title, playing, end, or false).
-    film({ seconds = 45 } = {}) {
+    // `seconds` is how long the day plays; `reveal` ({ names, tokens })
+    // what the film shows beyond the star names.
+    film({ seconds, reveal = {} } = {}) {
       if (app.film.state !== "idle") throw new Error("a film is already playing");
-      app.film.play({ seconds }).catch((err) => app.errors.push({ message: `film: ${err.message}`, source: "film", ts: Date.now() }));
-      return { started: true, seconds };
+      seconds = Number(seconds) || undefined;
+      app.film.play({ seconds, reveal: { names: !!reveal.names, tokens: !!reveal.tokens } }).catch((err) => app.errors.push({ message: `film: ${err.message}`, source: "film", ts: Date.now() }));
+      return { started: true, seconds: seconds ?? null };
     },
     stopFilm: (opts) => act(() => app.film.stop(), opts),
+    // A poster of the day (export-panel.js, poster.js): renders it now at
+    // `size` (story, portrait, card or wide), revealing what `reveal` turns
+    // on, and says what it drew (`lines`) and how big the PNG is; `save`
+    // saves it as the panel's Save PNG does. The panel itself opens with
+    // command("poster"); exportPanel() says what it has picked.
+    poster: (opts) => app.exportPanel.render(opts ?? {}),
+    exportPanel: () => app.exportPanel.state(),
     // Opens the palette with `text` typed in, or closes it with null.
     palette: (text = "", opts) => act(() => (text == null ? palette.close() : palette.open(text)), { settle: false, ...opts }),
 
