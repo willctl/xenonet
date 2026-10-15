@@ -20,6 +20,7 @@ import { readWiki } from "./wiki.js";
 import { TranscriptSearch } from "./search.js";
 import { Transcripts, createStats } from "./stats.js";
 import { summarize, dayLog, summaryText, handoffBrief, narrate } from "./digest.js";
+import { constellationOf, posterSalt } from "./redact.js";
 import * as store from "./store.js";
 import { Blocks } from "./blocks/lifecycle.js";
 import { claudeLines, codexLines } from "./lines.js";
@@ -639,6 +640,13 @@ export class XenoNetState extends EventEmitter {
       live: this.liveSnapshot(),
       repos: this.projects.filter((p) => this.repos.status.get(p.key)?.dirty).map((p) => ({ name: p.name, ...this.repos.status.get(p.key) })),
     });
+  }
+
+  // The day's constellation for a poster or a film (redact.js): star names
+  // in place of project names, and no hours. The real names come only
+  // when `names` asks for them, for an export that reveals them.
+  constellation({ names = false } = {}) {
+    return constellationOf(this.dayLog(), { salt: posterSalt(config.stateDir), names });
   }
 
   async narrate(kind, since) {

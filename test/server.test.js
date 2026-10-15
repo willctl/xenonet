@@ -160,7 +160,16 @@ test("the map, its live state, history, summary and digests", async () => {
   assert.equal(summary.url, `http://127.0.0.1:${port}/`);
   assert.ok(summary.needsYou.some((n) => n.kind === "question"));
   assert.ok((await get(`/api/digest?since=${Date.now() - 6 * 3600e3}`)).data.totals.sessions > 0);
-  assert.equal((await get("/api/daylog")).data.hours.length, 24);
+  const log = (await get("/api/daylog")).data;
+  assert.equal(log.hours.length, 24);
+  // What a poster or film gets: star names, never the projects' own, and
+  // no hours; the names only when asked for.
+  const stars = (await get("/api/constellation")).data;
+  assert.ok(stars.stars.length > 0 && stars.stars.every((s) => /^[A-Z][a-z]+( \d+)?$/.test(s.name) && !("project" in s)));
+  assert.ok(!log.topProjects.some((p) => stars.stars.some((s) => s.name === p.name)));
+  assert.ok(!("hours" in stars) && !("busiestHour" in stars) && !("sessions" in stars));
+  assert.deepEqual((await get("/api/constellation?names=1")).data.stars.map((s) => s.project), log.topProjects.map((p) => p.name));
+  assert.deepEqual((await get("/api/constellation")).data.stars, stars.stars, "the same names again");
   assert.match((await post("/api/narrate", { kind: "day" })).data.text, /While you were away/);
   assert.match((await post("/api/narrate", {})).data.text, /While you were away/);
 });
