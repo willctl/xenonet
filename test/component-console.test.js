@@ -27,9 +27,10 @@ function runtime(t) {
 
 // A service that writes its connection file and answers hello and console
 // requests: `desktop` whether Desktop is connected, `ready` whether its page
-// is, `consoleApi` the console interface it speaks. `seen` is every console
-// request that reached it.
-async function service(env, { desktop = true, ready = true, consoleApi = { min: 1, max: 1 }, answer } = {}) {
+// is, `consoleApi` the console interface it speaks, `slowHellos` how many
+// hellos it leaves unanswered first, as a busy service would. `seen` is
+// every console request that reached it.
+async function service(env, { desktop = true, ready = true, consoleApi = { min: 1, max: 1 }, slowHellos = 0, answer } = {}) {
   const s = { desktop, ready, seen: [], hellos: 0, sockets: new Set() };
   let closing = false;
   const server = net.createServer((socket) => {
@@ -39,7 +40,7 @@ async function service(env, { desktop = true, ready = true, consoleApi = { min: 
     rpc(socket, async (method, params) => {
       if (method === "hello") {
         if (params.token !== TOKEN) throw new Error("XenoNet refused this connection.");
-        s.hellos++;
+        if (s.hellos++ < slowHellos) return new Promise(() => {});
         return { version: "0.11.0", api: { min: 1, max: 1 }, consoleApi, desktop: s.desktop };
       }
       if (method !== "console") throw new Error("Unsupported request.");
@@ -134,6 +135,21 @@ test("launching a Desktop that's already up brings its window forward, or leaves
   assert.deepEqual(s.seen.filter((x) => x.op === "window"), [{ op: "window", show: "inactive" }, { op: "window" }]);
   s.ready = false;
   await assert.rejects(c.ready({ timeout: 250 }), /did not become ready/);
+});
+
+test("waiting for Desktop goes on when one probe isn't answered in time, since a ping is safe to ask again", { timeout: 20000 }, async (t) => {
+  const { env } = runtime(t);
+  const s = await service(env, { slowHellos: 1 });
+  t.after(s.close);
+  const c = installedConsole({ env });
+  const started = Date.now();
+  assert.equal((await c.ready({ timeout: 15000 })).page.ready, true);
+  assert.ok(Date.now() - started >= 5000, "the first probe ran out its 5 s before the next was tried");
+  assert.deepEqual([s.hellos, s.seen.map((x) => x.op)], [2, ["ping"]], "one unanswered hello, then one that got through");
+  // Anything else the service says still ends the wait at once: here a
+  // connection file whose token it refuses.
+  fs.writeFileSync(descriptorFile(env), JSON.stringify({ ...JSON.parse(fs.readFileSync(descriptorFile(env), "utf8")), token: "cd".repeat(32) }));
+  await assert.rejects(c.ready({ timeout: 15000 }), /refused/);
 });
 
 test("launching starts the registered Desktop with how to show it, without ELECTRON_RUN_AS_NODE, and waits for its page", async (t) => {
