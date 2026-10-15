@@ -372,8 +372,10 @@ test instances, the VM lab and how the code is laid out.
 Issues and pull requests are welcome. Run `npm test` before you send a
 change, and `npm run test:e2e` too if it touches the UI. Write commit
 messages as [Conventional Commits](https://www.conventionalcommits.org),
-such as `feat: ...`, `fix: ...` or `docs: ...`. `AGENTS.md` says the same
-for coding agents, and how they can check their work.
+such as `feat: ...`, `fix: ...` or `docs: ...`. [CONTRIBUTING.md](CONTRIBUTING.md)
+has the whole of it, and `AGENTS.md` says the same for coding agents, and
+how they can check their work. For a security problem, see
+[SECURITY.md](SECURITY.md) instead of opening an issue.
 
 ## License
 
