@@ -296,7 +296,7 @@ test("lines read as XenoNet's tailer reads them: drift by source, with the versi
   assert.deepEqual(r.read(), { "anthropic/claude-code/transcript-line": 2 });
   // A rollout's version is in its first line.
   const c = readers();
-  checkLines(c.reader("openai/codex/rollout-line"), [JSON.stringify({ timestamp: T, type: "session_meta", payload: { cli_version: "1.2.0" } }), JSON.stringify({ timestamp: T, type: "token_usage_record", payload: {} })].join("\n"), CODEX_LINES);
+  checkLines(c.reader("openai/codex/rollout-line"), [JSON.stringify({ timestamp: T, type: "session_meta", payload: { cli_version: "1.2.0" } }), JSON.stringify({ timestamp: T, type: "made_up_record", payload: {} })].join("\n"), CODEX_LINES);
   assert.deepEqual(
     c.findings().map((f) => [f.kind, f.vendorVersion]),
     [

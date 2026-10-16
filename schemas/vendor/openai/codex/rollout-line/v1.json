@@ -40,7 +40,11 @@
       ],
       "additionalProperties": {},
       "x-xenonet": {
-        "closed": true
+        "closed": true,
+        "known": [
+          "ordinal",
+          "metadata"
+        ]
       }
     },
     {
@@ -86,7 +90,11 @@
       ],
       "additionalProperties": {},
       "x-xenonet": {
-        "closed": true
+        "closed": true,
+        "known": [
+          "ordinal",
+          "metadata"
+        ]
       }
     },
     {
@@ -862,7 +870,11 @@
       ],
       "additionalProperties": {},
       "x-xenonet": {
-        "closed": true
+        "closed": true,
+        "known": [
+          "ordinal",
+          "metadata"
+        ]
       }
     },
     {
@@ -944,6 +956,8 @@
                 "known": [
                   "namespace",
                   "encrypted_function_args",
+                  "encrypted_content",
+                  "status",
                   "internal_chat_message_metadata_passthrough"
                 ]
               }
@@ -977,6 +991,7 @@
                 "known": [
                   "status",
                   "namespace",
+                  "encrypted_content",
                   "internal_chat_message_metadata_passthrough"
                 ]
               }
@@ -1009,6 +1024,7 @@
                 "closed": true,
                 "known": [
                   "status",
+                  "encrypted_content",
                   "internal_chat_message_metadata_passthrough"
                 ]
               }
@@ -1217,6 +1233,19 @@
                 "type"
               ],
               "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "additional_tools"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {}
             }
           ],
           "x-xenonet": {
@@ -1231,7 +1260,11 @@
       ],
       "additionalProperties": {},
       "x-xenonet": {
-        "closed": true
+        "closed": true,
+        "known": [
+          "ordinal",
+          "metadata"
+        ]
       }
     },
     {
@@ -1258,7 +1291,11 @@
       ],
       "additionalProperties": {},
       "x-xenonet": {
-        "closed": true
+        "closed": true,
+        "known": [
+          "ordinal",
+          "metadata"
+        ]
       }
     },
     {
@@ -1267,6 +1304,19 @@
         "type": {
           "type": "string",
           "const": "world_state"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "token_usage_record"
         }
       },
       "required": [

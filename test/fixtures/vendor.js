@@ -114,7 +114,7 @@ export const VENDOR = {
       { record: { timestamp: T, type: "event_msg", payload: { type: "token_count", info: null, rate_limits: { primary: { used_percent: 1, resets_in_minutes: 4 } } } }, drift: [["new-field", "payload.rate_limits.primary.resets_in_minutes"]] },
       { record: { timestamp: T, type: "event_msg", payload: { type: "item_completed", item: { type: "Hologram" } } }, drift: [["new-variant", "payload.item.type"]] },
       { record: { timestamp: T, type: "world_view", payload: {} }, drift: [["new-variant", "type"]] },
-      { record: { timestamp: T, type: "turn_context", payload: { model: "m" }, ordinal: 7 }, drift: [["new-field", "ordinal"]] },
+      { record: { timestamp: T, type: "turn_context", payload: { model: "m" }, made_up: 7 }, drift: [["new-field", "made_up"]] },
       { record: { timestamp: T, type: "event_msg", payload: { type: "item_completed", item: { type: "FileChange", changes: { "/Users/ada/ledger/a.py": { type: "update", unified_diff: "@@", mode: 420 } } } } }, drift: [["new-field", "payload.item.changes.*.mode"]] },
       { record: { timestamp: T, type: "response_item", payload: { type: "function_call", call_id: "c1", name: "shell", arguments: "{}", weight: 2 } }, drift: [["new-field", "payload.weight"]] },
     ],

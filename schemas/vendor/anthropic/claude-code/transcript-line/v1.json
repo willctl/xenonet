@@ -617,6 +617,45 @@
         "type"
       ],
       "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "api-request"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "api-request-shape"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "api-request-blob"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
     }
   ],
   "x-xenonet": {

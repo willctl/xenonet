@@ -70,7 +70,7 @@ export const TranscriptLine = vendor(
     }).describe("A reply, or a part of one"),
     // Kinds XenoNet passes over: Claude Code's notes and summaries, and what
     // newer versions write about a session around them (its titles and
-    // mode, queued prompts, file history, links and costs).
+    // mode, queued prompts, file history, links, costs and API requests).
     ...skipped(
       "type",
       "system",
@@ -90,6 +90,9 @@ export const TranscriptLine = vendor(
       "pr-link",
       "relocated",
       "permission-mode",
+      "api-request",
+      "api-request-shape",
+      "api-request-blob",
     ),
   ]),
   {

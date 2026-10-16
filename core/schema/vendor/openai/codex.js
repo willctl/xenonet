@@ -103,18 +103,20 @@ const output = (type, known) => closed(outputShape(type), { known: [...known, PA
 
 const response = variants("type", [
   open({ type: z.literal("message"), role: str, content: z.union([z.array(text), str]) }),
-  call("function_call", ["namespace", "encrypted_function_args"]),
-  call("custom_tool_call", ["status", "namespace"]),
-  call("local_shell_call", ["status"]),
+  call("function_call", ["namespace", "encrypted_function_args", "encrypted_content", "status"]),
+  call("custom_tool_call", ["status", "namespace", "encrypted_content"]),
+  call("local_shell_call", ["status", "encrypted_content"]),
   output("function_call_output", ["name", "namespace"]),
   output("custom_tool_call_output", ["name"]),
   // Not in the protocol's types any more; older rollouts may have it.
   open(outputShape("local_shell_call_output")),
-  // Kinds XenoNet passes over: newer Codex writes the last eight.
-  ...skipped("type", "reasoning", "web_search_call", "agent_message", "tool_search_call", "tool_search_output", "image_generation_call", "compaction", "configuration_update", "compaction_trigger", "context_compaction"),
+  // Kinds XenoNet passes over: newer Codex writes the last nine.
+  ...skipped("type", "reasoning", "web_search_call", "agent_message", "tool_search_call", "tool_search_output", "image_generation_call", "compaction", "configuration_update", "compaction_trigger", "context_compaction", "additional_tools"),
 ]);
 
-const envelope = (type, payload) => closed({ timestamp: str.describe("ISO 8601"), type: z.literal(type), payload });
+// Newer Codex numbers each line (ordinal) and tags response items with
+// metadata; XenoNet reads neither.
+const envelope = (type, payload) => closed({ timestamp: str.describe("ISO 8601"), type: z.literal(type), payload }, { known: ["ordinal", "metadata"] });
 
 export const RolloutLine = vendor(
   "openai/codex/rollout-line",
@@ -125,8 +127,8 @@ export const RolloutLine = vendor(
     envelope("event_msg", event),
     envelope("response_item", response),
     envelope("compacted", open({})),
-    // A kind of line newer Codex writes, which XenoNet passes over.
-    ...skipped("type", "world_state"),
+    // Kinds of line newer Codex writes, which XenoNet passes over.
+    ...skipped("type", "world_state", "token_usage_record"),
   ]),
   {
     title: "A line of a Codex rollout",
@@ -179,6 +181,8 @@ const threadItem = variants("type", [
   open({ type: z.literal("fileChange"), changes: z.array(closed({ path: str, kind: z.union([str, closed({ type: str }, { known: ["move_path"] })]).optional() }, { known: ["diff"] })).optional(), status: maybe(str) }),
   open({ type: z.literal("webSearch"), query: maybe(str) }),
   open({ type: z.literal("contextCompaction") }),
+  // Kinds newer Codex lists, which XenoNet passes over.
+  ...skipped("type", "hookPrompt", "functionCallOutput", "collabAgentToolCall", "subAgentActivity", "imageView", "sleep", "imageGeneration", "enteredReviewMode", "exitedReviewMode"),
 ]);
 
 export const AppServer = vendor(
