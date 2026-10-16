@@ -275,6 +275,10 @@ const gatewayControl =
         engine,
         registration,
         actors,
+        // Runs an actor reports from elsewhere (a sandbox): sessions on the
+        // map, each with a beam from its actor.
+        runs: state.reportedRuns,
+        onRun: ({ actor, id }) => state.refreshAfterChange().then(() => actors.target(actor, id, "works-on")).catch(() => {}),
         store: engineStore,
         port: Number(process.env.XENONET_GATEWAY_PORT) || config.port + 10,
         version: VERSION,

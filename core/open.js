@@ -9,6 +9,12 @@ const DESKTOP_ID = /^local_[A-Za-z0-9-]{1,64}$/;
 export function actionsFor(node) {
   if (!node) return [];
   const acts = [];
+  // A run XenoNet only observes has no transcript here to preview, and
+  // nothing to open it in.
+  if (node.kind === "session" && node.observed) {
+    if (node.cwd) acts.push({ id: "open-folder", label: "Open folder" });
+    return acts;
+  }
   if (node.kind === "session") {
     if (node.app === "codex" && UUID.test(node.rawId)) acts.push({ id: "open-app", label: "Open in ChatGPT · Codex" });
     if (node.app === "claude" && node.desktopId && DESKTOP_ID.test(node.desktopId)) acts.push({ id: "open-app", label: "Open in Claude desktop" });

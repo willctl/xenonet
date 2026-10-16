@@ -92,7 +92,7 @@ Muse can't run commands on your Mac yet, so it takes the gateway instead (below)
 
 ### Actors outside this machine: the gateway
 
-The actor gateway is an MCP server for actors that work in their makers' clouds, such as Muse or a Grok Bot. Through it they can message the sessions and actors here, and read their own messages, with five tools: `send`, `inbox`, `peers`, `whoami` and `heartbeat`. They can reach nothing else of XenoNet through it.
+The actor gateway is an MCP server for actors that work in their makers' clouds, such as Muse or a Grok Bot. Through it they can message the sessions and actors here, and read their own messages, with the tools `send`, `inbox`, `peers`, `whoami` and `heartbeat`. With `report_run`, an actor that drives a harness somewhere else, such as Claude Code in a sandbox, shows each run as a session under it (see [Related work](related-work.md#space-a-run-in-a-sandbox-shown-as-a-session-experimental)). They can reach nothing else of XenoNet through it.
 
 It listens on this computer alone, on XenoNet's port plus 10 (47850). A tunnel puts it on the internet. XenoNet doesn't assume you have any particular one: you pick it, and XenoNet runs it with the sign-in that tool already has.
 

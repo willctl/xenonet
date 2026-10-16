@@ -60,6 +60,10 @@ export const config = {
   // XENONET_ACTORS=off turns the whole layer off: no reports, no list, no
   // events.
   actors: process.env.XENONET_ACTORS !== "off",
+  // The numbat bridge (core/actors/numbat.js): the NDJSON file numbat's
+  // hooks write events to, read for the agents XenoNet doesn't read itself.
+  // Off unless named, and never in the demo.
+  numbatFile: !demo && process.env.XENONET_NUMBAT_FILE ? path.resolve(process.env.XENONET_NUMBAT_FILE) : null,
   hideIdentities: process.env.XENONET_HIDE_IDENTITIES === "1",
   claudeConfigFile: world ? path.join(world.home, ".claude.json") : path.join(process.env.CLAUDE_CONFIG_DIR ?? home, ".claude.json"),
   ghConfigDir: world

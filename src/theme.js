@@ -8,6 +8,7 @@
 //
 // Read THEME and COLORS when drawing, not once at import: they change.
 import { themes, complete, ringColors, DEFAULT_THEME } from "../core/themes.js";
+import { SESSION_APPS } from "../core/schema/ids.js";
 
 const STORE = "xenonet.theme";
 
@@ -198,7 +199,9 @@ export const themeState = () => ({ id: THEME.id, name: THEME.name, builtIn: !!TH
 // What an agent is doing, by tool family.
 export const CATEGORY_LABEL = { shell: "shell", edit: "edit", read: "read", web: "web", mcp: "mcp", agent: "agent", code: "code", other: "other" };
 
-export const APP_LABEL = { claude: "Claude Code", codex: "Codex" };
+// Each session app's name (core/schema/ids.js): Claude Code, Codex, and
+// the apps whose runs XenoNet observes.
+export const APP_LABEL = { ...SESSION_APPS };
 export const APP_DESKTOP = { claude: "Claude desktop", codex: "ChatGPT desktop" };
 
 // Which color a node is drawn in: a role in COLORS, or a page type.

@@ -46,7 +46,7 @@ const parse = (s, fallback) => {
 // `probe`: "local" checks the loop on this computer alone, without the
 // internet (XENONET_GATEWAY_PROBE=local, for tests). `dir`: the state folder,
 // for the pid of a tunnel XenoNet runs. The rest stand in for tests.
-export function createGatewayControl({ engine, registration, actors, store, port, version, dir = null, probe = null, log = () => {}, now = Date.now, tunnelOptions = {}, reachCheck = checkReach, setTimer = setTimeout, clearTimer = clearTimeout, every = setInterval, stopEvery = clearInterval }) {
+export function createGatewayControl({ engine, registration, actors, runs = null, onRun = () => {}, store, port, version, dir = null, probe = null, log = () => {}, now = Date.now, tunnelOptions = {}, reachCheck = checkReach, setTimer = setTimeout, clearTimer = clearTimeout, every = setInterval, stopEvery = clearInterval }) {
   // { on, host, tunnel: { kind, name, host } }: host is the address in use,
   // the one the owner gave or the one the tunnel got; tunnel.host is the
   // one the owner gave, for the kinds that ask. A setting from before
@@ -78,6 +78,8 @@ export function createGatewayControl({ engine, registration, actors, store, port
     engine,
     registration,
     actors,
+    runs,
+    onRun,
     port,
     host: saved().host,
     version,

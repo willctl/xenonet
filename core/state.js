@@ -24,6 +24,8 @@ import { constellationOf, labelsOf, posterSalt } from "./redact.js";
 import * as store from "./store.js";
 import { Blocks } from "./blocks/lifecycle.js";
 import { claudeLines, codexLines } from "./lines.js";
+import { NumbatSessions } from "./numbat.js";
+import { ReportedRuns, observedSessions } from "./reported-runs.js";
 import { demoSessions, demoNativeProjects, demoTranscript, demoNarration, demoPicks, startDriver, clientsReady } from "./demo.js";
 
 const LIVE_THROTTLE_MS = 500;
@@ -96,6 +98,12 @@ export class XenoNetState extends EventEmitter {
     this.codexThreads = this.blocks.add(codexThreadsGatherer({ gather: config.demo ? async () => demoSessions("codex") : undefined }), { source: "codex" });
     this.codexProjects = this.blocks.add(codexProjectsGatherer({ gather: config.demo ? async () => demoNativeProjects() : undefined }), { source: "codex-projects" });
     this.blocks.add(codexClient, { source: "codex" });
+    // Runs XenoNet observes without a reader of its own: numbat's records,
+    // when XENONET_NUMBAT_FILE names them (core/numbat.js), and runs actors
+    // report through the gateway (core/reported-runs.js). Never in the demo.
+    this.numbat = config.numbatFile && !config.demo ? this.blocks.add(new NumbatSessions({ file: config.numbatFile }), { source: "numbat" }) : null;
+    this.reportedRuns = new ReportedRuns();
+    this.observed = observedSessions([this.numbat, this.reportedRuns]);
     this.live = new LiveTelemetry({
       claudeRoot: config.claudeProjectsDir,
       codexRoot: path.join(config.codexHome, "sessions"),
@@ -150,6 +158,10 @@ export class XenoNetState extends EventEmitter {
     const prev = this.graph?.nodes.filter((n) => n.kind === "session") ?? [];
     const keep = (status, app, fresh) => (status.ok ? fresh : prev.filter((n) => n.app === app));
     const sessions = [...keep(codex.status, "codex", codex.value), ...keep(claude.status, "claude", claude.value)];
+    // Observed runs, unless XenoNet reads the same run itself.
+    this.numbat?.read();
+    const read = new Set(sessions.map((x) => x.id));
+    for (const o of this.observed.sessions()) if (!read.has(o.id)) sessions.push(o);
     for (const s of sessions) if (this.demoTitles.has(s.id)) s.title = this.demoTitles.get(s.id);
     // Where sessions ran is evidence of where the projects are (see
     // scanProjects), so the scan comes after the session lists.
@@ -202,6 +214,7 @@ export class XenoNetState extends EventEmitter {
       codex.status,
       native.status,
       claude.status,
+      ...(this.numbat ? [{ name: "numbat", ok: this.numbat.fileState === "ok", count: this.numbat.runs.size, ...(this.numbat.fileState === "ok" ? {} : { error: `numbat's file is ${this.numbat.fileState}` }) }] : []),
       { name: "live", ok: this.live.status.watching, count: this.live.status.files },
       { name: "wiki", ok: !!wiki, count: wiki?.pages.length ?? 0, error: wiki ? undefined : "Agent Wiki folder not found" },
       { name: "search", ok: !this.search.status.errors, count: this.search.status.docs, ms: this.search.status.ms },

@@ -25,7 +25,7 @@
 // work to your absence. The demo's made-up you is shown like any actor.
 import { EventEmitter } from "node:events";
 import path from "node:path";
-import { YOU, parseActorId } from "../schema/ids.js";
+import { YOU, parseActorId, SESSION_PREFIX } from "../schema/ids.js";
 import { EngineStore } from "../engine/store.js";
 import { pathStyle, pathKey } from "../paths.js";
 import { writeDetail, presenceWords, statusLine, placeName, clip } from "./detail.js";
@@ -64,7 +64,7 @@ const FACTS = ["count", "paths", "platform", "subject", "app", "to"];
 export function nodeKind(id) {
   const s = String(id ?? "");
   if (parseActorId(s)) return "actor";
-  if (/^(claude|codex):/.test(s)) return "session";
+  if (SESSION_PREFIX.test(s)) return "session";
   const m = /^(project|zone|native):/.exec(s);
   return m ? m[1] : null;
 }

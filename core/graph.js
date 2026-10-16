@@ -85,6 +85,15 @@ export function buildGraph({ projectsDir, homeDir = null, projects, sessions, na
 
   // Where a session lives, ignoring lineage: native project, dir project, or zone.
   const homeOf = (s) => {
+    // A run reported from another machine (a sandbox, through the actor
+    // gateway) has no folder here.
+    if (s.observed === "gateway") {
+      if (!nodes.has("zone:elsewhere")) {
+        nodes.set("zone:elsewhere", { id: "zone:elsewhere", kind: "zone", name: "Elsewhere", path: null, app: null, external: true });
+        link("core", "zone:elsewhere", "zone");
+      }
+      return "zone:elsewhere";
+    }
     if (s.nativeProjectId && nativeIds.has(s.nativeProjectId)) return `native:codex:${s.nativeProjectId}`;
     const key = pathKey(s.cwd);
     const p = key && isUnder(key, rootKey) ? projectForKey(key) : null;

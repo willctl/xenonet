@@ -13,6 +13,7 @@
 // own processes (Actors#awaitSession).
 import path from "node:path";
 import { pathStyle } from "../paths.js";
+import { SESSION_LOCAL } from "../schema/ids.js";
 import { statusLine } from "./detail.js";
 import { nodeKind } from "./index.js";
 import { ActorError } from "./registration.js";
@@ -36,7 +37,7 @@ const POINTS_AT = {
 };
 const WORDS = { project: "a project", native: "a project", zone: "a folder", session: "a session" };
 // A session's id, as the engine has them (isAgentId in core/engine/engine.js).
-const SESSION = /^(claude|codex):[0-9A-Za-z][0-9A-Za-z-]{6,}$/;
+const SESSION = SESSION_LOCAL;
 
 // A node of the map from a report's `target` (a node id) or `path` (an
 // absolute path, landing on the project or folder holding it): { id }, or
