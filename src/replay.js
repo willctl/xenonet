@@ -171,6 +171,9 @@ export function createReplay({ scene, hud, sfx, onEnter, onExit, getCanvas }) {
 
   function startRecording() {
     const canvas = getCanvas();
+    // The clip takes the canvas's frames as they're drawn: every one, while
+    // it records (see render-budget.js).
+    scene.setRecording?.("clip", true);
     const stream = canvas.captureStream(30);
     const type = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find((t) => MediaRecorder.isTypeSupported(t));
     recorder = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 12e6 });
@@ -199,6 +202,7 @@ export function createReplay({ scene, hud, sfx, onEnter, onExit, getCanvas }) {
   function stopRecording() {
     recorder?.stop();
     recorder = null;
+    scene.setRecording?.("clip", false);
     recBtn.classList.remove("on");
     recBtn.textContent = "● rec";
   }

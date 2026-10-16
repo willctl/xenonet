@@ -9,7 +9,8 @@
 //   screenshot  the window as it looks, even when covered or hidden
 //   input       real keyboard and mouse input: keys, text, click, move,
 //               drag, scroll, at a point or at a node
-//   window      show (inactive or in front), hide, or set the page's size
+//   window      show (inactive or in front), hide, minimize, or set the
+//               page's size
 //   logs        recent page console, page errors, server output
 //   reload, quit, cdp (any Chrome DevTools Protocol command)
 //
@@ -36,7 +37,7 @@ const within = (p, ms, what) => Promise.race([p, sleep(ms).then(() => Promise.re
 // Mouse buttons as CDP's `buttons` bit field.
 const BUTTONS = { left: 1, right: 2, middle: 4 };
 
-export function createControl({ root, production = false, instance, port, getWindow, showWindow, hideWindow, reveal, recorder, filmFile }) {
+export function createControl({ root, production = false, instance, port, getWindow, showWindow, hideWindow, reveal, recorder, filmFile, onDriven = () => {} }) {
   // ---------- logs ----------
 
   const entries = [];
@@ -259,12 +260,15 @@ export function createControl({ root, production = false, instance, port, getWin
 
   // ---------- window ----------
 
-  async function windowOp({ show, hide, size } = {}) {
+  async function windowOp({ show, hide, minimize, size } = {}) {
     if (show) {
       reveal?.();
       showWindow(show === "front" ? true : "inactive");
     }
     if (hide) hideWindow();
+    // Into the Dock or the taskbar, as the window's own button does; show
+    // brings it back.
+    if (minimize) win().minimize();
     if (size === null || size === "window") await cdp("Emulation.clearDeviceMetricsOverride");
     else if (size) await cdp("Emulation.setDeviceMetricsOverride", { ...parseSize(size), mobile: false });
     if (size !== undefined) await sleep(150);
@@ -273,7 +277,25 @@ export function createControl({ root, production = false, instance, port, getWin
 
   // ---------- requests ----------
 
-  async function handle({ op, ...a } = {}) {
+  // While a request is in hand, and for a moment after, the window counts
+  // as driven: the page keeps drawing even while hidden or covered, so
+  // what a script waits for (the view settling, a screenshot) happens
+  // (src/render-budget.js). The moment covers the frame a request leaves
+  // to be drawn, and the next request of a script that runs several.
+  const DRIVEN_TAIL_MS = 2000;
+  let inHand = 0, tail = null;
+  async function handle(body = {}) {
+    inHand++;
+    clearTimeout(tail);
+    if (inHand === 1) onDriven(true);
+    try {
+      return await handleOne(body);
+    } finally {
+      if (--inHand === 0) tail = setTimeout(() => inHand === 0 && onDriven(false), DRIVEN_TAIL_MS);
+    }
+  }
+
+  async function handleOne({ op, ...a } = {}) {
     consolePolicy({ op, ...a }, production);
     switch (op) {
       case "ping":

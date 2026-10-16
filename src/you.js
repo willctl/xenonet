@@ -20,8 +20,10 @@
 // says you're away once and then nothing, so ten minutes on XenoNet has you
 // offline (ten silent heartbeats), and after ten minutes it sends nothing
 // at all until the window shows again. The desktop app says when its
-// window hides (onWindowState), since the page keeps drawing and so stays
-// visible to itself; a test window that's never shown counts as shown.
+// window hides (onWindowState), and its word is the one that counts: its
+// page also reads as hidden while other windows cover it, which is still
+// you at the computer, not away; a test window that's never shown counts
+// as shown.
 //
 // With the same key it reads your record back (GET /api/actors/you), which
 // no other program can, so the layer draws where you've looked, after a
@@ -86,7 +88,7 @@ export function createYou({
   let reading = null;
   const queue = [];
   const live = () => shown && !off;
-  const hidden = () => doc?.visibilityState === "hidden" || !windowShown;
+  const hidden = () => (!desktop?.onWindowState && doc?.visibilityState === "hidden") || !windowShown;
   // Hidden ten minutes: XenoNet has you offline by now, and nothing more goes.
   const gone = () => hiddenAt != null && now() - hiddenAt >= AWAY_MS;
 

@@ -48,7 +48,7 @@ export const STEPS = `  launch[:inactive|front|hidden]  start it unless it's run
   drag:<x1,y1,x2,y2>              alt-drag: holds Alt, which moves a node
   scroll:<x,y,dy>                 a wheel turn
   size:<1600x900[@2] | window>    the page's size
-  show / hide                     the window (shown without taking focus)
+  show / hide / minimize          the window (shown without taking focus)
   still:on|off                    hold ambient animation still
   settle                          wait for the view to settle
   shot:<name>                     .xenonet/<name>.png, held still and settled
@@ -241,6 +241,9 @@ export async function runStep(s, step, say = () => {}) {
       break;
     case "hide":
       say(await s.window({ hide: true }));
+      break;
+    case "minimize":
+      say(await s.window({ minimize: true }));
       break;
     case "still":
       say({ still: await s.driver("still", arg !== "off") });

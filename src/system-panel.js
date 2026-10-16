@@ -87,7 +87,9 @@ function gauge(id, label) {
   </div>`;
 }
 
-export function createSystemPanel({ el, tick: tickEl }) {
+// `drawn()`: whether the console is drawn (main.js; render-budget.js), so a
+// window nobody can see doesn't ask for readings every two seconds.
+export function createSystemPanel({ el, tick: tickEl, drawn = () => !document.hidden }) {
   let on = true;
   try {
     on = localStorage.getItem(KEY) !== "off";
@@ -179,7 +181,7 @@ export function createSystemPanel({ el, tick: tickEl }) {
 
   async function tick() {
     clearTimeout(timer);
-    if (!on || document.hidden || busy) return;
+    if (!on || !drawn() || busy) return;
     busy = true;
     try {
       const r = await fetch("/api/system");
@@ -192,7 +194,7 @@ export function createSystemPanel({ el, tick: tickEl }) {
     }
     busy = false;
     el.classList.toggle("stale", stale);
-    if (on && !document.hidden) timer = setTimeout(tick, EVERY);
+    if (on && drawn()) timer = setTimeout(tick, EVERY);
   }
 
   document.addEventListener("visibilitychange", () => {
@@ -215,6 +217,9 @@ export function createSystemPanel({ el, tick: tickEl }) {
   return {
     toggle: () => show(!on),
     show,
+    // The console is drawn again: a fresh reading now, and every two
+    // seconds after.
+    drawnAgain: () => tick(),
     get on() {
       return on;
     },

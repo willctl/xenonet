@@ -111,6 +111,11 @@ export function createDriver(app) {
       },
       motion: motion(scene),
       still: scene.still,
+      // How often the map draws now (render-budget.js): the pace, what it
+      // sees (seen, focused, driven, recording, lively), the frame rate
+      // it keeps (null for every frame the display offers) and the frames
+      // drawn so far.
+      render: renderState(),
       view: scene.view(),
       viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
       // The narrow screen's sheet of panels: which is open, if the screen is narrow.
@@ -134,14 +139,24 @@ export function createDriver(app) {
     };
   }
 
-  // Resolves once the view has stayed settled for a few frames.
+  function renderState() {
+    const d = scene.drawingState();
+    return { ...d, fps: Number.isFinite(d.fps) ? d.fps : null };
+  }
+
+  // Resolves once the view has stayed settled for a few frames, and the
+  // map has drawn it (at rest it draws only so often; see render-budget.js).
   async function settled({ timeout = 15000 } = {}) {
     const t0 = performance.now();
     for (let calm = 0; ; ) {
       await frame();
       const m = motion(scene);
       calm = m.settled ? calm + 1 : 0;
-      if (calm >= 3) return { waitedMs: Math.round(performance.now() - t0) };
+      if (calm >= 3) {
+        scene.wake();
+        await frame();
+        return { waitedMs: Math.round(performance.now() - t0) };
+      }
       if (performance.now() - t0 > timeout) {
         const what = [m.layout && "the layout", m.camera && "the camera", m.moves && `${m.moves} gathering nodes`, m.theme && "a change of theme", m.transitions && `${m.transitions} CSS transitions`].filter(Boolean).join(", ");
         throw new Error(`still moving after ${timeout} ms: ${what}`);
@@ -453,6 +468,21 @@ export function createDriver(app) {
         for (const end = performance.now() + 15000; !shows(); await frame()) if (performance.now() > end) throw new Error(`the map didn't show ${root.path} within 15 s`);
       }, opts);
       return { ...st, root };
+    },
+
+    // How often the map draws (render-budget.js), as state() says, with
+    // the frames it drew over the next `ms` and the rate that makes.
+    async render({ ms = 1000 } = {}) {
+      const before = scene.drawingState(), t0 = performance.now();
+      const rates = new Set();
+      const watch = setInterval(() => rates.add(scene.drawingState().fps), 50);
+      await new Promise((r) => setTimeout(r, ms));
+      clearInterval(watch);
+      const now = scene.drawingState();
+      const drawn = now.frames - before.frames;
+      // `rates`: the frame rates kept meanwhile, sampled; `forcedDrawn`:
+      // frames drawn out of turn, for a change that had to show at once.
+      return { ...renderState(), drawn, forcedDrawn: now.forced - before.forced, rates: [...rates].map((r) => (Number.isFinite(r) ? r : null)), perSecond: Math.round((drawn / ((performance.now() - t0) / 1000)) * 10) / 10 };
     },
 
     // Holds every ambient animation still, CSS included, for screenshots.

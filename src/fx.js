@@ -7,6 +7,7 @@ import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { THEME } from "./theme.js";
 
 export const Additive = THREE.AdditiveBlending;
@@ -386,3 +387,24 @@ export const LensShader = {
       gl_FragColor = vec4(max(col, 0.0), base.a);
     }`,
 };
+
+// The lens and the output pass (tone mapping and the screen's color
+// space) in one pass over the screen instead of two: the same picture,
+// with one fewer full-screen read and write each frame. Built on three's
+// OutputPass, whose shader it adds the lens to; null if that shader isn't
+// as expected, for the two passes instead.
+export function lensOutputPass() {
+  const pass = new OutputPass();
+  const lens = /void main\(\) \{([\s\S]*)gl_FragColor = vec4\(max\(col, 0\.0\), base\.a\);\s*\}/.exec(LensShader.fragmentShader)?.[1];
+  const read = "gl_FragColor = texture2D( tDiffuse, vUv );";
+  const shader = pass.material.fragmentShader;
+  if (!lens || !shader.includes(read) || !shader.includes("varying vec2 vUv;")) {
+    pass.dispose();
+    return null;
+  }
+  for (const k of ["time", "aberration", "vignette", "grain"]) pass.uniforms[k] = { value: LensShader.uniforms[k].value };
+  pass.material.fragmentShader = shader
+    .replace("varying vec2 vUv;", "varying vec2 vUv;\nuniform float time; uniform float aberration; uniform float vignette; uniform float grain;\nfloat rand(vec2 co) { return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453); }")
+    .replace(read, `${lens}gl_FragColor = vec4(max(col, 0.0), base.a);`);
+  return pass;
+}

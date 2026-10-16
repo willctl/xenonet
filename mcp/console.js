@@ -444,10 +444,11 @@ function buildServer() {
     "window",
     {
       title: "XenoNet's window",
-      description: 'Shows the window ("inactive": without taking focus; "front": focused), hides it, or sets the page\'s size, such as "1600x900", or "1600x900@2" for a pixel ratio of 2 ("window" goes back to the window\'s own size).',
+      description: 'Shows the window ("inactive": without taking focus; "front": focused), hides it, minimizes it (show brings it back), or sets the page\'s size, such as "1600x900", or "1600x900@2" for a pixel ratio of 2 ("window" goes back to the window\'s own size).',
       inputSchema: z.object({
         show: z.enum(["inactive", "front"]).optional(),
         hide: z.boolean().optional(),
+        minimize: z.boolean().optional(),
         size: z.string().optional(),
         instance: instanceArg,
       }),

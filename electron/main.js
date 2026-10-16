@@ -2,7 +2,8 @@
 // process (or reuses one already listening), shows the UI in a frameless
 // window, hosts real shells for the terminal drawer, and lives in the tray
 // (the menu bar on macOS).
-import { app, BrowserWindow, ipcMain, Notification, screen, session, shell, utilityProcess, nativeImage } from "electron";
+import { app, BrowserWindow, ipcMain, Notification, powerMonitor, screen, session, shell, utilityProcess, nativeImage } from "electron";
+import { execFile } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -159,9 +160,8 @@ function windowState() {
 }
 function tellWindow(state = windowState()) {
   if (!state) return;
-  // The page hears it too (src/you.js): it keeps drawing while the window
-  // is hidden, so it never sees itself hidden. It goes with a window that
-  // closes.
+  // The page hears it too (src/you.js, and src/render-budget.js, which
+  // draws nothing while it's hidden). It goes with a window that closes.
   if (state !== "closed") win?.webContents.send("app:window-state", state);
   if (serviceClient) { serviceClient.request("window", state).catch(() => {}); return; }
   if (!server) return;
@@ -171,6 +171,31 @@ function tellWindow(state = windowState()) {
 }
 // XenoNet Dev's control channel, for scripts, tests and agents (control.js).
 let control = null;
+
+// ---------- how often the page draws (src/render-budget.js) ----------
+//
+// The page keeps its own pace, and draws nothing while the window can't be
+// seen. What only this process knows, it tells the page: a recording that
+// needs every frame (recorder.js), a script, test or agent working the
+// window through the control channel, which needs it drawn even while
+// hidden, and the screen locked or the computer going to sleep. Chromium
+// itself pauses a page that's hidden, minimized or, on macOS, covered by
+// other windows, unless background throttling is off: it's off for a test
+// window that's never shown (which stands in for a visible one), and while
+// recording or driven, so those get every frame wherever the window is.
+let driven = false;
+const held = { locked: false, asleep: false };
+let throttling = null;
+const drawingState = () => ({ recording: !!recorder?.recording, driven, hold: held.locked || held.asleep });
+function tellDrawing() {
+  if (!win || win.isDestroyed()) return;
+  const allowed = !offscreen && !recorder?.recording && !driven;
+  if (allowed !== throttling) {
+    throttling = allowed;
+    win.webContents.setBackgroundThrottling(allowed);
+  }
+  win.webContents.send("app:drawing", drawingState());
+}
 // The themes and the one in use, as the page last said (src/themes-ui.js),
 // for the Theme menus in the tray and the macOS menu bar (theme-menu.js).
 let themeMenu = null;
@@ -396,13 +421,16 @@ function showWindow(focus = true) {
   if (focus === "inactive") {
     win.showInactive();
     win.moveTop();
-    return;
+  } else {
+    win.show();
+    if (focus) {
+      if (isMac) app.focus({ steal: true });
+      win.focus();
+    }
   }
-  win.show();
-  if (focus) {
-    if (isMac) app.focus({ steal: true });
-    win.focus();
-  }
+  // Said here as well as on the window's show event, which macOS doesn't
+  // always send (see hideWindow).
+  tellWindow();
 }
 
 // A hidden window (XENONET_SHOW=hidden) brought out to watch, at the control
@@ -410,6 +438,7 @@ function showWindow(focus = true) {
 function reveal() {
   if (!offscreen || !win || win.isDestroyed()) return;
   offscreen = false;
+  tellDrawing();
   win.webContents.setAudioMuted(MUTED);
   if (!isMac) {
     win.center();
@@ -428,6 +457,10 @@ function hideWindow() {
   }
   win.hide();
   dockFollowsWindow(false);
+  // On macOS the window's hide event follows whether it can be seen, so a
+  // window hidden while other windows covered it sends none: said here,
+  // for the page, which stops drawing (src/render-budget.js), and for you.
+  tellWindow();
 }
 showWindow.isFocused = () => !!win && !win.isDestroyed() && win.isFocused() && win.isVisible();
 
@@ -473,10 +506,12 @@ async function createWindow() {
       preload: path.join(root, "electron", "preload.cjs"),
       contextIsolation: true,
       sandbox: true,
-      backgroundThrottling: false,
+      // See tellDrawing: off only where the page must draw unseen.
+      backgroundThrottling: !offscreen,
       spellcheck: false,
     },
   });
+  throttling = !offscreen;
   control?.watch(win);
   if (offscreen || MUTED) win.webContents.setAudioMuted(true);
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -612,6 +647,9 @@ function wireIpc() {
     fs.writeFileSync(chosen.filePath, exported.content, { mode: 0o600 });
     return { file: tilde(chosen.filePath, app.getPath("home")) };
   });
+  // What the page's pace of drawing depends on that only this process
+  // knows (see tellDrawing).
+  ipcMain.handle("app:drawing", (e) => (ownPage(e) ? drawingState() : null));
   // An actor's token saved to a file you pick (the Actors panel's "Save to
   // a file…"; docs/design/actors/interface.md, section 2): the save dialog
   // over the window, then the file written so only you can read it (0600),
@@ -699,7 +737,7 @@ function wireIpc() {
 
 // Recording the window (films of the day), shared by the page and the
 // control channel.
-const recorder = createRecorder(() => win);
+const recorder = createRecorder(() => win, { onChange: () => tellDrawing() });
 // The frame a film records in (core/frames.js): the window takes the
 // largest size in the frame's shape that fits its display, and the film is
 // scaled to the frame's own width.
@@ -875,7 +913,17 @@ if (iconsArg >= 0) {
     await loadShellEnv({ locale: app.getSystemLocale() });
     wireIpc();
     wireDownloads();
-    control = createControl({ root: independent ? runtimeDir() : root, production: independent, instance: instance || { id: "installed", name: "XenoNet", demo: false }, port: PORT, getWindow: () => win, showWindow, hideWindow, reveal, recorder, filmFile });
+    control = createControl({ root: independent ? runtimeDir() : root, production: independent, instance: instance || { id: "installed", name: "XenoNet", demo: false }, port: PORT, getWindow: () => win, showWindow, hideWindow, reveal, recorder, filmFile, onDriven: (on) => ((driven = on), tellDrawing()) });
+    // A locked screen or a computer going to sleep: nothing to draw for.
+    for (const [event, key, on] of [["lock-screen", "locked", true], ["unlock-screen", "locked", false], ["suspend", "asleep", true], ["resume", "asleep", false]]) powerMonitor.on(event, () => ((held[key] = on), tellDrawing()));
+    // The screen may be locked already, with no lock-screen event to come:
+    // XenoNet started by a script or an agent while you're away. On macOS
+    // Electron says only "idle" then, so the session's own word is read.
+    if (isMac)
+      execFile("/usr/sbin/ioreg", ["-n", "Root", "-d1", "-a"], { timeout: 3000 }, (err, out) => {
+        if (!err && /<key>CGSSessionScreenIsLocked<\/key>\s*<true\/>/.test(out)) (held.locked = true), tellDrawing();
+      });
+    else if (powerMonitor.getSystemIdleState(1) === "locked") held.locked = true;
     try {
       const how = await startServer();
       console.log(`[xenonet] server ${how} at ${BASE}`);

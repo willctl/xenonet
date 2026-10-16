@@ -165,6 +165,20 @@ test("presence: idle after two minutes without input or without focus, away afte
   assert.equal(p.sent.length, before, "no minute's word while hidden");
 });
 
+test("the desktop window covered by others: the page reads as hidden, but the window shows, so you're idle, not away", async () => {
+  const p = page({ window: "shown" });
+  await p.run(0);
+  p.doc.focused = false;
+  p.fire("blur");
+  p.doc.visibilityState = "hidden";
+  p.fire("visibilitychange");
+  await p.run(1000);
+  assert.equal(p.sent.at(-1).body.presence, "idle");
+  const before = p.sent.length;
+  await p.run(MIN);
+  assert.ok(p.sent.length > before, "a minute's word, as for any window that shows");
+});
+
 test("the desktop window hidden: away is said once and then nothing, so XenoNet has you offline ten minutes on; shown again, you're back", async () => {
   const p = page({ window: "shown" });
   await p.run(0);

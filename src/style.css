@@ -3270,6 +3270,16 @@ body.still *::after {
   transition: none !important;
 }
 
+/* Nobody can see the window and the map draws nothing (render-budget.js):
+   CSS animations wait where they are, and changes land without a
+   transition, so nothing has the window redrawn frame after frame. */
+body.undrawn *,
+body.undrawn *::before,
+body.undrawn *::after {
+  animation-play-state: paused !important;
+  transition: none !important;
+}
+
 /* how the projects folder is read (modals.js projects) */
 .pj-note {
   margin: 4px 0 10px;

@@ -64,13 +64,18 @@ export function createTelemetry({ onSelect, onDecisionKey = null }) {
   });
   let index = new Map();
 
+  // The canvas's pixels per CSS pixel, kept from its last resize so a
+  // frame never has to ask the page's layout.
+  let ratio = 1;
   function resize() {
     const r = canvas.getBoundingClientRect();
     const pr = Math.min(devicePixelRatio, 2);
     canvas.width = Math.max(1, Math.round(r.width * pr));
     canvas.height = Math.max(1, Math.round(r.height * pr));
+    ratio = canvas.width / Math.max(1, r.width);
   }
   addEventListener("resize", resize);
+  if (typeof ResizeObserver === "function") new ResizeObserver(resize).observe(canvas);
   resize();
 
   const smooth = (arr, k = 4) => arr.map((_, i) => {
@@ -79,10 +84,20 @@ export function createTelemetry({ onSelect, onDecisionKey = null }) {
     return s / c;
   });
 
+  // The series smoothed, worked out once for each snapshot.
+  let smoothed = null, smoothedFor = null;
+  // Drawn on the map's frames (main.js), at most SCOPE_FPS a second: it
+  // scrolls two pixels a second, and its marker pulses slowly.
+  const SCOPE_FPS = 15;
+  let drawnAt = -Infinity;
+  function frame(now) {
+    if (now - drawnAt < 1000 / SCOPE_FPS - 2) return;
+    drawnAt = now;
+    draw();
+  }
   function draw() {
-    requestAnimationFrame(draw);
     const W = canvas.width, H = canvas.height;
-    const pr = W / Math.max(1, canvas.getBoundingClientRect().width);
+    const pr = ratio;
     ctx.clearRect(0, 0, W, H);
     // grid
     ctx.strokeStyle = withAlpha(THEME.colors.accent, 0.08);
@@ -103,7 +118,8 @@ export function createTelemetry({ onSelect, onDecisionKey = null }) {
       ctx.stroke();
     }
     if (!snap) return;
-    const series = { claude: smooth(snap.series.claude), codex: smooth(snap.series.codex) };
+    if (smoothedFor !== snap) (smoothedFor = snap), (smoothed = { claude: smooth(snap.series.claude), codex: smooth(snap.series.codex) });
+    const series = smoothed;
     const max = Math.max(2000, ...series.claude, ...series.codex);
     const scale = (v) => H - 4 - (Math.log10(1 + v) / Math.log10(1 + max)) * (H - 10);
     for (const app of ["codex", "claude"]) {
@@ -135,7 +151,6 @@ export function createTelemetry({ onSelect, onDecisionKey = null }) {
     ctx.fillStyle = withAlpha(THEME.colors.accent, 0.35 + 0.3 * Math.sin(Date.now() / 260));
     ctx.fillRect(W - 2 * pr, 0, 2 * pr, H);
   }
-  requestAnimationFrame(draw);
 
   // Just the bar and its value; the forecast and reset time are on hover.
   function gauge(label, pct, sub, forecast, value = null, cls = "", setup = false) {
@@ -265,6 +280,8 @@ export function createTelemetry({ onSelect, onDecisionKey = null }) {
 
   return {
     refreshSpend: readSpend,
+    // One of the map's frames (scene.onDrawn): the scope moves on.
+    frame,
     update(next, graphIndex) {
       snap = next;
       index = graphIndex;

@@ -56,6 +56,13 @@ contextBridge.exposeInMainWorld("xenonetDesktop", {
   // told of each change. A test window that's never shown counts as shown.
   windowState: () => ipcRenderer.invoke("app:window-state"),
   onWindowState: (fn) => ipcRenderer.on("app:window-state", (_e, state) => fn(state)),
+  // What the page's pace of drawing depends on that only the desktop app
+  // knows (src/render-budget.js): { recording, driven, hold }, a recording
+  // that needs every frame, a script or agent working the window, and the
+  // screen locked or the computer asleep. Asked once, then told of each
+  // change.
+  drawing: () => ipcRenderer.invoke("app:drawing"),
+  onDrawing: (fn) => ipcRenderer.on("app:drawing", (_e, state) => fn(state)),
   // An actor's token, shown once in the Actors panel, saved through a save
   // dialog to a file only you can read: { file, warning } (file with ~), or
   // null when you cancel. `slug` names the file it suggests.

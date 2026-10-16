@@ -24,6 +24,7 @@
     "provider-drift": "node scripts/provider-drift.mjs",
     "schemas": "node scripts/schemas.mjs",
     "bench": "node scripts/bench.mjs",
+    "bench:gpu": "node scripts/gpu-bench.mjs",
     "lab": "node scripts/lab/lab.mjs",
     "hook:snippet": "node scripts/hook-snippet.mjs",
     "app": "electron .",

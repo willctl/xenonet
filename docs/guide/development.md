@@ -95,6 +95,8 @@ Every action waits until the view has settled, then returns the new state, so no
 
 A screenshot waits the same way. It also holds every ambient animation still, including the sky, the sonar, the sweep, sparks and CSS animations, so two shots of the same state match. Screenshots work while the window is covered, unfocused or hidden. They land in `.xenonet/`, which git ignores.
 
+The map draws at a pace, not at the display's rate (`src/render-budget.js`): 60 frames a second while something moves, 30 at rest, 20 at rest behind another app, and none while nobody can see the window, unless a recording needs every frame. While the control channel has a request in hand, and for two seconds after, the window counts as driven and draws even while hidden or covered, so the view settles and screenshots show it. `state` says how the map is drawing (`render`), and the driver's `render` counts the frames it draws over a second or more. `npm run bench:gpu` measures what that costs the machine in each window state.
+
 ### Instances
 
 Development instances each have their own settings and port, so they run beside installed XenoNet and each other.
@@ -247,6 +249,7 @@ The console page imports only the core modules that have no Node in them, `theme
 - `provider-drift.mjs` and `provider-drift/`, the daily check of new provider releases against the vendor schemas (see [Provider drift](provider-drift.md))
 - `schemas.mjs`, for the schema files in `schemas/`
 - `bench.mjs`, the benchmark
+- `gpu-bench.mjs` (`npm run bench:gpu`), what the console costs the machine on a Mac: GPU time, CPU and memory with the window at rest, turning, busy, behind another app, covered, minimized and hidden
 - `hook-snippet.mjs`
 - `dev-install.mjs`
 - `dist.mjs`

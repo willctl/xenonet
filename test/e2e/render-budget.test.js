@@ -1,0 +1,158 @@
+// End to end: how often the console draws (src/render-budget.js), on a
+// real XenoNet Dev (the test instance, with the demo's made-up data; see
+// xenonet.test.js): at rest it keeps to the rest pace instead of the
+// display's rate, a recording gets every frame (films, the showcase and
+// the X cuts all record through the desktop app's recorder), a replay
+// draws at the moving pace, the palette's frame rate choice holds, and a
+// window nobody can see draws nothing.
+//
+//   npm run test:e2e
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import net from "node:net";
+import os from "node:os";
+import path from "node:path";
+import { xenonet } from "../../core/control.js";
+import { findFfmpeg } from "../../core/dirs.js";
+
+const port = await new Promise((resolve) => {
+  const probe = net.createServer().listen(0, "127.0.0.1", () => {
+    const { port } = probe.address();
+    probe.close(() => resolve(port));
+  });
+});
+const s = xenonet("test", { port });
+const film = path.join(fs.realpathSync.native(os.tmpdir()), `xenonet-e2e-budget-${port}.mp4`);
+
+const shoot = (name, body) => async () => {
+  try {
+    await body();
+  } catch (err) {
+    const shot = await s.screenshot({ name: `e2e-${name}`, inline: false }).catch(() => null);
+    if (shot) err.message += `\n(screenshot: ${shot.file})`;
+    throw err;
+  }
+};
+
+before(async () => {
+  await xenonet("test").quit();
+  await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
+  await s.driver("settled", { timeout: 60000 });
+}, { timeout: 180000 });
+
+after(async () => {
+  await s.record({ action: "stop" }).catch(() => {});
+  fs.rmSync(film, { force: true });
+  if (process.env.XENONET_E2E_KEEP === "1") return;
+  await s.quit().catch(() => {});
+  fs.rmSync(path.join(fs.realpathSync.native(os.tmpdir()), `xenonet-demo-${port}`), { recursive: true, force: true, maxRetries: 10 });
+});
+
+// The frames drawn over 1.5 s, settled first so nothing is moving.
+async function measure() {
+  await s.driver("settled", { timeout: 30000 });
+  return s.driver("render", { ms: 1500 });
+}
+
+// The demo's sessions come and go, and a new one sets the layout moving
+// for a few seconds, at the moving pace: what was drawn is checked against
+// the rates kept meanwhile (`rates`), with room for a frame forced out of
+// turn and the timer's edges.
+function within(r, rest, moving) {
+  assert.ok(r.rates.every((x) => x === rest || x === moving), `only the rest and moving rates: ${JSON.stringify(r)}`);
+  const most = Math.max(...r.rates), least = Math.min(...r.rates);
+  assert.ok(r.perSecond <= most + 2 + r.forcedDrawn, `no more than ${most} a second: ${JSON.stringify(r)}`);
+  assert.ok(r.perSecond >= least * 0.6, `about ${least} a second or more: ${JSON.stringify(r)}`);
+}
+
+test("at rest the map keeps to the rest pace, not the display's rate", { timeout: 60000 }, shoot("budget-rest", async () => {
+  const st = await s.driver("state");
+  assert.equal(st.render.pace, "balanced");
+  const r = await measure();
+  // Worked through the control channel, the window counts as in use.
+  assert.equal(r.driven, true);
+  assert.ok(r.rates.includes(30), JSON.stringify(r));
+  within(r, 30, 60);
+}));
+
+test("camera moves still run in the paced loop: selecting a project flies to its gathering", { timeout: 60000 }, shoot("budget-camera", async () => {
+  await s.driver("select", null);
+  await s.driver("reset");
+  const before = (await s.driver("state")).view;
+  const { nodes } = await s.driver("find", { query: "atlas-api", kind: "project", limit: 1 });
+  const st = await s.driver("select", nodes[0].id);
+  assert.ok(st.gathered?.members.length, "it gathered");
+  const at = await s.eval(`return window.__xenonet.scene.where(${JSON.stringify(nodes[0].id)})`);
+  const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  assert.notDeepEqual(st.view.camera, before.camera, "the camera moved");
+  assert.ok(dist(st.view.target, at) < dist(before.target, at) / 2, `it looks at the gathering: ${JSON.stringify({ before, after: st.view, at })}`);
+  await s.driver("select", null);
+}));
+
+test("a recording draws every frame the display offers, and the rest pace comes back after", { timeout: 90000, skip: !findFfmpeg() && "needs ffmpeg" }, shoot("budget-recording", async () => {
+  await s.record({ action: "start", file: film, fps: 30 });
+  let r;
+  try {
+    r = await measure();
+  } finally {
+    await s.record({ action: "stop" });
+  }
+  assert.deepEqual(r.recording, ["desktop"]);
+  assert.equal(r.fps, null, "every frame");
+  assert.ok(r.perSecond > 45, `more than the moving pace's share at 60 Hz: ${r.perSecond}`);
+  const after = await measure();
+  assert.deepEqual(after.recording, []);
+  within(after, 30, 60);
+}));
+
+test("a replay draws at the moving pace while it plays", { timeout: 60000 }, shoot("budget-replay", async () => {
+  await s.driver("command", "replay");
+  try {
+    const r = await s.driver("render", { ms: 1000 });
+    assert.deepEqual(r.lively, ["replay"]);
+    assert.equal(r.fps, 60);
+  } finally {
+    await s.input({ keys: "Escape" });
+  }
+  assert.equal((await s.driver("state")).overlays.replay, false);
+}));
+
+test("the frame rate choice in the palette: lower GPU use, every frame, then balanced again", { timeout: 60000 }, shoot("budget-pace", async () => {
+  const commands = (await s.driver("commands")).map((c) => c.id);
+  for (const id of ["pace-balanced", "pace-low", "pace-smooth"]) assert.ok(commands.includes(id), id);
+  try {
+    await s.driver("command", "pace-low");
+    let r = await measure();
+    assert.equal(r.pace, "low");
+    assert.ok(r.rates.includes(15), JSON.stringify(r));
+    within(r, 15, 30);
+    await s.driver("command", "pace-smooth");
+    r = await measure();
+    assert.equal(r.pace, "smooth");
+    assert.equal(r.fps, null);
+  } finally {
+    await s.driver("command", "pace-balanced");
+  }
+  assert.equal((await s.driver("state")).render.pace, "balanced");
+}));
+
+test("a window nobody can see draws nothing, and draws again once it can", { timeout: 60000 }, shoot("budget-unseen", async () => {
+  // As the page would hear it from the desktop app (the window hidden, and
+  // no script working it), counted in the page so no request to the window
+  // lands in the middle; then put back as the desktop app says.
+  const r = await s.eval(`return await (async () => {
+    const scene = window.__xenonet.scene;
+    scene.setDrawing({ seen: false, driven: false });
+    const from = scene.drawingState().frames;
+    await new Promise((go) => setTimeout(go, 1200));
+    const unseen = scene.drawingState().frames - from;
+    scene.setDrawing({ seen: true, driven: true });
+    const back = scene.drawingState().frames;
+    await new Promise((go) => setTimeout(go, 600));
+    return { unseen, seen: scene.drawingState().frames - back };
+  })()`);
+  assert.equal(r.unseen, 0, "no frames while unseen");
+  assert.ok(r.seen >= 8, `frames again once seen: ${r.seen}`);
+  await s.driver("settled", { timeout: 30000 });
+}));

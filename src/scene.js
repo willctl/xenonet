@@ -6,7 +6,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { COLORS, CATEGORY_COLORS, nodeColor, THEME, onTheme } from "./theme.js";
 import {
   Additive, glowTex, sparkTex, ringTex, reticleTex, fatEdges, fatLine, writeLine, arcPoints, pointsArray,
-  releaseMaterial, setLineResolution, nebula, LensShader, skyColors,
+  releaseMaterial, setLineResolution, nebula, LensShader, lensOutputPass, skyColors,
 } from "./fx.js";
 import { STARS, GRID, SWEEP, SONAR, LINES, pick } from "./looks/index.js";
 import { sonarGap } from "../core/themes.js";
@@ -17,6 +17,7 @@ import { freeTangents, frameFree } from "./framing.js";
 import { hostVisual, STALE_LIGHT, sameHost } from "./hosts.js";
 import { createHostLayer } from "./hosts-draw.js";
 import { onEnvironment, environmentState } from "./environment.js";
+import { createPacer, frameRate, DEFAULT_PACE, paceOf } from "./render-budget.js";
 import { environmentOf } from "../core/environments.js";
 import { exportLabel } from "../core/export-labels.js";
 
@@ -93,7 +94,11 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
 
   const placeLink = (line, start, end) => line.userData.look.place(line, start, end);
 
-  const graph = new ForceGraph3D(el, { controlType: "orbit", rendererConfig: { antialias: true, powerPreference: "high-performance" } })
+  // The canvas itself gets no antialiasing: the map is drawn off-screen
+  // (the composer, below), and only the final full-screen pass lands on
+  // the canvas, with no edges to smooth. The default GPU, not the most
+  // powerful: on a Mac with two, the one that keeps the battery.
+  const graph = new ForceGraph3D(el, { controlType: "orbit", rendererConfig: { antialias: false, powerPreference: "default" } })
     .backgroundColor(THEME.colors.bg)
     .showNavInfo(false)
     .nodeLabel(() => "")
@@ -173,14 +178,20 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
   const composer = graph.postProcessingComposer();
   // The composer renders off-screen, where the canvas's own antialiasing does
   // not apply; a multisampled half-float target brings MSAA back and avoids banding.
+  // At twice the screen's density or more, 2 samples look the same as 4 in
+  // every theme (they differ only in single pixels along lines' edges),
+  // and cost a fifth less a frame: storing and resolving four half-float
+  // samples per pixel was the most expensive part of a frame.
   const size = renderer.getDrawingBufferSize(new THREE.Vector2());
-  composer.reset(new THREE.WebGLRenderTarget(size.x, size.y, { samples: 4, type: THREE.HalfFloatType }));
+  composer.reset(new THREE.WebGLRenderTarget(size.x, size.y, { samples: renderer.getPixelRatio() >= 2 ? 2 : 4, type: THREE.HalfFloatType }));
   composer.setPixelRatio(renderer.getPixelRatio());
   const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), THEME.glow.bloom, THEME.glow.radius, THEME.glow.threshold);
-  const lens = new ShaderPass(LensShader);
   composer.addPass(bloom);
+  // The lens and the output in one pass where it can (see fx.js).
+  const merged = lensOutputPass();
+  const lens = merged ?? new ShaderPass(LensShader);
   composer.addPass(lens);
-  composer.addPass(new OutputPass());
+  if (!merged) composer.addPass(new OutputPass());
 
   const scene = graph.scene();
   const camera = graph.camera();
@@ -1126,13 +1137,83 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
   el.addEventListener("pointerleave", () => ((pointerMove = null), hoverActor(null)));
 
   // ---------- frame loop ----------
+  //
+  // One loop draws the map, at the pace render-budget.js sets: each frame
+  // moves the scene's animation on, then runs the force graph's own frame
+  // (its layout, the camera's controls and moves, hover and the render),
+  // which no longer runs by itself. Between frames the loop waits on a
+  // timer when the next one is far off, so a map at rest doesn't wake the
+  // page at the display's rate, and while nobody can see the window it
+  // draws nothing.
 
   const timer = new THREE.Timer();
   let ambientClock = 0;
-  (function loop() {
-    requestAnimationFrame(loop);
+  // The force graph's layout, which stops after its cooldown, by the clock.
+  const forceGraph = scene.children.find((o) => typeof o.resetCountdown === "function");
+  const ownFrames = typeof graph._animationCycle === "function";
+  if (ownFrames) graph.pauseAnimation();
+  else console.warn("[xenonet] the force graph has no frame of its own to run; it draws at the display's rate");
+  // What the pace depends on (see frameRate): the setting, whether the
+  // window can be seen, is focused or is being driven, and what records
+  // every frame (a film, a clip) or counts as moving (a replay playing).
+  const drawing = { pace: DEFAULT_PACE, seen: true, focused: true, driven: false };
+  const recording = new Set(), lively = new Set();
+  // Input on the map counts as moving for a moment, so hovering, picking
+  // and the keys answer at the moving pace.
+  const INPUT_MS = 1200;
+  let inputAt = -Infinity;
+  const onInput = () => ((inputAt = performance.now()), nudge());
+  for (const type of ["pointermove", "pointerdown", "wheel"]) el.addEventListener(type, onInput, { passive: true });
+  addEventListener("keydown", onInput, { passive: true });
+  const pacer = createPacer();
+  let forced = true, rafId = null, waitTimer = null, lastFrameAt = -Infinity, frames = 0, forcedFrames = 0;
+  const drawnHooks = [];
+  // The frame rate now (0: none, Infinity: every frame).
+  function rate() {
+    const moving = lively.size > 0 || performance.now() - inputAt < INPUT_MS || !motion().settled;
+    return frameRate({ ...drawing, recording: recording.size > 0, moving });
+  }
+  // While drawing nothing, the loop looks again this often, in case what
+  // it waits on changed without a word (a window shown again says so).
+  const IDLE_MS = 500;
+  function schedule(ms) {
+    if (rafId != null || waitTimer != null) return;
+    // A frame or two away, it waits for the display's next one; further,
+    // a timer first, so the page sleeps until shortly before it.
+    if (ms > 20) waitTimer = setTimeout(() => ((waitTimer = null), (rafId = requestAnimationFrame(loop))), ms - 10);
+    else rafId = requestAnimationFrame(loop);
+  }
+  // Looks again at the display's next frame rather than waiting for the
+  // timer: the pace may have changed.
+  function nudge() {
+    if (waitTimer != null) clearTimeout(waitTimer), (waitTimer = null);
+    rafId ??= requestAnimationFrame(loop);
+  }
+  // Draws the next frame the display offers, whatever the pace, unless
+  // nothing should be drawn at all: something changed that should show
+  // at once.
+  function wake() {
+    forced = true;
+    nudge();
+  }
+  function loop(now) {
+    rafId = null;
+    const fps = rate();
+    if (fps > 0 && (forced || pacer.due(now, fps))) {
+      if (forced && !pacer.due(now, fps)) forcedFrames++;
+      forced = false;
+      pacer.drew(now, fps);
+      drawFrame(now);
+    }
+    schedule(fps > 0 ? pacer.wait(now, fps) : IDLE_MS);
+  }
+
+  // One frame of the map. (frame, above, frames a gathering.)
+  function drawFrame(at) {
     timer.update();
-    const dt = Math.min(timer.getDelta(), 0.05);
+    // Long enough for the slowest pace, and short enough that the map
+    // doesn't leap after a pause.
+    const dt = Math.min(timer.getDelta(), 0.2);
     // Ambient animation runs on its own clock, at the theme's pace, and
     // stops while still.
     ambientClock += dt * THEME.motion.pace;
@@ -1225,9 +1306,23 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
       dropWave(waves[i]);
       waves.splice(i, 1);
     }
-  })();
+    // The layout stops on its own clock (cooldownTime). After a pause
+    // (nobody could see the window) it gets that time afresh, so a layout
+    // that started meanwhile finishes rather than stopping half done.
+    const t0 = performance.now();
+    if (engineRunning && t0 - lastFrameAt > 1000) forceGraph?.resetCountdown();
+    lastFrameAt = t0;
+    if (ownFrames) {
+      graph._animationCycle();
+      graph.pauseAnimation();
+    }
+    frames++;
+    for (const fn of drawnHooks) fn(at);
+  }
+  schedule(0);
 
   addEventListener("resize", () => {
+    wake();
     graph.width(innerWidth).height(innerHeight);
     bloom.setSize(innerWidth, innerHeight);
     setLineResolution(innerWidth, innerHeight);
@@ -1300,6 +1395,7 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
   // their new colors. Sparks, packets and waves already on their way finish
   // in the old ones. What's replaced is disposed.
   function retheme(theme) {
+    wake();
     stars = starsOf(theme, stars);
     setEnvironment(environmentOf(environmentState().id));
     grid = gridOf(theme, grid);
@@ -1505,6 +1601,7 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
     },
     setFocusLighting(on) {
       focusLighting = !!on;
+      wake();
     },
     // Selecting a project gathers its sessions (see gather); selecting one
     // of them keeps the gathering, and anything else lets it go.
@@ -1527,6 +1624,7 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
         else if (!(GATHER_KINDS.has(node.kind) && gather(node))) this.focus(node);
       }
       branch = litFor(node);
+      wake();
     },
     // The root of the current gathering, and the gathered node `by` places
     // from `node` (wrapping), for stepping through with the arrow keys.
@@ -1628,6 +1726,7 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
     hosts: () => hosts.state(),
     homeOf,
     hover(node) {
+      wake();
       if (node && isActorId(node.id)) return hoverActor(actors.get(node.id));
       hoverActor(null);
       hoverNode(node ? (nodeIndex.get(node.id) ?? null) : null);
@@ -1636,10 +1735,37 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
     // For scripts and tests (src/driver.js): what's still moving, holding the
     // view still, what's gathered, and where a node is on screen.
     motion,
-    setStill,
+    setStill(on) {
+      setStill(on);
+      wake();
+    },
     get still() {
       return still;
     },
+
+    // How often the map draws (see render-budget.js). `setDrawing` takes
+    // any of { pace, seen, focused, driven }; `setRecording` holds every
+    // frame while any reason does (a film, a clip), and `setLively` counts
+    // as moving (a replay playing). `onDrawn(fn)` hears each frame drawn,
+    // for what else in the page keeps to the same frames. `wake` draws the
+    // display's next frame, whatever the pace, unless nobody can see it.
+    setDrawing(patch) {
+      if ("pace" in patch) patch = { ...patch, pace: paceOf(patch.pace) };
+      Object.assign(drawing, patch);
+      wake();
+    },
+    setRecording(reason, on) {
+      recording[on ? "add" : "delete"](reason);
+      wake();
+    },
+    setLively(reason, on) {
+      lively[on ? "add" : "delete"](reason);
+      wake();
+    },
+    onDrawn: (fn) => drawnHooks.push(fn),
+    wake,
+    // What the budget sees now and the frames drawn so far, for the driver.
+    drawingState: () => ({ ...drawing, recording: [...recording], lively: [...lively], fps: rate(), frames, forced: forcedFrames }),
     gathering: () => (fan ? { root: fan.root.id, members: fan.order.map((n) => n.id), sessions: fan.sessions } : null),
     view: () => ({ camera: camera.position.toArray().map(Math.round), target: controls.target.toArray().map(Math.round), autoRotate: controls.autoRotate }),
     // In CSS pixels from the page's top left; null if it isn't drawn.
@@ -1655,6 +1781,7 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
 
     // Wallpaper: no reticle, faded labels, slower orbit and a breathing dolly.
     setWallpaper(on) {
+      wake();
       if (on) {
         release();
         fit(2400);

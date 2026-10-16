@@ -6,6 +6,7 @@ import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/500.css";
 import "./style.css";
 import { createScene } from "./scene.js";
+import { DEFAULT_PACE, PACES, paceOf, createCssPacer } from "./render-budget.js";
 import { createHud } from "./hud.js";
 import { createPreview } from "./preview.js";
 import { createAmbient } from "./ambient.js";
@@ -401,7 +402,7 @@ const spotifyChip = createSpotifyChip({ el: document.getElementById("spotify"), 
 spotifyChip.refresh();
 // This computer's CPU, GPU and memory, between the status and Token use
 // panels (system-panel.js).
-const systemPanel = createSystemPanel({ el: document.getElementById("sysmon"), tick: document.getElementById("sysmon-tick") });
+const systemPanel = createSystemPanel({ el: document.getElementById("sysmon"), tick: document.getElementById("sysmon-tick"), drawn: () => scene.drawingState().fps > 0 });
 
 const alerts = createAlerts({
   sfx,
@@ -475,9 +476,11 @@ const replay = createReplay({
   onEnter: () => {
     select(null);
     document.body.classList.add("replaying");
+    scene.setLively("replay", true);
   },
   onExit: () => {
     document.body.classList.remove("replaying");
+    scene.setLively("replay", false);
     hud.refreshFilters();
   },
 });
@@ -594,6 +597,12 @@ const commandList = [
     run: () => setScope({ window: w.id }),
   })),
   { id: "focus-lighting", label: "Turn focus lighting on or off", keywords: "glare glow bloom dim zoom distance", run: () => setFocusLighting(!focusLighting) },
+  // How often the map draws (render-budget.js), kept for this window.
+  ...[
+    ["balanced", "Frame rate: balanced (the default)"],
+    ["low", "Frame rate: lower GPU use"],
+    ["smooth", "Frame rate: every frame the screen shows"],
+  ].map(([id, label]) => ({ id: `pace-${id}`, label, keywords: "frame rate fps gpu power battery energy smooth performance laptop", run: () => setPace(id) })),
   { id: "scope-background", label: "Show or hide background sessions", keywords: "codex guardian review compaction exec subagents agents scope", run: () => setScope({ background: !scope.background }) },
   ...(desktop?.terminal
     ? [
@@ -739,6 +748,59 @@ const palette = createPalette({
 document.getElementById("palette-open").addEventListener("click", () => palette.open());
 
 // ---------- data ----------
+
+// ---------- how often the console draws (see render-budget.js) ----------
+//
+// The pace chosen in the palette, kept for this window; whether the window
+// can be seen (the desktop app says when it's hidden or minimized, or the
+// screen is locked, and covered by other windows the page is hidden);
+// whether it's the window you're using; and what else the desktop app says:
+// a recording that needs every frame, or a script or agent working the
+// window through the control channel, which needs it drawn even hidden.
+
+const PACE_KEY = "xenonet.pace";
+let pace = DEFAULT_PACE;
+try {
+  pace = paceOf(localStorage.getItem(PACE_KEY));
+} catch {}
+let windowShown = true;
+let desktopDrawing = { recording: false, driven: false, hold: false };
+function drawingChanged() {
+  const seen = windowShown && !desktopDrawing.hold && document.visibilityState !== "hidden";
+  scene.setDrawing({ pace, seen, focused: document.hasFocus(), driven: !!desktopDrawing.driven });
+  scene.setRecording("desktop", !!desktopDrawing.recording);
+  // Nothing drawn: the page's CSS animations wait (style.css), and the
+  // system panel stops asking for readings until it's drawn again.
+  const undrawn = scene.drawingState().fps === 0;
+  if (!undrawn && document.body.classList.contains("undrawn")) systemPanel.drawnAgain();
+  document.body.classList.toggle("undrawn", undrawn);
+}
+drawingChanged();
+document.addEventListener("visibilitychange", drawingChanged);
+addEventListener("focus", drawingChanged);
+addEventListener("blur", drawingChanged);
+desktop?.onWindowState?.((state) => ((windowShown = state !== "hidden"), drawingChanged()));
+Promise.resolve(desktop?.windowState?.()).then((state) => ((windowShown = state !== "hidden"), drawingChanged()), () => {});
+const heardDrawing = (d) => d && ((desktopDrawing = d), drawingChanged());
+desktop?.onDrawing?.(heardDrawing);
+Promise.resolve(desktop?.drawing?.()).then(heardDrawing, () => {});
+// The page's CSS animations keep to the map's frames, except at the
+// smooth pace.
+const cssPacer = createCssPacer();
+scene.onDrawn((now) => {
+  if (pace !== "smooth") cssPacer.step();
+  telemetry.frame(now);
+});
+function setPace(id) {
+  pace = paceOf(id);
+  if (pace === "smooth") cssPacer.release();
+  drawingChanged();
+  try {
+    localStorage.setItem(PACE_KEY, pace);
+  } catch {}
+  const p = PACES[pace];
+  hud.toast(pace === "smooth" ? "The map draws every frame the screen can show, which uses the most GPU" : `The map draws up to ${p.moving} frames a second while it moves and ${p.rest} at rest, fewer behind other windows`);
+}
 
 // ---------- focus lighting (see scene.js), remembered ----------
 
@@ -1090,14 +1152,18 @@ for (const type of ["pointerdown", "keydown", "wheel"]) {
     true,
   );
 }
-document.addEventListener("visibilitychange", () => {
-  if (document.hidden) hiddenAt = Date.now();
-  else if (hiddenAt) {
-    const since = hiddenAt;
-    hiddenAt = null;
-    maybeWelcomeBack(since);
-  }
-});
+// A browser tab hidden. Not in the desktop app, whose page also reads as
+// hidden while other windows cover it: there the first input after ten
+// minutes says you're back, as above.
+if (!desktop)
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) hiddenAt = Date.now();
+    else if (hiddenAt) {
+      const since = hiddenAt;
+      hiddenAt = null;
+      maybeWelcomeBack(since);
+    }
+  });
 if (params.has("away")) setTimeout(() => modals.away(Date.now() - Number(params.get("away") || 7200) * 1000), 800);
 
 // ---------- day & night ----------

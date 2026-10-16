@@ -91,6 +91,12 @@ On a Mac, use ⌘ wherever this page says Ctrl. The terminal's key stays
 - The panel beside it shows this computer's load: CPU and each core, memory,
   and the GPU and its memory. Turn it off with `Show or hide this computer's
   load` in the palette.
+- The map draws up to 60 frames a second while it moves, 30 at rest and
+  fewer behind other apps, and stops while the window is hidden or
+  minimized, covered by other windows on a Mac, or the screen is locked, so
+  it can stay open all day. `Frame rate: lower GPU use` in the palette
+  halves that, and `Frame rate: every frame the screen shows` draws at the
+  screen's own rate.
 
 ### Lets sessions work together
 

@@ -25,7 +25,7 @@ function encoder(ffmpeg) {
   return ["-c:v", "mpeg4", "-q:v", "3"];
 }
 
-export function createRecorder(getWindow) {
+export function createRecorder(getWindow, { onChange = () => {} } = {}) {
   let rec = null;
 
   // `size`: the film's frame in pixels ([1920, 1080]); the window takes the
@@ -74,6 +74,8 @@ export function createRecorder(getWindow) {
       for (let k = 0; frames < due && k < 4 && proc.stdin.writable; k++, frames++) proc.stdin.write(jpeg);
     }, 1000 / fps / 2);
     rec = { proc, timer, file, startedAt, win, frames: () => frames, err: () => err, size: () => size0, before: keep ? null : before };
+    // The page draws every frame while it records (src/render-budget.js).
+    onChange(true);
     return { file, fps, width, startedAt };
   }
 
@@ -81,6 +83,7 @@ export function createRecorder(getWindow) {
     if (!rec) throw new Error("nothing is being recorded");
     const r = rec;
     rec = null;
+    onChange(false);
     clearInterval(r.timer);
     if (!r.win.isDestroyed()) {
       r.win.webContents.endFrameSubscription();
