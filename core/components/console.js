@@ -27,7 +27,10 @@ export function installedConsole({ env = process.env } = {}) {
   }
   async function ready({ timeout = 60000 } = {}) {
     for (const until = Date.now() + timeout; Date.now() < until;) {
-      const state = await ping();
+      // A probe the service was too busy to answer in time, while it starts
+      // or a slow machine starves it, counts as not ready yet and is asked
+      // again: a ping changes nothing, so asking twice is safe.
+      const state = await ping().catch((err) => { if (/did not answer/.test(err.message)) return null; throw err; });
       if (state?.page?.ready) return state;
       await new Promise((r) => setTimeout(r, 200));
     }
