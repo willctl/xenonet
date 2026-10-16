@@ -1,0 +1,145 @@
+# Live delivery and scopes
+
+A message from one session to another normally waits for the hooks: the
+other session gets it during its current turn, or when it next starts one.
+Live delivery puts it into the session as it's sent, even when the session
+is idle. This page covers how, how to choose who gets a message, what actors
+may see, and the guards that keep messages from being misused.
+
+## How a message gets in
+
+XenoNet tries these in order and uses the first that works:
+
+| Way in | For | What it takes |
+|---|---|---|
+| Claude Code channel | Claude Code CLI | Start the session with XenoNet as a channel (below). |
+| OpenCode's server | OpenCode TUI | Start OpenCode with `--hostname 127.0.0.1`, and allow the session: `xenonet live allow <session>`. |
+| Typing into tmux | any harness in a tmux pane | Allow the session. The sender must be you, or an actor with a token. |
+| Hooks (next turn) | Claude Code, Codex | Nothing: this is how messages always arrived. |
+
+If nothing picks a message up within a minute, XenoNet notifies you.
+`xenonet live` shows each delivery's state: `live`, `next-turn` or
+`notified`, and how long it took to be acknowledged.
+
+### Claude Code
+
+```
+xenonet doctor --live
+```
+
+prints the command to start Claude Code with XenoNet as a channel:
+
+```
+claude --dangerously-load-development-channels server:xenonet
+```
+
+Channels are a Claude Code research preview
+([reference](https://code.claude.com/docs/en/channels-reference)), and
+XenoNet's channel isn't on Anthropic's allowlist yet, so Claude Code shows a
+warning when the session starts. Team and Enterprise organizations have to
+turn channels on first. XenoNet only pushes to a session that was started
+this way. Any other session gets messages through its hooks, as before.
+
+### OpenCode
+
+OpenCode's TUI runs an HTTP server only when it's told where to listen
+([server docs](https://opencode.ai/docs/server/)). Start it with
+`opencode --hostname 127.0.0.1`. XenoNet finds the running OpenCode
+processes and their ports, and posts the message to the session's
+`prompt_async`, which starts a turn. Messages go in only to sessions you
+allow, and each allowance expires (8 hours by default).
+
+### tmux
+
+For a harness with no way in, XenoNet can type the message into the tmux
+pane the session runs in. It does this only when all of these hold:
+
+- You allowed that session (`xenonet live allow <session>`), and the
+  allowance hasn't expired.
+- The sender is you or an actor with a token. A message from another session
+  never gets typed.
+- The session is idle and isn't waiting on you.
+- The session's own process is in the foreground of the pane's terminal.
+  XenoNet checks this twice, the second time just before it types.
+
+The text goes in as one line, starting with `[XenoNet from …]`, with control
+characters and escape sequences removed. It's sent literally, then Enter.
+Every attempt goes in the audit log. On macOS, tmux needs no extra
+permissions.
+
+## Choosing who gets a message: selectors
+
+`send`'s `to` and `peers`' `scope` take a selector: one or more `key:value`
+terms, all of which must hold.
+
+| Key | Matches |
+|---|---|
+| `project:atlas` | the project's name, or its repo's folder |
+| `identity:adal` | an account the session ran as or belongs to: a GitHub login, a git email, a Claude account |
+| `app:opencode` | the harness: `claude`, `codex`, `opencode`, `gemini-cli`, … |
+| `machine:local` | the machine |
+| `status:idle` | `idle`, `working`, or `live` (working or idle) |
+| `by:hermes` | sessions an actor reports it started or works on |
+
+A value ending in `*` matches a prefix. Separate terms with spaces or `+`,
+for example `project:atlas app:opencode` or `identity:adal+status:idle`.
+
+Everything `to` took before still works the same: a session's id
+(`claude:…`), an actor's id (`actor:hermes`), words from a title, `repo` and
+`all`.
+
+## What actors may see: scopes
+
+An actor sees and reaches no session until you grant its token a scope:
+
+```
+xenonet live grant hermes project:atlas identity:adal --hours 72
+xenonet live revoke hermes
+```
+
+- A grant is a selector. The actor's `peers`, its `send` to an id or words,
+  and its broadcasts (`all`, `repo`, a selector) only reach what the grant
+  covers.
+- A grant expires (30 days by default). `revoke` takes effect at once.
+- A grant for one identity never shows another identity's sessions, so
+  separate accounts stay apart.
+- An actor sees another actor only if its grant names it with `by:<slug>`.
+- `by:` matches what actors report they work on, so a grant can't use the
+  actor's own slug: an actor's reports never widen its own scope.
+
+You and the sessions on this machine see everything, as before.
+
+## Guards
+
+| Guard | Default |
+|---|---|
+| Pause everything | `xenonet live pause`, or "Pause or resume messages between sessions" in the command palette. While paused, only you can send, and nothing is woken. |
+| Message size | 4,000 characters |
+| Per sender | 20 messages a minute |
+| Per recipient | 30 messages a minute |
+| Fan-out | 25 recipients per message |
+| Duplicates | the same text to the same recipients within a minute is refused |
+| Loops | 24 messages between the same two agents in ten minutes, or a reply chain 6 deep, stops the thread until you step in |
+| Wake budget | 12 wakes an hour per sender, 30 per session. A provider at 90% of its plan limit takes no wakes. |
+| Consent | waking an OpenCode session, or typing into any session, needs your allowance for that session, which expires |
+| Secrets | key- and token-like strings are redacted when a message crosses identities, or goes to or from an actor |
+| Framing | every delivered message names its sender and says it's another agent's message, not your user's instruction |
+| Audit | `xenonet live audit`: an append-only log of grants, consents, pauses, refusals, deliveries and typing, with message hashes, never text |
+
+## Threat model
+
+| Threat | What stops it |
+|---|---|
+| An actor reads or messages sessions it shouldn't | Default deny, per-actor grants that expire, instant revoke, scope checks on peers, ids, title words and broadcasts |
+| One account's agent reaches another account's sessions | Identity terms in grants. Secrets are redacted across identities. |
+| Prompt injection through a message | Framing as peer content with sender provenance. Messages can't approve or authorize anything. Control characters are stripped. |
+| Typing into the wrong window | Per-session consent; pid, tty and foreground checks done twice; tmux only; one literal line |
+| Two agents in a loop, or a flood | Per-sender, per-recipient and per-pair limits, duplicate checks, reply depth, fan-out cap |
+| Wakes burning plan limits | Wake budgets per sender and session, and no wakes for a provider near its limit |
+| A token or key passed along | Redaction across identities and actors |
+| Something goes wrong at scale | The pause switch in the CLI and the command palette |
+| Finding out what happened | The append-only audit log |
+
+What it doesn't stop: a session or actor you allowed can still say
+misleading things within its scope, and a model can still choose to act on a
+peer's message. Keep grants narrow.
