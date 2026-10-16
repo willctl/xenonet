@@ -26,6 +26,7 @@ import { Blocks } from "./blocks/lifecycle.js";
 import { claudeLines, codexLines } from "./lines.js";
 import { NumbatSessions } from "./numbat.js";
 import { OpenCodeSessions, opencodeDbPath } from "./native/opencode.js";
+import { GeminiCliSessions, geminiRoot } from "./native/gemini-cli.js";
 import { ReportedRuns, observedSessions } from "./reported-runs.js";
 import { demoSessions, demoNativeProjects, demoTranscript, demoNarration, demoPicks, startDriver, clientsReady } from "./demo.js";
 
@@ -107,9 +108,10 @@ export class XenoNetState extends EventEmitter {
     // Experimental native readers (core/native): sessions read from a
     // harness's own records, when XENONET_READERS names it.
     this.opencode = config.readers?.has("opencode") ? this.blocks.add(new OpenCodeSessions({ file: opencodeDbPath({ home: config.homeDir }) }), { source: "opencode" }) : null;
+    this.geminiCli = config.readers?.has("gemini-cli") ? this.blocks.add(new GeminiCliSessions({ root: geminiRoot({ home: config.homeDir }) }), { source: "gemini-cli" }) : null;
     // Sessions from outside XenoNet's Claude Code and Codex readers. The
     // native readers come first, so a run they read wins over numbat's.
-    this.observed = observedSessions([this.opencode, this.numbat, this.reportedRuns]);
+    this.observed = observedSessions([this.opencode, this.geminiCli, this.numbat, this.reportedRuns]);
     this.live = new LiveTelemetry({
       claudeRoot: config.claudeProjectsDir,
       codexRoot: path.join(config.codexHome, "sessions"),
@@ -167,6 +169,7 @@ export class XenoNetState extends EventEmitter {
     // Observed runs, unless XenoNet reads the same run itself.
     this.numbat?.read();
     this.opencode?.read();
+    this.geminiCli?.read();
     const read = new Set(sessions.map((x) => x.id));
     for (const o of this.observed.sessions()) if (!read.has(o.id)) sessions.push(o);
     for (const s of sessions) if (this.demoTitles.has(s.id)) s.title = this.demoTitles.get(s.id);
@@ -222,6 +225,7 @@ export class XenoNetState extends EventEmitter {
       native.status,
       claude.status,
       ...(this.opencode ? [{ name: "opencode", ok: this.opencode.fileState === "ok", count: this.opencode.runs.size, ...(this.opencode.fileState === "ok" ? {} : { error: `OpenCode's database is ${this.opencode.fileState}` }) }] : []),
+      ...(this.geminiCli ? [{ name: "gemini-cli", ok: this.geminiCli.rootState === "ok", count: this.geminiCli.runs.size, ...(this.geminiCli.rootState === "ok" ? {} : { error: `Gemini CLI's folder is ${this.geminiCli.rootState}` }) }] : []),
       ...(this.numbat ? [{ name: "numbat", ok: this.numbat.fileState === "ok", count: this.numbat.runs.size, ...(this.numbat.fileState === "ok" ? {} : { error: `numbat's file is ${this.numbat.fileState}` }) }] : []),
       { name: "live", ok: this.live.status.watching, count: this.live.status.files },
       { name: "wiki", ok: !!wiki, count: wiki?.pages.length ?? 0, error: wiki ? undefined : "Agent Wiki folder not found" },

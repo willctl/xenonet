@@ -166,6 +166,13 @@ export const PROVIDERS = [
     rangeSources: ["anomaly/opencode/db"],
     notInspected: "Its database is written by a running OpenCode with a model behind it. The check records the latest version, and whether the schema's range takes it.",
   },
+  {
+    id: "google/gemini-cli",
+    name: "Gemini CLI",
+    sources: ["google/gemini-cli/chat-record"],
+    release: { npm: "@google/gemini-cli", tags: ["latest"] },
+    notInspected: "Its chat records are written by a running Gemini CLI with a model behind it, and carry no version. The check records the latest version only.",
+  },
 ];
 
 export const providerById = (id) => PROVIDERS.find((p) => p.id === id) ?? null;

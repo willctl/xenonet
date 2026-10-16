@@ -241,6 +241,17 @@ export const VENDOR = {
       { record: { session: [], edits: [{ session_id: "s1", time_created: 1, path: "/a" }] }, drift: [["missing-field", "edits[].tool"]] },
     ],
   },
+  "google/gemini-cli/chat-record": {
+    fits: [
+      { sessionId: "8f1d2c3b-0000-4000-8000-000000000001", projectHash: "ab12", startTime: "2026-10-16T12:00:00.000Z", lastUpdated: "2026-10-16T12:00:00.000Z", kind: "main" },
+      { id: "m2", timestamp: "2026-10-16T12:00:05.000Z", type: "gemini", content: "", toolCalls: [{ id: "c1", name: "write_file", args: { file_path: "/Users/ada/atlas/notes.txt", content: "x" }, status: "success", timestamp: "2026-10-16T12:00:06.000Z" }] },
+      { $set: { lastUpdated: "2026-10-16T12:00:07.000Z" } },
+      { $rewindTo: "m2" },
+    ],
+    odd: [
+      { record: { id: "m3", type: "gemini", toolCalls: [{ id: "c2", name: 5 }] }, drift: [["type-change", "toolCalls[].name"]], strip: [["toolCalls", 0, "name"]] },
+    ],
+  },
   "nous/hermes-agent/install-stamp": {
     fits: [{ schemaVersion: 2, commit: "0a1b2c3d4e", commitDate: 1791200000, branch: "main", builtAt: "2026-10-05T12:00:00+00:00", dirty: false, source: "git", distribution: null, updateMechanism: "self", baseVersion: "0.21.5", displayVersion: "0.21.5+12.g0a1b2c3", distance: 12, payload: "bootstrap", tag: null }],
     odd: [

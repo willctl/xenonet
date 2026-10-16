@@ -8,3 +8,4 @@ import "./openai/codex.js";
 import "./github/gh.js";
 import "./nous/hermes-agent.js";
 import "./anomaly/opencode.js";
+import "./google/gemini-cli.js";
