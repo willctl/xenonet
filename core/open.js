@@ -11,7 +11,8 @@ export function actionsFor(node) {
   const acts = [];
   // A run XenoNet only observes has no transcript here to preview, and
   // nothing to open it in.
-  if (node.kind === "session" && node.observed) {
+  // Nor one an experimental reader reads, for now.
+  if (node.kind === "session" && (node.observed || node.reader)) {
     if (node.cwd) acts.push({ id: "open-folder", label: "Open folder" });
     return acts;
   }

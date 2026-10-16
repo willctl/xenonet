@@ -228,6 +228,19 @@ export const VENDOR = {
     fits: [{ heartbeat: { at: 1791230000.5, pid: 4300 }, last_success: { at: 1791230000.5 } }, { heartbeat: null, last_success: null }],
     odd: [{ record: { heartbeat: { at: "now", pid: 4300 } }, drift: [["type-change", "heartbeat.at"]], strip: [["heartbeat", "at"]] }],
   },
+  "anomaly/opencode/db": {
+    fits: [
+      {
+        session: [{ id: "ses_eb95b1836ffexD4vYDGuLeJDCy", parent_id: null, directory: "/Users/ada/atlas", title: "Overwrite notes", version: "1.19.3", time_created: 1792186574794, time_updated: 1792186579752, time_archived: null }],
+        edits: [{ session_id: "ses_eb95b1836ffexD4vYDGuLeJDCy", time_created: 1792186578050, tool: "write", path: "/Users/ada/atlas/notes.txt" }],
+      },
+      { session: [], edits: [] },
+    ],
+    odd: [
+      { record: { session: [{ id: "s1", directory: "/a", version: "1.19.3", time_created: "today", time_updated: 1 }], edits: [] }, drift: [["type-change", "session[].time_created"]], strip: [["session", 0, "time_created"]] },
+      { record: { session: [], edits: [{ session_id: "s1", time_created: 1, path: "/a" }] }, drift: [["missing-field", "edits[].tool"]] },
+    ],
+  },
   "nous/hermes-agent/install-stamp": {
     fits: [{ schemaVersion: 2, commit: "0a1b2c3d4e", commitDate: 1791200000, branch: "main", builtAt: "2026-10-05T12:00:00+00:00", dirty: false, source: "git", distribution: null, updateMechanism: "self", baseVersion: "0.21.5", displayVersion: "0.21.5+12.g0a1b2c3", distance: 12, payload: "bootstrap", tag: null }],
     odd: [

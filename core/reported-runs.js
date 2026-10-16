@@ -94,7 +94,11 @@ export function observedSessions(sources) {
   const list = sources.filter(Boolean);
   return {
     sources: list,
-    sessions: () => list.flatMap((s) => s.sessions()),
+    // One session per id: the first source to list it wins.
+    sessions: () => {
+      const seen = new Set();
+      return list.flatMap((s) => s.sessions()).filter((x) => !seen.has(x.id) && seen.add(x.id));
+    },
     live: (id) => {
       for (const s of list) {
         const l = s.live(id);

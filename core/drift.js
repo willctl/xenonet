@@ -69,6 +69,7 @@ const SOURCES = {
   "nous/hermes-agent/cron-jobs": "Hermes Agent's scheduled jobs",
   "nous/hermes-agent/cron-ticker": "Hermes Agent's scheduler ticker",
   "nous/hermes-agent/install-stamp": "Hermes Agent's build stamp",
+  "anomaly/opencode/db": "OpenCode's database",
 };
 export const sourceName = (source) => SOURCES[source] ?? source;
 

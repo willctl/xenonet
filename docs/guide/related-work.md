@@ -46,6 +46,12 @@ The run shows in the Elsewhere zone, since its folder isn't on this machine, wit
 
 This is tested against XenoNet's real gateway and a stand-in SPACE API. It isn't yet tested on a Firecracker host.
 
+## Native readers: other harnesses' own records (experimental)
+
+XenoNet can read some other harnesses' sessions from their own records, without numbat. Each reader is off unless `XENONET_READERS` names it, as a comma-separated list. A session such a reader finds is read, not observed: its edits count in warnings like any session's. XenoNet has no hooks into these harnesses, so their sessions can't be sent messages yet, and have no transcript to preview.
+
+**OpenCode** (`XENONET_READERS=opencode`). Each OpenCode session is a session, `opencode:<id>`, with a subagent's run under the session that started it. XenoNet opens OpenCode's database, `opencode.db`, read only for each look: `OPENCODE_DB`, or `$XDG_DATA_HOME/opencode/`, or `~/.local/share/opencode/` on every OS. It reads each session's id, parent, folder, title, version and times, and the files its `edit`, `write`, `multiedit` and `apply_patch` tools changed. It never reads prompts, replies, tool output or file contents. A session drops off a day after its last change. This is tested with a made-up database and against sessions OpenCode 1.19 wrote.
+
 ## What XenoNet detects today
 
 Sessions are runs of a harness; actors last across runs.
@@ -54,6 +60,7 @@ Sessions are runs of a harness; actors last across runs.
 |---|---|---|---|---|
 | Claude Code (CLI, and its sessions in Claude desktop) | Sessions | Reads its transcripts; hooks once you connect it | Yes | Yes, once connected |
 | Codex (CLI and app) | Sessions | Reads its rollouts and app-server; hooks once you connect it | Yes | Yes, once connected |
+| OpenCode (experimental) | Sessions | Reads its database, when you turn that on | Yes | No |
 | Runs numbat records (experimental) | Sessions, observed | numbat's event file, when you name it | Yes, observed | No |
 | A run in a SPACE sandbox (experimental) | Session, under its actor | `report_run` through the actor gateway | No | No |
 | Pi | Runs in a records panel, not the map | Reads its session files, when you turn that on | No | No |

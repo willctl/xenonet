@@ -157,6 +157,15 @@ export const PROVIDERS = [
     rangeSources: ["nous/hermes-agent/spawn-ledger", "nous/hermes-agent/gateway-state", "nous/hermes-agent/processes", "nous/hermes-agent/cron-jobs", "nous/hermes-agent/cron-ticker"],
     notInspected: "Its files are written by a running Hermes with a model behind it. The check records the latest version, and whether the schemas' ranges take it.",
   },
+  {
+    id: "anomaly/opencode",
+    name: "OpenCode",
+    sources: ["anomaly/opencode/db"],
+    release: { npm: "opencode-ai", tags: ["latest"] },
+    // Its database says the version that wrote each session.
+    rangeSources: ["anomaly/opencode/db"],
+    notInspected: "Its database is written by a running OpenCode with a model behind it. The check records the latest version, and whether the schema's range takes it.",
+  },
 ];
 
 export const providerById = (id) => PROVIDERS.find((p) => p.id === id) ?? null;

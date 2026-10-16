@@ -272,7 +272,8 @@ export class Engine extends EventEmitter {
   // Whether messages can reach an agent: a session always may, in its
   // inbox; an actor only once it reports itself with a token you allowed.
   // A run XenoNet only observes (numbat's, or one reported through the
-  // gateway) has no hooks here, so nothing would reach it.
+  // gateway), or one an experimental reader reads, has no hooks here, so
+  // nothing would reach it.
   #reads(id) {
     if (this.state.observed?.live?.(id)) return false;
     return !isActorAgent(id) || !!this.actors?.isRegistered(id);
@@ -280,7 +281,8 @@ export class Engine extends EventEmitter {
 
   // Why an actor XenoNet only observes isn't sent messages.
   #deaf(a) {
-    return new Error(`${a.id} ("${a.title}") can't read messages: XenoNet only observes it, so nothing would reach it`);
+    const how = a.reader ? "XenoNet reads its records but has no way to message it" : "XenoNet only observes it";
+    return new Error(`${a.id} ("${a.title}") can't read messages: ${how}, so nothing would reach it`);
   }
 
   // What kind of agent another is, as agents read it: its app, or for an

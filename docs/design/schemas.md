@@ -160,6 +160,7 @@ drift record and the rules; this is how they're built.
 | `nous/hermes-agent/cron-jobs` | `cron/jobs.json`: when each job runs, how its last run went, and its folder; never names or prompts | `hermes-files.js` | Hermes's | `<1.0.0` |
 | `nous/hermes-agent/cron-ticker` | `cron/ticker_heartbeat` and `ticker_last_success`, one line each, read into a shape | `hermes-files.js` | Hermes's | `<1.0.0` |
 | `nous/hermes-agent/install-stamp` | `hermes-agent/install-stamp.json`, Hermes's build stamp | `hermes-files.js` | Its own `schemaVersion` | `<=2` |
+| `anomaly/opencode/db` | `opencode.db`, OpenCode's session database (experimental reader) | `native/opencode.js` | The newest session's own `version` | `<2.0.0` |
 
 Not covered, since the contracts don't list them: the Remote Control
 owner line `identities.js` finds in a transcript's first 64 KB, the
