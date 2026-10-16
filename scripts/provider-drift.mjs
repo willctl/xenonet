@@ -150,6 +150,7 @@ async function inspect(opts) {
       entries.push({
         id: p.id,
         name: p.name,
+        experimental: !!p.experimental,
         sources: p.sources,
         release: released ? { url: releaseUrl, versions: released } : null,
         releaseError,
