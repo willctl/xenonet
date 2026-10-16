@@ -230,7 +230,7 @@ function buildServer(actor = null) {
     "send",
     {
       title: "Message other sessions and actors",
-      description: 'Sends a message to another session or actor. Name it in to by its id from peers (or the id\'s first characters), by words from its title, "repo" for every session working in this repo, or "all". A connected session gets it during its current turn, or when it next starts one if it\'s idle. An actor that reports itself gets it when it next reads its inbox. An actor XenoNet only observes can\'t read messages, so XenoNet never sends it one. Keep the message short and self-contained, since the others can\'t see your conversation. To answer a message, pass its number as reply_to, and you can leave out to.',
+      description: 'Sends a message to another session or actor. Name it in to by its id from peers (or the id\'s first characters), by words from its title, "repo" for every session working in this repo, or "all". A connected session gets it during its current turn, or when it next starts one if it\'s idle. An actor that reports itself gets it when it next reads its inbox. An actor XenoNet only observes can\'t read messages, so XenoNet never sends it one. Keep the message short and self-contained, since the others can\'t see your conversation. To answer a message, pass its number as reply_to, and you can leave out to: the reply goes to that message\'s sender, or, if you sent it, to whoever you sent it to.',
       inputSchema: z.object({ to: z.string().optional(), text: z.string(), reply_to: z.number().int().optional() }),
       annotations: write,
     },
