@@ -154,7 +154,7 @@ export function createExportPanel({ modals, scene, sfx, toast, onFilm = null, ca
       const poster = await renderPoster({ scene, size, reveal: { names: !!reveal.names, tokens: !!reveal.tokens } });
       const blob = await posterBlob(poster);
       if (save) await savePoster(poster);
-      return { width: poster.width, height: poster.height, size: poster.size, bytes: blob.size, lines: poster.lines, revealed: { names: !!reveal.names, tokens: !!reveal.tokens }, saved: !!save };
+      return { width: poster.width, height: poster.height, size: poster.size, bytes: blob.size, lines: poster.lines, labels: poster.labels, revealed: { names: !!reveal.names, tokens: !!reveal.tokens }, saved: !!save };
     },
   };
 }

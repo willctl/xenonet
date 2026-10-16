@@ -9,7 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { dayLog } from "../core/digest.js";
-import { starName, starNames, posterSalt, archetypeOf, constellationOf, dayKey } from "../core/redact.js";
+import { starName, starNames, posterSalt, archetypeOf, constellationOf, labelsOf, dayKey } from "../core/redact.js";
 
 const salt = "a".repeat(64);
 const at = (h, m = 0) => new Date(2026, 9, 3, h, m).getTime();
@@ -129,4 +129,42 @@ test("the constellation of the day: star names, totals and the archetype, and no
 
   const quiet = constellationOf(dayLog([], { now: at(18) }), { salt, now: at(18) });
   assert.deepEqual({ ...quiet, date: null }, { date: null, archetype: "quiet sky", totals: { sessions: 0, turns: 0, toolCalls: 0, files: 0 }, tokens: 0, stars: [], apps: {} });
+});
+
+// The map's nodes an export would show, of every kind the map labels, with
+// the day's projects among them.
+const NODES = [
+  { id: "core", kind: "core", name: "Projects", path: `${HOME}/Projects` },
+  { id: `project:${HOME}/Projects/atlas-api`, kind: "project", name: "atlas-api" },
+  { id: `project:${HOME}/Projects/ledger`, kind: "project", name: "ledger" },
+  { id: `project:${HOME}/Clients/harbor-api`, kind: "project", name: "harbor-api" },
+  { id: `project:${HOME}/Clients`, kind: "project", name: "Clients", group: true },
+  { id: `zone:${HOME}/Scratch`, kind: "zone", name: "Scratch" },
+  { id: "claude:0190d3e0-0000-7000-8000-000000000001", kind: "session", title: "Add partial refunds to the orders API" },
+  { id: "page:partial-refunds", kind: "page", name: "Partial refunds" },
+  { id: "resource:github", kind: "resource", name: "github" },
+  { id: "native:codex-1", kind: "native", name: "Codex" },
+  { id: `wiki:${HOME}/wiki`, kind: "wiki", name: "Agent Wiki" },
+  { id: "host:dana-mbp.local", kind: "host", name: "dana-mbp.local" },
+  { id: "actor:hermes", kind: "actor", name: "Hermes" },
+];
+
+test("the map's labels for an export: a star name for every labelled node, none for a session or an actor, the same names the constellation gets, and nothing of the names", () => {
+  const log = day();
+  const labels = labelsOf(NODES, log, { salt, now: at(18) });
+  const labelled = NODES.filter((n) => !["session", "actor"].includes(n.kind));
+  assert.deepEqual(Object.keys(labels).sort(), labelled.map((n) => n.id).sort());
+  for (const n of labelled) assert.match(labels[n.id], /^[A-Z][a-z]+( \d+)?$/, `${n.id}: ${labels[n.id]}`);
+  assert.equal(new Set(Object.values(labels)).size, labelled.length, "each node its own name");
+  const values = Object.values(labels).join(" ").toLowerCase();
+  for (const s of SECRETS) assert.ok(!values.includes(s.toLowerCase()), `${s} in a label`);
+  // The constellation, made with the same nodes, names its stars the same way.
+  const c = constellationOf(log, { salt, now: at(18), nodes: NODES });
+  assert.deepEqual(c.stars.map((s) => s.name), log.topProjects.map((p) => labels[p.id]));
+  assert.ok(!("labels" in c), "the constellation itself carries no lookup");
+  // The same all day, and new the next day.
+  assert.deepEqual(labelsOf(NODES, log, { salt, now: at(23) }), labels);
+  assert.notDeepEqual(labelsOf(NODES, log, { salt, now: at(18) + 24 * 3600e3 }), labels);
+  // Without nodes, nothing.
+  assert.deepEqual(labelsOf([], log, { salt, now: at(18) }), {});
 });

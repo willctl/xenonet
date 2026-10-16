@@ -6,7 +6,7 @@
 // reveals more. "Make a film of today" records it in the desktop app
 // (electron/recorder.js), as a story (9:16); xenonet film records it from a
 // hidden window.
-import { fetchConstellation } from "./poster.js";
+import { fetchConstellation, fetchExportLabels } from "./poster.js";
 import { titleCard, overlay, endCard } from "./film-cards.js";
 import { filmPlaySeconds } from "../core/frames.js";
 
@@ -27,10 +27,13 @@ export function createFilm({ scene, replay }) {
   // revealing what `reveal` turns on (names, tokens).
   async function play({ seconds = filmPlaySeconds(), reveal = {} } = {}) {
     if (state !== "idle") return;
-    const [day, history] = await Promise.all([fetchConstellation(reveal), fetch("/api/history").then((r) => r.json())]);
+    const [day, history, labels] = await Promise.all([fetchConstellation(reveal), fetch("/api/history").then((r) => r.json()), reveal.names ? null : fetchExportLabels()]);
     const events = history.events ?? [];
     if (!events.length) throw new Error("nothing happened today to make a film of");
     document.body.classList.add("filming");
+    // The map's own labels follow the cards: star names, and none on a
+    // session, unless the film reveals the names (core/export-labels.js).
+    scene.setRedaction(labels);
     root.hidden = false;
     scene.reset();
 
@@ -76,6 +79,7 @@ export function createFilm({ scene, replay }) {
   function stop() {
     cancelAnimationFrame(raf);
     if (replay.active) replay.exit();
+    scene.setRedaction(null);
     document.body.classList.remove("filming");
     root.hidden = true;
     root.innerHTML = "";

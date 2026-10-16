@@ -11,6 +11,9 @@ import { drawPoster } from "./poster-draw.js";
 // The day's constellation, with the projects' names only when revealing
 // them.
 export const fetchConstellation = (reveal = {}) => fetch(`/api/constellation${reveal.names ? "?names=1" : ""}`).then((r) => r.json());
+// The map's own labels for an export: each labelled node's star name, by
+// id (core/export-labels.js), the same names the constellation gets.
+export const fetchExportLabels = () => fetch("/api/constellation/labels").then((r) => r.json());
 
 // Renders the poster at `size` (a size's id), with what `reveal` turns on
 // (names, tokens), onto a canvas: { canvas, width, height, lines }.
@@ -20,7 +23,19 @@ export async function renderPoster({ scene, size, reveal = {}, data = null, them
   // Canvas text only uses font weights already loaded; load every one drawn.
   await themeFonts(theme);
   data ??= await fetchConstellation(reveal);
-  const shot = scene.renderHighRes(W, H);
+  // The map behind the poster shows star names and no session's title,
+  // unless the export reveals the names; afterwards the map is as it was
+  // (which, during a film, is the film's own redaction).
+  const labels = reveal.names ? null : await fetchExportLabels();
+  const before = scene.redaction;
+  let shot, shown;
+  scene.setRedaction(labels);
+  try {
+    shown = scene.labelTexts();
+    shot = scene.renderHighRes(W, H);
+  } finally {
+    scene.setRedaction(before);
+  }
   const img = new Image();
   img.src = shot.url;
   await img.decode();
@@ -28,7 +43,7 @@ export async function renderPoster({ scene, size, reveal = {}, data = null, them
   canvas.width = W;
   canvas.height = H;
   const lines = drawPoster(canvas.getContext("2d"), { width: W, height: H, image: img, data, reveal, theme });
-  return { canvas, width: W, height: H, size: id, lines };
+  return { canvas, width: W, height: H, size: id, lines, labels: shown };
 }
 
 // The PNG, as a blob: the pixels and nothing else.

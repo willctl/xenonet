@@ -49,6 +49,32 @@ async function until(fn, ok, ms = 20000) {
 const CLOCK = /\b\d{1,2}:\d{2}\b/;
 // Everything a poster's lines say, as one text.
 const said = (lines) => [lines.band, lines.headline, lines.date, lines.url, ...lines.stars.names, ...lines.stats.flat(), ...lines.apps.map((a) => `${a.label} ${a.count}`)].join("\n");
+// A star name as the map writes a label: capitals, a count when two
+// collide, and a group's slash.
+const STAR_LABEL = /^[A-Z]+( \d+)?( \/)?$/;
+// The map's own labels (driver labels): what each shows, by id.
+const labelsById = (list) => new Map(list.map((l) => [l.id, l]));
+// Checks the map's labels during an export against the plain ones from
+// before it: every labelled kind shows a star name in place of its own,
+// no session shows a label, and no plain name shows anywhere.
+function assertRedacted(during, plain, what) {
+  const was = labelsById(plain);
+  const texts = during.filter((l) => l.visible).map((l) => l.text);
+  assert.ok(texts.length >= 2, `${what}: labels showing: ${texts}`);
+  for (const l of during) {
+    const before = was.get(l.id);
+    if (l.kind === "session") assert.ok(!l.visible, `${what}: a session's label shows: ${l.text}`);
+    else if (l.visible) {
+      assert.match(l.text, STAR_LABEL, `${what}: ${l.kind} ${l.text}`);
+      if (before) assert.notEqual(l.text, before.text, `${what}: ${l.kind} still reads ${l.text}`);
+    }
+  }
+  for (const p of plain) {
+    if (p.kind === "session" || !p.text) continue;
+    const word = p.text.replace(/ \/$/, "").toLowerCase();
+    for (const t of texts) assert.ok(!t.toLowerCase().includes(word), `${what}: ${p.text} in ${t}`);
+  }
+}
 
 before(async () => {
   await xenonet("test").quit();
@@ -91,11 +117,16 @@ test("each size renders at its own pixels, with the mark, star names and no cloc
   const day = await api("/api/daylog");
   const projects = day.topProjects.map((p) => p.name);
   assert.ok(projects.length >= 2 && day.busiestHour != null, "the demo has busy projects and a busiest hour");
+  // The map's labels as they read between exports: the plain names.
+  const { redacted, labels: plain } = await s.driver("labels");
+  assert.equal(redacted, false);
+  assert.ok(plain.some((l) => l.kind === "project" && l.visible && projects.some((p) => l.text.toLowerCase().includes(p.toLowerCase()))), "the map names its projects");
   for (const size of POSTER_SIZES) {
     const r = await s.driver("poster", { size: size.id });
     assert.deepEqual([r.width, r.height, r.size], [size.width, size.height, size.id]);
     assert.ok(r.bytes > 20000, `${size.id}: a PNG of ${r.bytes} bytes`);
     const text = said(r.lines);
+    assertRedacted(r.labels, plain, `${size.id} map`);
     assert.ok(text.includes(MARK_BAND) && text.includes(MARK_URL), `${size.id}: the mark`);
     assert.doesNotMatch(text, CLOCK, `${size.id}: a clock`);
     for (const p of projects) assert.ok(!text.toLowerCase().includes(p.toLowerCase()), `${size.id}: ${p} in ${text}`);
@@ -111,15 +142,20 @@ test("each size renders at its own pixels, with the mark, star names and no cloc
   // Revealed, for this one export: the projects' names, and the tokens.
   const shown = await s.driver("poster", { size: "card", reveal: { names: true, tokens: true } });
   assert.ok(shown.lines.stars.names.some((n) => projects.includes(n)), `${shown.lines.stars.names} has a project`);
+  assert.deepEqual(shown.labels.map((l) => l.text), plain.map((l) => l.text), "revealed, the map keeps its own labels");
   assert.ok(shown.lines.stats.some(([, k]) => k === "tokens"));
   assert.deepEqual(shown.revealed, { names: true, tokens: true });
   const next = await s.driver("poster", { size: "card" });
   assert.ok(!next.lines.stars.names.some((n) => projects.includes(n)), "the next export starts hidden again");
+  const after = await s.driver("labels");
+  assert.equal(after.redacted, false);
+  assert.deepEqual(after.labels.map((l) => [l.id, l.text]), plain.map((l) => [l.id, l.text]), "the map has its own labels back");
   assert.equal((await s.driver("state")).errors, 0, JSON.stringify(await s.driver("errors")));
 }));
 
-test("a film plays in a story-shaped window with the mark, star names, running counts and no clock", { timeout: 90000 }, shoot("film", async () => {
+test("a film plays in a story-shaped window with the mark, star names, running counts and no clock, and the map's own labels follow", { timeout: 90000 }, shoot("film", async () => {
   const projects = (await api("/api/daylog")).topProjects.map((p) => p.name);
+  const { labels: plain } = await s.driver("labels");
   // The frame the desktop app records a film in, at half size: narrow
   // enough for the page's narrow layout.
   await s.window({ size: "540x960" });
@@ -135,6 +171,10 @@ test("a film plays in a story-shaped window with the mark, star names, running c
     assert.match(text, /tool calls/i);
     assert.match(text, /sessions at work/i);
     for (const p of projects) assert.ok(!text.toLowerCase().includes(p.toLowerCase()), `${p} in ${text}`);
+    // The map behind the cards: star names, and no session's title.
+    const during = await s.driver("labels");
+    assert.equal(during.redacted, true);
+    assertRedacted(during.labels, plain, "film map");
     assert.equal(await s.eval(`return document.querySelector(".film .fl-clock")`), null);
     assert.ok(await s.eval(`return !!document.querySelector(".film [data-fl-progress]")`), "a line fills instead");
     // The end card, with the day's stars.
@@ -145,6 +185,18 @@ test("a film plays in a story-shaped window with the mark, star names, running c
     assert.doesNotMatch(card, CLOCK);
     for (const p of projects) assert.ok(!card.toLowerCase().includes(p.toLowerCase()), `${p} in ${card}`);
     await until(() => s.driver("state"), (x) => !x.overlays.film, 20000);
+    // Over, the map has its own labels back.
+    const after = await s.driver("labels");
+    assert.equal(after.redacted, false);
+    assert.deepEqual(after.labels.map((l) => [l.id, l.text]), plain.map((l) => [l.id, l.text]));
+    // A film that reveals the names keeps the map as it is.
+    const revealed = await s.driver("film", { seconds: 7, reveal: { names: true } });
+    assert.ok(revealed.started);
+    await until(() => s.driver("state"), (x) => x.overlays.film === "playing", 30000);
+    const shown = await s.driver("labels");
+    assert.equal(shown.redacted, false);
+    assert.ok(shown.labels.some((l) => l.kind === "project" && l.visible && projects.some((p) => l.text.toLowerCase().includes(p.toLowerCase()))), "revealed, the map names its projects");
+    await s.driver("stopFilm");
   } finally {
     await s.driver("stopFilm").catch(() => {});
     await s.window({ size: null });

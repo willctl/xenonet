@@ -153,7 +153,7 @@ The console page imports only the core modules that have no Node in them, `theme
 | `live.js` | The transcript reader and its signals |
 | `graph.js`, `state.js` | The map's data |
 | `search.js`, `digest.js` | Search and digests |
-| `redact.js`, `frames.js` | What an export of the day may say (star names, the archetype), and the frames posters and films come in |
+| `redact.js`, `export-labels.js`, `frames.js` | What an export of the day may say (star names, the archetype), what the map's own labels show during one, and the frames posters and films come in |
 | `identities.js` | Who sessions ran as |
 | `claude-usage.js` | Claude plan usage |
 | `config.js`, `dirs.js`, `paths.js`, `store.js` | Settings, and the places XenoNet keeps things |

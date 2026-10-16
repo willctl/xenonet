@@ -152,9 +152,10 @@ how to stop it.
 - Replay plays the last 24 hours in one minute. A poster of the day saves
   or copies the map with the day's numbers, in four sizes, and a film of
   the day saves a 15 to 30 second MP4 at 9:16. Both show projects as star
-  names and no clock, unless you reveal more for that export, and both are
-  made on your computer: nothing is uploaded, and the files carry no
-  metadata.
+  names and no clock, on the cards and on the map itself, where sessions
+  show no title and only actors keep their names, unless you reveal more
+  for that export. Both are made on your computer: nothing is uploaded,
+  and the files carry no metadata.
 
 ### Comes in eight themes
 

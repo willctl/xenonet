@@ -9,6 +9,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { LABELLED_KINDS } from "./export-labels.js";
 
 // The syllables a star name is made of: an onset, a vowel and, at the end,
 // sometimes a coda. Three bytes of the hash pick each one.
@@ -95,9 +96,14 @@ export function archetypeOf({ totals, hours } = {}) {
 // how many sessions ran in each app. No ids, no names, no hours and no
 // times. With `names`, each star also carries its project's name, for an
 // export that reveals them.
-export function constellationOf(day, { salt, now = Date.now(), names = false } = {}) {
+// The ids a day's names cover: the brightest projects of the log and every
+// labelled node on the map (export-labels.js), named together so the
+// overlay of a film or a poster and the map behind it agree on each name.
+const namedIds = (day, nodes) => [...(day?.topProjects ?? []).map((p) => p.id), ...nodes.filter((n) => LABELLED_KINDS.has(n?.kind)).map((n) => n.id)];
+
+export function constellationOf(day, { salt, now = Date.now(), names = false, nodes = [] } = {}) {
   const projects = day?.topProjects ?? [];
-  const stars = starNames(projects.map((p) => p.id), { salt, day: dayKey(now) });
+  const stars = starNames(namedIds(day, nodes), { salt, day: dayKey(now) });
   const apps = {};
   for (const s of day?.sessions ?? []) apps[s.app || "other"] = (apps[s.app || "other"] ?? 0) + 1;
   const t = day?.totals ?? {};
@@ -109,4 +115,16 @@ export function constellationOf(day, { salt, now = Date.now(), names = false } =
     stars: projects.map((p) => ({ name: stars.get(p.id), toolCalls: p.toolCalls ?? 0, ...(names ? { project: p.name } : {}) })),
     apps,
   };
+}
+
+// The star name of each labelled node on the map, by id, from the same
+// names the day's constellation gets: what the map's own labels show while
+// a film plays or a poster renders (export-labels.js). The keys are ids
+// the page already holds, so this is a lookup for the page and never part
+// of an export, which carries the names alone.
+export function labelsOf(nodes, day, { salt, now = Date.now() } = {}) {
+  const stars = starNames(namedIds(day, nodes), { salt, day: dayKey(now) });
+  const labels = {};
+  for (const n of nodes) if (LABELLED_KINDS.has(n?.kind)) labels[n.id] = stars.get(n.id);
+  return labels;
 }

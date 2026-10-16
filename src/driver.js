@@ -410,6 +410,11 @@ export function createDriver(app) {
     // command("poster"); exportPanel() says what it has picked.
     poster: (opts) => app.exportPanel.render(opts ?? {}),
     exportPanel: () => app.exportPanel.state(),
+    // The map's own labels as they read now (scene.js, labelTexts), and
+    // whether an export has them redacted: star names on projects, groups,
+    // folders, pages, shared systems and machines, and none on sessions
+    // (core/export-labels.js), as while a film plays.
+    labels: () => ({ redacted: !!scene.redaction, labels: scene.labelTexts() }),
     // Opens the palette with `text` typed in, or closes it with null.
     palette: (text = "", opts) => act(() => (text == null ? palette.close() : palette.open(text)), { settle: false, ...opts }),
 

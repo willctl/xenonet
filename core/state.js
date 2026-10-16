@@ -20,7 +20,7 @@ import { readWiki } from "./wiki.js";
 import { TranscriptSearch } from "./search.js";
 import { Transcripts, createStats } from "./stats.js";
 import { summarize, dayLog, summaryText, handoffBrief, narrate } from "./digest.js";
-import { constellationOf, posterSalt } from "./redact.js";
+import { constellationOf, labelsOf, posterSalt } from "./redact.js";
 import * as store from "./store.js";
 import { Blocks } from "./blocks/lifecycle.js";
 import { claudeLines, codexLines } from "./lines.js";
@@ -646,7 +646,13 @@ export class XenoNetState extends EventEmitter {
   // in place of project names, and no hours. The real names come only
   // when `names` asks for them, for an export that reveals them.
   constellation({ names = false } = {}) {
-    return constellationOf(this.dayLog(), { salt: posterSalt(config.stateDir), names });
+    return constellationOf(this.dayLog(), { salt: posterSalt(config.stateDir), names, nodes: [...this.index.values()] });
+  }
+
+  // The map's own labels for an export: each labelled node's star name, by
+  // id, from the same names as the constellation (redact.js, labelsOf).
+  exportLabels() {
+    return labelsOf([...this.index.values()], this.dayLog(), { salt: posterSalt(config.stateDir) });
   }
 
   async narrate(kind, since) {

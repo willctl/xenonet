@@ -267,6 +267,17 @@ function buildServer() {
   );
 
   tool(
+    "labels",
+    {
+      title: "The map's labels",
+      description: "Reads every drawn node's label as it reads now (id, kind, text, visible), and whether an export has them redacted: while a film plays, and during a poster render, projects, groups, folders, pages, shared systems and machines show star names and sessions show no label (core/export-labels.js), unless the export reveals the names. For checking what a film or a poster shows of the map.",
+      inputSchema: z.object({ instance: instanceArg }),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async ({ instance }) => reply(await target(instance).driver("labels")),
+  );
+
+  tool(
     "identities",
     {
       title: "Identities",
