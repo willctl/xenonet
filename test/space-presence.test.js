@@ -93,7 +93,7 @@ test("the script itself, run as a sandbox runs it, says who it is and leaves no 
   const { execFile } = await import("node:child_process");
   const g = await gateway();
   const out = await new Promise((resolve, reject) =>
-    execFile(process.execPath, ["scripts/space/presence.mjs", "--once"], { env: { XENONET_GATEWAY_URL: g.url, XENONET_GATEWAY_TOKEN: g.token, XENONET_STATUS: "Linting" }, timeout: 20000 }, (err, stdout, stderr) => (err ? reject(err) : resolve(stdout + stderr))),
+    execFile(process.execPath, ["scripts/space/presence.mjs", "--once"], { env: { ...process.env, XENONET_GATEWAY_TOKEN_FILE: "", XENONET_GATEWAY_URL: g.url, XENONET_GATEWAY_TOKEN: g.token, XENONET_STATUS: "Linting" }, timeout: 20000 }, (err, stdout, stderr) => (err ? reject(err) : resolve(stdout + stderr))),
   );
   assert.match(out, /actor:space-runner/);
   assert.equal(out.includes(g.token), false);

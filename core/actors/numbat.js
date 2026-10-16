@@ -29,9 +29,9 @@
 // itself, and Hermes, which has an observer of its own: nothing counts
 // twice. Only the agents named in AGENT_NAMES are shown.
 import fs from "node:fs";
-import path from "node:path";
 import { Observer } from "./observer.js";
 import { PRODUCTS } from "./products.js";
+import { pathStyle } from "../paths.js";
 
 const PRODUCT = PRODUCTS.numbat;
 export const SCHEMA_VERSIONS = new Set(["0.2.0", "0.3.0", "0.4.0", "0.5.0"]);
@@ -93,12 +93,14 @@ export function readRecord(line) {
   if (!agent || !type || !id || !/^[a-z0-9][a-z0-9-]*$/.test(agent)) return { ok: false, why: "malformed" };
   if (LEFT_OUT.has(agent) || !Object.hasOwn(AGENT_NAMES, agent)) return { ok: false, why: "left-out" };
   const at = Date.parse(r.timestamp ?? "");
+  // Paths as the machine that wrote them has them, POSIX or Windows.
+  const abs = (p) => !!p && pathStyle(p).isAbsolute(p);
   const project = str(r.project_path);
   let file = str(r.file_path);
-  if (file && !path.isAbsolute(file)) file = project && path.isAbsolute(project) ? path.join(project, file) : null;
+  if (file && !abs(file)) file = abs(project) ? pathStyle(project).join(project, file) : null;
   return {
     ok: true,
-    event: { id, agent, type, at: Number.isFinite(at) ? at : null, session: str(r.session_id), project: project && path.isAbsolute(project) ? project : null, file: EDITS.has(type) ? file : null },
+    event: { id, agent, type, at: Number.isFinite(at) ? at : null, session: str(r.session_id), project: abs(project) ? project : null, file: EDITS.has(type) ? file : null },
   };
 }
 
@@ -181,7 +183,7 @@ export class NumbatObserver extends Observer {
     if (place) this.touch(id, place, "works-on", now);
     if (e.type === "file.write" || e.type === "file.delete") {
       // An edit outside every place XenoNet knows is left out.
-      if (e.file && place) this.happened(id, { ref: `numbat:${e.id}`.slice(0, 200), kind: "edited", target: place, paths: [path.resolve(e.file)], at: when });
+      if (e.file && place) this.happened(id, { ref: `numbat:${e.id}`.slice(0, 200), kind: "edited", target: place, paths: [pathStyle(e.file).resolve(e.file)], at: when });
     } else if (e.type === "command.exec" && place) this.gather(id, { kind: "ran", target: place, at: when });
   }
 

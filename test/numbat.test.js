@@ -31,7 +31,7 @@ function setup() {
 test("a record is read for what XenoNet needs, and other records, versions and agents are passed over", () => {
   const ok = readRecord(JSON.stringify(event({ event_type: "file.write", project_path: ATLAS_DIR, file_path: "src/a.js", session_id: "s" })));
   assert.equal(ok.ok, true);
-  assert.equal(ok.event.file, path.join(ATLAS_DIR, "src/a.js"), "a relative path joins its project");
+  assert.equal(ok.event.file, `${ATLAS_DIR}/src/a.js`, "a relative path joins its project");
   assert.deepEqual(Object.keys(ok.event).sort(), ["agent", "at", "file", "id", "project", "session", "type"], "no endpoint, command or content");
   assert.equal(readRecord("{not json").why, "malformed");
   assert.equal(readRecord(JSON.stringify({ record_type: "finding", schema_version: "0.5.0" })).why, "not-an-event");
