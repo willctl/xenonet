@@ -524,6 +524,15 @@ const poster = () => exportPanel.open();
 
 // ---------- commands (palette) ----------
 
+// Pauses every message and wake at once, or resumes them (xenonet live pause does the same).
+async function toggleDelivery() {
+  const now = await fetch("/api/delivery").then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  if (!now) return hud.toast("Couldn't reach XenoNet's messages", true);
+  const res = await fetch("/api/delivery/pause", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ paused: !now.paused }) });
+  const body = await res.json().catch(() => ({}));
+  hud.toast(res.ok ? (body.paused ? "Messages paused: sessions and actors can't message or wake each other" : "Messages resumed") : `Couldn't change it: ${body.error ?? res.statusText}`, !res.ok);
+}
+
 const commandList = [
   { id: "wallpaper", label: "Wallpaper mode", key: "W", keywords: "ambient screensaver", run: () => setWallpaper(!wallpaperOn) },
   { id: "replay", label: "Replay the last 24 hours", keywords: "timelapse time-lapse history", run: () => replay.enter() },
@@ -539,6 +548,8 @@ const commandList = [
   { id: "updates", label: "Check for XenoNet updates", keywords: "version release download install restart", run: () => updatesPanel.open() },
   { id: "doctor", label: "Check XenoNet's setup", keywords: "doctor health sign in login auth permissions problems diagnose", run: () => doctorPanel.open() },
   { id: "connect-agents", label: "Connect Claude Code and Codex to XenoNet", keywords: "si super intelligence agents claude code codex mcp hooks engine coordinate messages work together", run: () => connectPanel.open() },
+  // The kill switch for messages between sessions and actors, and every wake (core/delivery/policy.js).
+  { id: "pause-messages", label: "Pause or resume messages between sessions", keywords: "si agents stop kill switch halt wake live delivery actors abuse", run: () => toggleDelivery() },
   { id: "actors", label: "Actors", keywords: "si agents hermes grok bot muse programs allow deny requests register tokens observers you show me on the map add remove", run: () => openActors() },
   { id: "install-command", label: "Install the xenonet command", keywords: "cli terminal shell path doctor", run: () => installCommand() },
   { id: "layout", label: "Reset layout and unpin dragged nodes", keywords: "positions", run: async () => (await fetch("/api/layout", { method: "DELETE" }), hud.toast("Layout reset")) },
