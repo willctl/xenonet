@@ -3,19 +3,42 @@
   "$id": "https://xenonet.dev/schemas/session/v1.json",
   "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
   "title": "Session",
-  "description": "A Claude Code session or a Codex thread, as XenoNet lists it. The map's session nodes (graph/v1) are these with where they live and what they're doing added.",
+  "description": "One run of a harness (a Claude Code session, a Codex thread, a Gemini CLI run…), as XenoNet lists it. The map's session nodes (graph/v1) are these with where they live and what they're doing added.",
   "type": "object",
   "properties": {
     "id": {
       "type": "string",
-      "pattern": "^(@[a-z][a-z0-9-]{1,31}:)?(claude|codex):.",
+      "pattern": "^(@[a-z][a-z0-9-]{1,31}:)?(antigravity|gemini-cli|devin-cli|kimi-code|qwen-code|openhands|opencode|openclaw|windsurf|copilot|factory|claude|cursor|vscode|auggie|cowork|codex|cline|goose|crush|junie|kiro|kilo|amp|pi):.",
       "description": "<app>:<the app's own id>, the id the rest of XenoNet uses; another host's carry @<host>:"
     },
     "app": {
       "type": "string",
       "enum": [
         "claude",
-        "codex"
+        "codex",
+        "gemini-cli",
+        "cursor",
+        "copilot",
+        "vscode",
+        "opencode",
+        "openclaw",
+        "antigravity",
+        "factory",
+        "devin-cli",
+        "kimi-code",
+        "pi",
+        "qwen-code",
+        "cline",
+        "amp",
+        "auggie",
+        "kiro",
+        "goose",
+        "kilo",
+        "openhands",
+        "crush",
+        "junie",
+        "windsurf",
+        "cowork"
       ]
     },
     "rawId": {
@@ -221,6 +244,21 @@
     "background": {
       "description": "Background work (codex exec, reviews, compaction) the map leaves out unless asked",
       "type": "boolean"
+    },
+    "observed": {
+      "description": "How XenoNet knows of it: numbat's event records, or an actor's report through the gateway",
+      "type": "string",
+      "enum": [
+        "numbat",
+        "gateway"
+      ]
+    },
+    "reportedBy": {
+      "description": "The actor that reported it through the gateway",
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

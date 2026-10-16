@@ -18,23 +18,19 @@ import { LOOK_MS } from "./observer.js";
 import { HermesObserver } from "./hermes.js";
 import { GrokBotObserver } from "./grok-bot.js";
 import { MuseObserver } from "./muse.js";
-import { NumbatObserver } from "./numbat.js";
 import { ReportedSpawns } from "./attribution.js";
 
 // The observers for `actors`, or null where there are none. `procs` is the
 // process table (core/procs.js), shared with the process checks; `home`
 // the folder the products keep their state under; `hermes`, `grokBot` and
-// `muse`, anything more for each observer (where its app may be, say);
-// `numbat`, { file }: the numbat bridge, off unless a file is named.
-export function createObservers({ actors, registration = null, procs, home, env = process.env, clock = systemClock, hermes = {}, grokBot = {}, muse = {}, numbat = null } = {}) {
+// `muse`, anything more for each observer (where its app may be, say).
+export function createObservers({ actors, registration = null, procs, home, env = process.env, clock = systemClock, hermes = {}, grokBot = {}, muse = {} } = {}) {
   if (!actors || actors.demo) return null;
   const observing = (product) => () => registration?.observing(product) ?? true;
   const list = [
     new HermesObserver({ actors, procs, home, env, observing: observing("hermes-agent"), every: null, clock, ...hermes }),
     new GrokBotObserver({ actors, procs, home, observing: observing("grok-bot"), every: null, clock, ...grokBot }),
     new MuseObserver({ actors, procs, home, observing: observing("muse"), every: null, clock, ...muse }),
-    // numbat's records, only when you named its file (opt-in).
-    ...(numbat?.file ? [new NumbatObserver({ actors, observing: observing("numbat"), every: null, clock, ...numbat })] : []),
   ];
   const reported = new ReportedSpawns({ actors, procs });
   let timer = null;

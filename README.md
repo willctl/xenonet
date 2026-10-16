@@ -363,8 +363,8 @@ Here is what's planned:
 do, for security. [SPACE](https://github.com/perplexityai/SPACE) isolates
 where agents run, in microVM sandboxes. XenoNet coordinates the sessions
 that are live on your machine: the map, warnings before two sessions edit
-one file, and messages between them. XenoNet can read numbat's events and
-show a SPACE sandbox as an actor, both experimental. See
+one file, and messages between them. XenoNet can show the runs numbat
+records, and a run in a SPACE sandbox, as sessions, both experimental. See
 [Related work](docs/guide/related-work.md).
 
 ## Development

@@ -24,7 +24,7 @@ import { EventEmitter } from "node:events";
 import { execFile } from "node:child_process";
 import path from "node:path";
 import { pathStyle } from "../paths.js";
-import { YOU, parseActorId } from "../schema/ids.js";
+import { YOU, parseActorId, SESSION_LOCAL } from "../schema/ids.js";
 import { productOf } from "../actors/products.js";
 import { quoted } from "./attest.js";
 import { limiter } from "../projects.js";
@@ -38,7 +38,7 @@ const RECENT_MS = 30 * 60e3; // a new agent hears about the agents active this r
 const CLAIM_MINUTES = 60;
 const MAX_TEXT = 4000;
 const ACTOR_CLAIMS = 50; // claims an actor may hold at once
-const AGENT = /^(claude|codex):[0-9A-Za-z][0-9A-Za-z-]{6,}$/;
+const AGENT = SESSION_LOCAL;
 
 export const isAgentId = (id) => AGENT.test(String(id ?? ""));
 // An actor of this machine as the engine has it, never you: an actor:<slug>
@@ -182,7 +182,11 @@ export class Engine extends EventEmitter {
     if (id === YOU) return { id: YOU, app: "you", title: "you", project: null, top: null, status: "working", lastActive: this.now(), ended: false };
     const now = this.now();
     const node = this.state.index?.get(id);
-    const live = this.state.live?.sessions?.get(id);
+    // A run XenoNet has no transcript of (numbat's records, or one an actor
+    // reported through the gateway) reads the same way, its edits marked
+    // observed, since XenoNet inferred them.
+    const live = this.state.live?.sessions?.get(id) ?? this.state.observed?.live?.(id) ?? null;
+    const observed = !!live?.observed;
     const contact = this.store.contact(id);
     const cwd = node?.worktree || node?.cwd || contact?.cwd || null;
     const gone = contact?.pid ? !alive(contact.pid) : false;
@@ -192,14 +196,14 @@ export class Engine extends EventEmitter {
       .map((list) => list[list.length - 1])
       .filter((e) => now - e.ts < EDIT_HOLD_MS)
       .sort((a, b) => b.ts - a.ts)
-      .map((e) => ({ path: path.isAbsolute(e.path) ? e.path : pathStyle(cwd ?? e.path).resolve(cwd ?? "/", e.path), at: e.ts }));
+      .map((e) => ({ path: path.isAbsolute(e.path) ? e.path : pathStyle(cwd ?? e.path).resolve(cwd ?? "/", e.path), at: e.ts, ...(observed ? { observed: true } : {}) }));
     // Working: a turn under way, or anything in the transcript in the last
     // minute and a half (a long turn can look idle between events).
     const working = !!live && (live.status(now) !== "idle" || now - live.lastEventAt < WORKING_MS);
     const lastActive = Math.max(live?.lastEventAt ?? 0, node?.updatedAt ?? 0, contact?.at ?? 0);
     // Ended: its SessionEnd hook said so (unless it has been at work since),
     // or the process its tools ran under is gone.
-    const ended = gone || (!!contact?.ended_at && (live?.lastEventAt ?? 0) < contact.ended_at + 5000);
+    const ended = gone || (!!contact?.ended_at && (live?.lastEventAt ?? 0) < contact.ended_at + 5000) || (live?.endedAt != null && live.lastEventAt <= live.endedAt);
     const need = live?.needsYou?.(now)?.kind;
     return {
       id,
@@ -222,6 +226,7 @@ export class Engine extends EventEmitter {
       editing,
       claims: this.store.claims(now).filter((c) => c.agent === id).map((c) => ({ pattern: c.pattern, note: c.note, until: c.expires_at })),
       reachable: !!contact && !contact.ended_at && now - contact.at < REACHABLE_MS,
+      ...(observed ? { observed: node?.observed ?? true } : {}),
     };
   }
 
@@ -266,7 +271,10 @@ export class Engine extends EventEmitter {
 
   // Whether messages can reach an agent: a session always may, in its
   // inbox; an actor only once it reports itself with a token you allowed.
+  // A run XenoNet only observes (numbat's, or one reported through the
+  // gateway) has no hooks here, so nothing would reach it.
   #reads(id) {
+    if (this.state.observed?.live?.(id)) return false;
     return !isActorAgent(id) || !!this.actors?.isRegistered(id);
   }
 
@@ -409,7 +417,11 @@ export class Engine extends EventEmitter {
   }
 
   async #resolve(me, to) {
-    if (isAgentId(to)) return this.view(to);
+    if (isAgentId(to)) {
+      const one = await this.view(to);
+      if (!this.#reads(to)) throw this.#deaf(one);
+      return one;
+    }
     if (isActorAgent(to)) {
       if (!this.actors?.has(to)) throw new Error(`no actor is ${to}; peers lists them`);
       const one = await this.view(to);
@@ -583,7 +595,7 @@ export class Engine extends EventEmitter {
     if (!fresh.length) return "";
     const lines = fresh.map((c) => {
       const who = `"${c.agent.title}" (${this.#kindOf(c.agent)}, ${c.agent.status === "idle" ? "idle" : "working now"}, ${c.agent.id})`;
-      const seen = c.observed ? "observed: XenoNet inferred it, the actor didn't report it" : null;
+      const seen = !c.observed ? null : isActorAgent(c.agent.id) ? "observed: XenoNet inferred it, the actor didn't report it" : `observed${c.agent.observed === "numbat" ? " through numbat" : ""}: XenoNet inferred it from records, not a transcript`;
       if (c.how === "editing") return `- ${who} edited ${path.basename(c.file)} ${ago(now - c.at)}, in this same working tree${seen ? ` (${seen})` : ""}.`;
       if (c.how === "worktree") {
         const notes = [c.agent.branch && `branch ${c.agent.branch}`, seen].filter(Boolean);

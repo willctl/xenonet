@@ -1,18 +1,26 @@
 #!/usr/bin/env node
-// XenoNet presence from inside a sandbox: a small, dependency-free client
-// for XenoNet's actor gateway, for an agent running somewhere else, such as
+// A run in a sandbox, shown in XenoNet: a small, dependency-free client for
+// XenoNet's actor gateway, for a harness running somewhere else, such as in
 // a SPACE sandbox (SPACE, by Perplexity, runs code in Firecracker microVMs;
-// https://github.com/perplexityai/SPACE). It says whoami once, then sends a
-// heartbeat every minute with a one-line status, and says goodbye (offline)
-// when it's stopped. The sandbox shows in XenoNet as the actor whose gateway
-// token it holds, and its user sees the status line.
+// https://github.com/perplexityai/SPACE).
+//
+// A session is one run of a harness; an actor is the identity that lasts.
+// So the gateway token is the actor's (one you add in XenoNet's window),
+// and each sandbox reports its run as a session under that actor: the
+// actor's heartbeat says it's at work, and report_run says which run, with
+// which harness. Every minute it reports both; stopped, it reports the run
+// ended and leaves the actor as it is, since other runs may go on.
 //
 // Inside the sandbox:
 //
 //   XENONET_GATEWAY_URL         the gateway's address, https://<host>/mcp
 //   XENONET_GATEWAY_TOKEN_FILE  a file holding the actor's gateway token
 //   (or XENONET_GATEWAY_TOKEN)  the token itself, from the command's env
-//   XENONET_STATUS              the status line (optional)
+//   XENONET_RUN_ID              this run's name, the same each time (the
+//                               sandbox's id, say)
+//   XENONET_RUN_APP             the harness it runs: claude, codex,
+//                               gemini-cli… (core/schema/ids.js)
+//   XENONET_STATUS              the run's title line (optional)
 //   XENONET_HEARTBEAT_SECONDS   how often (optional; 60, at least 5)
 //
 //   node presence.mjs [--once]
@@ -24,9 +32,10 @@
 // where you sent it.
 //
 // From the machine that starts the sandbox, `node presence.mjs space-command
-// <sandbox id>` asks the SPACE API to start this script in the sandbox,
+// <sandbox id> <harness>` asks the SPACE API to start this script in the sandbox,
 // with the gateway's address and token in that command's own env, never in
-// the sandbox's metadata or template (see spaceCommand below).
+// the sandbox's metadata or template (see spaceCommand below), and the
+// sandbox's id as the run's name.
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 
@@ -85,10 +94,11 @@ export async function callTool(url, token, name, args = {}, { fetch: f = fetch, 
 // The SPACE API request that starts this script in a sandbox: POST
 // /v1/sandboxes/{id}/commands, with the management token as Bearer, and
 // the gateway's address and token in the command's env alone.
-export function spaceCommand({ sandbox, gatewayUrl, gatewayToken, status = null, script = "/opt/xenonet/presence.mjs", node = "node" }) {
-  if (!/^sbx_[A-Za-z0-9_-]+$/.test(sandbox ?? "")) throw new Error("a SPACE sandbox id starts with sbx_");
+export function spaceCommand({ sandbox, gatewayUrl, gatewayToken, app, status = null, script = "/opt/xenonet/presence.mjs", node = "node" }) {
+  if (!/^sbx_[A-Za-z0-9_-]{1,60}$/.test(sandbox ?? "")) throw new Error("a SPACE sandbox id starts with sbx_");
+  if (typeof app !== "string" || !/^[a-z][a-z0-9-]{1,31}$/.test(app)) throw new Error("say which harness runs in it: claude, codex, gemini-cli…");
   checkUrl(gatewayUrl);
-  const env = { XENONET_GATEWAY_URL: gatewayUrl, XENONET_GATEWAY_TOKEN: gatewayToken, ...(status ? { XENONET_STATUS: status } : {}) };
+  const env = { XENONET_GATEWAY_URL: gatewayUrl, XENONET_GATEWAY_TOKEN: gatewayToken, XENONET_RUN_ID: sandbox, XENONET_RUN_APP: app, ...(status ? { XENONET_STATUS: status } : {}) };
   return { path: `/v1/sandboxes/${sandbox}/commands`, body: { command: [node, script], env } };
 }
 
@@ -114,6 +124,7 @@ async function main(argv) {
       sandbox: argv[1],
       gatewayUrl: process.env.XENONET_GATEWAY_URL ?? "",
       gatewayToken: tokenFrom(),
+      app: argv[2] ?? process.env.XENONET_RUN_APP,
       status: process.env.XENONET_STATUS ?? null,
       ...(process.env.XENONET_PRESENCE_SCRIPT ? { script: process.env.XENONET_PRESENCE_SCRIPT } : {}),
     });
@@ -122,16 +133,23 @@ async function main(argv) {
   }
   const url = checkUrl(process.env.XENONET_GATEWAY_URL ?? "").href;
   const token = tokenFrom();
-  const status = (process.env.XENONET_STATUS ?? "At work in a sandbox").slice(0, 140);
+  const run = process.env.XENONET_RUN_ID ?? "";
+  const app = process.env.XENONET_RUN_APP ?? "";
+  if (!run || !app) throw new Error("set XENONET_RUN_ID (this run's name) and XENONET_RUN_APP (its harness)");
+  const title = (process.env.XENONET_STATUS ?? "").slice(0, 90) || undefined;
   const every = Math.max(5, Number(process.env.XENONET_HEARTBEAT_SECONDS) || 60) * 1000;
   const me = await callTool(url, token, "whoami");
-  console.log(`XenoNet sees this sandbox as ${me?.you?.id ?? "an actor"}`);
-  await callTool(url, token, "heartbeat", { presence: "working", status });
+  const beat = async (presence = "working") => {
+    await callTool(url, token, "heartbeat", { presence: "working" });
+    return callTool(url, token, "report_run", { run, app, presence, ...(title ? { title } : {}) });
+  };
+  const r = await beat();
+  console.log(`XenoNet shows this run as ${r?.session ?? "a session"}, under ${me?.you?.id ?? "its actor"}`);
   if (argv.includes("--once")) return;
-  const timer = setInterval(() => callTool(url, token, "heartbeat", { presence: "working", status }).catch((e) => console.error(e.message)), every);
+  const timer = setInterval(() => beat().catch((e) => console.error(e.message)), every);
   const bye = async () => {
     clearInterval(timer);
-    await callTool(url, token, "heartbeat", { presence: "offline" }).catch(() => {});
+    await callTool(url, token, "report_run", { run, app, presence: "ended" }).catch(() => {});
     process.exit(0);
   };
   process.on("SIGTERM", bye);

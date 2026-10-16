@@ -136,11 +136,11 @@ test("a free slug suggested for one that's taken, and a Hermes profile's slug", 
 test("the products: their slugs and names, which observe and which report themselves", () => {
   assert.deepEqual(OBSERVED.map((p) => p.id), ["hermes-agent", "grok-bot", "muse"], "dots on hold");
   assert.deepEqual(Object.values(PRODUCTS).filter((p) => p.registers).map((p) => p.id), ["hermes-agent", "grok-bot", "muse"], "dots don't report themselves");
-  assert.deepEqual(Object.keys(WHY_NOT), ["dots", "numbat"]);
+  assert.deepEqual(Object.keys(WHY_NOT), ["dots"]);
   assert.equal(productOf("hermes-agent").slug, "hermes");
   assert.equal(productOf("toaster"), null);
   assert.equal(productOf("constructor"), null, "only its own keys");
-  assert.deepEqual(["hermes", "hermes-x", "grok-bot", "muse", "dots", "numbat-cursor", "wren"].map(productOfSlug), ["hermes-agent", "hermes-agent", "grok-bot", "muse", "dots", "numbat", null]);
+  assert.deepEqual(["hermes", "hermes-x", "grok-bot", "muse", "dots", "wren"].map(productOfSlug), ["hermes-agent", "hermes-agent", "grok-bot", "muse", "dots", null]);
 });
 
 test("a token: xenonet_actor_ and 64 hex digits, new each time, kept only as its SHA-256", () => {

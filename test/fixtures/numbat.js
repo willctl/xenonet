@@ -29,11 +29,11 @@ export function event(fields = {}) {
 export const STREAM = (at) => {
   const t = (s) => new Date(at - s * 1000).toISOString();
   return [
-    event({ event_type: "session.start", session_id: "g-1", project_path: ATLAS_DIR, timestamp: t(60) }),
-    event({ event_type: "command.exec", session_id: "g-1", project_path: ATLAS_DIR, command: "npm test -- --token=made-up-secret", tool_name: "run_shell_command", timestamp: t(50) }),
-    event({ event_type: "file.write", session_id: "g-1", project_path: ATLAS_DIR, file_path: `${ATLAS_DIR}/src/refunds.js`, tool_name: "write_file", content_preview: "made-up preview", timestamp: t(40) }),
-    event({ event_type: "file.write", session_id: "g-1", project_path: ATLAS_DIR, file_path: "src/ledger.js", tool_name: "replace", timestamp: t(30) }),
-    event({ source_agent: "cursor", event_type: "file.write", session_id: "c-1", project_path: "/tmp/elsewhere", file_path: "/tmp/elsewhere/notes.md", timestamp: t(20) }),
+    event({ event_type: "session.start", session_id: "g-0000001", project_path: ATLAS_DIR, timestamp: t(60) }),
+    event({ event_type: "command.exec", session_id: "g-0000001", project_path: ATLAS_DIR, command: "npm test -- --token=made-up-secret", tool_name: "run_shell_command", timestamp: t(50) }),
+    event({ event_type: "file.write", session_id: "g-0000001", project_path: ATLAS_DIR, file_path: `${ATLAS_DIR}/src/refunds.js`, tool_name: "write_file", content_preview: "made-up preview", timestamp: t(40) }),
+    event({ event_type: "file.write", session_id: "g-0000001", project_path: ATLAS_DIR, file_path: "src/ledger.js", tool_name: "replace", timestamp: t(30) }),
+    event({ source_agent: "cursor", event_type: "file.write", session_id: "c-0000001", project_path: "/tmp/elsewhere", file_path: "/tmp/elsewhere/notes.md", timestamp: t(20) }),
     // Left out: agents XenoNet reads itself, other record types, a version
     // XenoNet doesn't know.
     event({ source_agent: "claude-code", event_type: "file.write", session_id: "x", project_path: LEDGER_DIR, file_path: `${LEDGER_DIR}/a.js`, timestamp: t(10) }),

@@ -79,6 +79,49 @@ export function qualify(id, host = null, { self = null } = {}) {
 // The other way round: { host, local } as an id.
 export const formatQualified = ({ host = null, local }, opts) => qualify(local, host, opts);
 
+// ---------- sessions ----------
+
+// A session is the state around one run of a harness: a Claude Code
+// session, a Codex thread, a Gemini CLI run. Its id is "<app>:<the run's
+// id>". An actor (below) is something that lasts across runs. The apps XenoNet
+// knows sessions of, and what each is called. claude and codex XenoNet reads
+// itself; the others are observed (numbat's records, or a run an actor
+// reports through the gateway) until XenoNet has a reader of its own.
+export const SESSION_APPS = {
+  claude: "Claude Code",
+  codex: "Codex",
+  "gemini-cli": "Gemini CLI",
+  cursor: "Cursor",
+  copilot: "GitHub Copilot CLI",
+  vscode: "VS Code agent mode",
+  opencode: "OpenCode",
+  openclaw: "OpenClaw",
+  antigravity: "Antigravity",
+  factory: "Factory Droid",
+  "devin-cli": "Devin CLI",
+  "kimi-code": "Kimi Code",
+  pi: "Pi",
+  "qwen-code": "Qwen Code",
+  cline: "Cline",
+  amp: "Amp",
+  auggie: "Auggie",
+  kiro: "Kiro",
+  goose: "Goose",
+  kilo: "Kilo Code",
+  openhands: "OpenHands",
+  crush: "Crush",
+  junie: "Junie",
+  windsurf: "Windsurf",
+  cowork: "Claude Cowork",
+};
+export const isSessionApp = (app) => typeof app === "string" && Object.hasOwn(SESSION_APPS, app);
+const APP_ALT = Object.keys(SESSION_APPS).sort((a, b) => b.length - a.length).join("|");
+// A session's id, unqualified: the app, then the run's own id.
+export const SESSION_LOCAL = new RegExp(`^(${APP_ALT}):[0-9A-Za-z][0-9A-Za-z-]{6,}$`);
+export const SESSION_PREFIX = new RegExp(`^(${APP_ALT}):`);
+export const isSessionId = (id) => SESSION_LOCAL.test(String(id ?? ""));
+export const appOfSession = (id) => SESSION_PREFIX.exec(String(id ?? ""))?.[1] ?? null;
+
 // ---------- actors ----------
 
 export const ACTOR_SLUG = /^[a-z0-9][a-z0-9-]{0,31}$/;
