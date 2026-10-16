@@ -29,7 +29,7 @@ const hosted = process.env.CI === "true" && process.env.XENONET_E2E_RESTART !== 
 test("production Desktop restarts without losing its service, console connection or terminal", { timeout: 300000, skip: hosted && "hosted runners have lost the service or Desktop part way through this test (see the note above); XENONET_E2E_RESTART=1 runs it anyway" }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-components-"));
   const port = await freePort();
-  const env = { ...process.env, XENONET_INSTANCE: "test", XENONET_DEMO: "1", XENONET_STANDALONE: "1", XENONET_RUNTIME_DIR: dir, XENONET_RUNTIME_EXEC: process.execPath, XENONET_PORT: String(port), XENONET_DESKTOP_PORT: String(await freePort()), XENONET_SHOW: "hidden" };
+  const env = { ...process.env, XENONET_INSTANCE: "test", XENONET_DEMO: "1", XENONET_STANDALONE: "1", XENONET_RUNTIME_DIR: dir, XENONET_RUNTIME_EXEC: process.execPath, XENONET_PORT: String(port), XENONET_DESKTOP_PORT: String(await freePort()), XENONET_SHOW: process.env.XENONET_E2E_SHOW ?? "hidden" };
   delete env.ELECTRON_RUN_AS_NODE;
   if (process.env.XENONET_TEST_COMPONENT_BUNDLE) await installBundle(process.env.XENONET_TEST_COMPONENT_BUNDLE, { env, command: false });
   const electron = process.env.XENONET_TEST_PACKAGED_EXE || createRequire(import.meta.url)("electron");
@@ -68,7 +68,7 @@ test("production Desktop restarts without losing its service, console connection
     assert.equal((await mcp.call("terminal", { action: "list" })).result.isError, true);
     assert.equal(mcp.proc.exitCode, null);
     await assert.rejects(service.request("console", { op: "ping" }), /closed or restarting/);
-    await s.launch({ show: "hidden" });
+    await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
     assert.notEqual((await s.ping()).pid, desktop.pid);
     assert.equal((await mcp.call("terminal", { action: "list" })).result.isError, undefined);
     assert.equal(mcp.proc.exitCode, null);
@@ -86,7 +86,7 @@ test("production Desktop restarts without losing its service, console connection
     // Hosted runners' software rendering may never settle the camera, and
     // a look is the page's own 3 s timer, so the selection doesn't wait.
     await s.driver("select", atlas.id, { settle: false });
-    const looked = await until(async () => (await s.api("/api/actors/you")).recent?.find((e) => e.target === atlas.id && e.at >= since));
+    const looked = await until(async () => (await s.api("/api/actors/you")).recent?.find((e) => e.kind === "status" && e.target === atlas.id && e.at >= since));
     assert.equal(looked.detail, "Looking at atlas-api");
     // Desktop passes on its page's requests alone; other programs go to the
     // service, which sees who they are.

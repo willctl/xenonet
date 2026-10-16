@@ -45,7 +45,7 @@ function fakeChild() {
 test("CPU use: from the cores' times between readings, each core and all of them, with the model in plain words", async () => {
   const osm = fakeOs({ threads: 4 });
   let t = 1_800_000_000_000;
-  const stats = createSystemStats({ platform: "freebsd", osm, now: () => t, wait: async () => osm.tick([1, 0.5, 0, 0.5]) });
+  const stats = createSystemStats({ platform: "freebsd", osm, exists: () => false, now: () => t, wait: async () => osm.tick([1, 0.5, 0, 0.5]) });
   const r = await stats.read();
   assert.deepEqual(r.cpu, { model: "Intel Core i7-9700K", threads: 4, ghz: 3.6, usage: 0.5, cores: [1, 0.5, 0, 0.5] });
   assert.deepEqual(r.memory, { total: 32 * GB, used: 20 * GB });

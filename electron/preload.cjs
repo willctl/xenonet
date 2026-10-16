@@ -60,4 +60,5 @@ contextBridge.exposeInMainWorld("xenonetDesktop", {
   // dialog to a file only you can read: { file, warning } (file with ~), or
   // null when you cancel. `slug` names the file it suggests.
   saveToken: (token, { slug } = {}) => ipcRenderer.invoke("app:save-token", { token, slug }),
+  savePatch: (value) => ipcRenderer.invoke("app:save-patch", value),
 });

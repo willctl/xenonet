@@ -5,7 +5,7 @@ import { xenonet } from "../../core/control.js";
 
 const port = await new Promise((resolve) => { const p = net.createServer().listen(0, "127.0.0.1", () => { const port = p.address().port; p.close(() => resolve(port)); }); });
 const s = xenonet("test", { port });
-before(async () => { await xenonet("test").quit(); await s.launch({ show: "hidden" }); }, { timeout: 180000 });
+before(async () => { await xenonet("test").quit(); await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" }); }, { timeout: 180000 });
 after(async () => { await s.quit().catch(() => {}); });
 
 test("focusing an MCP system shows metadata; tools and context are accessible without execution", { timeout: 60000 }, async () => {

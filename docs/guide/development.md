@@ -28,6 +28,14 @@ XenoNet Dev picks up edits as you save them:
 
 Vite keeps its prebundled dependencies in each checkout's `.xenonet/vite`, which git ignores. So worktrees that link `node_modules` don't share them.
 
+### Linux and WSL2 checks
+
+On a Windows host where application control blocks unapproved native scripts or executables, run XenoNet development tools, builds and tests inside WSL2 or Docker. Keep the source checkout in your normal projects folder. Install Linux dependencies from the Linux shell rather than reusing Windows `node_modules`.
+
+Run Electron checks as a regular Linux user. A headless display needs Xvfb and a WebGL renderer. Use `XENONET_E2E_SHOW=inactive XENONET_SOFTWARE_RENDERING=1 xvfb-run -a npm run test:e2e`. Chromium's software renderer draws windows inside Xvfb's isolated display. Keeping them visible there prevents hidden-window frame throttling and stale captures. The renderer sandbox stays enabled, and installed app settings stay as they were. Each test port gets its own Electron profile.
+
+For machines with many cores, `npm test -- --test-concurrency=4` keeps the unit suite's process count bounded. Review/export verification with a real OpenShell gateway is described in [Agent workflows](integrations.md#storage-and-verification). Its fixture makes no model or provider calls.
+
 `npm run dev:install` puts XenoNet Dev.app in `~/Applications` and opens it. Then you can test the Dock, the menu bar and notifications without building an installer. XenoNet Dev.app is the Electron that `npm install` fetched, renamed and given XenoNet's icon, with a pointer to this checkout. So code changes never need a reinstall. Run `npm run dev:install` again after Electron updates, or if you move the checkout. To remove XenoNet Dev.app, drag it to the Trash.
 
 ## The page's Content-Security-Policy

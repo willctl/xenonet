@@ -27,3 +27,6 @@
 .in-panel [data-in-form] > .act { margin: 10px 6px 0 0; }
 .in-panel [data-in-inspection] { white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.6 var(--mono); }
 @media (max-width: 720px) { .in-fields, .in-columns { grid-template-columns: 1fr; } }
+.in-review-files { display: grid; gap: 6px; margin: 12px 0; }
+.in-review-files .act { text-align: left; overflow-wrap: anywhere; }
+.in-panel [data-in-diff] { white-space: pre; max-height: 420px; overflow: auto; tab-size: 4; }

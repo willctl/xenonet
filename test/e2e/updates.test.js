@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { xenonet } from "../../core/control.js";
 
 const s = xenonet("test");
-before(async () => { await s.quit(); await s.launch({ show: "hidden" }); }, { timeout: 180000 });
+before(async () => { await s.quit(); await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" }); }, { timeout: 180000 });
 after(async () => { await s.quit().catch(() => {}); });
 
 test("Updates is reachable from the palette and driver, and source builds cannot update", { timeout: 60000 }, async () => {
