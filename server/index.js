@@ -876,6 +876,8 @@ async function api(req, res, url) {
     return send(res, 200, state.digest(since));
   }
   if (req.method === "GET" && route === "/api/daylog") return send(res, 200, state.dayLog());
+  if (req.method === "GET" && route === "/api/constellation") return send(res, 200, state.constellation({ names: url.searchParams.get("names") === "1" }));
+  if (req.method === "GET" && route === "/api/constellation/labels") return send(res, 200, state.exportLabels());
   if (req.method === "POST" && route === "/api/narrate") {
     const { kind, since } = await readJson(req);
     try {

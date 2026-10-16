@@ -50,7 +50,11 @@ export function createRecorder(getWindow) {
       await sleep(400);
     }
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    const proc = spawn(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "image2pipe", "-framerate", String(fps), "-c:v", "mjpeg", "-i", "-", "-vf", `scale=${width}:-2:flags=lanczos,format=yuv420p`, ...encoder(ffmpeg), "-movflags", "+faststart", file], { stdio: ["pipe", "ignore", "pipe"], windowsHide: true });
+    // No tags in the file, so the MP4 says nothing of this computer or
+    // its software: -map_metadata -1 drops any, bitexact keeps the muxer
+    // from writing its own, and the stream's encoder tag is emptied. What
+    // stays is the container's own boxes (its brand, a handler name).
+    const proc = spawn(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "image2pipe", "-framerate", String(fps), "-c:v", "mjpeg", "-i", "-", "-vf", `scale=${width}:-2:flags=lanczos,format=yuv420p`, ...encoder(ffmpeg), "-map_metadata", "-1", "-fflags", "+bitexact", "-metadata:s:v:0", "encoder=", "-movflags", "+faststart", file], { stdio: ["pipe", "ignore", "pipe"], windowsHide: true });
     let err = "";
     proc.stderr.on("data", (d) => (err = (err + d).slice(-4000)));
     proc.stdin.on("error", () => {});

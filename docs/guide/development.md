@@ -153,6 +153,7 @@ The console page imports only the core modules that have no Node in them, `theme
 | `live.js` | The transcript reader and its signals |
 | `graph.js`, `state.js` | The map's data |
 | `search.js`, `digest.js` | Search and digests |
+| `redact.js`, `export-labels.js`, `frames.js` | What an export of the day may say (star names, the archetype), what the map's own labels show during one, and the frames posters and films come in |
 | `identities.js` | Who sessions ran as |
 | `claude-usage.js` | Claude plan usage |
 | `config.js`, `dirs.js`, `paths.js`, `store.js` | Settings, and the places XenoNet keeps things |
@@ -190,11 +191,12 @@ The console page imports only the core modules that have no Node in them, `theme
 | `actors.js`, `actors-model.js` | The actors' layer |
 | `hosts.js`, `hosts-draw.js` | Other machines' constellations |
 | `framing.js` | Where the camera stands to frame the map |
-| `hud.js`, `telemetry.js`, `alerts.js`, `modals.js`, `palette.js`, `replay.js`, `poster.js`, `terminal.js`, `identities.js` | The panels around the map |
+| `hud.js`, `telemetry.js`, `alerts.js`, `modals.js`, `palette.js`, `replay.js`, `terminal.js`, `identities.js` | The panels around the map |
+| `export-panel.js`, `poster.js`, `poster-draw.js`, `mark.js` | The export panel, and posters of the day: the preview, the sizes, what an export reveals, and the mark |
 | `connect.js` | The panel for connecting Claude Code and Codex |
 | `doctor.js` | The panel for XenoNet's doctor |
 | `stats.js` | The panel for a session's stats |
-| `film.js` | Films of the day |
+| `film.js`, `film-cards.js` | Films of the day, and their cards |
 | `root.js` | The panel for changing the projects folder |
 | `themes-ui.js`, `theme-switcher.js`, `theme-gallery.js` | Themes from the palette |
 | `actors-panel.js`, `actor-inspector.js`, `actor-requests.js`, `gateway-panel.js`, `wake-panel.js`, `remote-panel.js`, `remote-views.js` | The Actors panel, an actor in the inspector, the programs asking to be one, the actor gateway, how actors are woken, and remote connections and their views in the panel |

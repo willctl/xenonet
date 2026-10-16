@@ -256,6 +256,28 @@ function buildServer() {
   );
 
   tool(
+    "poster",
+    {
+      title: "A poster of today",
+      description: "Renders today's constellation as a poster (src/poster.js) at `size`: story (1080×1920), portrait (1080×1350), card (1200×630) or wide (1920×1080). Projects show as star names and no clock appears, unless `names` or `tokens` reveal them for this one. Returns what it drew (`lines`) and the PNG's size; `save` saves it to the pictures folder, as the export panel's Save PNG does. The panel itself, with its preview, opens with command poster.",
+      inputSchema: z.object({ size: z.enum(["story", "portrait", "card", "wide"]).optional(), names: z.boolean().optional(), tokens: z.boolean().optional(), save: z.boolean().optional(), instance: instanceArg }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async ({ size, names, tokens, save, instance }) => reply(await target(instance).driver("poster", { size, reveal: { names, tokens }, save })),
+  );
+
+  tool(
+    "labels",
+    {
+      title: "The map's labels",
+      description: "Reads every drawn node's label as it reads now (id, kind, text, visible), and whether an export has them redacted: while a film plays, and during a poster render, projects, groups, folders, pages, shared systems and machines show star names and sessions show no label (core/export-labels.js), unless the export reveals the names. For checking what a film or a poster shows of the map.",
+      inputSchema: z.object({ instance: instanceArg }),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async ({ instance }) => reply(await target(instance).driver("labels")),
+  );
+
+  tool(
     "identities",
     {
       title: "Identities",

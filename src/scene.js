@@ -18,6 +18,7 @@ import { hostVisual, STALE_LIGHT, sameHost } from "./hosts.js";
 import { createHostLayer } from "./hosts-draw.js";
 import { onEnvironment, environmentState } from "./environment.js";
 import { environmentOf } from "../core/environments.js";
+import { exportLabel } from "../core/export-labels.js";
 
 const HIERARCHY = new Set(["contains", "nested", "satellite", "native", "zone", "session", "lineage", "resource", "wiki", "page"]);
 const idOf = (end) => (typeof end === "object" ? end.id : end);
@@ -62,6 +63,9 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
   let liveData = null;
   let wallpaper = null;
   let labelFade = 1;
+  // While a film plays or a poster renders: { id: star name }, and the map's
+  // own labels follow it (export-labels.js). Null the rest of the time.
+  let redaction = null;
 
   // ---------- links: in the theme's style of line (see looks/lines.js) ----------
 
@@ -93,7 +97,11 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
     .backgroundColor(THEME.colors.bg)
     .showNavInfo(false)
     .nodeLabel(() => "")
-    .nodeThreeObject((n) => (n.__obs = buildNode(n)))
+    .nodeThreeObject((n) => {
+      n.__obs = buildNode(n);
+      if (redaction) redactLabel(n);
+      return n.__obs;
+    })
     .nodeThreeObjectExtend(false)
     .nodeVisibility((n) => !visible || visible.has(n.id))
     .linkVisibility((l) => !visible || (visible.has(idOf(l.source)) && visible.has(idOf(l.target))))
@@ -372,6 +380,29 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
     if (!g) return;
     g.userData.scaleTarget = g.userData.baseScale ?? 1;
     if (g.userData.label && node.kind === "session") g.userData.label.visible = !!g.userData.labelSticky || !!fan?.items.has(node);
+  }
+
+  // A node's label during an export (export-labels.js): a star name in
+  // place of a project's, a group's, a folder's, a page's, a shared
+  // system's or a machine's, and none on a session. Off again, the label
+  // gets its own text back, and a session's its usual showing.
+  function redactLabel(n) {
+    const g = n.__obs, lbl = g?.userData.label;
+    if (!lbl) return;
+    lbl.userData.plain ??= lbl.text;
+    if (redaction) {
+      const text = exportLabel(n, redaction);
+      lbl.userData.hidden = text == null;
+      if (text == null) lbl.visible = false;
+      else {
+        if (lbl.text !== text) lbl.text = text;
+        lbl.visible = true;
+      }
+    } else {
+      if (lbl.text !== lbl.userData.plain) lbl.text = lbl.userData.plain;
+      lbl.userData.hidden = false;
+      lbl.visible = n.kind !== "session" || !!g.userData.labelSticky || !!fan?.items.has(n) || n === selected || n === hovered;
+    }
   }
 
   // ---------- packets: glowing data moving along links and arcs ----------
@@ -1139,6 +1170,9 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
       if (lbl) {
         const fade = n === selected || n === hovered ? 1 : labelFade;
         lbl.material.opacity = (lbl.material.userData.base ?? 1) * (g.userData.dim ?? 1) * fade;
+        // Hidden for an export stays hidden, whatever a selection or a
+        // gathering would show.
+        if (redaction && lbl.userData.hidden) lbl.visible = false;
       }
     }
     if (selected && reticle.visible) {
@@ -1250,6 +1284,7 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
     }
     g.add(...fresh.children);
     g.userData = fresh.userData;
+    if (redaction) redactLabel(n);
     if (n.__live !== undefined) applyLive(n, n.__live);
     if (n === selected || n === hovered) highlight(n);
     if (fan?.items.has(n)) fanLabel(n, true);
@@ -1574,6 +1609,21 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
     },
     getNode: (id) => nodeIndex.get(id),
     nodes: () => [...nodeIndex.values()],
+    // The map's own labels during an export (export-labels.js): `labels`
+    // ({ id: star name }) puts star names on projects, groups, folders,
+    // pages, shared systems and machines and takes the labels off sessions,
+    // for every node drawn now and any drawn later; null gives each label
+    // its own text back.
+    setRedaction(labels) {
+      redaction = labels ? { ...labels } : null;
+      for (const n of graph.graphData().nodes) redactLabel(n);
+    },
+    get redaction() {
+      return redaction;
+    },
+    // Every drawn node's label as it reads now, for the driver and the
+    // tests: what a film or a poster shows of the map.
+    labelTexts: () => graph.graphData().nodes.filter((n) => n.__obs?.userData.label).map((n) => ({ id: n.id, kind: n.kind, text: n.__obs.userData.label.text, visible: !!n.__obs.userData.label.visible })),
     // Other machines' constellations and the bridges drawn (hosts-draw.js).
     hosts: () => hosts.state(),
     homeOf,
@@ -1626,21 +1676,51 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
       restTarget = on ? 1 : 0;
     },
 
-    // One frame at poster resolution. Lines keep their on-screen width; the
-    // pixel ratio is raised so everything else renders at `width` pixels.
-    renderHighRes(width = 3840) {
+    // One frame at poster resolution. At the window's shape, the pixel
+    // ratio is raised so everything renders at `width` pixels, and lines
+    // keep their on-screen width. With a `height`, the frame has a shape
+    // of its own (a poster's, core/frames.js): the camera takes that shape
+    // and backs off when it's narrower than the window, so what the window
+    // shows across still fits, then gets its own view back.
+    renderHighRes(width = 3840, height = null) {
       const pr0 = renderer.getPixelRatio();
-      const pr = width / innerWidth;
       const ret = reticle.visible;
       reticle.visible = false;
-      renderer.setPixelRatio(pr);
-      composer.setPixelRatio(pr);
-      composer.render();
-      const url = renderer.domElement.toDataURL("image/png");
-      renderer.setPixelRatio(pr0);
-      composer.setPixelRatio(pr0);
+      let url, W, H;
+      if (height) {
+        const aspect0 = camera.aspect;
+        const pos0 = camera.position.clone();
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+        camera.position.copy(controls.target).addScaledVector(pos0.clone().sub(controls.target), Math.max(1, aspect0 / camera.aspect));
+        camera.updateMatrixWorld();
+        renderer.setPixelRatio(1);
+        renderer.setSize(width, height, false);
+        composer.setPixelRatio(1);
+        composer.setSize(width, height);
+        composer.render();
+        url = renderer.domElement.toDataURL("image/png");
+        [W, H] = [width, height];
+        renderer.setPixelRatio(pr0);
+        renderer.setSize(innerWidth, innerHeight, false);
+        composer.setPixelRatio(pr0);
+        composer.setSize(innerWidth, innerHeight);
+        camera.aspect = aspect0;
+        camera.updateProjectionMatrix();
+        camera.position.copy(pos0);
+        camera.updateMatrixWorld();
+      } else {
+        const pr = width / innerWidth;
+        renderer.setPixelRatio(pr);
+        composer.setPixelRatio(pr);
+        composer.render();
+        url = renderer.domElement.toDataURL("image/png");
+        renderer.setPixelRatio(pr0);
+        composer.setPixelRatio(pr0);
+        [W, H] = [Math.round(innerWidth * pr), Math.round(innerHeight * pr)];
+      }
       reticle.visible = ret;
-      return { url, width: Math.round(innerWidth * pr), height: Math.round(innerHeight * pr) };
+      return { url, width: W, height: H };
     },
   };
   onTheme(retheme);

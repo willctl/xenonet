@@ -30,7 +30,7 @@ $ xenonet
 | `xenonet messages` | Shows what sessions and actors said to each other in the last day. |
 | `xenonet search <words>` | Searches every Claude Code and Codex transcript. |
 | `xenonet root [folder]` | Shows the projects folder XenoNet reads and where that comes from, or reads another folder. `--check` only says what XenoNet would find there. `--reset` goes back to `~/Projects`. See [Changing the projects folder](projects.md#changing-the-projects-folder). |
-| `xenonet film` | Renders a film of today in a hidden XenoNet Dev window, and saves the MP4. It takes `--seconds`, `--theme`, `--size` and `--out`. |
+| `xenonet film` | Renders a film of today in a hidden XenoNet Dev window, as a 15 to 30 second story (9:16), and saves the MP4 with no tags. Projects show as star names and no clock appears unless `--names` or `--tokens` say otherwise. It also takes `--seconds`, `--theme`, `--size` and `--out`. |
 | `xenonet script record`, `xenonet script run <file>` | Saves what you did in XenoNet Dev as a script, and plays scripts back. See [Driving XenoNet](development.md#driving-xenonet-from-agents-scripts-and-tests). |
 | `xenonet theme [name]` | Lists the themes, or switches to one. `xenonet theme copy <theme> <name>` starts one of your own. |
 | `xenonet connect`, `xenonet disconnect` | [Connects Claude Code and Codex](agents.md#connecting-claude-code-and-codex), or takes XenoNet out again, after showing each change. |
