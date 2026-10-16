@@ -173,6 +173,13 @@ export const PROVIDERS = [
     release: { npm: "@google/gemini-cli", tags: ["latest"] },
     notInspected: "Its chat records are written by a running Gemini CLI with a model behind it, and carry no version. The check records the latest version only.",
   },
+  {
+    id: "github/copilot-cli",
+    name: "GitHub Copilot CLI",
+    sources: ["github/copilot-cli/session-event"],
+    release: { npm: "@github/copilot", tags: ["latest"] },
+    notInspected: "Its event logs are written by a running Copilot CLI signed in to GitHub, and the check runs with no secrets. The check records the latest version only.",
+  },
 ];
 
 export const providerById = (id) => PROVIDERS.find((p) => p.id === id) ?? null;

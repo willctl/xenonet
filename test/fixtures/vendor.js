@@ -252,6 +252,17 @@ export const VENDOR = {
       { record: { id: "m3", type: "gemini", toolCalls: [{ id: "c2", name: 5 }] }, drift: [["type-change", "toolCalls[].name"]], strip: [["toolCalls", 0, "name"]] },
     ],
   },
+  "github/copilot-cli/session-event": {
+    fits: [
+      { id: "e1", timestamp: "2026-10-16T12:00:00.000Z", parentId: null, type: "session.start", data: { sessionId: "0f3c2b1a-0000-4000-8000-000000000001", version: 1, producer: "copilot-agent", copilotVersion: "1.0.98", startTime: "2026-10-16T12:00:00.000Z", context: { cwd: "/Users/ada/atlas", branch: "main" } } },
+      { id: "e2", timestamp: "2026-10-16T12:00:05.000Z", parentId: "e1", type: "tool.execution_start", data: { toolCallId: "t1", toolName: "str_replace_editor", arguments: { command: "str_replace", path: "/Users/ada/atlas/notes.txt" } } },
+      { id: "e3", timestamp: "2026-10-16T12:00:09.000Z", parentId: "e2", type: "assistant.message", data: { content: "Done" } },
+    ],
+    odd: [
+      { record: { id: "e4", timestamp: "2026-10-16T12:00:10.000Z", type: "session.start", data: { sessionId: "x", version: "1" } }, drift: [["type-change", "data.version"]], strip: [["data", "version"]] },
+      { record: { timestamp: "2026-10-16T12:00:10.000Z", type: "session.idle" }, drift: [["missing-field", "id"]] },
+    ],
+  },
   "nous/hermes-agent/install-stamp": {
     fits: [{ schemaVersion: 2, commit: "0a1b2c3d4e", commitDate: 1791200000, branch: "main", builtAt: "2026-10-05T12:00:00+00:00", dirty: false, source: "git", distribution: null, updateMechanism: "self", baseVersion: "0.21.5", displayVersion: "0.21.5+12.g0a1b2c3", distance: 12, payload: "bootstrap", tag: null }],
     odd: [

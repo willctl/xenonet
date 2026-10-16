@@ -164,6 +164,7 @@ drift record and the rules; this is how they're built.
 | `google/gemini-cli/chat-record` | `~/.gemini/tmp/*/chats/session-*.jsonl`, Gemini CLI's chat records (experimental reader) | `native/gemini-cli.js` | None; the newest schema | `*` |
 
 Not covered, since the contracts don't list them: the Remote Control
+| `github/copilot-cli/session-event` | `~/.copilot/session-state/<id>/events.jsonl`, Copilot CLI's session events (experimental reader) | `native/copilot-cli.js` | `session.start`'s `version` | `1` |
 owner line `identities.js` finds in a transcript's first 64 KB, the
 settings files and `codex mcp get` that connecting reads, hook payloads,
 the CLIs' version and sign-in outputs, git's files and output, project
