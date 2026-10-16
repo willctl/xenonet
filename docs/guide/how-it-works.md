@@ -79,6 +79,7 @@ On Linux, these go in the XDG defaults, `~/.local/state` and `~/.cache`.
 | `XENONET_IDENTITIES` | On. Set it to `off` to stop reading the apps' sign-ins, gh's accounts and each repo's git identity. |
 | `XENONET_HIDE_IDENTITIES` | Off. Set it to `1` to start with identities masked. |
 | `XENONET_ACTORS` | On. Set it to `off` to turn [actors](actors.md) off. Then there's no layer and no observers, and nothing is reported, you included. |
+| `XENONET_NUMBAT_FILE` | Unset. Name the NDJSON file numbat writes events to, and XenoNet shows the agents in it as actors. See [Related work](related-work.md#numbat-agents-xenonet-doesnt-read-itself-experimental). |
 | `XENONET_DEMO` | Set it to `1` for demo mode, the same as `npm run demo`. |
 | `XENONET_UPSTREAM` | XenoNet Dev only: another XenoNet's address on this computer, such as a forwarded port, whose data the page shows, read-only. See [Developing on another computer](development.md#developing-on-another-computer). |
 | `XENONET_HOSTS` | Off. Set it to `1` to show [other machines' XenoNets](other-machines.md), a prototype. |

@@ -106,9 +106,10 @@ const registration = actors ? createRegistration({ actors }) : null;
 const actorCaller = registration ? createActorCaller({ registration, verify }) : null;
 actors?.drive(CLOCK_MS, () => registration.tick());
 // The observers of Hermes Agent, Grok Bot and Muse (core/actors/observers.js),
+// and the numbat bridge when XENONET_NUMBAT_FILE names its file,
 // each on unless you turned it off; never in the demo, whose actors are
 // made up and whose machine isn't read. Loaded only where they run.
-const observers = actors && !config.demo ? (await import("../core/actors/observers.js")).createObservers({ actors, registration, procs, home: config.homeDir }) : null;
+const observers = actors && !config.demo ? (await import("../core/actors/observers.js")).createObservers({ actors, registration, procs, home: config.homeDir, numbat: config.numbatFile ? { file: config.numbatFile } : null }) : null;
 for (const o of observers?.list ?? []) state.blocks.add(o);
 const connect = createConnect({ port: config.port, root: process.env.XENONET_LAUNCHER_ROOT || root, demo: config.demo, exec: process.env.XENONET_LAUNCHER_EXEC || process.env.XENONET_EXEC || process.execPath, runAsNode: !process.env.XENONET_LAUNCHER_EXEC && !!process.env.XENONET_EXEC });
 

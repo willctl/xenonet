@@ -20,3 +20,4 @@ XenoNet is the network for SI (super intelligence) on your machine. It has a bac
 - [How it works](how-it-works.md) lists where XenoNet's data comes from, where XenoNet keeps its files, and the environment variables it reads.
 - [Development](development.md) covers working on XenoNet itself, driving it from agents, scripts and tests, and the layout of the code.
 - [Provider drift](provider-drift.md) says how the daily check of new Claude Code, Agent SDK and Codex releases works, and how to act on its report.
+- [Related work](related-work.md) compares XenoNet with numbat and SPACE, and covers using them with XenoNet, with a table of the agents XenoNet detects today.

@@ -357,6 +357,16 @@ Here is what's planned:
 - More sources. XenoNet will read other agent apps besides Claude Code and
   Codex.
 
+## Related work
+
+[numbat](https://github.com/perplexityai/numbat) audits what coding agents
+do, for security. [SPACE](https://github.com/perplexityai/SPACE) isolates
+where agents run, in microVM sandboxes. XenoNet coordinates the sessions
+that are live on your machine: the map, warnings before two sessions edit
+one file, and messages between them. XenoNet can read numbat's events and
+show a SPACE sandbox as an actor, both experimental. See
+[Related work](docs/guide/related-work.md).
+
 ## Development
 
 ```bash
