@@ -36,6 +36,7 @@ const SOURCES = [
   "anomaly/opencode/db",
   "google/gemini-cli/chat-record",
   "github/copilot-cli/session-event",
+  "anysphere/cursor/hook-input",
 ];
 
 test("every vendor source the contracts list has a schema, read leniently, with the versions it was made for", () => {

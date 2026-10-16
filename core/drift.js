@@ -72,6 +72,7 @@ const SOURCES = {
   "anomaly/opencode/db": "OpenCode's database",
   "google/gemini-cli/chat-record": "Gemini CLI's chat records",
   "github/copilot-cli/session-event": "Copilot CLI's session events",
+  "anysphere/cursor/hook-input": "Cursor's hook input",
 };
 export const sourceName = (source) => SOURCES[source] ?? source;
 

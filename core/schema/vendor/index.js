@@ -10,3 +10,4 @@ import "./nous/hermes-agent.js";
 import "./anomaly/opencode.js";
 import "./google/gemini-cli.js";
 import "./github/copilot-cli.js";
+import "./anysphere/cursor.js";

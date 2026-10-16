@@ -263,6 +263,17 @@ export const VENDOR = {
       { record: { timestamp: "2026-10-16T12:00:10.000Z", type: "session.idle" }, drift: [["missing-field", "id"]] },
     ],
   },
+  "anysphere/cursor/hook-input": {
+    fits: [
+      { at: "2026-10-16T12:00:00.000Z", hook_event_name: "sessionStart", conversation_id: "6b0e5f1c-0000-4000-8000-000000000001", session_id: "6b0e5f1c-0000-4000-8000-000000000001", cursor_version: "2.4.1", workspace_roots: ["/Users/ada/atlas"] },
+      { at: "2026-10-16T12:00:05.000Z", hook_event_name: "afterFileEdit", conversation_id: "6b0e5f1c-0000-4000-8000-000000000001", cursor_version: "2.4.1", workspace_roots: ["/Users/ada/atlas"], file_path: "/Users/ada/atlas/notes.txt" },
+      { at: "2026-10-16T12:00:09.000Z", hook_event_name: "sessionEnd", session_id: "6b0e5f1c-0000-4000-8000-000000000001", reason: "completed" },
+    ],
+    odd: [
+      { record: { at: "2026-10-16T12:00:00.000Z", hook_event_name: "afterFileEdit", file_path: 5 }, drift: [["type-change", "file_path"]], strip: [["file_path"]] },
+      { record: { at: "2026-10-16T12:00:00.000Z" }, drift: [["missing-field", "hook_event_name"]] },
+    ],
+  },
   "nous/hermes-agent/install-stamp": {
     fits: [{ schemaVersion: 2, commit: "0a1b2c3d4e", commitDate: 1791200000, branch: "main", builtAt: "2026-10-05T12:00:00+00:00", dirty: false, source: "git", distribution: null, updateMechanism: "self", baseVersion: "0.21.5", displayVersion: "0.21.5+12.g0a1b2c3", distance: 12, payload: "bootstrap", tag: null }],
     odd: [

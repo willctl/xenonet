@@ -165,6 +165,7 @@ drift record and the rules; this is how they're built.
 
 Not covered, since the contracts don't list them: the Remote Control
 | `github/copilot-cli/session-event` | `~/.copilot/session-state/<id>/events.jsonl`, Copilot CLI's session events (experimental reader) | `native/copilot-cli.js` | `session.start`'s `version` | `1` |
+| `anysphere/cursor/hook-input` | The file `scripts/cursor/hook.mjs` writes from Cursor's hook input (experimental reader) | `native/cursor.js` | `cursor_version` | `*` |
 owner line `identities.js` finds in a transcript's first 64 KB, the
 settings files and `codex mcp get` that connecting reads, hook payloads,
 the CLIs' version and sign-in outputs, git's files and output, project

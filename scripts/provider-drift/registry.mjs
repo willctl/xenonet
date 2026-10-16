@@ -180,6 +180,12 @@ export const PROVIDERS = [
     release: { npm: "@github/copilot", tags: ["latest"] },
     notInspected: "Its event logs are written by a running Copilot CLI signed in to GitHub, and the check runs with no secrets. The check records the latest version only.",
   },
+  {
+    id: "anysphere/cursor",
+    name: "Cursor",
+    sources: ["anysphere/cursor/hook-input"],
+    notInspected: "Its hook input is only written by a running Cursor agent with a model behind it, and Cursor publishes no package to read. The check records nothing; the schema follows Cursor's hooks reference.",
+  },
 ];
 
 export const providerById = (id) => PROVIDERS.find((p) => p.id === id) ?? null;

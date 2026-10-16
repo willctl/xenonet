@@ -56,6 +56,21 @@ XenoNet can read some other harnesses' sessions from their own records, without 
 
 **GitHub Copilot CLI** (`XENONET_READERS=copilot`). Each Copilot CLI session is a session, `copilot:<session id>`. XenoNet reads its event log, `~/.copilot/session-state/<id>/events.jsonl` (or `<id>.jsonl`, the layout before 1.0.11): the session's id, working folder, branch, title and times, the file each edit tool names, and the files its shutdown says it changed. It never reads prompts, replies, commands or tool results. A session ends at its shutdown. This is tested with made-up events in the shape of the Copilot SDK's published event schema, not yet against a real session.
 
+**Cursor** (`XENONET_READERS=cursor`). Cursor's agent sessions are read through Cursor's [hooks](https://cursor.com/docs/agent/hooks), since Cursor documents no session format. Each conversation is a session, `cursor:<conversation id>`, in its first workspace folder. Add XenoNet's hook to `~/.cursor/hooks.json` for `sessionStart`, `afterFileEdit` and `sessionEnd`, telling it the file to write:
+
+```json
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [{ "command": "node /path/to/xenonet/scripts/cursor/hook.mjs /path/to/cursor-hooks.ndjson" }],
+    "afterFileEdit": [{ "command": "node /path/to/xenonet/scripts/cursor/hook.mjs /path/to/cursor-hooks.ndjson" }],
+    "sessionEnd": [{ "command": "node /path/to/xenonet/scripts/cursor/hook.mjs /path/to/cursor-hooks.ndjson" }]
+  }
+}
+```
+
+Then start XenoNet with `XENONET_CURSOR_EVENTS` set to that file (by default it reads `cursor-hooks.ndjson` in XenoNet's state folder). From each hook's input the hook keeps the conversation id, the Cursor version, the workspace folders, the edited file's path and how the session ended. It never keeps the prompt, an edit's text, a file's content, the model or your email. It always answers `{}` and never blocks the agent. A session ends at `sessionEnd`. This is tested with made-up hook input in the shape of Cursor's hooks reference, not yet in Cursor itself.
+
 ## What XenoNet detects today
 
 Sessions are runs of a harness; actors last across runs.
@@ -65,6 +80,7 @@ Sessions are runs of a harness; actors last across runs.
 | Claude Code (CLI, and its sessions in Claude desktop) | Sessions | Reads its transcripts; hooks once you connect it | Yes | Yes, once connected |
 | Codex (CLI and app) | Sessions | Reads its rollouts and app-server; hooks once you connect it | Yes | Yes, once connected |
 | Gemini CLI (experimental) | Sessions | Reads its chat records, when you turn that on | Yes | No |
+| Cursor (experimental) | Sessions | XenoNet's hook in Cursor's hooks.json, when you turn that on | Yes | No |
 | GitHub Copilot CLI (experimental) | Sessions | Reads its event logs, when you turn that on | Yes | No |
 | OpenCode (experimental) | Sessions | Reads its database, when you turn that on | Yes | No |
 | Runs numbat records (experimental) | Sessions, observed | numbat's event file, when you name it | Yes, observed | No |
