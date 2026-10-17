@@ -70,6 +70,10 @@ pub(crate) unsafe fn arg_of(env: sys::napi_env, v: sys::napi_value, depth: usize
             if is {
                 return Ok(Arg::Other);
             }
+            // A Map as its [key, value] pairs, a Set as its values.
+            if let Some(items) = unsafe { collection(env, v)? } {
+                return unsafe { arg_of(env, items, depth + 1) };
+            }
             let mut keys = ptr::null_mut();
             check(
                 unsafe { sys::napi_get_all_property_names(env, v, sys::KeyCollectionMode::own_only, sys::KeyFilter::enumerable | sys::KeyFilter::skip_symbols, sys::KeyConversion::numbers_to_strings, &mut keys) },
@@ -89,6 +93,28 @@ pub(crate) unsafe fn arg_of(env: sys::napi_env, v: sys::napi_value, depth: usize
         }
         _ => Arg::Other,
     })
+}
+
+// A Map or a Set, as Array.from makes it, or None for anything else.
+unsafe fn collection(env: sys::napi_env, v: sys::napi_value) -> Result<Option<sys::napi_value>> {
+    let mut global = ptr::null_mut();
+    check(unsafe { sys::napi_get_global(env, &mut global) }, "get the global")?;
+    for name in [c"Map", c"Set"] {
+        let mut ctor = ptr::null_mut();
+        check(unsafe { sys::napi_get_named_property(env, global, name.as_ptr(), &mut ctor) }, "get a constructor")?;
+        let mut is = false;
+        check(unsafe { sys::napi_instanceof(env, v, ctor, &mut is) }, "tell a collection")?;
+        if is {
+            let mut array = ptr::null_mut();
+            check(unsafe { sys::napi_get_named_property(env, global, c"Array".as_ptr(), &mut array) }, "get Array")?;
+            let mut from = ptr::null_mut();
+            check(unsafe { sys::napi_get_named_property(env, array, c"from".as_ptr(), &mut from) }, "get Array.from")?;
+            let mut out = ptr::null_mut();
+            check(unsafe { sys::napi_call_function(env, array, from, 1, &v, &mut out) }, "list a collection")?;
+            return Ok(Some(out));
+        }
+    }
+    Ok(None)
 }
 
 /// A JS value as it came.
@@ -267,4 +293,53 @@ pub fn throw_sql(env: &Env, e: &SqlError) -> Error {
         sys::napi_throw(env, err);
     }
     Error::new(Status::PendingException, e.message().to_string())
+}
+
+pub(crate) unsafe fn arg_to_js(env: sys::napi_env, a: &Arg) -> Result<sys::napi_value> {
+    let mut out = ptr::null_mut();
+    match a {
+        Arg::Undef | Arg::Other => check(unsafe { sys::napi_get_undefined(env, &mut out) }, "make undefined")?,
+        Arg::Null => check(unsafe { sys::napi_get_null(env, &mut out) }, "make null")?,
+        Arg::Bool(b) => check(unsafe { sys::napi_get_boolean(env, *b, &mut out) }, "make a boolean")?,
+        Arg::Num(n) => check(unsafe { sys::napi_create_double(env, *n, &mut out) }, "make a number")?,
+        Arg::Big(n) => check(unsafe { sys::napi_create_bigint_int64(env, *n, &mut out) }, "make a BigInt")?,
+        Arg::Text(s) => check(unsafe { sys::napi_create_string_utf8(env, s.as_ptr().cast(), s.len() as isize, &mut out) }, "make a string")?,
+        Arg::Bytes(b) => out = unsafe { cell_value(env, &Cell::Blob(b.clone()))? },
+        Arg::List(items) => {
+            check(unsafe { sys::napi_create_array_with_length(env, items.len(), &mut out) }, "make an array")?;
+            for (i, x) in items.iter().enumerate() {
+                let v = unsafe { arg_to_js(env, x)? };
+                check(unsafe { sys::napi_set_element(env, out, i as u32, v) }, "fill an array")?;
+            }
+        }
+        Arg::Obj(fields) => {
+            check(unsafe { sys::napi_create_object(env, &mut out) }, "make an object")?;
+            for (k, x) in fields {
+                let mut key = ptr::null_mut();
+                check(unsafe { sys::napi_create_string_utf8(env, k.as_ptr().cast(), k.len() as isize, &mut key) }, "make a key")?;
+                let v = unsafe { arg_to_js(env, x)? };
+                check(unsafe { sys::napi_set_property(env, out, key, v) }, "fill an object")?;
+            }
+        }
+    }
+    Ok(out)
+}
+
+impl ToNapiValue for JsArg {
+    unsafe fn to_napi_value(env: sys::napi_env, val: Self) -> Result<sys::napi_value> {
+        unsafe { arg_to_js(env, &val.0) }
+    }
+}
+
+/// A JSON value as the JS value it reads as.
+pub fn value_to_arg(v: &serde_json::Value) -> Arg {
+    use serde_json::Value as V;
+    match v {
+        V::Null => Arg::Null,
+        V::Bool(b) => Arg::Bool(*b),
+        V::Number(n) => Arg::Num(n.as_f64().unwrap_or(f64::NAN)),
+        V::String(s) => Arg::Text(s.clone()),
+        V::Array(a) => Arg::List(a.iter().map(value_to_arg).collect()),
+        V::Object(o) => Arg::Obj(o.iter().map(|(k, v)| (k.clone(), value_to_arg(v))).collect()),
+    }
 }

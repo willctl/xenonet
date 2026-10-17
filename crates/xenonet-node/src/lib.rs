@@ -14,6 +14,7 @@ mod drift;
 mod js;
 mod lines;
 mod machine;
+mod peer;
 mod procs;
 mod schema;
 mod secrets;
