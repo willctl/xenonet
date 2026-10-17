@@ -491,6 +491,7 @@ place. This table follows it.
 | `core/private-file.js`, `core/actors/token-file.js` (but the doctor's look in repos) | `xenonet-base/src/private_file.rs`, `xenonet-actors/src/token_file.rs` | `private-file`, `token-files`, `cli-actor`, `mcp-actor`, `hosts-config` pass, the Windows ACL cases included |
 | `xenonet mcp` for sessions (`mcp/xenonet.js`), a prototype | `xenonet-mcp`, on rmcp, Rust 1.88+ | Its own stdio tests; the same answers as the JS servers to the probe and the handshake |
 | `xenonet hook` (`cli/commands/hook.js`) | `xenonet-cli`, the `xenonet` binary | `launcher`'s hook cases, as Rust tests of the binary |
+| `core/config.js`, `core/instances.js`, `core/version.js`, `core/environments.js`, `core/demo-root.js` | `xenonet-app/src/config.rs`, `instances.rs`, `version.rs`, `environments.rs`, `demo_root.rs`, with Node's `path` (both flavors) in `nodepath.rs` | `environments`, `demo-root`, `control`, `golden`, `state`, `store`, `workspace` pass |
 
 With every twin in place, all 111 test files that reach one pass. The
 twins load in the Node processes a test starts too (a server, the

@@ -654,6 +654,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "xenonet-app"
+version = "0.2.0"
+dependencies = [
+ "regex",
+ "serde_json",
+ "xenonet-base",
+]
+
+[[package]]
 name = "xenonet-base"
 version = "0.2.0"
 dependencies = [
@@ -687,6 +696,7 @@ dependencies = [
  "napi-derive",
  "serde_json",
  "xenonet-actors",
+ "xenonet-app",
  "xenonet-base",
  "xenonet-blocks",
  "xenonet-schema",

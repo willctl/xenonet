@@ -1,0 +1,15 @@
+[package]
+name = "xenonet-app"
+description = "XenoNet's settings and the small pieces around them: config, instances, the version, environments and themes, the xenonet command, the desktop apps' URLs, decisions, the demo world and the machine's numbers."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+regex.workspace = true
+serde_json.workspace = true
+xenonet-base.workspace = true

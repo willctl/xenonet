@@ -27,6 +27,7 @@ xenonet-blocks.workspace = true
 xenonet-schema.workspace = true
 xenonet-sources.workspace = true
 xenonet-state.workspace = true
+xenonet-app.workspace = true
 
 [build-dependencies]
 napi-build.workspace = true

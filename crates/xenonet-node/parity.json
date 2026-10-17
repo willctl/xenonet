@@ -148,6 +148,31 @@
         "Requests are the Rust's own HTTP/1.1, with Connection: close, and without the accept, user-agent and accept-encoding headers fetch adds. The twin leaves a server whose base isn't http://127.0.0.1:<port> to the JS.",
         "A header given in another case replaces the one XenoNet sends by itself (Content-Type for content-type); fetch sent both, joined."
       ]
+    },
+    "core/version.js": {
+      "rust": "crates/xenonet-app/src/version.rs",
+      "differences": []
+    },
+    "core/environments.js": {
+      "rust": "crates/xenonet-app/src/environments.rs",
+      "differences": []
+    },
+    "core/instances.js": {
+      "rust": "crates/xenonet-app/src/instances.rs",
+      "differences": [
+        "An XENONET_INSTANCE naming one of Object.prototype's keys (toString, constructor…) is refused like any other unknown id; JS took it, with a port of NaN."
+      ]
+    },
+    "core/demo-root.js": {
+      "rust": "crates/xenonet-app/src/demo_root.rs",
+      "differences": []
+    },
+    "core/config.js": {
+      "rust": "crates/xenonet-app/src/config.rs, with Node's path in crates/xenonet-app/src/nodepath.rs",
+      "differences": [
+        "The demo's made-up world (core/demo.js), Xenolith's folder and server (core/xenolith.js) and Claude desktop's folder (core/dirs.js) are still found by JS, when the Rust asks for them, in the order the JS did.",
+        "readers and hiddenResources come from Rust as arrays, which the twin makes Sets."
+      ]
     }
   },
   "tests": [
@@ -157,6 +182,8 @@
     "test/actor-registration.test.js",
     "test/actor-routes.test.js",
     "test/actor-schemas.test.js",
+    "test/actor-spend-view.test.js",
+    "test/actor-spend.test.js",
     "test/actor-wake.test.js",
     "test/actors.test.js",
     "test/assistant-connections.test.js",
@@ -187,8 +214,16 @@
     "test/component-packages.test.js",
     "test/control-client.test.js",
     "test/control.test.js",
+    "test/copilot-cli.test.js",
     "test/costs.test.js",
+    "test/cursor.test.js",
     "test/decide.test.js",
+    "test/delivery-opencode.test.js",
+    "test/delivery-router.test.js",
+    "test/delivery-routes.test.js",
+    "test/delivery-scopes.test.js",
+    "test/delivery-wake.test.js",
+    "test/demo-root.test.js",
     "test/doctor.test.js",
     "test/drift.test.js",
     "test/engine-actors.test.js",
@@ -196,9 +231,11 @@
     "test/engine-routes.test.js",
     "test/engine-store.test.js",
     "test/engine.test.js",
+    "test/environments.test.js",
     "test/features.test.js",
     "test/film-cards.test.js",
     "test/gateway-tunnel.test.js",
+    "test/gemini-cli.test.js",
     "test/git-status.test.js",
     "test/golden.test.js",
     "test/graph.test.js",
@@ -229,11 +266,13 @@
     "test/numbat.test.js",
     "test/observer.test.js",
     "test/observers.test.js",
+    "test/opencode.test.js",
     "test/page-markup.test.js",
     "test/platform.test.js",
     "test/poster.test.js",
     "test/private-file.test.js",
     "test/projects.test.js",
+    "test/provider-drift-native.test.js",
     "test/provider-drift.test.js",
     "test/refusal-browser.test.js",
     "test/refusals.test.js",
@@ -261,6 +300,7 @@
     "test/verify.test.js",
     "test/windows-command.test.js",
     "test/workspace.test.js",
+    "test/xenolith.test.js",
     "test/you-page.test.js"
   ]
 }

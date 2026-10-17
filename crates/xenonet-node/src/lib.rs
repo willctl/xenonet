@@ -5,6 +5,7 @@
 //! converts the answers.
 
 mod actors;
+mod app;
 mod base;
 mod blocks;
 mod drift;
