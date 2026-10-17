@@ -12,14 +12,18 @@ XenoNet tries these in order and uses the first that works:
 
 | Way in | For | What it takes |
 |---|---|---|
-| Claude Code channel | Claude Code CLI | Start the session with XenoNet as a channel (below). |
+| Claude Code channel | an idle Claude Code CLI session | Claude Code 2.1.80 or later, started with XenoNet as a channel (below). A working session gets the message from its hooks during its turn, which is sooner. |
 | OpenCode's server | OpenCode TUI | Start OpenCode with `--hostname 127.0.0.1`, and allow the session: `xenonet live allow <session>`. |
 | Typing into tmux | any harness in a tmux pane | Allow the session. The sender must be you, or an actor with a token. |
 | Hooks (next turn) | Claude Code, Codex | Nothing: this is how messages always arrived. |
 
-If nothing picks a message up within a minute, XenoNet notifies you.
-`xenonet live` shows each delivery's state: `live`, `next-turn` or
-`notified`, and how long it took to be acknowledged.
+If nothing picks a message up within a minute, XenoNet notifies you. A
+message pushed through a channel or typed into a pane that nothing
+acknowledged also goes back to the hooks, so the session's next turn still
+gets it. `xenonet live` shows each delivery's state: `live`, `next-turn` or
+`notified`, and how long it took to be acknowledged. The sender's answer
+says which way each message is going: "right away, through its channel",
+or when the session next starts a turn.
 
 ### Claude Code
 
@@ -35,10 +39,20 @@ claude --dangerously-load-development-channels server:xenonet
 
 Channels are a Claude Code research preview
 ([reference](https://code.claude.com/docs/en/channels-reference)), and
-XenoNet's channel isn't on Anthropic's allowlist yet, so Claude Code shows a
-warning when the session starts. Team and Enterprise organizations have to
-turn channels on first. XenoNet only pushes to a session that was started
-this way. Any other session gets messages through its hooks, as before.
+XenoNet's channel isn't on Anthropic's allowlist yet, so Claude Code asks
+you to confirm each time the session starts. Team and Enterprise
+organizations have to turn channels on first (`channelsEnabled`). XenoNet
+only pushes to a session that was started this way, naming its own server
+(`server:xenonet`, or `server:xenonet-dev` for XenoNet Dev). Any other
+session gets messages through its hooks, as before.
+
+Claude Code asks MCP servers for protocol revision 2026-07-28 first, but
+registers a channel only on the 2025 handshake, since the newer revision has
+no way to carry a channel's messages. So XenoNet's MCP server answers a
+session started as a channel on the 2025 handshake. If a message doesn't
+arrive, start the session with `claude --debug` and look for "Channel
+notifications" in the debug log, which says whether the channel was
+registered and why not.
 
 ### OpenCode
 
@@ -99,7 +113,8 @@ xenonet live revoke hermes
 
 - A grant is a selector. The actor's `peers`, its `send` to an id or words,
   and its broadcasts (`all`, `repo`, a selector) only reach what the grant
-  covers.
+  covers. So do the counts `whoami` gives it, and the sessions `who_has`
+  and a claim's "also held by" name.
 - A grant expires (30 days by default). `revoke` takes effect at once.
 - A grant for one identity never shows another identity's sessions, so
   separate accounts stay apart.
