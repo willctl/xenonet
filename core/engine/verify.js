@@ -5,7 +5,10 @@
 //
 //   1. A request in a Claude Code session's name must come from a Claude
 //      Code process or from under one (its MCP server, its hooks, its
-//      shell), and a Codex thread's from a Codex process or from under it.
+//      shell), a Codex thread's from a Codex process or from under it, and
+//      an OpenCode session's from an OpenCode process or from under it.
+//      Every OpenCode reads the same database and can open any session, so
+//      OpenCode sessions aren't pinned to a process (2 and 3 below).
 //   2. Claude Code sends its HTTP hooks from its own process, which makes
 //      them the word on which process holds which session: when that
 //      process is signed by Anthropic, they pin the session to it (its pid
@@ -67,7 +70,8 @@
 // agents' tools keep working should netstat ever answer in a way XenoNet
 // doesn't read (the doctor's self-test says so). `state.unseen` counts the
 // refusals.
-const APP = { claude: "Claude Code", codex: "Codex" };
+const APP = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode" };
+const aApp = (app) => `${app === "opencode" ? "an" : "a"} ${APP[app]}`;
 const PRODUCT = { "hermes-agent": "Hermes Agent", "grok-bot": "Grok Bot", muse: "Muse", dots: "the ChatGPT app" };
 // The products whose apps their makers sign, by the maker's name (their
 // teams are in core/procs.js): their actors register and report only from
@@ -107,7 +111,7 @@ export function ownOf(chain) {
 // to its own processes, and any other is an actor of your own.
 export function actorRefusal(chain, { product = null, pid = null, registering = false } = {}) {
   const agent = chain.find((p) => p.agent);
-  if (agent) return registering ? `a session can't register an actor, only ask you to, and this came from under a ${APP[agent.agent]} process` : `an actor's token doesn't work from under a session, and this came from under a ${APP[agent.agent]} process`;
+  if (agent) return registering ? `a session can't register an actor, only ask you to, and this came from under ${aApp(agent.agent)} process` : `an actor's token doesn't work from under a session, and this came from under ${aApp(agent.agent)} process`;
   const own = chain[0]?.product;
   if (own?.role === "app") return `${PRODUCT[own.product]}'s own processes can't ${registering ? "register an actor" : "use an actor's token"}: they could be relaying for its cloud`;
   if (Object.hasOwn(PRODUCT, product ?? "")) {
@@ -160,11 +164,13 @@ export function createVerifier({ procs, store, home = null, now = () => Date.now
     if (!APP[app] || !procs.supported) return pass();
     const { pid, chain } = await see(socket);
     if (!pid) return pass();
-    if (!chain.length) return unseen(agent, `requests in ${agent}'s name have to come from a ${APP[app]} process, and this one had gone before XenoNet could look`);
+    if (!chain.length) return unseen(agent, `requests in ${agent}'s name have to come from ${aApp(app)} process, and this one had gone before XenoNet could look`);
     state.checked++;
     const holder = chain.find((p) => p.agent === app);
-    if (!holder) return refuse(agent, `requests in ${agent}'s name have to come from a ${APP[app]} process, and this one doesn't`);
+    if (!holder) return refuse(agent, `requests in ${agent}'s name have to come from ${aApp(app)} process, and this one doesn't`);
     const root = { pid: holder.pid, start: holder.start };
+    // Any OpenCode may have the session open (see 1 above).
+    if (app === "opencode") return { ok: true, checked: true, root };
     const same = (p) => p.pid === root.pid && p.start === root.start;
     // The pins of processes still running; the others go.
     const held = [];
@@ -198,7 +204,7 @@ export function createVerifier({ procs, store, home = null, now = () => Date.now
     if (!chain.length) return unseen(null, "this is yours to do, and XenoNet couldn't see which program asked; run it in your own terminal or in XenoNet");
     state.checked++;
     const near = chain.find((p) => p.agent || p.product || p.pid === home);
-    if (near?.agent) return refuse(null, `this is yours to do, and it came from under a ${APP[near.agent]} process; run it in your own terminal or in XenoNet`);
+    if (near?.agent) return refuse(null, `this is yours to do, and it came from under ${aApp(near.agent)} process; run it in your own terminal or in XenoNet`);
     if (near?.product) return refuse(null, `this is yours to do, and it came from under ${PRODUCT[near.product.product]}; run it in your own terminal or in XenoNet`);
     return { ok: true, checked: true };
   }
@@ -297,7 +303,7 @@ export function createVerifier({ procs, store, home = null, now = () => Date.now
     state.checked++;
     const near = chain.find((p) => p.agent || (home != null && p.pid === home));
     let verdict;
-    if (near?.agent) verdict = refuse(null, `this is for XenoNet's own window, and it came from under a ${APP[near.agent]} process`);
+    if (near?.agent) verdict = refuse(null, `this is for XenoNet's own window, and it came from under ${aApp(near.agent)} process`);
     else if (!near) verdict = refuse(null, "this is for XenoNet's own window, and it came from outside XenoNet");
     // Every process from the caller up to XenoNet's app is the app's own, by
     // the executable's real path: a shell in XenoNet's terminal, and whatever
@@ -329,7 +335,7 @@ export function createVerifier({ procs, store, home = null, now = () => Date.now
     state.checked++;
     const [p] = chain;
     let verdict;
-    if (p.agent) verdict = refuse(null, `a ${APP[p.agent]} process can't be XenoNet's Desktop`);
+    if (p.agent) verdict = refuse(null, `${aApp(p.agent)} process can't be XenoNet's Desktop`);
     else if (p.product) verdict = refuse(null, `${PRODUCT[p.product.product]}'s processes can't be XenoNet's Desktop`);
     else if (!/\.app\/Contents\/MacOS\/[^/]+$/.test(fileOf(p) ?? "")) verdict = refuse(null, "only an app's own executable can be XenoNet's Desktop");
     else verdict = { ok: true, checked: true };

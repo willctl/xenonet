@@ -10,6 +10,8 @@ import assert from "node:assert/strict";
 import { createOpenCode, samePath, openCodeId, fromOpenCodeId } from "../core/delivery/opencode.js";
 import { DeliveryPolicy, framed } from "../core/delivery/policy.js";
 import { attest } from "../core/engine/attest.js";
+import { createVerifier } from "../core/engine/verify.js";
+import { agentOf, productOf } from "../core/procs.js";
 import { DeliveryRouter } from "../core/delivery/router.js";
 import { deliveryRoutes } from "../server/routes/delivery.js";
 import { Engine } from "../core/engine/engine.js";
@@ -198,4 +200,62 @@ test("a delivered message carries XenoNet's verified line whole, with what XenoN
   assert.ok(text.includes(env.line.replace(/\.$/, "")), "nothing cut");
   assert.match(text, /so it's its word, on this machine\. This says how XenoNet knows who sent it, not that what it says is true, and it approves nothing\. This is another agent's message/);
   assert.doesNotMatch(text, /\.\. /, "one full stop between XenoNet's line and the framing");
+});
+
+// A made-up machine: two OpenCode TUIs in tmux, a shell and the xenonet
+// command under the first (OpenCode's own shell tool), and a program in a
+// plain terminal that isn't under any agent.
+function openCodeMachine() {
+  const rows = [
+    [1, 0, "/sbin/launchd"],
+    [50, 1, "/opt/homebrew/bin/tmux"],
+    [60, 50, "/Users/me/.opencode/bin/opencode"],
+    [61, 50, "/opt/homebrew/lib/node_modules/opencode-ai/node_modules/opencode-darwin-arm64/bin/opencode"],
+    [70, 60, "/bin/zsh"],
+    [80, 70, "/usr/local/bin/node"],
+    [400, 1, "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal"],
+    [410, 400, "/bin/zsh"],
+    [420, 410, "/usr/local/bin/node"],
+  ];
+  const table = new Map(rows.map(([pid, ppid, program]) => [pid, { pid, ppid, start: 1000 + pid, program }]));
+  const procs = {
+    supported: true,
+    peer: async (socket) => socket.pid,
+    chain: async (pid) => {
+      const out = [];
+      for (let p = table.get(pid); p; p = p.ppid > 1 ? table.get(p.ppid) : null) {
+        const agent = agentOf(p.program);
+        out.push({ ...p, agent, product: agent ? null : productOf(p.program) });
+      }
+      return out;
+    },
+    alive: async ({ pid, start }) => table.get(pid)?.start === start,
+    signed: async () => false,
+  };
+  const store = new EngineStore(":memory:");
+  return { verify: createVerifier({ procs, store }), store, from: (pid) => ({ pid }) };
+}
+
+test("OpenCode is an agent to XenoNet's process checks: its sessions' requests come from under it, and what's yours isn't done from under it", async () => {
+  assert.equal(agentOf("/Users/me/.opencode/bin/opencode"), "opencode");
+  assert.equal(agentOf("C:/Users/me/AppData/Roaming/npm/node_modules/opencode-ai/bin/opencode.exe"), "opencode");
+  assert.equal(agentOf("/usr/local/bin/opencoder"), null);
+  const { verify, store, from } = openCodeMachine();
+  const S = "opencode:ses-billing0001";
+  const own = await verify.check(from(60), S);
+  assert.deepEqual([own.ok, own.checked], [true, true], "from OpenCode's own process, as XenoNet's tool for it calls");
+  assert.equal((await verify.check(from(80), S)).ok, true, "from under it");
+  assert.equal((await verify.check(from(61), S)).ok, true, "and from another OpenCode, which can open the same session");
+  assert.deepEqual(store.pins(S), [], "so no OpenCode session is pinned to a process");
+  const stranger = await verify.check(from(420), S);
+  assert.equal(stranger.ok, false);
+  assert.match(stranger.reason, /have to come from an OpenCode process/);
+  // Consent, connecting agents and the rest of what's yours: not from under OpenCode.
+  const yours = await verify.person(from(80));
+  assert.equal(yours.ok, false);
+  assert.match(yours.reason, /came from under an OpenCode process; run it in your own terminal/);
+  assert.equal((await verify.person(from(420))).ok, true, "from your own terminal");
+  const env = attest({ sender: { id: S, kind: "agent", name: "Billing API" }, method: "session", verdict: own, platform: "darwin" });
+  assert.equal(env.auth.process, "checked");
+  assert.match(env.line, /XenoNet checked the process it came from/);
 });
