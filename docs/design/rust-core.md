@@ -171,6 +171,12 @@ What crosses the boundary, and how:
   (`crates/xenonet-node/src/machine.rs`): each time it needs something it
   asks and waits, and the twin answers, awaiting what it must
   (`js/drive.js`). JS waits only while Rust computes between questions.
+  An answer that isn't a promise goes back at once and one that is costs
+  one await, as the JS's own call or await did, so other work runs between
+  the same steps it ran between in the JS. The collaborators a module was
+  given (the actors, a store, a test's fake) are called by name when the
+  JS called them (`xenonet-engine/src/peer.rs`), so what stands in their
+  place then is what's called.
   In the binary the same code runs against the system itself.
 - **Events.** A block's EventEmitter stays in its twin. Rust returns each
   state change, and the twin emits it.
@@ -519,7 +525,7 @@ place. This table follows it.
 | `core/delivery/channel.js`, `tmux.js`, `resume.js`, `setup.js`, `opencode.js` | `xenonet-engine/src/delivery/` (polls, processes, commands, files and HTTP through the twins) | `delivery-router`, `delivery-wake`, `delivery-opencode`, `doctor` pass |
 | `core/delivery/router.js` | `xenonet-engine/src/delivery/router.rs` (each record's JS object and the timers in the twin) | `delivery-router`, `delivery-wake`, `delivery-opencode`, `delivery-scopes`, `server` pass |
 
-With every twin in place, all 111 test files that reach one pass. The
+With every twin in place, all 129 test files that reach one pass. The
 twins load in the Node processes a test starts too (a server, the
 command, an MCP server), so the route and command tests run on them. The two
 fixes on `fix/scanner-racy-mtime` are in the Rust (the scanner reads a
