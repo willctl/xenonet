@@ -157,6 +157,35 @@ export const PROVIDERS = [
     rangeSources: ["nous/hermes-agent/spawn-ledger", "nous/hermes-agent/gateway-state", "nous/hermes-agent/processes", "nous/hermes-agent/cron-jobs", "nous/hermes-agent/cron-ticker"],
     notInspected: "Its files are written by a running Hermes with a model behind it. The check records the latest version, and whether the schemas' ranges take it.",
   },
+  {
+    id: "anomaly/opencode",
+    name: "OpenCode",
+    sources: ["anomaly/opencode/db"],
+    release: { npm: "opencode-ai", tags: ["latest"] },
+    // Its database says the version that wrote each session.
+    rangeSources: ["anomaly/opencode/db"],
+    notInspected: "Its database is written by a running OpenCode with a model behind it. The check records the latest version, and whether the schema's range takes it.",
+  },
+  {
+    id: "google/gemini-cli",
+    name: "Gemini CLI",
+    sources: ["google/gemini-cli/chat-record"],
+    release: { npm: "@google/gemini-cli", tags: ["latest"] },
+    notInspected: "Its chat records are written by a running Gemini CLI with a model behind it, and carry no version. The check records the latest version only.",
+  },
+  {
+    id: "github/copilot-cli",
+    name: "GitHub Copilot CLI",
+    sources: ["github/copilot-cli/session-event"],
+    release: { npm: "@github/copilot", tags: ["latest"] },
+    notInspected: "Its event logs are written by a running Copilot CLI signed in to GitHub, and the check runs with no secrets. The check records the latest version only.",
+  },
+  {
+    id: "anysphere/cursor",
+    name: "Cursor",
+    sources: ["anysphere/cursor/hook-input"],
+    notInspected: "Its hook input is only written by a running Cursor agent with a model behind it, and Cursor publishes no package to read. The check records nothing; the schema follows Cursor's hooks reference.",
+  },
 ];
 
 export const providerById = (id) => PROVIDERS.find((p) => p.id === id) ?? null;

@@ -259,6 +259,13 @@
         "string",
         "null"
       ]
+    },
+    "reader": {
+      "description": "Read from the harness's own records by an experimental reader (core/native)",
+      "type": "string",
+      "enum": [
+        "experimental"
+      ]
     }
   },
   "required": [
