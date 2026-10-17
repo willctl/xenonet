@@ -20,8 +20,8 @@ import { claudeSessionsGatherer, readClaudeSession, renameClaudeSession } from "
 import { cleanTitle, renamable } from "./rename.js";
 import { buildGraph } from "./graph.js";
 import { actionsFor } from "../../../../core/open.js";
-import { LiveTelemetry } from "../../../../core/live.js";
-import { fetchClaudeUsage } from "../../../../core/claude-usage.js";
+import { LiveTelemetry } from "./live.js";
+import { fetchClaudeUsage } from "./claude-usage.js";
 import { RepoWatch } from "../../../../core/git.js";
 import { IdentityWatch } from "../../../../core/identities.js";
 import { readWiki } from "../../../../core/wiki.js";

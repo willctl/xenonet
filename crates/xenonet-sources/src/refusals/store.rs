@@ -45,13 +45,9 @@ fn nn(v: Option<&Value>) -> Option<&Value> {
     v.filter(|v| !v.is_null())
 }
 
-/// What makes two sightings of a refusal the same one: the request's id
-/// when there is one, else where it was written.
+// detect.js's keyOf, with the session's id as a template writes it.
 fn key_of(sig: &Value, session_id: Option<&Value>) -> String {
-    let s = |k: &str| get(sig, k).map_or_else(|| "undefined".to_string(), js_string);
-    let id = nn(get(sig, "requestId")).or(nn(get(sig, "messageId"))).or(nn(get(sig, "uuid"))).map(js_string);
-    let id = id.unwrap_or_else(|| format!("{}@{}", session_id.map_or_else(|| "undefined".to_string(), js_string), s("at")));
-    format!("{}|{}|{id}", s("provider"), s("kind"))
+    super::detect::key_of(sig, &session_id.map_or_else(|| "undefined".to_string(), js_string))
 }
 
 /// A transcript's lines as JSON, what doesn't read as JSON left out.
