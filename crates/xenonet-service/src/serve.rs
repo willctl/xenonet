@@ -313,6 +313,26 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str) -> i32 {
         println!("[xenonet] XENONET_UPSTREAM isn't in the Rust service yet; this XenoNet reads its own");
     }
 
+    // Remote actors' private endpoint, listening while a grant could be
+    // used, and the connections' clock.
+    if let (Some(connections), Some(service)) = (ctx.cores.connections.clone(), ctx.cores.assistant.clone()) {
+        let e = crate::assistant_endpoint::Endpoint::new(
+            connections.clone(),
+            service,
+            ctx.cores.audit.clone(),
+            config.endpoint_file(),
+            Arc::new(|line: &str| println!("[xenonet] {line}")),
+        );
+        *ctx.endpoint.lock().unwrap() = Some(Arc::new(e.clone()));
+        tokio::spawn(async move { e.sync().await });
+        tokio::spawn(async move {
+            let mut every = tokio::time::interval(Duration::from_secs(60));
+            loop {
+                every.tick().await;
+                connections.tick();
+            }
+        });
+    }
     // The background work, as the JS service starts it once it listens.
     ctx.cores.doctor.start();
     if let Some(a) = &ctx.cores.actors {
