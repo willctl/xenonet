@@ -21,7 +21,7 @@
 // window or with xenonet actor, so a model can't add or drop actors in
 // passing.
 import { McpServer } from "@modelcontextprotocol/server";
-import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import { serveStdio, StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -31,7 +31,7 @@ import { checkup } from "../core/doctor/checkup.js";
 import { tokenFromEnv } from "../core/actors/token-file.js";
 import { TOKEN_GREP } from "../core/actors/tokens.js";
 
-let built = null; // the server instance serveStdio pinned for this connection
+let built = null; // the server instance serving this connection
 const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const PORT = Number(process.env.XENONET_PORT) || 47840;
 const XENONET = { base: `http://127.0.0.1:${PORT}` };
@@ -350,8 +350,20 @@ function buildServer(actor = null) {
 export async function serve() {
   let actor = null;
   if (servesActor() && readActorToken()) actor = await Promise.race([asActor("GET", "/api/actors/me").catch(() => null), new Promise((r) => setTimeout(r, 1500, null).unref())]);
-  serveStdio(() => buildServer(actor), { onerror: (err) => console.error(`[xenonet] ${err.message}`) });
-  if (channelEnabled()) listenChannel(() => built).catch((err) => console.error(`[xenonet] channel: ${err.message}`));
+  if (!channelEnabled()) {
+    serveStdio(() => buildServer(actor), { onerror: (err) => console.error(`[xenonet] ${err.message}`) });
+    return;
+  }
+  // Claude Code asks stdio servers for MCP's 2026-07-28 revision first, and
+  // skips channel notifications on it, since that revision has no path for
+  // them. serveStdio would take that revision, so a session listening to
+  // XenoNet as a channel gets a server wired to stdio by hand, which speaks
+  // only the 2025 handshake; Claude Code falls back to it and registers the
+  // channel (https://code.claude.com/docs/en/mcp#push-messages-with-channels).
+  const server = buildServer(actor);
+  server.server.onerror = (err) => console.error(`[xenonet] ${err.message}`);
+  await server.connect(new StdioServerTransport());
+  listenChannel(() => built).catch((err) => console.error(`[xenonet] channel: ${err.message}`));
 }
 
 // Run directly (node mcp/xenonet.js) rather than imported by the xenonet command.
