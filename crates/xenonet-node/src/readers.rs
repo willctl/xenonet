@@ -8,6 +8,7 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde_json::{json, Value};
 use std::sync::{LazyLock, Mutex};
+use xenonet_sources::codex::{self, Obj, F};
 use xenonet_sources::git;
 use xenonet_state::projects::{self, FactsCache, Scan};
 
@@ -155,4 +156,186 @@ pub fn project_relations(env: &Env, projects: Json) -> Result<Jv> {
         Ok((parents, same)) => Ok(Jv::Obj(vec![("parentOf", Jv::Json(json!(parents))), ("sameRemote", Jv::Json(json!(same)))])),
         Err(e) => thrown(env, e),
     }
+}
+
+// ---------- codex.js ----------
+
+pub(crate) fn jv(f: F) -> Jv {
+    match f {
+        F::Undef => Jv::Undef,
+        F::Num(n) => Jv::Num(n),
+        F::V(v) => Jv::Json(v),
+        F::Arr(a) => Jv::Arr(a.into_iter().map(jv).collect()),
+    }
+}
+
+pub(crate) fn obj(o: Obj) -> Jv {
+    Jv::Obj(o.into_iter().map(|(k, f)| (k, jv(f))).collect())
+}
+
+pub(crate) fn objs(os: Vec<Obj>) -> Jv {
+    Jv::Arr(os.into_iter().map(obj).collect())
+}
+
+#[napi(js_name = "codexSourceKinds")]
+pub fn codex_source_kinds() -> Vec<&'static str> {
+    codex::SOURCE_KINDS.to_vec()
+}
+
+#[napi(js_name = "codexStateDb")]
+pub fn codex_state_db() -> u32 {
+    codex::STATE_DB
+}
+
+#[napi(js_name = "codexRequestTimeoutMs")]
+pub fn codex_request_timeout_ms() -> f64 {
+    codex::REQUEST_TIMEOUT_MS
+}
+
+/// { parent, nickname, kind }
+#[napi(js_name = "codexSubAgentOf")]
+pub fn codex_sub_agent_of(env: &Env, t: MaybeJson) -> Result<Jv> {
+    match codex::sub_agent_of(t.0.as_ref()) {
+        Ok((parent, nickname, kind)) => Ok(Jv::Obj(vec![("parent", Jv::Json(parent)), ("nickname", Jv::Json(nickname)), ("kind", Jv::Json(kind))])),
+        Err(e) => thrown(env, e),
+    }
+}
+
+#[napi(js_name = "codexThreadToSession")]
+pub fn codex_thread_to_session(env: &Env, t: MaybeJson, archived: bool) -> Result<Jv> {
+    codex::thread_to_session(t.0.as_ref(), archived).map(obj).or_else(|e| thrown(env, e))
+}
+
+/// A page of the app-server's items, oldest first.
+#[napi(js_name = "codexNormalizeItems")]
+pub fn codex_normalize_items(env: &Env, data: MaybeJson) -> Result<Jv> {
+    codex::normalize_items(data.0.as_ref()).map(objs).or_else(|e| thrown(env, e))
+}
+
+#[napi(js_name = "codexSaysUnsupported")]
+pub fn codex_says_unsupported(rpc: MaybeJson) -> bool {
+    codex::says_unsupported(rpc.0.as_ref())
+}
+
+/// A thread's items from its rollout, as its lines are read.
+#[napi(js_name = "RolloutEntries")]
+pub struct JsRolloutEntries {
+    e: codex::RolloutEntries,
+}
+
+#[napi]
+impl JsRolloutEntries {
+    #[napi(constructor)]
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        JsRolloutEntries { e: codex::RolloutEntries::default() }
+    }
+
+    /// A line's record, as lines.js read it.
+    #[napi]
+    pub fn add(&mut self, env: &Env, raw: MaybeJson) -> Result<()> {
+        self.e.add(raw.0.unwrap_or(Value::Null)).or_else(|e| thrown(env, e))
+    }
+
+    /// { entries, cursor, total }: newest first, `cursor` continuing
+    /// further back.
+    #[napi]
+    pub fn page(&self, cursor: MaybeJson, limit: f64) -> Jv {
+        let all = self.e.list();
+        let (a, b, next) = codex::rollout_page(all.len(), cursor.0.as_ref(), limit);
+        Jv::Obj(vec![("entries", objs(all[a..b].to_vec())), ("cursor", opt_s(next)), ("total", Jv::Num(all.len() as f64))])
+    }
+}
+
+/// One app-server's stdout, read into its messages.
+#[napi(js_name = "CodexStdout")]
+pub struct JsCodexStdout {
+    io: codex::Stdout,
+}
+
+#[napi]
+impl JsCodexStdout {
+    #[napi(constructor)]
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        JsCodexStdout { io: codex::Stdout::default() }
+    }
+
+    /// The messages a chunk completes: { decline } (a line to write back),
+    /// { id, result }, or { id, error: { message, rpc } }.
+    #[napi]
+    pub fn take(&mut self, chunk: String) -> Jv {
+        let mut out = Vec::new();
+        for m in self.io.take(&chunk) {
+            match m {
+                codex::Message::Decline(line) => out.push(Jv::Obj(vec![("decline", Jv::Json(Value::String(line)))])),
+                codex::Message::Answer { id, result, error: None } => out.push(Jv::Obj(vec![("id", Jv::Json(id)), ("result", jv(result))])),
+                codex::Message::Answer { id, error: Some((message, rpc)), .. } => {
+                    let error = Jv::Obj(vec![("message", Jv::Json(Value::String(message))), ("rpc", Jv::Json(rpc))]);
+                    out.push(Jv::Obj(vec![("id", Jv::Json(id)), ("error", error)]));
+                }
+                codex::Message::Other => {}
+            }
+        }
+        Jv::Arr(out)
+    }
+}
+
+/// The last lines a client's app-servers wrote to stderr.
+#[napi(js_name = "CodexStderr")]
+pub struct JsCodexStderr {
+    io: codex::Stderr,
+}
+
+#[napi]
+impl JsCodexStderr {
+    #[napi(constructor)]
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        JsCodexStderr { io: codex::Stderr::default() }
+    }
+
+    /// Keeps a chunk's lines, and gives back the last 20.
+    #[napi]
+    pub fn push(&mut self, chunk: String) -> Vec<String> {
+        self.io.push(&chunk);
+        self.io.lines.clone()
+    }
+
+    #[napi]
+    pub fn exited(&self, code: MaybeJson) -> String {
+        self.io.exited(code.0.as_ref())
+    }
+}
+
+/// The numbers of the other state databases in Codex's folder.
+#[napi(js_name = "codexOtherStateDbs")]
+pub fn codex_other_state_dbs(dir: String) -> Vec<String> {
+    let names: Vec<String> =
+        xenonet_base::paths::read_dir_sorted(std::path::Path::new(&dir)).map(|es| es.iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
+    codex::other_state_dbs(&names)
+}
+
+fn cells(rows: Vec<Vec<(&'static str, codex::Cell)>>) -> Jv {
+    let cell = |c: codex::Cell| match c {
+        codex::Cell::V(v) => Jv::Json(v),
+        codex::Cell::Bytes(b) => Jv::Bytes(b),
+    };
+    Jv::Arr(rows.into_iter().map(|r| Jv::Obj(r.into_iter().map(|(k, c)| (k, cell(c))).collect())).collect())
+}
+
+/// null (no database), { rows: { projects, project_roots } }, or
+/// { missing: [...] } when a query failed.
+#[napi(js_name = "codexReadStateDb")]
+pub fn codex_read_state_db(file: String) -> Jv {
+    match codex::read_state_db(&file) {
+        None => Jv::Json(Value::Null),
+        Some(codex::StateRows::Rows { projects, roots }) => Jv::Obj(vec![("rows", Jv::Obj(vec![("projects", cells(projects)), ("project_roots", cells(roots))]))]),
+        Some(codex::StateRows::Missing(m)) => Jv::Obj(vec![("missing", Jv::Json(json!(m)))]),
+    }
+}
+
+#[napi(js_name = "codexNativeProjects")]
+pub fn codex_native_projects(env: &Env, rows: MaybeJson) -> Result<Jv> {
+    codex::native_projects(rows.0.as_ref()).map(objs).or_else(|e| thrown(env, e))
 }

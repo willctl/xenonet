@@ -33,9 +33,17 @@ fn count_after(head: &str, word: &str) -> f64 {
     0.0
 }
 
+/// A text split as `split(/\r?\n/)` splits it: at each newline, with a
+/// carriage return before one taken too.
+pub(crate) fn split_lines(s: &str) -> Vec<&str> {
+    let parts: Vec<&str> = s.split('\n').collect();
+    let last = parts.len() - 1;
+    parts.into_iter().enumerate().map(|(i, l)| if i < last { l.strip_suffix('\r').unwrap_or(l) } else { l }).collect()
+}
+
 // A text's lines as /\r?\n/ splits it, without the empty ones.
 fn lines_of(out: &str) -> Vec<&str> {
-    out.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l)).filter(|l| !l.is_empty()).collect()
+    split_lines(out).into_iter().filter(|l| !l.is_empty()).collect()
 }
 
 /// `git status --porcelain=v1 -b`'s output as counts: the branch (and how
