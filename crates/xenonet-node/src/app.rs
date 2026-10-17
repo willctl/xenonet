@@ -742,3 +742,157 @@ impl AppSpotify {
         ask_jv(job, ask)
     }
 }
+
+// ----- tasks: async Rust whose waiting the twin does -----
+
+use xenonet_app::task;
+
+fn failure_jv(f: task::Failure) -> Jv {
+    match f {
+        task::Failure::Rethrow => Jv::Obj(vec![("rethrow", Jv::Bool(true))]),
+        task::Failure::Error { message, fields, kind } => {
+            let mut m = serde_json::Map::new();
+            m.insert("message".into(), Value::String(message));
+            m.insert("kind".into(), Value::String(kind.into()));
+            for (k, v) in fields {
+                m.insert(k, v);
+            }
+            Jv::Json(Value::Object(m))
+        }
+    }
+}
+
+/// A Rust task for the twin's drive() (js/task.js): next() runs it until it
+/// asks for something ({ ask }) or ends ({ done } or { fail }).
+#[napi(js_name = "AppTask")]
+pub struct AppTask {
+    task: task::Task,
+    started: bool,
+}
+
+impl AppTask {
+    pub(crate) fn of(task: task::Task) -> Self {
+        AppTask { task, started: false }
+    }
+}
+
+#[napi]
+impl AppTask {
+    /// `threw` describes the error the last request threw; else `ok` is
+    /// what it answered.
+    #[napi]
+    pub fn next(&mut self, ok: MaybeJson, threw: Option<Json>) -> Jv {
+        let reply = if self.started {
+            Some(match threw {
+                Some(e) => Err(e.0),
+                None => Ok(ok.0.unwrap_or(Value::Null)),
+            })
+        } else {
+            None
+        };
+        self.started = true;
+        match self.task.step(reply) {
+            task::Outcome::Ask(q) => Jv::Obj(vec![("ask", Jv::Json(q))]),
+            task::Outcome::Done(v) => Jv::Obj(vec![("done", Jv::Json(v))]),
+            task::Outcome::Failed(f) => Jv::Obj(vec![("fail", failure_jv(f))]),
+        }
+    }
+}
+
+// ----- control -----
+
+use xenonet_app::control;
+
+#[napi(js_name = "appUserDataDir")]
+pub fn app_user_data_dir(name: String, platform: String, appdata: Option<String>, xdg_config_home: Option<String>, home: String) -> String {
+    control::user_data_dir(&name, &platform, appdata.as_deref(), xdg_config_home.as_deref(), &home)
+}
+
+#[napi(js_name = "appElectronCommand")]
+pub fn app_electron_command(root: String, home: String, platform: String, software_rendering: bool) -> Json {
+    let (command, args) = control::electron_command(&root, &home, &platform, software_rendering);
+    Json(json!({ "command": command, "args": args }))
+}
+
+#[napi(js_name = "appLockHolder")]
+pub fn app_lock_holder(dir: String) -> AppTask {
+    AppTask::of(task::Task::new(move |io| async move { control::lock_holder(&io, &dir).await }))
+}
+
+#[napi(js_name = "appControlCheck")]
+pub fn app_control_check(id: String) -> Option<String> {
+    let o = control::Opts { port: None, user_data: Some(""), log_dir: Some(""), settle_ms: 0.0, term_ms: 0.0, root: "", tmpdir: "", platform: "", appdata: None, xdg_config_home: None, home: "" };
+    control::Instance::new(&id, &o).err()
+}
+
+/// One instance of XenoNet Dev, for the twin's xenonet().
+#[napi(js_name = "AppControl")]
+pub struct AppControl {
+    inst: control::Instance,
+}
+
+#[napi]
+impl AppControl {
+    #[napi(constructor)]
+    pub fn new(id: String, opts: Json) -> Result<Self> {
+        let o = opts.0;
+        let text = |k: &str| o.get(k).and_then(Value::as_str).map(String::from);
+        let (user_data, log_dir, root, tmpdir, platform, appdata, xdg, home) = (text("userData"), text("logDir"), text("root").unwrap_or_default(), text("tmpdir").unwrap_or_default(), text("platform").unwrap_or_default(), text("appdata"), text("xdgConfigHome"), text("home").unwrap_or_default());
+        let num = |k: &str, d: f64| o.get(k).and_then(Value::as_f64).unwrap_or(d);
+        let opts = control::Opts {
+            port: o.get("port").cloned(),
+            user_data: user_data.as_deref(),
+            log_dir: log_dir.as_deref(),
+            settle_ms: num("settleMs", 15000.0),
+            term_ms: num("termMs", 5000.0),
+            root: &root,
+            tmpdir: &tmpdir,
+            platform: &platform,
+            appdata: appdata.as_deref(),
+            xdg_config_home: xdg.as_deref(),
+            home: &home,
+        };
+        control::Instance::new(&id, &opts).map(|inst| AppControl { inst }).map_err(Error::from_reason)
+    }
+
+    #[napi(getter)]
+    pub fn name(&self) -> String {
+        self.inst.name.clone()
+    }
+
+    #[napi(getter)]
+    pub fn base(&self) -> String {
+        self.inst.base.clone()
+    }
+
+    /// A task for one of the instance's methods, with its arguments.
+    #[napi]
+    pub fn task(&self, kind: String, args: Json) -> AppTask {
+        let i = self.inst.clone();
+        let a = args.0;
+        let num = move |a: &Value, k: &str, d: f64| a.get(k).and_then(Value::as_f64).unwrap_or(d);
+        AppTask::of(task::Task::new(move |io| async move {
+            let opts = a.get("opts");
+            match kind.as_str() {
+                "health" => Ok(Value::Bool(i.health(&io).await)),
+                "call" => i.call(&io, a.get("body").unwrap_or(&Value::Null), num(&a, "wait", 20000.0)).await,
+                "ping" => i.ping(&io).await,
+                "ready" => i.ready(&io, num(&a, "timeout", 60000.0)).await,
+                "launch" => i.launch(&io, a.get("show"), a.get("restart") == Some(&Value::Bool(true)), num(&a, "timeout", 120000.0)).await,
+                "quit" => i.quit(&io, num(&a, "timeout", 20000.0)).await,
+                "driver" => {
+                    let args = match a.get("args") {
+                        Some(Value::Array(x)) => x.clone(),
+                        _ => Vec::new(),
+                    };
+                    i.driver(&io, a.get("method").unwrap_or(&Value::Null), &args).await
+                }
+                "simulate" => i.simulate(&io, a.get("kind").unwrap_or(&Value::Null), a.get("a"), a.get("b")).await,
+                "screenshot" | "input" | "window" | "record" | "logs" => i.call(&io, &control::Instance::body(&kind, None, opts), 20000.0).await,
+                "eval" => i.call(&io, &control::Instance::body("eval", Some(("expression", a.get("expression").cloned().unwrap_or(Value::Null))), opts), 20000.0).await,
+                "api" => i.api(&io, a.get("route").and_then(Value::as_str).unwrap_or("")).await,
+                _ => Err(task::Failure::msg(format!("no control task {kind}"))),
+            }
+        }))
+    }
+}

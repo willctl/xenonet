@@ -230,6 +230,15 @@
         "The sign-in, the tokens, and each call's decisions (refreshing early, one 401 refreshed and tried again, a 429 waited out) are the Rust's; the twin awaits the credential store and fetch it was given, as the Rust asks.",
         "The demo's player keeps its state in the twin; what each command does to it is the Rust's."
       ]
+    },
+    "core/control.js": {
+      "rust": "crates/xenonet-app/src/control.rs, on the task bridge in crates/xenonet-app/src/task.rs",
+      "differences": [
+        "Each method is a Rust task (async Rust whose awaits the twin answers): fetch to the instance's server, the system's alive, kill, command and spawn, and the environment are still done by JS, with the system given.",
+        "lockHolder reads the lock's link and connects to its socket from Rust, synchronously (a Unix socket answers at once or not at all); JS gave the connection a second.",
+        "electronCommand still finds npm's Electron with Node's module resolution; whether XenoNet Dev.app is this checkout's is the Rust's.",
+        "A port given as null is taken as not given; JS used null."
+      ]
     }
   },
   "tests": [

@@ -166,6 +166,13 @@ What crosses the boundary, and how:
   Rust's, and the JS around them only reads files.
 - **Events.** A block's EventEmitter stays in its twin. Rust returns each
   state change, and the twin emits it.
+- **Tasks.** An async module whose awaits nest deeply (control.js's
+  launch, a host's relay) is ported as async Rust: wherever the JS awaited
+  a fetch, a child process, a timer or a function it was given, the Rust
+  awaits `io.ask(request)` (`crates/xenonet-app/src/task.rs`). The twin
+  steps the task, does what it asks with the fakes or Node's own calls,
+  and hands back each reply (`crates/xenonet-node/js/task.js`). The logic
+  ports await for await, and in the binary tokio does the asking.
 
 A call into the addon costs about 20 ns. A call back into JS costs more,
 about 300 ns with a string to pass, which matters only where a twin calls
@@ -495,6 +502,7 @@ place. This table follows it.
 | `core/command.js`, `core/open.js`, `core/decide.js` | `xenonet-app/src/command.rs`, `open.rs`, `decide.rs` (the credential store and OpenRouter are awaited by the twin) | `cli`, `doctor`, `windows-command`, `open`, `numbat`, `decide`, `costs`, `integrations` pass |
 | `core/mcp-info.js`, `core/mcp-discovery.js`, `core/diagnostics.js` | `xenonet-app/src/mcp_info.rs` (a state machine the twin drives), `mcp_discovery.rs` (the MCP client stays the SDK's for now), `diagnostics.rs` | `mcp-info`, `log` pass |
 | `core/script.js`, `core/spotify.js` | `xenonet-app/src/script.rs`, `spotify.rs`: each step, and each Spotify call, a state machine the twin drives | `script`, `spotify` pass |
+| `core/control.js` | `xenonet-app/src/control.rs`, on `task.rs`: async Rust whose awaits the twin answers (fetch, the system's processes, spawning) | `control-client`, `control` pass |
 
 With every twin in place, all 111 test files that reach one pass. The
 twins load in the Node processes a test starts too (a server, the

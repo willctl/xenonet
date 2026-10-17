@@ -5,6 +5,7 @@
 
 pub mod command;
 pub mod config;
+pub mod control;
 pub mod decide;
 pub mod diagnostics;
 pub mod demo_root;
@@ -19,4 +20,5 @@ pub mod nodepath;
 pub mod open;
 pub mod script;
 pub mod spotify;
+pub mod task;
 pub mod version;

@@ -29,6 +29,21 @@ pub fn encode_uri(s: &str) -> String {
     out
 }
 
+/// pathToFileURL(p).href for a POSIX path: %, \\, line breaks and tabs
+/// encoded first, then what a URL's path encodes (spaces, quotes, #, ?,
+/// <, >, `, {, } and everything past ASCII).
+pub fn path_to_file_url(p: &str) -> String {
+    let mut out = String::from("file://");
+    for &b in p.as_bytes() {
+        match b {
+            b'%' | b'\\' | b'\n' | b'\r' | b'\t' | b' ' | b'"' | b'#' | b'<' | b'>' | b'?' | b'`' | b'{' | b'}' => out.push_str(&format!("%{b:02X}")),
+            0..=0x1f | 0x7f..=0xff => out.push_str(&format!("%{b:02X}")),
+            _ => out.push(b as char),
+        }
+    }
+    out
+}
+
 /// One name or value as URLSearchParams writes it: space as +, and
 /// everything but A-Z a-z 0-9 * - . _ as %XX.
 pub fn form_encode(s: &str) -> String {
