@@ -9,8 +9,10 @@
 // promises did; `shared` is the map of those under way, one per instance.
 //
 // What an answer threw is kept: if the machine fails with it, that very
-// value is thrown. An answer that isn't a promise goes back at once.
-export async function drive(machine, handle, shared = null) {
+// value is thrown. An answer that isn't a promise goes back at once, and
+// one that is costs one await, as the JS's own await did. `finish` maps
+// what the machine came to, without another turn.
+export async function drive(machine, handle, shared = null, finish = null) {
   const thrown = new Map();
   const failure = (err) => {
     const h = thrown.size + 1;
@@ -63,17 +65,35 @@ export async function drive(machine, handle, shared = null) {
   for (;;) {
     if (out.ask) {
       const a = now(out.ask);
-      if (a && !a.later) out = machine.next(a);
-      else if (a) out = machine.next(await Promise.resolve(a.later).then((ok) => ({ ok }), (err) => ({ error: failure(err) })));
-      else out = machine.next(await answer(out.ask));
-    } else if (out.all) out = machine.next(await Promise.all(out.all.map(answer)));
-    else break;
+      if (!a) out = machine.next(await answer(out.ask));
+      else if (!a.later) out = machine.next(a);
+      else {
+        let got;
+        try {
+          got = { ok: await a.later };
+        } catch (err) {
+          got = { error: failure(err) };
+        }
+        out = machine.next(got);
+      }
+    } else if (out.all) {
+      // Each started at once, as Promise.all started them; what's a
+      // promise is waited for, the rest go back as they are.
+      const got = out.all.map((q) => {
+        const a = now(q);
+        if (!a) return { wait: answer(q) };
+        if (a.later) return { wait: Promise.resolve(a.later).then((ok) => ({ ok }), (err) => ({ error: failure(err) })) };
+        return a;
+      });
+      for (let i = 0; i < got.length; i++) if (got[i].wait) got[i] = await got[i].wait;
+      out = machine.next(got);
+    } else break;
   }
   if ("error" in out) {
     if (out.handle != null && thrown.has(out.handle)) throw thrown.get(out.handle);
     throw Object.assign(new Error(out.error), out.code != null ? { code: out.code } : {});
   }
-  return out.done;
+  return finish ? finish(out.done) : out.done;
 }
 
 const at = (root, path) => (path ? String(path).split(".").reduce((o, k) => o?.[k], root) : root);
