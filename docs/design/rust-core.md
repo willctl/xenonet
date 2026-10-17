@@ -505,6 +505,7 @@ place. This table follows it.
 | `core/engine/store.js` | `xenonet-engine/src/store.rs`, on `sql.rs` (node:sqlite's binding and rows, over rusqlite) | `engine-store` and the 36 other files that reach it pass |
 | `core/actors/index.js`, `you.js`, `demo.js`, `attribution.js` | `xenonet-actors/src/registry.rs`, `you.rs`, `demo.rs`, `attribution.rs` (mapOf stays JS, over the state) | `actors`, `actor-needs-you`, `observer`, `observers` and the other files that reach them pass |
 | `core/actors/registration.js`, `observer.js` | `xenonet-actors/src/registration.rs`, `observer.rs`, calling the actors through the objects given (`xenonet-engine/src/peer.rs`) | `actor-registration`, `actor-routes`, `actor-gateway`, `observer`, `observers` and the observers' own tests pass |
+| `core/actors/app-bundle.js`, `muse.js`, `grok-bot.js`, `hermes-files.js` | `xenonet-actors/src/app_bundle.rs`, `muse.rs`, `grok_bot.rs`, `hermes_files.rs` (files, plutil and Hermes's state.db read through the twin) | `muse-observer`, `grok-bot-observer`, `hermes-files`, `hermes-observer`, `observers` pass |
 
 With every twin in place, all 111 test files that reach one pass. The
 twins load in the Node processes a test starts too (a server, the

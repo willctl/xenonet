@@ -14,6 +14,14 @@ export const KEEPALIVE_MS = C.keepaliveMs;
 
 const CORE = Symbol("xenonet.observer");
 
+// procs.census() as Rust reads it: the table's [pid, row] pairs, and what
+// each process is.
+export async function readCensus(procs) {
+  const c = await procs.census();
+  const table = [...c.table];
+  return { table, of: table.map(([, p]) => c.of(p)) };
+}
+
 export class Observer extends Block {
   constructor({ name, product, actors, observing = () => true, every = LOOK_MS, clock }) {
     super({ name, kind: "observer", clock });
@@ -43,6 +51,11 @@ export class Observer extends Block {
   }
   touch(id, nodeId, relation, at = this.clock.now()) {
     this[CORE].touch(this, id, nodeId, relation, at);
+  }
+
+  // The census, with what each of its processes is, for a look in Rust.
+  async __census() {
+    return readCensus(this.procs);
   }
 
   // One look (look(), each kind's own), unless its observer is off or the

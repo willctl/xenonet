@@ -17,3 +17,4 @@ sha2.workspace = true
 unicode-normalization.workspace = true
 xenonet-base.workspace = true
 xenonet-engine.workspace = true
+xenonet-schema.workspace = true

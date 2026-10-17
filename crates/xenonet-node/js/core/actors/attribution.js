@@ -5,6 +5,7 @@
 // called them, through the objects given here.
 import { native } from "../../index.js";
 import { drive, calls } from "../../machine.js";
+import { readCensus } from "./observer.js";
 
 const C = native.attributionConstants();
 export const SPAWN_WAIT_MS = C.spawnWaitMs;
@@ -14,7 +15,9 @@ export function startedUnder({ table, of }, isRoot) {
   return native.attrStartedUnder([...table], (p) => of(p), (p) => !!isRoot(p));
 }
 
-const CORE = Symbol("xenonet.spawns");
+// The Rust state under a Spawns, for an observer that keeps one.
+export const SPAWNS_CORE = Symbol("xenonet.spawns");
+const CORE = SPAWNS_CORE;
 
 export class Spawns {
   constructor({ store, map, procs }) {
@@ -72,11 +75,7 @@ export class ReportedSpawns {
       store: this.spawns.store,
       map: this.spawns.map,
       // The census, with what each of its processes is.
-      census: async () => {
-        const c = await procs.census();
-        const table = [...c.table];
-        return { table, of: table.map(([, p]) => c.of(p)) };
-      },
+      census: () => readCensus(procs),
     };
     return drive(native.reportedLook(this.spawns[CORE], at), calls(deps));
   }

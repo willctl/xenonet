@@ -83,3 +83,65 @@ mod tests {
         assert_eq!(utf16_cmp("\u{ffff}", "\u{10000}"), Greater);
     }
 }
+
+/// `pathStyle(base).join(base, ...parts)`: joined in the syntax `base` keeps
+/// (core/paths.js), and normalized as Node's path module normalizes.
+pub fn join_style(base: &str, parts: &[&str]) -> String {
+    use xenonet_base::paths::{normalize_posix, path_style, PathStyle};
+    let all: Vec<&str> = std::iter::once(base).chain(parts.iter().copied()).filter(|p| !p.is_empty()).collect();
+    match path_style(base) {
+        PathStyle::Posix => normalize_posix(&all.join("/")),
+        PathStyle::Windows => normalize_win32(&all.join("\\")),
+        PathStyle::Native => {
+            if cfg!(windows) {
+                normalize_win32(&all.join("\\"))
+            } else {
+                normalize_posix(&all.join("/"))
+            }
+        }
+    }
+}
+
+// path.win32.normalize, for the paths the modules join: a drive or UNC
+// root kept, separators made backslashes and collapsed, . and .. worked out.
+fn normalize_win32(p: &str) -> String {
+    let s = p.replace('/', "\\");
+    let (root, rest) = if s.len() >= 2 && s.as_bytes()[1] == b':' {
+        let drive = &s[..2];
+        let rest = &s[2..];
+        if rest.starts_with('\\') {
+            (format!("{drive}\\"), rest.trim_start_matches('\\'))
+        } else {
+            (drive.to_string(), rest)
+        }
+    } else if s.starts_with("\\\\") {
+        ("\\\\".to_string(), s.trim_start_matches('\\'))
+    } else if s.starts_with('\\') {
+        ("\\".to_string(), s.trim_start_matches('\\'))
+    } else {
+        (String::new(), s.as_str())
+    };
+    let trailing = rest.ends_with('\\');
+    let mut parts: Vec<&str> = Vec::new();
+    for seg in rest.split('\\') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                if parts.last().is_some_and(|l| *l != "..") {
+                    parts.pop();
+                } else if root.is_empty() {
+                    parts.push("..");
+                }
+            }
+            seg => parts.push(seg),
+        }
+    }
+    let mut out = format!("{root}{}", parts.join("\\"));
+    if out.is_empty() {
+        out = ".".into();
+    }
+    if trailing && !parts.is_empty() {
+        out.push('\\');
+    }
+    out
+}

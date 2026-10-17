@@ -268,6 +268,32 @@
       "differences": [
         "Rust calls the actors, the product, the clock and the observer's own observing(), look(), ok() and problem() through the observer, as the JS did; the timer and the look under way stay in the twin."
       ]
+    },
+    "core/actors/app-bundle.js": {
+      "rust": "crates/xenonet-actors/src/app_bundle.rs",
+      "differences": [
+        "The files are read through files and a binary Info.plist's keys through binary (plutil) in the twin; the product's ids are still the RegExp given, tested in JS.",
+        "plist is a copy of what was read."
+      ]
+    },
+    "core/actors/muse.js": {
+      "rust": "crates/xenonet-actors/src/muse.rs",
+      "differences": [
+        "The look calls the actors, its app, procs and the observer's own keep and say through the observer; the census is read with what each process is in one go."
+      ]
+    },
+    "core/actors/grok-bot.js": {
+      "rust": "crates/xenonet-actors/src/grok_bot.rs",
+      "differences": [
+        "The look and the poll call the actors, its app, procs and the observer's own methods through the observer; its Spawns' state is shared with the Rust, which calls saw and settle directly.",
+        "tracked and appPids are copies; a tracked process's program isn't kept, since nothing reads it."
+      ]
+    },
+    "core/actors/hermes-files.js": {
+      "rust": "crates/xenonet-actors/src/hermes_files.rs",
+      "differences": [
+        "Files, folders, the vendor readers and Date.parse are the twin's; Hermes's state.db is still opened in the twin (node:sqlite read only, or a test's open) and queried with Rust's SQL."
+      ]
     }
   },
   "tests": [

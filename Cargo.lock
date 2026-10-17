@@ -670,6 +670,7 @@ dependencies = [
  "unicode-normalization",
  "xenonet-base",
  "xenonet-engine",
+ "xenonet-schema",
 ]
 
 [[package]]

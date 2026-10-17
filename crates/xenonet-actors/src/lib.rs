@@ -4,12 +4,16 @@
 //! with the engine.
 
 pub mod adapters;
+pub mod app_bundle;
 pub mod attribution;
 pub mod demo;
 pub mod detail;
+pub mod grok_bot;
 pub mod handoff;
+pub mod hermes_files;
 pub mod key;
 pub mod limits;
+pub mod muse;
 pub mod names;
 pub mod observer;
 pub mod registration;
