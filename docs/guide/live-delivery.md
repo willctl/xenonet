@@ -96,7 +96,12 @@ OpenCode's TUI runs an HTTP server only when it's told where to listen
 `opencode --hostname 127.0.0.1`. XenoNet finds the running OpenCode
 processes and their ports, and posts the message to the session's
 `prompt_async`, which starts a turn. Messages go in only to sessions you
-allow, and each allowance expires (8 hours by default).
+allow, and each allowance expires (8 hours by default). `xenonet live allow`
+takes the `ses_…` id OpenCode shows. The sessions you allow are among the
+agents, with the titles OpenCode gives them, so other sessions can message
+them by title words or by a selector such as `app:opencode`.
+[OpenCode sessions messaging each other](opencode-messaging.md) has a demo
+of it, and the tools that let an OpenCode session send.
 
 ### tmux
 

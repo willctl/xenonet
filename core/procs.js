@@ -53,14 +53,16 @@ function run(file, args) {
 
 // The agent app a program is, from its path: Claude Code (the CLI, the
 // native install under ~/.local/share/claude/versions, or the one Claude
-// desktop runs from its claude.app) or Codex (the CLI, or the one the
-// ChatGPT app bundles). Programs run by Node or Bun are told by their
-// arguments, when given.
+// desktop runs from its claude.app), Codex (the CLI, or the one the
+// ChatGPT app bundles) or OpenCode (its one binary, however it was
+// installed). Programs run by Node or Bun are told by their arguments, when
+// given.
 export function agentOf(program, args = "") {
   const p = String(program ?? "").replace(/\\/g, "/");
   const base = path.posix.basename(p);
   if (base === "claude" || /\/claude\/versions\/[^/]+$/.test(p)) return "claude";
   if (base === "codex" || /^codex-(aarch64|x86_64)/.test(base)) return "codex";
+  if (base === "opencode" || base === "opencode.exe") return "opencode";
   if (/^(node|bun)$/.test(base)) {
     if (/@anthropic-ai\/claude-code\/cli\.js/.test(args)) return "claude";
     if (/@openai\/codex\//.test(args)) return "codex";

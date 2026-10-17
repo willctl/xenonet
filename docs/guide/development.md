@@ -255,6 +255,7 @@ The console page imports only the core modules that have no Node in them, `theme
 - `dist.mjs`
 - `builder-hooks.mjs`, the build hooks
 - `lab/`, the VM lab
+- `demo/`, OpenCode sessions messaging each other through a XenoNet from the checkout, with the tools it gives them (see [OpenCode sessions messaging each other](opencode-messaging.md))
 
 ### `test/`
 

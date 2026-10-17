@@ -180,6 +180,8 @@ export class Engine extends EventEmitter {
     for (const [id, n] of this.state.index ?? []) if (n.kind === "session" && !n.archived && (n.updatedAt ?? 0) >= since) ids.add(id);
     for (const c of this.store.contacts(since)) if (!c.ended_at) ids.add(c.agent);
     for (const id of this.actors?.engineIds(since) ?? []) ids.add(id);
+    // OpenCode sessions you allowed XenoNet to wake (core/delivery/router.js).
+    for (const id of this.delivery?.known?.() ?? []) ids.add(id);
     const views = await Promise.all([...ids].filter((id) => isAgentId(id) || isActorAgent(id)).map((id) => this.view(id)));
     // Working agents first, then the most recent; sessions that ended drop
     // out, unless you allowed XenoNet to resume one for a message.
@@ -198,7 +200,11 @@ export class Engine extends EventEmitter {
     const live = this.state.live?.sessions?.get(id) ?? this.state.observed?.live?.(id) ?? null;
     const observed = !!live?.observed;
     const contact = this.store.contact(id);
-    const cwd = node?.worktree || node?.cwd || contact?.cwd || null;
+    // A session XenoNet has no record of, but whose own app answers for it
+    // (an OpenCode session, through its server): its title, folder, last
+    // change and whether a turn is under way, as that app says.
+    const told = !node && !live && this.delivery?.describe ? await Promise.resolve().then(() => this.delivery.describe(id)).catch(() => null) : null;
+    const cwd = node?.worktree || node?.cwd || contact?.cwd || told?.directory || null;
     const gone = contact?.pid ? !alive(contact.pid) : false;
     const repo = await this.repos.of(cwd);
     const place = this.#placeOf(id, cwd);
@@ -209,8 +215,8 @@ export class Engine extends EventEmitter {
       .map((e) => ({ path: path.isAbsolute(e.path) ? e.path : pathStyle(cwd ?? e.path).resolve(cwd ?? "/", e.path), at: e.ts, ...(observed ? { observed: true } : {}) }));
     // Working: a turn under way, or anything in the transcript in the last
     // minute and a half (a long turn can look idle between events).
-    const working = !!live && (live.status(now) !== "idle" || now - live.lastEventAt < WORKING_MS);
-    const lastActive = Math.max(live?.lastEventAt ?? 0, node?.updatedAt ?? 0, contact?.at ?? 0);
+    const working = (!!live && (live.status(now) !== "idle" || now - live.lastEventAt < WORKING_MS)) || !!told?.busy;
+    const lastActive = Math.max(live?.lastEventAt ?? 0, node?.updatedAt ?? 0, contact?.at ?? 0, told?.updated ?? 0);
     // Ended: its SessionEnd hook said so (unless it has been at work since),
     // or the process its tools ran under is gone.
     const ended = gone || (!!contact?.ended_at && (live?.lastEventAt ?? 0) < contact.ended_at + 5000) || (live?.endedAt != null && live.lastEventAt <= live.endedAt);
@@ -218,7 +224,7 @@ export class Engine extends EventEmitter {
     return {
       id,
       app: id.split(":")[0],
-      title: clip(node?.title ?? (cwd ? `${id.split(":")[0]} in ${path.basename(cwd)}` : short(id)), 90),
+      title: clip(node?.title ?? (told?.title || null) ?? (cwd ? `${id.split(":")[0]} in ${path.basename(cwd)}` : short(id)), 90),
       // A session an experimental reader reads (core/native), which no
       // message reaches.
       reader: node?.reader ?? null,
@@ -238,7 +244,7 @@ export class Engine extends EventEmitter {
       focus: this.store.focus(id)?.text ?? null,
       editing,
       claims: this.store.claims(now).filter((c) => c.agent === id).map((c) => ({ pattern: c.pattern, note: c.note, until: c.expires_at })),
-      reachable: !!contact && !contact.ended_at && now - contact.at < REACHABLE_MS,
+      reachable: (!!contact && !contact.ended_at && now - contact.at < REACHABLE_MS) || !!this.delivery?.reaches?.(id),
       ...(observed ? { observed: node?.observed ?? true } : {}),
     };
   }
