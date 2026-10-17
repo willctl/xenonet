@@ -13,4 +13,5 @@ mod lines;
 mod machine;
 mod procs;
 mod schema;
+mod secrets;
 mod state;

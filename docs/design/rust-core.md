@@ -500,6 +500,7 @@ place. This table follows it.
 | `xenonet mcp` for sessions (`mcp/xenonet.js`), a prototype | `xenonet-mcp`, on rmcp, Rust 1.88+ | Its own stdio tests; the same answers as the JS servers to the probe and the handshake |
 | `xenonet hook` (`cli/commands/hook.js`) | `xenonet-cli`, the `xenonet` binary | `launcher`'s hook cases, as Rust tests of the binary |
 | `core/procs.js` | `xenonet-engine/src/procs.rs`, its lookups a machine the twin answers with the commands' output | `procs` and the 20 other files that reach it pass |
+| `core/secret-store.js` | `xenonet-actors/src/secret_store.rs` (the store's program still runs in the twin) | `assistant-tunnels`, `actor-wake`, `decide`, `costs`, `integrations`, `spotify` pass |
 
 With every twin in place, all 111 test files that reach one pass. The
 twins load in the Node processes a test starts too (a server, the

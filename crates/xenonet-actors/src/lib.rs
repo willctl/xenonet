@@ -3,5 +3,6 @@
 //! (`token_file`); the registry, registration and what actors report follow
 //! with the engine.
 
+pub mod secret_store;
 pub mod token_file;
 pub mod tokens;

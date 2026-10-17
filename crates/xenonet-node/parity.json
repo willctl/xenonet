@@ -155,6 +155,14 @@
         "The commands still run in the twin, through exec (and the clock is its now): Rust says which to run, reads their answers and keeps what's kept. A command asked for while the same one is still running (the shared table, a signature, a bundle's id) waits for that one's answer, as the JS's shared promises did; the twin's machine driver (crates/xenonet-node/js/machine.js) does the waiting.",
         "selfTest's own connection is still made in the twin; Rust says what the answers mean."
       ]
+    },
+    "core/secret-store.js": {
+      "rust": "crates/xenonet-actors/src/secret_store.rs",
+      "differences": [
+        "The store's program still runs in the twin, through run; Rust checks the target and the secret, says what the program is given and reads what it said.",
+        "The memory store keeps a target and a secret by their text, String(value); the JS's Map kept the values given.",
+        "A comment that isn't text is written as String(comment); the JS threw on macOS."
+      ]
     }
   },
   "tests": [
