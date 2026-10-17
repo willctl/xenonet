@@ -65,10 +65,11 @@ export function parseLog(text, date) {
   return out;
 }
 
-// Agent Wiki's folder, read: its pages (with the projects they mention,
-// paths under `root`, the projects folder), the last two days' log and the
-// inbox. Null without a folder.
-export async function readWiki(dir, projects, { root = null, now = Date.now() } = {}) {
+// The shared context's folder (Xenolith's, or Agent Wiki's), read: its pages
+// (with the projects they mention, paths under `root`, the projects folder),
+// the last two days' log and the inbox. `server` is the MCP server that
+// owns it. Null without a folder.
+export async function readWiki(dir, projects, { root = null, now = Date.now(), server = "agent-wiki" } = {}) {
   if (!dir) return null;
   const pages = [];
   const files = await fsp.readdir(path.join(dir, "pages")).catch(() => []);
@@ -103,5 +104,5 @@ export async function readWiki(dir, projects, { root = null, now = Date.now() } 
   }
   const bySlug = new Map(pages.map((p) => [p.slug, Object.assign(p, { writes: [] })]));
   for (const e of log) for (const slug of e.pages) bySlug.get(slug)?.writes.push(e);
-  return { dir, pages, inbox, log: log.sort((a, b) => a.ts - b.ts) };
+  return { dir, server, pages, inbox, log: log.sort((a, b) => a.ts - b.ts) };
 }

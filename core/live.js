@@ -18,6 +18,7 @@ import { claudeUsageGatherer, desktopUsageGatherer } from "./claude-usage.js";
 import { ClaudeLine, CodexLine, linesOf, isCodexPrompt } from "./lines.js";
 import { claudeSignal, codexSignal } from "./refusals/detect.js";
 import { costParts, plainModel, priorityTier, PRICES_CHECKED } from "./pricing.js";
+import { isContextServer } from "./xenolith.js";
 
 const PRIME_WINDOW_MS = 24 * 3600e3;
 const SWEEP_MS = 2000;
@@ -598,7 +599,7 @@ export class LiveTelemetry extends EventEmitter {
 
   // Wiki writes name the pages they touch; the UI beams to them.
   wikiPagesOf(server, input) {
-    if (server !== "agent-wiki" || !input || typeof input !== "object") return null;
+    if (!isContextServer(server) || !input || typeof input !== "object") return null;
     const pages = [].concat(input.pages ?? [], input.slug ?? []).filter((p) => typeof p === "string");
     return pages.length ? pages.slice(0, 6) : null;
   }

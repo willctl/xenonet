@@ -69,7 +69,7 @@ On Linux, these go in the XDG defaults, `~/.local/state` and `~/.cache`.
 | `XENONET_STATE_DIR` | `%LOCALAPPDATA%\XenoNet`, or `~/Library/Application Support/XenoNet` on macOS |
 | `XENONET_CACHE_DIR` | `%LOCALAPPDATA%\XenoNet\Cache`, or `~/Library/Caches/XenoNet` on macOS |
 | `XENONET_CAPTURES_DIR` | Posters go in `Pictures\XenoNet`, and clips in `Videos\XenoNet`. On macOS, clips go in `Movies/XenoNet`. |
-| `XENONET_WIKI_DIR` | XenoNet finds it from Agent Wiki's settings when Agent Wiki is installed. Otherwise there's none. Any folder with `pages/*.md` works, and it can also have `log/<year>/<date>.md` and `inbox/*.md`. |
+| `XENONET_WIKI_DIR` | XenoNet finds it from Xenolith's settings, or Agent Wiki's when Xenolith isn't installed ([Shared context](shared-context.md)). Otherwise there's none. Any folder with `pages/*.md` works, and it can also have `log/<year>/<date>.md` and `inbox/*.md`. |
 | `XENONET_POLL_MS` | `8000` |
 | `XENONET_CLAUDE_USAGE` | On. Set it to `off` to stop asking Anthropic for Claude plan usage. |
 | `XENONET_ACTIVE_MINUTES` | `60`, how recently a session must have run in a project for the map to light the project |

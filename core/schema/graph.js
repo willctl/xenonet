@@ -128,16 +128,17 @@ const ZoneNode = obj({
 }).describe("A folder outside the projects folder where sessions ran: the home folder, scratch folders, temp, or one folder");
 
 const WikiNode = obj({
-  id: z.string().regex(hosted("resource:agent-wiki$")),
+  id: z.string().regex(hosted("resource:(xenolith|agent-wiki)$")),
   kind: z.literal("wiki"),
   name: z.string(),
+  server: z.enum(["xenolith", "agent-wiki"]).optional().describe("The MCP server that writes to it"),
   path: z.string(),
   pageCount: count,
   inbox: z.array(obj({ id: z.string(), title: z.string(), app: nstr })),
   ...placed,
   ...rolled,
   ...remote,
-}).describe("Agent Wiki, the agents' shared memory");
+}).describe("The shared context: Xenolith, or Agent Wiki before it");
 
 const PageNode = obj({
   id: z.string().regex(hosted("wiki:")),

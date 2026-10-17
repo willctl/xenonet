@@ -178,7 +178,7 @@ export class XenoNetState extends EventEmitter {
       this.repoPassFor = null;
       await this.#repoPass().catch(() => {});
     }
-    const wiki = await readWiki(config.wikiDir, projects.value, { root }).catch(() => null);
+    const wiki = await readWiki(config.wikiDir, projects.value, { root, server: config.wikiServer }).catch(() => null);
 
     const graph = buildGraph({
       projectsDir: root,

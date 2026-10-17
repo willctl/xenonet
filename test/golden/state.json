@@ -1628,6 +1628,7 @@
     "id": "resource:agent-wiki",
     "kind": "wiki",
     "name": "Agent Wiki",
+    "server": "agent-wiki",
     "path": "<world>/home/wiki",
     "pageCount": 5,
     "inbox": [
