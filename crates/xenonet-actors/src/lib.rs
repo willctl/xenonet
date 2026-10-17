@@ -4,14 +4,19 @@
 //! with the engine.
 
 pub mod adapters;
+pub mod attribution;
+pub mod demo;
 pub mod detail;
 pub mod handoff;
 pub mod key;
 pub mod limits;
 pub mod names;
+pub mod registration;
+pub mod registry;
 pub mod secret_store;
 pub mod spend;
 pub mod token_file;
 pub mod tokens;
+pub mod you;
 
 pub use xenonet_engine::products;

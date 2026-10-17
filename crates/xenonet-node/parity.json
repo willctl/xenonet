@@ -225,6 +225,35 @@
         "ENGINE_MIGRATIONS still run on a node:sqlite database given to migrateEngine: Rust says each step's statements, from the columns the database has.",
         "block is a Block whose lifecycle is a copy of the one opening the file left. Closing a store that's closed doesn't throw; DatabaseSync's close did."
       ]
+    },
+    "core/actors/index.js": {
+      "rust": "crates/xenonet-actors/src/registry.rs",
+      "differences": [
+        "mapOf, the map's adapter over XenoNet's state, is still the JS: it reads the state's own nodes.",
+        "Events are told (event, the list's timer) once the call that made them is done, not in its middle.",
+        "remove() and unregister() run what goes first (beforeRemove) in the twin, at the point Rust says.",
+        "actors.actors and actors.waiting are copies of Rust's records; attribution lets waiting reports go through expireWaiting() and dropWaitingAt(), which the JS didn't need.",
+        "An upsert or report gives back a copy of the record, not the record itself."
+      ]
+    },
+    "core/actors/you.js": {
+      "rust": "crates/xenonet-actors/src/you.rs",
+      "differences": [
+        "Your state lives in the registry's Rust (you_report and the rest); createYou gives the registry's own you."
+      ]
+    },
+    "core/actors/demo.js": {
+      "rust": "crates/xenonet-actors/src/demo.rs",
+      "differences": [
+        "The demo world's own nodes (its projects, sessions, files and Wren's Claude account) are still read from core/demo.js and core/identities.js in the twin."
+      ]
+    },
+    "core/actors/attribution.js": {
+      "rust": "crates/xenonet-actors/src/attribution.rs",
+      "differences": [
+        "The store, the map, procs and the actors are called through the objects given, as the JS called them. ReportedSpawns reads the census with what each process is in one go.",
+        "Spawns' pending, done and claimed are copies (claimed can be added to); a pin whose agent isn't text doesn't match, where JS threw."
+      ]
     }
   },
   "tests": [

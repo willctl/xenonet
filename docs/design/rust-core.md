@@ -503,6 +503,7 @@ place. This table follows it.
 | `core/secret-store.js` | `xenonet-actors/src/secret_store.rs` (the store's program still runs in the twin) | `assistant-tunnels`, `actor-wake`, `decide`, `costs`, `integrations`, `spotify` pass |
 | `core/actors/products.js`, `detail.js`, `names.js`, `key.js`, `limits.js`, `handoff.js`, `adapters.js`, `spend.js` | `xenonet-engine/src/products.rs`; `xenonet-actors/src/detail.rs`, `names.rs` (on unicode-normalization), `key.rs`, `limits.rs`, `handoff.rs`, `adapters.rs`, `spend.rs` | `actor-names`, `actor-limits`, `actor-spend`, `actors`, `actor-gateway`, `actor-routes`, `gateway-tunnel`, `assistant-connections`, `server` pass |
 | `core/engine/store.js` | `xenonet-engine/src/store.rs`, on `sql.rs` (node:sqlite's binding and rows, over rusqlite) | `engine-store` and the 36 other files that reach it pass |
+| `core/actors/index.js`, `you.js`, `demo.js`, `attribution.js` | `xenonet-actors/src/registry.rs`, `you.rs`, `demo.rs`, `attribution.rs` (mapOf stays JS, over the state) | `actors`, `actor-needs-you`, `observer`, `observers` and the other files that reach them pass |
 
 With every twin in place, all 111 test files that reach one pass. The
 twins load in the Node processes a test starts too (a server, the
