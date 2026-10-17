@@ -760,11 +760,9 @@ impl AskWorker {
                     o.insert("usage".into(), usage.clone());
                 }
                 o.insert("finishedAt".into(), json!(local_iso(&now())));
-                // The last event goes first: a reader that sees the result settled has every event.
+                // The last event and the log line go first: a reader that sees the result settled has
+                // every event, and the request log has the end of the question.
                 emit(json!({ "type": "answered", "found": found }));
-                if let Err(e) = write_json(&self.wiki_dir, &f.result, &Value::Object(o)) {
-                    log(&format!("result write failed: {e}"));
-                }
                 self.reqlog.write(vec![
                     ("kind", json!("ask")),
                     ("event", json!("done")),
@@ -778,6 +776,9 @@ impl AskWorker {
                     ("usage", usage),
                     ("model", json!(cfg.model)),
                 ]);
+                if let Err(e) = write_json(&self.wiki_dir, &f.result, &Value::Object(o)) {
+                    log(&format!("result write failed: {e}"));
+                }
             }
             Err(mut e) => {
                 if e.kind == "aborted" && self.stopping() {
@@ -797,9 +798,6 @@ impl AskWorker {
                 o.insert("reads".into(), json!(reads));
                 o.insert("finishedAt".into(), json!(local_iso(&now())));
                 emit(json!({ "type": status, "errorKind": e.kind }));
-                if let Err(w) = write_json(&self.wiki_dir, &f.result, &Value::Object(o)) {
-                    log(&format!("result write failed: {w}"));
-                }
                 self.reqlog.write(vec![
                     ("kind", json!("ask")),
                     ("event", json!("done")),
@@ -811,6 +809,9 @@ impl AskWorker {
                     ("ms", json!(ms)),
                     ("model", json!(cfg.model)),
                 ]);
+                if let Err(w) = write_json(&self.wiki_dir, &f.result, &Value::Object(o)) {
+                    log(&format!("result write failed: {w}"));
+                }
             }
         }
         beating.store(false, Ordering::SeqCst);

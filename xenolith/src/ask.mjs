@@ -596,10 +596,11 @@ export class AskWorker {
       const found = r.output?.found !== false;
       const sources = await resolveSources(this.wikiDir, r.output?.sources);
       const ms = Date.now() - t0;
-      // The last event goes first: a reader that sees the result settled has every event.
+      // The last event and the log line go first: a reader that sees the result settled has every
+      // event, and the request log has the end of the question.
       emit({ type: 'answered', found });
-      await writeJson(this.wikiDir, f.result, { status: 'done', answer, found, sources, ...base, ms, searches, reads, usage: r.usage, finishedAt: wiki.localISO() });
       this.reqlog.write({ kind: 'ask', event: 'done', ask: id, result: 'ok', found, searches, reads, sources: sources.map((s) => s.target), ms, usage: r.usage, model: this.cfg.model });
+      await writeJson(this.wikiDir, f.result, { status: 'done', answer, found, sources, ...base, ms, searches, reads, usage: r.usage, finishedAt: wiki.localISO() });
     } catch (err) {
       const e = err instanceof ModelError ? err : new ModelError('model_error', err?.message || String(err));
       if (!(err instanceof ModelError)) log(err?.stack || err);
@@ -608,8 +609,8 @@ export class AskWorker {
       const status = e.kind === 'aborted' ? 'cancelled' : 'error';
       const ms = Date.now() - t0;
       emit({ type: status, errorKind: e.kind });
-      await writeJson(this.wikiDir, f.result, { status, errorKind: e.kind, error: explain(e, this.cfg), ...base, ms, searches, reads, finishedAt: wiki.localISO() }).catch((w) => log(`result write failed: ${w.message}`));
       this.reqlog.write({ kind: 'ask', event: 'done', ask: id, result: e.kind, error: clip(e.message, 300), searches, reads, ms, model: this.cfg.model });
+      await writeJson(this.wikiDir, f.result, { status, errorKind: e.kind, error: explain(e, this.cfg), ...base, ms, searches, reads, finishedAt: wiki.localISO() }).catch((w) => log(`result write failed: ${w.message}`));
     } finally {
       clearInterval(beat);
     }
