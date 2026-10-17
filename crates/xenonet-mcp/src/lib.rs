@@ -221,3 +221,16 @@ pub async fn serve() {
     }
     let _ = running.waiting().await;
 }
+
+/// Serves the console operator (mcp/console.js) on stdio. Not in Rust yet.
+pub async fn serve_console() -> Result<(), String> {
+    Err("the console operator isn't in the Rust xenonet yet: it runs as node mcp/console.js".into())
+}
+
+/// Serves the assistant's read-only server (mcp/assistant.js) on stdio, for
+/// `grant`, or over made-up data with `fixture`, for the XenoNet on `port`
+/// (XENONET_PORT, or 47840, when it's None). Not in Rust yet.
+pub async fn serve_assistant(grant: Option<String>, fixture: bool, port: Option<u16>) -> Result<(), String> {
+    let _ = (grant, fixture, port);
+    Err("xenonet mcp assistant isn't in the Rust xenonet yet: it runs as node mcp/assistant.js".into())
+}
