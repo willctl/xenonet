@@ -148,6 +148,491 @@
         "Requests are the Rust's own HTTP/1.1, with Connection: close, and without the accept, user-agent and accept-encoding headers fetch adds. The twin leaves a server whose base isn't http://127.0.0.1:<port> to the JS.",
         "A header given in another case replaces the one XenoNet sends by itself (Content-Type for content-type); fetch sent both, joined."
       ]
+    },
+    "core/blocks/clock.js": {
+      "rust": "crates/xenonet-blocks/src/clock.rs",
+      "differences": [
+        "The twin keeps Date.now() and the JS timers: Rust's cores take the time from whoever runs them, and a test mocks Date. The binary keeps time with SystemClock and tokio's timers."
+      ]
+    },
+    "core/blocks/index.js": {
+      "rust": "crates/xenonet-blocks/src/lib.rs",
+      "differences": [
+        "SqliteStore and migrateSqlite are still core/blocks/sqlite.js's: it has no twin (see core/blocks/sqlite.js)."
+      ]
+    },
+    "core/xenolith.js": {
+      "rust": "crates/xenonet-sources/src/xenolith.rs",
+      "differences": [
+        "A config.json that isn't UTF-8 is read as Node reads it, with U+FFFD for what isn't."
+      ]
+    },
+    "core/frames.js": {
+      "rust": "crates/xenonet-state/src/frames.rs",
+      "differences": [
+        "The page imports core/frames.js itself and keeps the JS; the twin is Node's."
+      ]
+    },
+    "core/rename.js": {
+      "rust": "crates/xenonet-state/src/rename.rs",
+      "differences": []
+    },
+    "core/export-labels.js": {
+      "rust": "crates/xenonet-state/src/export_labels.rs",
+      "differences": [
+        "The page imports core/export-labels.js itself and keeps the JS; the twin is Node's, and passes the labels to Rust on each call."
+      ]
+    },
+    "core/needs-you.js": {
+      "rust": "crates/xenonet-state/src/needs_you.rs",
+      "differences": [
+        "The page imports core/needs-you.js itself and keeps the JS; the twin is Node's.",
+        "order returns -1, 0 or 1, where JS returned the difference of the times it compared: the same order.",
+        "waitsWords looks up an actor's wait among its three words only; JS's lookup on a plain object also found Object.prototype's names (a wait of \"constructor\")."
+      ]
+    },
+    "core/refusals/demo.js": {
+      "rust": "crates/xenonet-sources/src/refusals/demo.rs",
+      "differences": []
+    },
+    "core/refusals/query.js": {
+      "rust": "crates/xenonet-sources/src/refusals/query.rs",
+      "differences": [
+        "Facets and sorts compare as crates/xenonet-base/src/jsstr.rs's localeCompare does: ICU's root order for Latin text, code points after it.",
+        "A record whose source has no file is shown with source {}, where JS made { file: undefined } (the same JSON)."
+      ]
+    },
+    "core/refusals/store.js": {
+      "rust": "crates/xenonet-sources/src/refusals/store.rs",
+      "differences": [
+        "Rust reads and writes the files; the twin asks now() and context() when the JS did (after the record is known to be new) and passes their answers in.",
+        "context.jsonl.gz is gzipped by flate2, not zlib: the same text unpacked, other bytes.",
+        "claudeContext and codexContext give copies of the lines they were given, not the same objects.",
+        "A field the signal leaves undefined is left out of the record returned, where JS kept the key with undefined (the same JSON)."
+      ]
+    },
+    "core/redact.js": {
+      "rust": "crates/xenonet-state/src/redact.rs",
+      "differences": [
+        "HMAC-SHA256 is written out on sha2 (checked against RFC 4231's vectors), where JS used crypto.createHmac.",
+        "starNames takes ids that are equal as JSON as one id; JS's Set kept two equal objects apart (ids are strings)."
+      ]
+    },
+    "core/digest.js": {
+      "rust": "crates/xenonet-state/src/digest.rs",
+      "differences": [
+        "askCodex still runs codex exec from the twin (a child process); Rust gives its arguments and narrate's prompt.",
+        "dayLog's date is English as en-US writes it (\"Saturday, October 3\") whatever the system's locale, where Node used the system's.",
+        "summarize writes since and until as null when they aren't numbers, where JS gave them back as they came."
+      ]
+    },
+    "core/classify.js": {
+      "rust": "crates/xenonet-state/src/classify.rs",
+      "differences": [
+        "Codex (digest.js's askCodex) and the decider are still asked from the twin; Rust makes the outline, the prompt, the questions and the picks.",
+        "jevQuestions' batches hold copies of the outline's folders, not the same objects."
+      ]
+    },
+    "core/openrouter-usage.js": {
+      "rust": "crates/xenonet-sources/src/openrouter_usage.rs",
+      "differences": [
+        "The key (the credential store), the request (fetch) and the reading kept for a minute stay in the twin; Rust says what OpenRouter's answer means and how long it stands."
+      ]
+    },
+    "core/store.js": {
+      "rust": "crates/xenonet-state/src/store.rs",
+      "differences": [
+        "The document stays the JS object the JSON store's twin loaded, changed in place, since its callers hold its parts: Rust says what prepare fills in and what setLayout and clearProjectRules change, and the twin applies it. The other setters only set a key."
+      ]
+    },
+    "core/workspace.js": {
+      "rust": "crates/xenonet-state/src/workspace.rs",
+      "differences": [
+        "The config (config.js), the store, the scan (the projects twin's scanProjects) and the scan's time limit stay in the twin; Rust reads the folders and decides.",
+        "A folder's links are followed with Rust's canonicalize, without the \\\\?\\ it puts in front on Windows, where Node used realpath."
+      ]
+    },
+    "core/graph.js": {
+      "rust": "crates/xenonet-state/src/graph.rs",
+      "differences": [
+        "A layout pin without x, y or z gives null for it, where JS left fx, fy or fz undefined (left out of the JSON)."
+      ]
+    },
+    "core/state.js": {
+      "rust": "crates/xenonet-state/src/state.rs",
+      "differences": [
+        "The class stays the twin's: an EventEmitter that owns the blocks, the timers and the map, whose graph, index and parent maps the server and the tests read and change, so they stay JS objects. Rust makes the refresh's decisions (which sessions it maps, each source's status, the projects folder's rules and detection, where a session lives, the live snapshot as the page gets it, the tray's summary, a handoff's notes) and keeps what a refresh remembers for the next (Memory: pulses, the map's signature, sign-ins, nudges to commit).",
+        "The live snapshot it gives is Rust's copy, not the tailer's snapshot changed in place.",
+        "It imports config.js, open.js and demo.js as JS: they're not this group's."
+      ]
+    },
+    "core/live.js": {
+      "rust": "crates/xenonet-sources/src/live/telemetry.rs",
+      "differences": [
+        "Each session's state is Rust's (LiveCore, in the twin). `live.sessions` is a Map-like of views onto it: a field reads and sets Rust's, and a value read is a copy, so a change made inside it (`s.turn.active = false`, `s.prompts.push(…)`) doesn't reach Rust; set the field again. Its Maps (inflight, files, edits, mcp, subagents, daily, spend, seenMessages) are views whose get, set, has, delete, clear and entries reach Rust, and a push onto `recentTools` does. Nothing outside live.js changes a field in place but the console's simulate, which uses only what reaches Rust. `sessions` has no set or delete, as nothing sets or forgets a session.",
+        "live.js's snapshot and sessionNotes hand out each session's own tokens, context, toolCounts, prompts and messages, which JS holding them sees change (test/golden.test.js relies on it). The twin keeps those as JS objects it writes Rust's state into after every call that changes the session; writing into one doesn't reach Rust. A collisionDiffs list doesn't change with later edits, where JS's was the session's own.",
+        "`live.limits` and `live.limitSamples` are { codex, claude } whose fields set Rust's; replacing the whole object, or a sample changed in place, doesn't. `claudeSamples` and `history` are copies, and the activity event emitted is a copy of the history's entry, where JS's were the same objects.",
+        "An event keeps a field whose value is undefined (a Codex tool call's agentId). Elsewhere a field JS would hold as undefined is left out (a tool call without a name in the snapshot's lastTool, a Codex subagent without an id, a usage reading that lacks one): the same in JSON.",
+        "A count or time a record gives as a string is taken as Number() reads it, where JS's `+` would have joined strings (\"5\" input tokens). Context used and window keep the value the record gave, as JS did.",
+        "A Map key that's an object (a tool_use id that isn't a string, say) matches no other, as a reference does in JS; other keys are told apart as SameValueZero tells them. A value JSON can't hold (NaN, a function) reaches Rust as JSON makes it (NaN as null): only a direct call can pass one.",
+        "noteToolResult(ok, ts, tool) from JS doesn't follow `tool`, JS's own copy: Rust keeps its own records of calls. activity(s, ev) for a session that isn't in the map makes it. applyClaudeLine, which took a subagent object JS holds, isn't on the twin (nothing outside live.js calls it). A listener that throws while a line's events are emitted counts the line as an error, after Rust has taken all of it, where JS stopped there.",
+        "Sorts by a number (history, subagents, files, resources, Claude samples) are a stable merge sort that counts NaN as equal, as V8's sort does with a comparator that's consistent.",
+        "Through the twin, applyClaude takes about 4 times as long as the JS (40,000 lines: 350 ms against 90 ms) and a snapshot about 6 times, since each record crosses into Rust whole and its events come back: a check of the contract, not yet faster.",
+        "What stays in JS: the tailer (its own twin), finding the roots (existsSync, realpath), the gatherers of Claude plan usage with their 30-second timer, and the EventEmitter."
+      ]
+    },
+    "core/claude-usage.js": {
+      "rust": "crates/xenonet-sources/src/claude_usage.rs",
+      "differences": [
+        "Rust decides: the sign-in a credentials text holds, whether it can be used now, the windows an answer gives (parseUsage), why there's no reading (a pause and how long, a refused sign-in, another status, no windows, Anthropic out of reach), when to ask again, and the samples Claude desktop's file holds.",
+        "What stays in JS, where the tests hand it in: the keychain read (execFile `security`), the file reads and the path to .credentials.json (node:path, win32 or posix), fetch and res.json(), the vendor schemas' checks (vendor.js's twin), JSON.parse of the desktop file, and the gatherers.",
+        "A reset time is read as ISO 8601 (time::parse_iso): one in another format V8's Date.parse takes (\"5\", \"Oct 3 2026\") reads as none, where JS read a time. Anthropic sends ISO 8601.",
+        "A desktop sample without `t` has no `ts` field, where JS's had one holding undefined."
+      ]
+    },
+    "core/refusals/detect.js": {
+      "rust": "crates/xenonet-sources/src/refusals/detect.rs",
+      "differences": [
+        "A signal's `at` reads the line's timestamp as ISO 8601 (time::parse_iso), where V8's Date.parse takes other formats too; both apps write ISO 8601.",
+        "The live telemetry's Rust reads every line's signal itself; the twin is for the refusal store and the refusals command."
+      ]
+    },
+    "core/native/copilot-cli.js": {
+      "rust": "crates/xenonet-sources/src/native/copilot_cli.rs",
+      "differences": [
+        "vendor.js's check stays JS: Rust calls the twin's guarded reader(SOURCE).check back for the first 16 session events and tool starts of each log, with the version session.start gives, so each of those records crosses to JS and back. A test's own `files` (readdirSync, statSync, readFileSync) is read through the same way; a Dirent without isDirectory makes the folder unreadable, where JS threw out of read() (a problem).",
+        "Logs are parsed as in core/blocks/normalizer.js's entry (crates/xenonet-base/src/json.rs).",
+        "Times are read by crates/xenonet-base/src/time.rs: ISO 8601 only, a time without a zone as UTC; V8's Date.parse fallback for other forms isn't kept.",
+        "Paths keep the writing machine's style through Node 22's path.win32 and path.posix rules, ported in crates/xenonet-sources/src/native/node_path.rs; a drive-relative Windows path (C:foo) resolves against the process's folder, not the drive's own (=C:).",
+        "`runs` is a Map rebuilt from Rust after each read (the same Map until the next one); `cache` isn't exposed; EDIT_TOOLS is a copy, so changing either changes nothing in Rust."
+      ]
+    },
+    "core/native/gemini-cli.js": {
+      "rust": "crates/xenonet-sources/src/native/gemini_cli.rs",
+      "differences": [
+        "vendor.js's check stays JS, called back for the first 12 records of each file (until the metadata, then those with tool calls), as in copilot-cli's entry; a test's own `files` is read through the same way.",
+        "Records, times and paths as in copilot-cli's entry.",
+        "A chat with more messages than V8 takes as arguments (Math.min(...times), hundreds of thousands) reads in Rust; JS threw and passed over the file.",
+        "`runs` and `cache` as in copilot-cli's entry."
+      ]
+    },
+    "core/native/cursor.js": {
+      "rust": "crates/xenonet-sources/src/native/cursor.rs",
+      "differences": [
+        "vendor.js's check stays JS, called back for the first 32 records; the reader is got when the first record is checked, where JS got it as it began to parse (records or none). What the check throws is the block's problem, as in JS. A test's own `files` (statSync, openSync, readSync, closeSync) is read through.",
+        "Records, times and paths as in copilot-cli's entry; an `at` that isn't a string is read as String() writes it, ISO only.",
+        "`runs` as in copilot-cli's entry; `seen` and `fileState` are read only."
+      ]
+    },
+    "core/native/opencode.js": {
+      "rust": "crates/xenonet-sources/src/native/opencode.rs",
+      "differences": [
+        "Rust opens opencode.db read only through rusqlite (SQLite bundled) and runs the JS's statements, where JS used node:sqlite. Values read as node:sqlite gives them: an integer past 2^53 is an error, so the read is unreadable; a REAL that isn't finite reads as null (node:sqlite: Infinity); a BLOB as an object of its bytes by index (node:sqlite: a Uint8Array). An open's error message is rusqlite's, and only its permission, EACCES or EPERM counts.",
+        "Given `open` (a test's handle, or a stand-in), the twin opens with it and runs Rust's statements on that handle, called back from Rust; its rows cross to Rust.",
+        "vendor.js's reader stays JS: got once the database has opened, as JS got it, with `missing` and `check` called back. When getting the reader throws, the twin closes the database before throwing (JS left it open).",
+        "`files.existsSync` stays the twin's, its answer handed to Rust.",
+        "`runs` as in copilot-cli's entry; `fileState` and `version` are read only; EDIT_TOOLS and PATCH_TOOLS are copies."
+      ]
+    },
+    "core/numbat.js": {
+      "rust": "crates/xenonet-sources/src/numbat.rs",
+      "differences": [
+        "Records and times as in copilot-cli's entry (a timestamp that isn't a string is read as String() writes it, ISO only).",
+        "runId and sessionIdOf take String() of the ids: a non-string id that needs a digest is digested, where JS's crypto threw.",
+        "On Windows a file's inode isn't known, so a rotated file is read from the start only once it's shorter than what was read of it.",
+        "A test's own `files` (statSync, openSync, readSync, closeSync) is read through, the bytes handed over as latin1.",
+        "`runs` as in copilot-cli's entry; `offset`, `ino`, `partial` and `fileState` are read only (`skipped` can be set); SCHEMA_VERSIONS and LEFT_OUT are copies."
+      ]
+    },
+    "core/reported-runs.js": {
+      "rust": "crates/xenonet-sources/src/reported_runs.rs",
+      "differences": [
+        "report takes String(actor) and String(app ?? \"\"), so an app that isn't a string but names one (an array [\"claude\"]) is kept as its string, where JS kept the value; forget takes String(actor).",
+        "`runs` is a copy, a Map of plain runs: changing it changes nothing.",
+        "A live view's status(now) reads its run while it's the same run; once the run has gone, it reads what the run was when it went, for the last 256 runs to go (JS's closure held any run), and after that what it was when live() was called.",
+        "observedSessions keeps the first session of each id as Rust says; an id that's NaN counts as null (JSON has no NaN), and an object or array is never a repeat (JS: the same object twice is).",
+        "The clock (`now`) stays the twin's, asked only for a report that's good, as in JS."
+      ]
+    },
+    "core/git.js": {
+      "rust": "crates/xenonet-sources/src/git.rs",
+      "differences": [
+        "Running git (execFile, or the exec a test passes) stays in the twin, as do gitAvailable's cache and its execFileSync of xcode-select, the watch's three-at-a-time turns and its per-repo gatherers. Rust parses what git says, decides the guards and filter overrides, what each answer means for the next run, and words the watch's problems.",
+        "An exit code that isn't a number (a spawn error's \"ENOENT\") counts as neither 1 nor 129, as it did in JS."
+      ]
+    },
+    "core/projects.js": {
+      "rust": "crates/xenonet-state/src/projects.rs",
+      "differences": [
+        "After the walk, Rust reads the folders, repos, package.json, Cargo.toml, pyproject.toml, .gitmodules and READMEs it looks at itself, with std::fs and synchronously, where the JS awaited fs.promises. The event loop waits for that part of a scan (no timer, so no abort, can come in during it); the walk itself is still the scanner block's, read with fs.promises and the scanner's fs.",
+        "A workspace's manifest is read synchronously when the walk hands a folder to look, where the JS awaited it.",
+        "The regular expressions the scan reads files with (gitdir:, ref:, the origin's url, .gitmodules' paths, a workspace's [workspace] line) are matched by hand, as JS matches them, with JS's white space and line terminators.",
+        "rules given as null are read as none; the JS threw at the first lookup.",
+        "A session folder that isn't a string is String()'d; the JS's path.dirname threw on it.",
+        "projectRelations gives keys and parents as strings; the JS kept them as the projects had them.",
+        "On Windows, path.relative, path.dirname and path.basename are std::path's approximations of Node's path.win32, not ports of it.",
+        "mapLimit and limiter stay in the twin: their scheduling is the event loop's."
+      ]
+    },
+    "core/codex.js": {
+      "rust": "crates/xenonet-sources/src/codex.rs",
+      "differences": [
+        "The app-server's process (spawn, or what a test passes), the requests' encoding (JSON.stringify of the caller's params), their promises and time limits, the vendor readers' checks, the listing's and renaming's requests, and the rollouts' reads (lines.js) and their cache stay in the twin. Rust reads the app-server's lines, declines its own requests, words its errors, keeps its stderr's tail, makes threads sessions and items entries, and pages through them.",
+        "A line from the app-server that is JSON null is passed over; the JS threw in its stdout handler.",
+        "A thread's time written as a string is read as ISO 8601 (time::parse_iso). V8's Date.parse also reads other formats (\"Oct 5 2026\"), which give null here.",
+        "A text cut through a surrogate pair by excerpt ends in U+FFFD, where JS kept the lone half.",
+        "Codex desktop's state database is read with rusqlite, read-only, in place of node:sqlite. A BLOB comes back as a Buffer (node:sqlite: a Uint8Array); an integer past 2^53 fails the query, as node:sqlite refuses one, and the columns are then checked as for any failed query.",
+        "A rollout's entries are made in Rust from each line's record (CodexLine's raw), not from the line's getters: the same fields, read once."
+      ]
+    },
+    "core/claude.js": {
+      "rust": "crates/xenonet-sources/src/claude.rs",
+      "differences": [
+        "The Agent SDK's calls (listSessions, getSessionMessages, renameSession) and the vendor readers' samples stay in the twin. Rust reads Claude desktop's files, merges them into the SDK's listing, makes messages entries and pages through them.",
+        "Claude desktop's session files are parsed by crates/xenonet-base/src/json.rs, as in core/blocks/normalizer.js's entry.",
+        "A message's timestamp is read as ISO 8601. V8's Date.parse also reads other formats, which give NaN here.",
+        "renameDesktopRecord still parses the record with JSON.parse in the twin, so a broken file throws V8's SyntaxError; Rust checks it's the same session's, sets the title and writes the text (keys in JS's order). The write, the rename and its retries stay in the twin."
+      ]
+    },
+    "core/identities.js": {
+      "rust": "crates/xenonet-state/src/identities.rs",
+      "differences": [
+        "linkIdentities: the twin hands Rust each node's id, kind, app, claudeAccount, provider, updatedAt, createdAt, git.origin, key, group and name, and each link's ends and kind, and applies what Rust returns: ranAs and identities on the nodes, graph.identities, and the changes to saved.signins (the same span objects, extended or added to) and saved.known (set, or Object.assign'd as before). When an odd record makes it throw, nothing is changed; the JS could have changed part of the graph and the saved state first.",
+        "A pushes-as link whose push names no `how` leaves `via` out, where the JS set it to undefined (the same in JSON); a firstSeen that isn't there is left out the same way.",
+        "An identity's detail that isn't an object is taken as {}; the JS kept it, and threw when it merged into it.",
+        "A sign-in timeline that isn't an array throws for either app; the JS threw only when it used it.",
+        "accountAt compares times as numbers; the JS compared two strings as strings.",
+        "Only Claude's four plan names are looked up; the JS's object literal also answered Object.prototype's names.",
+        "The regular expressions for hosts.yml, ssh config, remotes, credential scopes and gh's helper run on the regex crate with JS's \\s, `.` and \\b spelled out; the ones with a backreference or a lookahead are matched by hand.",
+        "IdentityWatch keeps where each transcript is and each session's owner in Rust (TranscriptOwners), read with std::fs; the object no longer has the owners, transcripts and transcriptsAt fields (nothing read them). Finding a repo's config file and the stamp of your git config's files read the disk in Rust too. The sign-in files' gatherers and their reads, and git config's execFile, stay in the twin."
+      ]
+    },
+    "core/schema/check.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "zod stays JS: the twin has z.toJSONSchema write each schema's JSON Schema for input (io: \"input\"; for every XenoNet schema that's the same document as its file in schemas/, checked), and Rust checks the data against it. A registered schema is checked against all the registered documents, which refer to each other by $id, compiled again when the registry grows; any other zod schema against its own, compiled once. The documents of z.object() (strip) differ by mode, and input's leaves its unknown keys open, as zod does.",
+        "A JSON Schema document doesn't say everything zod knew, so Rust reads zod's shapes, and where two zod schemas write the same document it takes the usual one: anyOf with { \"type\": \"null\" } last is .nullable(), so z.union([X, z.null()]) with an X that fails more than one way reports X's issues where zod reports \"expected null\"; an intersection of two plain objects is written as one object, so a value that isn't an object gets one issue where zod gives one from each side; a string's or a number's checks run in zod's usual order (a format, the least, the most, then patterns); equal least and most lengths are one .length() check; a oneOf's discriminator is the first key whose values tell its options apart (x-xenonet names it in the vendor schemas).",
+        "What JSON Schema can't hold isn't checked: a .refine() isn't in the document, and a schema z.toJSONSchema can't write (z.date(), a transform) throws zod's error from check() where the JS checked it. A string format zod checks by code rather than by a pattern (z.url(), z.jwt(), z.ipv6()) isn't checked; XenoNet's schemas use only date-time, which has one. multipleOf is an exact remainder, not zod's floatSafeRemainder; no schema uses it.",
+        "Patterns run as JS runs them without flags, on UTF-16 code units (jsregex.rs, a backtracking matcher: xenonet-schema has no regex dependency, and the regex crate's \\s, \\w, \\b and . differ). A backreference is refused when compiled, loudly. All 36 patterns in XenoNet's schemas run.",
+        "The value is read whole into Rust before it's checked, keeping undefined, NaN, the infinities, a function's length and an object's constructor name (zod's \"received Date\"). One that holds itself is read once: its inner self is the same kind of object without keys, where zod would follow it as far as the schema goes. A key an object has only through its prototype (\"toString\" in {}) isn't present to Rust.",
+        "A compare script ran zod's check and Rust's on 227,538 values (every registered schema; the fixtures' values and one made from each schema, then mutated: wrong types, keys missing and extra, undefined, NaN, the infinities, unsafe ints, long strings and arrays, Dates, Maps, Sets, class instances, null prototypes, functions, bigints, symbols, lone surrogates, unknown discriminators), strict and not, against both forms of the documents: no difference."
+      ]
+    },
+    "core/schema/registry.js": {
+      "rust": "crates/xenonet-schema/src/registry.rs",
+      "differences": [
+        "zod stays JS: define()'s .meta() and its zod registry, the zod schemas schemaFor() returns, and z.toJSONSchema, whose output Rust puts in the files' key order with their comment. Rust keeps the ids, refuses what JS refuses, finds either form of an id, sorts them, and writes the files' texts.",
+        "jsonSchemas() keeps z.toJSONSchema's output until another schema is defined; the JS wrote it again on every call.",
+        "A document without $schema, $id, title or description (z.toJSONSchema's __shared $defs, which XenoNet's schemas don't make) has those keys left out, where JS gave them as undefined."
+      ]
+    },
+    "core/schema/files.js": {
+      "rust": "crates/xenonet-schema/src/files.rs",
+      "differences": [
+        "The texts come from schemaFiles(); Rust lists, compares, writes and removes. A failed write or removal throws Rust's io error, not Node's (with its code and syscall)."
+      ]
+    },
+    "core/schema/index.js": {
+      "rust": "crates/xenonet-schema/src/registry.rs",
+      "differences": [
+        "Imports the definitions' twins and re-exports the registry's and check's."
+      ]
+    },
+    "core/schema/common.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports zod's builders, which stay JS; what they make reaches Rust as JSON Schema."
+      ]
+    },
+    "core/schema/session.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/project.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/identity.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/graph.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/live.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/engine.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/doctor.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/theme.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/state.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/actor.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/drift.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/host.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/assistant.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/vendor/anomaly/opencode.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/vendor/anthropic/agent-sdk.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/vendor/anthropic/claude-code.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/vendor/anthropic/claude-desktop.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/vendor/anthropic/oauth.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/vendor/anysphere/cursor.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/vendor/common.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports zod's builders for the vendor schemas, which stay JS; what they make reaches Rust as JSON Schema (lenient.rs, check.rs)."
+      ]
+    },
+    "core/schema/vendor/github/copilot-cli.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/vendor/github/gh.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/vendor/google/gemini-cli.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/vendor/index.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Imports the vendor definitions' twins, which register through the registry's."
+      ]
+    },
+    "core/schema/vendor/nous/hermes-agent.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/vendor/openai/codex.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/stats.js": {
+      "rust": "crates/xenonet-state/src/stats.rs",
+      "differences": [
+        "The transcripts are read through the lines twin (readLines, which unpacks a .zst archive in JS and runs each line through the vendor checks), and Rust is handed each line's record. Rust finds the files, stats them for the cache key, and makes the events and the sums.",
+        "Through the twin, a session's stats take about 5.7 times as long as the JS (20,000 lines, 10 MB: 315 ms against 55 ms), most of it the lines twin's reading and each record crossing to Rust again. Don't put this twin in the module's place before the readers are Rust end to end.",
+        "The stats kept for the last 40 sessions stay JS objects in the twin, so an unchanged session gives back the same object; Rust keeps their keys and says which session to let go.",
+        "A call's figures are priced as the pricing twin reads them (Number(v)). core/pricing.js adds them with + first, so a figure written as a string (which the vendor checks take out of sampled lines) can land on the other side of the long-context threshold.",
+        "Transcripts reads its folders synchronously in Rust; rollouts and listedAt are getters over Rust's state (rollouts is a new Map each time). A session id that isn't a string is made one with String(), where JS threw at sessionId.slice.",
+        "A model named like a property every object inherits (constructor, toString, __proto__…) gets no key in a turn's byModel, as in JS, but its figures aren't added onto Object.prototype as JS adds them.",
+        "Objects are told apart by the line they came from, as a JS Map tells them apart by identity. summarize, given events, counts each event's objects as its own even where the caller's events share one, and reads t as Number(t).",
+        "A sort whose comparator gives NaN (figures that aren't numbers) is a stable sort's, which may order such entries differently from V8's."
+      ]
+    },
+    "core/search.js": {
+      "rust": "crates/xenonet-state/src/search.rs",
+      "differences": [
+        "The index is Rust's own connection (rusqlite, SQLite bundled) to the same search.sqlite, made by the same statements, every number bound as a double as node:sqlite binds it, and set up as node:sqlite sets one up (foreign keys on, double-quoted strings off, no busy timeout). An index the JS made is carried on by the twin and the other way round, table for table, value types included.",
+        "The files are read in the twin (fs.promises, zlib for a .zst archive), and each line goes through the transcripts' normalizer there, as the vendor checks are still JS. Rust says what to read, whether a rollout must be read whole, and indexes each line's record. Listing the folders and stat are Rust's, synchronous.",
+        "Indexing through the twin takes about 3 times as long as the JS (10 MB: 410 ms against 140 ms), each record crossing to Rust again; a search takes about 0.7 times as long.",
+        "db is a handle to Rust's connection with node:sqlite's prepare, get, all, run, exec and close (rows without a prototype, BLOBs as Uint8Array), not a DatabaseSync: its other methods aren't there, a parameter that isn't a number, string or null is refused, and named parameters aren't read. The prepared statements JS kept as fields (insert, getFile, putFile, dropFile) aren't there.",
+        "SQLite's errors are Errors with SQLite's message and code ERR_SQLITE_ERROR, without node:sqlite's errcode and errstr.",
+        "A document's first 200 UTF-16 units decide whether it's one seen already; a text cut inside a surrogate pair ends in U+FFFD here where JS kept the lone half (SQLite stores U+FFFD either way), so two texts that differ only in that half count as one.",
+        "A file, app or session id that isn't a string is made one with String(); a dbFile that isn't one throws at open(), as path.dirname did."
+      ]
+    },
+    "core/wiki.js": {
+      "rust": "crates/xenonet-sources/src/wiki.rs",
+      "differences": [
+        "Rust reads the folder (std::fs, in Node's order), and a page that isn't UTF-8 is read as Node reads it, with U+FFFD for what isn't.",
+        "updated is read as Date.parse reads ISO 8601, a date and time without a zone as local time; V8's fallback for other formats (\"Oct 3 2026\") gives null here. A local time at a daylight saving change can come out an hour from V8's.",
+        "A page's writes are copies of the log's entries, not the same objects.",
+        "Arguments are read as JSON values: a project's getters, and values JSON can't hold, aren't seen. A text that isn't a string is made one with String() (parseFrontmatter still gives back what it was given as the body when there's no frontmatter, and slices what it was given when there is)."
+      ]
     }
   },
   "tests": [
@@ -157,6 +642,8 @@
     "test/actor-registration.test.js",
     "test/actor-routes.test.js",
     "test/actor-schemas.test.js",
+    "test/actor-spend-view.test.js",
+    "test/actor-spend.test.js",
     "test/actor-wake.test.js",
     "test/actors.test.js",
     "test/assistant-connections.test.js",
@@ -187,8 +674,16 @@
     "test/component-packages.test.js",
     "test/control-client.test.js",
     "test/control.test.js",
+    "test/copilot-cli.test.js",
     "test/costs.test.js",
+    "test/cursor.test.js",
     "test/decide.test.js",
+    "test/delivery-opencode.test.js",
+    "test/delivery-router.test.js",
+    "test/delivery-routes.test.js",
+    "test/delivery-scopes.test.js",
+    "test/delivery-wake.test.js",
+    "test/digest.test.js",
     "test/doctor.test.js",
     "test/drift.test.js",
     "test/engine-actors.test.js",
@@ -196,9 +691,12 @@
     "test/engine-routes.test.js",
     "test/engine-store.test.js",
     "test/engine.test.js",
+    "test/export-labels.test.js",
     "test/features.test.js",
     "test/film-cards.test.js",
+    "test/frames.test.js",
     "test/gateway-tunnel.test.js",
+    "test/gemini-cli.test.js",
     "test/git-status.test.js",
     "test/golden.test.js",
     "test/graph.test.js",
@@ -226,23 +724,29 @@
     "test/mcp-actor.test.js",
     "test/mcp-info.test.js",
     "test/muse-observer.test.js",
+    "test/needs-you.test.js",
     "test/numbat.test.js",
     "test/observer.test.js",
     "test/observers.test.js",
+    "test/opencode.test.js",
     "test/page-markup.test.js",
     "test/platform.test.js",
     "test/poster.test.js",
     "test/private-file.test.js",
     "test/projects.test.js",
+    "test/provider-drift-native.test.js",
     "test/provider-drift.test.js",
+    "test/redact.test.js",
     "test/refusal-browser.test.js",
     "test/refusals.test.js",
+    "test/rename.test.js",
     "test/root.test.js",
     "test/schema-ids.test.js",
     "test/schema-output.test.js",
     "test/schema-registry.test.js",
     "test/schemas.test.js",
     "test/scope.test.js",
+    "test/script.test.js",
     "test/server.test.js",
     "test/signals.test.js",
     "test/space-presence.test.js",
@@ -261,6 +765,7 @@
     "test/verify.test.js",
     "test/windows-command.test.js",
     "test/workspace.test.js",
+    "test/xenolith.test.js",
     "test/you-page.test.js"
   ]
 }

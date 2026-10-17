@@ -10,6 +10,7 @@ pub mod fs;
 pub mod http;
 pub mod ids;
 pub mod json;
+pub mod jsstr;
 pub mod log;
 pub mod ordered;
 pub mod paths;

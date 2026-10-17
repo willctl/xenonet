@@ -66,11 +66,13 @@ crates/
                            units.js for the command, private-file.js, client.js
   xenonet-blocks           core/blocks/: lifecycle, scanner, gatherer, tailer, normalizer, JSON and SQLite stores
   xenonet-schema           core/schema/, vendor.js, drift.js: the schemas, lenient reading, drift records
-  xenonet-sources          lines.js, claude.js, codex.js, git.js, wiki.js, live.js, numbat.js, demo.js, native/
+  xenonet-sources          lines.js, claude.js, codex.js, git.js, wiki.js, live.js, numbat.js, demo.js, native/,
+                           claude-usage.js, openrouter-usage.js, reported-runs.js, xenolith.js, refusals/
   xenonet-state            graph.js, state.js, search.js, digest.js, stats.js, identities.js, projects.js,
-                           workspace.js, classify.js, store.js, statefile.js, migrate.js
+                           workspace.js, classify.js, store.js, statefile.js, migrate.js, redact.js, frames.js,
+                           rename.js, export-labels.js, needs-you.js
   xenonet-engine           engine/, delivery/, procs.js
-  xenonet-actors           actors/, assistant/, secret-store.js, integrations/, refusals/
+  xenonet-actors           actors/, assistant/, secret-store.js, integrations/
   xenonet-hosts            hosts/
   xenonet-doctor           doctor/, diagnostics.js
   xenonet-server           server/: the API, static files, upstream, the actor gateway and its tunnels,
@@ -83,7 +85,8 @@ xenolith/rust/crates/      Xenolith's crates (xenolith-core and its command), wh
 ```
 
 Each crate depends only on crates above it in the list, as the layers of
-`core/` do today. `server`, `mcp` and `cli` are thin layers over the rest
+`core/` do today. refusals/ sits with the sources, not the actors, since
+the live tailer reads every line through refusals/detect.js. `server`, `mcp` and `cli` are thin layers over the rest
 and don't import each other, except that `xenonet-cli` starts the other
 two. Only `xenonet-node` knows about Node.
 
@@ -480,6 +483,33 @@ place. This table follows it.
 | `core/lines.js` | `xenonet-sources/src/lines.rs` | `lines`, `codex`, `vendor-schemas` pass |
 | `core/schema/lenient.js` | `xenonet-schema/src/lenient.rs`, `fields.rs` | `vendor-reader`, `vendor-schemas`, `provider-drift` pass |
 | `core/drift.js`, `core/vendor.js` | `xenonet-schema/src/drift.rs`, `vendor.rs` | `drift`, `vendor-reader`, `server` pass |
+| `core/blocks/clock.js`, `core/blocks/index.js` | `xenonet-blocks/src/clock.rs`, `lib.rs` (the twin keeps `Date.now()` and the timers, which tests mock) | `xenolith`, and every test that loads a block |
+| `core/xenolith.js` | `xenonet-sources/src/xenolith.rs` | `xenolith` passes |
+| `core/frames.js`, `core/rename.js`, `core/export-labels.js`, `core/needs-you.js` | `xenonet-state/src/frames.rs`, `rename.rs`, `export_labels.rs`, `needs_you.rs` (the page keeps their JS) | `frames`, `rename`, `export-labels`, `needs-you`, `poster`, `page-markup` pass |
+| `core/refusals/demo.js`, `query.js`, `store.js` | `xenonet-sources/src/refusals/` (in xenonet-sources, not xenonet-actors: the live tailer reads refusals) | `refusals`, `refusal-browser` pass |
+| `core/redact.js`, `core/digest.js`, `core/classify.js` | `xenonet-state/src/redact.rs`, `digest.rs`, `classify.rs` (running Codex and asking the decider stay in the twins) | `redact`, `digest`, `decide`, `poster` pass |
+| `core/openrouter-usage.js` | `xenonet-sources/src/openrouter_usage.rs` (the key and the request stay in the twin) | `costs` passes |
+| `core/store.js`, `core/workspace.js` | `xenonet-state/src/store.rs`, `workspace.rs` (the config and the scan's time limit stay in the twins) | `store`, `workspace` pass |
+| `core/graph.js` | `xenonet-state/src/graph.rs`, with projects.rs's relations | `graph`, `golden`, `state`, `hosts-hub`, `numbat`, `root` pass |
+| `core/state.js` | `xenonet-state/src/state.rs` (the class, its timers and its maps stay in the twin; Rust decides and remembers) | `state`, `golden`, `root`, `schema-output`, `hosts-merge`, `actors`, `server` pass |
+| `core/live.js` | `xenonet-sources/src/live/telemetry.rs`, with `live/mod.rs`'s helpers | `live`, `stall`, `signals`, `costs`, `golden`, `state`, `server` pass |
+| `core/claude-usage.js` | `xenonet-sources/src/claude_usage.rs` (the keychain, files, fetch and timers stay in the twin) | `claude-usage`, `live` pass |
+| `core/refusals/detect.js` | `xenonet-sources/src/refusals/detect.rs` | `refusals`, `refusal-browser`, `live` pass |
+| `core/native/copilot-cli.js`, `gemini-cli.js`, `cursor.js` | `xenonet-sources/src/native/{copilot_cli,gemini_cli,cursor}.rs`, with Node's path rules in `node_path.rs` (vendor.js's check called back) | `copilot-cli`, `gemini-cli`, `cursor` pass |
+| `core/native/opencode.js` | `xenonet-sources/src/native/opencode.rs`, on rusqlite with SQLite bundled (a test's `open` handle runs its statements) | `opencode` passes |
+| `core/numbat.js` | `xenonet-sources/src/numbat.rs` | `numbat`, `gemini-cli` pass |
+| `core/reported-runs.js` | `xenonet-sources/src/reported_runs.rs` | `space-presence`, `actor-spend`, and `state`, `golden` through core/state.js pass |
+| `core/git.js` | `xenonet-sources/src/git.rs` (running git stays in the twin) | `git-status` passes |
+| `core/projects.js` | `xenonet-state/src/projects.rs` (mapLimit and limiter stay in the twin) | `projects`, `workspace`, `graph` pass |
+| `core/codex.js` | `xenonet-sources/src/codex.rs`, the state database on rusqlite (the app-server's process and requests stay in the twin) | `codex`, `codex-client` pass |
+| `core/claude.js` | `xenonet-sources/src/claude.rs` (the Agent SDK's calls stay in the twin) | `claude` passes |
+| `core/identities.js` | `xenonet-state/src/identities.rs` (git config's run and the sign-in files' reads stay in the twin) | `identities`, `identities-page` pass |
+| `core/schema/check.js` | `xenonet-schema/src/check.rs`, with JS's regular expressions in `jsregex.rs`; zod writes the JSON Schema in the twin | `schema-registry`, `schemas`, `actor-schemas`, `schema-output`, and every test that checks |
+| `core/schema/registry.js`, `files.js`, `index.js` | `xenonet-schema/src/registry.rs`, `files.rs` (zod's .meta() and z.toJSONSchema stay in the twin) | `schema-registry`, `schemas`, `vendor-schemas` pass |
+| `core/schema/common.js`, the definitions, `vendor/` | Their JSON Schema, which `check.rs` checks against; the zod definitions stay JS, since schemas/ is written from them | every test that loads a schema |
+| `core/stats.js` | `xenonet-state/src/stats.rs` (the twin reads the lines through the lines twin) | `stats`, `codex`, `golden` pass |
+| `core/search.js` | `xenonet-state/src/search.rs`, its own connection to the same `search.sqlite` | `features`, `lines`, `golden`, `state` pass |
+| `core/wiki.js` | `xenonet-sources/src/wiki.rs` | `features`, `xenolith`, `projects` pass |
 | `core/blocks/sqlite.js` | `xenonet-blocks/src/sqlite.rs`, on rusqlite with SQLite bundled | No twin (its migrations take a `node:sqlite` handle): Rust tests of the same cases, and the Rust opens a JS-made `engine.sqlite` (version 7, WAL, 18 tables) and `search.sqlite` (an FTS5 match on what node:sqlite indexed) |
 | `core/blocks/store.js` | `xenonet-blocks/src/store.rs` | `blocks-store`, `statefile`, `store`, `hosts-config` pass |
 | `core/migrate.js`, `core/statefile.js` | `xenonet-state/src/migrate.rs`, `statefile.rs` | `statefile`, `store`, `state` pass |
@@ -492,7 +522,7 @@ place. This table follows it.
 | `xenonet mcp` for sessions (`mcp/xenonet.js`), a prototype | `xenonet-mcp`, on rmcp, Rust 1.88+ | Its own stdio tests; the same answers as the JS servers to the probe and the handshake |
 | `xenonet hook` (`cli/commands/hook.js`) | `xenonet-cli`, the `xenonet` binary | `launcher`'s hook cases, as Rust tests of the binary |
 
-With every twin in place, all 111 test files that reach one pass. The
+With every twin in place, all 131 test files that reach one pass (of 170; the other 39 load no module that has a twin). The
 twins load in the Node processes a test starts too (a server, the
 command, an MCP server), so the route and command tests run on them. The two
 fixes on `fix/scanner-racy-mtime` are in the Rust (the scanner reads a
@@ -506,4 +536,4 @@ since each record crosses between JS and Rust several times while the
 vendor checks are still JS. The readers gain from Rust once they're Rust
 from the file to the answer.
 
-Not ported yet: everything else, in the order above.
+The readers and the schemas (step 2) are ported: every module of `core/` that reads a source, the map and its state, and `core/schema/`. Through the twins they're slower than the JS (a map of 3,000 sessions takes about 26 ms against 5 ms, a session's stats about 6 times as long), since every value crosses between JS and Rust; they gain once they're Rust from the file to the answer. Not ported yet: the engine and what follows it, in the order above.
