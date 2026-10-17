@@ -146,6 +146,8 @@ What crosses the boundary, and how:
 - **Values** convert through `serde_json`, with their keys in order.
   Records the readers hand around are Rust objects with getters (a
   transcript line is parsed once, in Rust, and read where it's needed).
+  Numbers, `__proto__` keys and dates convert as JS would make them
+  (`crates/xenonet-node/src/js.rs`), not as napi's own conversion does.
 - **Time.** Rust cores take the time as an argument, or a `Clock`. A twin
   passes its clock's `now()`, so a test's hand-moved clock moves Rust
   too. Timers belong to whoever runs the core: tokio in the binary, the
@@ -241,6 +243,26 @@ The JS route tests (`server.test.js`, `engine-routes.test.js`,
 `actor-routes.test.js` and the rest) start a server and talk HTTP to it.
 They get a switch that starts `xenonet serve` instead, so the same files
 check the binary.
+
+### Reading transcripts fast
+
+Measured on a 15 MB Claude Code transcript of 20,000 lines, on a recent
+Mac:
+
+| Reading | Time |
+|---|---|
+| The JS readers (`JSON.parse` and the views' getters) | 40 ms |
+| Rust, each line parsed into a whole JSON value (XenoNet's parser, as `JSON.parse` reads) | 48 ms |
+| Rust, the same with serde_json's own parser | 38 ms |
+| Rust, each line read into a typed view of only the fields the readers use (serde, borrowing the text) | 7 ms |
+
+A whole JSON value per line is no faster than V8's `JSON.parse`. So the
+Rust readers read each line into a typed view of the fields they read,
+leniently (a field of another type reads as missing, as the vendor check
+leaves it), and build the whole record only for a line the drift check
+looks at in full: the first of each kind in a file, then the 2nd, 4th,
+8th and so on. The JSON reader that reads as `JSON.parse` does stays for
+the stores and for those lines.
 
 ## The MCP servers
 
