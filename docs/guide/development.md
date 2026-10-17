@@ -12,6 +12,9 @@ npm run test:e2e  # end-to-end tests, on a hidden XenoNet Dev with made-up data
 node cli/xenonet.js console launch shot:overview  # drive XenoNet Dev from a terminal (see below)
 npm run lab -- status  # macOS: the VM lab, Linux VMs to try other machines in (see below)
 npm run dist      # the installers for this OS, in release/ (dist:win, dist:mac)
+npm run rust:build  # the Rust core's Node addon, for the port to Rust (see crates/ below)
+npm run test:rust   # the unit tests that pass with the Rust core in place of the JS
+cargo test        # the Rust core's own tests
 ```
 
 ## XenoNet Dev
@@ -261,3 +264,7 @@ The console page imports only the core modules that have no Node in them, `theme
 ### `test/`
 
 `test/` has the unit tests, and `test/e2e/` has the end-to-end tests.
+
+### `crates/`
+
+`crates/` is the Rust core that XenoNet is moving to, a crate per layer ([Rust core](../design/rust-core.md)). While the port runs, `xenonet-node` puts the Rust behind the JS modules. Each ported module has a twin in `crates/xenonet-node/js/core/`, with the module's exports, backed by Rust. `npm run rust:build` builds the addon. `npm run test:rust` runs the test files listed in `crates/xenonet-node/parity.json` with every twin loaded in place of its module, and `npm run test:rust -- --all` tries every test file that way. `npm test` still runs the JS.

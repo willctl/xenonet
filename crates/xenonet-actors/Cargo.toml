@@ -1,0 +1,15 @@
+[package]
+name = "xenonet-actors"
+description = "Actors: the programs you allow in XenoNet, their tokens, and what they report."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+getrandom.workspace = true
+sha2.workspace = true
+xenonet-base.workspace = true

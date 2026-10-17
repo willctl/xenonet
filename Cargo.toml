@@ -1,0 +1,50 @@
+# XenoNet's Rust core (docs/design/rust-core.md). Electron and the console
+# page stay in JS; everything else moves here, a crate per layer.
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+# Xenolith's crates join once its own workspace folds into this one. The MCP
+# server needs Rust 1.88 or later (rmcp), so it builds on its own until the
+# workspace pins a toolchain.
+exclude = ["xenolith", "crates/xenonet-mcp"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+authors = ["willctl"]
+repository = "https://github.com/willctl/xenonet"
+publish = false
+
+[workspace.dependencies]
+xenonet-actors = { path = "crates/xenonet-actors" }
+xenonet-base = { path = "crates/xenonet-base" }
+xenonet-blocks = { path = "crates/xenonet-blocks" }
+xenonet-schema = { path = "crates/xenonet-schema" }
+xenonet-sources = { path = "crates/xenonet-sources" }
+xenonet-state = { path = "crates/xenonet-state" }
+# JS keeps an object's keys in the order they were added, and so do the
+# files and answers XenoNet writes: preserve_order keeps that order here.
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+# Where the JS matches with a regular expression that has no lookaround
+# (the log's key patterns); lookarounds are written out by hand.
+regex = "1"
+# engine.sqlite and search.sqlite. Bundled, so FTS5 and VACUUM INTO are
+# there whatever SQLite the system has.
+rusqlite = { version = "0.40", features = ["bundled"] }
+# Tokens: a SHA-256 of each is all XenoNet keeps, and 32 random bytes from
+# the system make one.
+sha2 = "0.10"
+getrandom = "0.3"
+# The Node-API bindings that put the crates behind the JS modules during the
+# port. The last releases that build on Rust 1.85; the resolver keeps their
+# dependencies to versions that do too.
+napi = { version = "3.4", default-features = false, features = ["napi8", "serde-json"] }
+napi-derive = "3.3"
+napi-build = "2.2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4

@@ -1,0 +1,26 @@
+# The xenonet MCP server in Rust, on the official rmcp crate. Every rmcp
+# release needs Rust 1.88 or later, so until the workspace pins a toolchain
+# (docs/design/rust-core.md, "Toolchain") this crate is a workspace of its
+# own, built with a newer toolchain than the rest:
+#   rustup run 1.90.0 cargo test --manifest-path crates/xenonet-mcp/Cargo.toml
+[package]
+name = "xenonet-mcp"
+description = "XenoNet's MCP server for sessions, in Rust: the engine's tools, and live messages for a Claude Code channel session."
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+authors = ["willctl"]
+repository = "https://github.com/willctl/xenonet"
+publish = false
+
+[[bin]]
+name = "xenonet-mcp"
+path = "src/main.rs"
+
+[dependencies]
+rmcp = { version = "3.5", default-features = false, features = ["server", "transport-io"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["macros", "rt", "io-std", "io-util", "net", "time"] }
+
+[workspace]

@@ -19,6 +19,8 @@
     "test": "node --test \"test/*.test.js\"",
     "test:e2e": "node --test --test-concurrency=1 \"test/e2e/*.test.js\"",
     "test:real": "node --test --test-concurrency=1 \"test/real/*.test.js\"",
+    "test:rust": "node scripts/rust-parity.mjs",
+    "rust:build": "node scripts/rust-build.mjs",
     "drive": "node cli/xenonet.js console",
     "contracts": "node scripts/check-contracts.mjs",
     "provider-drift": "node scripts/provider-drift.mjs",

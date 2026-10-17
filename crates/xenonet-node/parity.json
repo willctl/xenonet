@@ -1,0 +1,266 @@
+{
+  "modules": {
+    "core/pricing.js": {
+      "rust": "crates/xenonet-base/src/pricing.rs",
+      "differences": []
+    },
+    "core/paths.js": {
+      "rust": "crates/xenonet-base/src/paths.rs",
+      "differences": [
+        "pathStyle still returns one of Node's path modules: Rust picks which.",
+        "listFiles throws a match's error once the walk is over, not where it was thrown (match isn't called again after it throws)."
+      ]
+    },
+    "core/blocks/lifecycle.js": {
+      "rust": "crates/xenonet-blocks/src/lifecycle.rs",
+      "differences": [
+        "setState refuses a state that isn't one of STATES; JS took any string."
+      ]
+    },
+    "core/blocks/normalizer.js": {
+      "rust": "crates/xenonet-blocks/src/normalizer.rs",
+      "differences": [
+        "Lines are parsed by crates/xenonet-base/src/json.rs: a number past a double's range reads as null (JS: Infinity), a lone surrogate escape as U+FFFD, and nesting past 512 levels is unparsable.",
+        "The SyntaxError handed to unparsable has Rust's message, not V8's."
+      ]
+    },
+    "core/blocks/scanner.js": {
+      "rust": "crates/xenonet-blocks/src/scanner.rs",
+      "differences": [
+        "It has the fix on fix/scanner-racy-mtime: a folder read within 2 s of its mtime is read again on the next walk."
+      ]
+    },
+    "core/blocks/tailer.js": {
+      "rust": "crates/xenonet-blocks/src/tailer.rs",
+      "differences": [
+        "It has the fix on fix/scanner-racy-mtime: started again after a stop, a file it followed before is caught up by the sweep, as live, not history.",
+        "A sweep of the files it follows sees files added while it goes, as JS's for…of over the Map did; one the sweep drops while a read of it is under way stops that read, where JS read on with the entry it had."
+      ]
+    },
+    "core/lines.js": {
+      "rust": "crates/xenonet-sources/src/lines.rs",
+      "differences": [
+        "A view reads a copy of its record, made when it's built: a change to `raw` after that isn't seen (no reader changes one).",
+        "Lines are parsed as in core/blocks/normalizer.js's entry.",
+        "Through the twin, reading a transcript takes about 8 times as long as the JS (20,000 lines, 15 MB: 340 ms against 40 ms), since each record crosses between JS and Rust several times while vendor.js's checks are still JS. Don't put this twin in the module's place before the readers are Rust end to end.",
+        "readLines still reads the file, and unpacks a .zst archive, in JS: the Rust reader needs a zstd decoder first."
+      ]
+    },
+    "core/blocks/store.js": {
+      "rust": "crates/xenonet-blocks/src/store.rs",
+      "differences": [
+        "A document is written as JSON.stringify(doc, null, 2) writes it, byte for byte over 3,000 random documents, except that an object's own toJSON (other than a Date's) isn't called, and a lone surrogate in a string is written as U+FFFD where JS writes \\udXXX.",
+        "An error writing the file is worded as Node words it for the common codes (ENOTDIR, EACCES, ENOSPC…); others keep the system's words.",
+        "JsonStore's timer and health stay in the twin.",
+        "The parts prepare says it repaired come back as strings."
+      ]
+    },
+    "core/migrate.js": {
+      "rust": "crates/xenonet-state/src/migrate.rs",
+      "differences": [
+        "Rust plans every step before the first runs, so when there's no way to the version wanted, that's the error, even if a step before the gap would have thrown."
+      ]
+    },
+    "core/statefile.js": {
+      "rust": "crates/xenonet-state/src/statefile.rs",
+      "differences": [
+        "inspectState, the doctor's look at the state folder, is still the JS's."
+      ]
+    },
+    "core/actors/tokens.js": {
+      "rust": "crates/xenonet-actors/src/tokens.rs",
+      "differences": [
+        "TOKEN and GATEWAY_TOKEN are still RegExp objects, made from Rust's patterns.",
+        "tokenInUrl still reads the URL with Node's URL; Rust checks its parameters and path."
+      ]
+    },
+    "core/blocks/gatherer.js": {
+      "rust": "crates/xenonet-blocks/src/gatherer.rs",
+      "differences": [
+        "backoff lists baseMs, factor and maxMs after the keys it was given; a factor given as undefined counts as 2 (JS made it undefined)."
+      ]
+    },
+    "core/schema/lenient.js": {
+      "rust": "crates/xenonet-schema/src/lenient.rs",
+      "differences": [
+        "jsonType stays JS: it's typeof, for JS values of any sort.",
+        "A compiled schema is a Rust handle, not an object whose nodes JS can read.",
+        "strip orders keys at the same level by bytes where JS used localeCompare; taking keys out of an object gives the same result in any order."
+      ]
+    },
+    "core/schema/ids.js": {
+      "rust": "crates/xenonet-base/src/ids.rs",
+      "differences": [
+        "HOST_ID, ACTOR_SLUG, SESSION_LOCAL and SESSION_PREFIX are still RegExp objects, made from Rust's patterns.",
+        "What's checked of a JS value (a string, a whole number) and how an error writes it stay in the twin; repoKey's aliases are looked up there."
+      ]
+    },
+    "core/drift.js": {
+      "rust": "crates/xenonet-schema/src/drift.rs",
+      "differences": [
+        "SOURCES is main's list: the drift work for every provider (feat/drift-all-providers) adds four names, which the Rust needs too once it lands.",
+        "jsonType and cleanVariant stay JS: they're about JS values.",
+        "The save's timer stays in the twin."
+      ]
+    },
+    "core/vendor.js": {
+      "rust": "crates/xenonet-schema/src/vendor.rs",
+      "differences": [
+        "The report's text (reportLines), the transcript hooks' glue between a normalizer and its reader, and agentSdkVersion (Node's module resolution) stay in the twin.",
+        "A reader's careful map isn't a Map JS can walk: the twin offers its size and has()."
+      ]
+    },
+    "core/dirs.js": {
+      "rust": "crates/xenonet-base/src/dirs.rs",
+      "differences": [
+        "findCodexBinary and findFfmpeg stay JS compositions of the Rust parts and onPath."
+      ]
+    },
+    "core/log.js": {
+      "rust": "crates/xenonet-base/src/log.rs",
+      "differences": [
+        "The key patterns run on Rust's regex: \\b is ASCII's, as JS's is, but \\s is Unicode's White_Space, which differs from JS's at U+FEFF and U+0085.",
+        "A message cut at its length that would split a pair of UTF-16 units leaves the whole character out; JS kept half of it."
+      ]
+    },
+    "core/units.js": {
+      "rust": "crates/xenonet-base/src/units.rs",
+      "differences": [
+        "excerpt cutting a character in two ends in U+FFFD, which is what JS's half of one prints as. The twin leaves that cut to JS, as it does money given something other than a number."
+      ]
+    },
+    "core/private-file.js": {
+      "rust": "crates/xenonet-base/src/private_file.rs",
+      "differences": [
+        "Commands still run through JS in the twin (the run given, or runPrivateCommand); the Rust's own runner, run_command, pipes a failed command's stderr into its error instead of passing it to the parent's stderr as well.",
+        "The name of icacls's answer file ends in 12 hex digits from std's RandomState, not crypto.randomBytes: it needs to be unlike the others, not secret."
+      ]
+    },
+    "core/actors/token-file.js": {
+      "rust": "crates/xenonet-actors/src/token_file.rs",
+      "differences": [
+        "findTokenFiles and createTokenScan, the doctor's look for tokens left in repos, are still the JS: they move with the doctor."
+      ]
+    },
+    "core/client.js": {
+      "rust": "crates/xenonet-base/src/client.rs",
+      "differences": [
+        "Requests are the Rust's own HTTP/1.1, with Connection: close, and without the accept, user-agent and accept-encoding headers fetch adds. The twin leaves a server whose base isn't http://127.0.0.1:<port> to the JS.",
+        "A header given in another case replaces the one XenoNet sends by itself (Content-Type for content-type); fetch sent both, joined."
+      ]
+    }
+  },
+  "tests": [
+    "test/actor-gateway.test.js",
+    "test/actor-names.test.js",
+    "test/actor-needs-you.test.js",
+    "test/actor-registration.test.js",
+    "test/actor-routes.test.js",
+    "test/actor-schemas.test.js",
+    "test/actor-wake.test.js",
+    "test/actors.test.js",
+    "test/assistant-connections.test.js",
+    "test/assistant-endpoint.test.js",
+    "test/assistant-routes.test.js",
+    "test/assistant-service.test.js",
+    "test/assistant-tunnels.test.js",
+    "test/blocks-gatherer.test.js",
+    "test/blocks-lifecycle.test.js",
+    "test/blocks-normalizer.test.js",
+    "test/blocks-scanner.test.js",
+    "test/blocks-store.test.js",
+    "test/blocks-tailer.test.js",
+    "test/claude-usage.test.js",
+    "test/claude.test.js",
+    "test/cli-actor.test.js",
+    "test/cli-gateway.test.js",
+    "test/cli-status-agents.test.js",
+    "test/cli.test.js",
+    "test/client.test.js",
+    "test/codex-client.test.js",
+    "test/codex.test.js",
+    "test/component-activation.test.js",
+    "test/component-auth.test.js",
+    "test/component-console.test.js",
+    "test/component-download.test.js",
+    "test/component-install.test.js",
+    "test/component-packages.test.js",
+    "test/control-client.test.js",
+    "test/control.test.js",
+    "test/costs.test.js",
+    "test/decide.test.js",
+    "test/doctor.test.js",
+    "test/drift.test.js",
+    "test/engine-actors.test.js",
+    "test/engine-connect.test.js",
+    "test/engine-routes.test.js",
+    "test/engine-store.test.js",
+    "test/engine.test.js",
+    "test/features.test.js",
+    "test/film-cards.test.js",
+    "test/gateway-tunnel.test.js",
+    "test/git-status.test.js",
+    "test/golden.test.js",
+    "test/graph.test.js",
+    "test/grok-bot-observer.test.js",
+    "test/hermes-files.test.js",
+    "test/hermes-observer.test.js",
+    "test/hosts-cli.test.js",
+    "test/hosts-config.test.js",
+    "test/hosts-doctor.test.js",
+    "test/hosts-hub.test.js",
+    "test/hosts-ids.test.js",
+    "test/hosts-link.test.js",
+    "test/hosts-merge.test.js",
+    "test/hosts-relay.test.js",
+    "test/hosts-routes.test.js",
+    "test/hosts-server.test.js",
+    "test/identities-page.test.js",
+    "test/identities.test.js",
+    "test/integrations.test.js",
+    "test/lab.test.js",
+    "test/launcher.test.js",
+    "test/lines.test.js",
+    "test/live.test.js",
+    "test/log.test.js",
+    "test/mcp-actor.test.js",
+    "test/mcp-info.test.js",
+    "test/muse-observer.test.js",
+    "test/numbat.test.js",
+    "test/observer.test.js",
+    "test/observers.test.js",
+    "test/page-markup.test.js",
+    "test/platform.test.js",
+    "test/poster.test.js",
+    "test/private-file.test.js",
+    "test/projects.test.js",
+    "test/provider-drift.test.js",
+    "test/refusal-browser.test.js",
+    "test/refusals.test.js",
+    "test/root.test.js",
+    "test/schema-ids.test.js",
+    "test/schema-output.test.js",
+    "test/schema-registry.test.js",
+    "test/schemas.test.js",
+    "test/scope.test.js",
+    "test/server.test.js",
+    "test/signals.test.js",
+    "test/space-presence.test.js",
+    "test/spotify.test.js",
+    "test/stall.test.js",
+    "test/state.test.js",
+    "test/statefile.test.js",
+    "test/stats.test.js",
+    "test/store.test.js",
+    "test/system-stats.test.js",
+    "test/theme-menu.test.js",
+    "test/token-files.test.js",
+    "test/vendor-adapters.test.js",
+    "test/vendor-reader.test.js",
+    "test/vendor-schemas.test.js",
+    "test/verify.test.js",
+    "test/windows-command.test.js",
+    "test/workspace.test.js",
+    "test/you-page.test.js"
+  ]
+}
