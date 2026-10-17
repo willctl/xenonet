@@ -414,6 +414,30 @@ impl Policy {
         Some(Principal::Token { id: t.id.clone(), subject: t.subject.clone(), scopes: t.scopes.clone() })
     }
 
+    /// The live record of a token, by the token itself.
+    pub fn token(&self, secret: &str) -> Option<&TokenRec> {
+        if !is_token(secret) {
+            return None;
+        }
+        let hash = hash_token(secret);
+        self.tokens.iter().find(|t| t.hash == hash)
+    }
+
+    /// A principal as this policy sees it now: a token's holder again from its live record, so a
+    /// revoked or expired token stops working at once, even on a connection opened before.
+    pub fn current(&self, who: &Principal, now: i64) -> Option<Principal> {
+        match who {
+            Principal::Local => Some(Principal::Local),
+            Principal::Token { id, .. } => {
+                if self.problem.is_some() {
+                    return None;
+                }
+                let t = self.tokens.iter().find(|t| t.id == *id && t.expires_at.is_none_or(|e| e > now))?;
+                Some(Principal::Token { id: t.id.clone(), subject: t.subject.clone(), scopes: t.scopes.clone() })
+            }
+        }
+    }
+
     fn grant_level(&self, subject: &str, space: &SpaceId, facts: &Facts, now: i64) -> Option<Level> {
         self.grants.iter().filter(|g| g.subject == subject && g.expires_at > now && g.scope.covers(space, facts)).map(|g| g.scope.level).max()
     }
@@ -688,5 +712,19 @@ mod tests {
         assert_eq!(p.revoke_token("client:phone"), 1);
         assert!(p.tokens.is_empty());
         assert!(p.issue("client:phone", vec![], "", None, None, now).is_err());
+    }
+
+    #[test]
+    fn a_principal_is_checked_again_against_the_live_policy() {
+        let now = 7;
+        let mut p = Policy::new();
+        let (secret, rec) = p.issue("actor:hermes", vec![sc("ctx:read")], "", Some(1_000_000), None, now).unwrap();
+        let who = p.principal_for(&secret, now).unwrap();
+        assert_eq!(p.current(&who, now), Some(who.clone()));
+        assert_eq!(p.current(&who, now + 1_000_001), None, "expired since the connection opened");
+        assert_eq!(p.token(&secret).map(|t| t.id.clone()), Some(rec.id.clone()));
+        p.revoke_token(&rec.id);
+        assert_eq!(p.current(&who, now), None, "revoked since the connection opened");
+        assert_eq!(p.current(&Principal::Local, now), Some(Principal::Local));
     }
 }

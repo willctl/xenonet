@@ -192,6 +192,39 @@ at once, and a grant that names one space exactly starts it. The policy is
 `access.json` in Xenolith's config folder, never in the wiki. `"local": "none"`
 there takes access away from this machine's sessions too.
 
+### Tokens
+
+A grant does nothing until its subject holds a token. Tokens are
+`xenolith_` and 64 hex digits; Xenolith keeps only their SHA-256, and shows a
+token once:
+
+```bash
+xenolith token create actor:hermes --label "Hermes on the server" --days 90
+xenolith token create client:phone --scope "ctx:read:project:atlas"
+xenolith token revoke tok_1a2b3c4d5e6f
+```
+
+A token's scopes default to what its subject is granted when it is made. What
+a token may do in a space is the lower of its own scopes and its subject's live
+grants there, so a token never reaches past what you granted, and revoking
+either one takes effect on connections already open.
+
+- **Over HTTP** a token travels as `Authorization: Bearer`, at `/mcp` only. The
+  service acts as an OAuth 2.1 resource server the way MCP's authorization spec
+  describes: its metadata is at `/.well-known/oauth-protected-resource`, a
+  missing or bad token gets a 401 with a `WWW-Authenticate` challenge, and a
+  call the token's scopes can't reach gets a 403 with `insufficient_scope` and
+  the scope it needs. A call its scopes reach but its grants don't is refused
+  with the same answer whether the space exists or not. A token in a URL is
+  refused, and a token at `/status`, `/health`, `/ui` or `/api` gets a 403,
+  since those show this machine's folders. Without a token, the service treats
+  a request as this machine's own: don't expose its port.
+- **Over stdio**, `XENOLITH_TOKEN` in the server's environment makes it work
+  as the token's holder, for an actor started on this machine with its own
+  token. A token Xenolith doesn't know stops the server from starting.
+
+The secret guard refuses Xenolith and XenoNet tokens in notes and pages.
+
 ## The curator
 
 `xenolith curator` runs as you, never as the service. It runs the Codex CLI

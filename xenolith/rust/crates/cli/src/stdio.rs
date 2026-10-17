@@ -1,6 +1,9 @@
 //! `serve` over stdio: one JSON-RPC message per line on stdin, responses on stdout (and nothing else
 //! there: logging goes to stderr). Requests run concurrently on a few worker threads, as the Node
 //! server's async handlers do, so a slow call never holds up a quick one. Ends when stdin closes.
+//!
+//! The app that starts it is this machine's, so it works as you do. With XENOLITH_TOKEN set (an
+//! actor started with its own token), it works as that token's holder, checked again on each call.
 
 use crate::mcp::{self, Ctx, log};
 use xenolith_core::access::Principal;
@@ -12,7 +15,23 @@ use std::sync::{Arc, Mutex, mpsc};
 
 const WORKERS: usize = 8;
 
+/// Who this connection works as: you, or the holder of the token in XENOLITH_TOKEN. A token
+/// Xenolith doesn't know ends the server at once, so the app says it failed to start.
+fn principal() -> Principal {
+    let Some(token) = std::env::var("XENOLITH_TOKEN").ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()) else {
+        return Principal::Local;
+    };
+    match xenolith_core::access::load(&xenolith_core::paths::AppPaths::current()).principal_for(&token, xenolith_core::text::now_ms()) {
+        Some(p) => p,
+        None => {
+            log("XENOLITH_TOKEN is not a token Xenolith knows: it is unknown, expired or revoked");
+            std::process::exit(1)
+        }
+    }
+}
+
 pub fn run(read_only: bool) -> ! {
+    let principal = principal();
     let st = Arc::new(if read_only { mcp::setup_read_only() } else { mcp::setup() });
     let proc_name = if read_only { std::env::var("XENOLITH_PROCESS").unwrap_or_else(|_| "read-only".into()) } else { "stdio".into() };
     let reqlog: Arc<RequestLog> = Arc::new(mcp::open_request_log(&proc_name, &st.config));
@@ -26,12 +45,12 @@ pub fn run(read_only: bool) -> ! {
     let rx = Arc::new(Mutex::new(rx));
     let workers: Vec<_> = (0..WORKERS)
         .map(|_| {
-            let (rx, st, reqlog, client_info, stdout) = (rx.clone(), st.clone(), reqlog.clone(), client_info.clone(), stdout.clone());
+            let (rx, st, reqlog, client_info, stdout, principal) = (rx.clone(), st.clone(), reqlog.clone(), client_info.clone(), stdout.clone(), principal.clone());
             std::thread::spawn(move || {
                 loop {
                     let Ok(m) = rx.lock().unwrap().recv() else { break };
                     let client = client_info.lock().unwrap().clone().unwrap_or_default();
-                    let ctx = Ctx::new("stdio", None, client, &reqlog, None, Principal::Local);
+                    let ctx = Ctx::new("stdio", None, client, &reqlog, None, principal.clone());
                     let resp = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| mcp::handle(&st, &ctx, &m, &client_info)))
                         .unwrap_or_else(|_| m.get("id").cloned().map(|id| mcp::rpc_error(id, -32603, "Internal error")));
                     if let Some(resp) = resp {
@@ -67,7 +86,7 @@ pub fn run(read_only: bool) -> ! {
                 }
                 // initialize sets the client name the later calls are logged with: answer it in order.
                 Some("initialize") => {
-                    let ctx = Ctx::new("stdio", None, String::new(), &reqlog, None, Principal::Local);
+                    let ctx = Ctx::new("stdio", None, String::new(), &reqlog, None, principal.clone());
                     if let Some(resp) = mcp::handle(&st, &ctx, &m, &client_info) {
                         let mut out = stdout.lock().unwrap();
                         let _ = writeln!(out, "{resp}");

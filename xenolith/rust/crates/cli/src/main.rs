@@ -41,7 +41,7 @@ fn set_if_unset(k: &str, v: &str) {
 
 fn usage() -> ! {
     eprintln!(
-        "usage: xenolith serve [--http [--port N] [--parent-stdin] | --read-only | --init] | xenolith hook | xenolith curator [--once | --parent-stdin | --asks-only | --retry-dead | --file-raw-dead | --login-status] | xenolith forget \"<text>\" [--ignore-case] [--yes] | xenolith embeddings status|sync | xenolith models [set curator|ask <model> [--effort <level>] | reset curator|ask] | xenolith spaces [add <space>] | xenolith grant <subject> <scope> | xenolith revoke <subject> [<scope>] | xenolith access | xenolith --version"
+        "usage: xenolith serve [--http [--port N] [--parent-stdin] | --read-only | --init] | xenolith hook | xenolith curator [--once | --parent-stdin | --asks-only | --retry-dead | --file-raw-dead | --login-status] | xenolith forget \"<text>\" [--ignore-case] [--yes] | xenolith embeddings status|sync | xenolith models [set curator|ask <model> [--effort <level>] | reset curator|ask] | xenolith spaces [add <space>] | xenolith grant <subject> <scope> | xenolith revoke <subject> [<scope>] | xenolith access | xenolith token create|revoke ... | xenolith --version"
     );
     std::process::exit(2)
 }
@@ -64,7 +64,7 @@ fn main() {
             curator::run(&args[1..])
         }
         Some("forget") => forget::run(&args[1..]),
-        Some(cmd @ ("spaces" | "grant" | "revoke" | "access")) => access_cli::run(cmd, &args[1..]),
+        Some(cmd @ ("spaces" | "grant" | "revoke" | "access" | "token")) => access_cli::run(cmd, &args[1..]),
         Some("embeddings") => embeddings::run(&args[1..]),
         Some("models") => models::run(&args[1..]),
         Some("serve") => {}

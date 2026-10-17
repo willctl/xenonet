@@ -190,7 +190,10 @@ fn default_space(root: &Path, policy: &Policy, who: &Principal, need: Level, now
 pub fn open_space(st: &State, ctx: &Ctx, root: &Path, args: &Value, need: Level) -> Result<(SpaceId, PathBuf), Error> {
     let policy = access::load(&AppPaths::current());
     let now = now_ms();
-    let who = &ctx.principal;
+    let Some(who) = policy.current(&ctx.principal, now) else {
+        return Err(Error::Wiki("Refused: this token has been revoked or has expired. Ask the user for a new one.".into()));
+    };
+    let who = &who;
     if Policy::scope_ceiling(who).is_none_or(|c| c < need) {
         *ctx.scope_needed.lock().unwrap() = Some(format!("ctx:{}", need.as_str()));
         return Err(Error::Wiki(format!("Refused: this token's scopes don't include ctx:{}. Ask the user for a token that does.", need.as_str())));
@@ -223,6 +226,7 @@ pub fn open_space(st: &State, ctx: &Ctx, root: &Path, args: &Value, need: Level)
 fn spaces_line(root: &Path, who: &Principal, current: &SpaceId) -> Option<String> {
     let policy = access::load(&AppPaths::current());
     let now = now_ms();
+    let who = &policy.current(who, now)?;
     let mine: Vec<(SpaceId, Level)> = spaces::list(root).into_iter().filter_map(|s| policy.level(who, &s, now).map(|l| (s, l))).collect();
     if mine.len() <= 1 && *who == Principal::Local {
         return None;

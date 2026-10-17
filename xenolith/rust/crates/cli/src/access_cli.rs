@@ -7,6 +7,10 @@
 //!                                                      machine:<name>) a scope, for N days (30)
 //!   xenolith revoke <subject> [<scope>]               take its grants away: all, or one scope
 //!   xenolith access [--json]                          the policy: grants, tokens (never secrets), spaces
+//!   xenolith token create <subject> [--scope "<scopes>"] [--label <text>] [--days N]
+//!                                                      a token for the subject, shown once; its scopes
+//!                                                      default to what the subject is granted now
+//!   xenolith token revoke <tok_…|subject>             revoke one token, or every token of a subject
 
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -23,7 +27,7 @@ fn fail(msg: &str) -> ! {
 
 fn usage() -> ! {
     eprintln!(
-        "usage: xenolith spaces [add <space> [--identity <name>]] [--json] | xenolith grant <subject> <scope> [--days N] | xenolith revoke <subject> [<scope>] | xenolith access [--json]"
+        "usage: xenolith spaces [add <space> [--identity <name>]] [--json] | xenolith grant <subject> <scope> [--days N] | xenolith revoke <subject> [<scope>] | xenolith access [--json] | xenolith token create <subject> [--scope \"<scopes>\"] [--label <text>] [--days N] | xenolith token revoke <tok_…|subject>"
     );
     std::process::exit(2)
 }
@@ -142,6 +146,46 @@ pub fn run(cmd: &str, args: &[String]) -> ! {
                 println!("Revoked {n} grant(s) of {subject}.");
             }
             std::process::exit(0)
+        }
+        ("token", ["create", subject]) => {
+            let scopes = match opts(args, "--scope").first() {
+                Some(text) => access::parse_scope_list(text).unwrap_or_else(|e| fail(&e.to_string())),
+                // What the subject is granted now: the token asks for no more, and no less.
+                None => {
+                    let p = access::load(&paths);
+                    let granted: Vec<access::Scope> = p.grants.iter().filter(|g| g.subject == *subject && g.expires_at > now).map(|g| g.scope.clone()).collect();
+                    if granted.is_empty() {
+                        fail(&format!("{subject} has no grants, so a token would reach nothing. Grant it a scope first (xenolith grant), or pass --scope."));
+                    }
+                    granted
+                }
+            };
+            let days = opts(args, "--days").first().map(|d| d.parse::<f64>().unwrap_or_else(|_| fail("--days takes a number")));
+            let ttl = days.map(|d| ((d * 86_400_000.0) as i64).clamp(60_000, 3650 * 86_400_000));
+            let label = opts(args, "--label").first().copied().unwrap_or("");
+            let (token, rec) = access::update(&paths, |p| p.issue(subject, scopes.clone(), label, ttl, None, now)).unwrap_or_else(|e| fail(&e.to_string()));
+            if json_out {
+                println!("{}", json!({ "token": token, "id": rec.id, "subject": rec.subject, "scopes": rec.scopes.iter().map(format_scope).collect::<Vec<_>>(), "expiresAt": rec.expires_at }));
+            } else {
+                println!("{token}");
+                eprintln!(
+                    "Token {} for {} ({}), {}. It is shown once: give it to the agent as Authorization: Bearer, or as XENOLITH_TOKEN for a stdio server.",
+                    rec.id,
+                    rec.subject,
+                    rec.scopes.iter().map(format_scope).collect::<Vec<_>>().join(" "),
+                    rec.expires_at.map(|e| format!("until {}", when(e))).unwrap_or_else(|| "until revoked".into())
+                );
+            }
+            std::process::exit(0)
+        }
+        ("token", ["revoke", which]) => {
+            let n = access::update(&paths, |p| Ok(p.revoke_token(which))).unwrap_or_else(|e| fail(&e.to_string()));
+            if json_out {
+                println!("{}", json!({ "revoked": n }));
+            } else {
+                println!("Revoked {n} token(s).");
+            }
+            std::process::exit(if n == 0 { 1 } else { 0 })
         }
         ("access", []) => {
             let p = access::load(&paths);

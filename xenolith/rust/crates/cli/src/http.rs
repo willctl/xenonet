@@ -4,7 +4,7 @@
 
 use crate::httpd::{self, Request, Response};
 use crate::mcp::{self, Ctx, State, log, rpc_error};
-use xenolith_core::access::Principal;
+use xenolith_core::access::{self, Principal};
 use crate::uiapi;
 use xenolith_core::inbox;
 use xenolith_core::lock::lock_info;
@@ -297,6 +297,67 @@ fn sdk_error(status: u16, code: i64, message: &str) -> Reply {
     Reply::json(status, &rpc_error(Value::Null, code, message))
 }
 
+// ---------------------------------------------------------------- tokens (OAuth 2.1 resource server, as MCP's authorization spec has it)
+
+/// RFC 9728's metadata for the MCP endpoint: what it is and which scopes it knows.
+pub fn protected_resource(base: &str) -> Value {
+    json!({
+        "resource": format!("{base}/mcp"),
+        "scopes_supported": access::scopes_supported(),
+        "bearer_methods_supported": ["header"],
+        "resource_name": "Xenolith",
+    })
+}
+
+/// A 401 (or 403 for insufficient_scope) with RFC 6750's WWW-Authenticate challenge, pointing at
+/// the resource metadata as MCP clients expect. Without credentials there is no error code.
+fn challenge(base: &str, error: Option<&str>, scope: Option<&str>, why: &str) -> Reply {
+    let mut parts = vec![];
+    if let Some(e) = error {
+        parts.push(format!("error=\"{e}\""));
+    }
+    parts.push(format!("error_description=\"{why}\""));
+    if let Some(s) = scope {
+        parts.push(format!("scope=\"{s}\""));
+    }
+    parts.push(format!("resource_metadata=\"{base}/.well-known/oauth-protected-resource/mcp\""));
+    let status = if error == Some("insufficient_scope") { 403 } else { 401 };
+    Reply::json(status, &json!({ "error": error.unwrap_or("unauthorized"), "error_description": why })).with("WWW-Authenticate", &format!("Bearer {}", parts.join(", ")))
+}
+
+/// 127.0.0.1 and localhost name the same server: a token issued for one works at the other.
+fn same_resource(a: &str, b: &str) -> bool {
+    a.replace("://localhost:", "://127.0.0.1:") == b.replace("://localhost:", "://127.0.0.1:")
+}
+
+/// Who a request to /mcp comes from, or the challenge to answer it with. Without a token it is
+/// this machine's own (the listener is loopback only), unless access.json says "local": "none".
+fn principal_of(base: &str, bearer: &Option<Option<String>>, entry: &mut Entry) -> Result<Principal, Reply> {
+    let policy = access::load(&AppPaths::current());
+    let now = now_ms();
+    match bearer {
+        None if policy.local.is_some() => Ok(Principal::Local),
+        None => {
+            entry.result = Some("unauthorized".into());
+            Err(challenge(base, None, None, "This server needs a token."))
+        }
+        Some(None) => {
+            entry.result = Some("unauthorized".into());
+            Err(challenge(base, Some("invalid_request"), None, "Send the token as Authorization: Bearer <token>."))
+        }
+        Some(Some(t)) => {
+            let rec = policy.token(t).filter(|r| r.resource.as_deref().is_none_or(|res| same_resource(res, &format!("{base}/mcp"))));
+            match rec.and_then(|_| policy.principal_for(t, now)) {
+                Some(p) => Ok(p),
+                None => {
+                    entry.result = Some("invalid-token".into());
+                    Err(challenge(base, Some("invalid_token"), None, "The token is unknown, expired, revoked, or for another server."))
+                }
+            }
+        }
+    }
+}
+
 fn handle(app: &App, req: &Request, entry: &mut Entry) -> Reply {
     let host = req.header("host").unwrap_or_default().to_lowercase();
     if host != format!("127.0.0.1:{}", app.port) && host != format!("localhost:{}", app.port) {
@@ -323,6 +384,25 @@ fn handle(app: &App, req: &Request, entry: &mut Entry) -> Reply {
     let path = percent_decode_path(&path);
     entry.path = path.clone();
     let method = req.method.as_str();
+    let base = format!("http://{host}");
+    // Tokens travel in the Authorization header only (RFC 6750 5.3): logs and histories keep URLs.
+    if query.split('&').any(|kv| kv.split('=').next().is_some_and(|k| k.eq_ignore_ascii_case("access_token") || k.eq_ignore_ascii_case("token"))) || url.contains(access::TOKEN_PREFIX) {
+        entry.result = Some("token-in-url".into());
+        return Reply::json(400, &json!({ "error": "invalid_request", "error_description": "Send tokens in the Authorization header, never in a URL." }));
+    }
+    if path == "/.well-known/oauth-protected-resource" || path == "/.well-known/oauth-protected-resource/mcp" {
+        if method != "GET" {
+            return Reply::json(405, &json!({ "error": "Use GET" })).with("Allow", "GET");
+        }
+        return Reply::json(200, &protected_resource(&base));
+    }
+    // A token is for /mcp: the window's API, /status and /health belong to this machine and show
+    // its folders.
+    let bearer = access::bearer_of(req.header("authorization").as_deref());
+    if bearer.is_some() && path != "/mcp" {
+        entry.result = Some("forbidden-token".into());
+        return Reply::json(403, &json!({ "error": "Forbidden: tokens work at /mcp only" }));
+    }
     if path == "/health" || path == "/status" {
         if method != "GET" {
             return Reply::json(405, &json!({ "error": "Use GET" })).with("Allow", "GET");
@@ -359,6 +439,10 @@ fn handle(app: &App, req: &Request, entry: &mut Entry) -> Reply {
     if app.closing.load(Ordering::SeqCst) {
         return Reply::json(503, &rpc_error(Value::Null, -32000, "xenolith is restarting; retry shortly."));
     }
+    let principal = match principal_of(&base, &bearer, entry) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
     let raw = match read_body(req) {
         Ok(b) => b,
         Err(status) => {
@@ -418,10 +502,18 @@ fn handle(app: &App, req: &Request, entry: &mut Entry) -> Reply {
     let st = app.state();
     let client = sid.as_deref().and_then(|s| app.sessions.get(s)).unwrap_or_default();
     let on_error = |m: &str| app.counters.error(m);
-    let ctx = Ctx::new("http", Some(entry.rid.clone()), client, &app.reqlog, Some(&on_error), Principal::Local);
+    let ctx = Ctx::new("http", Some(entry.rid.clone()), client, &app.reqlog, Some(&on_error), principal);
     let ci = Mutex::new(None);
     let responses: Vec<Value> = messages.iter().filter_map(|m| mcp::handle(&st, &ctx, m, &ci)).collect();
     let out = if responses.len() == 1 { responses[0].clone() } else { Value::Array(responses) };
+    // A call the token's scopes can't reach at all: 403 insufficient_scope, so the client can ask
+    // for the scope (MCP's step-up); the JSON-RPC answer still says what was refused.
+    if let (Some(scope), 1) = (ctx.scope_needed.lock().unwrap().clone(), messages.len()) {
+        entry.result = Some("insufficient-scope".into());
+        let mut r = challenge(&base, Some("insufficient_scope"), Some(&scope), "The token's scopes don't reach what this call needs.");
+        r.body = format!("{out}\n").into_bytes();
+        return with_headers(r, reply_headers);
+    }
     with_headers(Reply { status: 200, body: out.to_string().into_bytes(), headers: vec![("Content-Type".into(), "application/json".into())] }, reply_headers)
 }
 

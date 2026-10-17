@@ -19,6 +19,7 @@ static PATTERNS: LazyLock<Vec<Pattern>> = LazyLock::new(|| {
         ("a Google API key", r"(?<![A-Za-z0-9])AIza[0-9A-Za-z_-]{35}"),
         ("a JSON Web Token", r"(?<![A-Za-z0-9])eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),
         ("an npm token", r"(?<![A-Za-z0-9])npm_[A-Za-z0-9]{36}(?![A-Za-z0-9])"),
+        ("a Xenolith or XenoNet token", r"(?<![A-Za-z0-9])(?:xenolith(?:_refresh)?|xenonet_(?:actor|gateway))_[0-9a-f]{64}(?![0-9a-f])"),
         ("a US Social Security number", r"(?<![\d-])(?!000|666|9\d\d)\d{3}-(?!00)\d{2}-(?!0000)\d{4}(?![\d-])"),
     ]
     .into_iter()
@@ -137,6 +138,9 @@ mod tests {
         assert_eq!(find_secret("ssn 123-45-6789"), Some("a US Social Security number"));
         assert_eq!(find_secret("order 123-45-67890"), None);
         assert_eq!(redact_secrets("use AKIAIOSFODNN7EXAMPLE now"), "use [REDACTED] now");
+        let (token, _) = crate::access::new_token();
+        assert_eq!(find_secret(&format!("token {token} for hermes")), Some("a Xenolith or XenoNet token"));
+        assert_eq!(find_secret(&format!("xenonet_actor_{}", "a".repeat(64))), Some("a Xenolith or XenoNet token"));
         assert_eq!(redact_secrets("api_key=abc123def456ghi"), "api_key=[REDACTED]"); // gitleaks:allow -- synthetic rejection fixture
     }
 }
