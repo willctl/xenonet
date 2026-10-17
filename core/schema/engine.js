@@ -46,6 +46,7 @@ export const EngineAgent = define(
     status: z.enum(["working", "idle", "ended"]).optional(),
     ended: z.boolean().optional(),
     needsYou: z.enum(["question", "permission"]).nullable().optional(),
+    reader: z.enum(["experimental"]).nullable().optional().describe("Read from its own records by an experimental reader (core/native), so no message reaches it"),
     lastActive: ms.optional(),
     focus: nstr.optional().describe("What it says it's doing"),
     editing: z

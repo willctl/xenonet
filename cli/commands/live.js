@@ -1,18 +1,22 @@
 // xenonet live: messages that reach sessions as they're sent, and their
-// controls: pause them all, let XenoNet wake or type into a session, grant an
-// actor's token a scope, and read the audit log (server/routes/delivery.js).
+// controls: pause them all, let XenoNet wake, type into or resume a session,
+// grant an actor's token a scope, and read the audit log
+// (server/routes/delivery.js).
 import { c, print, json, table, Fail } from "../lib/out.js";
 import { need, get, post } from "../../core/client.js";
 
 export const help = `Live delivery puts a message into a session as it's sent, instead of when
-the session next starts a turn: through a Claude Code channel, an OpenCode
-session's own server, or, with your consent, typed into its tmux pane.
+the session next starts a turn: to a session listening after its turn,
+through a Claude Code channel or an OpenCode session's own server, or, with
+your consent, typed into its tmux pane, or in a turn XenoNet resumes a
+Claude Code or Codex session that has ended for.
 
-  xenonet live                         what's paused, granted and allowed, and the last deliveries
+  xenonet live                         what's paused, granted and allowed, plans used, who's
+                                       listening, and the last deliveries
   xenonet live pause | resume          stop every message (and wake) at once, or start again
   xenonet live allow <session> [--hours n] [--remote]
-                                       let XenoNet wake or type into one session (8 hours by
-                                       default); --remote lets actors outside this machine do it
+                                       let XenoNet wake, type into or resume one session (8 hours
+                                       by default); --remote lets actors outside this machine do it
   xenonet live disallow <session>
   xenonet live grant <actor> <scope…> [--hours n]
                                        what an actor's token may see and message, such as
@@ -21,8 +25,10 @@ session's own server, or, with your consent, typed into its tmux pane.
   xenonet live audit                   the audit log's last entries
   --json                               as JSON
 
-An actor sees and reaches no session until you grant it a scope. Set up
-Claude Code sessions to listen live with xenonet doctor --live.`;
+An actor sees and reaches no session until you grant it a scope. A wake
+spends the session's plan: each sender and session has an hourly budget,
+and a provider at 90% of its plan takes none. Set up Claude Code sessions to
+take messages live with xenonet doctor --live.`;
 
 const actorId = (a) => (String(a).startsWith("actor:") ? a : `actor:${a}`);
 
@@ -35,9 +41,15 @@ export async function run(args, flags) {
     const d = await get(s, "/api/delivery");
     if (flags.json) return json(d), 0;
     print(`${c.bold("Live delivery")} ${d.paused ? c.red("paused") : c.green("on")}`);
+    const plans = Object.entries(d.usage ?? {}).filter(([, u]) => u != null);
+    if (plans.length) print(`Plans used: ${plans.map(([app, u]) => `${app} ${Math.round(u * 100)}%${u >= 0.9 ? c.red(" (no wakes)") : ""}`).join(", ")}${c.dim(" · a provider at 90% takes no wakes")}`);
     print(c.bold("\nActors' scopes"));
     print(d.grants.length ? table(d.grants.map((g) => [g.actor, g.selector, g.expired ? c.red("expired") : `until ${new Date(g.expiresAt).toLocaleString()}`]), { indent: 2 }) : c.dim("  none: actors see no sessions"));
-    print(c.bold("\nSessions XenoNet may wake or type into"));
+    if (d.listening?.length) {
+      print(c.bold("\nListening after a turn"));
+      print(table(d.listening.map((l) => [l.agent, `until ${new Date(l.until).toLocaleTimeString()}`]), { indent: 2 }));
+    }
+    print(c.bold("\nSessions XenoNet may wake, type into or resume"));
     const consent = Object.entries(d.consent);
     print(consent.length ? table(consent.map(([id, x]) => [id, `until ${new Date(x.until).toLocaleString()}`, x.remote ? "remote too" : ""]), { indent: 2 }) : c.dim("  none"));
     print(c.bold("\nLast deliveries"));

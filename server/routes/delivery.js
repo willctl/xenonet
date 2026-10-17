@@ -22,7 +22,11 @@ export function deliveryRoutes({ policy, router, verify, readJson, send }) {
     try {
       if (bearerOf(req.headers) !== undefined) return send(res, 403, { error: "delivery's controls are yours, and an actor can't change them", code: "yours" });
       if (req.method === "GET" && route === "/api/delivery") {
-        return send(res, 200, { paused: policy.paused, grants: policy.grants(), consent: policy.data.consent, recent: router?.list(50) ?? [], audit: policy.readAudit(Number(url.searchParams.get("audit")) || 50) });
+        // Plans as the wake budget reads them (a provider at 90% takes no
+        // wakes), and the sessions listening after a turn now.
+        const usage = Object.fromEntries(["claude", "codex"].map((app) => [app, router?.usage?.(app) ?? null]));
+        const listening = [...(router?.engine?.listening?.entries() ?? [])].map(([agent, until]) => ({ agent, until }));
+        return send(res, 200, { paused: policy.paused, grants: policy.grants(), consent: policy.data.consent, usage, listening, recent: router?.list(50) ?? [], audit: policy.readAudit(Number(url.searchParams.get("audit")) || 50) });
       }
       if (req.method !== "POST") return send(res, 404, { error: "not found" });
       const you = await verify.person(req.socket);

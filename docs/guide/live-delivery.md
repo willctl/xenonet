@@ -12,9 +12,11 @@ XenoNet tries these in order and uses the first that works:
 
 | Way in | For | What it takes |
 |---|---|---|
+| Listening after a turn | Claude Code, including headless runs (`claude -p`) | Start the session with XenoNet's listen settings (below). |
 | Claude Code channel | an idle Claude Code CLI session | Claude Code 2.1.80 or later, started with XenoNet as a channel (below). A working session gets the message from its hooks during its turn, which is sooner. |
 | OpenCode's server | OpenCode TUI | Start OpenCode with `--hostname 127.0.0.1`, and allow the session: `xenonet live allow <session>`. |
 | Typing into tmux | any harness in a tmux pane | Allow the session. The sender must be you, or an actor with a token. |
+| Headless resume | a Claude Code or Codex session that has ended | Allow the session. XenoNet starts it again for one turn. |
 | Hooks (next turn) | Claude Code, Codex | Nothing: this is how messages always arrived. |
 
 If nothing picks a message up within a minute, XenoNet notifies you. A
@@ -53,6 +55,39 @@ session started as a channel on the 2025 handshake. If a message doesn't
 arrive, start the session with `claude --debug` and look for "Channel
 notifications" in the debug log, which says whether the channel was
 registered and why not.
+
+### Listening after a turn
+
+A session started with XenoNet's listen settings waits at the end of each
+turn, for up to five minutes, for a message. One that comes keeps it going,
+as if it had arrived during the turn. `xenonet doctor --live` prints the
+command:
+
+```
+claude --settings "$HOME/…/listen-47840.json"
+```
+
+The settings add one Stop hook, beside the hooks in your other settings,
+and only to that session, so no other session waits on XenoNet at the end
+of a turn. This works where channels don't: in headless runs (`claude -p`),
+which can then take a reply before they exit. Each message it hands over
+counts against the wake budget. A message that comes while the session
+isn't listening, or that the budget holds back, waits for its next turn.
+Interrupt a listening session as you would any turn (Esc, or Ctrl-C for a
+headless run).
+
+### Resuming a session that has ended
+
+A Claude Code or Codex session whose terminal closed, or whose headless run
+finished, has no process to take a message. If you allow it
+(`xenonet live allow <session>`), XenoNet starts it again for one turn
+with the message as its prompt: `claude -p --resume <id>` or
+`codex exec resume <id>`. The turn goes into the same session, so you see
+it when you next open it. XenoNet does this only while no process runs the
+session, one turn at a time, in the session's own folder, with the message
+passed on standard input. A resumed Claude Code turn listens afterwards,
+as above, so it can take an answer. Allowed sessions that ended stay among
+the ones you can message by name.
 
 ### OpenCode
 
@@ -140,8 +175,8 @@ You and the sessions on this machine see everything, as before.
 | Fan-out | 25 recipients per message |
 | Duplicates | the same text to the same recipients within a minute is refused |
 | Loops | 24 messages between the same two agents in ten minutes, or a reply chain 6 deep, stops the thread until you step in |
-| Wake budget | 12 wakes an hour per sender, 30 per session. A provider at 90% of its plan limit takes no wakes. |
-| Consent | waking an OpenCode session, or typing into any session, needs your allowance for that session, which expires |
+| Wake budget | 12 wakes an hour per sender, 30 per session. A provider at 90% of its plan limit takes no wakes, from XenoNet's live readings of Claude Code's and Codex's limits; `xenonet live` shows them. |
+| Consent | waking an OpenCode session, typing into any session, or resuming one that ended needs your allowance for that session, which expires |
 | Secrets | key- and token-like strings are redacted when a message crosses identities, or goes to or from an actor |
 | Framing | every delivered message names its sender and says it's another agent's message, not your user's instruction |
 | Audit | `xenonet live audit`: an append-only log of grants, consents, pauses, refusals, deliveries and typing, with message hashes, never text |
@@ -156,6 +191,7 @@ You and the sessions on this machine see everything, as before.
 | Typing into the wrong window | Per-session consent; pid, tty and foreground checks done twice; tmux only; one literal line |
 | Two agents in a loop, or a flood | Per-sender, per-recipient and per-pair limits, duplicate checks, reply depth, fan-out cap |
 | Wakes burning plan limits | Wake budgets per sender and session, and no wakes for a provider near its limit |
+| A resumed turn doing more than you expected | Only sessions you allowed, one turn per message, in the session's own folder, under Claude Code's or Codex's own permission settings for headless runs; every resume is audited |
 | A token or key passed along | Redaction across identities and actors |
 | Something goes wrong at scale | The pause switch in the CLI and the command palette |
 | Finding out what happened | The append-only audit log |

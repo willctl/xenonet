@@ -164,6 +164,8 @@ export class Engine extends EventEmitter {
     this.actors = actors;
     this.noticed = new Map(); // `${agent}[/${subagent}]|${file}|${other}|${how}` → when it was warned
     this.waiters = new Map(); // agent → Set(resolve), inboxes waiting for mail
+    this.listening = new Map(); // agent → until when its Stop hook listens
+    this.stopMail = new Map(); // agent → when its Stop hook last handed mail over
   }
 
   // ---------- agents ----------
@@ -181,8 +183,9 @@ export class Engine extends EventEmitter {
     // OpenCode sessions you allowed XenoNet to wake (core/delivery/router.js).
     for (const id of this.delivery?.known?.() ?? []) ids.add(id);
     const views = await Promise.all([...ids].filter((id) => isAgentId(id) || isActorAgent(id)).map((id) => this.view(id)));
-    // Working agents first, then the most recent; sessions that ended drop out.
-    return views.filter((v) => v.lastActive >= since && !v.ended).sort((a, b) => (b.status === "working") - (a.status === "working") || b.lastActive - a.lastActive);
+    // Working agents first, then the most recent; sessions that ended drop
+    // out, unless you allowed XenoNet to resume one for a message.
+    return views.filter((v) => v.lastActive >= since && (!v.ended || this.delivery?.resumable?.(v))).sort((a, b) => (b.status === "working") - (a.status === "working") || b.lastActive - a.lastActive);
   }
 
   async view(id) {
@@ -222,6 +225,9 @@ export class Engine extends EventEmitter {
       id,
       app: id.split(":")[0],
       title: clip(node?.title ?? (told?.title || null) ?? (cwd ? `${id.split(":")[0]} in ${path.basename(cwd)}` : short(id)), 90),
+      // A session an experimental reader reads (core/native), which no
+      // message reaches.
+      reader: node?.reader ?? null,
       project: place?.name ?? null,
       projectId: place?.id ?? null,
       projectKind: place?.kind ?? null,
@@ -285,7 +291,8 @@ export class Engine extends EventEmitter {
   // Whether messages can reach an agent: a session always may, in its
   // inbox; an actor only once it reports itself with a token you allowed.
   // A run XenoNet only observes (numbat's, or one reported through the
-  // gateway) has no hooks here, so nothing would reach it.
+  // gateway), or one an experimental reader reads, has no hooks here, so
+  // nothing would reach it.
   #reads(id) {
     if (this.delivery?.reaches?.(id)) return true;
     if (this.state.observed?.live?.(id)) return false;
@@ -294,7 +301,8 @@ export class Engine extends EventEmitter {
 
   // Why an actor XenoNet only observes isn't sent messages.
   #deaf(a) {
-    return new Error(`${a.id} ("${a.title}") can't read messages: XenoNet only observes it, so nothing would reach it`);
+    const how = a.reader ? "XenoNet reads its records but has no way to message it" : "XenoNet only observes it";
+    return new Error(`${a.id} ("${a.title}") can't read messages: ${how}, so nothing would reach it`);
   }
 
   // What kind of agent another is, as agents read it: its app, or for an
@@ -396,14 +404,15 @@ export class Engine extends EventEmitter {
 
   // `to`: an agent's id (or its first characters), words from its title,
   // "repo" for everyone working in this repo, or "all". Without `to`, a reply
-  // goes back to the message's sender.
+  // goes back to the message's sender, or, when you sent that message
+  // yourself, to whoever it went to.
   // `envelope`: how XenoNet knows who sent it (attest.js), from the route's
   // own checks; never from what the sender said.
   async send(me, { to, text, replyTo = null }, { envelope = null } = {}) {
     text = String(text ?? "").trim();
     if (!text) throw new Error("the message is empty");
     if (text.length > MAX_TEXT) throw new Error(`keep messages under ${MAX_TEXT} characters`);
-    if (!to && replyTo) to = this.store.message(Number(replyTo))?.sender;
+    if (!to && replyTo) to = Engine.replyTarget(me, this.store.message(Number(replyTo)));
     if (!to) throw new Error('say who it\'s for: a session\'s id, words from its title, "repo" or "all"');
     const self = await this.view(me);
     // Actors XenoNet only observes are left out: nothing reads their inbox.
@@ -443,6 +452,18 @@ export class Engine extends EventEmitter {
     const ways = recipients.map((r) => this.delivery?.way?.(me, r) ?? delivery(r));
     this.emit("message", { id, from: me, to: recipients.map((r) => r.id), target, text, ts: now, ...(envelope ? { verified: envelope.line, strength: envelope.auth.strength } : {}) });
     return { id, to: recipients.map((r, i) => ({ ...brief(r), delivery: ways[i] })), ...(scope ? { alsoTo: "sessions that start work in this repo in the next half hour" } : {}) };
+  }
+
+  // Who a reply with no `to` is for: the sender of the message it answers,
+  // unless that's you, in which case it goes to the same audience: "all",
+  // the repo you're in now (not necessarily the one you sent it in), or the
+  // one agent.
+  static replyTarget(me, m) {
+    if (!m) return undefined;
+    if (m.sender !== me) return m.sender;
+    if (m.target === "all") return "all";
+    if (m.scope || String(m.target).startsWith("repo:")) return "repo";
+    return m.target;
   }
 
   // An agent new to a repo gets what was said to everyone there in the last
@@ -496,6 +517,49 @@ export class Engine extends EventEmitter {
       });
     }
     return this.#take(me);
+  }
+
+  // A session's listening Stop hook (/api/hook/claude/listen, which a
+  // session gets by starting with XenoNet's listen settings; see xenonet
+  // doctor --live): after a turn it waits up to `ms` for a message and hands
+  // it over, which keeps the session going, as a block from a Stop hook
+  // does. Each message it hands over is a wake, checked against the budget
+  // like any other; one the budget refuses waits for the next turn. It stops
+  // as soon as the session goes on anyway (the main Stop hook handed mail
+  // over) or the hook's request goes away (`signal`). Returns the hook's
+  // answer and the ids it took, or null.
+  async listen(me, { ms, signal = null } = {}) {
+    const goingOn = () => this.now() - (this.stopMail.get(me) ?? -Infinity) < 5000;
+    const deadline = Date.now() + ms;
+    this.listening.set(me, deadline);
+    try {
+      for (;;) {
+        if (signal?.aborted || goingOn()) return null;
+        await this.#catchUp(me);
+        const waiting = this.store.unseen(me);
+        if (waiting.length) {
+          if (!(this.delivery?.wake?.(waiting[0].sender, me) ?? { ok: true }).ok) return null;
+          const list = await this.#take(me);
+          const text = this.#mail(list);
+          if (text) return { decision: "block", reason: text, ids: list.map((m) => m.id) };
+        }
+        const left = deadline - Date.now();
+        if (left <= 0) return null;
+        // Until a message comes, the main Stop hook takes one, the request
+        // goes, or the window ends.
+        await new Promise((resolve) => {
+          const set = this.waiters.get(me) ?? this.waiters.set(me, new Set()).get(me);
+          const seen = ({ agent }) => agent === me && done();
+          const done = () => (clearTimeout(timer), set.delete(done), signal?.removeEventListener("abort", done), this.off("seen", seen), resolve());
+          const timer = setTimeout(done, left);
+          set.add(done);
+          signal?.addEventListener("abort", done);
+          this.on("seen", seen);
+        });
+      }
+    } finally {
+      this.listening.delete(me);
+    }
   }
 
   async #take(me) {
@@ -630,6 +694,7 @@ export class Engine extends EventEmitter {
     if (event === "Stop") {
       if (input.stop_hook_active) return null;
       const text = this.#mail(await this.#take(me));
+      if (text) this.stopMail.set(me, this.now());
       return text ? { decision: "block", reason: text } : null;
     }
     return null;

@@ -228,6 +228,52 @@ export const VENDOR = {
     fits: [{ heartbeat: { at: 1791230000.5, pid: 4300 }, last_success: { at: 1791230000.5 } }, { heartbeat: null, last_success: null }],
     odd: [{ record: { heartbeat: { at: "now", pid: 4300 } }, drift: [["type-change", "heartbeat.at"]], strip: [["heartbeat", "at"]] }],
   },
+  "anomaly/opencode/db": {
+    fits: [
+      {
+        session: [{ id: "ses_eb95b1836ffexD4vYDGuLeJDCy", parent_id: null, directory: "/Users/ada/atlas", title: "Overwrite notes", version: "1.19.3", time_created: 1792186574794, time_updated: 1792186579752, time_archived: null }],
+        edits: [{ session_id: "ses_eb95b1836ffexD4vYDGuLeJDCy", time_created: 1792186578050, tool: "write", path: "/Users/ada/atlas/notes.txt" }],
+      },
+      { session: [], edits: [] },
+    ],
+    odd: [
+      { record: { session: [{ id: "s1", directory: "/a", version: "1.19.3", time_created: "today", time_updated: 1 }], edits: [] }, drift: [["type-change", "session[].time_created"]], strip: [["session", 0, "time_created"]] },
+      { record: { session: [], edits: [{ session_id: "s1", time_created: 1, path: "/a" }] }, drift: [["missing-field", "edits[].tool"]] },
+    ],
+  },
+  "google/gemini-cli/chat-record": {
+    fits: [
+      { sessionId: "8f1d2c3b-0000-4000-8000-000000000001", projectHash: "ab12", startTime: "2026-10-16T12:00:00.000Z", lastUpdated: "2026-10-16T12:00:00.000Z", kind: "main" },
+      { id: "m2", timestamp: "2026-10-16T12:00:05.000Z", type: "gemini", content: "", toolCalls: [{ id: "c1", name: "write_file", args: { file_path: "/Users/ada/atlas/notes.txt", content: "x" }, status: "success", timestamp: "2026-10-16T12:00:06.000Z" }] },
+      { $set: { lastUpdated: "2026-10-16T12:00:07.000Z" } },
+      { $rewindTo: "m2" },
+    ],
+    odd: [
+      { record: { id: "m3", type: "gemini", toolCalls: [{ id: "c2", name: 5 }] }, drift: [["type-change", "toolCalls[].name"]], strip: [["toolCalls", 0, "name"]] },
+    ],
+  },
+  "github/copilot-cli/session-event": {
+    fits: [
+      { id: "e1", timestamp: "2026-10-16T12:00:00.000Z", parentId: null, type: "session.start", data: { sessionId: "0f3c2b1a-0000-4000-8000-000000000001", version: 1, producer: "copilot-agent", copilotVersion: "1.0.98", startTime: "2026-10-16T12:00:00.000Z", context: { cwd: "/Users/ada/atlas", branch: "main" } } },
+      { id: "e2", timestamp: "2026-10-16T12:00:05.000Z", parentId: "e1", type: "tool.execution_start", data: { toolCallId: "t1", toolName: "str_replace_editor", arguments: { command: "str_replace", path: "/Users/ada/atlas/notes.txt" } } },
+      { id: "e3", timestamp: "2026-10-16T12:00:09.000Z", parentId: "e2", type: "assistant.message", data: { content: "Done" } },
+    ],
+    odd: [
+      { record: { id: "e4", timestamp: "2026-10-16T12:00:10.000Z", type: "session.start", data: { sessionId: "x", version: "1" } }, drift: [["type-change", "data.version"]], strip: [["data", "version"]] },
+      { record: { timestamp: "2026-10-16T12:00:10.000Z", type: "session.idle" }, drift: [["missing-field", "id"]] },
+    ],
+  },
+  "anysphere/cursor/hook-input": {
+    fits: [
+      { at: "2026-10-16T12:00:00.000Z", hook_event_name: "sessionStart", conversation_id: "6b0e5f1c-0000-4000-8000-000000000001", session_id: "6b0e5f1c-0000-4000-8000-000000000001", cursor_version: "2.4.1", workspace_roots: ["/Users/ada/atlas"] },
+      { at: "2026-10-16T12:00:05.000Z", hook_event_name: "afterFileEdit", conversation_id: "6b0e5f1c-0000-4000-8000-000000000001", cursor_version: "2.4.1", workspace_roots: ["/Users/ada/atlas"], file_path: "/Users/ada/atlas/notes.txt" },
+      { at: "2026-10-16T12:00:09.000Z", hook_event_name: "sessionEnd", session_id: "6b0e5f1c-0000-4000-8000-000000000001", reason: "completed" },
+    ],
+    odd: [
+      { record: { at: "2026-10-16T12:00:00.000Z", hook_event_name: "afterFileEdit", file_path: 5 }, drift: [["type-change", "file_path"]], strip: [["file_path"]] },
+      { record: { at: "2026-10-16T12:00:00.000Z" }, drift: [["missing-field", "hook_event_name"]] },
+    ],
+  },
   "nous/hermes-agent/install-stamp": {
     fits: [{ schemaVersion: 2, commit: "0a1b2c3d4e", commitDate: 1791200000, branch: "main", builtAt: "2026-10-05T12:00:00+00:00", dirty: false, source: "git", distribution: null, updateMechanism: "self", baseVersion: "0.21.5", displayVersion: "0.21.5+12.g0a1b2c3", distance: 12, payload: "bootstrap", tag: null }],
     odd: [

@@ -69,6 +69,10 @@ const SOURCES = {
   "nous/hermes-agent/cron-jobs": "Hermes Agent's scheduled jobs",
   "nous/hermes-agent/cron-ticker": "Hermes Agent's scheduler ticker",
   "nous/hermes-agent/install-stamp": "Hermes Agent's build stamp",
+  "anomaly/opencode/db": "OpenCode's database",
+  "google/gemini-cli/chat-record": "Gemini CLI's chat records",
+  "github/copilot-cli/session-event": "Copilot CLI's session events",
+  "anysphere/cursor/hook-input": "Cursor's hook input",
 };
 export const sourceName = (source) => SOURCES[source] ?? source;
 

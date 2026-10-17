@@ -341,7 +341,7 @@ export function importsFrom(sources, pkg) {
 // ---------- TypeScript declarations ----------
 
 // Comments out, strings kept.
-function stripComments(text) {
+export function stripComments(text) {
   let out = "";
   for (let i = 0; i < text.length; ) {
     const c = text[i];
@@ -365,7 +365,7 @@ function stripComments(text) {
 }
 
 // `text` split at `sep` where it isn't inside brackets or a string.
-function splitTop(text, sep) {
+export function splitTop(text, sep) {
   const parts = [];
   let depth = 0;
   let quote = null;
@@ -431,10 +431,15 @@ export function tsToSchema(type, decls, seen = new Set()) {
   const t = String(type ?? "").trim().replace(/^\|/, "").trim();
   const union = splitTop(t, "|");
   if (union.length > 1) {
-    const parts = union.map((u) => tsToSchema(u, decls, seen));
+    // A union of unions is one union.
+    const parts = union.map((u) => tsToSchema(u, decls, seen)).flatMap((p) => (Array.isArray(p.anyOf) && Object.keys(p).length === 1 ? p.anyOf : Array.isArray(p.enum) && Object.keys(p).length === 1 ? p.enum.map((v) => ({ const: v })) : [p]));
     const literals = parts.every((p) => p.const !== undefined) ? parts.map((p) => p.const) : null;
     return literals ? { enum: literals } : { anyOf: parts };
   }
+  // An intersection (Base & Extra): one object with every part's fields, or,
+  // when a part is a union of objects, one object for each of its options.
+  const all = splitTop(t, "&");
+  if (all.length > 1) return intersect(all.map((a) => tsToSchema(a, decls, seen)));
   if (/^\(.*\)$/s.test(t)) return tsToSchema(t.slice(1, -1), decls, seen);
   if (/^'([^']*)'$|^"([^"]*)"$/.test(t)) return { const: t.slice(1, -1) };
   if (/^-?\d+(\.\d+)?$/.test(t)) return { const: Number(t) };
@@ -450,6 +455,16 @@ export function tsToSchema(type, decls, seen = new Set()) {
   const name = /^([A-Za-z_$][\w$.]*)/.exec(t)?.[1];
   if (name && decls.has(name) && !seen.has(name)) return tsToSchema(decls.get(name), decls, new Set([...seen, name]));
   return {};
+}
+
+function intersect(parts) {
+  const at = parts.findIndex((p) => Array.isArray(p.anyOf));
+  if (at >= 0) return { anyOf: parts[at].anyOf.map((o) => intersect([...parts.slice(0, at), o, ...parts.slice(at + 1)])) };
+  const objects = parts.filter((p) => p.type === "object");
+  if (!objects.length) return {};
+  const properties = Object.assign({}, ...objects.map((o) => o.properties ?? {}));
+  const required = [...new Set(objects.flatMap((o) => o.required ?? []))];
+  return { type: "object", properties, required };
 }
 
 function objectSchema(t, decls, seen) {

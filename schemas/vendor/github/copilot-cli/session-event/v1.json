@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/github/copilot-cli/session-event/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Copilot CLI's session events",
+  "description": "The lines of Copilot CLI's session event logs (~/.copilot/session-state/<id>/events.jsonl, or <id>.jsonl before 1.0.11): session.start (id, version, start, working folder and branch), resume and context changes, title changes, shutdown (the files it changed), and tool.execution_start for the file an edit tool names. Other kinds of event are passed over. The version is session.start's own (version).",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "string"
+    },
+    "parentId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "type": {
+      "type": "string",
+      "description": "session.start, session.context_changed, session.title_changed, session.shutdown and tool.execution_start are read; the rest (over a hundred kinds) are passed over"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "description": "session.start",
+          "type": "string"
+        },
+        "version": {
+          "description": "session.start: the format's version",
+          "type": "number"
+        },
+        "startTime": {
+          "type": "string"
+        },
+        "context": {
+          "description": "session.start and session.resume: the working folder",
+          "type": "object",
+          "properties": {
+            "cwd": {
+              "type": "string"
+            },
+            "branch": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "cwd"
+          ],
+          "additionalProperties": {}
+        },
+        "cwd": {
+          "description": "session.context_changed",
+          "type": "string"
+        },
+        "title": {
+          "description": "session.title_changed",
+          "type": "string"
+        },
+        "codeChanges": {
+          "description": "session.shutdown",
+          "type": "object",
+          "properties": {
+            "filesModified": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "filesModified"
+          ],
+          "additionalProperties": {}
+        },
+        "toolName": {
+          "description": "tool.execution_start",
+          "type": "string"
+        },
+        "arguments": {
+          "description": "tool.execution_start: only an edit tool's path is read"
+        }
+      },
+      "additionalProperties": {}
+    }
+  },
+  "required": [
+    "id",
+    "timestamp",
+    "type"
+  ],
+  "additionalProperties": {},
+  "x-xenonet": {
+    "vendorVersions": "1",
+    "lenient": true
+  }
+}
