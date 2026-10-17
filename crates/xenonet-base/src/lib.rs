@@ -11,6 +11,7 @@ pub mod log;
 pub mod ordered;
 pub mod paths;
 pub mod pricing;
+pub mod private_file;
 pub mod text;
 pub mod time;
 pub mod units;

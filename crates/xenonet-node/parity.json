@@ -128,6 +128,19 @@
       "differences": [
         "excerpt cutting a character in two ends in U+FFFD, which is what JS's half of one prints as. The twin leaves that cut to JS, as it does money given something other than a number."
       ]
+    },
+    "core/private-file.js": {
+      "rust": "crates/xenonet-base/src/private_file.rs",
+      "differences": [
+        "Commands still run through JS in the twin (the run given, or runPrivateCommand); the Rust's own runner, run_command, pipes a failed command's stderr into its error instead of passing it to the parent's stderr as well.",
+        "The name of icacls's answer file ends in 12 hex digits from std's RandomState, not crypto.randomBytes: it needs to be unlike the others, not secret."
+      ]
+    },
+    "core/actors/token-file.js": {
+      "rust": "crates/xenonet-actors/src/token_file.rs",
+      "differences": [
+        "findTokenFiles and createTokenScan, the doctor's look for tokens left in repos, are still the JS: they move with the doctor."
+      ]
     }
   },
   "tests": [
@@ -211,6 +224,7 @@
     "test/page-markup.test.js",
     "test/platform.test.js",
     "test/poster.test.js",
+    "test/private-file.test.js",
     "test/projects.test.js",
     "test/provider-drift.test.js",
     "test/refusal-browser.test.js",

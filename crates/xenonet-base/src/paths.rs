@@ -205,6 +205,30 @@ pub fn join(dir: &str, name: &str) -> String {
     normalize_posix(&format!("{dir}/{name}"))
 }
 
+/// path.resolve on this machine: absolute, `.` and `..` worked out, and no
+/// slash at the end.
+pub fn resolve(p: &str) -> String {
+    #[cfg(windows)]
+    {
+        let full = std::path::absolute(if p.is_empty() { "." } else { p }).map_or_else(|_| p.to_string(), |a| a.to_string_lossy().into_owned());
+        if full.len() > 3 {
+            full.trim_end_matches(['\\', '/']).to_string()
+        } else {
+            full
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let full = if p.starts_with('/') { p.to_string() } else { format!("{}/{p}", std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default()) };
+        let n = normalize_posix(&full);
+        if n.len() > 1 {
+            n.trim_end_matches('/').to_string()
+        } else {
+            n
+        }
+    }
+}
+
 /// path.posix.normalize: `.` and `..` worked out, slashes collapsed, a
 /// trailing slash kept.
 pub fn normalize_posix(p: &str) -> String {

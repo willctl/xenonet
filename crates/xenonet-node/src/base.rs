@@ -503,3 +503,75 @@ pub fn units_share(p: f64) -> String {
 pub fn units_excerpt(s: String, n: f64) -> String {
     units::excerpt(&s, n as usize)
 }
+
+// ----- private files -----
+
+use crate::js::Jv;
+use xenonet_base::private_file::{self, Error as PrivateError};
+
+/// What the twin's `run` answers: a command's output, or its error's
+/// message (the twin keeps the error, to throw again if it ends the call).
+#[napi(object)]
+pub struct RunAnswer {
+    pub out: Option<String>,
+    pub error: Option<String>,
+}
+
+/// A JS `run`, called with [file, ...args], as private_file's Run.
+pub(crate) fn runner<'a, 'f: 'a>(f: &'a Function<'f, Vec<String>, RunAnswer>) -> Box<private_file::Run<'a>> {
+    Box::new(move |file, args| {
+        let argv = std::iter::once(file).chain(args.iter().copied()).map(String::from).collect();
+        match f.call(argv) {
+            Ok(RunAnswer { out: Some(out), .. }) => Ok(out),
+            Ok(RunAnswer { error, .. }) => Err(error.unwrap_or_default()),
+            Err(e) => Err(e.reason.clone()),
+        }
+    })
+}
+
+/// { ok } or { error: { kind, message, code } }: "run" when a command
+/// failed (the twin throws its error), "said" or "fs" for an Error of these
+/// words (and code).
+pub(crate) fn outcome(r: std::result::Result<Jv, PrivateError>) -> Jv {
+    match r {
+        Ok(v) => Jv::Obj(vec![("ok", v)]),
+        Err(e) => {
+            let (kind, code) = match &e {
+                PrivateError::Run(_) => ("run", None),
+                PrivateError::Said(_) => ("said", None),
+                PrivateError::Fs(f) => ("fs", f.code.clone()),
+            };
+            let code = code.map_or(Jv::Undef, |c| Jv::Json(Value::String(c)));
+            Jv::Obj(vec![("error", Jv::Obj(vec![("kind", Jv::Json(json!(kind))), ("message", Jv::Json(json!(e.message()))), ("code", code)]))])
+        }
+    }
+}
+
+pub(crate) fn text(s: String) -> Jv {
+    Jv::Json(Value::String(s))
+}
+
+#[napi(js_name = "userSid")]
+pub fn user_sid(run: Function<Vec<String>, RunAnswer>) -> Jv {
+    outcome(private_file::user_sid(&mut runner(&run)).map(text))
+}
+
+#[napi(js_name = "aclOf")]
+pub fn acl_of(file: String, run: Function<Vec<String>, RunAnswer>) -> Jv {
+    outcome(private_file::acl_of(&file, &mut runner(&run)).map(text))
+}
+
+#[napi(js_name = "othersIn")]
+pub fn others_in(sddl: String, sid: String) -> Vec<String> {
+    private_file::others_in(&sddl, &sid)
+}
+
+#[napi(js_name = "otherReaders")]
+pub fn other_readers(file: String, windows: bool, run: Function<Vec<String>, RunAnswer>) -> Jv {
+    outcome(private_file::other_readers(&file, windows, &mut runner(&run)).map(|v| Jv::Json(json!(v))))
+}
+
+#[napi(js_name = "protectFile")]
+pub fn protect_file(file: String, windows: bool, run: Function<Vec<String>, RunAnswer>) -> Jv {
+    outcome(private_file::protect_file(&file, windows, &mut runner(&run)).map(|()| Jv::Undef))
+}

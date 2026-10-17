@@ -59,3 +59,47 @@ pub fn bearer_of(raw: String) -> Option<String> {
 pub fn token_in_url(params: Vec<Vec<String>>, path: String) -> bool {
     tokens::token_in_url(params.iter().map(|p| (p.first().map_or("", String::as_str), p.get(1).map_or("", String::as_str))), &path)
 }
+
+// ----- token files -----
+
+use crate::base::{outcome, runner, text, RunAnswer};
+use crate::js::Jv;
+use serde_json::{json, Value};
+use xenonet_actors::token_file;
+
+#[napi(js_name = "heavyFolders")]
+pub fn heavy_folders() -> Vec<&'static str> {
+    token_file::HEAVY_FOLDERS.to_vec()
+}
+
+#[napi(js_name = "readTokenFile")]
+pub fn read_token_file(file: String, windows: bool, run: Function<Vec<String>, RunAnswer>) -> Jv {
+    outcome(token_file::read_token_file(&file, windows, &mut runner(&run)).map(text))
+}
+
+/// The twin hands over the two variables, each when it's set and not empty.
+#[napi(js_name = "tokenFromEnv")]
+pub fn token_from_env(token_file_var: Option<String>, token_var: Option<String>, windows: bool, run: Function<Vec<String>, RunAnswer>) -> Jv {
+    let env = |k: &str| match k {
+        "XENONET_ACTOR_TOKEN_FILE" => token_file_var.clone(),
+        "XENONET_ACTOR_TOKEN" => token_var.clone(),
+        _ => None,
+    };
+    let found = token_file::token_from_env(&env, windows, &mut runner(&run));
+    outcome(found.map(|t| t.map_or(Jv::Json(Value::Null), |(token, file)| Jv::Obj(vec![("token", text(token)), ("file", Jv::Json(json!(file)))]))))
+}
+
+#[napi(js_name = "gitTreeOf")]
+pub fn git_tree_of(dir: String) -> Option<String> {
+    token_file::git_tree_of(&dir)
+}
+
+#[napi(js_name = "tokenFileRefusal")]
+pub fn token_file_refusal(file: String, force: bool, projects_dir: Option<String>) -> Option<String> {
+    token_file::token_file_refusal(&file, force, projects_dir.as_deref())
+}
+
+#[napi(js_name = "writeTokenFile")]
+pub fn write_token_file(file: String, token: String, windows: bool, run: Function<Vec<String>, RunAnswer>, force: bool, projects_dir: Option<String>) -> Jv {
+    outcome(token_file::write_token_file(&file, &token, windows, &mut runner(&run), force, projects_dir.as_deref()).map(text))
+}
