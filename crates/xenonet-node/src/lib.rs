@@ -7,3 +7,4 @@
 mod base;
 mod blocks;
 mod js;
+mod lines;

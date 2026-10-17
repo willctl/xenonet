@@ -22,6 +22,7 @@ napi-derive.workspace = true
 serde_json.workspace = true
 xenonet-base.workspace = true
 xenonet-blocks.workspace = true
+xenonet-sources.workspace = true
 
 [build-dependencies]
 napi-build.workspace = true

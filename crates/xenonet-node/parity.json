@@ -36,6 +36,15 @@
         "It has the fix on fix/scanner-racy-mtime: started again after a stop, a file it followed before is caught up by the sweep, as live, not history.",
         "A sweep of the files it follows sees files added while it goes, as JS's for…of over the Map did; one the sweep drops while a read of it is under way stops that read, where JS read on with the entry it had."
       ]
+    },
+    "core/lines.js": {
+      "rust": "crates/xenonet-sources/src/lines.rs",
+      "differences": [
+        "A view reads a copy of its record, made when it's built: a change to `raw` after that isn't seen (no reader changes one).",
+        "Lines are parsed as in core/blocks/normalizer.js's entry.",
+        "Through the twin, reading a transcript takes about 8 times as long as the JS (20,000 lines, 15 MB: 340 ms against 40 ms), since each record crosses between JS and Rust several times while vendor.js's checks are still JS. Don't put this twin in the module's place before the readers are Rust end to end.",
+        "readLines still reads the file, and unpacks a .zst archive, in JS: the Rust reader needs a zstd decoder first."
+      ]
     }
   },
   "tests": [

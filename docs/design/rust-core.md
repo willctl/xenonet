@@ -440,11 +440,18 @@ place. This table follows it.
 | `core/blocks/normalizer.js` | `xenonet-blocks/src/normalizer.rs` | `blocks-normalizer` passes |
 | `core/blocks/scanner.js` | `xenonet-blocks/src/scanner.rs`, with the read-again fix | `blocks-scanner`, `projects` pass |
 | `core/blocks/tailer.js` | `xenonet-blocks/src/tailer.rs`, with the restart fix | `blocks-tailer`, `live` pass |
+| `core/lines.js` | `xenonet-sources/src/lines.rs` | `lines`, `codex`, `vendor-schemas` pass |
 
 With every twin in place, all 92 test files that reach one pass. The two
 fixes on `fix/scanner-racy-mtime` are in the Rust (the scanner reads a
 folder again when it read it just after it changed, and the tailer
 catches up the files it followed as live after a restart), and that
 branch's new tests pass against them too.
+
+A twin is the contract's check, not yet something to ship: reading a
+transcript through the lines twin takes about 8 times as long as the JS,
+since each record crosses between JS and Rust several times while the
+vendor checks are still JS. The readers gain from Rust once they're Rust
+from the file to the answer.
 
 Not ported yet: everything else, in the order above.

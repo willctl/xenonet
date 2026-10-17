@@ -18,6 +18,7 @@ publish = false
 [workspace.dependencies]
 xenonet-base = { path = "crates/xenonet-base" }
 xenonet-blocks = { path = "crates/xenonet-blocks" }
+xenonet-sources = { path = "crates/xenonet-sources" }
 # JS keeps an object's keys in the order they were added, and so do the
 # files and answers XenoNet writes: preserve_order keeps that order here.
 serde = { version = "1", features = ["derive"] }

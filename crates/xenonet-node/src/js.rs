@@ -218,3 +218,90 @@ impl napi::bindgen_prelude::TypeName for Fields {
         napi::ValueType::Object
     }
 }
+
+/// A JS value to build, for answers JSON can't hold: undefined, NaN and
+/// the infinities, bytes, and objects with such fields, in order.
+pub enum Jv {
+    Undef,
+    Num(f64),
+    Bool(bool),
+    Json(Value),
+    Bytes(Vec<u8>),
+    Obj(Vec<(&'static str, Jv)>),
+    Arr(Vec<Jv>),
+}
+
+impl From<Option<Value>> for Jv {
+    fn from(v: Option<Value>) -> Self {
+        v.map_or(Jv::Undef, Jv::Json)
+    }
+}
+
+unsafe fn build(env: sys::napi_env, v: &Jv) -> Result<sys::napi_value> {
+    let mut out = ptr::null_mut();
+    match v {
+        Jv::Undef => check(unsafe { sys::napi_get_undefined(env, &mut out) }, "make undefined")?,
+        Jv::Num(n) => check(unsafe { sys::napi_create_double(env, *n, &mut out) }, "make a number")?,
+        Jv::Bool(b) => check(unsafe { sys::napi_get_boolean(env, *b, &mut out) }, "make a boolean")?,
+        Jv::Json(j) => out = unsafe { to_js(env, j, 0)? },
+        Jv::Bytes(b) => {
+            let mut data = ptr::null_mut();
+            check(unsafe { sys::napi_create_buffer_copy(env, b.len(), b.as_ptr().cast(), &mut data, &mut out) }, "make a buffer")?;
+        }
+        Jv::Obj(fields) => {
+            check(unsafe { sys::napi_create_object(env, &mut out) }, "make an object")?;
+            for (k, f) in fields {
+                let key = unsafe { string(env, k)? };
+                let value = unsafe { build(env, f)? };
+                check(unsafe { sys::napi_set_property(env, out, key, value) }, "fill an object")?;
+            }
+        }
+        Jv::Arr(items) => {
+            check(unsafe { sys::napi_create_array_with_length(env, items.len(), &mut out) }, "make an array")?;
+            for (i, x) in items.iter().enumerate() {
+                let item = unsafe { build(env, x)? };
+                check(unsafe { sys::napi_set_element(env, out, i as u32, item) }, "fill an array")?;
+            }
+        }
+    }
+    Ok(out)
+}
+
+impl ToNapiValue for Jv {
+    unsafe fn to_napi_value(env: sys::napi_env, val: Self) -> Result<sys::napi_value> {
+        unsafe { build(env, &val) }
+    }
+}
+
+impl napi::bindgen_prelude::TypeName for Jv {
+    fn type_name() -> &'static str {
+        "unknown"
+    }
+    fn value_type() -> napi::ValueType {
+        napi::ValueType::Unknown
+    }
+}
+
+/// A JS value coming in that may be undefined (None), as `typeof` tells
+/// it from null.
+pub struct MaybeJson(pub Option<Value>);
+
+impl FromNapiValue for MaybeJson {
+    unsafe fn from_napi_value(env: sys::napi_env, v: sys::napi_value) -> Result<Self> {
+        if unsafe { type_of(env, v)? } == sys::ValueType::napi_undefined {
+            return Ok(MaybeJson(None));
+        }
+        Ok(MaybeJson(Some(unsafe { from_js(env, v, 0)? })))
+    }
+}
+
+impl napi::bindgen_prelude::TypeName for MaybeJson {
+    fn type_name() -> &'static str {
+        "unknown"
+    }
+    fn value_type() -> napi::ValueType {
+        napi::ValueType::Unknown
+    }
+}
+
+impl napi::bindgen_prelude::ValidateNapiValue for MaybeJson {}
