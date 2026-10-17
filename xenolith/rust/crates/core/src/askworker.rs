@@ -760,10 +760,11 @@ impl AskWorker {
                     o.insert("usage".into(), usage.clone());
                 }
                 o.insert("finishedAt".into(), json!(local_iso(&now())));
+                // The last event goes first: a reader that sees the result settled has every event.
+                emit(json!({ "type": "answered", "found": found }));
                 if let Err(e) = write_json(&self.wiki_dir, &f.result, &Value::Object(o)) {
                     log(&format!("result write failed: {e}"));
                 }
-                emit(json!({ "type": "answered", "found": found }));
                 self.reqlog.write(vec![
                     ("kind", json!("ask")),
                     ("event", json!("done")),
@@ -795,10 +796,10 @@ impl AskWorker {
                 o.insert("searches".into(), json!(searches));
                 o.insert("reads".into(), json!(reads));
                 o.insert("finishedAt".into(), json!(local_iso(&now())));
+                emit(json!({ "type": status, "errorKind": e.kind }));
                 if let Err(w) = write_json(&self.wiki_dir, &f.result, &Value::Object(o)) {
                     log(&format!("result write failed: {w}"));
                 }
-                emit(json!({ "type": status, "errorKind": e.kind }));
                 self.reqlog.write(vec![
                     ("kind", json!("ask")),
                     ("event", json!("done")),

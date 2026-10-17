@@ -596,8 +596,9 @@ export class AskWorker {
       const found = r.output?.found !== false;
       const sources = await resolveSources(this.wikiDir, r.output?.sources);
       const ms = Date.now() - t0;
-      await writeJson(this.wikiDir, f.result, { status: 'done', answer, found, sources, ...base, ms, searches, reads, usage: r.usage, finishedAt: wiki.localISO() });
+      // The last event goes first: a reader that sees the result settled has every event.
       emit({ type: 'answered', found });
+      await writeJson(this.wikiDir, f.result, { status: 'done', answer, found, sources, ...base, ms, searches, reads, usage: r.usage, finishedAt: wiki.localISO() });
       this.reqlog.write({ kind: 'ask', event: 'done', ask: id, result: 'ok', found, searches, reads, sources: sources.map((s) => s.target), ms, usage: r.usage, model: this.cfg.model });
     } catch (err) {
       const e = err instanceof ModelError ? err : new ModelError('model_error', err?.message || String(err));
@@ -606,8 +607,8 @@ export class AskWorker {
       if (e.kind === 'signed_out') this.signedIn = false;
       const status = e.kind === 'aborted' ? 'cancelled' : 'error';
       const ms = Date.now() - t0;
-      await writeJson(this.wikiDir, f.result, { status, errorKind: e.kind, error: explain(e, this.cfg), ...base, ms, searches, reads, finishedAt: wiki.localISO() }).catch((w) => log(`result write failed: ${w.message}`));
       emit({ type: status, errorKind: e.kind });
+      await writeJson(this.wikiDir, f.result, { status, errorKind: e.kind, error: explain(e, this.cfg), ...base, ms, searches, reads, finishedAt: wiki.localISO() }).catch((w) => log(`result write failed: ${w.message}`));
       this.reqlog.write({ kind: 'ask', event: 'done', ask: id, result: e.kind, error: clip(e.message, 300), searches, reads, ms, model: this.cfg.model });
     } finally {
       clearInterval(beat);
