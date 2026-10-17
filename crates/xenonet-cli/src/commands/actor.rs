@@ -12,7 +12,7 @@
 
 use crate::args::Flags;
 use crate::js::{encode, have, list, num, on, str, t};
-use crate::out::{ago, c, clip, eprint, json, now, print, table, write, Done, Fail, Layout};
+use crate::out::{ago, c, clip, eprint, json, json_at, now, print, table, write, Done, Fail, Layout};
 use crate::products::known;
 use crate::prompt::confirm;
 use crate::reach::{bearer, need};
@@ -154,11 +154,11 @@ fn unread_words(me: &Value) -> String {
 fn list_actors(_args: &[String], flags: &Flags) -> Done {
     let s = need(flags)?;
     let answer = s.get("/api/actors")?;
-    let actors = answer.get("actors").cloned().unwrap_or(Value::Null);
     if flags.on("json") {
-        json(&actors);
+        json_at(answer.get("actors"));
         return Ok(0);
     }
+    let actors = answer.get("actors").cloned().unwrap_or(Value::Null);
     // You, outside XenoNet's window, are only a placeholder.
     let shown: Vec<&Value> = actors.as_array().into_iter().flatten().filter(|a| str(a, "id") != Some("actor:you") || str(a, "presence") != Some("unknown")).collect();
     if shown.is_empty() {
@@ -242,11 +242,11 @@ fn observe(args: &[String], flags: &Flags) -> Done {
     let s = need(flags)?;
     let Some(product) = args.first().filter(|p| !p.is_empty()) else {
         let answer = s.get("/api/actors/observers")?;
-        let observers = answer.get("observers").cloned().unwrap_or(Value::Null);
         if flags.on("json") {
-            json(&observers);
+            json_at(answer.get("observers"));
             return Ok(0);
         }
+        let observers = answer.get("observers").cloned().unwrap_or(Value::Null);
         let rows: Vec<Vec<String>> =
             observers.as_array().into_iter().flatten().map(|o| vec![if on(o, "on") { c::green("on") } else { c::dim("off") }, t(o, "name"), c::dim(t(o, "product"))]).collect();
         print(table(&rows, Layout::default()));
@@ -327,7 +327,9 @@ fn register(_args: &[String], flags: &Flags) -> Done {
         let saved = write_token_file(file, &token, cfg!(windows), &mut run, force, projects_dir.as_deref()).map_err(|e| Fail::error(e.message()))?;
         if flags.on("json") {
             let mut out = Map::new();
-            out.insert("id".into(), creds.get("id").cloned().unwrap_or(Value::Null));
+            if let Some(id) = creds.get("id") {
+                out.insert("id".into(), id.clone());
+            }
             out.insert("state".into(), json!("allowed"));
             out.insert("file".into(), json!(saved));
             if let Some(ignored) = creds.get("ignored") {

@@ -10,7 +10,7 @@
 use crate::args::Flags;
 use crate::handoff::handoff;
 use crate::js::{encode, have, list, num, on, str, t};
-use crate::out::{ago, c, json, now, pad, print, Done, Fail};
+use crate::out::{ago, c, json, json_at, now, pad, print, Done, Fail};
 use crate::reach::need;
 use serde_json::{json, Map, Value};
 use xenonet_base::client::{name_of, Server};
@@ -151,7 +151,11 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         None | Some("tunnels") => {
             let st = s.get("/api/actors/gateway")?;
             if flags.on("json") {
-                json(if what.is_some() { st.get("kinds").unwrap_or(&Value::Null) } else { &st });
+                if what.is_some() {
+                    json_at(st.get("kinds"));
+                } else {
+                    json(&st);
+                }
             } else if what.is_some() {
                 show_kinds(&st);
             } else {

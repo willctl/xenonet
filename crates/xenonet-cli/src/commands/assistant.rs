@@ -9,7 +9,7 @@
 use crate::args::Flags;
 use crate::config::instance_dir;
 use crate::js::{have, list, num, on, str, t};
-use crate::out::{ago, c, json, now, print, table, Done, Fail, Layout};
+use crate::out::{ago, c, json, json_at, now, print, table, Done, Fail, Layout};
 use crate::pending;
 use crate::reach::find;
 use crate::sys;
@@ -147,11 +147,11 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             let limit = if limit == 0.0 || limit.is_nan() { 50.0 } else { limit };
             let route = format!("/api/assistant/audit?limit={}{}", number_string(limit), given.map_or(String::new(), |g| format!("&grant={g}")));
             let answer = s.get(&route)?;
-            let records = answer.get("records").cloned().unwrap_or(Value::Null);
             if flags.on("json") {
-                json(&records);
+                json_at(answer.get("records"));
                 return Ok(0);
             }
+            let records = answer.get("records").cloned().unwrap_or(Value::Null);
             let records = records.as_array().cloned().unwrap_or_default();
             if records.is_empty() {
                 print(c::dim("Nothing read in the last seven days."));

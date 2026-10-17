@@ -5,7 +5,7 @@
 use crate::args::Flags;
 use crate::clock;
 use crate::js::{have, list, num, on, str, t};
-use crate::out::{c, json, print, table, Done, Layout};
+use crate::out::{c, json_at, print, table, Done, Layout};
 use crate::reach::need;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -29,11 +29,11 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
     let s = need(flags)?;
     let state = s.get("/api/engine/state")?;
     let agents = s.get("/api/engine/agents").unwrap_or_else(|_| json!([]));
-    let messages = state.get("messages").cloned().unwrap_or(Value::Null);
     if flags.on("json") {
-        json(&messages);
+        json_at(state.get("messages"));
         return Ok(0);
     }
+    let messages = state.get("messages").cloned().unwrap_or(Value::Null);
     let mut messages = messages.as_array().cloned().unwrap_or_default();
     if messages.is_empty() {
         print(c::dim("No messages between sessions or actors in the last 24 hours."));

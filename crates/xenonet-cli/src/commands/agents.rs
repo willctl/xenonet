@@ -64,13 +64,14 @@ fn show(a: &Value, room: usize) {
 
 pub fn run(_args: &[String], flags: &Flags) -> Done {
     let s = need(flags)?;
-    let mut agents = s.get("/api/engine/agents")?.as_array().cloned().unwrap_or_default();
+    let answer = s.get("/api/engine/agents")?;
+    let mut agents = answer.as_array().cloned().unwrap_or_default();
     if flags.on("repo") {
         let here = sys::cwd();
         agents.retain(|a| ["top", "cwd"].iter().any(|k| str(a, k).filter(|d| !d.is_empty()).is_some_and(|d| here == d || here.starts_with(&format!("{d}{}", sys::SEP)))));
     }
     if flags.on("json") {
-        json(&Value::Array(agents));
+        json(&if flags.on("repo") { Value::Array(agents) } else { answer });
         return Ok(0);
     }
     if agents.is_empty() {

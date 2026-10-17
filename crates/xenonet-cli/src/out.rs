@@ -321,6 +321,15 @@ pub fn json(v: &Value) {
     write(&format!("{}\n", json::stringify(v, 2)));
 }
 
+/// A field of an answer as JSON, or "undefined" when it isn't there, as
+/// JSON.stringify leaves it.
+pub fn json_at(v: Option<&Value>) {
+    match v {
+        Some(v) => json(v),
+        None => print("undefined"),
+    }
+}
+
 /// A line on stderr.
 pub fn eprint(s: impl AsRef<str>) {
     let _ = std::io::stderr().lock().write_all(format!("{}\n", s.as_ref()).as_bytes());

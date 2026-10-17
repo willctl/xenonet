@@ -6,7 +6,7 @@
 use crate::args::Flags;
 use crate::clock;
 use crate::js::{list, num, on, t};
-use crate::out::{c, json, print, table, Done, Fail, Layout};
+use crate::out::{c, json, json_at, print, table, Done, Fail, Layout};
 use crate::reach::need;
 use serde_json::{Map, Value};
 use xenonet_base::json::{number, number_string, stringify};
@@ -153,7 +153,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         Some("audit") => {
             let d = s.get("/api/delivery?audit=100")?;
             if flags.on("json") {
-                json(d.get("audit").unwrap_or(&Value::Null));
+                json_at(d.get("audit"));
                 return Ok(0);
             }
             for a in list(&d, "audit") {
