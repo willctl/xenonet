@@ -12,6 +12,7 @@ mod blocks;
 mod components;
 mod drift;
 mod hosts;
+mod integrations;
 mod js;
 mod lines;
 mod schema;

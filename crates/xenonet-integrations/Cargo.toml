@@ -1,0 +1,19 @@
+[package]
+name = "xenonet-integrations"
+description = "XenoNet's integrations: routing suggestions through OpenRouter, OpenShell sandboxes with a frozen text baseline and the review of what comes back, and Pi sessions and exports read as metadata."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+getrandom.workspace = true
+libc.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+xenonet-app.workspace = true
+xenonet-base.workspace = true

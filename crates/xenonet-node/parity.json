@@ -440,6 +440,44 @@
       "differences": [
         "Bindings and their checks, each run's state and backoff, its log as shown, the health addresses and the client's own environment (the key only in CONTROL_PLANE_API_KEY, OPENAI_API_KEY taken out of a run's) are the Rust's; the processes, timers, credential store (secret-store.js's TARGET check through a callback), health probes and files are the twin's."
       ]
+    },
+    "core/integrations/common.js": {
+      "rust": "crates/xenonet-integrations/src/common.rs",
+      "differences": [
+        "Text cut in the middle of a character outside the BMP ends in U+FFFD, where the JS kept half a surrogate pair; on 40,000 random texts that's the only difference in clean(). Tickets hold their values as JSON."
+      ]
+    },
+    "core/integrations/routing.js": {
+      "rust": "crates/xenonet-integrations/src/routing.rs",
+      "differences": [
+        "JevRouter (an npm library) routes, in the twin; the decider is core/decide.js. The decider's answer is checked, and the record built, in Rust. A response without answers is refused as an invalid distribution, where the JS threw a TypeError."
+      ]
+    },
+    "core/integrations/pi.js": {
+      "rust": "crates/xenonet-integrations/src/pi.rs",
+      "differences": [
+        "Times are read as ISO 8601, as Date.parse reads those; another format Date.parse takes (\"Jan 1 2026\") reads as 0. The scan is synchronous in Rust behind the twin's async function."
+      ]
+    },
+    "core/integrations/reviews.js": {
+      "rust": "crates/xenonet-integrations/src/reviews.rs",
+      "differences": [
+        "The program that collects text inside the sandbox (COLLECT_TEXT) runs in the sandbox's Node, so the twin takes it from core/integrations/reviews.js as it is. git runs through the twin.",
+        "A file's stamp (taken before and after reading it, with O_NOFOLLOW) is the system's dev, inode, size and nanosecond times; the JS compared millisecond floats. Both refuse a file that changed under the read.",
+        "The digest sorts paths with Rust's approximation of ICU's root collation (as localeCompare did), so a review made by the JS and launched by the Rust could read as changed in the ten minutes a preview lasts."
+      ]
+    },
+    "core/integrations/openshell.js": {
+      "rust": "crates/xenonet-integrations/src/openshell.rs",
+      "differences": [
+        "Each action is a task asking the twin for its commands (run), the records and the reviews; review, exportReview and forgetReview stay synchronous, driven at once. A command's stderr reaches the task with its error, for the policy_denied check."
+      ]
+    },
+    "core/integrations/index.js": {
+      "rust": "crates/xenonet-integrations/src/index.rs",
+      "differences": [
+        "The decider (core/decide.js), the scan's async wrapper and the composition stay in the twin."
+      ]
     }
   },
   "tests": [
@@ -525,6 +563,7 @@
     "test/hosts-server.test.js",
     "test/identities-page.test.js",
     "test/identities.test.js",
+    "test/integrations-routes.test.js",
     "test/integrations.test.js",
     "test/lab.test.js",
     "test/launcher.test.js",
@@ -549,6 +588,7 @@
     "test/refusal-browser.test.js",
     "test/refusals.test.js",
     "test/root.test.js",
+    "test/sandbox-reviews.test.js",
     "test/schema-ids.test.js",
     "test/schema-output.test.js",
     "test/schema-registry.test.js",
