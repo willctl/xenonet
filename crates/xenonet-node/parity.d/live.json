@@ -1,0 +1,69 @@
+{
+  "modules": {
+    "core/live.js": {
+      "rust": "crates/xenonet-sources/src/live/telemetry.rs",
+      "differences": [
+        "Each session's state is Rust's (LiveCore, in the twin). `live.sessions` is a Map-like of views onto it: a field reads and sets Rust's, and a value read is a copy, so a change made inside it (`s.turn.active = false`, `s.prompts.push(…)`) doesn't reach Rust; set the field again. Its Maps (inflight, files, edits, mcp, subagents, daily, spend, seenMessages) are views whose get, set, has, delete, clear and entries reach Rust, and a push onto `recentTools` does. Nothing outside live.js changes a field in place but the console's simulate, which uses only what reaches Rust. `sessions` has no set or delete, as nothing sets or forgets a session.",
+        "live.js's snapshot and sessionNotes hand out each session's own tokens, context, toolCounts, prompts and messages, which JS holding them sees change (test/golden.test.js relies on it). The twin keeps those as JS objects it writes Rust's state into after every call that changes the session; writing into one doesn't reach Rust. A collisionDiffs list doesn't change with later edits, where JS's was the session's own.",
+        "`live.limits` and `live.limitSamples` are { codex, claude } whose fields set Rust's; replacing the whole object, or a sample changed in place, doesn't. `claudeSamples` and `history` are copies, and the activity event emitted is a copy of the history's entry, where JS's were the same objects.",
+        "An event keeps a field whose value is undefined (a Codex tool call's agentId). Elsewhere a field JS would hold as undefined is left out (a tool call without a name in the snapshot's lastTool, a Codex subagent without an id, a usage reading that lacks one): the same in JSON.",
+        "A count or time a record gives as a string is taken as Number() reads it, where JS's `+` would have joined strings (\"5\" input tokens). Context used and window keep the value the record gave, as JS did.",
+        "A Map key that's an object (a tool_use id that isn't a string, say) matches no other, as a reference does in JS; other keys are told apart as SameValueZero tells them. A value JSON can't hold (NaN, a function) reaches Rust as JSON makes it (NaN as null): only a direct call can pass one.",
+        "noteToolResult(ok, ts, tool) from JS doesn't follow `tool`, JS's own copy: Rust keeps its own records of calls. activity(s, ev) for a session that isn't in the map makes it. applyClaudeLine, which took a subagent object JS holds, isn't on the twin (nothing outside live.js calls it). A listener that throws while a line's events are emitted counts the line as an error, after Rust has taken all of it, where JS stopped there.",
+        "Sorts by a number (history, subagents, files, resources, Claude samples) are a stable merge sort that counts NaN as equal, as V8's sort does with a comparator that's consistent.",
+        "Through the twin, applyClaude takes about 4 times as long as the JS (40,000 lines: 350 ms against 90 ms) and a snapshot about 6 times, since each record crosses into Rust whole and its events come back: a check of the contract, not yet faster.",
+        "What stays in JS: the tailer (its own twin), finding the roots (existsSync, realpath), the gatherers of Claude plan usage with their 30-second timer, and the EventEmitter."
+      ]
+    },
+    "core/claude-usage.js": {
+      "rust": "crates/xenonet-sources/src/claude_usage.rs",
+      "differences": [
+        "Rust decides: the sign-in a credentials text holds, whether it can be used now, the windows an answer gives (parseUsage), why there's no reading (a pause and how long, a refused sign-in, another status, no windows, Anthropic out of reach), when to ask again, and the samples Claude desktop's file holds.",
+        "What stays in JS, where the tests hand it in: the keychain read (execFile `security`), the file reads and the path to .credentials.json (node:path, win32 or posix), fetch and res.json(), the vendor schemas' checks (vendor.js's twin), JSON.parse of the desktop file, and the gatherers.",
+        "A reset time is read as ISO 8601 (time::parse_iso): one in another format V8's Date.parse takes (\"5\", \"Oct 3 2026\") reads as none, where JS read a time. Anthropic sends ISO 8601.",
+        "A desktop sample without `t` has no `ts` field, where JS's had one holding undefined."
+      ]
+    },
+    "core/refusals/detect.js": {
+      "rust": "crates/xenonet-sources/src/refusals/detect.rs",
+      "differences": [
+        "A signal's `at` reads the line's timestamp as ISO 8601 (time::parse_iso), where V8's Date.parse takes other formats too; both apps write ISO 8601.",
+        "The live telemetry's Rust reads every line's signal itself; the twin is for the refusal store and the refusals command."
+      ]
+    }
+  },
+  "tests": [
+    "test/actor-spend.test.js",
+    "test/actors.test.js",
+    "test/claude-usage.test.js",
+    "test/codex-client.test.js",
+    "test/codex.test.js",
+    "test/control.test.js",
+    "test/costs.test.js",
+    "test/features.test.js",
+    "test/golden.test.js",
+    "test/hosts-merge.test.js",
+    "test/hosts-server.test.js",
+    "test/live.test.js",
+    "test/mcp-info.test.js",
+    "test/platform.test.js",
+    "test/projects.test.js",
+    "test/refusal-browser.test.js",
+    "test/refusals.test.js",
+    "test/root.test.js",
+    "test/schema-output.test.js",
+    "test/scope.test.js",
+    "test/server.test.js",
+    "test/signals.test.js",
+    "test/stall.test.js",
+    "test/state.test.js",
+    "test/stats.test.js",
+    "test/vendor-adapters.test.js",
+    "test/xenolith.test.js"
+  ],
+  "status": [
+    ["`core/live.js`", "`xenonet-sources/src/live/telemetry.rs`, with `live/mod.rs`'s helpers", "`live`, `stall`, `signals`, `costs`, `golden`, `state`, `server` pass"],
+    ["`core/claude-usage.js`", "`xenonet-sources/src/claude_usage.rs` (the keychain, files, fetch and timers stay in the twin)", "`claude-usage`, `live` pass"],
+    ["`core/refusals/detect.js`", "`xenonet-sources/src/refusals/detect.rs`", "`refusals`, `refusal-browser`, `live` pass"]
+  ]
+}
