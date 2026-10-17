@@ -313,6 +313,68 @@
       "differences": [
         "Each action is a Rust task; the service's connections, Desktop's process and fetch are the twin's."
       ]
+    },
+    "core/hosts/frames.js": {
+      "rust": "crates/xenonet-hosts/src/frames.rs",
+      "differences": [
+        "A line nested deeper than 512 levels (the Rust JSON reader's limit, eight times MAX_DEPTH) reads as \"a frame nested too deep\" rather than as a frame: parseFrame gives that as its error, where JSON.parse took any depth and shallow() caught it after.",
+        "shallow() walks the JS value through Node-API, without converting it, so a value too deep to convert is still answered."
+      ]
+    },
+    "core/hosts/aliases.js": {
+      "rust": "crates/xenonet-hosts/src/aliases.rs",
+      "differences": [
+        "When to read ~/.ssh/config again is the Rust's; reading the file's words stays identities.js's parseSshAliases, through the twin."
+      ]
+    },
+    "core/hosts/cache.js": {
+      "rust": "crates/xenonet-hosts/src/cache.rs",
+      "differences": [
+        "A snapshot whose id is undefined is written with \"id\": null; JSON.stringify left the field out. Nothing reads it."
+      ]
+    },
+    "core/hosts/doctor.js": {
+      "rust": "crates/xenonet-hosts/src/doctor.rs",
+      "differences": []
+    },
+    "core/hosts/declared.js": {
+      "rust": "crates/xenonet-hosts/src/declared.rs",
+      "differences": [
+        "The schemas are zod's: the twin reads each one's shape off its _zod.def once, as a table the Rust walks, and a union's options are tried with zod's safeParse through a callback."
+      ]
+    },
+    "core/hosts/config.js": {
+      "rust": "crates/xenonet-hosts/src/config.rs",
+      "differences": [
+        "The schema's check of an entry (zod's check and explain) is asked of the twin; the store (blocks/store.js), the files and the new key are the twin's. A value with a line break is left out of the ssh config even if the schema took it."
+      ]
+    },
+    "core/hosts/link.js": {
+      "rust": "crates/xenonet-hosts/src/link.rs",
+      "differences": [
+        "The link's state, what a frame may be, the clock offset, the backoff and why a connection ended are the Rust's, which answers each thing that happens with effects (spawn, write, kill, emit, timers, settling a get); the program, its pipes, the timers and the gets' promises are the twin's. A hello is checked against the schema (zod) through a callback."
+      ]
+    },
+    "core/hosts/merge.js": {
+      "rust": "crates/xenonet-hosts/src/merge.rs",
+      "differences": [
+        "The schemas (zod's safeParse and declared) and graph.js's activityOf are asked of the twin through callbacks.",
+        "cleanOnce remembers a node by its text alone, in Rust; the JS also remembered it by the object, which saved stringifying it again.",
+        "The answers are copies, and the twin puts this machine's own values back in them where the JS's spreads kept them, so a caller holding one finds that same one. A project node of this machine's map is a copy in mergeGraph's nodes, as are the other local nodes; the JS kept those."
+      ]
+    },
+    "core/hosts/hub.js": {
+      "rust": "crates/xenonet-hosts/src/hub.rs",
+      "differences": [
+        "How a host stands, what the page hears of it, a host's own doctor, the probe's counts and the waits are the Rust's; the emitter, the timers and the hosts' runtimes are the twin's, with the links, the merge and the cache through their twins."
+      ]
+    },
+    "core/hosts/relay.js": {
+      "rust": "crates/xenonet-hosts/src/relay.rs",
+      "differences": [
+        "The home folder's scrubber, the shaping, the metadata-only cut, the allowlist and what waits while the console reads slowly are the Rust's; the HTTP calls to the XenoNet here, the pipes, the timers and the signals are the twin's.",
+        "metadataOnly's functions return a changed copy; the JS changed the value in place."
+      ]
     }
   },
   "tests": [
@@ -387,6 +449,7 @@
     "test/hosts-cli.test.js",
     "test/hosts-config.test.js",
     "test/hosts-doctor.test.js",
+    "test/hosts-frames.test.js",
     "test/hosts-hub.test.js",
     "test/hosts-ids.test.js",
     "test/hosts-link.test.js",
