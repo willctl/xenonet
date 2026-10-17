@@ -25,7 +25,7 @@ export async function listeningPorts(pid, { platform = process.platform, exec = 
 export const samePath = (a, b, platform = process.platform) => native.openCodeSamePath(a, b, platform === "win32");
 
 export function createOpenCode({ fetch = globalThis.fetch, processes = openCodeProcesses, ports = listeningPorts, cacheMs = 10e3, now = () => Date.now() } = {}) {
-  const core = new native.OpenCodeCore(cacheMs, process.platform === "win32");
+  const core = new native.DeliveryOpenCodeCore(cacheMs, process.platform === "win32");
   const deps = {
     now: () => now(),
     processes: () => processes(),

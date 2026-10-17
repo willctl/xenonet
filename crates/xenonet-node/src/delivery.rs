@@ -417,7 +417,9 @@ pub fn open_code_ports(pid: f64, platform: String) -> Machine {
     start(move |asker| oc::listening_ports(&mut AskCalls(asker), pid, &platform).map(|ps| Arg::List(ps.into_iter().map(Arg::num).collect())))
 }
 
-#[napi]
+// Named apart from the native reader's OpenCodeCore (native.rs): one JS
+// name each.
+#[napi(js_name = "DeliveryOpenCodeCore")]
 pub struct OpenCodeCore {
     inner: Arc<OpenCode>,
     windows: bool,
