@@ -5,6 +5,7 @@ pub mod gatherer;
 pub mod lifecycle;
 pub mod normalizer;
 pub mod scanner;
+pub mod sqlite;
 pub mod store;
 pub mod tailer;
 

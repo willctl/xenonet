@@ -92,9 +92,9 @@ and need Rust 1.85. Xenolith's are edition 2024; editions mix per crate.
 
 ### Dependencies
 
-The crates the port uses, each for a reason. Only `serde`, `serde_json`
-and the napi crates are in the workspace yet. The others come with the
-crates that need them.
+The crates the port uses, each for a reason. `serde_json`, the napi
+crates, `rusqlite`, `sha2`, `getrandom` and (in the MCP crate) `rmcp` and
+`tokio` are in so far. The others come with the crates that need them.
 
 | Crate | For |
 |---|---|
@@ -479,6 +479,7 @@ place. This table follows it.
 | `core/lines.js` | `xenonet-sources/src/lines.rs` | `lines`, `codex`, `vendor-schemas` pass |
 | `core/schema/lenient.js` | `xenonet-schema/src/lenient.rs`, `fields.rs` | `vendor-reader`, `vendor-schemas`, `provider-drift` pass |
 | `core/drift.js`, `core/vendor.js` | `xenonet-schema/src/drift.rs`, `vendor.rs` | `drift`, `vendor-reader`, `server` pass |
+| `core/blocks/sqlite.js` | `xenonet-blocks/src/sqlite.rs`, on rusqlite with SQLite bundled | No twin (its migrations take a `node:sqlite` handle): Rust tests of the same cases, and the Rust opens a JS-made `engine.sqlite` (version 7, WAL, 18 tables) and `search.sqlite` (an FTS5 match on what node:sqlite indexed) |
 | `core/blocks/store.js` | `xenonet-blocks/src/store.rs` | `blocks-store`, `statefile`, `store`, `hosts-config` pass |
 | `core/migrate.js`, `core/statefile.js` | `xenonet-state/src/migrate.rs`, `statefile.rs` | `statefile`, `store`, `state` pass |
 | `core/schema/ids.js` | `xenonet-base/src/ids.rs` | `schema-ids`, `hosts-ids`, `schemas` pass |
