@@ -10,6 +10,7 @@ mod actor_spend;
 mod actors_core;
 mod actors;
 mod args;
+mod attest;
 mod attribution;
 mod connections;
 mod base;

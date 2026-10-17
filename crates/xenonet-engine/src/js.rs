@@ -178,3 +178,14 @@ fn normalize_win32(p: &str) -> String {
     }
     out
 }
+
+/// What an object literal reads under `name` that it doesn't have itself:
+/// Object.prototype's member of that name, as String() writes it, or None.
+pub fn proto_member(name: &str) -> Option<String> {
+    match name {
+        "constructor" => Some("function Object() { [native code] }".into()),
+        "__proto__" => Some("[object Object]".into()),
+        "__defineGetter__" | "__defineSetter__" | "hasOwnProperty" | "__lookupGetter__" | "__lookupSetter__" | "isPrototypeOf" | "propertyIsEnumerable" | "toString" | "valueOf" | "toLocaleString" => Some(format!("function {name}() {{ [native code] }}")),
+        _ => None,
+    }
+}

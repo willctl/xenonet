@@ -47,15 +47,7 @@ fn app_name(app: &str) -> Option<&'static str> {
 /// `APP[app]`, as JS reads a property of an object literal: its own, or
 /// what Object.prototype has under that name, as String() writes it.
 fn app_lookup(app: &str) -> Option<String> {
-    if let Some(n) = app_name(app) {
-        return Some(n.into());
-    }
-    match app {
-        "constructor" => Some("function Object() { [native code] }".into()),
-        "__proto__" => Some("[object Object]".into()),
-        "__defineGetter__" | "__defineSetter__" | "hasOwnProperty" | "__lookupGetter__" | "__lookupSetter__" | "isPrototypeOf" | "propertyIsEnumerable" | "toString" | "valueOf" | "toLocaleString" => Some(format!("function {app}() {{ [native code] }}")),
-        _ => None,
-    }
+    app_name(app).map(str::to_string).or_else(|| crate::js::proto_member(app))
 }
 
 fn a_app(app: &str) -> String {
@@ -75,7 +67,7 @@ fn product_name(product: &str) -> Option<&'static str> {
 /// `PRODUCT[x]` in a sentence: "undefined" for one it hasn't.
 fn product_word(x: &Arg) -> String {
     let key = js_text(x);
-    product_name(&key).map_or_else(|| app_lookup(&key).filter(|_| app_name(&key).is_none()).unwrap_or_else(|| "undefined".into()), str::to_string)
+    product_name(&key).map_or_else(|| crate::js::proto_member(&key).unwrap_or_else(|| "undefined".into()), str::to_string)
 }
 
 /// The products whose apps their makers sign, by the maker's name.
