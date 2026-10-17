@@ -162,10 +162,10 @@ drift record and the rules; this is how they're built.
 | `nous/hermes-agent/install-stamp` | `hermes-agent/install-stamp.json`, Hermes's build stamp | `hermes-files.js` | Its own `schemaVersion` | `<=2` |
 | `anomaly/opencode/db` | `opencode.db`, OpenCode's session database (experimental reader) | `native/opencode.js` | The newest session's own `version` | `<2.0.0` |
 | `google/gemini-cli/chat-record` | `~/.gemini/tmp/*/chats/session-*.jsonl`, Gemini CLI's chat records (experimental reader) | `native/gemini-cli.js` | None; the newest schema | `*` |
-
-Not covered, since the contracts don't list them: the Remote Control
 | `github/copilot-cli/session-event` | `~/.copilot/session-state/<id>/events.jsonl`, Copilot CLI's session events (experimental reader) | `native/copilot-cli.js` | `session.start`'s `version` | `1` |
 | `anysphere/cursor/hook-input` | The file `scripts/cursor/hook.mjs` writes from Cursor's hook input (experimental reader) | `native/cursor.js` | `cursor_version` | `*` |
+
+Not covered, since the contracts don't list them: the Remote Control
 owner line `identities.js` finds in a transcript's first 64 KB, the
 settings files and `codex mcp get` that connecting reads, hook payloads,
 the CLIs' version and sign-in outputs, git's files and output, project

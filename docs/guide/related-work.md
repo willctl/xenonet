@@ -56,7 +56,7 @@ XenoNet can read some other harnesses' sessions from their own records, without 
 
 **GitHub Copilot CLI** (`XENONET_READERS=copilot`). Each Copilot CLI session is a session, `copilot:<session id>`. XenoNet reads its event log, `~/.copilot/session-state/<id>/events.jsonl` (or `<id>.jsonl`, the layout before 1.0.11): the session's id, working folder, branch, title and times, the file each edit tool names, and the files its shutdown says it changed. It never reads prompts, replies, commands or tool results. A session ends at its shutdown. This is tested with made-up events in the shape of the Copilot SDK's published event schema, not yet against a real session.
 
-**Cursor** (`XENONET_READERS=cursor`). Cursor's agent sessions are read through Cursor's [hooks](https://cursor.com/docs/agent/hooks), since Cursor documents no session format. Each conversation is a session, `cursor:<conversation id>`, in its first workspace folder. Add XenoNet's hook to `~/.cursor/hooks.json` for `sessionStart`, `afterFileEdit` and `sessionEnd`, telling it the file to write:
+**Cursor** (`XENONET_READERS=cursor`). Cursor's agent sessions are read through Cursor's [hooks](https://cursor.com/docs/agent/hooks), since Cursor documents no session format. Each conversation is a session, `cursor:<conversation id>`, in its first workspace folder. Add XenoNet's hook to `~/.cursor/hooks.json` for `sessionStart`, `afterFileEdit` and `sessionEnd`, telling it the file to write. The hook is a script in a checkout of XenoNet's source, `scripts/cursor/hook.mjs`; the installed app doesn't include it yet.
 
 ```json
 {
