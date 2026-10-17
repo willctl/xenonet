@@ -6,11 +6,15 @@
 pub mod command;
 pub mod config;
 pub mod decide;
+pub mod diagnostics;
 pub mod demo_root;
 pub mod environments;
 pub mod fsx;
 pub mod instances;
 pub mod jstext;
+pub mod jsv;
+pub mod mcp_discovery;
+pub mod mcp_info;
 pub mod nodepath;
 pub mod open;
 pub mod version;

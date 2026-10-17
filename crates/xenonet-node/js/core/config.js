@@ -5,9 +5,11 @@
 // desktop's folder.
 import os from "node:os";
 import { native } from "../index.js";
-import { createWorld } from "../../../../core/demo.js";
+import { peer } from "../peer.js";
 import { appDir, findClaudeDesktopDir } from "./dirs.js";
-import { contextServerOf, findContextDir } from "../../../../core/xenolith.js";
+
+const { createWorld } = await import(peer("demo.js"));
+const { contextServerOf, findContextDir } = await import(peer("xenolith.js"));
 
 export { appDir };
 

@@ -493,6 +493,7 @@ place. This table follows it.
 | `xenonet hook` (`cli/commands/hook.js`) | `xenonet-cli`, the `xenonet` binary | `launcher`'s hook cases, as Rust tests of the binary |
 | `core/config.js`, `core/instances.js`, `core/version.js`, `core/environments.js`, `core/demo-root.js` | `xenonet-app/src/config.rs`, `instances.rs`, `version.rs`, `environments.rs`, `demo_root.rs`, with Node's `path` (both flavors) in `nodepath.rs` | `environments`, `demo-root`, `control`, `golden`, `state`, `store`, `workspace` pass |
 | `core/command.js`, `core/open.js`, `core/decide.js` | `xenonet-app/src/command.rs`, `open.rs`, `decide.rs` (the credential store and OpenRouter are awaited by the twin) | `cli`, `doctor`, `windows-command`, `open`, `numbat`, `decide`, `costs`, `integrations` pass |
+| `core/mcp-info.js`, `core/mcp-discovery.js`, `core/diagnostics.js` | `xenonet-app/src/mcp_info.rs` (a state machine the twin drives), `mcp_discovery.rs` (the MCP client stays the SDK's for now), `diagnostics.rs` | `mcp-info`, `log` pass |
 
 With every twin in place, all 111 test files that reach one pass. The
 twins load in the Node processes a test starts too (a server, the

@@ -40,6 +40,9 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 # the system make one.
 sha2 = "0.10"
 getrandom = "0.3"
+# URLs as `new URL()` reads and writes them (the WHATWG URL Standard), for
+# what the JS checks, cleans or builds with Node's URL.
+url = "2"
 # The Node-API bindings that put the crates behind the JS modules during the
 # port. The last releases that build on Rust 1.85; the resolver keeps their
 # dependencies to versions that do too.

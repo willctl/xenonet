@@ -194,6 +194,27 @@
         "The credential store and OpenRouter are still awaited in the twin, with the secrets and fetch given; the Rust builds each request and reads each answer.",
         "A decisions URL that isn't a URL logs an empty host when OpenRouter can't be reached; JS threw a TypeError there."
       ]
+    },
+    "core/mcp-info.js": {
+      "rust": "crates/xenonet-app/src/mcp_info.rs",
+      "differences": [
+        "Collecting a catalog is a Rust state machine: the twin asks Codex (the request given) or the server (discover) what the Rust says to, and hands each answer back.",
+        "URLs are read and written by the url crate (the WHATWG URL Standard, as Node's URL is); its IDNA handling may differ from Node's for unusual host names.",
+        "Left out, read is the Rust's own JSON reader rather than a JS function."
+      ]
+    },
+    "core/mcp-discovery.js": {
+      "rust": "crates/xenonet-app/src/mcp_discovery.rs",
+      "differences": [
+        "The MCP client itself is still the MCP SDK's, in the twin: the Rust says how to reach the server (its transport, with ${VAR}s filled in), how far to page, and what the answer is. rmcp's client can take over in the binary, once the MCP crate builds with the workspace."
+      ]
+    },
+    "core/diagnostics.js": {
+      "rust": "crates/xenonet-app/src/diagnostics.rs",
+      "differences": [
+        "A field JS set to undefined (a doctor result's missing id, say) is left out of the bundle rather than kept as undefined; the bundle's JSON is the same.",
+        "A log entry's time that isn't one throws an Error saying Invalid time value, where JS threw a RangeError."
+      ]
     }
   },
   "tests": [

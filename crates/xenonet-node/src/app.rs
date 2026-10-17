@@ -371,3 +371,176 @@ pub fn app_decide_answered(body: MaybeJson, model: String, kind: String, questio
     let (line, d) = decide::answered(body.0.as_ref(), &model, &kind, questions as usize, ms);
     Jv::Obj(vec![("log", log_line(&line)), ("decision", Jv::Json(d))])
 }
+
+// ----- mcp-info -----
+
+use xenonet_app::mcp_info;
+
+/// A JS read(file), or none, for Rust to read the file itself; the first
+/// error it throws is kept, to throw when the call is over.
+struct Reader<'a> {
+    f: Option<Function<'a, Option<String>, Json>>,
+    failed: Option<Error>,
+}
+
+impl Reader<'_> {
+    fn read(&mut self, file: Option<&str>) -> Value {
+        match &self.f {
+            None => file.and_then(|f| std::fs::read(f).ok()).and_then(|b| xenonet_base::json::parse(&String::from_utf8_lossy(&b)).ok()).unwrap_or_else(|| json!({})),
+            Some(f) => match f.call(file.map(String::from)) {
+                Ok(j) => j.0,
+                Err(e) => {
+                    self.failed.get_or_insert(e);
+                    json!({})
+                }
+            },
+        }
+    }
+}
+
+fn next_jv(c: &mcp_info::Collect, next: mcp_info::Next) -> Jv {
+    let next = match next {
+        mcp_info::Next::Request { method, params } => Jv::Obj(vec![("request", Jv::Obj(vec![("method", s(method)), ("params", Jv::Json(params))]))]),
+        mcp_info::Next::Discover(spec) => Jv::Obj(vec![("discover", Jv::Json(spec))]),
+        mcp_info::Next::Done(r) => Jv::Obj(vec![("done", Jv::Json(r))]),
+    };
+    Jv::Obj(vec![("state", Jv::Json(c.to_value())), ("next", next)])
+}
+
+#[napi(js_name = "appMcpPublicUrl")]
+pub fn app_mcp_public_url(value: Option<String>, origin_only: bool) -> Option<String> {
+    mcp_info::public_url(value.as_deref(), origin_only)
+}
+
+#[napi(js_name = "appMcpDisplaySchema")]
+pub fn app_mcp_display_schema(value: MaybeJson, depth: f64) -> Json {
+    Json(mcp_info::display_schema(value.0.as_ref(), if depth.is_finite() && depth > 0.0 { depth as usize } else { 0 }))
+}
+
+#[napi(js_name = "appMcpDisplayCatalog")]
+pub fn app_mcp_display_catalog(raw: MaybeJson) -> Json {
+    Json(mcp_info::display_catalog(raw.0.as_ref()))
+}
+
+#[napi(js_name = "appMcpBegin")]
+pub fn app_mcp_begin(server: String, sessions: Json, settings: Json, now: f64, read: Option<Function<Option<String>, Json>>) -> Result<Jv> {
+    let sessions = match sessions.0 {
+        Value::Array(a) => a,
+        _ => Vec::new(),
+    };
+    let mut r = Reader { f: read, failed: None };
+    let (c, next) = mcp_info::begin(&server, &sessions, &settings.0, now, &mut |f| r.read(f));
+    match r.failed {
+        Some(e) => Err(e),
+        None => Ok(next_jv(&c, next)),
+    }
+}
+
+#[napi(js_name = "appMcpStep")]
+pub fn app_mcp_step(state: Json, answer: Json, settings: Json, read: Option<Function<Option<String>, Json>>) -> Result<Jv> {
+    let answer = match answer.0.get("error") {
+        Some(e) => mcp_info::Answer::Failed { name: e.get("name").and_then(Value::as_str).map(String::from), code: e.get("code").filter(|c| !c.is_null()).cloned() },
+        None => mcp_info::Answer::Ok(answer.0.get("ok").cloned().unwrap_or(Value::Null)),
+    };
+    let mut r = Reader { f: read, failed: None };
+    let (c, next) = mcp_info::step(mcp_info::Collect::from_value(state.0), answer, &settings.0, &mut |f| r.read(f));
+    match r.failed {
+        Some(e) => Err(e),
+        None => Ok(next_jv(&c, next)),
+    }
+}
+
+#[napi(js_name = "appMcpFresh")]
+pub fn app_mcp_fresh(checked_at: f64, now: f64) -> bool {
+    mcp_info::fresh(checked_at, now)
+}
+
+#[napi(js_name = "appDemoMcpInfo")]
+pub fn app_demo_mcp_info(server: String, now: f64) -> Json {
+    Json(mcp_info::demo_mcp_info(&server, now))
+}
+
+// ----- mcp-discovery -----
+
+use xenonet_app::mcp_discovery;
+
+#[napi(js_name = "appMcpDiscoveryConstants")]
+pub fn app_mcp_discovery_constants() -> Json {
+    Json(json!({ "timeoutMs": mcp_discovery::TIMEOUT_MS, "signalMs": mcp_discovery::SIGNAL_MS }))
+}
+
+#[napi(js_name = "appMcpTransport")]
+pub fn app_mcp_transport(spec: Json, env: Json) -> Json {
+    Json(mcp_discovery::transport(&spec.0, &env_map(env)))
+}
+
+#[napi(js_name = "appMcpAnotherPage")]
+pub fn app_mcp_another_page(pages: u32, rows: u32, cursor: MaybeJson, next: MaybeJson) -> bool {
+    mcp_discovery::another_page(pages as usize, rows as usize, cursor.0.as_ref().filter(|c| !c.is_null()), next.0.as_ref().filter(|c| !c.is_null()))
+}
+
+#[napi(js_name = "appMcpFound")]
+pub fn app_mcp_found(server_info: MaybeJson, capabilities: MaybeJson, instructions: MaybeJson, tools: Json, resources: Json, templates: Json, by_url: bool) -> Json {
+    Json(mcp_discovery::found(server_info.0.as_ref(), capabilities.0.as_ref(), instructions.0.as_ref(), tools.0, resources.0, templates.0, by_url))
+}
+
+// ----- diagnostics -----
+
+use xenonet_app::diagnostics;
+
+#[napi(js_name = "appDiagnosticsSchema")]
+pub fn app_diagnostics_schema() -> &'static str {
+    diagnostics::SCHEMA
+}
+
+#[napi(js_name = "appMakeBundle")]
+pub fn app_make_bundle(g: Json) -> Jv {
+    let v = g.0;
+    let errors = match v.get("errors") {
+        Some(Value::Array(a)) => a.clone(),
+        _ => Vec::new(),
+    };
+    let env = match v.get("env") {
+        Some(Value::Object(m)) => m.clone(),
+        _ => Default::default(),
+    };
+    let text = |k: &str| v.get(k).map(xenonet_base::text::js_string).unwrap_or_default();
+    let (home, platform, arch, release, node) = (text("home"), text("platform"), text("arch"), text("release"), text("node"));
+    let electron = v.get("electron").and_then(Value::as_str).map(String::from);
+    let gathered = diagnostics::Gathered {
+        xenonet: v.get("xenonet"),
+        doctor: v.get("doctor"),
+        errors: &errors,
+        connect: v.get("connect"),
+        launcher: v.get("launcher"),
+        env: &env,
+        home: &home,
+        now: v.get("now").and_then(Value::as_f64).unwrap_or(f64::NAN),
+        platform: &platform,
+        arch: &arch,
+        release: &release,
+        node: &node,
+        electron: electron.as_deref(),
+    };
+    answer(diagnostics::make_bundle(&gathered).map(Jv::Json))
+}
+
+#[napi(js_name = "appBundleMarkdown")]
+pub fn app_bundle_markdown(b: Json) -> String {
+    diagnostics::bundle_markdown(&b.0)
+}
+
+#[napi(js_name = "appAgentBrief")]
+pub fn app_agent_brief(sources: Vec<String>) -> String {
+    diagnostics::agent_brief(&sources)
+}
+
+#[napi(js_name = "appWriteLook")]
+pub fn app_write_look(state_dir: String, bundle: Json, sources: Vec<String>, now: f64) -> Jv {
+    fs_answer(diagnostics::write_look(&state_dir, &bundle.0, &sources, now).map(s))
+}
+
+#[napi(js_name = "appAskCommand")]
+pub fn app_ask_command(app: String, model: Option<String>, dir: MaybeJson, sources: Vec<String>) -> Json {
+    Json(diagnostics::ask_command(&app, model.as_deref(), &dir.0.unwrap_or(Value::Null), &sources))
+}
