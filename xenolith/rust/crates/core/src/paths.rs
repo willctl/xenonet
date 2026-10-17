@@ -29,10 +29,10 @@ pub fn home_dir(env: &Env) -> PathBuf {
     if let Some(h) = env.get(var).filter(|h| !h.is_empty()) {
         return PathBuf::from(h);
     }
-    if cfg!(windows)
-        && let (Some(d), Some(p)) = (env.get("HOMEDRIVE"), env.get("HOMEPATH"))
-    {
-        return PathBuf::from(format!("{d}{p}"));
+    if cfg!(windows) {
+        if let (Some(d), Some(p)) = (env.get("HOMEDRIVE"), env.get("HOMEPATH")) {
+            return PathBuf::from(format!("{d}{p}"));
+        }
     }
     PathBuf::from(".")
 }

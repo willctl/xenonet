@@ -114,11 +114,10 @@ impl RequestLog {
             st.checked_at = 0;
             if let Ok(rd) = fs::read_dir(dir) {
                 for e in rd.flatten() {
-                    if let Some((d, n)) = parse_name(&e.file_name().to_string_lossy())
-                        && d == date
-                        && n > st.part
-                    {
-                        st.part = n;
+                    if let Some((d, n)) = parse_name(&e.file_name().to_string_lossy()) {
+                        if d == date && n > st.part {
+                            st.part = n;
+                        }
                     }
                 }
             }
@@ -179,10 +178,10 @@ impl RequestLog {
         let file = self.current_file(dir, &mut st);
         if st.open.as_ref().is_none_or(|(p, _)| *p != file) {
             st.open = None;
-            if fs::create_dir_all(dir).is_ok()
-                && let Ok(f) = fs::OpenOptions::new().create(true).append(true).open(&file)
-            {
-                st.open = Some((file.clone(), f));
+            if fs::create_dir_all(dir).is_ok() {
+                if let Ok(f) = fs::OpenOptions::new().create(true).append(true).open(&file) {
+                    st.open = Some((file.clone(), f));
+                }
             }
         }
         // One write per line, in append mode: lines from several processes never interleave.
@@ -212,11 +211,10 @@ pub fn sweep(dir: &Path, retention_days: i64) -> usize {
     let mut removed = 0;
     if let Ok(rd) = fs::read_dir(dir) {
         for e in rd.flatten() {
-            if let Some((d, _)) = parse_name(&e.file_name().to_string_lossy())
-                && d < cutoff
-                && fs::remove_file(e.path()).is_ok()
-            {
-                removed += 1;
+            if let Some((d, _)) = parse_name(&e.file_name().to_string_lossy()) {
+                if d < cutoff && fs::remove_file(e.path()).is_ok() {
+                    removed += 1;
+                }
             }
         }
     }

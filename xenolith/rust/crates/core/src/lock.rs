@@ -59,9 +59,7 @@ pub fn machine_id() -> String {
     ID.get_or_init(|| {
         #[cfg(target_os = "linux")]
         for f in ["/etc/machine-id", "/var/lib/dbus/machine-id"] {
-            if let Ok(s) = fs::read_to_string(f)
-                && !s.trim().is_empty()
-            {
+            if let Some(s) = fs::read_to_string(f).ok().filter(|s| !s.trim().is_empty()) {
                 return s.trim().to_string();
             }
         }
@@ -265,9 +263,7 @@ pub fn owner_liveness(locks: &Path, owner: &Owner) -> Liveness {
         return Liveness::Unknown;
     }
     #[cfg(windows)]
-    if owner.alive
-        && let Some(start) = owner.start
-    {
+    if let Some(start) = owner.start.filter(|_| owner.alive) {
         let file = locks.join("alive").join(alive_name(owner.pid, start));
         return match open_exclusive(&file, false) {
             Ok(f) => {
@@ -286,11 +282,12 @@ pub fn owner_liveness(locks: &Path, owner: &Owner) -> Liveness {
         return Liveness::Dead;
     }
     // The pid is in use: by the owner, or by a process that got its pid after it died?
-    if !cfg!(windows)
-        && let (Some(start), Some(now)) = (owner.start, process_start_ms(owner.pid))
-        && (now - start).abs() > START_TOLERANCE_MS
-    {
-        return Liveness::Dead;
+    if !cfg!(windows) {
+        if let (Some(start), Some(now)) = (owner.start, process_start_ms(owner.pid)) {
+            if (now - start).abs() > START_TOLERANCE_MS {
+                return Liveness::Dead;
+            }
+        }
     }
     Liveness::Alive
 }
@@ -319,11 +316,11 @@ fn break_lock(lock_dir: &Path, expected_token: Option<&str>) -> bool {
         return false;
     }
     let owner = fs::read_to_string(stale.join("owner")).ok().and_then(|t| parse_owner(&t));
-    if let (Some(exp), Some(tok)) = (expected_token, owner.as_ref().and_then(|o| o.token.as_deref()))
-        && exp != tok
-    {
-        let _ = fs::rename(&stale, lock_dir);
-        return false;
+    if let (Some(exp), Some(tok)) = (expected_token, owner.as_ref().and_then(|o| o.token.as_deref())) {
+        if exp != tok {
+            let _ = fs::rename(&stale, lock_dir);
+            return false;
+        }
     }
     let _ = fs::remove_dir_all(&stale);
     true

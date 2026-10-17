@@ -65,10 +65,10 @@ impl AskCfg {
     /// curator's chosen model when Ask follows it. Read before each question.
     pub fn with_choice(&self, wiki_dir: &Path) -> AskCfg {
         let mut out = self.clone();
-        if self.follows_curator
-            && let Some(m) = crate::settings::model_choice(wiki_dir, "curator").model
-        {
-            out.model = m;
+        if self.follows_curator {
+            if let Some(m) = crate::settings::model_choice(wiki_dir, "curator").model {
+                out.model = m;
+            }
         }
         let c = crate::settings::model_choice(wiki_dir, "ask");
         if let Some(m) = c.model {
@@ -240,10 +240,10 @@ pub fn parse_search(text: &str) -> Map<String, Value> {
             hits.push(Hit { rel: m[1].to_string(), label: m[2].to_string(), target: m[3].to_string(), snippet: None });
             continue;
         }
-        if let (Some(s), Some(cur)) = (SNIP.captures(line), hits.last_mut())
-            && cur.snippet.is_none()
-        {
-            cur.snippet = Some(clip_str(&LEAD.replace(&s[1], ""), 200));
+        if let (Some(s), Some(cur)) = (SNIP.captures(line), hits.last_mut()) {
+            if cur.snippet.is_none() {
+                cur.snippet = Some(clip_str(&LEAD.replace(&s[1], ""), 200));
+            }
         }
     }
     let mut o = Map::new();

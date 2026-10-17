@@ -193,11 +193,10 @@ impl Cron {
             };
             return format!("{list} at {at}");
         }
-        if self.any_weekday
-            && self.months == 0x1ffe
-            && let Some(d) = one(u64::from(self.days))
-        {
-            return format!("Monthly on day {d} at {at}");
+        if self.any_weekday && self.months == 0x1ffe {
+            if let Some(d) = one(u64::from(self.days)) {
+                return format!("Monthly on day {d} at {at}");
+            }
         }
         format!("Custom: {}", self.text)
     }

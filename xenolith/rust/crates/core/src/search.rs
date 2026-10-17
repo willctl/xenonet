@@ -39,11 +39,12 @@ fn tune(name: &str, default: f64) -> f64 {
     #[cfg(debug_assertions)]
     if let Ok(s) = std::env::var("XENOLITH_SEARCH_TUNE") {
         for kv in s.split(',') {
-            if let Some((k, v)) = kv.split_once('=')
-                && k.trim() == name
-                && let Ok(x) = v.trim().parse()
-            {
-                return x;
+            if let Some((k, v)) = kv.split_once('=') {
+                if k.trim() == name {
+                    if let Ok(x) = v.trim().parse() {
+                        return x;
+                    }
+                }
             }
         }
     }
@@ -138,7 +139,7 @@ pub fn page_sections(body: &str) -> Vec<(String, String, String)> {
         if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
             fence = !fence;
         }
-        if !fence && let Some(c) = H.captures(line) {
+        if let Some(c) = H.captures(line).filter(|_| !fence) {
             let heading = c[2].trim().to_string();
             let base = anchor(&heading);
             let mut a = base.clone();

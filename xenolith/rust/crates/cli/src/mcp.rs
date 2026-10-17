@@ -190,15 +190,11 @@ fn validate(schema: &Value, args: &Value) -> Vec<String> {
             problems.push(format!("Invalid input: expected {want_label}, received {} at {name}", type_name(Some(v))));
             continue;
         }
-        if let Some(options) = spec.get("enum").and_then(Value::as_array)
-            && !options.contains(v)
-        {
+        if let Some(options) = spec.get("enum").and_then(Value::as_array).filter(|o| !o.contains(v)) {
             let list = options.iter().map(|o| o.to_string()).collect::<Vec<_>>().join("|");
             problems.push(format!("Invalid option: expected one of {list} at {name}"));
         }
-        if let (Some(p), Some(s)) = (spec.get("pattern").and_then(Value::as_str), v.as_str())
-            && !regex::Regex::new(p).is_ok_and(|re| re.is_match(s))
-        {
+        if let Some(p) = spec.get("pattern").and_then(Value::as_str).filter(|p| v.as_str().is_some_and(|s| !regex::Regex::new(p).is_ok_and(|re| re.is_match(s)))) {
             problems.push(format!("Invalid string: must match pattern /{p}/ at {name}"));
         }
         if let Some(n) = v.as_f64() {

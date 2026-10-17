@@ -89,11 +89,10 @@ pub fn api_key(s: &Settings) -> Option<String> {
     type Looked = Option<(String, i64, Option<String>)>;
     static LOOKED: Mutex<Looked> = Mutex::new(None);
     let mut looked = LOOKED.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((target, at, key)) = looked.as_ref()
-        && *target == s.credential
-        && (key.is_some() || crate::text::now_ms() - at < 60_000)
-    {
-        return key.clone();
+    if let Some((target, at, key)) = looked.as_ref() {
+        if *target == s.credential && (key.is_some() || crate::text::now_ms() - at < 60_000) {
+            return key.clone();
+        }
     }
     let key = platform_secret(&s.credential);
     *looked = Some((s.credential.clone(), crate::text::now_ms(), key.clone()));
@@ -206,12 +205,12 @@ fn request(s: &Settings, key: &str, input: &[String], timeout: Duration) -> Resu
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
     let out = cmd.spawn().and_then(|mut child| {
-        if let Some(mut stdin) = child.stdin.take()
-            && let Err(e) = stdin.write_all(config.as_bytes())
-        {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(e);
+        if let Some(mut stdin) = child.stdin.take() {
+            if let Err(e) = stdin.write_all(config.as_bytes()) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(e);
+            }
         }
         child.wait_with_output()
     });
@@ -332,7 +331,7 @@ pub fn vector(wiki_dir: &Path, model: &str, key: &str) -> Option<Arc<Vec<f32>>> 
     if bytes.is_empty() || bytes.len() % 4 != 0 {
         return None;
     }
-    let v: Arc<Vec<f32>> = Arc::new(bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect());
+    let v: Arc<Vec<f32>> = Arc::new(bytes.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect());
     cache().lock().unwrap_or_else(|e| e.into_inner()).insert(file, v.clone());
     Some(v)
 }
@@ -472,10 +471,10 @@ mod tests {
                 if line == "\r\n" {
                     break;
                 }
-                if let Some((name, value)) = line.split_once(':')
-                    && name.eq_ignore_ascii_case("content-length")
-                {
-                    length = value.trim().parse::<usize>().unwrap();
+                if let Some((name, value)) = line.split_once(':') {
+                    if name.eq_ignore_ascii_case("content-length") {
+                        length = value.trim().parse::<usize>().unwrap();
+                    }
                 }
                 headers.push_str(&line);
             }

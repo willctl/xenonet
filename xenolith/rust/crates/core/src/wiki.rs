@@ -575,9 +575,7 @@ pub fn upsert_page(wiki_dir: &Path, input: &UpsertInput) -> Result<UpsertResult>
     }
     let kind = input.kind.as_ref().map(|t| t.trim().to_lowercase());
     static TYPE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z][a-z0-9-]{0,30}$").unwrap());
-    if let Some(t) = kind.as_ref().filter(|t| !t.is_empty())
-        && !TYPE_RE.is_match(t)
-    {
+    if let Some(t) = kind.as_ref().filter(|t| !t.is_empty() && !TYPE_RE.is_match(t)) {
         return wiki_err(format!("Invalid type \"{t}\"."));
     }
     let summary = input.summary.as_ref().map(|s| one_line(s));
@@ -831,10 +829,10 @@ pub(crate) fn list_log_files(wiki_dir: &Path) -> Vec<(String, String, PathBuf, u
                 continue;
             }
             let n = f.file_name().to_string_lossy().to_string();
-            if let Some(date) = n.strip_suffix(".md").filter(|d| DATE_RE.is_match(d))
-                && let Some((len, mtime)) = crate::readcache::stamp(&f)
-            {
-                out.push((date.to_string(), format!("log/{yn}/{n}"), f.path(), len, mtime));
+            if let Some(date) = n.strip_suffix(".md").filter(|d| DATE_RE.is_match(d)) {
+                if let Some((len, mtime)) = crate::readcache::stamp(&f) {
+                    out.push((date.to_string(), format!("log/{yn}/{n}"), f.path(), len, mtime));
+                }
             }
         }
     }
@@ -981,10 +979,10 @@ fn read_whole(wiki_dir: &Path, target: &str) -> Result<(String, String)> {
             abs = with_md;
         }
     }
-    if !abs.exists()
-        && let Some(found) = case_insensitive(&abs)
-    {
-        abs = found;
+    if !abs.exists() {
+        if let Some(found) = case_insensitive(&abs) {
+            abs = found;
+        }
     }
     if !abs.exists() {
         return wiki_err(format!("Not found: \"{target}\". Use wiki_search, or a page slug from the index (wiki_read(\"index.md\"))."));

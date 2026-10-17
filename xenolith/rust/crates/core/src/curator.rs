@@ -974,9 +974,7 @@ fn prepare_plan(wiki_dir: &Path, plan: &Value, ctx: &Ctx, batch_id: &str) -> Res
     for n in &ctx.notes {
         let file = wiki::confined_path(wiki_dir, &curator_paths(wiki_dir).inbox.join(format!("{}.md", n.id)))?;
         let text = read_if_exists(&file)?;
-        if let Some(t) = text
-            && hash_text(&t, 16) != n.hash
-        {
+        if text.is_some_and(|t| hash_text(&t, 16) != n.hash) {
             return Err(CommitError::Conflict(format!("note {} was edited while it was being filed", n.id)));
         }
     }
@@ -1881,9 +1879,11 @@ impl Curator {
                 }
                 // The account's model list, for the window's model picker (models.rs).
                 crate::models::publish(&self.wiki_dir, &self.cfg.codex_home);
-                if !out && let Some(slug) = crate::lint::next_due(&self.wiki_dir, &self.cfg) {
-                    self.lint_one(&slug);
-                    continue; // new notes come first: check the inbox again before the next review
+                if !out {
+                    if let Some(slug) = crate::lint::next_due(&self.wiki_dir, &self.cfg) {
+                        self.lint_one(&slug);
+                        continue; // new notes come first: check the inbox again before the next review
+                    }
                 }
                 self.set_state(if out { "signed_out" } else { "idle" }, Some(if out { SIGNED_OUT } else { "" }));
                 let now = now_ms();

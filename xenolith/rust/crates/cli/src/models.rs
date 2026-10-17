@@ -46,10 +46,10 @@ pub fn run(args: &[String]) -> ! {
                 (model.or(keep.model), effort.or(keep.reasoning_effort))
             };
             let o = models::overview(&wiki_dir, &config);
-            if !args.iter().any(|a| a == "--force")
-                && let Some(why) = models::refusal(model.as_deref(), effort.as_deref(), o[role]["model"].as_str().unwrap_or_default(), Some(&o["available"]).filter(|a| a.is_object()))
-            {
-                fail(&format!("{why}. Use --force to save it anyway."));
+            if !args.iter().any(|a| a == "--force") {
+                if let Some(why) = models::refusal(model.as_deref(), effort.as_deref(), o[role]["model"].as_str().unwrap_or_default(), Some(&o["available"]).filter(|a| a.is_object())) {
+                    fail(&format!("{why}. Use --force to save it anyway."));
+                }
             }
             match settings::set_model(&wiki_dir, role, model.as_deref(), effort.as_deref(), "cli") {
                 Ok(_) => {

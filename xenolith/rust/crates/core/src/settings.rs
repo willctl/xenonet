@@ -236,10 +236,10 @@ pub fn set_model(wiki_dir: &Path, role: &str, model: Option<&str>, effort: Optio
                 models.insert(role.into(), Value::Object(r));
             }
         }
-        if v["models"].as_object().is_some_and(|m| m.is_empty())
-            && let Some(o) = v.as_object_mut()
-        {
-            o.remove("models");
+        if v["models"].as_object().is_some_and(|m| m.is_empty()) {
+            if let Some(o) = v.as_object_mut() {
+                o.remove("models");
+            }
         }
     })?;
     Ok(choice)

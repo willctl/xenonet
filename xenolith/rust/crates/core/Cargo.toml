@@ -3,6 +3,7 @@ name = "xenolith-core"
 description = "Xenolith's storage: paths, pages, index, log, search, inbox, locks, request log, secret guard"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 

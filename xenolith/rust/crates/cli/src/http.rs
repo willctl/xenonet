@@ -408,10 +408,7 @@ fn handle(app: &App, req: &Request, entry: &mut Entry) -> Reply {
     if init.is_some() && messages.len() > 1 {
         return with_headers(sdk_error(400, -32600, "Invalid Request: Only one initialization request is allowed"), reply_headers);
     }
-    if init.is_none()
-        && let Some(v) = req.header("mcp-protocol-version")
-        && !mcp::SUPPORTED_VERSIONS.contains(&v.as_str())
-    {
+    if let Some(v) = req.header("mcp-protocol-version").filter(|v| init.is_none() && !mcp::SUPPORTED_VERSIONS.contains(&v.as_str())) {
         return with_headers(sdk_error(400, -32000, &format!("Bad Request: Unsupported protocol version: {v} (supported versions: {})", mcp::SUPPORTED_VERSIONS.join(", "))), reply_headers);
     }
     if !messages.iter().any(mcp::is_request) {

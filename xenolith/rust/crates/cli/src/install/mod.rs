@@ -275,7 +275,7 @@ fn install(o: &Opts) -> Result<(), InstallError> {
     };
     println!("Xenolith installer v{}{}", xenolith_core::VERSION, if sandbox { " (sandbox)" } else { "" });
     #[cfg(windows)]
-    if !sandbox && let Some(pkg) = windows::packaged() {
+    if let Some(pkg) = windows::packaged().filter(|_| !sandbox) {
         return Err(InstallError(format!(
             "This terminal runs inside the app package {pkg}. Windows redirects what it writes to AppData into that app's private storage, where the service, the tray at sign-in and the other AI apps cannot see it. Nothing was changed.\nRun it from a normal terminal instead: press Win+R, type cmd, press Enter, then run this again."
         )));
@@ -291,9 +291,7 @@ fn install(o: &Opts) -> Result<(), InstallError> {
     let prev = read_json(&p.config)?;
     let prev_s = |k: &str| prev.as_ref().and_then(|v| v[k].as_str()).map(String::from);
     let wiki_dir = o.wiki_dir.clone().map(|d| std::path::absolute(&d).unwrap_or(d)).or_else(|| prev_s("wikiDir").map(PathBuf::from)).unwrap_or_else(|| p.default_wiki.clone());
-    if let Some(old) = prev_s("wikiDir")
-        && Path::new(&old) != wiki_dir
-    {
+    if let Some(old) = prev_s("wikiDir").filter(|old| Path::new(old) != wiki_dir) {
         warn(&format!("wiki folder changed from {old} (old folder left untouched)"));
     }
     let port = o.port.or_else(|| prev.as_ref().and_then(|v| v["httpPort"].as_u64()).and_then(|x| u16::try_from(x).ok())).unwrap_or(DEFAULT_PORT);
@@ -797,8 +795,10 @@ fn claude_plugin(cl: &Path, p: &Places, res: &mut Results) -> Result<(), Install
     let markets = json_of(&run(cl, &["plugin", "marketplace", "list", "--json"]));
     let known = markets.as_array().and_then(|a| a.iter().find(|m| m["name"] == CLAUDE_MARKET)).cloned();
     let mut have = known.is_some();
-    if let Some(path) = known.as_ref().and_then(|k| k["path"].as_str().or(k["installLocation"].as_str()))
-        && PathBuf::from(path).to_string_lossy().to_lowercase() != p.market.to_string_lossy().to_lowercase()
+    if let Some(path) = known
+        .as_ref()
+        .and_then(|k| k["path"].as_str().or(k["installLocation"].as_str()))
+        .filter(|path| PathBuf::from(path).to_string_lossy().to_lowercase() != p.market.to_string_lossy().to_lowercase())
     {
         must(&["plugin", "marketplace", "remove", CLAUDE_MARKET])?;
         info(&format!("marketplace {CLAUDE_MARKET} was registered at {path}; registering it at {}", fwd(&p.market)));
@@ -827,9 +827,7 @@ fn claude_plugin(cl: &Path, p: &Places, res: &mut Results) -> Result<(), Install
     // by `plugin update`. Reinstall whenever the cached copy differs from what was just rendered.
     let mut mine = listed();
     let cached = |m: &Option<Value>| m.as_ref().and_then(|x| x["installPath"].as_str()).map(PathBuf::from);
-    if let Some(dir) = cached(&mine)
-        && tree_hash(&dir) != tree_hash(&p.rendered)
-    {
+    if cached(&mine).is_some_and(|dir| tree_hash(&dir) != tree_hash(&p.rendered)) {
         must(&["plugin", "uninstall", CLAUDE_PLUGIN_ID])?;
         must(&["plugin", "install", CLAUDE_PLUGIN_ID])?;
         mine = listed();
@@ -931,7 +929,7 @@ fn uninstall(o: &Opts) -> Result<(), InstallError> {
     let cfg = read_json(&p.config).ok().flatten();
     println!("Xenolith uninstaller");
     #[cfg(windows)]
-    if !sandbox && let Some(pkg) = windows::packaged() {
+    if let Some(pkg) = windows::packaged().filter(|_| !sandbox) {
         return Err(InstallError(format!(
             "This terminal runs inside the app package {pkg}, where Windows redirects AppData writes into that app's private storage. Run it from a normal terminal: Win+R, cmd."
         )));

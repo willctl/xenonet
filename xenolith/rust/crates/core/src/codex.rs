@@ -359,8 +359,10 @@ fn run(cfg: &ModelCfg, prompt: &str, o: &mut RunOpts<'_>, work_dir: &Path, schem
                     killed = true;
                     kill_tree(&mut child);
                 }
-                if stdout_done && let Ok(Some(s)) = child.try_wait() {
-                    break s;
+                if stdout_done {
+                    if let Ok(Some(s)) = child.try_wait() {
+                        break s;
+                    }
                 }
                 if stdout_done {
                     std::thread::sleep(Duration::from_millis(20));

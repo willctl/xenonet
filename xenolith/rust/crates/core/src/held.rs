@@ -296,9 +296,8 @@ pub fn apply_auto_locked(wiki_dir: &Path, batch: &str) -> wiki::Result<Vec<Strin
             }
         }
     }
-    if !misfits.is_empty()
-        && let Some(mut f) = load(wiki_dir, batch)
-    {
+    let held = if misfits.is_empty() { None } else { load(wiki_dir, batch) };
+    if let Some(mut f) = held {
         for (i, why) in misfits {
             let Some(e) = f.changes.get_mut(i).filter(|e| e.auto_failed.is_none()) else { continue };
             let what = if cleanup { "Cleanup" } else { "Change" };

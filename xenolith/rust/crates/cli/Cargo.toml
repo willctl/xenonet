@@ -3,11 +3,12 @@ name = "xenolith-cli"
 description = "Xenolith: the MCP server, the session hook and the curator (and, later, the service and installer)"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [[bin]]
-name = "xenolith-cli"
+name = "xenolith"
 path = "src/main.rs"
 
 [dependencies]

@@ -1,10 +1,15 @@
+# Xenolith's own workspace, so xenolith/ builds on its own. When XenoNet's root workspace takes
+# these crates in, this [workspace] goes and the root lists xenolith/rust/crates/* instead.
 [workspace]
 resolver = "3"
 members = ["crates/core", "crates/cli", "crates/tray"]
+# The tray's GUI crates (tray-icon, muda) need Rust 1.90; the core and the CLI build on 1.85.
+default-members = ["crates/core", "crates/cli"]
 
 [workspace.package]
 version = "1.8.0" # kept equal to package.json's version (scripts/build.mjs checks)
 edition = "2024"
+rust-version = "1.85"
 license = "MIT"
 publish = false
 
@@ -14,7 +19,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode"] }
 fancy-regex = "0.19"
-sha2 = "0.11"
+sha2 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 getrandom = "0.4"
 unicode-normalization = "0.1"

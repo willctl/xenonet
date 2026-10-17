@@ -72,13 +72,12 @@ fn decode(s: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'%'
-            && i + 2 < bytes.len()
-            && let Ok(b) = u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("zz"), 16)
-        {
-            out.push(b);
-            i += 3;
-            continue;
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(b) = u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("zz"), 16) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
         }
         out.push(bytes[i]);
         i += 1;
@@ -318,10 +317,10 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
         }
         let (model, effort) = (body["model"].as_str().filter(|s| !s.is_empty()), body["reasoningEffort"].as_str().filter(|s| !s.is_empty()));
         let before = xenolith_core::models::overview(wiki_dir, &st.config);
-        if body["force"] != true
-            && let Some(why) = xenolith_core::models::refusal(model, effort, before[role]["model"].as_str().unwrap_or_default(), Some(&before["available"]).filter(|a| a.is_object()))
-        {
-            return json_reply(400, &json!({ "error": why }));
+        if body["force"] != true {
+            if let Some(why) = xenolith_core::models::refusal(model, effort, before[role]["model"].as_str().unwrap_or_default(), Some(&before["available"]).filter(|a| a.is_object())) {
+                return json_reply(400, &json!({ "error": why }));
+            }
         }
         return match xenolith_core::settings::set_model(wiki_dir, role, model, effort, "window") {
             Ok(_) => {

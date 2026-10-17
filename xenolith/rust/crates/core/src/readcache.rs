@@ -33,11 +33,7 @@ pub fn stamp(e: &DirEntry) -> Option<(u64, i128)> {
 pub fn read(path: &Path, len: u64, mtime: i128) -> Option<Arc<str>> {
     {
         let c = CACHE.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(e) = c.0.get(path)
-            && e.len == len
-            && e.mtime == mtime
-            && e.at.elapsed() < RECHECK
-        {
+        if let Some(e) = c.0.get(path).filter(|e| e.len == len && e.mtime == mtime && e.at.elapsed() < RECHECK) {
             return Some(e.text.clone());
         }
     }

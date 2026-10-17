@@ -27,9 +27,7 @@ fn read_ini(path: &Path) -> Result<HashMap<String, String>, String> {
         if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
             continue;
         }
-        if let Some((k, v)) = line.split_once('=')
-            && !k.trim().is_empty()
-        {
+        if let Some((k, v)) = line.split_once('=').filter(|(k, _)| !k.trim().is_empty()) {
             d.insert(k.trim().to_ascii_lowercase(), v.trim().to_string());
         }
     }

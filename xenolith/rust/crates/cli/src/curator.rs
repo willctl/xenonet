@@ -132,9 +132,7 @@ pub fn run(args: &[String]) -> ! {
     ]);
     let ask_thread = asker.clone().map(|a| std::thread::spawn(move || a.run()));
     let mut failed = None;
-    if let Some(c) = &curator
-        && let Err(e) = c.run()
-    {
+    if let Some(Err(e)) = curator.as_ref().map(|c| c.run()) {
         failed = Some(format!("{e:?}"));
         if let Some(a) = &asker {
             a.stop();
