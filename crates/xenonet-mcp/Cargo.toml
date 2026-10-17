@@ -17,7 +17,17 @@ path = "src/main.rs"
 test = false
 
 [dependencies]
+# The assistant's request ids (r_<uuid v4>) and its client's jitter.
+getrandom.workspace = true
+# The patterns the JS servers match with: the channel flags, tokens to
+# withhold and the assistant's ids in its schemas.
+regex.workspace = true
 rmcp.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+xenonet-actors.workspace = true
 xenonet-base.workspace = true
+
+# Whether a pid still runs (kill with signal 0), as process.kill(pid, 0).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
