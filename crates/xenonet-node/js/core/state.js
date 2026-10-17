@@ -32,12 +32,12 @@ import { constellationOf, labelsOf, posterSalt } from "./redact.js";
 import * as store from "./store.js";
 import { Blocks } from "./blocks/lifecycle.js";
 import { claudeLines, codexLines } from "./lines.js";
-import { NumbatSessions } from "../../../../core/numbat.js";
-import { OpenCodeSessions, opencodeDbPath } from "../../../../core/native/opencode.js";
-import { GeminiCliSessions, geminiRoot } from "../../../../core/native/gemini-cli.js";
-import { CopilotCliSessions, copilotRoot } from "../../../../core/native/copilot-cli.js";
-import { CursorSessions, cursorEventsFile } from "../../../../core/native/cursor.js";
-import { ReportedRuns, observedSessions } from "../../../../core/reported-runs.js";
+import { NumbatSessions } from "./numbat.js";
+import { OpenCodeSessions, opencodeDbPath } from "./native/opencode.js";
+import { GeminiCliSessions, geminiRoot } from "./native/gemini-cli.js";
+import { CopilotCliSessions, copilotRoot } from "./native/copilot-cli.js";
+import { CursorSessions, cursorEventsFile } from "./native/cursor.js";
+import { ReportedRuns, observedSessions } from "./reported-runs.js";
 import { demoSessions, demoNativeProjects, demoTranscript, demoNarration, demoPicks, startDriver, clientsReady } from "../../../../core/demo.js";
 // The addon as `rust`: #refresh has a `native` of its own, Codex's projects.
 import { native as rust } from "../index.js";
