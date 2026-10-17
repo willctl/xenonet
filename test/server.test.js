@@ -176,6 +176,24 @@ test("the map, its live state, history, summary and digests", async () => {
   assert.match((await post("/api/narrate", {})).data.text, /While you were away/);
 });
 
+test("what each actor's work cost today: the demo's Wren and the rest, adding up to the day's estimate", async () => {
+  let spend;
+  for (const until = Date.now() + 20000; Date.now() < until; await new Promise((r) => setTimeout(r, 200))) {
+    spend = (await get("/api/spend")).data;
+    if (spend.actors?.total > 0 && spend.actors.actors.some((a) => a.id === "actor:wren" && a.cost > 0)) break;
+  }
+  const a = spend.actors;
+  assert.ok(a.actors.some((r) => r.id === "actor:wren" && r.name === "Wren" && r.cost > 0 && r.sessions > 0), JSON.stringify(a));
+  assert.ok(a.unattributed.sessions > 0 && a.unattributed.cost > 0);
+  assert.ok(Math.abs(a.actors.reduce((s, r) => s + r.cost, 0) + a.unattributed.cost - a.total) < 1e-9, "the parts add up");
+  assert.ok(!a.actors.some((r) => r.id === "actor:you"));
+  assert.ok(spend.openrouter, "and OpenRouter's key, as before");
+  // Alone, for the xenonet command: no OpenRouter.
+  const alone = (await get("/api/spend/actors")).data;
+  assert.deepEqual(Object.keys(alone).sort(), ["actors", "at", "checked", "since", "total", "unattributed"]);
+  assert.ok(alone.actors.some((r) => r.id === "actor:wren"));
+});
+
 test("sessions: by words or folder, their stats, transcripts and handoffs", async () => {
   const found = (await get("/api/sessions?q=partial%20refunds")).data;
   assert.ok(found.some((s) => s.id === SESSION(1) && s.title === "Add partial refunds to the orders API"));

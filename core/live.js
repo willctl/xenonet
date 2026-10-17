@@ -1124,6 +1124,20 @@ export class LiveTelemetry extends EventEmitter {
     return { today: byApp.claude + byApp.codex, byApp, perHour, unpriced: [...unpriced].sort(), checked: PRICES_CHECKED };
   }
 
+  // What each session's calls today would cost at API prices, the same
+  // sums costs() adds up: [{ id, app, cost, tokens, unpriced }] for each
+  // session with a call today, for what each actor's work costs
+  // (core/actors/spend.js).
+  sessionCosts(now) {
+    const day = dayKey(now);
+    const out = [];
+    for (const s of this.sessions.values()) {
+      const d = s.spend.get(day);
+      if (d) out.push({ id: s.id, app: s.app, cost: d.cost, tokens: d.tokens, unpriced: [...d.unpriced].sort() });
+    }
+    return out;
+  }
+
   snapshot() {
     const now = Date.now();
     const sessions = [...this.sessions.values()].filter((s) => now - s.lastEventAt < PRIME_WINDOW_MS).map((s) => s.snapshot(now));

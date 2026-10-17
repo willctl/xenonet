@@ -1672,6 +1672,32 @@ details[open] summary::before {
 }
 .spend-pace { margin-left: auto; }
 .spend-pace b { font-size: 12px; color: var(--text); text-shadow: none; }
+/* What each actor's work cost today (telemetry.js renderActorSpend): a dot
+   in the actor's color, its share of the day and its dollars. */
+.spend-actors {
+  margin: -4px 0 8px;
+  padding: 4px 8px 5px;
+  border-left: 1px solid rgb(var(--gold-rgb) / 0.22);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.spend-actors[hidden] { display: none; }
+.sa-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 3px; color: var(--dim); }
+.sa-more { all: unset; cursor: pointer; color: var(--gold); letter-spacing: 0.14em; }
+.sa-more:hover, .sa-more:focus-visible { text-decoration: underline; }
+.sa-more[hidden] { display: none; }
+.sa-list { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.sa-list li { display: grid; grid-template-columns: 8px minmax(0, 1fr) 54px 46px; align-items: center; gap: 7px; }
+.sa-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--c); box-shadow: 0 0 6px var(--c); }
+.sa-list li.none .sa-dot { width: 4px; height: 4px; border: 1px solid var(--dim); background: none; box-shadow: none; }
+.sa-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sa-list li.none .sa-name { color: var(--dim); }
+.sa-bar { height: 3px; background: rgb(var(--gold-rgb) / 0.1); }
+.sa-bar b { display: block; height: 100%; background: var(--gold); box-shadow: 0 0 5px rgb(var(--gold-rgb) / 0.6); }
+.sa-list li.none .sa-bar b { background: var(--dim); box-shadow: none; }
+.sa-v { font-family: var(--mono); font-size: 11px; letter-spacing: 0; text-align: right; color: var(--text); }
 .gauge.or .g-bar i.on { background: var(--gold); box-shadow: 0 0 6px rgb(var(--gold-rgb) / 0.7); }
 .gauge.or.off .g-bar { background: repeating-linear-gradient(90deg, rgb(var(--gold-rgb) / 0.12) 0 6px, transparent 6px 8px); }
 .gauge.or.off .g-v { color: var(--gold); }

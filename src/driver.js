@@ -326,10 +326,14 @@ export function createDriver(app) {
       };
     },
 
-    // About what today's work would cost, and what OpenRouter's key has
-    // spent, as Token use shows them (telemetry.js). Read-only.
+    // About what today's work would cost, by app and by actor, and what
+    // OpenRouter's key has spent, as Token use shows them (telemetry.js):
+    // `byActor` is GET /api/spend's breakdown, and `actors` the rows the
+    // panel draws of it. "refresh" reads them again; "more" and "fewer"
+    // open and fold the actors past the first few. Changes nothing else.
     async spend(action = "read") {
       if (action === "refresh") await app.refreshSpend?.();
+      else if (action === "more" || action === "fewer") app.expandActorSpend?.(action === "more");
       else if (action !== "read") throw new Error(`Unknown spend action: ${action}`);
       return app.spend?.() ?? null;
     },

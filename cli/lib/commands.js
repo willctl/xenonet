@@ -18,6 +18,7 @@ export const COMMANDS = {
   who: { about: "Which sessions and actors have a hand in a file", args: "<path>" },
   session: { about: "A session's models, tokens, estimated cost, turns and tools", args: "[words|id]" },
   live: { about: "Messages that reach sessions as they're sent: pause, consent, actors' scopes, audit", args: "[pause|resume|allow|grant|revoke|audit]" },
+  spend: { about: "About what today's work would cost at API prices, by app and by actor" },
   messages: { about: "What sessions and actors said to each other today" },
   root: { about: "The projects folder XenoNet reads, or read another", args: "[folder]" },
   hosts: { about: "Other machines' XenoNets on this map, over SSH (a prototype, with XENONET_HOSTS=1)", args: "[self|add|remove|test]" },

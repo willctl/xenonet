@@ -185,6 +185,42 @@ test("xenonet status, agents, who and doctor: what a running XenoNet says, and t
   }
 });
 
+test("xenonet spend: today's estimate by app and by actor, with the rest unattributed, and a XenoNet from before it", async () => {
+  const costs = { today: 12.4, byApp: { claude: 9.1, codex: 3.3 }, perHour: 1.8, unpriced: ["claude-made-up-9"], checked: "2026-10-03" };
+  let byActor = {
+    at: Date.now(),
+    since: Date.now() - 3600e3,
+    checked: "2026-10-03",
+    total: 12.4,
+    actors: [
+      { id: "actor:wren", name: "Wren", cost: 2.1, tokens: 90000, sessions: 3, unpriced: [], elsewhere: 0 },
+      { id: "actor:kestrel", name: "Kestrel", cost: 0, tokens: 0, sessions: 0, unpriced: [], elsewhere: 2 },
+    ],
+    unattributed: { cost: 10.3, tokens: 400000, sessions: 9, unpriced: ["claude-made-up-9"] },
+  };
+  const s = await fakeXenoNet({
+    "GET /api/health": () => [200, health],
+    "GET /api/live": () => [200, { costs }],
+    "GET /api/spend/actors": () => (byActor ? [200, byActor] : [404, { error: "not found" }]),
+  });
+  const port = ["--port", String(s.port)];
+  try {
+    const out = await via(s, "GET /api/spend/actors", ["spend", ...port]);
+    assert.equal(out.code, 0, out.stderr);
+    assert.match(out.stdout, /^About \$12\.40 today at API prices, \$1\.80 an hour at this pace\n  Claude Code {2}\$9\.10\n  Codex {8}\$3\.30\n/);
+    assert.match(out.stdout, /By actor\n  Wren {10}\$2\.10 {3}3 sessions\n  Kestrel {7}— {7}2 runs elsewhere, not priced\n  Unattributed {2}\$10\.30 {2}9 sessions not tied to an actor, such as the ones you start\n/);
+    assert.match(out.stdout, /Not counted, with no price: claude-made-up-9\. Prices checked 2026-10-03\./);
+    assert.deepEqual(JSON.parse((await xenonet(["spend", "--json", ...port])).stdout), { costs, byActor });
+    byActor = null;
+    const old = await via(s, "GET /api/spend/actors", ["spend", ...port]);
+    assert.equal(old.code, 0, old.stderr);
+    assert.match(old.stdout, /About \$12\.40 today/);
+    assert.match(old.stdout, /This XenoNet doesn't break the day down by actor\./);
+  } finally {
+    s.close();
+  }
+});
+
 test("a busy XenoNet on the port named still counts as running: it has longer than the quick probe", async () => {
   const s = await fakeXenoNet({
     "GET /api/health": () => new Promise((resolve) => setTimeout(() => resolve([200, health]), HEALTH_MS + 500)),

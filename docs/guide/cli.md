@@ -27,6 +27,7 @@ $ xenonet
 | `xenonet agents` | Lists the sessions at work in the last two hours, with where each is, what it says it's doing, and the files it's editing or has claimed. The actors at work come after them, in a list of their own. `--repo` keeps only those in the current repo. |
 | `xenonet who <path>` | Says which sessions and actors have a hand in a file. |
 | `xenonet session [words]` | Shows a session's models, tokens, estimated cost, turns and tools. Without words, it shows the latest session in the current folder. With words, it shows the newest session whose title has them. |
+| `xenonet spend` | Says about what today's work would cost at API prices, for Claude Code and for Codex, and by actor. See [What each actor's work costs](actors.md#what-each-actors-work-costs). |
 | `xenonet messages` | Shows what sessions and actors said to each other in the last day. |
 | `xenonet search <words>` | Searches every Claude Code and Codex transcript. |
 | `xenonet root [folder]` | Shows the projects folder XenoNet reads and where that comes from, or reads another folder. `--check` only says what XenoNet would find there. `--reset` goes back to `~/Projects`. See [Changing the projects folder](projects.md#changing-the-projects-folder). |

@@ -172,7 +172,7 @@ The console page imports only the core modules that have no Node in them, `theme
 | `open.js` | Opening sessions in their apps |
 | `engine/` | The engine that connects sessions to each other |
 | `procs.js` | Which process is on the other end of a connection to the engine |
-| `actors/` | Actors, with the registry, registering and tokens, you, the observers of Hermes Agent, Grok Bot and Muse, and remote actors' connections, account links, provider adapters and presence |
+| `actors/` | Actors, with the registry, registering and tokens, you, the observers of Hermes Agent, Grok Bot and Muse, remote actors' connections, account links, provider adapters and presence, and what each actor's work costs (`spend.js`) |
 | `assistant/` | What remote actors read: the projection, the read service, the made-up fixture, page tokens, the log, credentials and tombstones, and the adapter's client (see [Remote actors](../design/cloud-assistants.md)) |
 | `doctor/` | The doctor's checks |
 | `stats.js`, `pricing.js` | Sessions' stats, and API prices by date |
@@ -202,7 +202,7 @@ The console page imports only the core modules that have no Node in them, `theme
 | `actors.js`, `actors-model.js` | The actors' layer |
 | `hosts.js`, `hosts-draw.js` | Other machines' constellations |
 | `framing.js` | Where the camera stands to frame the map |
-| `hud.js`, `telemetry.js`, `alerts.js`, `needs-you.js`, `modals.js`, `palette.js`, `replay.js`, `terminal.js`, `identities.js` | The panels around the map |
+| `hud.js`, `telemetry.js`, `actor-spend-view.js`, `alerts.js`, `needs-you.js`, `modals.js`, `palette.js`, `replay.js`, `terminal.js`, `identities.js` | The panels around the map. `actor-spend-view.js` has Token use's rows of spend by actor. |
 | `export-panel.js`, `poster.js`, `poster-draw.js`, `mark.js` | The export panel, and posters of the day: the preview, the sizes, what an export reveals, and the mark |
 | `connect.js` | The panel for connecting Claude Code and Codex |
 | `doctor.js` | The panel for XenoNet's doctor |

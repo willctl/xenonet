@@ -91,9 +91,10 @@ On a Mac, use ⌘ wherever this page says Ctrl. The terminal's key stays
   subagents it ran. Every chart has a table view.
 - XenoNet forecasts how many turns a session has left before it compacts its
   context, and when you'll reach your plan limit at the current pace.
-- Token use shows about what today's work would cost at API prices, and at
-  this minute's pace. With an OpenRouter key, it shows what the key has
-  spent and how much of its limit is left.
+- Token use shows about what today's work would cost at API prices, at this
+  minute's pace, and for each actor whose sessions ran today. With an
+  OpenRouter key, it shows what the key has spent and how much of its limit
+  is left.
 - The panel beside it shows this computer's load: CPU and each core, memory,
   and the GPU and its memory. Turn it off with `Show or hide this computer's
   load` in the palette.

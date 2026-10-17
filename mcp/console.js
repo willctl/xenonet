@@ -231,8 +231,21 @@ function buildServer() {
 
   tool(
     "spend",
-    { title: "Read Token use", description: "Reads the Token use panel, including the configured OpenRouter key's spend or its visible setup/error state. Refresh asks for current cached provider usage; it never sends a model request or changes credentials.", inputSchema: z.object({ refresh: z.boolean().optional(), instance: instanceArg }), annotations: { readOnlyHint: true, openWorldHint: false } },
-    async ({ refresh, instance }) => reply(await target(instance).driver("spend", refresh ? "refresh" : "read")),
+    {
+      title: "Read Token use",
+      description:
+        "Reads the Token use panel: about what today's work would cost at API prices, by app (costs) and by actor (byActor, and the rows the panel draws in actors), and the configured OpenRouter key's spend or its visible setup/error state. Each session counts for one actor at most: the one that reported it as a run, or started it, or started the session it came from; the rest is unattributed, including sessions the person starts. A run reported from elsewhere is counted apart, unpriced. Refresh asks for current cached provider usage and the breakdown again; actors opens (more) or folds (fewer) the actors past the first few. It never sends a model request or changes credentials.",
+      inputSchema: z.object({ refresh: z.boolean().optional(), actors: z.enum(["more", "fewer"]).optional().describe("Open or fold the actors past the first few"), instance: instanceArg }),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async ({ refresh, actors, instance }) => {
+      const t = target(instance);
+      if (refresh) {
+        const read = await t.driver("spend", "refresh");
+        if (!actors) return reply(read);
+      }
+      return reply(await t.driver("spend", actors ?? "read"));
+    },
   );
 
   tool(

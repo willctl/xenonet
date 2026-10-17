@@ -4,6 +4,8 @@ import { COLORS, THEME, categoryVar, withAlpha } from "./theme.js";
 import { hostTag } from "./hosts.js";
 import { stoppedWords } from "./live-words.js";
 import { openRouterView } from "./openrouter-view.js";
+import { actorSpendView, TOP } from "./actor-spend-view.js";
+import { colorOf } from "./actors-model.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -45,15 +47,23 @@ export function createTelemetry({ onSelect, onDecisionKey = null }) {
   const setSpend = counter($("#spend-today"), money);
   const setPace = counter($("#spend-pace"), money);
   let snap = null;
-  // What OpenRouter's key has spent (GET /api/spend), read every minute
-  // while the window shows.
+  // What OpenRouter's key has spent, and what each actor's work cost today
+  // (GET /api/spend), read every minute while the window shows.
   let spend = null;
   let spendTimer = null;
+  // Whether the actors past the first few show (Token use's "more").
+  let actorsOpen = false;
   $("#gauges").addEventListener("click", (e) => { if (e.target.closest("[data-openrouter-setup]")) onDecisionKey?.(); });
+  $("#spend-actors").addEventListener("click", (e) => {
+    if (!e.target.closest("[data-spend-more]")) return;
+    actorsOpen = !actorsOpen;
+    renderActorSpend();
+  });
   async function readSpend() {
     if (!document.hidden) {
       spend = await fetch("/api/spend").then((r) => (r.ok ? r.json() : null)).catch(() => null);
       if (snap) renderGauges();
+      renderActorSpend();
     }
     clearTimeout(spendTimer);
     spendTimer = setTimeout(readSpend, 60e3);
@@ -223,6 +233,28 @@ export function createTelemetry({ onSelect, onDecisionKey = null }) {
     el.title = [`About ${money(c.byApp.claude)} for Claude Code and ${money(c.byApp.codex)} for Codex today, at Anthropic's and OpenAI's API prices (checked ${c.checked}).`, c.unpriced.length ? `Not counted, with no price: ${c.unpriced.join(", ")}.` : "", "On a plan, the work costs the plan; this is what it would cost on the API."].filter(Boolean).join(" ");
   }
 
+  // What each actor's work cost today, as GET /api/spend last said: the top
+  // few, the rest under "more", and what no actor is tied to last. Drawn
+  // when it's read, not on every snapshot, so a row's hover stays put.
+  let actorView = null;
+  function renderActorSpend() {
+    const el = $("#spend-actors");
+    actorView = actorSpendView(spend?.actors, { expanded: actorsOpen, money });
+    el.hidden = !actorView;
+    if (!actorView) return;
+    const more = el.querySelector("[data-spend-more]");
+    const folded = actorView.more > 0;
+    more.hidden = actorView.rows.length - 1 + actorView.more <= TOP;
+    more.textContent = folded ? `+${actorView.more} more` : "fewer";
+    more.setAttribute("aria-expanded", String(actorsOpen));
+    el.querySelector("ol").innerHTML = actorView.rows
+      .map((r) => {
+        const color = r.unattributed ? "var(--dim)" : colorOf({ id: r.id, kind: r.id === "actor:you" ? "human" : "agent" }, THEME);
+        return `<li class="${r.unattributed ? "none" : ""}" data-spend-actor="${h(r.id)}" title="${h(r.title)}" style="--c:${h(color)}"><i class="sa-dot"></i><span class="sa-name">${h(r.name)}</span><span class="sa-bar"><b style="width:${(r.share * 100).toFixed(1)}%"></b></span><span class="sa-v">${h(r.value)}</span></li>`;
+      })
+      .join("");
+  }
+
   // An account signed in only on another machine (with XENONET_HOSTS=1): its
   // plan's bars of their own under the machine it was read on, never named
   // by the account, so hidden identities stay hidden.
@@ -293,9 +325,21 @@ export function createTelemetry({ onSelect, onDecisionKey = null }) {
     get snapshot() {
       return snap;
     },
-    // What OpenRouter's key has spent, as GET /api/spend last said.
+    // What OpenRouter's key has spent, and each actor's work today, as GET
+    // /api/spend last said.
     get spend() {
       return spend;
+    },
+    // Spend by actor as the panel shows it: whether it shows, whether the
+    // rest is open, how many are folded away, and each row.
+    get actorSpend() {
+      const el = $("#spend-actors");
+      return { shown: !el.hidden, expanded: actorsOpen, more: actorView?.more ?? 0, rows: (actorView?.rows ?? []).map(({ id, name, value, share, unattributed }) => ({ id, name, value, share, unattributed })), text: el.hidden ? "" : el.innerText.replace(/\s+/g, " ").trim() };
+    },
+    // Opens or folds the actors past the first few, as "more" does.
+    expandActorSpend(open = !actorsOpen) {
+      actorsOpen = !!open;
+      renderActorSpend();
     },
   };
 }

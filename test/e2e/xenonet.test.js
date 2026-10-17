@@ -445,6 +445,44 @@ test("Token use says about what today's work would cost, and what the demo's mad
   assert.equal(sp.openrouter.limit, 50);
 }));
 
+test("Token use says what each actor's work cost today: the demo's Wren, and the rest unattributed, adding up to the day's", { timeout: 60000 }, shoot("spend-actors", async () => {
+  await home();
+  const errors = (await s.driver("errors")).length;
+  const until = async (fn, ms = 20000) => {
+    const end = Date.now() + ms;
+    let got;
+    while (!(got = await fn()) && Date.now() < end) await sleep(500);
+    return got;
+  };
+  // The breakdown is read once a minute; refresh reads it now.
+  const sp = await until(async () => {
+    const v = await s.driver("spend", "refresh");
+    return v?.actors?.shown && v.byActor?.actors?.some((r) => r.id === "actor:wren" && r.cost > 0) ? v : null;
+  });
+  assert.ok(sp, "the breakdown shows, with Wren's sessions in it");
+  const b = sp.byActor;
+  assert.ok(Math.abs(b.actors.reduce((a, r) => a + r.cost, 0) + b.unattributed.cost - b.total) < 1e-9, "each session counted once: the parts add up");
+  assert.ok(b.unattributed.sessions > 0 && b.unattributed.cost > 0, "the demo's other sessions are no actor's");
+  assert.ok(!b.actors.some((r) => r.id === "actor:you"), "the made-up you starts sessions in places, never a session");
+  // Its live refunds session at least (the older ones may be yesterday's
+  // just after midnight).
+  assert.ok(b.actors.find((r) => r.id === "actor:wren").sessions >= 1);
+  // The panel: Wren's row, and the unattributed rest last.
+  const rows = sp.actors.rows;
+  assert.equal(rows.at(-1).id, "unattributed");
+  assert.match(rows.find((r) => r.id === "actor:wren")?.value ?? "", /^\$\d+\.\d\d$/);
+  assert.match(sp.actors.text, /by actor.*wren.*\$\d+\.\d\d.*unattributed.*\$\d+\.\d\d/i);
+  assert.match(sp.text, /about \$\d+\.\d\d today/i, "the day's estimate stays as it was");
+  const title = await s.eval(`return document.querySelector('#spend-actors [data-spend-actor="actor:wren"]')?.title ?? null`);
+  assert.match(title, /^Wren: About \$\d+\.\d\d today over \d+ sessions? XenoNet ties to it\./);
+  // Three actors at most show at first; the demo's fit, so nothing folds.
+  const open = await s.driver("spend", "more");
+  assert.deepEqual([open.actors.expanded, open.actors.more], [true, 0]);
+  assert.equal(await s.eval(`return document.querySelector('#spend-actors [data-spend-more]').hidden`), true, "no more or fewer with nothing to fold");
+  assert.equal((await s.driver("spend", "fewer")).actors.expanded, false);
+  assert.deepEqual((await s.driver("errors")).slice(errors), [], "no page errors");
+}));
+
 test("Spotify's chip shows what's playing in the demo's made-up player, pauses it, and XenoNet's music steps aside while it plays", { timeout: 60000 }, shoot("spotify", async () => {
   await home();
   const until = async (fn, ms = 8000) => {
