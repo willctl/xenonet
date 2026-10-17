@@ -9,6 +9,7 @@
 
 pub mod attest;
 pub mod connect;
+pub mod delivery;
 pub mod js;
 pub mod jsre;
 pub mod peer;

@@ -217,6 +217,21 @@
         "Names sort as ICU's root collation sorts ASCII text (localeCompare); outside ASCII, by an approximation of it."
       ]
     },
+    "core/delivery/selector.js": {
+      "rust": "crates/xenonet-engine/src/delivery/selector.rs",
+      "differences": []
+    },
+    "core/delivery/usage.js": {
+      "rust": "crates/xenonet-engine/src/delivery/usage.rs",
+      "differences": []
+    },
+    "core/delivery/policy.js": {
+      "rust": "crates/xenonet-engine/src/delivery/policy.rs",
+      "differences": [
+        "The policy's clock, limits and files stay the twin's own properties and node:fs; what it keeps (data, hits, the dedupe keys, the audit in memory) is Rust's, and policy.data reads a copy of it.",
+        "Text cut by sanitize mid-surrogate-pair ends in U+FFFD where JS kept the lone half."
+      ]
+    },
     "core/engine/connect.js": {
       "rust": "crates/xenonet-engine/src/connect.rs",
       "differences": [

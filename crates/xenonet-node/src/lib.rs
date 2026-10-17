@@ -14,6 +14,7 @@ mod attest;
 mod attribution;
 mod connect;
 mod connections;
+mod delivery;
 mod base;
 mod blocks;
 mod drift;
