@@ -251,6 +251,13 @@
         "The config (config.js), the store, the scan (scanProjects, until projects.js's twin is beside it) and the scan's time limit stay in the twin; Rust reads the folders and decides.",
         "A folder's links are followed with Rust's canonicalize, without the \\\\?\\ it puts in front on Windows, where Node used realpath."
       ]
+    },
+    "core/graph.js": {
+      "rust": "crates/xenonet-state/src/graph.rs",
+      "differences": [
+        "Which project orbits which (projects.js's projectRelations) is worked out by the twin and handed in, so the Rust takes it as an argument.",
+        "A layout pin without x, y or z gives null for it, where JS left fx, fy or fz undefined (left out of the JSON)."
+      ]
     }
   },
   "tests": [

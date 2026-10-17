@@ -487,6 +487,7 @@ place. This table follows it.
 | `core/redact.js`, `core/digest.js`, `core/classify.js` | `xenonet-state/src/redact.rs`, `digest.rs`, `classify.rs` (running Codex and asking the decider stay in the twins) | `redact`, `digest`, `decide`, `poster` pass |
 | `core/openrouter-usage.js` | `xenonet-sources/src/openrouter_usage.rs` (the key and the request stay in the twin) | `costs` passes |
 | `core/store.js`, `core/workspace.js` | `xenonet-state/src/store.rs`, `workspace.rs` (the config, the scan and its time limit stay in the twins) | `store`, `workspace` pass |
+| `core/graph.js` | `xenonet-state/src/graph.rs` (projectRelations comes in as an argument) | `graph`, `golden`, `state`, `hosts-hub`, `numbat`, `root` pass |
 | `core/blocks/sqlite.js` | `xenonet-blocks/src/sqlite.rs`, on rusqlite with SQLite bundled | No twin (its migrations take a `node:sqlite` handle): Rust tests of the same cases, and the Rust opens a JS-made `engine.sqlite` (version 7, WAL, 18 tables) and `search.sqlite` (an FTS5 match on what node:sqlite indexed) |
 | `core/blocks/store.js` | `xenonet-blocks/src/store.rs` | `blocks-store`, `statefile`, `store`, `hosts-config` pass |
 | `core/migrate.js`, `core/statefile.js` | `xenonet-state/src/migrate.rs`, `statefile.rs` | `statefile`, `store`, `state` pass |
