@@ -188,6 +188,22 @@ function buildServer() {
   );
 
   tool(
+    "needs_you",
+    {
+      title: "Needs you",
+      description: "Reads the Needs you queue: everything waiting on the person, the longest wait first. That is sessions waiting on a question or a permission, actors waiting on them, programs asking to be actors and sessions' asks for an actor's gateway token. Each item has its key, kind (question, permission, actor, request, gateway, or requests: how many programs ask, in a window that can't see who), who it is (title, and the session's app or another machine's host), what it waits for, since when (or until when a request lapses), the actions that answer it and whether its row shows in the open panel. `open` and `close` show or hide the panel. `show` selects an item on the map, `open-app` opens a session in its app (where its question is answered), and `dismiss` puts a session's wait away, as the panel's buttons do; each takes the item's key and returns the state that follows. Allowing or denying a program, and writing to an actor, are the person's, so this tool does neither.",
+      inputSchema: z.object({
+        action: z.enum(["read", "open", "close", "show", "open-app", "dismiss"]).optional().describe("read (the default) lists the queue."),
+        key: z.string().optional().describe("For show, open-app and dismiss: an item's key from the queue."),
+        settle: settleArg,
+        instance: instanceArg,
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ action = "read", key, settle, instance }) => reply(await target(instance).driver("needsYou", action, key, { settle })),
+  );
+
+  tool(
     "refusals",
     {
       title: "Browse provider refusals",
