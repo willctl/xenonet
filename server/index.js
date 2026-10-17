@@ -22,6 +22,12 @@ import { EngineStore } from "../core/engine/store.js";
 import { createVerifier } from "../core/engine/verify.js";
 import { createProcs } from "../core/procs.js";
 import { engineRoutes } from "./routes/engine.js";
+import { deliveryRoutes } from "./routes/delivery.js";
+import { DeliveryPolicy } from "../core/delivery/policy.js";
+import { DeliveryRouter } from "../core/delivery/router.js";
+import { Channels } from "../core/delivery/channel.js";
+import { createOpenCode } from "../core/delivery/opencode.js";
+import { createTmux } from "../core/delivery/tmux.js";
 import { actorRoutes, createActorCaller } from "./routes/actors.js";
 import { createActors, mapOf, CLOCK_MS } from "../core/actors/index.js";
 import { createRegistration } from "../core/actors/registration.js";
@@ -93,7 +99,11 @@ state.blocks.add(engineStore.block);
 // demo's made-up ones, and registered and observed actors, whom agents see
 // among them in the engine. XENONET_ACTORS=off turns the layer off.
 const actors = config.actors ? createActors({ store: engineStore, demo: config.demo, map: mapOf(state) }) : null;
-const engine = new Engine({ state, store: engineStore, actors });
+// Delivery: scopes and guards on messages, and the router that puts them
+// into live sessions (core/delivery).
+const deliveryPolicy = new DeliveryPolicy({ file: path.join(config.stateDir, "delivery.json"), auditFile: path.join(config.stateDir, "delivery-audit.jsonl") });
+const engine = new Engine({ state, store: engineStore, actors, policy: deliveryPolicy });
+const channels = new Channels();
 // Requests in an agent's name, or with an actor's token, are checked
 // against the process they come from (see core/engine/verify.js). Under
 // the desktop app, the server's parent is XenoNet itself, whose window is
@@ -251,7 +261,22 @@ state.on("tokens", (t) => broadcast("tokens", t));
 engine.on("message", (m) => broadcast("agent-message", m));
 // A message an actor sent becomes its said event, never its text.
 engine.on("message", (m) => actors?.said(m));
-const engineRoute = engineRoutes({ engine, connect, verify, readJson, send, actorCaller, actors });
+const engineRoute = engineRoutes({ engine, connect, verify, readJson, send, actorCaller, actors, channels });
+const deliveryRouter = new DeliveryRouter({
+  engine,
+  policy: deliveryPolicy,
+  channels,
+  opencode: createOpenCode(),
+  tmux: createTmux(),
+  notify: ({ agent, title, from }) => {
+    if (config.demo) return;
+    notifyDesktop({ type: "notify", key: `delivery:${agent}`, id: agent, title: "A message wasn't picked up", subtitle: title, body: `${from}'s message to ${title} is still waiting: the session hasn't started a turn in a minute.` });
+  },
+});
+engine.delivery = deliveryRouter;
+deliveryRouter.on("delivery", (d) => broadcast("delivery", d));
+deliveryRouter.on("error", (err) => console.error(`[xenonet] delivery: ${err.message}`));
+const deliveryRoute = deliveryRoutes({ policy: deliveryPolicy, router: deliveryRouter, verify, readJson, send });
 // The actors' list goes out when it changes, and so do the map's changes
 // to it; each event as it happens; and how many registrations wait for
 // you, which the window then reads with its key.
@@ -627,6 +652,7 @@ async function api(req, res, url) {
     }
   }
   if (route.startsWith("/api/engine/") || route === "/api/hook/codex") return engineRoute(req, res, url);
+  if (route === "/api/delivery" || route.startsWith("/api/delivery/")) return deliveryRoute(req, res, url);
   if (route === "/api/actors" || route.startsWith("/api/actors/")) return actorRoute(req, res, url);
   if (route === "/api/assistant" || route.startsWith("/api/assistant/")) return assistantRoute(req, res, url);
   if (await hostRoute(req, res, url)) return;

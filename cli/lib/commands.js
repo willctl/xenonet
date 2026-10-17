@@ -17,6 +17,7 @@ export const COMMANDS = {
   gateway: { about: "The actor gateway, for actors outside this machine: its tunnel, address and apps", args: "[tunnels|on|off|check|repair|address|token|revoke]" },
   who: { about: "Which sessions and actors have a hand in a file", args: "<path>" },
   session: { about: "A session's models, tokens, estimated cost, turns and tools", args: "[words|id]" },
+  live: { about: "Messages that reach sessions as they're sent: pause, consent, actors' scopes, audit", args: "[pause|resume|allow|grant|revoke|audit]" },
   messages: { about: "What sessions and actors said to each other today" },
   root: { about: "The projects folder XenoNet reads, or read another", args: "[folder]" },
   hosts: { about: "Other machines' XenoNets on this map, over SSH (a prototype, with XENONET_HOSTS=1)", args: "[self|add|remove|test]" },

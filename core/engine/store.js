@@ -290,6 +290,12 @@ export class EngineStore {
     const mark = this.db.prepare("UPDATE deliveries SET seen_at = ? WHERE agent = ? AND message_id = ? AND seen_at IS NULL");
     for (const id of ids) mark.run(now, agent, id);
   }
+  // A message pushed into a session that never showed it got there waits
+  // for the session's hooks again (core/delivery/router.js).
+  markUnseen(agent, ids) {
+    const mark = this.db.prepare("UPDATE deliveries SET seen_at = NULL WHERE agent = ? AND message_id = ?");
+    for (const id of ids) mark.run(agent, id);
+  }
   // Who a message went to, and who has seen it.
   deliveries = (id) => this.db.prepare("SELECT agent, seen_at FROM deliveries WHERE message_id = ?").all(id);
   recent = (since) => this.db.prepare("SELECT * FROM messages WHERE created_at >= ? ORDER BY id").all(since);

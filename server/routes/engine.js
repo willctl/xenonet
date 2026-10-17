@@ -23,15 +23,19 @@ import { isAgentId } from "../../core/engine/engine.js";
 import { bearerOf, tokenInUrl } from "../../core/actors/tokens.js";
 import { RATES } from "./actors.js";
 import { attest } from "../../core/engine/attest.js";
+import { parseSelector } from "../../core/delivery/selector.js";
 
 // The capability each operation needs from an actor.
 const NEEDS = { send: "message-agents", claim: "edit-repos" };
 const ACTOR_BODY = 16 << 10;
 
-export function engineRoutes({ engine, connect, verify, readJson, send, actorCaller = null, actors = null }) {
+// A peers scope: repo, machine, or a selector (core/delivery/selector.js).
+const scopeOf = (s) => (s === "machine" ? "machine" : typeof s === "string" && parseSelector(s) ? s : "repo");
+
+export function engineRoutes({ engine, connect, verify, readJson, send, actorCaller = null, actors = null, channels = null }) {
   const ops = {
     whoami: (me) => engine.whoami(me),
-    peers: (me, b) => engine.peers(me, { scope: b.scope === "machine" ? "machine" : "repo" }),
+    peers: (me, b) => engine.peers(me, { scope: scopeOf(b.scope) }),
     "who-has": (me, b) => engine.whoHas(me, String(b.path ?? "")),
     // With how XenoNet knows who sent it (core/engine/attest.js), from the
     // checks this route made, never from the body.
@@ -40,6 +44,11 @@ export function engineRoutes({ engine, connect, verify, readJson, send, actorCal
     claim: (me, b) => engine.claim(me, { paths: b.paths, note: b.note, minutes: b.minutes }),
     release: (me, b) => engine.release(me, { paths: Array.isArray(b.paths) && b.paths.length ? b.paths : null }),
     focus: (me, b) => engine.setFocus(me, b.text),
+    // A Claude Code session's channel waiting for messages (core/delivery/channel.js).
+    channel: async (me, b) => {
+      if (!channels || !me.startsWith("claude:")) return { items: [], off: true };
+      return { items: await channels.poll(me, Math.min(Number(b.waitSeconds) || 25, 50) * 1000) };
+    },
   };
 
   // An operation called by an actor, with its token: who it is, checked;
@@ -112,7 +121,7 @@ export function engineRoutes({ engine, connect, verify, readJson, send, actorCal
       const name = route.slice("/api/engine/".length);
       const op = ops[name];
       if (req.method !== "POST" || !op) return send(res, 404, { error: "not found" });
-      if (bearerOf(req.headers) !== undefined) return await asActor(req, res, name, op);
+      if (bearerOf(req.headers) !== undefined) return name === "channel" ? send(res, 404, { error: "not found" }) : await asActor(req, res, name, op);
       const me = req.headers["x-xenonet-agent"];
       if (!isAgentId(me)) return send(res, 400, { error: "say which session is calling, in x-xenonet-agent (claude:<session id> or codex:<thread id>)" });
       const ok = await verify.check(req.socket, me);
