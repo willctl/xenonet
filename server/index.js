@@ -28,6 +28,9 @@ import { DeliveryRouter } from "../core/delivery/router.js";
 import { Channels } from "../core/delivery/channel.js";
 import { createOpenCode } from "../core/delivery/opencode.js";
 import { createTmux } from "../core/delivery/tmux.js";
+import { createResume } from "../core/delivery/resume.js";
+import { planUsage } from "../core/delivery/usage.js";
+import { writeListenSettings } from "../core/delivery/setup.js";
 import { actorRoutes, createActorCaller } from "./routes/actors.js";
 import { createActors, mapOf, CLOCK_MS } from "../core/actors/index.js";
 import { createRegistration } from "../core/actors/registration.js";
@@ -262,12 +265,26 @@ engine.on("message", (m) => broadcast("agent-message", m));
 // A message an actor sent becomes its said event, never its text.
 engine.on("message", (m) => actors?.said(m));
 const engineRoute = engineRoutes({ engine, connect, verify, readJson, send, actorCaller, actors, channels });
+// The settings a Claude Code session starts with to listen after its turns
+// (xenonet doctor --live), which a resumed turn gets too.
+let listenFile = null;
+if (!config.demo) {
+  try {
+    listenFile = writeListenSettings({ dir: config.stateDir, port: config.port });
+  } catch (err) {
+    console.error(`[xenonet] listen settings: ${err.message}`);
+  }
+}
 const deliveryRouter = new DeliveryRouter({
   engine,
   policy: deliveryPolicy,
   channels,
   opencode: createOpenCode(),
   tmux: createTmux(),
+  // Made-up sessions are never resumed.
+  resume: config.demo ? null : createResume({ settings: listenFile }),
+  // A provider at 90% of its plan takes no wakes: from the live readings.
+  usage: (app) => planUsage({ ...state.live?.limits, claude: state.live?.claudeLimits?.() ?? null }, app),
   notify: ({ agent, title, from }) => {
     if (config.demo) return;
     notifyDesktop({ type: "notify", key: `delivery:${agent}`, id: agent, title: "A message wasn't picked up", subtitle: title, body: `${from}'s message to ${title} is still waiting: the session hasn't started a turn in a minute.` });
@@ -1085,6 +1102,28 @@ async function api(req, res, url) {
       if (out) return send(res, 200, out);
     }
     res.writeHead(204).end();
+    return;
+  }
+
+  // A session's Stop hook that listens after its turns (xenonet doctor
+  // --live, core/delivery/setup.js): it waits for a message up to the
+  // window the session started with, and hands it over to keep it going.
+  // If the session stops waiting first, the message stays unread for its
+  // next turn.
+  if (req.method === "POST" && route === "/api/hook/claude/listen") {
+    const body = await readJson(req).catch(() => ({}));
+    if (body.hook_event_name === "Stop" && typeof body.session_id === "string" && /^[0-9a-f-]{36}$/i.test(body.session_id)) {
+      const me = `claude:${body.session_id}`;
+      const ok = await verify.check(req.socket, me, { hook: true });
+      if (!ok.ok) return send(res, 403, { error: ok.reason });
+      const seconds = Math.min(Math.max(Number(url.searchParams.get("seconds")) || 300, 5), 3600);
+      const gone = new AbortController();
+      res.on("close", () => res.writableEnded || gone.abort());
+      const out = await engine.listen(me, { ms: seconds * 1000, signal: gone.signal }).catch(() => null);
+      if (out && (gone.signal.aborted || res.destroyed)) engine.store.markUnseen(me, out.ids);
+      else if (out) return send(res, 200, { decision: out.decision, reason: out.reason });
+    }
+    if (!res.destroyed) res.writeHead(204).end();
     return;
   }
 
