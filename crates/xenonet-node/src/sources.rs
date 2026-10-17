@@ -114,3 +114,116 @@ pub fn context_server_of(dir: String) -> &'static str {
 pub fn context_name(server: Option<String>) -> &'static str {
     xenolith::context_name(server.as_deref())
 }
+
+// ---------- refusals/ ----------
+
+use xenonet_sources::refusals::{demo, query, store};
+
+// { ok } or { error: { message, code } }: the twin throws the error as
+// Node would have, with its code, or a RangeError for a time JS can't
+// write.
+fn answer(r: std::result::Result<Value, store::StoreError>) -> Jv {
+    match r {
+        Ok(v) => Jv::Obj(vec![("ok", Jv::Json(v))]),
+        Err(e) => Jv::Obj(vec![("error", Jv::Obj(vec![("message", Jv::Json(Value::String(e.message))), ("code", e.code.map_or(Jv::Undef, |c| Jv::Json(Value::String(c))))]))]),
+    }
+}
+
+#[napi(js_name = "demoRefusals")]
+pub fn demo_refusals(now: f64) -> Json {
+    Json(Value::Array(demo::demo_refusals(now)))
+}
+
+#[napi(js_name = "refusalSorts")]
+pub fn refusal_sorts() -> Vec<&'static str> {
+    query::REFUSAL_SORTS.to_vec()
+}
+
+#[napi(js_name = "refusalPublicRecord")]
+pub fn refusal_public_record(r: Json) -> Json {
+    Json(query::public_record(&r.0))
+}
+
+#[napi(js_name = "refusalModelOf")]
+pub fn refusal_model_of(r: Json) -> Json {
+    Json(query::model_of(&r.0))
+}
+
+#[napi(js_name = "refusalCategoryOf")]
+pub fn refusal_category_of(r: Json) -> Json {
+    Json(query::category_of(&r.0))
+}
+
+#[napi(js_name = "queryRefusals")]
+pub fn query_refusals(records: Json, q: Json) -> Json {
+    Json(query::query_refusals(records.0.as_array().map_or(&[], Vec::as_slice), &q.0))
+}
+
+#[napi(js_name = "refusalSchema")]
+pub fn refusal_schema() -> &'static str {
+    store::SCHEMA
+}
+
+#[napi(js_name = "refusalClaudeContext")]
+pub fn refusal_claude_context(all: Json, sig: Json) -> Json {
+    Json(store::claude_context(all.0.as_array().map_or(&[], Vec::as_slice), &sig.0).map_or(Value::Null, |c| c.to_json()))
+}
+
+#[napi(js_name = "refusalCodexContext")]
+pub fn refusal_codex_context(env: &Env, all: Json, sig: Json) -> Result<Json> {
+    match store::codex_context(all.0.as_array().map_or(&[], Vec::as_slice), &sig.0) {
+        Ok(c) => Ok(Json(c.to_json())),
+        Err(m) => thrown(env, TypeError(m)),
+    }
+}
+
+#[napi(js_name = "refusalContextOn")]
+pub fn refusal_context_on(dir: String, env_value: Option<String>) -> bool {
+    store::context_on(std::path::Path::new(&dir), env_value.as_deref())
+}
+
+#[napi(js_name = "refusalSetContext")]
+pub fn refusal_set_context(dir: String, on: bool) -> Jv {
+    answer(store::set_context(std::path::Path::new(&dir), on).map(Value::Bool))
+}
+
+#[napi(js_name = "RefusalStore")]
+pub struct JsRefusalStore {
+    r: store::Refusals,
+}
+
+#[napi]
+impl JsRefusalStore {
+    #[napi(constructor)]
+    pub fn new(dir: String, home: String) -> Self {
+        JsRefusalStore { r: store::Refusals::new(&dir, &home) }
+    }
+    #[napi]
+    pub fn known(&mut self, sig: Json, at: Json) -> bool {
+        self.r.known(&sig.0, &at.0)
+    }
+    #[napi]
+    pub fn record(&mut self, sig: Json, at: Json, now: f64, context: bool) -> Jv {
+        answer(self.r.record(&sig.0, &at.0, now, context).map(|r| r.unwrap_or(Value::Null)))
+    }
+    #[napi]
+    pub fn get(&self, id: String) -> Json {
+        Json(self.r.get(&id).unwrap_or(Value::Null))
+    }
+    #[napi]
+    pub fn list(&self, since: f64, provider: Option<String>, kind: Option<String>) -> Json {
+        Json(Value::Array(self.r.list(since, provider.as_deref(), kind.as_deref())))
+    }
+    #[napi]
+    pub fn capture(&self, id: String) -> Jv {
+        answer(self.r.capture(&id))
+    }
+    #[napi(js_name = "exportLines")]
+    pub fn export_lines(&self, since: f64, provider: Option<String>, kind: Option<String>, with_context: bool, scrubbed: bool) -> Json {
+        Json(Value::Array(self.r.export_lines(since, provider.as_deref(), kind.as_deref(), with_context, scrubbed)))
+    }
+    #[napi(js_name = "contextFile")]
+    pub fn context_file(&self, id: String) -> String {
+        self.r.context_file(&id).to_string_lossy().into_owned()
+    }
+}

@@ -190,6 +190,26 @@
         "order returns -1, 0 or 1, where JS returned the difference of the times it compared: the same order.",
         "waitsWords looks up an actor's wait among its three words only; JS's lookup on a plain object also found Object.prototype's names (a wait of \"constructor\")."
       ]
+    },
+    "core/refusals/demo.js": {
+      "rust": "crates/xenonet-sources/src/refusals/demo.rs",
+      "differences": []
+    },
+    "core/refusals/query.js": {
+      "rust": "crates/xenonet-sources/src/refusals/query.rs",
+      "differences": [
+        "Facets and sorts compare as crates/xenonet-base/src/jsstr.rs's localeCompare does: ICU's root order for Latin text, code points after it.",
+        "A record whose source has no file is shown with source {}, where JS made { file: undefined } (the same JSON)."
+      ]
+    },
+    "core/refusals/store.js": {
+      "rust": "crates/xenonet-sources/src/refusals/store.rs",
+      "differences": [
+        "Rust reads and writes the files; the twin asks now() and context() when the JS did (after the record is known to be new) and passes their answers in.",
+        "context.jsonl.gz is gzipped by flate2, not zlib: the same text unpacked, other bytes.",
+        "claudeContext and codexContext give copies of the lines they were given, not the same objects.",
+        "A field the signal leaves undefined is left out of the record returned, where JS kept the key with undefined (the same JSON)."
+      ]
     }
   },
   "tests": [
