@@ -14,8 +14,9 @@ use std::path::Path;
 
 pub const WEEK_MS: f64 = 7.0 * 24.0 * 3600e3;
 
-/// A migration step: a function of the database.
-pub type Step = Box<dyn Fn(&Connection) -> rusqlite::Result<()>>;
+/// A migration step: a function of the database. Send, so a store can be
+/// used from a machine's thread.
+pub type Step = Box<dyn Fn(&Connection) -> rusqlite::Result<()> + Send>;
 
 /// Where a database's version started, where it is, and whether a newer
 /// XenoNet moved it further than this one knows.
