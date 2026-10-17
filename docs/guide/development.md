@@ -80,7 +80,7 @@ Installed XenoNet and XenoNet Dev both have a control channel, so an agent or a 
 
 The control channel operates the console. The engine that connects sessions to each other is a separate MCP server, `xenonet`, in `mcp/xenonet.js`. See [Sessions working together](agents.md).
 
-- Agents can use the control channel through the `xenonet-console` MCP server's tools, including navigation, search, screenshots, terminals, themes and updates. Installed Tools omit `eval` and `simulate`, which are only for development. `actors` includes the programs waiting for an Allow, and how each token stands. `feed` is the activity feed. `mcp_info` opens a shared system's metadata, tools and context catalog without executing tools. `environment` changes the surroundings independently of the theme.
+- Agents can use the control channel through the `xenonet-console` MCP server's tools, including navigation, search, screenshots, terminals, themes and updates. Installed Tools omit `eval` and `simulate`, which are only for development. `actors` includes the programs waiting for an Allow, and how each token stands. `needs_you` reads the Needs you queue and shows, opens or dismisses an item, but never allows or denies one. `feed` is the activity feed. `mcp_info` opens a shared system's metadata, tools and context catalog without executing tools. `environment` changes the surroundings independently of the theme.
 - `.mcp.json` registers these tools for Claude Code, which asks you once to approve them. `.codex/config.toml` registers them for Codex, in a trusted project. Start Claude Code or Codex in the repo's root folder.
 - From a terminal, `xenonet console <steps>` runs the same actions one after another, for example `xenonet console launch select:atlas-api shot:atlas`. `npm run drive -- <steps>` does the same. `xenonet console --help` lists the steps.
 - XenoNet Dev keeps a log of what you do in it, as the same steps. Selecting a node, a palette command, a session's stats, a theme and a film all go in the log. `xenonet script record --instance dev > tour.json` saves it, and `xenonet script run tour.json` plays it back, in any instance, shown or hidden.
@@ -146,7 +146,7 @@ Requests reach it as `POST /api/dev/control` on the instance's server, which rel
 
 XenoNet is one core with several ways in: the console, the desktop app, the HTTP API, the `xenonet` command and the MCP servers. The core holds the logic. Each of the others is a thin layer over it, which imports from `core/` and from no other layer. The one exception is `xenonet mcp`, which starts the MCP server in `mcp/`.
 
-The console page imports only the core modules that have no Node in them, `themes.js` and `units.js`. The `xenonet` command and the MCP servers reach a running XenoNet through its HTTP API, with `core/client.js`. They reach XenoNet Dev through its control channel, with `core/control.js`.
+The console page imports only the core modules that have no Node in them, `themes.js`, `units.js` and `needs-you.js`. The `xenonet` command and the MCP servers reach a running XenoNet through its HTTP API, with `core/client.js`. They reach XenoNet Dev through its control channel, with `core/control.js`.
 
 ### `core/`
 
@@ -177,6 +177,7 @@ The console page imports only the core modules that have no Node in them, `theme
 | `doctor/` | The doctor's checks |
 | `stats.js`, `pricing.js` | Sessions' stats, and API prices by date |
 | `units.js` | Money, tokens and durations as people read them. The page uses it too. |
+| `needs-you.js` | Everything waiting on you as one queue, the longest wait first, with what answers each: the Needs you panel, the tray and `xenonet status` read it. The page uses it too. |
 | `themes.js`, `themefiles.js` | Themes. The page uses `themes.js` too, and `themefiles.js` handles your own. |
 | `script.js` | Running steps and scripts against XenoNet Dev |
 | `client.js` | The client for a running XenoNet's API |
@@ -201,7 +202,7 @@ The console page imports only the core modules that have no Node in them, `theme
 | `actors.js`, `actors-model.js` | The actors' layer |
 | `hosts.js`, `hosts-draw.js` | Other machines' constellations |
 | `framing.js` | Where the camera stands to frame the map |
-| `hud.js`, `telemetry.js`, `alerts.js`, `modals.js`, `palette.js`, `replay.js`, `terminal.js`, `identities.js` | The panels around the map |
+| `hud.js`, `telemetry.js`, `alerts.js`, `needs-you.js`, `modals.js`, `palette.js`, `replay.js`, `terminal.js`, `identities.js` | The panels around the map |
 | `export-panel.js`, `poster.js`, `poster-draw.js`, `mark.js` | The export panel, and posters of the day: the preview, the sizes, what an export reveals, and the mark |
 | `connect.js` | The panel for connecting Claude Code and Codex |
 | `doctor.js` | The panel for XenoNet's doctor |

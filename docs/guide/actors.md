@@ -10,7 +10,7 @@ Sessions can see actors too, in `peers` and in their briefings. An actor's recen
 
 Each actor takes its theme's form. Actors breathe, glow as brightly as they're present, and react when they act, with light running down the beam to what they touched.
 
-An actor waiting on you gets a card in the strip at the top. A click takes whatever is drawn in front, actor or node. Selecting an actor frames it with what it acts on, and shows it in the inspector. The Actors panel also lists the programs asking to be actors.
+An actor waiting on you gets a card in the strip at the top, and a row in the Needs you panel (`N`), which lists everything waiting on you, the longest wait first. A click takes whatever is drawn in front, actor or node. Selecting an actor frames it with what it acts on, and shows it in the inspector. The Actors panel also lists the programs asking to be actors.
 
 ## How XenoNet knows an actor
 
@@ -159,7 +159,7 @@ While XenoNet's window is hidden, you're away, and ten minutes later you're offl
 
 Your own programs register with the `xenonet` command, and wait for your Allow in XenoNet's window. Every new actor waits for it, even one you register from your own terminal.
 
-The request shows as a card in the strip at the top and in the Actors panel, with what it asks for and which program asked. Allow makes its token work. Deny, or ten minutes without an answer, revokes the token. `Add an actor` in the Actors panel does it all in one step.
+The request shows as a card in the strip at the top, in the Needs you panel and in the Actors panel, with what it asks for and which program asked. Allow makes its token work. Deny, or ten minutes without an answer, revokes the token. `Add an actor` in the Actors panel does it all in one step.
 
 ```console
 $ xenonet actor register --name Wren --capabilities run-commands,edit-repos,message-agents --token-file ~/.config/wren/xenonet.token
