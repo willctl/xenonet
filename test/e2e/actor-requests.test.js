@@ -182,7 +182,7 @@ test("the actor gateway: set up in the window with a tunnel of your own, its add
     fetch(`http://127.0.0.1:${on.body.port}/mcp`, { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...(tok ? { authorization: `Bearer ${tok}` } : {}) }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
   assert.equal((await rpc(null, "tools/list")).status, 401);
   const listed = await (await rpc(token, "tools/list")).json();
-  assert.deepEqual(listed.result.tools.map((t) => t.name).sort(), ["heartbeat", "inbox", "peers", "send", "whoami"]);
+  assert.deepEqual(listed.result.tools.map((t) => t.name).sort(), ["heartbeat", "inbox", "peers", "report_run", "send", "whoami"]);
   const me = await (await rpc(token, "tools/call", { name: "whoami", arguments: {} })).json();
   assert.match(me.result.content[0].text, /actor:lark/);
   // Its first call ticks the last step.
