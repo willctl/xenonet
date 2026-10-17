@@ -148,6 +148,13 @@
         "Requests are the Rust's own HTTP/1.1, with Connection: close, and without the accept, user-agent and accept-encoding headers fetch adds. The twin leaves a server whose base isn't http://127.0.0.1:<port> to the JS.",
         "A header given in another case replaces the one XenoNet sends by itself (Content-Type for content-type); fetch sent both, joined."
       ]
+    },
+    "core/procs.js": {
+      "rust": "crates/xenonet-engine/src/procs.rs",
+      "differences": [
+        "The commands still run in the twin, through exec (and the clock is its now): Rust says which to run, reads their answers and keeps what's kept. A command asked for while the same one is still running (the shared table, a signature, a bundle's id) waits for that one's answer, as the JS's shared promises did; the twin's machine driver (crates/xenonet-node/js/machine.js) does the waiting.",
+        "selfTest's own connection is still made in the twin; Rust says what the answers mean."
+      ]
     }
   },
   "tests": [

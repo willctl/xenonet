@@ -678,6 +678,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "xenonet-engine"
+version = "0.2.0"
+dependencies = [
+ "getrandom",
+ "regex",
+ "rusqlite",
+ "serde_json",
+ "sha2",
+ "xenonet-base",
+ "xenonet-blocks",
+]
+
+[[package]]
 name = "xenonet-node"
 version = "0.2.0"
 dependencies = [
@@ -689,6 +702,7 @@ dependencies = [
  "xenonet-actors",
  "xenonet-base",
  "xenonet-blocks",
+ "xenonet-engine",
  "xenonet-schema",
  "xenonet-sources",
  "xenonet-state",

@@ -10,5 +10,7 @@ mod blocks;
 mod drift;
 mod js;
 mod lines;
+mod machine;
+mod procs;
 mod schema;
 mod state;

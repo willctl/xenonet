@@ -164,6 +164,14 @@ What crosses the boundary, and how:
   says what to read next, and whoever runs it does the reading: tokio in
   the binary, `fs.promises` in a twin. The decisions the tests check are
   Rust's, and the JS around them only reads files.
+- **Machines.** Where the JS awaits in the middle of its decisions (the
+  process lookups, the engine's checks of who sent a request, a store or
+  a command a test fakes), the Rust is plain code against a trait for what
+  it reads. Behind a twin it runs on a thread of its own
+  (`crates/xenonet-node/src/machine.rs`): each time it needs something it
+  asks and waits, and the twin answers, awaiting what it must
+  (`js/machine.js`). JS waits only while Rust computes between questions.
+  In the binary the same code runs against the system itself.
 - **Events.** A block's EventEmitter stays in its twin. Rust returns each
   state change, and the twin emits it.
 
@@ -491,6 +499,7 @@ place. This table follows it.
 | `core/private-file.js`, `core/actors/token-file.js` (but the doctor's look in repos) | `xenonet-base/src/private_file.rs`, `xenonet-actors/src/token_file.rs` | `private-file`, `token-files`, `cli-actor`, `mcp-actor`, `hosts-config` pass, the Windows ACL cases included |
 | `xenonet mcp` for sessions (`mcp/xenonet.js`), a prototype | `xenonet-mcp`, on rmcp, Rust 1.88+ | Its own stdio tests; the same answers as the JS servers to the probe and the handshake |
 | `xenonet hook` (`cli/commands/hook.js`) | `xenonet-cli`, the `xenonet` binary | `launcher`'s hook cases, as Rust tests of the binary |
+| `core/procs.js` | `xenonet-engine/src/procs.rs`, its lookups a machine the twin answers with the commands' output | `procs` and the 20 other files that reach it pass |
 
 With every twin in place, all 111 test files that reach one pass. The
 twins load in the Node processes a test starts too (a server, the
