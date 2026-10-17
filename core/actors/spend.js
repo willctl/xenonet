@@ -86,7 +86,10 @@ export function attribute({ sessions = [], starts = [], known = null, ids = null
 export function spendByActor({ spend = [], sessions = [], starts = [], names = new Map(), since = null } = {}) {
   const known = names instanceof Map ? names : new Map(Object.entries(names ?? {}));
   const list = [...spend].filter((s) => typeof s?.id === "string" && Number.isFinite(s.cost));
-  const who = attribute({ sessions, starts, known: new Set(known.keys()), ids: [...list.map((s) => s.id), ...sessions.map((s) => s?.id).filter(Boolean)] });
+  // Only the sessions that count today: those with calls, and the runs
+  // reported from elsewhere. The map can hold thousands of older ones.
+  const runs = sessions.filter((s) => s?.observed === "gateway" && typeof s.id === "string");
+  const who = attribute({ sessions, starts, known: new Set(known.keys()), ids: [...list.map((s) => s.id), ...runs.map((s) => s.id)] });
   const part = () => ({ cost: 0, tokens: 0, sessions: 0, unpriced: new Set() });
   const rows = new Map();
   const row = (id) => rows.get(id) ?? rows.set(id, { id, name: known.get(id) ?? id, ...part(), elsewhere: 0 }).get(id);
@@ -104,8 +107,8 @@ export function spendByActor({ spend = [], sessions = [], starts = [], names = n
     for (const m of s.unpriced ?? []) r.unpriced.add(m);
     total += s.cost;
   }
-  for (const s of sessions) {
-    if (s?.observed !== "gateway" || counted.has(s.id) || (since != null && !(s.updatedAt >= since))) continue;
+  for (const s of runs) {
+    if (counted.has(s.id) || (since != null && !(s.updatedAt >= since))) continue;
     const w = who.get(s.id);
     if (w) row(w.actor).elsewhere++;
   }
