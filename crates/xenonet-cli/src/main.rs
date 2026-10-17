@@ -5,7 +5,7 @@
 
 mod hook;
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+const VERSION: &str = env!("XENONET_VERSION");
 
 // `--port 47842` or `--port=47842`.
 fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
@@ -18,6 +18,12 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let code = match args.first().map(String::as_str) {
         Some("hook") => hook::run(args.get(1).map(String::as_str), flag(&args, "port")),
+        Some("serve") => xenonet_service::run(&args[1..], VERSION),
+        Some("mcp") => {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a runtime");
+            rt.block_on(xenonet_mcp::serve());
+            0
+        }
         Some("-v" | "--version") => {
             println!("{VERSION}");
             0

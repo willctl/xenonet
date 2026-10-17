@@ -1,0 +1,24 @@
+[package]
+name = "xenonet-service"
+description = "The XenoNet service in Rust (xenonet serve): the HTTP API on 127.0.0.1, its event stream, the component service's socket, and the actor gateway."
+version.workspace = true
+edition.workspace = true
+# It runs on tokio beside the MCP servers, in the one binary (Rust 1.88+).
+rust-version = "1.88"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+bytes.workspace = true
+getrandom.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+xenonet-actors.workspace = true
+xenonet-base.workspace = true
+xenonet-schema.workspace = true

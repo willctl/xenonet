@@ -1,9 +1,10 @@
 [package]
 name = "xenonet-cli"
-description = "The xenonet command, in Rust. So far it runs Claude Code's and Codex's hooks; the other commands follow the port."
+description = "The xenonet command, in Rust: every command, the hooks, the MCP servers (xenonet mcp) and the service (xenonet serve)."
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
+# It holds the MCP servers, on rmcp (Rust 1.88+).
+rust-version = "1.88"
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -14,4 +15,8 @@ name = "xenonet"
 path = "src/main.rs"
 
 [dependencies]
+serde_json.workspace = true
+tokio.workspace = true
 xenonet-base.workspace = true
+xenonet-mcp.workspace = true
+xenonet-service.workspace = true
