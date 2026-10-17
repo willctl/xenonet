@@ -1,0 +1,34 @@
+# XenoNet's Rust core (docs/design/rust-core.md). Electron and the console
+# page stay in JS; everything else moves here, a crate per layer.
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+# Xenolith's crates join once its own workspace folds into this one.
+exclude = ["xenolith"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+authors = ["willctl"]
+repository = "https://github.com/willctl/xenonet"
+publish = false
+
+[workspace.dependencies]
+xenonet-base = { path = "crates/xenonet-base" }
+xenonet-blocks = { path = "crates/xenonet-blocks" }
+# JS keeps an object's keys in the order they were added, and so do the
+# files and answers XenoNet writes: preserve_order keeps that order here.
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+# The Node-API bindings that put the crates behind the JS modules during the
+# port. The last releases that build on Rust 1.85; the resolver keeps their
+# dependencies to versions that do too.
+napi = { version = "3.4", default-features = false, features = ["napi8", "serde-json"] }
+napi-derive = "3.3"
+napi-build = "2.2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
