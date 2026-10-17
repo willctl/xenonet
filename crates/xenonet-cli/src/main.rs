@@ -4,7 +4,6 @@
 //! and this says so rather than guess.
 
 mod hook;
-mod http;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 

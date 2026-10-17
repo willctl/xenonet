@@ -141,6 +141,13 @@
       "differences": [
         "findTokenFiles and createTokenScan, the doctor's look for tokens left in repos, are still the JS: they move with the doctor."
       ]
+    },
+    "core/client.js": {
+      "rust": "crates/xenonet-base/src/client.rs",
+      "differences": [
+        "Requests are the Rust's own HTTP/1.1, with Connection: close, and without the accept, user-agent and accept-encoding headers fetch adds. The twin leaves a server whose base isn't http://127.0.0.1:<port> to the JS.",
+        "A header given in another case replaces the one XenoNet sends by itself (Content-Type for content-type); fetch sent both, joined."
+      ]
     }
   },
   "tests": [
@@ -169,6 +176,7 @@
     "test/cli-gateway.test.js",
     "test/cli-status-agents.test.js",
     "test/cli.test.js",
+    "test/client.test.js",
     "test/codex-client.test.js",
     "test/codex.test.js",
     "test/component-activation.test.js",

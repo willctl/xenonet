@@ -5,9 +5,9 @@
 //! answer within 4 seconds, it prints nothing and the agent carries on: it
 //! always exits 0. XENONET_PORT (or --port) says which XenoNet.
 
-use crate::http;
 use std::io::{Read, Write};
 use std::time::Duration;
+use xenonet_base::http;
 use xenonet_base::json::Value;
 use xenonet_base::text::js_number;
 
@@ -30,12 +30,10 @@ pub fn run(app: Option<&str>, port_flag: Option<&str>) -> i32 {
     let body = if text.is_empty() { "{}".to_string() } else { text };
     let env = std::env::var("XENONET_PORT").ok();
     if let Some(port) = port(port_flag, env.as_deref()) {
-        if let Ok(a) = http::post_json(port, &format!("/api/hook/{app}"), body.as_bytes(), TIMEOUT) {
-            if a.status == 200 {
-                let mut out = std::io::stdout().lock();
-                let _ = out.write_all(&a.body);
-                let _ = out.flush();
-            }
+        if let Ok(http::Answer { status: 200, body: Ok(body), .. }) = http::post_json(port, &format!("/api/hook/{app}"), body.as_bytes(), TIMEOUT) {
+            let mut out = std::io::stdout().lock();
+            let _ = out.write_all(&body);
+            let _ = out.flush();
         }
     }
     0

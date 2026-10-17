@@ -63,7 +63,7 @@ done.
 Cargo.toml                 the workspace: shared versions, the release profile
 crates/
   xenonet-base             paths.js, pricing.js, dirs.js, log.js, schema/ids.js, JSON and time as JS reads them,
-                           units for the command
+                           units.js for the command, private-file.js, client.js
   xenonet-blocks           core/blocks/: lifecycle, scanner, gatherer, tailer, normalizer, JSON and SQLite stores
   xenonet-schema           core/schema/, vendor.js, drift.js: the schemas, lenient reading, drift records
   xenonet-sources          lines.js, claude.js, codex.js, git.js, wiki.js, live.js, numbat.js, demo.js, native/
@@ -485,13 +485,14 @@ place. This table follows it.
 | `core/migrate.js`, `core/statefile.js` | `xenonet-state/src/migrate.rs`, `statefile.rs` | `statefile`, `store`, `state` pass |
 | `core/dirs.js`, `core/log.js` | `xenonet-base/src/dirs.rs`, `log.rs` | `platform`, `log`, `cli`, `doctor` pass |
 | `core/schema/ids.js` | `xenonet-base/src/ids.rs` | `schema-ids`, `hosts-ids`, `schemas` pass |
+| `core/client.js` | `xenonet-base/src/client.rs`, `http.rs` (HTTP/1.1 to 127.0.0.1, which the hook uses too) | `client`, `cli`, and the MCP servers' tests through it |
 | `core/units.js` | `xenonet-base/src/units.rs`, rounding as `toFixed`, `toLocaleString` and `Math.round` do | `stats`, `token-files`, `state`, `server` pass |
 | `core/actors/tokens.js` | `xenonet-actors/src/tokens.rs` | `token-files`, `actor-registration`, `actor-routes`, `actor-gateway` pass |
 | `core/private-file.js`, `core/actors/token-file.js` (but the doctor's look in repos) | `xenonet-base/src/private_file.rs`, `xenonet-actors/src/token_file.rs` | `private-file`, `token-files`, `cli-actor`, `mcp-actor`, `hosts-config` pass, the Windows ACL cases included |
 | `xenonet mcp` for sessions (`mcp/xenonet.js`), a prototype | `xenonet-mcp`, on rmcp, Rust 1.88+ | Its own stdio tests; the same answers as the JS servers to the probe and the handshake |
 | `xenonet hook` (`cli/commands/hook.js`) | `xenonet-cli`, the `xenonet` binary | `launcher`'s hook cases, as Rust tests of the binary |
 
-With every twin in place, all 110 test files that reach one pass. The
+With every twin in place, all 111 test files that reach one pass. The
 twins load in the Node processes a test starts too (a server, the
 command, an MCP server), so the route and command tests run on them. The two
 fixes on `fix/scanner-racy-mtime` are in the Rust (the scanner reads a

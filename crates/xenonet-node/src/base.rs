@@ -575,3 +575,95 @@ pub fn other_readers(file: String, windows: bool, run: Function<Vec<String>, Run
 pub fn protect_file(file: String, windows: bool, run: Function<Vec<String>, RunAnswer>) -> Jv {
     outcome(private_file::protect_file(&file, windows, &mut runner(&run)).map(|()| Jv::Undef))
 }
+
+// ----- the client -----
+
+use crate::js::MaybeJson;
+use xenonet_base::client;
+
+#[napi(object)]
+pub struct ClientConstants {
+    pub xenonet: u32,
+    pub demo: u32,
+    pub dev: u32,
+    pub health_ms: u32,
+    pub named_health_ms: u32,
+}
+
+#[napi(js_name = "clientConstants")]
+pub fn client_constants() -> ClientConstants {
+    ClientConstants {
+        xenonet: client::XENONET_PORT.into(),
+        demo: client::DEMO_PORT.into(),
+        dev: client::DEV_PORT.into(),
+        health_ms: client::HEALTH_MS as u32,
+        named_health_ms: client::NAMED_HEALTH_MS as u32,
+    }
+}
+
+/// Which XenoNet, as the twin reads the options: a port when one is named
+/// (Number() of it), and XENONET_PORT when it's set.
+#[napi(object)]
+pub struct ClientPick {
+    pub port: Option<f64>,
+    pub demo: bool,
+    pub dev: bool,
+    pub env_port: Option<String>,
+}
+
+fn pick_of(p: ClientPick) -> client::Pick {
+    client::Pick { port: p.port, demo: p.demo, dev: p.dev, env_port: p.env_port }
+}
+
+#[napi(js_name = "clientCandidates")]
+pub fn client_candidates(p: ClientPick) -> Vec<f64> {
+    client::candidates(&pick_of(p))
+}
+
+#[napi(js_name = "clientHealthMs")]
+pub fn client_health_ms(p: ClientPick) -> f64 {
+    client::health_ms(&pick_of(p)) as f64
+}
+
+#[napi(js_name = "clientNotRunning")]
+pub fn client_not_running(ports: Vec<f64>) -> String {
+    client::not_running(&ports)
+}
+
+#[napi(js_name = "clientDefaultName")]
+pub fn client_default_name(port: f64) -> &'static str {
+    client::default_name(port)
+}
+
+// The calls wait on the network in a thread of their own, not in one of
+// libuv's few, which the files share: a long poll would hold one for its
+// whole wait.
+
+/// A promise of the first XenoNet of these ports that answers: { port,
+/// health }, or null.
+#[napi(js_name = "clientFind")]
+pub fn client_find(env: &Env, ports: Vec<f64>, answer_ms: f64) -> Result<Object<'_>> {
+    let (deferred, promise) = env.create_deferred()?;
+    std::thread::spawn(move || {
+        let found = client::find(&ports, std::time::Duration::from_millis(answer_ms.max(0.0) as u64));
+        deferred.resolve(move |_| Ok(found.map_or(Jv::Json(Value::Null), |s| Jv::Obj(vec![("port", Jv::Num(s.port.into())), ("health", Jv::Json(s.health))]))));
+    });
+    Ok(promise)
+}
+
+/// A promise of { ok } (the answer) or { error: { message, status } }.
+#[napi(js_name = "clientRequest")]
+pub fn client_request(env: &Env, port: f64, name: String, method: String, route: String, body: MaybeJson, headers: Vec<Vec<String>>) -> Result<Object<'_>> {
+    let (deferred, promise) = env.create_deferred()?;
+    let headers: Vec<(String, String)> = headers.into_iter().filter_map(|h| Some((h.first()?.clone(), h.get(1)?.clone()))).collect();
+    std::thread::spawn(move || {
+        let answer = client::request(port, &name, &method, &route, body.0.as_ref(), &headers);
+        deferred.resolve(move |_| {
+            Ok(match answer {
+                Ok(v) => Jv::Obj(vec![("ok", Jv::Json(v))]),
+                Err(e) => Jv::Obj(vec![("error", Jv::Obj(vec![("message", text(e.message)), ("status", e.status.map_or(Jv::Undef, |s| Jv::Num(s.into())))]))]),
+            })
+        });
+    });
+    Ok(promise)
+}
