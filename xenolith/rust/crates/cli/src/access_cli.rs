@@ -11,10 +11,14 @@
 //!                                                      a token for the subject, shown once; its scopes
 //!                                                      default to what the subject is granted now
 //!   xenolith token revoke <tok_…|subject>             revoke one token, or every token of a subject
+//!   xenolith audit [verify | tail [N]] [--json]       check the audit chain, or show its last entries
+//!
+//! Each change goes in the audit chain (xenolith_core::audit) as made by "you".
 
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use xenolith_core::access::{self, GRANT_MS, Policy, format_scope, format_selector, parse_scope};
+use xenolith_core::audit;
 use xenolith_core::paths::AppPaths;
 use xenolith_core::spaces::{self, SpaceId};
 use xenolith_core::text::{from_ms, local_iso, now_ms};
@@ -27,7 +31,7 @@ fn fail(msg: &str) -> ! {
 
 fn usage() -> ! {
     eprintln!(
-        "usage: xenolith spaces [add <space> [--identity <name>]] [--json] | xenolith grant <subject> <scope> [--days N] | xenolith revoke <subject> [<scope>] | xenolith access [--json] | xenolith token create <subject> [--scope \"<scopes>\"] [--label <text>] [--days N] | xenolith token revoke <tok_…|subject>"
+        "usage: xenolith spaces [add <space> [--identity <name>]] [--json] | xenolith grant <subject> <scope> [--days N] | xenolith revoke <subject> [<scope>] | xenolith access [--json] | xenolith token create <subject> [--scope \"<scopes>\"] [--label <text>] [--days N] | xenolith token revoke <tok_…|subject> | xenolith audit [verify | tail [N]] [--json]"
     );
     std::process::exit(2)
 }
@@ -115,6 +119,7 @@ pub fn run(cmd: &str, args: &[String]) -> ! {
                 })
                 .unwrap_or_else(|e| fail(&e.to_string()));
             }
+            audit::best_effort(&paths, "space", "you", vec![("space", json!(id.to_string())), ("event", json!("added")), ("identities", if identities.is_empty() { Value::Null } else { json!(identities) })]);
             if json_out {
                 println!("{}", json!({ "space": id.to_string(), "identities": identities }));
             } else {
@@ -127,6 +132,7 @@ pub fn run(cmd: &str, args: &[String]) -> ! {
             let days = opts(args, "--days").first().map(|d| d.parse::<f64>().unwrap_or_else(|_| fail("--days takes a number")));
             let ms = days.map_or(GRANT_MS, |d| ((d * 86_400_000.0) as i64).clamp(60_000, 3650 * 86_400_000));
             let g = access::update(&paths, |p| p.grant(subject, scope.clone(), ms, "you", now)).unwrap_or_else(|e| fail(&e.to_string()));
+            audit::best_effort(&paths, "grant", "you", vec![("subject", json!(g.subject)), ("scope", json!(format_scope(&g.scope))), ("expiresAt", json!(g.expires_at))]);
             if let Some(id) = named_space(&scope).filter(|id| !id.is_local()) {
                 spaces::create(&root(), &id).unwrap_or_else(|e| fail(&e.to_string()));
             }
@@ -140,6 +146,7 @@ pub fn run(cmd: &str, args: &[String]) -> ! {
         ("revoke", [subject, rest @ ..]) if rest.len() <= 1 => {
             let scope = rest.first().map(|s| parse_scope(s).unwrap_or_else(|| fail(&format!("\"{s}\" is not a scope"))));
             let n = access::update(&paths, |p| Ok(p.revoke(subject, scope.as_ref()))).unwrap_or_else(|e| fail(&e.to_string()));
+            audit::best_effort(&paths, "revoke", "you", vec![("subject", json!(subject)), ("scope", scope.as_ref().map(|s| json!(format_scope(s))).unwrap_or(Value::Null)), ("revoked", json!(n))]);
             if json_out {
                 println!("{}", json!({ "revoked": n }));
             } else {
@@ -164,6 +171,7 @@ pub fn run(cmd: &str, args: &[String]) -> ! {
             let ttl = days.map(|d| ((d * 86_400_000.0) as i64).clamp(60_000, 3650 * 86_400_000));
             let label = opts(args, "--label").first().copied().unwrap_or("");
             let (token, rec) = access::update(&paths, |p| p.issue(subject, scopes.clone(), label, ttl, None, now)).unwrap_or_else(|e| fail(&e.to_string()));
+            audit::best_effort(&paths, "token", "you", vec![("token", json!(rec.id)), ("subject", json!(rec.subject)), ("scopes", json!(rec.scopes.iter().map(format_scope).collect::<Vec<_>>())), ("expiresAt", rec.expires_at.map(|e| json!(e)).unwrap_or(Value::Null))]);
             if json_out {
                 println!("{}", json!({ "token": token, "id": rec.id, "subject": rec.subject, "scopes": rec.scopes.iter().map(format_scope).collect::<Vec<_>>(), "expiresAt": rec.expires_at }));
             } else {
@@ -180,12 +188,39 @@ pub fn run(cmd: &str, args: &[String]) -> ! {
         }
         ("token", ["revoke", which]) => {
             let n = access::update(&paths, |p| Ok(p.revoke_token(which))).unwrap_or_else(|e| fail(&e.to_string()));
+            audit::best_effort(&paths, "token-revoked", "you", vec![("which", json!(which)), ("revoked", json!(n))]);
             if json_out {
                 println!("{}", json!({ "revoked": n }));
             } else {
                 println!("Revoked {n} token(s).");
             }
             std::process::exit(if n == 0 { 1 } else { 0 })
+        }
+        ("audit", rest) if rest.is_empty() || rest == ["verify"] => {
+            let file = audit::chain_file(&paths);
+            let v = audit::verify(&file).unwrap_or_else(|e| fail(&e.to_string()));
+            if json_out {
+                println!("{}", json!({ "lines": v.lines, "head": v.head, "broken": v.broken.as_ref().map(|(n, why)| json!({ "line": n, "why": why })) }));
+            } else if let Some((line, why)) = &v.broken {
+                println!("The audit chain breaks at line {line} of {}: {why}.", wiki::disp(&file));
+            } else {
+                println!("The audit chain holds: {} entries, last hash {}.", v.lines, v.head);
+            }
+            std::process::exit(if v.broken.is_some() { 1 } else { 0 })
+        }
+        ("audit", ["tail", rest @ ..]) if rest.len() <= 1 => {
+            let n = rest.first().map(|n| n.parse::<usize>().unwrap_or_else(|_| fail("tail takes a number"))).unwrap_or(20);
+            let lines = audit::tail(&audit::chain_file(&paths), n);
+            if json_out {
+                println!("{}", json!({ "entries": lines }));
+            } else {
+                for l in &lines {
+                    let skip = ["seq", "at", "kind", "who", "prev", "hash"];
+                    let rest: Vec<String> = l.as_object().into_iter().flatten().filter(|(k, _)| !skip.contains(&k.as_str())).map(|(k, v)| format!("{k}={}", v.as_str().map(String::from).unwrap_or_else(|| v.to_string()))).collect();
+                    println!("{:>5} {} {:<13} {:<28} {}", l["seq"].as_i64().unwrap_or(0), l["at"].as_str().unwrap_or(""), l["kind"].as_str().unwrap_or(""), l["who"].as_str().unwrap_or(""), rest.join(" "));
+                }
+            }
+            std::process::exit(0)
         }
         ("access", []) => {
             let p = access::load(&paths);

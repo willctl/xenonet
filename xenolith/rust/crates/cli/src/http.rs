@@ -351,6 +351,8 @@ fn principal_of(base: &str, bearer: &Option<Option<String>>, entry: &mut Entry) 
                 Some(p) => Ok(p),
                 None => {
                     entry.result = Some("invalid-token".into());
+                    // Never the token itself: a hash of it, enough to tell attempts with one token apart.
+                    xenolith_core::audit::best_effort(&AppPaths::current(), "refused", "an unknown token", vec![("why", json!("invalid token")), ("token", json!(&access::hash_token(t)[..12])), ("transport", json!("http"))]);
                     Err(challenge(base, Some("invalid_token"), None, "The token is unknown, expired, revoked, or for another server."))
                 }
             }

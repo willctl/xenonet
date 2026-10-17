@@ -4,6 +4,7 @@
 //! only their title and description.
 
 use xenolith_core::access::{self, Level, Policy, Principal};
+use xenolith_core::audit;
 use xenolith_core::inbox::{self, NoteInput, PageInput};
 use xenolith_core::lock::cleanup_locks;
 use xenolith_core::paths::{AppPaths, Env};
@@ -188,31 +189,44 @@ fn default_space(root: &Path, policy: &Policy, who: &Principal, need: Level, now
 /// The space a call works in, after the access check (deny by default): its id and folder. You
 /// start a space by writing to it; a token needs admin there to do the same.
 pub fn open_space(st: &State, ctx: &Ctx, root: &Path, args: &Value, need: Level) -> Result<(SpaceId, PathBuf), Error> {
-    let policy = access::load(&AppPaths::current());
+    let paths = AppPaths::current();
+    let policy = access::load(&paths);
     let now = now_ms();
+    // Every refusal goes in the audit chain: who, where, what for and why (never the call's text).
+    let refuse = |space: Option<&SpaceId>, why: &str, e: Error| {
+        audit::best_effort(&paths, "refused", &ctx.principal.name(), vec![("space", space.map(|s| json!(s.to_string())).unwrap_or(Value::Null)), ("need", json!(need.as_str())), ("why", json!(why)), ("transport", json!(ctx.transport))]);
+        e
+    };
     let Some(who) = policy.current(&ctx.principal, now) else {
-        return Err(Error::Wiki("Refused: this token has been revoked or has expired. Ask the user for a new one.".into()));
+        return Err(refuse(None, "revoked", Error::Wiki("Refused: this token has been revoked or has expired. Ask the user for a new one.".into())));
     };
     let who = &who;
     if Policy::scope_ceiling(who).is_none_or(|c| c < need) {
         *ctx.scope_needed.lock().unwrap() = Some(format!("ctx:{}", need.as_str()));
-        return Err(Error::Wiki(format!("Refused: this token's scopes don't include ctx:{}. Ask the user for a token that does.", need.as_str())));
+        return Err(refuse(None, "scope", Error::Wiki(format!("Refused: this token's scopes don't include ctx:{}. Ask the user for a token that does.", need.as_str()))));
     }
     let id = match opt_s(args, "space").filter(|s| !s.trim().is_empty()) {
         Some(s) => SpaceId::parse(&s)?,
-        None => default_space(root, &policy, who, need, now).ok_or_else(|| match who {
-            Principal::Local => Error::Wiki(format!("Refused: you may not {} in any space (access.json says \"local\": \"none\").", need.as_str())),
-            Principal::Token { .. } => Error::Wiki(format!("Refused: no space that this token can {}. Ask the user to grant it one.", need.as_str())),
+        None => default_space(root, &policy, who, need, now).ok_or_else(|| {
+            refuse(
+                None,
+                "no space",
+                match who {
+                    Principal::Local => Error::Wiki(format!("Refused: you may not {} in any space (access.json says \"local\": \"none\").", need.as_str())),
+                    Principal::Token { .. } => Error::Wiki(format!("Refused: no space that this token can {}. Ask the user to grant it one.", need.as_str())),
+                },
+            )
         })?,
     };
     if !policy.allows(who, &id, need, now) {
-        return Err(no_space(&id, need));
+        return Err(refuse(Some(&id), "not granted", no_space(&id, need)));
     }
     if spaces::exists(root, &id) {
         return Ok((id.clone(), spaces::space_dir(root, &id)));
     }
     if need >= Level::Append && !st.read_only && policy.allows(who, &id, Level::Admin, now) {
         let dir = spaces::create(root, &id)?;
+        audit::best_effort(&paths, "space", &who.name(), vec![("space", json!(id.to_string())), ("event", json!("created"))]);
         return Ok((id, dir));
     }
     Err(match who {
@@ -461,6 +475,26 @@ pub fn call_tool(st: &State, ctx: &Ctx, called: &str, args: &Value) -> Value {
             _ => Err(Error::Wiki(format!("Tool {name} not found"))),
         }
     })();
+    // Every write goes in the audit chain: who, which space, which note, and a hash of the text.
+    if let (Ok(text), Some(space)) = (&outcome, &used_space) {
+        if needed_level(name, args) >= Level::Append {
+            let note = text.strip_prefix("Saved note ").or_else(|| text.strip_prefix("Already saved as note ")).and_then(|t| t.split_whitespace().next());
+            let content = format!("{}\n{}", s(args, "title"), if name == "context_log" { s(args, "body") } else { s(args, "content") });
+            audit::best_effort(
+                &AppPaths::current(),
+                "write",
+                &ctx.principal.name(),
+                vec![
+                    ("space", json!(space)),
+                    ("tool", json!(name)),
+                    ("note", note.map(|n| json!(n)).unwrap_or(Value::Null)),
+                    ("duplicate", if text.starts_with("Already saved") { json!(true) } else { Value::Null }),
+                    ("content", json!(audit::content_hash(&content))),
+                    ("transport", json!(ctx.transport)),
+                ],
+            );
+        }
+    }
     let (text, is_error, result, error) = match outcome {
         Ok(t) => (t, false, "ok", None),
         Err(Error::Wiki(m)) => {

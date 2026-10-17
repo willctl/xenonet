@@ -64,7 +64,7 @@ fn main() {
             curator::run(&args[1..])
         }
         Some("forget") => forget::run(&args[1..]),
-        Some(cmd @ ("spaces" | "grant" | "revoke" | "access" | "token")) => access_cli::run(cmd, &args[1..]),
+        Some(cmd @ ("spaces" | "grant" | "revoke" | "access" | "token" | "audit")) => access_cli::run(cmd, &args[1..]),
         Some("embeddings") => embeddings::run(&args[1..]),
         Some("models") => models::run(&args[1..]),
         Some("serve") => {}

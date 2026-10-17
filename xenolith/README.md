@@ -225,6 +225,25 @@ either one takes effect on connections already open.
 
 The secret guard refuses Xenolith and XenoNet tokens in notes and pages.
 
+### The audit chain
+
+Grants, revocations, tokens, refusals, writes and new spaces each add one JSON
+line to `audit/chain.jsonl` in Xenolith's state folder: when, what, who (`you`,
+or a token's subject and id), and the space. A write records the note's id and
+a hash of what was written, never the text, as XenoNet's delivery audit does.
+Each line carries the SHA-256 of the line before it, so a line changed, removed
+or put in between breaks the chain at that point:
+
+```bash
+xenolith audit verify
+xenolith audit tail 20
+```
+
+`verify` names the first line that doesn't follow and exits 1. The chain shows
+tampering but can't prevent it: whoever can write the file can rewrite all of
+it. Keep the last hash `verify` prints somewhere else to pin it. The curator's
+own record of each filed note stays in `.curator/audit/` inside each space.
+
 ## The curator
 
 `xenolith curator` runs as you, never as the service. It runs the Codex CLI

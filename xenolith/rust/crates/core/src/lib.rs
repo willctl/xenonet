@@ -1,12 +1,14 @@
 //! Xenolith's storage and the logic every program shares: where files live, pages and their
 //! frontmatter, the index, the daily log, search, the inbox, cross-process locks, the request log
 //! and the secret guard. A faithful port of the Node runtime (src/*.mjs): same files, same formats,
-//! so Node and Rust programs can work on one wiki at the same time.
+//! so Node and Rust programs can work on one wiki at the same time. What came after the port is
+//! Rust only: spaces, who may use them (access), and the audit chain.
 
 pub mod access;
 pub mod activity;
 pub mod asks;
 pub mod askworker;
+pub mod audit;
 pub mod codex;
 pub mod cron;
 pub mod curator;
