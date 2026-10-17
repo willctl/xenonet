@@ -514,6 +514,7 @@ place. This table follows it.
 | `core/engine/verify.js` | `xenonet-engine/src/verify.rs` (procs and the clock through the twin, the pins in the engine store) | `verify`, `delivery-opencode`, `actor-routes` pass |
 | `core/engine/attest.js` | `xenonet-engine/src/attest.rs` | `engine`, `engine-actors`, `actor-gateway`, `delivery-opencode` pass |
 | `core/engine/connect.js` | `xenonet-engine/src/connect.rs` (the files and the CLIs through the twin) | `engine-connect`, `engine`, `windows-command`, `cli`, `engine-routes` pass |
+| `core/engine/engine.js` | `xenonet-engine/src/engine.rs` (the map's state through narrow readers, events, waits and Repos's git in the twin) | `engine`, `engine-actors`, `delivery-wake`, `delivery-scopes`, `actor-wake`, `actor-gateway`, `server` pass |
 | `core/delivery/selector.js`, `usage.js`, `policy.js` | `xenonet-engine/src/delivery/` (the policy's clock, limits and files through the twin) | `delivery-scopes`, `delivery-wake`, `delivery-router`, `delivery-routes`, `delivery-opencode`, `engine` pass |
 | `core/delivery/channel.js`, `tmux.js`, `resume.js`, `setup.js`, `opencode.js` | `xenonet-engine/src/delivery/` (polls, processes, commands, files and HTTP through the twins) | `delivery-router`, `delivery-wake`, `delivery-opencode`, `doctor` pass |
 | `core/delivery/router.js` | `xenonet-engine/src/delivery/router.rs` (each record's JS object and the timers in the twin) | `delivery-router`, `delivery-wake`, `delivery-opencode`, `delivery-scopes`, `server` pass |

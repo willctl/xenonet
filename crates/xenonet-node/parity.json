@@ -264,6 +264,13 @@
         "The records are Rust's; the twin keeps a JS object for each, which route() and list() give and the events copy, and the timers."
       ]
     },
+    "core/engine/engine.js": {
+      "rust": "crates/xenonet-engine/src/engine.rs",
+      "differences": [
+        "The map's state (core/state.js and its readers) is read through narrow readers in the twin, which hand over only what the engine reads of a node or a live session; the events, the promises inboxes and listening hooks wait on, Intl's local time and Repos (a cache of the git reads' promises) stay JS.",
+        "Where the JS awaited one of the engine's own async functions, the Rust yields a turn, so that what runs between steps runs in the order it did; views asked together still read their repos together."
+      ]
+    },
     "core/engine/connect.js": {
       "rust": "crates/xenonet-engine/src/connect.rs",
       "differences": [

@@ -10,6 +10,7 @@
 pub mod attest;
 pub mod connect;
 pub mod delivery;
+pub mod engine;
 pub mod js;
 pub mod jsre;
 pub mod peer;
