@@ -337,3 +337,159 @@ pub fn build_graph(input: Json, parent_of: Json) -> Json {
     let parent_of: std::collections::HashMap<String, String> = parent_of.0.as_array().map_or_else(Default::default, |a| a.iter().filter_map(|p| Some((p.get(0)?.as_str()?.to_string(), p.get(1)?.as_str()?.to_string()))).collect());
     Json(graph::build_graph(&input.0, &parent_of))
 }
+
+// ---------- state.js ----------
+
+use xenonet_state::state;
+
+fn js_set(v: &Value) -> std::collections::HashSet<String> {
+    v.as_array().map_or_else(Default::default, |a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+}
+
+#[napi(js_name = "sourceStatus")]
+pub fn source_status(name: String, ok: bool, ms: MaybeJson, value: MaybeJson, error: MaybeJson) -> Json {
+    Json(state::source_status(&name, ok, ms.0.as_ref(), value.0.as_ref(), error.0.as_ref()))
+}
+
+#[napi(js_name = "visibleResource")]
+pub fn visible_resource(server: String, hidden: Json) -> bool {
+    state::visible_resource(&server, &js_set(&hidden.0))
+}
+
+#[napi(js_name = "mergeSessions")]
+pub fn merge_sessions(prev: Json, codex_ok: bool, codex: Json, claude_ok: bool, claude: Json, observed: Json, demo_titles: Json) -> Json {
+    let list = |v: &Json| v.0.as_array().cloned().unwrap_or_default();
+    let titles: std::collections::HashMap<String, Value> = demo_titles.0.as_array().map_or_else(Default::default, |a| a.iter().filter_map(|p| Some((p.get(0)?.as_str()?.to_string(), p.get(1).cloned().unwrap_or(Value::Null)))).collect());
+    Json(Value::Array(state::merge_sessions(&list(&prev), (codex_ok, &list(&codex)), (claude_ok, &list(&claude)), &list(&observed), &titles)))
+}
+
+#[napi(js_name = "sessionDirs")]
+pub fn session_dirs(sessions: Json) -> Json {
+    Json(Value::Array(state::session_dirs(sessions.0.as_array().map_or(&[], Vec::as_slice))))
+}
+
+#[napi(js_name = "projectsNote")]
+pub fn projects_note(scan: Json) -> String {
+    state::projects_note(&scan.0)
+}
+
+#[napi(js_name = "projectRules")]
+pub fn project_rules(codex: bool, root: String, picks: MaybeJson, yours: Json) -> Json {
+    Json(state::project_rules(codex, &root, picks.0.as_ref(), &yours.0))
+}
+
+#[napi(js_name = "ruleProblem")]
+pub fn rule_problem(as_: MaybeJson, full: String, projects_dir: String, is_dir: bool) -> Option<String> {
+    state::rule_problem(as_.0.as_ref(), &full, &projects_dir, is_dir)
+}
+
+#[napi(js_name = "projectDetection")]
+pub fn project_detection(root: String, scan: MaybeJson, rules: Json, codex: MaybeJson, current: MaybeJson) -> Json {
+    Json(state::project_detection(&root, scan.0.as_ref(), &rules.0, codex.0.as_ref(), current.0.as_ref()))
+}
+
+#[napi(js_name = "homeOf")]
+pub fn home_of(id: String, kind_of: Function<String, Option<String>>, parent_of: Function<String, Option<String>>) -> Option<String> {
+    state::home_of(&id, &mut |i| kind_of.call(i.to_string()).ok().flatten(), &mut |i| parent_of.call(i.to_string()).ok().flatten())
+}
+
+#[napi(js_name = "titleOf")]
+pub fn title_of(title: MaybeJson, name: MaybeJson, id: Json) -> Json {
+    Json(state::title_of(title.0.as_ref(), name.0.as_ref(), &id.0))
+}
+
+#[napi(js_name = "cleanIdentityName")]
+pub fn clean_identity_name(name: MaybeJson) -> Option<String> {
+    state::clean_identity_name(name.0.as_ref())
+}
+
+#[napi(js_name = "knownIdentity")]
+pub fn known_identity(id: MaybeJson, identities: Json, known: Json) -> Option<String> {
+    state::known_identity(id.0.as_ref(), identities.0.as_array().map_or(&[], Vec::as_slice), &known.0)
+}
+
+#[napi(js_name = "identityDetection")]
+pub fn identity_detection(enabled: bool, at: MaybeJson, identities: MaybeJson, saved: Json, node: Function<String, MaybeJson>) -> Json {
+    Json(state::identity_detection(enabled, at.0.as_ref(), identities.0.as_ref(), &saved.0, &mut |id| node.call(id.to_string()).ok().and_then(|n| n.0).filter(|v| !v.is_null())))
+}
+
+#[napi(js_name = "pinProblem")]
+pub fn pin_problem(kind: Option<String>) -> Option<&'static str> {
+    state::pin_problem(kind.as_deref())
+}
+
+#[napi(js_name = "liveSnapshotFor")]
+pub fn live_snapshot_for(snap: Json, hidden: Json, acks: Json, signed_in: MaybeJson, node: Function<String, MaybeJson>) -> Json {
+    Json(state::live_snapshot(snap.0, &js_set(&hidden.0), &acks.0, signed_in.0.as_ref(), &mut |id| node.call(id.to_string()).ok().and_then(|n| n.0).filter(|v| !v.is_null())))
+}
+
+#[napi(js_name = "trayStatus")]
+pub fn tray_status(snap: Json, title_of: Function<Json, MaybeJson>, url: String) -> Json {
+    Json(state::summary(&snap.0, &mut |id| title_of.call(Json(id.clone())).ok().and_then(|t| t.0).unwrap_or(Value::Null), &url))
+}
+
+#[napi(js_name = "handoffNotes")]
+pub fn handoff_notes(notes: Json, page: MaybeJson) -> Json {
+    Json(state::handoff_notes(&notes.0, page.0.as_ref()))
+}
+
+#[napi(js_name = "handoffNeedsTranscript")]
+pub fn handoff_needs_transcript(notes: Json) -> bool {
+    state::handoff_needs_transcript(&notes.0)
+}
+
+#[napi(js_name = "identitiesNote")]
+pub fn identities_note(identities: Json) -> String {
+    state::identities_note(identities.0.as_array().map_or(&[], Vec::as_slice))
+}
+
+#[napi(js_name = "readerStatus")]
+pub fn reader_status(name: String, state_: String, runs: u32, what: String) -> Json {
+    Json(state::reader_status(&name, &state_, runs as usize, &what))
+}
+
+#[napi(js_name = "trayUrl")]
+pub fn tray_url(host: String, port: Json) -> String {
+    state::url(&host, &port.0)
+}
+
+#[napi(js_name = "renameNote")]
+pub fn rename_note(desktop: bool, desktop_error: MaybeJson) -> Json {
+    Json(state::rename_note(desktop, desktop_error.0.as_ref()))
+}
+
+#[napi(js_name = "StateMemory")]
+pub struct JsStateMemory {
+    m: state::Memory,
+}
+
+#[napi]
+impl JsStateMemory {
+    #[napi(constructor)]
+    pub fn new() -> Self {
+        JsStateMemory { m: state::Memory::new() }
+    }
+    #[napi]
+    pub fn updated(&mut self, sessions: Json) -> Json {
+        Json(Value::Array(self.m.updated(sessions.0.as_array().map_or(&[], Vec::as_slice))))
+    }
+    #[napi]
+    pub fn changed(&mut self, graph: Json) -> bool {
+        self.m.changed(&graph.0)
+    }
+    #[napi(js_name = "noteSignins")]
+    pub fn note_signins(&mut self, accounts: Json, now: f64) -> Json {
+        Json(Value::Array(self.m.note_signins(&accounts.0, now)))
+    }
+    #[napi(getter, js_name = "signedIn")]
+    pub fn signed_in(&self) -> Json {
+        Json(self.m.signed_in().unwrap_or(Value::Null))
+    }
+    /// `home` is [id, name, repo] for the session's home, or null.
+    #[napi(js_name = "shipIt")]
+    pub fn ship_it(&mut self, ev: Json, home: MaybeJson, now: f64) -> Json {
+        let home = home.0.filter(|h| h.is_array());
+        let h = home.as_ref().and_then(|h| Some((h.get(0)?.as_str()?, h.get(1)?, h.get(2)?)));
+        Json(self.m.ship_it(&ev.0, h, now).unwrap_or(Value::Null))
+    }
+}

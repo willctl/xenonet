@@ -258,6 +258,14 @@
         "Which project orbits which (projects.js's projectRelations) is worked out by the twin and handed in, so the Rust takes it as an argument.",
         "A layout pin without x, y or z gives null for it, where JS left fx, fy or fz undefined (left out of the JSON)."
       ]
+    },
+    "core/state.js": {
+      "rust": "crates/xenonet-state/src/state.rs",
+      "differences": [
+        "The class stays the twin's: an EventEmitter that owns the blocks, the timers and the map, whose graph, index and parent maps the server and the tests read and change, so they stay JS objects. Rust makes the refresh's decisions (which sessions it maps, each source's status, the projects folder's rules and detection, where a session lives, the live snapshot as the page gets it, the tray's summary, a handoff's notes) and keeps what a refresh remembers for the next (Memory: pulses, the map's signature, sign-ins, nudges to commit).",
+        "The live snapshot it gives is Rust's copy, not the tailer's snapshot changed in place.",
+        "Until the other groups' twins are merged beside it, it imports their JS (projects, codex, claude, live, git, identities, wiki, search, stats, numbat, native/, reported-runs)."
+      ]
     }
   },
   "tests": [
