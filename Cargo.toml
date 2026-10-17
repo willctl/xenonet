@@ -40,6 +40,8 @@ sha2 = "0.10"
 getrandom = "0.3"
 # The local time zone, as JS's dates read it, on unix.
 libc = "0.2"
+# The refusals' context, kept gzipped as zlib.gzipSync wrote it.
+flate2 = "1"
 # The Node-API bindings that put the crates behind the JS modules during the
 # port. The last releases that build on Rust 1.85; the resolver keeps their
 # dependencies to versions that do too.
