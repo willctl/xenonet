@@ -316,8 +316,13 @@ test('replaceFile: installs, leaves an identical file alone, moves a running pro
       assert.equal(await fsp.readFile(dest, 'utf8'), 'another build');
       if (process.platform === 'win32') assert.equal(fs.readdirSync(path.dirname(dest)).filter((f) => f.includes('.old-')).length, 1, 'the running copy waits aside');
     } finally {
-      child.kill();
-      await new Promise((r) => child.on('exit', r));
+      // A copied Node may not start at all (Homebrew's loads its library from ../lib): then it has
+      // already exited, and 'exit' would never fire again.
+      if (child.exitCode === null && child.signalCode === null) {
+        const exited = new Promise((r) => child.on('exit', r));
+        child.kill();
+        await exited;
+      }
     }
     await new Promise((r) => setTimeout(r, 300));
     await removeOldCopies(dest);
