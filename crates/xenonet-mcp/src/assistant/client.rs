@@ -58,14 +58,18 @@ fn platform() -> &'static str {
     }
 }
 
-/// The endpoint's descriptor: in the runtime folder (core/components/
-/// runtime.js), named for the XenoNet's port.
-pub fn endpoint_file(port: &str) -> String {
-    let runtime = process::set("XENONET_RUNTIME_DIR").unwrap_or_else(|| {
+/// The runtime folder (core/components/runtime.js).
+fn runtime_dir() -> String {
+    process::set("XENONET_RUNTIME_DIR").unwrap_or_else(|| {
         let state = xenonet_base::dirs::app_dir("state", process::set("XDG_STATE_HOME").as_deref(), process::var("LOCALAPPDATA").as_deref(), platform(), &home(), "XenoNet");
         join_all(&[&state, "runtime"])
-    });
-    join_all(&[&runtime, &format!("assistant-{port}.json")])
+    })
+}
+
+/// The endpoint's descriptor (core/assistant/protocol.js): in the runtime
+/// folder, named for the XenoNet's port.
+pub fn endpoint_file(runtime: &str, port: &str) -> String {
+    join_all(&[runtime, &format!("assistant-{port}.json")])
 }
 
 fn is_grant(grant: &str) -> bool {
@@ -311,9 +315,14 @@ pub struct Read {
     pub detail: Option<String>,
 }
 
+/// A clock or a source of randomness, which tests stand in for.
+pub type Source = Box<dyn Fn() -> f64 + Send + Sync>;
+
 pub struct Client {
     grant: String,
-    port: String,
+    endpoint: String,
+    now: Source,
+    random: Source,
     state: Mutex<State>,
     opening: tokio::sync::Mutex<()>,
 }
@@ -333,7 +342,13 @@ impl Client {
             return Err("--grant takes a grant's id (gr_…), as XenoNet's window shows it".into());
         }
         let port = port.or_else(|| process::set("XENONET_PORT")).unwrap_or_else(|| "47840".into());
-        Ok(Client { grant: grant.to_string(), port, state: Mutex::default(), opening: tokio::sync::Mutex::new(()) })
+        Ok(Client::with(grant, endpoint_file(&runtime_dir(), &port), Box::new(now), Box::new(random)))
+    }
+
+    /// A client for `grant` that finds the endpoint described in
+    /// `endpoint`, with this clock and randomness.
+    pub fn with(grant: &str, endpoint: String, now: Source, random: Source) -> Client {
+        Client { grant: grant.to_string(), endpoint, now, random, state: Mutex::default(), opening: tokio::sync::Mutex::new(()) }
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
@@ -341,8 +356,7 @@ impl Client {
     }
 
     async fn open(&self) -> Result<Arc<Conn>, Refused> {
-        let file = endpoint_file(&self.port);
-        let Some(descriptor) = read_json(&file) else {
+        let Some(descriptor) = read_json(&self.endpoint) else {
             return Err(refused("SERVICE_UNAVAILABLE", "XenoNet's endpoint for remote actors isn't listening: XenoNet isn't running, or no grant is active"));
         };
         let int = |k: &str| descriptor.get(k).and_then(Value::as_f64).filter(|n| n.fract() == 0.0);
@@ -389,7 +403,7 @@ impl Client {
             if let Some(c) = s.client.as_ref().filter(|c| !c.is_closed()) {
                 return Ok(c.clone());
             }
-            if now() < s.retry_at {
+            if (self.now)() < s.retry_at {
                 return Err(refused("SERVICE_UNAVAILABLE", "waiting before trying XenoNet again"));
             }
             s.opened
@@ -419,7 +433,7 @@ impl Client {
                 s.client = None;
                 s.failures += 1;
                 let base = BACKOFF_MAX.min(BACKOFF_FIRST * 2f64.powi(s.failures as i32 - 1));
-                s.retry_at = now() + js_round(base * (0.8 + 0.4 * random()));
+                s.retry_at = (self.now)() + js_round(base * (0.8 + 0.4 * (self.random)()));
             }
         }
         s.opened += 1;
@@ -432,7 +446,7 @@ impl Client {
         let c = match self.connection().await {
             Ok(c) => c,
             Err(e) => {
-                let retry = (e.code == "SERVICE_UNAVAILABLE").then(|| 1000f64.max(self.state().retry_at - now()));
+                let retry = (e.code == "SERVICE_UNAVAILABLE").then(|| 1000f64.max(self.state().retry_at - (self.now)()));
                 return Read { ok: false, envelope: error_envelope(request_id, e.code, retry), detail: Some(e.detail) };
             }
         };
@@ -467,7 +481,7 @@ impl Client {
             return Standing::Not("GRANT_REVOKED");
         }
         let Some(credential) = read_credential(&dir, &self.grant) else { return Standing::Not("GRANT_REVOKED") };
-        if credential.expires_at.is_some_and(|t| t <= now()) {
+        if credential.expires_at.is_some_and(|t| t <= (self.now)()) {
             return Standing::Not("GRANT_EXPIRED");
         }
         Standing::Stands(revision_of(&dir, &self.grant))
@@ -477,4 +491,80 @@ impl Client {
 // Math.round: halves go up.
 fn js_round(x: f64) -> f64 {
     (x + 0.5).floor()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicU64;
+
+    // A clock the test moves by hand.
+    fn clock(start: f64) -> (Arc<AtomicU64>, Source) {
+        let t = Arc::new(AtomicU64::new(start.to_bits()));
+        let read = t.clone();
+        (t, Box::new(move || f64::from_bits(read.load(Ordering::SeqCst))))
+    }
+
+    fn folder(name: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("xenonet-mcp-client-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.to_string_lossy().into_owned()
+    }
+
+    const GRANT: &str = "gr_0123456789abcdef01234567";
+
+    // test/assistant-endpoint.test.js: a XenoNet that isn't there is
+    // refused at once, then not tried again until the wait is over, which
+    // doubles.
+    #[tokio::test(flavor = "current_thread")]
+    async fn waits_longer_after_each_failure() {
+        let dir = folder("nowhere");
+        let (t, now) = clock(1000.0);
+        let set = |ms: f64| t.store(ms.to_bits(), Ordering::SeqCst);
+        let client = Client::with(GRANT, endpoint_file(&dir, "1"), now, Box::new(|| 0.5));
+        let id = "r_00000000-0000-4000-8000-000000000000";
+        let first = client.read("status", &json!({}), id).await;
+        assert_eq!([&first.envelope["code"], &first.envelope["retryable"], &first.envelope["retry_after_ms"]], [&json!("SERVICE_UNAVAILABLE"), &json!(true), &json!(2000)]);
+        set(1500.0);
+        assert_eq!(client.read("status", &json!({}), id).await.envelope["retry_after_ms"], json!(1500));
+        set(3100.0);
+        assert_eq!(client.read("status", &json!({}), id).await.envelope["retry_after_ms"], json!(4000), "doubled");
+        assert_eq!(client.standing(), Standing::Not("SERVICE_UNAVAILABLE"), "no endpoint seen, so no folder to ask");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // A descriptor left by a service that isn't running: nothing is sent,
+    // and the grant's files still say how it stands.
+    #[tokio::test(flavor = "current_thread")]
+    async fn sends_nothing_to_a_service_that_is_gone_and_reads_the_grant_from_its_files() {
+        let dir = folder("gone");
+        let state = join_all(&[&dir, "assistant"]);
+        std::fs::create_dir_all(join_all(&[&state, "credentials"])).unwrap();
+        let token = format!("xenonet_assistant_{}", "a".repeat(64));
+        std::fs::write(
+            join_all(&[&state, "credentials", &format!("{GRANT}.json")]),
+            format!("{{\"schema\":\"assistant/credential/v1\",\"grant_id\":\"{GRANT}\",\"device_id\":\"dev_x\",\"expires_at\":5000,\"token\":\"{token}\"}}\n"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(join_all(&[&state, "revisions"])).unwrap();
+        std::fs::write(join_all(&[&state, "revisions", GRANT]), "3\n").unwrap();
+        // A port nothing listens on, and a pid nobody has.
+        let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        std::fs::write(endpoint_file(&dir, "9"), json!({ "api": { "min": 1, "max": 1 }, "pid": 1u64 << 30, "port": free, "state": state }).to_string()).unwrap();
+        let (t, now) = clock(1000.0);
+        let client = Client::with(GRANT, endpoint_file(&dir, "9"), now, Box::new(|| 0.5));
+        let r = client.read("status", &json!({}), "r_00000000-0000-4000-8000-000000000000").await;
+        assert_eq!((r.envelope["code"].as_str(), r.detail.as_deref()), (Some("SERVICE_UNAVAILABLE"), Some("XenoNet's endpoint file is from a service that isn't running")));
+        assert_eq!(client.standing(), Standing::Stands(Some(3.0)));
+        t.store(5000f64.to_bits(), Ordering::SeqCst);
+        assert_eq!(client.standing(), Standing::Not("GRANT_EXPIRED"));
+        std::fs::create_dir_all(join_all(&[&state, "revoked"])).unwrap();
+        std::fs::write(join_all(&[&state, "revoked", GRANT]), "{}\n").unwrap();
+        assert_eq!(client.standing(), Standing::Not("GRANT_REVOKED"));
+        std::fs::write(join_all(&[&state, "disabled"]), "{}\n").unwrap();
+        assert_eq!(client.standing(), Standing::Not("DISABLED"));
+        assert!(Client::new("gr_nope", None).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
