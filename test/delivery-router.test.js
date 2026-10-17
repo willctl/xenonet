@@ -165,11 +165,20 @@ test("channel: a poll waits and answers with what comes; items queue between pol
 
 test("the MCP server listens as a channel only when the session was started with XenoNet as one, and pushes notifications/claude/channel", async () => {
   const env = { CLAUDE_CODE_SESSION_ID: "abc", CLAUDE_PID: "77" };
-  assert.equal(channelEnabled({ env, cmdline: () => "claude --resume x" }), false);
-  assert.equal(channelEnabled({ env, cmdline: () => "claude --dangerously-load-development-channels server:xenonet" }), true);
-  assert.equal(channelEnabled({ env, cmdline: () => "claude --channels plugin:x server:xenonet-dev" }), true);
-  assert.equal(channelEnabled({ env: { ...env, XENONET_CHANNEL: "1" }, cmdline: () => "" }), true);
-  assert.equal(channelEnabled({ env: { XENONET_CHANNEL: "1" }, cmdline: () => "" }), false, "not Claude Code");
+  const o = { env, name: "xenonet" };
+  assert.equal(channelEnabled({ ...o, cmdline: () => "claude --resume x" }), false);
+  assert.equal(channelEnabled({ ...o, cmdline: () => "claude --dangerously-load-development-channels server:xenonet" }), true);
+  assert.equal(channelEnabled({ ...o, name: "xenonet-dev", cmdline: () => "claude --channels plugin:x server:xenonet-dev" }), true);
+  assert.equal(channelEnabled({ ...o, cmdline: () => "claude --channels plugin:x server:xenonet-dev" }), false, "XenoNet Dev's channel, not this server's");
+  assert.equal(channelEnabled({ ...o, env: { ...env, XENONET_CHANNEL: "1" }, cmdline: () => "" }), true);
+  assert.equal(channelEnabled({ ...o, env: { XENONET_CHANNEL: "1" }, cmdline: () => "" }), false, "not Claude Code");
+  // Started from inside another session, which left its own CLAUDE_PID: the
+  // parent is Claude Code, so it's the one asked.
+  const lines = { 10: "/usr/local/bin/claude --dangerously-load-development-channels server:xenonet", 77: "claude --resume other" };
+  assert.equal(channelEnabled({ ...o, ppid: 10, cmdline: (pid) => lines[pid] }), true);
+  assert.equal(channelEnabled({ ...o, ppid: 10, cmdline: (pid) => ({ ...lines, 10: "claude", 77: lines[10] })[pid] }), false);
+  // A launcher between them: CLAUDE_PID names the session.
+  assert.equal(channelEnabled({ ...o, ppid: 10, cmdline: (pid) => ({ 10: "/bin/sh -c xenonet mcp", 77: lines[10] })[pid] }), true);
   const sent = [];
   const server = { server: { notification: async (n) => sent.push(n) } };
   await listenChannel(() => server, { poll: async () => ({ items: [{ id: 4, from: "Muse\n<x>", text: "[XenoNet from Muse] hi" }] }), once: true });
