@@ -73,6 +73,12 @@
         "TOKEN and GATEWAY_TOKEN are still RegExp objects, made from Rust's patterns.",
         "tokenInUrl still reads the URL with Node's URL; Rust checks its parameters and path."
       ]
+    },
+    "core/blocks/gatherer.js": {
+      "rust": "crates/xenonet-blocks/src/gatherer.rs",
+      "differences": [
+        "backoff lists baseMs, factor and maxMs after the keys it was given; a factor given as undefined counts as 2 (JS made it undefined)."
+      ]
     }
   },
   "tests": [

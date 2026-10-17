@@ -878,3 +878,75 @@ pub fn write_json(file: String, doc: Json, indent: u32) -> Option<Jv> {
     let text = js_json::stringify(&doc.0, indent as usize);
     store::write_atomic(&file, &text).err().map(|e| Jv::Obj(vec![("code", Jv::Json(e.code.map_or(Value::Null, Value::String))), ("message", Jv::Json(Value::String(e.message)))]))
 }
+
+// ----- the gatherer -----
+
+use xenonet_blocks::gatherer::{Backoff, Gatherer};
+
+#[napi(js_name = "Gatherer")]
+pub struct JsGatherer {
+    g: Gatherer,
+}
+
+impl HasLife for JsGatherer {
+    fn life(&self) -> &Lifecycle {
+        &self.g.life
+    }
+    fn life_mut(&mut self) -> &mut Lifecycle {
+        &mut self.g.life
+    }
+}
+
+lifecycle_api!(JsGatherer);
+
+#[napi]
+impl JsGatherer {
+    /// `backoff`: [baseMs, factor or null, maxMs or null], or null.
+    #[allow(clippy::too_many_arguments)]
+    #[napi(constructor)]
+    pub fn new(name: String, every_ms: Option<f64>, next_in: bool, backoff: Option<Vec<Option<f64>>>, stamped: bool, keep: bool, now: f64) -> Self {
+        let backoff = backoff.map(|b| Backoff::of(b.first().copied().flatten().unwrap_or(f64::NAN), b.get(1).copied().flatten(), b.get(2).copied().flatten()));
+        JsGatherer { g: Gatherer::new(&name, every_ms, next_in, backoff, stamped, keep, now) }
+    }
+    /// The backoff as the gatherer uses it, or null.
+    #[napi(getter)]
+    pub fn backoff(&self) -> Option<crate::js::Fields> {
+        self.g.backoff.map(|b| crate::js::Fields(vec![("baseMs", Field::Num(b.base_ms)), ("factor", Field::Num(b.factor)), ("maxMs", Field::Num(b.max_ms))]))
+    }
+    #[napi]
+    pub fn due(&self, now: f64, same_stamp: bool) -> bool {
+        self.g.due(now, same_stamp)
+    }
+    #[napi]
+    pub fn skipped(&mut self) {
+        self.g.skipped();
+    }
+    #[napi]
+    pub fn done(&mut self, at: f64, wait: Option<f64>) {
+        self.g.done(at, wait);
+    }
+    #[napi]
+    pub fn failed(&mut self, at: f64, message: String) -> bool {
+        self.g.failed(at, &message)
+    }
+    #[napi]
+    pub fn forget(&mut self) {
+        self.g.forget();
+    }
+    #[napi(js_name = "nextWait")]
+    pub fn next_wait(&self, now: f64) -> f64 {
+        self.g.next_wait(now)
+    }
+    #[napi(getter)]
+    pub fn good(&self) -> bool {
+        self.g.good
+    }
+    #[napi(getter, js_name = "nextAt")]
+    pub fn next_at(&self) -> f64 {
+        self.g.next_at
+    }
+    #[napi(getter)]
+    pub fn failures(&self) -> u32 {
+        self.g.failures
+    }
+}
