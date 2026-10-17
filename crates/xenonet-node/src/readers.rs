@@ -8,6 +8,7 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde_json::{json, Value};
 use std::sync::{LazyLock, Mutex};
+use xenonet_sources::claude;
 use xenonet_sources::codex::{self, Obj, F};
 use xenonet_sources::git;
 use xenonet_state::projects::{self, FactsCache, Scan};
@@ -338,4 +339,85 @@ pub fn codex_read_state_db(file: String) -> Jv {
 #[napi(js_name = "codexNativeProjects")]
 pub fn codex_native_projects(env: &Env, rows: MaybeJson) -> Result<Jv> {
     codex::native_projects(rows.0.as_ref()).map(objs).or_else(|e| thrown(env, e))
+}
+
+// ---------- claude.js ----------
+
+/// Claude desktop's session files under its claude-code-sessions folder:
+/// [{ file, parts, data }], data undefined when it isn't JSON.
+#[napi(js_name = "claudeDesktopFiles")]
+pub fn claude_desktop_files(root: String) -> Jv {
+    Jv::Arr(
+        claude::desktop_files(&root)
+            .into_iter()
+            .map(|f| Jv::Obj(vec![("file", Jv::Json(Value::String(f.file))), ("parts", Jv::Json(json!(f.parts))), ("data", f.data.into())]))
+            .collect(),
+    )
+}
+
+/// From [[file, parts, record]…] (the records after the lenient reader):
+/// { desktop: the records by CLI session, files: [[desktop id, file]…] }.
+#[napi(js_name = "claudeDesktopIndex")]
+pub fn claude_desktop_index(records: Json) -> Jv {
+    let records: Vec<(String, Vec<String>, Value)> = match records.0 {
+        Value::Array(rs) => rs
+            .into_iter()
+            .filter_map(|r| {
+                let Value::Array(mut r) = r else { return None };
+                let d = r.pop()?;
+                let parts = r.pop().and_then(|p| p.as_array().map(|a| a.iter().map(xenonet_base::text::js_string).collect())).unwrap_or_default();
+                let file = r.pop().map(|f| xenonet_base::text::js_string(&f)).unwrap_or_default();
+                Some((file, parts, d))
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    let (desktop, files) = claude::desktop_index(records);
+    Jv::Obj(vec![("desktop", Jv::Json(Value::Array(desktop))), ("files", Jv::Json(json!(files)))])
+}
+
+#[napi(js_name = "claudeSessions")]
+pub fn claude_sessions(env: &Env, listed: Json, desktop: Json) -> Result<Jv> {
+    let listed = match listed.0 {
+        Value::Array(a) => a,
+        _ => Vec::new(),
+    };
+    let desktop = match desktop.0 {
+        Value::Array(a) => a,
+        _ => Vec::new(),
+    };
+    claude::sessions(&listed, &desktop).map(objs).or_else(|e| thrown(env, e))
+}
+
+/// { start, end, cursor } of a page of `len` messages.
+#[napi(js_name = "claudePage")]
+pub fn claude_page(len: f64, cursor: MaybeJson, limit: f64) -> Jv {
+    let (start, end, next) = claude::page(len as usize, cursor.0.as_ref(), limit);
+    Jv::Obj(vec![("start", Jv::Num(start as f64)), ("end", Jv::Num(end as f64)), ("cursor", opt_s(next))])
+}
+
+#[napi(js_name = "claudeEntries")]
+pub fn claude_entries(env: &Env, messages: Json) -> Result<Jv> {
+    let ms = match messages.0 {
+        Value::Array(a) => a,
+        _ => Vec::new(),
+    };
+    claude::entries(&ms).map(objs).or_else(|e| thrown(env, e))
+}
+
+#[napi(js_name = "claudeNoRecord")]
+pub fn claude_no_record() -> &'static str {
+    claude::NO_RECORD
+}
+
+#[napi(js_name = "claudeOtherSession")]
+pub fn claude_other_session() -> &'static str {
+    claude::OTHER_SESSION
+}
+
+/// The record's text with the new title, or null when it's another
+/// session's now.
+#[napi(js_name = "claudeRenamedRecord")]
+pub fn claude_renamed_record(record: MaybeJson, desktop_id: MaybeJson, cli_id: MaybeJson, title: MaybeJson) -> Option<String> {
+    claude::renamed_record(record.0.unwrap_or(Value::Null), desktop_id.0.as_ref(), cli_id.0.as_ref(), title.0.as_ref())
 }
