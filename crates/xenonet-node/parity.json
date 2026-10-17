@@ -301,6 +301,12 @@
         "Hermes's files are read through hermes-files.js's twin; the census is read in the twin (readCensus) and judged in Rust."
       ]
     },
+    "core/actors/reports.js": {
+      "rust": "crates/xenonet-actors/src/reports.rs",
+      "differences": [
+        "A path that isn't text fails with Node's message and code (ERR_INVALID_ARG_TYPE), thrown as an Error rather than a TypeError."
+      ]
+    },
     "core/actors/observers.js": {
       "rust": "crates/xenonet-actors/src/observers.rs",
       "differences": [

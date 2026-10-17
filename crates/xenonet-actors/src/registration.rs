@@ -126,7 +126,7 @@ fn text(a: &Arg) -> String {
 }
 
 // Number(v), as JS compares a value with a number.
-fn to_number(v: &Arg) -> f64 {
+pub fn to_number(v: &Arg) -> f64 {
     match v {
         Arg::Num(n) => *n,
         Arg::Big(n) => *n as f64,

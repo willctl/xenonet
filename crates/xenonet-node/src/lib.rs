@@ -22,6 +22,7 @@ mod observers_core;
 mod peer;
 mod procs;
 mod registration;
+mod reports;
 mod schema;
 mod secrets;
 mod state;

@@ -20,6 +20,7 @@ pub mod observer;
 pub mod observers;
 pub mod registration;
 pub mod registry;
+pub mod reports;
 pub mod secret_store;
 pub mod spend;
 pub mod token_file;

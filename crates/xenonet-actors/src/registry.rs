@@ -1928,7 +1928,8 @@ pub fn js_min(a: f64, b: f64) -> f64 {
     }
 }
 
-fn is_absolute(p: &str) -> bool {
+/// path.isAbsolute on this machine.
+pub fn is_absolute(p: &str) -> bool {
     if cfg!(windows) {
         let b = p.as_bytes();
         p.starts_with('\\') || p.starts_with('/') || (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/'))

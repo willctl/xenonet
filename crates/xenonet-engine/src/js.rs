@@ -102,6 +102,39 @@ pub fn join_style(base: &str, parts: &[&str]) -> String {
     }
 }
 
+/// `pathStyle(p).resolve(p)` for an absolute path: normalized in the
+/// syntax it keeps, without a separator at the end (but a root's).
+pub fn resolve_style(p: &str) -> String {
+    use xenonet_base::paths::{normalize_posix, path_style, resolve, PathStyle};
+    match path_style(p) {
+        PathStyle::Posix => {
+            let n = normalize_posix(p);
+            if n.len() > 1 {
+                n.trim_end_matches('/').to_string()
+            } else {
+                n
+            }
+        }
+        PathStyle::Windows => {
+            let n = normalize_win32(p);
+            // A UNC root is \\server\share\, a drive's C:\.
+            let root = if n.starts_with("\\\\") {
+                n.match_indices('\\').nth(3).map_or(n.len(), |(i, _)| i + 1)
+            } else if n.as_bytes().get(1) == Some(&b':') {
+                3
+            } else {
+                1
+            };
+            if n.len() > root {
+                n.trim_end_matches('\\').to_string()
+            } else {
+                n
+            }
+        }
+        PathStyle::Native => resolve(p),
+    }
+}
+
 // path.win32.normalize, for the paths the modules join: a drive or UNC
 // root kept, separators made backslashes and collapsed, . and .. worked out.
 fn normalize_win32(p: &str) -> String {
