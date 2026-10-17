@@ -163,12 +163,12 @@ pub trait Refusals: Send + Sync {
     }
 }
 
-/// core/integrations: what each of its routes calls, by the route's name
-/// (status, history, pi, sandbox/review, route/preview…), with the query
-/// or the body.
+/// core/integrations: the method each route calls, by its name in JS
+/// (status, history, shell.review, routing.route…), with the arguments the
+/// route passes it.
 #[async_trait]
 pub trait Integrations: Send + Sync {
-    async fn call(&self, _route: &str, _input: Value) -> R<Value> {
+    async fn call(&self, _method: &str, _args: Vec<Value>) -> R<Value> {
         pending(INTEGRATIONS)
     }
 }

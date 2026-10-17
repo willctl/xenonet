@@ -4,16 +4,13 @@
 //! when it runs standalone, and the background work, and stops on SIGINT,
 //! SIGTERM or the component service's stop.
 
-use crate::actor_caller::ActorCaller;
 use crate::buckets::now_ms;
 use crate::component::{self, Hooks};
 use crate::config::Config;
 use crate::cores::{CoreError, Cores};
-use crate::ctx::{Ctx, Music, RefusalNotes};
-use crate::events::Events;
+use crate::ctx::Ctx;
 use crate::http::{node_headers, parse_target, Body, Peer, Reply, ReplyBody, Req};
 use crate::routes;
-use crate::window_key::WindowKey;
 use bytes::Bytes;
 use hyper::body::{Frame, Incoming};
 use hyper::server::conn::http1;
@@ -102,13 +99,21 @@ pub async fn handle(ctx: &Arc<Ctx>, req: hyper::Request<Incoming>, peer: Peer) -
     if !path.starts_with("/api/") {
         return crate::static_files::serve(&ctx.config.root.join("dist"), &path);
     }
-    match routes::api(ctx, request).await {
+    let answer = routes::api(ctx, request).await;
+    answered(ctx, &method, &path, answer)
+}
+
+/// What the service answers for a route's result: what a core threw goes
+/// out with its status, a core not in Rust yet says so, and anything else
+/// is logged and an internal error.
+pub fn answered(ctx: &Ctx, method: &str, path: &str, answer: Result<Reply, CoreError>) -> Reply {
+    match answer {
         Ok(r) => r,
         Err(e) if e.is_pending() => Reply::coded(501, "pending", e.message),
         Err(e) if e.status.is_some() => Reply::error(e.status.unwrap(), e.message),
         Err(e) => {
             eprintln!("{}", e.message);
-            let short = shorten(&path);
+            let short = shorten(path);
             ctx.log("error", "service.route", &format!("{method} {short}: {}", e.message), Some(&ErrInfo { message: Some(e.message.clone()), stack: None, code: None }), None);
             Reply::error(500, "internal error")
         }
@@ -236,27 +241,11 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str) -> i32 {
     let log = Log::new(if config.demo { None } else { Some(&dir) }, "service", config.instance.as_deref(), Some(&version), &config.home, MAX_BYTES);
     let mut drift = DriftLog::default();
     drift.open(&Path::new(&config.cache_dir).join(DRIFT_FILE).to_string_lossy());
-    let window_key = Arc::new(WindowKey::new());
-    let caller = cores.registration.clone().map(|r| ActorCaller::new(r, cores.verify.clone()));
-    let themes_dir = Path::new(&config.state_dir).join("themes").to_string_lossy().into_owned();
+    let mut ctx = Ctx::new(config.clone(), version.clone(), cores, log);
     let (again_tx, again_rx) = mpsc::unbounded_channel();
-    let ctx = Arc::new(Ctx {
-        config: config.clone(),
-        version: version.clone(),
-        cores,
-        events: Arc::new(Events::new()),
-        window_key,
-        log: Mutex::new(log),
-        drift: Arc::new(Mutex::new(drift)),
-        caller,
-        components: Mutex::new(None),
-        gateway: None,
-        endpoint: Mutex::new(None),
-        themes_dir,
-        music: Mutex::new(Music { again: Some(again_tx), ..Default::default() }),
-        you_reports: Mutex::new(crate::routes::actors::you_reports_bucket(now_ms())),
-        refusal_notes: Mutex::new(RefusalNotes::default()),
-    });
+    ctx.music.get_mut().unwrap().again = Some(again_tx);
+    ctx.drift = Arc::new(Mutex::new(drift));
+    let ctx = Arc::new(ctx);
 
     let listener = match TcpListener::bind((config.host.as_str(), config.port)).await {
         Ok(l) => l,

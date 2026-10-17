@@ -64,6 +64,40 @@ impl From<BodyError> for CoreError {
 }
 
 impl Ctx {
+    /// The service's parts around its cores, as serve.rs makes them: no
+    /// log folder unless one's given, the drift log in memory unless it's
+    /// opened, a new window key.
+    pub fn new(config: Config, version: String, cores: Cores, log: Log) -> Ctx {
+        let caller = cores.registration.clone().map(|r| ActorCaller::new(r, cores.verify.clone()));
+        let themes_dir = std::path::Path::new(&config.state_dir).join("themes").to_string_lossy().into_owned();
+        Ctx {
+            config,
+            version,
+            cores,
+            events: Arc::new(Events::new()),
+            window_key: Arc::new(WindowKey::new()),
+            log: Mutex::new(log),
+            drift: Arc::new(Mutex::new(DriftLog::default())),
+            caller,
+            components: Mutex::new(None),
+            gateway: None,
+            endpoint: Mutex::new(None),
+            themes_dir,
+            music: Mutex::new(Music::default()),
+            you_reports: Mutex::new(Bucket::new(YOU_REPORTS, now_ms())),
+            refusal_notes: Mutex::new(RefusalNotes::default()),
+        }
+    }
+
+    /// A service for tests: the demo's settings, these cores, nothing written.
+    pub fn for_tests(cores: Cores) -> Arc<Ctx> {
+        let mut config = Config::from(&["--demo".to_string()], &|k: &str| (k == "HOME").then(|| "/home/nova".to_string()));
+        let tmp = std::env::temp_dir().join(format!("xenonet-service-test-{}", std::process::id()));
+        config.state_dir = tmp.join("state").to_string_lossy().into_owned();
+        config.cache_dir = tmp.join("cache").to_string_lossy().into_owned();
+        Arc::new(Ctx::new(config, "0.0.0".into(), cores, Log::new(None, "service", None, None, "/home/nova", 1 << 20)))
+    }
+
     pub fn now(&self) -> f64 {
         now_ms()
     }
