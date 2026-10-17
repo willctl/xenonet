@@ -4,6 +4,9 @@
 //!
 //! The app that starts it is this machine's, so it works as you do. With XENOLITH_TOKEN set (an
 //! actor started with its own token), it works as that token's holder, checked again on each call.
+//!
+//! A connection lasts, so it can subscribe to pages (resources.rs): once the client has
+//! initialized, a watcher looks once a second and sends what changed.
 
 use crate::mcp::{self, Ctx, log};
 use xenolith_core::access::Principal;
@@ -41,18 +44,31 @@ pub fn run(read_only: bool) -> ! {
     let shown = st.wiki_dir.as_ref().map(|d| wiki::disp(d)).unwrap_or_else(|| "(unavailable)".into());
     log(&format!("v{} ready (stdio, {mode}); wiki at {shown}", xenolith_core::VERSION));
 
+    let subs = Arc::new(crate::resources::Subscriptions::default());
     let (tx, rx) = mpsc::channel::<Value>();
     let rx = Arc::new(Mutex::new(rx));
     let workers: Vec<_> = (0..WORKERS)
         .map(|_| {
-            let (rx, st, reqlog, client_info, stdout, principal) = (rx.clone(), st.clone(), reqlog.clone(), client_info.clone(), stdout.clone(), principal.clone());
+            let (rx, st, reqlog, client_info, stdout, principal, subs) = (rx.clone(), st.clone(), reqlog.clone(), client_info.clone(), stdout.clone(), principal.clone(), subs.clone());
             std::thread::spawn(move || {
                 loop {
                     let Ok(m) = rx.lock().unwrap().recv() else { break };
                     let client = client_info.lock().unwrap().clone().unwrap_or_default();
                     let ctx = Ctx::new("stdio", None, client, &reqlog, None, principal.clone());
-                    let resp = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| mcp::handle(&st, &ctx, &m, &client_info)))
-                        .unwrap_or_else(|_| m.get("id").cloned().map(|id| mcp::rpc_error(id, -32603, "Internal error")));
+                    let resp = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match m.get("method").and_then(Value::as_str) {
+                        // Subscriptions belong to this connection, so they are answered here.
+                        Some(method @ ("resources/subscribe" | "resources/unsubscribe")) if !st.read_only => {
+                            let id = m.get("id").cloned()?;
+                            let params = m.get("params").cloned().unwrap_or(Value::Null);
+                            let r = if method == "resources/subscribe" { subs.subscribe(&st, &ctx, &params) } else { subs.unsubscribe(&params) };
+                            Some(match r {
+                                Ok(v) => json!({ "result": v, "jsonrpc": "2.0", "id": id }),
+                                Err((code, msg)) => mcp::rpc_error(id, code, &msg),
+                            })
+                        }
+                        _ => mcp::handle(&st, &ctx, &m, &client_info),
+                    }))
+                    .unwrap_or_else(|_| m.get("id").cloned().map(|id| mcp::rpc_error(id, -32603, "Internal error")));
                     if let Some(resp) = resp {
                         let mut out = stdout.lock().unwrap();
                         let _ = writeln!(out, "{resp}");
@@ -63,6 +79,7 @@ pub fn run(read_only: bool) -> ! {
         })
         .collect();
 
+    let mut watching = false;
     let stdin = std::io::stdin();
     for line in stdin.lock().lines() {
         let Ok(line) = line else { break };
@@ -83,6 +100,20 @@ pub fn run(read_only: bool) -> ! {
                 Some("notifications/initialized") => {
                     let client = client_info.lock().unwrap().clone().unwrap_or_default();
                     reqlog.write(vec![("kind", json!("session")), ("transport", json!("stdio")), ("client", json!(clip_str(&client, 80))), ("result", json!("initialized"))]);
+                    if !read_only && !watching {
+                        watching = true;
+                        let (st, subs, stdout, principal) = (st.clone(), subs.clone(), stdout.clone(), principal.clone());
+                        std::thread::spawn(move || {
+                            loop {
+                                for n in subs.poll(&st, &principal) {
+                                    let mut out = stdout.lock().unwrap();
+                                    let _ = writeln!(out, "{n}");
+                                    let _ = out.flush();
+                                }
+                                std::thread::sleep(std::time::Duration::from_secs(1));
+                            }
+                        });
+                    }
                 }
                 // initialize sets the client name the later calls are logged with: answer it in order.
                 Some("initialize") => {

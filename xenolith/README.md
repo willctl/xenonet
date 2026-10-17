@@ -141,6 +141,17 @@ the wiki without someone clicking it. `writeMode: "direct"` in `config.json`
 restores the v1.1 behavior: immediate deterministic page and log writes, and no
 curator.
 
+### Pages as resources
+
+Every page a caller may read is also an MCP resource,
+`xenolith://<kind>/<name>/pages/<slug>` (`xenolith://machine/local/pages/atlas`
+is this machine's page `atlas`), read as Markdown. A client can list them, read
+one, and over stdio subscribe to one: it then gets
+`notifications/resources/updated` when the page changes and
+`notifications/resources/list_changed` when pages come or go in its spaces. The
+HTTP service is stateless and offers no subscriptions. A page the caller may
+not read is "not found", like one that doesn't exist. The read-only server that Ask uses offers tools only.
+
 ## Spaces and access
 
 A space is one wiki. The wiki folder is this machine's space, `machine:local`.

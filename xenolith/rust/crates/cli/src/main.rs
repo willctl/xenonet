@@ -25,6 +25,7 @@ mod httpd;
 mod install;
 mod keypipe;
 mod mcp;
+mod resources;
 mod models;
 mod service;
 mod stdio;

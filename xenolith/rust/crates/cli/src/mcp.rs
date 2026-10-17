@@ -565,9 +565,16 @@ pub fn handle(st: &State, ctx: &Ctx, msg: &Value, client_info: &Mutex<Option<Str
                 let v = ci.get("version").and_then(Value::as_str).unwrap_or("");
                 *client_info.lock().unwrap() = Some(format!("{name} {v}").trim().to_string());
             }
+            // Pages as resources (resources.rs); subscribing needs a connection
+            // that lasts, which stateless HTTP doesn't have. The read-only server (Ask) offers tools only.
+            let mut capabilities = json!({ "tools": { "listChanged": true } });
+            if !st.read_only {
+                let live = ctx.transport == "stdio";
+                capabilities["resources"] = json!({ "subscribe": live, "listChanged": live });
+            }
             json!({
                 "protocolVersion": version,
-                "capabilities": { "tools": { "listChanged": true } },
+                "capabilities": capabilities,
                 "serverInfo": { "name": "xenolith", "title": "Xenolith", "version": xenolith_core::VERSION },
                 "instructions": instructions_for(st, &ctx.principal),
             })
@@ -577,6 +584,17 @@ pub fn handle(st: &State, ctx: &Ctx, msg: &Value, client_info: &Mutex<Option<Str
         "tools/call" => {
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
             call_tool(st, ctx, name, params.get("arguments").unwrap_or(&Value::Null))
+        }
+        m @ ("resources/list" | "resources/templates/list" | "resources/read") if !st.read_only => {
+            let r = match m {
+                "resources/list" => crate::resources::list(st, ctx, &params),
+                "resources/templates/list" => Ok(crate::resources::templates()),
+                _ => crate::resources::read(st, ctx, &params),
+            };
+            match r {
+                Ok(v) => v,
+                Err((code, message)) => return Some(rpc_error(id, code, &message)),
+            }
         }
         _ => return Some(rpc_error(id, -32601, "Method not found")),
     };
