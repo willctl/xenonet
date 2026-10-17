@@ -15,6 +15,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { parseSelector, matches, formatSelector } from "./selector.js";
+import { YOU } from "../schema/ids.js";
 
 export const LIMITS = {
   perSenderPerMinute: 20,
@@ -29,7 +30,10 @@ export const LIMITS = {
   grantMs: 30 * 24 * 3600e3,
 };
 
-const isActor = (id) => String(id).startsWith("actor:");
+// You write as actor:you from XenoNet's window and command
+// (core/schema/ids.js), or as "you": never an actor here, so never scoped.
+export const isYou = (id) => id === "you" || id === YOU;
+const isActor = (id) => String(id).startsWith("actor:") && !isYou(id);
 
 // Strings that look like keys or tokens: provider keys, GitHub and Slack
 // tokens, AWS key ids, JWTs, private key blocks, and NAME=value lines whose
@@ -183,7 +187,7 @@ export class DeliveryPolicy {
       this.audit({ kind: "refused", sender, to: recipients.length, why: code });
       throw Object.assign(new Error(why), { code, status: 429 });
     };
-    if (this.paused && sender !== "you") fail("XenoNet's messages are paused by your user; nothing is sent until they resume them", "paused");
+    if (this.paused && !isYou(sender)) fail("XenoNet's messages are paused by your user; nothing is sent until they resume them", "paused");
     if (recipients.length > L.fanOut) fail(`a message reaches at most ${L.fanOut} sessions; narrow it with a scope such as project:… or app:…`, "fan-out");
     if (depth >= L.maxHops) fail(`this thread is ${depth} replies deep; XenoNet stops agent-to-agent threads at ${L.maxHops} so two agents can't loop. Ask your user before going on.`, "hops");
     const t = this.now();
