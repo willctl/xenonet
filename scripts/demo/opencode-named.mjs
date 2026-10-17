@@ -445,24 +445,33 @@ export async function main(argv = process.argv.slice(2)) {
     }
     for (const p of projects) await until(`OpenCode in ${p.name}`, async () => (await http(p.base, "/global/health", { ms: 1000 }))?.healthy, { ms: 90e3 });
 
-    // The model, and whether it's free.
+    // The model, and whether it's free. OpenCode starts with the list of
+    // models it was built with and fetches the current one a moment later,
+    // so a model missing at first is asked about again for half a minute.
     const [providerID, modelID] = o.model.split("/");
-    const providers = await http(projects[0].base, "/config/providers", { ms: 30e3 });
-    const model = providers?.providers?.find((x) => x.id === providerID)?.models?.[modelID];
+    let providers = null;
+    const model = await until(`OpenCode's models to include ${o.model}`, async () => {
+      providers = await http(projects[0].base, "/config/providers", { ms: 30e3 });
+      return providers?.providers?.find((x) => x.id === providerID)?.models?.[modelID];
+    }, { ms: 30e3, every: 2000 }).catch(() => null);
     if (!model) {
       const free = Object.entries(providers?.providers?.find((x) => x.id === "opencode")?.models ?? {}).filter(([, m]) => !m.cost?.input && !m.cost?.output).map(([id]) => `opencode/${id}`);
       throw new Error(`OpenCode has no model ${o.model} here. Free ones it has now: ${free.join(", ") || "none"}`);
     }
     say(`${o.model} costs ${model.cost?.input || model.cost?.output ? "money: it needs an account" : "nothing: no account or key"}`);
 
-    // A session with its title in each TUI, and XenoNet's tools loaded.
+    // A session with its title in each TUI, and XenoNet's tools loaded. The
+    // TUI goes back to its home screen once OpenCode has loaded the tools,
+    // so each session is opened in its TUI after that, and again before
+    // each question.
     for (const p of projects) {
       const s = await http(p.base, "/session", { method: "POST", body: { title: p.title } });
       p.session = s.id;
       p.id = `opencode:${s.id.replace(/^ses_/, "ses-")}`;
-      await http(p.base, "/tui/select-session", { method: "POST", body: { sessionID: s.id } });
     }
     for (const p of projects) await until(`XenoNet's tools in ${p.name}`, async () => (await http(p.base, "/experimental/tool/ids", { ms: 60e3 }))?.includes?.("xenonet_send"), { ms: 180e3, every: 1000 });
+    const show = () => Promise.all(projects.map((p) => http(p.base, "/tui/select-session", { method: "POST", body: { sessionID: p.session } }).catch(() => null)));
+    await show();
 
     // XenoNet, and your consent for each session.
     await startXenoNet();
@@ -513,6 +522,7 @@ export async function main(argv = process.argv.slice(2)) {
         const from = byName[step.from];
         const before = await count();
         say(`\nRound ${round}: ${from.title} asks ${step.to}`);
+        await show();
         await http(from.base, `/session/${from.session}/prompt_async`, { method: "POST", body: { parts: [{ type: "text", text: kickoff(step) }] } });
         let lastCount = before, lastChange = Date.now();
         await until(`the answers to "${step.text}"`, async () => {
@@ -532,13 +542,14 @@ export async function main(argv = process.argv.slice(2)) {
     for (const p of projects) sessions[p.id] = { title: p.title, messages: await http(p.base, `/session/${p.session}/message`, { ms: 15e3 }) };
     const rows = timings({ messages: state.messages, deliveries: delivery.recent, sessions });
     say(`\n${report(rows)}`);
+    // Each TUI should still show its session, whose title its side panel has.
+    const screens = Object.fromEntries(projects.map((p) => [p.name, spawnSync("tmux", ["-L", sock, "capture-pane", "-p", "-J", "-S", "-", "-t", `xn-demo-${p.name}`], { encoding: "utf8" }).stdout ?? ""]));
+    const hidden = projects.filter((p) => !screens[p.name].includes(p.title));
+    if (hidden.length) say(`\nNot showing its session at the end: ${hidden.map((p) => p.title).join(", ")}. Its turns ran in its own OpenCode all the same.`);
 
     if (o.out) {
       fs.mkdirSync(o.out, { recursive: true });
-      for (const p of projects) {
-        const text = spawnSync("tmux", ["-L", sock, "capture-pane", "-p", "-J", "-S", "-", "-t", `xn-demo-${p.name}`], { encoding: "utf8" }).stdout;
-        fs.writeFileSync(path.join(o.out, `pane-${p.name}.txt`), text);
-      }
+      for (const p of projects) fs.writeFileSync(path.join(o.out, `pane-${p.name}.txt`), screens[p.name]);
       fs.writeFileSync(path.join(o.out, "timings.json"), JSON.stringify({ opencode: ocVersion, model: o.model, sessions: o.sessions, rounds: o.rounds, rows }, null, 1));
       fs.writeFileSync(path.join(o.out, "xenonet.json"), JSON.stringify({ messages: state.messages, deliveries: delivery.recent, audit: delivery.audit }, null, 1));
       fs.writeFileSync(path.join(o.out, "opencode.json"), JSON.stringify(sessions, null, 1));
