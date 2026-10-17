@@ -88,10 +88,9 @@ export function mergeHooks(settings, ours, add = null) {
 // Whether every group in `add` is already in place.
 const hooksInPlace = (settings, ours, add) => Object.entries(add).every(([event, group]) => (settings.hooks?.[event] ?? []).some((g) => (g.matcher ?? null) === (group.matcher ?? null) && g.hooks?.some((h) => ours(h) && JSON.stringify(h) === JSON.stringify(group.hooks[0]))));
 
-export function createConnect({ port, root, demo = false, exec = process.execPath, runAsNode = false, home = os.homedir(), env = process.env, platform = process.platform, run = runFile }) {
+export function createConnect({ port, root, demo = false, exec = process.execPath, runAsNode = false, home = os.homedir(), env = process.env, platform = process.platform, run = runFile, consoleMcp = !!env.XENONET_LAUNCHER_EXEC }) {
   const entry = pathStyle(root).join(root, "cli", "xenonet.js");
   const serverEnv = { XENONET_PORT: String(port), ...(runAsNode ? { ELECTRON_RUN_AS_NODE: "1" } : {}) };
-  const consoleMcp = !!env.XENONET_LAUNCHER_EXEC;
   const mcp = { type: "stdio", command: exec, args: [entry, "mcp"], env: serverEnv };
   const hookUrl = `http://127.0.0.1:${port}/api/hook/claude`;
   const claudeSettings = path.join(env.CLAUDE_CONFIG_DIR ?? path.join(home, ".claude"), "settings.json");
