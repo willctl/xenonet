@@ -16,6 +16,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { command } from "./harness/xenonet-bin.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const made = [];
@@ -61,7 +62,7 @@ async function fakeXenoNet() {
 
 // xenonet mcp, spoken to over stdio: initialize, then calls.
 async function mcp(env) {
-  const proc = spawn(process.execPath, [path.join(root, "cli", "xenonet.js"), "mcp"], { cwd: root, env: { ...process.env, CLAUDE_CODE_SESSION_ID: "", CLAUDE_PID: "", CODEX_THREAD_ID: "", XENONET_ACTOR_TOKEN: "", XENONET_ACTOR_TOKEN_FILE: "", ...env }, stdio: ["pipe", "pipe", "inherit"] });
+  const proc = spawn(...command(["mcp"]), { cwd: root, env: { ...process.env, CLAUDE_CODE_SESSION_ID: "", CLAUDE_PID: "", CODEX_THREAD_ID: "", XENONET_ACTOR_TOKEN: "", XENONET_ACTOR_TOKEN_FILE: "", ...env }, stdio: ["pipe", "pipe", "inherit"] });
   const replies = new Map();
   let buf = "";
   proc.stdout.on("data", (d) => {

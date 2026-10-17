@@ -15,6 +15,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { xenonet } from "../../core/control.js";
+import { command } from "../harness/xenonet-bin.js";
 
 const port = await new Promise((resolve) => {
   const probe = net.createServer().listen(0, "127.0.0.1", () => {
@@ -46,7 +47,7 @@ const fromWindow = (code) =>
 
 // The adapter, as a tunnel client runs it, against this instance.
 function adapter(grant) {
-  const proc = spawn(process.execPath, ["cli/xenonet.js", "mcp", "assistant", "--grant", grant, "--port", String(port)], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+  const proc = spawn(...command(["mcp", "assistant", "--grant", grant, "--port", String(port)]), { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
   let buf = "";
   let seq = 0;
   const pending = new Map();

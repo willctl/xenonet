@@ -14,6 +14,7 @@ import { Engine, matches, editPaths, parseRepo } from "../core/engine/engine.js"
 import { EngineStore } from "../core/engine/store.js";
 import { createConnect, mergeHooks } from "../core/engine/connect.js";
 import * as hooks from "./fixtures/hook-payloads.js";
+import { command } from "./harness/xenonet-bin.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // Temp folders, taken away after the tests.
@@ -387,7 +388,8 @@ const REAL = new Set(["PATH", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "HERMES_HOME", 
 function stdio(script, args, env, input = null) {
   const own = Object.fromEntries(Object.entries(process.env).filter(([name]) => !REAL.has(name.toUpperCase())));
   Object.assign(own, { HOME: agentHome, USERPROFILE: agentHome, PATH: path.join(agentHome, "bin"), XENONET_CODEX_BIN: path.join(agentHome, "bin", "codex"), CLAUDE_CODE_SESSION_ID: "", CLAUDE_PID: "", CODEX_THREAD_ID: "", XENONET_ACTOR_TOKEN: "", XENONET_ACTOR_TOKEN_FILE: "" });
-  const proc = spawn(process.execPath, [script, ...args], { cwd: root, env: { ...own, ...env }, stdio: ["pipe", "pipe", "inherit"] });
+  const [file, argv] = script === "cli/xenonet.js" ? command(args) : [process.execPath, [script, ...args]];
+  const proc = spawn(file, argv, { cwd: root, env: { ...own, ...env }, stdio: ["pipe", "pipe", "inherit"] });
   if (input !== null) proc.stdin.end(input);
   return proc;
 }
