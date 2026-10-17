@@ -311,7 +311,6 @@
       "rust": "crates/xenonet-actors/src/wake.rs",
       "differences": [
         "Timers, a stream's sinks, the credential store, DNS, fetch and WHATWG URL parsing are the twin's, called as the JS called them.",
-        "Between two calls the JS made without awaiting (to the actors, the clock), other work may now run, as it may at any await.",
         "It works on the engine's store the twin's EngineStore holds."
       ]
     },
