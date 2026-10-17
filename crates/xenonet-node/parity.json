@@ -109,6 +109,19 @@
         "The report's text (reportLines), the transcript hooks' glue between a normalizer and its reader, and agentSdkVersion (Node's module resolution) stay in the twin.",
         "A reader's careful map isn't a Map JS can walk: the twin offers its size and has()."
       ]
+    },
+    "core/dirs.js": {
+      "rust": "crates/xenonet-base/src/dirs.rs",
+      "differences": [
+        "findCodexBinary and findFfmpeg stay JS compositions of the Rust parts and onPath."
+      ]
+    },
+    "core/log.js": {
+      "rust": "crates/xenonet-base/src/log.rs",
+      "differences": [
+        "The key patterns run on Rust's regex: \\b is ASCII's, as JS's is, but \\s is Unicode's White_Space, which differs from JS's at U+FEFF and U+0085.",
+        "A message cut at its length that would split a pair of UTF-16 units leaves the whole character out; JS kept half of it."
+      ]
     }
   },
   "tests": [

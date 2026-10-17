@@ -62,7 +62,8 @@ done.
 ```
 Cargo.toml                 the workspace: shared versions, the release profile
 crates/
-  xenonet-base             core/paths.js, pricing.js, time as JS reads it, ids, units for the command
+  xenonet-base             paths.js, pricing.js, dirs.js, log.js, schema/ids.js, JSON and time as JS reads them,
+                           units for the command
   xenonet-blocks           core/blocks/: lifecycle, scanner, gatherer, tailer, normalizer, JSON and SQLite stores
   xenonet-schema           core/schema/, vendor.js, drift.js: the schemas, lenient reading, drift records
   xenonet-sources          lines.js, claude.js, codex.js, git.js, wiki.js, live.js, numbat.js, demo.js, native/
@@ -71,7 +72,7 @@ crates/
   xenonet-engine           engine/, delivery/, procs.js
   xenonet-actors           actors/, assistant/, secret-store.js, integrations/, refusals/
   xenonet-hosts            hosts/
-  xenonet-doctor           doctor/, diagnostics.js, log.js
+  xenonet-doctor           doctor/, diagnostics.js
   xenonet-server           server/: the API, static files, upstream, the actor gateway and its tunnels,
                            the assistant endpoint, the component service
   xenonet-mcp              mcp/: the xenonet, xenonet-console and assistant servers
@@ -482,6 +483,7 @@ place. This table follows it.
 | `core/blocks/sqlite.js` | `xenonet-blocks/src/sqlite.rs`, on rusqlite with SQLite bundled | No twin (its migrations take a `node:sqlite` handle): Rust tests of the same cases, and the Rust opens a JS-made `engine.sqlite` (version 7, WAL, 18 tables) and `search.sqlite` (an FTS5 match on what node:sqlite indexed) |
 | `core/blocks/store.js` | `xenonet-blocks/src/store.rs` | `blocks-store`, `statefile`, `store`, `hosts-config` pass |
 | `core/migrate.js`, `core/statefile.js` | `xenonet-state/src/migrate.rs`, `statefile.rs` | `statefile`, `store`, `state` pass |
+| `core/dirs.js`, `core/log.js` | `xenonet-base/src/dirs.rs`, `log.rs` | `platform`, `log`, `cli`, `doctor` pass |
 | `core/schema/ids.js` | `xenonet-base/src/ids.rs` | `schema-ids`, `hosts-ids`, `schemas` pass |
 | `core/actors/tokens.js` | `xenonet-actors/src/tokens.rs` | `token-files`, `actor-registration`, `actor-routes`, `actor-gateway` pass |
 | `xenonet mcp` for sessions (`mcp/xenonet.js`), a prototype | `xenonet-mcp`, on rmcp, Rust 1.88+ | Its own stdio tests; the same answers as the JS servers to the probe and the handshake |

@@ -3,9 +3,11 @@
 //! them (`time`), paths as XenoNet compares and shows them (`paths`), and
 //! what a call to a model cost at API prices (`pricing`).
 
+pub mod dirs;
 pub mod fs;
 pub mod ids;
 pub mod json;
+pub mod log;
 pub mod ordered;
 pub mod paths;
 pub mod pricing;

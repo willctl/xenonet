@@ -1,5 +1,6 @@
 //! xenonet-base for the twins of core/pricing.js and core/paths.js.
 
+use crate::js::Json;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde_json::{json, Map, Value};
@@ -333,4 +334,138 @@ pub fn remote_parts(url: String) -> Option<Vec<String>> {
 #[napi(js_name = "parseRepoId")]
 pub fn parse_repo_id(id: String) -> Option<String> {
     ids::parse_repo_id(&id).map(Into::into)
+}
+
+// ----- dirs -----
+
+use xenonet_base::dirs::{self, Look};
+
+/// A twin's way of looking at disk: the JS functions it was given.
+struct JsLook<'a> {
+    exists: Function<'a, String, bool>,
+    readdir: Function<'a, String, Vec<String>>,
+    mtime: Option<Function<'a, String, f64>>,
+}
+
+impl Look for JsLook<'_> {
+    fn exists(&mut self, path: &str) -> bool {
+        self.exists.call(path.to_string()).unwrap_or(false)
+    }
+    fn readdir(&mut self, path: &str) -> std::result::Result<Vec<String>, dirs::Unreadable> {
+        self.readdir.call(path.to_string()).map_err(|_| dirs::Unreadable)
+    }
+    fn mtime(&mut self, path: &str) -> f64 {
+        self.mtime.as_ref().and_then(|m| m.call(path.to_string()).ok()).unwrap_or(f64::NAN)
+    }
+}
+
+#[napi(object)]
+pub struct DirsEnv {
+    #[napi(js_name = "claudeDesktopDir")]
+    pub claude_desktop_dir: Option<String>,
+    #[napi(js_name = "localAppData")]
+    pub local_app_data: Option<String>,
+    #[napi(js_name = "appData")]
+    pub app_data: Option<String>,
+    #[napi(js_name = "xdgConfigHome")]
+    pub xdg_config_home: Option<String>,
+}
+
+fn env_of(e: DirsEnv) -> dirs::Env {
+    dirs::Env { claude_desktop_dir: e.claude_desktop_dir, local_app_data: e.local_app_data, app_data: e.app_data, xdg_config_home: e.xdg_config_home }
+}
+
+#[napi(js_name = "appDir")]
+pub fn app_dir(kind: String, xdg_state: Option<String>, xdg_cache: Option<String>, local_app_data: Option<String>, platform: String, home: String, name: String) -> String {
+    let xdg = if kind == "state" { xdg_state } else { xdg_cache };
+    dirs::app_dir(&kind, xdg.as_deref(), local_app_data.as_deref(), &platform, &home, &name)
+}
+
+#[napi(js_name = "findClaudeDesktopDir")]
+pub fn find_claude_desktop_dir(env: DirsEnv, platform: String, home: String, exists: Function<String, bool>, readdir: Function<String, Vec<String>>) -> Option<String> {
+    dirs::find_claude_desktop_dir(&env_of(env), &platform, &home, &mut JsLook { exists, readdir, mtime: None })
+}
+
+#[napi(js_name = "bundledCodexBinaries")]
+pub fn bundled_codex_binaries(
+    env: DirsEnv,
+    platform: String,
+    home: String,
+    exists: Function<String, bool>,
+    readdir: Function<String, Vec<String>>,
+    mtime: Function<String, f64>,
+) -> Vec<String> {
+    dirs::bundled_codex_binaries(&env_of(env), &platform, &home, &mut JsLook { exists, readdir, mtime: Some(mtime) })
+}
+
+// ----- the log -----
+
+use xenonet_base::log::{self as xlog, ErrInfo, Log};
+
+#[napi(object)]
+pub struct LogConstants {
+    pub levels: Vec<String>,
+    pub components: Vec<String>,
+    #[napi(js_name = "maxBytes")]
+    pub max_bytes: f64,
+}
+
+#[napi(js_name = "logConstants")]
+pub fn log_constants() -> LogConstants {
+    LogConstants {
+        levels: xlog::LEVELS.iter().map(|s| s.to_string()).collect(),
+        components: xlog::COMPONENTS.iter().map(|s| s.to_string()).collect(),
+        max_bytes: xlog::MAX_BYTES as f64,
+    }
+}
+
+#[napi]
+pub fn scrub(text: String, home: String) -> String {
+    xlog::scrub(&text, &home)
+}
+
+#[napi(js_name = "unsafeText")]
+pub fn unsafe_text(text: String, home: String) -> Option<&'static str> {
+    xlog::unsafe_text(&text, &home)
+}
+
+#[napi(object)]
+pub struct LogErr {
+    pub message: Option<String>,
+    pub stack: Option<String>,
+    pub code: Option<String>,
+}
+
+#[napi(js_name = "LogCore")]
+pub struct JsLog {
+    log: Log,
+}
+
+#[napi]
+impl JsLog {
+    #[napi(constructor)]
+    pub fn new(dir: Option<String>, component: String, instance: Option<String>, version: Option<String>, home: String, max_bytes: f64) -> Self {
+        JsLog {
+            log: Log::new(dir.as_deref(), &component, instance.as_deref(), version.as_deref(), &home, if max_bytes.is_finite() { max_bytes.max(0.0) as u64 } else { u64::MAX }),
+        }
+    }
+
+    /// The entry written, or null when the same came too soon.
+    #[allow(clippy::too_many_arguments)]
+    #[napi]
+    pub fn write(&mut self, level: String, code: String, message: Option<String>, err: Option<LogErr>, fix: Option<String>, ctx: Option<Json>, now: f64) -> Option<Json> {
+        let err = err.map(|e| ErrInfo { message: e.message, stack: e.stack, code: e.code });
+        self.log.write(&level, &code, message.as_deref(), err.as_ref(), fix.as_deref(), ctx.as_ref().map(|c| &c.0), now).map(Json)
+    }
+}
+
+#[napi(js_name = "readLogs")]
+pub fn read_logs(dir: String, since: f64, level: String, component: Option<String>, code: Option<String>, limit: f64) -> Json {
+    let limit = if limit.is_finite() { limit.max(0.0) as usize } else { usize::MAX };
+    Json(Value::Array(xlog::read_logs(std::path::Path::new(&dir), since, &level, component.as_deref(), code.as_deref(), limit)))
+}
+
+#[napi]
+pub fn summarize(entries: Json) -> Json {
+    Json(Value::Array(xlog::summarize(entries.0.as_array().map(Vec::as_slice).unwrap_or_default())))
 }

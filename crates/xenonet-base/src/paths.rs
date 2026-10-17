@@ -43,12 +43,19 @@ fn same_char(a: char, b: char) -> bool {
 // by a word character, a dot or a dash, replaced with "~": as
 // text.replace(/form(?![\w.-])/gi, "~").
 fn replace_form(text: &str, form: &[char]) -> String {
+    replace_unless(text, form, word_like)
+}
+
+/// Every match of `form` in `text`, compared without case and not followed
+/// by a character `stops` says, replaced with "~": as
+/// text.replace(/form(?!stops)/gi, "~").
+pub fn replace_unless(text: &str, form: &[char], stops: fn(char) -> bool) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
     let mut i = 0;
     while i <= chars.len() {
         let end = i + form.len();
-        let here = end <= chars.len() && chars[i..end].iter().zip(form).all(|(a, b)| same_char(*a, *b)) && chars.get(end).is_none_or(|c| !word_like(*c));
+        let here = end <= chars.len() && chars[i..end].iter().zip(form).all(|(a, b)| same_char(*a, *b)) && chars.get(end).is_none_or(|c| !stops(*c));
         if here {
             out.push('~');
             if form.is_empty() {
@@ -173,6 +180,20 @@ pub fn path_style(p: &str) -> PathStyle {
     } else {
         PathStyle::Native
     }
+}
+
+/// Joins any number of parts and normalizes, as Node's path.join does for
+/// this platform: empty parts are left out, and nothing at all is ".".
+pub fn join_all(parts: &[&str]) -> String {
+    let parts: Vec<&str> = parts.iter().copied().filter(|p| !p.is_empty()).collect();
+    if parts.is_empty() {
+        return ".".into();
+    }
+    if cfg!(windows) {
+        let p: PathBuf = parts.iter().collect();
+        return p.to_string_lossy().into_owned();
+    }
+    normalize_posix(&parts.join("/"))
 }
 
 /// Joins and normalizes as Node's path.join does for this platform.

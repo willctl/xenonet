@@ -28,6 +28,9 @@ xenonet-state = { path = "crates/xenonet-state" }
 # files and answers XenoNet writes: preserve_order keeps that order here.
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+# Where the JS matches with a regular expression that has no lookaround
+# (the log's key patterns); lookarounds are written out by hand.
+regex = "1"
 # engine.sqlite and search.sqlite. Bundled, so FTS5 and VACUUM INTO are
 # there whatever SQLite the system has.
 rusqlite = { version = "0.40", features = ["bundled"] }
