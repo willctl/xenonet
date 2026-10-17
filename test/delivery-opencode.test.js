@@ -8,7 +8,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createOpenCode, samePath, openCodeId, fromOpenCodeId } from "../core/delivery/opencode.js";
 import { DeliveryPolicy } from "../core/delivery/policy.js";
+import { DeliveryRouter } from "../core/delivery/router.js";
 import { deliveryRoutes } from "../server/routes/delivery.js";
+import { Engine } from "../core/engine/engine.js";
+import { EngineStore } from "../core/engine/store.js";
 
 // Servers on ports 1, 2 and 3, each started in its own folder. Every one
 // knows every session, as OpenCode's shared database has it; `busy` names
@@ -81,4 +84,107 @@ test("folders compare without a trailing slash, and on Windows whatever the case
   assert.ok(!samePath("/w/Atlas", "/w/atlas", "darwin"));
   assert.ok(!samePath("/w/atlas", "/w/atlas-docs", "darwin"));
   assert.ok(samePath("C:\\W\\Atlas\\", "c:/w/atlas", "win32"));
+});
+
+// A machine with one Claude Code session XenoNet reads, and three OpenCode
+// sessions it has no record of: two you allowed, one you didn't. Their own
+// OpenCode answers for each (title, folder, last change).
+function machine() {
+  const t = { now: Date.now() };
+  const now = () => t.now;
+  const A = "claude:aaaaaaaa-0001", BILLING = "opencode:ses-billing0001", DOCS = "opencode:ses-docs000002", OTHER = "opencode:ses-other00003";
+  const index = new Map([
+    ["project:atlas", { id: "project:atlas", kind: "project", name: "atlas", path: "/w/atlas" }],
+    ["project:docs", { id: "project:docs", kind: "project", name: "docs", path: "/w/docs" }],
+    [A, { id: A, kind: "session", app: "claude", title: "Add refunds", cwd: "/w/atlas", updatedAt: t.now - 10e3 }],
+  ]);
+  const state = { index, live: { sessions: new Map() }, homeOf: () => null, graph: { identities: [] } };
+  const store = new EngineStore(":memory:");
+  store.touch(A, { app: "claude", cwd: "/w/atlas", via: "hook" }, t.now);
+  const policy = new DeliveryPolicy({ now });
+  const repos = { of: async (cwd) => (cwd ? { top: cwd, common: `${cwd}/.git`, branch: "main" } : null) };
+  const engine = new Engine({ state, store, now, repos, policy });
+  const told = {
+    [BILLING]: { title: "Billing API", directory: "/w/atlas", updated: t.now - 5e3, busy: false },
+    [DOCS]: { title: "Docs site", directory: "/w/docs", updated: t.now - 60e3, busy: true },
+    [OTHER]: { title: "Somebody else's", directory: "/w/docs", updated: t.now, busy: false },
+  };
+  const asked = [], delivered = [];
+  const opencode = {
+    info: async (id) => (asked.push(id), told[id] ?? null),
+    deliver: async (id, text) => (delivered.push([id, text]), { ok: true, where: "http://127.0.0.1:4096" }),
+  };
+  const router = new DeliveryRouter({ engine, policy, opencode, ackMs: 60e3 });
+  engine.delivery = router;
+  policy.allow(BILLING);
+  policy.allow(DOCS);
+  return { t, engine, router, policy, store, asked, delivered, A, BILLING, DOCS, OTHER };
+}
+
+test("the OpenCode sessions you allowed are among the agents, by the titles and folders their OpenCode gives", async () => {
+  const m = machine();
+  const agents = await m.engine.agents();
+  const byId = Object.fromEntries(agents.map((a) => [a.id, a]));
+  assert.deepEqual(Object.keys(byId).sort(), [m.A, m.BILLING, m.DOCS].sort(), "not the one you didn't allow");
+  assert.equal(byId[m.BILLING].title, "Billing API");
+  assert.equal(byId[m.BILLING].project, "atlas");
+  assert.equal(byId[m.BILLING].status, "idle");
+  assert.equal(byId[m.DOCS].status, "working", "a turn under way, as its OpenCode says");
+  assert.equal(byId[m.DOCS].reachable, true);
+  assert.equal(byId[m.A].title, "Add refunds", "a session the map reads keeps its own title");
+  assert.ok(!m.asked.includes(m.A), "and OpenCode isn't asked about it");
+  m.policy.disallow(m.DOCS);
+  assert.ok(!(await m.engine.agents()).some((a) => a.id === m.DOCS), "taking consent back takes it off the list");
+});
+
+test("an OpenCode session sends by title words and by selector, and the message goes in through its OpenCode", async () => {
+  const m = machine();
+  const sent = await m.engine.send(m.A, { to: "docs site", text: "Which release is the docs site on?" });
+  assert.deepEqual(sent.to.map((r) => [r.id, r.delivery]), [[m.DOCS, "right away, through its OpenCode server"]]);
+  // From one OpenCode session to the others, by selector: never to itself.
+  const wide = await m.engine.send(m.BILLING, { to: "app:opencode", text: "Anyone on the docs?" });
+  assert.deepEqual(wide.to.map((r) => r.id), [m.DOCS]);
+  const narrow = await m.engine.send(m.BILLING, { to: "project:docs app:opencode", text: "And the release?" });
+  assert.deepEqual(narrow.to.map((r) => r.id), [m.DOCS]);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(m.delivered.length, 3);
+  const [id, text] = m.delivered[1];
+  assert.equal(id, m.DOCS);
+  assert.match(text, /^\[XenoNet from Billing API\] \(message #\d+;/, "framed with the sender's title from its OpenCode");
+  await assert.rejects(m.engine.send(m.A, { to: "somebody else", text: "x" }), /no session or actor matches/, "a session you didn't allow can't be found by its title");
+});
+
+test("the router lists only live consent for OpenCode, and describes only OpenCode sessions", async () => {
+  const m = machine();
+  m.policy.allow("claude:aaaaaaaa-0001");
+  assert.deepEqual(m.router.known().sort(), [m.BILLING, m.DOCS].sort());
+  m.t.now += 9 * 3600e3;
+  assert.deepEqual(m.router.known(), [], "consent expires (8 hours by default)");
+  assert.equal(await m.router.describe(m.A), null);
+  assert.equal((await m.router.describe(m.BILLING)).title, "Billing API");
+  assert.deepEqual(new DeliveryRouter({ engine: m.engine, policy: m.policy }).known(), [], "no OpenCode way in, none listed");
+});
+
+test("info: what the session's own OpenCode says of it, kept for a while; null when no OpenCode knows it", async () => {
+  let t = 0, calls = 0;
+  const fetch = async (url) => {
+    calls++;
+    const u = new URL(url);
+    const body =
+      u.pathname === "/global/health" ? { healthy: true } :
+      u.pathname === "/path" ? { directory: "/w/docs" } :
+      u.pathname === "/session/status" ? { ses_docs000002: { type: "busy" } } :
+      u.pathname === "/session/ses_docs000002" ? { id: "ses_docs000002", title: "Docs site", directory: "/w/docs", time: { created: 1, updated: 2 } } :
+      null;
+    return body ? { ok: true, status: 200, json: async () => body } : { ok: false, status: 404, json: async () => ({}) };
+  };
+  const oc = createOpenCode({ fetch, processes: async () => [{ pid: 7, args: "opencode --port 4096" }], now: () => t });
+  assert.deepEqual(await oc.info("opencode:ses-docs000002"), { title: "Docs site", directory: "/w/docs", updated: 2, busy: true });
+  const before = calls;
+  await oc.info("opencode:ses-docs000002");
+  assert.equal(calls, before, "asked again within the cache time: no requests");
+  assert.equal(await oc.info("opencode:ses-nobody00009"), null);
+  t += 11e3;
+  await oc.info("opencode:ses-docs000002");
+  assert.ok(calls > before, "and asked afresh after it");
 });

@@ -131,11 +131,39 @@ export function createOpenCode({ fetch = globalThis.fetch, processes = openCodeP
     return here ?? known;
   }
 
+  // What OpenCode says of a session, for the engine: its title, its folder,
+  // when it last changed, and whether a turn is under way. null when no
+  // running OpenCode knows it. Each answer is kept for cacheMs, since the
+  // engine asks every time it lists the agents.
+  const infos = new Map(); // ses_… → { at, value }
+  async function info(id) {
+    const ses = openCodeId(id);
+    const hit = infos.get(ses);
+    if (hit && now() - hit.at < cacheMs) return hit.value;
+    let value = null;
+    const s = await serverFor(id).catch(() => null);
+    if (s) {
+      try {
+        const [session, status] = await Promise.all([get(s.base, `/session/${encodeURIComponent(ses)}`), get(s.base, "/session/status")]);
+        const st = status?.[ses]?.type;
+        value = { title: typeof session?.title === "string" ? session.title : null, directory: session?.directory ?? null, updated: Number(session?.time?.updated) || null, busy: !!st && st !== "idle" };
+      } catch {}
+    }
+    infos.delete(ses);
+    infos.set(ses, { at: now(), value });
+    if (infos.size > 256) infos.delete(infos.keys().next().value);
+    return value;
+  }
+
   return {
     name: "opencode",
     servers,
     serverFor,
-    forget: () => (cache = { at: -Infinity, servers: [] }),
+    info,
+    forget: () => {
+      cache = { at: -Infinity, servers: [] };
+      infos.clear();
+    },
     async deliver(id, text) {
       const s = await serverFor(id);
       if (!s) return { ok: false, why: "no running OpenCode has this session" };

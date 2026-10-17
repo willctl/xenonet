@@ -38,6 +38,23 @@ export class DeliveryRouter extends EventEmitter {
     return String(id).startsWith("opencode:") && !!this.opencode && this.policy.consented(id);
   }
 
+  // The OpenCode sessions you allowed XenoNet to wake. XenoNet has no
+  // transcript of them, so the engine counts these among the agents, and
+  // they can be found by their titles and selectors before they've been in
+  // touch. Only these: XenoNet doesn't list every OpenCode session it finds.
+  known() {
+    if (!this.opencode) return [];
+    return Object.keys(this.policy.data?.consent ?? {}).filter((id) => id.startsWith("opencode:") && this.policy.consented(id));
+  }
+
+  // What its own OpenCode says of an OpenCode session (its title, folder,
+  // last change, and whether a turn is under way), for the engine's view of
+  // a session the map hasn't read; null for any other.
+  async describe(id) {
+    if (!String(id).startsWith("opencode:") || !this.opencode?.info) return null;
+    return this.opencode.info(id).catch(() => null);
+  }
+
   // How a message from `from` would reach `a`, an agent as the engine lists
   // it, if sent now: for the sender's answer. null when it waits for the hooks.
   way(from, a) {
