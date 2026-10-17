@@ -1,0 +1,14 @@
+[package]
+name = "xenonet-state"
+description = "The map's data and what XenoNet remembers: state.json and its versions, and, as the port goes on, the graph, search and stats."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+xenonet-base.workspace = true

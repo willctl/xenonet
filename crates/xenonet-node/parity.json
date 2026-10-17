@@ -52,7 +52,19 @@
         "A document is written as JSON.stringify(doc, null, 2) writes it, byte for byte over 3,000 random documents, except that an object's own toJSON (other than a Date's) isn't called, and a lone surrogate in a string is written as U+FFFD where JS writes \\udXXX.",
         "An error writing the file is worded as Node words it for the common codes (ENOTDIR, EACCES, ENOSPC…); others keep the system's words.",
         "JsonStore's timer and health stay in the twin.",
-        "The migrations still run through core/migrate.js, in JS; the parts prepare says it repaired come back as strings."
+        "The parts prepare says it repaired come back as strings."
+      ]
+    },
+    "core/migrate.js": {
+      "rust": "crates/xenonet-state/src/migrate.rs",
+      "differences": [
+        "Rust plans every step before the first runs, so when there's no way to the version wanted, that's the error, even if a step before the gap would have thrown."
+      ]
+    },
+    "core/statefile.js": {
+      "rust": "crates/xenonet-state/src/statefile.rs",
+      "differences": [
+        "inspectState, the doctor's look at the state folder, is still the JS's."
       ]
     },
     "core/actors/tokens.js": {

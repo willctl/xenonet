@@ -2,10 +2,10 @@
 // file with a version. Rust reads the file and decides what to do with it
 // (a fresh document, one moved aside, one read only, one moved up and its
 // copy kept), says so in the report, and writes the file through a
-// temporary one. The document, its migrations (core/migrate.js) and what
+// temporary one. The document, its migrations (through migrate.js) and what
 // fills it in stay JS, and so do the store's timer and its health.
 import path from "node:path";
-import { migrate } from "../../../../../core/migrate.js";
+import { migrate } from "../migrate.js";
 import { native } from "../../index.js";
 import { Block } from "./lifecycle.js";
 

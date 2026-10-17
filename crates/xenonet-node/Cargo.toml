@@ -25,6 +25,7 @@ xenonet-actors.workspace = true
 xenonet-base.workspace = true
 xenonet-blocks.workspace = true
 xenonet-sources.workspace = true
+xenonet-state.workspace = true
 
 [build-dependencies]
 napi-build.workspace = true
