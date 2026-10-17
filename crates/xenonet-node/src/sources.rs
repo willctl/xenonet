@@ -227,3 +227,35 @@ impl JsRefusalStore {
         self.r.context_file(&id).to_string_lossy().into_owned()
     }
 }
+
+// ---------- openrouter-usage.js ----------
+
+use xenonet_sources::openrouter_usage as openrouter;
+
+#[napi(js_name = "openrouterKeyUrl")]
+pub fn openrouter_key_url() -> &'static str {
+    openrouter::KEY_URL
+}
+
+#[napi(js_name = "openrouterUsageOf")]
+pub fn openrouter_usage_of(body: MaybeJson) -> Json {
+    Json(openrouter::usage_of(body.0.as_ref()))
+}
+
+/// `reached` false when OpenRouter couldn't be asked; `status` and `ok`
+/// are its answer's.
+#[napi(js_name = "openrouterReading")]
+pub fn openrouter_reading(has_key: bool, reached: bool, status: MaybeJson, ok: bool, body: MaybeJson, at: f64) -> Json {
+    let status = status.0.unwrap_or(Value::Null);
+    Json(openrouter::reading(has_key, reached.then_some((&status, ok)), body.0.as_ref(), at))
+}
+
+#[napi(js_name = "openrouterFresh")]
+pub fn openrouter_fresh(at: f64, now: f64) -> bool {
+    openrouter::fresh(at, now)
+}
+
+#[napi(js_name = "openrouterDemo")]
+pub fn openrouter_demo(now: f64) -> Json {
+    Json(openrouter::demo(now))
+}

@@ -484,6 +484,8 @@ place. This table follows it.
 | `core/xenolith.js` | `xenonet-sources/src/xenolith.rs` | `xenolith` passes |
 | `core/frames.js`, `core/rename.js`, `core/export-labels.js`, `core/needs-you.js` | `xenonet-state/src/frames.rs`, `rename.rs`, `export_labels.rs`, `needs_you.rs` (the page keeps their JS) | `frames`, `rename`, `export-labels`, `needs-you`, `poster`, `page-markup` pass |
 | `core/refusals/demo.js`, `query.js`, `store.js` | `xenonet-sources/src/refusals/` (in xenonet-sources, not xenonet-actors: the live tailer reads refusals) | `refusals`, `refusal-browser` pass |
+| `core/redact.js`, `core/digest.js`, `core/classify.js` | `xenonet-state/src/redact.rs`, `digest.rs`, `classify.rs` (running Codex and asking the decider stay in the twins) | `redact`, `digest`, `decide`, `poster` pass |
+| `core/openrouter-usage.js` | `xenonet-sources/src/openrouter_usage.rs` (the key and the request stay in the twin) | `costs` passes |
 | `core/blocks/sqlite.js` | `xenonet-blocks/src/sqlite.rs`, on rusqlite with SQLite bundled | No twin (its migrations take a `node:sqlite` handle): Rust tests of the same cases, and the Rust opens a JS-made `engine.sqlite` (version 7, WAL, 18 tables) and `search.sqlite` (an FTS5 match on what node:sqlite indexed) |
 | `core/blocks/store.js` | `xenonet-blocks/src/store.rs` | `blocks-store`, `statefile`, `store`, `hosts-config` pass |
 | `core/migrate.js`, `core/statefile.js` | `xenonet-state/src/migrate.rs`, `statefile.rs` | `statefile`, `store`, `state` pass |

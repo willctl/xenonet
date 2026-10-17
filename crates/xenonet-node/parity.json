@@ -210,6 +210,34 @@
         "claudeContext and codexContext give copies of the lines they were given, not the same objects.",
         "A field the signal leaves undefined is left out of the record returned, where JS kept the key with undefined (the same JSON)."
       ]
+    },
+    "core/redact.js": {
+      "rust": "crates/xenonet-state/src/redact.rs",
+      "differences": [
+        "HMAC-SHA256 is written out on sha2 (checked against RFC 4231's vectors), where JS used crypto.createHmac.",
+        "starNames takes ids that are equal as JSON as one id; JS's Set kept two equal objects apart (ids are strings)."
+      ]
+    },
+    "core/digest.js": {
+      "rust": "crates/xenonet-state/src/digest.rs",
+      "differences": [
+        "askCodex still runs codex exec from the twin (a child process); Rust gives its arguments and narrate's prompt.",
+        "dayLog's date is English as en-US writes it (\"Saturday, October 3\") whatever the system's locale, where Node used the system's.",
+        "summarize writes since and until as null when they aren't numbers, where JS gave them back as they came."
+      ]
+    },
+    "core/classify.js": {
+      "rust": "crates/xenonet-state/src/classify.rs",
+      "differences": [
+        "Codex (digest.js's askCodex) and the decider are still asked from the twin; Rust makes the outline, the prompt, the questions and the picks.",
+        "jevQuestions' batches hold copies of the outline's folders, not the same objects."
+      ]
+    },
+    "core/openrouter-usage.js": {
+      "rust": "crates/xenonet-sources/src/openrouter_usage.rs",
+      "differences": [
+        "The key (the credential store), the request (fetch) and the reading kept for a minute stay in the twin; Rust says what OpenRouter's answer means and how long it stands."
+      ]
     }
   },
   "tests": [
