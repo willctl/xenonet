@@ -123,7 +123,7 @@ pub fn parse_ps(text: String) -> Json {
 
 #[napi(js_name = "procsParseNetstat")]
 pub fn parse_netstat(text: String, local_port: MaybeJson, remote_port: MaybeJson) -> Option<f64> {
-    procs::parse_netstat(&text, &procs::template(local_port.0.as_ref()), &procs::template(remote_port.0.as_ref()))
+    procs::parse_netstat(&text, &xenonet_engine::js::template(local_port.0.as_ref()), &xenonet_engine::js::template(remote_port.0.as_ref()))
 }
 
 #[napi(js_name = "procsSelfTest")]
@@ -200,7 +200,7 @@ impl ProcsCore {
     /// What the census says a row is.
     #[napi]
     pub fn of(&self, row: MaybeJson) -> Json {
-        let row = row.0.filter(|r| procs::truthy(Some(r))).unwrap_or(Value::Null);
+        let row = row.0.filter(|r| xenonet_engine::js::truthy(Some(r))).unwrap_or(Value::Null);
         if row.is_null() {
             return Json(json!({ "agent": null, "product": null }));
         }

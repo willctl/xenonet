@@ -35,6 +35,9 @@ regex = "1"
 # engine.sqlite and search.sqlite. Bundled, so FTS5 and VACUUM INTO are
 # there whatever SQLite the system has.
 rusqlite = { version = "0.40", features = ["bundled"] }
+# Names are compared after NFKC and NFD (core/actors/names.js), which std
+# doesn't do.
+unicode-normalization = "0.1"
 # Tokens: a SHA-256 of each is all XenoNet keeps, and 32 random bytes from
 # the system make one.
 sha2 = "0.10"

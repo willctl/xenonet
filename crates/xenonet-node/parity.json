@@ -163,6 +163,59 @@
         "The memory store keeps a target and a secret by their text, String(value); the JS's Map kept the values given.",
         "A comment that isn't text is written as String(comment); the JS threw on macOS."
       ]
+    },
+    "core/actors/products.js": {
+      "rust": "crates/xenonet-engine/src/products.rs",
+      "differences": [
+        "In xenonet-engine, below the actors, since the engine names products too; xenonet-actors re-exports it.",
+        "productOf takes only a text id, and productOfSlug reads what it's given as String(slug)."
+      ]
+    },
+    "core/actors/detail.js": {
+      "rust": "crates/xenonet-actors/src/detail.rs",
+      "differences": [
+        "clip counts UTF-16 units as JS does, but a character it would cut in two is left out; JS kept half of it.",
+        "Facts given as null count as none (JS threw reading them), and a paths fact that isn't a list throws a plain Error, not a TypeError."
+      ]
+    },
+    "core/actors/names.js": {
+      "rust": "crates/xenonet-actors/src/names.rs",
+      "differences": [
+        "Unicode's data (NFKC and NFD, letters, digits and marks, scripts, the default-ignorable characters) comes from the unicode-normalization and regex crates, whose Unicode version may differ from V8's ICU by a release.",
+        "Lowercasing is Rust's to_lowercase: the same full mapping, final sigma included."
+      ]
+    },
+    "core/actors/key.js": {
+      "rust": "crates/xenonet-actors/src/key.rs",
+      "differences": [
+        "The key stays in Rust; reveal() copies it out, and the comparison is Rust's own constant-time one."
+      ]
+    },
+    "core/actors/limits.js": {
+      "rust": "crates/xenonet-actors/src/limits.rs",
+      "differences": [
+        "The clock is read once a call; JS read it again for each bucket a full table made it look at.",
+        "A key is kept by its text, String(key)."
+      ]
+    },
+    "core/actors/handoff.js": {
+      "rust": "crates/xenonet-actors/src/handoff.rs",
+      "differences": [
+        "The address's host is still read with Node's URL in the twin."
+      ]
+    },
+    "core/actors/adapters.js": {
+      "rust": "crates/xenonet-actors/src/adapters.rs",
+      "differences": [
+        "verified() still awaits the adapter's own check in the twin; Rust decides what its answer comes to."
+      ]
+    },
+    "core/actors/spend.js": {
+      "rust": "crates/xenonet-actors/src/spend.rs",
+      "differences": [
+        "dayStart (the local day, by the system's time zone) and actorSpend's gathering of the live costs and the map's sessions stay in the twin.",
+        "Names sort as ICU's root collation sorts ASCII text (localeCompare); outside ASCII, by an approximation of it."
+      ]
     }
   },
   "tests": [

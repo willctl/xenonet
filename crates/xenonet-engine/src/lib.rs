@@ -7,5 +7,7 @@
 //! the clock, the store) goes through a trait of its own, so the same code
 //! runs in the binary and behind a JS twin, where the twin does the reading.
 
+pub mod js;
 pub mod jsre;
 pub mod procs;
+pub mod products;

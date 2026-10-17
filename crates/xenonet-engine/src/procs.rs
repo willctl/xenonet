@@ -27,6 +27,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 use xenonet_base::json::number_string;
 use xenonet_base::paths::normalize_posix;
+use crate::js::{is_integer, template, truthy};
 use xenonet_base::text::{js_number, js_string, js_trim};
 
 const TABLE_MS: f64 = 1500.0;
@@ -457,31 +458,6 @@ pub fn parse_netstat(text: &str, local_port: &str, remote_port: &str) -> Option<
         closing = closing.or(Some(js_num(&m[5])));
     }
     closing
-}
-
-/// A value as a template literal writes it (`${v}`), undefined for a
-/// field that isn't there.
-pub fn template(v: Option<&Value>) -> String {
-    match v {
-        None => "undefined".into(),
-        Some(v) => js_string(v),
-    }
-}
-
-/// JS's truthiness.
-pub fn truthy(v: Option<&Value>) -> bool {
-    match v {
-        None | Some(Value::Null) => false,
-        Some(Value::Bool(b)) => *b,
-        Some(Value::Number(n)) => n.as_f64().is_some_and(|f| f != 0.0 && !f.is_nan()),
-        Some(Value::String(s)) => !s.is_empty(),
-        Some(_) => true,
-    }
-}
-
-/// Number.isInteger.
-pub fn is_integer(v: Option<&Value>) -> Option<f64> {
-    v.and_then(Value::as_f64).filter(|f| f.is_finite() && f.trunc() == *f)
 }
 
 fn key(p: &Row) -> String {
