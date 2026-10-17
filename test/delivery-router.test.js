@@ -18,7 +18,7 @@ function rig({ views = {}, opencode = null, tmux = null, ackMs = 50, pid = 4242 
   const engine = new EventEmitter();
   const seen = [];
   engine.view = async (id) => ({ id, title: id === "actor:muse" ? "Muse" : `t-${id}`, status: "idle", ...views[id] });
-  engine.store = { markSeen: (agent, ids) => seen.push([agent, ...ids]), contact: () => ({ pid }) };
+  engine.store = { markSeen: (agent, ids) => seen.push([agent, ...ids]), markUnseen: (agent, ids) => seen.push(["unseen", agent, ...ids]), contact: () => ({ pid }) };
   const policy = new DeliveryPolicy();
   const channels = new Channels();
   const notes = [];
@@ -43,6 +43,25 @@ test("a Claude Code session listening on its channel gets the message live, fram
   assert.equal(rec.ackedAt, null, "the channel's own poll isn't an ack");
   r.engine.emit("contact", { agent: A, via: "hook" });
   assert.ok(rec.ackedAt);
+});
+
+test("a channel only wakes an idle session: a working one gets the message from its hooks, during the turn under way", async () => {
+  const r = rig({ views: { [A]: { status: "working" } } });
+  r.channels.poll(A, 1000);
+  const [rec] = await r.router.route(msg());
+  assert.equal(rec.state, "next-turn");
+  assert.deepEqual(r.seen, []);
+});
+
+test("a push nothing acked goes back to the hooks, so a channel Claude Code dropped still reaches the next turn", async () => {
+  const r = rig();
+  r.channels.poll(A, 1000);
+  const [rec] = await r.router.route(msg());
+  assert.equal(rec.how, "channel");
+  await sleep(80);
+  assert.equal(rec.state, "notified");
+  assert.deepEqual(r.seen, [[A, 1], ["unseen", A, 1]]);
+  assert.equal(r.notes.length, 1);
 });
 
 test("no way in: the message waits for the next turn, is acked when the hooks hand it over, and else you're told after the ack time", async () => {

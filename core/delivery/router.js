@@ -9,8 +9,8 @@
 //
 // Acks: an OpenCode server's 204 is one; a channel or a typed message is
 // acked by the session's next hook after the push; a next-turn message when
-// the hooks hand it over (the engine's "seen"). Actors aren't routed here:
-// they read their inbox.
+// the hooks hand it over (the engine's "seen"). A push with no ack goes back
+// to waiting for the hooks. Actors aren't routed here: they read their inbox.
 //
 // Waking a session spends its plan, so every wake is checked against the
 // policy (pause switch, consent, wake budget) first; a message that may not
@@ -76,7 +76,10 @@ export class DeliveryRouter extends EventEmitter {
     if (!wake.ok) tried.push(`no wake: ${wake.why}`);
     else {
       // 1. A Claude Code channel: the session opted in by starting with it.
-      if (app === "claude" && this.channels?.live(rec.agent)) {
+      // Only to wake an idle one: a working session gets the message from its
+      // hooks during the turn under way, sooner than from a channel, which
+      // Claude Code holds until that turn ends.
+      if (app === "claude" && idle && this.channels?.live(rec.agent)) {
         if (this.channels.push(rec.agent, { id: m.id, from: fromName, text })) return success("channel");
         tried.push("channel closed");
       }
@@ -114,6 +117,11 @@ export class DeliveryRouter extends EventEmitter {
     if (rec.ackedAt) return;
     const timer = setTimeout(async () => {
       if (rec.ackedAt) return;
+      // Claude Code drops a push on a channel it didn't register (channels
+      // off for the organization, say) without a word, and a typed line can
+      // be lost. With no hook since, the message waits for the hooks again,
+      // so the session's next turn still gets it.
+      if (rec.how === "channel" || rec.how === "tmux") this.engine.store.markUnseen(rec.agent, [m.id]);
       rec.state = "notified";
       this.policy.audit({ kind: "notified", message: m.id, to: rec.agent });
       this.emit("delivery", { ...rec });
