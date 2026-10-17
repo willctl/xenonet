@@ -71,5 +71,9 @@ export const calls =
       return target[q.method](...(q.args ?? []));
     }
     if (q.op === "get") return at(deps, q.path);
+    if (q.op === "kind") {
+      const v = at(deps, q.path);
+      return v === null ? "null" : typeof v;
+    }
     return rest(q);
   };

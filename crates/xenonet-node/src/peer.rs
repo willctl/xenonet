@@ -130,6 +130,32 @@ impl peer::Calls for SyncCalls {
             arg_of(self.env, v, 0).map_err(|e| Thrown::new(e.reason.clone()))
         }
     }
+
+    fn kind(&mut self, path: &str) -> peer::Result<String> {
+        unsafe {
+            let v = match self.at(path) {
+                Ok(v) => v,
+                // Reading through undefined or null is undefined here, as
+                // optional chaining reads it.
+                Err(_) => return Ok("undefined".into()),
+            };
+            let mut t = 0;
+            check(sys::napi_typeof(self.env, v, &mut t), "tell a value's type")?;
+            use sys::ValueType::*;
+            Ok(match t {
+                _ if t == napi_undefined => "undefined",
+                _ if t == napi_null => "null",
+                _ if t == napi_boolean => "boolean",
+                _ if t == napi_number => "number",
+                _ if t == napi_string => "string",
+                _ if t == napi_symbol => "symbol",
+                _ if t == napi_function => "function",
+                _ if t == napi_bigint => "bigint",
+                _ => "object",
+            }
+            .into())
+        }
+    }
 }
 
 /// What a call into Rust that failed throws: the very value a JS call

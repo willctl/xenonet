@@ -48,10 +48,24 @@ pub trait Calls {
     fn call(&mut self, path: &str, method: &str, args: Vec<Arg>) -> Result<Arg>;
     /// `<path>`, read.
     fn get(&mut self, path: &str) -> Result<Arg>;
+    /// What `<path>` is, as typeof says it ("null" for null), without
+    /// reading it whole: a collaborator's field can be a whole object graph.
+    fn kind(&mut self, path: &str) -> Result<String>;
     /// The time, by the module's clock.
     fn now(&mut self) -> f64 {
         self.call("clock", "now", vec![]).ok().and_then(|a| a.as_f64()).unwrap_or(f64::NAN)
     }
+}
+
+/// `<path>?.<method>?.()`: Undef when there's nothing to call.
+pub fn opt_call(calls: &mut dyn Calls, path: &str, method: &str, args: Vec<Arg>) -> Result<Arg> {
+    if matches!(calls.kind(path)?.as_str(), "undefined" | "null") {
+        return Ok(Arg::Undef);
+    }
+    if calls.kind(&format!("{path}.{method}"))? != "function" {
+        return Ok(Arg::Undef);
+    }
+    calls.call(path, method, args)
 }
 
 /// A list as a call answered it: its items, or none.

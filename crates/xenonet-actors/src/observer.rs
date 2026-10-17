@@ -378,10 +378,7 @@ impl Observer {
         if !c.call("", "observing", vec![])?.truthy() {
             return Ok(false);
         }
-        if c.get("actors.map")?.is_nullish() || !matches!(c.get("actors.map.ready")?, Arg::Other) {
-            return Ok(true);
-        }
-        Ok(c.call("actors.map", "ready", vec![])? != Arg::Bool(false))
+        Ok(xenonet_engine::peer::opt_call(c, "actors.map", "ready", vec![])? != Arg::Bool(false))
     }
 
     /// One look: the kind's own look(at), then the minutes over recorded,

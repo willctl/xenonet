@@ -145,6 +145,10 @@ impl peer::Calls for AskCalls<'_> {
     fn get(&mut self, path: &str) -> peer::Result<Arg> {
         self.0.ask_arg(Arg::Obj(vec![("op".into(), Arg::text("get")), ("path".into(), Arg::text(path))]))
     }
+    fn kind(&mut self, path: &str) -> peer::Result<String> {
+        let k = self.0.ask_arg(Arg::Obj(vec![("op".into(), Arg::text("kind")), ("path".into(), Arg::text(path))]))?;
+        Ok(xenonet_engine::store::js_text(&k))
+    }
 }
 
 /// A function on its way, for the twin to drive.

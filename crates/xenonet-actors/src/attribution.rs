@@ -398,13 +398,7 @@ fn js_min(a: f64, b: f64) -> f64 {
 
 /// `<path>?.<method>?.()`: Undef when there's nothing to call.
 pub fn opt_call(calls: &mut dyn Calls, path: &str, method: &str) -> Result<Arg> {
-    if calls.get(path)?.is_nullish() {
-        return Ok(Arg::Undef);
-    }
-    if !matches!(calls.get(&format!("{path}.{method}"))?, Arg::Other) {
-        return Ok(Arg::Undef);
-    }
-    calls.call(path, method, vec![])
+    xenonet_engine::peer::opt_call(calls, path, method, vec![])
 }
 
 /// A census as the attribution reads it: its rows, and what each is.
