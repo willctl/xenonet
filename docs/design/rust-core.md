@@ -111,7 +111,7 @@ crates that need them.
 
 ### During the port: napi-rs, behind each module's own API
 
-The JS unit tests are the contract: 155 files and about 1,250 tests,
+The JS unit tests are the contract: 155 files and 1,288 tests,
 which import JS modules, call them, often synchronously, pass them fakes
 (a clock, a filesystem, callbacks such as a scanner's `pick` and `look`),
 and read their fields (`scanner.folders`, `normalizer.counters`). Rust
@@ -428,6 +428,22 @@ Each step leaves `npm test` passing on JS, and adds to `parity.json`.
 
 ## Status
 
-The port starts with this document. `crates/xenonet-node/parity.json`
-will record the modules ported and the test files that pass with their
-twins in place, and this section will follow it.
+`crates/xenonet-node/parity.json` is the record: the modules ported, what
+differs from their JS, and the test files that pass with every twin in
+place. This table follows it.
+
+| Module | Rust | Its own tests, with twins |
+|---|---|---|
+| `core/pricing.js` | `xenonet-base/src/pricing.rs` | `costs`, `stats` pass |
+| `core/paths.js` | `xenonet-base/src/paths.rs` | `platform`, `windows-command` pass |
+| `core/blocks/lifecycle.js` | `xenonet-blocks/src/lifecycle.rs` | `blocks-lifecycle` passes |
+| `core/blocks/normalizer.js` | `xenonet-blocks/src/normalizer.rs` | `blocks-normalizer` passes |
+| `core/blocks/scanner.js` | `xenonet-blocks/src/scanner.rs`, with the read-again fix | `blocks-scanner`, `projects` pass |
+
+With every twin in place, 91 of the 92 test files that reach one pass.
+`blocks-tailer` doesn't yet: the Rust scanner reads a folder again when it
+was read just after it changed, and the JS tailer on `main` reads a file
+the scanner lists again as history. The tailer's fix for that comes with
+its port.
+
+Not ported yet: everything else, in the order above.

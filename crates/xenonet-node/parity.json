@@ -1,0 +1,128 @@
+{
+  "modules": {
+    "core/pricing.js": {
+      "rust": "crates/xenonet-base/src/pricing.rs",
+      "differences": []
+    },
+    "core/paths.js": {
+      "rust": "crates/xenonet-base/src/paths.rs",
+      "differences": [
+        "pathStyle still returns one of Node's path modules: Rust picks which.",
+        "listFiles throws a match's error once the walk is over, not where it was thrown (match isn't called again after it throws)."
+      ]
+    },
+    "core/blocks/lifecycle.js": {
+      "rust": "crates/xenonet-blocks/src/lifecycle.rs",
+      "differences": [
+        "setState refuses a state that isn't one of STATES; JS took any string."
+      ]
+    },
+    "core/blocks/normalizer.js": {
+      "rust": "crates/xenonet-blocks/src/normalizer.rs",
+      "differences": [
+        "Lines are parsed by crates/xenonet-base/src/json.rs: a number past a double's range reads as null (JS: Infinity), a lone surrogate escape as U+FFFD, and nesting past 512 levels is unparsable.",
+        "The SyntaxError handed to unparsable has Rust's message, not V8's."
+      ]
+    },
+    "core/blocks/scanner.js": {
+      "rust": "crates/xenonet-blocks/src/scanner.rs",
+      "differences": [
+        "It has the fix on fix/scanner-racy-mtime: a folder read within 2 s of its mtime is read again on the next walk.",
+        "folders lists its folders by path; JS listed them in the order they were read."
+      ]
+    }
+  },
+  "tests": [
+    "test/actor-gateway.test.js",
+    "test/actor-needs-you.test.js",
+    "test/actor-registration.test.js",
+    "test/actor-routes.test.js",
+    "test/actor-wake.test.js",
+    "test/actors.test.js",
+    "test/assistant-connections.test.js",
+    "test/assistant-endpoint.test.js",
+    "test/assistant-routes.test.js",
+    "test/assistant-service.test.js",
+    "test/assistant-tunnels.test.js",
+    "test/blocks-gatherer.test.js",
+    "test/blocks-lifecycle.test.js",
+    "test/blocks-normalizer.test.js",
+    "test/blocks-scanner.test.js",
+    "test/blocks-store.test.js",
+    "test/claude-usage.test.js",
+    "test/claude.test.js",
+    "test/cli-actor.test.js",
+    "test/cli.test.js",
+    "test/codex-client.test.js",
+    "test/codex.test.js",
+    "test/component-activation.test.js",
+    "test/component-auth.test.js",
+    "test/component-console.test.js",
+    "test/component-download.test.js",
+    "test/component-install.test.js",
+    "test/component-packages.test.js",
+    "test/control-client.test.js",
+    "test/control.test.js",
+    "test/costs.test.js",
+    "test/decide.test.js",
+    "test/doctor.test.js",
+    "test/engine-actors.test.js",
+    "test/engine-connect.test.js",
+    "test/engine-routes.test.js",
+    "test/engine-store.test.js",
+    "test/engine.test.js",
+    "test/features.test.js",
+    "test/gateway-tunnel.test.js",
+    "test/git-status.test.js",
+    "test/golden.test.js",
+    "test/graph.test.js",
+    "test/grok-bot-observer.test.js",
+    "test/hermes-files.test.js",
+    "test/hermes-observer.test.js",
+    "test/hosts-config.test.js",
+    "test/hosts-doctor.test.js",
+    "test/hosts-hub.test.js",
+    "test/hosts-ids.test.js",
+    "test/hosts-link.test.js",
+    "test/hosts-merge.test.js",
+    "test/hosts-relay.test.js",
+    "test/hosts-server.test.js",
+    "test/identities.test.js",
+    "test/integrations.test.js",
+    "test/lab.test.js",
+    "test/launcher.test.js",
+    "test/lines.test.js",
+    "test/live.test.js",
+    "test/log.test.js",
+    "test/mcp-info.test.js",
+    "test/muse-observer.test.js",
+    "test/numbat.test.js",
+    "test/observer.test.js",
+    "test/observers.test.js",
+    "test/platform.test.js",
+    "test/projects.test.js",
+    "test/provider-drift.test.js",
+    "test/refusal-browser.test.js",
+    "test/refusals.test.js",
+    "test/root.test.js",
+    "test/schema-ids.test.js",
+    "test/schema-output.test.js",
+    "test/scope.test.js",
+    "test/signals.test.js",
+    "test/space-presence.test.js",
+    "test/spotify.test.js",
+    "test/stall.test.js",
+    "test/state.test.js",
+    "test/statefile.test.js",
+    "test/stats.test.js",
+    "test/store.test.js",
+    "test/system-stats.test.js",
+    "test/token-files.test.js",
+    "test/vendor-adapters.test.js",
+    "test/vendor-reader.test.js",
+    "test/vendor-schemas.test.js",
+    "test/verify.test.js",
+    "test/windows-command.test.js",
+    "test/workspace.test.js"
+  ]
+}

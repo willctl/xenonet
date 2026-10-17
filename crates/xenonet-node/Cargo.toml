@@ -1,0 +1,27 @@
+[package]
+name = "xenonet-node"
+description = "The Node-API addon that puts XenoNet's Rust crates behind the JS modules' own API, for the port (docs/design/rust-core.md)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+# The addon links against Node's own symbols when Node loads it, so it has
+# no test binary of its own: the JS twins' tests are its tests.
+test = false
+doctest = false
+
+[dependencies]
+napi.workspace = true
+napi-derive.workspace = true
+serde_json.workspace = true
+xenonet-base.workspace = true
+xenonet-blocks.workspace = true
+
+[build-dependencies]
+napi-build.workspace = true
