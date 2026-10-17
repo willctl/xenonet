@@ -238,6 +238,19 @@
       "differences": [
         "The key (the credential store), the request (fetch) and the reading kept for a minute stay in the twin; Rust says what OpenRouter's answer means and how long it stands."
       ]
+    },
+    "core/store.js": {
+      "rust": "crates/xenonet-state/src/store.rs",
+      "differences": [
+        "The document stays the JS object the JSON store's twin loaded, changed in place, since its callers hold its parts: Rust says what prepare fills in and what setLayout and clearProjectRules change, and the twin applies it. The other setters only set a key."
+      ]
+    },
+    "core/workspace.js": {
+      "rust": "crates/xenonet-state/src/workspace.rs",
+      "differences": [
+        "The config (config.js), the store, the scan (scanProjects, until projects.js's twin is beside it) and the scan's time limit stay in the twin; Rust reads the folders and decides.",
+        "A folder's links are followed with Rust's canonicalize, without the \\\\?\\ it puts in front on Windows, where Node used realpath."
+      ]
     }
   },
   "tests": [

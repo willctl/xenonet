@@ -238,3 +238,86 @@ pub fn jev_questions(outline: Json) -> Json {
 pub fn picks_from_answers(answers: Json, folders: Json, offset: f64) -> Json {
     Json(Value::Array(classify::picks_from_answers(&answers.0, folders.0.as_array().map_or(&[], Vec::as_slice), offset)))
 }
+
+// ---------- store.js ----------
+
+use xenonet_state::{store, workspace};
+
+/// { parts, repaired }: the parts of the document prepare() fills in, as
+/// they should be, and which of them weren't objects.
+#[napi(js_name = "prepareState")]
+pub fn prepare_state(state: Json) -> Json {
+    let mut m = state.0.as_object().cloned().unwrap_or_default();
+    let repaired = store::prepare(&mut m);
+    let parts: serde_json::Map<String, Value> = store::PARTS.iter().map(|k| (k.to_string(), m[*k].clone())).collect();
+    Json(json!({ "parts": parts, "repaired": repaired }))
+}
+
+/// [[id, place or null], …]: what setLayout does to the layout.
+#[napi(js_name = "layoutChanges")]
+pub fn layout_changes(positions: MaybeJson) -> Json {
+    Json(Value::Array(store::layout_changes(positions.0.as_ref()).into_iter().map(|(id, p)| json!([id, p])).collect()))
+}
+
+#[napi(js_name = "rulesToClear")]
+pub fn rules_to_clear(keys: Vec<String>, under_key: Option<String>) -> Vec<String> {
+    store::rules_to_clear(&keys, under_key.as_deref())
+}
+
+#[napi(js_name = "picksFolderKey")]
+pub fn picks_folder_key(root_key: MaybeJson) -> Result<String> {
+    store::folder_key(root_key.0.as_ref()).map_err(|m| Error::new(Status::GenericFailure, m))
+}
+
+// ---------- workspace.js ----------
+
+#[napi(js_name = "savedRoot")]
+pub fn saved_root(file: String) -> Option<String> {
+    workspace::saved_root(&file)
+}
+
+#[napi(js_name = "workspaceRoot")]
+pub fn workspace_root(env_dir: Option<String>, saved: MaybeJson, home: String) -> Json {
+    Json(workspace::root(env_dir.as_deref(), saved.0.as_ref(), &home))
+}
+
+#[napi(js_name = "workspaceLocked")]
+pub fn workspace_locked(env_dir: Option<String>, home: String) -> Option<String> {
+    workspace::locked(env_dir.as_deref(), &home)
+}
+
+#[napi(js_name = "workspaceChosen")]
+pub fn workspace_chosen(dir: Option<String>, default: String) -> Option<String> {
+    workspace::chosen(dir.as_deref(), &default)
+}
+
+#[napi(js_name = "resolveFolder")]
+pub fn resolve_folder(input: MaybeJson, home: String) -> Option<String> {
+    workspace::resolve_folder(input.0.as_ref(), &home)
+}
+
+#[napi(js_name = "validateFolder")]
+pub fn validate_folder(input: MaybeJson, home: String, platform: String) -> Json {
+    Json(workspace::validate(input.0.as_ref(), &home, &platform))
+}
+
+#[napi(js_name = "checkStart")]
+pub fn check_start(input: MaybeJson, home: String, projects_dir: String, platform: String, vcs_markers: Vec<String>) -> Json {
+    let markers: Vec<&str> = vcs_markers.iter().map(String::as_str).collect();
+    Json(workspace::check_start(input.0.as_ref(), &home, &projects_dir, &platform, &markers))
+}
+
+#[napi(js_name = "checkFinish")]
+pub fn check_finish(start: Json, scan: MaybeJson, time_ms: f64) -> Json {
+    Json(workspace::check_finish(&start.0, scan.0.as_ref().filter(|v| !v.is_null()), time_ms))
+}
+
+#[napi(js_name = "instanceDirVar")]
+pub fn instance_dir_var(kind: String) -> &'static str {
+    workspace::instance_dir_var(&kind)
+}
+
+#[napi(js_name = "standsFor")]
+pub fn stands_for(asked: Json, dev_port: Json, dev_name: String) -> Option<String> {
+    workspace::stands_for(asked.0.as_array().map_or(&[], Vec::as_slice), &dev_port.0, &dev_name)
+}
