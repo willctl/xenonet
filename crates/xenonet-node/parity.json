@@ -173,6 +173,27 @@
         "The demo's made-up world (core/demo.js), Xenolith's folder and server (core/xenolith.js) and Claude desktop's folder (core/dirs.js) are still found by JS, when the Rust asks for them, in the order the JS did.",
         "readers and hiddenResources come from Rust as arrays, which the twin makes Sets."
       ]
+    },
+    "core/command.js": {
+      "rust": "crates/xenonet-app/src/command.rs",
+      "differences": [
+        "savedPath's reg.exe runs through the run given, as in JS; the Rust says what to run and reads what comes back.",
+        "regPath's line is matched by Rust's regex: \\s is Unicode's White_Space, which differs from JS's at U+FEFF and U+0085."
+      ]
+    },
+    "core/open.js": {
+      "rust": "crates/xenonet-app/src/open.rs",
+      "differences": [
+        "launch and reveal still start the program from JS (spawn, detached); the Rust picks the program and its arguments.",
+        "A handoff brief cut at 6,000 UTF-16 units through a character's two halves ends in U+FFFD, which is what URLSearchParams made of the half."
+      ]
+    },
+    "core/decide.js": {
+      "rust": "crates/xenonet-app/src/decide.rs",
+      "differences": [
+        "The credential store and OpenRouter are still awaited in the twin, with the secrets and fetch given; the Rust builds each request and reads each answer.",
+        "A decisions URL that isn't a URL logs an empty host when OpenRouter can't be reached; JS threw a TypeError there."
+      ]
     }
   },
   "tests": [
@@ -266,6 +287,7 @@
     "test/numbat.test.js",
     "test/observer.test.js",
     "test/observers.test.js",
+    "test/open.test.js",
     "test/opencode.test.js",
     "test/page-markup.test.js",
     "test/platform.test.js",
@@ -293,6 +315,7 @@
     "test/store.test.js",
     "test/system-stats.test.js",
     "test/theme-menu.test.js",
+    "test/themes.test.js",
     "test/token-files.test.js",
     "test/vendor-adapters.test.js",
     "test/vendor-reader.test.js",
