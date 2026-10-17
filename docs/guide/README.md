@@ -8,6 +8,7 @@ XenoNet is the network for SI (super intelligence) on your machine. It has a bac
 - [Identities](identities.md) says how XenoNet links each session and project to your Claude, ChatGPT, GitHub and git accounts.
 - [Sessions working together](agents.md) says how to connect Claude Code and Codex to XenoNet, so each session can see and message the others on your machine.
 - [Live delivery and scopes](live-delivery.md) says how messages reach sessions as they're sent, how to choose who gets them with selectors such as `project:atlas app:opencode`, what actors may see, and the guards against misuse.
+- [OpenCode sessions messaging each other](opencode-messaging.md) has a demo of OpenCode sessions messaging each other by title and by selector, with its measured times, and says how to set it up in your own projects.
 - [Actors](actors.md) covers you at the console, always-on agents and your own programs, which XenoNet shows on a layer of their own.
 - [Remote actors](cloud-assistants.md) covers pairing an agent in the cloud, such as an OpenAI dot, so it can read session statuses here without changing anything, and stopping it.
 - [Other machines](other-machines.md) covers the prototype that shows other machines' XenoNets beside your own.
