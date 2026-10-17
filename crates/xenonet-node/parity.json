@@ -148,6 +148,24 @@
         "Requests are the Rust's own HTTP/1.1, with Connection: close, and without the accept, user-agent and accept-encoding headers fetch adds. The twin leaves a server whose base isn't http://127.0.0.1:<port> to the JS.",
         "A header given in another case replaces the one XenoNet sends by itself (Content-Type for content-type); fetch sent both, joined."
       ]
+    },
+    "core/blocks/clock.js": {
+      "rust": "crates/xenonet-blocks/src/clock.rs",
+      "differences": [
+        "The twin keeps Date.now() and the JS timers: Rust's cores take the time from whoever runs them, and a test mocks Date. The binary keeps time with SystemClock and tokio's timers."
+      ]
+    },
+    "core/blocks/index.js": {
+      "rust": "crates/xenonet-blocks/src/lib.rs",
+      "differences": [
+        "SqliteStore and migrateSqlite are still core/blocks/sqlite.js's: it has no twin (see core/blocks/sqlite.js)."
+      ]
+    },
+    "core/xenolith.js": {
+      "rust": "crates/xenonet-sources/src/xenolith.rs",
+      "differences": [
+        "A config.json that isn't UTF-8 is read as Node reads it, with U+FFFD for what isn't."
+      ]
     }
   },
   "tests": [
