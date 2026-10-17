@@ -25,6 +25,13 @@ xenonet-engine = { path = "crates/xenonet-engine" }
 xenonet-schema = { path = "crates/xenonet-schema" }
 xenonet-sources = { path = "crates/xenonet-sources" }
 xenonet-state = { path = "crates/xenonet-state" }
+# The app, components, hosts, assistant, integrations and doctor slice.
+xenonet-app = { path = "crates/xenonet-app" }
+xenonet-components = { path = "crates/xenonet-components" }
+xenonet-hosts = { path = "crates/xenonet-hosts" }
+xenonet-assistant = { path = "crates/xenonet-assistant" }
+xenonet-integrations = { path = "crates/xenonet-integrations" }
+xenonet-doctor = { path = "crates/xenonet-doctor" }
 # JS keeps an object's keys in the order they were added, and so do the
 # files and answers XenoNet writes: preserve_order keeps that order here.
 serde = { version = "1", features = ["derive"] }
@@ -42,10 +49,20 @@ unicode-normalization = "0.1"
 # the system make one.
 sha2 = "0.10"
 getrandom = "0.3"
-# The local time zone, as JS's dates read it, on unix.
+# The local time zone, as JS's dates read it, on unix; and O_NOFOLLOW as
+# each system defines it, for reading a review's files without following
+# a link.
 libc = "0.2"
-# The refusals' context, kept gzipped as zlib.gzipSync wrote it.
+# Gzip: the refusals' context, kept as zlib.gzipSync wrote it, and the
+# component packages (.tar.gz), which the components crate reads itself so
+# every entry is checked before anything is written.
 flate2 = "1"
+# URLs as `new URL()` reads and writes them (the WHATWG URL Standard), for
+# what the JS checks, cleans or builds with Node's URL.
+url = "2"
+# String.prototype.normalize("NFC"), for the assistant's labels: already
+# in the lock through url's idna.
+icu_normalizer = "2.1"
 # The Node-API bindings that put the crates behind the JS modules during the
 # port. The last releases that build on Rust 1.85; the resolver keeps their
 # dependencies to versions that do too.

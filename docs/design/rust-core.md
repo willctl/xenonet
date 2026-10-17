@@ -183,6 +183,13 @@ What crosses the boundary, and how:
   In the binary the same code runs against the system itself.
 - **Events.** A block's EventEmitter stays in its twin. Rust returns each
   state change, and the twin emits it.
+- **Tasks.** An async module whose awaits nest deeply (control.js's
+  launch, a host's relay) is ported as async Rust: wherever the JS awaited
+  a fetch, a child process, a timer or a function it was given, the Rust
+  awaits `io.ask(request)` (`crates/xenonet-app/src/task.rs`). The twin
+  steps the task, does what it asks with the fakes or Node's own calls,
+  and hands back each reply (`crates/xenonet-node/js/task.js`). The logic
+  ports await for await, and in the binary tokio does the asking.
 
 A call into the addon costs about 20 ns. A call back into JS costs more,
 about 300 ns with a string to pass, which matters only where a twin calls
@@ -554,6 +561,18 @@ place. This table follows it.
 | `core/delivery/selector.js`, `usage.js`, `policy.js` | `xenonet-engine/src/delivery/` (the policy's clock, limits and files through the twin) | `delivery-scopes`, `delivery-wake`, `delivery-router`, `delivery-routes`, `delivery-opencode`, `engine` pass |
 | `core/delivery/channel.js`, `tmux.js`, `resume.js`, `setup.js`, `opencode.js` | `xenonet-engine/src/delivery/` (polls, processes, commands, files and HTTP through the twins) | `delivery-router`, `delivery-wake`, `delivery-opencode`, `doctor` pass |
 | `core/delivery/router.js` | `xenonet-engine/src/delivery/router.rs` (each record's JS object and the timers in the twin) | `delivery-router`, `delivery-wake`, `delivery-opencode`, `delivery-scopes`, `server` pass |
+| `core/config.js`, `core/instances.js`, `core/version.js`, `core/environments.js`, `core/demo-root.js` | `xenonet-app/src/config.rs`, `instances.rs`, `version.rs`, `environments.rs`, `demo_root.rs`, with Node's `path` (both flavors) in `nodepath.rs` | `environments`, `demo-root`, `control`, `golden`, `state`, `store`, `workspace` pass |
+| `core/command.js`, `core/open.js`, `core/decide.js` | `xenonet-app/src/command.rs`, `open.rs`, `decide.rs` (the credential store and OpenRouter are awaited by the twin) | `cli`, `doctor`, `windows-command`, `open`, `numbat`, `decide`, `costs`, `integrations` pass |
+| `core/mcp-info.js`, `core/mcp-discovery.js`, `core/diagnostics.js` | `xenonet-app/src/mcp_info.rs` (a state machine the twin drives), `mcp_discovery.rs` (the MCP client stays the SDK's for now), `diagnostics.rs` | `mcp-info`, `log` pass |
+| `core/script.js`, `core/spotify.js` | `xenonet-app/src/script.rs`, `spotify.rs`: each step, and each Spotify call, a state machine the twin drives | `script`, `spotify` pass |
+| `core/control.js` | `xenonet-app/src/control.rs`, on `task.rs`: async Rust whose awaits the twin answers (fetch, the system's processes, spawning) | `control-client`, `control` pass |
+| `core/system-stats.js`, `core/themes.js`, `core/themefiles.js` | `xenonet-app/src/system_stats.rs`, `themes.rs` (the page keeps `core/themes.js`; `themes.json` is made from it, and a test checks the two agree), `themefiles.rs` | `system-stats`, `themes`, `theme-gallery`, `theme-menu`, `actors-layer`, `schema-output` pass |
+| `core/demo.js` | `xenonet-app/src/demo.rs`; randomness, ids and the clock asked of JS, so the seeded world is the same | `golden`, `actors`, `actor-spend`, `state`, `root`, `hosts-merge` pass |
+| `core/components/` (protocol, console-policy, rpc, runtime, packages, install, updates, console) | `xenonet-components`: packages checked against their release's hash and size, then unpacked by its own tar reader behind the same filter; service updates and recovery as tasks | `components`, `component-packages`, `component-activation`, `component-install`, `component-download`, `component-auth`, `component-console`, `launcher`, `assistant-endpoint`, `control-client` pass |
+| `core/hosts/` (frames, aliases, cache, doctor, declared, config, link, merge, hub, relay) | `xenonet-hosts`: a link's state as effects the twin performs, every id from a host qualified and every value copied as its schema declares, the relay's scrubbing, shaping and allowlist; zod's checks and graph.js's activityOf through callbacks | `hosts-cli`, `hosts-config`, `hosts-doctor`, `hosts-frames`, `hosts-hub`, `hosts-ids`, `hosts-link`, `hosts-merge`, `hosts-relay`, `hosts-routes`, `hosts-server` pass |
+| `core/assistant/` (protocol, audit, cursors, credentials, fixtures, projection, source, service, client, tunnel-client, tunnels) | `xenonet-assistant`: grant credentials written private in the JS's order, signed page tokens (HMAC-SHA256 on sha2), what a grant sees and its labels cleaned, the six reads as tasks, the adapter's retries and standing, tunnels' runs and the client's own environment; zod's checks, the grants' standing and rate, and the processes stay in the twins | `assistant-connections`, `assistant-endpoint`, `assistant-routes`, `assistant-service`, `assistant-source`, `assistant-tunnels`, `schemas` pass |
+| `core/integrations/` (common, routing, pi, reviews, openshell, index) | `xenonet-integrations`: credentials redacted, tickets and records, the routing answer's check, Pi metadata, the frozen text snapshot (O_NOFOLLOW reads, stamps before and after), what a sandbox returns validated as untrusted, the patch, and OpenShell's argv and flows as tasks; JevRouter, git and the in-sandbox collector (JS run inside the sandbox) stay in the twins | `integrations`, `integrations-routes`, `sandbox-reviews` pass |
+| `core/doctor/` (index, service, checkup, context) | `xenonet-doctor`: each check's verdict and words as a task asking the twin's ctx (files, processes, XenoNet's state) for what it reads, the hosts' checks, the summary, new problems and the last run's file; machine(), the runner's time limits and the schedule stay in the twins | `doctor`, `observers`, `token-files`, `hosts-doctor`, `schema-output` pass |
 
 With every twin in place, all 131 test files that reach one pass (of 170; the other 39 load no module that has a twin). The
 twins load in the Node processes a test starts too (a server, the

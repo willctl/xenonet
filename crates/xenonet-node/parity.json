@@ -177,6 +177,71 @@
         "Your state lives in the registry's Rust (you_report and the rest); createYou gives the registry's own you."
       ]
     },
+    "core/assistant/audit.js": {
+      "rust": "crates/xenonet-assistant/src/audit.rs",
+      "differences": [
+        "The store is the engine's (core/engine/store.js), asked by the twin. A result given as null is logged as \"null\"; the JS gave undefined and null their own words too, and no caller leaves it out."
+      ]
+    },
+    "core/assistant/client.js": {
+      "rust": "crates/xenonet-assistant/src/client.rs",
+      "differences": [
+        "When to try again, the endpoint file's checks, reading the credential for hello and the grant's standing are the Rust's; the connection (components/rpc.js), its requests and whether the endpoint's writer still runs are the twin's."
+      ]
+    },
+    "core/assistant/credentials.js": {
+      "rust": "crates/xenonet-assistant/src/credentials.rs",
+      "differences": [
+        "Written in the same order as the JS: the folder at 0700, the file made empty and new at 0600, protected, then filled, then checked for other readers; a file others could read is deleted and the write fails. Protecting the file and listing who else can read it stay private-file.js's, asked by the twin."
+      ]
+    },
+    "core/assistant/cursors.js": {
+      "rust": "crates/xenonet-assistant/src/cursors.rs, with HMAC-SHA256 in crypto.rs",
+      "differences": [
+        "HMAC-SHA256 is written on the sha2 crate (RFC 4231's vectors are its tests). The clock stays in the twin. The service signs with createCursors' own tokens only: a cursors object made some other way is refused with a TypeError, where the JS would have called its make and read."
+      ]
+    },
+    "core/assistant/fixtures.js": {
+      "rust": "crates/xenonet-assistant/src/fixtures.rs",
+      "differences": [
+        "A view's and a policy's places are pairs in Rust; the twin gives them back as Maps."
+      ]
+    },
+    "core/assistant/projection.js": {
+      "rust": "crates/xenonet-assistant/src/projection.rs",
+      "differences": [
+        "cleanLabel's lookbehinds and lookahead are written out by hand, with JS's \\s, ASCII \\b and ASCII case for /i; on 60,000 random labels of keys, paths, emails, spaces and other Unicode it gives the JS's answer for each.",
+        "A label with a lone surrogate reaches the Rust with U+FFFD in its place."
+      ]
+    },
+    "core/assistant/protocol.js": {
+      "rust": "crates/xenonet-assistant/src/protocol.rs",
+      "differences": []
+    },
+    "core/assistant/service.js": {
+      "rust": "crates/xenonet-assistant/src/service.rs",
+      "differences": [
+        "The request's checks, the six operations, paging, the envelope and its size, and the four-at-a-time limit are the Rust's; each answer is a task that asks the twin for the view, the actor, a session's stats, the attention ids' key, the schema's check (zod) and the time. The grant's standing (core/actors/connections.js), its rate (core/actors/limits.js), the arguments' schema, the timeout and the audit stay in the twin."
+      ]
+    },
+    "core/assistant/source.js": {
+      "rust": "crates/xenonet-assistant/src/source.rs",
+      "differences": [
+        "The state (core/state.js) and the actors' registry are other modules': the twin hands over the map's nodes, the live state and the registry's actors, and answers a session's place, a product and whether an actor is registered through callbacks. An actor's snapshot without via reads as an empty list; the JS threw."
+      ]
+    },
+    "core/assistant/tunnel-client.js": {
+      "rust": "crates/xenonet-assistant/src/tunnel_client.rs",
+      "differences": [
+        "Running tunnel-client --version, and reading the profiles' folders and files, stay in the twin."
+      ]
+    },
+    "core/assistant/tunnels.js": {
+      "rust": "crates/xenonet-assistant/src/tunnels.rs",
+      "differences": [
+        "Bindings and their checks, each run's state and backoff, its log as shown, the health addresses and the client's own environment (the key only in CONTROL_PLANE_API_KEY, OPENAI_API_KEY taken out of a run's) are the Rust's; the processes, timers, credential store (secret-store.js's TARGET check through a callback), health probes and files are the twin's."
+      ]
+    },
     "core/blocks/clock.js": {
       "rust": "crates/xenonet-blocks/src/clock.rs",
       "differences": [
@@ -273,6 +338,81 @@
         "A rollout's entries are made in Rust from each line's record (CodexLine's raw), not from the line's getters: the same fields, read once."
       ]
     },
+    "core/command.js": {
+      "rust": "crates/xenonet-app/src/command.rs",
+      "differences": [
+        "savedPath's reg.exe runs through the run given, as in JS; the Rust says what to run and reads what comes back.",
+        "regPath's line is matched by Rust's regex: \\s is Unicode's White_Space, which differs from JS's at U+FEFF and U+0085."
+      ]
+    },
+    "core/components/console-policy.js": {
+      "rust": "crates/xenonet-components/src/console_policy.rs",
+      "differences": []
+    },
+    "core/components/console.js": {
+      "rust": "crates/xenonet-components/src/console.rs",
+      "differences": [
+        "Each action is a Rust task; the service's connections, Desktop's process and fetch are the twin's."
+      ]
+    },
+    "core/components/install.js": {
+      "rust": "crates/xenonet-components/src/install.rs",
+      "differences": [
+        "The service's connection, starting a runtime, the startup check given in operations, and the clock are asked of the twin, with the operations given; the startup check XenoNet does itself runs the staged node from Rust, with a 15 s limit as spawnSync had."
+      ]
+    },
+    "core/components/packages.js": {
+      "rust": "crates/xenonet-components/src/packages.rs, with the archive in crates/xenonet-components/src/tar.rs",
+      "differences": [
+        "Packages are unpacked by the Rust's own tar reader (ustar, pax and GNU long names, checksums checked) behind the same filter, in place of node-tar; on the same archives it gives the same files, modes and mtimes (to the second). Folders keep the time they were made.",
+        "The install lock's file is closed once it holds the pid, and taken away when the lock goes; JS kept it open until then."
+      ]
+    },
+    "core/components/protocol.js": {
+      "rust": "crates/xenonet-components/src/protocol.rs",
+      "differences": []
+    },
+    "core/components/rpc.js": {
+      "rust": "crates/xenonet-components/src/rpc.rs",
+      "differences": [
+        "The framing and its rules (line and buffer limits, what a line may be, which events pass) are the Rust's; the socket, the requests waiting for answers and their timers stay in the twin."
+      ]
+    },
+    "core/components/runtime.js": {
+      "rust": "crates/xenonet-components/src/runtime.rs",
+      "differences": [
+        "The service's socket and process are still Node's: the Rust reads and checks the descriptor, builds the hello and decides when the service counts as started."
+      ]
+    },
+    "core/components/updates.js": {
+      "rust": "crates/xenonet-components/src/updates.rs",
+      "differences": [
+        "The download's bytes come through the fetcher given and are handed to the Rust a chunk at a time; the size limit, the hash check and putting the file in place are the Rust's."
+      ]
+    },
+    "core/config.js": {
+      "rust": "crates/xenonet-app/src/config.rs, with Node's path in crates/xenonet-app/src/nodepath.rs",
+      "differences": [
+        "The demo's made-up world (core/demo.js), Xenolith's folder and server (core/xenolith.js) and Claude desktop's folder (core/dirs.js) are still found by JS, when the Rust asks for them, in the order the JS did.",
+        "readers and hiddenResources come from Rust as arrays, which the twin makes Sets."
+      ]
+    },
+    "core/control.js": {
+      "rust": "crates/xenonet-app/src/control.rs, on the task bridge in crates/xenonet-app/src/task.rs",
+      "differences": [
+        "Each method is a Rust task (async Rust whose awaits the twin answers): fetch to the instance's server, the system's alive, kill, command and spawn, and the environment are still done by JS, with the system given.",
+        "lockHolder reads the lock's link and connects to its socket from Rust, synchronously (a Unix socket answers at once or not at all); JS gave the connection a second.",
+        "electronCommand still finds npm's Electron with Node's module resolution; whether XenoNet Dev.app is this checkout's is the Rust's.",
+        "A port given as null is taken as not given; JS used null."
+      ]
+    },
+    "core/decide.js": {
+      "rust": "crates/xenonet-app/src/decide.rs",
+      "differences": [
+        "The credential store and OpenRouter are still awaited in the twin, with the secrets and fetch given; the Rust builds each request and reads each answer.",
+        "A decisions URL that isn't a URL logs an empty host when OpenRouter can't be reached; JS threw a TypeError there."
+      ]
+    },
     "core/delivery/channel.js": {
       "rust": "crates/xenonet-engine/src/delivery/channel.rs",
       "differences": [
@@ -320,6 +460,25 @@
       "rust": "crates/xenonet-engine/src/delivery/usage.rs",
       "differences": []
     },
+    "core/demo-root.js": {
+      "rust": "crates/xenonet-app/src/demo_root.rs",
+      "differences": []
+    },
+    "core/demo.js": {
+      "rust": "crates/xenonet-app/src/demo.rs",
+      "differences": [
+        "Whether git runs (core/git.js), the ids identities.js gives accounts, the local clock, Math.random, crypto.randomUUID and Date.now are asked of JS, in the order the JS used them, so a test that seeds them gets the same world.",
+        "The second folder's repos are still made by the twin's git, asynchronously, from the steps the Rust gives; the first folder's are made by the Rust's own git, as the JS did synchronously.",
+        "Sessions listed before the world is made fail with an Error of the Rust's words where JS threw a TypeError."
+      ]
+    },
+    "core/diagnostics.js": {
+      "rust": "crates/xenonet-app/src/diagnostics.rs",
+      "differences": [
+        "A field JS set to undefined (a doctor result's missing id, say) is left out of the bundle rather than kept as undefined; the bundle's JSON is the same.",
+        "A log entry's time that isn't one throws an Error saying Invalid time value, where JS threw a RangeError."
+      ]
+    },
     "core/digest.js": {
       "rust": "crates/xenonet-state/src/digest.rs",
       "differences": [
@@ -332,6 +491,32 @@
       "rust": "crates/xenonet-base/src/dirs.rs",
       "differences": [
         "findCodexBinary and findFfmpeg stay JS compositions of the Rust parts and onPath."
+      ]
+    },
+    "core/doctor/checkup.js": {
+      "rust": "crates/xenonet-doctor/src/run.rs",
+      "differences": [
+        "Which results only keeps and the summary are the Rust's; finding a running XenoNet (client.js) and its folders (workspace.js) stay in the twin."
+      ]
+    },
+    "core/doctor/context.js": {
+      "rust": "none: it decides nothing",
+      "differences": [
+        "The twin hands machine() XenoNet's folders (config.js), its Codex (dirs.js) and whether git works (git.js), as the JS did."
+      ]
+    },
+    "core/doctor/index.js": {
+      "rust": "crates/xenonet-doctor/src/checks.rs and run.rs",
+      "differences": [
+        "Each check is a task asking the twin's ctx for what it reads (calls through ctx and ctx.actors, the token files' look, and a local time, which Intl formats in JS); its verdict and words are the Rust's. machine(), the runner's parallel runs with their time limit, and the hosts' key checks' composition stay in the twin.",
+        "Of the live state the checks get only its Claude plan reading, and of the health its sources and parts, so a run doesn't convert all of XenoNet's live state for each check.",
+        "A context missing a list the JS read as an array (health without sources, a drift file without records) reads as an empty one, where the JS's check failed with a TypeError."
+      ]
+    },
+    "core/doctor/service.js": {
+      "rust": "crates/xenonet-doctor/src/run.rs",
+      "differences": [
+        "What's a new problem and the last run's file are the Rust's; the schedule and the runs' promises stay in the twin."
       ]
     },
     "core/drift.js": {
@@ -375,6 +560,10 @@
         "verify.state reads the counts as they stand, through getters, rather than being the object the checks change."
       ]
     },
+    "core/environments.js": {
+      "rust": "crates/xenonet-app/src/environments.rs",
+      "differences": []
+    },
     "core/export-labels.js": {
       "rust": "crates/xenonet-state/src/export_labels.rs",
       "differences": [
@@ -400,6 +589,68 @@
         "A layout pin without x, y or z gives null for it, where JS left fx, fy or fz undefined (left out of the JSON)."
       ]
     },
+    "core/hosts/aliases.js": {
+      "rust": "crates/xenonet-hosts/src/aliases.rs",
+      "differences": [
+        "When to read ~/.ssh/config again is the Rust's; reading the file's words stays identities.js's parseSshAliases, through the twin."
+      ]
+    },
+    "core/hosts/cache.js": {
+      "rust": "crates/xenonet-hosts/src/cache.rs",
+      "differences": [
+        "A snapshot whose id is undefined is written with \"id\": null; JSON.stringify left the field out. Nothing reads it."
+      ]
+    },
+    "core/hosts/config.js": {
+      "rust": "crates/xenonet-hosts/src/config.rs",
+      "differences": [
+        "The schema's check of an entry (zod's check and explain) is asked of the twin; the store (blocks/store.js), the files and the new key are the twin's. A value with a line break is left out of the ssh config even if the schema took it."
+      ]
+    },
+    "core/hosts/declared.js": {
+      "rust": "crates/xenonet-hosts/src/declared.rs",
+      "differences": [
+        "The schemas are zod's: the twin reads each one's shape off its _zod.def once, as a table the Rust walks, and a union's options are tried with zod's safeParse through a callback."
+      ]
+    },
+    "core/hosts/doctor.js": {
+      "rust": "crates/xenonet-hosts/src/doctor.rs",
+      "differences": []
+    },
+    "core/hosts/frames.js": {
+      "rust": "crates/xenonet-hosts/src/frames.rs",
+      "differences": [
+        "A line nested deeper than 512 levels (the Rust JSON reader's limit, eight times MAX_DEPTH) reads as \"a frame nested too deep\" rather than as a frame: parseFrame gives that as its error, where JSON.parse took any depth and shallow() caught it after.",
+        "shallow() walks the JS value through Node-API, without converting it, so a value too deep to convert is still answered."
+      ]
+    },
+    "core/hosts/hub.js": {
+      "rust": "crates/xenonet-hosts/src/hub.rs",
+      "differences": [
+        "How a host stands, what the page hears of it, a host's own doctor, the probe's counts and the waits are the Rust's; the emitter, the timers and the hosts' runtimes are the twin's, with the links, the merge and the cache through their twins."
+      ]
+    },
+    "core/hosts/link.js": {
+      "rust": "crates/xenonet-hosts/src/link.rs",
+      "differences": [
+        "The link's state, what a frame may be, the clock offset, the backoff and why a connection ended are the Rust's, which answers each thing that happens with effects (spawn, write, kill, emit, timers, settling a get); the program, its pipes, the timers and the gets' promises are the twin's. A hello is checked against the schema (zod) through a callback."
+      ]
+    },
+    "core/hosts/merge.js": {
+      "rust": "crates/xenonet-hosts/src/merge.rs",
+      "differences": [
+        "The schemas (zod's safeParse and declared) and graph.js's activityOf are asked of the twin through callbacks.",
+        "cleanOnce remembers a node by its text alone, in Rust; the JS also remembered it by the object, which saved stringifying it again.",
+        "The answers are copies, and the twin puts this machine's own values back in them where the JS's spreads kept them, so a caller holding one finds that same one. A project node of this machine's map is a copy in mergeGraph's nodes, as are the other local nodes; the JS kept those."
+      ]
+    },
+    "core/hosts/relay.js": {
+      "rust": "crates/xenonet-hosts/src/relay.rs",
+      "differences": [
+        "The home folder's scrubber, the shaping, the metadata-only cut, the allowlist and what waits while the console reads slowly are the Rust's; the HTTP calls to the XenoNet here, the pipes, the timers and the signals are the twin's.",
+        "metadataOnly's functions return a changed copy; the JS changed the value in place."
+      ]
+    },
     "core/identities.js": {
       "rust": "crates/xenonet-state/src/identities.rs",
       "differences": [
@@ -411,6 +662,50 @@
         "Only Claude's four plan names are looked up; the JS's object literal also answered Object.prototype's names.",
         "The regular expressions for hosts.yml, ssh config, remotes, credential scopes and gh's helper run on the regex crate with JS's \\s, `.` and \\b spelled out; the ones with a backreference or a lookahead are matched by hand.",
         "IdentityWatch keeps where each transcript is and each session's owner in Rust (TranscriptOwners), read with std::fs; the object no longer has the owners, transcripts and transcriptsAt fields (nothing read them). Finding a repo's config file and the stamp of your git config's files read the disk in Rust too. The sign-in files' gatherers and their reads, and git config's execFile, stay in the twin."
+      ]
+    },
+    "core/instances.js": {
+      "rust": "crates/xenonet-app/src/instances.rs",
+      "differences": [
+        "An XENONET_INSTANCE naming one of Object.prototype's keys (toString, constructor…) is refused like any other unknown id; JS took it, with a port of NaN."
+      ]
+    },
+    "core/integrations/common.js": {
+      "rust": "crates/xenonet-integrations/src/common.rs",
+      "differences": [
+        "Text cut in the middle of a character outside the BMP ends in U+FFFD, where the JS kept half a surrogate pair; on 40,000 random texts that's the only difference in clean(). Tickets hold their values as JSON."
+      ]
+    },
+    "core/integrations/index.js": {
+      "rust": "crates/xenonet-integrations/src/index.rs",
+      "differences": [
+        "The decider (core/decide.js), the scan's async wrapper and the composition stay in the twin."
+      ]
+    },
+    "core/integrations/openshell.js": {
+      "rust": "crates/xenonet-integrations/src/openshell.rs",
+      "differences": [
+        "Each action is a task asking the twin for its commands (run), the records and the reviews; review, exportReview and forgetReview stay synchronous, driven at once. A command's stderr reaches the task with its error, for the policy_denied check."
+      ]
+    },
+    "core/integrations/pi.js": {
+      "rust": "crates/xenonet-integrations/src/pi.rs",
+      "differences": [
+        "Times are read as ISO 8601, as Date.parse reads those; another format Date.parse takes (\"Jan 1 2026\") reads as 0. The scan is synchronous in Rust behind the twin's async function."
+      ]
+    },
+    "core/integrations/reviews.js": {
+      "rust": "crates/xenonet-integrations/src/reviews.rs",
+      "differences": [
+        "The program that collects text inside the sandbox (COLLECT_TEXT) runs in the sandbox's Node, so the twin takes it from core/integrations/reviews.js as it is. git runs through the twin.",
+        "A file's stamp (taken before and after reading it, with O_NOFOLLOW) is the system's dev, inode, size and nanosecond times; the JS compared millisecond floats. Both refuse a file that changed under the read.",
+        "The digest sorts paths with Rust's approximation of ICU's root collation (as localeCompare did), so a review made by the JS and launched by the Rust could read as changed in the ten minutes a preview lasts."
+      ]
+    },
+    "core/integrations/routing.js": {
+      "rust": "crates/xenonet-integrations/src/routing.rs",
+      "differences": [
+        "JevRouter (an npm library) routes, in the twin; the decider is core/decide.js. The decider's answer is checked, and the record built, in Rust. A response without answers is refused as an invalid distribution, where the JS threw a TypeError."
       ]
     },
     "core/lines.js": {
@@ -442,6 +737,20 @@
       "differences": [
         "The key patterns run on Rust's regex: \\b is ASCII's, as JS's is, but \\s is Unicode's White_Space, which differs from JS's at U+FEFF and U+0085.",
         "A message cut at its length that would split a pair of UTF-16 units leaves the whole character out; JS kept half of it."
+      ]
+    },
+    "core/mcp-discovery.js": {
+      "rust": "crates/xenonet-app/src/mcp_discovery.rs",
+      "differences": [
+        "The MCP client itself is still the MCP SDK's, in the twin: the Rust says how to reach the server (its transport, with ${VAR}s filled in), how far to page, and what the answer is. rmcp's client can take over in the binary, once the MCP crate builds with the workspace."
+      ]
+    },
+    "core/mcp-info.js": {
+      "rust": "crates/xenonet-app/src/mcp_info.rs",
+      "differences": [
+        "Collecting a catalog is a Rust state machine: the twin asks Codex (the request given) or the server (discover) what the Rust says to, and hands each answer back.",
+        "URLs are read and written by the url crate (the WHATWG URL Standard, as Node's URL is); its IDNA handling may differ from Node's for unusual host names.",
+        "Left out, read is the Rust's own JSON reader rather than a JS function."
       ]
     },
     "core/migrate.js": {
@@ -503,6 +812,13 @@
         "On Windows a file's inode isn't known, so a rotated file is read from the start only once it's shorter than what was read of it.",
         "A test's own `files` (statSync, openSync, readSync, closeSync) is read through, the bytes handed over as latin1.",
         "`runs` as in copilot-cli's entry; `offset`, `ino`, `partial` and `fileState` are read only (`skipped` can be set); SCHEMA_VERSIONS and LEFT_OUT are copies."
+      ]
+    },
+    "core/open.js": {
+      "rust": "crates/xenonet-app/src/open.rs",
+      "differences": [
+        "launch and reveal still start the program from JS (spawn, detached); the Rust picks the program and its arguments.",
+        "A handoff brief cut at 6,000 UTF-16 units through a character's two halves ends in U+FFFD, which is what URLSearchParams made of the half."
       ]
     },
     "core/openrouter-usage.js": {
@@ -805,6 +1121,14 @@
         "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
       ]
     },
+    "core/script.js": {
+      "rust": "crates/xenonet-app/src/script.rs",
+      "differences": [
+        "Each step is a Rust state machine: the twin makes the calls it says to (the driver, launch, input, window…) on the control client given, sleeps when it says, and says what it says.",
+        "A number in a step that isn't one (click:a,b) reaches the call as null where JS passed NaN.",
+        "A state that isn't one throws a TypeError of the Rust's words when it's summed up, not V8's."
+      ]
+    },
     "core/search.js": {
       "rust": "crates/xenonet-state/src/search.rs",
       "differences": [
@@ -823,6 +1147,13 @@
         "The store's program still runs in the twin, through run; Rust checks the target and the secret, says what the program is given and reads what it said.",
         "The memory store keeps a target and a secret by their text, String(value); the JS's Map kept the values given.",
         "A comment that isn't text is written as String(comment); the JS threw on macOS."
+      ]
+    },
+    "core/spotify.js": {
+      "rust": "crates/xenonet-app/src/spotify.rs",
+      "differences": [
+        "The sign-in, the tokens, and each call's decisions (refreshing early, one 401 refreshed and tried again, a 429 waited out) are the Rust's; the twin awaits the credential store and fetch it was given, as the Rust asks.",
+        "The demo's player keeps its state in the twin; what each command does to it is the Rust's."
       ]
     },
     "core/state.js": {
@@ -858,6 +1189,27 @@
         "The document stays the JS object the JSON store's twin loaded, changed in place, since its callers hold its parts: Rust says what prepare fills in and what setLayout and clearProjectRules change, and the twin applies it. The other setters only set a key."
       ]
     },
+    "core/system-stats.js": {
+      "rust": "crates/xenonet-app/src/system_stats.rs",
+      "differences": [
+        "The programs the GPU readers keep running (nvidia-smi, Windows' counter loop) are started, read and stopped by the twin, with the spawn given; when to start one again, and when to give up on it, is the Rust's. So are the files and commands polled, and the idle timer.",
+        "A polled reading comes back as a new copy each time, where JS gave the same object while it was fresh."
+      ]
+    },
+    "core/themefiles.js": {
+      "rust": "crates/xenonet-app/src/themefiles.rs",
+      "differences": [
+        "A theme file that isn't JSON is reported with the Rust parser's words, not V8's."
+      ]
+    },
+    "core/themes.js": {
+      "rust": "crates/xenonet-app/src/themes.rs, with the built-ins' data in crates/xenonet-app/src/themes.json",
+      "differences": [
+        "The console page keeps core/themes.js; the Rust's data is made from it by node crates/xenonet-app/themes.mjs, and test/themes-rust-data.test.js fails when the two differ.",
+        "contrast and colorDistance can differ from JS in the last bit: the Rust's pow is the system's, where V8 has its own (Math.cbrt and Math.hypot are V8's, bit for bit).",
+        "conform hands back a copy of base when there's nothing to fold on, where JS gave base itself."
+      ]
+    },
     "core/units.js": {
       "rust": "crates/xenonet-base/src/units.rs",
       "differences": [
@@ -870,6 +1222,10 @@
         "The report's text (reportLines), the transcript hooks' glue between a normalizer and its reader, and agentSdkVersion (Node's module resolution) stay in the twin.",
         "A reader's careful map isn't a Map JS can walk: the twin offers its size and has()."
       ]
+    },
+    "core/version.js": {
+      "rust": "crates/xenonet-app/src/version.rs",
+      "differences": []
     },
     "core/wiki.js": {
       "rust": "crates/xenonet-sources/src/wiki.rs",
@@ -906,6 +1262,7 @@
     "test/actor-spend-view.test.js",
     "test/actor-spend.test.js",
     "test/actor-wake.test.js",
+    "test/actors-layer.test.js",
     "test/actors.test.js",
     "test/assistant-connections.test.js",
     "test/assistant-endpoint.test.js",
@@ -934,6 +1291,7 @@
     "test/component-download.test.js",
     "test/component-install.test.js",
     "test/component-packages.test.js",
+    "test/components.test.js",
     "test/control-client.test.js",
     "test/control.test.js",
     "test/copilot-cli.test.js",
@@ -945,6 +1303,7 @@
     "test/delivery-routes.test.js",
     "test/delivery-scopes.test.js",
     "test/delivery-wake.test.js",
+    "test/demo-root.test.js",
     "test/digest.test.js",
     "test/doctor.test.js",
     "test/drift.test.js",
@@ -953,6 +1312,7 @@
     "test/engine-routes.test.js",
     "test/engine-store.test.js",
     "test/engine.test.js",
+    "test/environments.test.js",
     "test/export-labels.test.js",
     "test/features.test.js",
     "test/film-cards.test.js",
@@ -969,6 +1329,7 @@
     "test/hosts-cli.test.js",
     "test/hosts-config.test.js",
     "test/hosts-doctor.test.js",
+    "test/hosts-frames.test.js",
     "test/hosts-hub.test.js",
     "test/hosts-ids.test.js",
     "test/hosts-link.test.js",
@@ -978,6 +1339,7 @@
     "test/hosts-server.test.js",
     "test/identities-page.test.js",
     "test/identities.test.js",
+    "test/integrations-routes.test.js",
     "test/integrations.test.js",
     "test/lab.test.js",
     "test/launcher.test.js",
@@ -991,6 +1353,7 @@
     "test/numbat.test.js",
     "test/observer.test.js",
     "test/observers.test.js",
+    "test/open.test.js",
     "test/opencode.test.js",
     "test/page-markup.test.js",
     "test/platform.test.js",
@@ -1005,6 +1368,7 @@
     "test/refusals.test.js",
     "test/rename.test.js",
     "test/root.test.js",
+    "test/sandbox-reviews.test.js",
     "test/schema-ids.test.js",
     "test/schema-output.test.js",
     "test/schema-registry.test.js",
@@ -1021,7 +1385,9 @@
     "test/stats.test.js",
     "test/store.test.js",
     "test/system-stats.test.js",
+    "test/theme-gallery.test.js",
     "test/theme-menu.test.js",
+    "test/themes.test.js",
     "test/token-files.test.js",
     "test/vendor-adapters.test.js",
     "test/vendor-reader.test.js",
