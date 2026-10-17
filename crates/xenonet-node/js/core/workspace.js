@@ -6,7 +6,7 @@ import path from "node:path";
 import { config, appDir } from "../../../../core/config.js";
 import { candidates, PORTS } from "./client.js";
 import { INSTANCES } from "../../../../core/instances.js";
-import { scanProjects, VCS_MARKERS } from "../../../../core/projects.js";
+import { scanProjects, VCS_MARKERS } from "./projects.js";
 import * as store from "./store.js";
 import { native } from "../index.js";
 

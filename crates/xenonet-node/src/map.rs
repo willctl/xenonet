@@ -339,12 +339,16 @@ pub fn activity_of(updated_at: MaybeJson, now: f64, windows: MaybeJson) -> &'sta
     graph::activity_of(updated_at.0.as_ref(), now, windows.0.as_ref())
 }
 
-/// buildGraph(input), `parent_of` as [[key, parent key], …].
+/// buildGraph(input): which project orbits which is projects.rs's
+/// relations, and a project whose name JS couldn't read throws its
+/// TypeError, as projectRelations did.
 #[napi(js_name = "buildGraph")]
-pub fn build_graph(input: Json, parent_of: Json) -> Json {
-    let parent_of: std::collections::HashMap<String, String> =
-        parent_of.0.as_array().map_or_else(Default::default, |a| a.iter().filter_map(|p| Some((p.get(0)?.as_str()?.to_string(), p.get(1)?.as_str()?.to_string()))).collect());
-    Json(graph::build_graph(&input.0, &parent_of))
+pub fn build_graph(env: &Env, input: Json) -> Result<Json> {
+    let projects = input.0.get("projects").and_then(Value::as_array).cloned().unwrap_or_default();
+    match xenonet_state::projects::relations(&projects) {
+        Ok((parent_of, _)) => Ok(Json(graph::build_graph(&input.0, &parent_of.into_iter().collect()))),
+        Err(e) => crate::sources::thrown(env, e),
+    }
 }
 
 // ---------- state.js ----------
