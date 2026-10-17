@@ -5,6 +5,7 @@ pub mod channel;
 pub mod opencode;
 pub mod policy;
 pub mod resume;
+pub mod router;
 pub mod selector;
 pub mod setup;
 pub mod tmux;

@@ -454,3 +454,76 @@ impl OpenCodeCore {
         start(move |asker| o.deliver(&mut AskCalls(asker), &id.0, &text.0, w))
     }
 }
+
+// ----- router -----
+
+use xenonet_engine::delivery::router::{self as rt, Router};
+
+#[napi(js_name = "routerAckMs")]
+pub fn router_ack_ms() -> f64 {
+    rt::ACK_MS
+}
+
+#[napi]
+pub struct RouterCore {
+    inner: Arc<Router>,
+}
+
+fn sync_done<T>(env: &Env, r: xenonet_engine::peer::Result<T>) -> Result<T> {
+    let out = r.map_err(|t| rethrow(env, t));
+    settle(env);
+    out
+}
+
+#[napi]
+impl RouterCore {
+    #[napi(constructor)]
+    pub fn new() -> Self {
+        RouterCore { inner: Arc::new(Router::default()) }
+    }
+    #[napi]
+    pub fn reaches(&self, env: Env, deps: Object, id: JsArg) -> Result<JsArg> {
+        sync_done(&env, self.inner.reaches(&mut SyncCalls::new(&env, &deps), &id.0)).map(JsArg)
+    }
+    #[napi]
+    pub fn known(&self, env: Env, deps: Object) -> Result<JsArg> {
+        sync_done(&env, self.inner.known(&mut SyncCalls::new(&env, &deps))).map(|l| JsArg(Arg::List(l)))
+    }
+    #[napi]
+    pub fn resumable(&self, env: Env, deps: Object, view: JsArg) -> Result<JsArg> {
+        sync_done(&env, self.inner.resumable(&mut SyncCalls::new(&env, &deps), &view.0)).map(JsArg)
+    }
+    #[napi]
+    pub fn wake(&self, env: Env, deps: Object, from: JsArg, agent: JsArg) -> Result<JsArg> {
+        sync_done(&env, self.inner.wake(&mut SyncCalls::new(&env, &deps), &from.0, &agent.0)).map(JsArg)
+    }
+    #[napi]
+    pub fn way(&self, env: Env, deps: Object, from: JsArg, a: JsArg) -> Result<Option<String>> {
+        sync_done(&env, self.inner.way(&mut SyncCalls::new(&env, &deps), &from.0, &a.0)).map(|w| w.map(str::to_string))
+    }
+    #[napi]
+    pub fn seen(&self, env: Env, deps: Object, agent: JsArg, ids: JsArg) -> Result<()> {
+        let ids = list(ids.0);
+        sync_done(&env, self.inner.seen(&mut SyncCalls::new(&env, &deps), &agent.0, &ids))
+    }
+    #[napi]
+    pub fn contact(&self, env: Env, deps: Object, agent: JsArg) -> Result<()> {
+        sync_done(&env, self.inner.contact(&mut SyncCalls::new(&env, &deps), &agent.0))
+    }
+    #[napi]
+    pub fn describe(&self, id: JsArg) -> Machine {
+        let r = self.inner.clone();
+        start(move |asker| r.describe(&mut AskCalls(asker), &id.0))
+    }
+    /// The records' keys.
+    #[napi]
+    pub fn route(&self, m: JsArg) -> Machine {
+        let r = self.inner.clone();
+        start(move |asker| r.route(&mut AskCalls(asker), &m.0).map(|keys| Arg::List(keys.into_iter().map(Arg::text).collect())))
+    }
+    #[napi]
+    pub fn expire(&self, key: String) -> Machine {
+        let r = self.inner.clone();
+        start(move |asker| r.expire(&mut AskCalls(asker), &key).map(|()| Arg::Undef))
+    }
+}

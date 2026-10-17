@@ -258,6 +258,12 @@
         "Commands, files and HTTP are the twin's; a lsof line ends at a line break as JS's m flag has it, but not at U+2028 or U+2029."
       ]
     },
+    "core/delivery/router.js": {
+      "rust": "crates/xenonet-engine/src/delivery/router.rs",
+      "differences": [
+        "The records are Rust's; the twin keeps a JS object for each, which route() and list() give and the events copy, and the timers."
+      ]
+    },
     "core/engine/connect.js": {
       "rust": "crates/xenonet-engine/src/connect.rs",
       "differences": [
