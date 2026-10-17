@@ -439,11 +439,12 @@ place. This table follows it.
 | `core/blocks/lifecycle.js` | `xenonet-blocks/src/lifecycle.rs` | `blocks-lifecycle` passes |
 | `core/blocks/normalizer.js` | `xenonet-blocks/src/normalizer.rs` | `blocks-normalizer` passes |
 | `core/blocks/scanner.js` | `xenonet-blocks/src/scanner.rs`, with the read-again fix | `blocks-scanner`, `projects` pass |
+| `core/blocks/tailer.js` | `xenonet-blocks/src/tailer.rs`, with the restart fix | `blocks-tailer`, `live` pass |
 
-With every twin in place, 91 of the 92 test files that reach one pass.
-`blocks-tailer` doesn't yet: the Rust scanner reads a folder again when it
-was read just after it changed, and the JS tailer on `main` reads a file
-the scanner lists again as history. The tailer's fix for that comes with
-its port.
+With every twin in place, all 92 test files that reach one pass. The two
+fixes on `fix/scanner-racy-mtime` are in the Rust (the scanner reads a
+folder again when it read it just after it changed, and the tailer
+catches up the files it followed as live after a restart), and that
+branch's new tests pass against them too.
 
 Not ported yet: everything else, in the order above.

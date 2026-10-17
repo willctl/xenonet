@@ -4,3 +4,4 @@
 pub mod lifecycle;
 pub mod normalizer;
 pub mod scanner;
+pub mod tailer;

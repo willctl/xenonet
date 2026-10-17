@@ -27,9 +27,9 @@
 //! clock may move each time it's read.
 
 use crate::lifecycle::Lifecycle;
-use std::collections::BTreeMap;
 use xenonet_base::fs::{DirEntry, Fs, FsError};
 use xenonet_base::json::number_string;
+use xenonet_base::ordered::OrderedMap;
 use xenonet_base::paths::join;
 
 /// How close to a folder's mtime a read of it is racy: wide enough for the
@@ -124,7 +124,7 @@ pub struct Scanner {
     pub limits: Limits,
     pub use_cache: bool,
     /// folder → what it held the last time it was read.
-    pub folders: BTreeMap<String, Folder>,
+    pub folders: OrderedMap<Folder>,
     pub last: Option<Last>,
     /// What the last walk was allowed, and how it went.
     pub budget: Limits,
@@ -133,7 +133,7 @@ pub struct Scanner {
 
 impl Scanner {
     pub fn new(name: &str, root: &str, limits: Limits, use_cache: bool, now: f64) -> Self {
-        Scanner { name: name.into(), root: root.into(), limits, use_cache, folders: BTreeMap::new(), last: None, budget: limits, life: Lifecycle::new(now) }
+        Scanner { name: name.into(), root: root.into(), limits, use_cache, folders: OrderedMap::new(), last: None, budget: limits, life: Lifecycle::new(now) }
     }
 
     /// Forgets every folder, so the next walk reads them all.
@@ -237,7 +237,7 @@ impl Scanner {
                 }
             }
             self.gone(before.as_ref(), &f);
-            self.folders.insert(dir.to_string(), f.clone());
+            self.folders.insert(dir, f.clone());
             f
         } else {
             known.cloned().expect("a kept folder")
@@ -353,7 +353,7 @@ impl Scanner {
             let now = Folder { mtime_ms: read.mtime_ms, subdirs: f.subdirs.clone(), racy: racy(at, read.mtime_ms) };
             let before = self.folders.get(&read.dir).cloned();
             self.gone(before.as_ref(), &now);
-            self.folders.insert(read.dir.clone(), now);
+            self.folders.insert(&read.dir, now);
         }
         w.slots[read.slot] = Slot::Found(Some(f));
         Ok(())

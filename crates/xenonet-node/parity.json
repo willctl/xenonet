@@ -27,8 +27,14 @@
     "core/blocks/scanner.js": {
       "rust": "crates/xenonet-blocks/src/scanner.rs",
       "differences": [
-        "It has the fix on fix/scanner-racy-mtime: a folder read within 2 s of its mtime is read again on the next walk.",
-        "folders lists its folders by path; JS listed them in the order they were read."
+        "It has the fix on fix/scanner-racy-mtime: a folder read within 2 s of its mtime is read again on the next walk."
+      ]
+    },
+    "core/blocks/tailer.js": {
+      "rust": "crates/xenonet-blocks/src/tailer.rs",
+      "differences": [
+        "It has the fix on fix/scanner-racy-mtime: started again after a stop, a file it followed before is caught up by the sweep, as live, not history.",
+        "A sweep of the files it follows sees files added while it goes, as JS's for…of over the Map did; one the sweep drops while a read of it is under way stops that read, where JS read on with the entry it had."
       ]
     }
   },
@@ -49,6 +55,7 @@
     "test/blocks-normalizer.test.js",
     "test/blocks-scanner.test.js",
     "test/blocks-store.test.js",
+    "test/blocks-tailer.test.js",
     "test/claude-usage.test.js",
     "test/claude.test.js",
     "test/cli-actor.test.js",

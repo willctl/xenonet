@@ -624,3 +624,147 @@ impl JsScanner {
         Ok(self.s.finish_breadth(walk, &mut now))
     }
 }
+
+// ----- the tailer -----
+
+use xenonet_base::ordered::Cursor;
+use xenonet_blocks::tailer::{Listed, Swept, Tailer};
+
+fn listed(l: Listed) -> &'static str {
+    match l {
+        Listed::Skip => "skip",
+        Listed::Dormant => "dormant",
+        Listed::Track => "track",
+    }
+}
+
+fn stat_of(mtime_ms: Option<f64>, size: Option<f64>) -> Option<(f64, u64)> {
+    Some((mtime_ms?, size? as u64))
+}
+
+#[napi(js_name = "Tailer")]
+pub struct JsTailer {
+    t: Tailer,
+}
+
+impl HasLife for JsTailer {
+    fn life(&self) -> &Lifecycle {
+        &self.t.life
+    }
+    fn life_mut(&mut self) -> &mut Lifecycle {
+        &mut self.t.life
+    }
+}
+
+lifecycle_api!(JsTailer);
+
+#[napi]
+impl JsTailer {
+    #[napi(constructor)]
+    pub fn new(name: String, prime_window_ms: f64, now: f64) -> Self {
+        JsTailer { t: Tailer::new(&name, prime_window_ms, now) }
+    }
+
+    #[napi(js_name = "listedAtStart")]
+    pub fn listed_at_start(&self, file: String) -> bool {
+        self.t.listed_at_start(&file)
+    }
+
+    #[napi(js_name = "atStart")]
+    pub fn at_start(&mut self, file: String, mtime_ms: Option<f64>, size: Option<f64>, now: f64) -> &'static str {
+        listed(self.t.at_start(&file, stat_of(mtime_ms, size), now))
+    }
+
+    #[napi]
+    pub fn park(&mut self, file: String, size: f64) -> bool {
+        self.t.park(&file, size as u64)
+    }
+
+    /// The next file a sweep looks at: [cursor, file], or null at the end.
+    #[napi(js_name = "nextFollowed")]
+    pub fn next_followed(&self, cursor: Option<f64>) -> Option<(f64, String)> {
+        self.t.next_followed(Cursor::of(cursor.map(|c| c as u64))).map(|(c, f)| (c.at().unwrap_or(0) as f64, f))
+    }
+
+    #[napi(js_name = "inSweep")]
+    pub fn in_sweep(&mut self, file: String, size: Option<f64>) -> &'static str {
+        match self.t.in_sweep(&file, size.map(|s| s as u64)) {
+            Swept::Drop => "drop",
+            Swept::Read => "read",
+            Swept::Nothing => "nothing",
+        }
+    }
+
+    #[napi(js_name = "mayDiscover")]
+    pub fn may_discover(&self, file: String) -> bool {
+        self.t.may_discover(&file)
+    }
+
+    #[napi]
+    pub fn discovered(&mut self, file: String, mtime_ms: Option<f64>, size: Option<f64>, clock: Function<(), f64>) -> &'static str {
+        listed(self.t.discovered(&file, stat_of(mtime_ms, size), || clock.call(()).unwrap_or(f64::NAN)))
+    }
+
+    #[napi(js_name = "addFile")]
+    pub fn add_file(&mut self, file: String) {
+        self.t.add_file(&file);
+    }
+
+    #[napi(js_name = "takeHeld")]
+    pub fn take_held(&mut self, file: String) -> Option<f64> {
+        self.t.take_held(&file).map(|n| n as f64)
+    }
+
+    /// The bytes to read now, as [from, to], or null.
+    #[napi(js_name = "planTake")]
+    pub fn plan_take(&mut self, file: String, size: f64, until: Option<f64>) -> Option<Vec<f64>> {
+        let until = until.filter(|u| u.is_finite()).map(|u| u as u64);
+        self.t.plan_take(&file, size as u64, until).map(|(a, b)| vec![a as f64, b as f64])
+    }
+
+    #[napi]
+    pub fn took(&mut self, file: String, data: Buffer, end: f64) -> Vec<String> {
+        self.t.took(&file, &data, end as u64)
+    }
+
+    #[napi(js_name = "okAfterRead")]
+    pub fn ok_after_read(&self, watchers: u32, roots: u32) -> bool {
+        self.t.ok_after_read(watchers as usize, roots as usize)
+    }
+
+    #[napi]
+    pub fn has(&self, file: String) -> bool {
+        self.t.files.contains(&file)
+    }
+
+    #[napi]
+    pub fn files(&self) -> Vec<String> {
+        self.t.files.keys().map(str::to_string).collect()
+    }
+
+    #[napi(js_name = "fileCount")]
+    pub fn file_count(&self) -> u32 {
+        self.t.files.len() as u32
+    }
+
+    #[napi(js_name = "offsetOf")]
+    pub fn offset_of(&self, file: String) -> Option<f64> {
+        self.t.files.get(&file).map(|f| f.offset as f64)
+    }
+
+    #[napi(js_name = "restOf")]
+    pub fn rest_of(&self, file: String) -> Option<Buffer> {
+        self.t.files.get(&file).map(|f| Buffer::from(f.rest.clone()))
+    }
+
+    /// The dormant files, as [file, size].
+    #[napi]
+    pub fn dormant(&self) -> Vec<(String, f64)> {
+        self.t.dormant.iter().map(|(k, v)| (k.to_string(), *v as f64)).collect()
+    }
+
+    #[napi(js_name = "dormantCount")]
+    pub fn dormant_count(&self) -> u32 {
+        self.t.dormant.len() as u32
+    }
+}

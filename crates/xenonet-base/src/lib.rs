@@ -5,6 +5,8 @@
 
 pub mod fs;
 pub mod json;
+pub mod ordered;
 pub mod paths;
 pub mod pricing;
+pub mod text;
 pub mod time;
