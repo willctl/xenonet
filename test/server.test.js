@@ -159,6 +159,8 @@ test("the map, its live state, history, summary and digests", async () => {
   const summary = (await get("/api/summary")).data;
   assert.equal(summary.url, `http://127.0.0.1:${port}/`);
   assert.ok(summary.needsYou.some((n) => n.kind === "question"));
+  assert.ok(summary.needsYou.every((n) => Number.isFinite(n.since)), "each wait says since when, for the queue's order");
+  assert.ok(Array.isArray(summary.actorsNeedYou) && Number.isInteger(summary.requests));
   assert.ok((await get(`/api/digest?since=${Date.now() - 6 * 3600e3}`)).data.totals.sessions > 0);
   const log = (await get("/api/daylog")).data;
   assert.equal(log.hours.length, 24);
@@ -463,8 +465,13 @@ test("actors: the list, one by its slug, events since a time, XenoNet Dev's simu
   const waiting = async () => (await get("/api/actors")).data.actors.find((a) => a.id === "actor:wren").needsYou ?? null;
   assert.equal((await post("/api/dev/simulate", { kind: "actor-needs-you", a: "actor:wren" })).data.kind, "actor-needs-you");
   assert.equal((await waiting())?.kind, "question");
+  // The tray's summary has it too, by name, with what it waits for.
+  const asks = (await get("/api/summary")).data.actorsNeedYou;
+  assert.deepEqual(asks.map((a) => [a.id, a.name, a.kind]), [["actor:wren", "Wren", "question"]]);
+  assert.ok(asks[0].text && Number.isFinite(asks[0].since));
   assert.equal((await post("/api/dev/simulate", { kind: "clear" })).data.kind, "clear");
   assert.equal(await waiting(), null, "clear takes the actor's wait away");
+  assert.deepEqual((await get("/api/summary")).data.actorsNeedYou, []);
 });
 
 test("registering actors over HTTP: a token that waits, the window's routes behind its key, and the demo's made-up request", async () => {
@@ -493,6 +500,10 @@ test("registering actors over HTTP: a token that waits, the window's routes behi
     stream.close();
   }
   assert.doesNotMatch(stream.text, /heron|xenonet_actor_/i, "never who asked, nor a token, on the stream");
+  // The summary, which has no key, says how many ask and never who.
+  const summary = (await get("/api/summary")).data;
+  assert.ok(summary.requests >= 1, `requests: ${summary.requests}`);
+  assert.doesNotMatch(JSON.stringify(summary), /heron|kite|xenonet_actor_/i);
   const me = await call("GET", "/api/actors/me", undefined, { authorization: `Bearer ${sim.data.token}` });
   assert.ok((me.status === 200 && me.data.state === "waiting") || (me.status === 403 && me.data.code === "wrong-process"), JSON.stringify(me.data));
   assert.equal((await get("/api/actors")).data.actors.some((a) => a.id === "actor:heron"), false, "not on the list until you allow it");

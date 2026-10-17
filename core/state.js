@@ -708,7 +708,7 @@ export class XenoNetState extends EventEmitter {
     const need = snap.sessions.filter((s) => s.needsYou && s.needsYou.kind !== "review");
     return {
       working: snap.sessions.filter((s) => s.status !== "idle").length,
-      needsYou: need.map((s) => ({ id: s.id, app: s.app, title: this.titleOf(s.id), kind: s.needsYou.kind, text: s.needsYou.text })),
+      needsYou: need.map((s) => ({ id: s.id, app: s.app, title: this.titleOf(s.id), kind: s.needsYou.kind, text: s.needsYou.text, since: s.needsYou.since ?? null })),
       review: snap.sessions.filter((s) => s.needsYou?.kind === "review").length,
       stuck: snap.sessions.filter((s) => s.stuck).map((s) => ({ id: s.id, title: this.titleOf(s.id), reasons: s.stuck.reasons })),
       collisions: snap.collisions.length,

@@ -525,6 +525,17 @@ function notifyMail({ actor, name, unread }) {
   notifyDesktop({ type: "notify", key: `actor-mail:${actor}`, command: "actors", title: `${name} has ${unread === 1 ? "a message" : `${unread} messages`} waiting`, subtitle: `Nothing can wake ${name}, so it reads them when it next checks`, body: "Ask it to check its XenoNet inbox, or set up a wake in the Actors panel." });
 }
 
+// What waits on you apart from sessions, for /api/summary: the actors
+// waiting on you, with what they wait for, and how many programs ask to be
+// actors or for a gateway token. Without actors (XENONET_ACTORS=off), none.
+function waitsOnYou() {
+  const waiting = (actors?.list().actors ?? []).filter((a) => a.needsYou && a.kind !== "human");
+  return {
+    actorsNeedYou: waiting.map((a) => ({ id: a.id, name: a.name, kind: a.needsYou.kind, text: a.needsYou.text, since: a.needsYou.since ?? null })),
+    requests: registration?.waiting() ?? 0,
+  };
+}
+
 // Dev only: puts real sessions into states that are otherwise rare (a
 // pending question, an edit collision, a stuck loop, a wiki write, a problem
 // the doctor found) so the visuals can be checked. In memory only; "clear"
@@ -961,7 +972,10 @@ async function api(req, res, url) {
   }
 
   // With hosts on, live hosts' alerts count in the tray and the menu bar too.
-  if (req.method === "GET" && route === "/api/summary") return send(res, 200, hub ? hub.summary(state.summary()) : state.summary());
+  // The actors waiting on you and how many programs ask to be actors come
+  // with it, for the tray's and xenonet status's Needs you (core/needs-you.js):
+  // a count of the programs, never who asked, since this route has no key.
+  if (req.method === "GET" && route === "/api/summary") return send(res, 200, { ...(hub ? hub.summary(state.summary()) : state.summary()), ...waitsOnYou() });
 
   if (req.method === "GET" && route === "/api/events") {
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });

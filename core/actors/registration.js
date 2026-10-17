@@ -234,6 +234,12 @@ export function createRegistration({ actors, now = actors.now, home = os.homedir
   return {
     events,
     on: (...args) => events.on(...args),
+    // How many wait for you now, registrations and gateway token asks, as
+    // the requests event says it: a count, never who asked.
+    waiting(t = now()) {
+      expireLapsed(t);
+      return store.waitingActorRequests(t).length + gatewayAsks.size;
+    },
 
     // A program asks to be an actor (POST /api/actors/register), with an
     // actor/registration/v1 body that fits its schema. `checked`, `chain`
