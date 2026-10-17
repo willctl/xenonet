@@ -4,7 +4,7 @@ use crate::js::Json;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde_json::{json, Map, Value};
-use xenonet_base::{paths, pricing, time};
+use xenonet_base::{paths, pricing, time, units};
 
 // ----- pricing -----
 
@@ -468,4 +468,38 @@ pub fn read_logs(dir: String, since: f64, level: String, component: Option<Strin
 #[napi]
 pub fn summarize(entries: Json) -> Json {
     Json(Value::Array(xlog::summarize(entries.0.as_array().map(Vec::as_slice).unwrap_or_default())))
+}
+
+// ----- units -----
+
+#[napi(js_name = "unitsMoney")]
+pub fn units_money(n: Option<f64>) -> String {
+    units::money(n)
+}
+
+#[napi(js_name = "unitsTokens")]
+pub fn units_tokens(n: Option<f64>) -> String {
+    units::tokens(n)
+}
+
+#[napi(js_name = "unitsDuration")]
+pub fn units_duration(ms: Option<f64>) -> String {
+    units::duration(ms)
+}
+
+// The twin says whether n was 1 itself, since "1" isn't.
+#[napi(js_name = "unitsPlural")]
+pub fn units_plural(n: f64, one: bool, word: String, many: String) -> String {
+    format!("{} {}", units::locale(n, 0, 3), if one { word } else { many })
+}
+
+// The twin divides, as JS would whatever it was given.
+#[napi(js_name = "unitsShare")]
+pub fn units_share(p: f64) -> String {
+    units::share_of(p)
+}
+
+#[napi(js_name = "unitsExcerpt")]
+pub fn units_excerpt(s: String, n: f64) -> String {
+    units::excerpt(&s, n as usize)
 }

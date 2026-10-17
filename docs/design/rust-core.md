@@ -485,11 +485,12 @@ place. This table follows it.
 | `core/migrate.js`, `core/statefile.js` | `xenonet-state/src/migrate.rs`, `statefile.rs` | `statefile`, `store`, `state` pass |
 | `core/dirs.js`, `core/log.js` | `xenonet-base/src/dirs.rs`, `log.rs` | `platform`, `log`, `cli`, `doctor` pass |
 | `core/schema/ids.js` | `xenonet-base/src/ids.rs` | `schema-ids`, `hosts-ids`, `schemas` pass |
+| `core/units.js` | `xenonet-base/src/units.rs`, rounding as `toFixed`, `toLocaleString` and `Math.round` do | `stats`, `token-files`, `state`, `server` pass |
 | `core/actors/tokens.js` | `xenonet-actors/src/tokens.rs` | `token-files`, `actor-registration`, `actor-routes`, `actor-gateway` pass |
 | `xenonet mcp` for sessions (`mcp/xenonet.js`), a prototype | `xenonet-mcp`, on rmcp, Rust 1.88+ | Its own stdio tests; the same answers as the JS servers to the probe and the handshake |
 | `xenonet hook` (`cli/commands/hook.js`) | `xenonet-cli`, the `xenonet` binary | `launcher`'s hook cases, as Rust tests of the binary |
 
-With every twin in place, all 105 test files that reach one pass. The
+With every twin in place, all 109 test files that reach one pass. The
 twins load in the Node processes a test starts too (a server, the
 command, an MCP server), so the route and command tests run on them. The two
 fixes on `fix/scanner-racy-mtime` are in the Rust (the scanner reads a

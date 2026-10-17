@@ -122,6 +122,12 @@
         "The key patterns run on Rust's regex: \\b is ASCII's, as JS's is, but \\s is Unicode's White_Space, which differs from JS's at U+FEFF and U+0085.",
         "A message cut at its length that would split a pair of UTF-16 units leaves the whole character out; JS kept half of it."
       ]
+    },
+    "core/units.js": {
+      "rust": "crates/xenonet-base/src/units.rs",
+      "differences": [
+        "excerpt cutting a character in two ends in U+FFFD, which is what JS's half of one prints as. The twin leaves that cut to JS, as it does money given something other than a number."
+      ]
     }
   },
   "tests": [
@@ -147,6 +153,8 @@
     "test/claude-usage.test.js",
     "test/claude.test.js",
     "test/cli-actor.test.js",
+    "test/cli-gateway.test.js",
+    "test/cli-status-agents.test.js",
     "test/cli.test.js",
     "test/codex-client.test.js",
     "test/codex.test.js",
@@ -168,6 +176,7 @@
     "test/engine-store.test.js",
     "test/engine.test.js",
     "test/features.test.js",
+    "test/film-cards.test.js",
     "test/gateway-tunnel.test.js",
     "test/git-status.test.js",
     "test/golden.test.js",
@@ -201,6 +210,7 @@
     "test/observers.test.js",
     "test/page-markup.test.js",
     "test/platform.test.js",
+    "test/poster.test.js",
     "test/projects.test.js",
     "test/provider-drift.test.js",
     "test/refusal-browser.test.js",
