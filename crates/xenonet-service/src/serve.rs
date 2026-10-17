@@ -61,7 +61,7 @@ impl hyper::body::Body for OutBody {
     }
 }
 
-fn response(reply: Reply) -> hyper::Response<OutBody> {
+pub fn to_response(reply: Reply) -> hyper::Response<OutBody> {
     let mut b = hyper::Response::builder().status(reply.status);
     for (k, v) in &reply.headers {
         b = b.header(k.as_str(), v.as_str());
@@ -350,7 +350,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str) -> i32 {
                 tokio::spawn(async move {
                     let service = service_fn(move |req| {
                         let ctx = ctx.clone();
-                        async move { Ok::<_, Infallible>(response(handle(&ctx, req, peer).await)) }
+                        async move { Ok::<_, Infallible>(to_response(handle(&ctx, req, peer).await)) }
                     });
                     let _ = http1::Builder::new().keep_alive(true).serve_connection(TokioIo::new(stream), service).await;
                 });
