@@ -155,6 +155,21 @@ Everywhere else, you're a placeholder: in the list other programs read, in the e
 
 While XenoNet's window is hidden, you're away, and ten minutes later you're offline. XenoNet keeps your record for 24 hours. Turning off `Show me on the map` in the Actors panel deletes it at once, and the window reports nothing more of you.
 
+## What each actor's work costs
+
+Under its estimate for today, Token use lists what each actor's work would cost at API prices. The three that spent the most show first, the rest are under **more**, and what no actor is tied to comes last. Hover over a row to see how many sessions it covers. `xenonet spend` says the same from a terminal.
+
+Each session counts for one actor at most, so nothing is counted twice and the rows add up to the day's estimate. A session is an actor's when XenoNet knows the actor started it:
+
+1. A run an actor reported through the [gateway](#actors-outside-this-machine-the-gateway) is that actor's.
+2. Otherwise, a session an actor started is its own, whether XenoNet traced it back to the actor's processes or the actor reported it. When two actors say they started the same session, what XenoNet traced itself comes first, then the earliest.
+3. Otherwise, a subagent, or a session another session started, counts for the actor of the session it came from. A fork doesn't, since whoever forked a session may not be whoever started it.
+4. Otherwise, the session is unattributed.
+
+The sessions you start yourself are unattributed too. The window tells XenoNet you started a session in a project, not which session, and XenoNet doesn't guess from timing. An actor that isn't in the Actors panel, such as one whose observer you turned off, gets no sessions either.
+
+A run reported from elsewhere has no transcript on this computer, so XenoNet can't price it. Its actor's row says how many such runs it had today, and they aren't in its cost.
+
 ## Your own programs
 
 Your own programs register with the `xenonet` command, and wait for your Allow in XenoNet's window. Every new actor waits for it, even one you register from your own terminal.
