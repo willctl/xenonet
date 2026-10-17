@@ -502,6 +502,7 @@ place. This table follows it.
 | `core/procs.js` | `xenonet-engine/src/procs.rs`, its lookups a machine the twin answers with the commands' output | `procs` and the 20 other files that reach it pass |
 | `core/secret-store.js` | `xenonet-actors/src/secret_store.rs` (the store's program still runs in the twin) | `assistant-tunnels`, `actor-wake`, `decide`, `costs`, `integrations`, `spotify` pass |
 | `core/actors/products.js`, `detail.js`, `names.js`, `key.js`, `limits.js`, `handoff.js`, `adapters.js`, `spend.js` | `xenonet-engine/src/products.rs`; `xenonet-actors/src/detail.rs`, `names.rs` (on unicode-normalization), `key.rs`, `limits.rs`, `handoff.rs`, `adapters.rs`, `spend.rs` | `actor-names`, `actor-limits`, `actor-spend`, `actors`, `actor-gateway`, `actor-routes`, `gateway-tunnel`, `assistant-connections`, `server` pass |
+| `core/engine/store.js` | `xenonet-engine/src/store.rs`, on `sql.rs` (node:sqlite's binding and rows, over rusqlite) | `engine-store` and the 36 other files that reach it pass |
 
 With every twin in place, all 111 test files that reach one pass. The
 twins load in the Node processes a test starts too (a server, the

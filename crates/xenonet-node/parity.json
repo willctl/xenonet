@@ -216,6 +216,15 @@
         "dayStart (the local day, by the system's time zone) and actorSpend's gathering of the live costs and the map's sessions stay in the twin.",
         "Names sort as ICU's root collation sorts ASCII text (localeCompare); outside ASCII, by an approximation of it."
       ]
+    },
+    "core/engine/store.js": {
+      "rust": "crates/xenonet-engine/src/store.rs",
+      "differences": [
+        "engine.sqlite is opened with rusqlite (SQLite bundled, the same pragmas, steps and copy before a migration), and every call binds and reads as node:sqlite does: a number as a REAL, undefined and booleans refused, rows with no prototype, numbers past 2^53 refused (crates/xenonet-engine/src/sql.rs).",
+        "db is a DatabaseSync of node:sqlite's kind over the store's own connection (prepare, all, get, run, exec, isTransaction); a typed array other than Uint8Array or Int8Array isn't bound as bytes.",
+        "ENGINE_MIGRATIONS still run on a node:sqlite database given to migrateEngine: Rust says each step's statements, from the columns the database has.",
+        "block is a Block whose lifecycle is a copy of the one opening the file left. Closing a store that's closed doesn't throw; DatabaseSync's close did."
+      ]
     }
   },
   "tests": [
