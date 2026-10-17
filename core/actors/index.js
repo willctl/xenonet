@@ -726,6 +726,27 @@ export class Actors extends EventEmitter {
     return a.via.includes("demo") || a.installed === true || (a.lastSeen != null && now - a.lastSeen < WEEK_MS);
   }
 
+  // Who started which sessions, for what each actor's work costs
+  // (core/actors/spend.js), from the actors the list shows: `names`, each
+  // one's name by its id, and `starts`, [{ actor, session, at, via }]: each
+  // session a spawned event of the last 7 days named, the first time from
+  // each source, and each session an actor holds as one it spawned. Only
+  // an actor that reports itself sets that without an event (reports.js),
+  // so for one that does, a target is its own word. Outside the demo,
+  // never you: you're a placeholder outside the window, and the window
+  // never says which session you started.
+  sessionsStarted({ now = this.now() } = {}) {
+    const names = new Map([...this.actors.values()].filter((a) => this.isPublic(a.id) && this.#listed(a, now)).map((a) => [a.id, a.name]));
+    const starts = [];
+    for (const r of this.store.actorSpawns(now - WEEK_MS)) if (names.has(r.actor) && nodeKind(r.target) === "session") starts.push({ actor: r.actor, session: r.target, at: r.at, via: r.via });
+    for (const id of names.keys()) {
+      const a = this.actors.get(id);
+      const via = a.via.includes("registered") ? "registered" : this.#source(a);
+      for (const t of a.targets.values()) if (t.relation === "spawned" && nodeKind(t.id) === "session") starts.push({ actor: id, session: t.id, at: t.since, via });
+    }
+    return { names, starts };
+  }
+
   // ---------- what the engine sees of actors ----------
 
   // The project or folder holding an absolute path, as a node id, or null:

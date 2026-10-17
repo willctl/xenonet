@@ -24,6 +24,7 @@ import { createProcs } from "../core/procs.js";
 import { engineRoutes } from "./routes/engine.js";
 import { actorRoutes, createActorCaller } from "./routes/actors.js";
 import { createActors, mapOf, CLOCK_MS } from "../core/actors/index.js";
+import { actorSpend } from "../core/actors/spend.js";
 import { createRegistration } from "../core/actors/registration.js";
 import { createWindowKey } from "../core/actors/key.js";
 import { workspaceRoutes } from "./routes/workspace.js";
@@ -186,6 +187,10 @@ const integrations = createIntegrations({ dir: config.demo ? null : path.join(co
 // What OpenRouter's key has spent, for Token use (core/openrouter-usage.js):
 // read only while a window asks, through GET /api/spend.
 const openrouter = config.demo ? createDemoOpenRouterUsage() : createOpenRouterUsage({ secrets: decisionSecrets, log });
+// What each actor's work cost today, for Token use and xenonet spend
+// (core/actors/spend.js): worked out when asked, from the tailer's costs,
+// the map's sessions and who started them. Null with actors off.
+const spendOfActors = () => actorSpend({ live: state.live, nodes: state.index.values(), actors });
 
 // Spotify, as a remote for the app you use (core/spotify.js): what's
 // playing goes to the page (spotify), a few seconds apart while a window
@@ -649,8 +654,11 @@ async function api(req, res, url) {
   }
 
   // What OpenRouter's key has spent, with the key XenoNet keeps for decision
-  // models; at most once a minute.
-  if (req.method === "GET" && route === "/api/spend") return send(res, 200, { openrouter: await openrouter.status() });
+  // models, at most once a minute; and what each actor's work cost today,
+  // at API prices (core/actors/spend.js). /api/spend/actors is that alone,
+  // for the xenonet command, which shouldn't have XenoNet ask OpenRouter.
+  if (req.method === "GET" && route === "/api/spend") return send(res, 200, { openrouter: await openrouter.status(), actors: spendOfActors() });
+  if (req.method === "GET" && route === "/api/spend/actors") return actors ? send(res, 200, spendOfActors()) : send(res, 404, { error: "this XenoNet has no actors" });
 
   // This computer's CPU, memory and GPU, for the system panel
   // (core/system-stats.js), with the last few minutes of each.

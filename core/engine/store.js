@@ -367,6 +367,10 @@ export class EngineStore {
       : this.#sql("SELECT * FROM actor_events WHERE at >= ? AND actor IS NOT ? ORDER BY at, rowid LIMIT ?").all(since, except, limit);
   // How many events of each kind each actor has had since `since`.
   actorEventCounts = (since) => this.#sql("SELECT actor, kind, count(*) AS n FROM actor_events WHERE at >= ? GROUP BY actor, kind").all(since);
+  // The targets of each actor's spawned events since `since`, the first
+  // time from each source: who started what, for what each actor's work
+  // costs (core/actors/spend.js).
+  actorSpawns = (since) => this.#sql("SELECT actor, target, via, MIN(at) AS at FROM actor_events WHERE kind = 'spawned' AND target IS NOT NULL AND at >= ? GROUP BY actor, target, via").all(since);
   // Whether an actor reported an event with this `ref` since `since`.
   hasActorRef = (actor, ref, since) => !!this.#sql("SELECT 1 FROM actor_events WHERE actor = ? AND ref = ? AND at >= ? LIMIT 1").get(actor, ref, since);
 
