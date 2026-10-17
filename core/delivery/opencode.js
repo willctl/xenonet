@@ -10,6 +10,13 @@ const run = (cmd, args) => new Promise((resolve) => execFile(cmd, args, { timeou
 
 // XenoNet's ids take OpenCode's ses_… with "-" for "_" (see core/native/opencode.js).
 export const openCodeId = (id) => String(id).replace(/^opencode:/, "").replace(/^ses-/, "ses_");
+// And back: XenoNet's id for a session named the way OpenCode shows it
+// (ses_…, or opencode:ses_…). Any other id comes back as it was.
+export const fromOpenCodeId = (id) => {
+  const s = String(id ?? "").trim();
+  const m = /^(?:opencode:)?ses_([0-9A-Za-z]+)$/.exec(s);
+  return m ? `opencode:ses-${m[1]}` : s;
+};
 
 // opencode processes: [{ pid, args }].
 export async function openCodeProcesses({ platform = process.platform, ps = run } = {}) {

@@ -1,11 +1,14 @@
 // OpenCode as a way in (core/delivery/opencode.js): which of the running
 // OpenCode servers a message goes to. Every OpenCode on a machine reads the
 // same database, so every server knows every session; only the one whose
-// TUI has the session open shows the turn a message starts. Made-up
-// servers, folders and sessions.
+// TUI has the session open shows the turn a message starts. And consent,
+// kept under the id the router looks it up by. Made-up servers, folders and
+// sessions.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createOpenCode, samePath } from "../core/delivery/opencode.js";
+import { createOpenCode, samePath, openCodeId, fromOpenCodeId } from "../core/delivery/opencode.js";
+import { DeliveryPolicy } from "../core/delivery/policy.js";
+import { deliveryRoutes } from "../server/routes/delivery.js";
 
 // Servers on ports 1, 2 and 3, each started in its own folder. Every one
 // knows every session, as OpenCode's shared database has it; `busy` names
@@ -44,6 +47,33 @@ test("with no server in the session's folder, any that knows it takes the messag
   const { oc, posted } = servers({ sessionDir: "/w/elsewhere" });
   await oc.deliver("opencode:ses-abc123", "hi");
   assert.deepEqual(posted, ["1/session/ses_abc123/prompt_async"]);
+});
+
+test("xenonet live allow takes the id OpenCode shows, keeps it as XenoNet's, and refuses what isn't a session's id", async () => {
+  assert.equal(fromOpenCodeId("ses_abc123"), "opencode:ses-abc123");
+  assert.equal(fromOpenCodeId(" opencode:ses_abc123 "), "opencode:ses-abc123");
+  assert.equal(fromOpenCodeId("opencode:ses-abc123"), "opencode:ses-abc123");
+  assert.equal(fromOpenCodeId("claude:11111111-2222"), "claude:11111111-2222");
+  assert.equal(openCodeId(fromOpenCodeId("ses_abc123")), "ses_abc123");
+  const policy = new DeliveryPolicy();
+  const route = deliveryRoutes({ policy, router: { list: () => [] }, verify: { person: async () => ({ ok: true }) }, readJson: async (r) => r.body, send: (res, status, body) => Object.assign(res, { status, body }) });
+  const go = async (path, body) => {
+    const res = {};
+    await route({ method: "POST", headers: {}, body, socket: {} }, res, new URL(path, "http://127.0.0.1"));
+    return res;
+  };
+  const ok = await go("/api/delivery/allow", { session: "ses_abc123", hours: 1 });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.session, "opencode:ses-abc123", "the answer says which id the consent is kept under");
+  assert.ok(policy.consented("opencode:ses-abc123"), "under the id the router asks about");
+  for (const bad of ["atlas", "", "opencode:", "ses_"]) {
+    const res = await go("/api/delivery/allow", { session: bad });
+    assert.equal(res.status, 400, bad);
+    assert.match(res.body.error, /isn't a session's id/);
+  }
+  assert.deepEqual(Object.keys(policy.data.consent), ["opencode:ses-abc123"], "nothing kept for the refused ones");
+  await go("/api/delivery/disallow", { session: "ses_abc123" });
+  assert.equal(policy.consented("opencode:ses-abc123"), false);
 });
 
 test("folders compare without a trailing slash, and on Windows whatever the case and slashes", () => {
