@@ -21,6 +21,7 @@ pub mod observer;
 pub mod observers;
 pub mod registration;
 pub mod registry;
+pub mod remote_presence;
 pub mod reports;
 pub mod secret_store;
 pub mod spend;

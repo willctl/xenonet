@@ -23,6 +23,7 @@ mod observers_core;
 mod peer;
 mod procs;
 mod registration;
+mod remote_presence;
 mod reports;
 mod schema;
 mod secrets;

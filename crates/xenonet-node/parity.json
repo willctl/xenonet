@@ -307,6 +307,10 @@
         "It works on the engine's store the twin's EngineStore holds, so another kind of store can't stand in for it."
       ]
     },
+    "core/actors/remote-presence.js": {
+      "rust": "crates/xenonet-actors/src/remote_presence.rs",
+      "differences": []
+    },
     "core/actors/reports.js": {
       "rust": "crates/xenonet-actors/src/reports.rs",
       "differences": [
