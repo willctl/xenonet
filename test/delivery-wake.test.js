@@ -92,7 +92,10 @@ test("the listen settings: a Stop hook to XenoNet's listen route, given longer t
   writeListenSettings({ dir, port: 47840 });
   assert.equal(fs.statSync(file).mtimeMs, mtime, "unchanged, not written again");
   const r = await liveSetup({ exec: async () => null, opencode: { servers: async () => [] }, listenFile: path.join(dir, "listen-47840.json"), home: path.dirname(dir) });
-  assert.equal(r.listen, `claude --settings "$HOME/${path.basename(dir)}/listen-47840.json"`);
+  // Your home folder as $HOME, but on Windows, whose shells spell it
+  // otherwise, the path as it is.
+  const listen = path.join(dir, "listen-47840.json");
+  assert.equal(r.listen, process.platform === "win32" ? `claude --settings "${listen}"` : `claude --settings "$HOME/${path.basename(dir)}/listen-47840.json"`);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
