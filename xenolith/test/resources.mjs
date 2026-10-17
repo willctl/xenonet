@@ -1,4 +1,5 @@
-// Pages as MCP resources, with update notifications (the Rust programs only). Resources follow the same access rules as the tools: a caller lists and
+// Pages as MCP resources, with update notifications, and the start rules as an MCP prompt (the
+// Rust programs only). Resources follow the same access rules as the tools: a caller lists and
 // reads the pages of the spaces it may read, and a page it may not read is "not found".
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -46,7 +47,7 @@ async function waitFor(fn, ms, label) {
   }
 }
 
-describe('pages as resources', { skip, timeout: 60_000 }, () => {
+describe('pages as resources, and the start prompt', { skip, timeout: 60_000 }, () => {
   let E;
   let token; // read on project:atlas only
   before(() => {
@@ -69,6 +70,7 @@ describe('pages as resources', { skip, timeout: 60_000 }, () => {
     try {
       const caps = c.getServerCapabilities();
       assert.deepEqual(caps.resources, { subscribe: true, listChanged: true });
+      assert.deepEqual(caps.prompts, { listChanged: false });
       const { resources } = await c.listResources();
       assert.deepEqual(
         resources.map((r) => [r.uri, r.name, r.title, r.description, r.mimeType]),
@@ -97,6 +99,7 @@ describe('pages as resources', { skip, timeout: 60_000 }, () => {
       assert.deepEqual((await c.listResources()).resources.map((r) => r.uri), ['xenolith://project/atlas/pages/db']);
       assert.match((await c.readResource({ uri: 'xenolith://project/atlas/pages/db' })).contents[0].text, /logical replication/);
       await assert.rejects(c.readResource({ uri: 'xenolith://machine/local/pages/home-lab' }), (e) => e.code === -32002, 'the same answer as a page that is not there');
+      await assert.rejects(c.getPrompt({ name: 'start', arguments: { space: 'machine:local' } }), /Refused: no space "machine:local" that you can read/);
     } finally {
       await c.close();
     }
@@ -126,7 +129,25 @@ describe('pages as resources', { skip, timeout: 60_000 }, () => {
     }
   });
 
-  test('over stateless HTTP: resources, but no subscriptions', async () => {
+  test('the start prompt is what context_start returns, rules first', async () => {
+    const c = await stdioClient(E.env);
+    try {
+      const { prompts } = await c.listPrompts();
+      assert.deepEqual(prompts.map((p) => [p.name, p.arguments.map((a) => a.name)]), [['start', ['app', 'topic', 'space']]]);
+      const p = await c.getPrompt({ name: 'start', arguments: { app: 'claude-code', space: 'project:atlas' } });
+      assert.equal(p.messages[0].role, 'user');
+      const text = p.messages[0].content.text;
+      assert.match(text, /# Xenolith protocol/);
+      assert.match(text, /## 1\. Start every conversation with `context_start`/);
+      assert.match(text, /^Space: project:atlas\. Other spaces you can use: machine:local \(admin\)\./m);
+      assert.match(text, /- db \[project\] Atlas database - Postgres 17/);
+      await assert.rejects(c.getPrompt({ name: 'other' }), /Unknown prompt/);
+    } finally {
+      await c.close();
+    }
+  });
+
+  test('over stateless HTTP: resources and prompts, but no subscriptions', async () => {
     const proc = spawn(...srv(runtime, '--http', '--port', '0', '--parent-stdin'), { env: E.env, stdio: ['pipe', 'pipe', 'pipe'] });
     const url = await new Promise((resolve, reject) => {
       let err = '';
@@ -155,6 +176,7 @@ describe('pages as resources', { skip, timeout: 60_000 }, () => {
     try {
       const caps = c.getServerCapabilities();
       assert.equal(caps.resources, undefined);
+      assert.equal(caps.prompts, undefined);
     } finally {
       await c.close();
     }

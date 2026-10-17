@@ -1,12 +1,16 @@
-//! Pages as MCP resources.
+//! Pages as MCP resources, and the start rules as an MCP prompt.
 //!
 //! Every page of every space a caller may read is a resource, `xenolith://<kind>/<name>/pages/<slug>`
 //! (xenolith://machine/local/pages/atlas is this machine's page "atlas"), read as text/markdown.
 //! Over stdio a client can subscribe to a page and gets notifications/resources/updated when it
 //! changes, and notifications/resources/list_changed when pages come or go in the spaces it can
 //! read. The HTTP service is stateless, so it offers neither.
+//!
+//! The `start` prompt is what context_start returns: the protocol (the rules every session
+//! follows), the space's index, recent activity and pending notes, for clients that put a prompt
+//! in front of a conversation.
 
-use crate::mcp::{Ctx, State};
+use crate::mcp::{Ctx, State, call_tool};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -117,6 +121,41 @@ pub fn read(st: &State, ctx: &Ctx, params: &Value) -> RpcResult {
         Ok((rel, text)) if rel == format!("pages/{slug}.md") => Ok(json!({ "contents": [{ "uri": uri, "mimeType": "text/markdown", "text": defang_remote_images(&text) }] })),
         _ => Err((NOT_FOUND, format!("Resource not found: {uri}"))),
     }
+}
+
+// ---------------------------------------------------------------- the start prompt
+
+pub fn prompts_list() -> Value {
+    json!({ "prompts": [{
+        "name": "start",
+        "title": "Start with shared context",
+        "description": "The rules every session follows with Xenolith, with a space's page index, recent activity and notes not yet filed: what context_start returns.",
+        "arguments": [
+            { "name": "app", "description": "Which app or agent you are, e.g. claude-code or codex.", "required": false },
+            { "name": "topic", "description": "A few words about the conversation, to find related pages.", "required": false },
+            { "name": "space", "description": "Which space: machine:local (the default), project:<name>, identity:<name> or actor:<slug>.", "required": false },
+        ],
+    }] })
+}
+
+/// prompts/get start: context_start's text as a user message, under the same access rules.
+pub fn prompt_get(st: &State, ctx: &Ctx, params: &Value) -> RpcResult {
+    if params.get("name").and_then(Value::as_str) != Some("start") {
+        return Err((-32602, format!("Unknown prompt: {}", params.get("name").and_then(Value::as_str).unwrap_or(""))));
+    }
+    let a = params.get("arguments").cloned().unwrap_or(json!({}));
+    let mut args = json!({ "app": a.get("app").and_then(Value::as_str).filter(|s| !s.trim().is_empty()).unwrap_or("mcp-prompt") });
+    for k in ["topic", "space"] {
+        if let Some(v) = a.get(k).and_then(Value::as_str).filter(|s| !s.trim().is_empty()) {
+            args[k] = json!(v);
+        }
+    }
+    let r = call_tool(st, ctx, "context_start", &args);
+    let text = r["content"][0]["text"].as_str().unwrap_or("").to_string();
+    if r["isError"] == true {
+        return Err((-32602, text));
+    }
+    Ok(json!({ "description": "Xenolith: the rules and the context to start with", "messages": [{ "role": "user", "content": { "type": "text", "text": text } }] }))
 }
 
 // ---------------------------------------------------------------- subscriptions (stdio)

@@ -565,12 +565,13 @@ pub fn handle(st: &State, ctx: &Ctx, msg: &Value, client_info: &Mutex<Option<Str
                 let v = ci.get("version").and_then(Value::as_str).unwrap_or("");
                 *client_info.lock().unwrap() = Some(format!("{name} {v}").trim().to_string());
             }
-            // Pages as resources (resources.rs); subscribing needs a connection
+            // Pages as resources and the start prompt (resources.rs); subscribing needs a connection
             // that lasts, which stateless HTTP doesn't have. The read-only server (Ask) offers tools only.
             let mut capabilities = json!({ "tools": { "listChanged": true } });
             if !st.read_only {
                 let live = ctx.transport == "stdio";
                 capabilities["resources"] = json!({ "subscribe": live, "listChanged": live });
+                capabilities["prompts"] = json!({ "listChanged": false });
             }
             json!({
                 "protocolVersion": version,
@@ -585,11 +586,13 @@ pub fn handle(st: &State, ctx: &Ctx, msg: &Value, client_info: &Mutex<Option<Str
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
             call_tool(st, ctx, name, params.get("arguments").unwrap_or(&Value::Null))
         }
-        m @ ("resources/list" | "resources/templates/list" | "resources/read") if !st.read_only => {
+        m @ ("resources/list" | "resources/templates/list" | "resources/read" | "prompts/list" | "prompts/get") if !st.read_only => {
             let r = match m {
                 "resources/list" => crate::resources::list(st, ctx, &params),
                 "resources/templates/list" => Ok(crate::resources::templates()),
-                _ => crate::resources::read(st, ctx, &params),
+                "resources/read" => crate::resources::read(st, ctx, &params),
+                "prompts/list" => Ok(crate::resources::prompts_list()),
+                _ => crate::resources::prompt_get(st, ctx, &params),
             };
             match r {
                 Ok(v) => v,
