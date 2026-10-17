@@ -657,6 +657,7 @@ dependencies = [
 name = "xenonet-base"
 version = "0.2.0"
 dependencies = [
+ "libc",
  "regex",
  "serde_json",
 ]
