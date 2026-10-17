@@ -26,13 +26,25 @@ const hasRustup = () => {
   }
 };
 
-// The command that runs cargo with `args`, as [file, args].
-export function cargoCommand(args) {
+// The pinned toolchain's folder of programs, or null. rustup run doesn't
+// always put it first on the PATH, and cargo then runs the rustc it finds.
+function toolchainBin(channel) {
+  try {
+    return path.dirname(execFileSync("rustup", ["which", "cargo", "--toolchain", channel], { encoding: "utf8", windowsHide: true }).trim());
+  } catch {
+    return null;
+  }
+}
+
+// The command that runs cargo with `args`, as [file, args, env].
+export function cargoCommand(args, env = process.env) {
   const channel = pinned();
-  return channel && hasRustup() ? ["rustup", ["run", channel, "cargo", ...args]] : ["cargo", args];
+  const bin = channel && hasRustup() ? toolchainBin(channel) : null;
+  if (!bin) return ["cargo", args, env];
+  return [path.join(bin, process.platform === "win32" ? "cargo.exe" : "cargo"), args, { ...env, PATH: `${bin}${path.delimiter}${env.PATH ?? ""}`, RUSTC: path.join(bin, process.platform === "win32" ? "rustc.exe" : "rustc") }];
 }
 
 export function cargo(args, options = {}) {
-  const [file, argv] = cargoCommand(args);
-  return execFileSync(file, argv, { cwd: root, windowsHide: true, ...options });
+  const [file, argv, env] = cargoCommand(args, options.env ?? process.env);
+  return execFileSync(file, argv, { cwd: root, windowsHide: true, ...options, env });
 }
