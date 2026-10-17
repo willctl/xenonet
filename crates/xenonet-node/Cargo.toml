@@ -24,6 +24,7 @@ serde_json.workspace = true
 xenonet-actors.workspace = true
 xenonet-base.workspace = true
 xenonet-blocks.workspace = true
+xenonet-schema.workspace = true
 xenonet-sources.workspace = true
 xenonet-state.workspace = true
 

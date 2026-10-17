@@ -79,6 +79,14 @@
       "differences": [
         "backoff lists baseMs, factor and maxMs after the keys it was given; a factor given as undefined counts as 2 (JS made it undefined)."
       ]
+    },
+    "core/schema/lenient.js": {
+      "rust": "crates/xenonet-schema/src/lenient.rs",
+      "differences": [
+        "jsonType stays JS: it's typeof, for JS values of any sort.",
+        "A compiled schema is a Rust handle, not an object whose nodes JS can read.",
+        "strip orders keys at the same level by bytes where JS used localeCompare; taking keys out of an object gives the same result in any order."
+      ]
     }
   },
   "tests": [

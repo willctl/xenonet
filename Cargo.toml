@@ -19,6 +19,7 @@ publish = false
 xenonet-actors = { path = "crates/xenonet-actors" }
 xenonet-base = { path = "crates/xenonet-base" }
 xenonet-blocks = { path = "crates/xenonet-blocks" }
+xenonet-schema = { path = "crates/xenonet-schema" }
 xenonet-sources = { path = "crates/xenonet-sources" }
 xenonet-state = { path = "crates/xenonet-state" }
 # JS keeps an object's keys in the order they were added, and so do the

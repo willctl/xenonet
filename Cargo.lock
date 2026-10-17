@@ -435,8 +435,17 @@ dependencies = [
  "xenonet-actors",
  "xenonet-base",
  "xenonet-blocks",
+ "xenonet-schema",
  "xenonet-sources",
  "xenonet-state",
+]
+
+[[package]]
+name = "xenonet-schema"
+version = "0.2.0"
+dependencies = [
+ "serde_json",
+ "xenonet-base",
 ]
 
 [[package]]

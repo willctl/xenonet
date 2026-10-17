@@ -9,4 +9,5 @@ mod base;
 mod blocks;
 mod js;
 mod lines;
+mod schema;
 mod state;
