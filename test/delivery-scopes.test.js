@@ -103,6 +103,18 @@ test("outside its scope an actor learns nothing of a session: not from whoami's 
   assert.deepEqual((await engine.whoHas(A, "/w/ledger/books.js")).map((h) => h.agent.id).sort(), [WREN, C], "a session here sees everyone");
 });
 
+test("you are never an actor here: you reach every actor and session with no grant, and the pause switch doesn't hold you", async () => {
+  const { engine, policy } = world();
+  const YOU = "actor:you";
+  assert.equal(policy.scopeOf(YOU), null);
+  assert.equal(policy.scopeOf("you"), null);
+  assert.deepEqual(policy.scopeOf(WREN), { deny: true }, "an actor still needs a grant");
+  assert.deepEqual((await engine.send(YOU, { to: WREN, text: "hold the job" })).to.map((r) => r.id), [WREN]);
+  policy.setPaused(true);
+  assert.deepEqual((await engine.send(YOU, { to: A, text: "still you" })).to.map((r) => r.id), [A]);
+  await assert.rejects(engine.send(A, { to: B, text: "a session" }), /paused/);
+});
+
 test("guards: the pause switch, fan-out, rate, duplicates, loops between two agents and deep reply chains", async () => {
   let w = world();
   w.policy.setPaused(true);

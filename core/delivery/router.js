@@ -19,7 +19,7 @@
 // policy (pause switch, consent, wake budget) first; a message that may not
 // wake anything still waits for the next turn.
 import { EventEmitter } from "node:events";
-import { framed, hashText } from "./policy.js";
+import { framed, hashText, isYou } from "./policy.js";
 
 export const ACK_MS = 60e3;
 const KEEP = 500;
@@ -106,8 +106,8 @@ export class DeliveryRouter extends EventEmitter {
     const view = await this.engine.view(rec.agent).catch(() => null);
     const app = rec.agent.split(":")[0];
     const idle = !view || view.status === "idle" || view.status === "ended";
-    const fromName = m.fromName ?? (m.from === "you" ? "your user" : (await this.engine.view(m.from).catch(() => null))?.title) ?? m.from;
-    const text = framed({ id: m.id, from: fromName, verified: m.verified, text: m.text, user: m.from === "you" });
+    const fromName = m.fromName ?? (isYou(m.from) ? "your user" : (await this.engine.view(m.from).catch(() => null))?.title) ?? m.from;
+    const text = framed({ id: m.id, from: fromName, verified: m.verified, text: m.text, user: isYou(m.from) });
     rec.fromName = fromName;
     const tried = [];
     const wake = idle ? this.policy.wakeAllowed(m.from, rec.agent, { usage: this.usage(app) }) : { ok: true };
@@ -148,7 +148,7 @@ export class DeliveryRouter extends EventEmitter {
       // 3. Typing into its tmux pane: consent, a sender XenoNet verified with
       // a token or you, and an idle session that isn't waiting on its user.
       if (this.tmux && idle && !view?.ended && !view?.needsYou) {
-        const sender = m.from === "you" || m.from.startsWith("actor:");
+        const sender = isYou(m.from) || m.from.startsWith("actor:");
         const pid = this.engine.store.contact?.(rec.agent)?.pid ?? null;
         if (!this.policy.consented(rec.agent, { remote: m.from.startsWith("actor:") })) tried.push("tmux: no consent");
         else if (!sender) tried.push("tmux: only you or an actor with a token may type");

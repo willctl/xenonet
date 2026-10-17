@@ -301,13 +301,14 @@ function messageActor(id) {
   const panel = modals.open(`<header class="m-head"><div><div class="m-chip">✉ message</div><h2>To ${escapeHtml(name)}</h2><div class="m-sub">It reads it in its inbox, marked as from you at XenoNet's window</div></div><button class="act" data-mclose>Close ✕</button></header><div class="m-body"><textarea class="msg-text" data-msg-text data-yours maxlength="4000" rows="6" placeholder="What to tell ${escapeHtml(name)}"></textarea><p class="pj-note">An actor reads it as from you. It's still its own to act on: XenoNet passes it on and approves nothing.</p><div class="m-foot"><span class="grow"></span><button class="act primary" data-msg-send data-yours>Send</button></div></div>`, { accent: "var(--actor)" });
   const box = panel.querySelector("[data-msg-text]");
   box.focus();
-  panel.querySelector("[data-msg-send]").addEventListener("click", async (e) => {
+  const send = panel.querySelector("[data-msg-send]");
+  send.addEventListener("click", async () => {
     const text = box.value.trim();
     if (!text) return box.focus();
-    e.currentTarget.disabled = true;
+    send.disabled = true;
     const r = await windowCalls.call("POST", "/api/actors/you/message", { to: id, text });
     if (!r.ok) {
-      e.currentTarget.disabled = false;
+      send.disabled = false;
       sfx("error");
       return hud.toast(r.error ?? "It didn't go", true);
     }

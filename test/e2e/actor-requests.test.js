@@ -293,13 +293,19 @@ test("waking an actor: a webhook set in the window, its key hidden as it's typed
     assert.equal(calls[0].headers.authorization, `Bearer ${KEY}`);
     assert.equal(await s.eval(`return document.documentElement.outerHTML.includes(${JSON.stringify(KEY)})`), false, "the key isn't in the page");
     await click("[data-ac-back]");
-    // Kite writes to Lark through the gateway: Lark's webhook is called.
+    // Kite can't write to Lark through the gateway: an actor reaches no
+    // other actor until you grant it a scope that names it.
     const rpc = (tok, method, params = {}) => fetch(`http://127.0.0.1:${on.body.port}/mcp`, { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: `Bearer ${tok}` }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
-    const sent = await (await rpc(kite, "tools/call", { name: "send", arguments: { to: "actor:lark", text: "the build is green" } })).json();
-    assert.equal(sent.result.isError, undefined, JSON.stringify(sent));
+    const refused = await (await rpc(kite, "tools/call", { name: "send", arguments: { to: "actor:lark", text: "the build is green" } })).json();
+    assert.equal(refused.result.isError, true, JSON.stringify(refused));
+    assert.match(refused.result.content[0].text, /no session or actor you can reach is actor:lark/);
+    assert.equal(calls.length, 1, "nothing woken");
+    // You write to Lark from XenoNet's window: Lark's webhook is called.
+    const sent = await fromWindow(`return await call("POST", "/api/actors/you/message", { to: "actor:lark", text: "the build is green" });`);
+    assert.equal(sent.status, 200, JSON.stringify(sent));
     assert.ok(await until(() => calls.length === 2), "woken within seconds");
     assert.deepEqual(calls[1].body.data, { actor: "actor:lark", unread: 1 });
-    assert.doesNotMatch(JSON.stringify(calls[1]), /green|kite/i, "never what it says or who sent it");
+    assert.doesNotMatch(JSON.stringify(calls[1]), /green|actor:you/i, "never what it says or who sent it");
     // Lark's row says how it's woken.
     const row = await until(async () => {
       const t = await s.eval(`return document.querySelector('[data-key="actor:lark"] [data-ac-wake-state]')?.innerText ?? null`);
