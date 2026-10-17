@@ -5,6 +5,12 @@
 //! (gateway/) and the assistant's endpoint, over the cores, each behind a
 //! trait until its crate lands (cores/).
 
+// A core's error carries what the JS errors do (a status, a code, extra
+// fields), and is rare: boxing it would only make each route wordier.
+#![allow(clippy::result_large_err)]
+// Hooks are closures shared between tasks, typed where they're kept.
+#![allow(clippy::type_complexity)]
+
 pub mod actor_caller;
 pub mod assistant_endpoint;
 pub mod borrowed;

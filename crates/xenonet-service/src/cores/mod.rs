@@ -43,7 +43,7 @@ use std::sync::Arc;
 pub use actors::{Actors, Registration, Reports, Runs, Spend, Wakes};
 pub use assistant::{AssistantService, AssistantSource, Audit, Connections, Tunnels};
 pub use delivery::{Policy, Router};
-pub use engine::{Channels, Connect, Engine, Verify};
+pub use engine::{Channels, Connect, Engine, EngineStore, Verify};
 pub use hosts::{HostsConfig, Hub};
 pub use services::{Decider, Diagnostics, Doctor, DriftReport, Integrations, McpInfo, OpenRouter, Refusals, Spotify, SystemStats, Terminals};
 pub use settings::{Command, Demo, Opener, Schemas, Store, Themes};
@@ -158,6 +158,7 @@ pub struct Cores {
     pub schemas: Arc<dyn Schemas>,
     pub drift: Arc<dyn DriftReport>,
     pub engine: Arc<dyn Engine>,
+    pub engine_store: Arc<dyn EngineStore>,
     pub connect: Arc<dyn Connect>,
     pub verify: Arc<dyn Verify>,
     pub channels: Arc<dyn Channels>,
@@ -207,6 +208,7 @@ impl Cores {
             schemas: p.clone(),
             drift: p.clone(),
             engine: p.clone(),
+            engine_store: p.clone(),
             connect: p.clone(),
             verify: p.clone(),
             channels: p.clone(),

@@ -430,7 +430,7 @@ impl ActorRoutes<'_> {
         // An allowed ask for a gateway token answers the window with the
         // token, once, and the gateway's address to go with it.
         if xenonet_base::text::truthy(out.get("credentials")) {
-            out["credentials"]["url"] = self.ctx.gateway.as_ref().map_or(Value::Null, |g| g.url());
+            out["credentials"]["url"] = self.ctx.gateway.get().map_or(Value::Null, |g| g.url());
         }
         Ok(Reply::json(200, out))
     }
@@ -460,7 +460,7 @@ impl ActorRoutes<'_> {
     }
 
     async fn gateway_state(&self, req: &mut Req) -> Result<Reply, CoreError> {
-        let Some(gateway) = self.ctx.gateway.clone() else { return Ok(fail(503, "off", "the actor gateway isn't here", &[], &none())) };
+        let Some(gateway) = self.ctx.gateway.get().cloned() else { return Ok(fail(503, "off", "the actor gateway isn't here", &[], &none())) };
         if let Some(r) = self.ctx.from_you(req).await {
             return Ok(fail(403, "yours", r, &[], &none()));
         }
@@ -497,7 +497,7 @@ impl ActorRoutes<'_> {
         let body = self.object_of(req, SMALL_BODY).await?;
         let caps = body.get("capabilities").filter(|c| c.is_array()).cloned();
         let mut creds = self.registration().gateway(&slug, caps)?;
-        creds["url"] = self.ctx.gateway.as_ref().map_or(Value::Null, |g| g.url());
+        creds["url"] = self.ctx.gateway.get().map_or(Value::Null, |g| g.url());
         Ok(Reply::json(201, creds))
     }
 

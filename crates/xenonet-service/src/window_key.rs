@@ -59,7 +59,7 @@ mod tests {
     fn the_key_matches_only_itself() {
         let k = WindowKey::new();
         assert_eq!(k.reveal().len(), 64);
-        assert!(k.matches(Some(&k.reveal().to_string())));
+        assert!(k.matches(Some(k.reveal())));
         assert!(!k.matches(Some("nope")));
         assert!(!k.matches(None));
         assert_eq!(format!("{k:?}"), "[the window key]");

@@ -258,6 +258,42 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str) -> i32 {
     ctx.music.get_mut().unwrap().again = Some(again_tx);
     ctx.drift = Arc::new(Mutex::new(drift));
     let ctx = Arc::new(ctx);
+    // The actor gateway (gateway/), for actors outside this machine: off
+    // until you turn it on, on a port of its own beside this one.
+    if let (Some(actors), Some(registration)) = (ctx.cores.actors.clone(), ctx.cores.registration.clone()) {
+        let (state, targets) = (ctx.cores.state.clone(), actors.clone());
+        let c = ctx.clone();
+        let parts = crate::gateway::control::ControlParts {
+            cores: crate::gateway::actor_gateway::GatewayCores {
+                engine: ctx.cores.engine.clone(),
+                registration,
+                actors,
+                reports: ctx.cores.reports.clone(),
+                runs: ctx.cores.runs.clone(),
+            },
+            store: ctx.cores.engine_store.clone(),
+            // A run an actor reports from elsewhere: a session on the map,
+            // with a beam from its actor.
+            on_run: Arc::new(move |actor: &str, id: &str| {
+                let (state, targets, actor, id) = (state.clone(), targets.clone(), actor.to_string(), id.to_string());
+                tokio::spawn(async move {
+                    if state.refresh_after_change().await.is_ok() {
+                        let _ = targets.target(&actor, &id, "works-on");
+                    }
+                });
+            }),
+            port: config.gateway_port,
+            version: version.clone(),
+            dir: (!config.demo).then(|| config.state_dir.clone()),
+            home: config.home.clone(),
+            probe_local: config.gateway_probe_local,
+            log: Arc::new(move |code: &str, detail: &str| c.log(if code == "gateway.error" { "warn" } else { "info" }, code, detail, None, None)),
+            tunnel_host: Arc::new(crate::gateway::tunnel::SystemHost),
+            network: Arc::new(crate::gateway::reach::SystemNetwork),
+            now: Arc::new(now_ms),
+        };
+        let _ = ctx.gateway.set(crate::gateway::control::GatewayControl::new(parts));
+    }
 
     let listener = match TcpListener::bind((config.host.as_str(), config.port)).await {
         Ok(l) => l,
@@ -355,6 +391,14 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str) -> i32 {
     if let Some(h) = &ctx.cores.hub {
         h.start();
     }
+    if let Some(g) = ctx.gateway.get().cloned() {
+        tokio::spawn(async move {
+            g.init().await;
+            if g.gateway().listening() {
+                println!("[xenonet] the actor gateway listens on 127.0.0.1:{}", g.gateway().port());
+            }
+        });
+    }
     if let Some(t) = ctx.cores.tunnels.clone() {
         tokio::spawn(async move {
             let _ = t.autostart().await;
@@ -425,6 +469,11 @@ fn shutdown(ctx: &Arc<Ctx>) {
     }
     if let Some(w) = &c.wakes {
         w.stop();
+    }
+    if let Some(g) = ctx.gateway.get() {
+        g.tunnel().stop();
+        let gw = g.gateway().clone();
+        drop(tokio::spawn(async move { gw.stop().await }));
     }
     if let Some(comp) = ctx.components.lock().unwrap().take() {
         comp.close();

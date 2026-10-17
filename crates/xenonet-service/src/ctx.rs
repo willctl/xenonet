@@ -27,7 +27,8 @@ pub struct Ctx {
     pub drift: Arc<Mutex<DriftLog>>,
     pub caller: Option<ActorCaller>,
     pub components: Mutex<Option<Arc<Components>>>,
-    pub gateway: Option<Arc<GatewayControl>>,
+    /// The actor gateway's switch, made once the service is (it logs to it).
+    pub gateway: std::sync::OnceLock<Arc<GatewayControl>>,
     pub endpoint: Mutex<Option<Arc<crate::assistant_endpoint::Endpoint>>>,
     pub themes_dir: String,
     pub music: Mutex<Music>,
@@ -82,7 +83,7 @@ impl Ctx {
             drift: Arc::new(Mutex::new(DriftLog::default())),
             caller,
             components: Mutex::new(None),
-            gateway: None,
+            gateway: std::sync::OnceLock::new(),
             endpoint: Mutex::new(None),
             themes_dir,
             music: Mutex::new(Music::default()),

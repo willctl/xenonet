@@ -460,7 +460,7 @@ impl ActorGateway {
                 id,
             ));
         }
-        let Some(meta) = meta else { return None };
+        let meta = meta?;
         for key in ["clientCapabilities"] {
             if meta.get(format!("{ENVELOPE}{key}")).is_none() {
                 let k = format!("{ENVELOPE}{key}");
@@ -646,7 +646,7 @@ impl ActorGateway {
             }
             "inbox" => {
                 let secs = xenonet_base::text::js_number(a.get("wait_seconds"));
-                let secs = if secs.is_nan() { 0.0 } else { secs.min(INBOX_WAIT_MAX).max(0.0) };
+                let secs = if secs.is_nan() { 0.0 } else { secs.clamp(0.0, INBOX_WAIT_MAX) };
                 c.engine.inbox(id, Duration::from_secs_f64(secs)).await.map_err(msg)
             }
             "report_run" => {

@@ -144,7 +144,24 @@ pub trait Channels: Send + Sync {
     }
 }
 
+/// The engine's database (core/engine/store.js), for what the service keeps
+/// in it itself: the gateway's settings, and when actors' tokens were made.
+pub trait EngineStore: Send + Sync {
+    /// `store.meta(key)`.
+    fn meta(&self, _key: &str) -> R<Option<String>> {
+        pending("core/engine/store.js")
+    }
+    fn set_meta(&self, _key: &str, _value: &str) -> R<()> {
+        pending("core/engine/store.js")
+    }
+    /// `store.actorTokenTimes()`: `{ slug, hasToken, at, hasGateway, gatewayAt }`.
+    fn actor_token_times(&self) -> R<Vec<Value>> {
+        pending("core/engine/store.js")
+    }
+}
+
 impl Engine for Pending {}
+impl EngineStore for Pending {}
 impl Connect for Pending {}
 impl Verify for Pending {}
 impl Channels for Pending {}
