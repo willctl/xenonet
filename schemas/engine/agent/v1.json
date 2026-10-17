@@ -92,6 +92,20 @@
         }
       ]
     },
+    "reader": {
+      "description": "Read from its own records by an experimental reader (core/native), so no message reaches it",
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "experimental"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "lastActive": {
       "type": "number",
       "description": "Epoch milliseconds"

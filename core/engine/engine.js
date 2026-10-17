@@ -209,6 +209,9 @@ export class Engine extends EventEmitter {
       id,
       app: id.split(":")[0],
       title: clip(node?.title ?? (cwd ? `${id.split(":")[0]} in ${path.basename(cwd)}` : short(id)), 90),
+      // A session an experimental reader reads (core/native), which no
+      // message reaches.
+      reader: node?.reader ?? null,
       project: place?.name ?? null,
       projectId: place?.id ?? null,
       projectKind: place?.kind ?? null,

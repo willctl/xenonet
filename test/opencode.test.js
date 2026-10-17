@@ -180,7 +180,7 @@ test("a session about to edit a file an OpenCode session edited is warned, and c
     assert.equal(conflicts[0].agent.id, O);
     assert.equal(conflicts[0].agent.app, "opencode");
     assert.equal(conflicts[0].observed, undefined, "read from its records, not inferred");
-    await assert.rejects(engine.send(C, { to: O, text: "hi" }), /can't read messages/);
+    await assert.rejects(engine.send(C, { to: O, text: "hi" }), /can't read messages: XenoNet reads its records but has no way to message it/);
   } finally {
     w.done();
   }
