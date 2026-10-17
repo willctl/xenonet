@@ -12,8 +12,10 @@
 //!   xenolith service --config <ini>    the Windows service (see service.rs)
 //!   xenolith install | uninstall       set Xenolith up for the apps on this computer, or take it out (see install/)
 //!   xenolith forget "<text>" [--yes]   find every copy of a text in the wiki and logs; --yes redacts them
+//!   xenolith spaces | grant | revoke | access   spaces and who may use them (see access_cli.rs)
 //!   xenolith --version
 
+mod access_cli;
 mod curator;
 mod embeddings;
 mod forget;
@@ -39,7 +41,7 @@ fn set_if_unset(k: &str, v: &str) {
 
 fn usage() -> ! {
     eprintln!(
-        "usage: xenolith serve [--http [--port N] [--parent-stdin] | --read-only | --init] | xenolith hook | xenolith curator [--once | --parent-stdin | --asks-only | --retry-dead | --file-raw-dead | --login-status] | xenolith forget \"<text>\" [--ignore-case] [--yes] | xenolith embeddings status|sync | xenolith models [set curator|ask <model> [--effort <level>] | reset curator|ask] | xenolith --version"
+        "usage: xenolith serve [--http [--port N] [--parent-stdin] | --read-only | --init] | xenolith hook | xenolith curator [--once | --parent-stdin | --asks-only | --retry-dead | --file-raw-dead | --login-status] | xenolith forget \"<text>\" [--ignore-case] [--yes] | xenolith embeddings status|sync | xenolith models [set curator|ask <model> [--effort <level>] | reset curator|ask] | xenolith spaces [add <space>] | xenolith grant <subject> <scope> | xenolith revoke <subject> [<scope>] | xenolith access | xenolith --version"
     );
     std::process::exit(2)
 }
@@ -62,6 +64,7 @@ fn main() {
             curator::run(&args[1..])
         }
         Some("forget") => forget::run(&args[1..]),
+        Some(cmd @ ("spaces" | "grant" | "revoke" | "access")) => access_cli::run(cmd, &args[1..]),
         Some("embeddings") => embeddings::run(&args[1..]),
         Some("models") => models::run(&args[1..]),
         Some("serve") => {}

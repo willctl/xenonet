@@ -3,6 +3,7 @@
 //! and the secret guard. A faithful port of the Node runtime (src/*.mjs): same files, same formats,
 //! so Node and Rust programs can work on one wiki at the same time.
 
+pub mod access;
 pub mod activity;
 pub mod asks;
 pub mod askworker;
@@ -23,6 +24,7 @@ pub mod reqlog;
 pub mod search;
 pub mod secrets;
 pub mod settings;
+pub mod spaces;
 pub mod sys;
 pub mod text;
 pub mod waker;

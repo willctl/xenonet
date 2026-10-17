@@ -991,6 +991,12 @@ fn read_whole(wiki_dir: &Path, target: &str) -> Result<(String, String)> {
     if !is_inside(&real_root, &real) {
         return wiki_err(format!("Refused: \"{target}\" resolves outside the wiki folder."));
     }
+    // Other spaces live in the machine space's spaces/ folder: each is read as its own space, with
+    // its own access, never as files of this one (spaces.rs).
+    let in_spaces = |base: &Path, p: &Path| p.strip_prefix(base).is_ok_and(|r| crate::spaces::is_spaces_path(&disp(r)));
+    if in_spaces(&root, &abs) || in_spaces(&real_root, &real) {
+        return wiki_err(format!("Not found: \"{target}\". Use context_search, or a page slug from the index (context_read(\"index.md\"))."));
+    }
     let rel_out = abs.strip_prefix(&root).map(disp).unwrap_or_default();
     let rel_out = if rel_out.is_empty() { ".".to_string() } else { rel_out };
     if abs.is_dir() {
@@ -998,7 +1004,7 @@ fn read_whole(wiki_dir: &Path, target: &str) -> Result<(String, String)> {
             .flatten()
             .filter_map(|e| {
                 let n = e.file_name().to_string_lossy().to_string();
-                if n.starts_with('.') && rel_out != "." {
+                if n.starts_with('.') && rel_out != "." || rel_out == "." && n.eq_ignore_ascii_case(crate::spaces::SPACES_DIR) {
                     return None;
                 }
                 Some(if e.path().is_dir() { format!("{n}/") } else { n })

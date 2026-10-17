@@ -12,7 +12,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "icons": "node scripts/build-icons.mjs",
-    "test": "node scripts/build.mjs && node scripts/build-icons.mjs && node --test test/e2e.mjs test/installer.mjs test/curator.mjs test/tray.mjs test/ui.mjs test/ask.mjs test/migrate.mjs test/portable.mjs test/memory-eval.mjs",
+    "test": "node scripts/build.mjs && node scripts/build-icons.mjs && node --test test/e2e.mjs test/installer.mjs test/curator.mjs test/tray.mjs test/ui.mjs test/ask.mjs test/migrate.mjs test/portable.mjs test/memory-eval.mjs test/spaces.mjs",
     "test:live": "node scripts/build.mjs && node --test test/live-curator.mjs",
     "install-local": "node scripts/install-local.mjs",
     "uninstall-local": "node scripts/install-local.mjs --uninstall",

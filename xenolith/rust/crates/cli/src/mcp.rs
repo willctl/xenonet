@@ -3,14 +3,16 @@
 //! two of them do something else, so they read differently: mcp/tools-direct-text.json replaces
 //! only their title and description.
 
+use xenolith_core::access::{self, Level, Policy, Principal};
 use xenolith_core::inbox::{self, NoteInput, PageInput};
 use xenolith_core::lock::cleanup_locks;
 use xenolith_core::paths::{AppPaths, Env};
 use xenolith_core::reqlog::{RequestLog, clip, clip_str, new_request_id, summarize_args};
+use xenolith_core::spaces::{self, SpaceId};
 use xenolith_core::text::{defang_remote_images, local_iso, now, now_ms};
 use xenolith_core::wiki::{self, Error, UpsertInput};
 use serde_json::{Map, Value, json};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 pub const SUPPORTED_VERSIONS: [&str; 5] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
@@ -102,8 +104,13 @@ fn lead_in(wiki_dir: &str, curated: bool) -> String {
     )
 }
 
-pub fn instructions(st: &State) -> String {
-    let dir = st.wiki_dir.as_ref().map(|d| wiki::disp(d)).unwrap_or_else(|| "~/Xenolith".into());
+/// The instructions a client gets at initialize. A token's holder may be elsewhere: it sees no
+/// folder of this machine's, only that the wiki is Xenolith's.
+pub fn instructions_for(st: &State, who: &Principal) -> String {
+    let dir = match who {
+        Principal::Local => st.wiki_dir.as_ref().map(|d| wiki::disp(d)).unwrap_or_else(|| "~/Xenolith".into()),
+        Principal::Token { .. } => "shared through Xenolith".into(),
+    };
     if st.read_only {
         return format!("Read-only access to this user's shared wiki ({dir}): context_search finds pages, log entries and notes not yet filed; context_read opens one.");
     }
@@ -137,6 +144,95 @@ pub struct Ctx<'a> {
     pub client: String,
     pub reqlog: &'a RequestLog,
     pub on_error: Option<&'a (dyn Fn(&str) + Sync)>,
+    /// Who is asking: you (stdio, or HTTP from this machine without a token), or a token's holder.
+    pub principal: Principal,
+    /// Set when a call needed a level the token's scopes never reach: over HTTP that is a 403
+    /// with insufficient_scope, so the client can ask for more (MCP's scope step-up).
+    pub scope_needed: Mutex<Option<String>>,
+}
+
+impl<'a> Ctx<'a> {
+    pub fn new(transport: &'a str, rid: Option<String>, client: String, reqlog: &'a RequestLog, on_error: Option<&'a (dyn Fn(&str) + Sync)>, principal: Principal) -> Self {
+        Ctx { transport, rid, client, reqlog, on_error, principal, scope_needed: Mutex::new(None) }
+    }
+}
+
+// ---------------------------------------------------------------- spaces and access
+
+/// The level a call needs: reads read, a note or an appended page appends, a replaced page writes.
+pub fn needed_level(name: &str, args: &Value) -> Level {
+    match name {
+        "context_log" => Level::Append,
+        "context_upsert_page" if args.get("mode").and_then(Value::as_str) == Some("replace") => Level::Write,
+        "context_upsert_page" => Level::Append,
+        _ => Level::Read,
+    }
+}
+
+/// The same answer for a space that doesn't exist and one the caller may not use, so a token
+/// can't learn which spaces exist.
+fn no_space(id: &SpaceId, need: Level) -> Error {
+    Error::Wiki(format!("Refused: no space \"{id}\" that you can {}.", need.as_str()))
+}
+
+/// A call's space when it names none: this machine's own, when the caller may use it; otherwise
+/// the first one it may (a token holder's own actor space, say).
+fn default_space(root: &Path, policy: &Policy, who: &Principal, need: Level, now: i64) -> Option<SpaceId> {
+    let local = SpaceId::local();
+    if policy.allows(who, &local, need, now) {
+        return Some(local);
+    }
+    spaces::list(root).into_iter().find(|s| policy.allows(who, s, need, now))
+}
+
+/// The space a call works in, after the access check (deny by default): its id and folder. You
+/// start a space by writing to it; a token needs admin there to do the same.
+pub fn open_space(st: &State, ctx: &Ctx, root: &Path, args: &Value, need: Level) -> Result<(SpaceId, PathBuf), Error> {
+    let policy = access::load(&AppPaths::current());
+    let now = now_ms();
+    let who = &ctx.principal;
+    if Policy::scope_ceiling(who).is_none_or(|c| c < need) {
+        *ctx.scope_needed.lock().unwrap() = Some(format!("ctx:{}", need.as_str()));
+        return Err(Error::Wiki(format!("Refused: this token's scopes don't include ctx:{}. Ask the user for a token that does.", need.as_str())));
+    }
+    let id = match opt_s(args, "space").filter(|s| !s.trim().is_empty()) {
+        Some(s) => SpaceId::parse(&s)?,
+        None => default_space(root, &policy, who, need, now).ok_or_else(|| match who {
+            Principal::Local => Error::Wiki(format!("Refused: you may not {} in any space (access.json says \"local\": \"none\").", need.as_str())),
+            Principal::Token { .. } => Error::Wiki(format!("Refused: no space that this token can {}. Ask the user to grant it one.", need.as_str())),
+        })?,
+    };
+    if !policy.allows(who, &id, need, now) {
+        return Err(no_space(&id, need));
+    }
+    if spaces::exists(root, &id) {
+        return Ok((id.clone(), spaces::space_dir(root, &id)));
+    }
+    if need >= Level::Append && !st.read_only && policy.allows(who, &id, Level::Admin, now) {
+        let dir = spaces::create(root, &id)?;
+        return Ok((id, dir));
+    }
+    Err(match who {
+        Principal::Local => Error::Wiki(format!("No space \"{id}\" yet. Logging a note to it starts it.")),
+        Principal::Token { .. } => no_space(&id, need),
+    })
+}
+
+/// context_start's line about spaces, when there is more than one or the caller holds a token:
+/// which space this is, and the others the caller can use, with its level in each.
+fn spaces_line(root: &Path, who: &Principal, current: &SpaceId) -> Option<String> {
+    let policy = access::load(&AppPaths::current());
+    let now = now_ms();
+    let mine: Vec<(SpaceId, Level)> = spaces::list(root).into_iter().filter_map(|s| policy.level(who, &s, now).map(|l| (s, l))).collect();
+    if mine.len() <= 1 && *who == Principal::Local {
+        return None;
+    }
+    let others: Vec<String> = mine.iter().filter(|(s, _)| s != current).map(|(s, l)| format!("{s} ({})", l.as_str())).collect();
+    Some(if others.is_empty() {
+        format!("Space: {current}. No other space is open to you.")
+    } else {
+        format!("Space: {current}. Other spaces you can use: {}. Pass `space` to any tool to work in one.", others.join(", "))
+    })
 }
 
 // ---------------------------------------------------------------- argument validation (the zod schemas)
@@ -259,13 +355,27 @@ pub fn call_tool(st: &State, ctx: &Ctx, called: &str, args: &Value) -> Value {
         return text_result(format!("MCP error -32602: Input validation error: Invalid arguments for tool {called}: {}", problems.join("; ")), true);
     }
     let t0 = now_ms();
+    let mut used_space: Option<String> = None;
     let outcome: Result<String, Error> = (|| {
-        let Some(dir) = st.wiki_dir.as_ref().filter(|_| st.setup_error.is_none()) else {
+        let Some(root) = st.wiki_dir.as_ref().filter(|_| st.setup_error.is_none()) else {
             return Err(Error::Wiki(st.setup_error.clone().unwrap_or_else(|| "The wiki folder could not be resolved.".into())));
         };
+        let (space, dir) = open_space(st, ctx, root, args, needed_level(name, args))?;
+        used_space = Some(space.to_string());
+        let dir = &dir;
         match name {
             // Read results never carry a remote image an app would fetch on its own (M2).
-            "context_start" => wiki::start_context(dir, &s(args, "app"), &s(args, "topic")).map(|t| defang_remote_images(&t).into_owned()),
+            "context_start" => {
+                let mut text = wiki::start_context(dir, &s(args, "app"), &s(args, "topic"))?;
+                if let Principal::Token { .. } = ctx.principal {
+                    // No folder of this machine's for a token's holder, who may be elsewhere.
+                    text = text.replacen(&format!(" Wiki folder: {}.", wiki::disp(dir)), "", 1);
+                }
+                if let (Some(line), Some(i)) = (spaces_line(root, &ctx.principal, &space), text.find("\n\n---")) {
+                    text.insert_str(i, &format!("\n{line}"));
+                }
+                Ok(defang_remote_images(&text).into_owned())
+            }
             "context_search" => {
                 let query = s(args, "query");
                 let scope = opt_s(args, "scope").unwrap_or_else(|| "all".into());
@@ -370,6 +480,8 @@ pub fn call_tool(st: &State, ctx: &Ctx, called: &str, args: &Value) -> Value {
         ("app", clip(args.get("app").unwrap_or(&Value::Null), 40).map(Value::String).unwrap_or(Value::Null)),
         ("ask", std::env::var("XENOLITH_ASK").ok().filter(|s| !s.is_empty()).map(Value::String).unwrap_or(Value::Null)),
         ("tool", json!(called)),
+        ("space", used_space.map(Value::String).unwrap_or(Value::Null)),
+        ("who", if ctx.principal == Principal::Local { Value::Null } else { json!(ctx.principal.name()) }),
         ("args", summarize_args(args).unwrap_or(Value::Null)),
         ("ms", json!(now_ms() - t0)),
         ("result", json!(result)),
@@ -419,7 +531,7 @@ pub fn handle(st: &State, ctx: &Ctx, msg: &Value, client_info: &Mutex<Option<Str
                 "protocolVersion": version,
                 "capabilities": { "tools": { "listChanged": true } },
                 "serverInfo": { "name": "xenolith", "title": "Xenolith", "version": xenolith_core::VERSION },
-                "instructions": instructions(st),
+                "instructions": instructions_for(st, &ctx.principal),
             })
         }
         "ping" => json!({}),

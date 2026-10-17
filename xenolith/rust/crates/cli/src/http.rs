@@ -4,6 +4,7 @@
 
 use crate::httpd::{self, Request, Response};
 use crate::mcp::{self, Ctx, State, log, rpc_error};
+use xenolith_core::access::Principal;
 use crate::uiapi;
 use xenolith_core::inbox;
 use xenolith_core::lock::lock_info;
@@ -417,7 +418,7 @@ fn handle(app: &App, req: &Request, entry: &mut Entry) -> Reply {
     let st = app.state();
     let client = sid.as_deref().and_then(|s| app.sessions.get(s)).unwrap_or_default();
     let on_error = |m: &str| app.counters.error(m);
-    let ctx = Ctx { transport: "http", rid: Some(entry.rid.clone()), client, reqlog: &app.reqlog, on_error: Some(&on_error) };
+    let ctx = Ctx::new("http", Some(entry.rid.clone()), client, &app.reqlog, Some(&on_error), Principal::Local);
     let ci = Mutex::new(None);
     let responses: Vec<Value> = messages.iter().filter_map(|m| mcp::handle(&st, &ctx, m, &ci)).collect();
     let out = if responses.len() == 1 { responses[0].clone() } else { Value::Array(responses) };

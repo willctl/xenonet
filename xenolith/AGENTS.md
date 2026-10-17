@@ -8,7 +8,8 @@ applies too: its commit conventions, and its rules for working beside other agen
 
 ## Where things are
 
-- `rust/`: the programs that ship. `crates/core` (xenolith-core: wiki, curator, held changes, search),
+- `rust/`: the programs that ship. `crates/core` (xenolith-core: wiki, curator, held changes, search,
+  spaces and access),
   `crates/cli` (`xenolith`: MCP server, HTTP service, window API, installer), `crates/tray`
   (`xenolith-tray`).
 - `ui/`: the window (React), built by `npm run build` into `dist/runtime/ui`.
@@ -44,6 +45,7 @@ applies too: its commit conventions, and its rules for working beside other agen
 | A change to `protocol/PROTOCOL.md` records the old version's hash | `wiki::tests::an_edited_protocol_keeps_the_old_hash_for_upgrades` |
 | Regexes match ASCII digits (`[0-9]`, never `\d`) | `wiki::tests::no_regex_in_the_crates_uses_unicode_digit_classes` |
 | Tools are defined once; the `source` enum is `inbox::SOURCES` | `mcp::tool_tests::one_tool_list_with_the_direct_texts_and_the_core_sources` |
+| Who may use which space lives in the config folder (access.json), never in the wiki; deny by default | `access::policy_file`, `access::tests` |
 | Files in the wiki folder are untrusted input (held changes, journals, settings) | `held::parse_file`, `curator::journal_problem`, `settings::approvals_and_problem`, and their tests |
 | The approval mode is read once per batch, under the commit's lock | `Journal.auto`, `held::apply_auto_locked`; the auto-mode tests in `test/curator.mjs` |
 | The installer leaves an app's config alone while that app runs | Claude desktop: `install::desktop_running` and its sandbox test. Codex and Claude Code: judgment |

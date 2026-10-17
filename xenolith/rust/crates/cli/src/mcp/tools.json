@@ -14,6 +14,10 @@
     "topic": {
      "description": "A few words about what the user just asked, used to find related pages.",
      "type": "string"
+    },
+    "space": {
+     "description": "Which space to start in: machine:local (this machine's, the default), project:<name>, identity:<name> or actor:<slug>. The result lists the other spaces you can use.",
+     "type": "string"
     }
    },
    "required": [
@@ -78,6 +82,10 @@
      "type": "integer",
      "minimum": 1,
      "maximum": 50
+    },
+    "space": {
+     "description": "Which space to search: machine:local (the default), project:<name>, identity:<name> or actor:<slug>. context_start lists the spaces you can use.",
+     "type": "string"
     }
    },
    "required": [
@@ -108,6 +116,10 @@
     },
     "section": {
      "description": "Optional: one section of a page or log day, by the anchor search results give (e.g. \"where-things-live\"); also accepted as \"slug#section\" in target.",
+     "type": "string"
+    },
+    "space": {
+     "description": "Which space to read from: machine:local (the default), project:<name>, identity:<name> or actor:<slug>.",
      "type": "string"
     }
    },
@@ -171,6 +183,10 @@
     },
     "idempotency_key": {
      "description": "Optional. Any string unique to this note; sending the same key again never creates a duplicate.",
+     "type": "string"
+    },
+    "space": {
+     "description": "Which space the note belongs to: machine:local (the default), project:<name> for one project's context, identity:<name>, or actor:<slug>.",
      "type": "string"
     }
    },
@@ -257,6 +273,10 @@
     },
     "idempotency_key": {
      "description": "Optional. Any string unique to this note; sending the same key again never creates a duplicate.",
+     "type": "string"
+    },
+    "space": {
+     "description": "Which space the page is in: machine:local (the default), project:<name>, identity:<name> or actor:<slug>.",
      "type": "string"
     }
    },

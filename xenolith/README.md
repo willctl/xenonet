@@ -141,6 +141,57 @@ the wiki without someone clicking it. `writeMode: "direct"` in `config.json`
 restores the v1.1 behavior: immediate deterministic page and log writes, and no
 curator.
 
+## Spaces and access
+
+A space is one wiki. The wiki folder is this machine's space, `machine:local`.
+Every other space is a wiki of the same layout in `spaces/<kind>/<name>/` inside
+it:
+
+| Space | Holds |
+| --- | --- |
+| `project:<name>` | one project's context |
+| `identity:<name>` | what belongs to one identity: an account, a persona |
+| `actor:<slug>` | an actor's own notes, such as an always-on agent's |
+| `machine:<name>` | one machine's context; `machine:local` is this one |
+
+Every tool takes `space`. Without it, a call works in `machine:local`, or, for
+a token's holder, in the first space it may use. `context_start` names the
+space and lists the others the caller can use. A note logged to a space that
+doesn't exist yet starts it; a read never does. Each space has its own inbox,
+pages, log, history and curator, and reads in `machine:local` never reach into
+`spaces/`.
+
+Access comes in four levels, each including the ones before it:
+
+| Level | Lets a caller |
+| --- | --- |
+| read | `context_start`, `context_search`, `context_read` |
+| append | `context_log`, and `context_upsert_page` with `mode: "append"` |
+| write | `context_upsert_page` with `mode: "replace"` |
+| admin | start a space |
+
+You and the sessions on this machine have admin in every space, as in XenoNet.
+Anyone else gets nothing until you grant it:
+
+```bash
+xenolith grant actor:hermes ctx:append:by:hermes --days 30
+xenolith grant client:phone ctx:read:identity:adal
+xenolith revoke actor:hermes
+xenolith access
+xenolith spaces add project:atlas --identity adal
+```
+
+A scope is `ctx:<level>` or `ctx:<level>:<selector>`. Selectors are XenoNet's:
+`key:value` terms that must all hold, joined with `+` inside a scope. `all`
+covers every space, and a value may end in `*`. The keys are `project`,
+`identity` (an identity's own space and the projects that belong to it),
+`machine` and `by` (an actor's own space, as `by:<slug>` names the actor in a
+XenoNet grant). A subject is `actor:<slug>`, `client:<id>` or `machine:<name>`.
+A grant expires (after 30 days unless you say otherwise), `revoke` takes effect
+at once, and a grant that names one space exactly starts it. The policy is
+`access.json` in Xenolith's config folder, never in the wiki. `"local": "none"`
+there takes access away from this machine's sessions too.
+
 ## The curator
 
 `xenolith curator` runs as you, never as the service. It runs the Codex CLI

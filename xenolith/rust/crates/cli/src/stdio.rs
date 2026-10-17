@@ -3,6 +3,7 @@
 //! server's async handlers do, so a slow call never holds up a quick one. Ends when stdin closes.
 
 use crate::mcp::{self, Ctx, log};
+use xenolith_core::access::Principal;
 use xenolith_core::reqlog::{RequestLog, clip_str};
 use xenolith_core::wiki;
 use serde_json::{Value, json};
@@ -30,7 +31,7 @@ pub fn run(read_only: bool) -> ! {
                 loop {
                     let Ok(m) = rx.lock().unwrap().recv() else { break };
                     let client = client_info.lock().unwrap().clone().unwrap_or_default();
-                    let ctx = Ctx { transport: "stdio", rid: None, client, reqlog: &reqlog, on_error: None };
+                    let ctx = Ctx::new("stdio", None, client, &reqlog, None, Principal::Local);
                     let resp = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| mcp::handle(&st, &ctx, &m, &client_info)))
                         .unwrap_or_else(|_| m.get("id").cloned().map(|id| mcp::rpc_error(id, -32603, "Internal error")));
                     if let Some(resp) = resp {
@@ -66,7 +67,7 @@ pub fn run(read_only: bool) -> ! {
                 }
                 // initialize sets the client name the later calls are logged with: answer it in order.
                 Some("initialize") => {
-                    let ctx = Ctx { transport: "stdio", rid: None, client: String::new(), reqlog: &reqlog, on_error: None };
+                    let ctx = Ctx::new("stdio", None, String::new(), &reqlog, None, Principal::Local);
                     if let Some(resp) = mcp::handle(&st, &ctx, &m, &client_info) {
                         let mut out = stdout.lock().unwrap();
                         let _ = writeln!(out, "{resp}");

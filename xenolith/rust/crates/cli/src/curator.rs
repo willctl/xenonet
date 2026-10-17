@@ -8,6 +8,11 @@
 //!   xenolith curator --file-raw-dead    file failed notes into the log as they are, without the model
 //!   xenolith curator --login-status     print {"signedIn":...} for the curator's Codex login
 //!   xenolith curator --asks-only        answer the window's questions without filing notes
+//!   --space <id>                         with --retry-dead, --file-raw-dead or --lint: that space's
+//!                                        notes and pages instead of this machine's (machine:local)
+//!
+//! Each space has its own curator (xenolith_core::spaces): this process runs one for this machine's
+//! space and one for every other space, and starts one for a space created while it runs.
 
 use xenolith_core::askworker::{AskCfg, AskWorker};
 use xenolith_core::codex;
@@ -19,8 +24,36 @@ use xenolith_core::waker::Waker;
 use xenolith_core::wiki;
 use serde_json::{Value, json};
 use std::io::Read;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
+use xenolith_core::spaces::{self, SpaceId};
+
+/// The spaces this process curates besides machine:local, each with its curator.
+type Others = Arc<Mutex<Vec<(SpaceId, Arc<Curator>, std::thread::JoinHandle<()>)>>>;
+
+/// Starts a curator for every space that has none yet; returns how many it started.
+fn start_space_curators(root: &Path, cfg: &CuratorCfg, reqlog: &Arc<RequestLog>, others: &Others) -> usize {
+    let mut have = others.lock().unwrap();
+    let mut started = 0;
+    for id in spaces::list(root).into_iter().filter(|s| !s.is_local()) {
+        if have.iter().any(|(s, _, _)| *s == id) {
+            continue;
+        }
+        let dir = spaces::space_dir(root, &id);
+        let c = Arc::new(Curator::new(&dir, cfg.clone(), reqlog.clone(), false, Waker::new()));
+        let (runner, label) = (c.clone(), id.to_string());
+        let t = std::thread::spawn(move || {
+            if let Err(e) = runner.run() {
+                log(&format!("the curator of {label} stopped: {e:?}"));
+            }
+        });
+        log(&format!("curating {id} too ({})", wiki::disp(&dir)));
+        have.push((id, c, t));
+        started += 1;
+    }
+    started
+}
 
 fn fatal(msg: &str) -> ! {
     log(&format!("fatal: {msg}"));
@@ -34,8 +67,19 @@ pub fn run(args: &[String]) -> ! {
     xenolith_core::embed::configure(&config);
     let paths = AppPaths::current();
     let cfg = CuratorCfg::from_config(&config, &paths);
-    let (wiki_dir, _) = wiki::resolve_wiki_dir(&env).unwrap_or_else(|e| fatal(&e.to_string()));
-    wiki::ensure_wiki(&wiki_dir).unwrap_or_else(|e| fatal(&e.to_string()));
+    let (root, _) = wiki::resolve_wiki_dir(&env).unwrap_or_else(|e| fatal(&e.to_string()));
+    wiki::ensure_wiki(&root).unwrap_or_else(|e| fatal(&e.to_string()));
+    // The maintenance commands work on one space: this machine's unless --space names another.
+    let wiki_dir: PathBuf = match args.iter().position(|a| a == "--space").and_then(|i| args.get(i + 1)) {
+        Some(s) => {
+            let id = SpaceId::parse(s).unwrap_or_else(|e| fatal(&e.to_string()));
+            if !spaces::exists(&root, &id) {
+                fatal(&format!("no space {id}"));
+            }
+            spaces::space_dir(&root, &id)
+        }
+        None => root.clone(),
+    };
     let days = config["logs"]["retentionDays"].as_i64().filter(|d| *d > 0).unwrap_or(30);
     let reqlog = Arc::new(RequestLog::new(&paths.log_dir, "curator", days));
 
@@ -84,16 +128,28 @@ pub fn run(args: &[String]) -> ! {
     }
     let once = has("--once");
     let asks_only = has("--asks-only");
+    if once && !asks_only {
+        // File what is due in the other spaces first; this machine's space follows below.
+        for id in spaces::list(&root).into_iter().filter(|s| !s.is_local()) {
+            let c = Arc::new(Curator::new(&spaces::space_dir(&root, &id), cfg.clone(), reqlog.clone(), true, Waker::new()));
+            if let Err(e) = c.run() {
+                fatal(&format!("{id}: {e:?}"));
+            }
+        }
+    }
+    let others: Others = Arc::new(Mutex::new(vec![]));
     let curator = (!asks_only).then(|| Arc::new(Curator::new(&wiki_dir, cfg.clone(), reqlog.clone(), once, Waker::new())));
     // The same process answers the window's questions (Ask): it is the one that runs as the user.
     let asker = (!once).then(|| {
         let server = std::env::current_exe().unwrap_or_else(|_| "xenolith".into());
         Arc::new(AskWorker::new(&wiki_dir, AskCfg::from_config(&config, &cfg), reqlog.clone(), server, paths.clone(), Waker::new()))
     });
+    let stopping = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let stop = {
-        let (curator, asker) = (curator.clone(), asker.clone());
+        let (curator, asker, others, stopping) = (curator.clone(), asker.clone(), others.clone(), stopping.clone());
         move || {
-            if let Some(c) = &curator {
+            stopping.store(true, Ordering::SeqCst);
+            for c in curator.iter().chain(others.lock().unwrap().iter().map(|(_, c, _)| c)) {
                 c.abort.store(true, Ordering::SeqCst);
                 c.waker.stop();
             }
@@ -131,6 +187,21 @@ pub fn run(args: &[String]) -> ! {
         ("asksOnly", if curator.is_none() { json!(true) } else { Value::Null }),
     ]);
     let ask_thread = asker.clone().map(|a| std::thread::spawn(move || a.run()));
+    // The other spaces' curators, and a look for new spaces every few seconds.
+    let watcher = (curator.is_some() && !once).then(|| {
+        let (root, cfg, reqlog, others, stopping) = (root.clone(), cfg.clone(), reqlog.clone(), others.clone(), stopping.clone());
+        std::thread::spawn(move || {
+            while !stopping.load(Ordering::SeqCst) {
+                start_space_curators(&root, &cfg, &reqlog, &others);
+                for _ in 0..50 {
+                    if stopping.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+        })
+    });
     let mut failed = None;
     if let Some(Err(e)) = curator.as_ref().map(|c| c.run()) {
         failed = Some(format!("{e:?}"));
@@ -138,6 +209,7 @@ pub fn run(args: &[String]) -> ! {
             a.stop();
         }
     }
+    stop_others(&stopping, &others, watcher);
     if let Some(t) = ask_thread {
         let _ = t.join();
     }
@@ -147,6 +219,22 @@ pub fn run(args: &[String]) -> ! {
     }
     log("stopped");
     std::process::exit(0)
+}
+
+/// Stops the other spaces' curators (when this machine's stopped first, on an error) and waits for them.
+fn stop_others(stopping: &std::sync::atomic::AtomicBool, others: &Others, watcher: Option<std::thread::JoinHandle<()>>) {
+    stopping.store(true, Ordering::SeqCst);
+    if let Some(w) = watcher {
+        let _ = w.join();
+    }
+    let all: Vec<_> = others.lock().unwrap().drain(..).collect();
+    for (_, c, _) in &all {
+        c.abort.store(true, Ordering::SeqCst);
+        c.waker.stop();
+    }
+    for (_, _, t) in all {
+        let _ = t.join();
+    }
 }
 
 /// SIGINT and SIGTERM stop gracefully (heartbeat "stopped", locks released), as the Node curator does.
