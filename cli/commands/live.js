@@ -8,7 +8,8 @@ export const help = `Live delivery puts a message into a session as it's sent, i
 the session next starts a turn: through a Claude Code channel, an OpenCode
 session's own server, or, with your consent, typed into its tmux pane.
 
-  xenonet live                         what's paused, granted and allowed, and the last deliveries
+  xenonet live                         what's paused, granted and allowed, plans used, and
+                                       the last deliveries
   xenonet live pause | resume          stop every message (and wake) at once, or start again
   xenonet live allow <session> [--hours n] [--remote]
                                        let XenoNet wake or type into one session (8 hours by
@@ -21,8 +22,10 @@ session's own server, or, with your consent, typed into its tmux pane.
   xenonet live audit                   the audit log's last entries
   --json                               as JSON
 
-An actor sees and reaches no session until you grant it a scope. Set up
-Claude Code sessions to listen live with xenonet doctor --live.`;
+An actor sees and reaches no session until you grant it a scope. A wake
+spends the session's plan: each sender and session has an hourly budget,
+and a provider at 90% of its plan takes none. Set up Claude Code sessions to
+take messages live with xenonet doctor --live.`;
 
 const actorId = (a) => (String(a).startsWith("actor:") ? a : `actor:${a}`);
 
@@ -35,6 +38,8 @@ export async function run(args, flags) {
     const d = await get(s, "/api/delivery");
     if (flags.json) return json(d), 0;
     print(`${c.bold("Live delivery")} ${d.paused ? c.red("paused") : c.green("on")}`);
+    const plans = Object.entries(d.usage ?? {}).filter(([, u]) => u != null);
+    if (plans.length) print(`Plans used: ${plans.map(([app, u]) => `${app} ${Math.round(u * 100)}%${u >= 0.9 ? c.red(" (no wakes)") : ""}`).join(", ")}${c.dim(" · a provider at 90% takes no wakes")}`);
     print(c.bold("\nActors' scopes"));
     print(d.grants.length ? table(d.grants.map((g) => [g.actor, g.selector, g.expired ? c.red("expired") : `until ${new Date(g.expiresAt).toLocaleString()}`]), { indent: 2 }) : c.dim("  none: actors see no sessions"));
     print(c.bold("\nSessions XenoNet may wake or type into"));

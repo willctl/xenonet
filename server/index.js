@@ -28,6 +28,7 @@ import { DeliveryRouter } from "../core/delivery/router.js";
 import { Channels } from "../core/delivery/channel.js";
 import { createOpenCode } from "../core/delivery/opencode.js";
 import { createTmux } from "../core/delivery/tmux.js";
+import { planUsage } from "../core/delivery/usage.js";
 import { actorRoutes, createActorCaller } from "./routes/actors.js";
 import { createActors, mapOf, CLOCK_MS } from "../core/actors/index.js";
 import { createRegistration } from "../core/actors/registration.js";
@@ -268,6 +269,8 @@ const deliveryRouter = new DeliveryRouter({
   channels,
   opencode: createOpenCode(),
   tmux: createTmux(),
+  // A provider at 90% of its plan takes no wakes: from the live readings.
+  usage: (app) => planUsage({ ...state.live?.limits, claude: state.live?.claudeLimits?.() ?? null }, app),
   notify: ({ agent, title, from }) => {
     if (config.demo) return;
     notifyDesktop({ type: "notify", key: `delivery:${agent}`, id: agent, title: "A message wasn't picked up", subtitle: title, body: `${from}'s message to ${title} is still waiting: the session hasn't started a turn in a minute.` });
