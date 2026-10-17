@@ -66,11 +66,13 @@ crates/
                            units.js for the command, private-file.js, client.js
   xenonet-blocks           core/blocks/: lifecycle, scanner, gatherer, tailer, normalizer, JSON and SQLite stores
   xenonet-schema           core/schema/, vendor.js, drift.js: the schemas, lenient reading, drift records
-  xenonet-sources          lines.js, claude.js, codex.js, git.js, wiki.js, live.js, numbat.js, demo.js, native/
+  xenonet-sources          lines.js, claude.js, codex.js, git.js, wiki.js, live.js, numbat.js, demo.js, native/,
+                           claude-usage.js, openrouter-usage.js, reported-runs.js, xenolith.js, refusals/
   xenonet-state            graph.js, state.js, search.js, digest.js, stats.js, identities.js, projects.js,
-                           workspace.js, classify.js, store.js, statefile.js, migrate.js
+                           workspace.js, classify.js, store.js, statefile.js, migrate.js, redact.js, frames.js,
+                           rename.js, export-labels.js, needs-you.js
   xenonet-engine           engine/, delivery/, procs.js
-  xenonet-actors           actors/, assistant/, secret-store.js, integrations/, refusals/
+  xenonet-actors           actors/, assistant/, secret-store.js, integrations/
   xenonet-hosts            hosts/
   xenonet-doctor           doctor/, diagnostics.js
   xenonet-server           server/: the API, static files, upstream, the actor gateway and its tunnels,
@@ -83,7 +85,8 @@ xenolith/rust/crates/      Xenolith's crates (xenolith-core and its command), wh
 ```
 
 Each crate depends only on crates above it in the list, as the layers of
-`core/` do today. `server`, `mcp` and `cli` are thin layers over the rest
+`core/` do today. refusals/ sits with the sources, not the actors, since
+the live tailer reads every line through refusals/detect.js. `server`, `mcp` and `cli` are thin layers over the rest
 and don't import each other, except that `xenonet-cli` starts the other
 two. Only `xenonet-node` knows about Node.
 
