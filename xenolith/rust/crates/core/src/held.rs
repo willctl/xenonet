@@ -218,7 +218,7 @@ fn check_batch(batch: &str) -> Result<(), Error> {
     if is_note_id(batch) { Ok(()) } else { Err(Error::NotFound(format!("no batch \"{}\"", take_chars(batch, 40)))) }
 }
 
-fn log_line(wiki_dir: &Path, app: &str, text: &str) -> wiki::Result<()> {
+pub(crate) fn log_line(wiki_dir: &Path, app: &str, text: &str) -> wiki::Result<()> {
     let now = now();
     wiki::append_to_log(wiki_dir, &now, &format!("- {} · {app} · {text}", local_hm(&now)), true).map(|_| ())
 }
@@ -276,7 +276,8 @@ fn check_fits(wiki_dir: &Path, e: &Entry) -> Result<Option<String>, Error> {
 /// page keeps waiting, and the log says so once. Returns the slugs it wrote.
 pub fn apply_auto_locked(wiki_dir: &Path, batch: &str) -> wiki::Result<Vec<String>> {
     let Some(f) = load(wiki_dir, batch) else { return Ok(vec![]) };
-    let pending: Vec<usize> = f.changes.iter().enumerate().filter(|(_, e)| e.status == "pending").map(|(i, _)| i).collect();
+    // A proposal from another machine (sync) always waits for the person, whatever approvals say.
+    let pending: Vec<usize> = f.changes.iter().enumerate().filter(|(_, e)| e.status == "pending" && e.held.kind != "sync").map(|(i, _)| i).collect();
     let cleanup = f.changes.iter().any(|e| e.held.kind == "lint");
     let mut misfits: Vec<(usize, String)> = vec![];
     if cleanup {

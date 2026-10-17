@@ -446,7 +446,19 @@ pub fn call_tool(st: &State, ctx: &Ctx, called: &str, args: &Value) -> Value {
                         body: s(args, "content"),
                         tags: args.get("tags").cloned().unwrap_or(Value::Null),
                         pages: slug.clone().filter(|s| !s.is_empty()).map(|s| json!([s])).unwrap_or(json!([])),
-                        page: Some(PageInput { slug, title: opt_s(args, "title"), kind: opt_s(args, "type"), summary: opt_s(args, "summary"), mode: opt_s(args, "mode") }),
+                        page: Some(PageInput {
+                            // A replace remembers the page it was written against, so a curator on
+                            // another machine can tell a stale one (sync).
+                            base: (opt_s(args, "mode").as_deref() == Some("replace")).then(|| {
+                                let slug = slug.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| wiki::slugify(&s(args, "title")));
+                                xenolith_core::sync::page_base(dir, &slug)
+                            }),
+                            slug,
+                            title: opt_s(args, "title"),
+                            kind: opt_s(args, "type"),
+                            summary: opt_s(args, "summary"),
+                            mode: opt_s(args, "mode"),
+                        }),
                         idempotency_key: opt_s(args, "idempotency_key"),
                     };
                     return Ok(queued(&inbox::submit_note(dir, &note, ctx.transport, &ctx.client)?));

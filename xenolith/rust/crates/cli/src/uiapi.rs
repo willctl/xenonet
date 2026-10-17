@@ -104,6 +104,17 @@ fn page_summary(p: &Page) -> Value {
 }
 
 /// The cleanup schedule for the window, with config.json's per-computer off switch.
+/// The folder a held-changes call works in: this machine's space, unless `space` names another
+/// (a proposal from another machine waits in the space it is for).
+fn held_dir(root: &Path, space: Option<&str>) -> Result<std::path::PathBuf, Reply> {
+    use xenolith_core::spaces::{self, SpaceId};
+    let Some(s) = space.filter(|s| !s.trim().is_empty()) else { return Ok(root.to_path_buf()) };
+    match SpaceId::parse(s) {
+        Ok(id) if spaces::exists(root, &id) => Ok(spaces::space_dir(root, &id)),
+        _ => Err(json_reply(404, &json!({ "error": format!("No space \"{}\" here.", s.trim()) }))),
+    }
+}
+
 fn cleanup_status(st: &State, wiki_dir: &Path) -> Value {
     xenolith_core::lint::schedule_status(wiki_dir, xenolith_core::curator::cleanups_off(&st.config))
 }
@@ -338,6 +349,11 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
         let body: Value = read_body(req).ok().and_then(|b| serde_json::from_str(&b).ok()).unwrap_or(Value::Null);
         let batch = body["batch"].as_str().unwrap_or("");
         let action = body["action"].as_str().unwrap_or("");
+        let dir = match held_dir(wiki_dir, body["space"].as_str()) {
+            Ok(d) => d,
+            Err(r) => return r,
+        };
+        let wiki_dir = &dir;
         let r = if path == "/api/held" {
             let Some(index) = body["index"].as_u64() else {
                 return json_reply(400, &json!({ "error": "Send JSON: {\"batch\": \"<id>\", \"index\": n, \"action\": \"approve\"|\"reject\"|\"refile\"|\"undo\"}" }));
@@ -458,7 +474,13 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
                 None => json_reply(404, &json!({ "error": format!("No log for {date}") })),
             }
         }
-        "/api/held" => json_reply(
+        "/api/held" => {
+            let dir = match held_dir(wiki_dir, param(query, "space").as_deref()) {
+                Ok(d) => d,
+                Err(r) => return r,
+            };
+            let wiki_dir = &dir;
+            json_reply(
             200,
             &json!({
                 "changes": held::list(wiki_dir),
@@ -467,7 +489,8 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
                 "approvalsProblem": xenolith_core::settings::approvals_and_problem(wiki_dir).1,
                 "auto": held::recent_auto(wiki_dir, 7),
             }),
-        ),
+        )
+        }
         "/api/settings" => {
             let (approvals, problem) = xenolith_core::settings::approvals_and_problem(wiki_dir);
             json_reply(200, &json!({ "approvals": approvals.as_str(), "problem": problem, "cleanup": cleanup_status(st, wiki_dir) }))

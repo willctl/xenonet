@@ -27,6 +27,7 @@ pub mod search;
 pub mod secrets;
 pub mod settings;
 pub mod spaces;
+pub mod sync;
 pub mod sys;
 pub mod text;
 pub mod waker;

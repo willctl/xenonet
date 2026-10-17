@@ -260,6 +260,52 @@ tampering but can't prevent it: whoever can write the file can rewrite all of
 it. Keep the last hash `verify` prints somewhere else to pin it. The curator's
 own record of each filed note stays in `.curator/audit/` inside each space.
 
+### Sync between machines
+
+Each space has one curator: the machine whose Xenolith files its notes into
+pages. A space you start is curated where you start it. Another machine can
+**follow** it: it keeps a copy, where its sessions read pages and leave notes
+as usual, and its own curator leaves that space alone. Once a minute (or on
+`xenolith sync`) it pushes the notes waiting there to the curator, as entries,
+and pulls the curator's pages back.
+
+On the curator, grant the other machine and make it a token:
+
+```bash
+xenolith grant machine:laptop ctx:write:project:atlas
+xenolith token create machine:laptop
+```
+
+On the other machine, name it, add the curator as a peer (the token comes on
+stdin, so it never shows in a process list), and follow the space:
+
+```bash
+xenolith sync name laptop
+xenolith sync peer add studio https://studio.example/xenolith < studio.token
+xenolith sync follow project:atlas studio
+xenolith sync
+```
+
+A peer's URL is the base of its Xenolith service: `https://` anywhere, or
+`http://` only to this machine, since a token never crosses a network in the
+clear. Put the service behind something that forwards an address to it, such
+as XenoNet's gateway or a tunnel of your own. The token is kept in
+`peers/<name>.token` in the config folder, readable by you alone.
+
+The curator takes entries at `/sync/v1/spaces/<kind>/<name>/entries`: a note
+needs append, a replaced page needs write. Each entry is taken once, however
+often it is sent. A page replaced on the other machine carries the version it
+was written against. When the curator's page has changed since, the push gets
+**409** and the write becomes a **proposal**: a change that waits for your OK
+even when approvals are automatic, listed by `xenolith held --space <space>`
+and approved, rejected or sent back there (or through the window's API with
+`space`). Approving it applies it only if the page hasn't changed again.
+Nothing written on either machine is lost: each pushed note moves to
+`.curator/sent/` with what the curator said, and each pull keeps the page it
+replaces in `.history/`. A machine that only follows a space sends anyone who
+pushes to it on to the curator (421). Both machines record each sync in their
+audit chains.
+
 ## The curator
 
 `xenolith curator` runs as you, never as the service. It runs the Codex CLI

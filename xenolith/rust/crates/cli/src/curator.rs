@@ -12,7 +12,9 @@
 //!                                        notes and pages instead of this machine's (machine:local)
 //!
 //! Each space has its own curator (xenolith_core::spaces): this process runs one for this machine's
-//! space and one for every other space, and starts one for a space created while it runs.
+//! space and one for every other space, and starts one for a space created while it runs. A space
+//! this machine only follows has its curator on another machine (xenolith_core::sync): this process
+//! syncs it once a minute instead.
 
 use xenolith_core::askworker::{AskCfg, AskWorker};
 use xenolith_core::codex;
@@ -36,7 +38,8 @@ type Others = Arc<Mutex<Vec<(SpaceId, Arc<Curator>, std::thread::JoinHandle<()>)
 fn start_space_curators(root: &Path, cfg: &CuratorCfg, reqlog: &Arc<RequestLog>, others: &Others) -> usize {
     let mut have = others.lock().unwrap();
     let mut started = 0;
-    for id in spaces::list(root).into_iter().filter(|s| !s.is_local()) {
+    let followed = xenolith_core::sync::Config::load(&AppPaths::current());
+    for id in spaces::list(root).into_iter().filter(|s| !s.is_local() && followed.curator_of(s).is_none()) {
         if have.iter().any(|(s, _, _)| *s == id) {
             continue;
         }
@@ -130,7 +133,8 @@ pub fn run(args: &[String]) -> ! {
     let asks_only = has("--asks-only");
     if once && !asks_only {
         // File what is due in the other spaces first; this machine's space follows below.
-        for id in spaces::list(&root).into_iter().filter(|s| !s.is_local()) {
+        let followed = xenolith_core::sync::Config::load(&paths);
+        for id in spaces::list(&root).into_iter().filter(|s| !s.is_local() && followed.curator_of(s).is_none()) {
             let c = Arc::new(Curator::new(&spaces::space_dir(&root, &id), cfg.clone(), reqlog.clone(), true, Waker::new()));
             if let Err(e) = c.run() {
                 fatal(&format!("{id}: {e:?}"));
@@ -191,8 +195,18 @@ pub fn run(args: &[String]) -> ! {
     let watcher = (curator.is_some() && !once).then(|| {
         let (root, cfg, reqlog, others, stopping) = (root.clone(), cfg.clone(), reqlog.clone(), others.clone(), stopping.clone());
         std::thread::spawn(move || {
+            let mut synced_at: Option<std::time::Instant> = None;
             while !stopping.load(Ordering::SeqCst) {
                 start_space_curators(&root, &cfg, &reqlog, &others);
+                // The spaces this machine follows: push their notes and pull their pages each minute.
+                if synced_at.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(60)) {
+                    synced_at = Some(std::time::Instant::now());
+                    for r in xenolith_core::sync::sync_all(&AppPaths::current(), &root) {
+                        if let Some(e) = r["error"].as_str() {
+                            log(&format!("sync of {}: {e}", r["space"].as_str().unwrap_or("?")));
+                        }
+                    }
+                }
                 for _ in 0..50 {
                     if stopping.load(Ordering::SeqCst) {
                         break;

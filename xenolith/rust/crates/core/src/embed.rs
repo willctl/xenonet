@@ -140,7 +140,7 @@ fn platform_secret(target: &str) -> Option<String> {
 /// and trust store, so a certificate the machine trusts (a company proxy's) is trusted here too, and it
 /// keeps a TLS stack out of xenolith itself, which every hook run would otherwise load (measured
 /// 2026-10-06: crypt32 and secur32 imports took a 15 ms start to 60 ms).
-fn curl() -> PathBuf {
+pub(crate) fn curl() -> PathBuf {
     #[cfg(windows)]
     {
         PathBuf::from(std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into())).join("System32").join("curl.exe")

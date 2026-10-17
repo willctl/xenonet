@@ -297,6 +297,78 @@ fn sdk_error(status: u16, code: i64, message: &str) -> Reply {
     Reply::json(status, &rpc_error(Value::Null, code, message))
 }
 
+// ---------------------------------------------------------------- sync (xenolith_core::sync)
+
+/// /sync/v1/spaces/<kind>/<name>/pages[/<slug>] (GET, read) and /entries (POST, append or write
+/// per entry). A space the caller may not read is "not found", like one that doesn't exist; a
+/// space this machine only follows sends the caller to its curator (421).
+fn sync_route(app: &App, req: &Request, method: &str, path: &str, who: Principal, entry: &mut Entry) -> Reply {
+    use xenolith_core::access::Level;
+    use xenolith_core::spaces::{self, SpaceId};
+    use xenolith_core::sync;
+    let rest = path.strip_prefix(&format!("{}/spaces/", sync::API)).unwrap_or("");
+    let parts: Vec<&str> = rest.split('/').collect();
+    let not_found = || Reply::json(404, &json!({ "error": "not_found", "error_description": "No such space or page here." }));
+    let (space, tail) = match parts.as_slice() {
+        [kind, name, tail @ ..] if !tail.is_empty() => match SpaceId::parse(&format!("{kind}:{name}")) {
+            Ok(id) if id.kind == *kind && id.name == *name => (id, tail.to_vec()),
+            _ => return not_found(),
+        },
+        _ => return not_found(),
+    };
+    let st = app.state();
+    let Some(root) = st.wiki_dir.clone().filter(|_| st.setup_error.is_none()) else {
+        return Reply::json(503, &json!({ "error": st.setup_error.clone().unwrap_or_default() }));
+    };
+    let paths = AppPaths::current();
+    let policy = access::load(&paths);
+    let now = now_ms();
+    let Some(who) = policy.current(&who, now) else {
+        return challenge(&format!("http://{}", req.header("host").unwrap_or_default()), Some("invalid_token"), None, "The token has been revoked or has expired.");
+    };
+    if !policy.allows(&who, &space, Level::Read, now) || !spaces::exists(&root, &space) {
+        xenolith_core::audit::best_effort(&paths, "refused", &who.name(), vec![("space", json!(space.to_string())), ("need", json!("read")), ("why", json!("sync: not granted")), ("transport", json!("sync"))]);
+        return not_found();
+    }
+    entry.client = Some(who.name());
+    let dir = spaces::space_dir(&root, &space);
+    match (method, tail.as_slice()) {
+        ("GET", ["pages"]) => Reply::json(200, &sync::page_list(&dir)),
+        ("GET", ["pages", slug]) => match sync::page_get(&dir, slug) {
+            Some(v) => Reply::json(200, &v),
+            None => not_found(),
+        },
+        ("POST", ["entries"]) => {
+            if let Some(curator) = sync::Config::load(&paths).curator_of(&space) {
+                return Reply::json(421, &json!({ "error": "not_curator", "error_description": format!("This machine follows {space}; its curator is {curator}."), "curator": curator }));
+            }
+            let body: Value = match read_body(req).ok().and_then(|b| serde_json::from_str(&b).ok()) {
+                Some(v) => v,
+                None => return Reply::json(400, &json!({ "error": "invalid_request", "error_description": "Send {\"entries\": [...]} as JSON." })),
+            };
+            let entries = body["entries"].as_array().cloned().unwrap_or_default();
+            if entries.is_empty() || entries.len() > sync::MAX_ENTRIES {
+                return Reply::json(400, &json!({ "error": "invalid_request", "error_description": format!("Send 1 to {} entries.", sync::MAX_ENTRIES) }));
+            }
+            let can = |l: Level| policy.allows(&who, &space, l, now);
+            let (results, conflict) = sync::accept(&dir, &who, &entries, &can);
+            let count = |r: &str| results.iter().filter(|x| x["result"] == r).count();
+            xenolith_core::audit::best_effort(
+                &paths,
+                "sync",
+                &who.name(),
+                vec![("space", json!(space.to_string())), ("accepted", json!(count("accepted"))), ("duplicates", json!(count("duplicate"))), ("conflicts", json!(count("conflict"))), ("refused", json!(count("refused")))],
+            );
+            entry.result = Some(if conflict { "conflict".into() } else { "ok".into() });
+            // 409 when any page write came in against an older version: it is a proposal now.
+            Reply::json(if conflict { 409 } else { 200 }, &json!({ "results": results }))
+        }
+        (_, ["entries"]) => Reply::json(405, &json!({ "error": "Use POST" })).with("Allow", "POST"),
+        (_, ["pages", ..]) => Reply::json(405, &json!({ "error": "Use GET" })).with("Allow", "GET"),
+        _ => not_found(),
+    }
+}
+
 // ---------------------------------------------------------------- tokens (OAuth 2.1 resource server, as MCP's authorization spec has it)
 
 /// RFC 9728's metadata for the MCP endpoint: what it is and which scopes it knows.
@@ -398,12 +470,23 @@ fn handle(app: &App, req: &Request, entry: &mut Entry) -> Reply {
         }
         return Reply::json(200, &protected_resource(&base));
     }
-    // A token is for /mcp: the window's API, /status and /health belong to this machine and show
-    // its folders.
+    // A token is for /mcp and sync: the window's API, /status and /health belong to this machine
+    // and show its folders.
     let bearer = access::bearer_of(req.header("authorization").as_deref());
-    if bearer.is_some() && path != "/mcp" {
+    let is_sync = path.starts_with(&format!("{}/", xenolith_core::sync::API));
+    if bearer.is_some() && path != "/mcp" && !is_sync {
         entry.result = Some("forbidden-token".into());
-        return Reply::json(403, &json!({ "error": "Forbidden: tokens work at /mcp only" }));
+        return Reply::json(403, &json!({ "error": "Forbidden: tokens work at /mcp and /sync only" }));
+    }
+    if is_sync {
+        if app.closing.load(Ordering::SeqCst) {
+            return Reply::json(503, &json!({ "error": "xenolith is restarting; retry shortly." }));
+        }
+        let principal = match principal_of(&base, &bearer, entry) {
+            Ok(p) => p,
+            Err(r) => return r,
+        };
+        return sync_route(app, req, method, &path, principal, entry);
     }
     if path == "/health" || path == "/status" {
         if method != "GET" {

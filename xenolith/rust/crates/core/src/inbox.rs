@@ -42,6 +42,11 @@ pub fn curator_paths(wiki_dir: &Path) -> CuratorPaths {
 
 static ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{3}-[a-z0-9]{6}$").unwrap());
 
+/// A page base as sync compares them: wiki::hash_text's 16 hex digits, or "none" for no page.
+pub fn is_base(b: &str) -> bool {
+    b == "none" || (b.len() == 16 && b.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)))
+}
+
 pub fn is_note_id(id: &str) -> bool {
     ID_RE.is_match(id)
 }
@@ -101,6 +106,9 @@ pub struct PageInput {
     pub kind: Option<String>,
     pub summary: Option<String>,
     pub mode: Option<String>,
+    /// For a replace: the page's hash when the session wrote it ("none" for a page that didn't
+    /// exist). Sync checks it on the space's curator, where a stale one becomes a proposal.
+    pub base: Option<String>,
 }
 
 pub struct Submitted {
@@ -127,13 +135,17 @@ pub fn submit_note(wiki_dir: &Path, input: &NoteInput, transport: &str, client: 
     let page = (kind == "page").then(|| {
         let p = input.page.as_ref();
         let get = |f: fn(&PageInput) -> Option<String>| p.and_then(f).unwrap_or_default();
-        json!({
+        let mut page = json!({
             "slug": get(|p| p.slug.clone()).trim().to_lowercase(),
             "title": one_line(&p.and_then(|p| p.title.clone()).unwrap_or_else(|| title.clone())),
             "type": get(|p| p.kind.clone()).trim().to_lowercase(),
             "summary": one_line(&get(|p| p.summary.clone())),
             "mode": if get(|p| p.mode.clone()) == "replace" { "replace" } else { "append" },
-        })
+        });
+        if let Some(b) = p.and_then(|p| p.base.clone()).filter(|b| is_base(b)).filter(|_| page["mode"] == "replace") {
+            page["base"] = json!(b);
+        }
+        page
     });
     let key = input.idempotency_key.as_deref().map(|k| take_chars(&one_line(k), 200)).unwrap_or_default();
     let (slug, summary) = page.as_ref().map(|p| (p["slug"].as_str().unwrap_or("").to_string(), p["summary"].as_str().unwrap_or("").to_string())).unwrap_or_default();
@@ -229,6 +241,9 @@ pub fn submit_note(wiki_dir: &Path, input: &NoteInput, transport: &str, client: 
         for (k, f) in [("page_slug", "slug"), ("page_title", "title"), ("page_type", "type"), ("page_summary", "summary"), ("page_mode", "mode")] {
             meta.set(k, pg[f].as_str().unwrap_or("").to_string());
         }
+        if let Some(b) = pg["base"].as_str() {
+            meta.set("page_base", b.to_string());
+        }
     }
     let content = frontmatter::serialize(&meta, if body.is_empty() { &title } else { &body });
     let file = crate::wiki::confined_path(wiki_dir, &p.inbox.join(format!("{id}.md")))?;
@@ -285,10 +300,15 @@ fn note_from_text(id: &str, text: &str, mtime: i64) -> Note {
     static H: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^#\s+(.+)$").unwrap());
     let heading = H.captures(&body).map(|c| c[1].to_string()).unwrap_or_default();
     let page = (meta.str("kind") == "page").then(|| {
-        json!({
+        let mut p = json!({
             "slug": meta.str("page_slug"), "title": meta.str("page_title"), "type": meta.str("page_type"),
             "summary": meta.str("page_summary"), "mode": if meta.str("page_mode") == "replace" { "replace" } else { "append" },
-        })
+        });
+        let base = meta.str("page_base");
+        if is_base(&base) {
+            p["base"] = json!(base);
+        }
+        p
     });
     let title = [meta.str("title"), heading, id.to_string()].into_iter().find(|s| !s.is_empty()).unwrap_or_default();
     let app = meta.str("app");
