@@ -711,9 +711,11 @@ its changes in and keeps the file's line endings.
 
 ```
 rust/crates/core/      xenolith-core: paths, pages and frontmatter, index, log, search, read, inbox, locks,
-                       request log, secret guard, the curator, Codex runs, Ask's worker
-rust/crates/cli/       xenolith: serve (MCP over stdio and HTTP, /health, /status, /ui, /api), hook,
-                       curator, service (Windows), install and uninstall
+                       request log, secret guard, the curator, Codex runs, Ask's worker, spaces,
+                       access, the audit chain, sync
+rust/crates/cli/       xenolith: serve (MCP over stdio and HTTP, /health, /status, /ui, /api, /sync),
+                       hook, curator, service (Windows), install and uninstall, spaces, grants,
+                       tokens, audit, sync and held changes
 rust/crates/tray/      xenolith-tray: the tray or menu bar icon, its menu, and the window
 protocol/PROTOCOL.md   rules every session follows (seeded into a new wiki; you own the wiki copy)
 protocol/POINTER.md    short global-instruction block
@@ -726,16 +728,17 @@ eval/synthetic/        the memory eval's synthetic wiki, questions and curator n
 eval/local/            your own real-wiki questions (gitignored)
 test/                  the suites: e2e (two real MCP clients, both transports), curator (fake model),
                        tray, installer, the window (ui), Ask (the fake model drives the real read-only
-                       server), migrate, portable (Linux/macOS differences), memory-eval, opt-in live
-                       and stress tests
-.github/workflows/     CI: the suites on Windows, Ubuntu and macOS, against Node and Rust
+                       server), migrate, portable (Linux/macOS differences), memory-eval, spaces,
+                       tokens, audit, resources, sync, opt-in live and stress tests
 ```
 
 The suites talk to the programs over MCP, `/api` and their files, so they are
 the contract for both implementations: `XENOLITH_IMPL=rust node --test ...`
 runs them against the Rust programs (`rust/target/release`, or
-`XENOLITH_RUST_BIN`). CI builds, lints (`cargo clippy -D warnings`) and tests
-the Rust programs on all three OSes and uploads the install payload for each.
+`XENOLITH_RUST_BIN`). Spaces, access, tokens, the audit chain, resources and
+sync exist in the Rust programs only, so their suites skip under the Node
+runtime. `scripts/check-rust.sh` formats, lints (`cargo clippy -D warnings`)
+and tests the Rust programs; XenoNet's CI doesn't run Xenolith's suites yet.
 `npm run bench` measures the footprint and speed of the Node runtime against the
 Rust program. It alternates 5 runs per side, reports each metric's median and
 range, checks every answer, and exits 1 on any error. Use
