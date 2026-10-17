@@ -166,6 +166,30 @@
       "differences": [
         "A config.json that isn't UTF-8 is read as Node reads it, with U+FFFD for what isn't."
       ]
+    },
+    "core/frames.js": {
+      "rust": "crates/xenonet-state/src/frames.rs",
+      "differences": [
+        "The page imports core/frames.js itself and keeps the JS; the twin is Node's."
+      ]
+    },
+    "core/rename.js": {
+      "rust": "crates/xenonet-state/src/rename.rs",
+      "differences": []
+    },
+    "core/export-labels.js": {
+      "rust": "crates/xenonet-state/src/export_labels.rs",
+      "differences": [
+        "The page imports core/export-labels.js itself and keeps the JS; the twin is Node's, and passes the labels to Rust on each call."
+      ]
+    },
+    "core/needs-you.js": {
+      "rust": "crates/xenonet-state/src/needs_you.rs",
+      "differences": [
+        "The page imports core/needs-you.js itself and keeps the JS; the twin is Node's.",
+        "order returns -1, 0 or 1, where JS returned the difference of the times it compared: the same order.",
+        "waitsWords looks up an actor's wait among its three words only; JS's lookup on a plain object also found Object.prototype's names (a wait of \"constructor\")."
+      ]
     }
   },
   "tests": [
