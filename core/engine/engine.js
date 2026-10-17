@@ -441,8 +441,9 @@ export class Engine extends EventEmitter {
   }
 
   // Who a reply with no `to` is for: the sender of the message it answers,
-  // unless that's you, in which case it follows your message to its
-  // recipients ("all", the repo, or the one agent).
+  // unless that's you, in which case it goes to the same audience: "all",
+  // the repo you're in now (not necessarily the one you sent it in), or the
+  // one agent.
   static replyTarget(me, m) {
     if (!m) return undefined;
     if (m.sender !== me) return m.sender;
