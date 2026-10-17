@@ -265,8 +265,8 @@ test("versions from npm's dist-tags, a GitHub release, an APT index, a Sparkle f
   assert.equal(newestInAppcast(feed(item("7.0"))), "7.0");
   assert.equal(newestInAppcast(feed(item("6.2") + item("7.1") + item("not a version") + `<item><enclosure sparkle:shortVersionString="7.0.1" url="https://example.com/y.dmg"/></item>`)), "7.1");
   assert.equal(newestInAppcast(feed("")), null);
-  // Cursor's update server, for Grok Bot's app.
-  assert.equal(versionInJson({ downloadUrl: "https://example.com/Grok_Bot_0.68.1.dmg", version: "0.68.1", commitSha: "abc" }), "0.68.1");
+  // A JSON update feed: the version in a field of its answer.
+  assert.equal(versionInJson({ downloadUrl: "https://example.com/App_0.68.1.dmg", version: "0.68.1", commitSha: "abc" }), "0.68.1");
   assert.equal(versionInJson({ release: { version: "1.2.3" } }, "release.version"), "1.2.3");
   assert.equal(versionInJson({ version: "not a version" }), null);
   assert.equal(versionInJson({ version: 7 }), null);

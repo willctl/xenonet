@@ -122,16 +122,6 @@ export const PROVIDERS = [
       "XenoNet reads none of its data, only whether its app runs, and from its Info.plist its version and bundle id. Its work happens in Meta's cloud, and what it keeps on the Mac is its sign-in and caches. The check records the latest version only.",
   },
   {
-    id: "spacexai/grok-bot-desktop",
-    name: "Grok Bot desktop",
-    sources: [],
-    // Cursor's update server, which the app asks itself (its product is
-    // "sand"), and which anyone can read.
-    release: { json: { url: "https://api2.cursor.sh/updates/api/download/stable/darwin-arm64/sand", field: "version" } },
-    notInspected:
-      "XenoNet reads none of its data, only the processes its app runs, and from its Info.plist its version. Its Bots work in Cursor's cloud. The check records the latest version only.",
-  },
-  {
     id: "github/gh",
     name: "GitHub CLI",
     sources: ["github/gh/hosts"],
