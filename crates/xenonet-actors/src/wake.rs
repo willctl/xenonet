@@ -38,6 +38,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use xenonet_base::json::stringify;
 use xenonet_engine::peer::{list, Calls, Thrown};
+use xenonet_engine::js::{base64, base64_bytes};
 use xenonet_engine::re;
 use xenonet_engine::sql::{Arg, Cell, SqlError};
 use xenonet_engine::store::{js_text, Shared};
@@ -152,50 +153,6 @@ pub fn check_wake_url(c: &mut dyn Calls, raw: &Arg) -> Result<(String, String)> 
         return fail(400.0, "bad-request", "that address is link-local, which a wake never goes to");
     }
     Ok((u.href, u.host))
-}
-
-/// Node's Buffer.from(text, "base64"): either alphabet, anything else
-/// skipped, and nothing after the first "=".
-fn base64_bytes(s: &str) -> Vec<u8> {
-    let mut bits = 0u32;
-    let mut n = 0;
-    let mut out = Vec::new();
-    for c in s.bytes() {
-        let v = match c {
-            b'A'..=b'Z' => c - b'A',
-            b'a'..=b'z' => c - b'a' + 26,
-            b'0'..=b'9' => c - b'0' + 52,
-            b'+' | b'-' => 62,
-            b'/' | b'_' => 63,
-            b'=' => break,
-            _ => continue,
-        };
-        bits = bits << 6 | v as u32;
-        n += 6;
-        if n >= 8 {
-            n -= 8;
-            out.push((bits >> n) as u8);
-            bits &= (1 << n) - 1;
-        }
-    }
-    out
-}
-
-fn base64(bytes: &[u8]) -> String {
-    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::new();
-    for chunk in bytes.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
-        let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
-        for i in 0..4 {
-            if i <= chunk.len() {
-                out.push(A[(n >> (18 - 6 * i) & 63) as usize] as char);
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
 }
 
 fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {

@@ -217,6 +217,12 @@
         "Names sort as ICU's root collation sorts ASCII text (localeCompare); outside ASCII, by an approximation of it."
       ]
     },
+    "core/engine/connect.js": {
+      "rust": "crates/xenonet-engine/src/connect.rs",
+      "differences": [
+        "The files, the CLIs and core/instances.js's table are the twin's, called as the JS called them."
+      ]
+    },
     "core/engine/attest.js": {
       "rust": "crates/xenonet-engine/src/attest.rs",
       "differences": []

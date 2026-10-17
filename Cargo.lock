@@ -708,6 +708,7 @@ dependencies = [
  "sha2",
  "xenonet-base",
  "xenonet-blocks",
+ "xenonet-schema",
 ]
 
 [[package]]

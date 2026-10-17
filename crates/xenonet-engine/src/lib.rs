@@ -8,6 +8,7 @@
 //! runs in the binary and behind a JS twin, where the twin does the reading.
 
 pub mod attest;
+pub mod connect;
 pub mod js;
 pub mod jsre;
 pub mod peer;

@@ -189,3 +189,58 @@ pub fn proto_member(name: &str) -> Option<String> {
         _ => None,
     }
 }
+
+/// Node's Buffer.from(text, "base64"): either alphabet, anything else
+/// skipped, and nothing after the first "=".
+pub fn base64_bytes(s: &str) -> Vec<u8> {
+    let mut bits = 0u32;
+    let mut n = 0;
+    let mut out = Vec::new();
+    for c in s.bytes() {
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' | b'-' => 62,
+            b'/' | b'_' => 63,
+            b'=' => break,
+            _ => continue,
+        };
+        bits = bits << 6 | v as u32;
+        n += 6;
+        if n >= 8 {
+            n -= 8;
+            out.push((bits >> n) as u8);
+            bits &= (1 << n) - 1;
+        }
+    }
+    out
+}
+
+pub fn base64(bytes: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(A[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+/// Buffer.from(text, "utf16le").
+pub fn utf16le(s: &str) -> Vec<u8> {
+    s.encode_utf16().flat_map(u16::to_le_bytes).collect()
+}
+
+/// buffer.toString("utf16le"): a byte left over is dropped.
+pub fn from_utf16le(b: &[u8]) -> String {
+    let units: Vec<u16> = b.chunks_exact(2).map(|p| u16::from_le_bytes([p[0], p[1]])).collect();
+    String::from_utf16_lossy(&units)
+}

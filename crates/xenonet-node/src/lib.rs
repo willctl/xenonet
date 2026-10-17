@@ -12,6 +12,7 @@ mod actors;
 mod args;
 mod attest;
 mod attribution;
+mod connect;
 mod connections;
 mod base;
 mod blocks;
