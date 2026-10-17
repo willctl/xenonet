@@ -21,8 +21,14 @@ const MARK = { ok: "✓", info: "·", warn: "!", fail: "✗", skip: "–" };
 const PAINT = { ok: "green", info: "blue", warn: "yellow", fail: "red", skip: "gray" };
 
 async function live(flags) {
-  const { liveSetup, CHANNELS_FROM } = await import("../../core/delivery/setup.js");
-  const r = await liveSetup({ port: flags.port ?? (flags.dev ? 47842 : flags.demo ? 47841 : 47840) });
+  const { liveSetup, writeListenSettings, CHANNELS_FROM, LISTEN_SECONDS } = await import("../../core/delivery/setup.js");
+  const { config } = await import("../../core/config.js");
+  const port = flags.port ?? (flags.dev ? 47842 : flags.demo ? 47841 : 47840);
+  let listenFile = null;
+  try {
+    listenFile = writeListenSettings({ dir: config.stateDir, port });
+  } catch {}
+  const r = await liveSetup({ port, listenFile });
   if (flags.json) return json(r), 0;
   const ok = (b) => (b ? c.green("✓") : c.yellow("!"));
   print(c.bold("Live delivery"));
@@ -36,6 +42,12 @@ async function live(flags) {
   print(`  ${r.alias}`);
   print(c.dim("Team and Enterprise organizations have to turn channels on first (channelsEnabled). If a message doesn't arrive, claude --debug logs why, and the session gets it on its next turn."));
   print();
+  if (r.listen) {
+    print(`Or have a session listen for ${LISTEN_SECONDS / 60} minutes after each turn, which works in headless runs (claude -p) too:`);
+    print(`  ${r.listen}`);
+    print(c.dim("While it listens, the session waits at the end of its turn, and a message that comes keeps it going. It goes with the channel flag above, if you want both."));
+    print();
+  }
   print("For OpenCode, its TUI serves what XenoNet posts to only when told where to listen:");
   print(`  ${r.opencodeAlias}`);
   print();

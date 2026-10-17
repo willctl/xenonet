@@ -164,6 +164,8 @@ export class Engine extends EventEmitter {
     this.actors = actors;
     this.noticed = new Map(); // `${agent}[/${subagent}]|${file}|${other}|${how}` → when it was warned
     this.waiters = new Map(); // agent → Set(resolve), inboxes waiting for mail
+    this.listening = new Map(); // agent → until when its Stop hook listens
+    this.stopMail = new Map(); // agent → when its Stop hook last handed mail over
   }
 
   // ---------- agents ----------
@@ -492,6 +494,49 @@ export class Engine extends EventEmitter {
     return this.#take(me);
   }
 
+  // A session's listening Stop hook (/api/hook/claude/listen, which a
+  // session gets by starting with XenoNet's listen settings; see xenonet
+  // doctor --live): after a turn it waits up to `ms` for a message and hands
+  // it over, which keeps the session going, as a block from a Stop hook
+  // does. Each message it hands over is a wake, checked against the budget
+  // like any other; one the budget refuses waits for the next turn. It stops
+  // as soon as the session goes on anyway (the main Stop hook handed mail
+  // over) or the hook's request goes away (`signal`). Returns the hook's
+  // answer and the ids it took, or null.
+  async listen(me, { ms, signal = null } = {}) {
+    const goingOn = () => this.now() - (this.stopMail.get(me) ?? -Infinity) < 5000;
+    const deadline = Date.now() + ms;
+    this.listening.set(me, deadline);
+    try {
+      for (;;) {
+        if (signal?.aborted || goingOn()) return null;
+        await this.#catchUp(me);
+        const waiting = this.store.unseen(me);
+        if (waiting.length) {
+          if (!(this.delivery?.wake?.(waiting[0].sender, me) ?? { ok: true }).ok) return null;
+          const list = await this.#take(me);
+          const text = this.#mail(list);
+          if (text) return { decision: "block", reason: text, ids: list.map((m) => m.id) };
+        }
+        const left = deadline - Date.now();
+        if (left <= 0) return null;
+        // Until a message comes, the main Stop hook takes one, the request
+        // goes, or the window ends.
+        await new Promise((resolve) => {
+          const set = this.waiters.get(me) ?? this.waiters.set(me, new Set()).get(me);
+          const seen = ({ agent }) => agent === me && done();
+          const done = () => (clearTimeout(timer), set.delete(done), signal?.removeEventListener("abort", done), this.off("seen", seen), resolve());
+          const timer = setTimeout(done, left);
+          set.add(done);
+          signal?.addEventListener("abort", done);
+          this.on("seen", seen);
+        });
+      }
+    } finally {
+      this.listening.delete(me);
+    }
+  }
+
   async #take(me) {
     await this.#catchUp(me);
     const list = this.store.unseen(me);
@@ -624,6 +669,7 @@ export class Engine extends EventEmitter {
     if (event === "Stop") {
       if (input.stop_hook_active) return null;
       const text = this.#mail(await this.#take(me));
+      if (text) this.stopMail.set(me, this.now());
       return text ? { decision: "block", reason: text } : null;
     }
     return null;

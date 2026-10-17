@@ -5,11 +5,12 @@ import { c, print, json, table, Fail } from "../lib/out.js";
 import { need, get, post } from "../../core/client.js";
 
 export const help = `Live delivery puts a message into a session as it's sent, instead of when
-the session next starts a turn: through a Claude Code channel, an OpenCode
-session's own server, or, with your consent, typed into its tmux pane.
+the session next starts a turn: to a session listening after its turn,
+through a Claude Code channel or an OpenCode session's own server, or, with
+your consent, typed into its tmux pane.
 
-  xenonet live                         what's paused, granted and allowed, plans used, and
-                                       the last deliveries
+  xenonet live                         what's paused, granted and allowed, plans used, who's
+                                       listening, and the last deliveries
   xenonet live pause | resume          stop every message (and wake) at once, or start again
   xenonet live allow <session> [--hours n] [--remote]
                                        let XenoNet wake or type into one session (8 hours by
@@ -42,6 +43,10 @@ export async function run(args, flags) {
     if (plans.length) print(`Plans used: ${plans.map(([app, u]) => `${app} ${Math.round(u * 100)}%${u >= 0.9 ? c.red(" (no wakes)") : ""}`).join(", ")}${c.dim(" · a provider at 90% takes no wakes")}`);
     print(c.bold("\nActors' scopes"));
     print(d.grants.length ? table(d.grants.map((g) => [g.actor, g.selector, g.expired ? c.red("expired") : `until ${new Date(g.expiresAt).toLocaleString()}`]), { indent: 2 }) : c.dim("  none: actors see no sessions"));
+    if (d.listening?.length) {
+      print(c.bold("\nListening after a turn"));
+      print(table(d.listening.map((l) => [l.agent, `until ${new Date(l.until).toLocaleTimeString()}`]), { indent: 2 }));
+    }
     print(c.bold("\nSessions XenoNet may wake or type into"));
     const consent = Object.entries(d.consent);
     print(consent.length ? table(consent.map(([id, x]) => [id, `until ${new Date(x.until).toLocaleString()}`, x.remote ? "remote too" : ""]), { indent: 2 }) : c.dim("  none"));

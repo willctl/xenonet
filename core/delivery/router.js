@@ -1,16 +1,18 @@
 // The delivery router: for each message and each session it's for, the
 // fastest way in that's allowed, then whether it arrived.
 //
-//   live       pushed into the running session: a Claude Code channel, an
-//              OpenCode server's prompt_async, or typed into its tmux pane
+//   live       into the session now: its Stop hook listening after a turn,
+//              a Claude Code channel, an OpenCode server's prompt_async, or
+//              typed into its tmux pane
 //   next turn  waits for the session's hooks, as before (when it next starts
 //              a turn, or during the one under way)
 //   notified   nothing picked it up within ackMs, so XenoNet told you
 //
 // Acks: an OpenCode server's 204 is one; a channel or a typed message is
-// acked by the session's next hook after the push; a next-turn message when
-// the hooks hand it over (the engine's "seen"). A push with no ack goes back
-// to waiting for the hooks. Actors aren't routed here: they read their inbox.
+// acked by the session's next hook after it; a message a listening Stop
+// hook or the hooks hand over, by the engine's "seen". A push with no ack
+// goes back to waiting for the hooks. Actors aren't routed here: they read
+// their inbox.
 //
 // Waking a session spends its plan, so every wake is checked against the
 // policy (pause switch, consent, wake budget) first; a message that may not
@@ -38,11 +40,20 @@ export class DeliveryRouter extends EventEmitter {
     return String(id).startsWith("opencode:") && !!this.opencode && this.policy.consented(id);
   }
 
+  // A wake for a session's listening Stop hook to hand a message over (the
+  // engine asks): the same budget as any other wake, spent when allowed.
+  wake(from, agent) {
+    const w = this.policy.wakeAllowed(from, agent, { usage: this.usage(String(agent).split(":")[0]) });
+    if (w.ok) this.policy.spendWake(from, agent);
+    return w;
+  }
+
   // How a message from `from` would reach `a`, an agent as the engine lists
   // it, if sent now: for the sender's answer. null when it waits for the hooks.
   way(from, a) {
     const idle = a.status === "idle";
     if (idle && !this.policy.wakeAllowed(from, a.id, { usage: this.usage(a.app) }).ok) return null;
+    if (this.engine.listening?.has(a.id)) return "right away: it's listening for messages";
     if (a.app === "claude" && idle && this.channels?.live(a.id)) return "right away, through its channel";
     if (a.app === "opencode" && this.opencode && this.policy.consented(a.id, { remote: String(from).startsWith("actor:") })) return "right away, through its OpenCode server";
     return null;
@@ -83,6 +94,13 @@ export class DeliveryRouter extends EventEmitter {
       this.emit("delivery", { ...rec });
       return true;
     };
+    // 0. Its Stop hook, listening after a turn: the hook hands the message
+    // over itself, and checks the wake then, when it keeps the session going.
+    if (this.engine.listening?.has(rec.agent)) {
+      Object.assign(rec, { state: "live", how: "listen" });
+      this.emit("delivery", { ...rec });
+      return true;
+    }
     if (!wake.ok) tried.push(`no wake: ${wake.why}`);
     else {
       // 1. A Claude Code channel: the session opted in by starting with it.
@@ -157,7 +175,9 @@ export class DeliveryRouter extends EventEmitter {
     }
   }
 
+  // A hook from the session after a push acks it; a message waiting for
+  // its listening Stop hook is acked when the hook takes it (#seen).
   #contact(agent) {
-    for (const rec of this.records.values()) if (rec.agent === agent && rec.state === "live" && !rec.ackedAt) this.#ack(rec);
+    for (const rec of this.records.values()) if (rec.agent === agent && rec.state === "live" && rec.how !== "listen" && !rec.ackedAt) this.#ack(rec);
   }
 }
