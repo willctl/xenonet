@@ -294,6 +294,18 @@
       "differences": [
         "Files, folders, the vendor readers and Date.parse are the twin's; Hermes's state.db is still opened in the twin (node:sqlite read only, or a test's open) and queried with Rust's SQL."
       ]
+    },
+    "core/actors/hermes.js": {
+      "rust": "crates/xenonet-actors/src/hermes.rs",
+      "differences": [
+        "Hermes's files are read through hermes-files.js's twin; the census is read in the twin (readCensus) and judged in Rust."
+      ]
+    },
+    "core/actors/observers.js": {
+      "rust": "crates/xenonet-actors/src/observers.rs",
+      "differences": [
+        "Which observers there are and how each is built stay in the twin, since they take the server's objects; the look over them and the status are Rust's."
+      ]
     }
   },
   "tests": [

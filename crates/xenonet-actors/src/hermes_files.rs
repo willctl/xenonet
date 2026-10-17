@@ -352,11 +352,11 @@ fn tool_paths_sql(with_time: bool) -> String {
 }
 
 fn rows(c: &mut dyn Calls, sql: &str, args: Vec<Arg>) -> Result<Vec<Value>> {
-    Ok(list(c.call("", "all", vec![Arg::text(sql), Arg::List(args)])?).iter().map(Arg::to_json).collect())
+    Ok(list(c.call("db", "all", vec![Arg::text(sql), Arg::List(args)])?).iter().map(Arg::to_json).collect())
 }
 
 fn row(c: &mut dyn Calls, sql: &str, args: Vec<Arg>) -> Result<Value> {
-    Ok(c.call("", "get", vec![Arg::text(sql), Arg::List(args)])?.to_json())
+    Ok(c.call("db", "get", vec![Arg::text(sql), Arg::List(args)])?.to_json())
 }
 
 fn empty(after_id: &Value) -> Value {
@@ -378,13 +378,13 @@ fn with_state(state: &str, code: Option<Value>, rest: Value) -> Value {
 }
 
 /// What's new in a profile's session database since the last read.
-/// Through the twin: open() opens the file read only, all/get(sql, args)
-/// query it, close() closes it.
+/// Through the twin's "db": open(file) opens the file read only,
+/// all/get(sql, args) query it, close() closes it.
 pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: &Value, session_ids: &[Value]) -> Result<Value> {
     if !c.call("files", "existsSync", vec![Arg::text(file)])?.truthy() {
         return Ok(with_state("missing", None, empty(after_id)));
     }
-    if let Err(t) = c.call("", "open", vec![]) {
+    if let Err(t) = c.call("db", "open", vec![Arg::text(file)]) {
         let denied = js(r"permission|EACCES|EPERM|authoriz", true).is_match(&t.message);
         return Ok(with_state(if denied { "denied" } else { "unreadable" }, Some(t.code.clone().unwrap_or(Value::Null)), empty(after_id)));
     }
@@ -486,7 +486,7 @@ pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: 
         let messages: Vec<Value> = arr("messages").as_array().cloned().unwrap_or_default().into_iter().filter(|m| m.get("active").and_then(Value::as_f64) != Some(0.0)).collect();
         Ok(json!({ "state": "ok", "version": version, "sessions": arr("sessions"), "messages": messages, "toolPaths": arr("tool_paths"), "heartbeats": arr("gateway_heartbeats"), "lastId": last_id }))
     })();
-    let _ = c.call("", "close", vec![]);
+    let _ = c.call("db", "close", vec![]);
     match out {
         Ok(v) => Ok(v),
         Err(t) => {

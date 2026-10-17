@@ -146,3 +146,75 @@ impl GrokBotCore {
         done(&env, self.inner.status(&mut c, &home)).map(Json)
     }
 }
+
+#[napi(js_name = "hermesDoingOf")]
+pub fn hermes_doing_of(d: MaybeJsonText) -> Option<&'static str> {
+    xenonet_actors::hermes::doing_of(&d.0)
+}
+
+#[napi(js_name = "hermesEndingOf")]
+pub fn hermes_ending_of(r: MaybeJsonText) -> Option<&'static str> {
+    xenonet_actors::hermes::ending_of(&r.0)
+}
+
+#[napi(js_name = "hermesHeartbeatMs")]
+pub fn hermes_heartbeat_ms() -> f64 {
+    xenonet_actors::hermes::HERMES_HEARTBEAT_MS
+}
+
+/// A value as String(value ?? "") reads it.
+pub struct MaybeJsonText(pub String);
+
+impl napi::bindgen_prelude::FromNapiValue for MaybeJsonText {
+    unsafe fn from_napi_value(env: napi::sys::napi_env, v: napi::sys::napi_value) -> Result<Self> {
+        let a = unsafe { crate::args::arg_of(env, v, 0)? };
+        Ok(MaybeJsonText(match a {
+            Arg::Undef | Arg::Null => String::new(),
+            other => xenonet_engine::store::js_text(&other),
+        }))
+    }
+}
+
+impl napi::bindgen_prelude::TypeName for MaybeJsonText {
+    fn type_name() -> &'static str {
+        "unknown"
+    }
+    fn value_type() -> napi::ValueType {
+        napi::ValueType::Unknown
+    }
+}
+
+impl napi::bindgen_prelude::ValidateNapiValue for MaybeJsonText {}
+
+#[napi]
+pub struct HermesCore {
+    inner: Arc<xenonet_actors::hermes::Hermes>,
+}
+
+#[napi]
+impl HermesCore {
+    #[napi(constructor)]
+    pub fn new(spawns: &crate::attribution::SpawnsCore, root: String, home: String) -> Self {
+        HermesCore { inner: Arc::new(xenonet_actors::hermes::Hermes::new(spawns.state.clone(), &root, &home)) }
+    }
+    #[napi]
+    pub fn look(&self, at: f64) -> Machine {
+        let h = self.inner.clone();
+        start(move |asker| h.look(&mut AskCalls(asker), at).map(|_| Arg::Undef))
+    }
+    #[napi]
+    pub fn status(&self, env: Env, me: Object) -> Result<Json> {
+        done(&env, self.inner.status(&mut SyncCalls::new(&env, &me))).map(Json)
+    }
+}
+
+/// The observers' look together, through their twin's deps.
+#[napi(js_name = "observersLook")]
+pub fn observers_look() -> Machine {
+    start(move |asker| xenonet_actors::observers::look(&mut AskCalls(asker)).map(|_| Arg::Undef))
+}
+
+#[napi(js_name = "observersStatus")]
+pub fn observers_status(env: Env, deps: Object) -> Result<Json> {
+    done(&env, xenonet_actors::observers::status(&mut SyncCalls::new(&env, &deps))).map(Json)
+}

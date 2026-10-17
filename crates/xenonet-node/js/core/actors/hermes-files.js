@@ -37,14 +37,24 @@ export const readTicker = (home, { version = null, files = fs } = {}) => native.
 export const readProcesses = (home, { version = null, files = fs } = {}) => native.hermesRead(depsOf(files), "processes", String(home), version);
 export const readJobs = (home, { version = null, files = fs } = {}) => native.hermesRead(depsOf(files), "jobs", String(home), version);
 
-export function readStateDb(file, { afterId = null, sinceMs, sessionIds = [], open = (f) => new DatabaseSync(f, { readOnly: true }), files = fs } = {}) {
+// Hermes's own database, opened read only for a moment: with node:sqlite,
+// or the `open` a test gives.
+export function stateDbOf(open = (f) => new DatabaseSync(f, { readOnly: true })) {
   let db = null;
-  const deps = {
-    ...depsOf(files),
-    open: () => void (db = open(file)),
+  return {
+    open: (file) => void (db = open(file)),
     all: (sql, args) => db.prepare(sql).all(...args),
     get: (sql, args) => db.prepare(sql).get(...args) ?? null,
-    close: () => db?.close(),
+    close: () => {
+      const d = db;
+      db = null;
+      d?.close();
+    },
   };
-  return native.hermesReadStateDb(deps, String(file), afterId, sinceMs, [...sessionIds]);
 }
+
+export function readStateDb(file, { afterId = null, sinceMs, sessionIds = [], open, files = fs } = {}) {
+  return native.hermesReadStateDb({ ...depsOf(files), db: stateDbOf(open) }, String(file), afterId, sinceMs, [...sessionIds]);
+}
+
+export { vendor, depsOf };
