@@ -250,7 +250,7 @@ fn text_of(content: Js<'_>) -> Result<String, TypeError> {
 }
 
 // [...a, ...b]: what spreading a value gives, or the TypeError JS throws.
-fn spread<'a>(v: Js<'a>, what: &str) -> Result<Vec<Value>, TypeError> {
+fn spread(v: Js<'_>, what: &str) -> Result<Vec<Value>, TypeError> {
     match nn(v) {
         None => Ok(Vec::new()),
         Some(Value::Array(a)) => Ok(a.clone()),
@@ -573,7 +573,7 @@ pub enum Message {
     Decline(String),
     /// An answer to request `id`: its result, or its error's message and
     /// the error itself.
-    Answer { id: Value, result: F, error: Option<(String, Value)> },
+    Answer { id: Value, result: Box<F>, error: Option<Box<(String, Value)>> },
     /// A notification, or what isn't JSON.
     Other,
 }
@@ -642,9 +642,9 @@ pub fn message(line: &str) -> Message {
     let error = opt_prop(m, "error");
     if truthy(error) {
         let message = nn(opt_prop(error, "message")).map_or_else(|| "app-server error".to_string(), js_string);
-        return Message::Answer { id: id.clone(), result: F::Undef, error: Some((message, error.cloned().unwrap_or(Value::Null))) };
+        return Message::Answer { id: id.clone(), result: Box::new(F::Undef), error: Some(Box::new((message, error.cloned().unwrap_or(Value::Null)))) };
     }
-    Message::Answer { id: id.clone(), result: F::of(opt_prop(m, "result")), error: None }
+    Message::Answer { id: id.clone(), result: Box::new(F::of(opt_prop(m, "result"))), error: None }
 }
 
 // ---------- Codex desktop's projects ----------
@@ -656,7 +656,7 @@ pub fn other_state_dbs(names: &[String]) -> Vec<String> {
         .iter()
         .filter_map(|n| n.strip_prefix("state_")?.strip_suffix(".sqlite").map(str::to_string))
         .filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
-        .filter(|n| n.parse::<f64>().map_or(true, |x| x != STATE_DB as f64))
+        .filter(|n| n.parse::<f64>().is_ok_and(|x| x != STATE_DB as f64))
         .collect()
 }
 
@@ -842,7 +842,7 @@ mod tests {
         assert_eq!(ms.len(), 5);
         assert_eq!(ms[0], Message::Other);
         assert_eq!(ms[1], Message::Decline("{\"jsonrpc\":\"2.0\",\"id\":\"a\",\"error\":{\"code\":-32601,\"message\":\"XenoNet is read-only\"}}\n".into()));
-        assert!(matches!(&ms[3], Message::Answer { error: Some((m, _)), .. } if m == "app-server error"));
+        assert!(matches!(&ms[3], Message::Answer { error: Some(e), .. } if e.0 == "app-server error"));
         assert_eq!(io.take(",\"result\":5}\n").len(), 1);
         let mut err = Stderr::default();
         err.push("a\nb\r\n\nc");

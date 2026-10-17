@@ -87,19 +87,17 @@ pub(crate) fn assignments(text: &str, key: &str) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
     let n = chars.len();
     let mut out = Vec::new();
-    let mut pos = 0;
-    'search: while pos <= n {
-        for p in pos..=n {
-            if p != 0 && !is_term(chars[p - 1]) {
-                continue;
-            }
+    // Each match is searched for from where the last one ended.
+    let mut p = 0;
+    while p <= n {
+        if p == 0 || is_term(chars[p - 1]) {
             if let Some((value, end)) = assignment_at(&chars, p, key) {
                 out.push(value);
-                pos = if end == p { end + 1 } else { end };
-                continue 'search;
+                p = if end == p { end + 1 } else { end };
+                continue;
             }
         }
-        break;
+        p += 1;
     }
     out
 }

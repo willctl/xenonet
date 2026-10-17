@@ -806,12 +806,15 @@ fn slice_end(len: usize, end: Option<&Value>) -> usize {
 
 // ---------- relations ----------
 
+/// Pairs of project keys.
+pub type KeyPairs = Vec<(String, String)>;
+
 /// Satellite projects hang off a parent: `ledger-local-supabase` orbits
 /// `ledger` when both sit in the same folder. A linked worktree orbits its
 /// repo. Clones of the same remote are linked as siblings. Returns
 /// (project key → parent key, in order) and the pairs of keys that share
 /// a remote.
-pub fn relations(projects: &[Value]) -> Result<(Vec<(String, String)>, Vec<(String, String)>), TypeError> {
+pub fn relations(projects: &[Value]) -> Result<(KeyPairs, KeyPairs), TypeError> {
     let real: Vec<&Value> = projects.iter().filter(|p| p.get("role").and_then(Value::as_str) != Some("group")).collect();
     let key_of = |p: &Value| -> String { p.get("key").map(text::js_string).unwrap_or_else(|| "undefined".into()) };
     let parent_of = |p: &Value| -> String {

@@ -11,6 +11,7 @@ use std::sync::{LazyLock, Mutex};
 use xenonet_sources::claude;
 use xenonet_sources::codex::{self, Obj, F};
 use xenonet_sources::git;
+use xenonet_state::identities;
 use xenonet_state::projects::{self, FactsCache, Scan};
 
 fn opt_s(v: Option<String>) -> Jv {
@@ -270,8 +271,9 @@ impl JsCodexStdout {
         for m in self.io.take(&chunk) {
             match m {
                 codex::Message::Decline(line) => out.push(Jv::Obj(vec![("decline", Jv::Json(Value::String(line)))])),
-                codex::Message::Answer { id, result, error: None } => out.push(Jv::Obj(vec![("id", Jv::Json(id)), ("result", jv(result))])),
-                codex::Message::Answer { id, error: Some((message, rpc)), .. } => {
+                codex::Message::Answer { id, result, error: None } => out.push(Jv::Obj(vec![("id", Jv::Json(id)), ("result", jv(*result))])),
+                codex::Message::Answer { id, error: Some(e), .. } => {
+                    let (message, rpc) = *e;
                     let error = Jv::Obj(vec![("message", Jv::Json(Value::String(message))), ("rpc", Jv::Json(rpc))]);
                     out.push(Jv::Obj(vec![("id", Jv::Json(id)), ("error", error)]));
                 }
@@ -420,4 +422,232 @@ pub fn claude_other_session() -> &'static str {
 #[napi(js_name = "claudeRenamedRecord")]
 pub fn claude_renamed_record(record: MaybeJson, desktop_id: MaybeJson, cli_id: MaybeJson, title: MaybeJson) -> Option<String> {
     claude::renamed_record(record.0.unwrap_or(Value::Null), desktop_id.0.as_ref(), cli_id.0.as_ref(), title.0.as_ref())
+}
+
+// ---------- identities.js ----------
+
+fn pairs(v: &Value) -> Vec<(String, String)> {
+    let s = |x: Option<&Value>| x.map_or_else(String::new, xenonet_base::text::js_string);
+    v.as_array().map(|a| a.iter().map(|p| (s(p.get(0)), s(p.get(1)))).collect()).unwrap_or_default()
+}
+
+fn value_pairs(v: Value) -> Vec<(Value, Value)> {
+    match v {
+        Value::Array(a) => a
+            .into_iter()
+            .map(|p| match p {
+                Value::Array(mut kv) if !kv.is_empty() => {
+                    let v = if kv.len() > 1 { kv.remove(1) } else { Value::Null };
+                    (kv.remove(0), v)
+                }
+                _ => (Value::Null, Value::Null),
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+#[napi(js_name = "idClaudeAccount")]
+pub fn id_claude_account(data: MaybeJson) -> Json {
+    Json(identities::claude_account(data.0.as_ref()))
+}
+
+#[napi(js_name = "idTokenClaims")]
+pub fn id_token_claims(auth: MaybeJson) -> Json {
+    Json(identities::id_token_claims(auth.0.as_ref()))
+}
+
+#[napi(js_name = "idChatgptAccount")]
+pub fn id_chatgpt_account(auth: MaybeJson, claims: MaybeJson) -> Json {
+    Json(identities::chatgpt_account(auth.0.as_ref(), claims.0.as_ref()))
+}
+
+#[napi(js_name = "idParseGhHosts")]
+pub fn id_parse_gh_hosts(text: String) -> Json {
+    Json(Value::Array(identities::parse_gh_hosts(&text)))
+}
+
+#[napi(js_name = "idGhHostsShape")]
+pub fn id_gh_hosts_shape(text: String) -> Json {
+    Json(identities::gh_hosts_shape(&text))
+}
+
+/// [[alias, host]…]
+#[napi(js_name = "idParseSshAliases")]
+pub fn id_parse_ssh_aliases(text: String) -> Json {
+    Json(json!(identities::parse_ssh_aliases(&text)))
+}
+
+#[napi(js_name = "idParseRemote")]
+pub fn id_parse_remote(url: String, aliases: Json) -> Json {
+    Json(identities::parse_remote(&url, &pairs(&aliases.0)).map_or(Value::Null, |r| r.to_json()))
+}
+
+#[napi(js_name = "idParseGitConfig")]
+pub fn id_parse_git_config(out: String) -> Json {
+    Json(identities::parse_git_config(&out))
+}
+
+#[napi(js_name = "idPushAccount")]
+pub fn id_push_account(env: &Env, url: MaybeJson, cfg: MaybeJson, aliases: Json) -> Result<Json> {
+    identities::push_account(url.0.as_ref(), cfg.0.as_ref(), &pairs(&aliases.0)).map(Json).or_else(|e| thrown(env, e))
+}
+
+fn signin_op(op: &identities::Signin) -> Jv {
+    match op {
+        identities::Signin::Same => Jv::Obj(vec![]),
+        identities::Signin::Extend(to) => Jv::Obj(vec![("extend", Jv::Num(*to))]),
+        identities::Signin::Push { span, drop } => Jv::Obj(vec![("span", Jv::Json(span.clone())), ("drop", Jv::Num(*drop as f64))]),
+    }
+}
+
+/// {} (nothing changed), { extend: to }, or { span, drop }.
+#[napi(js_name = "idNoteSignin")]
+pub fn id_note_signin(spans: Json, id: MaybeJson, now: f64, since: MaybeJson) -> Jv {
+    let spans = match spans.0 {
+        Value::Array(a) => a,
+        _ => Vec::new(),
+    };
+    signin_op(&identities::note_signin(&spans, id.0.as_ref().unwrap_or(&Value::Null), now, since.0.as_ref()))
+}
+
+#[napi(js_name = "idAccountAt")]
+pub fn id_account_at(spans: Json, current: MaybeJson, t: MaybeJson, known: Json) -> Json {
+    let spans = match spans.0 {
+        Value::Array(a) => a,
+        _ => Vec::new(),
+    };
+    let known = match known.0 {
+        Value::Array(a) => a,
+        _ => Vec::new(),
+    };
+    Json(identities::account_at(&spans, current.0.as_ref(), t.0.as_ref(), &known))
+}
+
+#[napi(js_name = "idEmptySaved")]
+pub fn id_empty_saved() -> Json {
+    Json(identities::empty_saved())
+}
+
+#[napi(js_name = "idGithubId")]
+pub fn id_github_id(host: String, login: String) -> String {
+    identities::github_id(&host, &login)
+}
+
+#[napi(js_name = "idGitId")]
+pub fn id_git_id(email: String) -> String {
+    identities::git_id(&email)
+}
+
+#[napi(js_name = "idClaudeId")]
+pub fn id_claude_id(account: String, org: String) -> String {
+    identities::claude_id(&account, &org)
+}
+
+/// From { nodes, links, accounts, ssh, repos, owners, saved, home, now }:
+/// { ranAs, links, identities, signins, known, dirty }.
+#[napi(js_name = "idLinkIdentities")]
+pub fn id_link_identities(env: &Env, input: Json) -> Result<Jv> {
+    let mut m = match input.0 {
+        Value::Object(m) => m,
+        _ => serde_json::Map::new(),
+    };
+    let mut take = |k: &str| m.remove(k).unwrap_or(Value::Null);
+    let nodes = match take("nodes") {
+        Value::Array(a) => a,
+        _ => Vec::new(),
+    };
+    let links: Vec<(Value, Value, Value)> = match take("links") {
+        Value::Array(a) => a
+            .into_iter()
+            .map(|l| {
+                let at = |i: usize| l.get(i).cloned().unwrap_or(Value::Null);
+                (at(0), at(1), at(2))
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    let accounts = take("accounts");
+    let ssh = pairs(&take("ssh"));
+    let repos = value_pairs(take("repos"));
+    let owners = value_pairs(take("owners"));
+    let saved = take("saved");
+    let home = take("home");
+    let now = xenonet_base::text::js_number(Some(&take("now")));
+    let home = home.as_str().filter(|h| !h.is_empty());
+    let out = identities::link_identities(identities::LinkInput {
+        nodes: &nodes,
+        links: &links,
+        accounts: &accounts,
+        ssh: &ssh,
+        repos: &repos,
+        owners: &owners,
+        saved: &saved,
+        home,
+        now,
+    });
+    let out = match out {
+        Ok(o) => o,
+        Err(e) => return thrown(env, e),
+    };
+    let indexed = |xs: Vec<(usize, Value)>| Jv::Arr(xs.into_iter().map(|(i, v)| Jv::Arr(vec![Jv::Num(i as f64), Jv::Json(v)])).collect());
+    Ok(Jv::Obj(vec![
+        ("ranAs", indexed(out.ran_as)),
+        ("links", indexed(out.identities)),
+        ("identities", Jv::Json(Value::Array(out.list))),
+        ("signins", Jv::Arr(out.signins.iter().map(|(app, op)| Jv::Arr(vec![Jv::Json(Value::String((*app).into())), signin_op(op)])).collect())),
+        ("known", Jv::Arr(out.known.into_iter().map(|(id, whole, v)| Jv::Arr(vec![Jv::Json(Value::String(id)), Jv::Bool(whole), Jv::Json(v)])).collect())),
+        ("dirty", Jv::Bool(out.dirty)),
+    ]))
+}
+
+#[napi(js_name = "idRepoConfigMtime")]
+pub fn id_repo_config_mtime(dir: String) -> Option<f64> {
+    identities::repo_config_mtime(&dir)
+}
+
+#[napi(js_name = "idGlobalStamp")]
+pub fn id_global_stamp(home: String, xdg_config_home: Option<String>) -> String {
+    identities::global_stamp(&home, xdg_config_home.as_deref())
+}
+
+#[napi(js_name = "idUnreadableConfig")]
+pub fn id_unreadable_config(path: String, home: String) -> String {
+    identities::unreadable_config(&path, &home)
+}
+
+/// { say: "ok" | "problem" | "", problem }
+#[napi(js_name = "idReport")]
+pub fn id_report(file: Option<Vec<String>>, repo: Option<String>, home: String, state: String, last_error: Option<String>) -> Jv {
+    let file = file.as_ref().map(|f| (f.first().map_or("", String::as_str), f.get(1).map_or("", String::as_str)));
+    let (say, problem) = identities::report(file, repo.as_deref(), &home, &state, last_error.as_deref());
+    Jv::Obj(vec![("say", Jv::Json(Value::String(say.into()))), ("problem", opt_s(problem))])
+}
+
+/// The environment git config runs in away from your home folder, or null.
+#[napi(js_name = "idGitEnv")]
+pub fn id_git_env(env: Json, home: String, your_home: String) -> Json {
+    let env = env.0.as_object().cloned().unwrap_or_default();
+    Json(identities::git_env(&env, &home, &your_home).map_or(Value::Null, Value::Object))
+}
+
+/// Where each Claude Code transcript is, and the account a Remote Control
+/// session names in its first lines.
+#[napi(js_name = "TranscriptOwners")]
+pub struct JsTranscriptOwners {
+    o: identities::TranscriptOwners,
+}
+
+#[napi]
+impl JsTranscriptOwners {
+    #[napi(constructor)]
+    pub fn new(dir: String) -> Self {
+        JsTranscriptOwners { o: identities::TranscriptOwners::new(&dir) }
+    }
+
+    /// { account, org }, or null.
+    #[napi]
+    pub fn owner(&mut self, id: String, now: f64) -> Result<Json> {
+        self.o.owner(&id, now).map(Json).map_err(|e| Error::new(Status::GenericFailure, e.message))
+    }
 }
