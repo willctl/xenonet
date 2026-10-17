@@ -42,7 +42,8 @@ struct Per {
     files: Vec<String>,
     errors: f64,
     subagents: f64,
-    first: Value,
+    // None when the first event had no time, which JSON then leaves out.
+    first: Option<Value>,
     last: f64,
     last_message: Value,
 }
@@ -75,7 +76,7 @@ pub fn summarize<E>(events: &[Value], since: f64, until: f64, title_of: &mut dyn
                     files: Vec::new(),
                     errors: 0.0,
                     subagents: 0.0,
-                    first: get(e, "ts").cloned().unwrap_or(Value::Null),
+                    first: get(e, "ts").cloned(),
                     last: ts,
                     last_message: Value::Null,
                 },
@@ -127,7 +128,9 @@ pub fn summarize<E>(events: &[Value], since: f64, until: f64, title_of: &mut dyn
             m.insert("files".into(), json!(s.files));
             m.insert("errors".into(), number(s.errors));
             m.insert("subagents".into(), number(s.subagents));
-            m.insert("first".into(), s.first.clone());
+            if let Some(first) = &s.first {
+                m.insert("first".into(), first.clone());
+            }
             m.insert("last".into(), number(s.last));
             m.insert("lastMessage".into(), s.last_message.clone());
             m.insert("needsYou".into(), needs_you(&s.id));
