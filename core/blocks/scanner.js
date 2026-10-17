@@ -11,6 +11,12 @@
 // files at the cost of a stat for each folder that didn't change. Folders
 // that went are forgotten, with everything under them.
 //
+// An mtime only moves when the filesystem's clock does. Linux keeps coarse
+// timestamps, so a file added a few milliseconds after a folder last
+// changed usually leaves its mtime as it was. A folder read that soon after
+// its last change could be hiding one (git calls such entries racy), so the
+// next walk reads it again, whatever its mtime says.
+//
 // scan() walks depth first, in the order each folder lists its entries: a
 // folder's files, then its subfolders. It's synchronous: a stat or a
 // readdir takes microseconds, and a trip to the thread pool for each costs
@@ -25,6 +31,12 @@
 import nodeFs from "node:fs";
 import path from "node:path";
 import { Block, messageOf } from "./lifecycle.js";
+
+// How close to a folder's mtime a read of it is racy: wide enough for the
+// coarsest clocks, FAT's 2 s, and either side, for a filesystem whose clock
+// runs ahead.
+const RACY_MS = 2000;
+const racy = (at, mtimeMs) => mtimeMs != null && Math.abs(at - mtimeMs) < RACY_MS;
 
 // fn over the items, n at a time, with the results in order.
 async function inTurn(items, n, fn) {
@@ -55,7 +67,7 @@ export class Scanner extends Block {
     this.concurrency = concurrency;
     this.useCache = cache;
     this.fs = fs;
-    // folder → { mtimeMs, subdirs }, from the last time it was read.
+    // folder → { mtimeMs, subdirs, racy }, from the last time it was read.
     this.folders = new Map();
     this.last = null;
     this.budget = { depth, folders, ms, last: null };
@@ -102,12 +114,13 @@ export class Scanner extends Block {
     }
     run.seen++;
     let f = this.folders.get(dir);
-    if (!this.useCache || !f || f.mtimeMs !== st.mtimeMs) {
+    if (!this.useCache || !this.#kept(f, st)) {
       if (run.read >= this.limits.folders) return void (run.truncated = "folders");
-      if (this.clock.now() - run.started > this.limits.ms) return void (run.truncated = "time");
+      const at = this.clock.now();
+      if (at - run.started > this.limits.ms) return void (run.truncated = "time");
       run.read++;
       const before = f;
-      f = { mtimeMs: st.mtimeMs, subdirs: [] };
+      f = { mtimeMs: st.mtimeMs, subdirs: [], racy: racy(at, st.mtimeMs) };
       let ents = [];
       try {
         ents = this.fs.readdirSync(dir, { withFileTypes: true });
@@ -127,6 +140,12 @@ export class Scanner extends Block {
       this.folders.set(dir, f);
     }
     for (const sub of f.subdirs) this.#walk(sub, level + 1, out, run);
+  }
+
+  // Whether a folder's last read still holds: its mtime hasn't moved, and
+  // it wasn't read so soon after a change that another could hide.
+  #kept(known, st) {
+    return !!known && !known.racy && known.mtimeMs === st.mtimeMs;
   }
 
   // Folders that went since a folder was last read, and everything that
@@ -178,7 +197,7 @@ export class Scanner extends Block {
         }
         if (n > 0) run.seen++;
         const known = this.folders.get(dir);
-        if (st && known?.mtimeMs === st.mtimeMs) {
+        if (st && this.#kept(known, st)) {
           plan.push({ dir, subdirs: known.subdirs, files: [] });
           continue;
         }
@@ -212,7 +231,8 @@ export class Scanner extends Block {
       run.truncated ??= "cancelled";
       return null;
     }
-    if (this.clock.now() - started > limits.ms) {
+    const at = this.clock.now();
+    if (at - started > limits.ms) {
       run.truncated ??= "time";
       return null;
     }
@@ -249,7 +269,7 @@ export class Scanner extends Block {
       }
     }
     if (this.useCache) {
-      const now = { mtimeMs, subdirs: f.subdirs };
+      const now = { mtimeMs, subdirs: f.subdirs, racy: racy(at, mtimeMs) };
       this.#gone(this.folders.get(dir), now);
       this.folders.set(dir, now);
     }
