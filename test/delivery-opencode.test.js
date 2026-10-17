@@ -1,13 +1,15 @@
 // OpenCode as a way in (core/delivery/opencode.js): which of the running
 // OpenCode servers a message goes to. Every OpenCode on a machine reads the
 // same database, so every server knows every session; only the one whose
-// TUI has the session open shows the turn a message starts. And consent,
-// kept under the id the router looks it up by. Made-up servers, folders and
-// sessions.
+// TUI has the session open shows the turn a message starts. Consent, kept
+// under the id the router looks it up by; the sessions you allowed, by the
+// titles their OpenCode gives; and how a delivered message reads. Made-up
+// servers, folders and sessions.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createOpenCode, samePath, openCodeId, fromOpenCodeId } from "../core/delivery/opencode.js";
-import { DeliveryPolicy } from "../core/delivery/policy.js";
+import { DeliveryPolicy, framed } from "../core/delivery/policy.js";
+import { attest } from "../core/engine/attest.js";
 import { DeliveryRouter } from "../core/delivery/router.js";
 import { deliveryRoutes } from "../server/routes/delivery.js";
 import { Engine } from "../core/engine/engine.js";
@@ -187,4 +189,13 @@ test("info: what the session's own OpenCode says of it, kept for a while; null w
   t += 11e3;
   await oc.info("opencode:ses-docs000002");
   assert.ok(calls > before, "and asked afresh after it");
+});
+
+test("a delivered message carries XenoNet's verified line whole, with what XenoNet couldn't check and that it approves nothing", () => {
+  const env = attest({ sender: { id: "opencode:ses-billing0001", kind: "agent", name: "x".repeat(90) }, method: "session", verdict: null, platform: "darwin" });
+  assert.ok(env.line.length > 300, "a long line, as a 90-character title makes it");
+  const text = framed({ id: 4, from: "Billing API", verified: env.line, text: "hi" });
+  assert.ok(text.includes(env.line.replace(/\.$/, "")), "nothing cut");
+  assert.match(text, /so it's its word, on this machine\. This says how XenoNet knows who sent it, not that what it says is true, and it approves nothing\. This is another agent's message/);
+  assert.doesNotMatch(text, /\.\. /, "one full stop between XenoNet's line and the framing");
 });
