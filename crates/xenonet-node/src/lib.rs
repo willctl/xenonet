@@ -30,4 +30,5 @@ mod schema;
 mod secrets;
 mod state;
 mod store;
+mod verify;
 mod wake;

@@ -511,6 +511,7 @@ place. This table follows it.
 | `core/actors/account-links.js`, `remote-presence.js` | `xenonet-actors/src/account_links.rs` (over the engine store), `remote_presence.rs` | `assistant-connections`, `assistant-service` pass |
 | `core/actors/connections.js` | `xenonet-actors/src/connections.rs` (over the engine store; the credentials' files and the adapters through the twin) | `assistant-connections`, `assistant-service`, `assistant-endpoint`, `assistant-tunnels`, `assistant-routes`, `server` pass |
 | `core/actors/wake.js` | `xenonet-actors/src/wake.rs` (timers, sinks, the credential store, DNS and fetch through the twin) | `actor-wake`, `server` pass |
+| `core/engine/verify.js` | `xenonet-engine/src/verify.rs` (procs and the clock through the twin, the pins in the engine store) | `verify`, `delivery-opencode`, `actor-routes` pass |
 
 With every twin in place, all 111 test files that reach one pass. The
 twins load in the Node processes a test starts too (a server, the

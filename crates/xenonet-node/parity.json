@@ -217,6 +217,13 @@
         "Names sort as ICU's root collation sorts ASCII text (localeCompare); outside ASCII, by an approximation of it."
       ]
     },
+    "core/engine/verify.js": {
+      "rust": "crates/xenonet-engine/src/verify.rs",
+      "differences": [
+        "procs and the clock are the twin's, called as the JS called them; the pins are the engine store's own, so another kind of store can't stand in for it.",
+        "verify.state reads the counts as they stand, through getters, rather than being the object the checks change."
+      ]
+    },
     "core/engine/store.js": {
       "rust": "crates/xenonet-engine/src/store.rs",
       "differences": [
