@@ -36,7 +36,8 @@ export function patchFiles(text) {
 
 // The files edit tools changed since `since`, taken out by SQLite: a part's
 // other fields never leave the database, apart from apply_patch's text,
-// whose file headers are kept and the rest dropped here.
+// whose file headers are kept and the rest dropped here. Newest first, so
+// a busy day can't crowd out the edits that matter: the last ones.
 const editsSql = `
   SELECT session_id, time_created,
     json_extract(data, '$.tool') AS tool,
@@ -46,10 +47,11 @@ const editsSql = `
   WHERE time_created > ? AND json_valid(data) AND json_extract(data, '$.type') = 'tool'
     AND json_extract(data, '$.tool') IN (${[...EDIT_TOOLS, ...PATCH_TOOLS].map((t) => `'${t}'`).join(", ")})
     AND COALESCE(json_extract(data, '$.state.status'), '') <> 'error'
-  ORDER BY time_created LIMIT ${EDITS_MAX}`;
+  ORDER BY time_created DESC LIMIT ${EDITS_MAX}`;
 
-// What's in the database since `sinceMs`: { state, version, sessions, edits }.
-export function readDb(file, { sinceMs = 0, open = (f) => new DatabaseSync(f, { readOnly: true }), files = fs } = {}) {
+// What's in the database since `sinceMs` (edits since `editsSinceMs`):
+// { state, version, sessions, edits }, edits oldest first.
+export function readDb(file, { sinceMs = 0, editsSinceMs = sinceMs, open = (f) => new DatabaseSync(f, { readOnly: true }), files = fs } = {}) {
   const empty = { version: null, sessions: [], edits: [] };
   if (!files.existsSync(file)) return { state: "missing", ...empty };
   let db;
@@ -62,7 +64,9 @@ export function readDb(file, { sinceMs = 0, open = (f) => new DatabaseSync(f, { 
   try {
     const columns = (t) => new Set(db.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name));
     const has = { session: columns("session"), part: columns("part") };
-    const version = has.session.has("version") ? cleanVersion(db.prepare("SELECT version AS v FROM session ORDER BY time_updated DESC LIMIT 1").get()?.v ?? null) : null;
+    // The newest session's version, by rowid when time_updated is gone, so
+    // the drift below is still recorded with a version.
+    const version = has.session.has("version") ? cleanVersion(db.prepare(`SELECT version AS v FROM session ORDER BY ${has.session.has("time_updated") ? "time_updated" : "rowid"} DESC LIMIT 1`).get()?.v ?? null) : null;
     for (const [t, needed] of Object.entries(NEEDED)) {
       if (!has[t].size) r.missing(t, version);
       else for (const c of needed) if (!has[t].has(c)) r.missing(`${t}[].${c}`, version);
@@ -70,7 +74,7 @@ export function readDb(file, { sinceMs = 0, open = (f) => new DatabaseSync(f, { 
     if (!NEEDED.session.every((c) => has.session.has(c))) return { state: "unreadable", ...empty, version };
     const cols = SESSION_COLUMNS.filter((c) => has.session.has(c));
     const session = db.prepare(`SELECT ${cols.join(", ")} FROM session WHERE time_updated > ? ORDER BY time_updated DESC LIMIT ${SESSIONS_MAX}`).all(sinceMs).map((x) => ({ ...x }));
-    const raw = NEEDED.part.every((c) => has.part.has(c)) ? db.prepare(editsSql).all(sinceMs) : [];
+    const raw = NEEDED.part.every((c) => has.part.has(c)) ? db.prepare(editsSql).all(editsSinceMs).reverse() : [];
     const edits = [];
     for (const e of raw) {
       if (e.path) edits.push({ session_id: e.session_id, time_created: e.time_created, tool: e.tool, path: e.path });
@@ -100,7 +104,7 @@ export class OpenCodeSessions extends Block {
 
   read(now = this.clock.now()) {
     try {
-      const got = readDb(this.file, { sinceMs: now - DAY_MS, files: this.files, ...(this.open ? { open: this.open } : {}) });
+      const got = readDb(this.file, { sinceMs: now - DAY_MS, editsSinceMs: now - EDIT_KEEP_MS, files: this.files, ...(this.open ? { open: this.open } : {}) });
       this.fileState = got.state;
       this.version = got.version;
       if (got.state !== "ok") {

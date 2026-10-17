@@ -15,6 +15,7 @@ import { actionsFor } from "../core/open.js";
 import { Session } from "../core/schema/session.js";
 import { drift } from "../core/drift.js";
 import { opencodeDb, tool } from "./fixtures/opencode.js";
+import { DatabaseSync } from "node:sqlite";
 
 const NOW = Date.parse("2026-10-16T12:00:00Z");
 const A = "ses_eb95b1836ffexD4vYDGuLeJDCy";
@@ -104,6 +105,32 @@ test("a missing database is said, and one in another layout is drift, not an err
     if (drift.list) assert.ok(drift.list().length > before, "the missing columns are drift");
   } finally {
     odd.done();
+  }
+});
+
+test("the last half hour's edits are read even after a busy day, and a renamed column is drift with its version", () => {
+  const busy = setup({
+    sessions: [{ id: A, directory: "/w/atlas", created: NOW - 20 * 3600e3, updated: NOW - 60e3 }],
+    parts: [...Array.from({ length: 5001 }, (_, i) => ({ session: A, at: NOW - 10 * 3600e3 + i, data: tool("write", { filePath: `/w/atlas/old-${i}.txt` }) })), { session: A, at: NOW - 60e3, data: tool("write", { filePath: "/w/atlas/now.txt" }) }],
+  });
+  try {
+    const o = new OpenCodeSessions({ file: busy.file }).read(NOW);
+    assert.deepEqual([...o.live(sessionIdOf(A)).edits.keys()], ["/w/atlas/now.txt"]);
+  } finally {
+    busy.done();
+  }
+  const renamed = setup();
+  try {
+    const db = new DatabaseSync(renamed.file);
+    db.exec("CREATE TABLE session (id text, directory text, version text, time_created integer, updated_at integer); CREATE TABLE part (session_id text, time_created integer, data text);");
+    db.prepare("INSERT INTO session VALUES ('ses_x', '/w', '1.20.0', 1, 2)").run();
+    db.close();
+    const seen = () => drift.list().find((r) => r.source === "anomaly/opencode/db" && r.kind === "missing-field" && r.path === "session[].time_updated")?.count ?? 0;
+    const before = seen();
+    assert.equal(readDb(renamed.file).state, "unreadable");
+    assert.equal(seen(), before + 1, "the column that went is drift");
+  } finally {
+    renamed.done();
   }
 });
 
