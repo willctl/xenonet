@@ -1,7 +1,7 @@
 //! xenonet-state's stats and search, and xenonet-sources' wiki, for their
-//! twins (core/wiki.js so far).
+//! twins (core/stats.js and core/wiki.js so far).
 
-use crate::js::MaybeJson;
+use crate::js::{Json, MaybeJson};
 use crate::sources::thrown;
 use napi::bindgen_prelude::*;
 use napi::sys;
@@ -10,6 +10,7 @@ use serde_json::Value;
 use std::ptr;
 use xenonet_sources::lines::TypeError;
 use xenonet_sources::wiki::{self, Out};
+use xenonet_state::stats::{self, Event, EventIds, File, Kept, Transcripts};
 
 // ---------- answers ----------
 
@@ -103,6 +104,13 @@ fn answer(env: &Env, r: std::result::Result<Out, TypeError>) -> Result<OutJs> {
     r.map(OutJs).or_else(|e| thrown(env, e))
 }
 
+fn values(v: Json) -> Vec<Value> {
+    match v.0 {
+        Value::Array(a) => a,
+        _ => Vec::new(),
+    }
+}
+
 // ---------- wiki.js ----------
 
 /// { meta, end }: the frontmatter's keys, and where the text after it
@@ -141,4 +149,97 @@ pub fn read_wiki(env: &Env, dir: MaybeJson, projects: MaybeJson, root: MaybeJson
         Some(_) => return thrown(env, TypeError("The \"path\" argument must be of type string".into())),
     };
     answer(env, wiki::read_wiki(&dir, projects.0.as_ref(), root.0.as_ref(), now, Out::of(server.0.as_ref())))
+}
+
+// ---------- stats.js ----------
+
+#[napi(js_name = "TranscriptsCore")]
+#[derive(Default)]
+pub struct JsTranscripts {
+    t: Transcripts,
+}
+
+#[napi]
+impl JsTranscripts {
+    #[napi(constructor)]
+    pub fn new() -> Self {
+        JsTranscripts::default()
+    }
+    /// [{ file, agentId }].
+    #[napi]
+    pub fn files(&mut self, session_id: String, claude_root: Option<String>, codex_roots: Vec<String>, now: f64) -> OutJs {
+        let files = self.t.files(&session_id, claude_root.as_deref(), &codex_roots, now);
+        OutJs(Out::Arr(files.into_iter().map(|(file, agent)| Out::obj(vec![("file", Out::Str(file)), ("agentId", agent.map_or(Out::Null, Out::Str))])).collect()))
+    }
+    #[napi]
+    pub fn list(&mut self, codex_roots: Vec<String>, now: f64) {
+        self.t.list(&codex_roots, now);
+    }
+    /// [[thread id, file]].
+    #[napi(getter)]
+    pub fn rollouts(&self) -> Vec<Vec<String>> {
+        self.t.rollouts.iter().map(|(k, f)| vec![k.clone(), f.clone()]).collect()
+    }
+    #[napi(getter, js_name = "listedAt")]
+    pub fn listed_at(&self) -> f64 {
+        self.t.listed_at
+    }
+}
+
+#[napi(js_name = "StatsKept")]
+#[derive(Default)]
+pub struct JsKept {
+    k: Kept,
+}
+
+#[napi]
+impl JsKept {
+    #[napi(constructor)]
+    pub fn new() -> Self {
+        JsKept::default()
+    }
+    #[napi]
+    pub fn hit(&self, session_id: String, key: String) -> bool {
+        self.k.hit(&session_id, &key)
+    }
+    /// The session let go to make room, if one was.
+    #[napi]
+    pub fn keep(&mut self, session_id: String, key: String) -> Option<String> {
+        self.k.keep(&session_id, &key)
+    }
+}
+
+/// What a session's files are now, as one key.
+#[napi(js_name = "statsStamp")]
+pub fn stats_stamp(files: Vec<String>) -> String {
+    Kept::stamp(&files)
+}
+
+/// The app a session id names.
+#[napi(js_name = "statsAppOf")]
+pub fn stats_app_of(session_id: String) -> String {
+    session_id.split(':').next().unwrap_or_default().to_string()
+}
+
+/// A session's stats from its files read: [{ agentId, lines: [record] }].
+#[napi(js_name = "sessionStats")]
+pub fn session_stats(env: &Env, session_id: String, files: Json) -> Result<OutJs> {
+    let files = values(files)
+        .into_iter()
+        .map(|f| {
+            let mut f = match f {
+                Value::Object(m) => m,
+                _ => Default::default(),
+            };
+            File { agent: f.remove("agentId"), lines: f.remove("lines").map(|l| values(Json(l))).unwrap_or_default() }
+        })
+        .collect();
+    answer(env, stats::session_stats(&session_id, files))
+}
+
+#[napi(js_name = "statsSummarize")]
+pub fn stats_summarize(env: &Env, events: Json, app: MaybeJson) -> Result<OutJs> {
+    let mut ids = EventIds::default();
+    let events: std::result::Result<Vec<Event>, TypeError> = values(events).iter().map(|e| Event::from_js(e, &mut ids)).collect();
+    answer(env, events.and_then(|es| stats::summarize(&es, app.0.as_ref())))
 }
