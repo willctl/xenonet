@@ -1,37 +1,138 @@
-//! The xenonet command, in Rust (docs/design/rust-core.md). It runs the
-//! hooks Claude Code and Codex call on every event, which gain the most
-//! from a native start; the rest of the command is still `cli/xenonet.js`,
-//! and this says so rather than guess.
+//! The xenonet command, in Rust (cli/xenonet.js; docs/design/rust-core.md).
+//! Each command lives in commands/. Commands share the core with the
+//! service and the MCP servers: they call it directly, or a running
+//! XenoNet over its HTTP API. What needs a part of the core that isn't in
+//! Rust yet goes through pending.rs, which says so. `xenonet serve` is the
+//! service itself.
 
-mod hook;
+mod args;
+mod clock;
+mod commands;
+mod config;
+mod handoff;
+mod js;
+mod needs_you;
+mod out;
+mod pending;
+mod products;
+mod prompt;
+mod reach;
+mod report;
+mod sys;
+
+use args::{parse, Flags, Parsed};
+use commands::{alias, find, COMMANDS};
+use out::{c, print, Done, Fail};
+use serde_json::{json, Value};
+use xenonet_base::log::{log_dir, ErrInfo, Log, MAX_BYTES};
 
 const VERSION: &str = env!("XENONET_VERSION");
 
-// `--port 47842` or `--port=47842`.
-fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
-    let long = format!("--{name}");
-    let eq = format!("--{name}=");
-    args.iter().enumerate().find_map(|(i, a)| if *a == long { args.get(i + 1).map(String::as_str) } else { a.strip_prefix(&eq) })
+fn help() {
+    let shown: Vec<_> = COMMANDS.iter().filter(|c| !c.hidden).collect();
+    let usage = |c: &commands::Command| format!("{} {}", c.name, c.args.unwrap_or("")).trim().to_string();
+    let w = shown.iter().map(|c| usage(c).chars().count()).max().unwrap_or(0);
+    let list: Vec<String> = shown.iter().map(|cmd| format!("  {:<width$}{}", usage(cmd), c::dim(cmd.about), width = w + 2)).collect();
+    print(format!(
+        "{} {}
+
+{}
+  xenonet <command> [options]
+
+{}
+{}
+
+{}
+  --json         JSON, for scripts
+  --dev, --demo  XenoNet Dev (port 47842) or its demo (47841), rather than XenoNet
+  --port <n>     The XenoNet on this port
+  --no-color     Plain text
+  -h, --help     Help, for xenonet or a command
+  -v, --version  The version
+
+{}
+  xenonet doctor
+  xenonet agents --repo
+  xenonet who src/scene.js
+  xenonet connect",
+        c::bold("xenonet"),
+        c::dim("· the network for SI on this computer"),
+        c::bold("Usage"),
+        c::bold("Commands"),
+        list.join("\n"),
+        c::bold("Options"),
+        c::bold("Examples"),
+    ));
+}
+
+fn run(name: &str, args: &[String], flags: &Flags) -> Done {
+    if flags.on("help") {
+        let Some(cmd) = find(name) else { return Err(Fail::error(format!("no command \"{name}\". xenonet --help lists them."))) };
+        print(format!("{}{}\n\n{}", c::bold(format!("xenonet {name}")), cmd.args.map_or(String::new(), |a| format!(" {a}")), commands::help(name)));
+        return Ok(0);
+    }
+    commands::run(name, args, flags)
+}
+
+fn main_of(argv: &[String]) -> Done {
+    let Parsed { mut flags, rest } = parse(argv);
+    out::set_color(!(flags.is_false("color") || flags.on("json")));
+    let mut words = rest.into_iter();
+    let name = words.next().filter(|n| !n.is_empty()).map(|n| alias(&n).to_string());
+    let args: Vec<String> = words.collect();
+    if flags.on("version") {
+        print(if flags.on("json") { xenonet_base::json::stringify(&json!({ "version": VERSION }), 0) } else { format!("xenonet {VERSION}") });
+        return Ok(0);
+    }
+    let Some(name) = name else {
+        if flags.on("help") {
+            help();
+            return Ok(0);
+        }
+        return run("status", &[], &flags);
+    };
+    if name == "help" {
+        let Some(first) = args.first().filter(|a| !a.is_empty()) else {
+            help();
+            return Ok(0);
+        };
+        flags.set("help", Value::Bool(true));
+        return run(alias(first), &[], &flags);
+    }
+    if find(&name).is_none() {
+        return Err(Fail::new(format!("no command \"{name}\". xenonet --help lists them."), 2));
+    }
+    run(&name, &args, &flags)
+}
+
+// What XenoNet didn't expect (not a Fail, which says how it was used
+// wrong) goes in its error log too, which xenonet logs reads.
+fn log_error(fail: &Fail, argv: &[String]) {
+    let dir = log_dir(&sys::state_dir(false));
+    let first = argv.iter().find(|a| !a.starts_with('-'));
+    let code = match first {
+        Some(n) if !n.is_empty() && n.bytes().all(|b| b.is_ascii_lowercase()) => format!("cli.{n}"),
+        _ => "cli.command".into(),
+    };
+    let err = ErrInfo { message: Some(fail.message.clone()), stack: None, code: None };
+    Log::new(Some(&dir), "cli", None, None, &sys::home(), MAX_BYTES).write("error", &code, Some(&fail.message), Some(&err), None, None, out::now());
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let code = match args.first().map(String::as_str) {
-        Some("hook") => hook::run(args.get(1).map(String::as_str), flag(&args, "port")),
-        Some("serve") => xenonet_service::run(&args[1..], VERSION),
-        Some("mcp") => {
-            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a runtime");
-            rt.block_on(xenonet_mcp::serve());
-            0
-        }
-        Some("-v" | "--version") => {
-            println!("{VERSION}");
-            0
-        }
-        _ => {
-            eprintln!("This xenonet runs hooks only, for now: use cli/xenonet.js for {}.", args.first().map_or("the other commands", String::as_str));
-            1
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    if argv.first().map(String::as_str) == Some("serve") {
+        std::process::exit(xenonet_service::run(&argv[1..], VERSION));
+    }
+    let code = match main_of(&argv) {
+        Ok(code) => code,
+        // A message; there's no stack to show with XENONET_DEBUG=1 here.
+        Err(fail) => {
+            out::eprint(format!("xenonet: {}", fail.message));
+            if !fail.expected {
+                log_error(&fail, &argv);
+            }
+            fail.code
         }
     };
-    std::process::exit(code);
+    std::process::exit(if code == 0 && out::wrote_badly() { 1 } else { code });
 }

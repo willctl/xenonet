@@ -1,0 +1,8 @@
+The console's themes: every color, the fonts, the sky, the floor grid, the
+glow and the music. A change shows in every XenoNet window at once.
+
+  xenonet theme                     the themes, and which is in use
+  xenonet theme helios              use one
+  xenonet theme copy ochre mine     start a theme of your own from one, as a
+                                  JSON file to edit; XenoNet follows each save
+  --json                          the list as JSON

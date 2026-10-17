@@ -17,6 +17,13 @@ path = "src/main.rs"
 [dependencies]
 serde_json.workspace = true
 tokio.workspace = true
+xenonet-actors.workspace = true
 xenonet-base.workspace = true
 xenonet-mcp.workspace = true
+xenonet-schema.workspace = true
 xenonet-service.workspace = true
+
+# The local time zone, as JS's Date shows a time (localtime_r), and the
+# terminal's width (TIOCGWINSZ), as Node's process.stdout.columns reads it.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

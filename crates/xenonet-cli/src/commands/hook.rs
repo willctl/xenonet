@@ -1,15 +1,19 @@
-//! xenonet hook <app>: what Claude Code's and Codex's hooks run (XenoNet
-//! adds them when you connect your agents). It passes the event on to the
-//! running XenoNet and prints what XenoNet wants the agent to hear, in the
-//! hook output format both read. If XenoNet isn't running, or doesn't
+//! xenonet hook <app> (cli/commands/hook.js): what Claude Code's and
+//! Codex's hooks run (XenoNet adds them when you connect your agents). It
+//! passes the event on to the running XenoNet and prints what XenoNet
+//! wants the agent to hear, in the hook output format both read. If XenoNet isn't running, or doesn't
 //! answer within 4 seconds, it prints nothing and the agent carries on: it
 //! always exits 0. XENONET_PORT (or --port) says which XenoNet.
 
+use crate::args::Flags;
+use crate::out::Done;
 use std::io::{Read, Write};
 use std::time::Duration;
 use xenonet_base::http;
 use xenonet_base::json::Value;
 use xenonet_base::text::js_number;
+
+pub const HELP: &str = include_str!("help/hook.txt");
 
 pub const TIMEOUT: Duration = Duration::from_secs(4);
 
@@ -21,7 +25,13 @@ pub fn port(flag: Option<&str>, env: Option<&str>) -> Option<u16> {
     (n.fract() == 0.0 && (1.0..=65535.0).contains(&n)).then_some(n as u16)
 }
 
-pub fn run(app: Option<&str>, port_flag: Option<&str>) -> i32 {
+pub fn run(args: &[String], flags: &Flags) -> Done {
+    // --port as JS's Number() reads the flag: on its own, it's 1.
+    let port_flag = flags.get("port").map(|v| if *v == Value::Bool(true) { "1".to_string() } else { xenonet_base::text::js_string(v) });
+    Ok(hook(args.first().map(String::as_str), port_flag.as_deref()))
+}
+
+pub fn hook(app: Option<&str>, port_flag: Option<&str>) -> i32 {
     let app = if app == Some("claude") { "claude" } else { "codex" };
     let mut input = Vec::new();
     let _ = std::io::stdin().read_to_end(&mut input);

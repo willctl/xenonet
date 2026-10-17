@@ -1,0 +1,4 @@
+Which XenoNet is running, what it reads, the sessions at work and the actors
+apart from them, what needs you (sessions and actors waiting on you, the
+longest wait first, and programs asking to be actors), and the doctor's
+last word. Exits 1 when no XenoNet answers.

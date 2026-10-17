@@ -1,0 +1,6 @@
+Searches every Claude Code and Codex transcript on this machine for the
+messages that have every word (or a word that starts with it), grouped by
+session, best matches first.
+
+  --limit <n>  how many sessions (default 10)
+  --json       the results as JSON
