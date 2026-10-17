@@ -23,6 +23,7 @@
 import { EventEmitter } from "node:events";
 import { execFile } from "node:child_process";
 import path from "node:path";
+import { parseSelector, matches as selects, formatSelector } from "../delivery/selector.js";
 import { pathStyle } from "../paths.js";
 import { YOU, parseActorId, SESSION_LOCAL } from "../schema/ids.js";
 import { productOf } from "../actors/products.js";
@@ -148,8 +149,14 @@ function readRepo(cwd) {
 export class Engine extends EventEmitter {
   // `actors`: the actor registry (core/actors), whose actors the engine
   // counts among the agents; none in tests that leave it out.
-  constructor({ state, store, repos = new Repos(), now = () => Date.now(), actors = null }) {
+  // `policy`: who may see and message whom, and the guards on messages
+  // (core/delivery/policy.js); none in tests that leave it out, which then
+  // work as before. `delivery`: the router (core/delivery/router.js), set
+  // once it's made, which can reach some sessions without hooks.
+  constructor({ state, store, repos = new Repos(), now = () => Date.now(), actors = null, policy = null }) {
     super();
+    this.policy = policy;
+    this.delivery = null;
     this.state = state;
     this.store = store;
     this.repos = repos;
@@ -278,6 +285,7 @@ export class Engine extends EventEmitter {
   // gateway), or one an experimental reader reads, has no hooks here, so
   // nothing would reach it.
   #reads(id) {
+    if (this.delivery?.reaches?.(id)) return true;
     if (this.state.observed?.live?.(id)) return false;
     return !isActorAgent(id) || !!this.actors?.isRegistered(id);
   }
@@ -318,7 +326,8 @@ export class Engine extends EventEmitter {
 
   async whoami(me) {
     const self = await this.view(me);
-    const others = (await this.agents()).filter((a) => a.id !== me);
+    // Counted inside the caller's scope: an actor learns nothing of the rest.
+    const others = (await this.agents()).filter((a) => a.id !== me && this.visibleTo(me, a));
     return { you: self, unread: this.store.unseen(me).length, peersInRepo: others.filter((a) => Engine.together(a, self)).length, peersOnMachine: others.length };
   }
 
@@ -328,8 +337,11 @@ export class Engine extends EventEmitter {
   async peers(me, { scope = "repo", withinMs = ACTIVE_MS } = {}) {
     const self = await this.view(me);
     const mine = new Set(self.editing.map((e) => this.#rel(self, e.path)));
+    // An actor has no repo: it sees what its scope allows, machine-wide.
+    const wide = scope === "machine" || isActorAgent(me);
+    const sel = scope !== "repo" && scope !== "machine" ? parseSelector(scope) : null;
     return (await this.agents(withinMs))
-      .filter((a) => a.id !== me && (scope === "machine" || Engine.together(a, self)))
+      .filter((a) => a.id !== me && this.visibleTo(me, a) && (sel ? selects(sel, this.facts(a)) : wide || Engine.together(a, self)))
       .map((a) => ({ ...a, overlap: a.editing.map((e) => this.#rel(a, e.path)).filter((r) => mine.has(r)) }));
   }
 
@@ -349,7 +361,9 @@ export class Engine extends EventEmitter {
   async #conflicts(self, files) {
     const out = [];
     for (const other of await this.agents()) {
-      if (other.id === self.id) continue;
+      // An actor hears only of those inside its scope (who_has, a claim's
+      // alsoHeldBy); a person (no id) and the sessions here, of everyone.
+      if (other.id === self.id || (self.id && !this.visibleTo(self.id, other))) continue;
       const together = Engine.together(other, self);
       for (const file of files) {
         const rel = this.#rel(self, file);
@@ -392,10 +406,12 @@ export class Engine extends EventEmitter {
     if (!to) throw new Error('say who it\'s for: a session\'s id, words from its title, "repo" or "all"');
     const self = await this.view(me);
     // Actors XenoNet only observes are left out: nothing reads their inbox.
-    const active = (await this.agents()).filter((a) => a.id !== me && this.#reads(a.id));
+    const active = (await this.agents()).filter((a) => a.id !== me && this.#reads(a.id) && this.visibleTo(me, a));
     let recipients, target;
     let scope = null;
-    if (to === "repo" || to === "project") {
+    const sel = to !== "all" ? parseSelector(to) : null;
+    if (sel) [recipients, target] = [active.filter((a) => selects(sel, this.facts(a))), formatSelector(sel)];
+    else if (to === "repo" || to === "project") {
       [recipients, target] = [active.filter((a) => Engine.together(a, self)), `repo:${self.top ? path.basename(self.top) : (self.project ?? "?")}`];
       scope = repoKey(self);
     }
@@ -405,12 +421,27 @@ export class Engine extends EventEmitter {
       [recipients, target] = [[one], one.id];
     }
     // A message to the repo also waits for agents that join it soon after.
-    if (!recipients.length && !scope) throw new Error(to === "all" ? "no other session or actor has been at work in the last two hours" : "no other session or actor has been at work in this repo in the last two hours");
+    if (!recipients.length && !scope) throw new Error(sel ? `no session or actor you can reach matches ${formatSelector(sel)}` : to === "all" ? "no other session or actor has been at work in the last two hours" : "no other session or actor has been at work in this repo in the last two hours");
+    if (this.policy) {
+      let depth = 0;
+      for (let r = replyTo ? this.store.message(Number(replyTo)) : null; r && depth < 50; r = r.reply_to ? this.store.message(r.reply_to) : null) depth++;
+      this.policy.checkSend({ sender: me, recipients, text, depth });
+      // Secrets don't cross identities, or go to or from an actor.
+      const mine = this.facts(self);
+      let redacted = 0;
+      for (const r of recipients) {
+        const out = this.policy.textFor({ text, sender: me, senderFacts: mine, recipientFacts: this.facts(r) });
+        if (out.redacted) [text, redacted] = [out.text, out.redacted];
+      }
+      if (redacted) this.policy.audit({ kind: "redacted", sender: me, count: redacted });
+    }
     const now = this.now();
     const id = this.store.send({ sender: me, target, scope, body: text, replyTo: replyTo ? Number(replyTo) : null, recipients: recipients.map((r) => r.id), envelope }, now);
     for (const r of recipients) for (const wake of this.waiters.get(r.id) ?? []) wake();
+    // How each will get it, asked before the router spends a wake on it.
+    const ways = recipients.map((r) => this.delivery?.way?.(me, r) ?? delivery(r));
     this.emit("message", { id, from: me, to: recipients.map((r) => r.id), target, text, ts: now, ...(envelope ? { verified: envelope.line, strength: envelope.auth.strength } : {}) });
-    return { id, to: recipients.map((r) => ({ ...brief(r), delivery: delivery(r) })), ...(scope ? { alsoTo: "sessions that start work in this repo in the next half hour" } : {}) };
+    return { id, to: recipients.map((r, i) => ({ ...brief(r), delivery: ways[i] })), ...(scope ? { alsoTo: "sessions that start work in this repo in the next half hour" } : {}) };
   }
 
   // An agent new to a repo gets what was said to everyone there in the last
@@ -424,16 +455,18 @@ export class Engine extends EventEmitter {
   async #resolve(me, to) {
     if (isAgentId(to)) {
       const one = await this.view(to);
+      if (!this.visibleTo(me, one)) throw new Error(`no session or actor you can reach is ${to}`);
       if (!this.#reads(to)) throw this.#deaf(one);
       return one;
     }
     if (isActorAgent(to)) {
       if (!this.actors?.has(to)) throw new Error(`no actor is ${to}; peers lists them`);
       const one = await this.view(to);
+      if (!this.visibleTo(me, one)) throw new Error(`no session or actor you can reach is ${to}`);
       if (!this.#reads(to)) throw this.#deaf(one);
       return one;
     }
-    const all = (await this.agents(7 * 24 * 3600e3)).filter((a) => a.id !== me);
+    const all = (await this.agents(7 * 24 * 3600e3)).filter((a) => a.id !== me && this.visibleTo(me, a));
     const words = String(to).toLowerCase().split(/\s+/).filter(Boolean);
     const match = (list) => {
       const byId = list.filter((a) => a.id.startsWith(to) || a.id.split(":")[1].startsWith(to));
@@ -468,6 +501,7 @@ export class Engine extends EventEmitter {
     await this.#catchUp(me);
     const list = this.store.unseen(me);
     this.store.markSeen(me, list.map((m) => m.id), this.now());
+    if (list.length) this.emit("seen", { agent: me, ids: list.map((m) => m.id) });
     const out = [];
     for (const m of list) {
       const from = await this.view(m.sender);
@@ -531,6 +565,35 @@ export class Engine extends EventEmitter {
   // Note that an agent was in touch directly, which means messages reach it.
   touch(me, { app, cwd, via, pid = null }) {
     this.store.touch(me, { app, cwd, via, pid: Number.isInteger(pid) && pid > 1 ? pid : null }, this.now());
+    this.emit("contact", { agent: me, via });
+  }
+
+  // ---------- scopes ----------
+
+  // What a selector is matched against for one agent (core/delivery/selector.js).
+  facts(a) {
+    const node = this.state.index?.get?.(a.id);
+    const known = this.state.graph?.identities ?? [];
+    const identities = new Set();
+    for (const link of node?.identities ?? []) {
+      const id = String(link.id ?? "").toLowerCase();
+      if (!id) continue;
+      identities.add(id);
+      identities.add(id.split(/[/:]/).pop());
+      const rec = known.find((i) => i.id === link.id);
+      if (rec?.handle) identities.add(String(rec.handle).toLowerCase().replace(/^@/, ""));
+    }
+    const projectNames = [a.project, a.top ? path.basename(a.top) : null].filter(Boolean);
+    // The actors that act on it, as they reported (actor_targets).
+    const actors = (this.store.actorTargets?.() ?? []).filter((t) => t.target === a.id).map((t) => String(t.actor).replace(/^actor:/, ""));
+    return { id: a.id, app: a.app, projectNames, identities: [...identities], machine: "local", status: a.ended ? "ended" : a.status, actors };
+  }
+
+  // Whether `me` may see or message `a`: always, without a policy; else as
+  // the caller's scope allows (an actor: only what its token was granted).
+  visibleTo(me, a) {
+    if (!this.policy || !a) return true;
+    return this.policy.visible(me, this.facts(a));
   }
 
   // ---------- hooks ----------
