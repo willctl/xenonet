@@ -260,6 +260,14 @@
       "differences": [
         "A theme file that isn't JSON is reported with the Rust parser's words, not V8's."
       ]
+    },
+    "core/demo.js": {
+      "rust": "crates/xenonet-app/src/demo.rs",
+      "differences": [
+        "Whether git runs (core/git.js), the ids identities.js gives accounts, the local clock, Math.random, crypto.randomUUID and Date.now are asked of JS, in the order the JS used them, so a test that seeds them gets the same world.",
+        "The second folder's repos are still made by the twin's git, asynchronously, from the steps the Rust gives; the first folder's are made by the Rust's own git, as the JS did synchronously.",
+        "Sessions listed before the world is made fail with an Error of the Rust's words where JS threw a TypeError."
+      ]
     }
   },
   "tests": [

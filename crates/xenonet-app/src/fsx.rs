@@ -109,3 +109,20 @@ pub fn random_hex(n: usize) -> String {
     getrandom::fill(&mut b).expect("the system's random numbers");
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
+
+/// fs.mkdtempSync(prefix): the prefix and six random letters and digits.
+pub fn mkdtemp(prefix: &str) -> Result<String, FsError> {
+    const SET: &[u8; 62] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let mut last = None;
+    for _ in 0..100 {
+        let mut b = [0u8; 6];
+        getrandom::fill(&mut b).expect("the system's random numbers");
+        let dir = format!("{prefix}{}", b.iter().map(|x| SET[*x as usize % 62] as char).collect::<String>());
+        match std::fs::create_dir(&dir) {
+            Ok(()) => return Ok(dir),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = Some(FsError::of(e, "mkdtemp", &format!("{prefix}XXXXXX"))),
+            Err(e) => return Err(FsError::of(e, "mkdtemp", &format!("{prefix}XXXXXX"))),
+        }
+    }
+    Err(last.unwrap_or_else(|| said("couldn't make a temporary folder")))
+}

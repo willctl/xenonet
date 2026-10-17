@@ -504,6 +504,7 @@ place. This table follows it.
 | `core/script.js`, `core/spotify.js` | `xenonet-app/src/script.rs`, `spotify.rs`: each step, and each Spotify call, a state machine the twin drives | `script`, `spotify` pass |
 | `core/control.js` | `xenonet-app/src/control.rs`, on `task.rs`: async Rust whose awaits the twin answers (fetch, the system's processes, spawning) | `control-client`, `control` pass |
 | `core/system-stats.js`, `core/themes.js`, `core/themefiles.js` | `xenonet-app/src/system_stats.rs`, `themes.rs` (the page keeps `core/themes.js`; `themes.json` is made from it, and a test checks the two agree), `themefiles.rs` | `system-stats`, `themes`, `theme-gallery`, `theme-menu`, `actors-layer`, `schema-output` pass |
+| `core/demo.js` | `xenonet-app/src/demo.rs`; randomness, ids and the clock asked of JS, so the seeded world is the same | `golden`, `actors`, `actor-spend`, `state`, `root`, `hosts-merge` pass |
 
 With every twin in place, all 111 test files that reach one pass. The
 twins load in the Node processes a test starts too (a server, the

@@ -1195,3 +1195,169 @@ pub fn app_read_themes(dir: String) -> Json {
 pub fn app_copy_theme(dir: String, from: Option<String>, id: String, name: MaybeJson) -> Jv {
     fs_answer(themefiles::copy_theme(&dir, from.as_deref(), &id, name.0.as_ref()).map(s))
 }
+
+// ----- demo -----
+
+use xenonet_app::demo;
+
+/// What the demo asks of JS: [gitAvailable, local, claudeId, githubId,
+/// gitId, random, randomUUID, now], each a function.
+struct JsAround<'a> {
+    git: Option<Function<'a, (), bool>>,
+    local: Option<Function<'a, f64, Vec<f64>>>,
+    claude: Option<Function<'a, FnArgs<(String, String)>, String>>,
+    github: Option<Function<'a, FnArgs<(String, String)>, String>>,
+    git_id: Option<Function<'a, String, String>>,
+    random: Function<'a, (), f64>,
+    uuid: Function<'a, (), String>,
+    now: Function<'a, (), f64>,
+    failed: Option<Error>,
+}
+
+impl JsAround<'_> {
+    fn keep<T: Default>(&mut self, r: Result<T>) -> T {
+        r.unwrap_or_else(|e| {
+            self.failed.get_or_insert(e);
+            T::default()
+        })
+    }
+}
+
+fn missing<T>() -> Result<T> {
+    Err(Error::from_reason("the demo needs that only when it makes its world"))
+}
+
+impl demo::Around for JsAround<'_> {
+    fn git_available(&mut self) -> bool {
+        let r = self.git.as_ref().map_or_else(missing, |f| f.call(()));
+        self.keep(r)
+    }
+    fn claude_id(&mut self, account: &str, org: &str) -> String {
+        let r = self.claude.as_ref().map_or_else(missing, |f| f.call((account.to_string(), org.to_string()).into()));
+        self.keep(r)
+    }
+    fn github_id(&mut self, host: &str, login: &str) -> String {
+        let r = self.github.as_ref().map_or_else(missing, |f| f.call((host.to_string(), login.to_string()).into()));
+        self.keep(r)
+    }
+    fn git_id(&mut self, email: &str) -> String {
+        let r = self.git_id.as_ref().map_or_else(missing, |f| f.call(email.to_string()));
+        self.keep(r)
+    }
+    fn local(&mut self, ms: f64) -> [i64; 5] {
+        let r = self.local.as_ref().map_or_else(missing, |f| f.call(ms));
+        let v = self.keep(r);
+        let at = |i: usize| v.get(i).copied().unwrap_or(0.0) as i64;
+        [at(0), at(1), at(2), at(3), at(4)]
+    }
+    fn random(&mut self) -> f64 {
+        let r = self.random.call(());
+        self.keep(r)
+    }
+    fn uuid(&mut self) -> String {
+        let r = self.uuid.call(());
+        self.keep(r)
+    }
+    fn now(&mut self) -> f64 {
+        let r = self.now.call(());
+        self.keep(r)
+    }
+}
+
+/// The demo's made-up world and sessions, for the twin of core/demo.js.
+#[napi(js_name = "AppDemo")]
+pub struct AppDemo {
+    inner: demo::Demo,
+}
+
+#[napi]
+impl AppDemo {
+    #[napi(constructor)]
+    pub fn new(tmpdir: String, port: String, today: String) -> Self {
+        AppDemo { inner: demo::Demo::new(&tmpdir, &port, &today) }
+    }
+
+    #[napi]
+    pub fn world(&self) -> Json {
+        Json(self.inner.world.to_value())
+    }
+
+    #[napi(js_name = "createWorld")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_world(
+        &mut self,
+        now: f64,
+        platform: String,
+        git: Function<(), bool>,
+        local: Function<f64, Vec<f64>>,
+        claude: Function<FnArgs<(String, String)>, String>,
+        github: Function<FnArgs<(String, String)>, String>,
+        git_id: Function<String, String>,
+        random: Function<(), f64>,
+        uuid: Function<(), String>,
+        clock: Function<(), f64>,
+    ) -> Result<Jv> {
+        let mut around = JsAround { git: Some(git), local: Some(local), claude: Some(claude), github: Some(github), git_id: Some(git_id), random, uuid, now: clock, failed: None };
+        let r = self.inner.create_world(now, &mut around, &platform);
+        if let Some(e) = around.failed {
+            return Err(e);
+        }
+        Ok(fs_answer(r.map(Jv::Json)))
+    }
+
+    /// The second folder's repos, made the first time something asks:
+    /// [{ dir, steps: [git's arguments…], dirty: [[file, text]…] }].
+    #[napi(js_name = "clientRepos")]
+    pub fn client_repos(&self) -> Json {
+        let steps = demo::repo_steps();
+        Json(Value::Array(
+            self.inner
+                .client_repos
+                .iter()
+                .map(|r| json!({ "dir": r.dir, "steps": steps, "dirty": r.dirty.iter().map(|(rel, t)| json!([xenonet_app::nodepath::NATIVE.join(&[&r.dir, rel]), t])).collect::<Vec<_>>() }))
+                .collect(),
+        ))
+    }
+
+    #[napi]
+    pub fn sessions(&self, app: String) -> Jv {
+        fs_answer(self.inner.sessions_of(&app).map(|v| Jv::Json(Value::Array(v))))
+    }
+
+    #[napi(js_name = "sessionList")]
+    pub fn session_list(&self) -> Json {
+        Json(Value::Array(self.inner.session_list()))
+    }
+
+    #[napi(js_name = "nativeProjects")]
+    pub fn native_projects(&self) -> Json {
+        Json(self.inner.native_projects())
+    }
+
+    #[napi]
+    pub fn transcript(&self, raw_id: String) -> Jv {
+        answer(self.inner.transcript(&raw_id).map(Jv::Json))
+    }
+
+    #[napi(js_name = "stepLive")]
+    pub fn step_live(&mut self, k: u32, now: f64, random: Function<(), f64>, uuid: Function<(), String>, clock: Function<(), f64>) -> Result<()> {
+        let mut around = JsAround { git: None, local: None, claude: None, github: None, git_id: None, random, uuid, now: clock, failed: None };
+        self.inner.step_live(k as usize, now, &mut around);
+        around.failed.map_or(Ok(()), Err)
+    }
+}
+
+#[napi(js_name = "appDemoClaudeAccount")]
+pub fn app_demo_claude_account(project: Option<String>) -> Json {
+    Json(demo::demo_claude_account(project.as_deref()))
+}
+
+#[napi(js_name = "appDemoPicks")]
+pub fn app_demo_picks(outline: MaybeJson) -> Json {
+    Json(demo::demo_picks(&outline.0.unwrap_or(Value::Null)))
+}
+
+#[napi(js_name = "appDemoNarration")]
+pub fn app_demo_narration() -> &'static str {
+    demo::NARRATION
+}

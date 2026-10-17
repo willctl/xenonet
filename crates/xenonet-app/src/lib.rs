@@ -7,6 +7,7 @@ pub mod command;
 pub mod config;
 pub mod control;
 pub mod decide;
+pub mod demo;
 pub mod diagnostics;
 pub mod demo_root;
 pub mod environments;
