@@ -9,7 +9,7 @@ import { GrokBotObserver } from "./grok-bot.js";
 import { MuseObserver } from "./muse.js";
 import { ReportedSpawns } from "./attribution.js";
 import { native } from "../../index.js";
-import { drive, calls } from "../../machine.js";
+import { drive, calls } from "../../drive.js";
 
 export function createObservers({ actors, registration = null, procs, home, env = process.env, clock = systemClock, hermes = {}, grokBot = {}, muse = {} } = {}) {
   if (!actors || actors.demo) return null;

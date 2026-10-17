@@ -8,7 +8,7 @@
 import { EventEmitter } from "node:events";
 import { execFile } from "node:child_process";
 import { native } from "../../index.js";
-import { drive, calls } from "../../machine.js";
+import { drive, calls } from "../../drive.js";
 import { limiter } from "../../../../../core/projects.js";
 
 const ACTIVE_MS = 2 * 3600e3;

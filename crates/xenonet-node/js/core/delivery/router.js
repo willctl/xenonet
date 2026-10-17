@@ -6,7 +6,7 @@
 // timers. The engine, policy and ways in are called as the JS called them.
 import { EventEmitter } from "node:events";
 import { native } from "../../index.js";
-import { drive, calls } from "../../machine.js";
+import { drive, calls } from "../../drive.js";
 
 export const ACK_MS = native.routerAckMs();
 

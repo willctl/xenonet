@@ -6,7 +6,7 @@
 // WakeError class programs test for.
 import dns from "node:dns";
 import { native } from "../../index.js";
-import { drive, calls } from "../../machine.js";
+import { drive, calls } from "../../drive.js";
 import { STORE } from "../engine/store.js";
 
 const C = native.wakeConstants();

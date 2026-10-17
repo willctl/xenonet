@@ -4,7 +4,7 @@
 // registration's. Every check and verdict is Rust's, over the engine
 // store's pins; procs and the clock are called as the JS called them.
 import { native } from "../../index.js";
-import { drive, calls } from "../../machine.js";
+import { drive, calls } from "../../drive.js";
 import { STORE } from "./store.js";
 
 export const ownOf = (chain) => chain.slice(0, native.verifyOwnOf(chain));

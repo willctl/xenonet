@@ -7,7 +7,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import { native } from "../../index.js";
-import { drive, calls } from "../../machine.js";
+import { drive, calls } from "../../drive.js";
 import { onPath } from "../paths.js";
 import { INSTANCES } from "../../../../../core/instances.js";
 

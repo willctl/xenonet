@@ -5,7 +5,7 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import { native } from "../../index.js";
-import { drive, calls } from "../../machine.js";
+import { drive, calls } from "../../drive.js";
 
 const run = (cmd, args) => new Promise((resolve) => execFile(cmd, args, { timeout: 3000, windowsHide: true, maxBuffer: 4 << 20 }, (err, out) => resolve(err ? "" : String(out))));
 

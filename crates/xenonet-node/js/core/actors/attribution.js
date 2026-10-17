@@ -4,7 +4,7 @@
 // Rust's; the store, the map, procs and the actors are called as the JS
 // called them, through the objects given here.
 import { native } from "../../index.js";
-import { drive, calls } from "../../machine.js";
+import { drive, calls } from "../../drive.js";
 import { readCensus } from "./observer.js";
 
 const C = native.attributionConstants();

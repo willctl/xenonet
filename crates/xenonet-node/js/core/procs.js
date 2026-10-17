@@ -7,7 +7,7 @@
 import { execFile } from "node:child_process";
 import net from "node:net";
 import { native } from "../index.js";
-import { drive } from "../machine.js";
+import { drive } from "../drive.js";
 
 // What the commands run with: start times in English and UTC, and text as
 // UTF-8, whatever XenoNet's own environment says.

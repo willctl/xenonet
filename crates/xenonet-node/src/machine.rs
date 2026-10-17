@@ -2,7 +2,7 @@
 //! a Rust function runs on a thread of its own, and each time it needs
 //! something from the outside (a command's output, the clock, a store, a
 //! collaborator's method, a fake a test passed in) it asks, and waits. The
-//! twin drives it (js/machine.js): it takes each question, answers it,
+//! twin drives it (js/drive.js): it takes each question, answers it,
 //! awaiting what it must, and hands the answer back, until the function is
 //! done.
 //!

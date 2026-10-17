@@ -7,7 +7,7 @@ import { Observer } from "./observer.js";
 import { PRODUCTS } from "./products.js";
 import { AppBundle } from "./app-bundle.js";
 import { native } from "../../index.js";
-import { drive, calls } from "../../machine.js";
+import { drive, calls } from "../../drive.js";
 
 const PRODUCT = PRODUCTS.muse;
 const BUNDLE = "Muse.app";

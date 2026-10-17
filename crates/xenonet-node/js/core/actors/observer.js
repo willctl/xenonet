@@ -5,7 +5,7 @@
 // and problem() through the observer, as the JS did. The twin keeps the
 // Block it is and its timer.
 import { native } from "../../index.js";
-import { drive, calls } from "../../machine.js";
+import { drive, calls } from "../../drive.js";
 import { Block } from "../blocks/lifecycle.js";
 
 const C = native.observerConstants();

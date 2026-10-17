@@ -3,7 +3,7 @@
 // time. Every check and drop is Rust's; the registry, the actor's
 // processes and their lineage are called as the JS called them.
 import { native } from "../../index.js";
-import { drive, calls } from "../../machine.js";
+import { drive, calls } from "../../drive.js";
 import { ActorError } from "./registration.js";
 
 export function takeHeartbeat(actors, id, body, { now = actors.now() } = {}) {

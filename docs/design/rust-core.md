@@ -170,7 +170,7 @@ What crosses the boundary, and how:
   it reads. Behind a twin it runs on a thread of its own
   (`crates/xenonet-node/src/machine.rs`): each time it needs something it
   asks and waits, and the twin answers, awaiting what it must
-  (`js/machine.js`). JS waits only while Rust computes between questions.
+  (`js/drive.js`). JS waits only while Rust computes between questions.
   In the binary the same code runs against the system itself.
 - **Events.** A block's EventEmitter stays in its twin. Rust returns each
   state change, and the twin emits it.

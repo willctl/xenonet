@@ -6,7 +6,7 @@
 // resolves to { code, stdout } and never throws for a non-zero exit.
 import { spawn } from "node:child_process";
 import { native } from "../index.js";
-import { drive } from "../machine.js";
+import { drive } from "../drive.js";
 import { onPath } from "./paths.js";
 
 const [target, secret] = native.secretPatterns();

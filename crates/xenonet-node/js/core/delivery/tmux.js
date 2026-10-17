@@ -4,7 +4,7 @@
 // and what's typed are Rust's; the commands run here.
 import { execFile } from "node:child_process";
 import { native } from "../../index.js";
-import { drive, calls } from "../../machine.js";
+import { drive, calls } from "../../drive.js";
 
 const run = (cmd, args) => new Promise((resolve) => execFile(cmd, args, { timeout: 3000, windowsHide: true }, (err, out) => resolve(err ? { ok: false, out: "" } : { ok: true, out: String(out) })));
 

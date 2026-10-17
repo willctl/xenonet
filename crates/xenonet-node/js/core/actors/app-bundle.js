@@ -5,7 +5,7 @@
 import fs from "node:fs";
 import { execFile } from "node:child_process";
 import { native } from "../../index.js";
-import { drive, calls } from "../../machine.js";
+import { drive, calls } from "../../drive.js";
 
 export const plistString = (text, key) => native.plistString(String(text ?? ""), String(key)) ?? null;
 

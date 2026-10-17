@@ -13,7 +13,7 @@ import { PRODUCTS } from "./products.js";
 import { hermesSlug } from "./names.js";
 import { hermesRoot, stateDbOf, vendor } from "./hermes-files.js";
 import { native } from "../../index.js";
-import { drive, calls } from "../../machine.js";
+import { drive, calls } from "../../drive.js";
 
 const PRODUCT = PRODUCTS["hermes-agent"];
 export const HERMES_HEARTBEAT_MS = native.hermesHeartbeatMs();
