@@ -43,7 +43,10 @@ fn launch_agents(p: &Places) -> PathBuf {
 }
 
 fn plist(label: &str, args: &[String], log: &Path, path: &str) -> String {
-    let a: String = args.iter().map(|x| format!("<string>{}</string>", xml(x))).collect();
+    let a: String = args.iter().fold(String::new(), |mut out, x| {
+        out.push_str(&format!("<string>{}</string>", xml(x)));
+        out
+    });
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key><string>{label}</string>\n  <key>ProgramArguments</key>\n  <array>{a}</array>\n  <key>RunAtLoad</key><true/>\n  <key>KeepAlive</key><true/>\n  <key>ThrottleInterval</key><integer>5</integer>\n  <key>ProcessType</key><string>Background</string>\n  <key>EnvironmentVariables</key>\n  <dict><key>PATH</key><string>{}</string></dict>\n  <key>StandardErrorPath</key><string>{}</string>\n  <key>StandardOutPath</key><string>/dev/null</string>\n</dict>\n</plist>\n",
         xml(path),

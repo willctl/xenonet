@@ -4,10 +4,10 @@
 //!   xenolith embeddings status    the settings, whether the API key is reachable, how many vectors exist
 //!   xenolith embeddings sync      embeds what has no vector yet and removes vectors whose text is gone
 
+use serde_json::json;
 use xenolith_core::embed::{self, Settings};
 use xenolith_core::paths::process_env;
 use xenolith_core::wiki;
-use serde_json::json;
 
 pub fn run(args: &[String]) -> ! {
     let env = process_env();

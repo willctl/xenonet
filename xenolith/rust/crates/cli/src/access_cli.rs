@@ -98,7 +98,8 @@ pub fn run(cmd: &str, args: &[String]) -> ! {
                 println!("{}", json!({ "spaces": list }));
             } else {
                 for s in &list {
-                    let ids = s["identities"].as_array().filter(|a| !a.is_empty()).map(|a| format!("  (identity {})", a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "))).unwrap_or_default();
+                    let ids =
+                        s["identities"].as_array().filter(|a| !a.is_empty()).map(|a| format!("  (identity {})", a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "))).unwrap_or_default();
                     println!("{:<32} {:>4} page(s){ids}", s["space"].as_str().unwrap_or(""), s["pages"]);
                 }
             }
@@ -119,7 +120,12 @@ pub fn run(cmd: &str, args: &[String]) -> ! {
                 })
                 .unwrap_or_else(|e| fail(&e.to_string()));
             }
-            audit::best_effort(&paths, "space", "you", vec![("space", json!(id.to_string())), ("event", json!("added")), ("identities", if identities.is_empty() { Value::Null } else { json!(identities) })]);
+            audit::best_effort(
+                &paths,
+                "space",
+                "you",
+                vec![("space", json!(id.to_string())), ("event", json!("added")), ("identities", if identities.is_empty() { Value::Null } else { json!(identities) })],
+            );
             if json_out {
                 println!("{}", json!({ "space": id.to_string(), "identities": identities }));
             } else {
@@ -171,7 +177,17 @@ pub fn run(cmd: &str, args: &[String]) -> ! {
             let ttl = days.map(|d| ((d * 86_400_000.0) as i64).clamp(60_000, 3650 * 86_400_000));
             let label = opts(args, "--label").first().copied().unwrap_or("");
             let (token, rec) = access::update(&paths, |p| p.issue(subject, scopes.clone(), label, ttl, None, now)).unwrap_or_else(|e| fail(&e.to_string()));
-            audit::best_effort(&paths, "token", "you", vec![("token", json!(rec.id)), ("subject", json!(rec.subject)), ("scopes", json!(rec.scopes.iter().map(format_scope).collect::<Vec<_>>())), ("expiresAt", rec.expires_at.map(|e| json!(e)).unwrap_or(Value::Null))]);
+            audit::best_effort(
+                &paths,
+                "token",
+                "you",
+                vec![
+                    ("token", json!(rec.id)),
+                    ("subject", json!(rec.subject)),
+                    ("scopes", json!(rec.scopes.iter().map(format_scope).collect::<Vec<_>>())),
+                    ("expiresAt", rec.expires_at.map(|e| json!(e)).unwrap_or(Value::Null)),
+                ],
+            );
             if json_out {
                 println!("{}", json!({ "token": token, "id": rec.id, "subject": rec.subject, "scopes": rec.scopes.iter().map(format_scope).collect::<Vec<_>>(), "expiresAt": rec.expires_at }));
             } else {
@@ -216,8 +232,21 @@ pub fn run(cmd: &str, args: &[String]) -> ! {
             } else {
                 for l in &lines {
                     let skip = ["seq", "at", "kind", "who", "prev", "hash"];
-                    let rest: Vec<String> = l.as_object().into_iter().flatten().filter(|(k, _)| !skip.contains(&k.as_str())).map(|(k, v)| format!("{k}={}", v.as_str().map(String::from).unwrap_or_else(|| v.to_string()))).collect();
-                    println!("{:>5} {} {:<13} {:<28} {}", l["seq"].as_i64().unwrap_or(0), l["at"].as_str().unwrap_or(""), l["kind"].as_str().unwrap_or(""), l["who"].as_str().unwrap_or(""), rest.join(" "));
+                    let rest: Vec<String> = l
+                        .as_object()
+                        .into_iter()
+                        .flatten()
+                        .filter(|(k, _)| !skip.contains(&k.as_str()))
+                        .map(|(k, v)| format!("{k}={}", v.as_str().map(String::from).unwrap_or_else(|| v.to_string())))
+                        .collect();
+                    println!(
+                        "{:>5} {} {:<13} {:<28} {}",
+                        l["seq"].as_i64().unwrap_or(0),
+                        l["at"].as_str().unwrap_or(""),
+                        l["kind"].as_str().unwrap_or(""),
+                        l["who"].as_str().unwrap_or(""),
+                        rest.join(" ")
+                    );
                 }
             }
             std::process::exit(0)

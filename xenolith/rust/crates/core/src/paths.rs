@@ -37,8 +37,7 @@ pub fn home_dir(env: &Env) -> PathBuf {
     PathBuf::from(".")
 }
 
-const OVERRIDES: [(&str, &str); 5] =
-    [("config", "XENOLITH_CONFIG_DIR"), ("data", "XENOLITH_DATA_DIR"), ("state", "XENOLITH_STATE_DIR"), ("log", "XENOLITH_LOG_DIR"), ("cache", "XENOLITH_CACHE_DIR")];
+const OVERRIDES: [(&str, &str); 5] = [("config", "XENOLITH_CONFIG_DIR"), ("data", "XENOLITH_DATA_DIR"), ("state", "XENOLITH_STATE_DIR"), ("log", "XENOLITH_LOG_DIR"), ("cache", "XENOLITH_CACHE_DIR")];
 
 fn abs_env(env: &Env, name: &str) -> Option<PathBuf> {
     env.get(name).filter(|v| Path::new(v).is_absolute()).map(PathBuf::from)

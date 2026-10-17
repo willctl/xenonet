@@ -9,12 +9,12 @@
 //! initialized, a watcher looks once a second and sends what changed.
 
 use crate::mcp::{self, Ctx, log};
-use xenolith_core::access::Principal;
-use xenolith_core::reqlog::{RequestLog, clip_str};
-use xenolith_core::wiki;
 use serde_json::{Value, json};
 use std::io::{BufRead, Write};
 use std::sync::{Arc, Mutex, mpsc};
+use xenolith_core::access::Principal;
+use xenolith_core::reqlog::{RequestLog, clip_str};
+use xenolith_core::wiki;
 
 const WORKERS: usize = 8;
 

@@ -5,6 +5,10 @@
 #
 #   scripts/check-rust.sh
 #
+# The core and the CLI build on Rust 1.85 (the workspace's default members); the tray needs 1.90, so
+# with an older default toolchain set XENOLITH_TRAY_TOOLCHAIN=1.90.0 (an installed rustup toolchain
+# with clippy) to lint it too.
+#
 # Needs rustup. It adds the x86_64-pc-windows-gnu and aarch64-apple-darwin targets if missing. The
 # Windows lint needs MinGW (apt install gcc-mingw-w64-x86-64). Off macOS, the tray is linted for
 # macOS only on a Mac: its macOS dependencies need Apple's SDK to build.
@@ -16,11 +20,15 @@ step() { printf '\n== %s\n' "$*"; }
 step "rustfmt"
 cargo fmt --all --check
 step "clippy ($host)"
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --all-targets -- -D warnings
+if [[ -n "${XENOLITH_TRAY_TOOLCHAIN:-}" ]]; then
+  step "clippy, the tray (Rust ${XENOLITH_TRAY_TOOLCHAIN})"
+  cargo "+${XENOLITH_TRAY_TOOLCHAIN}" clippy -p xenolith-tray --all-targets -- -D warnings
+fi
 if [[ "$host" != *windows* ]]; then
   rustup target add x86_64-pc-windows-gnu >/dev/null 2>&1 || true
   step "clippy (x86_64-pc-windows-gnu)"
-  cargo clippy --target x86_64-pc-windows-gnu --workspace --all-targets -- -D warnings
+  cargo clippy --target x86_64-pc-windows-gnu --all-targets -- -D warnings
 fi
 if [[ "$host" != *apple-darwin ]]; then
   rustup target add aarch64-apple-darwin >/dev/null 2>&1 || true
@@ -28,5 +36,5 @@ if [[ "$host" != *apple-darwin ]]; then
   cargo clippy --target aarch64-apple-darwin -p xenolith-core -p xenolith-cli --all-targets -- -D warnings
 fi
 step "tests ($host)"
-cargo test --workspace
+cargo test
 printf '\nAll Rust checks passed for %s, Windows and macOS.\n' "$host"

@@ -95,7 +95,7 @@ impl Cron {
             days: field(f[2], "day", 1, 31, &[])? as u32,
             months: field(f[3], "month", 1, 12, &MONTHS)? as u16,
             // 7 is Sunday too.
-            weekdays: ((weekdays | weekdays >> 7) & 0x7f) as u8,
+            weekdays: ((weekdays | (weekdays >> 7)) & 0x7f) as u8,
             any_day: f[2].starts_with('*'),
             any_weekday: f[4].starts_with('*'),
             text,

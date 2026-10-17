@@ -16,20 +16,20 @@
 //! this machine only follows has its curator on another machine (xenolith_core::sync): this process
 //! syncs it once a minute instead.
 
+use serde_json::{Value, json};
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 use xenolith_core::askworker::{AskCfg, AskWorker};
 use xenolith_core::codex;
 use xenolith_core::curator::{self, Curator, CuratorCfg, log};
 use xenolith_core::inbox;
 use xenolith_core::paths::{AppPaths, process_env};
 use xenolith_core::reqlog::RequestLog;
+use xenolith_core::spaces::{self, SpaceId};
 use xenolith_core::waker::Waker;
 use xenolith_core::wiki;
-use serde_json::{Value, json};
-use std::io::Read;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex};
-use xenolith_core::spaces::{self, SpaceId};
 
 /// The spaces this process curates besides machine:local, each with its curator.
 type Others = Arc<Mutex<Vec<(SpaceId, Arc<Curator>, std::thread::JoinHandle<()>)>>>;

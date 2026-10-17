@@ -171,13 +171,7 @@ fn propose(dir: &Path, who: &str, id: &str, note: &Value, base: &str, current: &
     } else {
         format!("{who} wrote this against {what}, but the page is at {current} now.")
     };
-    let held = HeldOp {
-        write,
-        reasons: vec![reason],
-        op,
-        notes: vec![json!({ "id": id, "app": note["app"], "title": note["title"], "source": note["source"] })],
-        kind: "sync".into(),
-    };
+    let held = HeldOp { write, reasons: vec![reason], op, notes: vec![json!({ "id": id, "app": note["app"], "title": note["title"], "source": note["source"] })], kind: "sync".into() };
     wiki::with_lock(dir, || {
         crate::held::record(dir, &batch, &local_iso(&now()), std::slice::from_ref(&held))?;
         crate::held::log_line(dir, "curator", &format!("Proposal from {who} waiting for your OK: {} [[{slug}]] (written against an older version)", crate::text::one_line(&title)))
@@ -446,7 +440,15 @@ pub fn sync_space(paths: &AppPaths, root: &Path, cfg: &Config, space: &SpaceId) 
             paths,
             "sync",
             "you",
-            vec![("space", json!(space.to_string())), ("peer", json!(peer)), ("as", json!(who)), ("pushed", json!(pushed)), ("conflicts", json!(conflicts)), ("refused", json!(refused)), ("pulled", json!(pulled))],
+            vec![
+                ("space", json!(space.to_string())),
+                ("peer", json!(peer)),
+                ("as", json!(who)),
+                ("pushed", json!(pushed)),
+                ("conflicts", json!(conflicts)),
+                ("refused", json!(refused)),
+                ("pulled", json!(pulled)),
+            ],
         );
     }
     report(json!({ "pushed": pushed, "conflicts": conflicts, "refused": refused, "pulled": pulled, "at": now_ms() }))
@@ -523,10 +525,12 @@ mod tests {
         assert_eq!((again[0]["result"].as_str(), again[0]["note"].as_str()), (Some("duplicate"), r[0]["note"].as_str()), "the same entry twice is one note");
 
         let fresh = page_base(&dir, "db");
-        let ok = json!({ "id": inbox::new_note_id(&now()), "note": { "kind": "page", "app": "codex", "title": "DB", "body": "Postgres 17.", "page": { "slug": "db", "mode": "replace", "base": fresh } } });
+        let ok =
+            json!({ "id": inbox::new_note_id(&now()), "note": { "kind": "page", "app": "codex", "title": "DB", "body": "Postgres 17.", "page": { "slug": "db", "mode": "replace", "base": fresh } } });
         assert_eq!(accept(&dir, &who, &[ok], &all).0[0]["result"], "accepted", "a replace against the current page is a note for the curator");
         let stale_id = inbox::new_note_id(&now());
-        let stale = json!({ "id": stale_id, "note": { "kind": "page", "app": "codex", "title": "DB", "body": "Postgres 15.", "page": { "slug": "db", "mode": "replace", "base": "0123456789abcdef" } } });
+        let stale =
+            json!({ "id": stale_id, "note": { "kind": "page", "app": "codex", "title": "DB", "body": "Postgres 15.", "page": { "slug": "db", "mode": "replace", "base": "0123456789abcdef" } } });
         let (r, conflict) = accept(&dir, &who, &[stale], &all);
         assert!(conflict);
         assert_eq!(r[0]["result"], "conflict");

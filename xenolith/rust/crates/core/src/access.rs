@@ -134,9 +134,7 @@ pub fn matches(sel: &Selector, space: &SpaceId, facts: &Facts) -> bool {
 /// XenoNet's within: everything `inner` can select lies inside `outer` (every term of outer
 /// appears in inner, or a prefix of it does).
 pub fn within(inner: &Selector, outer: &Selector) -> bool {
-    outer.terms.iter().all(|(ok, ov)| {
-        inner.terms.iter().any(|(ik, iv)| ik == ok && (iv == ov || ov.strip_suffix('*').is_some_and(|p| iv.starts_with(p))))
-    })
+    outer.terms.iter().all(|(ok, ov)| inner.terms.iter().any(|(ik, iv)| ik == ok && (iv == ov || ov.strip_suffix('*').is_some_and(|p| iv.starts_with(p)))))
 }
 
 // ---------------------------------------------------------------- scopes
@@ -179,7 +177,12 @@ pub fn scopes_supported() -> Vec<String> {
 
 /// A space-separated scope string (OAuth `scope`) as scopes; an error names the one that isn't.
 pub fn parse_scope_list(text: &str) -> Result<Vec<Scope>> {
-    text.split_whitespace().map(|s| parse_scope(s).ok_or_else(|| wiki::Error::Wiki(format!("\"{s}\" is not a scope: use ctx:read, ctx:append, ctx:write or ctx:admin, optionally with :<selector> such as ctx:read:project:atlas")))).collect()
+    text.split_whitespace()
+        .map(|s| {
+            parse_scope(s)
+                .ok_or_else(|| wiki::Error::Wiki(format!("\"{s}\" is not a scope: use ctx:read, ctx:append, ctx:write or ctx:admin, optionally with :<selector> such as ctx:read:project:atlas")))
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------- tokens
@@ -359,9 +362,7 @@ impl Policy {
         o.insert("local".into(), json!(self.local.map_or("none", Level::as_str)));
         o.insert(
             "grants".into(),
-            Value::Array(
-                self.grants.iter().map(|g| json!({ "subject": g.subject, "scope": format_scope(&g.scope), "at": g.at, "expiresAt": g.expires_at, "by": g.by })).collect(),
-            ),
+            Value::Array(self.grants.iter().map(|g| json!({ "subject": g.subject, "scope": format_scope(&g.scope), "at": g.at, "expiresAt": g.expires_at, "by": g.by })).collect()),
         );
         o.insert(
             "tokens".into(),

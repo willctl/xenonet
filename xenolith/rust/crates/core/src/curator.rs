@@ -484,7 +484,7 @@ pub fn validate_plan(plan: &Value, ctx: &Ctx) -> Vec<String> {
                 if ctx.known.contains(slug) {
                     problems.push(format!("{at}: page \"{slug}\" already exists; patch or replace it (it must be among the pages shown) or pick another slug"));
                 }
-                if !op["title"].as_str().is_some_and(|t| !t.trim().is_empty()) {
+                if op["title"].as_str().is_none_or(|t| t.trim().is_empty()) {
                     problems.push(format!("{at}.title is required for create"));
                 }
                 match content.filter(|c| !c.trim().is_empty()) {
@@ -526,7 +526,7 @@ pub fn validate_plan(plan: &Value, ctx: &Ctx) -> Vec<String> {
         }
     }
     for (i, e) in log.iter().enumerate() {
-        if !e["title"].as_str().is_some_and(|t| !t.trim().is_empty()) {
+        if e["title"].as_str().is_none_or(|t| t.trim().is_empty()) {
             problems.push(format!("log[{i}].title is required"));
         }
         if !is_str_list(&e["note_ids"]) || e["note_ids"].as_array().unwrap().iter().any(|id| !is_id(id)) {

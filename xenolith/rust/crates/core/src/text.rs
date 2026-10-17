@@ -98,8 +98,18 @@ pub fn hash_text(s: &str, len: usize) -> String {
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    digest.iter().map(|b| format!("{b:02x}")).collect()
+    hex(&Sha256::digest(bytes))
+}
+
+/// Lowercase hex of the bytes.
+pub fn hex(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        s.push(DIGITS[usize::from(b >> 4)] as char);
+        s.push(DIGITS[usize::from(b & 0x0f)] as char);
+    }
+    s
 }
 
 /// Lines that are only an HTML comment (curator batch markers).
@@ -120,7 +130,7 @@ pub fn display_path(p: &str) -> String {
 pub fn random_hex(n: usize) -> String {
     let mut buf = vec![0u8; n.div_ceil(2)];
     let _ = getrandom::fill(&mut buf);
-    let mut s: String = buf.iter().map(|b| format!("{b:02x}")).collect();
+    let mut s = hex(&buf);
     s.truncate(n);
     s
 }
@@ -131,7 +141,7 @@ pub fn random_uuid() -> String {
     let _ = getrandom::fill(&mut b);
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
-    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    let h = hex(&b);
     format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32])
 }
 

@@ -4,13 +4,13 @@
 //! logs/curator.log, with the host's own lines marked [tray].
 
 use crate::config::Config;
-use xenolith_core::sys::file_identity;
-use xenolith_core::waker::Waker;
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use xenolith_core::sys::file_identity;
+use xenolith_core::waker::Waker;
 
 const MAX_LOG: u64 = 5 * 1024 * 1024;
 

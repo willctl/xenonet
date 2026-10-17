@@ -5,12 +5,12 @@
 use crate::http::{App, Entry, Reply, read_body, status_report};
 use crate::httpd::Request;
 use crate::mcp::State;
+use serde_json::{Map, Value, json};
+use std::path::{Path, PathBuf};
 use xenolith_core::activity::{links_in, parse_log_day};
 use xenolith_core::text::{collate_cmp, local_iso, strip_markers, take_chars};
 use xenolith_core::wiki::{self, DATE_RE, Page, SLUG_RE};
 use xenolith_core::{asks, held, inbox};
-use serde_json::{Map, Value, json};
-use std::path::{Path, PathBuf};
 
 const CSP: &str =
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -396,10 +396,7 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
         }
         let worker = asks::worker_status(wiki_dir);
         if worker.get("running") != Some(&Value::Bool(true)) {
-            return json_reply(
-                503,
-                &json!({ "error": "Asking needs the curator, which runs in the Xenolith tray app. Start the tray (Start menu > Xenolith), then ask again.", "worker": worker }),
-            );
+            return json_reply(503, &json!({ "error": "Asking needs the curator, which runs in the Xenolith tray app. Start the tray (Start menu > Xenolith), then ask again.", "worker": worker }));
         }
         let question = body.get("question").and_then(Value::as_str).unwrap_or("");
         return match asks::create_ask(wiki_dir, question, body.get("parent").unwrap_or(&Value::Null)) {
@@ -456,7 +453,8 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
             let limit = int_param(param(query, "limit"), 20, 1, 50);
             let date = |k: &str| param(query, k).filter(|d| DATE_RE.is_match(d));
             let filters = xenolith_core::search::Filters { since: date("since"), until: date("until"), app: param(query, "app").filter(|a| !a.trim().is_empty()) };
-            let results: Vec<Value> = if q.trim().is_empty() { vec![] } else { xenolith_core::search::search(wiki_dir, &q, &scope, limit, &filters).unwrap_or_default().iter().map(hit_json).collect() };
+            let results: Vec<Value> =
+                if q.trim().is_empty() { vec![] } else { xenolith_core::search::search(wiki_dir, &q, &scope, limit, &filters).unwrap_or_default().iter().map(hit_json).collect() };
             json_reply(200, &json!({ "query": q, "terms": wiki::tokenize(&q), "results": results }))
         }
         "/api/activity" => {
@@ -481,15 +479,15 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
             };
             let wiki_dir = &dir;
             json_reply(
-            200,
-            &json!({
-                "changes": held::list(wiki_dir),
-                "forget": xenolith_core::forget::requests(wiki_dir, Some(&xenolith_core::paths::AppPaths::current().log_dir)),
-                "approvals": xenolith_core::settings::approvals(wiki_dir).as_str(),
-                "approvalsProblem": xenolith_core::settings::approvals_and_problem(wiki_dir).1,
-                "auto": held::recent_auto(wiki_dir, 7),
-            }),
-        )
+                200,
+                &json!({
+                    "changes": held::list(wiki_dir),
+                    "forget": xenolith_core::forget::requests(wiki_dir, Some(&xenolith_core::paths::AppPaths::current().log_dir)),
+                    "approvals": xenolith_core::settings::approvals(wiki_dir).as_str(),
+                    "approvalsProblem": xenolith_core::settings::approvals_and_problem(wiki_dir).1,
+                    "auto": held::recent_auto(wiki_dir, 7),
+                }),
+            )
         }
         "/api/settings" => {
             let (approvals, problem) = xenolith_core::settings::approvals_and_problem(wiki_dir);

@@ -3,6 +3,9 @@
 //! two of them do something else, so they read differently: mcp/tools-direct-text.json replaces
 //! only their title and description.
 
+use serde_json::{Map, Value, json};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use xenolith_core::access::{self, Level, Policy, Principal};
 use xenolith_core::audit;
 use xenolith_core::inbox::{self, NoteInput, PageInput};
@@ -12,9 +15,6 @@ use xenolith_core::reqlog::{RequestLog, clip, clip_str, new_request_id, summariz
 use xenolith_core::spaces::{self, SpaceId};
 use xenolith_core::text::{defang_remote_images, local_iso, now, now_ms};
 use xenolith_core::wiki::{self, Error, UpsertInput};
-use serde_json::{Map, Value, json};
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 pub const SUPPORTED_VERSIONS: [&str; 5] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
 const ASK_TOOLS: [&str; 2] = ["context_search", "context_read"];
@@ -194,7 +194,12 @@ pub fn open_space(st: &State, ctx: &Ctx, root: &Path, args: &Value, need: Level)
     let now = now_ms();
     // Every refusal goes in the audit chain: who, where, what for and why (never the call's text).
     let refuse = |space: Option<&SpaceId>, why: &str, e: Error| {
-        audit::best_effort(&paths, "refused", &ctx.principal.name(), vec![("space", space.map(|s| json!(s.to_string())).unwrap_or(Value::Null)), ("need", json!(need.as_str())), ("why", json!(why)), ("transport", json!(ctx.transport))]);
+        audit::best_effort(
+            &paths,
+            "refused",
+            &ctx.principal.name(),
+            vec![("space", space.map(|s| json!(s.to_string())).unwrap_or(Value::Null)), ("need", json!(need.as_str())), ("why", json!(why)), ("transport", json!(ctx.transport))],
+        );
         e
     };
     let Some(who) = policy.current(&ctx.principal, now) else {

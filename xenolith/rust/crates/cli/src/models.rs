@@ -6,10 +6,10 @@
 //!   xenolith models set curator|ask --effort <level>           keeps the model
 //!   xenolith models reset curator|ask                          back to the default
 
+use serde_json::Value;
 use xenolith_core::curator::CuratorCfg;
 use xenolith_core::paths::{AppPaths, process_env};
 use xenolith_core::{models, settings, wiki};
-use serde_json::Value;
 
 pub fn run(args: &[String]) -> ! {
     let env = process_env();

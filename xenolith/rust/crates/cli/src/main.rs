@@ -28,8 +28,8 @@ mod httpd;
 mod install;
 mod keypipe;
 mod mcp;
-mod resources;
 mod models;
+mod resources;
 mod service;
 mod stdio;
 mod sync_cli;
@@ -93,8 +93,10 @@ fn main() {
     if has("--http") {
         set_if_unset("XENOLITH_PROCESS", "service");
         let cfg = xenolith_core::wiki::read_config(&mcp::env()).unwrap_or_else(|_| json!({}));
-        let port =
-            opt("--port").and_then(|p| p.parse::<u16>().ok()).or_else(|| cfg.get("httpPort").and_then(Value::as_u64).and_then(|p| u16::try_from(p).ok())).unwrap_or(xenolith_core::wiki::DEFAULT_HTTP_PORT);
+        let port = opt("--port")
+            .and_then(|p| p.parse::<u16>().ok())
+            .or_else(|| cfg.get("httpPort").and_then(Value::as_u64).and_then(|p| u16::try_from(p).ok()))
+            .unwrap_or(xenolith_core::wiki::DEFAULT_HTTP_PORT);
         http::run(port, has("--parent-stdin"), has("--exit-on-upgrade"));
     }
     let read_only = has("--read-only");

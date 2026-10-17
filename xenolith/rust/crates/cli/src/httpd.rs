@@ -3,12 +3,12 @@
 //! piece with Content-Length and TCP_NODELAY. Strict where ambiguity could smuggle a request: no
 //! obsolete line folding, no Content-Length together with Transfer-Encoding, one Host.
 
-use xenolith_core::waker::Waker;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+use xenolith_core::waker::Waker;
 
 /// Largest request body read; larger ones get 413 and the connection closes.
 pub const MAX_BODY: usize = 4 * 1024 * 1024;

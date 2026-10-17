@@ -178,7 +178,10 @@ fn toml_str(s: &str) -> String {
 /// The agent's only tools: this program's `serve --read-only` over stdio, offering context_search and context_read.
 pub fn mcp_args(server: &Path, wiki_dir: &Path, paths: &AppPaths, ask_id: &str) -> Vec<String> {
     let s = |p: &Path| toml_str(&p.to_string_lossy());
-    let env: String = paths.env_vars().iter().map(|(k, v)| format!("{k}={}, ", s(v))).collect();
+    let env: String = paths.env_vars().iter().fold(String::new(), |mut out, (k, v)| {
+        out.push_str(&format!("{k}={}, ", s(v)));
+        out
+    });
     [
         format!("mcp_servers.wiki.command={}", s(server)),
         "mcp_servers.wiki.args=[\"serve\", \"--read-only\"]".to_string(),

@@ -4,15 +4,7 @@
 
 use crate::httpd::{self, Request, Response};
 use crate::mcp::{self, Ctx, State, log, rpc_error};
-use xenolith_core::access::{self, Principal};
 use crate::uiapi;
-use xenolith_core::inbox;
-use xenolith_core::lock::lock_info;
-use xenolith_core::paths::AppPaths;
-use xenolith_core::reqlog::{RequestLog, clip_str, new_request_id};
-use xenolith_core::text::{from_ms, local_iso, now_ms, parse_ms, random_uuid, sha256_hex};
-use xenolith_core::waker::Waker;
-use xenolith_core::{asks, wiki};
 use serde_json::{Map, Value, json};
 use std::collections::VecDeque;
 use std::io::Read;
@@ -20,6 +12,14 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
+use xenolith_core::access::{self, Principal};
+use xenolith_core::inbox;
+use xenolith_core::lock::lock_info;
+use xenolith_core::paths::AppPaths;
+use xenolith_core::reqlog::{RequestLog, clip_str, new_request_id};
+use xenolith_core::text::{from_ms, local_iso, now_ms, parse_ms, random_uuid, sha256_hex};
+use xenolith_core::waker::Waker;
+use xenolith_core::{asks, wiki};
 
 const MAX_BATCH: usize = 100;
 
@@ -327,7 +327,12 @@ fn sync_route(app: &App, req: &Request, method: &str, path: &str, who: Principal
         return challenge(&format!("http://{}", req.header("host").unwrap_or_default()), Some("invalid_token"), None, "The token has been revoked or has expired.");
     };
     if !policy.allows(&who, &space, Level::Read, now) || !spaces::exists(&root, &space) {
-        xenolith_core::audit::best_effort(&paths, "refused", &who.name(), vec![("space", json!(space.to_string())), ("need", json!("read")), ("why", json!("sync: not granted")), ("transport", json!("sync"))]);
+        xenolith_core::audit::best_effort(
+            &paths,
+            "refused",
+            &who.name(),
+            vec![("space", json!(space.to_string())), ("need", json!("read")), ("why", json!("sync: not granted")), ("transport", json!("sync"))],
+        );
         return not_found();
     }
     entry.client = Some(who.name());
@@ -357,7 +362,13 @@ fn sync_route(app: &App, req: &Request, method: &str, path: &str, who: Principal
                 &paths,
                 "sync",
                 &who.name(),
-                vec![("space", json!(space.to_string())), ("accepted", json!(count("accepted"))), ("duplicates", json!(count("duplicate"))), ("conflicts", json!(count("conflict"))), ("refused", json!(count("refused")))],
+                vec![
+                    ("space", json!(space.to_string())),
+                    ("accepted", json!(count("accepted"))),
+                    ("duplicates", json!(count("duplicate"))),
+                    ("conflicts", json!(count("conflict"))),
+                    ("refused", json!(count("refused"))),
+                ],
             );
             entry.result = Some(if conflict { "conflict".into() } else { "ok".into() });
             // 409 when any page write came in against an older version: it is a proposal now.
@@ -424,7 +435,12 @@ fn principal_of(base: &str, bearer: &Option<Option<String>>, entry: &mut Entry) 
                 None => {
                     entry.result = Some("invalid-token".into());
                     // Never the token itself: a hash of it, enough to tell attempts with one token apart.
-                    xenolith_core::audit::best_effort(&AppPaths::current(), "refused", "an unknown token", vec![("why", json!("invalid token")), ("token", json!(&access::hash_token(t)[..12])), ("transport", json!("http"))]);
+                    xenolith_core::audit::best_effort(
+                        &AppPaths::current(),
+                        "refused",
+                        "an unknown token",
+                        vec![("why", json!("invalid token")), ("token", json!(&access::hash_token(t)[..12])), ("transport", json!("http"))],
+                    );
                     Err(challenge(base, Some("invalid_token"), None, "The token is unknown, expired, revoked, or for another server."))
                 }
             }

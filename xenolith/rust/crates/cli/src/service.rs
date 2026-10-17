@@ -10,11 +10,11 @@
 //! (this account's profile is not the user's, so each folder is named).
 
 use crate::http::{self, Ended};
-use xenolith_core::waker::Waker;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use xenolith_core::waker::Waker;
 
 #[cfg_attr(not(windows), allow(dead_code))]
 pub const SERVICE_NAME: &str = "Xenolith";
@@ -55,9 +55,7 @@ fn apply(ini: &HashMap<String, String>) -> Result<Settings, String> {
     };
     set("XENOLITH_DIR", &ini["wikidir"]);
     set("XENOLITH_LOG_DIR", &ini["logdir"]);
-    for (key, var) in
-        [("configdir", "XENOLITH_CONFIG_DIR"), ("datadir", "XENOLITH_DATA_DIR"), ("statedir", "XENOLITH_STATE_DIR"), ("cachedir", "XENOLITH_CACHE_DIR"), ("home", "XENOLITH_HOME")]
-    {
+    for (key, var) in [("configdir", "XENOLITH_CONFIG_DIR"), ("datadir", "XENOLITH_DATA_DIR"), ("statedir", "XENOLITH_STATE_DIR"), ("cachedir", "XENOLITH_CACHE_DIR"), ("home", "XENOLITH_HOME")] {
         if let Some(v) = ini.get(key) {
             set(var, v);
         }
@@ -156,10 +154,10 @@ fn redirect_stderr(_: Option<&std::fs::File>) {}
 #[cfg(windows)]
 mod scm {
     use super::{Settings, host, note};
-    use xenolith_core::waker::Waker;
     use std::sync::{Arc, Mutex, OnceLock};
     use windows_sys::Win32::Foundation::{ERROR_CALL_NOT_IMPLEMENTED, ERROR_SERVICE_SPECIFIC_ERROR, NO_ERROR};
     use windows_sys::Win32::System::Services::*;
+    use xenolith_core::waker::Waker;
 
     struct Shared {
         settings: Settings,
