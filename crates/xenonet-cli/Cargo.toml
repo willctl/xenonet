@@ -1,0 +1,17 @@
+[package]
+name = "xenonet-cli"
+description = "The xenonet command, in Rust. So far it runs Claude Code's and Codex's hooks; the other commands follow the port."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "xenonet"
+path = "src/main.rs"
+
+[dependencies]
+xenonet-base.workspace = true

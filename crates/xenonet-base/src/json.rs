@@ -17,7 +17,8 @@
 //! - Writing, a double is written as JS writes a number (`1e+21`, `5e-7`,
 //!   `0.1`), and one that isn't finite as null.
 
-use serde_json::{Map, Number, Value};
+pub use serde_json::Value;
+use serde_json::{Map, Number};
 
 const MAX_DEPTH: usize = 512;
 

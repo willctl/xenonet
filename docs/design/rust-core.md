@@ -33,9 +33,11 @@ done.
 ## Why
 
 - Claude Code and Codex start `xenonet hook` on every hook event and
-  `xenonet mcp` for every session. Each is a Node process today, and
-  `xenonet --version` takes 50 to 60 ms on a recent Mac before it prints
-  anything. A native binary starts in a few milliseconds.
+  `xenonet mcp` for every session. Each is a Node process today. On a
+  recent Mac, a Codex hook run through Node takes about 88 ms from start
+  to exit, with XenoNet's answer; the Rust `xenonet hook` takes about
+  3 ms. Codex runs each of its hooks as a command, so a tool call starts
+  two.
 - The service, Tools and a host become one file per platform, with no
   Node runtime, launcher script or `ELECTRON_RUN_AS_NODE` beside them.
 - The service runs all the time (see [Always-on XenoNet](always-on.md)).
@@ -442,6 +444,7 @@ place. This table follows it.
 | `core/blocks/tailer.js` | `xenonet-blocks/src/tailer.rs`, with the restart fix | `blocks-tailer`, `live` pass |
 | `core/lines.js` | `xenonet-sources/src/lines.rs` | `lines`, `codex`, `vendor-schemas` pass |
 | `core/blocks/store.js` | `xenonet-blocks/src/store.rs` | `blocks-store`, `statefile`, `store`, `hosts-config` pass |
+| `xenonet hook` (`cli/commands/hook.js`) | `xenonet-cli`, the `xenonet` binary | `launcher`'s hook cases, as Rust tests of the binary |
 
 With every twin in place, all 92 test files that reach one pass. The two
 fixes on `fix/scanner-racy-mtime` are in the Rust (the scanner reads a

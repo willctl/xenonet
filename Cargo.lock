@@ -298,6 +298,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "xenonet-cli"
+version = "0.2.0"
+dependencies = [
+ "xenonet-base",
+]
+
+[[package]]
 name = "xenonet-node"
 version = "0.2.0"
 dependencies = [
