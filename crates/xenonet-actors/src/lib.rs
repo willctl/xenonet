@@ -11,6 +11,7 @@ pub mod handoff;
 pub mod key;
 pub mod limits;
 pub mod names;
+pub mod observer;
 pub mod registration;
 pub mod registry;
 pub mod secret_store;

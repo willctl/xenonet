@@ -166,8 +166,13 @@ impl Ordered {
     }
     // The newer half, once there are many.
     fn trim(&mut self) {
-        if self.items.len() > DONE_MAX {
-            let keep = self.items.split_off(self.items.len() - DONE_MAX / 2);
+        self.trim_to(DONE_MAX);
+    }
+
+    /// The newer half, once there are more than `max`.
+    pub fn trim_to(&mut self, max: usize) {
+        if self.items.len() > max {
+            let keep = self.items.split_off(self.items.len() - max / 2);
             *self = Ordered { index: keep.iter().cloned().collect(), items: keep };
         }
     }

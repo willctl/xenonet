@@ -254,6 +254,20 @@
         "The store, the map, procs and the actors are called through the objects given, as the JS called them. ReportedSpawns reads the census with what each process is in one go.",
         "Spawns' pending, done and claimed are copies (claimed can be added to); a pin whose agent isn't text doesn't match, where JS threw."
       ]
+    },
+    "core/actors/registration.js": {
+      "rust": "crates/xenonet-actors/src/registration.rs",
+      "differences": [
+        "The actors and the clock are called through the objects given; the store is the engine's own Rust store.",
+        "Events (requests, asked, asked-gateway) are told once the call is done, not in its middle.",
+        "An ActorError is the twin's own class, thrown again from Rust's marked error: its stack is the twin's."
+      ]
+    },
+    "core/actors/observer.js": {
+      "rust": "crates/xenonet-actors/src/observer.rs",
+      "differences": [
+        "Rust calls the actors, the product, the clock and the observer's own observing(), look(), ok() and problem() through the observer, as the JS did; the timer and the look under way stay in the twin."
+      ]
     }
   },
   "tests": [
