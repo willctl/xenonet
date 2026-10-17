@@ -290,6 +290,43 @@ impl Parser<'_> {
     }
 }
 
+/// The shortest digits that read back as `x` (a finite positive double),
+/// and the exponent of the first: 1000000000000000.2 is ("10000000000000002",
+/// 15). Rust's {:e} gives them, except where two are as near as each other
+/// to the double: ECMA-262 (Number::toString) takes the even one, and Rust
+/// the larger (1000000000000000.25 is …0.2 in JS, …0.3 in Rust).
+pub fn shortest(x: f64) -> (String, i32) {
+    let e = format!("{:e}", x);
+    let (mantissa, exp) = e.split_once('e').unwrap();
+    let exp: i32 = exp.parse().unwrap();
+    let mut digits: String = mantissa.chars().filter(|c| *c != '.').collect();
+    // Two digit strings of one length both read back as the double only
+    // when the double's spacing is wider than theirs, at 16 digits or more;
+    // and a tie needs the double to be exactly their midpoint.
+    let last = digits.as_bytes()[digits.len() - 1];
+    if digits.len() >= 15 && (last - b'0') % 2 == 1 {
+        let exact = format!("{:.800e}", x);
+        let (exact, exact_exp) = exact.split_once('e').unwrap();
+        let exact: String = exact.chars().filter(|c| *c != '.').collect();
+        for other in [last - 1, last + 1] {
+            if other > b'9' || exact_exp.parse::<i32>() != Ok(exp) {
+                continue;
+            }
+            let mut n = digits.clone().into_bytes();
+            *n.last_mut().unwrap() = other;
+            let n = String::from_utf8(n).unwrap();
+            let low = if other < last { &n } else { &digits };
+            let at_midpoint = exact.starts_with(low.as_str()) && exact.as_bytes()[low.len()] == b'5' && exact[low.len() + 1..].bytes().all(|b| b == b'0');
+            let reads_back = format!("{}.{}e{exp}", &n[..1], &n[1..]).parse::<f64>() == Ok(x);
+            if at_midpoint && reads_back {
+                digits = n;
+                break;
+            }
+        }
+    }
+    (digits, exp)
+}
+
 /// A number as JS writes it (Number.prototype.toString): the shortest
 /// digits that read back as the same double, in fixed notation from 1e-7
 /// up to 1e21 and in exponent notation outside that.
@@ -303,11 +340,7 @@ pub fn number_string(n: f64) -> String {
     if n == 0.0 {
         return "0".into();
     }
-    // Rust's {:e} gives the shortest round-trip digits: d.ddddde<exp>.
-    let e = format!("{:e}", n.abs());
-    let (mantissa, exp) = e.split_once('e').unwrap();
-    let exp: i32 = exp.parse().unwrap();
-    let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
+    let (digits, exp) = shortest(n.abs());
     let k = digits.len() as i32;
     let point = exp + 1; // where the decimal point goes, counted from the first digit
     let sign = if n < 0.0 { "-" } else { "" };
@@ -423,6 +456,24 @@ pub fn stringify(v: &Value, indent: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // As Node 22 writes them: of two shortest digit strings as near as each
+    // other to the double, the even one. The literals are exact doubles,
+    // longer than either.
+    #[test]
+    #[allow(clippy::excessive_precision)]
+    fn ties_go_to_even() {
+        for (x, js) in [
+            (1000000000000000.25, "1000000000000000.2"),
+            (1000000000000000.75, "1000000000000000.8"),
+            (4503599627370497.5, "4503599627370498"),
+            (0.3, "0.3"),
+            (5e-324, "5e-324"),
+            (1.6500000000000002e300, "1.6500000000000002e+300"),
+        ] {
+            assert_eq!(number_string(x), js, "{x}");
+        }
+    }
 
     #[test]
     fn reads_as_json_parse_does() {
