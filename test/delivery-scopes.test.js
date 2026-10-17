@@ -88,6 +88,21 @@ test("an actor sees and reaches nothing until its token is granted a scope, then
   assert.deepEqual(policy.readAudit().map((a) => a.kind).filter((k) => k !== "refused"), ["grant", "grant", "revoke"]);
 });
 
+test("outside its scope an actor learns nothing of a session: not from whoami's counts, who_has or a claim", async () => {
+  const { engine, store, policy, t } = world();
+  store.claim(C, "/w/ledger/books.js", "reworking", t.now + 3600e3, t.now);
+  const holders = async () => (await engine.whoHas(WREN, "/w/ledger/books.js")).map((h) => h.agent.id);
+  assert.equal((await engine.whoami(WREN)).peersOnMachine, 0, "default deny");
+  assert.deepEqual(await holders(), []);
+  assert.deepEqual((await engine.claim(WREN, { paths: ["/w/ledger/books.js"] })).alsoHeldBy, []);
+  policy.grant(WREN, "identity:adal");
+  assert.equal((await engine.whoami(WREN)).peersOnMachine, 2);
+  assert.deepEqual(await holders(), [], "the ledger session is kestrel's");
+  policy.grant(WREN, "project:ledger");
+  assert.deepEqual(await holders(), [C]);
+  assert.deepEqual((await engine.whoHas(A, "/w/ledger/books.js")).map((h) => h.agent.id).sort(), [WREN, C], "a session here sees everyone");
+});
+
 test("guards: the pause switch, fan-out, rate, duplicates, loops between two agents and deep reply chains", async () => {
   let w = world();
   w.policy.setPaused(true);

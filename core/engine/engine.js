@@ -321,7 +321,8 @@ export class Engine extends EventEmitter {
 
   async whoami(me) {
     const self = await this.view(me);
-    const others = (await this.agents()).filter((a) => a.id !== me);
+    // Counted inside the caller's scope: an actor learns nothing of the rest.
+    const others = (await this.agents()).filter((a) => a.id !== me && this.visibleTo(me, a));
     return { you: self, unread: this.store.unseen(me).length, peersInRepo: others.filter((a) => Engine.together(a, self)).length, peersOnMachine: others.length };
   }
 
@@ -355,7 +356,9 @@ export class Engine extends EventEmitter {
   async #conflicts(self, files) {
     const out = [];
     for (const other of await this.agents()) {
-      if (other.id === self.id) continue;
+      // An actor hears only of those inside its scope (who_has, a claim's
+      // alsoHeldBy); a person (no id) and the sessions here, of everyone.
+      if (other.id === self.id || (self.id && !this.visibleTo(self.id, other))) continue;
       const together = Engine.together(other, self);
       for (const file of files) {
         const rel = this.#rel(self, file);
