@@ -302,11 +302,13 @@ the 2025 handshake. The Rust server keeps that behavior:
   `claude` process (the parent, or `CLAUDE_PID`) was started with
   `--channels` or `--dangerously-load-development-channels` naming
   `server:<this server's name>`. `XENONET_CHANNEL=1` or `0` forces it.
-- **The handshake.** For a channel session the server's
-  `supported_protocol_versions` stops at 2025-11-25. `initialize` is
-  answered with 2025-11-25 (or an older version the client asked for),
-  and `server/discover` gets method-not-found, which sends Claude Code
-  back to the handshake.
+- **The handshake.** For a channel session, `server/discover` (the
+  2026-07-28 probe) gets method-not-found, as the JS server answers it,
+  which sends Claude Code back to `initialize`, where it asks for
+  2025-11-25 and gets it. The server doesn't cap its protocol versions to
+  do this: capped at 2025-11-25, rmcp answers the probe itself with
+  `-32022 Unsupported protocol version` before any handler runs, which
+  isn't the answer known to work. So it overrides `discover` instead.
 - **What it offers.** `{ tools: {}, experimental: { "claude/channel": {} } }`,
   and the instructions gain the paragraph on channel messages.
 - **The messages.** The server long-polls `POST /api/engine/channel`
@@ -317,18 +319,27 @@ the 2025 handshake. The Rust server keeps that behavior:
   service framed it, `from` with anything but word characters, spaces and
   `.:@-` taken out and cut to 80 characters, and `message_id` as a
   string.
-- **The fallback.** If an `rmcp` release can't be held to the 2025
+- **Checked.** `crates/xenonet-mcp` is a working prototype on rmcp 3.5.
+  Its tests drive it over stdio as Claude Code does (the probe, the
+  handshake, the tools, a message from a fake XenoNet's long poll), and
+  the same sequence against the JS servers gives the same answers in a
+  channel session and in any other: the probe's code, the protocol
+  version, the capabilities and the tools. Claude Code itself hasn't run
+  against it yet.
+- **The fallback.** If a later `rmcp` can't be held to the 2025
   handshake, the server serves channel sessions over its own stdio loop,
   as the JS server does: newline-delimited JSON-RPC, `initialize`,
-  `tools/list`, `tools/call` and the notification. A test replays a
-  recorded Claude Code exchange against whichever the server uses.
+  `tools/list`, `tools/call` and the notification.
 
 ### Toolchain
 
 Every current `rmcp` release needs Rust 1.88 or later (through let-chains
-and `darling` 0.23). The workspace builds on Rust 1.85 until the MCP crate
-arrives. Then a `rust-toolchain.toml` pins a newer toolchain, which rustup
-installs for this checkout without changing anyone's default.
+and `darling` 0.23). The workspace builds on Rust 1.85, and
+`crates/xenonet-mcp` is a workspace of its own for now, built with a newer
+toolchain (`rustup run 1.90.0 cargo test --manifest-path
+crates/xenonet-mcp/Cargo.toml`). Once a `rust-toolchain.toml` pins a newer
+toolchain for the checkout (rustup installs it there without changing
+anyone's default), the MCP crate joins the workspace.
 
 ## Hooks
 
@@ -470,6 +481,7 @@ place. This table follows it.
 | `core/blocks/store.js` | `xenonet-blocks/src/store.rs` | `blocks-store`, `statefile`, `store`, `hosts-config` pass |
 | `core/migrate.js`, `core/statefile.js` | `xenonet-state/src/migrate.rs`, `statefile.rs` | `statefile`, `store`, `state` pass |
 | `core/actors/tokens.js` | `xenonet-actors/src/tokens.rs` | `token-files`, `actor-registration`, `actor-routes`, `actor-gateway` pass |
+| `xenonet mcp` for sessions (`mcp/xenonet.js`), a prototype | `xenonet-mcp`, on rmcp, Rust 1.88+ | Its own stdio tests; the same answers as the JS servers to the probe and the handshake |
 | `xenonet hook` (`cli/commands/hook.js`) | `xenonet-cli`, the `xenonet` binary | `launcher`'s hook cases, as Rust tests of the binary |
 
 With every twin in place, all 96 test files that reach one pass. The

@@ -10,3 +10,4 @@ build/*
 .claude/
 /target/
 /crates/xenonet-node/*.node
+/crates/xenonet-mcp/target/
