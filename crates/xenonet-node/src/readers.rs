@@ -2,10 +2,14 @@
 //! built on them, for their twins: core/git.js, core/projects.js,
 //! core/codex.js, core/claude.js and core/identities.js.
 
-use crate::js::Jv;
+use crate::js::{Json, Jv, MaybeJson};
+use crate::sources::thrown;
+use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde_json::{json, Value};
+use std::sync::{LazyLock, Mutex};
 use xenonet_sources::git;
+use xenonet_state::projects::{self, FactsCache, Scan};
 
 fn opt_s(v: Option<String>) -> Jv {
     Jv::Json(v.map_or(Value::Null, Value::String))
@@ -67,4 +71,88 @@ pub fn git_unreadable(path: String) -> String {
 #[napi(js_name = "gitProblem")]
 pub fn git_problem(failed: Vec<String>) -> Option<String> {
     git::problem_of(&failed)
+}
+
+// ---------- projects.js ----------
+
+// What the bottom-up pass has seen, for a while (forgetScans clears it).
+static FACTS: LazyLock<Mutex<FactsCache>> = LazyLock::new(|| Mutex::new(FactsCache::default()));
+
+#[napi(js_name = "forgetProjectScans")]
+pub fn forget_project_scans() {
+    if let Ok(mut c) = FACTS.lock() {
+        c.clear();
+    }
+}
+
+#[napi(js_name = "projectVcsMarkers")]
+pub fn project_vcs_markers() -> Vec<&'static str> {
+    projects::VCS_MARKERS.to_vec()
+}
+
+#[napi(js_name = "projectScanLimits")]
+pub fn project_scan_limits() -> Jv {
+    Jv::Obj(vec![("depth", Jv::Num(projects::SCAN_DEPTH)), ("maxDirs", Jv::Num(projects::SCAN_MAX_DIRS)), ("maxSubmodules", Jv::Num(projects::SCAN_MAX_SUBMODULES))])
+}
+
+/// One scan of a projects folder: the walk hands it each folder read
+/// (look) and asks it about each subfolder (enter); finish does the rest.
+#[napi(js_name = "ProjectScan")]
+pub struct JsProjectScan {
+    scan: Scan,
+}
+
+#[napi]
+impl JsProjectScan {
+    #[napi(constructor)]
+    pub fn new(root: String, rules: Json) -> Self {
+        JsProjectScan { scan: Scan::new(&root, &rules.0) }
+    }
+
+    #[napi(getter, js_name = "rootRead")]
+    pub fn root_read(&self) -> bool {
+        self.scan.root_read
+    }
+
+    #[napi]
+    pub fn look(&mut self, dir: String, names: Vec<String>, dirs: Vec<bool>, level: f64, aborted: bool) {
+        let ents: Vec<(String, bool)> = names.into_iter().zip(dirs).collect();
+        self.scan.look(&dir, &ents, level, aborted);
+    }
+
+    #[napi]
+    pub fn enter(&self, name: String, dir: String, level: f64) -> bool {
+        self.scan.enter(&name, &dir, level)
+    }
+
+    /// { projects, folders, groups, count }.
+    #[napi]
+    pub fn finish(&mut self, env: &Env, sessions: Json, max_submodules: MaybeJson, now: f64) -> Result<Jv> {
+        let sessions = match sessions.0 {
+            Value::Array(a) => a,
+            _ => Vec::new(),
+        };
+        let mut cache = FACTS.lock().map_err(|_| Error::new(Status::GenericFailure, "the projects' cache is poisoned".to_string()))?;
+        match self.scan.finish(&sessions, max_submodules.0.as_ref(), &mut cache, now) {
+            Ok(f) => Ok(Jv::Obj(vec![
+                ("projects", Jv::Json(Value::Array(f.projects))),
+                ("folders", Jv::Json(Value::Array(f.folders))),
+                ("groups", Jv::Num(f.groups as f64)),
+                ("count", Jv::Num(f.count as f64)),
+            ])),
+            Err(e) => thrown(env, e),
+        }
+    }
+}
+
+/// { parentOf: [[key, parent]…], sameRemote: [[a, b]…] }.
+#[napi(js_name = "projectRelations")]
+pub fn project_relations(env: &Env, projects: Json) -> Result<Jv> {
+    let Value::Array(ps) = projects.0 else {
+        return thrown(env, xenonet_sources::lines::TypeError("projects.filter is not a function".into()));
+    };
+    match projects::relations(&ps) {
+        Ok((parents, same)) => Ok(Jv::Obj(vec![("parentOf", Jv::Json(json!(parents))), ("sameRemote", Jv::Json(json!(same)))])),
+        Err(e) => thrown(env, e),
+    }
 }
