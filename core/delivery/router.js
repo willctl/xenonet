@@ -38,6 +38,16 @@ export class DeliveryRouter extends EventEmitter {
     return String(id).startsWith("opencode:") && !!this.opencode && this.policy.consented(id);
   }
 
+  // How a message from `from` would reach `a`, an agent as the engine lists
+  // it, if sent now: for the sender's answer. null when it waits for the hooks.
+  way(from, a) {
+    const idle = a.status === "idle";
+    if (idle && !this.policy.wakeAllowed(from, a.id, { usage: this.usage(a.app) }).ok) return null;
+    if (a.app === "claude" && idle && this.channels?.live(a.id)) return "right away, through its channel";
+    if (a.app === "opencode" && this.opencode && this.policy.consented(a.id, { remote: String(from).startsWith("actor:") })) return "right away, through its OpenCode server";
+    return null;
+  }
+
   list(limit = 100) {
     return [...this.records.values()].slice(-limit);
   }

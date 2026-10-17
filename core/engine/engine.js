@@ -430,8 +430,10 @@ export class Engine extends EventEmitter {
     const now = this.now();
     const id = this.store.send({ sender: me, target, scope, body: text, replyTo: replyTo ? Number(replyTo) : null, recipients: recipients.map((r) => r.id), envelope }, now);
     for (const r of recipients) for (const wake of this.waiters.get(r.id) ?? []) wake();
+    // How each will get it, asked before the router spends a wake on it.
+    const ways = recipients.map((r) => this.delivery?.way?.(me, r) ?? delivery(r));
     this.emit("message", { id, from: me, to: recipients.map((r) => r.id), target, text, ts: now, ...(envelope ? { verified: envelope.line, strength: envelope.auth.strength } : {}) });
-    return { id, to: recipients.map((r) => ({ ...brief(r), delivery: delivery(r) })), ...(scope ? { alsoTo: "sessions that start work in this repo in the next half hour" } : {}) };
+    return { id, to: recipients.map((r, i) => ({ ...brief(r), delivery: ways[i] })), ...(scope ? { alsoTo: "sessions that start work in this repo in the next half hour" } : {}) };
   }
 
   // An agent new to a repo gets what was said to everyone there in the last

@@ -64,6 +64,23 @@ test("a push nothing acked goes back to the hooks, so a channel Claude Code drop
   assert.equal(r.notes.length, 1);
 });
 
+test("the sender hears how each message will get there: right away through a channel or OpenCode, else from the hooks", async () => {
+  const r = rig({ opencode: { deliver: async () => ({ ok: true }) } });
+  const idle = { id: A, app: "claude", status: "idle" };
+  assert.equal(r.router.way("you", idle), null, "no channel open");
+  r.channels.poll(A, 1000);
+  assert.equal(r.router.way("you", idle), "right away, through its channel");
+  assert.equal(r.router.way("you", { ...idle, status: "working" }), null);
+  r.policy.setPaused(true);
+  assert.equal(r.router.way("you", idle), null, "paused: no wakes");
+  r.policy.setPaused(false);
+  const oc = { id: O, app: "opencode", status: "working" };
+  assert.equal(r.router.way("you", oc), null, "no consent");
+  r.policy.allow(O);
+  assert.equal(r.router.way("you", oc), "right away, through its OpenCode server");
+  assert.equal(r.router.way("actor:muse", oc), null, "an actor needs remote consent");
+});
+
 test("no way in: the message waits for the next turn, is acked when the hooks hand it over, and else you're told after the ack time", async () => {
   let r = rig();
   let [rec] = await r.router.route(msg({ to: [B] }));
