@@ -3,6 +3,7 @@
 //! (`token_file`); the registry, registration and what actors report follow
 //! with the engine.
 
+pub mod account_links;
 pub mod adapters;
 pub mod app_bundle;
 pub mod attribution;

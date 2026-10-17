@@ -301,6 +301,12 @@
         "Hermes's files are read through hermes-files.js's twin; the census is read in the twin (readCensus) and judged in Rust."
       ]
     },
+    "core/actors/account-links.js": {
+      "rust": "crates/xenonet-actors/src/account_links.rs",
+      "differences": [
+        "It works on the engine's store the twin's EngineStore holds, so another kind of store can't stand in for it."
+      ]
+    },
     "core/actors/reports.js": {
       "rust": "crates/xenonet-actors/src/reports.rs",
       "differences": [

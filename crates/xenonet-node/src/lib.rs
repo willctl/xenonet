@@ -4,6 +4,7 @@
 //! it converts arguments, calls back into what a test passed in, and
 //! converts the answers.
 
+mod account_links;
 mod actor_helpers;
 mod actor_spend;
 mod actors_core;
