@@ -21,19 +21,20 @@ const MARK = { ok: "✓", info: "·", warn: "!", fail: "✗", skip: "–" };
 const PAINT = { ok: "green", info: "blue", warn: "yellow", fail: "red", skip: "gray" };
 
 async function live(flags) {
-  const { liveSetup } = await import("../../core/delivery/setup.js");
+  const { liveSetup, CHANNELS_FROM } = await import("../../core/delivery/setup.js");
   const r = await liveSetup({ port: flags.port ?? (flags.dev ? 47842 : flags.demo ? 47841 : 47840) });
   if (flags.json) return json(r), 0;
   const ok = (b) => (b ? c.green("✓") : c.yellow("!"));
   print(c.bold("Live delivery"));
-  print(`  ${ok(r.claude.channels)} Claude Code ${r.claude.version ?? "not found"}${r.claude.channels ? " has channels" : " needs 2.1.80 or later for channels"}`);
+  print(`  ${ok(r.claude.channels)} Claude Code ${r.claude.version ?? "not found"}${r.claude.channels ? " has channels" : ` needs ${CHANNELS_FROM.join(".")} or later for channels`}`);
   print(`  ${ok(r.tmux)} tmux ${r.tmux ?? "not found: XenoNet can't type into terminals, which only matters for sessions you allow it to"}`);
   print(`  ${c.blue("·")} OpenCode servers running: ${r.opencode.length ? r.opencode.join(", ") : "none"}`);
   print();
   print("Start Claude Code with XenoNet as a channel, so messages reach the session as they're sent:");
   print(`  ${r.command}`);
-  print(c.dim("Claude Code shows a warning about development channels the first time; XenoNet's isn't on Anthropic's list yet. To make it the default, add to your shell's profile:"));
+  print(c.dim("Claude Code asks you to confirm development channels each time it starts, since XenoNet's isn't on Anthropic's list yet. To make it the default, add to your shell's profile:"));
   print(`  ${r.alias}`);
+  print(c.dim("Team and Enterprise organizations have to turn channels on first (channelsEnabled). If a message doesn't arrive, claude --debug logs why, and the session gets it on its next turn."));
   print();
   print("For OpenCode, its TUI serves what XenoNet posts to only when told where to listen:");
   print(`  ${r.opencodeAlias}`);

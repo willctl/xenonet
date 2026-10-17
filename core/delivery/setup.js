@@ -6,8 +6,8 @@ import { createOpenCode } from "./opencode.js";
 
 const run = (cmd, args) => new Promise((resolve) => execFile(cmd, args, { timeout: 5000, windowsHide: true, shell: process.platform === "win32" }, (err, out) => resolve(err ? null : String(out).trim())));
 
-// The oldest Claude Code XenoNet expects channels in. Approximate: the docs
-// date the research preview, not the version; 2.1.302 is the one checked.
+// The first Claude Code with channels: its changelog adds --channels in
+// 2.1.80. Checked by hand against 2.1.302.
 export const CHANNELS_FROM = [2, 1, 80];
 export const newer = (v, min) => {
   const p = String(v ?? "").match(/(\d+)\.(\d+)\.(\d+)/)?.slice(1).map(Number);
@@ -26,13 +26,14 @@ export async function liveSetup({ port = 47840, exec = run, opencode = createOpe
   const servers = await opencode.servers().catch(() => []);
   const command = `claude --dangerously-load-development-channels server:${name}`;
   return {
-    claude: { version: claude, channels: newer(claude, CHANNELS_FROM) },
+    // `claude --version` says "2.1.302 (Claude Code)", `tmux -V` "tmux 3.6a".
+    claude: { version: claude?.match(/\d+\.\d+\.\d+/)?.[0] ?? claude, channels: newer(claude, CHANNELS_FROM) },
     command,
     alias: `alias claude='${command}'`,
     // OpenCode's TUI runs its HTTP server only when told where to listen;
     // with a host and no port it takes 4096, or a free port when that's taken.
     opencodeAlias: "alias opencode='opencode --hostname 127.0.0.1'",
-    tmux: tmux ?? null,
+    tmux: tmux?.replace(/^tmux\s+/, "") ?? null,
     opencode: servers.map((s) => s.base),
   };
 }
