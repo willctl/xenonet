@@ -51,6 +51,12 @@ pub trait Calls {
     /// What `<path>` is, as typeof says it ("null" for null), without
     /// reading it whole: a collaborator's field can be a whole object graph.
     fn kind(&mut self, path: &str) -> Result<String>;
+    /// Several calls at once, as Promise.all of them, each answer or what
+    /// it threw in order. Here one after the other, unless the calls are
+    /// asked of a twin that can run them together.
+    fn call_all(&mut self, calls: Vec<(&str, &str, Vec<Arg>)>) -> Vec<Result<Arg>> {
+        calls.into_iter().map(|(path, method, args)| self.call(path, method, args)).collect()
+    }
     /// The time, by the module's clock.
     fn now(&mut self) -> f64 {
         self.call("clock", "now", vec![]).ok().and_then(|a| a.as_f64()).unwrap_or(f64::NAN)

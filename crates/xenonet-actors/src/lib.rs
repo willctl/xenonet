@@ -28,6 +28,7 @@ pub mod secret_store;
 pub mod spend;
 pub mod token_file;
 pub mod tokens;
+pub mod wake;
 pub mod you;
 
 pub use xenonet_engine::products;
