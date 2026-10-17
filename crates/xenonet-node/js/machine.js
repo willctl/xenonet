@@ -9,7 +9,7 @@
 // promises did; `shared` is the map of those under way, one per instance.
 //
 // What an answer threw is kept: if the machine fails with it, that very
-// value is thrown.
+// value is thrown. An answer that isn't a promise goes back at once.
 export async function drive(machine, handle, shared = null) {
   const thrown = new Map();
   const failure = (err) => {
@@ -45,10 +45,28 @@ export async function drive(machine, handle, shared = null) {
       (err) => ({ error: failure(err) }),
     );
   };
+  // A question whose answer isn't a promise is answered at once, without
+  // an await, as the JS's own call was: between two calls it made without
+  // awaiting, nothing else runs.
+  const now = (q) => {
+    if (q.share != null && shared) return null;
+    let v;
+    try {
+      v = handle(q);
+    } catch (err) {
+      return { error: failure(err) };
+    }
+    if (v != null && typeof v.then === "function") return { later: v };
+    return { ok: v };
+  };
   let out = machine.next(undefined);
   for (;;) {
-    if (out.ask) out = machine.next(await answer(out.ask));
-    else if (out.all) out = machine.next(await Promise.all(out.all.map(answer)));
+    if (out.ask) {
+      const a = now(out.ask);
+      if (a && !a.later) out = machine.next(a);
+      else if (a) out = machine.next(await Promise.resolve(a.later).then((ok) => ({ ok }), (err) => ({ error: failure(err) })));
+      else out = machine.next(await answer(out.ask));
+    } else if (out.all) out = machine.next(await Promise.all(out.all.map(answer)));
     else break;
   }
   if ("error" in out) {
