@@ -7,7 +7,8 @@
 //! - `serve`: the sessions' and actors' server (mcp/xenonet.js), `xenonet
 //!   mcp`, in `xenonet`.
 //! - `serve_assistant`: the read-only server for a remote actor paired in
-//!   XenoNet's window (mcp/assistant.js), `xenonet mcp assistant`: not yet.
+//!   XenoNet's window (mcp/assistant.js), `xenonet mcp assistant`, in
+//!   `assistant`.
 //! - `serve_console`: the console operator (mcp/console.js), which stays
 //!   JS for now: it drives XenoNet Desktop through core/control.js, which
 //!   the desktop app, the end-to-end tests and the scripts use too.
@@ -15,6 +16,7 @@
 //! What they need of other slices of core/ that aren't in Rust yet is in
 //! `pending`.
 
+mod assistant;
 mod engine;
 mod pending;
 mod process;
@@ -43,6 +45,5 @@ pub async fn serve_console() -> Result<(), String> {
 /// for `grant`, or over made-up data with `fixture`, for the XenoNet on
 /// `port` (XENONET_PORT, or 47840, when it's None), until the client goes.
 pub async fn serve_assistant(grant: Option<String>, fixture: bool, port: Option<u16>) -> Result<(), String> {
-    let _ = (grant, fixture, port);
-    Err("xenonet mcp assistant isn't in the Rust xenonet yet: it runs as node mcp/assistant.js".into())
+    assistant::serve(grant, fixture, port).await
 }
