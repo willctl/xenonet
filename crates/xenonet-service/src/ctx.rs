@@ -34,6 +34,8 @@ pub struct Ctx {
     /// The window reports you at most once a second; this leaves room for bursts.
     pub you_reports: Mutex<Bucket>,
     pub refusal_notes: Mutex<RefusalNotes>,
+    /// XenoNet Dev reading another XenoNet (XENONET_UPSTREAM).
+    pub upstream: Option<crate::upstream::Upstream>,
 }
 
 /// What Spotify's poll keeps between looks (server/index.js's `music`).
@@ -86,6 +88,7 @@ impl Ctx {
             music: Mutex::new(Music::default()),
             you_reports: Mutex::new(Bucket::new(YOU_REPORTS, now_ms())),
             refusal_notes: Mutex::new(RefusalNotes::default()),
+            upstream: None,
         }
     }
 

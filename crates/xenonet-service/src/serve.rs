@@ -94,6 +94,9 @@ pub async fn handle(ctx: &Arc<Ctx>, req: hyper::Request<Incoming>, peer: Peer) -
     }
     let target = req.uri().to_string();
     let (path, query) = parse_target(&target);
+    if let Some(up) = ctx.upstream.as_ref().filter(|u| u.handles(&path)) {
+        return up.pass(&method, &target, &headers).await;
+    }
     let incoming = req.into_body();
     let request = Req { method: method.clone(), path: path.clone(), query, headers, peer, body: Body::Incoming(incoming) };
     if !path.starts_with("/api/") {
@@ -241,7 +244,16 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str) -> i32 {
     let log = Log::new(if config.demo { None } else { Some(&dir) }, "service", config.instance.as_deref(), Some(&version), &config.home, MAX_BYTES);
     let mut drift = DriftLog::default();
     drift.open(&Path::new(&config.cache_dir).join(DRIFT_FILE).to_string_lossy());
+    // XenoNet Dev reading another XenoNet, read-only: development only.
+    let upstream = match crate::upstream::upstream_of(config.upstream.as_deref()) {
+        Ok(u) => u,
+        Err(e) => {
+            eprintln!("[xenonet] {e}");
+            return 1;
+        }
+    };
     let mut ctx = Ctx::new(config.clone(), version.clone(), cores, log);
+    ctx.upstream = upstream;
     let (again_tx, again_rx) = mpsc::unbounded_channel();
     ctx.music.get_mut().unwrap().again = Some(again_tx);
     ctx.drift = Arc::new(Mutex::new(drift));
@@ -309,8 +321,10 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str) -> i32 {
     if config.demo {
         println!("[xenonet] demo mode: made-up projects and sessions, nothing real is read");
     }
-    if std::env::var("XENONET_UPSTREAM").is_ok_and(|u| !u.is_empty()) {
-        println!("[xenonet] XENONET_UPSTREAM isn't in the Rust service yet; this XenoNet reads its own");
+    if let Some(up) = &ctx.upstream {
+        println!("[xenonet] the page reads {}, and changes nothing there", up.host);
+    } else if std::env::var("XENONET_UPSTREAM").is_ok_and(|u| !u.is_empty()) {
+        println!("[xenonet] XENONET_UPSTREAM is for XenoNet Dev (--dev) only; this XenoNet reads its own");
     }
 
     // Remote actors' private endpoint, listening while a grant could be
