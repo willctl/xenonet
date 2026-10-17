@@ -1,7 +1,7 @@
-## Xenolith (shared memory across all AI apps)
+## Xenolith (shared memory for every app and agent)
 
-I use one shared wiki across Claude, ChatGPT, and other AI apps, reached through
-the `xenolith` tools. In every conversation, in every app:
+I keep one shared wiki for every app and agent I use, reached through the
+`xenolith` tools. In every conversation, in every app:
 
 1. Call `context_start` once before your first substantive reply (pass `app` and a
    short `topic`). Follow the protocol it returns.

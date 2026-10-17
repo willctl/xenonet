@@ -2,7 +2,7 @@
   "name": "@xenonet/xenolith",
   "version": "1.8.0",
   "private": true,
-  "description": "Shared plain-Markdown memory for Claude, ChatGPT and other AI apps, served over one local MCP server.",
+  "description": "Shared context for every app and agent on a machine: a plain-Markdown wiki you own, served by one local MCP server.",
   "author": "willctl",
   "license": "MIT",
   "type": "module",

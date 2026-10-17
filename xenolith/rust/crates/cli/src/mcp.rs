@@ -98,7 +98,7 @@ fn lead_in(wiki_dir: &str, curated: bool) -> String {
         "Record decisions, outcomes, preferences, facts and follow-ups worth keeping with context_log, and keep topic pages current with context_upsert_page."
     };
     format!(
-        "Shared long-term memory for this user across Claude, ChatGPT and other AI apps (wiki folder: {wiki_dir}). Call context_start once at the beginning of EVERY conversation, before your first substantive reply, and follow the protocol it returns. Search the wiki (context_search) before asking the user for context they may have given before. {writes} Never store secrets."
+        "Shared long-term memory for this user, for every app and agent they use (wiki folder: {wiki_dir}). Call context_start once at the beginning of EVERY conversation, before your first substantive reply, and follow the protocol it returns. Search the wiki (context_search) before asking the user for context they may have given before. {writes} Never store secrets."
     )
 }
 

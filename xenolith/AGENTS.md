@@ -1,8 +1,10 @@
 # Xenolith: notes for coding agents
 
-Xenolith is one shared memory for several AI apps: an MCP server over a plain-Markdown wiki, a
-curator that files notes into pages, a tray app with a window, and an installer. README.md
-describes what it does; this file is what an agent changing the code needs.
+Xenolith is one shared memory for every app and agent on a machine: an MCP server over a
+plain-Markdown wiki, a curator that files notes into pages, a tray app with a window, and an
+installer. It is XenoNet's shared context and also works on its own. README.md describes what it
+does; this file is what an agent changing the code needs. XenoNet's own AGENTS.md (one folder up)
+applies too: its commit conventions, and its rules for working beside other agents.
 
 ## Where things are
 
@@ -26,15 +28,18 @@ describes what it does; this file is what an agent changing the code needs.
   `rust/target/release` (or `XENOLITH_RUST_BIN`). A plain `npm test` runs them against the Node
   runtime and skips the Rust-only tests (the trust gate, held changes, forget, the Rust installer
   and tray), so run both.
-- `.claude/skills/verify-xenolith`: drive a change end to end on an isolated instance and keep
-  the evidence.
+- To see a change end to end, run an isolated instance: `npm run ui:preview` (a snapshot copy of
+  your wiki on port 47859), or `xenolith serve --http --port 0` with `XENOLITH_HOME` and
+  `XENOLITH_DIR` set to temp folders.
+- Rust 1.85 builds the core and the CLI (`cargo build` in `rust/`). The tray needs Rust 1.90:
+  `cargo +1.90 build -p xenolith-tray`, or that toolchain's cargo with `RUSTC` set to its rustc.
 
 ## Rules and what enforces them
 
 | Rule | Enforced by |
 | --- | --- |
-| Public commits use the repository identity; private paths and data stay out of tracked files | `scripts/check-public.mjs`, `.githooks/`, and CI; see `SECURITY.md` |
-| Lint every OS target before pushing Rust code | `scripts/check-rust.sh` (local), the CI matrix (after the push) |
+| Public commits use the repository identity; private paths and data stay out of tracked files | `scripts/check-public.mjs`; see `SECURITY.md` |
+| Lint every OS target before pushing Rust code | `scripts/check-rust.sh` (local) |
 | `package.json` and `rust/Cargo.toml` carry the same version | `scripts/build.mjs` fails |
 | A change to `protocol/PROTOCOL.md` records the old version's hash | `wiki::tests::an_edited_protocol_keeps_the_old_hash_for_upgrades` |
 | Regexes match ASCII digits (`[0-9]`, never `\d`) | `wiki::tests::no_regex_in_the_crates_uses_unicode_digit_classes` |
@@ -43,7 +48,7 @@ describes what it does; this file is what an agent changing the code needs.
 | The approval mode is read once per batch, under the commit's lock | `Journal.auto`, `held::apply_auto_locked`; the auto-mode tests in `test/curator.mjs` |
 | The installer leaves an app's config alone while that app runs | Claude desktop: `install::desktop_running` and its sandbox test. Codex and Claude Code: judgment |
 | Tests and verification never touch the installed service (port 47850) or the real wiki | The verify skill's isolated instance; judgment |
-| Commit messages are Conventional Commits; finished work is committed and pushed | Judgment (the owner's standing preference) |
+| Commit messages are Conventional Commits, one per logical change | Judgment; XenoNet's AGENTS.md |
 | Programs keep files in the platform's directories (XDG, AppData, Library), never a new `~/.something` | `xenolith_core::paths`; judgment |
 
 When a mistake repeats, fix it at the highest level that works: remove the way to make it, then a

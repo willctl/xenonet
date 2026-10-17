@@ -1,4 +1,4 @@
-//! Where the installer puts things: Xenolith's own standard folders (xenolith_core::paths) and the AI
+//! Where the installer puts things: Xenolith's own standard folders (xenolith_core::paths) and the
 //! apps' configuration files it edits. Computed from an environment map, so a sandboxed run (tests)
 //! uses a fake home without touching the real one.
 

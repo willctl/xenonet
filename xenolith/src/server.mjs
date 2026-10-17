@@ -60,7 +60,7 @@ function leadIn(wikiDir, curated) {
     : 'Record decisions, outcomes, preferences, facts and follow-ups worth keeping with context_log, and keep topic ' +
       'pages current with context_upsert_page.';
   return (
-    'Shared long-term memory for this user across Claude, ChatGPT and other AI apps ' +
+    'Shared long-term memory for this user, for every app and agent they use ' +
     `(wiki folder: ${wiki.displayPath(wikiDir)}). Call context_start once at the beginning of EVERY conversation, ` +
     'before your first substantive reply, and follow the protocol it returns. Search the wiki (context_search) ' +
     `before asking the user for context they may have given before. ${writes} Never store secrets.`
@@ -178,7 +178,7 @@ async function createMcpServer(state, ctx) {
       title: 'Start: load shared memory',
       description:
         'ALWAYS call this once at the start of every conversation, before your first substantive reply, in every app. ' +
-        "Loads the user's shared long-term memory (shared across Claude, ChatGPT and other AI apps): the wiki protocol " +
+        "Loads the user's shared long-term memory (shared by every app and agent they use): the wiki protocol " +
         'to follow, the page index, the last 7 days of activity, notes not yet filed, and pages related to `topic`. ' +
         'Cheap and read-only. Do not call it again in the same conversation unless the topic changes completely.',
       inputSchema: {

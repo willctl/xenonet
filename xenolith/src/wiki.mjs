@@ -339,11 +339,10 @@ export async function withLock(wikiDir, fn, opts = {}) {
 
 const README = `# Xenolith
 
-This folder is a shared, plain-Markdown memory used by AI apps on this PC
-(Claude desktop, Claude Code, ChatGPT desktop, Codex) through the local
-\`xenolith\` MCP server. You own it: open it in any editor or in Obsidian.
+This folder is a shared, plain-Markdown memory that the apps and agents on
+this computer read and write through the local \`xenolith\` MCP server. You own it: open it in any editor or in Obsidian.
 
-- \`PROTOCOL.md\`: the rules every AI session follows. Edit it freely; servers
+- \`PROTOCOL.md\`: the rules every session follows. Edit it freely; servers
   read it at startup and \`context_start\` returns the current text.
 - \`index.md\`: generated from page frontmatter. Do not edit it by hand.
 - \`pages/<slug>.md\`: one page per project, person, preference, decision,

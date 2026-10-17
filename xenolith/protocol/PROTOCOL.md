@@ -1,10 +1,10 @@
 # Xenolith protocol
 
-This folder is the shared, long-term memory for the user across every AI app and
-session: Claude (desktop, Code, Cowork), ChatGPT (desktop, Work, Codex), and any
-other agent connected to it. It is plain Markdown so it stays readable and
-portable. Treat it as the source of truth for context that should survive the
-current conversation. Each app's built-in memory is secondary to it.
+This folder is the user's shared, long-term memory. Every app and agent they
+work with reads and writes it, whatever model it runs on: Claude, ChatGPT,
+Codex and any other agent connected to it. It is plain Markdown so it stays
+readable and portable. Treat it as the source of truth for context that should
+survive the current conversation. Each app's built-in memory is secondary to it.
 
 You reach it through the `xenolith` tools. Follow these rules in every
 conversation, in every app, without being asked.
@@ -12,8 +12,8 @@ conversation, in every app, without being asked.
 ## 1. Start every conversation with `context_start`
 
 Call `context_start` once, before your first substantive reply, in every new
-conversation. Pass `app` (which app you are, e.g. `claude-desktop`,
-`chatgpt-desktop`, `claude-code`, `codex`) and `topic` (a few words about what the
+conversation. Pass `app` (which app you are, e.g. `claude-code`, `codex`,
+`claude-desktop`, `chatgpt-desktop`) and `topic` (a few words about what the
 user just asked). It returns this protocol, the page index, recent activity,
 and pages related to the topic. It is cheap; do not skip it because a request
 looks small. Do not call it again in the same conversation unless the topic

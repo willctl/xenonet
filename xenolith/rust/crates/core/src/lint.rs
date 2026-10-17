@@ -20,7 +20,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-pub const LINT_INSTRUCTIONS: &str = r###"You maintain a personal wiki that one person's AI apps (Claude, ChatGPT, Codex) read at the start of every conversation. A curator files new notes into it; your job is to tidy one page so it stays correct and easy to use. Return an edit plan as JSON. Code checks it, then applies it or shows it to the person first, depending on their setting; either way the person sees each change and can undo it. Propose only changes that keep every fact correct.
+pub const LINT_INSTRUCTIONS: &str = r###"You maintain a personal wiki that one person's apps and agents (Claude, ChatGPT, Codex and others) read at the start of every conversation. A curator files new notes into it; your job is to tidy one page so it stays correct and easy to use. Return an edit plan as JSON. Code checks it, then applies it or shows it to the person first, depending on their setting; either way the person sees each change and can undo it. Propose only changes that keep every fact correct.
 
 Look for, on the page below:
 - contradictions within the page, or with the recent log;

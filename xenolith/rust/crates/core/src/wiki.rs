@@ -352,11 +352,10 @@ pub fn with_lock<T>(wiki_dir: &Path, f: impl FnOnce() -> Result<T>) -> Result<T>
 
 const README: &str = "# Xenolith
 
-This folder is a shared, plain-Markdown memory used by AI apps on this PC
-(Claude desktop, Claude Code, ChatGPT desktop, Codex) through the local
-`xenolith` MCP server. You own it: open it in any editor or in Obsidian.
+This folder is a shared, plain-Markdown memory that the apps and agents on
+this computer read and write through the local `xenolith` MCP server. You own it: open it in any editor or in Obsidian.
 
-- `PROTOCOL.md`: the rules every AI session follows. Edit it freely; servers
+- `PROTOCOL.md`: the rules every session follows. Edit it freely; servers
   read it at startup and `context_start` returns the current text.
 - `index.md`: generated from page frontmatter. Do not edit it by hand.
 - `pages/<slug>.md`: one page per project, person, preference, decision,
@@ -390,7 +389,7 @@ pub fn ensure_wiki(wiki_dir: &Path) -> Result<()> {
 const OLD_PROTOCOLS: [&str; 6] = ["18164903345112d0", "192abaacb1b60064", "09a27d24ebee04ca", "2323d98efcb27d61", "654998a3f71913a9", "958d048836748db0"];
 /// The hash of this release's protocol/PROTOCOL.md (the test below pins it).
 #[cfg(test)]
-const CURRENT_PROTOCOL: &str = "f8b2c53871d94567";
+const CURRENT_PROTOCOL: &str = "a7de848ecc7f2d3e";
 
 /// Replaces an unedited PROTOCOL.md of an earlier release with this release's, keeping the old copy
 /// in .history/. An edited one is the user's and stays. Returns whether it replaced it.

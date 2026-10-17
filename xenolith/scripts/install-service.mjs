@@ -115,7 +115,7 @@ async function main() {
     sc('create', SERVICE_NAME, 'binPath=', binPath, 'start=', 'auto', 'obj=', SERVICE_ACCOUNT, 'DisplayName=', 'Xenolith');
     info('created service');
   }
-  sc('description', SERVICE_NAME, 'Shared AI memory (xenolith MCP server) on http://127.0.0.1 for Claude, ChatGPT and other local AI apps.');
+  sc('description', SERVICE_NAME, 'Shared memory (xenolith MCP server) on http://127.0.0.1 for the apps and agents on this computer.');
   // The Rust service also stops with an error code when an install replaces its program, so these
   // restarts are how an upgrade takes effect without admin rights.
   sc('failure', SERVICE_NAME, 'reset=', '86400', 'actions=', 'restart/2000/restart/5000/restart/30000');

@@ -4,21 +4,25 @@
 
 [Watch the 32-second demo](docs/showcase/xenolith-demo.mp4) · [Audit findings](docs/security-audit.md)
 
+**Shared context for SI.**
+
+Xenolith is one plain-Markdown wiki that every session on your computer reads
+and writes, whatever app or model it runs on. It is XenoNet's shared context,
+and it also runs on its own. Any MCP client can reach it through one local
+server (`xenolith`). The installer connects Claude Code, Claude desktop, Codex
+and ChatGPT desktop, and packages one plugin folder for the apps that take
+plugins.
+
 For trusted local machines. The HTTP service does not isolate OS accounts. Read
 [Security](SECURITY.md) before installing on a shared machine or enabling external model calls.
 
-One shared, provider-agnostic memory for every AI session on this computer:
-Claude desktop, Claude Code, ChatGPT desktop (Work or Codex mode) and the Codex
-CLI. It is a plain-Markdown wiki you own, reached through one local MCP server
-(`xenolith`), and packaged as one plugin folder that both Claude and ChatGPT
-install.
-
-Apps **tell the wiki what happened**, and a **curator** agent organizes it. The
-server accepts each write at once into a durable inbox. The curator then files
-the notes into pages, links, summaries and the activity log. It runs on your
-ChatGPT plan, with `gpt-6.1-sol` at medium reasoning by default (Status >
-Models in the window changes it). Reads are
-instant and deterministic, because no agent runs on the read path.
+Sessions **tell the wiki what happened**, and a **curator** agent organizes it.
+The server accepts each write at once into a durable inbox. The curator then
+files the notes into pages, links, summaries and the activity log. It runs a
+model through a command-line agent with your own sign-in. Today that agent is
+the Codex CLI, with `gpt-6.1-sol` at medium reasoning by default (Status >
+Models in the window changes it). Reads are instant and deterministic, because
+no model runs on the read path.
 
 Everything users run is two small Rust programs: `xenolith` (the MCP server,
 the session hook, the curator, the Windows service and the installer) and
@@ -43,8 +47,8 @@ installs the same way.
 
 The install is idempotent. Running it again upgrades in place and never touches
 wiki content. Options pass through: `-- --wiki-dir <path>`, `-- --port N` and
-`-- --no-approve`. With `--no-approve`, ChatGPT and Claude Code ask before each
-wiki tool call.
+`-- --no-approve`. With `--no-approve`, Codex, ChatGPT and Claude Code ask before
+each Xenolith tool call.
 
 By default the wiki tools run without asking. The installer sets
 `default_tools_approval_mode = "approve"` in `~/.codex/config.toml`, and adds the
@@ -119,8 +123,11 @@ cannot reach them, even through DNS rebinding.
 | `context_log` | tell the wiki what happened. The server queues it as a note for the curator, with its `source` |
 | `context_upsert_page` | hand over content for one page (`append` or `replace`). The server queues it for the curator |
 
-The names are unchanged from v1.1, so open sessions, cached tool lists and your
-own `PROTOCOL.md` keep working. Both write tools take an optional
+These names replace agent-wiki's `wiki_start`, `wiki_search`, `wiki_read`,
+`wiki_log` and `wiki_upsert_page`. A call under an old name still runs the same
+tool in this release, so sessions that listed the tools before an upgrade, and
+protocols you edited, keep working; `tools/list` shows only the new names, and
+the next release drops the old ones. Both write tools take an optional
 `idempotency_key`. Without one, the server stores the same note (same app, title
 and text) only once per day. Since v1.4 they also take an optional `source`:
 
@@ -136,9 +143,9 @@ curator.
 
 ## The curator
 
-`xenolith curator` runs as you, never as the service. It uses your ChatGPT
-sign-in through the official Codex CLI, and the service account must not have
-that sign-in. On Windows the tray hosts the curator and restarts it when
+`xenolith curator` runs as you, never as the service. It runs the Codex CLI
+with your own sign-in (a ChatGPT account), and the service account must not
+have that sign-in. Other command-line agents are not supported yet. On Windows the tray hosts the curator and restarts it when
 `xenolith` is replaced. On macOS and Linux, a launchd agent or a systemd user
 unit runs it. It never reads Codex's credential files.
 
@@ -270,7 +277,7 @@ unit runs it. It never reads Codex's credential files.
   filed note. It records what changed, why, the base and new hashes, the
   `.history/` copy, the model and the batch.
 - **Models.** The window's Status tab has a **Models** card. For the curator
-  and for Ask, pick a model from your ChatGPT account's list and a reasoning
+  and for Ask, pick a model from your account's list and a reasoning
   level, or keep the default: `config.json`, then `gpt-6.1-sol` with medium
   reasoning for the curator, and the curator's model with low reasoning for
   Ask. The list is Codex's own list of the models your account offers
@@ -354,7 +361,7 @@ McNemar p < 0.001), and notes routed to their page went from 4 of 12 first to
 The window's **Ask** tab (and the first row of every search) hands a question
 to an agent that searches and reads the wiki for you, then answers with the
 files it relied on. It runs in the curator process, as you, for the same reason
-the curator does: the service account must not have your ChatGPT sign-in.
+the curator does: the service account must not have your model sign-in.
 
 - **The agent.** Ask uses the curator's isolated `codex exec`, with the same
   `CODEX_HOME`, the same features off and no shell. It gets exactly one MCP

@@ -10,7 +10,7 @@
 //!   xenolith hook [stop]               the SessionStart hook (with "stop": the opt-in Stop hook)
 //!   xenolith curator [...]             the curator and the Ask worker (see curator.rs)
 //!   xenolith service --config <ini>    the Windows service (see service.rs)
-//!   xenolith install | uninstall       set Xenolith up for the AI apps, or take it out (see install/)
+//!   xenolith install | uninstall       set Xenolith up for the apps on this computer, or take it out (see install/)
 //!   xenolith forget "<text>" [--yes]   find every copy of a text in the wiki and logs; --yes redacts them
 //!   xenolith --version
 

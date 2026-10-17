@@ -1,6 +1,6 @@
 [package]
 name = "xenolith-tray"
-description = "Xenolith tray: the status of the shared AI memory, its curator, and the Xenolith window"
+description = "Xenolith tray: the status of the shared memory, its curator, and the Xenolith window"
 version.workspace = true
 edition.workspace = true
 # tray-icon and muda need it; the rest of the workspace builds on 1.85.

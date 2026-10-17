@@ -1,4 +1,4 @@
-//! `xenolith install` / `uninstall`: sets Xenolith up for every AI app on this computer, and takes
+//! `xenolith install` / `uninstall`: sets Xenolith up for every app on this computer, and takes
 //! it out again. Idempotent: re-running upgrades in place and never touches wiki content. Every
 //! existing config file is backed up once as <file>.bak-xenolith and merged, never replaced.
 //!
@@ -277,7 +277,7 @@ fn install(o: &Opts) -> Result<(), InstallError> {
     #[cfg(windows)]
     if let Some(pkg) = windows::packaged().filter(|_| !sandbox) {
         return Err(InstallError(format!(
-            "This terminal runs inside the app package {pkg}. Windows redirects what it writes to AppData into that app's private storage, where the service, the tray at sign-in and the other AI apps cannot see it. Nothing was changed.\nRun it from a normal terminal instead: press Win+R, type cmd, press Enter, then run this again."
+            "This terminal runs inside the app package {pkg}. Windows redirects what it writes to AppData into that app's private storage, where the service, the tray at sign-in and the other apps cannot see it. Nothing was changed.\nRun it from a normal terminal instead: press Win+R, type cmd, press Enter, then run this again."
         )));
     }
     let pay = payload(o.from.as_deref())?;
@@ -406,7 +406,7 @@ fn install(o: &Opts) -> Result<(), InstallError> {
     let rendered = render_plugin(&p.rendered, &map, &server)?;
     info(&format!("plugin -> {} ({} files, {})", fwd(&p.rendered), rendered.len(), if transport == "http" { format!("MCP over HTTP {mcp_url}") } else { "MCP over stdio".into() }));
     info(&format!("hook command: {hook}"));
-    let description = "Shared long-term memory across Claude, ChatGPT and other AI apps.";
+    let description = "Shared long-term memory for every app and agent on this computer.";
     write_lf(
         &p.market.join(".claude-plugin").join("marketplace.json"),
         &to_json(&json!({
@@ -1134,7 +1134,7 @@ mod service {
                     log.say("created the service");
                 }
             }
-            sc_ok(&["description", SERVICE_NAME, "Shared AI memory (xenolith MCP server) on http://127.0.0.1 for Claude, ChatGPT and other local AI apps."])?;
+            sc_ok(&["description", SERVICE_NAME, "Shared memory (xenolith MCP server) on http://127.0.0.1 for the apps and agents on this computer."])?;
             // The service also stops with an error code when an install replaces its program: these restarts are
             // how an upgrade takes effect without admin rights.
             sc_ok(&["failure", SERVICE_NAME, "reset=", "86400", "actions=", "restart/2000/restart/5000/restart/30000"])?;

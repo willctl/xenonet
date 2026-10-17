@@ -1,7 +1,7 @@
 {
   "name": "xenolith",
   "version": "__VERSION__",
-  "description": "Shared long-term memory across Claude, ChatGPT and other AI apps: a plain-Markdown wiki you own, served by one local MCP server.",
+  "description": "Shared long-term memory for every app and agent on this computer: a plain-Markdown wiki you own, served by one local MCP server.",
   "author": {
     "name": "willctl"
   },
@@ -11,8 +11,8 @@
   "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "Xenolith",
-    "shortDescription": "Shared memory across Claude, ChatGPT and other AI apps",
-    "longDescription": "One plain-Markdown wiki that every AI session on this PC reads and writes: Claude desktop, Claude Code, ChatGPT desktop and Codex. Sessions load the index and recent activity at the start, search before asking you for context, and log decisions, outcomes, preferences and follow-ups. The files live in a folder you own and can open in any editor.",
+    "shortDescription": "Shared memory for every app and agent on this computer",
+    "longDescription": "One plain-Markdown wiki that every session on this computer reads and writes, whatever app or model it runs on. Sessions load the index and recent activity at the start, search before asking you for context, and log decisions, outcomes, preferences and follow-ups. The files live in a folder you own and can open in any editor.",
     "developerName": "willctl",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],

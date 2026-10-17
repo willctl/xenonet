@@ -177,7 +177,7 @@ async function main() {
   if (pkg) {
     throw new InstallError(
       `This terminal runs inside the app package ${pkg}. Windows redirects what it writes to AppData into that app's\n` +
-        'private storage, where the service, the tray at sign-in and the other AI apps cannot see it. Nothing was changed.\n' +
+        'private storage, where the service, the tray at sign-in and the other apps cannot see it. Nothing was changed.\n' +
         'Run it from a normal terminal instead: press Win+R, type cmd, press Enter, then:\n' +
         `  cd /d "${REPO}" && npm run install-local`,
     );
@@ -554,7 +554,7 @@ async function main() {
   info(`plugin -> ${fwd(P.rendered)} (${files.length} files, ${transport === 'http' ? `MCP over HTTP ${mcpUrl}` : 'MCP over stdio'})`);
   info(`hook command: ${map.__HOOK_COMMAND__}`);
   const author = { name: 'willctl' };
-  const description = 'Shared long-term memory across Claude, ChatGPT and other AI apps.';
+  const description = 'Shared long-term memory for every app and agent on this computer.';
   await writeFileLF(
     path.join(P.market, '.claude-plugin', 'marketplace.json'),
     toJson({

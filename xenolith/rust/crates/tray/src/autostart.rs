@@ -225,7 +225,7 @@ pub fn repair(cfg: &Config) -> Result<String, String> {
     std::fs::create_dir_all(file.parent().unwrap()).map_err(|e| e.to_string())?;
     let exe = exe_path().display().to_string();
     let text = format!(
-        "[Desktop Entry]\nType=Application\nName=Xenolith\nComment=The shared AI memory: status, curator and window\nExec=\"{exe}\" --from autostart\nIcon=xenolith\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
+        "[Desktop Entry]\nType=Application\nName=Xenolith\nComment=Xenolith's shared memory: status, curator and window\nExec=\"{exe}\" --from autostart\nIcon=xenolith\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
     );
     std::fs::write(&file, text).map_err(|e| e.to_string())?;
     let s = check(cfg)?;

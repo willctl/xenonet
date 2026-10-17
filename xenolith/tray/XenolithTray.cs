@@ -46,7 +46,7 @@ using Microsoft.Win32;
 // The name Windows shows for the exe (Settings > Other system tray icons, Task Manager > Startup apps).
 [assembly: AssemblyTitle("Xenolith")]
 [assembly: AssemblyProduct("Xenolith")]
-[assembly: AssemblyDescription("Xenolith tray: status of the shared AI memory, and its curator")]
+[assembly: AssemblyDescription("Xenolith tray: status of the shared memory, and its curator")]
 
 public static class Program
 {

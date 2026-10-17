@@ -2,7 +2,7 @@
  {
   "name": "context_start",
   "title": "Start: load shared memory",
-  "description": "ALWAYS call this once at the start of every conversation, before your first substantive reply, in every app. Loads the user's shared long-term memory (shared across Claude, ChatGPT and other AI apps): the wiki protocol to follow, the page index, the last 7 days of activity, notes not yet filed, and pages related to `topic`. Cheap and read-only. Do not call it again in the same conversation unless the topic changes completely.",
+  "description": "ALWAYS call this once at the start of every conversation, before your first substantive reply, in every app. Loads the user's shared long-term memory (shared by every app and agent they use): the wiki protocol to follow, the page index, the last 7 days of activity, notes not yet filed, and pages related to `topic`. Cheap and read-only. Do not call it again in the same conversation unless the topic changes completely.",
   "inputSchema": {
    "$schema": "http://json-schema.org/draft-07/schema#",
    "type": "object",

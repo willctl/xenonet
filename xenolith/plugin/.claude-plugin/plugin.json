@@ -1,7 +1,7 @@
 {
   "name": "xenolith",
   "version": "__VERSION__",
-  "description": "Shared long-term memory across Claude, ChatGPT and other AI apps: a plain-Markdown wiki you own, served by one local MCP server.",
+  "description": "Shared long-term memory for every app and agent on this computer: a plain-Markdown wiki you own, served by one local MCP server.",
   "author": {
     "name": "willctl"
   },

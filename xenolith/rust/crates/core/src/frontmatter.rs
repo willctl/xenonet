@@ -203,13 +203,13 @@ mod tests {
         let mut m = Meta::default();
         m.set("title", "Xenolith");
         m.set("type", "project");
-        m.set("summary", "Shared AI memory: Windows service");
+        m.set("summary", "Shared memory: Windows service");
         m.set("tags", vec!["a".to_string(), "b c".to_string()]);
         m.set("created", "2026-10-01T14:46:56-05:00");
         m.set("note", "yes");
         let s = serialize(&m, "# Xenolith\n\nBody");
         assert!(s.starts_with(
-            "---\ntitle: Xenolith\ntype: project\nsummary: \"Shared AI memory: Windows service\"\ntags: [\"a\",\"b c\"]\ncreated: 2026-10-01T14:46:56-05:00\nnote: \"yes\"\n---\n\n# Xenolith"
+            "---\ntitle: Xenolith\ntype: project\nsummary: \"Shared memory: Windows service\"\ntags: [\"a\",\"b c\"]\ncreated: 2026-10-01T14:46:56-05:00\nnote: \"yes\"\n---\n\n# Xenolith"
         ));
         let (back, body) = parse(&s);
         assert_eq!(back, m);

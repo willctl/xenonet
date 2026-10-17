@@ -11,8 +11,8 @@ use std::io::{Read, Write};
 use std::sync::mpsc;
 use std::time::Duration;
 
-const RULES: &str = "Xenolith is the user's shared long-term memory across Claude, ChatGPT and other AI apps, reached through the xenolith tools. Call context_start once before your first substantive reply and follow the protocol it returns; search the wiki before asking for context the user may have given before, and tell it what happened (decisions, outcomes, preferences, facts, follow-ups) with context_log; plain notes are fine, a curator files them into pages (never secrets).";
-const FALLBACK: &str = "Xenolith (the user's shared memory across AI apps) is installed but could not be read just now; call context_start if the tools are available.";
+const RULES: &str = "Xenolith is the user's shared long-term memory for every app and agent they use, reached through the xenolith tools. Call context_start once before your first substantive reply and follow the protocol it returns; search the wiki before asking for context the user may have given before, and tell it what happened (decisions, outcomes, preferences, facts, follow-ups) with context_log; plain notes are fine, a curator files them into pages (never secrets).";
+const FALLBACK: &str = "Xenolith (the user's shared memory) is installed but could not be read just now; call context_start if the tools are available.";
 
 fn collect() -> Option<String> {
     let (dir, _) = wiki::resolve_wiki_dir(&process_env()).ok()?;
