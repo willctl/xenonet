@@ -395,14 +395,15 @@ export class Engine extends EventEmitter {
 
   // `to`: an agent's id (or its first characters), words from its title,
   // "repo" for everyone working in this repo, or "all". Without `to`, a reply
-  // goes back to the message's sender.
+  // goes back to the message's sender, or, when you sent that message
+  // yourself, to whoever it went to.
   // `envelope`: how XenoNet knows who sent it (attest.js), from the route's
   // own checks; never from what the sender said.
   async send(me, { to, text, replyTo = null }, { envelope = null } = {}) {
     text = String(text ?? "").trim();
     if (!text) throw new Error("the message is empty");
     if (text.length > MAX_TEXT) throw new Error(`keep messages under ${MAX_TEXT} characters`);
-    if (!to && replyTo) to = this.store.message(Number(replyTo))?.sender;
+    if (!to && replyTo) to = Engine.replyTarget(me, this.store.message(Number(replyTo)));
     if (!to) throw new Error('say who it\'s for: a session\'s id, words from its title, "repo" or "all"');
     const self = await this.view(me);
     // Actors XenoNet only observes are left out: nothing reads their inbox.
@@ -442,6 +443,18 @@ export class Engine extends EventEmitter {
     const ways = recipients.map((r) => this.delivery?.way?.(me, r) ?? delivery(r));
     this.emit("message", { id, from: me, to: recipients.map((r) => r.id), target, text, ts: now, ...(envelope ? { verified: envelope.line, strength: envelope.auth.strength } : {}) });
     return { id, to: recipients.map((r, i) => ({ ...brief(r), delivery: ways[i] })), ...(scope ? { alsoTo: "sessions that start work in this repo in the next half hour" } : {}) };
+  }
+
+  // Who a reply with no `to` is for: the sender of the message it answers,
+  // unless that's you, in which case it goes to the same audience: "all",
+  // the repo you're in now (not necessarily the one you sent it in), or the
+  // one agent.
+  static replyTarget(me, m) {
+    if (!m) return undefined;
+    if (m.sender !== me) return m.sender;
+    if (m.target === "all") return "all";
+    if (m.scope || String(m.target).startsWith("repo:")) return "repo";
+    return m.target;
   }
 
   // An agent new to a repo gets what was said to everyone there in the last

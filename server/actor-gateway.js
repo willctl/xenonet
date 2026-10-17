@@ -122,7 +122,7 @@ export function createActorGateway({ engine, registration, actors, runs = null, 
       "send",
       {
         title: "Message a session or actor",
-        description: 'Sends a message to a session or actor on your user\'s Mac. Name it in to by its id from peers (actor:grok-bot, claude:…), by words from its title, or "repo" or "all". A session gets it during its current turn or its next, and an actor when it next reads its inbox. To answer a message, pass its number as reply_to, and you can leave out to.',
+        description: 'Sends a message to a session or actor on your user\'s Mac. Name it in to by its id from peers (actor:grok-bot, claude:…), by words from its title, or "repo" or "all". A session gets it during its current turn or its next, and an actor when it next reads its inbox. To answer a message, pass its number as reply_to, and you can leave out to: the reply goes to that message\'s sender, or, if you sent it, to whoever you sent it to.',
         inputSchema: z.object({ to: z.string().optional(), text: z.string().min(1).max(4000), reply_to: z.number().int().optional() }),
         annotations: write,
       },
