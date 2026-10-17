@@ -82,6 +82,10 @@ export class Tailer extends Block {
     let failed = false;
     for (const scanner of this.scanners) {
       for (const file of scanner.scan()) {
+        // Started again after a stop: a file it followed before is caught up
+        // by the sweep, so what was written meanwhile reads as live, not as
+        // history. (The scan lists it again when its folder changed.)
+        if (this.files.has(file)) continue;
         const st = await fsp.stat(file).catch(() => null);
         if (!this.current(run)) return;
         if (!st) continue;
