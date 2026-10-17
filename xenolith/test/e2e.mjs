@@ -496,3 +496,23 @@ function describeHookTests({ env, getClient }) {
     }
   });
 }
+
+describe('the command line', { skip: IMPL !== 'rust' && 'the Rust programs only' }, () => {
+  test('serve with --help or an argument it does not know prints usage and starts nothing', async () => {
+    const dir = await fsp.mkdtemp(path.join(tmp, 'cli-'));
+    const env = { ...process.env, XENOLITH_HOME: path.join(dir, 'home'), XENOLITH_DIR: path.join(dir, 'wiki') };
+    for (const args of [['serve', '--help'], ['serve', '--hepl'], ['-h'], ['serve', '--port']]) {
+      let code = 0;
+      let stderr = '';
+      try {
+        execFileSync(rustBin(), args, { env, input: '', stdio: ['pipe', 'pipe', 'pipe'] });
+      } catch (e) {
+        code = e.status;
+        stderr = String(e.stderr);
+      }
+      assert.equal(code, 2, args.join(' '));
+      assert.match(stderr, /^(xenolith serve: (unknown argument \S+|--port takes a port number)\n)?usage: xenolith serve /, args.join(' '));
+    }
+    assert.ok(!fs.existsSync(path.join(dir, 'wiki')), 'no wiki was created');
+  });
+});

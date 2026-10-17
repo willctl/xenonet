@@ -59,6 +59,24 @@ fn main() {
         println!("{}", xenolith_core::VERSION);
         return;
     }
+    // A flag serve doesn't know (--help, a typo) must not start a server on the real wiki.
+    if has("--help") || has("-h") {
+        usage();
+    }
+    if args.first().map(String::as_str) == Some("serve") {
+        const SERVE_FLAGS: [&str; 6] = ["--http", "--port", "--parent-stdin", "--exit-on-upgrade", "--read-only", "--init"];
+        let mut it = args.iter().skip(1);
+        while let Some(a) = it.next() {
+            if !SERVE_FLAGS.contains(&a.as_str()) {
+                eprintln!("xenolith serve: unknown argument {a}");
+                usage();
+            }
+            if a == "--port" && it.next().and_then(|p| p.parse::<u16>().ok()).is_none() {
+                eprintln!("xenolith serve: --port takes a port number");
+                usage();
+            }
+        }
+    }
     match args.first().map(String::as_str) {
         Some("hook") if args.get(1).map(String::as_str) == Some("stop") => hook::run_stop(),
         Some("hook") => hook::run(),
