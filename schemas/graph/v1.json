@@ -840,7 +840,7 @@
             "properties": {
               "id": {
                 "type": "string",
-                "pattern": "^(?:@[a-z][a-z0-9-]{1,31}:)?resource:agent-wiki$"
+                "pattern": "^(?:@[a-z][a-z0-9-]{1,31}:)?resource:(xenolith|agent-wiki)$"
               },
               "kind": {
                 "type": "string",
@@ -848,6 +848,14 @@
               },
               "name": {
                 "type": "string"
+              },
+              "server": {
+                "description": "The MCP server that writes to it",
+                "type": "string",
+                "enum": [
+                  "xenolith",
+                  "agent-wiki"
+                ]
               },
               "path": {
                 "type": "string"
@@ -997,7 +1005,7 @@
               "lastSessionAt"
             ],
             "additionalProperties": {},
-            "description": "Agent Wiki, the agents' shared memory"
+            "description": "The shared context: Xenolith, or Agent Wiki before it"
           },
           {
             "type": "object",

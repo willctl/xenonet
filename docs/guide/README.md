@@ -12,6 +12,7 @@ XenoNet is the network for SI (super intelligence) on your machine. It has a bac
 - [Actors](actors.md) covers you at the console, always-on agents and your own programs, which XenoNet shows on a layer of their own.
 - [Remote actors](cloud-assistants.md) covers pairing an agent in the cloud, such as an OpenAI dot, so it can read session statuses here without changing anything, and stopping it.
 - [Other machines](other-machines.md) covers the prototype that shows other machines' XenoNets beside your own.
+- [Shared context](shared-context.md) covers Xenolith, the wiki every session shares, and how it shows on the map.
 - [Themes](themes.md) lists the themes that come with XenoNet, and says how to choose one or make your own.
 - [The xenonet command](cli.md) lists what the `xenonet` command does in a terminal.
 - [When something goes wrong](troubleshooting.md) covers XenoNet's error log, its doctor, and asking Codex or Claude Code about them.

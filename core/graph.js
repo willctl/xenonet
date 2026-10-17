@@ -6,6 +6,7 @@
 // and gathers like a project.
 import { pathKey, isUnder, baseName, scratchZone, tilde } from "./paths.js";
 import { projectRelations, normalizeRemote } from "./projects.js";
+import { contextName } from "./xenolith.js";
 
 export function activityOf(updatedAt, now, { activeWindowMs, recentWindowMs }) {
   if (!updatedAt) return "idle";
@@ -122,12 +123,14 @@ export function buildGraph({ projectsDir, homeDir = null, projects, sessions, na
     if (parent) links.push({ source: parent.id, target: s.id, kind: "lineage-cross" });
   }
 
-  // Agent Wiki: the shared memory as its own constellation. Its root takes the
-  // agent-wiki resource id so MCP beams from sessions land on it.
+  // The shared context (Xenolith, or Agent Wiki) as its own constellation.
+  // Its root takes its MCP server's resource id so beams from sessions'
+  // calls to that server land on it.
   const relations = [];
   if (wiki) {
-    const root = "resource:agent-wiki";
-    nodes.set(root, { id: root, kind: "wiki", name: "Agent Wiki", path: wiki.dir, pageCount: wiki.pages.length, inbox: wiki.inbox, lastActivity: wiki.log[wiki.log.length - 1]?.ts ?? null });
+    const server = wiki.server ?? "agent-wiki";
+    const root = `resource:${server}`;
+    nodes.set(root, { id: root, kind: "wiki", name: contextName(server), server, path: wiki.dir, pageCount: wiki.pages.length, inbox: wiki.inbox, lastActivity: wiki.log[wiki.log.length - 1]?.ts ?? null });
     link("core", root, "wiki");
     const slugs = new Set(wiki.pages.map((p) => p.slug));
     const seen = new Set();

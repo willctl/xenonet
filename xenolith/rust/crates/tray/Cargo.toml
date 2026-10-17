@@ -1,0 +1,50 @@
+[package]
+name = "xenolith-tray"
+description = "Xenolith tray: the status of the shared memory, its curator, and the Xenolith window"
+version.workspace = true
+edition.workspace = true
+# tray-icon and muda need it; the rest of the workspace builds on 1.85.
+rust-version = "1.90"
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "xenolith-tray"
+path = "src/main.rs"
+
+[dependencies]
+xenolith-core.workspace = true
+serde_json.workspace = true
+wry = { version = "0.57", default-features = false, features = ["os-webview"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_DataExchange",
+    "Win32_System_Environment",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_Pipes",
+    "Win32_System_Registry",
+    "Win32_System_Services",
+    "Win32_System_Threading",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(not(windows))'.dependencies]
+tao = "0.37"
+tray-icon = "0.26"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[build-dependencies]
+embed-resource = "3"

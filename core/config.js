@@ -1,22 +1,18 @@
 import os from "node:os";
 import path from "node:path";
-import fs from "node:fs";
 import { createWorld } from "./demo.js";
 import { appDir, findClaudeDesktopDir } from "./dirs.js";
+import { contextServerOf, findContextDir } from "./xenolith.js";
 
 export { appDir };
 
 const home = os.homedir();
 
-// Agent Wiki records its folder in ~/.agent-wiki/config.json.
+// The shared context's folder: XENONET_WIKI_DIR, or Xenolith's (or Agent
+// Wiki's) as their own programs find it (core/xenolith.js).
 function findWikiDir() {
   if (process.env.XENONET_WIKI_DIR) return process.env.XENONET_WIKI_DIR;
-  try {
-    const dir = JSON.parse(fs.readFileSync(path.join(home, ".agent-wiki", "config.json"), "utf8")).wikiDir;
-    if (dir && fs.existsSync(dir)) return dir;
-  } catch {}
-  const fallback = path.join(home, "AgentWiki");
-  return fs.existsSync(fallback) ? fallback : null;
+  return findContextDir()?.dir ?? null;
 }
 
 // Demo mode swaps every source for a made-up workspace in a temp folder.
@@ -28,6 +24,8 @@ const world = demo ? createWorld() : null;
 // itself.
 const serverDev = !demo && process.argv.includes("--dev") && !process.env.XENONET_PORT;
 const devDir = (kind) => (serverDev ? appDir(kind, { name: "XenoNet Dev" }) : null);
+
+const wikiDir = world ? world.wikiDir : findWikiDir();
 
 export const config = {
   demo,
@@ -74,7 +72,10 @@ export const config = {
     : process.env.GH_CONFIG_DIR ?? (process.env.XDG_CONFIG_HOME ? path.join(process.env.XDG_CONFIG_HOME, "gh") : process.platform === "win32" && process.env.APPDATA ? path.join(process.env.APPDATA, "GitHub CLI") : path.join(home, ".config", "gh")),
   stateDir: world?.stateDir ?? path.resolve(process.env.XENONET_STATE_DIR ?? devDir("state") ?? appDir("state")),
   cacheDir: world?.cacheDir ?? path.resolve(process.env.XENONET_CACHE_DIR ?? devDir("cache") ?? appDir("cache")),
-  wikiDir: world ? world.wikiDir : findWikiDir(),
+  wikiDir,
+  // The MCP server that writes to it (xenolith or agent-wiki): the map's
+  // wiki takes its name, so a session's calls to it land there.
+  wikiServer: world ? "agent-wiki" : contextServerOf(wikiDir),
   // MCP servers that are part of the host apps rather than shared systems;
   // they don't get their own resource node.
   hiddenResources: new Set(

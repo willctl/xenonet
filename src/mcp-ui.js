@@ -13,7 +13,7 @@ export function createMcpUi({ modals, toast }) {
   const cache = new Map();
   const pending = new Map();
   let view = null;
-  const serverOf = (node) => node.kind === "wiki" ? "agent-wiki" : node.name;
+  const serverOf = (node) => node.kind === "wiki" ? node.server ?? "agent-wiki" : node.name;
   const keyOf = (node) => `${node.host ?? ""}/${serverOf(node)}`;
   async function load(node, refresh = false) {
     const key = keyOf(node);
