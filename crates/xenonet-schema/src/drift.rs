@@ -574,7 +574,6 @@ impl DriftLog {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
