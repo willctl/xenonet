@@ -8,6 +8,7 @@ mod actors;
 mod app;
 mod base;
 mod blocks;
+mod components;
 mod drift;
 mod js;
 mod lines;

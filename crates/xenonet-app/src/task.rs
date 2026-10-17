@@ -117,6 +117,12 @@ impl Io {
         r
     }
 
+    /// The message of the last error a request threw, as `err.message`
+    /// reads it, for logic that words its own error around it.
+    pub fn last_message(&self) -> String {
+        self.last_error.borrow().as_ref().and_then(|e| e.get("message")).map(xenonet_base::text::js_string).unwrap_or_default()
+    }
+
     /// Waits this long (setTimeout's ms).
     pub async fn sleep(&self, ms: f64) {
         let _ = self.ask(json!({ "op": "sleep", "ms": xenonet_base::json::number(ms) })).await;

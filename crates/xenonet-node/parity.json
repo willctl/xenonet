@@ -268,6 +268,51 @@
         "The second folder's repos are still made by the twin's git, asynchronously, from the steps the Rust gives; the first folder's are made by the Rust's own git, as the JS did synchronously.",
         "Sessions listed before the world is made fail with an Error of the Rust's words where JS threw a TypeError."
       ]
+    },
+    "core/components/protocol.js": {
+      "rust": "crates/xenonet-components/src/protocol.rs",
+      "differences": []
+    },
+    "core/components/console-policy.js": {
+      "rust": "crates/xenonet-components/src/console_policy.rs",
+      "differences": []
+    },
+    "core/components/rpc.js": {
+      "rust": "crates/xenonet-components/src/rpc.rs",
+      "differences": [
+        "The framing and its rules (line and buffer limits, what a line may be, which events pass) are the Rust's; the socket, the requests waiting for answers and their timers stay in the twin."
+      ]
+    },
+    "core/components/runtime.js": {
+      "rust": "crates/xenonet-components/src/runtime.rs",
+      "differences": [
+        "The service's socket and process are still Node's: the Rust reads and checks the descriptor, builds the hello and decides when the service counts as started."
+      ]
+    },
+    "core/components/packages.js": {
+      "rust": "crates/xenonet-components/src/packages.rs, with the archive in crates/xenonet-components/src/tar.rs",
+      "differences": [
+        "Packages are unpacked by the Rust's own tar reader (ustar, pax and GNU long names, checksums checked) behind the same filter, in place of node-tar; on the same archives it gives the same files, modes and mtimes (to the second). Folders keep the time they were made.",
+        "The install lock's file is closed once it holds the pid, and taken away when the lock goes; JS kept it open until then."
+      ]
+    },
+    "core/components/install.js": {
+      "rust": "crates/xenonet-components/src/install.rs",
+      "differences": [
+        "The service's connection, starting a runtime, the startup check given in operations, and the clock are asked of the twin, with the operations given; the startup check XenoNet does itself runs the staged node from Rust, with a 15 s limit as spawnSync had."
+      ]
+    },
+    "core/components/updates.js": {
+      "rust": "crates/xenonet-components/src/updates.rs",
+      "differences": [
+        "The download's bytes come through the fetcher given and are handed to the Rust a chunk at a time; the size limit, the hash check and putting the file in place are the Rust's."
+      ]
+    },
+    "core/components/console.js": {
+      "rust": "crates/xenonet-components/src/console.rs",
+      "differences": [
+        "Each action is a Rust task; the service's connections, Desktop's process and fetch are the twin's."
+      ]
     }
   },
   "tests": [
@@ -308,6 +353,7 @@
     "test/component-download.test.js",
     "test/component-install.test.js",
     "test/component-packages.test.js",
+    "test/components.test.js",
     "test/control-client.test.js",
     "test/control.test.js",
     "test/copilot-cli.test.js",
