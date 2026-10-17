@@ -161,7 +161,7 @@ fn a_channel_session_gets_the_2025_handshake_and_its_messages() {
     assert_eq!(names, ["whoami", "peers", "who_has", "send", "inbox", "claim", "release", "focus", "doctor", "ask_gateway_token"]);
 
     let call = s.ask(3, "tools/call", json!({ "name": "send", "arguments": { "to": "repo", "text": "hello", "reply_to": 7 } }));
-    assert_eq!(call["result"]["isError"], json!(false), "{call}");
+    assert!(call["result"].get("isError").is_none(), "an answer, as the JS server gives it: {call}");
     let (path, agent, _, body) = loop {
         let h = heard.recv_timeout(Duration::from_secs(5)).unwrap();
         if h.0 != "/api/engine/channel" {
@@ -183,13 +183,20 @@ fn another_session_gets_both_eras_and_no_channel() {
     assert!(r["result"]["capabilities"].get("experimental").is_none(), "{r}");
 }
 
-// The tools are the JS server's, declared the same way.
+// The tools a session gets, each declared as the JS server declares it
+// (tests/contract.rs compares them with the JS server's own).
 #[test]
 fn the_tools_are_the_js_servers() {
-    let declared: Value = serde_json::from_str(include_str!("../tools.json")).unwrap();
     let (port, _heard) = xenonet(vec![]);
     let mut s = Server::start(port, false);
     init(&mut s);
     let tools = s.ask(2, "tools/list", json!({}));
-    assert_eq!(tools["result"]["tools"], declared["tools"]);
+    let tools = tools["result"]["tools"].as_array().unwrap();
+    let names: Vec<_> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["whoami", "peers", "who_has", "send", "inbox", "claim", "release", "focus", "doctor", "ask_gateway_token"]);
+    for t in tools {
+        assert_eq!(t["inputSchema"]["type"], json!("object"));
+        assert_eq!(t["inputSchema"]["$schema"], json!("https://json-schema.org/draft/2020-12/schema"));
+        assert!(t["title"].is_string() && t["description"].as_str().unwrap().len() > 40 && t["annotations"]["readOnlyHint"].is_boolean(), "{t}");
+    }
 }

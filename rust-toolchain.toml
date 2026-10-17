@@ -1,0 +1,8 @@
+# The Rust that builds XenoNet (docs/design/rust-core.md, "Toolchain"). The
+# MCP servers are on rmcp, whose releases need Rust 1.88 or later, and they
+# build into the one xenonet binary with the rest; rustup installs this
+# toolchain for the checkout without changing anyone's default. The crates
+# still declare the oldest Rust each builds on.
+[toolchain]
+channel = "1.90.0"
+components = ["rustfmt", "clippy"]

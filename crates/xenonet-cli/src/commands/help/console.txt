@@ -1,0 +1,72 @@
+Drives XenoNet Dev from a terminal, one step after another: the demo
+instance (made-up data) unless --instance says dev (your sessions) or test.
+
+  xenonet console launch "select:atlas-api" shot:atlas
+  xenonet console --instance dev state
+  xenonet console key:Mod+K type:wallpaper key:Enter shot:wallpaper
+
+Steps:
+  launch[:inactive|front|hidden]  start it unless it's running, and wait until it's ready
+  launch:restart[:…]              quit it if it's running, or end a copy stuck holding its
+                                  lock, then start it afresh (launch:restart:hidden, say)
+  quit                            quit it
+  status / state                  the instance and its window / the page's state
+  find:<words>                    nodes matching the words, with their ids
+  select:<id or words>            select a node (a project gathers its sessions)
+  deselect, back, next, prev, reset
+  command:<id>                    a palette command; commands lists them
+  stats:<id or words>             a session's stats panel
+  simulate:<kind>[,a[,b]]         needs-you, collision, stuck, wiki-write, turn-end, doctor, clear;
+                                  or an actor acting: actor-spawn, actor-edit, actor-message,
+                                  actor-online, actor-offline (a: the actor, b: what it acts on);
+                                  or actor-request[,name]: a made-up program asking to be an
+                                  actor, waiting for an Allow, and actor-needs-you[,actor]: an
+                                  agent waiting on you with a made-up question until clear,
+                                  actor-tunnel[,actor] and actor-tunnel-down[,actor]: a
+                                  made-up connection through a tunnel, with an adapter
+                                  connected or not, and actor-read[,actor[,node]]: a read
+                                  through it (all demo and test instances only);
+                                  with XENONET_HOSTS=1 also host-add,<id>,<port> (another XenoNet
+                                  here, shown as a host), host-offline and host-online (a: the
+                                  host, the first if left out) and host-skew[,host[,ms]]
+  actors                          the actors beside the map: presence, status, beams; and the
+                                  programs waiting for an Allow
+  feed[:<n>]                      the activity feed's last lines, sessions' and actors'
+  identities[:<keys>|all]         the identity chips; with chip keys (comma-separated), only their work
+  mask:on|off                     hide identities (GitHub A, Claude B…) or show them
+  hosts[:<ids>|all]               other machines on the map (XENONET_HOSTS=1) and how each
+                                  stands; with host ids (comma-separated, @here for this
+                                  machine), only their work
+  root[:<folder>|reset]           the projects folder; with a folder (~/… or a full path), read
+                                  that one instead, or reset to go back to ~/Projects
+  key:<combo>                     Mod+K, Escape, ArrowDown, W… (Mod is ⌘ on a Mac, Ctrl elsewhere)
+  type:<text>                     typed into whatever has focus
+  click:<x,y | @id>               a real click; click2: double-clicks
+  hover:<x,y | @id>               moves the pointer there
+  drag:<x1,y1,x2,y2>              alt-drag: holds Alt, which moves a node
+  scroll:<x,y,dy>                 a wheel turn
+  size:<1600x900[@2] | window>    the page's size
+  show / hide / minimize          the window (shown without taking focus)
+  still:on|off                    hold ambient animation still
+  settle                          wait for the view to settle
+  shot:<name>                     .xenonet/<name>.png, held still and settled
+  eval:<js>                       an expression, or a body with return
+  logs                            recent warnings and errors
+  listen:<ms>                     new warnings and errors over that long
+  theme:<name>                    switch the theme, live, and wait until it's drawn
+  themes                          the themes, and the one in use
+  environment:<id>                choose nebula, aurora, trench or vault independently of the theme
+  environments                    the environments and the one in use
+  environmentPicker               preview environment cards; keepEnvironment or revertEnvironment
+  mcp:<node-id>                    open a shared system's MCP details; mcpTab and mcpSearch browse it
+  previewTheme:<name>             show a theme in this window alone; keepTheme
+                                  or revertTheme after
+  themeSwitcher[:off]             "Theme…": the switcher; stepTheme[:-1] moves
+                                  through it, showing each theme (keepTheme or
+                                  revertTheme after, as Enter and Esc do)
+  themeGallery[:<name>|off]       the gallery of themes; focusTheme:<name> looks
+                                  at a card, makeTheme makes your own from it
+  film[:<seconds>]                play a film of the day (the day plays for
+                                  <seconds>, 12 unless said) and wait for its end
+  sleep:<ms>
+  <method>[:<arg>]                any other driver method (src/driver.js), such as ops or clearOps

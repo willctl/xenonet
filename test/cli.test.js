@@ -13,6 +13,7 @@ import { parse } from "../cli/lib/args.js";
 import { table, wrapText, plural, clip } from "../cli/lib/out.js";
 import { commandScript, commandState, installCommand, uninstallCommand } from "../core/command.js";
 import { HEALTH_MS } from "../core/client.js";
+import { command } from "./harness/xenonet-bin.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // Temp folders, taken away after the tests.
@@ -89,7 +90,7 @@ function xenonet(args, { cwd = root, input = "", env = {} } = {}) {
   const own = Object.fromEntries(Object.entries(process.env).filter(([name]) => !REAL.has(name.toUpperCase())));
   Object.assign(own, { NO_COLOR: "1", XENONET_PORT: "", HOME: home, USERPROFILE: home, PATH: path.join(home, "bin"), XENONET_CODEX_BIN: path.join(home, "bin", "codex") });
   return new Promise((resolve) => {
-    const proc = spawn(process.execPath, [path.join(root, "cli", "xenonet.js"), ...args], { cwd, env: { ...own, ...env }, stdio: ["pipe", "pipe", "pipe"] });
+    const proc = spawn(...command(args), { cwd, env: { ...own, ...env }, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "", stderr = "";
     proc.stdout.on("data", (d) => (stdout += d));
     proc.stderr.on("data", (d) => (stderr += d));

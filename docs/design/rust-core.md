@@ -359,12 +359,14 @@ the 2025 handshake. The Rust server keeps that behavior:
 ### Toolchain
 
 Every current `rmcp` release needs Rust 1.88 or later (through let-chains
-and `darling` 0.23). The workspace builds on Rust 1.85, and
-`crates/xenonet-mcp` is a workspace of its own for now, built with a newer
-toolchain (`rustup run 1.90.0 cargo test --manifest-path
-crates/xenonet-mcp/Cargo.toml`). Once a `rust-toolchain.toml` pins a newer
-toolchain for the checkout (rustup installs it there without changing
-anyone's default), the MCP crate joins the workspace.
+and `darling` 0.23). `rust-toolchain.toml` pins Rust 1.90.0 for the
+checkout (rustup installs it there without changing anyone's default), so
+`crates/xenonet-mcp` is a member of the workspace and builds into the one
+binary. The crates that hold `rmcp` or `tokio` (`xenonet-mcp`,
+`xenonet-service`, `xenonet-cli`) declare Rust 1.88; the rest still build
+on 1.85. A PATH can name a toolchain's own `cargo` rather than rustup's,
+which ignores the pin, so the scripts run cargo through
+`scripts/cargo.mjs`, which finds the pinned toolchain.
 
 ## Hooks
 
@@ -474,14 +476,36 @@ port. The service stays the only writer of `state.json` and
 
 Each step leaves `npm test` passing on JS, and adds to `parity.json`.
 
+## Decided along the way
+
+- **The toolchain** is pinned with the MCP crate (see "Toolchain").
+- **`hyper` with XenoNet's own router**: `crates/xenonet-service/src/routes`
+  dispatches in the order `api()` does, through every check in its place.
+- **The cores behind traits.** The service's routes call each core
+  through a trait shaped after the JS object `server/index.js` hands them
+  (`crates/xenonet-service/src/cores`: `State`, `Engine`, `Verify`,
+  `Actors`…), JSON in and out. A core not in Rust yet answers 501 with
+  `{ error, code: "pending" }`, and a check that can't run refuses. The
+  command (`crates/xenonet-cli/src/pending.rs`) and the MCP servers
+  (`crates/xenonet-mcp/src/pending.rs`) do the same for the core functions
+  they call. When a core lands, an adapter implements its trait, and
+  `Cores::pending()` gives way to it.
+- **The console operator stays JS for now**: `node mcp/console.js`, which
+  the binary's `xenonet mcp console` says to run. It drives Desktop through
+  `core/control.js`, which stays JS for `electron/`, the end-to-end tests
+  and the scripts, and its development instances run the checkout's
+  Electron, so Node is there whenever they are. Installed Tools without
+  Node need only its "installed" target over the component service's
+  socket, which can move to Rust then.
+
 ## Not decided yet
 
-- When to pin a newer Rust toolchain: with the MCP crate, or before.
-- `hyper` with XenoNet's own router (proposed above), or a framework.
-- Whether the `xenonet-console` MCP server, which drives Desktop's
-  control channel, moves to Rust or stays a JS tool in the Tools package.
 - Where terminals live: in the Rust service (with a pty crate), or in
-  Electron, as Desktop's own already do.
+  Electron, as Desktop's own already do. Until then the Rust service's
+  component service answers the terminal requests pending.
+- The DNS resolver and TLS the actor gateway's check of a public address
+  needs (`hickory-resolver` and `rustls`, say). The check on this computer
+  alone is in Rust.
 - Signing on Windows.
 - Whether a release ships Rust subsystems inside the JS service (twins in
   place) before the binary replaces the service.
@@ -540,8 +564,6 @@ place. This table follows it.
 | `core/units.js` | `xenonet-base/src/units.rs`, rounding as `toFixed`, `toLocaleString` and `Math.round` do | `stats`, `token-files`, `state`, `server` pass |
 | `core/actors/tokens.js` | `xenonet-actors/src/tokens.rs` | `token-files`, `actor-registration`, `actor-routes`, `actor-gateway` pass |
 | `core/private-file.js`, `core/actors/token-file.js` (but the doctor's look in repos) | `xenonet-base/src/private_file.rs`, `xenonet-actors/src/token_file.rs` | `private-file`, `token-files`, `cli-actor`, `mcp-actor`, `hosts-config` pass, the Windows ACL cases included |
-| `xenonet mcp` for sessions (`mcp/xenonet.js`), a prototype | `xenonet-mcp`, on rmcp, Rust 1.88+ | Its own stdio tests; the same answers as the JS servers to the probe and the handshake |
-| `xenonet hook` (`cli/commands/hook.js`) | `xenonet-cli`, the `xenonet` binary | `launcher`'s hook cases, as Rust tests of the binary |
 | `core/procs.js` | `xenonet-engine/src/procs.rs`, its lookups a machine the twin answers with the commands' output | `procs` and the 20 other files that reach it pass |
 | `core/secret-store.js` | `xenonet-actors/src/secret_store.rs` (the store's program still runs in the twin) | `assistant-tunnels`, `actor-wake`, `decide`, `costs`, `integrations`, `spotify` pass |
 | `core/actors/products.js`, `detail.js`, `names.js`, `key.js`, `limits.js`, `handoff.js`, `adapters.js`, `spend.js` | `xenonet-engine/src/products.rs`; `xenonet-actors/src/detail.rs`, `names.rs` (on unicode-normalization), `key.rs`, `limits.rs`, `handoff.rs`, `adapters.rs`, `spend.rs` | `actor-names`, `actor-limits`, `actor-spend`, `actors`, `actor-gateway`, `actor-routes`, `gateway-tunnel`, `assistant-connections`, `server` pass |
@@ -573,6 +595,12 @@ place. This table follows it.
 | `core/assistant/` (protocol, audit, cursors, credentials, fixtures, projection, source, service, client, tunnel-client, tunnels) | `xenonet-assistant`: grant credentials written private in the JS's order, signed page tokens (HMAC-SHA256 on sha2), what a grant sees and its labels cleaned, the six reads as tasks, the adapter's retries and standing, tunnels' runs and the client's own environment; zod's checks, the grants' standing and rate, and the processes stay in the twins | `assistant-connections`, `assistant-endpoint`, `assistant-routes`, `assistant-service`, `assistant-source`, `assistant-tunnels`, `schemas` pass |
 | `core/integrations/` (common, routing, pi, reviews, openshell, index) | `xenonet-integrations`: credentials redacted, tickets and records, the routing answer's check, Pi metadata, the frozen text snapshot (O_NOFOLLOW reads, stamps before and after), what a sandbox returns validated as untrusted, the patch, and OpenShell's argv and flows as tasks; JevRouter, git and the in-sandbox collector (JS run inside the sandbox) stay in the twins | `integrations`, `integrations-routes`, `sandbox-reviews` pass |
 | `core/doctor/` (index, service, checkup, context) | `xenonet-doctor`: each check's verdict and words as a task asking the twin's ctx (files, processes, XenoNet's state) for what it reads, the hosts' checks, the summary, new problems and the last run's file; machine(), the runner's time limits and the schedule stay in the twins | `doctor`, `observers`, `token-files`, `hosts-doctor`, `schema-output` pass |
+| `xenonet mcp` (`mcp/xenonet.js`), for sessions, actors and channel sessions | `xenonet-mcp`, on rmcp | Contract tests against the JS server (initialize, `tools/list`, the probe, in each kind of session); `mcp-actor`, `engine` pass against the binary |
+| `xenonet mcp assistant` (`mcp/assistant.js`, with `core/assistant/client.js`) | `xenonet-mcp` | `assistant-endpoint` but `--fixture` (pending on `core/assistant/service.js`), `e2e/assistant` pass against the binary |
+| `xenonet hook` and every other command (`cli/`) | `xenonet-cli`, the `xenonet` binary | `cli`, `cli-actor`, `cli-gateway`, `cli-status-agents`, `hosts-cli`, `launcher` pass against the binary, but the cases that reach a pending core |
+| `xenonet serve` (`server/index.js`, `server/routes/`, `component-service.js`, `static.js`, `upstream.js`) | `xenonet-service` | The JS route tests' cases as Rust tests of the routes; `control` passes against the binary; `server`, `hosts-server` wait on the map's core |
+| The actor gateway, its switch and tunnels (`server/actor-gateway.js`, `gateway-control.js`, `gateway-tunnel.js`, `gateway-reach.js`) | `xenonet-service/src/gateway` | 69 of the JS gateway's answers, byte for byte; `gateway-tunnel`'s cases; the public address check waits on a DNS and TLS decision |
+| The assistant's endpoint (`server/assistant-endpoint.js`) | `xenonet-service` | Its hello, read and sweep, as a Rust test |
 
 With every twin in place, all 131 test files that reach one pass (of 170; the other 39 load no module that has a twin). The
 twins load in the Node processes a test starts too (a server, the
@@ -589,3 +617,12 @@ vendor checks are still JS. The readers gain from Rust once they're Rust
 from the file to the answer.
 
 The readers and the schemas (step 2) are ported: every module of `core/` that reads a source, the map and its state, and `core/schema/`. Through the twins they're slower than the JS (a map of 3,000 sessions takes about 26 ms against 5 ms, a session's stats about 6 times as long), since every value crosses between JS and Rust; they gain once they're Rust from the file to the answer. Not ported yet: the engine and what follows it, in the order above.
+
+`npm run test:bin` builds the binary and runs every JS test that starts
+the service, the command or an MCP server against it
+(`XENONET_SERVICE_BIN`, `XENONET_CLI_BIN`, through
+`test/harness/xenonet-bin.js`), and `crates/xenonet-cli/bin-tests.json`
+keeps the counts. Desktop starts `xenonet serve` with
+`XENONET_SERVICE_RUNTIME=rust`; Node stays the default until every core
+the service calls is in Rust. The Service and Tools packages carry the
+binary as `bin/xenonet`.

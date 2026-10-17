@@ -1,26 +1,33 @@
-# The xenonet MCP server in Rust, on the official rmcp crate. Every rmcp
-# release needs Rust 1.88 or later, so until the workspace pins a toolchain
-# (docs/design/rust-core.md, "Toolchain") this crate is a workspace of its
-# own, built with a newer toolchain than the rest:
-#   rustup run 1.90.0 cargo test --manifest-path crates/xenonet-mcp/Cargo.toml
 [package]
 name = "xenonet-mcp"
-description = "XenoNet's MCP server for sessions, in Rust: the engine's tools, and live messages for a Claude Code channel session."
-version = "0.2.0"
-edition = "2021"
+description = "XenoNet's MCP servers, on rmcp: the engine's tools for sessions and actors, live messages for a Claude Code channel session, and the assistant's read-only tools."
+version.workspace = true
+edition.workspace = true
+# rmcp needs Rust 1.88 or later (rust-toolchain.toml pins the checkout's).
 rust-version = "1.88"
-license = "MIT"
-authors = ["willctl"]
-repository = "https://github.com/willctl/xenonet"
-publish = false
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
 
+# `xenonet mcp` runs it; the binary of its own is for its stdio tests.
 [[bin]]
 name = "xenonet-mcp"
 path = "src/main.rs"
+test = false
 
 [dependencies]
-rmcp = { version = "3.5", default-features = false, features = ["server", "transport-io"] }
-serde_json = { version = "1", features = ["preserve_order"] }
-tokio = { version = "1", features = ["macros", "rt", "io-std", "io-util", "net", "time"] }
+# The assistant's request ids (r_<uuid v4>) and its client's jitter.
+getrandom.workspace = true
+# The patterns the JS servers match with: the channel flags, tokens to
+# withhold and the assistant's ids in its schemas.
+regex.workspace = true
+rmcp.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+xenonet-actors.workspace = true
+xenonet-base.workspace = true
 
-[workspace]
+# Whether a pid still runs (kill with signal 0), as process.kill(pid, 0).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

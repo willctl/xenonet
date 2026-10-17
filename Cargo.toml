@@ -3,10 +3,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
-# Xenolith's crates join once its own workspace folds into this one. The MCP
-# server needs Rust 1.88 or later (rmcp), so it builds on its own until the
-# workspace pins a toolchain.
-exclude = ["xenolith", "crates/xenonet-mcp"]
+# Xenolith's crates join once its own workspace folds into this one.
+exclude = ["xenolith"]
 
 [workspace.package]
 version = "0.2.0"
@@ -69,6 +67,20 @@ icu_normalizer = "2.1"
 napi = { version = "3.4", default-features = false, features = ["napi8", "serde-json"] }
 napi-derive = "3.3"
 napi-build = "2.2"
+xenonet-mcp = { path = "crates/xenonet-mcp" }
+xenonet-service = { path = "crates/xenonet-service" }
+# The binary's processes: the service's sockets, timers and children, its
+# HTTP API (hyper, with XenoNet's own router on top), and the MCP servers
+# (rmcp, which needs Rust 1.88: rust-toolchain.toml pins the checkout's).
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-std", "io-util", "time", "sync", "process", "signal", "fs"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+rmcp = { version = "3.5", default-features = false, features = ["server", "transport-io"] }
+# The service's cores are traits the routes call through, async where the
+# JS awaits (crates/xenonet-service/src/cores).
+async-trait = "0.1"
 
 [profile.release]
 lto = "thin"

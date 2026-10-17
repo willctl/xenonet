@@ -1,0 +1,13 @@
+What went wrong in XenoNet lately: the background service, the desktop app
+and the xenonet command, each line with a code that says what it is and the
+fix when there's one. Home folders show as ~ and anything like a key is
+taken out, so it's safe to paste into an issue.
+
+  --errors          errors only (default: errors and warnings)
+  --all             info lines too
+  --since <time>    how far back: 30m, 6h, 2d (default 24h)
+  --component <c>   service, desktop or cli
+  --code <code>     codes starting with this, such as doctor. or service.port
+  --summary         each code once, with how often and when last
+  --dev             XenoNet Dev's log, not the installed XenoNet's
+  --json            as JSON lines

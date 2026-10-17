@@ -1,0 +1,23 @@
+Scripts drive XenoNet Dev one step after another, as xenonet console does,
+and the console keeps a log of what you do there as the same steps.
+
+  xenonet script record --instance dev > tour.json   what you did, as a script
+  xenonet script run tour.json                       play it in the demo
+  xenonet script run tour.json --instance dev --hidden
+  xenonet script run film.mjs                        a JS module, for anything else
+
+A script is a JSON list of steps: strings as xenonet console takes them
+("select:atlas-api", "shot:atlas", "film:30") or { "op": "select",
+"args": ["project:atlas-api"] }. A module's default export gets the
+instance (core/control.js) and a step function:
+
+  export default async function ({ xenonet, step }) {
+    await step("theme:helios");
+    await step({ op: "stats", args: ["claude:…"] });
+    await xenonet.screenshot({ name: "stats" });
+  }
+
+  --instance <id>   demo (the default), dev, test or film
+  --hidden          start it hidden if it isn't running
+  --last <n>        record only the last n steps
+  --clear           record, then empty the log

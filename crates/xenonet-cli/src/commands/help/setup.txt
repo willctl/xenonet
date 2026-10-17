@@ -1,0 +1,1 @@
+Install this downloaded component for your account. From its extracted folder, run its bundled node (node.exe on Windows) with cli/xenonet.js setup. Service and Tools can be installed in either order.

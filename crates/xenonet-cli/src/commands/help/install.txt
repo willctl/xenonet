@@ -1,0 +1,7 @@
+Installs a small script that runs this checkout's xenonet with this Node.
+It goes in ~/.local/bin, or %LOCALAPPDATA%/XenoNet/bin on Windows.
+Add that folder to PATH if it isn't there yet.
+
+  --dir <folder>  somewhere else on your PATH
+  --force         replace a xenonet there that isn't XenoNet's
+  --json          the result as JSON

@@ -22,6 +22,7 @@ import { createTray } from "./tray.js";
 import { launchedAtLogin } from "./login.js";
 import { loadShellEnv } from "./shellenv.js";
 import { prefs } from "./prefs.js";
+import { serviceRuntime, rustBinary } from "./service-runtime.js";
 import { installMenu, offerMove, askAboutLogin, uninstall } from "./mac.js";
 import { themeMenuOf } from "./theme-menu.js";
 import { instanceFrom } from "../core/instances.js";
@@ -61,7 +62,10 @@ const devBundle = fromSource && path.resolve(app.getAppPath()) !== root;
 // Demo mode (XENONET_DEMO=1) gets its own port so it never reuses a real server.
 const PORT = fromSource ? instance.port : Number(process.env.XENONET_PORT ?? (process.env.XENONET_DEMO === "1" ? 47841 : 47840));
 const SERVICE_BASE = `http://127.0.0.1:${PORT}`;
-const independent = app.isPackaged || process.env.XENONET_STANDALONE === "1";
+// The Rust service (XENONET_SERVICE_RUNTIME=rust, see service-runtime.js)
+// runs standalone, as an installed one does.
+const rustService = serviceRuntime({ pref: prefs().get("serviceRuntime") }) === "rust";
+const independent = app.isPackaged || process.env.XENONET_STANDALONE === "1" || rustService;
 let BASE = SERVICE_BASE;
 let serviceClient = null;
 let frontendServer = null;
@@ -277,8 +281,14 @@ async function startServer() {
       exec = installed.exec; serviceRoot = installed.root;
       Object.assign(env, installed.env);
     }
+    let args = null;
+    if (rustService) {
+      const bin = rustBinary({ root, serviceRoot });
+      if (bin) [exec, args] = [bin, ["serve"]];
+      else console.warn("[xenonet] the Rust service was asked for, but there's no xenonet binary: starting the JS service");
+    }
     if (!exec) throw new Error("XenoNet Service's runtime is missing. Reinstall XenoNet with the bundle installer.");
-    const how = await ensureService({ root: serviceRoot, exec, env });
+    const how = await ensureService({ root: serviceRoot, exec, args, env });
     serviceClient = await desktopClient({ env, handle: (method, body) => {
       if (method === "open") return openTarget(body?.target);
       if (method !== "console") throw new Error("Unsupported Desktop request.");

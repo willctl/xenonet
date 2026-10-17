@@ -1,0 +1,4 @@
+Prints tab completion for your shell. Add a line to your shell's profile:
+
+  zsh   eval "$(xenonet completion zsh)"     (in ~/.zshrc, after compinit)
+  bash  eval "$(xenonet completion bash)"    (in ~/.bashrc)

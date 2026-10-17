@@ -1,0 +1,106 @@
+{
+  "binary": "target/debug/xenonet",
+  "at": "2026-10-17",
+  "files": {
+    "test/server.test.js": {
+      "pass": 3,
+      "tests": 21,
+      "failed": [
+        "only this machine's own pages get in, and health says which XenoNet it is",
+        "the map, its live state, history, summary and digests",
+        "what each actor's work cost today: the demo's Wren and the rest, adding up to the day's estimate",
+        "sessions: by words or folder, their stats, transcripts and handoffs",
+        "acks, collisions and the layout",
+        "themes: the list, a switch and a copy of your own",
+        "a theme whole, built in or yours, for looking at it before switching",
+        "how the projects folder is read: rules, a fresh scan and the Codex pass",
+        "the projects folder: where it comes from, a check, a change and back",
+        "identities: a name, hiding one, pinning work to one, and detecting again",
+        "renaming a session: the demo keeps the name, the map goes out with it, and what isn't a name or a session is refused",
+        "the doctor and the xenonet command",
+        "drift: the report xenonet drift shows, and marking it seen",
+        "Claude Code's hooks honor the sender's process identity",
+        "XenoNet Dev's simulations, its control channel and captures",
+        "the event stream sends what changes",
+        "actors: the list, one by its slug, events since a time, XenoNet Dev's simulations, and the events that carry changes",
+        "registering actors over HTTP: a token that waits, the window's routes behind its key, and the demo's made-up request"
+      ]
+    },
+    "test/hosts-server.test.js": {
+      "pass": 0,
+      "tests": 8,
+      "failed": [
+        "a XenoNet without the flag is a host all the same, and shows only its own",
+        "the console shows the other XenoNet's map: its host node, its projects and sessions under @demo-b:, bridges between the two atlas-apis",
+        "a remote transcript and stats come through the relay; nothing opens, dismisses or hands off a remote session",
+        "the tray's summary counts the live host's alerts, each with its host and title",
+        "the event stream carries the other host's map, but not to a relay's stream",
+        "the host's clock three minutes off: the doctor says so",
+        "through a stand-in for ssh, a link reads the other XenoNet's real relay",
+        "when the other XenoNet stops, the host goes offline with its nodes kept and marked stale, and comes back when it does"
+      ]
+    },
+    "test/control.test.js": {
+      "pass": 4,
+      "tests": 6,
+      "failed": [
+        "mcp: answers a 2025-era client's handshake and lists the tools",
+        "mcp: answers a 2026-07-28 client, which sends no handshake"
+      ]
+    },
+    "test/cli.test.js": {
+      "pass": 11,
+      "tests": 13,
+      "failed": [
+        "xenonet connect --here: a XenoNet answering through a forwarded port is connected in this computer's settings, never by asking it",
+        "xenonet without a XenoNet: status says so, doctor runs here, and mistakes exit 2"
+      ]
+    },
+    "test/cli-actor.test.js": {
+      "pass": 12,
+      "tests": 12,
+      "failed": []
+    },
+    "test/cli-gateway.test.js": {
+      "pass": 4,
+      "tests": 4,
+      "failed": []
+    },
+    "test/cli-status-agents.test.js": {
+      "pass": 2,
+      "tests": 2,
+      "failed": []
+    },
+    "test/hosts-cli.test.js": {
+      "pass": 2,
+      "tests": 3,
+      "failed": [
+        "xenonet relay refuses a window it can't read, and a port that isn't one"
+      ]
+    },
+    "test/launcher.test.js": {
+      "pass": 4,
+      "tests": 4,
+      "failed": []
+    },
+    "test/mcp-actor.test.js": {
+      "pass": 4,
+      "tests": 4,
+      "failed": []
+    },
+    "test/engine.test.js": {
+      "pass": 17,
+      "tests": 17,
+      "failed": []
+    },
+    "test/assistant-endpoint.test.js": {
+      "pass": 6,
+      "tests": 9,
+      "failed": [
+        "the adapter: six read-only tools, the same answer as text and as structured content, made-up data with --fixture",
+        "the adapter against a real grant: reads, a stale cached answer when XenoNet is gone, nothing after revoking",
+        "the cache: by revision, tool and arguments, for 15 minutes, within its size, served only stale"
+      ]
+    }
+  }
+}

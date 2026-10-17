@@ -1,0 +1,19 @@
+Remote actors, such as an OpenAI dot, read what's going on here through
+connections you pair in XenoNet's window (Actors, then Remote connections).
+Each reads only the projects you picked, until its grant expires.
+
+  xenonet assistant                  whether cloud access is on, and each
+                                   connection: its actor, projects, expiry
+                                   and when it was last used
+  xenonet assistant audit [--grant <id>] [--limit <n>]
+                                   what was read lately: times, operations,
+                                   result codes and sizes, never content
+  xenonet assistant revoke <grant>   revokes one connection, for good
+  xenonet assistant disable          turns every connection off at once
+
+revoke and disable work with XenoNet stopped. To turn access on again, or to
+pair a connection, use XenoNet's window. Neither ever deletes what a remote
+actor has already read: revoke its endpoint with its provider too.
+
+  --dev    XenoNet Dev's connections rather than XenoNet's
+  --json   answers as JSON

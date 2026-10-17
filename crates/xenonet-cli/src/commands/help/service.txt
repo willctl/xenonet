@@ -1,0 +1,1 @@
+Manage the background service: xenonet service start, status or stop. Stop refuses while terminals are running unless you pass --force.
