@@ -30,6 +30,7 @@ xenonet-components = { path = "crates/xenonet-components" }
 xenonet-hosts = { path = "crates/xenonet-hosts" }
 xenonet-assistant = { path = "crates/xenonet-assistant" }
 xenonet-integrations = { path = "crates/xenonet-integrations" }
+xenonet-doctor = { path = "crates/xenonet-doctor" }
 # JS keeps an object's keys in the order they were added, and so do the
 # files and answers XenoNet writes: preserve_order keeps that order here.
 serde = { version = "1", features = ["derive"] }

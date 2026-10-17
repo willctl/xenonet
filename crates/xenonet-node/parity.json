@@ -478,6 +478,32 @@
       "differences": [
         "The decider (core/decide.js), the scan's async wrapper and the composition stay in the twin."
       ]
+    },
+    "core/doctor/index.js": {
+      "rust": "crates/xenonet-doctor/src/checks.rs and run.rs",
+      "differences": [
+        "Each check is a task asking the twin's ctx for what it reads (calls through ctx and ctx.actors, the token files' look, and a local time, which Intl formats in JS); its verdict and words are the Rust's. machine(), the runner's parallel runs with their time limit, and the hosts' key checks' composition stay in the twin.",
+        "Of the live state the checks get only its Claude plan reading, and of the health its sources and parts, so a run doesn't convert all of XenoNet's live state for each check.",
+        "A context missing a list the JS read as an array (health without sources, a drift file without records) reads as an empty one, where the JS's check failed with a TypeError."
+      ]
+    },
+    "core/doctor/service.js": {
+      "rust": "crates/xenonet-doctor/src/run.rs",
+      "differences": [
+        "What's a new problem and the last run's file are the Rust's; the schedule and the runs' promises stay in the twin."
+      ]
+    },
+    "core/doctor/checkup.js": {
+      "rust": "crates/xenonet-doctor/src/run.rs",
+      "differences": [
+        "Which results only keeps and the summary are the Rust's; finding a running XenoNet (client.js) and its folders (workspace.js) stay in the twin."
+      ]
+    },
+    "core/doctor/context.js": {
+      "rust": "none: it decides nothing",
+      "differences": [
+        "The twin hands machine() XenoNet's folders (config.js), its Codex (dirs.js) and whether git works (git.js), as the JS did."
+      ]
     }
   },
   "tests": [

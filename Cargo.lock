@@ -968,6 +968,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "xenonet-doctor"
+version = "0.2.0"
+dependencies = [
+ "regex",
+ "serde_json",
+ "xenonet-app",
+ "xenonet-base",
+ "xenonet-schema",
+]
+
+[[package]]
 name = "xenonet-hosts"
 version = "0.2.0"
 dependencies = [
@@ -1006,6 +1017,7 @@ dependencies = [
  "xenonet-base",
  "xenonet-blocks",
  "xenonet-components",
+ "xenonet-doctor",
  "xenonet-hosts",
  "xenonet-integrations",
  "xenonet-schema",

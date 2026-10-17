@@ -32,6 +32,7 @@ xenonet-components.workspace = true
 xenonet-hosts.workspace = true
 xenonet-assistant.workspace = true
 xenonet-integrations.workspace = true
+xenonet-doctor.workspace = true
 
 [build-dependencies]
 napi-build.workspace = true

@@ -1,0 +1,17 @@
+[package]
+name = "xenonet-doctor"
+description = "XenoNet's doctor: whether what XenoNet needs is in place, and how to fix it when it isn't. Each check's verdict and wording, the hosts' checks, the summary and what counts as a new problem."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+regex.workspace = true
+serde_json.workspace = true
+xenonet-app.workspace = true
+xenonet-base.workspace = true
+xenonet-schema.workspace = true

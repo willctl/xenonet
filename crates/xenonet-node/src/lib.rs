@@ -10,6 +10,7 @@ mod assistant;
 mod base;
 mod blocks;
 mod components;
+mod doctor;
 mod drift;
 mod hosts;
 mod integrations;
