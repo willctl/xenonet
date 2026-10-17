@@ -3,10 +3,12 @@
 // last word.
 import { c, print, json, table, plural, ago } from "../lib/out.js";
 import { find, get, nameOf, candidates } from "../../core/client.js";
+import { queueOfSummary, waitsWords } from "../../core/needs-you.js";
 
 export const help = `Which XenoNet is running, what it reads, the sessions at work and the actors
-apart from them, which sessions need you, and the doctor's last word.
-Exits 1 when no XenoNet answers.`;
+apart from them, what needs you (sessions and actors waiting on you, the
+longest wait first, and programs asking to be actors), and the doctor's
+last word. Exits 1 when no XenoNet answers.`;
 
 const NEED = { question: "has a question", permission: "is waiting for a permission" };
 const PRESENCES = ["working", "idle", "away", "offline", "unknown"];
@@ -23,7 +25,9 @@ export async function run(_args, flags) {
   // actors' list has them (you, outside XenoNet's window, only a placeholder).
   const agents = all.filter((a) => a.app !== "actor");
   const actors = list ? list.actors.filter((a) => a.id !== "actor:you" || a.presence !== "unknown").map((a) => ({ id: a.id, name: a.name, presence: a.presence, status: a.status })) : null;
-  if (flags.json) return json({ running: true, name: nameOf(s), version: s.health.version ?? null, port: s.port, demo: !!s.health.demo, sources: s.health.sources, summary, agents, actors, doctor: doctor && { at: doctor.at, summary: doctor.summary } });
+  // What waits on you, in the order the Needs you panel lists it.
+  const queue = queueOfSummary(summary);
+  if (flags.json) return json({ running: true, name: nameOf(s), version: s.health.version ?? null, port: s.port, demo: !!s.health.demo, sources: s.health.sources, summary, queue, agents, actors, doctor: doctor && { at: doctor.at, summary: doctor.summary } });
 
   const count = (name) => s.health.sources?.find((x) => x.name === name && x.ok)?.count;
   const reads = [count("projects") != null && plural(count("projects"), "project"), count("claude") != null && plural(count("claude"), "Claude session"), count("codex") != null && plural(count("codex"), "Codex thread")].filter(Boolean);
@@ -37,7 +41,10 @@ export async function run(_args, flags) {
   if (actors?.length) rows.push([c.dim("Actors"), PRESENCES.map((p) => [p, actors.filter((a) => a.presence === p).length]).filter(([, n]) => n).map(([p, n]) => `${n} ${p}`).join(", ")]);
   // A session on another machine (XENONET_HOSTS=1) says which.
   const named = (n) => `${n.host ? `${n.host} · ` : ""}${n.title}`;
-  for (const [i, n] of summary.needsYou.entries()) rows.push([i ? "" : c.dim("Needs you"), `${c.yellow("●")} ${named(n)} ${c.dim(`(${n.app}) ${NEED[n.kind] ?? n.kind}`)}`]);
+  // A program asking to be an actor is answered only in XenoNet's window.
+  const waits = (it) =>
+    it.kind === "requests" ? `${c.yellow("◇")} ${it.title} ${c.dim(`${waitsWords(it)}; answer in XenoNet's window`)}` : it.kind === "actor" ? `${c.yellow("◇")} ${it.title} ${c.dim(`(actor) ${waitsWords(it)}`)}` : `${c.yellow("●")} ${named(it)} ${c.dim(`(${it.app}) ${NEED[it.kind] ?? it.kind}`)}`;
+  for (const [i, it] of queue.entries()) rows.push([i ? "" : c.dim("Needs you"), waits(it)]);
   if (summary.stuck.length) rows.push([c.dim("Stuck"), summary.stuck.map(named).join(", ")]);
   if (doctor) {
     const { fail = 0, warn = 0 } = doctor.summary;

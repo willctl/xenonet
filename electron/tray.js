@@ -1,6 +1,9 @@
-// The tray orb (the menu bar item on macOS): how many agents need you (amber)
-// or are working, a tooltip listing them, and a menu for the common jumps
-// and the themes. It polls the server's /api/summary every few seconds.
+// The tray orb (the menu bar item on macOS): how many things wait on you
+// (amber), sessions and actors waiting and programs asking to be actors, or
+// how many agents are working, a tooltip listing them, and a menu for the
+// common jumps and the themes. What waits is the Needs you queue
+// (core/needs-you.js), in its order. It polls the server's /api/summary
+// every few seconds.
 // Notifications come from the page (alerts.js), so each alert gets exactly
 // one.
 //   Windows: the app icon with a numbered badge.
@@ -11,6 +14,7 @@ import { Tray, Menu, app } from "electron";
 import { iconImage, trayGlyph } from "./icons.js";
 import { loginSupported, loginLabel, opensAtLogin, setOpensAtLogin, onLoginChange } from "./login.js";
 import { themeItems } from "./theme-menu.js";
+import { queueOfSummary, countOf, waitsWords } from "../core/needs-you.js";
 
 const isMac = process.platform === "darwin";
 
@@ -42,25 +46,38 @@ export function createTray({ baseUrl, showWindow, sendCommand, select, themes = 
 
   function tooltip(s) {
     if (!s) return `${app.name} · connecting`;
+    const queue = queueOfSummary(s);
+    const waiting = countOf(queue);
     const parts = [`${s.working} working`];
-    if (s.needsYou.length) parts.push(`${s.needsYou.length} need${s.needsYou.length === 1 ? "s" : ""} you`);
+    if (waiting) parts.push(`${waiting} need${waiting === 1 ? "s" : ""} you`);
     if (s.collisions) parts.push(`${s.collisions} collision${s.collisions === 1 ? "" : "s"}`);
     if (s.stuck.length) parts.push(`${s.stuck.length} stuck`);
-    const lines = s.needsYou.slice(0, 3).map((n) => `◉ ${named(n, 40)}`);
+    const lines = queue.slice(0, 3).map((n) => `${n.kind === "question" || n.kind === "permission" ? "◉" : "◇"} ${named(n, 40)}`);
     return [`${app.name} · ${parts.join(" · ")}`, ...lines].join("\n").slice(0, 127);
   }
 
+  // One of the queue's items in the menu: a session opens in its app (one
+  // on another machine shows on the map), an actor shows on the map, and
+  // programs asking to be actors open the queue, where Allow is.
+  const openQueue = () => (showWindow(), sendCommand("needs-you"));
+  function queueItem(n) {
+    if (n.kind === "requests") return { label: `${n.title} ${waitsWords(n)}`, click: openQueue };
+    if (n.kind === "actor") return { label: `Actor · ${named(n, 40)} ${waitsWords(n)}`.slice(0, 64), click: () => (showWindow(), select(n.id)) };
+    return { label: `${n.app === "codex" ? "Codex" : "Claude"} · ${named(n, 48)}`, click: () => (n.host ? (showWindow(), select(n.id)) : post("/api/open", { nodeId: n.id, action: "open-app" })) };
+  }
+
   function menu(s) {
-    const need = s?.needsYou ?? [];
+    const need = s ? queueOfSummary(s) : [];
+    const waiting = countOf(need);
     const stuck = s?.stuck ?? [];
     return Menu.buildFromTemplate([
       { label: `Open ${app.name}`, click: () => showWindow() },
       { label: "Wallpaper mode", click: () => (showWindow(), sendCommand("wallpaper")) },
       { type: "separator" },
       {
-        label: need.length ? `Needs you (${need.length})` : "Nothing needs you",
+        label: waiting ? `Needs you (${waiting})` : "Nothing needs you",
         enabled: need.length > 0,
-        submenu: need.length ? need.map((n) => ({ label: `${n.app === "codex" ? "Codex" : "Claude"} · ${named(n, 48)}`, click: () => (n.host ? (showWindow(), select(n.id)) : post("/api/open", { nodeId: n.id, action: "open-app" })) })) : undefined,
+        submenu: need.length ? [{ label: "Open the queue", click: openQueue }, { type: "separator" }, ...need.map(queueItem)] : undefined,
       },
       ...(stuck.length ? [{ label: `May be stuck (${stuck.length})`, submenu: stuck.map((n) => ({ label: named(n, 48), click: () => (showWindow(), select(n.id)) })) }] : []),
       { type: "separator" },
@@ -80,7 +97,7 @@ export function createTray({ baseUrl, showWindow, sendCommand, select, themes = 
   // Rebuilt only when something in it changed, so an open menu isn't swapped
   // out from under the pointer every poll.
   function refreshMenu() {
-    const key = JSON.stringify([summary?.needsYou?.map((n) => [n.id, n.title]), summary?.stuck?.map((n) => [n.id, n.title]), opensAtLogin(), themeMenu]);
+    const key = JSON.stringify([summary ? queueOfSummary(summary).map((n) => [n.key, n.title, n.waits ?? null]) : null, summary?.stuck?.map((n) => [n.id, n.title]), opensAtLogin(), themeMenu]);
     if (key === lastMenu) return;
     lastMenu = key;
     tray.setContextMenu(menu(summary));
@@ -92,8 +109,7 @@ export function createTray({ baseUrl, showWindow, sendCommand, select, themes = 
     } catch {
       summary = null;
     }
-    const need = summary?.needsYou ?? [];
-    await setIcon(summary?.working ?? 0, need.length);
+    await setIcon(summary?.working ?? 0, summary ? countOf(queueOfSummary(summary)) : 0);
     tray.setToolTip(tooltip(summary));
     refreshMenu();
   }

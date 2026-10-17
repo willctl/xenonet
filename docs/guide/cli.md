@@ -17,7 +17,7 @@ $ xenonet
 
 | Command | What it does |
 | --- | --- |
-| `xenonet`, `xenonet status` | Shows which XenoNet is running, what it reads, the sessions at work, which sessions need you, and the doctor's last word. The actors get a line of their own. |
+| `xenonet`, `xenonet status` | Shows which XenoNet is running, what it reads, the sessions at work, what needs you and the doctor's last word. What needs you is in the Needs you panel's order, the longest wait first: sessions waiting on a question or a permission, actors waiting on you, and how many programs ask to join XenoNet, which only XenoNet's window can answer. The actors get a line of their own. |
 | `xenonet doctor` | Checks your setup. Each problem comes with a fix, and a failed check exits 1. See [The doctor](#the-doctor). |
 | `xenonet logs` | What went wrong lately, by code, with a fix when there's one; works with XenoNet stopped. See [When something goes wrong](troubleshooting.md). |
 | `xenonet diagnose` | A summary of XenoNet's state that's safe to share. `--ask` has a Codex or Claude Code session on this computer look at it with you. |

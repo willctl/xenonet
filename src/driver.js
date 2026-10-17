@@ -97,7 +97,7 @@ export function createDriver(app) {
       selection: selected ? brief(nodeOf(selected)) : null,
       gathered: scene.gathering(),
       identities: { filter: app.identities?.selected ?? [], masked: !!app.identities?.masked },
-      overlays: { palette: palette.isOpen, modal: modals.isOpen, preview: preview.isOpen, rename: !!app.hud?.renaming, terminal: !!app.terminal()?.isOpen, wallpaper: app.wallpaper(), replay: replay.active, film: app.film && app.film.state !== "idle" ? app.film.state : false, export: !!app.exportPanel?.isOpen, switcher: !!app.themes?.switcher.isOpen, gallery: !!app.themes?.gallery.isOpen },
+      overlays: { palette: palette.isOpen, modal: modals.isOpen, needsYou: !!app.needsYou?.isOpen, preview: preview.isOpen, rename: !!app.hud?.renaming, terminal: !!app.terminal()?.isOpen, wallpaper: app.wallpaper(), replay: replay.active, film: app.film && app.film.state !== "idle" ? app.film.state : false, export: !!app.exportPanel?.isOpen, switcher: !!app.themes?.switcher.isOpen, gallery: !!app.themes?.gallery.isOpen },
       alerts: alerts.items.map(alertBrief),
       counts: {
         nodes: graph?.nodes.length ?? 0,
@@ -108,6 +108,8 @@ export function createDriver(app) {
         actors: scene.actors().length,
         beams: scene.actorLayer.beams().length,
         requests: app.actorRequests?.view().waiting ?? 0,
+        // Everything waiting on you, as the Needs you panel counts it.
+        needsYou: app.needsYou?.state().count ?? 0,
       },
       motion: motion(scene),
       still: scene.still,
@@ -261,6 +263,32 @@ export function createDriver(app) {
         armed: app.actorRequests.armed(g.id),
       }));
       return { canDecide: v.canDecide, off: v.off, waiting: v.waiting, requests, gatewayAsks };
+    },
+
+    // The Needs you panel (needs-you.js). With no action, the queue it
+    // lists, the longest wait first: each item's key, kind (question,
+    // permission, actor, request, gateway, or requests for how many ask in
+    // a window without the key), who, what it waits for, since when (or
+    // until when a request lapses), what answers it, whether its row shows
+    // and, for a request, whether its Allow is ready. open and close the
+    // panel; show, open-app and dismiss answer the item with that key, as
+    // its buttons do, and return the state with the queue. Allow and Deny
+    // are yours, so there's no action for either.
+    async needsYou(action = "read", key, opts) {
+      const p = app.needsYou;
+      if (!p) throw new Error("This page has no Needs you panel.");
+      if (action === "read") return p.state();
+      const answers = { show: "show", "open-app": "open", dismiss: "dismiss" };
+      let st;
+      if (action === "open") st = await act(() => p.open(), opts);
+      else if (action === "close") st = await act(() => p.close(), opts);
+      else if (answers[action]) {
+        if (!p.state().items.some((it) => it.key === key)) throw new Error(`Nothing waits on you by the key "${key}"; needsYou lists them`);
+        let res;
+        st = await act(async () => (res = await p.act(key, answers[action])), opts);
+        if (!res.ok) throw new Error(res.error ?? `${action} didn't work`);
+      } else throw new Error("Use read, open, close, show, open-app or dismiss.");
+      return { ...st, needsYou: p.state() };
     },
 
     // How each registered actor's token stands, as the Actors panel says it
