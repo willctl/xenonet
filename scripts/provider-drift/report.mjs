@@ -195,11 +195,12 @@ export function renderMarkdown(report, { runUrl = null, fixes = [] } = {}) {
   for (const p of report.providers) {
     const versions = p.targets.length ? p.targets.map(versionsLine).join(", ") : p.releaseError ? "couldn't look up" : "none";
     const counts = countsOf(p.targets.flatMap((t) => t.findings.filter((f) => !f.sameAsLatest)));
-    out.push(`| ${p.name} | ${versions} | ${STATUS_WORDS[p.status] ?? p.status}${counts && p.status !== "ok" ? ` (${counts})` : ""} |`);
+    out.push(`| ${p.name}${p.experimental ? " (experimental)" : ""} | ${versions} | ${STATUS_WORDS[p.status] ?? p.status}${counts && p.status !== "ok" ? ` (${counts})` : ""} |`);
   }
   for (const p of report.providers) {
     out.push("");
-    out.push(`### ${p.name}`);
+    out.push(`### ${p.name}${p.experimental ? " (experimental)" : ""}`);
+    if (p.experimental) out.push("", "XenoNet's reader for it is experimental: its findings are for whoever works on that reader.");
     if (p.releaseError) out.push("", `Couldn't look up its versions: ${clean(p.releaseError)}`);
     if (p.notInspected) out.push("", `Not inspected: ${p.notInspected}`);
     for (const [source, why] of Object.entries(p.notInspectedSources ?? {})) out.push("", `Not inspected, ${code(source)}: ${why}`);
@@ -210,6 +211,7 @@ export function renderMarkdown(report, { runUrl = null, fixes = [] } = {}) {
         info.claudeCodeVersion && `its Claude Code ${clean(info.claudeCodeVersion, 40)}`,
         info.transcriptLines != null && `${info.transcriptLines} transcript lines read`,
         info.rolloutLines != null && `${info.rolloutLines} rollout lines read`,
+        info.typesFrom && `checked against ${clean(info.typesFrom, 80)}`,
         t.expected?.total && `${t.expected.met} of ${t.expected.total} expectations met`,
       ].filter(Boolean);
       const status = t.inspected === false ? (p.rangeChecked ? "checked against the schemas' ranges only" : "the version only") : (STATUS_WORDS[t.status] ?? t.status);

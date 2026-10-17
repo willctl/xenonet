@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/google/gemini-cli/chat-record/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Gemini CLI's chat records",
+  "description": "The lines of Gemini CLI's chat records (~/.gemini/tmp/<project>/chats/session-*.jsonl, or GEMINI_CLI_HOME's): the session's metadata, its messages' ids, kinds and times, the file each write_file and replace call names, and the metadata updates. The project's folder is read from .project_root beside chats. The records carry no version.",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string"
+    },
+    "projectHash": {
+      "type": "string"
+    },
+    "startTime": {
+      "type": "string"
+    },
+    "lastUpdated": {
+      "type": "string"
+    },
+    "kind": {
+      "description": "main or subagent",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "id": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "string"
+    },
+    "type": {
+      "description": "user, gemini, info, error, warning",
+      "type": "string"
+    },
+    "toolCalls": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "write_file and replace are edits"
+          },
+          "args": {
+            "type": "object",
+            "properties": {
+              "file_path": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": {}
+          },
+          "status": {
+            "description": "success, error, cancelled…",
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "$set": {
+      "type": "object",
+      "properties": {
+        "lastUpdated": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "$rewindTo": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": {},
+  "x-xenonet": {
+    "vendorVersions": "*",
+    "lenient": true
+  }
+}

@@ -22,6 +22,15 @@ import { EngineStore } from "../core/engine/store.js";
 import { createVerifier } from "../core/engine/verify.js";
 import { createProcs } from "../core/procs.js";
 import { engineRoutes } from "./routes/engine.js";
+import { deliveryRoutes } from "./routes/delivery.js";
+import { DeliveryPolicy } from "../core/delivery/policy.js";
+import { DeliveryRouter } from "../core/delivery/router.js";
+import { Channels } from "../core/delivery/channel.js";
+import { createOpenCode } from "../core/delivery/opencode.js";
+import { createTmux } from "../core/delivery/tmux.js";
+import { createResume } from "../core/delivery/resume.js";
+import { planUsage } from "../core/delivery/usage.js";
+import { writeListenSettings } from "../core/delivery/setup.js";
 import { actorRoutes, createActorCaller } from "./routes/actors.js";
 import { createActors, mapOf, CLOCK_MS } from "../core/actors/index.js";
 import { actorSpend } from "../core/actors/spend.js";
@@ -94,7 +103,11 @@ state.blocks.add(engineStore.block);
 // demo's made-up ones, and registered and observed actors, whom agents see
 // among them in the engine. XENONET_ACTORS=off turns the layer off.
 const actors = config.actors ? createActors({ store: engineStore, demo: config.demo, map: mapOf(state) }) : null;
-const engine = new Engine({ state, store: engineStore, actors });
+// Delivery: scopes and guards on messages, and the router that puts them
+// into live sessions (core/delivery).
+const deliveryPolicy = new DeliveryPolicy({ file: path.join(config.stateDir, "delivery.json"), auditFile: path.join(config.stateDir, "delivery-audit.jsonl") });
+const engine = new Engine({ state, store: engineStore, actors, policy: deliveryPolicy });
+const channels = new Channels();
 // Requests in an agent's name, or with an actor's token, are checked
 // against the process they come from (see core/engine/verify.js). Under
 // the desktop app, the server's parent is XenoNet itself, whose window is
@@ -256,7 +269,36 @@ state.on("tokens", (t) => broadcast("tokens", t));
 engine.on("message", (m) => broadcast("agent-message", m));
 // A message an actor sent becomes its said event, never its text.
 engine.on("message", (m) => actors?.said(m));
-const engineRoute = engineRoutes({ engine, connect, verify, readJson, send, actorCaller, actors });
+const engineRoute = engineRoutes({ engine, connect, verify, readJson, send, actorCaller, actors, channels });
+// The settings a Claude Code session starts with to listen after its turns
+// (xenonet doctor --live), which a resumed turn gets too.
+let listenFile = null;
+if (!config.demo) {
+  try {
+    listenFile = writeListenSettings({ dir: config.stateDir, port: config.port });
+  } catch (err) {
+    console.error(`[xenonet] listen settings: ${err.message}`);
+  }
+}
+const deliveryRouter = new DeliveryRouter({
+  engine,
+  policy: deliveryPolicy,
+  channels,
+  opencode: createOpenCode(),
+  tmux: createTmux(),
+  // Made-up sessions are never resumed.
+  resume: config.demo ? null : createResume({ settings: listenFile }),
+  // A provider at 90% of its plan takes no wakes: from the live readings.
+  usage: (app) => planUsage({ ...state.live?.limits, claude: state.live?.claudeLimits?.() ?? null }, app),
+  notify: ({ agent, title, from }) => {
+    if (config.demo) return;
+    notifyDesktop({ type: "notify", key: `delivery:${agent}`, id: agent, title: "A message wasn't picked up", subtitle: title, body: `${from}'s message to ${title} is still waiting: the session hasn't started a turn in a minute.` });
+  },
+});
+engine.delivery = deliveryRouter;
+deliveryRouter.on("delivery", (d) => broadcast("delivery", d));
+deliveryRouter.on("error", (err) => console.error(`[xenonet] delivery: ${err.message}`));
+const deliveryRoute = deliveryRoutes({ policy: deliveryPolicy, router: deliveryRouter, verify, readJson, send });
 // The actors' list goes out when it changes, and so do the map's changes
 // to it; each event as it happens; and how many registrations wait for
 // you, which the window then reads with its key.
@@ -530,6 +572,17 @@ function notifyMail({ actor, name, unread }) {
   notifyDesktop({ type: "notify", key: `actor-mail:${actor}`, command: "actors", title: `${name} has ${unread === 1 ? "a message" : `${unread} messages`} waiting`, subtitle: `Nothing can wake ${name}, so it reads them when it next checks`, body: "Ask it to check its XenoNet inbox, or set up a wake in the Actors panel." });
 }
 
+// What waits on you apart from sessions, for /api/summary: the actors
+// waiting on you, with what they wait for, and how many programs ask to be
+// actors or for a gateway token. Without actors (XENONET_ACTORS=off), none.
+function waitsOnYou() {
+  const waiting = (actors?.list().actors ?? []).filter((a) => a.needsYou && a.kind !== "human");
+  return {
+    actorsNeedYou: waiting.map((a) => ({ id: a.id, name: a.name, kind: a.needsYou.kind, text: a.needsYou.text, since: a.needsYou.since ?? null })),
+    requests: registration?.waiting() ?? 0,
+  };
+}
+
 // Dev only: puts real sessions into states that are otherwise rare (a
 // pending question, an edit collision, a stuck loop, a wiki write, a problem
 // the doctor found) so the visuals can be checked. In memory only; "clear"
@@ -632,6 +685,7 @@ async function api(req, res, url) {
     }
   }
   if (route.startsWith("/api/engine/") || route === "/api/hook/codex") return engineRoute(req, res, url);
+  if (route === "/api/delivery" || route.startsWith("/api/delivery/")) return deliveryRoute(req, res, url);
   if (route === "/api/actors" || route.startsWith("/api/actors/")) return actorRoute(req, res, url);
   if (route === "/api/assistant" || route.startsWith("/api/assistant/")) return assistantRoute(req, res, url);
   if (await hostRoute(req, res, url)) return;
@@ -969,7 +1023,10 @@ async function api(req, res, url) {
   }
 
   // With hosts on, live hosts' alerts count in the tray and the menu bar too.
-  if (req.method === "GET" && route === "/api/summary") return send(res, 200, hub ? hub.summary(state.summary()) : state.summary());
+  // The actors waiting on you and how many programs ask to be actors come
+  // with it, for the tray's and xenonet status's Needs you (core/needs-you.js):
+  // a count of the programs, never who asked, since this route has no key.
+  if (req.method === "GET" && route === "/api/summary") return send(res, 200, { ...(hub ? hub.summary(state.summary()) : state.summary()), ...waitsOnYou() });
 
   if (req.method === "GET" && route === "/api/events") {
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
@@ -1067,6 +1124,28 @@ async function api(req, res, url) {
       if (out) return send(res, 200, out);
     }
     res.writeHead(204).end();
+    return;
+  }
+
+  // A session's Stop hook that listens after its turns (xenonet doctor
+  // --live, core/delivery/setup.js): it waits for a message up to the
+  // window the session started with, and hands it over to keep it going.
+  // If the session stops waiting first, the message stays unread for its
+  // next turn.
+  if (req.method === "POST" && route === "/api/hook/claude/listen") {
+    const body = await readJson(req).catch(() => ({}));
+    if (body.hook_event_name === "Stop" && typeof body.session_id === "string" && /^[0-9a-f-]{36}$/i.test(body.session_id)) {
+      const me = `claude:${body.session_id}`;
+      const ok = await verify.check(req.socket, me, { hook: true });
+      if (!ok.ok) return send(res, 403, { error: ok.reason });
+      const seconds = Math.min(Math.max(Number(url.searchParams.get("seconds")) || 300, 5), 3600);
+      const gone = new AbortController();
+      res.on("close", () => res.writableEnded || gone.abort());
+      const out = await engine.listen(me, { ms: seconds * 1000, signal: gone.signal }).catch(() => null);
+      if (out && (gone.signal.aborted || res.destroyed)) engine.store.markUnseen(me, out.ids);
+      else if (out) return send(res, 200, { decision: out.decision, reason: out.reason });
+    }
+    if (!res.destroyed) res.writeHead(204).end();
     return;
   }
 

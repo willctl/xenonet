@@ -58,6 +58,7 @@ export const Session = define(
     // A run XenoNet has no reader of its own for.
     observed: z.enum(["numbat", "gateway"]).optional().describe("How XenoNet knows of it: numbat's event records, or an actor's report through the gateway"),
     reportedBy: nstr.optional().describe("The actor that reported it through the gateway"),
+    reader: z.enum(["experimental"]).optional().describe("Read from the harness's own records by an experimental reader (core/native)"),
   }),
   {
     title: "Session",

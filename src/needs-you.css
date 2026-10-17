@@ -1,0 +1,129 @@
+/* The Needs you panel (src/needs-you.js): what waits on you, the longest
+   wait first, in the attention color, as everything waiting on you is, in
+   every theme. Each row's --c is its kind's. */
+
+.ny ol.ny-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ny .ny-row {
+  --c: var(--attention);
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 9px 4px;
+  border-bottom: 1px solid rgb(var(--attention-rgb) / 0.18);
+  background: linear-gradient(90deg, rgb(var(--attention-rgb) / 0.08), transparent 70%);
+}
+/* Another machine's wait that may be over, after the rest. */
+.ny .ny-row:has(.ny-host.stale) { opacity: 0.6; }
+.ny .ny-n {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--c);
+  text-align: center;
+  text-shadow: 0 0 8px var(--c);
+}
+.ny .ny-main { min-width: 0; }
+.ny .ny-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.ny .ny-name .sw { align-self: center; flex: none; }
+/* An actor is marked as one, where a session has its app's swatch; a
+   program asking to join, in the attention color. */
+.ny .ny-mark {
+  color: var(--actor);
+  font-size: 11px;
+  text-shadow: 0 0 6px var(--actor);
+}
+.ny .ny-request .ny-mark,
+.ny .ny-gateway .ny-mark,
+.ny .ny-requests .ny-mark { color: var(--attention); text-shadow: 0 0 6px var(--attention); }
+.ny .ny-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.ny .ny-what {
+  font-size: 10.5px;
+  color: var(--c);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.ny .ny-host {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.ny .ny-time {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.ny .ny-text {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.ny .ny-asker {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.ny .ny-asker code {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+}
+.ny .ny-acts {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.ny .ny-acts .act { padding: 5px 10px; font-size: 10.5px; }
+.ny .ny-acts .act.primary:not(:disabled) {
+  border-color: var(--attention);
+  color: var(--bright);
+  background: rgb(var(--attention-rgb) / 0.16);
+}
+.ny .ny-acts .act:disabled { opacity: 0.45; cursor: default; }
+.ny .ny-empty {
+  margin: 6px 0 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* The strip's way into the panel (alerts.js), beside "+N more". */
+.al-foot {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+.al-more.al-queue {
+  color: var(--attention);
+  border-color: rgb(var(--attention-rgb) / 0.55);
+}
+body.wallpaper .alerts .al-foot { display: none; }
+
+@media (max-width: 640px) {
+  .ny .ny-row { grid-template-columns: 22px minmax(0, 1fr); }
+  .ny .ny-acts { grid-column: 2; justify-content: flex-start; }
+}

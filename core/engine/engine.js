@@ -23,6 +23,7 @@
 import { EventEmitter } from "node:events";
 import { execFile } from "node:child_process";
 import path from "node:path";
+import { parseSelector, matches as selects, formatSelector } from "../delivery/selector.js";
 import { pathStyle } from "../paths.js";
 import { YOU, parseActorId, SESSION_LOCAL } from "../schema/ids.js";
 import { productOf } from "../actors/products.js";
@@ -148,8 +149,14 @@ function readRepo(cwd) {
 export class Engine extends EventEmitter {
   // `actors`: the actor registry (core/actors), whose actors the engine
   // counts among the agents; none in tests that leave it out.
-  constructor({ state, store, repos = new Repos(), now = () => Date.now(), actors = null }) {
+  // `policy`: who may see and message whom, and the guards on messages
+  // (core/delivery/policy.js); none in tests that leave it out, which then
+  // work as before. `delivery`: the router (core/delivery/router.js), set
+  // once it's made, which can reach some sessions without hooks.
+  constructor({ state, store, repos = new Repos(), now = () => Date.now(), actors = null, policy = null }) {
     super();
+    this.policy = policy;
+    this.delivery = null;
     this.state = state;
     this.store = store;
     this.repos = repos;
@@ -157,6 +164,8 @@ export class Engine extends EventEmitter {
     this.actors = actors;
     this.noticed = new Map(); // `${agent}[/${subagent}]|${file}|${other}|${how}` → when it was warned
     this.waiters = new Map(); // agent → Set(resolve), inboxes waiting for mail
+    this.listening = new Map(); // agent → until when its Stop hook listens
+    this.stopMail = new Map(); // agent → when its Stop hook last handed mail over
   }
 
   // ---------- agents ----------
@@ -171,9 +180,12 @@ export class Engine extends EventEmitter {
     for (const [id, n] of this.state.index ?? []) if (n.kind === "session" && !n.archived && (n.updatedAt ?? 0) >= since) ids.add(id);
     for (const c of this.store.contacts(since)) if (!c.ended_at) ids.add(c.agent);
     for (const id of this.actors?.engineIds(since) ?? []) ids.add(id);
+    // OpenCode sessions you allowed XenoNet to wake (core/delivery/router.js).
+    for (const id of this.delivery?.known?.() ?? []) ids.add(id);
     const views = await Promise.all([...ids].filter((id) => isAgentId(id) || isActorAgent(id)).map((id) => this.view(id)));
-    // Working agents first, then the most recent; sessions that ended drop out.
-    return views.filter((v) => v.lastActive >= since && !v.ended).sort((a, b) => (b.status === "working") - (a.status === "working") || b.lastActive - a.lastActive);
+    // Working agents first, then the most recent; sessions that ended drop
+    // out, unless you allowed XenoNet to resume one for a message.
+    return views.filter((v) => v.lastActive >= since && (!v.ended || this.delivery?.resumable?.(v))).sort((a, b) => (b.status === "working") - (a.status === "working") || b.lastActive - a.lastActive);
   }
 
   async view(id) {
@@ -188,7 +200,11 @@ export class Engine extends EventEmitter {
     const live = this.state.live?.sessions?.get(id) ?? this.state.observed?.live?.(id) ?? null;
     const observed = !!live?.observed;
     const contact = this.store.contact(id);
-    const cwd = node?.worktree || node?.cwd || contact?.cwd || null;
+    // A session XenoNet has no record of, but whose own app answers for it
+    // (an OpenCode session, through its server): its title, folder, last
+    // change and whether a turn is under way, as that app says.
+    const told = !node && !live && this.delivery?.describe ? await Promise.resolve().then(() => this.delivery.describe(id)).catch(() => null) : null;
+    const cwd = node?.worktree || node?.cwd || contact?.cwd || told?.directory || null;
     const gone = contact?.pid ? !alive(contact.pid) : false;
     const repo = await this.repos.of(cwd);
     const place = this.#placeOf(id, cwd);
@@ -199,8 +215,8 @@ export class Engine extends EventEmitter {
       .map((e) => ({ path: path.isAbsolute(e.path) ? e.path : pathStyle(cwd ?? e.path).resolve(cwd ?? "/", e.path), at: e.ts, ...(observed ? { observed: true } : {}) }));
     // Working: a turn under way, or anything in the transcript in the last
     // minute and a half (a long turn can look idle between events).
-    const working = !!live && (live.status(now) !== "idle" || now - live.lastEventAt < WORKING_MS);
-    const lastActive = Math.max(live?.lastEventAt ?? 0, node?.updatedAt ?? 0, contact?.at ?? 0);
+    const working = (!!live && (live.status(now) !== "idle" || now - live.lastEventAt < WORKING_MS)) || !!told?.busy;
+    const lastActive = Math.max(live?.lastEventAt ?? 0, node?.updatedAt ?? 0, contact?.at ?? 0, told?.updated ?? 0);
     // Ended: its SessionEnd hook said so (unless it has been at work since),
     // or the process its tools ran under is gone.
     const ended = gone || (!!contact?.ended_at && (live?.lastEventAt ?? 0) < contact.ended_at + 5000) || (live?.endedAt != null && live.lastEventAt <= live.endedAt);
@@ -208,7 +224,10 @@ export class Engine extends EventEmitter {
     return {
       id,
       app: id.split(":")[0],
-      title: clip(node?.title ?? (cwd ? `${id.split(":")[0]} in ${path.basename(cwd)}` : short(id)), 90),
+      title: clip(node?.title ?? (told?.title || null) ?? (cwd ? `${id.split(":")[0]} in ${path.basename(cwd)}` : short(id)), 90),
+      // A session an experimental reader reads (core/native), which no
+      // message reaches.
+      reader: node?.reader ?? null,
       project: place?.name ?? null,
       projectId: place?.id ?? null,
       projectKind: place?.kind ?? null,
@@ -225,7 +244,7 @@ export class Engine extends EventEmitter {
       focus: this.store.focus(id)?.text ?? null,
       editing,
       claims: this.store.claims(now).filter((c) => c.agent === id).map((c) => ({ pattern: c.pattern, note: c.note, until: c.expires_at })),
-      reachable: !!contact && !contact.ended_at && now - contact.at < REACHABLE_MS,
+      reachable: (!!contact && !contact.ended_at && now - contact.at < REACHABLE_MS) || !!this.delivery?.reaches?.(id),
       ...(observed ? { observed: node?.observed ?? true } : {}),
     };
   }
@@ -272,15 +291,18 @@ export class Engine extends EventEmitter {
   // Whether messages can reach an agent: a session always may, in its
   // inbox; an actor only once it reports itself with a token you allowed.
   // A run XenoNet only observes (numbat's, or one reported through the
-  // gateway) has no hooks here, so nothing would reach it.
+  // gateway), or one an experimental reader reads, has no hooks here, so
+  // nothing would reach it.
   #reads(id) {
+    if (this.delivery?.reaches?.(id)) return true;
     if (this.state.observed?.live?.(id)) return false;
     return !isActorAgent(id) || !!this.actors?.isRegistered(id);
   }
 
   // Why an actor XenoNet only observes isn't sent messages.
   #deaf(a) {
-    return new Error(`${a.id} ("${a.title}") can't read messages: XenoNet only observes it, so nothing would reach it`);
+    const how = a.reader ? "XenoNet reads its records but has no way to message it" : "XenoNet only observes it";
+    return new Error(`${a.id} ("${a.title}") can't read messages: ${how}, so nothing would reach it`);
   }
 
   // What kind of agent another is, as agents read it: its app, or for an
@@ -313,7 +335,8 @@ export class Engine extends EventEmitter {
 
   async whoami(me) {
     const self = await this.view(me);
-    const others = (await this.agents()).filter((a) => a.id !== me);
+    // Counted inside the caller's scope: an actor learns nothing of the rest.
+    const others = (await this.agents()).filter((a) => a.id !== me && this.visibleTo(me, a));
     return { you: self, unread: this.store.unseen(me).length, peersInRepo: others.filter((a) => Engine.together(a, self)).length, peersOnMachine: others.length };
   }
 
@@ -323,8 +346,11 @@ export class Engine extends EventEmitter {
   async peers(me, { scope = "repo", withinMs = ACTIVE_MS } = {}) {
     const self = await this.view(me);
     const mine = new Set(self.editing.map((e) => this.#rel(self, e.path)));
+    // An actor has no repo: it sees what its scope allows, machine-wide.
+    const wide = scope === "machine" || isActorAgent(me);
+    const sel = scope !== "repo" && scope !== "machine" ? parseSelector(scope) : null;
     return (await this.agents(withinMs))
-      .filter((a) => a.id !== me && (scope === "machine" || Engine.together(a, self)))
+      .filter((a) => a.id !== me && this.visibleTo(me, a) && (sel ? selects(sel, this.facts(a)) : wide || Engine.together(a, self)))
       .map((a) => ({ ...a, overlap: a.editing.map((e) => this.#rel(a, e.path)).filter((r) => mine.has(r)) }));
   }
 
@@ -344,7 +370,9 @@ export class Engine extends EventEmitter {
   async #conflicts(self, files) {
     const out = [];
     for (const other of await this.agents()) {
-      if (other.id === self.id) continue;
+      // An actor hears only of those inside its scope (who_has, a claim's
+      // alsoHeldBy); a person (no id) and the sessions here, of everyone.
+      if (other.id === self.id || (self.id && !this.visibleTo(self.id, other))) continue;
       const together = Engine.together(other, self);
       for (const file of files) {
         const rel = this.#rel(self, file);
@@ -376,21 +404,24 @@ export class Engine extends EventEmitter {
 
   // `to`: an agent's id (or its first characters), words from its title,
   // "repo" for everyone working in this repo, or "all". Without `to`, a reply
-  // goes back to the message's sender.
+  // goes back to the message's sender, or, when you sent that message
+  // yourself, to whoever it went to.
   // `envelope`: how XenoNet knows who sent it (attest.js), from the route's
   // own checks; never from what the sender said.
   async send(me, { to, text, replyTo = null }, { envelope = null } = {}) {
     text = String(text ?? "").trim();
     if (!text) throw new Error("the message is empty");
     if (text.length > MAX_TEXT) throw new Error(`keep messages under ${MAX_TEXT} characters`);
-    if (!to && replyTo) to = this.store.message(Number(replyTo))?.sender;
+    if (!to && replyTo) to = Engine.replyTarget(me, this.store.message(Number(replyTo)));
     if (!to) throw new Error('say who it\'s for: a session\'s id, words from its title, "repo" or "all"');
     const self = await this.view(me);
     // Actors XenoNet only observes are left out: nothing reads their inbox.
-    const active = (await this.agents()).filter((a) => a.id !== me && this.#reads(a.id));
+    const active = (await this.agents()).filter((a) => a.id !== me && this.#reads(a.id) && this.visibleTo(me, a));
     let recipients, target;
     let scope = null;
-    if (to === "repo" || to === "project") {
+    const sel = to !== "all" ? parseSelector(to) : null;
+    if (sel) [recipients, target] = [active.filter((a) => selects(sel, this.facts(a))), formatSelector(sel)];
+    else if (to === "repo" || to === "project") {
       [recipients, target] = [active.filter((a) => Engine.together(a, self)), `repo:${self.top ? path.basename(self.top) : (self.project ?? "?")}`];
       scope = repoKey(self);
     }
@@ -400,12 +431,39 @@ export class Engine extends EventEmitter {
       [recipients, target] = [[one], one.id];
     }
     // A message to the repo also waits for agents that join it soon after.
-    if (!recipients.length && !scope) throw new Error(to === "all" ? "no other session or actor has been at work in the last two hours" : "no other session or actor has been at work in this repo in the last two hours");
+    if (!recipients.length && !scope) throw new Error(sel ? `no session or actor you can reach matches ${formatSelector(sel)}` : to === "all" ? "no other session or actor has been at work in the last two hours" : "no other session or actor has been at work in this repo in the last two hours");
+    if (this.policy) {
+      let depth = 0;
+      for (let r = replyTo ? this.store.message(Number(replyTo)) : null; r && depth < 50; r = r.reply_to ? this.store.message(r.reply_to) : null) depth++;
+      this.policy.checkSend({ sender: me, recipients, text, depth });
+      // Secrets don't cross identities, or go to or from an actor.
+      const mine = this.facts(self);
+      let redacted = 0;
+      for (const r of recipients) {
+        const out = this.policy.textFor({ text, sender: me, senderFacts: mine, recipientFacts: this.facts(r) });
+        if (out.redacted) [text, redacted] = [out.text, out.redacted];
+      }
+      if (redacted) this.policy.audit({ kind: "redacted", sender: me, count: redacted });
+    }
     const now = this.now();
     const id = this.store.send({ sender: me, target, scope, body: text, replyTo: replyTo ? Number(replyTo) : null, recipients: recipients.map((r) => r.id), envelope }, now);
     for (const r of recipients) for (const wake of this.waiters.get(r.id) ?? []) wake();
+    // How each will get it, asked before the router spends a wake on it.
+    const ways = recipients.map((r) => this.delivery?.way?.(me, r) ?? delivery(r));
     this.emit("message", { id, from: me, to: recipients.map((r) => r.id), target, text, ts: now, ...(envelope ? { verified: envelope.line, strength: envelope.auth.strength } : {}) });
-    return { id, to: recipients.map((r) => ({ ...brief(r), delivery: delivery(r) })), ...(scope ? { alsoTo: "sessions that start work in this repo in the next half hour" } : {}) };
+    return { id, to: recipients.map((r, i) => ({ ...brief(r), delivery: ways[i] })), ...(scope ? { alsoTo: "sessions that start work in this repo in the next half hour" } : {}) };
+  }
+
+  // Who a reply with no `to` is for: the sender of the message it answers,
+  // unless that's you, in which case it goes to the same audience: "all",
+  // the repo you're in now (not necessarily the one you sent it in), or the
+  // one agent.
+  static replyTarget(me, m) {
+    if (!m) return undefined;
+    if (m.sender !== me) return m.sender;
+    if (m.target === "all") return "all";
+    if (m.scope || String(m.target).startsWith("repo:")) return "repo";
+    return m.target;
   }
 
   // An agent new to a repo gets what was said to everyone there in the last
@@ -419,16 +477,18 @@ export class Engine extends EventEmitter {
   async #resolve(me, to) {
     if (isAgentId(to)) {
       const one = await this.view(to);
+      if (!this.visibleTo(me, one)) throw new Error(`no session or actor you can reach is ${to}`);
       if (!this.#reads(to)) throw this.#deaf(one);
       return one;
     }
     if (isActorAgent(to)) {
       if (!this.actors?.has(to)) throw new Error(`no actor is ${to}; peers lists them`);
       const one = await this.view(to);
+      if (!this.visibleTo(me, one)) throw new Error(`no session or actor you can reach is ${to}`);
       if (!this.#reads(to)) throw this.#deaf(one);
       return one;
     }
-    const all = (await this.agents(7 * 24 * 3600e3)).filter((a) => a.id !== me);
+    const all = (await this.agents(7 * 24 * 3600e3)).filter((a) => a.id !== me && this.visibleTo(me, a));
     const words = String(to).toLowerCase().split(/\s+/).filter(Boolean);
     const match = (list) => {
       const byId = list.filter((a) => a.id.startsWith(to) || a.id.split(":")[1].startsWith(to));
@@ -459,10 +519,54 @@ export class Engine extends EventEmitter {
     return this.#take(me);
   }
 
+  // A session's listening Stop hook (/api/hook/claude/listen, which a
+  // session gets by starting with XenoNet's listen settings; see xenonet
+  // doctor --live): after a turn it waits up to `ms` for a message and hands
+  // it over, which keeps the session going, as a block from a Stop hook
+  // does. Each message it hands over is a wake, checked against the budget
+  // like any other; one the budget refuses waits for the next turn. It stops
+  // as soon as the session goes on anyway (the main Stop hook handed mail
+  // over) or the hook's request goes away (`signal`). Returns the hook's
+  // answer and the ids it took, or null.
+  async listen(me, { ms, signal = null } = {}) {
+    const goingOn = () => this.now() - (this.stopMail.get(me) ?? -Infinity) < 5000;
+    const deadline = Date.now() + ms;
+    this.listening.set(me, deadline);
+    try {
+      for (;;) {
+        if (signal?.aborted || goingOn()) return null;
+        await this.#catchUp(me);
+        const waiting = this.store.unseen(me);
+        if (waiting.length) {
+          if (!(this.delivery?.wake?.(waiting[0].sender, me) ?? { ok: true }).ok) return null;
+          const list = await this.#take(me);
+          const text = this.#mail(list);
+          if (text) return { decision: "block", reason: text, ids: list.map((m) => m.id) };
+        }
+        const left = deadline - Date.now();
+        if (left <= 0) return null;
+        // Until a message comes, the main Stop hook takes one, the request
+        // goes, or the window ends.
+        await new Promise((resolve) => {
+          const set = this.waiters.get(me) ?? this.waiters.set(me, new Set()).get(me);
+          const seen = ({ agent }) => agent === me && done();
+          const done = () => (clearTimeout(timer), set.delete(done), signal?.removeEventListener("abort", done), this.off("seen", seen), resolve());
+          const timer = setTimeout(done, left);
+          set.add(done);
+          signal?.addEventListener("abort", done);
+          this.on("seen", seen);
+        });
+      }
+    } finally {
+      this.listening.delete(me);
+    }
+  }
+
   async #take(me) {
     await this.#catchUp(me);
     const list = this.store.unseen(me);
     this.store.markSeen(me, list.map((m) => m.id), this.now());
+    if (list.length) this.emit("seen", { agent: me, ids: list.map((m) => m.id) });
     const out = [];
     for (const m of list) {
       const from = await this.view(m.sender);
@@ -526,6 +630,35 @@ export class Engine extends EventEmitter {
   // Note that an agent was in touch directly, which means messages reach it.
   touch(me, { app, cwd, via, pid = null }) {
     this.store.touch(me, { app, cwd, via, pid: Number.isInteger(pid) && pid > 1 ? pid : null }, this.now());
+    this.emit("contact", { agent: me, via });
+  }
+
+  // ---------- scopes ----------
+
+  // What a selector is matched against for one agent (core/delivery/selector.js).
+  facts(a) {
+    const node = this.state.index?.get?.(a.id);
+    const known = this.state.graph?.identities ?? [];
+    const identities = new Set();
+    for (const link of node?.identities ?? []) {
+      const id = String(link.id ?? "").toLowerCase();
+      if (!id) continue;
+      identities.add(id);
+      identities.add(id.split(/[/:]/).pop());
+      const rec = known.find((i) => i.id === link.id);
+      if (rec?.handle) identities.add(String(rec.handle).toLowerCase().replace(/^@/, ""));
+    }
+    const projectNames = [a.project, a.top ? path.basename(a.top) : null].filter(Boolean);
+    // The actors that act on it, as they reported (actor_targets).
+    const actors = (this.store.actorTargets?.() ?? []).filter((t) => t.target === a.id).map((t) => String(t.actor).replace(/^actor:/, ""));
+    return { id: a.id, app: a.app, projectNames, identities: [...identities], machine: "local", status: a.ended ? "ended" : a.status, actors };
+  }
+
+  // Whether `me` may see or message `a`: always, without a policy; else as
+  // the caller's scope allows (an actor: only what its token was granted).
+  visibleTo(me, a) {
+    if (!this.policy || !a) return true;
+    return this.policy.visible(me, this.facts(a));
   }
 
   // ---------- hooks ----------
@@ -561,6 +694,7 @@ export class Engine extends EventEmitter {
     if (event === "Stop") {
       if (input.stop_hook_active) return null;
       const text = this.#mail(await this.#take(me));
+      if (text) this.stopMail.set(me, this.now());
       return text ? { decision: "block", reason: text } : null;
     }
     return null;

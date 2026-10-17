@@ -58,6 +58,12 @@ On a Mac, use ⌘ wherever this page says Ctrl. The terminal's key stays
 - A session that asks a question, or waits for you to approve a plan or a
   permission, turns amber and plays a chime. The tray icon, the tab title
   and a desktop notification show it too.
+- Press `N`, or **Needs you** under the alerts, for everything waiting on
+  you in one list, the longest wait first: sessions' questions and
+  permissions, actors waiting on you, and programs asking to join XenoNet.
+  Open a session in its app to answer it, show it on the map, dismiss it,
+  or allow or deny a program, from the same list. The tray's Needs you menu
+  lists them in the same order.
 - A session that finished its turn gets a quieter cyan signal, so you know
   it's ready for review. A turn you stopped yourself ends without a signal.
 - When two sessions edit the same file within ten minutes, a red arc joins

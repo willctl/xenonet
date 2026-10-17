@@ -19,6 +19,8 @@ import { createRefusalsPanel } from "./refusals.js";
 import { createIntegrationsPanel } from "./integrations.js";
 import { createRootPanel } from "./root.js";
 import { createAlerts } from "./alerts.js";
+import { createNeedsYou } from "./needs-you.js";
+import { needsYouQueue, countOf } from "../core/needs-you.js";
 import { createPalette } from "./palette.js";
 import { createReplay } from "./replay.js";
 import { createFilm } from "./film.js";
@@ -127,6 +129,7 @@ const actorRequests = createActorRequests({
   onChange: (view) => {
     alerts.setRequests(view);
     actorsPanel?.refresh();
+    needsYou.refresh();
   },
 });
 // How each registered actor's token stands, read with the window's key
@@ -186,13 +189,15 @@ function showGather(g) {
   gatherBar.querySelector("[data-gather-text]").textContent = `${what} around ${g.root.name ?? g.root.title}${g.root.host ? ` on ${g.root.host}` : ""}`;
 }
 
+// How it went: { ok, error }.
 async function openInApp(nodeOrId) {
   const node = typeof nodeOrId === "string" ? scene.getNode(nodeOrId) : nodeOrId;
-  if (!node) return;
+  if (!node) return { ok: false, error: "it isn't on the map" };
   const res = await post("/api/open", { nodeId: node.id, action: "open-app" });
   if (res.ok) you.did("opened", node.id);
   sfx(res.ok ? "success" : "error");
   hud.toast(res.ok ? `Opening in ${node.app === "codex" ? "Codex" : "Claude"}` : "Couldn't open the desktop app", !res.ok);
+  return { ok: res.ok, error: res.ok ? null : ((await res.json().catch(() => ({}))).error ?? "Couldn't open the desktop app") };
 }
 
 // A session's new name, saved in its own app (core/rename.js), so Claude
@@ -419,6 +424,33 @@ const alerts = createAlerts({
     armsIn: (id) => actorRequests.armsIn(id),
   },
   native: desktop ? { notify: (n) => desktop.notify(n), clear: (keys) => desktop.clearNotifications(keys) } : null,
+  queue: { count: () => countOf(needsYouNow()), open: () => needsYou.open() },
+});
+
+// Everything waiting on you, the longest wait first (core/needs-you.js),
+// from what the strip shows: the map's sessions waiting on a question or a
+// permission, the actors waiting on you and the registrations waiting.
+function needsYouNow() {
+  const view = actorRequests.view();
+  const sessions = (lastLive?.sessions ?? []).filter((s) => s.needsYou && hud.index.has(s.id)).map((s) => ({ id: s.id, app: s.app, title: hud.index.get(s.id)?.title ?? s.id, kind: s.needsYou.kind, text: s.needsYou.text, since: s.needsYou.since, host: s.host ?? null, stale: !!s.stale }));
+  return needsYouQueue({ sessions, actors: lastActors?.actors ?? [], requests: view.requests, gatewayAsks: view.gatewayAsks, canDecide: view.canDecide, waiting: view.off ? 0 : view.waiting });
+}
+// The Needs you panel (needs-you.js), which answers them: from the
+// palette, N, the strip's button and the tray's menu.
+const needsYou = createNeedsYou({
+  modals,
+  sfx,
+  items: needsYouNow,
+  request: (id) => {
+    const view = actorRequests.view();
+    return view.requests.find((r) => r.id === id) ?? view.gatewayAsks.find((g) => g.id === id) ?? null;
+  },
+  select,
+  openApp: openInApp,
+  ack,
+  message: (id) => messageActor(id),
+  decide: decideRequest,
+  armed: (id) => actorRequests.armed(id),
 });
 
 const updatesPanel = createUpdatesPanel({ modals, desktop, toast: (message) => hud.toast(message) });
@@ -524,6 +556,15 @@ const poster = () => exportPanel.open();
 
 // ---------- commands (palette) ----------
 
+// Pauses every message and wake at once, or resumes them (xenonet live pause does the same).
+async function toggleDelivery() {
+  const now = await fetch("/api/delivery").then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  if (!now) return hud.toast("Couldn't reach XenoNet's messages", true);
+  const res = await fetch("/api/delivery/pause", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ paused: !now.paused }) });
+  const body = await res.json().catch(() => ({}));
+  hud.toast(res.ok ? (body.paused ? "Messages paused: sessions and actors can't message or wake each other" : "Messages resumed") : `Couldn't change it: ${body.error ?? res.statusText}`, !res.ok);
+}
+
 const commandList = [
   { id: "wallpaper", label: "Wallpaper mode", key: "W", keywords: "ambient screensaver", run: () => setWallpaper(!wallpaperOn) },
   { id: "replay", label: "Replay the last 24 hours", keywords: "timelapse time-lapse history", run: () => replay.enter() },
@@ -532,6 +573,7 @@ const commandList = [
   { id: "daylog", label: "Show the day's log", keywords: "summary today end of day", run: () => modals.dayLog() },
   { id: "away2", label: "What happened in the last 2 hours", keywords: "away digest", run: () => modals.away(Date.now() - 2 * 3600e3) },
   { id: "away8", label: "What happened in the last 8 hours", keywords: "away digest", run: () => modals.away(Date.now() - 8 * 3600e3) },
+  { id: "needs-you", label: "Needs you: everything waiting on you", key: "N", keywords: "queue waiting questions permissions approvals allow deny requests actors tokens inbox attention", run: () => needsYou.open() },
   { id: "needs", label: "Open Claude's waiting sessions", keywords: "needs input", run: () => post("/api/open", { action: "needs-input" }) },
   { id: "ackall", label: "Dismiss all ready-for-review alerts", keywords: "acknowledge", run: () => ack(lastLive?.sessions.filter((s) => s.needsYou?.kind === "review" && !s.host).map((s) => s.id) ?? []) },
   // The desktop app notifies natively; a browser tab has to ask first.
@@ -539,6 +581,8 @@ const commandList = [
   { id: "updates", label: "Check for XenoNet updates", keywords: "version release download install restart", run: () => updatesPanel.open() },
   { id: "doctor", label: "Check XenoNet's setup", keywords: "doctor health sign in login auth permissions problems diagnose", run: () => doctorPanel.open() },
   { id: "connect-agents", label: "Connect Claude Code and Codex to XenoNet", keywords: "si super intelligence agents claude code codex mcp hooks engine coordinate messages work together", run: () => connectPanel.open() },
+  // The kill switch for messages between sessions and actors, and every wake (core/delivery/policy.js).
+  { id: "pause-messages", label: "Pause or resume messages between sessions", keywords: "si agents stop kill switch halt wake live delivery actors abuse", run: () => toggleDelivery() },
   { id: "actors", label: "Actors", keywords: "si agents hermes grok bot muse programs allow deny requests register tokens observers you show me on the map add remove", run: () => openActors() },
   { id: "install-command", label: "Install the xenonet command", keywords: "cli terminal shell path doctor", run: () => installCommand() },
   { id: "layout", label: "Reset layout and unpin dragged nodes", keywords: "positions", run: async () => (await fetch("/api/layout", { method: "DELETE" }), hud.toast("Layout reset")) },
@@ -910,6 +954,7 @@ function applyActors(list) {
   hud.seedActors(asDrawn(list));
   alerts.setActors(list);
   actorsPanel?.refresh();
+  needsYou.refresh();
 }
 
 // You, as this page sees you (see youHere): drawn from your input here,
@@ -995,6 +1040,7 @@ function applyLive(snap) {
   hud.setLive(snap);
   telemetry.update(snap, hud.index);
   alerts.update(snap, hud.index);
+  needsYou.refresh();
   const working = snap.sessions.filter((s) => s.status !== "idle").length;
   ambient.setIntensity(snap.tpm, working);
   for (const s of snap.sessions) {
@@ -1127,6 +1173,8 @@ addEventListener("keydown", (e) => {
   if (e.target.matches?.("input, textarea, .xterm-helper-textarea") || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === "w" || e.key === "W") setWallpaper(!wallpaperOn);
   else if (e.key === "Escape" && wallpaperOn) setWallpaper(false);
+  // N opens what waits on you, or closes it again.
+  else if ((e.key === "n" || e.key === "N") && !palette.isOpen && (!modals.isOpen || needsYou.isOpen)) needsYou.toggle();
 });
 
 // ---------- while you were away ----------
@@ -1218,6 +1266,7 @@ if (import.meta.env.DEV || desktop) {
     actorRequests,
     actorTokens,
     remoteConnections,
+    needsYou,
     sound: () => ({ state: ambient.state, mode: ambient.mode, heard: ambient.heard() }),
     spotify: () => spotifyChip.state,
     system: () => systemPanel.state,

@@ -133,7 +133,7 @@ test("xenonet status, agents, who and doctor: what a running XenoNet says, and t
   let doctor = doctorResult("ok");
   const s = await fakeXenoNet({
     "GET /api/health": () => [200, health],
-    "GET /api/summary": () => [200, { working: 1, needsYou: [{ id: "codex:x", app: "codex", title: "Rate-limit the API", kind: "question" }], review: 0, stuck: [], collisions: 0 }],
+    "GET /api/summary": () => [200, { working: 1, needsYou: [{ id: "codex:x", app: "codex", title: "Rate-limit the API", kind: "question", since: Date.now() - 60e3 }], review: 0, stuck: [], collisions: 0, actorsNeedYou: [{ id: "actor:wren", name: "Wren", kind: "permission", text: "May I message the team?", since: Date.now() - 120e3 }], requests: 2 }],
     "GET /api/engine/agents": () => [200, [agent]],
     "GET /api/engine/who": (url) => {
       const file = url.searchParams.get("path");
@@ -151,7 +151,10 @@ test("xenonet status, agents, who and doctor: what a running XenoNet says, and t
     assert.equal(status.code, 0);
     assert.match(status.stdout, /^● XenoNet Dev 9\.9\.9 on 127\.0\.0\.1:\d+/);
     assert.match(status.stdout, /Reads\s+3 projects, 12 Claude sessions, 1 Codex thread\n/);
-    assert.match(status.stdout, /Needs you\s+● Rate-limit the API \(codex\) has a question/);
+    // The longest wait first, as the Needs you panel lists them; programs
+    // asking to be actors, by how many, at the end.
+    assert.match(status.stdout, /Needs you\s+◇ Wren \(actor\) needs permission\n\s+● Rate-limit the API \(codex\) has a question\n\s+◇ 2 programs ask to join XenoNet; answer in XenoNet's window/);
+    assert.deepEqual(JSON.parse((await xenonet(["status", "--json", ...port])).stdout).queue.map((it) => it.kind), ["actor", "question", "requests"]);
     assert.match(status.stdout, /Doctor\s+everything XenoNet needs is in place/);
 
     const agents = await xenonet(["agents", ...port]);

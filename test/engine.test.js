@@ -142,6 +142,33 @@ test("messages: to one agent, to the repo, replies, and an inbox that waits", as
   await assert.rejects(engine.send(A, { to: B, text: "" }), /empty/);
 });
 
+test("replies without to: back to the sender, or after your own message to its recipients", async () => {
+  const { engine } = world(Date.now());
+  // Your own message to one agent: the reply follows it there, not back to you.
+  const own = await engine.send(A, { to: B, text: "One more thing about refunds." });
+  const followUp = await engine.send(A, { replyTo: own.id, text: "Never mind, it's done." });
+  assert.deepEqual(followUp.to.map((r) => r.id), [B]);
+  const got = await engine.inbox(B);
+  assert.deepEqual(got.map((m) => m.text), ["One more thing about refunds.", "Never mind, it's done."]);
+  assert.equal(got[1].replyTo, own.id);
+  assert.deepEqual(await engine.inbox(A), [], "nothing comes back to the sender");
+  // Your own message to the repo: the reply goes to the repo again.
+  const toRepo = await engine.send(A, { to: "repo", text: "Refunds is moving." });
+  const again = await engine.send(A, { replyTo: toRepo.id, text: "Moved." });
+  assert.deepEqual(again.to.map((r) => r.id).sort(), toRepo.to.map((r) => r.id).sort());
+  // Someone else's message: the reply goes to its sender.
+  const back = await engine.send(B, { replyTo: own.id, text: "Thanks." });
+  assert.deepEqual(back.to.map((r) => r.id), [A]);
+});
+
+test("replyTarget: who a reply with no to is for", () => {
+  assert.equal(Engine.replyTarget("a", { sender: "b", target: "a" }), "b");
+  assert.equal(Engine.replyTarget("a", { sender: "a", target: "b" }), "b");
+  assert.equal(Engine.replyTarget("a", { sender: "a", target: "all" }), "all");
+  assert.equal(Engine.replyTarget("a", { sender: "a", target: "repo:atlas", scope: "k" }), "repo");
+  assert.equal(Engine.replyTarget("a", undefined), undefined);
+});
+
 test("hooks: a briefing at the start, a warning before an edit, mail between tool calls, and at Stop", async () => {
   const { engine, store, t } = world(Date.now());
   const raw = (id) => id.split(":")[1];

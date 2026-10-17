@@ -14,6 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { inspectAgentSdk, inspectClaudeCode } from "./inspect-claude.mjs";
 import { inspectCodex } from "./inspect-codex.mjs";
+import { inspectGeminiCli, inspectCopilotCli, inspectOpenCode } from "./inspect-native.mjs";
 import { REPO } from "./common.mjs";
 
 const readJson = (rel) => JSON.parse(fs.readFileSync(path.join(REPO, rel), "utf8"));
@@ -121,16 +122,6 @@ export const PROVIDERS = [
       "XenoNet reads none of its data, only whether its app runs, and from its Info.plist its version and bundle id. Its work happens in Meta's cloud, and what it keeps on the Mac is its sign-in and caches. The check records the latest version only.",
   },
   {
-    id: "spacexai/grok-bot-desktop",
-    name: "Grok Bot desktop",
-    sources: [],
-    // Cursor's update server, which the app asks itself (its product is
-    // "sand"), and which anyone can read.
-    release: { json: { url: "https://api2.cursor.sh/updates/api/download/stable/darwin-arm64/sand", field: "version" } },
-    notInspected:
-      "XenoNet reads none of its data, only the processes its app runs, and from its Info.plist its version. Its Bots work in Cursor's cloud. The check records the latest version only.",
-  },
-  {
     id: "github/gh",
     name: "GitHub CLI",
     sources: ["github/gh/hosts"],
@@ -156,6 +147,63 @@ export const PROVIDERS = [
     // version; those two carry versions of their own format.
     rangeSources: ["nous/hermes-agent/spawn-ledger", "nous/hermes-agent/gateway-state", "nous/hermes-agent/processes", "nous/hermes-agent/cron-jobs", "nous/hermes-agent/cron-ticker"],
     notInspected: "Its files are written by a running Hermes with a model behind it. The check records the latest version, and whether the schemas' ranges take it.",
+  },
+  // The providers XenoNet's experimental readers read (core/native/*.js).
+  // `experimental` marks them in the report. None of them is run: each is
+  // checked against what its project publishes (inspect-native.mjs).
+  {
+    id: "anomaly/opencode",
+    name: "OpenCode",
+    experimental: true,
+    sources: ["anomaly/opencode/db"],
+    release: { npm: "opencode-ai", tags: ["latest"] },
+    // Its database says the version that wrote each session.
+    rangeSources: ["anomaly/opencode/db"],
+    // Its tables, from its source at the release's tag.
+    inspect: inspectOpenCode,
+    notInspected: "No run is made: its database is written by a running OpenCode with a model behind it. Its tables are read from its source at the release's tag instead.",
+  },
+  {
+    id: "google/gemini-cli",
+    name: "Gemini CLI",
+    experimental: true,
+    sources: ["google/gemini-cli/chat-record"],
+    release: { npm: "@google/gemini-cli", tags: ["latest"] },
+    // The types in @google/gemini-cli-core of the same version
+    // (chatRecordingTypes.d.ts). XenoNetChatRecordLine is the check's own
+    // name for any line of a record (inspect-native.mjs).
+    inspect: inspectGeminiCli,
+    types: [
+      { source: "google/gemini-cli/chat-record", xenonet: [], provider: "XenoNetChatRecordLine" },
+      { source: "google/gemini-cli/chat-record", xenonet: ["toolCalls", "[]"], provider: "ToolCallRecord" },
+      { source: "google/gemini-cli/chat-record", xenonet: ["$set"], provider: "ConversationRecord" },
+    ],
+    notInspected: "No run is made: its chat records are written by a running Gemini CLI with a model behind it, and carry no version. Their types are read from @google/gemini-cli-core of the same version instead.",
+  },
+  {
+    id: "github/copilot-cli",
+    name: "GitHub Copilot CLI",
+    experimental: true,
+    sources: ["github/copilot-cli/session-event"],
+    release: { npm: "@github/copilot", tags: ["latest"] },
+    // The event types the Copilot SDK publishes (generated/session-events.d.ts),
+    // its latest whatever the CLI's version. XenoNetEventData is the check's
+    // own name for the data of the events XenoNet reads (inspect-native.mjs).
+    inspect: inspectCopilotCli,
+    types: [
+      { source: "github/copilot-cli/session-event", xenonet: [], provider: "SessionEvent" },
+      { source: "github/copilot-cli/session-event", xenonet: ["data"], provider: "XenoNetEventData" },
+      { source: "github/copilot-cli/session-event", xenonet: ["data", "context"], provider: "WorkingDirectoryContext" },
+      { source: "github/copilot-cli/session-event", xenonet: ["data", "codeChanges"], provider: "ShutdownCodeChanges" },
+    ],
+    notInspected: "No run is made: its event logs are written by a running Copilot CLI signed in to GitHub, and the check runs with no secrets. The event types are read from the Copilot SDK's latest release instead, which is versioned apart from the CLI.",
+  },
+  {
+    id: "anysphere/cursor",
+    name: "Cursor",
+    experimental: true,
+    sources: ["anysphere/cursor/hook-input"],
+    notInspected: "Its hook input is only written by a running Cursor agent with a model behind it, and Cursor publishes no package or source for it to read. The check records nothing; the schema follows Cursor's hooks reference.",
   },
 ];
 

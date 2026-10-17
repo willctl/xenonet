@@ -31,8 +31,10 @@ const keyOf = (it) => (it.kind === "review" || it.kind === "requests" ? it.kind 
 
 // `requests` answers the request cards (see actor-requests.js): allow(id),
 // deny(id), open() for the Actors panel, and armed(id) / armsIn(id) for
-// Allow's moment of wait after a card shows.
-export function createAlerts({ sfx, select, ack, openApp, collision, doctor = () => {}, requests = null, native = null }) {
+// Allow's moment of wait after a card shows. `queue` is the Needs you panel
+// (needs-you.js): count() of what waits on you, and open(), for the
+// strip's button that opens it.
+export function createAlerts({ sfx, select, ack, openApp, collision, doctor = () => {}, requests = null, native = null, queue = null }) {
   const el = document.getElementById("alerts");
   const tpl = document.createElement("template");
   const cards = new Map(); // key → { el, sig }
@@ -138,7 +140,8 @@ export function createAlerts({ sfx, select, ack, openApp, collision, doctor = ()
         dismissed.delete(key);
       }
     }
-    const waiting = strong.filter((s) => !s.stale).length + actorItems.length;
+    // As many as the Needs you panel counts, programs asking to join too.
+    const waiting = queue ? queue.count() : strong.filter((s) => !s.stale).length + actorItems.length;
     document.title = waiting ? `(${waiting}) XenoNet` : "XenoNet";
     lastItems = items;
     render();
@@ -234,6 +237,8 @@ export function createAlerts({ sfx, select, ack, openApp, collision, doctor = ()
   }
 
   let more = null;
+  let foot = null;
+  let queueBtn = null;
   function render() {
     const items = lastItems.filter((it) => !dismissed.has(keyOf(it)));
     const shown = expanded ? items : items.slice(0, MAX_VISIBLE);
@@ -264,13 +269,26 @@ export function createAlerts({ sfx, select, ack, openApp, collision, doctor = ()
       if (want !== card.el) el.insertBefore(card.el, want);
       prev = card.el;
     }
+    // Under the cards: +N more, and the Needs you panel's button with how
+    // many wait on you, in the panel's order there.
     const hidden = items.length - shown.length;
+    foot ??= Object.assign(document.createElement("div"), { className: "al-foot" });
     if (hidden > 0 || expanded) {
       more ??= Object.assign(document.createElement("button"), { className: "al-more" });
       more.dataset.alMore = "";
       more.textContent = expanded ? "show fewer" : `+${hidden} more`;
-      if (more.parentNode !== el || el.lastElementChild !== more) el.appendChild(more);
+      if (more.parentNode !== foot) foot.prepend(more);
     } else more?.remove();
+    const waiting = queue?.count() ?? 0;
+    if (waiting) {
+      queueBtn ??= Object.assign(document.createElement("button"), { className: "al-more al-queue", title: "Everything waiting on you, the longest wait first · N" });
+      queueBtn.dataset.alQueue = "";
+      queueBtn.textContent = `needs you · ${waiting}`;
+      if (queueBtn.parentNode !== foot) foot.appendChild(queueBtn);
+    } else queueBtn?.remove();
+    if (foot.childElementCount) {
+      if (foot.parentNode !== el || el.lastElementChild !== foot) el.appendChild(foot);
+    } else foot.remove();
     if (shown.length) el.hidden = false;
     else if (!el.querySelector(".al")) el.hidden = true;
     arm();
@@ -346,6 +364,10 @@ export function createAlerts({ sfx, select, ack, openApp, collision, doctor = ()
     if (openBtn) {
       e.stopPropagation();
       return openApp(openBtn.dataset.alOpen);
+    }
+    if (e.target.closest("[data-al-queue]")) {
+      e.stopPropagation();
+      return queue?.open();
     }
     if (e.target.closest("[data-al-more]")) {
       expanded = !expanded;

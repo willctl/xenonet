@@ -111,6 +111,16 @@ test("tails appended Claude and Codex lines into live events and state", async (
   fs.rmSync(f.root, { recursive: true, force: true });
 });
 
+// Linux's coarse timestamps often leave a folder's mtime as it was when a
+// file is added just after the folder last changed, which made the sweep
+// tests below fail now and then there. These folders keep one mtime
+// throughout, as if every change fell in the same tick: stamp them before
+// the start and again after the changes.
+function oneTick(dirs) {
+  const at = new Date(Date.now() - 200);
+  return () => dirs.forEach((d) => fs.utimesSync(d, at, at));
+}
+
 // The watcher misses events: macOS starts a watch a moment after fs.watch
 // returns, and drops events under load. A sweep has to catch up, new
 // transcripts included.
@@ -118,6 +128,8 @@ test("a sweep finds what the file watcher missed, new transcripts too", async ()
   const f = setup();
   const ts = new Date().toISOString();
   fs.writeFileSync(f.claudeFile, line({ type: "user", timestamp: ts, message: { role: "user", content: "start" } }));
+  const tick = oneTick([path.dirname(f.subFile), path.dirname(f.codexFile)]);
+  tick();
   const live = new LiveTelemetry({ claudeRoot: f.claudeRoot, codexRoot: f.codexRoot, claudeDesktopDir: null });
   const events = [];
   live.on("activity", (e) => events.push(e));
@@ -127,6 +139,7 @@ test("a sweep finds what the file watcher missed, new transcripts too", async ()
   fs.appendFileSync(f.claudeFile, line({ type: "assistant", timestamp: ts, message: { id: "m1", content: [{ type: "tool_use", id: "tu1", name: "Bash", input: { command: "npm test" } }] } }));
   fs.appendFileSync(f.subFile, line({ type: "user", timestamp: ts, isSidechain: true, message: { role: "user", content: "Investigate the parser" } }));
   fs.writeFileSync(f.codexFile, line({ type: "event_msg", timestamp: ts, payload: { type: "task_started" } }));
+  tick();
   await live.sweep();
 
   const kinds = events.map((e) => `${e.sessionId.split(":")[0]}:${e.kind}:${e.detail ?? e.label ?? ""}`);
@@ -138,6 +151,8 @@ test("a sweep finds transcripts in folders made since start, and forgets folders
   const f = setup();
   const ts = new Date().toISOString();
   fs.writeFileSync(f.claudeFile, line({ type: "user", timestamp: ts, message: { role: "user", content: "start" } }));
+  const tick = oneTick([f.claudeRoot, path.join(f.claudeRoot, "C--proj")]);
+  tick();
   const live = new LiveTelemetry({ claudeRoot: f.claudeRoot, codexRoot: f.codexRoot, claudeDesktopDir: null });
   const events = [];
   live.on("activity", (e) => events.push(e));
@@ -149,6 +164,7 @@ test("a sweep finds transcripts in folders made since start, and forgets folders
   fs.mkdirSync(path.join(f.claudeRoot, "D--other"));
   fs.writeFileSync(path.join(f.claudeRoot, "D--other", `${other}.jsonl`), line({ type: "user", timestamp: ts, message: { role: "user", content: "new project" } }));
   fs.rmSync(path.join(f.claudeRoot, "C--proj", CLAUDE_ID), { recursive: true });
+  tick();
   await live.sweep();
 
   assert.deepEqual(events.map((e) => `${e.sessionId}:${e.detail}`), [`claude:${other}:new project`]);

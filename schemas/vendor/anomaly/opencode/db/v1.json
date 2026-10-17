@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/anomaly/opencode/db/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "OpenCode's database",
+  "description": "The rows XenoNet reads from OpenCode's opencode.db ($XDG_DATA_HOME/opencode, ~/.local/share/opencode by default, or OPENCODE_DB), opened read only: its sessions and which files their edit tools changed. The version is the newest session's own (session.version).",
+  "type": "object",
+  "properties": {
+    "session": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "ses_…"
+          },
+          "parent_id": {
+            "description": "Set for a subagent's run: the session that started it",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "directory": {
+            "type": "string",
+            "description": "Where it ran"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "type": "string",
+            "description": "The OpenCode version that made it"
+          },
+          "time_created": {
+            "type": "number",
+            "description": "Epoch milliseconds"
+          },
+          "time_updated": {
+            "type": "number",
+            "description": "Epoch milliseconds"
+          },
+          "time_archived": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "directory",
+          "version",
+          "time_created",
+          "time_updated"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "select id, parent_id, directory, title, version, time_created, time_updated, time_archived from session"
+    },
+    "edits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "time_created": {
+            "type": "number"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "session_id",
+          "time_created",
+          "tool"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "The file each edit, write and multiedit tool part names (data.state.input.filePath), and each apply_patch part's file headers, taken from part.data; nothing else in a part is kept"
+    }
+  },
+  "required": [
+    "session",
+    "edits"
+  ],
+  "additionalProperties": {},
+  "x-xenonet": {
+    "vendorVersions": "<2.0.0",
+    "lenient": true
+  }
+}

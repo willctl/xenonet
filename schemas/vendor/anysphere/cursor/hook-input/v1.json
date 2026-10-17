@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/anysphere/cursor/hook-input/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Cursor's hook input",
+  "description": "The fields of Cursor's hook input (cursor.com/docs/agent/hooks) that XenoNet's Cursor hook keeps, one line per sessionStart, afterFileEdit, stop and sessionEnd, in the file it's told to write. The version is Cursor's own (cursor_version).",
+  "type": "object",
+  "properties": {
+    "at": {
+      "type": "string",
+      "description": "When XenoNet's hook ran, ISO 8601"
+    },
+    "hook_event_name": {
+      "type": "string",
+      "description": "sessionStart, afterFileEdit, stop or sessionEnd"
+    },
+    "conversation_id": {
+      "description": "The conversation, stable across its turns",
+      "type": "string"
+    },
+    "session_id": {
+      "description": "sessionStart and sessionEnd: the same as conversation_id",
+      "type": "string"
+    },
+    "cursor_version": {
+      "type": "string"
+    },
+    "workspace_roots": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "file_path": {
+      "description": "afterFileEdit: the file, an absolute path",
+      "type": "string"
+    },
+    "reason": {
+      "description": "sessionEnd: completed, aborted, error, window_close or user_close",
+      "type": "string"
+    },
+    "status": {
+      "description": "stop: completed, aborted or error",
+      "type": "string"
+    }
+  },
+  "required": [
+    "at",
+    "hook_event_name"
+  ],
+  "additionalProperties": {},
+  "x-xenonet": {
+    "vendorVersions": "*",
+    "lenient": true
+  }
+}

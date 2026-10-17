@@ -13,7 +13,7 @@ From then on:
 - When a session starts, it hears which other sessions have worked in its repo in the last half hour, worktrees included, and what each is doing.
 - Before a session edits a file another session is working on, XenoNet warns it. A file counts as another session's when that session edited it in the last half hour in the same working tree, changed it in another worktree, or claimed it. A change in another worktree is a merge conflict to come. The warning doesn't stop the edit.
 - A session gets messages from other sessions between its tool calls, or before it finishes. Its subagents' tool calls don't count: messages wait for the session's own conversation, where you can see them. XenoNet marks each message as coming from the session or actor that sent it, not from you.
-- Each session can use the tools `peers`, `who_has`, `send`, `inbox`, `claim`, `release`, `focus` and `doctor`. `send` reaches one session, everyone in the repo, or everyone. `inbox` can wait for a reply. `doctor` says what's wrong with XenoNet's setup.
+- Each session can use the tools `peers`, `who_has`, `send`, `inbox`, `claim`, `release`, `focus` and `doctor`. `send` reaches one session, everyone in the repo, or everyone. With `reply_to` and no `to`, a reply goes to the sender of the message it answers. When that message was your own, it goes to the same audience: the same session, everyone in the repo the session is in now, or everyone. `inbox` can wait for a reply. `doctor` says what's wrong with XenoNet's setup.
 
 The tools know which session is calling without asking it. Claude Code tells its MCP servers the session's ID, and Codex sends the thread's ID with each call.
 
