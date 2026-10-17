@@ -854,6 +854,7 @@ dependencies = [
  "getrandom",
  "regex",
  "serde_json",
+ "sha2",
  "url",
  "xenonet-base",
 ]

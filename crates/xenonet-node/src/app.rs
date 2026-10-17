@@ -544,3 +544,201 @@ pub fn app_write_look(state_dir: String, bundle: Json, sources: Vec<String>, now
 pub fn app_ask_command(app: String, model: Option<String>, dir: MaybeJson, sources: Vec<String>) -> Json {
     Json(diagnostics::ask_command(&app, model.as_deref(), &dir.0.unwrap_or(Value::Null), &sources))
 }
+
+// ----- script -----
+
+use xenonet_app::script;
+
+fn arg_jv(a: script::Arg) -> Jv {
+    match a {
+        script::Arg::V(v) => Jv::Json(v),
+        script::Arg::Undef => Jv::Undef,
+        script::Arg::Obj(fields) => Jv::Obj(fields.into_iter().map(|(k, a)| (k, arg_jv(a))).collect()),
+    }
+}
+
+fn script_jv(state: script::State, out: script::Out) -> Jv {
+    let then = match out.then {
+        script::Then::Call { target, args } => Jv::Obj(vec![("call", Jv::Obj(vec![("target", s(target)), ("args", Jv::Arr(args.into_iter().map(arg_jv).collect()))]))]),
+        script::Then::Sleep(ms) => Jv::Obj(vec![("sleep", Jv::Num(ms))]),
+        script::Then::Done => Jv::Obj(vec![("done", Jv::Bool(true))]),
+        script::Then::Rethrow => Jv::Obj(vec![("rethrow", Jv::Bool(true))]),
+        script::Then::Fail { message, type_error } => Jv::Obj(vec![("fail", Jv::Obj(vec![("message", s(message)), ("typeError", Jv::Bool(type_error))]))]),
+    };
+    Jv::Obj(vec![("state", Jv::Json(state)), ("out", Jv::Obj(vec![("say", Jv::Arr(out.say.into_iter().map(arg_jv).collect())), ("then", then)]))])
+}
+
+#[napi(js_name = "appScriptSteps")]
+pub fn app_script_steps() -> &'static str {
+    script::STEPS
+}
+
+#[napi(js_name = "appScriptBrief")]
+pub fn app_script_brief(st: MaybeJson) -> Jv {
+    match st.0 {
+        None => answer(Err("Cannot read properties of undefined (reading 'selection')".into())),
+        Some(v) => answer(script::brief(&v).map(Jv::Json)),
+    }
+}
+
+#[napi(js_name = "appScriptBegin")]
+pub fn app_script_begin(step: MaybeJson, name: String, film_seconds: f64) -> Jv {
+    let (state, out) = script::begin(&step.0.unwrap_or(Value::String("undefined".into())), &script::Context { name, film_seconds });
+    script_jv(state, out)
+}
+
+/// `threw` is the message of the error the call threw, if it did; else
+/// `ok` is what it answered.
+#[napi(js_name = "appScriptResume")]
+pub fn app_script_resume(state: Json, ok: MaybeJson, threw: Option<String>) -> Jv {
+    let answer = match (threw, ok.0) {
+        (Some(m), _) => script::Answer::Threw(m),
+        (None, Some(v)) => script::Answer::Ok(v),
+        (None, None) => script::Answer::Undefined,
+    };
+    let (state, out) = script::resume(state.0, answer);
+    script_jv(state, out)
+}
+
+// ----- spotify -----
+
+use xenonet_app::spotify;
+
+fn spotify_error(e: &spotify::SpotifyError) -> Jv {
+    Jv::Obj(vec![("status", Jv::Num(f64::from(e.status))), ("code", s(e.code)), ("message", s(e.message.clone()))])
+}
+
+fn ask_jv(job: spotify::Job, ask: spotify::Ask) -> Jv {
+    let ask = match ask {
+        spotify::Ask::SecretGet(t) => Jv::Obj(vec![("secret", Jv::Obj(vec![("op", s("get")), ("target", s(t))]))]),
+        spotify::Ask::SecretHas(t) => Jv::Obj(vec![("secret", Jv::Obj(vec![("op", s("has")), ("target", s(t))]))]),
+        spotify::Ask::SecretRemove(t) => Jv::Obj(vec![("secret", Jv::Obj(vec![("op", s("remove")), ("target", s(t))]))]),
+        spotify::Ask::SecretSet { target, value, comment } => Jv::Obj(vec![("secret", Jv::Obj(vec![("op", s("set")), ("target", s(target)), ("value", s(value)), ("comment", s(comment))]))]),
+        spotify::Ask::Fetch { url, method, headers, body, timeout_ms, fallback, skip } => {
+            let mut f = vec![("url", s(url)), ("method", s(method)), ("headers", Jv::Obj(headers.into_iter().map(|(k, v)| (k, s(v))).collect()))];
+            if let Some(b) = body {
+                f.push(("body", s(b)));
+            }
+            f.extend([("timeoutMs", Jv::Num(timeout_ms)), ("fallback", Jv::Json(fallback)), ("skip", Jv::Json(json!(skip)))]);
+            Jv::Obj(vec![("fetch", Jv::Obj(f))])
+        }
+        spotify::Ask::Log { level, code, message } => Jv::Obj(vec![("log", Jv::Obj(vec![("level", s(level)), ("code", s(code)), ("message", s(message))]))]),
+        spotify::Ask::Done(v) => Jv::Obj(vec![("done", Jv::Json(v))]),
+        spotify::Ask::Fail(e) => Jv::Obj(vec![("fail", spotify_error(&e))]),
+        spotify::Ask::Rethrow => Jv::Obj(vec![("rethrow", Jv::Bool(true))]),
+    };
+    Jv::Obj(vec![("job", Jv::Json(job)), ("ask", ask)])
+}
+
+#[napi(js_name = "appSpotifyConstants")]
+pub fn app_spotify_constants() -> Json {
+    Json(json!({ "scopes": spotify::SCOPES, "refreshTarget": spotify::REFRESH_TARGET, "clientId": "^[0-9a-f]{32}$", "redirect": spotify::REDIRECT_SHOWN }))
+}
+
+#[napi(js_name = "appSpotifyChallenge")]
+pub fn app_spotify_challenge(verifier: String) -> String {
+    spotify::challenge_of(&verifier)
+}
+
+#[napi(js_name = "appSpotifyNowPlaying")]
+pub fn app_spotify_now_playing(p: MaybeJson) -> Json {
+    Json(spotify::now_playing(p.0.as_ref()))
+}
+
+#[napi(js_name = "appSpotifyDuck")]
+pub fn app_spotify_duck(waiting: bool, player: MaybeJson, device: MaybeJson, held: MaybeJson, dip: f64) -> Jv {
+    let d = spotify::duck_plan(waiting, player.0.as_ref(), device.0.as_ref(), held.0.as_ref(), dip);
+    let held = d.held.map_or(Jv::Undef, Jv::Json);
+    match d.volume {
+        Some(v) => Jv::Obj(vec![("op", s("volume")), ("volume", Jv::Num(v)), ("held", held)]),
+        None => Jv::Obj(vec![("op", Jv::Json(Value::Null)), ("held", held)]),
+    }
+}
+
+#[napi(js_name = "appSpotifyDemoPlayer")]
+pub fn app_spotify_demo_player() -> Json {
+    Json(spotify::demo_player())
+}
+
+#[napi(js_name = "appSpotifyDemoSettings")]
+pub fn app_spotify_demo_settings() -> Json {
+    Json(spotify::demo_settings())
+}
+
+#[napi(js_name = "appSpotifyDemoCommand")]
+pub fn app_spotify_demo_command(p: Json, op: MaybeJson, value: MaybeJson) -> Json {
+    let mut p = p.0;
+    spotify::demo_command(&mut p, op.0.as_ref().and_then(Value::as_str), value.0.as_ref());
+    Json(p)
+}
+
+/// One Spotify connection, for the twin's createSpotify.
+#[napi(js_name = "AppSpotify")]
+pub struct AppSpotify {
+    inner: spotify::Spotify,
+}
+
+#[napi]
+impl AppSpotify {
+    #[napi(constructor)]
+    pub fn new(file: String, port: MaybeJson) -> Self {
+        AppSpotify { inner: spotify::Spotify::new(&file, port.0.unwrap_or(Value::String("undefined".into()))) }
+    }
+
+    #[napi]
+    pub fn settings(&self) -> Json {
+        Json(self.inner.settings())
+    }
+
+    /// { ok }, or { error: { spotify } } or { error: { fs } }.
+    #[napi(js_name = "setApp")]
+    pub fn set_app(&mut self, client_id: String) -> Jv {
+        match self.inner.set_app(&client_id) {
+            Ok(v) => Jv::Obj(vec![("ok", Jv::Json(v))]),
+            Err(spotify::Failed::Spotify(e)) => Jv::Obj(vec![("error", Jv::Obj(vec![("spotify", spotify_error(&e))]))]),
+            Err(spotify::Failed::Fs(e)) => Jv::Obj(vec![("error", Jv::Obj(vec![("fs", fs_error(&e))]))]),
+        }
+    }
+
+    #[napi]
+    pub fn set(&mut self, device: MaybeJson, duck: MaybeJson) -> Jv {
+        match self.inner.set(device.0.as_ref(), duck.0.as_ref()) {
+            Ok(v) => Jv::Obj(vec![("ok", Jv::Json(v))]),
+            Err(e) => Jv::Obj(vec![("error", Jv::Obj(vec![("fs", fs_error(&e))]))]),
+        }
+    }
+
+    #[napi]
+    pub fn begin(&mut self, now: f64) -> Jv {
+        match self.inner.begin(now) {
+            Ok(v) => Jv::Obj(vec![("ok", Jv::Json(v))]),
+            Err(e) => Jv::Obj(vec![("error", Jv::Obj(vec![("spotify", spotify_error(&e))]))]),
+        }
+    }
+
+    #[napi]
+    pub fn start(&mut self, kind: String, args: Json, now: f64) -> Jv {
+        let (job, ask) = self.inner.start(&kind, &args.0, now);
+        ask_jv(job, ask)
+    }
+
+    /// `got` is { value }, { threw: message } or { res: { ok, status, body, retryAfter } }.
+    #[napi]
+    pub fn resume(&mut self, job: Json, got: Json, now: f64) -> Jv {
+        let g = got.0;
+        let got = if let Some(m) = g.get("threw") {
+            spotify::Got::Threw(xenonet_base::text::js_string(m))
+        } else if let Some(r) = g.get("res") {
+            spotify::Got::Response {
+                ok: r.get("ok") == Some(&Value::Bool(true)),
+                status: r.get("status").and_then(Value::as_f64).unwrap_or(0.0) as u16,
+                body: r.get("body").cloned().unwrap_or(Value::Null),
+                retry_after: r.get("retryAfter").filter(|x| !x.is_null()).map(xenonet_base::text::js_string),
+            }
+        } else {
+            spotify::Got::Value(g.get("value").cloned().unwrap_or(Value::Null))
+        };
+        let (job, ask) = self.inner.resume(job.0, got, now);
+        ask_jv(job, ask)
+    }
+}

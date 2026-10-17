@@ -215,6 +215,21 @@
         "A field JS set to undefined (a doctor result's missing id, say) is left out of the bundle rather than kept as undefined; the bundle's JSON is the same.",
         "A log entry's time that isn't one throws an Error saying Invalid time value, where JS threw a RangeError."
       ]
+    },
+    "core/script.js": {
+      "rust": "crates/xenonet-app/src/script.rs",
+      "differences": [
+        "Each step is a Rust state machine: the twin makes the calls it says to (the driver, launch, input, window…) on the control client given, sleeps when it says, and says what it says.",
+        "A number in a step that isn't one (click:a,b) reaches the call as null where JS passed NaN.",
+        "A state that isn't one throws a TypeError of the Rust's words when it's summed up, not V8's."
+      ]
+    },
+    "core/spotify.js": {
+      "rust": "crates/xenonet-app/src/spotify.rs",
+      "differences": [
+        "The sign-in, the tokens, and each call's decisions (refreshing early, one 401 refreshed and tried again, a 429 waited out) are the Rust's; the twin awaits the credential store and fetch it was given, as the Rust asks.",
+        "The demo's player keeps its state in the twin; what each command does to it is the Rust's."
+      ]
     }
   },
   "tests": [
@@ -325,6 +340,7 @@
     "test/schema-registry.test.js",
     "test/schemas.test.js",
     "test/scope.test.js",
+    "test/script.test.js",
     "test/server.test.js",
     "test/signals.test.js",
     "test/space-presence.test.js",

@@ -17,4 +17,6 @@ pub mod mcp_discovery;
 pub mod mcp_info;
 pub mod nodepath;
 pub mod open;
+pub mod script;
+pub mod spotify;
 pub mod version;
