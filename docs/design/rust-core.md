@@ -441,6 +441,7 @@ place. This table follows it.
 | `core/blocks/scanner.js` | `xenonet-blocks/src/scanner.rs`, with the read-again fix | `blocks-scanner`, `projects` pass |
 | `core/blocks/tailer.js` | `xenonet-blocks/src/tailer.rs`, with the restart fix | `blocks-tailer`, `live` pass |
 | `core/lines.js` | `xenonet-sources/src/lines.rs` | `lines`, `codex`, `vendor-schemas` pass |
+| `core/blocks/store.js` | `xenonet-blocks/src/store.rs` | `blocks-store`, `statefile`, `store`, `hosts-config` pass |
 
 With every twin in place, all 92 test files that reach one pass. The two
 fixes on `fix/scanner-racy-mtime` are in the Rust (the scanner reads a

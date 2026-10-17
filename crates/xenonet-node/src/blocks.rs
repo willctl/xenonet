@@ -768,3 +768,113 @@ impl JsTailer {
         self.t.dormant.len() as u32
     }
 }
+
+// ----- the JSON store -----
+
+use crate::js::Jv;
+use xenonet_blocks::store::{self, DocHooks, Report};
+
+/// A twin's document hooks. `prepare` is guarded (it answers `failed` for a
+/// document it can't use); `fresh`, `versionOf` and `prepareFresh` throw
+/// when the caller's code does, which stops the read.
+struct JsDocHooks<'a> {
+    env: &'a Env,
+    fresh: Function<'a, (), Unknown<'a>>,
+    version_of: Function<'a, Unknown<'a>, Unknown<'a>>,
+    migrate: Function<'a, FnArgs<(Unknown<'a>, f64, f64)>, Unknown<'a>>,
+    prepare: Function<'a, Unknown<'a>, Unknown<'a>>,
+    prepare_fresh: Function<'a, Unknown<'a>, Unknown<'a>>,
+    failed: Unknown<'a>,
+    failure: Function<'a, (), String>,
+}
+
+impl<'a> JsDocHooks<'a> {
+    fn is_failed(&self, v: &Unknown<'a>) -> bool {
+        let mut same = false;
+        unsafe { sys::napi_strict_equals(self.env.raw(), v.raw(), self.failed.raw(), &mut same) };
+        same
+    }
+}
+
+impl<'a> DocHooks<Unknown<'a>> for JsDocHooks<'a> {
+    fn fresh(&mut self) -> std::result::Result<Unknown<'a>, Halt> {
+        self.fresh.call(()).map_err(|_| Halt)
+    }
+    fn parsed(&mut self, v: Value) -> std::result::Result<Unknown<'a>, Halt> {
+        let raw = unsafe { crate::js::to_js(self.env.raw(), &v, 0) }.map_err(|_| Halt)?;
+        Ok(unsafe { Unknown::from_raw_unchecked(self.env.raw(), raw) })
+    }
+    fn version_of(&mut self, doc: &Unknown<'a>) -> std::result::Result<Option<f64>, Halt> {
+        let v = self.version_of.call(*doc).map_err(|_| Halt)?;
+        Ok(match v.get_type() {
+            Ok(ValueType::Number) => Some(unsafe { v.cast::<f64>() }.map_err(|_| Halt)?),
+            _ => None,
+        })
+    }
+    fn migrate(&mut self, doc: Unknown<'a>, from: f64, to: f64) -> std::result::Result<std::result::Result<Unknown<'a>, String>, Halt> {
+        let v = self.migrate.call(FnArgs::from((doc, from, to))).map_err(|_| Halt)?;
+        Ok(if self.is_failed(&v) { Err(self.failure.call(()).unwrap_or_default()) } else { Ok(v) })
+    }
+    fn prepare(&mut self, doc: &mut Unknown<'a>) -> std::result::Result<std::result::Result<Vec<String>, ()>, Halt> {
+        let v = self.prepare.call(*doc).map_err(|_| Halt)?;
+        if self.is_failed(&v) {
+            return Ok(Err(()));
+        }
+        let list = unsafe { crate::js::from_js(self.env.raw(), v.raw(), 0) }.map_err(|_| Halt)?;
+        Ok(Ok(list.as_array().map(|a| a.iter().map(xenonet_base::text::js_string).collect()).unwrap_or_default()))
+    }
+    fn prepare_fresh(&mut self, doc: &mut Unknown<'a>) -> std::result::Result<(), Halt> {
+        self.prepare_fresh.call(*doc).map(|_| ()).map_err(|_| Halt)
+    }
+}
+
+fn report_jv(r: Report) -> Jv {
+    let opt = |s: Option<String>| Jv::Json(s.map_or(Value::Null, Value::String));
+    let mut fields = vec![
+        ("file", Jv::Json(Value::String(r.file))),
+        ("version", Jv::Json(r.version.map_or(Value::Null, js_json::number))),
+        ("migrated", Jv::Json(r.migrated.map_or(Value::Null, |(f, t)| json!({ "from": js_json::number(f), "to": js_json::number(t) })))),
+        ("backup", opt(r.backup)),
+        ("broken", opt(r.broken)),
+        ("readOnly", Jv::Bool(r.read_only)),
+        ("problem", opt(r.problem)),
+    ];
+    if !r.repaired.is_empty() {
+        fields.push(("repaired", Jv::Json(json!(r.repaired))));
+    }
+    Jv::Obj(fields)
+}
+
+/// Reads a versioned JSON file through a twin's hooks: { doc, report }.
+#[allow(clippy::too_many_arguments)]
+#[napi(js_name = "readVersioned")]
+pub fn read_versioned(
+    env: &Env,
+    file: String,
+    latest: f64,
+    now: f64,
+    fresh: Function<(), Unknown>,
+    version_of: Function<Unknown, Unknown>,
+    migrate: Function<FnArgs<(Unknown, f64, f64)>, Unknown>,
+    prepare: Function<Unknown, Unknown>,
+    prepare_fresh: Function<Unknown, Unknown>,
+    failed: Unknown,
+    failure: Function<(), String>,
+) -> Result<Jv> {
+    let mut hooks = JsDocHooks { env, fresh, version_of, migrate, prepare, prepare_fresh, failed, failure };
+    let (doc, report) = store::read_versioned(&file, latest, now, &mut hooks).map_err(|_| Error::new(Status::GenericFailure, "a hook threw".to_string()))?;
+    Ok(Jv::Obj(vec![("doc", Jv::Raw(doc.raw())), ("report", report_jv(report))]))
+}
+
+#[napi(js_name = "freeName")]
+pub fn free_name(file: String, base: String, now: f64, ext: String) -> String {
+    store::free_name(&file, &base, now, &ext)
+}
+
+/// Writes a document as JSON.stringify(doc, null, indent) would, through a
+/// temporary file renamed into place: null, or the error, as Node words it.
+#[napi(js_name = "writeJson")]
+pub fn write_json(file: String, doc: Json, indent: u32) -> Option<Jv> {
+    let text = js_json::stringify(&doc.0, indent as usize);
+    store::write_atomic(&file, &text).err().map(|e| Jv::Obj(vec![("code", Jv::Json(e.code.map_or(Value::Null, Value::String))), ("message", Jv::Json(Value::String(e.message)))]))
+}

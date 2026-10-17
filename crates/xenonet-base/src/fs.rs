@@ -25,6 +25,37 @@ impl FsError {
     }
 }
 
+impl FsError {
+    /// The error as Node words it: "ENOTDIR: not a directory, mkdir '/x'".
+    pub fn of(e: io::Error, syscall: &str, path: &str) -> Self {
+        let code = code_of(&e);
+        let message = match code {
+            Some(c) => format!("{c}: {}, {syscall} '{path}'", describe(c).map_or_else(|| e.to_string(), str::to_string)),
+            None => e.to_string(),
+        };
+        FsError { code: code.map(Into::into), message }
+    }
+}
+
+// libuv's words for the errors the blocks meet.
+fn describe(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "ENOENT" => "no such file or directory",
+        "ENOTDIR" => "not a directory",
+        "EISDIR" => "illegal operation on a directory",
+        "EACCES" => "permission denied",
+        "EPERM" => "operation not permitted",
+        "EEXIST" => "file already exists",
+        "ENOSPC" => "no space left on device",
+        "EROFS" => "read-only file system",
+        "EBUSY" => "resource busy or locked",
+        "EMFILE" => "too many open files",
+        "ENOTEMPTY" => "directory not empty",
+        "EXDEV" => "cross-device link not permitted",
+        _ => return None,
+    })
+}
+
 impl From<io::Error> for FsError {
     fn from(e: io::Error) -> Self {
         FsError { code: code_of(&e).map(Into::into), message: e.to_string() }

@@ -45,6 +45,15 @@
         "Through the twin, reading a transcript takes about 8 times as long as the JS (20,000 lines, 15 MB: 340 ms against 40 ms), since each record crosses between JS and Rust several times while vendor.js's checks are still JS. Don't put this twin in the module's place before the readers are Rust end to end.",
         "readLines still reads the file, and unpacks a .zst archive, in JS: the Rust reader needs a zstd decoder first."
       ]
+    },
+    "core/blocks/store.js": {
+      "rust": "crates/xenonet-blocks/src/store.rs",
+      "differences": [
+        "A document is written as JSON.stringify(doc, null, 2) writes it, byte for byte over 3,000 random documents, except that an object's own toJSON (other than a Date's) isn't called, and a lone surrogate in a string is written as U+FFFD where JS writes \\udXXX.",
+        "An error writing the file is worded as Node words it for the common codes (ENOTDIR, EACCES, ENOSPC…); others keep the system's words.",
+        "The migrations still run through core/migrate.js, in JS; the parts prepare says it repaired come back as strings.",
+        "JsonStore's timer and health stay in the twin."
+      ]
     }
   },
   "tests": [

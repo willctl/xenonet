@@ -34,7 +34,7 @@ unsafe fn string(env: sys::napi_env, s: &str) -> Result<sys::napi_value> {
     Ok(out)
 }
 
-unsafe fn to_js(env: sys::napi_env, v: &Value, depth: usize) -> Result<sys::napi_value> {
+pub(crate) unsafe fn to_js(env: sys::napi_env, v: &Value, depth: usize) -> Result<sys::napi_value> {
     if depth > MAX_DEPTH {
         return Err(Error::new(Status::InvalidArg, "a value nested too deeply".to_string()));
     }
@@ -71,7 +71,7 @@ unsafe fn to_js(env: sys::napi_env, v: &Value, depth: usize) -> Result<sys::napi
     Ok(out)
 }
 
-unsafe fn type_of(env: sys::napi_env, v: sys::napi_value) -> Result<i32> {
+pub(crate) unsafe fn type_of(env: sys::napi_env, v: sys::napi_value) -> Result<i32> {
     let mut t = 0;
     check(unsafe { sys::napi_typeof(env, v, &mut t) }, "tell a value's type")?;
     Ok(t)
@@ -84,7 +84,7 @@ fn skipped(t: i32) -> bool {
     t == napi_undefined || t == napi_function || t == napi_symbol
 }
 
-unsafe fn from_js(env: sys::napi_env, v: sys::napi_value, depth: usize) -> Result<Value> {
+pub(crate) unsafe fn from_js(env: sys::napi_env, v: sys::napi_value, depth: usize) -> Result<Value> {
     use sys::ValueType::*;
     if depth > MAX_DEPTH {
         return Err(Error::new(Status::InvalidArg, "a value nested too deeply, or in a cycle".to_string()));
@@ -229,6 +229,8 @@ pub enum Jv {
     Bytes(Vec<u8>),
     Obj(Vec<(&'static str, Jv)>),
     Arr(Vec<Jv>),
+    /// A JS value made in this call, handed straight back.
+    Raw(sys::napi_value),
 }
 
 impl From<Option<Value>> for Jv {
@@ -256,6 +258,7 @@ unsafe fn build(env: sys::napi_env, v: &Jv) -> Result<sys::napi_value> {
                 check(unsafe { sys::napi_set_property(env, out, key, value) }, "fill an object")?;
             }
         }
+        Jv::Raw(v) => out = *v,
         Jv::Arr(items) => {
             check(unsafe { sys::napi_create_array_with_length(env, items.len(), &mut out) }, "make an array")?;
             for (i, x) in items.iter().enumerate() {

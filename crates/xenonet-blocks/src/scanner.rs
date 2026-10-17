@@ -95,9 +95,7 @@ impl Run {
     }
 }
 
-/// Stops a walk: a rule or the clock couldn't answer (a JS callback threw).
-#[derive(Debug)]
-pub struct Halt;
+pub use crate::Halt;
 
 /// The files a walk wants and the folders it enters. `pick(name, dir)` and
 /// `enter(name, dir, level)`.
