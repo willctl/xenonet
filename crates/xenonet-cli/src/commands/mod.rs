@@ -7,21 +7,37 @@ use crate::out::Done;
 
 pub mod actor;
 pub mod agents;
+pub mod assistant;
 pub mod completion;
+pub mod connect;
+pub mod console;
+pub mod decide;
+pub mod diagnose;
+pub mod disconnect;
+pub mod doctor;
 pub mod drift;
+pub mod film;
 pub mod gateway;
 pub mod hook;
 pub mod hosts;
+pub mod install;
 pub mod live;
 pub mod logs;
 pub mod mcp;
 pub mod messages;
+pub mod refusals;
+pub mod relay;
 pub mod root;
+pub mod script;
 pub mod search;
+pub mod service;
 pub mod session;
+pub mod setup;
 pub mod spend;
 pub mod status;
 pub mod theme;
+pub mod uninstall;
+pub mod update;
 pub mod who;
 
 /// A command: what it does, the words it takes, and whether the help
@@ -90,21 +106,37 @@ pub fn help(name: &str) -> &'static str {
     match name {
         "actor" => actor::HELP,
         "agents" => agents::HELP,
+        "assistant" => assistant::HELP,
         "completion" => completion::HELP,
+        "connect" => connect::HELP,
+        "console" => console::HELP,
+        "decide" => decide::HELP,
+        "diagnose" => diagnose::HELP,
+        "disconnect" => disconnect::HELP,
+        "doctor" => doctor::HELP,
         "drift" => drift::HELP,
+        "film" => film::HELP,
         "gateway" => gateway::HELP,
         "hook" => hook::HELP,
         "hosts" => hosts::HELP,
+        "install" => install::HELP,
         "live" => live::HELP,
         "logs" => logs::HELP,
         "mcp" => mcp::HELP,
         "messages" => messages::HELP,
+        "refusals" => refusals::HELP,
+        "relay" => relay::HELP,
         "root" => root::HELP,
+        "script" => script::HELP,
         "search" => search::HELP,
+        "service" => service::HELP,
         "session" => session::HELP,
+        "setup" => setup::HELP,
         "spend" => spend::HELP,
         "status" => status::HELP,
         "theme" => theme::HELP,
+        "uninstall" => uninstall::HELP,
+        "update" => update::HELP,
         "who" => who::HELP,
         _ => find(name).map_or("", |c| c.about),
     }
@@ -115,21 +147,37 @@ pub fn run(name: &str, args: &[String], flags: &Flags) -> Done {
     match name {
         "actor" => actor::run(args, flags),
         "agents" => agents::run(args, flags),
+        "assistant" => assistant::run(args, flags),
         "completion" => completion::run(args, flags),
+        "connect" => connect::run(args, flags),
+        "console" => console::run(args, flags),
+        "decide" => decide::run(args, flags),
+        "diagnose" => diagnose::run(args, flags),
+        "disconnect" => disconnect::run(args, flags),
+        "doctor" => doctor::run(args, flags),
         "drift" => drift::run(args, flags),
+        "film" => film::run(args, flags),
         "gateway" => gateway::run(args, flags),
         "hook" => hook::run(args, flags),
         "hosts" => hosts::run(args, flags),
+        "install" => install::run(args, flags),
         "live" => live::run(args, flags),
         "logs" => logs::run(args, flags),
         "mcp" => mcp::run(args, flags),
         "messages" => messages::run(args, flags),
+        "refusals" => refusals::run(args, flags),
+        "relay" => relay::run(args, flags),
         "root" => root::run(args, flags),
+        "script" => script::run(args, flags),
         "search" => search::run(args, flags),
+        "service" => service::run(args, flags),
         "session" => session::run(args, flags),
+        "setup" => setup::run(args, flags),
         "spend" => spend::run(args, flags),
         "status" => status::run(args, flags),
         "theme" => theme::run(args, flags),
+        "uninstall" => uninstall::run(args, flags),
+        "update" => update::run(args, flags),
         "who" => who::run(args, flags),
         _ => Err(crate::out::Fail::error(format!("no command \"{name}\". xenonet --help lists them."))),
     }

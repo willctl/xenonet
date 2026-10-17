@@ -1,0 +1,25 @@
+The provider refusals XenoNet kept: each Claude Code or Codex turn its
+provider refused, with the provider's category and words, the model and
+the request's id, and, if you keep context, the transcript up to it.
+
+  xenonet refusals [list]          the records, newest first
+  xenonet refusals show <id>       one record; --context prints its context
+  xenonet refusals export          JSON lines for a dataset, to stdout or --out
+                                 <file>; --with-context adds each one's request
+                                 (messages, ready to tokenize); --scrub takes
+                                 home folders and keys out
+  xenonet refusals capture <id>    add context to a record kept without it, while
+                                 its transcript is still there (--all for every one)
+  xenonet refusals context on|off  keep context with each new record (off unless
+                                 you turn it on: transcripts can hold secrets)
+  xenonet refusals scan            look through transcripts for refusals XenoNet
+                                 hasn't kept yet
+
+  --since <time>   30m, 6h, 30d (list, export, scan; default everything, and
+                   scan 90d)
+  --provider <p>   anthropic, openai, claude or codex
+  --dev            XenoNet Dev's records
+  --json           as JSON
+
+Records stay in XenoNet's state folder until you delete them; nothing is
+sent anywhere.

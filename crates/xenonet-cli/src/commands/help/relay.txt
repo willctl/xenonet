@@ -1,0 +1,14 @@
+Streams this machine's XenoNet to a console on another machine, read-only,
+as one JSON object per line on standard output. A console with hosts on
+runs it over SSH (ssh <host> xenonet relay); you don't need to run it
+yourself. It reads the XenoNet on 127.0.0.1 and never opens a port.
+
+  --port <n>     the XenoNet to read (47840, or 47841 with --demo)
+  --since <age>  sessions updated this recently: 7d (the default), 12h, 90m
+  --detail       live detail too (questions, last messages, tool details,
+                 files touched), not only titles, states and counts
+  --start        start a XenoNet here if none is running, for as long as the
+                 relay runs
+
+A key restricted to the relay in authorized_keys
+(command="xenonet relay --port 47840") may still ask for --since.

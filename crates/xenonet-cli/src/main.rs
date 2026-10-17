@@ -10,6 +10,7 @@ mod clock;
 mod commands;
 mod config;
 mod handoff;
+mod instances;
 mod js;
 mod needs_you;
 mod out;
