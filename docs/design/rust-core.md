@@ -509,6 +509,7 @@ place. This table follows it.
 | `core/actors/hermes.js`, `observers.js` | `xenonet-actors/src/hermes.rs`, `observers.rs` (the observers themselves are built in the twin) | `hermes-observer`, `observers`, `server`, `doctor` pass |
 | `core/actors/reports.js` | `xenonet-actors/src/reports.rs` (the actor's processes and their lineage are read through the twin) | `actors`, `actor-routes`, `engine-actors`, `delivery-scopes`, `observers` pass |
 | `core/actors/account-links.js`, `remote-presence.js` | `xenonet-actors/src/account_links.rs` (over the engine store), `remote_presence.rs` | `assistant-connections`, `assistant-service` pass |
+| `core/actors/connections.js` | `xenonet-actors/src/connections.rs` (over the engine store; the credentials' files and the adapters through the twin) | `assistant-connections`, `assistant-service`, `assistant-endpoint`, `assistant-tunnels`, `assistant-routes`, `server` pass |
 
 With every twin in place, all 111 test files that reach one pass. The
 twins load in the Node processes a test starts too (a server, the

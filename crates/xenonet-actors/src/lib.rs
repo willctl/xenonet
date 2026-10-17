@@ -7,6 +7,7 @@ pub mod account_links;
 pub mod adapters;
 pub mod app_bundle;
 pub mod attribution;
+pub mod connections;
 pub mod demo;
 pub mod detail;
 pub mod grok_bot;

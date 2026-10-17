@@ -242,6 +242,13 @@
         "Your state lives in the registry's Rust (you_report and the rest); createYou gives the registry's own you."
       ]
     },
+    "core/actors/connections.js": {
+      "rust": "crates/xenonet-actors/src/connections.rs",
+      "differences": [
+        "The credentials' files (core/assistant/credentials.js), the adapters and the clock are the twin's, called as the JS called them.",
+        "It works on the engine's store the twin's EngineStore holds, so another kind of store can't stand in for it."
+      ]
+    },
     "core/actors/demo.js": {
       "rust": "crates/xenonet-actors/src/demo.rs",
       "differences": [
