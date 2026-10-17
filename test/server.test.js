@@ -12,6 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { vendorSources } from "../core/schema/lenient.js";
 import { createProcs } from "../core/procs.js";
+import { service, rustService } from "./harness/xenonet-bin.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const freePort = () =>
@@ -31,7 +32,7 @@ let server;
 let output = "";
 
 function start(args, p, extra = {}) {
-  const proc = spawn(process.execPath, ["server/index.js", ...args], { cwd: root, env: { ...env, XENONET_PORT: String(p), ...extra }, stdio: ["ignore", "pipe", "pipe"] });
+  const proc = spawn(...service(args), { cwd: root, env: { ...env, XENONET_PORT: String(p), ...extra }, stdio: ["ignore", "pipe", "pipe"] });
   proc.stdout.on("data", (d) => (output += d));
   proc.stderr.on("data", (d) => (output += d));
   return proc;
@@ -114,6 +115,9 @@ before(async () => {
     try {
       const { data } = await get("/api/graph");
       if (data.nodes?.some((n) => n.kind === "session")) return;
+      // The Rust service before the map's core is in Rust: up, and each
+      // test passes or fails on what it reaches.
+      if (rustService && data.code === "pending") return;
     } catch {}
   }
   throw new Error(`the demo server didn't start:\n${output}`);
