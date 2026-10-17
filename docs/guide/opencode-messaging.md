@@ -56,14 +56,14 @@ On a Mac with Apple silicon, OpenCode 1.18.15 and `opencode/big-pickle`, three s
 
 | Step | Median | Range |
 |---|---|---|
-| XenoNet takes the message | 61 ms | 10 to 91 ms |
-| OpenCode's server takes it | 75 ms | 20 to 98 ms |
-| The recipient's turn starts | 82 ms | 21 ms to 1.4 s |
-| The answer is back at XenoNet, for the 12 answers | 0.8 s | 0.6 to 11.2 s |
+| XenoNet takes the message | 66 ms | 13 to 112 ms |
+| OpenCode's server takes it | 84 ms | 27 to 155 ms |
+| The recipient's turn starts | 90 ms | 45 ms to 3.0 s |
+| The answer is back at XenoNet, for the 12 answers | 0.9 s | 0.6 to 8.5 s |
 
-Most of XenoNet's time is reading the process table, to check that the message came from an OpenCode process. It keeps what it read for a second and a half, so a session's next message is taken in about 10 ms. OpenCode's server takes the message some 15 ms later. An idle recipient starts its turn at once. The slow starts, up to 1.4 s, were recipients still finishing a turn of their own. OpenCode holds the message until that turn ends. The rest is the model, reading its notes and answering.
+Most of XenoNet's time is reading the process table, to check that the message came from an OpenCode process. It keeps what it read for a second and a half, so a message that soon after another is taken in 13 to 30 ms. OpenCode's server takes the message some 15 to 20 ms later. An idle recipient starts its turn at once. The slow starts, up to 3.0 s, were recipients still finishing a turn of their own. OpenCode holds the message until that turn ends. The rest is the model, reading its notes and answering.
 
-A second run, with two sessions, two rounds and `opencode/deepseek-v4.1-flash-free`, made 8 messages. XenoNet took them in a median of 65 ms and OpenCode's server in 82 ms, the recipient's turn started in 84 ms, and the answers took 2.0 to 7.4 s.
+A second run, with two sessions, two rounds and `opencode/deepseek-v4.1-flash-free`, made 8 messages. XenoNet took them in a median of 68 ms and OpenCode's server in 85 ms, the recipient's turn started in 86 ms, and the answers took 2.2 to 6.6 s.
 
 ## In your own projects
 
