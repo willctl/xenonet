@@ -87,6 +87,13 @@
         "A compiled schema is a Rust handle, not an object whose nodes JS can read.",
         "strip orders keys at the same level by bytes where JS used localeCompare; taking keys out of an object gives the same result in any order."
       ]
+    },
+    "core/schema/ids.js": {
+      "rust": "crates/xenonet-base/src/ids.rs",
+      "differences": [
+        "HOST_ID, ACTOR_SLUG, SESSION_LOCAL and SESSION_PREFIX are still RegExp objects, made from Rust's patterns.",
+        "What's checked of a JS value (a string, a whole number) and how an error writes it stay in the twin; repoKey's aliases are looked up there."
+      ]
     }
   },
   "tests": [
@@ -95,6 +102,7 @@
     "test/actor-needs-you.test.js",
     "test/actor-registration.test.js",
     "test/actor-routes.test.js",
+    "test/actor-schemas.test.js",
     "test/actor-wake.test.js",
     "test/actors.test.js",
     "test/assistant-connections.test.js",
@@ -125,6 +133,7 @@
     "test/costs.test.js",
     "test/decide.test.js",
     "test/doctor.test.js",
+    "test/drift.test.js",
     "test/engine-actors.test.js",
     "test/engine-connect.test.js",
     "test/engine-routes.test.js",
@@ -146,7 +155,9 @@
     "test/hosts-link.test.js",
     "test/hosts-merge.test.js",
     "test/hosts-relay.test.js",
+    "test/hosts-routes.test.js",
     "test/hosts-server.test.js",
+    "test/identities-page.test.js",
     "test/identities.test.js",
     "test/integrations.test.js",
     "test/lab.test.js",
@@ -160,6 +171,7 @@
     "test/numbat.test.js",
     "test/observer.test.js",
     "test/observers.test.js",
+    "test/page-markup.test.js",
     "test/platform.test.js",
     "test/projects.test.js",
     "test/provider-drift.test.js",
@@ -168,6 +180,8 @@
     "test/root.test.js",
     "test/schema-ids.test.js",
     "test/schema-output.test.js",
+    "test/schema-registry.test.js",
+    "test/schemas.test.js",
     "test/scope.test.js",
     "test/server.test.js",
     "test/signals.test.js",
@@ -179,12 +193,14 @@
     "test/stats.test.js",
     "test/store.test.js",
     "test/system-stats.test.js",
+    "test/theme-menu.test.js",
     "test/token-files.test.js",
     "test/vendor-adapters.test.js",
     "test/vendor-reader.test.js",
     "test/vendor-schemas.test.js",
     "test/verify.test.js",
     "test/windows-command.test.js",
-    "test/workspace.test.js"
+    "test/workspace.test.js",
+    "test/you-page.test.js"
   ]
 }

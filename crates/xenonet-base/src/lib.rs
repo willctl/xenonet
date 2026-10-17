@@ -4,6 +4,7 @@
 //! what a call to a model cost at API prices (`pricing`).
 
 pub mod fs;
+pub mod ids;
 pub mod json;
 pub mod ordered;
 pub mod paths;

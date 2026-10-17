@@ -195,3 +195,142 @@ pub fn list_files(dir: String, pick: Function<String, bool>, depth: u32) -> Resu
         None => Ok(out),
     }
 }
+
+// ----- ids -----
+
+use xenonet_base::ids;
+
+#[napi(object)]
+pub struct IdPatterns {
+    #[napi(js_name = "schemaBase")]
+    pub schema_base: String,
+    #[napi(js_name = "hostId")]
+    pub host_id: String,
+    #[napi(js_name = "actorSlug")]
+    pub actor_slug: String,
+    #[napi(js_name = "sessionApps")]
+    pub session_apps: String,
+    pub you: String,
+}
+
+#[napi(js_name = "idPatterns")]
+pub fn id_patterns() -> IdPatterns {
+    IdPatterns {
+        schema_base: ids::SCHEMA_BASE.into(),
+        host_id: ids::HOST_ID.into(),
+        actor_slug: ids::ACTOR_SLUG.into(),
+        session_apps: ids::session_app_alternation(),
+        you: ids::YOU.into(),
+    }
+}
+
+#[napi(js_name = "sessionAppNames")]
+pub fn session_app_names() -> Vec<Vec<&'static str>> {
+    ids::SESSION_APPS.iter().map(|(a, n)| vec![*a, *n]).collect()
+}
+
+#[napi(js_name = "isSchemaPath")]
+pub fn is_schema_path(path: String) -> bool {
+    ids::is_schema_path(&path)
+}
+
+#[napi(js_name = "shortId")]
+pub fn short_id(path: String, major: f64) -> Result<String> {
+    ids::short_id(&path, major).map_err(|e| Error::new(Status::InvalidArg, e))
+}
+
+#[napi(object)]
+pub struct ParsedSchemaId {
+    pub id: String,
+    pub path: String,
+    pub major: f64,
+}
+
+#[napi(js_name = "parseSchemaId")]
+pub fn parse_schema_id(id: String) -> Option<ParsedSchemaId> {
+    ids::parse_schema_id(&id).map(|p| ParsedSchemaId { id: p.id, path: p.path, major: p.major as f64 })
+}
+
+#[napi(js_name = "schemaUri")]
+pub fn schema_uri(short: String) -> Option<String> {
+    ids::schema_uri(&short).ok()
+}
+
+#[napi(js_name = "isHostId")]
+pub fn is_host_id(host: String) -> bool {
+    ids::is_host_id(&host)
+}
+
+#[napi(object)]
+pub struct Qualified {
+    pub host: Option<String>,
+    pub local: String,
+}
+
+#[napi(js_name = "parseQualified")]
+pub fn parse_qualified(id: String) -> Option<Qualified> {
+    ids::parse_qualified(&id).map(|(h, l)| Qualified { host: h.map(Into::into), local: l.into() })
+}
+
+/// The id qualified, or which of the two isn't one: { id } or { error }.
+#[napi(object)]
+pub struct QualifyAnswer {
+    pub id: Option<String>,
+    pub error: Option<String>,
+}
+
+#[napi]
+pub fn qualify(id: String, host: Option<String>, self_host: Option<String>) -> QualifyAnswer {
+    match ids::qualify(&id, host.as_deref(), self_host.as_deref()) {
+        Ok(q) => QualifyAnswer { id: Some(q), error: None },
+        Err(ids::QualifyError::NotAnId) => QualifyAnswer { id: None, error: Some("id".into()) },
+        Err(ids::QualifyError::NotAHost) => QualifyAnswer { id: None, error: Some("host".into()) },
+    }
+}
+
+#[napi(js_name = "isSessionApp")]
+pub fn is_session_app(app: String) -> bool {
+    ids::is_session_app(&app)
+}
+
+#[napi(js_name = "isSessionId")]
+pub fn is_session_id(id: String) -> bool {
+    ids::is_session_id(&id)
+}
+
+#[napi(js_name = "appOfSession")]
+pub fn app_of_session(id: String) -> Option<&'static str> {
+    ids::app_of_session(&id)
+}
+
+#[napi(js_name = "isActorSlug")]
+pub fn is_actor_slug(slug: String) -> bool {
+    ids::is_actor_slug(&slug)
+}
+
+#[napi(object)]
+pub struct ActorRef {
+    pub host: Option<String>,
+    pub slug: String,
+}
+
+#[napi(js_name = "parseActorId")]
+pub fn parse_actor_id(id: String) -> Option<ActorRef> {
+    ids::parse_actor_id(&id).map(|(h, s)| ActorRef { host: h.map(Into::into), slug: s.into() })
+}
+
+#[napi(js_name = "normalizeRemote")]
+pub fn normalize_remote(url: String) -> String {
+    ids::normalize_remote(&url)
+}
+
+/// A remote's host and repo path, [host, repo], or null.
+#[napi(js_name = "remoteParts")]
+pub fn remote_parts(url: String) -> Option<Vec<String>> {
+    ids::remote_parts(&url).map(|(h, r)| vec![h, r])
+}
+
+#[napi(js_name = "parseRepoId")]
+pub fn parse_repo_id(id: String) -> Option<String> {
+    ids::parse_repo_id(&id).map(Into::into)
+}
