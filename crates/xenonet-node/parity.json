@@ -375,6 +375,71 @@
         "The home folder's scrubber, the shaping, the metadata-only cut, the allowlist and what waits while the console reads slowly are the Rust's; the HTTP calls to the XenoNet here, the pipes, the timers and the signals are the twin's.",
         "metadataOnly's functions return a changed copy; the JS changed the value in place."
       ]
+    },
+    "core/assistant/protocol.js": {
+      "rust": "crates/xenonet-assistant/src/protocol.rs",
+      "differences": []
+    },
+    "core/assistant/audit.js": {
+      "rust": "crates/xenonet-assistant/src/audit.rs",
+      "differences": [
+        "The store is the engine's (core/engine/store.js), asked by the twin. A result given as null is logged as \"null\"; the JS gave undefined and null their own words too, and no caller leaves it out."
+      ]
+    },
+    "core/assistant/cursors.js": {
+      "rust": "crates/xenonet-assistant/src/cursors.rs, with HMAC-SHA256 in crypto.rs",
+      "differences": [
+        "HMAC-SHA256 is written on the sha2 crate (RFC 4231's vectors are its tests). The clock stays in the twin. The service signs with createCursors' own tokens only: a cursors object made some other way is refused with a TypeError, where the JS would have called its make and read."
+      ]
+    },
+    "core/assistant/credentials.js": {
+      "rust": "crates/xenonet-assistant/src/credentials.rs",
+      "differences": [
+        "Written in the same order as the JS: the folder at 0700, the file made empty and new at 0600, protected, then filled, then checked for other readers; a file others could read is deleted and the write fails. Protecting the file and listing who else can read it stay private-file.js's, asked by the twin."
+      ]
+    },
+    "core/assistant/fixtures.js": {
+      "rust": "crates/xenonet-assistant/src/fixtures.rs",
+      "differences": [
+        "A view's and a policy's places are pairs in Rust; the twin gives them back as Maps."
+      ]
+    },
+    "core/assistant/projection.js": {
+      "rust": "crates/xenonet-assistant/src/projection.rs",
+      "differences": [
+        "cleanLabel's lookbehinds and lookahead are written out by hand, with JS's \\s, ASCII \\b and ASCII case for /i; on 60,000 random labels of keys, paths, emails, spaces and other Unicode it gives the JS's answer for each.",
+        "A label with a lone surrogate reaches the Rust with U+FFFD in its place."
+      ]
+    },
+    "core/assistant/source.js": {
+      "rust": "crates/xenonet-assistant/src/source.rs",
+      "differences": [
+        "The state (core/state.js) and the actors' registry are other modules': the twin hands over the map's nodes, the live state and the registry's actors, and answers a session's place, a product and whether an actor is registered through callbacks. An actor's snapshot without via reads as an empty list; the JS threw."
+      ]
+    },
+    "core/assistant/service.js": {
+      "rust": "crates/xenonet-assistant/src/service.rs",
+      "differences": [
+        "The request's checks, the six operations, paging, the envelope and its size, and the four-at-a-time limit are the Rust's; each answer is a task that asks the twin for the view, the actor, a session's stats, the attention ids' key, the schema's check (zod) and the time. The grant's standing (core/actors/connections.js), its rate (core/actors/limits.js), the arguments' schema, the timeout and the audit stay in the twin."
+      ]
+    },
+    "core/assistant/client.js": {
+      "rust": "crates/xenonet-assistant/src/client.rs",
+      "differences": [
+        "When to try again, the endpoint file's checks, reading the credential for hello and the grant's standing are the Rust's; the connection (components/rpc.js), its requests and whether the endpoint's writer still runs are the twin's."
+      ]
+    },
+    "core/assistant/tunnel-client.js": {
+      "rust": "crates/xenonet-assistant/src/tunnel_client.rs",
+      "differences": [
+        "Running tunnel-client --version, and reading the profiles' folders and files, stay in the twin."
+      ]
+    },
+    "core/assistant/tunnels.js": {
+      "rust": "crates/xenonet-assistant/src/tunnels.rs",
+      "differences": [
+        "Bindings and their checks, each run's state and backoff, its log as shown, the health addresses and the client's own environment (the key only in CONTROL_PLANE_API_KEY, OPENAI_API_KEY taken out of a run's) are the Rust's; the processes, timers, credential store (secret-store.js's TARGET check through a callback), health probes and files are the twin's."
+      ]
     }
   },
   "tests": [
@@ -393,6 +458,7 @@
     "test/assistant-endpoint.test.js",
     "test/assistant-routes.test.js",
     "test/assistant-service.test.js",
+    "test/assistant-source.test.js",
     "test/assistant-tunnels.test.js",
     "test/blocks-gatherer.test.js",
     "test/blocks-lifecycle.test.js",

@@ -28,6 +28,7 @@ xenonet-state = { path = "crates/xenonet-state" }
 xenonet-app = { path = "crates/xenonet-app" }
 xenonet-components = { path = "crates/xenonet-components" }
 xenonet-hosts = { path = "crates/xenonet-hosts" }
+xenonet-assistant = { path = "crates/xenonet-assistant" }
 # JS keeps an object's keys in the order they were added, and so do the
 # files and answers XenoNet writes: preserve_order keeps that order here.
 serde = { version = "1", features = ["derive"] }
@@ -48,6 +49,9 @@ url = "2"
 # Component packages (.tar.gz): the gzip under the tar, which the components
 # crate reads itself so every entry is checked before anything is written.
 flate2 = "1"
+# String.prototype.normalize("NFC"), for the assistant's labels: already
+# in the lock through url's idna.
+icu_normalizer = "2.1"
 # The Node-API bindings that put the crates behind the JS modules during the
 # port. The last releases that build on Rust 1.85; the resolver keeps their
 # dependencies to versions that do too.

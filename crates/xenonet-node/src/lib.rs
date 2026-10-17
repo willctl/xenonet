@@ -6,6 +6,7 @@
 
 mod actors;
 mod app;
+mod assistant;
 mod base;
 mod blocks;
 mod components;
