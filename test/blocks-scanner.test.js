@@ -62,6 +62,26 @@ test("later walks read only the folders that changed, and forget the ones that w
   assert.equal(rel(tree, s.scan()).length, 4, "forgotten: everything read again");
 });
 
+// Linux's coarse timestamps: a file added in the same tick of the
+// filesystem's clock as the folder's last change leaves its mtime as it was.
+test("a folder read just after it changed is read again, so a file its mtime doesn't show is still found", async () => {
+  for (const walk of [(s) => s.scan(), (s) => s.scanBreadth()]) {
+    const tree = world();
+    let now = T + 5000;
+    const s = new Scanner({ name: "t", root: tree.path("projects"), pick: jsonl, clock: { now: () => now } });
+    await walk(s);
+    tree.write("projects/-b/s3.jsonl", "{}\n");
+    tree.touch("projects/-b", T + 4500);
+    assert.deepEqual(rel(tree, await walk(s)).sort(), ["projects/-b/s2.jsonl", "projects/-b/s3.jsonl"]);
+    tree.write("projects/-b/s4.jsonl", "{}\n");
+    tree.touch("projects/-b", T + 4500);
+    assert.deepEqual(rel(tree, await walk(s)).sort(), ["projects/-b/s2.jsonl", "projects/-b/s3.jsonl", "projects/-b/s4.jsonl"], "the same mtime, read again");
+    now = T + 9000;
+    await walk(s);
+    assert.deepEqual(await walk(s), [], "read long enough after its change: trusted again");
+  }
+});
+
 test("depth, the folders it enters, and a walk without the cache", () => {
   const tree = world();
   const shallow = new Scanner({ name: "t", root: tree.path("projects"), depth: 1, pick: jsonl });
