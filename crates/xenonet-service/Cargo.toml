@@ -10,7 +10,14 @@ authors.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+# `xenonet serve` runs it; the binary of its own is for its tests.
+[[bin]]
+name = "xenonet-service"
+path = "src/main.rs"
+test = false
+
 [dependencies]
+async-trait.workspace = true
 bytes.workspace = true
 getrandom.workspace = true
 http-body-util.workspace = true

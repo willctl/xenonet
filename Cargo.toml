@@ -53,6 +53,9 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
 bytes = "1"
 rmcp = { version = "3.5", default-features = false, features = ["server", "transport-io"] }
+# The service's cores are traits the routes call through, async where the
+# JS awaits (crates/xenonet-service/src/cores).
+async-trait = "0.1"
 
 [profile.release]
 lto = "thin"
