@@ -8,14 +8,15 @@
 //                                   and keep the passing ones in parity.json
 //   npm run test:rust -- <files>    these files
 //
-// A file counts only if it reaches a twin. One that fails with twins is
+// A file counts only if it reaches a twin, in its own process or one it
+// starts. One that fails with twins is
 // run again without them, to tell a difference in Rust from a test that
 // fails here anyway.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const parityFile = path.join(root, "crates", "xenonet-node", "parity.json");
@@ -26,12 +27,18 @@ const write = args.includes("--write");
 const named = args.filter((a) => !a.startsWith("--"));
 const parity = JSON.parse(fs.readFileSync(parityFile, "utf8"));
 
+// The hook goes to every Node process a test starts too (a server, the
+// command, an MCP server), through NODE_OPTIONS, so they run on the twins.
+const hookOption = `--import=${pathToFileURL(path.join(root, register)).href}`;
+
 function run(file, { twins }) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-parity-"));
   const logFile = path.join(tmp, "twins");
-  const argv = [...(twins ? ["--import", register] : []), "--test", "--test-reporter=dot", file];
+  const argv = ["--test", "--test-reporter=dot", file];
+  const env = { ...process.env, XENONET_TWIN_LOG: twins ? logFile : "" };
+  if (twins) env.NODE_OPTIONS = [process.env.NODE_OPTIONS, hookOption].filter(Boolean).join(" ");
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, argv, { cwd: root, env: { ...process.env, XENONET_TWIN_LOG: twins ? logFile : "" }, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, argv, { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (out += d));

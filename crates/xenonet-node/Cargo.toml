@@ -17,9 +17,11 @@ test = false
 doctest = false
 
 [dependencies]
+getrandom.workspace = true
 napi.workspace = true
 napi-derive.workspace = true
 serde_json.workspace = true
+xenonet-actors.workspace = true
 xenonet-base.workspace = true
 xenonet-blocks.workspace = true
 xenonet-sources.workspace = true

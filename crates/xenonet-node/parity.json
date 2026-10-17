@@ -51,13 +51,21 @@
       "differences": [
         "A document is written as JSON.stringify(doc, null, 2) writes it, byte for byte over 3,000 random documents, except that an object's own toJSON (other than a Date's) isn't called, and a lone surrogate in a string is written as U+FFFD where JS writes \\udXXX.",
         "An error writing the file is worded as Node words it for the common codes (ENOTDIR, EACCES, ENOSPC…); others keep the system's words.",
-        "The migrations still run through core/migrate.js, in JS; the parts prepare says it repaired come back as strings.",
-        "JsonStore's timer and health stay in the twin."
+        "JsonStore's timer and health stay in the twin.",
+        "The migrations still run through core/migrate.js, in JS; the parts prepare says it repaired come back as strings."
+      ]
+    },
+    "core/actors/tokens.js": {
+      "rust": "crates/xenonet-actors/src/tokens.rs",
+      "differences": [
+        "TOKEN and GATEWAY_TOKEN are still RegExp objects, made from Rust's patterns.",
+        "tokenInUrl still reads the URL with Node's URL; Rust checks its parameters and path."
       ]
     }
   },
   "tests": [
     "test/actor-gateway.test.js",
+    "test/actor-names.test.js",
     "test/actor-needs-you.test.js",
     "test/actor-registration.test.js",
     "test/actor-routes.test.js",
@@ -104,6 +112,7 @@
     "test/grok-bot-observer.test.js",
     "test/hermes-files.test.js",
     "test/hermes-observer.test.js",
+    "test/hosts-cli.test.js",
     "test/hosts-config.test.js",
     "test/hosts-doctor.test.js",
     "test/hosts-hub.test.js",
@@ -119,6 +128,7 @@
     "test/lines.test.js",
     "test/live.test.js",
     "test/log.test.js",
+    "test/mcp-actor.test.js",
     "test/mcp-info.test.js",
     "test/muse-observer.test.js",
     "test/numbat.test.js",
@@ -133,6 +143,7 @@
     "test/schema-ids.test.js",
     "test/schema-output.test.js",
     "test/scope.test.js",
+    "test/server.test.js",
     "test/signals.test.js",
     "test/space-presence.test.js",
     "test/spotify.test.js",

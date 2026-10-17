@@ -16,6 +16,7 @@ repository = "https://github.com/willctl/xenonet"
 publish = false
 
 [workspace.dependencies]
+xenonet-actors = { path = "crates/xenonet-actors" }
 xenonet-base = { path = "crates/xenonet-base" }
 xenonet-blocks = { path = "crates/xenonet-blocks" }
 xenonet-sources = { path = "crates/xenonet-sources" }
@@ -23,6 +24,10 @@ xenonet-sources = { path = "crates/xenonet-sources" }
 # files and answers XenoNet writes: preserve_order keeps that order here.
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+# Tokens: a SHA-256 of each is all XenoNet keeps, and 32 random bytes from
+# the system make one.
+sha2 = "0.10"
+getrandom = "0.3"
 # The Node-API bindings that put the crates behind the JS modules during the
 # port. The last releases that build on Rust 1.85; the resolver keeps their
 # dependencies to versions that do too.

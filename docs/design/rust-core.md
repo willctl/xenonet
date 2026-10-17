@@ -444,9 +444,12 @@ place. This table follows it.
 | `core/blocks/tailer.js` | `xenonet-blocks/src/tailer.rs`, with the restart fix | `blocks-tailer`, `live` pass |
 | `core/lines.js` | `xenonet-sources/src/lines.rs` | `lines`, `codex`, `vendor-schemas` pass |
 | `core/blocks/store.js` | `xenonet-blocks/src/store.rs` | `blocks-store`, `statefile`, `store`, `hosts-config` pass |
+| `core/actors/tokens.js` | `xenonet-actors/src/tokens.rs` | `token-files`, `actor-registration`, `actor-routes`, `actor-gateway` pass |
 | `xenonet hook` (`cli/commands/hook.js`) | `xenonet-cli`, the `xenonet` binary | `launcher`'s hook cases, as Rust tests of the binary |
 
-With every twin in place, all 92 test files that reach one pass. The two
+With every twin in place, all 96 test files that reach one pass. The
+twins load in the Node processes a test starts too (a server, the
+command, an MCP server), so the route and command tests run on them. The two
 fixes on `fix/scanner-racy-mtime` are in the Rust (the scanner reads a
 folder again when it read it just after it changed, and the tailer
 catches up the files it followed as live after a restart), and that

@@ -4,6 +4,7 @@
 //! it converts arguments, calls back into what a test passed in, and
 //! converts the answers.
 
+mod actors;
 mod base;
 mod blocks;
 mod js;
