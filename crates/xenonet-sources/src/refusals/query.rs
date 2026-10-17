@@ -3,8 +3,8 @@
 
 use serde_json::{Map, Value};
 use std::cmp::Ordering;
-use xenonet_base::jsstr::{collapse_space, locale_compare};
 use xenonet_base::json::number;
+use xenonet_base::jsstr::{collapse_space, locale_compare};
 use xenonet_base::text::{js_number, js_string, js_trim, truthy};
 
 pub const REFUSAL_SORTS: [&str; 6] = ["newest", "oldest", "provider", "model", "category", "kind"];

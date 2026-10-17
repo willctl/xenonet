@@ -46,7 +46,7 @@ pub fn mcp_server_of(tool_name: &str) -> Option<String> {
         if !rest[at..].starts_with("__") {
             continue;
         }
-        let Some(&(_, next)) = chars.get(i + 2) else { return None };
+        let &(_, next) = chars.get(i + 2)?;
         if next == '_' {
             continue;
         }
@@ -371,7 +371,7 @@ fn ordered(v: &Value) -> Value {
 pub fn tool_key(name: &str, input: Option<&Value>) -> String {
     let text = xenonet_base::json::stringify(&ordered(input.unwrap_or(&Value::Null)), 0);
     let digest = Sha256::digest(text.as_bytes());
-    format!("{name}|{}", digest.iter().map(|b| format!("{b:02x}")).collect::<String>())
+    format!("{name}|{}", jsstr::hex(&digest))
 }
 
 /// The pages a write to the shared context names, for the map to beam to.

@@ -99,7 +99,7 @@ static RUN_SALT: Mutex<Option<String>> = Mutex::new(None);
 fn new_salt() -> String {
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes).expect("the system's randomness");
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    jsstr::hex(&bytes)
 }
 
 /// The salt, kept in the state folder as poster-salt: made the first time

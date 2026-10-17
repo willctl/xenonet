@@ -78,7 +78,7 @@ pub fn outline_folders(folders: &[Value]) -> Vec<Value> {
 pub fn fingerprint(outline: &[Value]) -> String {
     let shape: Vec<Value> = outline.iter().map(|f| json!([field(f, "path"), get(f, "xenonet").and_then(Value::as_str) == Some("repo"), field(f, "markers")])).collect();
     let text = xenonet_base::json::stringify(&Value::Array(shape), 0);
-    let hex: String = Sha256::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
+    let hex = jsstr::hex(&Sha256::digest(text.as_bytes()));
     hex[..16].to_string()
 }
 
@@ -209,7 +209,8 @@ mod tests {
 
     #[test]
     fn picks_that_change_something() {
-        let outline = vec![json!({ "path": "a", "xenonet": "folder", "markers": [] }), json!({ "path": "r", "xenonet": "repo", "markers": [] }), json!({ "path": "g", "xenonet": "group" })];
+        let outline =
+            vec![json!({ "path": "a", "xenonet": "folder", "markers": [] }), json!({ "path": "r", "xenonet": "repo", "markers": [] }), json!({ "path": "g", "xenonet": "group" })];
         let text = "```json\n{\"picks\":[{\"path\":\"a\",\"as\":\"project\",\"reason\":\"  a manifest and tests  \"},{\"path\":\"r\",\"as\":\"project\"},{\"path\":\"g\",\"as\":\"group\"},{\"path\":\"a\",\"as\":\"group\"}]}\n```";
         assert_eq!(parse_picks(text, &outline).unwrap(), vec![json!({ "path": "a", "as": "project", "reason": "a manifest and tests" })]);
         assert!(parse_picks("nope", &outline).is_err());
@@ -217,7 +218,11 @@ mod tests {
         let q = jev_questions(&outline);
         assert_eq!(q.len(), 1);
         assert_eq!(q[0]["questions"].as_object().unwrap().keys().collect::<Vec<_>>(), ["f0", "f1"]);
-        let picks = picks_from_answers(&json!({ "f0": { "choice": "project", "confidence": 0.8 }, "f1": { "choice": "group", "confidence": 0.9 } }), &[outline[0].clone(), outline[2].clone()], 0.0);
+        let picks = picks_from_answers(
+            &json!({ "f0": { "choice": "project", "confidence": 0.8 }, "f1": { "choice": "group", "confidence": 0.9 } }),
+            &[outline[0].clone(), outline[2].clone()],
+            0.0,
+        );
         assert_eq!(picks, vec![json!({ "path": "a", "as": "project", "reason": "the decision model was 80% sure" })]);
     }
 }

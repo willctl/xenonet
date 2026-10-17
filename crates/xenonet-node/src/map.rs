@@ -164,7 +164,15 @@ pub fn digest_summarize(events: Json, since: f64, until: f64, title_of: Function
 }
 
 #[napi(js_name = "digestDayLog")]
-pub fn digest_day_log(events: Json, now: f64, title_of: Option<Function<Json, MaybeJson>>, home_of: Function<Json, MaybeJson>, name_of: Function<Json, MaybeJson>, live: MaybeJson, repos: Json) -> Result<Json> {
+pub fn digest_day_log(
+    events: Json,
+    now: f64,
+    title_of: Option<Function<Json, MaybeJson>>,
+    home_of: Function<Json, MaybeJson>,
+    name_of: Function<Json, MaybeJson>,
+    live: MaybeJson,
+    repos: Json,
+) -> Result<Json> {
     let mut title = title_of.as_ref().map(asker);
     let mut home = asker(&home_of);
     let mut name = asker(&name_of);
@@ -334,7 +342,8 @@ pub fn activity_of(updated_at: MaybeJson, now: f64, windows: MaybeJson) -> &'sta
 /// buildGraph(input), `parent_of` as [[key, parent key], …].
 #[napi(js_name = "buildGraph")]
 pub fn build_graph(input: Json, parent_of: Json) -> Json {
-    let parent_of: std::collections::HashMap<String, String> = parent_of.0.as_array().map_or_else(Default::default, |a| a.iter().filter_map(|p| Some((p.get(0)?.as_str()?.to_string(), p.get(1)?.as_str()?.to_string()))).collect());
+    let parent_of: std::collections::HashMap<String, String> =
+        parent_of.0.as_array().map_or_else(Default::default, |a| a.iter().filter_map(|p| Some((p.get(0)?.as_str()?.to_string(), p.get(1)?.as_str()?.to_string()))).collect());
     Json(graph::build_graph(&input.0, &parent_of))
 }
 
@@ -359,7 +368,10 @@ pub fn visible_resource(server: String, hidden: Json) -> bool {
 #[napi(js_name = "mergeSessions")]
 pub fn merge_sessions(prev: Json, codex_ok: bool, codex: Json, claude_ok: bool, claude: Json, observed: Json, demo_titles: Json) -> Json {
     let list = |v: &Json| v.0.as_array().cloned().unwrap_or_default();
-    let titles: std::collections::HashMap<String, Value> = demo_titles.0.as_array().map_or_else(Default::default, |a| a.iter().filter_map(|p| Some((p.get(0)?.as_str()?.to_string(), p.get(1).cloned().unwrap_or(Value::Null)))).collect());
+    let titles: std::collections::HashMap<String, Value> = demo_titles
+        .0
+        .as_array()
+        .map_or_else(Default::default, |a| a.iter().filter_map(|p| Some((p.get(0)?.as_str()?.to_string(), p.get(1).cloned().unwrap_or(Value::Null)))).collect());
     Json(Value::Array(state::merge_sessions(&list(&prev), (codex_ok, &list(&codex)), (claude_ok, &list(&claude)), &list(&observed), &titles)))
 }
 
@@ -459,6 +471,7 @@ pub fn rename_note(desktop: bool, desktop_error: MaybeJson) -> Json {
 }
 
 #[napi(js_name = "StateMemory")]
+#[derive(Default)]
 pub struct JsStateMemory {
     m: state::Memory,
 }

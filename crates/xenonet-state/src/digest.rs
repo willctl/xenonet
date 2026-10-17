@@ -178,12 +178,16 @@ fn local_hour(ms: f64) -> Option<usize> {
     Some((local.rem_euclid(86_400_000.0) / 3_600_000.0).floor() as usize)
 }
 
+/// A question a summary asks its caller about a value (an id): a title, a
+/// home, a name. What the caller throws stops the summary.
+pub type Ask<'a, E> = &'a mut dyn FnMut(&Value) -> Result<Value, E>;
+
 /// The callbacks dayLog asks: a session's title, its home on the map, and
 /// a home's name.
 pub struct DayHooks<'a, E> {
-    pub title_of: Option<&'a mut dyn FnMut(&Value) -> Result<Value, E>>,
-    pub home_of: Option<&'a mut dyn FnMut(&Value) -> Result<Value, E>>,
-    pub name_of: Option<&'a mut dyn FnMut(&Value) -> Result<Value, E>>,
+    pub title_of: Option<Ask<'a, E>>,
+    pub home_of: Option<Ask<'a, E>>,
+    pub name_of: Option<Ask<'a, E>>,
 }
 
 /// dayLog(events, { now, titleOf, homeOf, nameOf, live, repos }): the
@@ -257,7 +261,14 @@ pub fn summary_text(sum: &Value, label: &str) -> String {
     for s in sum.get("sessions").and_then(Value::as_array).map_or(&[][..], Vec::as_slice).iter().take(12) {
         let tools = get(s, "tools").and_then(Value::as_object).map_or_else(String::new, |m| m.iter().map(|(k, v)| format!("{k} {}", js_string(v))).collect::<Vec<_>>().join(", "));
         let files: Vec<String> = get(s, "files").and_then(Value::as_array).map_or_else(Vec::new, |f| f.iter().map(|x| xenonet_base::text::join_item(Some(x))).collect());
-        let mut line = format!("- {} \"{}\": {} turns, {} tool calls ({})", tpl(get(s, "app")), tpl(get(s, "title")), tpl(get(s, "turns")), tpl(get(s, "toolCalls")), if tools.is_empty() { "none".into() } else { tools });
+        let mut line = format!(
+            "- {} \"{}\": {} turns, {} tool calls ({})",
+            tpl(get(s, "app")),
+            tpl(get(s, "title")),
+            tpl(get(s, "turns")),
+            tpl(get(s, "toolCalls")),
+            if tools.is_empty() { "none".into() } else { tools }
+        );
         if !files.is_empty() {
             line.push_str(&format!(", edited {}", files.iter().take(6).cloned().collect::<Vec<_>>().join(", ")));
         }
@@ -285,7 +296,7 @@ fn clip_text(s: Option<&Value>, n: usize) -> String {
     }
 }
 
-fn last_text<'a>(list: Option<&'a Value>) -> Option<&'a Value> {
+fn last_text(list: Option<&Value>) -> Option<&Value> {
     list.and_then(Value::as_array).and_then(|a| a.last()).and_then(|x| get(x, "text"))
 }
 
@@ -337,7 +348,8 @@ pub fn narrate_prompt(text: &str) -> String {
 /// folder, its last message written to `out`, in a schema's shape when
 /// there's one.
 pub fn codex_exec_args(dir: &str, out: &str, schema_file: Option<&str>) -> Vec<String> {
-    let mut args: Vec<String> = ["exec", "--ephemeral", "--skip-git-repo-check", "-s", "read-only", "--color", "never", "-C", dir, "-o", out].iter().map(|s| s.to_string()).collect();
+    let mut args: Vec<String> =
+        ["exec", "--ephemeral", "--skip-git-repo-check", "-s", "read-only", "--color", "never", "-C", dir, "-o", out].iter().map(|s| s.to_string()).collect();
     if let Some(f) = schema_file {
         args.extend(["--output-schema".to_string(), f.to_string()]);
     }
@@ -363,7 +375,11 @@ mod tests {
         assert_eq!(sum["sessions"][0]["files"], json!(["a.js", "b.js"]));
         assert_eq!(sum["sessions"][0]["title"], "T claude:a");
         assert!(summary_text(&sum, "Today").starts_with("Today: 2 sessions, 1 turns, 2 tool calls, 2 files edited, 0 errors."));
-        let brief = handoff_brief(&json!({ "app": "codex", "title": "Fix", "cwd": "/p" }), &json!({ "firstPrompt": { "text": "Go" }, "prompts": [{ "text": "Go" }], "edits": ["/p/a"], "files": ["/p/a", "/p/b"] }), None);
+        let brief = handoff_brief(
+            &json!({ "app": "codex", "title": "Fix", "cwd": "/p" }),
+            &json!({ "firstPrompt": { "text": "Go" }, "prompts": [{ "text": "Go" }], "edits": ["/p/a"], "files": ["/p/a", "/p/b"] }),
+            None,
+        );
         assert!(brief.contains("Folder: /p\n\nOriginal goal: Go\n\nFiles it worked on:\n- /p/a\n- /p/b"));
         assert_eq!(long_date(f64::NAN), "Invalid Date");
     }

@@ -314,7 +314,10 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
         if g.has(&id) {
             continue;
         }
-        g.set(&id, obj(json!({ "id": id, "kind": "resource", "name": get(r, "server").cloned().unwrap_or(Value::Null), "lastActivity": get(r, "ts").cloned().unwrap_or(Value::Null) })));
+        g.set(
+            &id,
+            obj(json!({ "id": id, "kind": "resource", "name": get(r, "server").cloned().unwrap_or(Value::Null), "lastActivity": get(r, "ts").cloned().unwrap_or(Value::Null) })),
+        );
         g.link("core", &id, "resource");
     }
 

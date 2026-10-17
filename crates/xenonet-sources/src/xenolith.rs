@@ -106,7 +106,8 @@ pub fn context_server_of(dir: &str) -> &'static str {
         // /^#\s*Xenolith protocol/m: a "#" at a line's start, then any
         // white space (line breaks too), then the words.
         let starts = std::iter::once(0).chain(head.char_indices().filter(|(_, c)| matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')).map(|(i, c)| i + c.len_utf8()));
-        let protocol = starts.collect::<Vec<_>>().into_iter().any(|i| head[i..].strip_prefix('#').is_some_and(|r| xenonet_base::text::js_trim_start(r).starts_with("Xenolith protocol")));
+        let protocol =
+            starts.collect::<Vec<_>>().into_iter().any(|i| head[i..].strip_prefix('#').is_some_and(|r| xenonet_base::text::js_trim_start(r).starts_with("Xenolith protocol")));
         if protocol {
             return "xenolith";
         }

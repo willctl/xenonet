@@ -188,12 +188,18 @@ pub fn check_finish(start: &Value, sc: Option<&Value>, time_ms: f64) -> Value {
     }
     let mut warnings: Vec<Value> = start["warnings"].as_array().cloned().unwrap_or_default();
     match sc {
-        None => warnings.push(json!(format!("Scanning {shown} took more than {} s: it's big, or slow to read, and XenoNet reads it again every few seconds.", number_string(time_ms / 1000.0)))),
+        None => warnings.push(json!(format!(
+            "Scanning {shown} took more than {} s: it's big, or slow to read, and XenoNet reads it again every few seconds.",
+            number_string(time_ms / 1000.0)
+        ))),
         Some(s) if !truthy(s.get("projects")) && !truthy(s.get("groups")) => warnings.push(json!(format!("XenoNet finds no projects in {shown}: no repos, and no folders in it."))),
         _ => {}
     }
     if let Some(s) = sc.filter(|s| truthy(s.get("truncated"))) {
-        warnings.push(json!(format!("The scan stopped at its {}-folder limit, so some projects may be missing. XENONET_PROJECTS_MAX_DIRS raises it.", s.get("maxDirs").map_or_else(|| "undefined".into(), js_string))));
+        warnings.push(json!(format!(
+            "The scan stopped at its {}-folder limit, so some projects may be missing. XENONET_PROJECTS_MAX_DIRS raises it.",
+            s.get("maxDirs").map_or_else(|| "undefined".into(), js_string)
+        )));
     }
     let scan = sc.map_or(Value::Null, |s| {
         let mut m = serde_json::Map::new();

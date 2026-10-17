@@ -85,7 +85,10 @@ mod tests {
     fn answers() {
         let body = json!({ "data": { "usage_daily": "0.5", "usage": 3, "limit": null, "limit_remaining": "", "is_free_tier": true } });
         let u = usage_of(Some(&body));
-        assert_eq!((u["today"].clone(), u["total"].clone(), u["limit"].clone(), u["remaining"].clone(), u["freeTier"].clone()), (json!(0.5), json!(3), Value::Null, Value::Null, json!(true)));
+        assert_eq!(
+            (u["today"].clone(), u["total"].clone(), u["limit"].clone(), u["remaining"].clone(), u["freeTier"].clone()),
+            (json!(0.5), json!(3), Value::Null, Value::Null, json!(true))
+        );
         assert_eq!(reading(true, Some((&json!(403), false)), None, 0.0)["key"], "rejected");
         assert_eq!(reading(true, Some((&json!(500), false)), None, 0.0)["error"], "OpenRouter answered 500");
         assert_eq!(reading(false, None, None, 0.0), json!({ "key": "missing" }));

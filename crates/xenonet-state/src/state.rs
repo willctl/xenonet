@@ -117,7 +117,8 @@ pub fn project_rules(codex: bool, root: &str, picks: Option<&Value>, yours: &Val
             let parts: Vec<&str> = std::iter::once(root).chain(rel.split('/')).collect();
             let dir = xenonet_base::paths::join_all(&parts);
             let Some(key) = path_key(&dir) else { continue };
-            rules.insert(key, json!({ "path": dir, "as": get(p, "as").cloned().unwrap_or(Value::Null), "by": "codex", "reason": get(p, "reason").cloned().unwrap_or(Value::Null) }));
+            rules
+                .insert(key, json!({ "path": dir, "as": get(p, "as").cloned().unwrap_or(Value::Null), "by": "codex", "reason": get(p, "reason").cloned().unwrap_or(Value::Null) }));
         }
     }
     for (key, r) in yours.as_object().into_iter().flatten() {
@@ -188,7 +189,7 @@ pub fn project_detection(root: &str, scan: Option<&Value>, rules: &Value, codex:
 pub fn home_of(id: &str, kind_of: &mut dyn FnMut(&str) -> Option<String>, parent_of: &mut dyn FnMut(&str) -> Option<String>) -> Option<String> {
     let mut cur = Some(id.to_string());
     for _ in 0..8 {
-        let Some(c) = cur.filter(|c| !c.is_empty()) else { return None };
+        let c = cur.filter(|c| !c.is_empty())?;
         if let Some(kind) = kind_of(&c) {
             if kind != "session" {
                 return if kind == "native" { parent_of(&c) } else { Some(c) };
@@ -427,18 +428,45 @@ impl Memory {
             .iter()
             .map(|n| {
                 let ids = get(n, "identities").and_then(Value::as_array).map(|l| {
-                    Value::String(l.iter().map(|x| format!("{}:{}:{}", get(x, "role").map_or("undefined".into(), js_string), get(x, "id").map_or("undefined".into(), js_string), get(x, "confidence").map_or("undefined".into(), js_string))).collect::<Vec<_>>().join(","))
+                    Value::String(
+                        l.iter()
+                            .map(|x| {
+                                format!(
+                                    "{}:{}:{}",
+                                    get(x, "role").map_or("undefined".into(), js_string),
+                                    get(x, "id").map_or("undefined".into(), js_string),
+                                    get(x, "confidence").map_or("undefined".into(), js_string)
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join(","),
+                    )
                 });
                 json!([
-                    f(n, "id"), f(n, "updatedAt"), f(n, "archived"), f(n, "title"), f(n, "activity"), f(n, "active"), f(n, "sessionCount"),
-                    sub(n, "repo", "dirty"), sub(n, "repo", "branch"), f(n, "pinned"),
+                    f(n, "id"),
+                    f(n, "updatedAt"),
+                    f(n, "archived"),
+                    f(n, "title"),
+                    f(n, "activity"),
+                    f(n, "active"),
+                    f(n, "sessionCount"),
+                    sub(n, "repo", "dirty"),
+                    sub(n, "repo", "branch"),
+                    f(n, "pinned"),
                     get(n, "inbox").and_then(Value::as_array).map_or(Value::Null, |a| Value::from(a.len())),
-                    f(n, "updated"), f(n, "role"), f(n, "parent"), f(n, "detected"), sub(n, "rule", "as"), sub(n, "ranAs", "id"), sub(n, "ranAs", "confidence"),
+                    f(n, "updated"),
+                    f(n, "role"),
+                    f(n, "parent"),
+                    f(n, "detected"),
+                    sub(n, "rule", "as"),
+                    sub(n, "ranAs", "id"),
+                    sub(n, "ranAs", "confidence"),
                     ids.unwrap_or(Value::Null),
                 ])
             })
             .collect();
-        let ids: Vec<Value> = items(get(graph, "identities")).iter().map(|i| json!([f(i, "id"), f(i, "handle"), f(i, "name"), f(i, "hidden"), f(i, "signedIn"), f(i, "active")])).collect();
+        let ids: Vec<Value> =
+            items(get(graph, "identities")).iter().map(|i| json!([f(i, "id"), f(i, "handle"), f(i, "name"), f(i, "hidden"), f(i, "signedIn"), f(i, "active")])).collect();
         let signature = stringify(&json!([nodes, items(get(graph, "relations")).len(), ids]), 0);
         let changed = self.signature.as_deref() != Some(&signature);
         self.signature = Some(signature);
@@ -575,7 +603,24 @@ mod tests {
         assert!(m.ship_it(&ev, Some(("project:p", &json!("p"), &json!({ "dirty": 1 }))), 1e9).unwrap()["detail"] == "1 uncommitted file in p");
         assert!(m.ship_it(&ev, Some(("project:p", &json!("p"), &json!({ "dirty": 1 }))), 1e9 + 1.0).is_none());
 
-        assert_eq!(home_of("s", &mut |id| Some(if id == "n" { "native" } else if id == "p" { "project" } else { "session" }.into()), &mut |id| Some(if id == "s" { "n" } else { "p" }.into())).as_deref(), Some("p"));
+        assert_eq!(
+            home_of(
+                "s",
+                &mut |id| Some(
+                    if id == "n" {
+                        "native"
+                    } else if id == "p" {
+                        "project"
+                    } else {
+                        "session"
+                    }
+                    .into()
+                ),
+                &mut |id| Some(if id == "s" { "n" } else { "p" }.into())
+            )
+            .as_deref(),
+            Some("p")
+        );
         assert_eq!(clean_identity_name(Some(&json!("  Ada\u{7}  "))).as_deref(), Some("Ada"));
         assert_eq!(rule_problem(Some(&json!("nope")), "/p/x", "/p", true).as_deref(), Some("unknown rule"));
         assert_eq!(rule_problem(Some(&json!("project")), "/q/x", "/p", true).as_deref(), Some("Only folders inside p can have rules"));

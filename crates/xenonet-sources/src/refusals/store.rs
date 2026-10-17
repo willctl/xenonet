@@ -271,7 +271,7 @@ fn random_hex4() -> String {
         let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
         bytes = (t as u32).to_le_bytes();
     }
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    jsstr::hex(&bytes)
 }
 
 impl Refusals {
@@ -325,7 +325,11 @@ impl Refusals {
         let Some(file) = file.filter(|f| Path::new(f).exists()) else { return no("its transcript isn't there any more") };
         let all = read_jsonl(Path::new(&file)).map_err(|e| StoreError::io(e, "open", Path::new(&file)))?;
         let sig = rec.get("signal").cloned().unwrap_or(Value::Null);
-        let got = if rec.get("provider").and_then(Value::as_str) == Some("openai") { Some(codex_context(&all, &sig).map_err(|m| StoreError { message: m, code: None })?) } else { claude_context(&all, &sig) };
+        let got = if rec.get("provider").and_then(Value::as_str) == Some("openai") {
+            Some(codex_context(&all, &sig).map_err(|m| StoreError { message: m, code: None })?)
+        } else {
+            claude_context(&all, &sig)
+        };
         let Some(got) = got else { return no("its line isn't in the transcript") };
         let (mut lines, mut cut) = trimmed(got.lines);
         let join = |lines: &[Value]| lines.iter().map(|l| stringify(l, 0)).collect::<Vec<_>>().join("\n");
@@ -348,7 +352,7 @@ impl Refusals {
         }
         let req_file = folder.join("request.json");
         write_private(&req_file, format!("{}\n", stringify(&Value::Object(request), 1)).as_bytes(), false).map_err(|e| StoreError::io(e, "open", &req_file))?;
-        let digest: String = Sha256::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
+        let digest = jsstr::hex(&Sha256::digest(text.as_bytes()));
         rec.insert(
             "context".into(),
             json!({ "file": "context.jsonl.gz", "request": "request.json", "lines": lines.len(), "bytes": text.len(), "sha256": digest, "truncated": cut }),
