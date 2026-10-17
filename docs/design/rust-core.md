@@ -503,6 +503,7 @@ place. This table follows it.
 | `core/mcp-info.js`, `core/mcp-discovery.js`, `core/diagnostics.js` | `xenonet-app/src/mcp_info.rs` (a state machine the twin drives), `mcp_discovery.rs` (the MCP client stays the SDK's for now), `diagnostics.rs` | `mcp-info`, `log` pass |
 | `core/script.js`, `core/spotify.js` | `xenonet-app/src/script.rs`, `spotify.rs`: each step, and each Spotify call, a state machine the twin drives | `script`, `spotify` pass |
 | `core/control.js` | `xenonet-app/src/control.rs`, on `task.rs`: async Rust whose awaits the twin answers (fetch, the system's processes, spawning) | `control-client`, `control` pass |
+| `core/system-stats.js`, `core/themes.js`, `core/themefiles.js` | `xenonet-app/src/system_stats.rs`, `themes.rs` (the page keeps `core/themes.js`; `themes.json` is made from it, and a test checks the two agree), `themefiles.rs` | `system-stats`, `themes`, `theme-gallery`, `theme-menu`, `actors-layer`, `schema-output` pass |
 
 With every twin in place, all 111 test files that reach one pass. The
 twins load in the Node processes a test starts too (a server, the

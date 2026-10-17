@@ -20,5 +20,8 @@ pub mod nodepath;
 pub mod open;
 pub mod script;
 pub mod spotify;
+pub mod system_stats;
 pub mod task;
+pub mod themefiles;
+pub mod themes;
 pub mod version;

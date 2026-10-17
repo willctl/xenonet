@@ -896,3 +896,302 @@ impl AppControl {
         }))
     }
 }
+
+// ----- system-stats -----
+
+use xenonet_app::system_stats as stats;
+
+#[napi(js_name = "appSystemConstants")]
+pub fn app_system_constants() -> Json {
+    Json(json!({ "history": stats::HISTORY, "freshMs": stats::FRESH_MS, "idleMs": stats::IDLE_MS, "staleMs": stats::STALE_MS, "nvidiaQuery": stats::NVIDIA_QUERY, "nvidiaArgs": stats::nvidia_args() }))
+}
+
+#[napi(js_name = "appCpuModel")]
+pub fn app_cpu_model(model: String) -> Option<String> {
+    stats::cpu_model(&model)
+}
+
+#[napi(js_name = "appParseNvidia")]
+pub fn app_parse_nvidia(line: String) -> Option<Json> {
+    stats::parse_nvidia(&line).map(Json)
+}
+
+#[napi(js_name = "appParseIoreg")]
+pub fn app_parse_ioreg(text: String, total_mem: Option<f64>) -> Option<Json> {
+    stats::parse_ioreg(&text, total_mem).map(Json)
+}
+
+fn adapters_of(v: &Value) -> Vec<(String, f64)> {
+    match v {
+        Value::Array(a) => a.iter().map(|x| (x.get("name").map(xenonet_base::text::js_string).unwrap_or_default(), x.get("mem").and_then(Value::as_f64).unwrap_or(0.0))).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// What a line changed: { adapters } or { latest }, or nothing.
+#[napi(js_name = "appParseWindowsGpu")]
+pub fn app_parse_windows_gpu(line: String, adapters: Json) -> Json {
+    Json(match stats::parse_windows_gpu(&line, &adapters_of(&adapters.0)) {
+        stats::WindowsLine::Adapters(a) => json!({ "adapters": a.into_iter().map(|(name, mem)| json!({ "name": name, "mem": xenonet_base::json::number(mem) })).collect::<Vec<_>>() }),
+        stats::WindowsLine::Latest(l) => json!({ "latest": l }),
+        stats::WindowsLine::Nothing => json!({}),
+    })
+}
+
+#[napi(js_name = "appWindowsGpuScript")]
+pub fn app_windows_gpu_script(parent: f64) -> String {
+    stats::windows_gpu_script(parent)
+}
+
+#[napi(js_name = "appWindowsGpuCommand")]
+pub fn app_windows_gpu_command(system_root: Option<String>, parent: f64) -> Json {
+    Json(json!({ "file": stats::windows_powershell(system_root.as_deref()), "args": stats::windows_args(parent) }))
+}
+
+#[napi(js_name = "appFindNvidiaSmi")]
+pub fn app_find_nvidia_smi(platform: String, path_var: String, pathext: Option<String>, system_root: Option<String>, program_files: Option<String>, exists: Function<String, bool>) -> Option<String> {
+    stats::find_nvidia_smi(&platform, &path_var, pathext.as_deref(), system_root.as_deref(), program_files.as_deref(), &mut |f| exists.call(f.to_string()).unwrap_or(false))
+}
+
+#[napi(js_name = "appDrmCards")]
+pub fn app_drm_cards(names: Vec<String>) -> Vec<String> {
+    stats::drm_cards(&names)
+}
+
+#[napi(js_name = "appAmdCard")]
+pub fn app_amd_card(index: u32, busy: Option<String>, used: Option<String>, total: Option<String>, label: Option<String>) -> Json {
+    Json(stats::amd_card(index as usize, busy.as_deref(), used.as_deref(), total.as_deref(), label.as_deref()))
+}
+
+#[napi(js_name = "appDemoSystemReading")]
+pub fn app_demo_system_reading(at: f64) -> Json {
+    Json(stats::demo_reading(at))
+}
+
+/// A program kept running for GPU readings: nvidia-smi ("nvidia") or
+/// Windows' counter loop ("windows").
+#[napi(js_name = "AppGpuStream")]
+pub struct AppGpuStream {
+    windows: bool,
+    proc: stats::Streamed,
+    nvidia: stats::NvidiaCards,
+    counters: stats::WindowsReadings,
+}
+
+#[napi]
+impl AppGpuStream {
+    #[napi(constructor)]
+    pub fn new(kind: String) -> Self {
+        AppGpuStream { windows: kind == "windows", proc: Default::default(), nvidia: Default::default(), counters: Default::default() }
+    }
+
+    #[napi(getter)]
+    pub fn dead(&self) -> bool {
+        self.proc.dead()
+    }
+
+    /// The generation to start the program as, or null to leave it.
+    #[napi]
+    pub fn start(&mut self, now: f64) -> Option<u32> {
+        self.proc.start(now)
+    }
+
+    #[napi(js_name = "spawnFailed")]
+    pub fn spawn_failed(&mut self, now: f64) {
+        self.proc.spawn_failed(now);
+    }
+
+    #[napi]
+    pub fn data(&mut self, chunk: String, now: f64) {
+        for line in self.proc.data(&chunk) {
+            if self.windows {
+                self.counters.line(&line, now);
+            } else {
+                self.nvidia.line(&line, now);
+            }
+        }
+    }
+
+    #[napi]
+    pub fn gone(&mut self, generation: u32, now: f64) {
+        self.proc.gone(generation, now);
+    }
+
+    /// Whether there was a program to kill.
+    #[napi]
+    pub fn stop(&mut self) -> bool {
+        self.proc.stop()
+    }
+
+    #[napi]
+    pub fn read(&self, now: f64) -> Json {
+        Json(Value::Array(if self.windows { self.counters.read(now) } else { self.nvidia.read(now) }))
+    }
+}
+
+/// A reading run each time it's asked for, at most every couple of seconds.
+#[napi(js_name = "AppPolled")]
+pub struct AppPolled {
+    inner: stats::Polled,
+}
+
+#[napi]
+impl AppPolled {
+    #[napi(constructor)]
+    pub fn new() -> Self {
+        AppPolled { inner: Default::default() }
+    }
+
+    /// The last reading while it's fresh, else undefined.
+    #[napi]
+    pub fn fresh(&self, now: f64) -> Jv {
+        self.inner.fresh(now).map_or(Jv::Undef, Jv::Json)
+    }
+
+    #[napi]
+    pub fn set(&mut self, v: MaybeJson, now: f64) {
+        self.inner.set(v.0.unwrap_or(Value::Null), now);
+    }
+}
+
+#[napi(object)]
+pub struct CpuTimes {
+    pub user: Option<f64>,
+    pub nice: Option<f64>,
+    pub sys: Option<f64>,
+    pub irq: Option<f64>,
+    pub idle: Option<f64>,
+}
+
+fn times_of(t: Vec<CpuTimes>) -> Vec<stats::Times> {
+    let n = |x: Option<f64>| x.unwrap_or(f64::NAN);
+    t.into_iter().map(|c| stats::Times { user: n(c.user), nice: n(c.nice), sys: n(c.sys), irq: n(c.irq), idle: n(c.idle) }).collect()
+}
+
+/// The CPU and memory side of the system panel.
+#[napi(js_name = "AppSystemStats")]
+pub struct AppSystemStats {
+    inner: stats::Stats,
+}
+
+#[napi]
+impl AppSystemStats {
+    #[napi(constructor)]
+    pub fn new() -> Self {
+        AppSystemStats { inner: Default::default() }
+    }
+
+    #[napi(js_name = "hasPrev")]
+    pub fn has_prev(&self) -> bool {
+        self.inner.has_prev()
+    }
+
+    #[napi(js_name = "setPrev")]
+    pub fn set_prev(&mut self, times: Vec<CpuTimes>) {
+        self.inner.set_prev(&times_of(times));
+    }
+
+    #[napi]
+    pub fn fresh(&self, now: f64) -> bool {
+        self.inner.fresh(now)
+    }
+
+    #[napi]
+    pub fn cpu(&mut self, model: Option<String>, speed: Option<f64>, threads: u32, times: Vec<CpuTimes>) -> Json {
+        Json(self.inner.cpu(model.as_deref(), speed, threads as usize, &times_of(times)))
+    }
+
+    #[napi]
+    #[allow(clippy::too_many_arguments)]
+    pub fn reading(&mut self, at: f64, platform: String, arch: Option<String>, uptime: f64, cpu: Json, total: f64, free: f64, gpus: MaybeJson, reader: Option<String>) -> Json {
+        let gpus = match gpus.0 {
+            Some(Value::Array(a)) => Some(a),
+            _ => None,
+        };
+        Json(self.inner.reading(at, &platform, arch.as_deref(), uptime, cpu.0, total, free, gpus, reader.as_deref()))
+    }
+}
+
+// ----- themes -----
+
+use xenonet_app::{themefiles, themes};
+
+#[napi(js_name = "appDefaultTheme")]
+pub fn app_default_theme() -> &'static str {
+    themes::DEFAULT_THEME
+}
+
+#[napi(js_name = "appBuiltInThemes")]
+pub fn app_built_in_themes() -> Vec<String> {
+    themes::built_in_ids()
+}
+
+#[napi(js_name = "appThemeStyles")]
+pub fn app_theme_styles() -> Json {
+    Json(Value::Object(themes::styles().into_iter().map(|(k, v)| (k.to_string(), json!(v))).collect()))
+}
+
+#[napi(js_name = "appThemeMerge")]
+pub fn app_theme_merge(base: MaybeJson, over: MaybeJson) -> Json {
+    Json(themes::merge(base.0.as_ref(), over.0.as_ref()))
+}
+
+#[napi(js_name = "appThemeConform")]
+pub fn app_theme_conform(base: MaybeJson, over: MaybeJson, at: String) -> Jv {
+    match base.0 {
+        // conform(undefined, over): JS spread nothing in, and gave back
+        // undefined itself when over isn't an object.
+        None if !matches!(over.0, Some(Value::Object(_))) => Jv::Undef,
+        b => Jv::Json(themes::conform(&b.unwrap_or(Value::Null), over.0.as_ref(), &at)),
+    }
+}
+
+#[napi(js_name = "appThemeComplete")]
+pub fn app_theme_complete(theme: MaybeJson) -> Json {
+    Json(themes::complete(theme.0.as_ref()))
+}
+
+#[napi(js_name = "appSonarGap")]
+pub fn app_sonar_gap(every: MaybeJson) -> Option<f64> {
+    themes::sonar_gap(every.0.as_ref())
+}
+
+#[napi(js_name = "appThemes")]
+pub fn app_themes(custom: MaybeJson) -> Json {
+    let custom = match custom.0 {
+        Some(Value::Object(m)) => m,
+        _ => Default::default(),
+    };
+    Json(Value::Object(themes::themes(&custom)))
+}
+
+#[napi(js_name = "appContrast")]
+pub fn app_contrast(a: String, b: String) -> f64 {
+    themes::contrast(&a, &b)
+}
+
+#[napi(js_name = "appColorDistance")]
+pub fn app_color_distance(a: String, b: String) -> f64 {
+    themes::color_distance(&a, &b)
+}
+
+#[napi(js_name = "appRingColors")]
+pub fn app_ring_colors(theme: Json) -> Vec<String> {
+    themes::ring_colors(&theme.0)
+}
+
+#[napi(js_name = "appMathCbrt")]
+pub fn app_math_cbrt(x: f64) -> f64 {
+    themes::js_cbrt(x)
+}
+
+#[napi(js_name = "appReadThemes")]
+pub fn app_read_themes(dir: String) -> Json {
+    let (all, problems) = themefiles::read_themes(&dir);
+    Json(json!({ "themes": Value::Object(all), "problems": problems }))
+}
+
+#[napi(js_name = "appCopyTheme")]
+pub fn app_copy_theme(dir: String, from: Option<String>, id: String, name: MaybeJson) -> Jv {
+    fs_answer(themefiles::copy_theme(&dir, from.as_deref(), &id, name.0.as_ref()).map(s))
+}

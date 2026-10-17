@@ -239,6 +239,27 @@
         "electronCommand still finds npm's Electron with Node's module resolution; whether XenoNet Dev.app is this checkout's is the Rust's.",
         "A port given as null is taken as not given; JS used null."
       ]
+    },
+    "core/system-stats.js": {
+      "rust": "crates/xenonet-app/src/system_stats.rs",
+      "differences": [
+        "The programs the GPU readers keep running (nvidia-smi, Windows' counter loop) are started, read and stopped by the twin, with the spawn given; when to start one again, and when to give up on it, is the Rust's. So are the files and commands polled, and the idle timer.",
+        "A polled reading comes back as a new copy each time, where JS gave the same object while it was fresh."
+      ]
+    },
+    "core/themes.js": {
+      "rust": "crates/xenonet-app/src/themes.rs, with the built-ins' data in crates/xenonet-app/src/themes.json",
+      "differences": [
+        "The console page keeps core/themes.js; the Rust's data is made from it by node crates/xenonet-app/themes.mjs, and test/themes-rust-data.test.js fails when the two differ.",
+        "contrast and colorDistance can differ from JS in the last bit: the Rust's pow is the system's, where V8 has its own (Math.cbrt and Math.hypot are V8's, bit for bit).",
+        "conform hands back a copy of base when there's nothing to fold on, where JS gave base itself."
+      ]
+    },
+    "core/themefiles.js": {
+      "rust": "crates/xenonet-app/src/themefiles.rs",
+      "differences": [
+        "A theme file that isn't JSON is reported with the Rust parser's words, not V8's."
+      ]
     }
   },
   "tests": [
@@ -251,6 +272,7 @@
     "test/actor-spend-view.test.js",
     "test/actor-spend.test.js",
     "test/actor-wake.test.js",
+    "test/actors-layer.test.js",
     "test/actors.test.js",
     "test/assistant-connections.test.js",
     "test/assistant-endpoint.test.js",
@@ -360,6 +382,7 @@
     "test/stats.test.js",
     "test/store.test.js",
     "test/system-stats.test.js",
+    "test/theme-gallery.test.js",
     "test/theme-menu.test.js",
     "test/themes.test.js",
     "test/token-files.test.js",

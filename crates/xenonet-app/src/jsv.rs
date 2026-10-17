@@ -83,3 +83,8 @@ pub fn less(a: Option<&Value>, b: Option<&Value>) -> bool {
         }
     }
 }
+
+/// `typeof v` for a JSON value.
+pub fn type_name(v: &Value) -> &'static str {
+    xenonet_base::text::type_of(Some(v))
+}
