@@ -8,6 +8,23 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const debug = process.argv.includes("--debug");
+
+// Two Rust functions exported under one JS name build fine, and the second
+// silently takes the first's place, so the build refuses them.
+const exported = new Map();
+const src = path.join(root, "crates", "xenonet-node", "src");
+for (const file of fs.readdirSync(src).filter((f) => f.endsWith(".rs"))) {
+  const lines = fs.readFileSync(path.join(src, file), "utf8").split("\n");
+  lines.forEach((line, i) => {
+    const attr = /^#\[napi(?:\((.*)\))?\]\s*$/.exec(line.trim());
+    const item = attr && lines.slice(i + 1, i + 4).find((l) => /^pub (fn|struct) /.test(l));
+    if (!item) return;
+    const rust = /^pub (?:fn|struct) (\w+)/.exec(item)[1];
+    const name = /js_name = "([^"]+)"/.exec(attr[1] ?? "")?.[1] ?? (item.startsWith("pub fn") ? rust.replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase()) : rust);
+    if (exported.has(name)) throw new Error(`${name} is exported twice: ${exported.get(name)} and ${file}:${i + 1}`);
+    exported.set(name, `${file}:${i + 1}`);
+  });
+}
 execFileSync("cargo", ["build", "-p", "xenonet-node", ...(debug ? [] : ["--release"])], { cwd: root, stdio: "inherit" });
 const lib = { darwin: "libxenonet_node.dylib", win32: "xenonet_node.dll" }[process.platform] ?? "libxenonet_node.so";
 const built = path.join(root, "target", debug ? "debug" : "release", lib);

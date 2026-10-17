@@ -90,6 +90,10 @@ impl<V> OrderedMap<V> {
         self.order.values().map(|k| (k.as_str(), &self.by_key[k].1))
     }
 
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&str, &mut V)> {
+        self.by_key.iter_mut().map(|(k, (_, v))| (k.as_str(), v))
+    }
+
     /// Keeps only what `keep` says to, in order.
     pub fn retain(&mut self, mut keep: impl FnMut(&str, &V) -> bool) {
         let gone: Vec<String> = self.iter().filter(|(k, v)| !keep(k, v)).map(|(k, _)| k.to_string()).collect();

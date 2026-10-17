@@ -64,8 +64,8 @@ Cargo.toml                 the workspace: shared versions, the release profile
 crates/
   xenonet-base             core/paths.js, pricing.js, time as JS reads it, ids, units for the command
   xenonet-blocks           core/blocks/: lifecycle, scanner, gatherer, tailer, normalizer, JSON and SQLite stores
-  xenonet-sources          lines.js, claude.js, codex.js, git.js, wiki.js, live.js, numbat.js, demo.js, native/
   xenonet-schema           core/schema/, vendor.js, drift.js: the schemas, lenient reading, drift records
+  xenonet-sources          lines.js, claude.js, codex.js, git.js, wiki.js, live.js, numbat.js, demo.js, native/
   xenonet-state            graph.js, state.js, search.js, digest.js, stats.js, identities.js, projects.js,
                            workspace.js, classify.js, store.js, statefile.js, migrate.js
   xenonet-engine           engine/, delivery/, procs.js
@@ -478,6 +478,7 @@ place. This table follows it.
 | `core/blocks/gatherer.js` | `xenonet-blocks/src/gatherer.rs` | `blocks-gatherer`, `identities`, `claude-usage`, `git-status` pass |
 | `core/lines.js` | `xenonet-sources/src/lines.rs` | `lines`, `codex`, `vendor-schemas` pass |
 | `core/schema/lenient.js` | `xenonet-schema/src/lenient.rs`, `fields.rs` | `vendor-reader`, `vendor-schemas`, `provider-drift` pass |
+| `core/drift.js`, `core/vendor.js` | `xenonet-schema/src/drift.rs`, `vendor.rs` | `drift`, `vendor-reader`, `server` pass |
 | `core/blocks/store.js` | `xenonet-blocks/src/store.rs` | `blocks-store`, `statefile`, `store`, `hosts-config` pass |
 | `core/migrate.js`, `core/statefile.js` | `xenonet-state/src/migrate.rs`, `statefile.rs` | `statefile`, `store`, `state` pass |
 | `core/schema/ids.js` | `xenonet-base/src/ids.rs` | `schema-ids`, `hosts-ids`, `schemas` pass |

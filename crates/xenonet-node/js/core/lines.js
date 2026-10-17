@@ -9,7 +9,7 @@
 // where a read of a growing file starts; the reads stay here.
 import fsp from "node:fs/promises";
 import zlib from "node:zlib";
-import { transcriptHooks } from "../../../../core/vendor.js";
+import { transcriptHooks } from "./vendor.js";
 import { native } from "../index.js";
 import { Normalizer } from "./blocks/normalizer.js";
 
@@ -117,12 +117,12 @@ export const isCodexPrompt = (text) => native.isCodexPrompt(text);
 
 // How the drift hooks sort and date lines (vendor.js's transcriptHooks).
 const claudeHooks = {
-  kindOf: (o) => native.claudeKindOf(o.type),
-  versionOf: (o, current) => native.claudeVersionOf(o.version, current ?? null),
+  kindOf: (o) => native.claudeLineKindOf(o.type),
+  versionOf: (o, current) => native.claudeLineVersionOf(o.version, current ?? null),
 };
 const codexHooks = {
-  kindOf: (o) => native.codexKindOf(o.type, o.payload?.type, o.payload?.item?.type),
-  versionOf: (o, current) => native.codexVersionOf(o.type, o.payload?.cli_version, current ?? null),
+  kindOf: (o) => native.codexLineKindOf(o.type, o.payload?.type, o.payload?.item?.type),
+  versionOf: (o, current) => native.codexLineVersionOf(o.type, o.payload?.cli_version, current ?? null),
 };
 
 export const claudeLines = new Normalizer({ name: "claude-lines", source: "anthropic/claude-code/transcript-line", normalize: (raw) => new ClaudeLine(raw) }).use(transcriptHooks("anthropic/claude-code/transcript-line", claudeHooks));

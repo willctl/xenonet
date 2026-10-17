@@ -12,8 +12,14 @@ use xenonet_schema::lenient::{self, Finding, Key, Schema, SpecRef, Step};
 
 #[napi(js_name = "SchemaSpec")]
 pub struct JsSpec {
-    schema: Rc<Schema>,
+    pub(crate) schema: Rc<Schema>,
     at: SpecRef,
+}
+
+/// A major of a vendor source's schema as JS sees it: { id, major, range, spec }.
+pub fn major_jv(env: &Env, m: lenient::Major) -> Result<Jv> {
+    let at = SpecRef::Node(m.schema.root);
+    Ok(Jv::Obj(vec![("id", Jv::Json(Value::String(m.id))), ("major", Jv::Num(f64::from(m.major))), ("range", Jv::Json(m.range)), ("spec", spec_raw(env, &m.schema, at)?)]))
 }
 
 fn key_json(k: &Key) -> Value {
@@ -102,13 +108,7 @@ pub fn compile_schema(root: Json) -> JsSpec {
 #[napi(js_name = "loadVendor")]
 pub fn load_vendor(env: &Env, source: String, dir: String) -> Result<Jv> {
     let majors = lenient::load_vendor(&source, Path::new(&dir));
-    let out = majors
-        .into_iter()
-        .map(|m| {
-            let at = SpecRef::Node(m.schema.root);
-            Ok(Jv::Obj(vec![("id", Jv::Json(Value::String(m.id))), ("major", Jv::Num(f64::from(m.major))), ("range", Jv::Json(m.range)), ("spec", spec_raw(env, &m.schema, at)?)]))
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let out = majors.into_iter().map(|m| major_jv(env, m)).collect::<Result<Vec<_>>>()?;
     Ok(Jv::Arr(out))
 }
 

@@ -156,23 +156,23 @@ pub fn is_codex_prompt(text: MaybeJson) -> bool {
     lines::is_codex_prompt(text.0.as_ref())
 }
 
-#[napi(js_name = "claudeKindOf")]
-pub fn claude_kind_of(kind: MaybeJson) -> String {
+#[napi(js_name = "claudeLineKindOf")]
+pub fn claude_line_kind_of(kind: MaybeJson) -> String {
     lines::claude_kind_of(kind.0.as_ref())
 }
 
-#[napi(js_name = "claudeVersionOf")]
-pub fn claude_version_of(version: MaybeJson, current: Option<String>) -> Option<String> {
+#[napi(js_name = "claudeLineVersionOf")]
+pub fn claude_line_version_of(version: MaybeJson, current: Option<String>) -> Option<String> {
     lines::claude_version_of(version.0.as_ref(), current)
 }
 
-#[napi(js_name = "codexKindOf")]
-pub fn codex_kind_of(kind: MaybeJson, payload_type: MaybeJson, item_type: MaybeJson) -> String {
+#[napi(js_name = "codexLineKindOf")]
+pub fn codex_line_kind_of(kind: MaybeJson, payload_type: MaybeJson, item_type: MaybeJson) -> String {
     lines::codex_kind_of(kind.0.as_ref(), payload_type.0.as_ref(), item_type.0.as_ref())
 }
 
-#[napi(js_name = "codexVersionOf")]
-pub fn codex_version_of(kind: MaybeJson, cli_version: MaybeJson, current: Option<String>) -> Option<String> {
+#[napi(js_name = "codexLineVersionOf")]
+pub fn codex_line_version_of(kind: MaybeJson, cli_version: MaybeJson, current: Option<String>) -> Option<String> {
     lines::codex_version_of(kind.0.as_ref(), cli_version.0.as_ref(), current)
 }
 

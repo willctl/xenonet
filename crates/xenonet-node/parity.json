@@ -94,6 +94,21 @@
         "HOST_ID, ACTOR_SLUG, SESSION_LOCAL and SESSION_PREFIX are still RegExp objects, made from Rust's patterns.",
         "What's checked of a JS value (a string, a whole number) and how an error writes it stay in the twin; repoKey's aliases are looked up there."
       ]
+    },
+    "core/drift.js": {
+      "rust": "crates/xenonet-schema/src/drift.rs",
+      "differences": [
+        "SOURCES is main's list: the drift work for every provider (feat/drift-all-providers) adds four names, which the Rust needs too once it lands.",
+        "jsonType and cleanVariant stay JS: they're about JS values.",
+        "The save's timer stays in the twin."
+      ]
+    },
+    "core/vendor.js": {
+      "rust": "crates/xenonet-schema/src/vendor.rs",
+      "differences": [
+        "The report's text (reportLines), the transcript hooks' glue between a normalizer and its reader, and agentSdkVersion (Node's module resolution) stay in the twin.",
+        "A reader's careful map isn't a Map JS can walk: the twin offers its size and has()."
+      ]
     }
   },
   "tests": [
