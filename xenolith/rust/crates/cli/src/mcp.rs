@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 pub const SUPPORTED_VERSIONS: [&str; 5] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
-const ASK_TOOLS: [&str; 2] = ["wiki_search", "wiki_read"];
+const ASK_TOOLS: [&str; 2] = ["context_search", "context_read"];
 const TOOLS: &str = include_str!("mcp/tools.json");
 const TOOLS_DIRECT_TEXT: &str = include_str!("mcp/tools-direct-text.json");
 
@@ -93,19 +93,19 @@ pub fn open_request_log(proc_name: &str, config: &Value) -> RequestLog {
 
 fn lead_in(wiki_dir: &str, curated: bool) -> String {
     let writes = if curated {
-        "Tell it what happened with wiki_log (and wiki_upsert_page for page content): a curator agent organizes notes into pages, so hand over the facts and skip the formatting."
+        "Tell it what happened with context_log (and context_upsert_page for page content): a curator agent organizes notes into pages, so hand over the facts and skip the formatting."
     } else {
-        "Record decisions, outcomes, preferences, facts and follow-ups worth keeping with wiki_log, and keep topic pages current with wiki_upsert_page."
+        "Record decisions, outcomes, preferences, facts and follow-ups worth keeping with context_log, and keep topic pages current with context_upsert_page."
     };
     format!(
-        "Shared long-term memory for this user across Claude, ChatGPT and other AI apps (wiki folder: {wiki_dir}). Call wiki_start once at the beginning of EVERY conversation, before your first substantive reply, and follow the protocol it returns. Search the wiki (wiki_search) before asking the user for context they may have given before. {writes} Never store secrets."
+        "Shared long-term memory for this user across Claude, ChatGPT and other AI apps (wiki folder: {wiki_dir}). Call context_start once at the beginning of EVERY conversation, before your first substantive reply, and follow the protocol it returns. Search the wiki (context_search) before asking the user for context they may have given before. {writes} Never store secrets."
     )
 }
 
 pub fn instructions(st: &State) -> String {
     let dir = st.wiki_dir.as_ref().map(|d| wiki::disp(d)).unwrap_or_else(|| "~/Xenolith".into());
     if st.read_only {
-        return format!("Read-only access to this user's shared wiki ({dir}): wiki_search finds pages, log entries and notes not yet filed; wiki_read opens one.");
+        return format!("Read-only access to this user's shared wiki ({dir}): context_search finds pages, log entries and notes not yet filed; context_read opens one.");
     }
     let protocol = st.wiki_dir.as_ref().map(|d| wiki::read_protocol(d)).unwrap_or_else(|| wiki::DEFAULT_PROTOCOL.to_string());
     format!("{}\n\n{}", lead_in(&dir, st.curated), protocol.trim())
@@ -230,21 +230,33 @@ fn queued(r: &inbox::Submitted) -> String {
         format!("Already saved as note {} ({}); nothing new was queued.", r.id, r.status)
     } else {
         format!(
-            "Saved note {} ({}). The curator will file it into the wiki shortly; until then it is listed under \"Pending notes\" in wiki_start and found by wiki_search. No need to check on it.",
+            "Saved note {} ({}). The curator will file it into the wiki shortly; until then it is listed under \"Pending notes\" in context_start and found by context_search. No need to check on it.",
             r.id, r.rel
         )
     }
 }
 
-/// Runs one tool; failures become isError results. Logs the call.
-pub fn call_tool(st: &State, ctx: &Ctx, name: &str, args: &Value) -> Value {
+/// The tools' names before Xenolith, from agent-wiki. A call under one still works for this release,
+/// so sessions that listed the tools before an upgrade, and protocols written for them, keep working;
+/// tools/list shows only the new names. Remove them in the next release.
+pub const OLD_NAMES: [(&str, &str); 5] =
+    [("wiki_start", "context_start"), ("wiki_search", "context_search"), ("wiki_read", "context_read"), ("wiki_log", "context_log"), ("wiki_upsert_page", "context_upsert_page")];
+
+/// A tool's current name: itself, or the one an old name stands for.
+pub fn current_name(name: &str) -> &str {
+    OLD_NAMES.iter().find(|(old, _)| *old == name).map_or(name, |(_, new)| new)
+}
+
+/// Runs one tool; failures become isError results. Logs the call, under the name it was called by.
+pub fn call_tool(st: &State, ctx: &Ctx, called: &str, args: &Value) -> Value {
+    let name = current_name(called);
     let list = tools(st);
     let Some(def) = list.iter().find(|t| t["name"] == name) else {
-        return text_result(format!("MCP error -32602: Tool {name} not found"), true);
+        return text_result(format!("MCP error -32602: Tool {called} not found"), true);
     };
     let problems = validate(&def["inputSchema"], args);
     if !problems.is_empty() {
-        return text_result(format!("MCP error -32602: Input validation error: Invalid arguments for tool {name}: {}", problems.join("; ")), true);
+        return text_result(format!("MCP error -32602: Input validation error: Invalid arguments for tool {called}: {}", problems.join("; ")), true);
     }
     let t0 = now_ms();
     let outcome: Result<String, Error> = (|| {
@@ -253,8 +265,8 @@ pub fn call_tool(st: &State, ctx: &Ctx, name: &str, args: &Value) -> Value {
         };
         match name {
             // Read results never carry a remote image an app would fetch on its own (M2).
-            "wiki_start" => wiki::start_context(dir, &s(args, "app"), &s(args, "topic")).map(|t| defang_remote_images(&t).into_owned()),
-            "wiki_search" => {
+            "context_start" => wiki::start_context(dir, &s(args, "app"), &s(args, "topic")).map(|t| defang_remote_images(&t).into_owned()),
+            "context_search" => {
                 let query = s(args, "query");
                 let scope = opt_s(args, "scope").unwrap_or_else(|| "all".into());
                 let limit = args.get("limit").and_then(Value::as_i64).unwrap_or(8);
@@ -273,11 +285,11 @@ pub fn call_tool(st: &State, ctx: &Ctx, name: &str, args: &Value) -> Value {
                 }
                 Ok(defang_remote_images(&format!("{} result(s) for {what}:\n\n{}", hits.len(), wiki::format_search_results(&hits))).into_owned())
             }
-            "wiki_read" => {
+            "context_read" => {
                 let (rel, text) = wiki::read_section(dir, &s(args, "target"), opt_s(args, "section").as_deref())?;
                 Ok(format!("File: {rel}\n\n{}", defang_remote_images(&text)))
             }
-            "wiki_log" => {
+            "context_log" => {
                 if st.curated {
                     let note = NoteInput {
                         kind: "log".into(),
@@ -295,7 +307,7 @@ pub fn call_tool(st: &State, ctx: &Ctx, name: &str, args: &Value) -> Value {
                 let (rel, heading) = wiki::append_log(dir, &s(args, "app"), &s(args, "title"), &s(args, "body"), args.get("tags").unwrap_or(&Value::Null), args.get("pages").unwrap_or(&Value::Null))?;
                 Ok(format!("Logged to {rel}: {}", heading.trim_start_matches("## ")))
             }
-            "wiki_upsert_page" => {
+            "context_upsert_page" => {
                 if st.curated {
                     let slug = opt_s(args, "slug");
                     let note = NoteInput {
@@ -357,7 +369,7 @@ pub fn call_tool(st: &State, ctx: &Ctx, name: &str, args: &Value) -> Value {
         ("client", json!(clip_str(&ctx.client, 80))),
         ("app", clip(args.get("app").unwrap_or(&Value::Null), 40).map(Value::String).unwrap_or(Value::Null)),
         ("ask", std::env::var("XENOLITH_ASK").ok().filter(|s| !s.is_empty()).map(Value::String).unwrap_or(Value::Null)),
-        ("tool", json!(name)),
+        ("tool", json!(called)),
         ("args", summarize_args(args).unwrap_or(Value::Null)),
         ("ms", json!(now_ms() - t0)),
         ("result", json!(result)),
@@ -446,5 +458,17 @@ mod tool_tests {
             let offered: Vec<&str> = t["inputSchema"]["properties"]["source"]["enum"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
             assert_eq!(offered, xenolith_core::inbox::SOURCES, "{}: keep the source enum equal to xenolith_core::inbox::SOURCES", t["name"]);
         }
+    }
+
+    #[test]
+    fn each_old_name_stands_for_a_listed_tool_and_none_is_listed() {
+        let listed: Vec<String> = tool_list(true).iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
+        for (old, new) in OLD_NAMES {
+            assert!(listed.iter().any(|n| n == new), "{old} stands for {new}, which tools.json does not have");
+            assert!(!listed.iter().any(|n| n == old), "{old} must not be listed");
+            assert_eq!(current_name(old), new);
+        }
+        assert_eq!(current_name("context_read"), "context_read");
+        assert_eq!(current_name("nope"), "nope");
     }
 }

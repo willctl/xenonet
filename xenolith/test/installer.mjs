@@ -370,7 +370,7 @@ test('the Rust installer: a sandboxed install merges into your files, re-runs as
 
     let r = run('install');
     assert.equal(r.status, 0, r.stdout + r.stderr);
-    assert.match(r.stdout, /MCP over stdio OK: xenolith \d+\.\d+\.\d+, 5 tools, wiki_start OK/);
+    assert.match(r.stdout, /MCP over stdio OK: xenolith \d+\.\d+\.\d+, 5 tools, context_start OK/);
     assert.match(r.stdout, /hook OK under/);
     const text = fs.readFileSync(desktop, 'utf8');
     assert.ok(text.includes('\r\n'), 'your line endings are kept');

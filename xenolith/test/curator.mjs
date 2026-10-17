@@ -158,17 +158,17 @@ describe('curated writes over both transports', () => {
     claude = await connect('stdio', E.env, 'claude-code');
     chatgpt = await connect('http', E.env, 'codex-desktop', server.url);
     const { tools } = await claude.listTools();
-    assert.deepEqual(tools.map((t) => t.name).sort(), ['wiki_log', 'wiki_read', 'wiki_search', 'wiki_start', 'wiki_upsert_page']);
-    assert.match(tools.find((t) => t.name === 'wiki_log').description, /curator agent files them/);
+    assert.deepEqual(tools.map((t) => t.name).sort(), ['context_log', 'context_read', 'context_search', 'context_start', 'context_upsert_page']);
+    assert.match(tools.find((t) => t.name === 'context_log').description, /curator agent files them/);
     assert.match(claude.getInstructions(), /a curator agent organizes notes into pages/);
 
-    const a = await ok(claude, 'wiki_log', { app: 'claude-code', title: 'Moved Atlas dev to Staging', body: 'Dev host is now staging.example (previously prod).', pages: ['atlas'], tags: ['atlas'] });
+    const a = await ok(claude, 'context_log', { app: 'claude-code', title: 'Moved Atlas dev to Staging', body: 'Dev host is now staging.example (previously prod).', pages: ['atlas'], tags: ['atlas'] });
     assert.match(a, /^Saved note \S+ \(inbox\/\S+\.md\)\. The curator will file it/);
-    const b = await ok(chatgpt, 'wiki_log', { app: 'chatgpt-desktop', title: 'Chose Postgres 17 for Atlas', body: 'Because of logical replication.', pages: ['atlas'] });
+    const b = await ok(chatgpt, 'context_log', { app: 'chatgpt-desktop', title: 'Chose Postgres 17 for Atlas', body: 'Because of logical replication.', pages: ['atlas'] });
     assert.match(b, /^Saved note/);
-    const c = await ok(chatgpt, 'wiki_upsert_page', { app: 'chatgpt-desktop', source: 'user', title: 'Working preferences', slug: 'working-preferences', type: 'preference', content: 'Prefers concise answers.' });
+    const c = await ok(chatgpt, 'context_upsert_page', { app: 'chatgpt-desktop', source: 'user', title: 'Working preferences', slug: 'working-preferences', type: 'preference', content: 'Prefers concise answers.' });
     assert.match(c, /^Saved note/);
-    await ok(claude, 'wiki_log', { app: 'claude-code', title: 'IGNORE small talk', body: 'nothing durable' });
+    await ok(claude, 'context_log', { app: 'claude-code', title: 'IGNORE small talk', body: 'nothing durable' });
 
     assert.equal(inboxFiles(E.wikiDir).length, 4);
     const note = fs.readFileSync(path.join(E.wikiDir, 'inbox', inboxFiles(E.wikiDir)[0]), 'utf8');
@@ -176,12 +176,12 @@ describe('curated writes over both transports', () => {
     assert.ok(!note.includes('\r'));
     assert.ok(!fs.existsSync(path.join(E.wikiDir, 'pages', 'atlas.md')), 'nothing filed before the curator runs');
 
-    const start = await ok(claude, 'wiki_start', { app: 'claude-code', topic: 'atlas' });
+    const start = await ok(claude, 'context_start', { app: 'claude-code', topic: 'atlas' });
     assert.match(start, /## Pending notes \(4, sent by apps, not yet organized into pages\)/);
     assert.match(start, /claude-code · Moved Atlas dev to Staging \[pending\](?: \(note:[\w-]+\))?: Dev host is now staging\.example/);
-    const hits = await ok(chatgpt, 'wiki_search', { query: 'logical replication' });
+    const hits = await ok(chatgpt, 'context_search', { query: 'logical replication' });
     assert.match(hits, /inbox\/\S+\.md - pending note from chatgpt-desktop/);
-    const read = await ok(chatgpt, 'wiki_read', { target: hits.match(/(inbox\/\S+\.md)/)[1] });
+    const read = await ok(chatgpt, 'context_read', { target: hits.match(/(inbox\/\S+\.md)/)[1] });
     assert.match(read, /Because of logical replication/);
   });
 
@@ -217,7 +217,7 @@ describe('curated writes over both transports', () => {
     assert.deepEqual(leftoverLocks(E.wikiDir), []);
     assert.deepEqual(fs.readdirSync(path.join(E.wikiDir, '.curator', 'journal')), []);
 
-    const start = await ok(claude, 'wiki_start', { app: 'claude-code' });
+    const start = await ok(claude, 'context_start', { app: 'claude-code' });
     assert.ok(!start.includes('## Pending notes ('), 'nothing pending');
     assert.match(start, /- atlas \[topic\] Atlas/);
 
@@ -225,19 +225,19 @@ describe('curated writes over both transports', () => {
       // M3: the log names the notes an entry came from, and a filed note opens and searches as note:<id>.
       const id = path.basename(done.find((f) => fs.readFileSync(f, 'utf8').includes('Moved Atlas dev to Staging')), '.md');
       assert.match(log, new RegExp(`^## \\d\\d:\\d\\d · claude-code · Moved Atlas dev to Staging\\n\\n(?:.*\\n)*?sources: note:${id}$`, 'm'));
-      assert.ok(!start.includes('sources: note:'), 'wiki_start leaves the ids out of the recent log');
-      const note = await ok(claude, 'wiki_read', { target: `note:${id}` });
+      assert.ok(!start.includes('sources: note:'), 'context_start leaves the ids out of the recent log');
+      const note = await ok(claude, 'context_read', { target: `note:${id}` });
       assert.match(note, new RegExp(`^File: \\.curator/done/\\d{4}/\\d{2}/${id}\\.md\\n\\nFiled by the curator at \\S+: integrated \\(filed into atlas\\); pages changed: \\[\\[atlas\\]\\]\\.\\n\\n---\\n`));
       assert.match(note, /Dev host is now staging\.example \(previously prod\)\./);
-      const hits = await ok(claude, 'wiki_search', { query: 'staging.example previously prod', scope: 'notes' });
+      const hits = await ok(claude, 'context_search', { query: 'staging.example previously prod', scope: 'notes' });
       assert.match(hits, new RegExp(`^1\\. \\.curator/done/\\S+ - filed note from claude-code, .*\\(read: "note:${id}"`, 'm'));
-      const all = await ok(claude, 'wiki_search', { query: 'staging.example' });
+      const all = await ok(claude, 'context_search', { query: 'staging.example' });
       assert.match(all.split('\n').find((l) => /^1\. /.test(l)), /pages\/atlas\.md/, 'the page ranks above its filed note');
     }
   });
 
   test('a second round patches the existing page, keeping history', async () => {
-    await ok(chatgpt, 'wiki_log', { app: 'chatgpt-desktop', title: 'Atlas backups nightly', body: 'pg_dump at 02:00.', pages: ['atlas'] });
+    await ok(chatgpt, 'context_log', { app: 'chatgpt-desktop', title: 'Atlas backups nightly', body: 'pg_dump at 02:00.', pages: ['atlas'] });
     assert.equal((await runCurator(E.env).done).code, 0);
     const atlas = fs.readFileSync(path.join(E.wikiDir, 'pages', 'atlas.md'), 'utf8');
     assert.match(atlas, /- Atlas backups nightly: pg_dump at 02:00\./);
@@ -270,13 +270,13 @@ describe('curated writes over both transports', () => {
   test('the request log has one line per HTTP request and per tool call, with client names', async () => {
     const lines = requestLines(E.logs);
     const tools = lines.filter((l) => l.kind === 'tool');
-    const httpTool = tools.find((l) => l.transport === 'http' && l.tool === 'wiki_log');
+    const httpTool = tools.find((l) => l.transport === 'http' && l.tool === 'context_log');
     assert.equal(httpTool.client, 'codex-desktop 9.1.0', 'client name from initialize, over stateless HTTP');
     assert.equal(httpTool.app, 'chatgpt-desktop');
     assert.equal(httpTool.result, 'ok');
     assert.equal(typeof httpTool.ms, 'number');
-    assert.ok(httpTool.rid && lines.some((l) => l.kind === 'http' && l.rid === httpTool.rid && l.rpc === 'tools/call wiki_log' && l.status === 200));
-    const stdioTool = tools.find((l) => l.transport === 'stdio' && l.tool === 'wiki_log');
+    assert.ok(httpTool.rid && lines.some((l) => l.kind === 'http' && l.rid === httpTool.rid && l.rpc === 'tools/call context_log' && l.status === 200));
+    const stdioTool = tools.find((l) => l.transport === 'stdio' && l.tool === 'context_log');
     assert.equal(stdioTool.client, 'claude-code 9.1.0');
     assert.equal(stdioTool.proc, 'stdio');
     assert.ok(lines.some((l) => l.kind === 'http' && l.rpc === 'initialize'));
@@ -348,7 +348,7 @@ describe('many concurrent writers on both transports while the curator runs', ()
     try {
       const results = await Promise.all(
         titles.map((title, i) =>
-          call(clients[i % 4], 'wiki_log', { app: `app-${i % 4}`, title, body: `body of ${title}`, pages: [slugs[i % 3]] }),
+          call(clients[i % 4], 'context_log', { app: `app-${i % 4}`, title, body: `body of ${title}`, pages: [slugs[i % 3]] }),
         ),
       );
       for (const r of results) assert.equal(r.isError, false, r.text);
@@ -389,7 +389,7 @@ describe('duplicate submissions', () => {
     const b = await connect('http', E.env, 'codex', server.url);
     try {
       const sends = Array.from({ length: 6 }, (_, i) =>
-        call(i % 2 ? b : a, 'wiki_log', { app: 'claude-code', title: 'Retried note', body: 'same', idempotency_key: 'conv-42-turn-7' }),
+        call(i % 2 ? b : a, 'context_log', { app: 'claude-code', title: 'Retried note', body: 'same', idempotency_key: 'conv-42-turn-7' }),
       );
       const rs = await Promise.all(sends);
       for (const r of rs) assert.equal(r.isError, false, r.text);
@@ -398,14 +398,14 @@ describe('duplicate submissions', () => {
       assert.equal(inboxFiles(E.wikiDir).length, 1);
 
       // Same content without a key on the same day: one note. Different content: a new note.
-      await ok(a, 'wiki_log', { app: 'claude-code', title: 'Plain dup', body: 'x' });
-      assert.match(await ok(b, 'wiki_log', { app: 'claude-code', title: 'Plain dup', body: 'x' }), /^Already saved/);
-      await ok(b, 'wiki_log', { app: 'claude-code', title: 'Plain dup', body: 'y' });
+      await ok(a, 'context_log', { app: 'claude-code', title: 'Plain dup', body: 'x' });
+      assert.match(await ok(b, 'context_log', { app: 'claude-code', title: 'Plain dup', body: 'x' }), /^Already saved/);
+      await ok(b, 'context_log', { app: 'claude-code', title: 'Plain dup', body: 'y' });
       assert.equal(inboxFiles(E.wikiDir).length, 3);
 
       // After filing, a resend still finds the original.
       assert.equal((await runCurator(E.env).done).code, 0);
-      assert.match(await ok(a, 'wiki_log', { app: 'claude-code', title: 'Retried note', body: 'same', idempotency_key: 'conv-42-turn-7' }), /^Already saved as note \S+ \(filed\)/);
+      assert.match(await ok(a, 'context_log', { app: 'claude-code', title: 'Retried note', body: 'same', idempotency_key: 'conv-42-turn-7' }), /^Already saved as note \S+ \(filed\)/);
       assert.equal(inboxFiles(E.wikiDir).length, 0);
     } finally {
       await Promise.allSettled([a.close(), b.close()]);
@@ -421,7 +421,7 @@ describe('crashes mid-write: nothing lost, duplicated or left locked', () => {
     const E = makeEnv();
     const s1 = await startHttp({ ...E.env, XENOLITH_FAULT: 'submit-after-write' });
     const c1 = await connect('http', E.env, 'codex', s1.url);
-    const pending = call(c1, 'wiki_log', { app: 'codex', title: 'Crash note', body: 'b', idempotency_key: 'k-crash' }).catch((e) => ({ error: e }));
+    const pending = call(c1, 'context_log', { app: 'codex', title: 'Crash note', body: 'b', idempotency_key: 'k-crash' }).catch((e) => ({ error: e }));
     await waitFor(() => /FAULT submit-after-write/.test(s1.stderr()), 10_000, 'fault point');
     s1.proc.kill('SIGKILL');
     await pending;
@@ -433,7 +433,7 @@ describe('crashes mid-write: nothing lost, duplicated or left locked', () => {
     assert.ok(Date.now() - t0 < 8000, `restart took ${Date.now() - t0} ms`);
     const c2 = await connect('http', E.env, 'codex', s2.url);
     try {
-      const r = await ok(c2, 'wiki_log', { app: 'codex', title: 'Crash note', body: 'b', idempotency_key: 'k-crash' });
+      const r = await ok(c2, 'context_log', { app: 'codex', title: 'Crash note', body: 'b', idempotency_key: 'k-crash' });
       assert.match(r, /^Already saved as note/);
       assert.equal(inboxFiles(E.wikiDir).length, 1, 'not duplicated');
     } finally {
@@ -486,8 +486,8 @@ describe('crashes mid-write: nothing lost, duplicated or left locked', () => {
       const server = await startHttp(E.env);
       const c = await connect('http', E.env, 'codex', server.url);
       try {
-        await ok(c, 'wiki_log', { app: 'codex', title: 'First crash note', body: 'one', pages: ['crash-a'] });
-        await ok(c, 'wiki_log', { app: 'codex', title: 'Second crash note', body: 'two', pages: ['crash-b'] });
+        await ok(c, 'context_log', { app: 'codex', title: 'First crash note', body: 'one', pages: ['crash-a'] });
+        await ok(c, 'context_log', { app: 'codex', title: 'Second crash note', body: 'two', pages: ['crash-b'] });
         const doomed = runCurator({ ...E.env, XENOLITH_FAULT: fault });
         await waitFor(() => doomed.stderr().includes(`FAULT ${fault}`), 15_000, 'fault point');
         doomed.proc.kill('SIGKILL');
@@ -532,7 +532,7 @@ describe('model failures', () => {
     const server = await startHttp(E.env);
     const c = await connect('http', E.env, 'codex', server.url);
     try {
-      await ok(c, 'wiki_log', { app: 'codex', title: 'Set up AWS CLI', body: 'Profile "work" configured; keys are in 1Password.', pages: ['aws'] });
+      await ok(c, 'context_log', { app: 'codex', title: 'Set up AWS CLI', body: 'Profile "work" configured; keys are in 1Password.', pages: ['aws'] });
       for (let i = 0; i < 2; i++) assert.equal((await runCurator(E.env).done).code, 0);
       // maxAttempts is 2, but the second attempt waits for backoff: force it.
       const stateDir = path.join(E.wikiDir, '.curator', 'state');
@@ -548,7 +548,7 @@ describe('model failures', () => {
       const lines = requestLines(E.logs);
       assert.ok(lines.some((l) => l.event === 'plan-rejected' && l.problems.some((p) => /looks like an AWS access key ID/.test(p))));
 
-      const start = await ok(c, 'wiki_start', { app: 'codex' });
+      const start = await ok(c, 'context_start', { app: 'codex' });
       assert.match(start, /Set up AWS CLI \[NOT CURATED: failed, see the tray\]/);
       const s = await getJson(server.port, '/status');
       assert.equal(s.json.health, 'degraded');
@@ -569,7 +569,7 @@ describe('model failures', () => {
     const E = makeEnv();
     const c = await connect('stdio', E.env, 'claude-code');
     try {
-      const r = await call(c, 'wiki_log', { app: 'claude-code', title: 'creds', body: `key ${SECRET}` });
+      const r = await call(c, 'context_log', { app: 'claude-code', title: 'creds', body: `key ${SECRET}` });
       assert.equal(r.isError, true);
       assert.match(r.text, /^Refused/);
       assert.equal(inboxFiles(E.wikiDir).length, 0);
@@ -588,11 +588,11 @@ describe('model failures', () => {
     E.env.FAKE_CODEX_STATE = path.join(E.dir, 'calls');
     const c = await connect('stdio', E.env, 'claude-code');
     try {
-      await ok(c, 'wiki_log', { app: 'claude-code', title: 'Seed page', body: 'seed', pages: ['repair'] });
+      await ok(c, 'context_log', { app: 'claude-code', title: 'Seed page', body: 'seed', pages: ['repair'] });
       fs.writeFileSync(E.env.FAKE_CODEX_STATE, '1'); // create without the wrong hash
       assert.equal((await runCurator(E.env).done).code, 0);
       fs.writeFileSync(E.env.FAKE_CODEX_STATE, '0'); // next call: wrong hash, then repaired
-      await ok(c, 'wiki_log', { app: 'claude-code', title: 'Patch me', body: 'patched', pages: ['repair'] });
+      await ok(c, 'context_log', { app: 'claude-code', title: 'Patch me', body: 'patched', pages: ['repair'] });
       assert.equal((await runCurator(E.env).done).code, 0);
       assert.match(fs.readFileSync(path.join(E.wikiDir, 'pages', 'repair.md'), 'utf8'), /- Patch me: patched/);
       const lines = requestLines(E.logs);
@@ -600,7 +600,7 @@ describe('model failures', () => {
 
       const B = makeEnv({}, { FAKE_CODEX_MODE: 'bad-json' });
       const b = await connect('stdio', B.env, 'claude-code');
-      await ok(b, 'wiki_log', { app: 'claude-code', title: 'Whatever', body: 'x' });
+      await ok(b, 'context_log', { app: 'claude-code', title: 'Whatever', body: 'x' });
       assert.equal((await runCurator(B.env).done).code, 0);
       const st = JSON.parse(fs.readFileSync(walk(path.join(B.wikiDir, '.curator', 'state'))[0], 'utf8'));
       assert.equal(st.attempts, 1);
@@ -617,10 +617,10 @@ describe('model failures', () => {
     const E = makeEnv({}, { FAKE_CODEX_MODE: 'touch-page-once' });
     const c = await connect('stdio', E.env, 'claude-code');
     try {
-      await ok(c, 'wiki_log', { app: 'claude-code', title: 'Create it', body: 'v1', pages: ['contested'] });
+      await ok(c, 'context_log', { app: 'claude-code', title: 'Create it', body: 'v1', pages: ['contested'] });
       assert.equal((await runCurator(E.env).done).code, 0);
       E.env.FAKE_CODEX_STATE = path.join(E.dir, 'calls');
-      await ok(c, 'wiki_log', { app: 'claude-code', title: 'Change it', body: 'v2', pages: ['contested'] });
+      await ok(c, 'context_log', { app: 'claude-code', title: 'Change it', body: 'v2', pages: ['contested'] });
       assert.equal((await runCurator(E.env).done).code, 0);
       const page = fs.readFileSync(path.join(E.wikiDir, 'pages', 'contested.md'), 'utf8');
       assert.match(page, /Human edit while planning\./);
@@ -635,11 +635,11 @@ describe('model failures', () => {
     const E = makeEnv();
     const c = await connect('stdio', E.env, 'claude-code');
     try {
-      await ok(c, 'wiki_log', { app: 'claude-code', title: 'Seed A', body: 'a0', pages: ['touch-a'] });
-      await ok(c, 'wiki_log', { app: 'claude-code', title: 'Seed B', body: 'b0', pages: ['touch-b'] });
+      await ok(c, 'context_log', { app: 'claude-code', title: 'Seed A', body: 'a0', pages: ['touch-a'] });
+      await ok(c, 'context_log', { app: 'claude-code', title: 'Seed B', body: 'b0', pages: ['touch-b'] });
       assert.equal((await runCurator(E.env).done).code, 0);
-      await ok(c, 'wiki_log', { app: 'claude-code', title: 'Second A', body: 'a1', pages: ['touch-a'] });
-      await ok(c, 'wiki_log', { app: 'claude-code', title: 'Second B', body: 'b1', pages: ['touch-b'] });
+      await ok(c, 'context_log', { app: 'claude-code', title: 'Second A', body: 'a1', pages: ['touch-a'] });
+      await ok(c, 'context_log', { app: 'claude-code', title: 'Second B', body: 'b1', pages: ['touch-b'] });
       const env = { ...E.env, XENOLITH_TOUCH: 'commit-after-first-page', XENOLITH_TOUCH_FILE: path.join(E.wikiDir, 'pages', 'touch-b.md') };
       assert.equal((await runCurator(env).done).code, 0);
       const a = fs.readFileSync(path.join(E.wikiDir, 'pages', 'touch-a.md'), 'utf8');
@@ -664,7 +664,7 @@ describe('model failures', () => {
       const E = makeEnv({}, { FAKE_CODEX_MODE: mode });
       const c = await connect('stdio', E.env, 'claude-code');
       try {
-        await ok(c, 'wiki_log', { app: 'claude-code', title: 'Waits politely', body: 'x' });
+        await ok(c, 'context_log', { app: 'claude-code', title: 'Waits politely', body: 'x' });
         assert.equal((await runCurator(E.env).done).code, 0);
         assert.equal(inboxFiles(E.wikiDir).length, 1);
         assert.ok(!fs.existsSync(path.join(E.wikiDir, '.curator', 'state')) || walk(path.join(E.wikiDir, '.curator', 'state')).length === 0, 'no attempt counted');
@@ -705,13 +705,13 @@ describe('the trust gate (M2)', { skip: IMPL !== 'rust' && 'the Rust programs on
     const UI = { 'X-Xenolith': 'ui' };
     try {
       const page = path.join(E.wikiDir, 'pages', 'harbor.md');
-      await ok(c, 'wiki_log', { app: 'claude-code', source: 'user', title: 'Harbor runs on port 8443', body: 'Staging and production use port 8443.', pages: ['harbor'] });
+      await ok(c, 'context_log', { app: 'claude-code', source: 'user', title: 'Harbor runs on port 8443', body: 'Staging and production use port 8443.', pages: ['harbor'] });
       assert.equal((await runCurator(E.env).done).code, 0);
       assert.ok(fs.existsSync(page), 'a note from the user is filed as usual');
       const note = walk(path.join(E.wikiDir, '.curator', 'done'))[0];
       assert.match(fs.readFileSync(note, 'utf8'), /^source: user$/m, 'the source is kept in the note');
 
-      await ok(c, 'wiki_log', { app: 'codex', source: 'external', title: 'Forum says Harbor moved', body: 'A forum post says Harbor moved to port 9443.', pages: ['harbor'] });
+      await ok(c, 'context_log', { app: 'codex', source: 'external', title: 'Forum says Harbor moved', body: 'A forum post says Harbor moved to port 9443.', pages: ['harbor'] });
       const before = fs.readFileSync(page, 'utf8');
       assert.equal((await runCurator(E.env).done).code, 0);
       assert.equal(fs.readFileSync(page, 'utf8'), before, 'the page is untouched');
@@ -736,7 +736,7 @@ describe('the trust gate (M2)', { skip: IMPL !== 'rust' && 'the Rust programs on
       assert.equal((await postJson(server.port, '/api/held', { batch: ch.batch, index: 0, action: 'approve' }, UI)).status, 404, 'decided once');
 
       // A plain change from an app goes through; the window can revert it while nobody touched the page.
-      await ok(c, 'wiki_log', { app: 'claude-code', title: 'Harbor batch size is 750', body: 'Raised from 500.', pages: ['harbor'] });
+      await ok(c, 'context_log', { app: 'claude-code', title: 'Harbor batch size is 750', body: 'Raised from 500.', pages: ['harbor'] });
       const approved = fs.readFileSync(page, 'utf8');
       assert.equal((await runCurator(E.env).done).code, 0);
       assert.match(fs.readFileSync(page, 'utf8'), /batch size is 750/);
@@ -753,9 +753,9 @@ describe('the trust gate (M2)', { skip: IMPL !== 'rust' && 'the Rust programs on
       assert.match(fs.readFileSync(path.join(E.wikiDir, 'inbox', `${asked.json.note}.md`), 'utf8'), /^source: user$/m);
 
       // Read results never carry a remote image an app would fetch by itself.
-      await ok(c, 'wiki_log', { app: 'claude-code', source: 'user', title: 'Harbor dashboard', body: 'See ![graph](https://grafana.example/render.png?x=1) for load.', pages: ['harbor'] });
+      await ok(c, 'context_log', { app: 'claude-code', source: 'user', title: 'Harbor dashboard', body: 'See ![graph](https://grafana.example/render.png?x=1) for load.', pages: ['harbor'] });
       assert.equal((await runCurator(E.env).done).code, 0);
-      const read = await ok(c, 'wiki_read', { target: 'harbor' });
+      const read = await ok(c, 'context_read', { target: 'harbor' });
       assert.match(read, /\[graph\]\(https:\/\/grafana\.example\/render\.png\?x=1\)/);
       assert.ok(!read.includes('![graph]'), read);
       assert.match(fs.readFileSync(page, 'utf8'), /!\[graph\]/, 'the page itself is left as written');
@@ -771,8 +771,8 @@ describe('the trust gate (M2)', { skip: IMPL !== 'rust' && 'the Rust programs on
     const server = await startHttp(E.env);
     const c = await connect('http', E.env, 'claude-code', server.url);
     try {
-      await ok(c, 'wiki_log', { app: 'claude-code', source: 'user', title: 'Shed roof', body: 'The roof is LINTME and fine.', pages: ['shed'] });
-      await ok(c, 'wiki_log', { app: 'claude-code', source: 'user', title: 'Garden tools', body: 'Spade and rake.', pages: ['tools'] });
+      await ok(c, 'context_log', { app: 'claude-code', source: 'user', title: 'Shed roof', body: 'The roof is LINTME and fine.', pages: ['shed'] });
+      await ok(c, 'context_log', { app: 'claude-code', source: 'user', title: 'Garden tools', body: 'Spade and rake.', pages: ['tools'] });
       assert.equal((await runCurator(E.env).done).code, 0);
       const page = path.join(E.wikiDir, 'pages', 'shed.md');
       const before = fs.readFileSync(page, 'utf8');
@@ -803,7 +803,7 @@ describe('the trust gate (M2)', { skip: IMPL !== 'rust' && 'the Rust programs on
     const c = await connect('http', E.env, 'claude-code', server.url);
     const modelCalls = () => (fs.existsSync(E.env.FAKE_CODEX_LOG) ? fs.readFileSync(E.env.FAKE_CODEX_LOG, 'utf8').trim().split('\n').length : 0);
     try {
-      await ok(c, 'wiki_log', { app: 'claude-code', source: 'user', title: 'Shed roof', body: 'The roof is LINTME and fine.', pages: ['shed'] });
+      await ok(c, 'context_log', { app: 'claude-code', source: 'user', title: 'Shed roof', body: 'The roof is LINTME and fine.', pages: ['shed'] });
       assert.equal((await runCurator(E.env).done).code, 0);
       const page = path.join(E.wikiDir, 'pages', 'shed.md');
       const before = modelCalls();
@@ -861,7 +861,7 @@ describe('the trust gate (M2)', { skip: IMPL !== 'rust' && 'the Rust programs on
       const off = await postJson(server.port, '/api/settings', { cleanupSchedule: 'off' }, UI);
       assert.equal(off.status, 200);
       assert.deepEqual([off.json.cleanup.description, off.json.cleanup.due, off.json.cleanup.next], ['Off', false, null]);
-      await ok(c, 'wiki_log', { app: 'claude-code', source: 'user', title: 'Shed roof', body: 'The roof is LINTME and fine.', pages: ['shed'] });
+      await ok(c, 'context_log', { app: 'claude-code', source: 'user', title: 'Shed roof', body: 'The roof is LINTME and fine.', pages: ['shed'] });
       assert.equal((await runCurator(E.env).done).code, 0);
       const before = modelCalls();
       assert.equal((await runCurator(E.env, ['--lint']).done).code, 0);
@@ -954,7 +954,7 @@ describe('the trust gate (M2)', { skip: IMPL !== 'rust' && 'the Rust programs on
       assert.deepEqual(st.models, { curator: { model: 'gpt-6-astra', reasoningEffort: 'high' }, ask: { model: 'gpt-6-astra', reasoningEffort: 'low' } });
       // A model Codex refuses: the running curator waits (the note is not failed) and says why ...
       fs.writeFileSync(modeFile, 'refuse-model=gpt-6-astra');
-      await ok(c, 'wiki_log', { app: 'claude-code', source: 'user', title: 'Shed roof', body: 'Fixed the shed roof.', pages: ['shed'] });
+      await ok(c, 'context_log', { app: 'claude-code', source: 'user', title: 'Shed roof', body: 'Fixed the shed roof.', pages: ['shed'] });
       const reason = await waitFor(async () => (await getJson(server.port, '/api/status')).json.reasons.find((x) => /Codex refused the model gpt-6-astra with high reasoning/.test(x)), 20_000, 'the refusal in /status');
       assert.match(reason, /choose another: window > Status > Models/);
       assert.equal((await getJson(server.port, '/api/status')).json.queue.dead, 0, 'a refused model fails no note');
@@ -1005,12 +1005,12 @@ describe('the trust gate (M2)', { skip: IMPL !== 'rust' && 'the Rust programs on
     const UI = { 'X-Xenolith': 'ui' };
     try {
       const page = path.join(E.wikiDir, 'pages', 'harbor.md');
-      await ok(c, 'wiki_log', { app: 'claude-code', source: 'user', title: 'Harbor runs on port 8443', body: 'Staging and production use port 8443.', pages: ['harbor'] });
+      await ok(c, 'context_log', { app: 'claude-code', source: 'user', title: 'Harbor runs on port 8443', body: 'Staging and production use port 8443.', pages: ['harbor'] });
       assert.equal((await runCurator(E.env).done).code, 0);
       const before = fs.readFileSync(page, 'utf8');
       assert.equal((await getJson(server.port, '/api/settings')).json.approvals, 'auto');
 
-      await ok(c, 'wiki_log', { app: 'codex', source: 'external', title: 'Forum says Harbor moved', body: 'A forum post says Harbor moved to port 9443.', pages: ['harbor'] });
+      await ok(c, 'context_log', { app: 'codex', source: 'external', title: 'Forum says Harbor moved', body: 'A forum post says Harbor moved to port 9443.', pages: ['harbor'] });
       assert.equal((await runCurator(E.env).done).code, 0);
       assert.match(fs.readFileSync(page, 'utf8'), /Forum says Harbor moved/, 'applied without waiting');
       const log = allLogText(E.wikiDir);
@@ -1045,7 +1045,7 @@ describe('the trust gate (M2)', { skip: IMPL !== 'rust' && 'the Rust programs on
       assert.equal((await getJson(server.port, '/api/settings')).json.approvals, 'auto', 'a refused request changes nothing');
       assert.equal((await postJson(server.port, '/api/settings', { approvals: 'sometimes' }, UI)).status, 400);
       assert.equal((await postJson(server.port, '/api/settings', { approvals: 'manual' }, UI)).json.approvals, 'manual');
-      await ok(c, 'wiki_log', { app: 'codex', source: 'external', title: 'Blog says Harbor uses TLS 1.3', body: 'A blog post says Harbor only accepts TLS 1.3.', pages: ['harbor'] });
+      await ok(c, 'context_log', { app: 'codex', source: 'external', title: 'Blog says Harbor uses TLS 1.3', body: 'A blog post says Harbor only accepts TLS 1.3.', pages: ['harbor'] });
       assert.equal((await runCurator(E.env).done).code, 0);
       assert.doesNotMatch(fs.readFileSync(page, 'utf8'), /Blog says Harbor/);
       assert.equal((await getJson(server.port, '/api/status')).json.held, 1);
@@ -1058,7 +1058,7 @@ describe('the trust gate (M2)', { skip: IMPL !== 'rust' && 'the Rust programs on
 
       // A change left waiting when the setting goes back to the default (an upgrade) goes in when the curator starts.
       await postJson(server.port, '/api/settings', { approvals: 'manual' }, UI);
-      await ok(c, 'wiki_log', { app: 'codex', source: 'external', title: 'Wiki says Harbor runs 3 replicas', body: 'A wiki page says Harbor runs 3 replicas.', pages: ['harbor'] });
+      await ok(c, 'context_log', { app: 'codex', source: 'external', title: 'Wiki says Harbor runs 3 replicas', body: 'A wiki page says Harbor runs 3 replicas.', pages: ['harbor'] });
       assert.equal((await runCurator(E.env).done).code, 0);
       assert.equal((await getJson(server.port, '/api/status')).json.held, 1);
       fs.rmSync(path.join(E.wikiDir, '.curator', 'settings.json'));
@@ -1079,13 +1079,13 @@ describe('the trust gate (M2)', { skip: IMPL !== 'rust' && 'the Rust programs on
     const UI = { 'X-Xenolith': 'ui' };
     try {
       const phone = '555-0142-7781';
-      await ok(c, 'wiki_log', { app: 'claude-code', source: 'user', title: 'Dana phone', body: `Dana's old phone is ${phone}.`, pages: ['dana'] });
+      await ok(c, 'context_log', { app: 'claude-code', source: 'user', title: 'Dana phone', body: `Dana's old phone is ${phone}.`, pages: ['dana'] });
       assert.equal((await runCurator(E.env).done).code, 0);
       assert.match(fs.readFileSync(path.join(E.wikiDir, 'pages', 'dana.md'), 'utf8'), new RegExp(phone));
 
       // An app's own request to forget is not enough; the user's is recorded and waits.
-      await ok(c, 'wiki_log', { app: 'codex', title: 'FORGET a number', body: phone });
-      const userNote = (await ok(c, 'wiki_log', { app: 'claude-code', source: 'user', title: 'FORGET Dana old phone', body: phone })).match(/^Saved note (\S+)/)[1];
+      await ok(c, 'context_log', { app: 'codex', title: 'FORGET a number', body: phone });
+      const userNote = (await ok(c, 'context_log', { app: 'claude-code', source: 'user', title: 'FORGET Dana old phone', body: phone })).match(/^Saved note (\S+)/)[1];
       assert.equal((await runCurator(E.env).done).code, 0);
       const st = (await getJson(server.port, '/api/status')).json;
       assert.equal(st.held, 1, JSON.stringify(st.reasons));

@@ -113,11 +113,11 @@ cannot reach them, even through DNS rebinding.
 
 | Tool | What it does |
 | --- | --- |
-| `wiki_start` | protocol, page index, recent activity, pending notes, related pages |
-| `wiki_search` | BM25 search over sections: each page's intro and its `##` and `###` sections, each log entry, and each note, plus the page's `aliases`. Results cite the section that matched. Filters: `scope` (`all`, `pages`, `log`, `notes`), `since` and `until` dates, and `app`. `queries` takes up to 5 other wordings, searched together and fused by reciprocal rank. With hybrid search on, results also rank by meaning (see Search) |
-| `wiki_read` | a page, a log day, a note (`note:<id>`, pending or filed, with what the curator did with it), or any file in the wiki. `slug#section` (or `section`) returns one section with the page's header line |
-| `wiki_log` | tell the wiki what happened. The server queues it as a note for the curator, with its `source` |
-| `wiki_upsert_page` | hand over content for one page (`append` or `replace`). The server queues it for the curator |
+| `context_start` | protocol, page index, recent activity, pending notes, related pages |
+| `context_search` | BM25 search over sections: each page's intro and its `##` and `###` sections, each log entry, and each note, plus the page's `aliases`. Results cite the section that matched. Filters: `scope` (`all`, `pages`, `log`, `notes`), `since` and `until` dates, and `app`. `queries` takes up to 5 other wordings, searched together and fused by reciprocal rank. With hybrid search on, results also rank by meaning (see Search) |
+| `context_read` | a page, a log day, a note (`note:<id>`, pending or filed, with what the curator did with it), or any file in the wiki. `slug#section` (or `section`) returns one section with the page's header line |
+| `context_log` | tell the wiki what happened. The server queues it as a note for the curator, with its `source` |
+| `context_upsert_page` | hand over content for one page (`append` or `replace`). The server queues it for the curator |
 
 The names are unchanged from v1.1, so open sessions, cached tool lists and your
 own `PROTOCOL.md` keep working. Both write tools take an optional
@@ -248,10 +248,10 @@ unit runs it. It never reads Codex's credential files.
   (`xenolith hook stop`, for Claude Code and Codex). With `"hooks": {"nudge":
   true}` in `config.json`, the hook asks the model to log what is worth keeping
   before it stops. It asks once per session, and only when the transcript is
-  long (`nudgeMinLines`, 30) and has no `wiki_log` call. Without that setting it
+  long (`nudgeMinLines`, 30) and has no `context_log` call. Without that setting it
   does nothing.
 - **Sources stay reachable.** Each log entry ends its header with a
-  `sources: note:<id>` line. `wiki_read("note:<id>")` opens that note wherever
+  `sources: note:<id>` line. `context_read("note:<id>")` opens that note wherever
   it is, in the inbox or in `.curator/done/`, with the curator's disposition and
   the pages it changed. Search covers filed notes and ranks them below pages and
   the log. The window opens a filed note from search or from an activity entry.
@@ -263,7 +263,7 @@ unit runs it. It never reads Codex's credential files.
 - **Throughput.** The curator waits until 20 s pass with no new note, but never
   more than 2 min, then files batches of up to 12 notes. Failures back off exponentially,
   from 1 min to 1 h. After 5 failures a note becomes a dead letter, shown in the
-  tray and in `wiki_start`. From the tray you can **Retry** it or **File as
+  tray and in `context_start`. From the tray you can **Retry** it or **File as
   sent**. When the curator is signed out or hits a usage or rate limit, notes
   wait without using up attempts.
 - **Audit.** The curator writes `.curator/audit/YYYY/MM/<id>.json` for every
@@ -358,8 +358,8 @@ the curator does: the service account must not have your ChatGPT sign-in.
 
 - **The agent.** Ask uses the curator's isolated `codex exec`, with the same
   `CODEX_HOME`, the same features off and no shell. It gets exactly one MCP
-  server, `xenolith serve --read-only`. That server offers `wiki_search` and
-  `wiki_read` and nothing that writes. It does not even create the skeleton,
+  server, `xenolith serve --read-only`. That server offers `context_search` and
+  `context_read` and nothing that writes. It does not even create the skeleton,
   break locks or refresh the index. Codex's `enabled_tools` also lists only those
   two. The prompt carries the page index and up to three earlier turns of the
   conversation. The answer comes back as JSON: `answer` in Markdown with

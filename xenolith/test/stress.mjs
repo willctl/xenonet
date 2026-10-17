@@ -130,7 +130,7 @@ test('stress: 16 clients on 10 server processes and the curator, one server kill
       const r = await cl.c.callTool({ name, arguments: args });
       latencies.push({ name, ms: performance.now() - t0 });
       const text = r.content.map((x) => x.text).join('\n');
-      const notYet = name === 'wiki_read' && /^Not found: /.test(text); // the curator has not created that page yet
+      const notYet = name === 'context_read' && /^Not found: /.test(text); // the curator has not created that page yet
       if (r.isError && !notYet) failures.push({ client: cl.name, name, text });
       return { ok: !r.isError, text };
     } catch (e) {
@@ -149,26 +149,26 @@ test('stress: 16 clients on 10 server processes and the curator, one server kill
     for (let n = 0; n < NOTES_PER_CLIENT; n++) {
       const title = `Stress note ${cl.name} #${String(n).padStart(2, '0')}`;
       ops.push(async () => {
-        const r = await call(cl, 'wiki_log', { app: cl.name, title, body: `body of ${title}`, pages: [SLUGS[(ci + n) % SLUGS.length]], tags: ['stress'] });
+        const r = await call(cl, 'context_log', { app: cl.name, title, body: `body of ${title}`, pages: [SLUGS[(ci + n) % SLUGS.length]], tags: ['stress'] });
         if (r.ok && /^Saved note/.test(r.text)) acked.set(title, cl.name);
       });
     }
     for (let u = 0; u < UPSERTS_PER_CLIENT; u++) {
       const title = `Stress page hand-over ${cl.name} #${u}`;
       ops.push(async () => {
-        const r = await call(cl, 'wiki_upsert_page', { app: cl.name, slug: SLUGS[u % SLUGS.length], title, content: `${title}: added by ${cl.name}` });
+        const r = await call(cl, 'context_upsert_page', { app: cl.name, slug: SLUGS[u % SLUGS.length], title, content: `${title}: added by ${cl.name}` });
         if (r.ok && /^Saved note/.test(r.text)) acked.set(title, cl.name);
       });
     }
     for (let q = 0; q < READS_PER_CLIENT; q++) {
       const pick = q % 4;
       ops.push(async () => {
-        if (pick === 0) await call(cl, 'wiki_start', { app: cl.name, topic: 'stress' });
-        else if (pick === 1) await call(cl, 'wiki_search', { query: `stress note ${q}` });
+        if (pick === 0) await call(cl, 'context_start', { app: cl.name, topic: 'stress' });
+        else if (pick === 1) await call(cl, 'context_search', { query: `stress note ${q}` });
         else if (pick === 2) {
-          const r = await call(cl, 'wiki_read', { target: SLUGS[q % SLUGS.length] });
+          const r = await call(cl, 'context_read', { target: SLUGS[q % SLUGS.length] });
           if (r.ok) assert.ok(!/^\s*$/.test(r.text), 'a page read is never empty');
-        } else await call(cl, 'wiki_read', { target: 'index.md' });
+        } else await call(cl, 'context_read', { target: 'index.md' });
       });
     }
     ops.sort(() => Math.random() - 0.5);
@@ -181,7 +181,7 @@ test('stress: 16 clients on 10 server processes and the curator, one server kill
     Promise.all(
       [0, 5, 9, 13].map(async (ci) => {
         const cl = clients[ci];
-        const r = await call(cl, 'wiki_log', { app: 'shared', title: `Shared retry ${k}`, body: 'sent by four apps at once', idempotency_key: `stress-key-${k}`, pages: ['beta'] });
+        const r = await call(cl, 'context_log', { app: 'shared', title: `Shared retry ${k}`, body: 'sent by four apps at once', idempotency_key: `stress-key-${k}`, pages: ['beta'] });
         keyResults.push({ k, ok: r.ok, saved: /^Saved note/.test(r.text), dup: /^Already saved/.test(r.text) });
       }),
     ),
@@ -236,8 +236,8 @@ test('stress: 16 clients on 10 server processes and the curator, one server kill
     assert.ok(toolLines >= latencies.length, `every answered call is logged (${toolLines} lines, ${latencies.length} answered)`);
 
     const pct = (xs, p) => xs.sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor(xs.length * p))].toFixed(0);
-    const writes = latencies.filter((l) => l.name === 'wiki_log' || l.name === 'wiki_upsert_page').map((l) => l.ms);
-    const reads = latencies.filter((l) => !(l.name === 'wiki_log' || l.name === 'wiki_upsert_page')).map((l) => l.ms);
+    const writes = latencies.filter((l) => l.name === 'context_log' || l.name === 'context_upsert_page').map((l) => l.ms);
+    const reads = latencies.filter((l) => !(l.name === 'context_log' || l.name === 'context_upsert_page')).map((l) => l.ms);
     const batches = entries.filter((e) => e.kind === 'curator' && e.event === 'batch');
     console.log(
       `stress: ${latencies.length} calls in ${wroteMs} ms from ${clients.length} clients on ${HTTP_SERVERS + STDIO_CLIENTS} servers; ` +

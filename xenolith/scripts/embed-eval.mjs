@@ -205,19 +205,19 @@ for (const setName of SETS) {
   const wikiDir = await copyWiki(set.wikiSrc, path.join(work, 'wiki'), { inbox: true });
   const units = sections(wikiDir);
   const questions = set.questions.filter((q) => !q.abstain);
-  // BM25: the program's own search, deep enough to fuse (50 is wiki_search's maximum).
+  // BM25: the program's own search, deep enough to fuse (50 is context_search's maximum).
   const client = new Client({ name: 'xenolith-embed-eval', version: '1' });
   await client.connect(new StdioClientTransport({ ...srvT(path.join(REPO, 'dist', 'runtime'), '--read-only'), env: { ...childEnv, XENOLITH_DIR: wikiDir, XENOLITH_HOME: path.join(work, 'home') }, stderr: 'ignore' }));
   const lexical = {};
   try {
     for (const q of questions) {
       if (q.note) {
-        const r = await client.callTool({ name: 'wiki_search', arguments: { query: `${q.note.title} ${q.note.body.slice(0, 400)}`, scope: 'pages', limit: 50 } });
+        const r = await client.callTool({ name: 'context_search', arguments: { query: `${q.note.title} ${q.note.body.slice(0, 400)}`, scope: 'pages', limit: 50 } });
         lexical[q.id] = { route: searchHits(r.content?.[0]?.text) };
       } else {
         lexical[q.id] = {};
         for (const [mode, text] of [['question', q.question], ['keywords', q.query]]) {
-          const r = await client.callTool({ name: 'wiki_search', arguments: { query: text, limit: 50 } });
+          const r = await client.callTool({ name: 'context_search', arguments: { query: text, limit: 50 } });
           lexical[q.id][mode] = searchHits(r.content?.[0]?.text);
         }
       }

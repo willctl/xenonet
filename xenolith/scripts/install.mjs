@@ -750,11 +750,11 @@ async function main() {
       const sv = client.getServerVersion();
       const { tools } = await client.listTools();
       const names = tools.map((t) => t.name).sort().join(',');
-      if (names !== 'wiki_log,wiki_read,wiki_search,wiki_start,wiki_upsert_page') throw new InstallError(`unexpected tools: ${names}`);
+      if (names !== 'context_log,context_read,context_search,context_start,context_upsert_page') throw new InstallError(`unexpected tools: ${names}`);
       if (!client.getInstructions()?.includes(fwd(wikiDir))) throw new InstallError('server instructions do not name the wiki folder');
-      const r = await client.callTool({ name: 'wiki_start', arguments: { app: 'installer', topic: 'install' } });
-      if (r.isError) throw new InstallError(`wiki_start failed over ${label}: ${r.content[0]?.text}`);
-      info(`MCP over ${label} OK: ${sv.name} ${sv.version}, 5 tools, wiki_start OK`);
+      const r = await client.callTool({ name: 'context_start', arguments: { app: 'installer', topic: 'install' } });
+      if (r.isError) throw new InstallError(`context_start failed over ${label}: ${r.content[0]?.text}`);
+      info(`MCP over ${label} OK: ${sv.name} ${sv.version}, 5 tools, context_start OK`);
     } finally {
       await client.close();
     }

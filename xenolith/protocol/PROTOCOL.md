@@ -9,9 +9,9 @@ current conversation. Each app's built-in memory is secondary to it.
 You reach it through the `xenolith` tools. Follow these rules in every
 conversation, in every app, without being asked.
 
-## 1. Start every conversation with `wiki_start`
+## 1. Start every conversation with `context_start`
 
-Call `wiki_start` once, before your first substantive reply, in every new
+Call `context_start` once, before your first substantive reply, in every new
 conversation. Pass `app` (which app you are, e.g. `claude-desktop`,
 `chatgpt-desktop`, `claude-code`, `codex`) and `topic` (a few words about what the
 user just asked). It returns this protocol, the page index, recent activity,
@@ -23,15 +23,15 @@ changes completely.
 
 Before asking the user for context they may have given before (a project's
 details, a person, a preference, an earlier decision, where something lives),
-call `wiki_search` and read what it finds with `wiki_read`. The wiki may use
+call `context_search` and read what it finds with `context_read`. The wiki may use
 other words than the question: if a search misses, search again with names,
 the broader topic or what the answer would say, or pass such wordings in
 `queries` with the first search. Only ask if the wiki does not have it.
 
-## 3. Tell the wiki what happened with `wiki_log`
+## 3. Tell the wiki what happened with `context_log`
 
 When an exchange produces something a future session would want, tell the
-wiki: call `wiki_log` with a one-line `title` and the facts in `body`. Plain
+wiki: call `context_log` with a one-line `title` and the facts in `body`. Plain
 notes are fine. A curator agent files every note into the right pages, links
 them, keeps superseded facts and writes the activity log, so do not spend
 effort on structure, formatting or prose, and do not read pages first.
@@ -57,15 +57,15 @@ output, `agent` (the default) for your own conclusion. Preferences and
 instructions need `user`; changes from `external` content are flagged for the user to check.
 
 The note is saved at once. Until the curator has filed it, it is listed under
-"Pending notes" in `wiki_start` and found by `wiki_search`; do not send it again.
-`wiki_read("note:<id>")` opens a note, filed or not, as it was sent.
+"Pending notes" in `context_start` and found by `context_search`; do not send it again.
+`context_read("note:<id>")` opens a note, filed or not, as it was sent.
 
 ## 4. Pages
 
 Pages are the organized view, kept by the curator: one page per project,
 person, system, recurring topic, or set of preferences. Read them with
-`wiki_read`. When you have content meant for one page (for example, the user
-asks you to rewrite the Atlas page), hand it over with `wiki_upsert_page`:
+`context_read`. When you have content meant for one page (for example, the user
+asks you to rewrite the Atlas page), hand it over with `context_upsert_page`:
 `mode: "replace"` means your content is meant as the whole page, `"append"`
 adds to it. The curator merges it, keeps the previous version in `.history/`,
 and records what changed in the page's `## History` section. Pages state the
@@ -87,7 +87,7 @@ only when the user asks.
 - If the user says "don't log this", "off the record", or similar, do not write
   anything from that exchange.
 - If the user asks you to correct or forget something, tell the wiki what is
-  wrong and what is right (or send the corrected page with `wiki_upsert_page`);
+  wrong and what is right (or send the corrected page with `context_upsert_page`);
   the curator updates the page and keeps a dated note of the change.
 - If the wiki contradicts what the user says now, the user wins; tell the wiki.
 - If the wiki contradicts an app's built-in memory, prefer the wiki's newer entry.

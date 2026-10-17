@@ -104,7 +104,7 @@ describe('markdown rendering', () => {
     assert.ok(s.length <= 82, `${s.length}`);
     assert.equal(snippetAround('short [[slug|text]] **bold**', ['x']), 'short text bold');
     assert.equal(plainText('# T\n\nSee [[a-b|A B]] and [x](http://y).', 100), 'T See A B and x.');
-    assert.equal(plainText('> call `wiki_start` and _then_ wiki_log', 100), 'call wiki_start and then wiki_log', 'snake_case names keep their underscores');
+    assert.equal(plainText('> call `context_start` and _then_ context_log', 100), 'call context_start and then context_log', 'snake_case names keep their underscores');
   });
 });
 
@@ -241,7 +241,7 @@ describe('the /ui and /api endpoints', { timeout: 60_000 }, () => {
   test('inbox shows a note queued over MCP; status; pausing needs POST, JSON and the X-Xenolith header', async () => {
     const client = new Client({ name: 'ui-test', version: '1' });
     await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)));
-    await client.callTool({ name: 'wiki_log', arguments: { app: 'ui-test', title: 'Queued for the window', body: 'body', pages: ['alpha'] } });
+    await client.callTool({ name: 'context_log', arguments: { app: 'ui-test', title: 'Queued for the window', body: 'body', pages: ['alpha'] } });
     await client.close();
     const box = (await req('GET', '/api/inbox')).json;
     assert.equal(box.notes.length, 1);

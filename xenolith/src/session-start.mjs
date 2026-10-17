@@ -17,13 +17,13 @@ import * as wiki from './wiki.mjs';
 const WATCHDOG_MS = 5000;
 const RULES =
   "Xenolith is the user's shared long-term memory across Claude, ChatGPT and other AI apps, reached through the " +
-  'xenolith tools. Call wiki_start once before your first substantive reply and follow the protocol it returns; ' +
+  'xenolith tools. Call context_start once before your first substantive reply and follow the protocol it returns; ' +
   'search the wiki before asking for context the user may have given before, and tell it what happened (decisions, ' +
-  'outcomes, preferences, facts, follow-ups) with wiki_log; plain notes are fine, a curator files them into pages ' +
+  'outcomes, preferences, facts, follow-ups) with context_log; plain notes are fine, a curator files them into pages ' +
   '(never secrets).';
 const FALLBACK =
   "Xenolith (the user's shared memory across AI apps) is installed but could not be read just now; " +
-  'call wiki_start if the tools are available.';
+  'call context_start if the tools are available.';
 
 async function collect() {
   const { wikiDir } = await wiki.resolveWikiDir();

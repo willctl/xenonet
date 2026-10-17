@@ -1,6 +1,6 @@
 //! Ask, the curator's side (src/ask.mjs): answers the window's questions with an agent that searches
 //! and reads the wiki. The agent is the curator's isolated `codex exec` (codex.rs) with no shell and
-//! exactly one MCP server: this program's `serve --read-only`, which offers wiki_search and wiki_read
+//! exactly one MCP server: this program's `serve --read-only`, which offers context_search and context_read
 //! and nothing that writes. Questions, claims, events and results are files (see asks.rs).
 
 use crate::asks::{asks_dir, is_ask_id};
@@ -134,14 +134,14 @@ pub fn ask_schema() -> Value {
 pub const ASK_INSTRUCTIONS: &str = r##"You answer one person's questions from their personal wiki: the shared long-term memory their AI apps (Claude, ChatGPT, Codex) keep for them. Find the answer with the wiki tools, then reply.
 
 Tools (the only ones you have)
-- wiki_search(query, scope?, since?, until?, app?, limit?): full-text search of the pages, the daily activity log and the notes the apps sent (scope "notes": only those, filed or not; since/until: dates YYYY-MM-DD; app: one app's entries and notes). Returns ranked files, each with the section that matched and its lines.
-- wiki_read(target): one file: a page slug (e.g. "xenolith"), a log day ("YYYY-MM-DD"), a note ("note:<id>") or a path such as "index.md". A result's read target with "#section" returns just that section, with the page's header line.
+- context_search(query, scope?, since?, until?, app?, limit?): full-text search of the pages, the daily activity log and the notes the apps sent (scope "notes": only those, filed or not; since/until: dates YYYY-MM-DD; app: one app's entries and notes). Returns ranked files, each with the section that matched and its lines.
+- context_read(target): one file: a page slug (e.g. "xenolith"), a log day ("YYYY-MM-DD"), a note ("note:<id>") or a path such as "index.md". A result's read target with "#section" returns just that section, with the page's header line.
 
 How to work
 - Search with the words the answer itself is likely to contain (names, paths, terms), not the question's phrasing. If a search misses, try other words or another scope.
 - Read the page or log day that holds the answer before relying on it: search snippets are cut short and lack context. Reading the matched section is usually enough; read the whole page when the section does not settle it.
 - For questions about a time ("on October 1", "last week"), search with since/until around those dates.
-- Pages are summaries. When a page is thin on the point, or the question needs exact detail (when it happened, the exact command or value, what was said), follow the log entry's "sources:" line to the note it came from (wiki_read("note:<id>")): that is the original as an app sent it.
+- Pages are summaries. When a page is thin on the point, or the question needs exact detail (when it happened, the exact command or value, what was said), follow the log entry's "sources:" line to the note it came from (context_read("note:<id>")): that is the original as an app sent it.
 - Be quick: usually one to three searches and one to three reads. Stop as soon as you can answer.
 - Use only what the wiki says. Never guess or fill gaps from general knowledge. If the wiki does not answer the question, set found to false and say briefly what it has that comes closest.
 - When entries disagree, the newer one wins; mention the older value with its date when it matters.
@@ -175,7 +175,7 @@ fn toml_str(s: &str) -> String {
     Value::String(display_path(s)).to_string()
 }
 
-/// The agent's only tools: this program's `serve --read-only` over stdio, offering wiki_search and wiki_read.
+/// The agent's only tools: this program's `serve --read-only` over stdio, offering context_search and context_read.
 pub fn mcp_args(server: &Path, wiki_dir: &Path, paths: &AppPaths, ask_id: &str) -> Vec<String> {
     let s = |p: &Path| toml_str(&p.to_string_lossy());
     let env: String = paths.env_vars().iter().map(|(k, v)| format!("{k}={}, ", s(v))).collect();
@@ -183,7 +183,7 @@ pub fn mcp_args(server: &Path, wiki_dir: &Path, paths: &AppPaths, ask_id: &str) 
         format!("mcp_servers.wiki.command={}", s(server)),
         "mcp_servers.wiki.args=[\"serve\", \"--read-only\"]".to_string(),
         format!("mcp_servers.wiki.env={{XENOLITH_DIR={}, {env}XENOLITH_PROCESS=\"ask\", XENOLITH_ASK={}}}", s(wiki_dir), toml_str(ask_id)),
-        "mcp_servers.wiki.enabled_tools=[\"wiki_search\", \"wiki_read\"]".to_string(),
+        "mcp_servers.wiki.enabled_tools=[\"context_search\", \"context_read\"]".to_string(),
         "mcp_servers.wiki.default_tools_approval_mode=\"approve\"".to_string(),
     ]
     .into_iter()
@@ -223,7 +223,7 @@ fn clip_val(v: &Value, max: usize) -> Value {
     clip(v, max).map(Value::String).unwrap_or(Value::Null)
 }
 
-/// wiki_search's text result -> {count, hits: [{target, kind, title, snippet}]}.
+/// context_search's text result -> {count, hits: [{target, kind, title, snippet}]}.
 pub fn parse_search(text: &str) -> Map<String, Value> {
     static HIT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[0-9]+\. (\S+) - (.+) \(read: "([^"]+)", score [0-9.]+\)$"#).unwrap());
     static SNIP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^ {3}> (.*)$").unwrap());
@@ -263,7 +263,7 @@ pub fn parse_search(text: &str) -> Map<String, Value> {
     o
 }
 
-/// wiki_read's text result ("File: <rel>\n\n<content>") -> {target, kind, title, chars}.
+/// context_read's text result ("File: <rel>\n\n<content>") -> {target, kind, title, chars}.
 pub fn parse_read(text: &str) -> Map<String, Value> {
     static FILE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^File: (.+)\n\n((?s).*)$").unwrap());
     static DATE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([0-9]{4}-[0-9]{2}-[0-9]{2})\.md$").unwrap());
@@ -311,7 +311,7 @@ pub fn parse_read(text: &str) -> Map<String, Value> {
 
 fn pick_args(tool: &str, a: &Value) -> Value {
     let mut o = Map::new();
-    if tool == "wiki_read" {
+    if tool == "context_read" {
         o.insert("target".into(), clip_val(&a["target"], 160));
     } else {
         o.insert("query".into(), clip_val(&a["query"], 200));
@@ -372,8 +372,8 @@ pub fn step_from_event(e: &Value) -> Option<Value> {
             }
             o.insert("status".into(), json!("done"));
             match tool.as_str() {
-                "wiki_search" => o.extend(parse_search(&text)),
-                "wiki_read" => o.extend(parse_read(&text)),
+                "context_search" => o.extend(parse_search(&text)),
+                "context_read" => o.extend(parse_read(&text)),
                 _ => {}
             }
             Some(Value::Object(o))
@@ -719,10 +719,10 @@ impl AskWorker {
             let mut on_event = |e: &Value| {
                 let Some(step) = step_from_event(e) else { return };
                 if step["type"] == "tool" && step["status"] == "done" {
-                    if step["tool"] == "wiki_search" {
+                    if step["tool"] == "context_search" {
                         *searches.lock().unwrap() += 1;
                     }
-                    if step["tool"] == "wiki_read" {
+                    if step["tool"] == "context_read" {
                         *reads.lock().unwrap() += 1;
                     }
                 }

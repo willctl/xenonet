@@ -1,7 +1,7 @@
 // The inbox: notes the apps send ("tell the wiki what happened"). A note is
 // accepted only once it is fsync'd to inbox/<id>.md; the curator organizes it
-// into pages later. Notes stay visible (inbox/ is plain Markdown, wiki_start
-// lists them, wiki_search finds them) until the curator has filed them.
+// into pages later. Notes stay visible (inbox/ is plain Markdown, context_start
+// lists them, context_search finds them) until the curator has filed them.
 //
 //   inbox/<id>.md                      pending notes: frontmatter + the note
 //   .curator/keys/<hash>.json          idempotency key -> note id
@@ -267,7 +267,7 @@ export async function listNotes(wikiDir) {
   return notes.filter(Boolean).sort((a, b) => a.ms - b.ms || a.id.localeCompare(b.id));
 }
 
-/** Pending notes as search documents (wiki_search scopes "all" and "log"). */
+/** Pending notes as search documents (context_search scopes "all" and "log"). */
 export async function noteSearchDocs(wikiDir) {
   return (await listNotes(wikiDir).catch(() => [])).map((n) => ({
     kind: 'note',

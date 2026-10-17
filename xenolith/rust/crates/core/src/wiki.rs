@@ -1,5 +1,5 @@
 //! The wiki: config resolution, the skeleton, atomic writes, pages and the generated index, the
-//! daily log, full-text search, reads and wiki_start (src/wiki.mjs). Formats are byte-for-byte the
+//! daily log, full-text search, reads and context_start (src/wiki.mjs). Formats are byte-for-byte the
 //! Node runtime's, so both can work on one wiki.
 
 use crate::frontmatter::{self, Meta, Val};
@@ -357,7 +357,7 @@ This folder is a shared, plain-Markdown memory used by AI apps on this PC
 `xenolith` MCP server. You own it: open it in any editor or in Obsidian.
 
 - `PROTOCOL.md`: the rules every AI session follows. Edit it freely; servers
-  read it at startup and `wiki_start` returns the current text.
+  read it at startup and `context_start` returns the current text.
 - `index.md`: generated from page frontmatter. Do not edit it by hand.
 - `pages/<slug>.md`: one page per project, person, preference, decision,
   how-to, reference or topic.
@@ -390,7 +390,7 @@ pub fn ensure_wiki(wiki_dir: &Path) -> Result<()> {
 const OLD_PROTOCOLS: [&str; 6] = ["18164903345112d0", "192abaacb1b60064", "09a27d24ebee04ca", "2323d98efcb27d61", "654998a3f71913a9", "958d048836748db0"];
 /// The hash of this release's protocol/PROTOCOL.md (the test below pins it).
 #[cfg(test)]
-const CURRENT_PROTOCOL: &str = "fc7421883718dae3";
+const CURRENT_PROTOCOL: &str = "f8b2c53871d94567";
 
 /// Replaces an unedited PROTOCOL.md of an earlier release with this release's, keeping the old copy
 /// in .history/. An edited one is the user's and stays. Returns whether it replaced it.
@@ -765,7 +765,7 @@ pub fn recent_log(wiki_dir: &Path, days: i64, cap: usize) -> String {
     if let Some(m) = BOUNDARY.find(&cut) {
         cut = cut[m.start() + 1..].to_string();
     }
-    format!("(older entries truncated; read a day with wiki_read(\"YYYY-MM-DD\"))\n\n{cut}")
+    format!("(older entries truncated; read a day with context_read(\"YYYY-MM-DD\"))\n\n{cut}")
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -843,7 +843,7 @@ pub(crate) fn list_log_files(wiki_dir: &Path) -> Vec<(String, String, PathBuf, u
 pub struct Hit {
     pub kind: &'static str,
     pub rel: String,
-    /// What wiki_read takes: a page slug, a log date or note:<id>.
+    /// What context_read takes: a page slug, a log date or note:<id>.
     pub target: String,
     pub label: String,
     /// The anchor of the section that matched best ("" for a page's intro or a note), and its heading.
@@ -854,7 +854,7 @@ pub struct Hit {
 }
 
 impl Hit {
-    /// target#section, as wiki_read takes it.
+    /// target#section, as context_read takes it.
     pub fn read_target(&self) -> String {
         if self.section.is_empty() { self.target.clone() } else { format!("{}#{}", self.target, self.section) }
     }
@@ -985,7 +985,7 @@ fn read_whole(wiki_dir: &Path, target: &str) -> Result<(String, String)> {
         }
     }
     if !abs.exists() {
-        return wiki_err(format!("Not found: \"{target}\". Use wiki_search, or a page slug from the index (wiki_read(\"index.md\"))."));
+        return wiki_err(format!("Not found: \"{target}\". Use context_search, or a page slug from the index (context_read(\"index.md\"))."));
     }
     let real_root = canonical_root(&root)?;
     let real = fs::canonicalize(&abs)?;
@@ -1013,7 +1013,7 @@ fn read_whole(wiki_dir: &Path, target: &str) -> Result<(String, String)> {
     Ok((rel_out, text))
 }
 
-// ---------------------------------------------------------------- wiki_start
+// ---------------------------------------------------------------- context_start
 
 pub fn start_context(wiki_dir: &Path, app: &str, topic: &str) -> Result<String> {
     let now = now();
@@ -1059,11 +1059,11 @@ pub fn start_context(wiki_dir: &Path, app: &str, topic: &str) -> Result<String> 
     out.push(String::new());
     out.push(if recent.is_empty() { "(no activity logged yet)".into() } else { recent });
     out.push(String::new());
-    out.push("Read a page with wiki_read(\"<slug>\") or a day with wiki_read(\"YYYY-MM-DD\").".into());
+    out.push("Read a page with context_read(\"<slug>\") or a day with context_read(\"YYYY-MM-DD\").".into());
     Ok(out.join("\n"))
 }
 
-/// wiki_start section: notes the curator has not organized yet.
+/// context_start section: notes the curator has not organized yet.
 pub fn render_pending_notes(notes: &[inbox::Note], max: usize, cap: usize) -> Vec<String> {
     let mut out = vec![format!("## Pending notes ({}, sent by apps, not yet organized into pages)", notes.len()), String::new()];
     let mut used = 0;
@@ -1087,7 +1087,7 @@ pub fn render_pending_notes(notes: &[inbox::Note], max: usize, cap: usize) -> Ve
         out.push(format!("- ...and {} more", notes.len() - max));
     }
     out.push(String::new());
-    out.push("Read one in full with wiki_read(\"note:<id>\"). Do not send them again: they are already saved.".into());
+    out.push("Read one in full with context_read(\"note:<id>\"). Do not send them again: they are already saved.".into());
     out
 }
 

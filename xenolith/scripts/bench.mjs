@@ -14,7 +14,7 @@
 //   rank-sum outcome (two-sided p about 0.008); overlapping ranges are no measurable difference.
 // - Every answer is checked, not just received: no JSON-RPC, HTTP or tool error, and the text each
 //   call must return (the search finds the page, the read returns the file, the note is saved, the
-//   hook lists the pages rather than its could-not-read fallback). Every wiki_log note is distinct,
+//   hook lists the pages rather than its could-not-read fallback). Every context_log note is distinct,
 //   so each is a durable write rather than a duplicate the server skips, and after each run the notes
 //   must be in inbox/. Errors are counted per metric and listed; any error makes the bench exit 1.
 // - "process start" is the floor neither side can beat: `node -e 0`, or `xenolith --version`.
@@ -141,21 +141,21 @@ const inboxNotes = (wikiDir) => fs.readdirSync(path.join(wikiDir, 'inbox')).filt
 
 const CALL_MIX = [
   {
-    name: 'wiki_start',
+    name: 'context_start',
     args: () => ({ app: 'bench', topic: 'postgres upgrade' }),
     ok: (t) => t.startsWith('# Xenolith: session start') && t.includes('# Xenolith protocol'),
   },
   {
-    name: 'wiki_search',
+    name: 'context_search',
     args: () => ({ query: 'harbor deploy' }),
     ok: (t) => /^[1-9]\d* result\(s\) for "harbor deploy"/.test(t) && t.includes('pages/harbor.md'),
   },
-  { name: 'wiki_search', args: () => ({ query: 'vpn dns' }), ok: (t) => /^[1-9]\d* result\(s\)/.test(t) && t.includes('pages/vpn-setup.md') },
-  { name: 'wiki_read', args: () => ({ target: 'harbor' }), ok: (t) => t.startsWith('File: pages/harbor.md') && t.includes('title: Harbor') },
-  { name: 'wiki_read', args: () => ({ target: 'index.md' }), ok: (t) => t.startsWith('File: index.md') && t.includes('[[harbor|Harbor]]') },
+  { name: 'context_search', args: () => ({ query: 'vpn dns' }), ok: (t) => /^[1-9]\d* result\(s\)/.test(t) && t.includes('pages/vpn-setup.md') },
+  { name: 'context_read', args: () => ({ target: 'harbor' }), ok: (t) => t.startsWith('File: pages/harbor.md') && t.includes('title: Harbor') },
+  { name: 'context_read', args: () => ({ target: 'index.md' }), ok: (t) => t.startsWith('File: index.md') && t.includes('[[harbor|Harbor]]') },
   // Distinct per call: the server answers a repeated note with "Already saved" and writes nothing.
   {
-    name: 'wiki_log',
+    name: 'context_log',
     args: (tag) => ({ app: 'bench', title: `Bench note ${tag}`, body: `a note from the benchmark (${tag})` }),
     ok: (t) => t.startsWith('Saved note '),
   },
@@ -312,7 +312,7 @@ async function stdioRun(prog, env, calls, tally, tag) {
       continue;
     }
     tally.answers++;
-    if (call.name === 'wiki_log') saved++;
+    if (call.name === 'context_log') saved++;
     lat.push(ms);
   }
   let mem;
@@ -391,7 +391,7 @@ async function httpRun(prog, env, calls, concurrency, tally, tag) {
           continue;
         }
         tally.answers++;
-        if (call.name === 'wiki_log') saved++;
+        if (call.name === 'context_log') saved++;
         lat.push(ms);
       }
     }),

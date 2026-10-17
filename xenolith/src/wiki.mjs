@@ -344,7 +344,7 @@ This folder is a shared, plain-Markdown memory used by AI apps on this PC
 \`xenolith\` MCP server. You own it: open it in any editor or in Obsidian.
 
 - \`PROTOCOL.md\`: the rules every AI session follows. Edit it freely; servers
-  read it at startup and \`wiki_start\` returns the current text.
+  read it at startup and \`context_start\` returns the current text.
 - \`index.md\`: generated from page frontmatter. Do not edit it by hand.
 - \`pages/<slug>.md\`: one page per project, person, preference, decision,
   how-to, reference or topic.
@@ -588,7 +588,7 @@ export async function recentLog(wikiDir, days = 7, cap = 5000) {
   let cut = joined.slice(joined.length - cap);
   const boundary = cut.search(/\n(?=#{1,2} |- \d{2}:\d{2} · )/);
   if (boundary >= 0) cut = cut.slice(boundary + 1);
-  return `(older entries truncated; read a day with wiki_read("YYYY-MM-DD"))\n\n${cut}`;
+  return `(older entries truncated; read a day with context_read("YYYY-MM-DD"))\n\n${cut}`;
 }
 
 /** Newest log headlines first: [{date, time, text}]. */
@@ -782,7 +782,7 @@ export async function readTarget(wikiDir, target) {
   if (!(await exists(abs)) && !/\.md$/i.test(abs) && (await exists(`${abs}.md`))) abs = `${abs}.md`;
   if (!(await exists(abs))) abs = (await caseInsensitive(abs)) ?? abs; // Linux: "INDEX.md", "Protocol.md"
   if (!(await exists(abs))) {
-    throw new WikiError(`Not found: "${target}". Use wiki_search, or a page slug from the index (wiki_read("index.md")).`);
+    throw new WikiError(`Not found: "${target}". Use context_search, or a page slug from the index (context_read("index.md")).`);
   }
   const realRoot = await fsp.realpath(root);
   const real = await fsp.realpath(abs);
@@ -799,7 +799,7 @@ export async function readTarget(wikiDir, target) {
   return { rel: relOut, text: toLF(await fsp.readFile(abs, 'utf8')) };
 }
 
-// ---------------------------------------------------------------- wiki_start
+// ---------------------------------------------------------------- context_start
 
 export async function startContext(wikiDir, { app, topic } = {}) {
   const now = new Date();
@@ -834,13 +834,13 @@ export async function startContext(wikiDir, { app, topic } = {}) {
   }
   if (notes.length) out.push('', ...renderPendingNotes(notes));
   out.push('', '## Recent activity (last 7 days)', '', recent || '(no activity logged yet)');
-  out.push('', 'Read a page with wiki_read("<slug>") or a day with wiki_read("YYYY-MM-DD").');
+  out.push('', 'Read a page with context_read("<slug>") or a day with context_read("YYYY-MM-DD").');
   return out.join('\n');
 }
 
 const STATUS_LABEL = { pending: 'pending', retrying: 'retrying', dead: 'NOT CURATED: failed, see the tray' };
 
-/** wiki_start section: notes the curator has not organized yet. Their text is shown so nothing is invisible meanwhile. */
+/** context_start section: notes the curator has not organized yet. Their text is shown so nothing is invisible meanwhile. */
 export function renderPendingNotes(notes, { max = 20, cap = 4000 } = {}) {
   const out = [`## Pending notes (${notes.length}, sent by apps, not yet organized into pages)`, ''];
   let used = 0;
@@ -853,6 +853,6 @@ export function renderPendingNotes(notes, { max = 20, cap = 4000 } = {}) {
     out.push(line);
   }
   if (notes.length > max) out.push(`- ...and ${notes.length - max} more`);
-  out.push('', 'Read one in full with wiki_read("inbox/<id>.md"). Do not send them again: they are already saved.');
+  out.push('', 'Read one in full with context_read("inbox/<id>.md"). Do not send them again: they are already saved.');
   return out;
 }

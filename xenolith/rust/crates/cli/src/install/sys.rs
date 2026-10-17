@@ -132,7 +132,7 @@ pub fn wait_for_health(port: u16, ok: impl Fn(&Value) -> bool, timeout: Duration
 }
 
 /// What the self-test checks over one transport: the server's name and version, its tools, and that
-/// its instructions name the wiki and wiki_start answers.
+/// its instructions name the wiki and context_start answers.
 pub struct McpCheck {
     pub server: String,
     pub tools: Vec<String>,
@@ -155,7 +155,7 @@ fn summarize(init: &Value, tools: &Value, start: &Value) -> McpCheck {
     }
 }
 
-const START: &str = r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"wiki_start","arguments":{"app":"installer","topic":"install"}}}"#;
+const START: &str = r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"context_start","arguments":{"app":"installer","topic":"install"}}}"#;
 
 /// The installed server over stdio.
 pub fn mcp_stdio(agent: &Path, env_clear_xenolith: bool) -> Result<McpCheck, String> {

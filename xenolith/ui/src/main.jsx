@@ -1402,6 +1402,10 @@ function TargetChip({ kind, target, title }) {
   return href ? <a className="link-chip small-chip" href={href}>{body}</a> : <span className="link-chip small-chip">{body}</span>;
 }
 
+// Questions asked before the tools were renamed keep their steps under the old names (wiki_*).
+const isSearch = (tool) => tool === 'context_search' || tool === 'wiki_search';
+const isRead = (tool) => tool === 'context_read' || tool === 'wiki_read';
+
 function Step({ s }) {
   if (s.type === 'thought') {
     return (
@@ -1412,7 +1416,7 @@ function Step({ s }) {
     );
   }
   const running = s.status === 'running';
-  const search = s.tool === 'wiki_search';
+  const search = isSearch(s.tool);
   return (
     <li className={`step${running ? ' running' : ''}${s.status === 'error' ? ' failed' : ''}`}>
       <span className="step-icon">{running ? <span className="spinner" /> : <Icon name={search ? 'search' : kindIcon(s.kind)} size={13} />}</span>
@@ -1456,7 +1460,7 @@ function activity(a, steps) {
   if (a.status === 'queued') return a.worker && !a.worker.running ? 'Waiting for the curator (it is not running)…' : 'Waiting for the curator…';
   if (a.status === 'stalled') return 'The curator stopped responding…';
   const last = steps.at(-1);
-  if (last?.type === 'tool' && last.status === 'running') return last.tool === 'wiki_search' ? `Searching for “${last.args?.query}”…` : `Reading ${last.args?.target}…`;
+  if (last?.type === 'tool' && last.status === 'running') return isSearch(last.tool) ? `Searching for “${last.args?.query}”…` : `Reading ${last.args?.target}…`;
   return steps.some((s) => s.type === 'tool') ? 'Thinking…' : 'Deciding where to look…';
 }
 
@@ -1465,8 +1469,8 @@ function Trace({ a, steps, open, onToggle, onStop }) {
   useTicker(live);
   const started = Date.parse(a.startedAt || a.createdAt);
   const ms = live ? Date.now() - started : a.result?.ms ?? 0;
-  const searches = steps.filter((s) => s.tool === 'wiki_search').length;
-  const reads = steps.filter((s) => s.tool === 'wiki_read').length;
+  const searches = steps.filter((s) => isSearch(s.tool)).length;
+  const reads = steps.filter((s) => isRead(s.tool)).length;
   const summary = live
     ? activity(a, steps)
     : [searches && `Searched ${searches === 1 ? 'once' : `${searches} times`}`, reads && `read ${reads} file${reads > 1 ? 's' : ''}`].filter(Boolean).join(', ') || 'Answered from the page index';
@@ -1713,7 +1717,7 @@ function StatusView({ status, offline }) {
         <h3 className="section-label">Ask</h3>
         <Row k="Agent">{ask.running ? (ask.active?.length ? `answering ${ask.active.length} question${ask.active.length > 1 ? 's' : ''}` : 'ready') : 'not running: it runs with the curator in the tray app'}</Row>
         <Row k="Model">{ask.model ? `${ask.model}, ${ask.reasoningEffort} reasoning` : '—'}</Row>
-        <Row k="Tools">wiki_search and wiki_read only (read-only)</Row>
+        <Row k="Tools">context_search and context_read only (read-only)</Row>
       </div>
       <div className="card">
         <h3 className="section-label">Queue</h3>

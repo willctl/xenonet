@@ -119,16 +119,16 @@ describe('hook command', () => {
 });
 
 describe('files and paths', () => {
-  test('wiki_read finds INDEX.md and Xenolith on a case-sensitive filesystem', async () => {
+  test('context_read finds INDEX.md and Xenolith on a case-sensitive filesystem', async () => {
     const wikiDir = path.join(tmp, 'wiki-case');
     const env = { ...process.env, XENOLITH_DIR: wikiDir, XENOLITH_HOME: path.join(tmp, 'home-case'), XENOLITH_WRITE_MODE: 'direct' };
     const client = new Client({ name: 'portable-test', version: '1' });
     await client.connect(new StdioClientTransport({ ...srvT(path.join(REPO, 'dist', 'runtime')), env, stderr: 'ignore' }));
     try {
-      const w = await client.callTool({ name: 'wiki_upsert_page', arguments: { app: 'test', title: 'Xenolith', type: 'project', summary: 'test page', content: '# Xenolith\n\nHello.', mode: 'replace' } });
+      const w = await client.callTool({ name: 'context_upsert_page', arguments: { app: 'test', title: 'Xenolith', type: 'project', summary: 'test page', content: '# Xenolith\n\nHello.', mode: 'replace' } });
       assert.ok(!w.isError, w.content?.[0]?.text);
       for (const target of ['INDEX.md', 'Xenolith', 'protocol.md']) {
-        const r = await client.callTool({ name: 'wiki_read', arguments: { target } });
+        const r = await client.callTool({ name: 'context_read', arguments: { target } });
         assert.ok(!r.isError, `${target}: ${r.content?.[0]?.text}`);
       }
     } finally {

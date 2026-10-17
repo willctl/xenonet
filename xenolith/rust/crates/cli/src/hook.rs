@@ -11,8 +11,8 @@ use std::io::{Read, Write};
 use std::sync::mpsc;
 use std::time::Duration;
 
-const RULES: &str = "Xenolith is the user's shared long-term memory across Claude, ChatGPT and other AI apps, reached through the xenolith tools. Call wiki_start once before your first substantive reply and follow the protocol it returns; search the wiki before asking for context the user may have given before, and tell it what happened (decisions, outcomes, preferences, facts, follow-ups) with wiki_log; plain notes are fine, a curator files them into pages (never secrets).";
-const FALLBACK: &str = "Xenolith (the user's shared memory across AI apps) is installed but could not be read just now; call wiki_start if the tools are available.";
+const RULES: &str = "Xenolith is the user's shared long-term memory across Claude, ChatGPT and other AI apps, reached through the xenolith tools. Call context_start once before your first substantive reply and follow the protocol it returns; search the wiki before asking for context the user may have given before, and tell it what happened (decisions, outcomes, preferences, facts, follow-ups) with context_log; plain notes are fine, a curator files them into pages (never secrets).";
+const FALLBACK: &str = "Xenolith (the user's shared memory across AI apps) is installed but could not be read just now; call context_start if the tools are available.";
 
 fn collect() -> Option<String> {
     let (dir, _) = wiki::resolve_wiki_dir(&process_env()).ok()?;
@@ -35,10 +35,10 @@ fn collect() -> Option<String> {
     Some(lines.join("\n"))
 }
 
-const NUDGE: &str = "Before you stop: if this session produced anything durable (a decision and why, an outcome and where it lives, a preference the user stated, a fact about a project, person or system, a follow-up), tell the shared wiki with wiki_log now, with its source. Otherwise just stop. (Xenolith asks this once per session.)";
+const NUDGE: &str = "Before you stop: if this session produced anything durable (a decision and why, an outcome and where it lives, a preference the user stated, a fact about a project, person or system, a follow-up), tell the shared wiki with context_log now, with its source. Otherwise just stop. (Xenolith asks this once per session.)";
 
 /// The Stop hook (M7, opt-in with config.json "hooks": {"nudge": true}): once per session, when the
-/// transcript is long and has no wiki_log call, asks the model to log what is worth keeping before it
+/// transcript is long and has no context_log call, asks the model to log what is worth keeping before it
 /// stops. Claude Code and Codex both take {"decision": "block", "reason": ...} as "continue with this".
 /// Never blocks twice: not when a Stop hook already continued the turn (stop_hook_active), and a
 /// marker per session remembers that it asked (or that the session logged).
@@ -85,7 +85,7 @@ fn nudge_reason(input: &str) -> Option<String> {
     }
     let transcript = std::fs::read_to_string(ev["transcript_path"].as_str()?).ok()?;
     let min_lines = config["hooks"]["nudgeMinLines"].as_u64().unwrap_or(30) as usize;
-    static LOGGED: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(r#""(?:name|tool)"\s*:\s*"[^"]*wiki_log""#).unwrap());
+    static LOGGED: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(r#""(?:name|tool)"\s*:\s*"[^"]*(?:context_log|wiki_log)""#).unwrap());
     let _ = std::fs::create_dir_all(&marks);
     if LOGGED.is_match(&transcript) {
         let _ = std::fs::write(&mark, "logged\n"); // nothing to ask, now or later

@@ -44,7 +44,7 @@ test('live: the real model files two notes into pages and the log', { skip: !liv
       { app: 'claude-code', title: 'Started Orchard, a recipe-scaling CLI', body: 'Repo C:/Projects/orchard, TypeScript, Node 24. Decided on SQLite (better-sqlite3) for the pantry list because it needs no server.', tags: ['orchard'] },
       { app: 'chatgpt-desktop', title: 'Orchard moved to Postgres', body: 'Orchard now uses Postgres 17 instead of SQLite, because the pantry list is shared with the family web app. Database runs in docker compose (service "db").' },
     ]) {
-      const r = await client.callTool({ name: 'wiki_log', arguments: args });
+      const r = await client.callTool({ name: 'context_log', arguments: args });
       assert.ok(!r.isError, r.content[0].text);
     }
   } finally {

@@ -2,14 +2,14 @@
 //   node server.mjs                     stdio (launched per client by the host app)
 //   node server.mjs --http [--port N]   Streamable HTTP on 127.0.0.1 (run by the Windows service)
 //       --parent-stdin                  exit gracefully when stdin closes (the service wrapper's stop signal)
-//   node server.mjs --read-only         stdio with wiki_search and wiki_read only, writing nothing to the wiki
+//   node server.mjs --read-only         stdio with context_search and context_read only, writing nothing to the wiki
 //                                       (the Ask agent's tools: ask.mjs)
 //   node server.mjs --init              create the wiki skeleton, print {"ok":true,...}, exit
 //   node server.mjs --version           print the version, exit
 // In stdio mode stdout carries JSON-RPC only: all logging goes to stderr.
 //
-// Reads (wiki_start, wiki_search, wiki_read) are instant and deterministic.
-// Writes (wiki_log, wiki_upsert_page) are queued as notes in inbox/ and filed
+// Reads (context_start, context_search, context_read) are instant and deterministic.
+// Writes (context_log, context_upsert_page) are queued as notes in inbox/ and filed
 // by the curator (curator.mjs), unless writeMode is "direct" (v1.1 behavior).
 // Every HTTP request and tool call is logged to logs/requests-YYYY-MM-DD.jsonl.
 
@@ -33,7 +33,7 @@ const log = (...a) => console.error(`[xenolith ${new Date().toISOString()}]`, ..
 
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const WRITES = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
-const ASK_TOOLS = ['wiki_search', 'wiki_read'];
+const ASK_TOOLS = ['context_search', 'context_read'];
 const MAX_BODY = 4 * 1024 * 1024;
 const startedAt = Date.now();
 /** Hash of this bundle, so the installer can tell the service is running exactly the build it just installed. */
@@ -55,14 +55,14 @@ const keyParam = z
 
 function leadIn(wikiDir, curated) {
   const writes = curated
-    ? 'Tell it what happened with wiki_log (and wiki_upsert_page for page content): a curator agent organizes ' +
+    ? 'Tell it what happened with context_log (and context_upsert_page for page content): a curator agent organizes ' +
       'notes into pages, so hand over the facts and skip the formatting.'
-    : 'Record decisions, outcomes, preferences, facts and follow-ups worth keeping with wiki_log, and keep topic ' +
-      'pages current with wiki_upsert_page.';
+    : 'Record decisions, outcomes, preferences, facts and follow-ups worth keeping with context_log, and keep topic ' +
+      'pages current with context_upsert_page.';
   return (
     'Shared long-term memory for this user across Claude, ChatGPT and other AI apps ' +
-    `(wiki folder: ${wiki.displayPath(wikiDir)}). Call wiki_start once at the beginning of EVERY conversation, ` +
-    'before your first substantive reply, and follow the protocol it returns. Search the wiki (wiki_search) ' +
+    `(wiki folder: ${wiki.displayPath(wikiDir)}). Call context_start once at the beginning of EVERY conversation, ` +
+    'before your first substantive reply, and follow the protocol it returns. Search the wiki (context_search) ' +
     `before asking the user for context they may have given before. ${writes} Never store secrets.`
   );
 }
@@ -124,7 +124,7 @@ async function createMcpServer(state, ctx) {
   const curated = writeMode === 'curated';
   let instructions;
   if (readOnly) {
-    instructions = `Read-only access to this user's shared wiki (${wiki.displayPath(wikiDir ?? '~/Xenolith')}): wiki_search finds pages, log entries and notes not yet filed; wiki_read opens one.`;
+    instructions = `Read-only access to this user's shared wiki (${wiki.displayPath(wikiDir ?? '~/Xenolith')}): context_search finds pages, log entries and notes not yet filed; context_read opens one.`;
   } else {
     let protocol = wiki.DEFAULT_PROTOCOL;
     if (wikiDir) protocol = await wiki.readProtocol(wikiDir).catch(() => wiki.DEFAULT_PROTOCOL);
@@ -173,7 +173,7 @@ async function createMcpServer(state, ctx) {
   };
 
   register(
-    'wiki_start',
+    'context_start',
     {
       title: 'Start: load shared memory',
       description:
@@ -187,17 +187,17 @@ async function createMcpServer(state, ctx) {
       },
       annotations: READ_ONLY,
     },
-    tool('wiki_start', ({ app, topic }) => wiki.startContext(wikiDir, { app, topic })),
+    tool('context_start', ({ app, topic }) => wiki.startContext(wikiDir, { app, topic })),
   );
 
   register(
-    'wiki_search',
+    'context_search',
     {
       title: 'Search shared memory',
       description:
         "Full-text search of the user's shared wiki (topic pages, the daily activity log, and notes not yet filed). Use it " +
         'BEFORE asking the user for context they may have given before: project details, people, preferences, earlier ' +
-        'decisions, where something lives. Returns ranked files with matching lines; open one with wiki_read.',
+        'decisions, where something lives. Returns ranked files with matching lines; open one with context_read.',
       inputSchema: {
         query: z.string().describe('Words to search for, e.g. "atlas docker networking".'),
         scope: z.enum(['all', 'pages', 'log']).optional().describe('Search pages, the log (with pending notes), or both (default all).'),
@@ -205,7 +205,7 @@ async function createMcpServer(state, ctx) {
       },
       annotations: READ_ONLY,
     },
-    tool('wiki_search', async ({ query, scope, limit }) => {
+    tool('context_search', async ({ query, scope, limit }) => {
       const hits = await wiki.search(wikiDir, query, { scope: scope || 'all', limit: limit || 8 });
       if (!hits.length) return `No results for "${query}". The wiki has nothing on this yet.`;
       return `${hits.length} result(s) for "${query}":\n\n${wiki.formatSearchResults(hits)}`;
@@ -213,7 +213,7 @@ async function createMcpServer(state, ctx) {
   );
 
   register(
-    'wiki_read',
+    'context_read',
     {
       title: 'Read a wiki page or log day',
       description:
@@ -224,7 +224,7 @@ async function createMcpServer(state, ctx) {
       },
       annotations: READ_ONLY,
     },
-    tool('wiki_read', async ({ target }) => {
+    tool('context_read', async ({ target }) => {
       const { rel, text } = await wiki.readTarget(wikiDir, target);
       return `File: ${rel}\n\n${text}`;
     }),
@@ -234,10 +234,10 @@ async function createMcpServer(state, ctx) {
     r.duplicate
       ? `Already saved as note ${r.id} (${r.status}); nothing new was queued.`
       : `Saved note ${r.id} (${r.rel}). The curator will file it into the wiki shortly; until then it is listed under ` +
-        '"Pending notes" in wiki_start and found by wiki_search. No need to check on it.';
+        '"Pending notes" in context_start and found by context_search. No need to check on it.';
 
   register(
-    'wiki_log',
+    'context_log',
     {
       title: curated ? 'Tell the wiki what happened' : 'Log to shared memory',
       description: curated
@@ -253,7 +253,7 @@ async function createMcpServer(state, ctx) {
           'and where it lives), a stated preference or standing instruction, a fact about a project/person/system, or an ' +
           'open follow-up. One entry per meaningful unit of work, usually at the end of the exchange, written to make sense ' +
           'without this conversation (name the project, include paths, URLs, versions). Never include secrets; write where ' +
-          'a secret lives instead. Also update the matching page with wiki_upsert_page when durable knowledge changed.',
+          'a secret lives instead. Also update the matching page with context_upsert_page when durable knowledge changed.',
       inputSchema: {
         app: appParam,
         title: z.string().describe('One line: what happened, e.g. "Fixed Atlas docker networking".'),
@@ -264,7 +264,7 @@ async function createMcpServer(state, ctx) {
       },
       annotations: WRITES,
     },
-    tool('wiki_log', async (input) => {
+    tool('context_log', async (input) => {
       if (curated) return queued(await inbox.submitNote(wikiDir, { ...input, kind: 'log' }, { transport: ctx.transport, client: ctx.client() }));
       const { rel, heading } = await wiki.appendLog(wikiDir, input);
       return `Logged to ${rel}: ${heading.replace(/^## /, '')}`;
@@ -272,7 +272,7 @@ async function createMcpServer(state, ctx) {
   );
 
   register(
-    'wiki_upsert_page',
+    'context_upsert_page',
     {
       title: curated ? 'Suggest content for a wiki page' : 'Create or update a wiki page',
       description: curated
@@ -301,7 +301,7 @@ async function createMcpServer(state, ctx) {
       },
       annotations: WRITES,
     },
-    tool('wiki_upsert_page', async (input) => {
+    tool('context_upsert_page', async (input) => {
       if (curated) {
         const note = {
           kind: 'page',
@@ -423,7 +423,7 @@ function sessionStore(file) {
   };
 }
 
-/** What a JSON-RPC body asks for, for the request log: "initialize", "tools/call wiki_log", ... */
+/** What a JSON-RPC body asks for, for the request log: "initialize", "tools/call context_log", ... */
 function describeRpc(body) {
   const msgs = Array.isArray(body) ? body : [body];
   return msgs

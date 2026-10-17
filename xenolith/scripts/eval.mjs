@@ -6,11 +6,11 @@
 //   options: --tier search,ask,curate     --concurrency 3     --only <id,id>     --out <file.json>
 //
 // Tiers:
-//   search   wiki_search alone, no model: is an evidence file in the top 1/3/8 results, for the question
+//   search   context_search alone, no model: is an evidence file in the top 1/3/8 results, for the question
 //            as asked and for the words a good agent would search for? (deterministic: test/memory-eval.mjs)
 //   ask      the real Ask pipeline (server + curator --asks-only, as the window uses it) on a copy of the
 //            wiki: did it read the evidence, cite it, contain the expected facts, abstain when it should?
-//   curate   each note stream through wiki_log and `curator.mjs --once` on a fresh copy: do the pages
+//   curate   each note stream through context_log and `curator.mjs --once` on a fresh copy: do the pages
 //            say what they should afterwards (updates, history, poisoning, duplicates, secrets)?
 //
 // The categories follow LongMemEval (extraction, multi-session, temporal, knowledge update, abstention).
@@ -202,7 +202,7 @@ export async function searchTier(set, { work, ms = null, review = false, embeddi
     for (const q of set.questions.filter((x) => !x.abstain && !x.note)) {
       const row = { id: q.id, category: q.category };
       for (const [mode, query] of [['question', q.question], ['keywords', q.query]]) {
-        const r = await client.callTool({ name: 'wiki_search', arguments: { query, limit: 8 } });
+        const r = await client.callTool({ name: 'context_search', arguments: { query, limit: 8 } });
         const rels = searchRels(r.content?.[0]?.text || '');
         row[mode] = rankOf(rels, q.evidence);
         if (row[mode] !== 1) row[`${mode}Top`] = rels.slice(0, 3); // what ranked above the evidence, for tuning
@@ -213,7 +213,7 @@ export async function searchTier(set, { work, ms = null, review = false, embeddi
     // to decide which pages it shows the model (curator.rs, context). A hit: the page it belongs on.
     for (const q of set.questions.filter((x) => x.note)) {
       const query = `${q.note.title} ${q.note.body.slice(0, 400)}`;
-      const r = await client.callTool({ name: 'wiki_search', arguments: { query, scope: 'pages', limit: 4 } });
+      const r = await client.callTool({ name: 'context_search', arguments: { query, scope: 'pages', limit: 4 } });
       const rels = searchRels(r.content?.[0]?.text || '');
       routing.push({ id: q.id, rank: rankOf(rels, q.evidence), top: rels });
     }
@@ -373,8 +373,8 @@ export async function askTier(set, { work, ms, concurrency, only }) {
         for (let q = queue.shift(); q; q = queue.shift()) {
           const a = await askOne(port, q.question, ms.live ? 400_000 : 60_000);
           const steps = (a.events || []).filter((e) => e.type === 'tool' && e.status === 'done');
-          const reads = steps.filter((s) => s.tool === 'wiki_read').map((s) => relOf(s.target, s.kind));
-          const searched = steps.filter((s) => s.tool === 'wiki_search').flatMap((s) => (s.hits || []).map((h) => relOf(h.target, h.kind)));
+          const reads = steps.filter((s) => s.tool === 'context_read').map((s) => relOf(s.target, s.kind));
+          const searched = steps.filter((s) => s.tool === 'context_search').flatMap((s) => (s.hits || []).map((h) => relOf(h.target, h.kind)));
           const result = a.result || {};
           const cited = (result.sources || []).map((s) => relOf(s.target, s.kind));
           const ev = q.evidence || [];
@@ -570,7 +570,7 @@ export async function curateTier(set, { work, ms, concurrency, only }) {
         let rejected = false;
         try {
           for (const n of s.notes) {
-            const r = await client.callTool({ name: 'wiki_log', arguments: { app: n.app || 'eval', title: n.title, body: n.body, tags: n.tags || [], pages: n.pages || [], ...(n.source ? { source: n.source } : {}) } });
+            const r = await client.callTool({ name: 'context_log', arguments: { app: n.app || 'eval', title: n.title, body: n.body, tags: n.tags || [], pages: n.pages || [], ...(n.source ? { source: n.source } : {}) } });
             if (r.isError) rejected = true;
           }
         } finally {

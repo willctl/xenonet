@@ -1,6 +1,6 @@
 [
  {
-  "name": "wiki_start",
+  "name": "context_start",
   "title": "Start: load shared memory",
   "description": "ALWAYS call this once at the start of every conversation, before your first substantive reply, in every app. Loads the user's shared long-term memory (shared across Claude, ChatGPT and other AI apps): the wiki protocol to follow, the page index, the last 7 days of activity, notes not yet filed, and pages related to `topic`. Cheap and read-only. Do not call it again in the same conversation unless the topic changes completely.",
   "inputSchema": {
@@ -31,9 +31,9 @@
   }
  },
  {
-  "name": "wiki_search",
+  "name": "context_search",
   "title": "Search shared memory",
-  "description": "Full-text search of the user's shared wiki (topic pages, the daily activity log, and the notes apps sent, filed or not). Use it BEFORE asking the user for context they may have given before: project details, people, preferences, earlier decisions, where something lives. Returns ranked files with the section that matched and its lines; open one with wiki_read (the \"read\" target opens just that section).",
+  "description": "Full-text search of the user's shared wiki (topic pages, the daily activity log, and the notes apps sent, filed or not). Use it BEFORE asking the user for context they may have given before: project details, people, preferences, earlier decisions, where something lives. Returns ranked files with the section that matched and its lines; open one with context_read (the \"read\" target opens just that section).",
   "inputSchema": {
    "$schema": "http://json-schema.org/draft-07/schema#",
    "type": "object",
@@ -95,7 +95,7 @@
   }
  },
  {
-  "name": "wiki_read",
+  "name": "context_read",
   "title": "Read a wiki page or log day",
   "description": "Read one file from the shared wiki: a page slug (e.g. \"atlas\"), a log date (\"YYYY-MM-DD\"), or a path relative to the wiki folder (e.g. \"index.md\", \"PROTOCOL.md\", \"pages/atlas.md\"), or a note the apps sent (\"note:<id>\", as search results and log entries name them: the exact original, with what the curator did with it).",
   "inputSchema": {
@@ -126,7 +126,7 @@
   }
  },
  {
-  "name": "wiki_log",
+  "name": "context_log",
   "title": "Tell the wiki what happened",
   "description": "Tell the user's shared wiki what happened. Hand over the facts quickly: a curator agent files them into the right pages, links them and writes the activity log, so do not spend effort on structure or prose, and do not read pages first. Use when an exchange produced something a future session would want: a decision and why, an outcome (what was built, fixed, configured or learned, and where it lives), a stated preference or standing instruction, a fact about a project/person/system, or an open follow-up. Include names, paths, URLs and versions. One note per meaningful unit of work, usually at the end of the exchange. The note is saved durably at once. Never include secrets; say where a secret lives instead.",
   "inputSchema": {
@@ -190,7 +190,7 @@
   }
  },
  {
-  "name": "wiki_upsert_page",
+  "name": "context_upsert_page",
   "title": "Suggest content for a wiki page",
   "description": "Hand the shared wiki content for a page: one page per project, person, system, set of preferences, decision, how-to or reference. The curator merges it into the existing page (or creates it), keeping structure, links, history and superseded facts, so plain notes are fine. mode \"replace\" means your content is meant as the whole new page; \"append\" (default) means it adds to the page. Saved durably at once. Never include secrets.",
   "inputSchema": {

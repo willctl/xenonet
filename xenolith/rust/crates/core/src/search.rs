@@ -1,4 +1,4 @@
-//! wiki_search (M5): BM25 over sections. Each page's intro and each of its ## and ### sections, each
+//! context_search (M5): BM25 over sections. Each page's intro and each of its ## and ### sections, each
 //! log entry and each note is a document; a file's score is its best section's, with a little credit
 //! for other matching sections, so results stay one per file and cite the section that matched.
 //!
@@ -88,7 +88,7 @@ pub fn query_dates(query: &str) -> Vec<String> {
     out
 }
 
-/// Optional limits on what a search returns (wiki_search's since/until/app).
+/// Optional limits on what a search returns (context_search's since/until/app).
 #[derive(Clone, Debug, Default)]
 pub struct Filters {
     /// YYYY-MM-DD, inclusive: log entries and notes by their date, pages by when they were last updated.

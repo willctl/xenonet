@@ -727,7 +727,7 @@ pub struct Journal {
     pub auto: bool,
 }
 
-/// A log entry's "sources:" line: the notes it was written from, as wiki_read targets.
+/// A log entry's "sources:" line: the notes it was written from, as context_read targets.
 pub fn sources_line<'a>(ids: impl Iterator<Item = &'a str>) -> String {
     format!("sources: {}", ids.map(|id| format!("note:{id}")).collect::<Vec<_>>().join(", "))
 }

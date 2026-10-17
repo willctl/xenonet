@@ -843,7 +843,7 @@ fn claude_plugin(cl: &Path, p: &Places, res: &mut Results) -> Result<(), Install
 /// The installed server over stdio (and HTTP when the service runs), and the hook under the shells
 /// the apps use.
 fn self_test(p: &Places, wiki_dir: &Path, port: u16, transport: &str, hook: &str, child_env: &[(String, String)]) -> Result<(), InstallError> {
-    let want = "wiki_log,wiki_read,wiki_search,wiki_start,wiki_upsert_page";
+    let want = "context_log,context_read,context_search,context_start,context_upsert_page";
     let check = |label: &str, r: Result<sys::McpCheck, String>| -> Result<(), InstallError> {
         let c = r.map_err(|e| InstallError(format!("MCP over {label}: {e}")))?;
         if c.tools.join(",") != want {
@@ -853,9 +853,9 @@ fn self_test(p: &Places, wiki_dir: &Path, port: u16, transport: &str, hook: &str
             return Err(InstallError(format!("MCP over {label}: the server instructions do not name the wiki folder")));
         }
         if !c.start_ok {
-            return Err(InstallError(format!("MCP over {label}: wiki_start failed")));
+            return Err(InstallError(format!("MCP over {label}: context_start failed")));
         }
-        info(&format!("MCP over {label} OK: {}, 5 tools, wiki_start OK", c.server));
+        info(&format!("MCP over {label} OK: {}, 5 tools, context_start OK", c.server));
         Ok(())
     };
     let stdio = with_env(child_env, || sys::mcp_stdio(&p.agent, true));

@@ -12,7 +12,7 @@
 //   .curator/asks/worker.json        the worker's heartbeat: model, sign-in, questions in progress
 //
 // The agent is the curator's isolated `codex exec` (codex.mjs) with no shell and exactly one MCP
-// server: this bundle's server.mjs --read-only, which offers wiki_search and wiki_read and nothing
+// server: this bundle's server.mjs --read-only, which offers context_search and context_read and nothing
 // that writes. Its tool calls land in the request log like any other client's, tagged with the ask id.
 
 import fs from 'node:fs';
@@ -241,8 +241,8 @@ export const ASK_SCHEMA = {
 export const ASK_INSTRUCTIONS = `You answer one person's questions from their personal wiki: the shared long-term memory their AI apps (Claude, ChatGPT, Codex) keep for them. Find the answer with the wiki tools, then reply.
 
 Tools (the only ones you have)
-- wiki_search(query, scope?, limit?): full-text search of the pages, the daily activity log and notes the curator has not filed yet. Returns ranked files with matching lines.
-- wiki_read(target): one file: a page slug (e.g. "xenolith"), a log day ("YYYY-MM-DD"), or a path such as "inbox/<id>.md".
+- context_search(query, scope?, limit?): full-text search of the pages, the daily activity log and notes the curator has not filed yet. Returns ranked files with matching lines.
+- context_read(target): one file: a page slug (e.g. "xenolith"), a log day ("YYYY-MM-DD"), or a path such as "inbox/<id>.md".
 
 How to work
 - Search with the words the answer itself is likely to contain (names, paths, terms), not the question's phrasing. If a search misses, try other words or another scope.
@@ -270,14 +270,14 @@ export function buildAskPrompt({ question, thread = [], pages = [], now = wiki.l
 
 const tomlStr = (s) => JSON.stringify(wiki.displayPath(s)); // a TOML basic string: JSON's escapes are TOML's
 
-/** The agent's only tools: this bundle's server.mjs --read-only over stdio, offering wiki_search and wiki_read. */
+/** The agent's only tools: this bundle's server.mjs --read-only over stdio, offering context_search and context_read. */
 export function mcpArgs({ serverPath = SERVER_PATH, wikiDir, paths = wiki.appPaths(), askId }) {
   const c = (kv) => ['-c', kv];
   return [
     ...c(`mcp_servers.wiki.command=${tomlStr(process.execPath)}`),
     ...c(`mcp_servers.wiki.args=[${tomlStr(serverPath)}, "--read-only"]`),
     ...c(`mcp_servers.wiki.env={XENOLITH_DIR=${tomlStr(wikiDir)}, ${Object.entries(wiki.pathsEnv(paths)).map(([k, v]) => `${k}=${tomlStr(v)}, `).join('')}XENOLITH_PROCESS="ask", XENOLITH_ASK=${tomlStr(askId)}}`),
-    ...c('mcp_servers.wiki.enabled_tools=["wiki_search", "wiki_read"]'),
+    ...c('mcp_servers.wiki.enabled_tools=["context_search", "context_read"]'),
     ...c('mcp_servers.wiki.default_tools_approval_mode="approve"'),
   ];
 }
@@ -293,7 +293,7 @@ function hitTitle(kind, label, target) {
   return target;
 }
 
-/** wiki_search's text result -> {count, hits: [{target, kind, title, snippet}]}. */
+/** context_search's text result -> {count, hits: [{target, kind, title, snippet}]}. */
 export function parseSearch(text) {
   const hits = [];
   let cur = null;
@@ -310,7 +310,7 @@ export function parseSearch(text) {
   return { count: hits.length, hits: hits.slice(0, 8).map((h) => ({ target: h.target, kind: h.kind, title: hitTitle(h.kind, h.label, h.target), snippet: h.snippet || '' })) };
 }
 
-/** wiki_read's text result ("File: <rel>\n\n<content>") -> {target, kind, title, chars}. */
+/** context_read's text result ("File: <rel>\n\n<content>") -> {target, kind, title, chars}. */
 export function parseRead(text) {
   const m = wiki.toLF(text).match(/^File: (.+)\n\n([\s\S]*)$/);
   if (!m) return { kind: 'file', target: '', title: '', chars: String(text).length };
@@ -324,7 +324,7 @@ export function parseRead(text) {
 }
 
 const pickArgs = (tool, a = {}) =>
-  tool === 'wiki_read' ? { target: clip(a?.target, 160) } : { query: clip(a?.query, 200), scope: a?.scope || undefined, limit: a?.limit || undefined };
+  tool === 'context_read' ? { target: clip(a?.target, 160) } : { query: clip(a?.query, 200), scope: a?.scope || undefined, limit: a?.limit || undefined };
 
 /** A codex JSONL event -> a step the window shows (a search, a read, a remark), or null. */
 export function stepFromEvent(e) {
@@ -339,8 +339,8 @@ export function stepFromEvent(e) {
     if (item.error || item.result?.isError || item.status === 'failed') {
       return { ...base, status: 'error', error: clip(item.error?.message || item.error || text || 'the call failed', 200) };
     }
-    if (tool === 'wiki_search') return { ...base, status: 'done', ...parseSearch(text) };
-    if (tool === 'wiki_read') return { ...base, status: 'done', ...parseRead(text) };
+    if (tool === 'context_search') return { ...base, status: 'done', ...parseSearch(text) };
+    if (tool === 'context_read') return { ...base, status: 'done', ...parseRead(text) };
     return { ...base, status: 'done' };
   }
   if (item.type === 'agent_message' && e.type === 'item.completed') {
@@ -585,8 +585,8 @@ export class AskWorker {
           const step = stepFromEvent(e);
           if (!step) return;
           if (step.type === 'tool' && step.status === 'done') {
-            if (step.tool === 'wiki_search') searches++;
-            if (step.tool === 'wiki_read') reads++;
+            if (step.tool === 'context_search') searches++;
+            if (step.tool === 'context_read') reads++;
           }
           emit(step);
         },

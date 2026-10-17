@@ -13,7 +13,7 @@
 //   signed-out         exec fails with 401; `login status` says not logged in
 //   wrong-hash-once    the first plan uses a wrong base hash (exercises the repair round)
 //   touch-page-once    the first call edits the target page on disk before answering (a human edit mid-plan)
-//   ask-write          (Ask) also try wiki_log, which the read-only server must not offer
+//   ask-write          (Ask) also try context_log, which the read-only server must not offer
 //   refuse-model=<m>   exec with -m <m> fails the way ChatGPT refuses a model the account does not offer
 // FAKE_CODEX_DELAY_MS  sleep before answering (Ask: before each step)
 // FAKE_CODEX_LOG       append {args, codexHome, apiKey} per call (JSON lines)
@@ -234,13 +234,13 @@ async function ask(question) {
     return result?.content?.map((c) => c.text).join('\n') || '';
   };
   event({ type: 'item.completed', item: { id: 'item_0', type: 'agent_message', text: `Tools: ${offered.join(', ')}. Looking in the wiki.` } });
-  if (modes.has('ask-write')) await call('wiki_log', { app: 'fake', title: 'should not be possible' });
+  if (modes.has('ask-write')) await call('context_log', { app: 'fake', title: 'should not be possible' });
   const words = question.toLowerCase().match(/[a-z0-9-]{4,}/g) || [];
-  const found = await call('wiki_search', { query: words.join(' ') });
+  const found = await call('context_search', { query: words.join(' ') });
   const target = found.match(/\(read: "([^"]+)"/)?.[1];
   let line = '';
   if (target) {
-    const text = await call('wiki_read', { target });
+    const text = await call('context_read', { target });
     line = text.split('\n').find((l) => !l.startsWith('File:') && words.some((w) => l.toLowerCase().includes(w)) && !/^(title|summary|tags):/.test(l)) || '';
   }
   await client.close();

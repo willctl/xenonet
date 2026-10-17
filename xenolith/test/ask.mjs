@@ -155,26 +155,26 @@ function snapshot(dir) {
 }
 
 describe('the read-only server (the agent’s only tools)', { timeout: 30_000 }, () => {
-  test('offers wiki_search and wiki_read only, answers them, and writes nothing to the wiki', async () => {
+  test('offers context_search and context_read only, answers them, and writes nothing to the wiki', async () => {
     const W = makeWiki('readonly');
     const before = snapshot(W.wikiDir);
     const c = new Client({ name: 'codex-mcp-client', version: 'test' });
     await c.connect(new StdioClientTransport({ ...srvT(runtime, '--read-only'), env: { ...W.env, XENOLITH_PROCESS: 'ask', XENOLITH_ASK: 'test-ask' }, stderr: 'pipe' }));
     try {
-      assert.deepEqual((await c.listTools()).tools.map((t) => t.name).sort(), ['wiki_read', 'wiki_search']);
-      const s = await c.callTool({ name: 'wiki_search', arguments: { query: 'logon task' } });
+      assert.deepEqual((await c.listTools()).tools.map((t) => t.name).sort(), ['context_read', 'context_search']);
+      const s = await c.callTool({ name: 'context_search', arguments: { query: 'logon task' } });
       assert.match(s.content[0].text, /pages\/alpha\.md - Alpha \[project\] \(read: "alpha"/);
-      const r = await c.callTool({ name: 'wiki_read', arguments: { target: 'alpha' } });
+      const r = await c.callTool({ name: 'context_read', arguments: { target: 'alpha' } });
       assert.match(r.content[0].text, /^File: pages\/alpha\.md/);
-      const w = await c.callTool({ name: 'wiki_log', arguments: { app: 'x', title: 'nope' } }).catch((e) => ({ isError: true, content: [{ text: e.message }] }));
-      assert.equal(w.isError, true, 'wiki_log is not there to call');
-      assert.match(w.content[0].text, /wiki_log|not found/i);
+      const w = await c.callTool({ name: 'context_log', arguments: { app: 'x', title: 'nope' } }).catch((e) => ({ isError: true, content: [{ text: e.message }] }));
+      assert.equal(w.isError, true, 'context_log is not there to call');
+      assert.match(w.content[0].text, /context_log|not found/i);
     } finally {
       await c.close();
     }
     assert.deepEqual(snapshot(W.wikiDir), before, 'no skeleton, lock, index or note was written');
     const lines = requestLog(W.logs).filter((l) => l.kind === 'tool');
-    assert.deepEqual(lines.map((l) => [l.proc, l.tool, l.ask]), [['ask', 'wiki_search', 'test-ask'], ['ask', 'wiki_read', 'test-ask']]);
+    assert.deepEqual(lines.map((l) => [l.proc, l.tool, l.ask]), [['ask', 'context_search', 'test-ask'], ['ask', 'context_read', 'test-ask']]);
   });
 });
 
@@ -214,14 +214,14 @@ describe('Ask end to end: the window, the service and the curator', { timeout: 1
     const a = await api.settle(r.json.id);
     assert.equal(a.status, 'done', JSON.stringify(a));
     const thought = a.events.find((e) => e.type === 'thought');
-    assert.match(thought.text, /^Tools: wiki_read, wiki_search\./, 'the agent was offered exactly the two read tools');
+    assert.match(thought.text, /^Tools: context_read, context_search\./, 'the agent was offered exactly the two read tools');
     const tools = a.events.filter((e) => e.type === 'tool');
-    assert.deepEqual(tools.map((e) => [e.tool, e.status]), [['wiki_search', 'running'], ['wiki_search', 'done'], ['wiki_read', 'running'], ['wiki_read', 'done']]);
+    assert.deepEqual(tools.map((e) => [e.tool, e.status]), [['context_search', 'running'], ['context_search', 'done'], ['context_read', 'running'], ['context_read', 'done']]);
     const search = tools[1];
     assert.equal(search.args.query, 'what tray logon task called');
     assert.ok(search.count >= 1);
     assert.deepEqual(search.hits[0], { target: 'alpha', kind: 'page', title: 'Alpha', snippet: 'The tray logon task is called XenolithTray in Task Scheduler.' });
-    assert.deepEqual({ ...tools[3], at: 0 }, { at: 0, type: 'tool', id: tools[3].id, tool: 'wiki_read', args: { target: 'alpha' }, status: 'done', target: 'alpha', kind: 'page', title: 'Alpha', chars: tools[3].chars });
+    assert.deepEqual({ ...tools[3], at: 0 }, { at: 0, type: 'tool', id: tools[3].id, tool: 'context_read', args: { target: 'alpha' }, status: 'done', target: 'alpha', kind: 'page', title: 'Alpha', chars: tools[3].chars });
     assert.equal(a.events.at(-1).type, 'answered');
     assert.match(a.result.answer, /XenolithTray/);
     assert.equal(a.result.found, true);
@@ -234,7 +234,7 @@ describe('Ask end to end: the window, the service and the curator', { timeout: 1
     // The request log ties the agent's tool calls to the question.
     const log = requestLog(W.logs);
     const calls = log.filter((l) => l.kind === 'tool' && l.ask === r.json.id);
-    assert.deepEqual(calls.map((l) => [l.proc, l.tool, l.result]), [['ask', 'wiki_search', 'ok'], ['ask', 'wiki_read', 'ok']]);
+    assert.deepEqual(calls.map((l) => [l.proc, l.tool, l.result]), [['ask', 'context_search', 'ok'], ['ask', 'context_read', 'ok']]);
     assert.ok(log.some((l) => l.kind === 'ask' && l.event === 'start' && l.ask === r.json.id && l.question === 'What is the tray logon task called?'));
     const done = log.find((l) => l.kind === 'ask' && l.event === 'done' && l.ask === r.json.id);
     assert.equal(done.result, 'ok');
@@ -274,14 +274,14 @@ describe('Ask end to end: the window, the service and the curator', { timeout: 1
     assert.equal((await api.ask('More?', '2020-01-01_00-00-00-000-abcdef')).status, 400, 'an unknown parent');
   });
 
-  test('the agent cannot write: wiki_log is not even offered, and nothing reaches the inbox', async () => {
+  test('the agent cannot write: context_log is not even offered, and nothing reaches the inbox', async () => {
     W.setMode('ask-write');
     const a = await api.settle((await api.ask('What is the tray logon task called?')).json.id);
     assert.equal(a.status, 'done');
-    const write = a.events.find((e) => e.type === 'tool' && e.tool === 'wiki_log' && e.status !== 'running');
+    const write = a.events.find((e) => e.type === 'tool' && e.tool === 'context_log' && e.status !== 'running');
     assert.equal(write.status, 'error');
     assert.ok(!fs.existsSync(path.join(W.wikiDir, 'inbox')) || fs.readdirSync(path.join(W.wikiDir, 'inbox')).length === 0);
-    assert.ok(!requestLog(W.logs).some((l) => l.tool === 'wiki_log'));
+    assert.ok(!requestLog(W.logs).some((l) => l.tool === 'context_log'));
   });
 
   test('Stop: a running question is stopped and says so', async () => {

@@ -118,7 +118,7 @@ for (const mode of ['stdio', 'http']) {
     test('server instructions include the lead-in and the protocol', () => {
       for (const c of [claude, chatgpt]) {
         const ins = c.getInstructions();
-        assert.match(ins, /Call wiki_start once at the beginning of EVERY conversation/);
+        assert.match(ins, /Call context_start once at the beginning of EVERY conversation/);
         assert.ok(ins.includes(bundledProtocol.trim()), 'instructions contain PROTOCOL.md');
         assert.ok(ins.includes(wikiDir.replace(/\\/g, '/')), 'instructions name the wiki folder');
       }
@@ -127,10 +127,17 @@ for (const mode of ['stdio', 'http']) {
     test('exactly the 5 tools exist, with readOnly annotations', async () => {
       const { tools } = await claude.listTools();
       const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
-      assert.deepEqual(Object.keys(byName).sort(), ['wiki_log', 'wiki_read', 'wiki_search', 'wiki_start', 'wiki_upsert_page']);
-      for (const n of ['wiki_start', 'wiki_search', 'wiki_read']) assert.equal(byName[n].annotations?.readOnlyHint, true, n);
-      for (const n of ['wiki_log', 'wiki_upsert_page']) assert.equal(byName[n].annotations?.readOnlyHint, false, n);
-      assert.match(byName.wiki_start.description, /^ALWAYS call this once at the start of every conversation/);
+      assert.deepEqual(Object.keys(byName).sort(), ['context_log', 'context_read', 'context_search', 'context_start', 'context_upsert_page']);
+      for (const n of ['context_start', 'context_search', 'context_read']) assert.equal(byName[n].annotations?.readOnlyHint, true, n);
+      for (const n of ['context_log', 'context_upsert_page']) assert.equal(byName[n].annotations?.readOnlyHint, false, n);
+      assert.match(byName.context_start.description, /^ALWAYS call this once at the start of every conversation/);
+    });
+
+    test('the agent-wiki names (wiki_*) still answer for one release, unlisted', { skip: IMPL !== 'rust' && 'the Rust programs only' }, async () => {
+      const { tools } = await claude.listTools();
+      assert.ok(!tools.some((t) => t.name.startsWith('wiki_')), 'old names are not listed');
+      assert.match(await ok(claude, 'wiki_start', { app: 'claude-desktop', topic: 'anything' }), /# Xenolith protocol/);
+      assert.match(await ok(claude, 'wiki_search', { query: 'anything' }), /^No results|result\(s\)/);
     });
 
     test('the wiki skeleton is created', () => {
@@ -144,8 +151,8 @@ for (const mode of ['stdio', 'http']) {
       assert.match(fs.readFileSync(path.join(wikiDir, 'index.md'), 'utf8'), /GENERATED.*Do not edit/);
     });
 
-    test('wiki_start works on an empty wiki', async () => {
-      const text = await ok(claude, 'wiki_start', { app: 'claude-desktop', topic: 'anything' });
+    test('context_start works on an empty wiki', async () => {
+      const text = await ok(claude, 'context_start', { app: 'claude-desktop', topic: 'anything' });
       assert.match(text, /\(no pages yet\)/);
       assert.match(text, /# Xenolith protocol/);
       assert.match(text, /Now: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}/);
@@ -153,7 +160,7 @@ for (const mode of ['stdio', 'http']) {
     });
 
     test('page creation writes frontmatter and LF only, even from CRLF input', async () => {
-      await ok(claude, 'wiki_upsert_page', {
+      await ok(claude, 'context_upsert_page', {
         app: 'Claude Desktop',
         title: 'Atlas',
         slug: 'atlas',
@@ -181,7 +188,7 @@ for (const mode of ['stdio', 'http']) {
     });
 
     test('a log written by the other client shows up in search', async () => {
-      const r = await ok(chatgpt, 'wiki_log', {
+      const r = await ok(chatgpt, 'context_log', {
         app: 'chatgpt-desktop',
         title: 'Fixed Atlas docker networking',
         body: 'Containers now share the atlas_net bridge network.\r\nRestarted with docker compose up -d.',
@@ -191,49 +198,49 @@ for (const mode of ['stdio', 'http']) {
       assert.match(r, /Logged to log\/\d{4}\/\d{4}-\d{2}-\d{2}\.md/);
       const log = fs.readFileSync(todayLog, 'utf8');
       assert.match(log, /^## \d{2}:\d{2} · chatgpt-desktop · Fixed Atlas docker networking\n\ntags: atlas, docker {2}\npages: \[\[atlas\]\]\n\nContainers now share/m);
-      const hits = await ok(claude, 'wiki_search', { query: 'bridge network' });
+      const hits = await ok(claude, 'context_search', { query: 'bridge network' });
       assert.ok(hits.includes(`log/${today.slice(0, 4)}/${today}.md`), hits);
       assert.match(hits, /> \[\d{2}:\d{2} · chatgpt-desktop · Fixed Atlas docker networking\] Containers now share the atlas_net bridge network/);
-      const pagesOnly = await ok(claude, 'wiki_search', { query: 'docker', scope: 'pages' });
+      const pagesOnly = await ok(claude, 'context_search', { query: 'docker', scope: 'pages' });
       assert.match(pagesOnly, /pages\/atlas\.md/);
       assert.ok(!pagesOnly.includes('log/'), pagesOnly);
-      assert.match(await ok(claude, 'wiki_search', { query: 'zebra unicorn' }), /No results/);
+      assert.match(await ok(claude, 'context_search', { query: 'zebra unicorn' }), /No results/);
     });
 
-    test('search cites the section that matched; wiki_read opens just that section; date and app filters', { skip: IMPL !== 'rust' && 'the Rust programs only' }, async () => {
+    test('search cites the section that matched; context_read opens just that section; date and app filters', { skip: IMPL !== 'rust' && 'the Rust programs only' }, async () => {
       // M5: a log entry is a section of its day, read as "<date>#<anchor>".
-      const hits = await ok(claude, 'wiki_search', { query: 'atlas_net bridge' });
+      const hits = await ok(claude, 'context_search', { query: 'atlas_net bridge' });
       const m = hits.match(new RegExp(`\\(read: "(${today}#[a-z0-9-]+)"`));
       assert.ok(m, hits);
       assert.match(hits, new RegExp(`log ${today} › \\d{2}:\\d{2} · chatgpt-desktop · Fixed Atlas docker networking`));
-      const one = await ok(claude, 'wiki_read', { target: m[1] });
+      const one = await ok(claude, 'context_read', { target: m[1] });
       assert.match(one, new RegExp(`^File: log/\\d{4}/${today}\\.md#${m[1].split('#')[1]}\\n\\n# ${today}\\n\\n## \\d{2}:\\d{2} · chatgpt-desktop · Fixed Atlas docker networking\\n\\ntags:`));
-      assert.equal(await ok(claude, 'wiki_read', { target: today, section: m[1].split('#')[1] }), one, 'the same as a section argument');
-      const bad = await call(claude, 'wiki_read', { target: `${today}#no-such-entry` });
+      assert.equal(await ok(claude, 'context_read', { target: today, section: m[1].split('#')[1] }), one, 'the same as a section argument');
+      const bad = await call(claude, 'context_read', { target: `${today}#no-such-entry` });
       assert.ok(bad.isError && /No section "no-such-entry".*Its sections: /.test(bad.text), bad.text);
       // Filters: dates around today keep it; a range before today, or another app, leave it out.
-      assert.match(await ok(claude, 'wiki_search', { query: 'bridge network', since: today, until: today }), /Fixed Atlas docker networking/);
-      assert.match(await ok(claude, 'wiki_search', { query: 'bridge network', until: '2000-01-01' }), /No results/);
-      assert.match(await ok(claude, 'wiki_search', { query: 'bridge network', app: 'codex' }), /No results/);
-      assert.match(await ok(claude, 'wiki_search', { query: 'bridge network', app: 'ChatGPT Desktop' }), /Fixed Atlas docker networking/, 'app names are normalized');
-      const wrong = await call(claude, 'wiki_search', { query: 'x', since: 'yesterday' });
+      assert.match(await ok(claude, 'context_search', { query: 'bridge network', since: today, until: today }), /Fixed Atlas docker networking/);
+      assert.match(await ok(claude, 'context_search', { query: 'bridge network', until: '2000-01-01' }), /No results/);
+      assert.match(await ok(claude, 'context_search', { query: 'bridge network', app: 'codex' }), /No results/);
+      assert.match(await ok(claude, 'context_search', { query: 'bridge network', app: 'ChatGPT Desktop' }), /Fixed Atlas docker networking/, 'app names are normalized');
+      const wrong = await call(claude, 'context_search', { query: 'x', since: 'yesterday' });
       assert.ok(wrong.isError && /pattern/.test(wrong.text), wrong.text);
       // Other wordings in `queries` are searched with the query and fused into one ranking.
-      assert.match(await ok(claude, 'wiki_search', { query: 'zebra quokka marmalade' }), /No results .* try names, the broader topic/);
-      const fused = await ok(claude, 'wiki_search', { query: 'zebra quokka marmalade', queries: ['atlas_net bridge', ''] });
+      assert.match(await ok(claude, 'context_search', { query: 'zebra quokka marmalade' }), /No results .* try names, the broader topic/);
+      const fused = await ok(claude, 'context_search', { query: 'zebra quokka marmalade', queries: ['atlas_net bridge', ''] });
       assert.match(fused, /result\(s\) for "zebra quokka marmalade" and 1 other wording\(s\):/);
       assert.match(fused, /Fixed Atlas docker networking/);
     });
 
     test('append, then replace, creates exactly one .history file with no colon', async () => {
-      await ok(chatgpt, 'wiki_upsert_page', { app: 'chatgpt-desktop', title: 'Atlas', slug: 'atlas', content: 'Moved dev to Staging.' });
+      await ok(chatgpt, 'context_upsert_page', { app: 'chatgpt-desktop', title: 'Atlas', slug: 'atlas', content: 'Moved dev to Staging.' });
       let raw = fs.readFileSync(path.join(wikiDir, 'pages', 'atlas.md'), 'utf8');
       assert.match(raw, /\n### \d{4}-\d{2}-\d{2} \d{2}:\d{2} \(chatgpt-desktop\)\n\nMoved dev to Staging\.\n$/);
       assert.match(raw, /^updated_by: chatgpt-desktop$/m);
       const histDir = path.join(wikiDir, '.history', 'pages', 'atlas');
       assert.ok(!fs.existsSync(histDir) || fs.readdirSync(histDir).length === 0, 'append keeps no history');
 
-      const r = await ok(claude, 'wiki_upsert_page', {
+      const r = await ok(claude, 'context_upsert_page', {
         app: 'claude-desktop',
         title: 'Atlas',
         slug: 'atlas',
@@ -252,8 +259,8 @@ for (const mode of ['stdio', 'http']) {
       assert.match(fs.readFileSync(todayLog, 'utf8'), /· claude-desktop · Page rewritten: Atlas \[\[atlas\]\]/);
     });
 
-    test("wiki_start shows the index, related hits and both apps' activity", async () => {
-      const text = await ok(chatgpt, 'wiki_start', { app: 'chatgpt-desktop', topic: 'docker networking' });
+    test("context_start shows the index, related hits and both apps' activity", async () => {
+      const text = await ok(chatgpt, 'context_start', { app: 'chatgpt-desktop', topic: 'docker networking' });
       assert.match(text, /## Page index \(1\)\n\n- atlas \[project\] Atlas - Audit app/);
       assert.match(text, /## Related to "docker networking"\n\n1\. /);
       assert.match(text, /chatgpt-desktop · Fixed Atlas docker networking/);
@@ -261,18 +268,18 @@ for (const mode of ['stdio', 'http']) {
       assert.match(text, /You are: chatgpt-desktop\./);
     });
 
-    test('wiki_read works by slug and by date, and refuses paths outside the wiki', async () => {
-      assert.match(await ok(claude, 'wiki_read', { target: 'atlas' }), /^File: pages\/atlas\.md\n\n---\ntitle: Atlas/);
-      assert.match(await ok(claude, 'wiki_read', { target: today }), new RegExp(`^File: log/${today.slice(0, 4)}/${today}\\.md\\n\\n# ${today}`));
-      assert.match(await ok(claude, 'wiki_read', { target: '[[atlas]]' }), /pages\/atlas\.md/);
-      assert.match(await ok(claude, 'wiki_read', { target: 'index.md' }), /# Index/);
-      assert.match(await ok(claude, 'wiki_read', { target: 'PROTOCOL' }), /# Xenolith protocol/);
+    test('context_read works by slug and by date, and refuses paths outside the wiki', async () => {
+      assert.match(await ok(claude, 'context_read', { target: 'atlas' }), /^File: pages\/atlas\.md\n\n---\ntitle: Atlas/);
+      assert.match(await ok(claude, 'context_read', { target: today }), new RegExp(`^File: log/${today.slice(0, 4)}/${today}\\.md\\n\\n# ${today}`));
+      assert.match(await ok(claude, 'context_read', { target: '[[atlas]]' }), /pages\/atlas\.md/);
+      assert.match(await ok(claude, 'context_read', { target: 'index.md' }), /# Index/);
+      assert.match(await ok(claude, 'context_read', { target: 'PROTOCOL' }), /# Xenolith protocol/);
       for (const bad of ['../../etc/passwd', '..\\..\\Windows\\win.ini', path.join(os.homedir(), '.ssh', 'config')]) {
-        const r = await call(claude, 'wiki_read', { target: bad });
+        const r = await call(claude, 'context_read', { target: bad });
         assert.equal(r.isError, true, bad);
         assert.match(r.text, /outside the wiki/, bad);
       }
-      const missing = await call(claude, 'wiki_read', { target: '1999-01-01' });
+      const missing = await call(claude, 'context_read', { target: '1999-01-01' });
       assert.equal(missing.isError, true);
       assert.match(missing.text, /No log entries for 1999-01-01/);
     });
@@ -300,19 +307,19 @@ for (const mode of ['stdio', 'http']) {
         'api key assignment': j('api_key', '=', 'abc123def456ghi789'),
       };
       for (const [label, s] of Object.entries(secrets)) {
-        const r = await call(chatgpt, 'wiki_log', { app: 'chatgpt-desktop', title: `Secret test ${label}`, body: `value ${s} end` });
+        const r = await call(chatgpt, 'context_log', { app: 'chatgpt-desktop', title: `Secret test ${label}`, body: `value ${s} end` });
         assert.equal(r.isError, true, `${label} should be refused`);
         assert.match(r.text, /Refused: .*Record WHERE the secret lives instead/, label);
       }
-      assert.equal((await call(claude, 'wiki_upsert_page', { app: 'claude-desktop', title: 'Keys', content: `key ${secrets.ghp}` })).isError, true);
-      assert.equal((await call(claude, 'wiki_log', { app: 'claude-desktop', title: `Rotated ${secrets.aws}` })).isError, true);
+      assert.equal((await call(claude, 'context_upsert_page', { app: 'claude-desktop', title: 'Keys', content: `key ${secrets.ghp}` })).isError, true);
+      assert.equal((await call(claude, 'context_log', { app: 'claude-desktop', title: `Rotated ${secrets.aws}` })).isError, true);
 
       const fine = [
         'the token refreshes every 8 hours',
         'Build 20261001134205123456 passed; artifact 4729381047561029384756 uploaded',
         "API key is in the 1Password vault 'Work'",
       ];
-      for (const s of fine) await ok(chatgpt, 'wiki_log', { app: 'chatgpt-desktop', title: 'Fine prose', body: s });
+      for (const s of fine) await ok(chatgpt, 'context_log', { app: 'chatgpt-desktop', title: 'Fine prose', body: s });
       const log = fs.readFileSync(todayLog, 'utf8');
       assert.ok(!log.includes('Secret test'), 'no refused entry landed');
       for (const s of Object.values(secrets)) assert.ok(!log.includes(s));
@@ -320,10 +327,10 @@ for (const mode of ['stdio', 'http']) {
       assert.ok(!fs.existsSync(path.join(wikiDir, 'pages', 'keys.md')));
     });
 
-    test('20 concurrent wiki_log calls split across both clients all land', async () => {
+    test('20 concurrent context_log calls split across both clients all land', async () => {
       const titles = Array.from({ length: 20 }, (_, i) => `Concurrent entry ${String(i).padStart(2, '0')}`);
       const results = await Promise.all(
-        titles.map((title, i) => call(i % 2 ? chatgpt : claude, 'wiki_log', { app: i % 2 ? 'chatgpt-desktop' : 'claude-desktop', title })),
+        titles.map((title, i) => call(i % 2 ? chatgpt : claude, 'context_log', { app: i % 2 ? 'chatgpt-desktop' : 'claude-desktop', title })),
       );
       for (const r of results) assert.equal(r.isError, false, r.text);
       const log = fs.readFileSync(todayLog, 'utf8');
@@ -387,10 +394,10 @@ function runHook(hookEnv, { payload } = {}) {
   });
 }
 
-const FALLBACK_RE = /installed but could not be read just now; call wiki_start if the tools are available/;
+const FALLBACK_RE = /installed but could not be read just now; call context_start if the tools are available/;
 
 describe('the Stop hook nudge (M7, opt-in)', { skip: IMPL !== 'rust' && 'the Rust programs only' }, () => {
-  test('once per session, when the transcript is long and has no wiki_log call', async () => {
+  test('once per session, when the transcript is long and has no context_log call', async () => {
     const home = path.join(tmp, 'nudge-home');
     fs.mkdirSync(home, { recursive: true });
     const stopEnv = { ...process.env, XENOLITH_HOME: home, XENOLITH_DIR: path.join(tmp, 'nudge-wiki') };
@@ -405,7 +412,7 @@ describe('the Stop hook nudge (M7, opt-in)', { skip: IMPL !== 'rust' && 'the Rus
       });
     const line = (o) => `${JSON.stringify(o)}\n`;
     const long = path.join(tmp, 'long.jsonl');
-    fs.writeFileSync(long, Array.from({ length: 40 }, (_, i) => line({ type: i % 2 ? 'assistant' : 'user', message: { content: `turn ${i}, which mentions wiki_log in passing` } })).join(''));
+    fs.writeFileSync(long, Array.from({ length: 40 }, (_, i) => line({ type: i % 2 ? 'assistant' : 'user', message: { content: `turn ${i}, which mentions context_log in passing` } })).join(''));
     const logged = path.join(tmp, 'logged.jsonl');
     fs.writeFileSync(logged, fs.readFileSync(long, 'utf8') + line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'mcp__xenolith__wiki_log', input: {} }] } }));
     const short = path.join(tmp, 'short.jsonl');
@@ -421,7 +428,7 @@ describe('the Stop hook nudge (M7, opt-in)', { skip: IMPL !== 'rust' && 'the Rus
     assert.ok(r.ms < 3000, `answers without waiting for stdin to close (${r.ms} ms)`);
     const out = JSON.parse(r.out);
     assert.equal(out.decision, 'block');
-    assert.match(out.reason, /wiki_log/);
+    assert.match(out.reason, /context_log/);
     assert.equal((await stop({ session_id: 's2', transcript_path: long })).out, '', 'never twice in a session');
     assert.equal((await stop({ session_id: 's3', transcript_path: long, stop_hook_active: true })).out, '', 'not while a Stop hook already continued the turn');
     assert.equal((await stop({ session_id: 's4', transcript_path: logged })).out, '', 'a session that logged is left alone');
@@ -432,14 +439,14 @@ describe('the Stop hook nudge (M7, opt-in)', { skip: IMPL !== 'rust' && 'the Rus
 function describeHookTests({ env, getClient }) {
   test('the hook emits valid JSON with pages and headlines', async () => {
     // Newest event: a compact page-change line, after the 20 full entries above.
-    await ok(getClient(), 'wiki_upsert_page', { app: 'claude-code', title: 'Hook check', type: 'reference', content: 'x' });
+    await ok(getClient(), 'context_upsert_page', { app: 'claude-code', title: 'Hook check', type: 'reference', content: 'x' });
     const payload = JSON.stringify({ session_id: 'test', hook_event_name: 'SessionStart', source: 'startup' });
     const r = await runHook(env, { payload });
     assert.equal(r.code, 0);
     const json = JSON.parse(r.out);
     assert.equal(json.hookSpecificOutput.hookEventName, 'SessionStart');
     const ctx = json.hookSpecificOutput.additionalContext;
-    assert.match(ctx, /Call wiki_start once before your first substantive reply/);
+    assert.match(ctx, /Call context_start once before your first substantive reply/);
     assert.match(ctx, /Pages \(2\): atlas, hook-check/);
     const headlines = ctx.split('\n').filter((l) => l.startsWith('- '));
     assert.equal(headlines.length, 15, 'capped at 15 headlines');

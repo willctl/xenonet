@@ -5,7 +5,7 @@
 //!   xenolith serve --http [--port N]   Streamable HTTP on 127.0.0.1 (the service)
 //!       --parent-stdin                   exit gracefully when stdin closes (the service wrapper's stop signal)
 //!       --exit-on-upgrade                exit (code 75) when an install replaces this program (launchd, systemd)
-//!   xenolith serve --read-only         stdio with wiki_search and wiki_read only, writing nothing
+//!   xenolith serve --read-only         stdio with context_search and context_read only, writing nothing
 //!   xenolith serve --init              create the wiki skeleton, print {"ok":true,...}, exit
 //!   xenolith hook [stop]               the SessionStart hook (with "stop": the opt-in Stop hook)
 //!   xenolith curator [...]             the curator and the Ask worker (see curator.rs)

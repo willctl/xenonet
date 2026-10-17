@@ -279,7 +279,7 @@ describe('tray app', { skip, timeout: 120_000 }, () => {
     const client = new Client({ name: 'tray-test', version: '1' });
     await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)));
     try {
-      const r = await client.callTool({ name: 'wiki_log', arguments: { app: 'tray-test', title: 'Filed by the hosted curator', body: 'x', pages: ['tray'] } });
+      const r = await client.callTool({ name: 'context_log', arguments: { app: 'tray-test', title: 'Filed by the hosted curator', body: 'x', pages: ['tray'] } });
       assert.ok(!r.isError, r.content[0].text);
       const page = path.join(wikiDir, 'pages', 'tray.md');
       for (let i = 0; i < 150 && !fs.existsSync(page); i++) await sleep(200);
@@ -519,7 +519,7 @@ describe('tray app (Rust)', { skip: IMPL !== 'rust', timeout: 180_000 }, () => {
     const curatorLog = path.join(home, 'logs', 'curator.log');
     const clog = () => (fs.existsSync(curatorLog) ? fs.readFileSync(curatorLog, 'utf8') : '');
     try {
-      const r = await client.callTool({ name: 'wiki_log', arguments: { app: 'tray-test', title: 'Filed by the hosted curator', body: 'x', pages: ['tray-rust'] } });
+      const r = await client.callTool({ name: 'context_log', arguments: { app: 'tray-test', title: 'Filed by the hosted curator', body: 'x', pages: ['tray-rust'] } });
       assert.ok(!r.isError, r.content[0].text);
       const page = path.join(wikiDir, 'pages', 'tray-rust.md');
       for (let i = 0; i < 150 && !fs.existsSync(page); i++) await sleep(200);
