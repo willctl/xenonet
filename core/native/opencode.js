@@ -107,8 +107,11 @@ export class OpenCodeSessions extends Block {
       const got = readDb(this.file, { sinceMs: now - DAY_MS, editsSinceMs: now - EDIT_KEEP_MS, files: this.files, ...(this.open ? { open: this.open } : {}) });
       this.fileState = got.state;
       this.version = got.version;
+      // A read that failed once (the database busy mid-write, say) keeps
+      // the last good one, so sessions don't flicker off the map; a
+      // database that's gone or can't be opened drops them.
       if (got.state !== "ok") {
-        this.runs.clear();
+        if (got.state !== "unreadable") this.runs.clear();
         return this.ok(now), this;
       }
       const runs = new Map();

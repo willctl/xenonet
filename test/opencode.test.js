@@ -134,6 +134,25 @@ test("the last half hour's edits are read even after a busy day, and a renamed c
   }
 });
 
+test("a read that fails once keeps the sessions it had; a database that's gone drops them", () => {
+  const w = setup(world());
+  try {
+    const o = new OpenCodeSessions({ file: w.file }).read(NOW);
+    assert.equal(o.sessions().length, 2);
+    o.open = () => ({ prepare: () => { throw new Error("database is locked"); }, close() {} });
+    o.read(NOW + 8e3);
+    assert.equal(o.status().state, "unreadable");
+    assert.equal(o.sessions().length, 2, "busy mid-write: kept");
+    o.open = undefined;
+    fs.rmSync(w.file);
+    o.read(NOW + 16e3);
+    assert.equal(o.status().state, "missing");
+    assert.equal(o.sessions().length, 0);
+  } finally {
+    w.done();
+  }
+});
+
 test("the database is where OpenCode keeps it", () => {
   assert.equal(opencodeDbPath({ home: "/home/ada", env: {} }), "/home/ada/.local/share/opencode/opencode.db");
   assert.equal(opencodeDbPath({ home: "/home/ada", env: { XDG_DATA_HOME: "/data" } }), "/data/opencode/opencode.db");
