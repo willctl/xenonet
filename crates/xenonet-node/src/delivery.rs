@@ -229,3 +229,228 @@ impl PolicyCore {
         self.run(&env, &deps, |p, c| p.read_audit(c, limit)).map(JsArg)
     }
 }
+
+// ----- channels -----
+
+#[napi]
+pub struct ChannelsCore {
+    inner: RefCell<xenonet_engine::delivery::channel::Channels>,
+}
+
+fn now_of(env: &Env, deps: &Object) -> impl FnMut() -> f64 {
+    let mut c = SyncCalls::new(env, deps);
+    move || {
+        use xenonet_engine::peer::Calls;
+        match c.call("", "now", vec![]) {
+            Ok(Arg::Num(n)) => n,
+            _ => f64::NAN,
+        }
+    }
+}
+
+#[napi]
+impl ChannelsCore {
+    #[napi(constructor)]
+    pub fn new() -> Self {
+        ChannelsCore { inner: RefCell::new(Default::default()) }
+    }
+
+    #[napi]
+    pub fn live(&self, env: Env, deps: Object, agent: String, waiting: bool) -> Result<bool> {
+        let mut now = now_of(&env, &deps);
+        let out = self.inner.try_borrow().map_err(|_| busy())?.live(&agent, waiting, &mut now);
+        settle(&env);
+        Ok(out)
+    }
+    /// What waited for this poll, or null to wait.
+    #[napi]
+    pub fn poll(&self, agent: String, now: f64) -> Result<JsArg> {
+        Ok(JsArg(self.inner.try_borrow_mut().map_err(|_| busy())?.poll(&agent, now).map_or(Arg::Null, Arg::List)))
+    }
+    #[napi]
+    pub fn polled(&self, agent: String, now: f64) -> Result<()> {
+        self.inner.try_borrow_mut().map_err(|_| busy())?.polled(&agent, now);
+        Ok(())
+    }
+    /// "not-live", "waiter" or "queued".
+    #[napi]
+    pub fn push(&self, env: Env, deps: Object, agent: String, item: JsArg, waiting: bool) -> Result<String> {
+        use xenonet_engine::delivery::channel::Push;
+        let mut now = now_of(&env, &deps);
+        let out = self.inner.try_borrow_mut().map_err(|_| busy())?.push(&agent, item.0, waiting, &mut now);
+        settle(&env);
+        Ok(match out {
+            Push::NotLive => "not-live",
+            Push::Waiter => "waiter",
+            Push::Queued => "queued",
+        }
+        .into())
+    }
+}
+
+#[napi(js_name = "channelWaitMs")]
+pub fn channel_wait_ms(wait: f64) -> f64 {
+    xenonet_engine::delivery::channel::Channels::wait_ms(wait)
+}
+
+// ----- tmux -----
+
+use crate::machine::{start, AskCalls, Machine};
+use std::sync::Arc;
+use xenonet_engine::delivery::tmux::Tmux;
+
+#[napi]
+pub struct TmuxCore {
+    inner: Arc<Tmux>,
+}
+
+#[napi]
+impl TmuxCore {
+    #[napi(constructor)]
+    pub fn new(off: bool) -> Self {
+        TmuxCore { inner: Arc::new(Tmux { off }) }
+    }
+    #[napi]
+    pub fn locate(&self, pid: JsArg) -> Machine {
+        let t = self.inner.clone();
+        start(move |asker| t.locate(&mut AskCalls(asker), &pid.0).map(|p| p.map_or(Arg::Null, |(p, pid)| p.to_arg(Some(pid)))))
+    }
+    #[napi]
+    pub fn deliver(&self, pid: JsArg, text: JsArg) -> Machine {
+        let t = self.inner.clone();
+        start(move |asker| t.deliver(&mut AskCalls(asker), &pid.0, &text.0))
+    }
+}
+
+// ----- resume -----
+
+use xenonet_engine::delivery::resume;
+
+#[napi(js_name = "resumeEnv")]
+pub fn resume_env(entries: JsArg) -> JsArg {
+    let pairs = list(entries.0).into_iter().map(|e| {
+        let e = list(e);
+        (xenonet_engine::store::js_text(&e.first().cloned().unwrap_or(Arg::Undef)), e.get(1).cloned().unwrap_or(Arg::Undef))
+    });
+    JsArg(Arg::List(resume::resume_env(pairs.collect()).into_iter().map(|(k, v)| Arg::List(vec![Arg::text(k), v])).collect()))
+}
+
+#[napi(js_name = "resumeCommand")]
+pub fn resume_command(agent: JsArg, settings: JsArg) -> JsArg {
+    JsArg(resume::resume_command(&agent.0, &settings.0).map_or(Arg::Null, |(c, a)| Arg::List(vec![Arg::text(c), Arg::List(a)])))
+}
+
+/// { why } it can't, or { cmd: [command, args] }.
+#[napi(js_name = "resumePlan")]
+pub fn resume_plan(env: Env, deps: Object, agent: JsArg, settings: JsArg, cwd: JsArg, windows: bool) -> Result<JsArg> {
+    let out = resume::plan(&mut SyncCalls::new(&env, &deps), &agent.0, &settings.0, &cwd.0, windows);
+    let out = out.map_err(|t| rethrow(&env, t))?;
+    settle(&env);
+    Ok(JsArg(match out {
+        Err(why) => Arg::Obj(vec![("why".into(), Arg::text(why))]),
+        Ok((c, a)) => Arg::Obj(vec![("cmd".into(), Arg::List(vec![Arg::text(c), Arg::List(a)]))]),
+    }))
+}
+
+// ----- setup -----
+
+use xenonet_engine::delivery::setup;
+
+#[napi(js_name = "setupNewer")]
+pub fn setup_newer(v: JsArg, min: Vec<f64>) -> bool {
+    setup::newer(&v.0, &min)
+}
+
+#[napi(js_name = "setupServerName")]
+pub fn setup_server_name(port: JsArg) -> String {
+    setup::server_name(&port.0)
+}
+
+#[napi(js_name = "setupListenSettings")]
+pub fn setup_listen_settings(port: JsArg, seconds: JsArg) -> crate::js::Json {
+    crate::js::Json(setup::listen_settings(&port.0, &seconds.0))
+}
+
+#[napi(js_name = "setupWriteListen")]
+pub fn setup_write_listen(env: Env, deps: Object, dir: String, port: JsArg, seconds: JsArg) -> Result<String> {
+    let out = setup::write_listen_settings(&mut SyncCalls::new(&env, &deps), &dir, &port.0, &seconds.0).map_err(|t| rethrow(&env, t))?;
+    settle(&env);
+    Ok(out)
+}
+
+#[napi(js_name = "setupLive")]
+pub fn setup_live(port: JsArg, listen_file: JsArg, home: JsArg) -> Machine {
+    start(move |asker| setup::live_setup(&mut AskCalls(asker), &port.0, &listen_file.0, &home.0).map(|v| crate::args::value_to_arg(&v)))
+}
+
+// ----- opencode -----
+
+use xenonet_engine::delivery::opencode::{self as oc, OpenCode};
+
+#[napi(js_name = "openCodeId")]
+pub fn open_code_id(id: JsArg) -> String {
+    oc::open_code_id(&id.0)
+}
+
+#[napi(js_name = "fromOpenCodeId")]
+pub fn from_open_code_id(id: JsArg) -> String {
+    oc::from_open_code_id(&id.0)
+}
+
+#[napi(js_name = "openCodeParsePs")]
+pub fn open_code_parse_ps(out: String) -> JsArg {
+    JsArg(Arg::List(oc::parse_ps(&out).iter().map(|p| p.to_arg()).collect()))
+}
+
+#[napi(js_name = "openCodeSamePath")]
+pub fn open_code_same_path(a: JsArg, b: JsArg, windows: bool) -> bool {
+    oc::same_path(&a.0, &b.0, windows)
+}
+
+#[napi(js_name = "openCodeProcesses")]
+pub fn open_code_processes(windows: bool) -> Machine {
+    start(move |asker| oc::open_code_processes(&mut AskCalls(asker), windows).map(|ps| Arg::List(ps.iter().map(|p| p.to_arg()).collect())))
+}
+
+#[napi(js_name = "openCodePorts")]
+pub fn open_code_ports(pid: f64, platform: String) -> Machine {
+    start(move |asker| oc::listening_ports(&mut AskCalls(asker), pid, &platform).map(|ps| Arg::List(ps.into_iter().map(Arg::num).collect())))
+}
+
+#[napi]
+pub struct OpenCodeCore {
+    inner: Arc<OpenCode>,
+    windows: bool,
+}
+
+#[napi]
+impl OpenCodeCore {
+    #[napi(constructor)]
+    pub fn new(cache_ms: f64, windows: bool) -> Self {
+        OpenCodeCore { inner: Arc::new(OpenCode::new(cache_ms)), windows }
+    }
+    #[napi]
+    pub fn servers(&self) -> Machine {
+        let o = self.inner.clone();
+        start(move |asker| o.servers(&mut AskCalls(asker)).map(|s| Arg::List(s.iter().map(|s| s.to_arg()).collect())))
+    }
+    #[napi(js_name = "serverFor")]
+    pub fn server_for(&self, id: JsArg) -> Machine {
+        let (o, w) = (self.inner.clone(), self.windows);
+        start(move |asker| o.server_for(&mut AskCalls(asker), &id.0, w).map(|s| s.map_or(Arg::Null, |s| s.to_arg())))
+    }
+    #[napi]
+    pub fn info(&self, id: JsArg) -> Machine {
+        let (o, w) = (self.inner.clone(), self.windows);
+        start(move |asker| o.info(&mut AskCalls(asker), &id.0, w))
+    }
+    #[napi]
+    pub fn forget(&self) {
+        self.inner.forget();
+    }
+    #[napi]
+    pub fn deliver(&self, id: JsArg, text: JsArg) -> Machine {
+        let (o, w) = (self.inner.clone(), self.windows);
+        start(move |asker| o.deliver(&mut AskCalls(asker), &id.0, &text.0, w))
+    }
+}

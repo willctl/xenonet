@@ -515,6 +515,7 @@ place. This table follows it.
 | `core/engine/attest.js` | `xenonet-engine/src/attest.rs` | `engine`, `engine-actors`, `actor-gateway`, `delivery-opencode` pass |
 | `core/engine/connect.js` | `xenonet-engine/src/connect.rs` (the files and the CLIs through the twin) | `engine-connect`, `engine`, `windows-command`, `cli`, `engine-routes` pass |
 | `core/delivery/selector.js`, `usage.js`, `policy.js` | `xenonet-engine/src/delivery/` (the policy's clock, limits and files through the twin) | `delivery-scopes`, `delivery-wake`, `delivery-router`, `delivery-routes`, `delivery-opencode`, `engine` pass |
+| `core/delivery/channel.js`, `tmux.js`, `resume.js`, `setup.js`, `opencode.js` | `xenonet-engine/src/delivery/` (polls, processes, commands, files and HTTP through the twins) | `delivery-router`, `delivery-wake`, `delivery-opencode`, `doctor` pass |
 
 With every twin in place, all 111 test files that reach one pass. The
 twins load in the Node processes a test starts too (a server, the

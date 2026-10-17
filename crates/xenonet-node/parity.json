@@ -232,6 +232,32 @@
         "Text cut by sanitize mid-surrogate-pair ends in U+FFFD where JS kept the lone half."
       ]
     },
+    "core/delivery/channel.js": {
+      "rust": "crates/xenonet-engine/src/delivery/channel.rs",
+      "differences": [
+        "The polls themselves, promises with their timers, are the twin's; an item kept for the next poll comes back as a copy."
+      ]
+    },
+    "core/delivery/tmux.js": {
+      "rust": "crates/xenonet-engine/src/delivery/tmux.rs",
+      "differences": []
+    },
+    "core/delivery/resume.js": {
+      "rust": "crates/xenonet-engine/src/delivery/resume.rs",
+      "differences": [
+        "Starting the resumed turn's process and watching it are the twin's."
+      ]
+    },
+    "core/delivery/setup.js": {
+      "rust": "crates/xenonet-engine/src/delivery/setup.rs",
+      "differences": []
+    },
+    "core/delivery/opencode.js": {
+      "rust": "crates/xenonet-engine/src/delivery/opencode.rs",
+      "differences": [
+        "Commands, files and HTTP are the twin's; a lsof line ends at a line break as JS's m flag has it, but not at U+2028 or U+2029."
+      ]
+    },
     "core/engine/connect.js": {
       "rust": "crates/xenonet-engine/src/connect.rs",
       "differences": [
