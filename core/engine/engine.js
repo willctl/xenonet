@@ -181,8 +181,9 @@ export class Engine extends EventEmitter {
     for (const c of this.store.contacts(since)) if (!c.ended_at) ids.add(c.agent);
     for (const id of this.actors?.engineIds(since) ?? []) ids.add(id);
     const views = await Promise.all([...ids].filter((id) => isAgentId(id) || isActorAgent(id)).map((id) => this.view(id)));
-    // Working agents first, then the most recent; sessions that ended drop out.
-    return views.filter((v) => v.lastActive >= since && !v.ended).sort((a, b) => (b.status === "working") - (a.status === "working") || b.lastActive - a.lastActive);
+    // Working agents first, then the most recent; sessions that ended drop
+    // out, unless you allowed XenoNet to resume one for a message.
+    return views.filter((v) => v.lastActive >= since && (!v.ended || this.delivery?.resumable?.(v))).sort((a, b) => (b.status === "working") - (a.status === "working") || b.lastActive - a.lastActive);
   }
 
   async view(id) {

@@ -1,20 +1,22 @@
 // xenonet live: messages that reach sessions as they're sent, and their
-// controls: pause them all, let XenoNet wake or type into a session, grant an
-// actor's token a scope, and read the audit log (server/routes/delivery.js).
+// controls: pause them all, let XenoNet wake, type into or resume a session,
+// grant an actor's token a scope, and read the audit log
+// (server/routes/delivery.js).
 import { c, print, json, table, Fail } from "../lib/out.js";
 import { need, get, post } from "../../core/client.js";
 
 export const help = `Live delivery puts a message into a session as it's sent, instead of when
 the session next starts a turn: to a session listening after its turn,
 through a Claude Code channel or an OpenCode session's own server, or, with
-your consent, typed into its tmux pane.
+your consent, typed into its tmux pane, or in a turn XenoNet resumes a
+Claude Code or Codex session that has ended for.
 
   xenonet live                         what's paused, granted and allowed, plans used, who's
                                        listening, and the last deliveries
   xenonet live pause | resume          stop every message (and wake) at once, or start again
   xenonet live allow <session> [--hours n] [--remote]
-                                       let XenoNet wake or type into one session (8 hours by
-                                       default); --remote lets actors outside this machine do it
+                                       let XenoNet wake, type into or resume one session (8 hours
+                                       by default); --remote lets actors outside this machine do it
   xenonet live disallow <session>
   xenonet live grant <actor> <scope…> [--hours n]
                                        what an actor's token may see and message, such as
@@ -47,7 +49,7 @@ export async function run(args, flags) {
       print(c.bold("\nListening after a turn"));
       print(table(d.listening.map((l) => [l.agent, `until ${new Date(l.until).toLocaleTimeString()}`]), { indent: 2 }));
     }
-    print(c.bold("\nSessions XenoNet may wake or type into"));
+    print(c.bold("\nSessions XenoNet may wake, type into or resume"));
     const consent = Object.entries(d.consent);
     print(consent.length ? table(consent.map(([id, x]) => [id, `until ${new Date(x.until).toLocaleString()}`, x.remote ? "remote too" : ""]), { indent: 2 }) : c.dim("  none"));
     print(c.bold("\nLast deliveries"));

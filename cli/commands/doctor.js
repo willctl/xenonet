@@ -51,7 +51,7 @@ async function live(flags) {
   print("For OpenCode, its TUI serves what XenoNet posts to only when told where to listen:");
   print(`  ${r.opencodeAlias}`);
   print();
-  print(c.dim("OpenCode sessions and tmux panes take messages only once you allow it, per session: xenonet live allow <session>. xenonet live pause stops everything."));
+  print(c.dim("OpenCode sessions and tmux panes take messages only once you allow it, per session: xenonet live allow <session>. So does a Claude Code or Codex session that has ended, which XenoNet then resumes for a turn to take a message (claude -p --resume, codex exec resume). xenonet live pause stops everything."));
   return r.claude.channels ? 0 : 1;
 }
 

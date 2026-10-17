@@ -28,6 +28,7 @@ import { DeliveryRouter } from "../core/delivery/router.js";
 import { Channels } from "../core/delivery/channel.js";
 import { createOpenCode } from "../core/delivery/opencode.js";
 import { createTmux } from "../core/delivery/tmux.js";
+import { createResume } from "../core/delivery/resume.js";
 import { planUsage } from "../core/delivery/usage.js";
 import { writeListenSettings } from "../core/delivery/setup.js";
 import { actorRoutes, createActorCaller } from "./routes/actors.js";
@@ -265,7 +266,7 @@ engine.on("message", (m) => broadcast("agent-message", m));
 engine.on("message", (m) => actors?.said(m));
 const engineRoute = engineRoutes({ engine, connect, verify, readJson, send, actorCaller, actors, channels });
 // The settings a Claude Code session starts with to listen after its turns
-// (xenonet doctor --live).
+// (xenonet doctor --live), which a resumed turn gets too.
 let listenFile = null;
 if (!config.demo) {
   try {
@@ -280,6 +281,8 @@ const deliveryRouter = new DeliveryRouter({
   channels,
   opencode: createOpenCode(),
   tmux: createTmux(),
+  // Made-up sessions are never resumed.
+  resume: config.demo ? null : createResume({ settings: listenFile }),
   // A provider at 90% of its plan takes no wakes: from the live readings.
   usage: (app) => planUsage({ ...state.live?.limits, claude: state.live?.claudeLimits?.() ?? null }, app),
   notify: ({ agent, title, from }) => {

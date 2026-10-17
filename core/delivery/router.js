@@ -2,17 +2,18 @@
 // fastest way in that's allowed, then whether it arrived.
 //
 //   live       into the session now: its Stop hook listening after a turn,
-//              a Claude Code channel, an OpenCode server's prompt_async, or
-//              typed into its tmux pane
+//              a Claude Code channel, an OpenCode server's prompt_async,
+//              typed into its tmux pane, or a headless resume of a session
+//              whose process has gone
 //   next turn  waits for the session's hooks, as before (when it next starts
 //              a turn, or during the one under way)
 //   notified   nothing picked it up within ackMs, so XenoNet told you
 //
-// Acks: an OpenCode server's 204 is one; a channel or a typed message is
-// acked by the session's next hook after it; a message a listening Stop
-// hook or the hooks hand over, by the engine's "seen". A push with no ack
-// goes back to waiting for the hooks. Actors aren't routed here: they read
-// their inbox.
+// Acks: an OpenCode server's 204 is one; a channel, a typed message or a
+// resumed turn is acked by the session's next hook after it; a message a
+// listening Stop hook or the hooks hand over, by the engine's "seen". A
+// push with no ack goes back to waiting for the hooks. Actors aren't routed
+// here: they read their inbox.
 //
 // Waking a session spends its plan, so every wake is checked against the
 // policy (pause switch, consent, wake budget) first; a message that may not
@@ -24,9 +25,9 @@ export const ACK_MS = 60e3;
 const KEEP = 500;
 
 export class DeliveryRouter extends EventEmitter {
-  constructor({ engine, policy, channels = null, opencode = null, tmux = null, notify = () => {}, usage = () => null, now = () => Date.now(), ackMs = ACK_MS }) {
+  constructor({ engine, policy, channels = null, opencode = null, tmux = null, resume = null, notify = () => {}, usage = () => null, now = () => Date.now(), ackMs = ACK_MS }) {
     super();
-    Object.assign(this, { engine, policy, channels, opencode, tmux, notify, usage, now, ackMs });
+    Object.assign(this, { engine, policy, channels, opencode, tmux, resume, notify, usage, now, ackMs });
     this.records = new Map(); // `${message}|${agent}` → record
     this.timers = new Map();
     engine.on("message", (m) => void this.route(m).catch((err) => this.emit("error", err)));
@@ -40,6 +41,12 @@ export class DeliveryRouter extends EventEmitter {
     return String(id).startsWith("opencode:") && !!this.opencode && this.policy.consented(id);
   }
 
+  // Whether a session that ended can still be messaged: you allowed it, and
+  // a headless resume would start it for the message.
+  resumable(view) {
+    return !!this.resume && !!view?.ended && this.resume.can(view.id) && this.policy.consented(view.id);
+  }
+
   // A wake for a session's listening Stop hook to hand a message over (the
   // engine asks): the same budget as any other wake, spent when allowed.
   wake(from, agent) {
@@ -51,10 +58,11 @@ export class DeliveryRouter extends EventEmitter {
   // How a message from `from` would reach `a`, an agent as the engine lists
   // it, if sent now: for the sender's answer. null when it waits for the hooks.
   way(from, a) {
-    const idle = a.status === "idle";
+    const idle = a.status === "idle" || a.status === "ended";
     if (idle && !this.policy.wakeAllowed(from, a.id, { usage: this.usage(a.app) }).ok) return null;
     if (this.engine.listening?.has(a.id)) return "right away: it's listening for messages";
-    if (a.app === "claude" && idle && this.channels?.live(a.id)) return "right away, through its channel";
+    if (a.app === "claude" && a.status === "idle" && this.channels?.live(a.id)) return "right away, through its channel";
+    if (a.status === "ended" && this.resumable(a) && this.policy.consented(a.id, { remote: String(from).startsWith("actor:") })) return "right away, in a turn XenoNet resumes it for";
     if (a.app === "opencode" && this.opencode && this.policy.consented(a.id, { remote: String(from).startsWith("actor:") })) return "right away, through its OpenCode server";
     return null;
   }
@@ -122,7 +130,7 @@ export class DeliveryRouter extends EventEmitter {
       }
       // 3. Typing into its tmux pane: consent, a sender XenoNet verified with
       // a token or you, and an idle session that isn't waiting on its user.
-      if (this.tmux && idle && !view?.needsYou) {
+      if (this.tmux && idle && !view?.ended && !view?.needsYou) {
         const sender = m.from === "you" || m.from.startsWith("actor:");
         const pid = this.engine.store.contact?.(rec.agent)?.pid ?? null;
         if (!this.policy.consented(rec.agent, { remote: m.from.startsWith("actor:") })) tried.push("tmux: no consent");
@@ -133,6 +141,17 @@ export class DeliveryRouter extends EventEmitter {
           this.policy.audit({ kind: "typed", message: m.id, from: m.from, to: rec.agent, pane: r.where ?? null, ok: r.ok, why: r.why ?? null, text: hashText(m.text) });
           if (r.ok) return success("tmux", { where: r.where });
           tried.push(`tmux: ${r.why}`);
+        }
+      }
+      // 4. A headless resume, for a Claude Code or Codex session whose
+      // process has gone, with your consent: never while it runs.
+      if (this.resume && view?.ended && this.resume.can(rec.agent)) {
+        if (!this.policy.consented(rec.agent, { remote: m.from.startsWith("actor:") })) tried.push("resume: no consent");
+        else {
+          const r = await this.resume.deliver({ agent: rec.agent, cwd: view.cwd, text }).catch((err) => ({ ok: false, why: err.message }));
+          this.policy.audit({ kind: "resumed", message: m.id, from: m.from, to: rec.agent, ok: r.ok, why: r.why ?? null, text: hashText(m.text) });
+          if (r.ok) return success("resume", { where: r.where });
+          tried.push(`resume: ${r.why}`);
         }
       }
     }
@@ -146,10 +165,11 @@ export class DeliveryRouter extends EventEmitter {
     const timer = setTimeout(async () => {
       if (rec.ackedAt) return;
       // Claude Code drops a push on a channel it didn't register (channels
-      // off for the organization, say) without a word, and a typed line can
-      // be lost. With no hook since, the message waits for the hooks again,
-      // so the session's next turn still gets it.
-      if (rec.how === "channel" || rec.how === "tmux") this.engine.store.markUnseen(rec.agent, [m.id]);
+      // off for the organization, say) without a word, a typed line can be
+      // lost, and a resumed turn can fail to start. With no hook since, the
+      // message waits for the hooks again, so the session's next turn still
+      // gets it.
+      if (["channel", "tmux", "resume"].includes(rec.how)) this.engine.store.markUnseen(rec.agent, [m.id]);
       rec.state = "notified";
       this.policy.audit({ kind: "notified", message: m.id, to: rec.agent });
       this.emit("delivery", { ...rec });
