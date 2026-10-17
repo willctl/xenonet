@@ -167,6 +167,20 @@ What crosses the boundary, and how:
   says what to read next, and whoever runs it does the reading: tokio in
   the binary, `fs.promises` in a twin. The decisions the tests check are
   Rust's, and the JS around them only reads files.
+- **Machines.** Where the JS awaits in the middle of its decisions (the
+  process lookups, the engine's checks of who sent a request, a store or
+  a command a test fakes), the Rust is plain code against a trait for what
+  it reads. Behind a twin it runs on a thread of its own
+  (`crates/xenonet-node/src/machine.rs`): each time it needs something it
+  asks and waits, and the twin answers, awaiting what it must
+  (`js/drive.js`). JS waits only while Rust computes between questions.
+  An answer that isn't a promise goes back at once and one that is costs
+  one await, as the JS's own call or await did, so other work runs between
+  the same steps it ran between in the JS. The collaborators a module was
+  given (the actors, a store, a test's fake) are called by name when the
+  JS called them (`xenonet-engine/src/peer.rs`), so what stands in their
+  place then is what's called.
+  In the binary the same code runs against the system itself.
 - **Events.** A block's EventEmitter stays in its twin. Rust returns each
   state change, and the twin emits it.
 
@@ -521,6 +535,25 @@ place. This table follows it.
 | `core/private-file.js`, `core/actors/token-file.js` (but the doctor's look in repos) | `xenonet-base/src/private_file.rs`, `xenonet-actors/src/token_file.rs` | `private-file`, `token-files`, `cli-actor`, `mcp-actor`, `hosts-config` pass, the Windows ACL cases included |
 | `xenonet mcp` for sessions (`mcp/xenonet.js`), a prototype | `xenonet-mcp`, on rmcp, Rust 1.88+ | Its own stdio tests; the same answers as the JS servers to the probe and the handshake |
 | `xenonet hook` (`cli/commands/hook.js`) | `xenonet-cli`, the `xenonet` binary | `launcher`'s hook cases, as Rust tests of the binary |
+| `core/procs.js` | `xenonet-engine/src/procs.rs`, its lookups a machine the twin answers with the commands' output | `procs` and the 20 other files that reach it pass |
+| `core/secret-store.js` | `xenonet-actors/src/secret_store.rs` (the store's program still runs in the twin) | `assistant-tunnels`, `actor-wake`, `decide`, `costs`, `integrations`, `spotify` pass |
+| `core/actors/products.js`, `detail.js`, `names.js`, `key.js`, `limits.js`, `handoff.js`, `adapters.js`, `spend.js` | `xenonet-engine/src/products.rs`; `xenonet-actors/src/detail.rs`, `names.rs` (on unicode-normalization), `key.rs`, `limits.rs`, `handoff.rs`, `adapters.rs`, `spend.rs` | `actor-names`, `actor-limits`, `actor-spend`, `actors`, `actor-gateway`, `actor-routes`, `gateway-tunnel`, `assistant-connections`, `server` pass |
+| `core/engine/store.js` | `xenonet-engine/src/store.rs`, on `sql.rs` (node:sqlite's binding and rows, over rusqlite) | `engine-store` and the 36 other files that reach it pass |
+| `core/actors/index.js`, `you.js`, `demo.js`, `attribution.js` | `xenonet-actors/src/registry.rs`, `you.rs`, `demo.rs`, `attribution.rs` (mapOf stays JS, over the state) | `actors`, `actor-needs-you`, `observer`, `observers` and the other files that reach them pass |
+| `core/actors/registration.js`, `observer.js` | `xenonet-actors/src/registration.rs`, `observer.rs`, calling the actors through the objects given (`xenonet-engine/src/peer.rs`) | `actor-registration`, `actor-routes`, `actor-gateway`, `observer`, `observers` and the observers' own tests pass |
+| `core/actors/app-bundle.js`, `muse.js`, `grok-bot.js`, `hermes-files.js` | `xenonet-actors/src/app_bundle.rs`, `muse.rs`, `grok_bot.rs`, `hermes_files.rs` (files, plutil and Hermes's state.db read through the twin) | `muse-observer`, `grok-bot-observer`, `hermes-files`, `hermes-observer`, `observers` pass |
+| `core/actors/hermes.js`, `observers.js` | `xenonet-actors/src/hermes.rs`, `observers.rs` (the observers themselves are built in the twin) | `hermes-observer`, `observers`, `server`, `doctor` pass |
+| `core/actors/reports.js` | `xenonet-actors/src/reports.rs` (the actor's processes and their lineage are read through the twin) | `actors`, `actor-routes`, `engine-actors`, `delivery-scopes`, `observers` pass |
+| `core/actors/account-links.js`, `remote-presence.js` | `xenonet-actors/src/account_links.rs` (over the engine store), `remote_presence.rs` | `assistant-connections`, `assistant-service` pass |
+| `core/actors/connections.js` | `xenonet-actors/src/connections.rs` (over the engine store; the credentials' files and the adapters through the twin) | `assistant-connections`, `assistant-service`, `assistant-endpoint`, `assistant-tunnels`, `assistant-routes`, `server` pass |
+| `core/actors/wake.js` | `xenonet-actors/src/wake.rs` (timers, sinks, the credential store, DNS and fetch through the twin) | `actor-wake`, `server` pass |
+| `core/engine/verify.js` | `xenonet-engine/src/verify.rs` (procs and the clock through the twin, the pins in the engine store) | `verify`, `delivery-opencode`, `actor-routes` pass |
+| `core/engine/attest.js` | `xenonet-engine/src/attest.rs` | `engine`, `engine-actors`, `actor-gateway`, `delivery-opencode` pass |
+| `core/engine/connect.js` | `xenonet-engine/src/connect.rs` (the files and the CLIs through the twin) | `engine-connect`, `engine`, `windows-command`, `cli`, `engine-routes` pass |
+| `core/engine/engine.js` | `xenonet-engine/src/engine.rs` (the map's state through narrow readers, events, waits and Repos's git in the twin) | `engine`, `engine-actors`, `delivery-wake`, `delivery-scopes`, `actor-wake`, `actor-gateway`, `server` pass |
+| `core/delivery/selector.js`, `usage.js`, `policy.js` | `xenonet-engine/src/delivery/` (the policy's clock, limits and files through the twin) | `delivery-scopes`, `delivery-wake`, `delivery-router`, `delivery-routes`, `delivery-opencode`, `engine` pass |
+| `core/delivery/channel.js`, `tmux.js`, `resume.js`, `setup.js`, `opencode.js` | `xenonet-engine/src/delivery/` (polls, processes, commands, files and HTTP through the twins) | `delivery-router`, `delivery-wake`, `delivery-opencode`, `doctor` pass |
+| `core/delivery/router.js` | `xenonet-engine/src/delivery/router.rs` (each record's JS object and the timers in the twin) | `delivery-router`, `delivery-wake`, `delivery-opencode`, `delivery-scopes`, `server` pass |
 
 With every twin in place, all 131 test files that reach one pass (of 170; the other 39 load no module that has a twin). The
 twins load in the Node processes a test starts too (a server, the

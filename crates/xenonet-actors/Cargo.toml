@@ -11,5 +11,10 @@ publish.workspace = true
 
 [dependencies]
 getrandom.workspace = true
+regex.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
+unicode-normalization.workspace = true
 xenonet-base.workspace = true
+xenonet-engine.workspace = true
+xenonet-schema.workspace = true
