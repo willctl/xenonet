@@ -181,12 +181,22 @@ test("the map, its live state, history, summary and digests", async () => {
   assert.ok(stars.stars.length > 0 && stars.stars.every((s) => /^[A-Z][a-z]+( \d+)?$/.test(s.name) && !("project" in s)));
   assert.ok(!log.topProjects.some((p) => stars.stars.some((s) => s.name === p.name)));
   assert.ok(!("hours" in stars) && !("busiestHour" in stars) && !("sessions" in stars));
-  // The demo's live sessions keep adding tool calls between two reads, which
-  // can change a star's counts and swap projects whose counts are close, so
-  // these compare which names, not their order or counts.
+  // The demo's history may still be loading, and its live sessions keep
+  // adding tool calls, either of which can change which projects are the
+  // day's top five between two reads. So each pair is read until it agrees,
+  // for 10 seconds at most, and compared as sets.
   const sorted = (names) => [...names].sort();
-  assert.deepEqual(sorted((await get("/api/constellation?names=1")).data.stars.map((s) => s.project)), sorted(log.topProjects.map((p) => p.name)));
-  assert.deepEqual(sorted((await get("/api/constellation")).data.stars.map((s) => s.name)), sorted(stars.stars.map((s) => s.name)), "the same names again");
+  const agreed = async (read) => {
+    for (const until = Date.now() + 10000; ; await new Promise((r) => setTimeout(r, 200))) {
+      const pair = (await read()).map(sorted);
+      if (JSON.stringify(pair[0]) === JSON.stringify(pair[1]) || Date.now() > until) return pair;
+    }
+  };
+  const names = async () => (await get("/api/constellation")).data.stars.map((s) => s.name);
+  const [named, top] = await agreed(async () => [(await get("/api/constellation?names=1")).data.stars.map((s) => s.project), (await get("/api/daylog")).data.topProjects.map((p) => p.name)]);
+  assert.deepEqual(named, top);
+  const [again, before] = await agreed(async () => [await names(), await names()]);
+  assert.deepEqual(again, before, "the same names again");
   assert.match((await post("/api/narrate", { kind: "day" })).data.text, /While you were away/);
   assert.match((await post("/api/narrate", {})).data.text, /While you were away/);
 });
