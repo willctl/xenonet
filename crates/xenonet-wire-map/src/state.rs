@@ -159,8 +159,11 @@ impl MapState {
         });
         let gatherer = |name: &str| Arc::new(Gather::new(name, Options { fallback: json!([]), ..Default::default() }));
         let (claude_sessions, codex_threads, codex_projects) = (gatherer("claude-sessions"), gatherer("codex-threads"), gatherer("codex-projects"));
-        // The projects folder you chose, if you did (workspace.js).
-        let root = workspace::root(cfg.env_projects_dir.as_deref(), Some(&store.workspace_root()), &cfg.home_dir);
+        // The projects folder you chose, if you did (workspace.js), as
+        // state.json has it: the store itself is read at the first refresh,
+        // with the rest of what it saves then.
+        let saved = workspace::saved_root(&std::path::Path::new(&cfg.state_dir).join("state.json").to_string_lossy()).map(Value::String);
+        let root = workspace::root(cfg.env_projects_dir.as_deref(), saved.as_ref(), &cfg.home_dir);
         let projects_dir = root["path"].as_str().unwrap_or(&cfg.projects_dir).to_string();
         let _ = version;
         let state = Arc::new_cyclic(|me| MapState {

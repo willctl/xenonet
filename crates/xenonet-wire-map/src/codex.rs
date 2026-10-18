@@ -94,14 +94,25 @@ impl CodexClient {
     }
 
     fn spawn(self: &Arc<Self>) -> Result<(), Failed> {
-        let mut child = Command::new(&self.bin)
+        // Each start counts, and so does the initialize it was for, which a
+        // start that fails fails too (as the JS's spawn's error event does).
+        lock(&self.inner).life.count("starts", 1.0);
+        let spawned = Command::new(&self.bin)
             .arg("app-server")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| Failed::said(format!("spawn {} ENOENT: {e}", self.bin)))?;
+            .spawn();
+        let mut child = match spawned {
+            Ok(c) => c,
+            Err(e) => {
+                lock(&self.inner).life.count("requests", 1.0);
+                // As Node words it: spawn <file> <code>.
+                let code = xenonet_base::fs::code_of(&e).map_or_else(|| e.to_string(), str::to_string);
+                return Err(Failed::said(format!("spawn {} {code}", self.bin)));
+            }
+        };
         let (Some(stdin), Some(stdout), Some(stderr)) = (child.stdin.take(), child.stdout.take(), child.stderr.take()) else {
             return Err(Failed::said("codex app-server has no pipes"));
         };
@@ -110,7 +121,6 @@ impl CodexClient {
         let (serial, err_tail) = {
             let mut g = lock(&self.inner);
             g.serial += 1;
-            g.life.count("starts", 1.0);
             g.proc = Some(Proc { stdin: stdin.clone(), pending: pending.clone(), serial: g.serial });
             (g.serial, g.stderr.clone())
         };

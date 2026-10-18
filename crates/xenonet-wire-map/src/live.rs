@@ -7,9 +7,9 @@
 //!
 //! At start the tailer reads the last day's transcripts as history, then
 //! follows them: a sweep every 2 seconds reads what was added to the files
-//! it follows, and every 15th sweep walks the folders for new ones. The JS
-//! watches the folders too, for lines within 30 ms; the binary has no
-//! file watcher, so the sweep is how it follows them.
+//! it follows and walks the folders for new ones. The JS watches the
+//! folders too, for lines within 30 ms; the binary has no file watcher, so
+//! it looks at the files it follows four times a second instead.
 
 use crate::blocks::{health_of, Block};
 use crate::gatherer::{Gather, Options};
@@ -29,8 +29,12 @@ use xenonet_sources::live::telemetry::{Emit, Telemetry, Where};
 
 const PRIME_WINDOW_MS: f64 = 24.0 * 3600e3;
 const SWEEP_MS: u64 = 2000;
-// Sweeps: a walk for new files every 30 seconds.
-const DISCOVER_EVERY: u64 = 15;
+// What stands in for the JS's watches: what was added to the files it
+// follows is read four times a second, and every sweep walks the folders
+// for new files (the JS walks every 15th, since its watches see them).
+const FOLLOW_MS: u64 = 250;
+// The JS's sweeps that walk: every 15th, so every 30 seconds.
+const JS_WALK_EVERY: u64 = 15;
 const DEPTH: f64 = 6.0;
 const LIMITS_EVERY_MS: u64 = 30_000;
 
@@ -289,9 +293,18 @@ impl Live {
     /// Catches up on what was added to the files it follows, and with
     /// `discover`, walks the folders for new ones.
     fn sweep_now(&self, discover: bool) -> Vec<Event> {
+        self.catch_up(true, discover, discover)
+    }
+
+    // The files it follows read where they grew (`count`: as a sweep), and
+    // with `discover`, a walk for new ones (`walk`: counted as one, which
+    // the JS's every 15th sweep is).
+    fn catch_up(&self, count: bool, discover: bool, walk: bool) -> Vec<Event> {
         let mut out = Vec::new();
         let mut t = lock(&self.tail);
-        t.tailer.life.count("sweeps", 1.0);
+        if count {
+            t.tailer.life.count("sweeps", 1.0);
+        }
         let mut cursor = xenonet_base::ordered::Cursor::of(None);
         while let Some((c, file)) = t.tailer.next_followed(cursor) {
             cursor = c;
@@ -310,7 +323,9 @@ impl Live {
         }
         lock(&self.status).files = t.tailer.files.len();
         if discover {
-            t.tailer.life.count("walks", 1.0);
+            if walk {
+                t.tailer.life.count("walks", 1.0);
+            }
             for file in Self::walk(&mut t) {
                 if !t.tailer.may_discover(&file) || lock(&self.telemetry).classify(&file).is_none() {
                     continue;
@@ -334,6 +349,15 @@ impl Live {
         self.tell(events);
     }
 
+    /// What a watch event would read: the files it follows, where they
+    /// grew. Passed over while a sweep runs, which reads them too.
+    pub async fn follow(self: &Arc<Self>) {
+        let Ok(_one) = self.sweeping.try_lock() else { return };
+        let me = self.clone();
+        let events = crate::util::blocking(move || me.catch_up(false, false, false)).await;
+        self.tell(events);
+    }
+
     /// Reads the transcripts written lately as history, then follows them.
     pub async fn start(self: &Arc<Self>) {
         let me = self.clone();
@@ -341,13 +365,26 @@ impl Live {
         self.tell(events);
         let me = self.clone();
         let sweeps = tokio::spawn(async move {
-            let mut n = 0u64;
             let mut every = tokio::time::interval(Duration::from_millis(SWEEP_MS));
             every.tick().await;
+            let mut n = 0u64;
             loop {
                 every.tick().await;
-                me.sweep(n.is_multiple_of(DISCOVER_EVERY)).await;
+                let _one = me.sweeping.lock().await;
+                let m = me.clone();
+                let walk = n.is_multiple_of(JS_WALK_EVERY);
+                let events = crate::util::blocking(move || m.catch_up(true, true, walk)).await;
+                me.tell(events);
                 n += 1;
+            }
+        });
+        let me = self.clone();
+        let follow = tokio::spawn(async move {
+            let mut every = tokio::time::interval(Duration::from_millis(FOLLOW_MS));
+            every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                every.tick().await;
+                me.follow().await;
             }
         });
         let me = self.clone();
@@ -359,7 +396,7 @@ impl Live {
                 me.read_claude_limits().await;
             }
         });
-        lock(&self.tasks).extend([sweeps, limits]);
+        lock(&self.tasks).extend([sweeps, follow, limits]);
         self.read_claude_limits().await;
     }
 

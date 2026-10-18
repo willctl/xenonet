@@ -92,7 +92,10 @@ impl TranscriptSearch {
                 }
             }
         };
-        let mut run = Search::run(file, app, &plan.session_id, plan.items);
+        // A Codex rollout's prompts are its user_message events while it has
+        // no completed user message.
+        let user_events = plan.app == "codex" && !plan.items;
+        let mut run = Search::run(file, app, &plan.session_id, user_events);
         let mut sampling = Sampling::default();
         for l in &lines {
             let Some(raw) = self.vendor.line(codex, l, &mut sampling) else { continue };
