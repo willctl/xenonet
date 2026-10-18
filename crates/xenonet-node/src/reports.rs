@@ -28,7 +28,7 @@ pub fn heartbeat(env: Env, deps: Object<'_>, id: JsArg, body: JsArg, now: JsArg)
             settle(&env);
             Ok(())
         }
-        Err(f) => Err(fail(&env, f)),
+        Err(f) => Err(fail(env, f)),
     }
 }
 

@@ -11,9 +11,9 @@ use serde_json::{json, Value};
 use xenonet_actors::hermes_files as hf;
 use xenonet_engine::peer::list;
 
-fn done<T>(env: &Env, r: xenonet_engine::peer::Result<T>) -> Result<T> {
-    let out = r.map_err(|t| rethrow(env, t));
-    settle(env);
+fn done<T>(env: Env, r: xenonet_engine::peer::Result<T>) -> Result<T> {
+    let out = r.map_err(|t| rethrow(&env, t));
+    settle(&env);
     out
 }
 
@@ -51,17 +51,17 @@ pub fn hermes_root(home: String, hermes_home: Option<String>) -> String {
 
 #[napi(js_name = "hermesListProfiles")]
 pub fn list_profiles(env: Env, deps: Object<'_>, root: String) -> Result<Json> {
-    done(&env, hf::list_profiles(&mut SyncCalls::new(&env, &deps), &root)).map(Json)
+    done(env, hf::list_profiles(&mut SyncCalls::new(&env, &deps), &root)).map(Json)
 }
 
 #[napi(js_name = "hermesInstalled")]
 pub fn installed(env: Env, deps: Object<'_>, root: String) -> Result<bool> {
-    done(&env, hf::installed(&mut SyncCalls::new(&env, &deps), &root))
+    done(env, hf::installed(&mut SyncCalls::new(&env, &deps), &root))
 }
 
 #[napi(js_name = "hermesReadStamp")]
 pub fn read_stamp(env: Env, deps: Object<'_>, root: String) -> Result<Json> {
-    done(&env, hf::read_stamp(&mut SyncCalls::new(&env, &deps), &root)).map(Json)
+    done(env, hf::read_stamp(&mut SyncCalls::new(&env, &deps), &root)).map(Json)
 }
 
 #[napi(js_name = "hermesRead")]
@@ -76,11 +76,11 @@ pub fn read(env: Env, deps: Object<'_>, what: String, home: String, v: MaybeJson
         "jobs" => hf::read_jobs(&mut c, &home, v),
         other => Err(xenonet_engine::peer::Thrown::new(format!("no reader {other}"))),
     };
-    done(&env, out).map(Json)
+    done(env, out).map(Json)
 }
 
 #[napi(js_name = "hermesReadStateDb")]
 pub fn read_state_db(env: Env, deps: Object<'_>, file: String, after_id: MaybeJson, since_ms: MaybeJson, session_ids: JsArg) -> Result<Json> {
     let ids: Vec<Value> = list(session_ids.0).iter().map(xenonet_engine::sql::Arg::to_json).collect();
-    done(&env, hf::read_state_db(&mut SyncCalls::new(&env, &deps), &file, &after_id.0.unwrap_or(Value::Null), &since_ms.0.unwrap_or(Value::Null), &ids)).map(Json)
+    done(env, hf::read_state_db(&mut SyncCalls::new(&env, &deps), &file, &after_id.0.unwrap_or(Value::Null), &since_ms.0.unwrap_or(Value::Null), &ids)).map(Json)
 }

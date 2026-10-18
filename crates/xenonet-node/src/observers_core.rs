@@ -16,9 +16,9 @@ use xenonet_actors::muse::Muse;
 use xenonet_engine::peer::Calls;
 use xenonet_engine::sql::Arg;
 
-fn done<T>(env: &Env, r: xenonet_engine::peer::Result<T>) -> Result<T> {
-    let out = r.map_err(|t| rethrow(env, t));
-    settle(env);
+fn done<T>(env: Env, r: xenonet_engine::peer::Result<T>) -> Result<T> {
+    let out = r.map_err(|t| rethrow(&env, t));
+    settle(&env);
     out
 }
 
@@ -56,15 +56,15 @@ impl AppBundleCore {
     }
     #[napi(js_name = "where")]
     pub fn where_(&self, env: Env, me: Object<'_>) -> Result<Option<String>> {
-        done(&env, self.inner.where_(&mut SyncCalls::new(&env, &me)))
+        done(env, self.inner.where_(&mut SyncCalls::new(&env, &me)))
     }
     #[napi]
     pub fn installed(&self, env: Env, me: Object<'_>) -> Result<bool> {
-        done(&env, self.inner.installed(&mut SyncCalls::new(&env, &me)))
+        done(env, self.inner.installed(&mut SyncCalls::new(&env, &me)))
     }
     #[napi]
     pub fn ours(&self, env: Env, me: Object<'_>) -> Result<bool> {
-        done(&env, self.inner.ours(&mut SyncCalls::new(&env, &me)))
+        done(env, self.inner.ours(&mut SyncCalls::new(&env, &me)))
     }
     #[napi]
     pub fn read(&self) -> Machine {
@@ -77,7 +77,7 @@ impl AppBundleCore {
             Arg::Text(h) => h,
             _ => String::new(),
         };
-        done(&env, self.inner.sources(&mut SyncCalls::new(&env, &me), &home)).map(Json)
+        done(env, self.inner.sources(&mut SyncCalls::new(&env, &me), &home)).map(Json)
     }
 }
 
@@ -101,7 +101,7 @@ impl MuseCore {
     pub fn status(&self, env: Env, me: Object<'_>) -> Result<Json> {
         let mut c = SyncCalls::new(&env, &me);
         let home = home_of(&mut c);
-        done(&env, self.inner.status(&mut c, &home)).map(Json)
+        done(env, self.inner.status(&mut c, &home)).map(Json)
     }
 }
 
@@ -132,7 +132,7 @@ impl GrokBotCore {
     }
     #[napi(js_name = "mayPoll")]
     pub fn may_poll(&self, env: Env, me: Object<'_>) -> Result<bool> {
-        done(&env, self.inner.may_poll(&mut SyncCalls::new(&env, &me)))
+        done(env, self.inner.may_poll(&mut SyncCalls::new(&env, &me)))
     }
     #[napi]
     pub fn poll(&self, at: f64) -> Machine {
@@ -143,7 +143,7 @@ impl GrokBotCore {
     pub fn status(&self, env: Env, me: Object<'_>) -> Result<Json> {
         let mut c = SyncCalls::new(&env, &me);
         let home = home_of(&mut c);
-        done(&env, self.inner.status(&mut c, &home)).map(Json)
+        done(env, self.inner.status(&mut c, &home)).map(Json)
     }
 }
 
@@ -204,7 +204,7 @@ impl HermesCore {
     }
     #[napi]
     pub fn status(&self, env: Env, me: Object<'_>) -> Result<Json> {
-        done(&env, self.inner.status(&mut SyncCalls::new(&env, &me))).map(Json)
+        done(env, self.inner.status(&mut SyncCalls::new(&env, &me))).map(Json)
     }
 }
 
@@ -216,5 +216,5 @@ pub fn observers_look() -> Machine {
 
 #[napi(js_name = "observersStatus")]
 pub fn observers_status(env: Env, deps: Object<'_>) -> Result<Json> {
-    done(&env, xenonet_actors::observers::status(&mut SyncCalls::new(&env, &deps))).map(Json)
+    done(env, xenonet_actors::observers::status(&mut SyncCalls::new(&env, &deps))).map(Json)
 }

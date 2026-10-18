@@ -55,13 +55,13 @@ pub fn throw_actor(env: &Env, e: &ActorError) -> Error {
     Error::new(Status::PendingException, e.message.clone())
 }
 
-pub fn fail(env: &Env, f: Fail) -> Error {
+pub fn fail(env: Env, f: Fail) -> Error {
     match f {
         Fail::Actor(e) => {
-            settle(env);
-            throw_actor(env, &e)
+            settle(&env);
+            throw_actor(&env, &e)
         }
-        Fail::Thrown(t) => rethrow(env, t),
+        Fail::Thrown(t) => rethrow(&env, t),
     }
 }
 
@@ -77,20 +77,20 @@ fn busy() -> Error {
 impl RegistrationCore {
     // A call that needs none of what's kept, so it may come back in
     // during another (observers asks observing).
-    fn free<T>(&self, env: &Env, deps: &Object<'_>, f: impl FnOnce(&mut SyncCalls) -> registration::Result<T>) -> Result<T> {
-        let mut calls = SyncCalls::new(env, deps);
+    fn free<T>(&self, env: Env, deps: &Object<'_>, f: impl FnOnce(&mut SyncCalls) -> registration::Result<T>) -> Result<T> {
+        let mut calls = SyncCalls::new(&env, deps);
         match f(&mut calls) {
             Ok(v) => Ok(v),
             Err(e) => Err(fail(env, e)),
         }
     }
 
-    fn with<T>(&self, env: &Env, deps: &Object<'_>, f: impl FnOnce(&mut Registration, &mut SyncCalls) -> registration::Result<T>) -> Result<T> {
+    fn with<T>(&self, env: Env, deps: &Object<'_>, f: impl FnOnce(&mut Registration, &mut SyncCalls) -> registration::Result<T>) -> Result<T> {
         let mut r = self.inner.try_borrow_mut().map_err(|_| busy())?;
-        let mut calls = SyncCalls::new(env, deps);
+        let mut calls = SyncCalls::new(&env, deps);
         match f(&mut r, &mut calls) {
             Ok(v) => {
-                settle(env);
+                settle(&env);
                 Ok(v)
             }
             Err(e) => Err(fail(env, e)),
@@ -114,78 +114,78 @@ impl RegistrationCore {
 
     #[napi]
     pub fn waiting(&self, env: Env, deps: Object<'_>, t: f64) -> Result<u32> {
-        self.with(&env, &deps, |r, _| r.waiting(t).map(|n| n as u32))
+        self.with(env, &deps, |r, _| r.waiting(t).map(|n| n as u32))
     }
     #[napi]
     pub fn register(&self, env: Env, deps: Object<'_>, body: JsArg, checked: JsArg, chain: JsArg, cwd: JsArg) -> Result<Json> {
-        self.with(&env, &deps, |r, c| r.register(c, &body.0, &checked.0, &chain.0, &cwd.0)).map(Json)
+        self.with(env, &deps, |r, c| r.register(c, &body.0, &checked.0, &chain.0, &cwd.0)).map(Json)
     }
     #[napi]
     pub fn requests(&self, env: Env, deps: Object<'_>) -> Result<Json> {
-        self.with(&env, &deps, |r, c| r.requests(c)).map(Json)
+        self.with(env, &deps, |r, c| r.requests(c)).map(Json)
     }
     #[napi]
     pub fn decide(&self, env: Env, deps: Object<'_>, request: JsArg, decision: JsArg) -> Result<Json> {
-        self.with(&env, &deps, |r, c| r.decide(c, &request.0, &decision.0)).map(Json)
+        self.with(env, &deps, |r, c| r.decide(c, &request.0, &decision.0)).map(Json)
     }
     #[napi]
     pub fn add(&self, env: Env, deps: Object<'_>, body: JsArg) -> Result<Json> {
-        self.with(&env, &deps, |r, c| r.add(c, &body.0)).map(Json)
+        self.with(env, &deps, |r, c| r.add(c, &body.0)).map(Json)
     }
     #[napi]
     pub fn rotate(&self, env: Env, deps: Object<'_>, slug: JsArg) -> Result<Json> {
-        self.with(&env, &deps, |r, c| r.rotate(c, &slug.0)).map(Json)
+        self.with(env, &deps, |r, c| r.rotate(c, &slug.0)).map(Json)
     }
     #[napi]
     pub fn remove(&self, env: Env, deps: Object<'_>, slug: JsArg, reason: String) -> Result<Json> {
-        self.with(&env, &deps, |r, c| r.remove(c, &slug.0, &reason)).map(Json)
+        self.with(env, &deps, |r, c| r.remove(c, &slug.0, &reason)).map(Json)
     }
     #[napi]
     pub fn authenticate(&self, env: Env, deps: Object<'_>, token: JsArg) -> Result<Json> {
-        self.with(&env, &deps, |r, c| r.authenticate(c, &token.0)).map(Json)
+        self.with(env, &deps, |r, c| r.authenticate(c, &token.0)).map(Json)
     }
     #[napi]
     pub fn gateway(&self, env: Env, deps: Object<'_>, slug: JsArg, body: JsArg) -> Result<Json> {
-        self.with(&env, &deps, |r, c| r.gateway(c, &slug.0, &body.0)).map(Json)
+        self.with(env, &deps, |r, c| r.gateway(c, &slug.0, &body.0)).map(Json)
     }
     #[napi(js_name = "askGateway")]
     pub fn ask_gateway(&self, env: Env, deps: Object<'_>, slug: JsArg, checked: JsArg, chain: JsArg, cwd: JsArg) -> Result<Json> {
-        self.with(&env, &deps, |r, c| r.ask_gateway(c, &slug.0, &checked.0, &chain.0, &cwd.0)).map(Json)
+        self.with(env, &deps, |r, c| r.ask_gateway(c, &slug.0, &checked.0, &chain.0, &cwd.0)).map(Json)
     }
     #[napi(js_name = "dropGateway")]
     pub fn drop_gateway(&self, env: Env, deps: Object<'_>, slug: JsArg) -> Result<Json> {
-        self.with(&env, &deps, |r, c| r.drop_gateway(c, &slug.0)).map(Json)
+        self.with(env, &deps, |r, c| r.drop_gateway(c, &slug.0)).map(Json)
     }
     #[napi(js_name = "authenticateGateway")]
     pub fn authenticate_gateway(&self, env: Env, deps: Object<'_>, token: JsArg) -> Result<Json> {
-        self.with(&env, &deps, |r, c| r.authenticate_gateway(c, &token.0)).map(Json)
+        self.with(env, &deps, |r, c| r.authenticate_gateway(c, &token.0)).map(Json)
     }
     #[napi(js_name = "productOf")]
     pub fn product_of(&self, env: Env, deps: Object<'_>, auth: JsArg) -> Result<Json> {
-        self.free(&env, &deps, |c| Registration::product_of(c, &auth.0)).map(Json)
+        self.free(env, &deps, |c| Registration::product_of(c, &auth.0)).map(Json)
     }
     #[napi]
     pub fn me(&self, env: Env, deps: Object<'_>, auth: JsArg, extra: JsArg) -> Result<Json> {
-        self.with(&env, &deps, |r, c| r.me(c, &auth.0, &extra.0)).map(Json)
+        self.with(env, &deps, |r, c| r.me(c, &auth.0, &extra.0)).map(Json)
     }
     #[napi]
     pub fn tick(&self, env: Env, deps: Object<'_>, t: f64) -> Result<()> {
-        self.with(&env, &deps, |r, _| r.tick(t))
+        self.with(env, &deps, |r, _| r.tick(t))
     }
     #[napi]
     pub fn observers(&self, env: Env, deps: Object<'_>) -> Result<Json> {
-        self.free(&env, &deps, |c| Registration::observers(c)).map(Json)
+        self.free(env, &deps, |c| Registration::observers(c)).map(Json)
     }
     #[napi]
     pub fn observing(&self, env: Env, deps: Object<'_>, product: JsArg) -> Result<bool> {
-        self.free(&env, &deps, |c| Registration::observing(c, &product.0))
+        self.free(env, &deps, |c| Registration::observing(c, &product.0))
     }
     #[napi]
     pub fn observe(&self, env: Env, deps: Object<'_>, product: JsArg, on: JsArg) -> Result<Json> {
-        self.free(&env, &deps, |c| Registration::observe(c, &product.0, &on.0)).map(Json)
+        self.free(env, &deps, |c| Registration::observe(c, &product.0, &on.0)).map(Json)
     }
     #[napi]
     pub fn simulate(&self, env: Env, deps: Object<'_>, kind: JsArg, a: JsArg) -> Result<Json> {
-        self.with(&env, &deps, |r, c| r.simulate(c, &kind.0, &a.0)).map(Json)
+        self.with(env, &deps, |r, c| r.simulate(c, &kind.0, &a.0)).map(Json)
     }
 }

@@ -9,7 +9,7 @@ use xenonet_sources::lines::TypeError;
 use xenonet_sources::{live, xenolith};
 
 // What JS would throw, thrown as JS throws it: a TypeError.
-pub(crate) fn thrown<T>(env: &Env, e: TypeError) -> Result<T> {
+pub(crate) fn thrown<T>(env: Env, e: TypeError) -> Result<T> {
     let _ = env.throw_type_error(&e.0, None);
     Err(Error::new(Status::PendingException, e.0))
 }
@@ -62,7 +62,7 @@ pub fn live_patch_files(text: MaybeJson) -> Vec<String> {
 }
 
 #[napi(js_name = "liveClaudeEdits")]
-pub fn live_claude_edits(env: &Env, name: String, input: MaybeJson) -> Result<Json> {
+pub fn live_claude_edits(env: Env, name: String, input: MaybeJson) -> Result<Json> {
     match live::claude_edits(&name, input.0.as_ref()) {
         Ok(e) => Ok(Json(Value::Array(e))),
         Err(e) => thrown(env, e),
@@ -170,7 +170,7 @@ pub fn refusal_claude_context(all: Json, sig: Json) -> Json {
 }
 
 #[napi(js_name = "refusalCodexContext")]
-pub fn refusal_codex_context(env: &Env, all: Json, sig: Json) -> Result<Json> {
+pub fn refusal_codex_context(env: Env, all: Json, sig: Json) -> Result<Json> {
     match store::codex_context(all.0.as_array().map_or(&[], Vec::as_slice), &sig.0) {
         Ok(c) => Ok(Json(c.to_json())),
         Err(m) => thrown(env, TypeError(m)),

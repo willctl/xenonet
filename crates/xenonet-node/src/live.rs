@@ -133,7 +133,7 @@ fn key_of(v: MaybeJson) -> Option<Value> {
     v.0
 }
 
-fn type_error<T>(env: &Env, what: &str) -> Result<T> {
+fn type_error<T>(env: Env, what: &str) -> Result<T> {
     thrown(env, TypeError(what.into()))
 }
 
@@ -177,27 +177,27 @@ impl JsLiveCore {
     /// A line the tailer read (`raw`, as its normalizer gave it): its
     /// refusal, and what it says.
     #[napi]
-    pub fn line(&mut self, env: &Env, codex: bool, session_id: String, agent_id: MaybeJson, file: MaybeJson, raw: MaybeJson, live: bool, now: f64) -> Result<Jv> {
+    pub fn line(&mut self, env: Env, codex: bool, session_id: String, agent_id: MaybeJson, file: MaybeJson, raw: MaybeJson, live: bool, now: f64) -> Result<Jv> {
         let f = Where { session_id, agent_id: or_null(agent_id), file: or_null(file) };
         let mut out = Vec::new();
         let r = self.t.line(codex, &f, or_null(raw), live, now, &mut out);
-        emits(env, out, r.err())
+        emits(&env, out, r.err())
     }
 
     /// A line given straight to applyClaude or applyCodex.
     #[napi]
-    pub fn apply(&mut self, env: &Env, codex: bool, session_id: String, agent_id: MaybeJson, raw: MaybeJson, live: bool, now: f64) -> Result<Jv> {
+    pub fn apply(&mut self, env: Env, codex: bool, session_id: String, agent_id: MaybeJson, raw: MaybeJson, live: bool, now: f64) -> Result<Jv> {
         let f = Where { session_id, agent_id: or_null(agent_id), file: Value::Null };
         let mut out = Vec::new();
         let raw = or_null(raw);
         let r = if codex { self.t.apply_codex(&f, raw, live, now, &mut out) } else { self.t.apply_claude(&f, raw, live, now, &mut out) };
-        emits(env, out, r.err())
+        emits(&env, out, r.err())
     }
 
     /// An event a caller made for a session (made when it's new).
     #[napi]
     pub fn activity(&mut self, env: &Env, id: String, app: String, ev: Unknown<'_>, live: bool, now: f64) -> Result<Jv> {
-        let Some(fields) = (unsafe { js_fields(env.raw(), ev.raw())? }) else { return type_error(env, "Cannot read properties of undefined (reading 'ts')") };
+        let Some(fields) = (unsafe { js_fields(env.raw(), ev.raw())? }) else { return type_error(*env, "Cannot read properties of undefined (reading 'ts')") };
         let i = self.t.session(&id, &app);
         let mut out = Vec::new();
         self.t.note_activity(i, fields, live, now, &mut out);
@@ -205,10 +205,10 @@ impl JsLiveCore {
     }
 
     #[napi(js_name = "noteHook")]
-    pub fn note_hook(&mut self, env: &Env, id: String, body: MaybeJson, now: f64) -> Result<Jv> {
+    pub fn note_hook(&mut self, env: Env, id: String, body: MaybeJson, now: f64) -> Result<Jv> {
         let mut out = Vec::new();
         let r = self.t.note_hook(&id, body.0.as_ref(), now, &mut out);
-        emits(env, out, r.err())
+        emits(&env, out, r.err())
     }
 
     /// A tool call, as noteTool takes it: { name, detail, full, files, ts,
@@ -245,18 +245,18 @@ impl JsLiveCore {
     }
 
     #[napi(js_name = "codexItem")]
-    pub fn codex_item(&mut self, env: &Env, id: String, item: MaybeJson, ts: f64, live: bool, now: f64) -> Result<Jv> {
+    pub fn codex_item(&mut self, env: Env, id: String, item: MaybeJson, ts: f64, live: bool, now: f64) -> Result<Jv> {
         let i = self.t.find(&id).unwrap_or_else(|| self.t.session(&id, "codex"));
         let mut out = Vec::new();
         let r = match &item.0 {
             None | Some(Value::Null) => Err(TypeError("Cannot read properties of undefined (reading 'type')".into())),
             Some(it) => self.t.codex_item(i, it, ts, live, now, &mut out),
         };
-        emits(env, out, r.err())
+        emits(&env, out, r.err())
     }
 
     #[napi(js_name = "noteCodexLimits")]
-    pub fn note_codex_limits(&mut self, env: &Env, rl: MaybeJson, ts: f64) -> Result<()> {
+    pub fn note_codex_limits(&mut self, env: Env, rl: MaybeJson, ts: f64) -> Result<()> {
         match &rl.0 {
             None | Some(Value::Null) => type_error(env, "Cannot read properties of undefined (reading 'primary')"),
             Some(v) => {
@@ -278,13 +278,13 @@ impl JsLiveCore {
     }
 
     #[napi]
-    pub fn history(&self, env: &Env) -> Result<Jv> {
-        events(env, self.t.history())
+    pub fn history(&self, env: Env) -> Result<Jv> {
+        events(&env, self.t.history())
     }
 
     #[napi(js_name = "historySince")]
-    pub fn history_since(&self, env: &Env, since: f64) -> Result<Jv> {
-        events(env, self.t.history_since(since))
+    pub fn history_since(&self, env: Env, since: f64) -> Result<Jv> {
+        events(&env, self.t.history_since(since))
     }
 
     // ----- sessions -----
@@ -393,7 +393,7 @@ impl JsLiveCore {
     }
 
     #[napi(js_name = "sessionAddMessage")]
-    pub fn session_add_message(&mut self, env: &Env, id: String, text: MaybeJson, ts: f64) -> Result<()> {
+    pub fn session_add_message(&mut self, env: Env, id: String, text: MaybeJson, ts: f64) -> Result<()> {
         let Some(i) = self.t.find(&id) else { return Ok(()) };
         self.t.at_mut(i).add_message(text.0.as_ref(), ts).or_else(|e| thrown(env, e))
     }
@@ -406,7 +406,7 @@ impl JsLiveCore {
     }
 
     #[napi(js_name = "sessionAddEdits")]
-    pub fn session_add_edits(&mut self, env: &Env, id: String, edits: MaybeJson, ts: f64) -> Result<()> {
+    pub fn session_add_edits(&mut self, env: Env, id: String, edits: MaybeJson, ts: f64) -> Result<()> {
         let Some(i) = self.t.find(&id) else { return Ok(()) };
         match edits.0 {
             Some(Value::Array(list)) => self.t.at_mut(i).add_edits(&list, ts).or_else(|e| thrown(env, e)),
@@ -502,7 +502,7 @@ impl JsLiveCore {
 
     /// Anthropic answered `r`, this time.
     #[napi(js_name = "claudeAsked")]
-    pub fn claude_asked(&mut self, env: &Env, r: MaybeJson, now: f64) -> Result<()> {
+    pub fn claude_asked(&mut self, env: Env, r: MaybeJson, now: f64) -> Result<()> {
         self.t.claude_asked(r.0.as_ref(), now).or_else(|e| thrown(env, e))
     }
 
@@ -553,7 +553,7 @@ impl JsLiveCore {
     }
 
     #[napi]
-    pub fn costs(&self, env: &Env, now: f64, sessions: MaybeJson) -> Result<Json> {
+    pub fn costs(&self, env: Env, now: f64, sessions: MaybeJson) -> Result<Json> {
         match sessions.0 {
             Some(Value::Array(list)) => Ok(Json(self.t.costs(now, &list))),
             _ => type_error(env, "sessions.filter is not a function"),
@@ -638,7 +638,7 @@ pub fn claude_usage_desktop_version(raw: MaybeJson) -> Option<String> {
 }
 
 #[napi(js_name = "claudeUsageDesktopSamples")]
-pub fn claude_usage_desktop_samples(env: &Env, raw: MaybeJson, checked: MaybeJson) -> Result<Json> {
+pub fn claude_usage_desktop_samples(env: Env, raw: MaybeJson, checked: MaybeJson) -> Result<Json> {
     match claude_usage::desktop_samples(raw.0.as_ref(), checked.0.as_ref()) {
         Ok(v) => Ok(Json(v)),
         Err(claude_usage::DesktopError::Plain(m)) => Err(Error::new(Status::GenericFailure, m)),
@@ -659,7 +659,7 @@ pub fn refusal_codex_signal(raw: MaybeJson) -> Json {
 }
 
 #[napi(js_name = "refusalKeyOf")]
-pub fn refusal_key_of(env: &Env, sig: MaybeJson, session_id: MaybeJson) -> Result<String> {
+pub fn refusal_key_of(env: Env, sig: MaybeJson, session_id: MaybeJson) -> Result<String> {
     let session = match &session_id.0 {
         None => "undefined".to_string(),
         Some(v) => xenonet_base::text::js_string(v),

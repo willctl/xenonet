@@ -128,15 +128,15 @@ fn opt(a: JsArg) -> Option<Arg> {
 }
 
 impl PolicyCore {
-    fn run<T>(&self, env: &Env, deps: &Object<'_>, f: impl FnOnce(&mut Policy, &mut SyncCalls) -> policy::Result<T>) -> Result<T> {
+    fn run<T>(&self, env: Env, deps: &Object<'_>, f: impl FnOnce(&mut Policy, &mut SyncCalls) -> policy::Result<T>) -> Result<T> {
         let mut p = self.inner.try_borrow_mut().map_err(|_| busy())?;
-        let mut c = SyncCalls::new(env, deps);
+        let mut c = SyncCalls::new(&env, deps);
         match f(&mut p, &mut c) {
             Ok(v) => {
-                settle(env);
+                settle(&env);
                 Ok(v)
             }
-            Err(e) => Err(throw(env, e)),
+            Err(e) => Err(throw(&env, e)),
         }
     }
 }
@@ -151,7 +151,7 @@ impl PolicyCore {
     /// What the policy's file keeps, read.
     #[napi]
     pub fn load(&self, env: Env, deps: Object<'_>) -> Result<()> {
-        self.run(&env, &deps, |p, c| {
+        self.run(env, &deps, |p, c| {
             *p = Policy::load(c)?;
             Ok(())
         })
@@ -171,62 +171,62 @@ impl PolicyCore {
     }
     #[napi(js_name = "setPaused")]
     pub fn set_paused(&self, env: Env, deps: Object<'_>, on: bool, by: JsArg) -> Result<JsArg> {
-        self.run(&env, &deps, |p, c| p.set_paused(c, on, &by.0)).map(JsArg)
+        self.run(env, &deps, |p, c| p.set_paused(c, on, &by.0)).map(JsArg)
     }
     #[napi]
     pub fn grant(&self, env: Env, deps: Object<'_>, actor: JsArg, selector: JsArg, ttl_ms: JsArg, by: JsArg) -> Result<JsArg> {
         let ttl = opt(ttl_ms);
-        self.run(&env, &deps, |p, c| p.grant(c, &actor.0, &selector.0, ttl.as_ref(), &by.0)).map(JsArg)
+        self.run(env, &deps, |p, c| p.grant(c, &actor.0, &selector.0, ttl.as_ref(), &by.0)).map(JsArg)
     }
     #[napi]
     pub fn revoke(&self, env: Env, deps: Object<'_>, actor: JsArg, by: JsArg) -> Result<JsArg> {
-        self.run(&env, &deps, |p, c| p.revoke(c, &actor.0, &by.0)).map(JsArg)
+        self.run(env, &deps, |p, c| p.revoke(c, &actor.0, &by.0)).map(JsArg)
     }
     #[napi]
     pub fn grants(&self, env: Env, deps: Object<'_>) -> Result<JsArg> {
-        self.run(&env, &deps, |p, c| p.grants(c)).map(JsArg)
+        self.run(env, &deps, |p, c| p.grants(c)).map(JsArg)
     }
     #[napi(js_name = "scopeOf")]
     pub fn scope_of(&self, env: Env, deps: Object<'_>, id: JsArg) -> Result<JsArg> {
-        self.run(&env, &deps, |p, c| p.scope_of(c, &id.0).map(|s| s.to_arg())).map(JsArg)
+        self.run(env, &deps, |p, c| p.scope_of(c, &id.0).map(|s| s.to_arg())).map(JsArg)
     }
     #[napi]
     pub fn visible(&self, env: Env, deps: Object<'_>, caller: JsArg, facts: JsArg) -> Result<bool> {
-        self.run(&env, &deps, |p, c| p.visible(c, &caller.0, &facts.0))
+        self.run(env, &deps, |p, c| p.visible(c, &caller.0, &facts.0))
     }
     #[napi(js_name = "checkSend")]
     pub fn check_send(&self, env: Env, deps: Object<'_>, sender: JsArg, recipients: JsArg, text: JsArg, depth: f64) -> Result<()> {
         let recipients = list(recipients.0);
-        self.run(&env, &deps, |p, c| p.check_send(c, &sender.0, &recipients, &text.0, depth))
+        self.run(env, &deps, |p, c| p.check_send(c, &sender.0, &recipients, &text.0, depth))
     }
     #[napi]
     pub fn allow(&self, env: Env, deps: Object<'_>, session: JsArg, remote: bool, ttl_ms: JsArg, by: JsArg) -> Result<JsArg> {
         let ttl = opt(ttl_ms);
-        self.run(&env, &deps, |p, c| p.allow(c, &session.0, remote, ttl.as_ref(), &by.0)).map(JsArg)
+        self.run(env, &deps, |p, c| p.allow(c, &session.0, remote, ttl.as_ref(), &by.0)).map(JsArg)
     }
     #[napi]
     pub fn disallow(&self, env: Env, deps: Object<'_>, session: JsArg, by: JsArg) -> Result<()> {
-        self.run(&env, &deps, |p, c| p.disallow(c, &session.0, &by.0))
+        self.run(env, &deps, |p, c| p.disallow(c, &session.0, &by.0))
     }
     #[napi]
     pub fn consented(&self, env: Env, deps: Object<'_>, session: JsArg, remote: bool) -> Result<JsArg> {
-        self.run(&env, &deps, |p, c| p.consented(c, &session.0, remote)).map(JsArg)
+        self.run(env, &deps, |p, c| p.consented(c, &session.0, remote)).map(JsArg)
     }
     #[napi(js_name = "wakeAllowed")]
     pub fn wake_allowed(&self, env: Env, deps: Object<'_>, sender: JsArg, target: JsArg, usage: JsArg) -> Result<JsArg> {
-        self.run(&env, &deps, |p, c| p.wake_allowed(c, &sender.0, &target.0, &usage.0)).map(JsArg)
+        self.run(env, &deps, |p, c| p.wake_allowed(c, &sender.0, &target.0, &usage.0)).map(JsArg)
     }
     #[napi(js_name = "spendWake")]
     pub fn spend_wake(&self, env: Env, deps: Object<'_>, sender: JsArg, target: JsArg) -> Result<()> {
-        self.run(&env, &deps, |p, c| p.spend_wake(c, &sender.0, &target.0))
+        self.run(env, &deps, |p, c| p.spend_wake(c, &sender.0, &target.0))
     }
     #[napi]
     pub fn audit(&self, env: Env, deps: Object<'_>, entry: JsArg) -> Result<JsArg> {
-        self.run(&env, &deps, |p, c| p.audit(c, entry.0)).map(JsArg)
+        self.run(env, &deps, |p, c| p.audit(c, entry.0)).map(JsArg)
     }
     #[napi(js_name = "readAudit")]
     pub fn read_audit(&self, env: Env, deps: Object<'_>, limit: f64) -> Result<JsArg> {
-        self.run(&env, &deps, |p, c| p.read_audit(c, limit)).map(JsArg)
+        self.run(env, &deps, |p, c| p.read_audit(c, limit)).map(JsArg)
     }
 }
 
@@ -237,8 +237,8 @@ pub struct ChannelsCore {
     inner: RefCell<xenonet_engine::delivery::channel::Channels>,
 }
 
-fn now_of(env: &Env, deps: &Object<'_>) -> impl FnMut() -> f64 {
-    let mut c = SyncCalls::new(env, deps);
+fn now_of(env: Env, deps: &Object<'_>) -> impl FnMut() -> f64 {
+    let mut c = SyncCalls::new(&env, deps);
     move || {
         use xenonet_engine::peer::Calls;
         match c.call("", "now", vec![]) {
@@ -257,7 +257,7 @@ impl ChannelsCore {
 
     #[napi]
     pub fn live(&self, env: Env, deps: Object<'_>, agent: String, waiting: bool) -> Result<bool> {
-        let mut now = now_of(&env, &deps);
+        let mut now = now_of(env, &deps);
         let out = self.inner.try_borrow().map_err(|_| busy())?.live(&agent, waiting, &mut now);
         settle(&env);
         Ok(out)
@@ -276,7 +276,7 @@ impl ChannelsCore {
     #[napi]
     pub fn push(&self, env: Env, deps: Object<'_>, agent: String, item: JsArg, waiting: bool) -> Result<String> {
         use xenonet_engine::delivery::channel::Push;
-        let mut now = now_of(&env, &deps);
+        let mut now = now_of(env, &deps);
         let out = self.inner.try_borrow_mut().map_err(|_| busy())?.push(&agent, item.0, waiting, &mut now);
         settle(&env);
         Ok(match out {
@@ -471,9 +471,9 @@ pub struct RouterCore {
     inner: Arc<Router>,
 }
 
-fn sync_done<T>(env: &Env, r: xenonet_engine::peer::Result<T>) -> Result<T> {
-    let out = r.map_err(|t| rethrow(env, t));
-    settle(env);
+fn sync_done<T>(env: Env, r: xenonet_engine::peer::Result<T>) -> Result<T> {
+    let out = r.map_err(|t| rethrow(&env, t));
+    settle(&env);
     out
 }
 
@@ -485,32 +485,32 @@ impl RouterCore {
     }
     #[napi]
     pub fn reaches(&self, env: Env, deps: Object<'_>, id: JsArg) -> Result<JsArg> {
-        sync_done(&env, self.inner.reaches(&mut SyncCalls::new(&env, &deps), &id.0)).map(JsArg)
+        sync_done(env, self.inner.reaches(&mut SyncCalls::new(&env, &deps), &id.0)).map(JsArg)
     }
     #[napi]
     pub fn known(&self, env: Env, deps: Object<'_>) -> Result<JsArg> {
-        sync_done(&env, self.inner.known(&mut SyncCalls::new(&env, &deps))).map(|l| JsArg(Arg::List(l)))
+        sync_done(env, self.inner.known(&mut SyncCalls::new(&env, &deps))).map(|l| JsArg(Arg::List(l)))
     }
     #[napi]
     pub fn resumable(&self, env: Env, deps: Object<'_>, view: JsArg) -> Result<JsArg> {
-        sync_done(&env, self.inner.resumable(&mut SyncCalls::new(&env, &deps), &view.0)).map(JsArg)
+        sync_done(env, self.inner.resumable(&mut SyncCalls::new(&env, &deps), &view.0)).map(JsArg)
     }
     #[napi]
     pub fn wake(&self, env: Env, deps: Object<'_>, from: JsArg, agent: JsArg) -> Result<JsArg> {
-        sync_done(&env, self.inner.wake(&mut SyncCalls::new(&env, &deps), &from.0, &agent.0)).map(JsArg)
+        sync_done(env, self.inner.wake(&mut SyncCalls::new(&env, &deps), &from.0, &agent.0)).map(JsArg)
     }
     #[napi]
     pub fn way(&self, env: Env, deps: Object<'_>, from: JsArg, a: JsArg) -> Result<Option<String>> {
-        sync_done(&env, self.inner.way(&mut SyncCalls::new(&env, &deps), &from.0, &a.0)).map(|w| w.map(str::to_string))
+        sync_done(env, self.inner.way(&mut SyncCalls::new(&env, &deps), &from.0, &a.0)).map(|w| w.map(str::to_string))
     }
     #[napi]
     pub fn seen(&self, env: Env, deps: Object<'_>, agent: JsArg, ids: JsArg) -> Result<()> {
         let ids = list(ids.0);
-        sync_done(&env, self.inner.seen(&mut SyncCalls::new(&env, &deps), &agent.0, &ids))
+        sync_done(env, self.inner.seen(&mut SyncCalls::new(&env, &deps), &agent.0, &ids))
     }
     #[napi]
     pub fn contact(&self, env: Env, deps: Object<'_>, agent: JsArg) -> Result<()> {
-        sync_done(&env, self.inner.contact(&mut SyncCalls::new(&env, &deps), &agent.0))
+        sync_done(env, self.inner.contact(&mut SyncCalls::new(&env, &deps), &agent.0))
     }
     #[napi]
     pub fn describe(&self, id: JsArg) -> Machine {

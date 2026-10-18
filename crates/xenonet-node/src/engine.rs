@@ -52,13 +52,13 @@ fn throw(env: &Env, f: Fail) -> Error {
     }
 }
 
-fn done<T>(env: &Env, r: eng::Result<T>) -> Result<T> {
+fn done<T>(env: Env, r: eng::Result<T>) -> Result<T> {
     match r {
         Ok(v) => {
-            settle(env);
+            settle(&env);
             Ok(v)
         }
-        Err(f) => Err(throw(env, f)),
+        Err(f) => Err(throw(&env, f)),
     }
 }
 
@@ -175,22 +175,22 @@ impl EngineCore {
 
     #[napi]
     pub fn release(&self, env: Env, deps: Object<'_>, me: JsArg, paths: JsArg) -> Result<JsArg> {
-        done(&env, self.inner.release(&mut SyncCalls::new(&env, &deps), &me.0, &paths.0)).map(JsArg)
+        done(env, self.inner.release(&mut SyncCalls::new(&env, &deps), &me.0, &paths.0)).map(JsArg)
     }
     #[napi(js_name = "setFocus")]
     pub fn set_focus(&self, env: Env, deps: Object<'_>, me: JsArg, text: JsArg) -> Result<JsArg> {
-        done(&env, self.inner.set_focus(&mut SyncCalls::new(&env, &deps), &me.0, &text.0)).map(JsArg)
+        done(env, self.inner.set_focus(&mut SyncCalls::new(&env, &deps), &me.0, &text.0)).map(JsArg)
     }
     #[napi]
     pub fn touch(&self, env: Env, deps: Object<'_>, me: JsArg, ask: JsArg) -> Result<()> {
-        done(&env, self.inner.touch(&mut SyncCalls::new(&env, &deps), &me.0, &ask.0))
+        done(env, self.inner.touch(&mut SyncCalls::new(&env, &deps), &me.0, &ask.0))
     }
     #[napi]
     pub fn facts(&self, env: Env, deps: Object<'_>, a: JsArg) -> Result<JsArg> {
-        done(&env, self.inner.facts(&mut SyncCalls::new(&env, &deps), &a.0)).map(JsArg)
+        done(env, self.inner.facts(&mut SyncCalls::new(&env, &deps), &a.0)).map(JsArg)
     }
     #[napi(js_name = "visibleTo")]
     pub fn visible_to(&self, env: Env, deps: Object<'_>, me: JsArg, a: JsArg) -> Result<bool> {
-        done(&env, self.inner.visible_to(&mut SyncCalls::new(&env, &deps), &me.0, &a.0))
+        done(env, self.inner.visible_to(&mut SyncCalls::new(&env, &deps), &me.0, &a.0))
     }
 }

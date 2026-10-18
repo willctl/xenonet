@@ -101,13 +101,13 @@ impl TypeName for OutJs {
     }
 }
 
-fn answer(env: &Env, r: std::result::Result<Out, TypeError>) -> Result<OutJs> {
+fn answer(env: Env, r: std::result::Result<Out, TypeError>) -> Result<OutJs> {
     r.map(OutJs).or_else(|e| thrown(env, e))
 }
 
 // What the index's errors throw: a TypeError where JS would throw one, and
 // SQLite's message as node:sqlite throws it.
-fn failed<T>(env: &Env, e: search::Error) -> Result<T> {
+fn failed<T>(env: Env, e: search::Error) -> Result<T> {
     match e {
         search::Error::Type(e) => thrown(env, e),
         search::Error::Sql(m) => {
@@ -142,19 +142,19 @@ pub fn wiki_links(text: String) -> Vec<String> {
 }
 
 #[napi(js_name = "wikiMentionedProjects")]
-pub fn wiki_mentioned_projects(env: &Env, text: String, tags: MaybeJson, projects: MaybeJson, root: MaybeJson) -> Result<OutJs> {
+pub fn wiki_mentioned_projects(env: Env, text: String, tags: MaybeJson, projects: MaybeJson, root: MaybeJson) -> Result<OutJs> {
     let keys = wiki::mentioned_projects(&text, tags.0.as_ref(), projects.0.as_ref(), root.0.as_ref());
     answer(env, keys.map(|ks| Out::Arr(ks.into_iter().map(|k| Out::of(k.as_ref())).collect())))
 }
 
 #[napi(js_name = "wikiParseLog")]
-pub fn wiki_parse_log(env: &Env, text: String, date: MaybeJson) -> Result<OutJs> {
+pub fn wiki_parse_log(env: Env, text: String, date: MaybeJson) -> Result<OutJs> {
     answer(env, wiki::parse_log(&text, date.0.as_ref()).map(|es| Out::Arr(es.iter().map(wiki::LogEntry::out).collect())))
 }
 
 /// The folder read, or null without one.
 #[napi(js_name = "readWiki")]
-pub fn read_wiki(env: &Env, dir: MaybeJson, projects: MaybeJson, root: MaybeJson, now: f64, server: MaybeJson) -> Result<OutJs> {
+pub fn read_wiki(env: Env, dir: MaybeJson, projects: MaybeJson, root: MaybeJson, now: f64, server: MaybeJson) -> Result<OutJs> {
     let dir = match dir.0 {
         None | Some(Value::Null) => return Ok(OutJs(Out::Null)),
         Some(v) if !xenonet_base::text::truthy(Some(&v)) => return Ok(OutJs(Out::Null)),
@@ -236,7 +236,7 @@ pub fn stats_app_of(session_id: String) -> String {
 
 /// A session's stats from its files read: [{ agentId, lines: [record] }].
 #[napi(js_name = "sessionStats")]
-pub fn session_stats(env: &Env, session_id: String, files: Json) -> Result<OutJs> {
+pub fn session_stats(env: Env, session_id: String, files: Json) -> Result<OutJs> {
     let files = values(files)
         .into_iter()
         .map(|f| {
@@ -251,7 +251,7 @@ pub fn session_stats(env: &Env, session_id: String, files: Json) -> Result<OutJs
 }
 
 #[napi(js_name = "statsSummarize")]
-pub fn stats_summarize(env: &Env, events: Json, app: MaybeJson) -> Result<OutJs> {
+pub fn stats_summarize(env: Env, events: Json, app: MaybeJson) -> Result<OutJs> {
     let mut ids = EventIds::default();
     let events: std::result::Result<Vec<Event>, TypeError> = values(events).iter().map(|e| Event::from_js(e, &mut ids)).collect();
     answer(env, events.and_then(|es| stats::summarize(&es, app.0.as_ref())))
@@ -328,11 +328,11 @@ impl JsSearch {
         self.s.generation as f64
     }
     #[napi]
-    pub fn connect(&mut self, env: &Env) -> Result<()> {
+    pub fn connect(&mut self, env: Env) -> Result<()> {
         self.s.connect().or_else(|e| failed(env, e))
     }
     #[napi]
-    pub fn prepare(&mut self, env: &Env) -> Result<()> {
+    pub fn prepare(&mut self, env: Env) -> Result<()> {
         self.s.prepare().or_else(|e| failed(env, e))
     }
     #[napi]
@@ -340,7 +340,7 @@ impl JsSearch {
         self.s.close();
     }
     #[napi]
-    pub fn plan(&self, env: &Env, file: String, app: String) -> Result<Option<JsPlan>> {
+    pub fn plan(&self, env: Env, file: String, app: String) -> Result<Option<JsPlan>> {
         match self.s.plan(&file, &app) {
             Ok(p) => Ok(p.map(|p| JsPlan { p })),
             Err(e) => failed(env, e),
@@ -348,7 +348,7 @@ impl JsSearch {
     }
     /// The lines to index, or null when the file must be read whole first.
     #[napi]
-    pub fn begin(&self, env: &Env, plan: &mut JsPlan, text: String) -> Result<Option<Vec<String>>> {
+    pub fn begin(&self, env: Env, plan: &mut JsPlan, text: String) -> Result<Option<Vec<String>>> {
         match self.s.begin(&mut plan.p, &text) {
             Ok(Begun::ReadWhole) => Ok(None),
             Ok(Begun::Lines(lines)) => Ok(Some(lines)),
@@ -356,27 +356,27 @@ impl JsSearch {
         }
     }
     #[napi]
-    pub fn add(&self, env: &Env, run: &mut JsRun, raw: Json) -> Result<()> {
+    pub fn add(&self, env: Env, run: &mut JsRun, raw: Json) -> Result<()> {
         self.s.add(&mut run.r, raw.0).or_else(|e| failed(env, e))
     }
     #[napi]
-    pub fn commit(&self, env: &Env, plan: &JsPlan) -> Result<()> {
+    pub fn commit(&self, env: Env, plan: &JsPlan) -> Result<()> {
         self.s.commit(&plan.p).or_else(|e| failed(env, e))
     }
     #[napi]
-    pub fn rollback(&self, env: &Env) -> Result<()> {
+    pub fn rollback(&self, env: Env) -> Result<()> {
         self.s.rollback().or_else(|e| failed(env, e))
     }
     /// [files, documents].
     #[napi]
-    pub fn counts(&self, env: &Env) -> Result<Vec<f64>> {
+    pub fn counts(&self, env: Env) -> Result<Vec<f64>> {
         match self.s.counts() {
             Ok((files, docs)) => Ok(vec![files, docs]),
             Err(e) => failed(env, e),
         }
     }
     #[napi]
-    pub fn search(&self, env: &Env, q: String, limit: f64) -> Result<OutJs> {
+    pub fn search(&self, env: Env, q: String, limit: f64) -> Result<OutJs> {
         match self.s.search(&q, limit) {
             Ok(hits) => Ok(OutJs(Out::Arr(hits))),
             Err(e) => failed(env, e),
@@ -386,16 +386,16 @@ impl JsSearch {
     // ----- the handle -----
 
     #[napi]
-    pub fn check(&self, env: &Env, generation: f64, sql: String) -> Result<()> {
+    pub fn check(&self, env: Env, generation: f64, sql: String) -> Result<()> {
         self.s.check(generation as u64, &sql).or_else(|e| failed(env, e))
     }
     #[napi(js_name = "closeHandle")]
-    pub fn close_handle(&mut self, env: &Env, generation: f64) -> Result<()> {
+    pub fn close_handle(&mut self, env: Env, generation: f64) -> Result<()> {
         self.s.close_handle(generation as u64).or_else(|e| failed(env, e))
     }
     /// The rows, each an object of its columns.
     #[napi]
-    pub fn query(&self, env: &Env, generation: f64, sql: String, params: Json, all: bool) -> Result<OutJs> {
+    pub fn query(&self, env: Env, generation: f64, sql: String, params: Json, all: bool) -> Result<OutJs> {
         match self.s.query(generation as u64, &sql, &values(params), all) {
             Ok(rows) => Ok(OutJs(Out::Arr(rows.into_iter().map(Out::Obj).collect()))),
             Err(e) => failed(env, e),
@@ -403,21 +403,21 @@ impl JsSearch {
     }
     /// { changes, lastInsertRowid }.
     #[napi(js_name = "runSql")]
-    pub fn run_sql(&self, env: &Env, generation: f64, sql: String, params: Json) -> Result<OutJs> {
+    pub fn run_sql(&self, env: Env, generation: f64, sql: String, params: Json) -> Result<OutJs> {
         match self.s.run_sql(generation as u64, &sql, &values(params)) {
             Ok((changes, rowid)) => Ok(OutJs(Out::obj(vec![("changes", Out::Num(changes)), ("lastInsertRowid", Out::Num(rowid))]))),
             Err(e) => failed(env, e),
         }
     }
     #[napi]
-    pub fn exec(&self, env: &Env, generation: f64, sql: String) -> Result<()> {
+    pub fn exec(&self, env: Env, generation: f64, sql: String) -> Result<()> {
         self.s.exec(generation as u64, &sql).or_else(|e| failed(env, e))
     }
 }
 
 /// [{ role, text, ts }].
 #[napi(js_name = "searchDocsFromLine")]
-pub fn search_docs_from_line(env: &Env, raw: Json, app: String, user_events: bool) -> Result<OutJs> {
+pub fn search_docs_from_line(env: Env, raw: Json, app: String, user_events: bool) -> Result<OutJs> {
     let docs = search::docs_from_line(raw.0, &app, user_events);
     answer(env, docs.map(|ds| Out::Arr(ds.into_iter().map(|d| Out::obj(vec![("role", Out::Str(d.role.into())), ("text", Out::Str(d.text)), ("ts", Out::Num(d.ts))])).collect())))
 }

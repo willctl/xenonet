@@ -42,13 +42,13 @@ fn throw(env: &Env, f: Fail) -> Error {
     }
 }
 
-fn done<T>(env: &Env, r: wake::Result<T>) -> Result<T> {
+fn done<T>(env: Env, r: wake::Result<T>) -> Result<T> {
     match r {
         Ok(v) => {
-            settle(env);
+            settle(&env);
             Ok(v)
         }
-        Err(f) => Err(throw(env, f)),
+        Err(f) => Err(throw(&env, f)),
     }
 }
 
@@ -93,7 +93,7 @@ pub fn link_local(ip: JsArg) -> bool {
 #[napi(js_name = "wakeCheckUrl")]
 pub fn check_url(env: Env, deps: Object<'_>, raw: JsArg) -> Result<Json> {
     let out = wake::check_wake_url(&mut SyncCalls::new(&env, &deps), &raw.0);
-    done(&env, out).map(|(url, host)| Json(json!({ "url": url, "host": host })))
+    done(env, out).map(|(url, host)| Json(json!({ "url": url, "host": host })))
 }
 
 #[napi(js_name = "wakeSignature")]
@@ -120,20 +120,20 @@ impl WakesCore {
 
     #[napi]
     pub fn arrived(&self, env: Env, deps: Object<'_>, id: JsArg) -> Result<()> {
-        done(&env, self.inner.arrived(&mut SyncCalls::new(&env, &deps), &id.0))
+        done(env, self.inner.arrived(&mut SyncCalls::new(&env, &deps), &id.0))
     }
     #[napi]
     pub fn view(&self, env: Env, id: JsArg) -> Result<JsArg> {
-        done(&env, self.inner.view(&id.0)).map(JsArg)
+        done(env, self.inner.view(&id.0)).map(JsArg)
     }
     #[napi]
     pub fn list(&self, env: Env, deps: Object<'_>) -> Result<JsArg> {
-        done(&env, self.inner.list(&mut SyncCalls::new(&env, &deps))).map(JsArg)
+        done(env, self.inner.list(&mut SyncCalls::new(&env, &deps))).map(JsArg)
     }
     /// The set the sink joined.
     #[napi]
     pub fn subscribe(&self, env: Env, deps: Object<'_>, id: JsArg, sink: u32) -> Result<u32> {
-        done(&env, self.inner.subscribe(&mut SyncCalls::new(&env, &deps), &id.0, u64::from(sink))).map(|n| n as u32)
+        done(env, self.inner.subscribe(&mut SyncCalls::new(&env, &deps), &id.0, u64::from(sink))).map(|n| n as u32)
     }
     #[napi]
     pub fn unsubscribe(&self, id: JsArg, set: u32, sink: u32) {
@@ -141,7 +141,7 @@ impl WakesCore {
     }
     #[napi]
     pub fn stop(&self, env: Env, deps: Object<'_>) -> Result<()> {
-        done(&env, self.inner.stop(&mut SyncCalls::new(&env, &deps)))
+        done(env, self.inner.stop(&mut SyncCalls::new(&env, &deps)))
     }
     #[napi(js_name = "wakeDue")]
     pub fn wake_due(&self, id: JsArg) -> bool {
@@ -149,7 +149,7 @@ impl WakesCore {
     }
     #[napi(js_name = "notifyDue")]
     pub fn notify_due(&self, env: Env, deps: Object<'_>, id: JsArg) -> Result<()> {
-        done(&env, self.inner.notify_due(&mut SyncCalls::new(&env, &deps), &id.0))
+        done(env, self.inner.notify_due(&mut SyncCalls::new(&env, &deps), &id.0))
     }
 
     #[napi]

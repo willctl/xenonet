@@ -24,9 +24,9 @@ pub struct ObserverCore {
     inner: Arc<Observer>,
 }
 
-fn done<T>(env: &Env, r: xenonet_engine::peer::Result<T>) -> Result<T> {
-    let out = r.map_err(|t| rethrow(env, t));
-    settle(env);
+fn done<T>(env: Env, r: xenonet_engine::peer::Result<T>) -> Result<T> {
+    let out = r.map_err(|t| rethrow(&env, t));
+    settle(&env);
     out
 }
 
@@ -43,15 +43,15 @@ impl ObserverCore {
 
     #[napi]
     pub fn keep(&self, env: Env, me: Object<'_>, id: JsArg, o: JsArg) -> Result<()> {
-        done(&env, self.inner.keep(&mut SyncCalls::new(&env, &me), &s(&id.0), &o.0))
+        done(env, self.inner.keep(&mut SyncCalls::new(&env, &me), &s(&id.0), &o.0))
     }
     #[napi]
     pub fn say(&self, env: Env, me: Object<'_>, id: JsArg, o: JsArg) -> Result<bool> {
-        done(&env, self.inner.say(&mut SyncCalls::new(&env, &me), &s(&id.0), &o.0))
+        done(env, self.inner.say(&mut SyncCalls::new(&env, &me), &s(&id.0), &o.0))
     }
     #[napi]
     pub fn happened(&self, env: Env, me: Object<'_>, id: JsArg, o: JsArg) -> Result<JsArg> {
-        done(&env, self.inner.happened(&mut SyncCalls::new(&env, &me), &s(&id.0), &o.0)).map(JsArg)
+        done(env, self.inner.happened(&mut SyncCalls::new(&env, &me), &s(&id.0), &o.0)).map(JsArg)
     }
     #[napi]
     pub fn gather(&self, id: JsArg, o: JsArg) {
@@ -59,15 +59,15 @@ impl ObserverCore {
     }
     #[napi]
     pub fn flush(&self, env: Env, me: Object<'_>, now: JsArg) -> Result<()> {
-        done(&env, self.inner.flush(&mut SyncCalls::new(&env, &me), &now.0))
+        done(env, self.inner.flush(&mut SyncCalls::new(&env, &me), &now.0))
     }
     #[napi]
     pub fn touch(&self, env: Env, me: Object<'_>, id: JsArg, node: JsArg, relation: JsArg, at: JsArg) -> Result<()> {
-        done(&env, self.inner.touch(&mut SyncCalls::new(&env, &me), &s(&id.0), &node.0, &relation.0, &at.0))
+        done(env, self.inner.touch(&mut SyncCalls::new(&env, &me), &s(&id.0), &node.0, &relation.0, &at.0))
     }
     #[napi(js_name = "mayLook")]
     pub fn may_look(&self, env: Env, me: Object<'_>) -> Result<bool> {
-        done(&env, Observer::may_look(&mut SyncCalls::new(&env, &me)))
+        done(env, Observer::may_look(&mut SyncCalls::new(&env, &me)))
     }
     /// One look, as a machine: the observer's look(at), then flush, ok or
     /// problem, through the observer.

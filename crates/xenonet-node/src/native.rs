@@ -167,9 +167,9 @@ impl JsCopilotCli {
         JsCopilotCli { c: copilot_cli::CopilotCli::new() }
     }
     #[napi]
-    pub fn read(&mut self, env: &Env, root: Option<String>, now: f64, check: CheckFn<'_>, failed: Unknown<'_>, io: Option<IoFn<'_>>) {
+    pub fn read(&mut self, env: Env, root: Option<String>, now: f64, check: CheckFn<'_>, failed: Unknown<'_>, io: Option<IoFn<'_>>) {
         let mut files = files_of(&io);
-        self.c.read(root.as_deref(), now, files.as_mut(), &mut |r, v| checked(env, &check, &failed, r, v));
+        self.c.read(root.as_deref(), now, files.as_mut(), &mut |r, v| checked(&env, &check, &failed, r, v));
     }
     #[napi(getter, js_name = "rootState")]
     pub fn root_state(&self) -> &'static str {
@@ -227,9 +227,9 @@ impl JsGeminiCli {
         JsGeminiCli { g: gemini_cli::GeminiCli::new() }
     }
     #[napi]
-    pub fn read(&mut self, env: &Env, root: Option<String>, now: f64, check: CheckFn<'_>, failed: Unknown<'_>, io: Option<IoFn<'_>>) {
+    pub fn read(&mut self, env: Env, root: Option<String>, now: f64, check: CheckFn<'_>, failed: Unknown<'_>, io: Option<IoFn<'_>>) {
         let mut files = files_of(&io);
-        self.g.read(root.as_deref(), now, files.as_mut(), &mut |r, v| checked(env, &check, &failed, r, v));
+        self.g.read(root.as_deref(), now, files.as_mut(), &mut |r, v| checked(&env, &check, &failed, r, v));
     }
     #[napi(getter, js_name = "rootState")]
     pub fn root_state(&self) -> &'static str {
@@ -278,9 +278,9 @@ impl JsCursor {
     }
     /// True when the vendor check threw (the twin has what it threw).
     #[napi]
-    pub fn read(&mut self, env: &Env, file: Option<String>, now: f64, check: CheckFn<'_>, failed: Unknown<'_>, io: Option<IoFn<'_>>) -> bool {
+    pub fn read(&mut self, env: Env, file: Option<String>, now: f64, check: CheckFn<'_>, failed: Unknown<'_>, io: Option<IoFn<'_>>) -> bool {
         let mut files = files_of(&io);
-        self.c.read(file.as_deref(), now, files.as_mut(), &mut |r, v| checked(env, &check, &failed, r, v)).is_err()
+        self.c.read(file.as_deref(), now, files.as_mut(), &mut |r, v| checked(&env, &check, &failed, r, v)).is_err()
     }
     #[napi(getter, js_name = "fileState")]
     pub fn file_state(&self) -> &'static str {
@@ -396,7 +396,7 @@ impl Vendor for JsVendor<'_> {
 }
 
 fn read_db(
-    env: &Env,
+    env: Env,
     exists: bool,
     file: &str,
     since_ms: f64,
@@ -407,7 +407,7 @@ fn read_db(
     check: &CheckFn<'_>,
     failed: &Unknown<'_>,
 ) -> std::result::Result<opencode::Read, Threw> {
-    let mut vendor = JsVendor { env, ready, missing, check, failed };
+    let mut vendor = JsVendor { env: &env, ready, missing, check, failed };
     let mut open = || -> std::result::Result<Box<dyn Db + '_>, String> {
         match query {
             Some(q) => {
@@ -424,7 +424,7 @@ fn read_db(
 /// readDb's answer, or true when getting the vendor reader threw.
 #[napi(js_name = "opencodeReadDb")]
 pub fn opencode_read_db(
-    env: &Env,
+    env: Env,
     exists: bool,
     file: String,
     since_ms: f64,
@@ -457,7 +457,7 @@ impl JsOpenCode {
     #[napi]
     pub fn read(
         &mut self,
-        env: &Env,
+        env: Env,
         now: f64,
         exists: bool,
         file: String,

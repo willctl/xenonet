@@ -9,7 +9,7 @@ use serde_json::Value;
 use xenonet_sources::lines::{self, ClaudeLine, CodexLine, TypeError, Usage};
 
 // What JS would throw, thrown as JS throws it: a TypeError.
-fn thrown<T>(env: &Env, e: TypeError) -> Result<T> {
+fn thrown<T>(env: Env, e: TypeError) -> Result<T> {
     let _ = env.throw_type_error(&e.0, None);
     Err(Error::new(Status::PendingException, e.0))
 }
@@ -42,39 +42,39 @@ impl JsClaudeLine {
         JsClaudeLine { l: ClaudeLine { raw: raw.0 } }
     }
     #[napi(getter)]
-    pub fn kind(&self, env: &Env) -> Result<Jv> {
+    pub fn kind(&self, env: Env) -> Result<Jv> {
         self.l.kind().map(maybe).or_else(|e| thrown(env, e))
     }
     #[napi(getter)]
-    pub fn ts(&self, env: &Env) -> Result<f64> {
+    pub fn ts(&self, env: Env) -> Result<f64> {
         self.l.ts().or_else(|e| thrown(env, e))
     }
     #[napi(getter)]
-    pub fn meta(&self, env: &Env) -> Result<Jv> {
+    pub fn meta(&self, env: Env) -> Result<Jv> {
         self.l.meta().map(maybe).or_else(|e| thrown(env, e))
     }
     #[napi(getter)]
-    pub fn sidechain(&self, env: &Env) -> Result<Jv> {
+    pub fn sidechain(&self, env: Env) -> Result<Jv> {
         self.l.sidechain().map(maybe).or_else(|e| thrown(env, e))
     }
     #[napi(getter, js_name = "compactSummary")]
-    pub fn compact_summary(&self, env: &Env) -> Result<Jv> {
+    pub fn compact_summary(&self, env: Env) -> Result<Jv> {
         self.l.compact_summary().map(maybe).or_else(|e| thrown(env, e))
     }
     #[napi(getter)]
-    pub fn effort(&self, env: &Env) -> Result<Jv> {
+    pub fn effort(&self, env: Env) -> Result<Jv> {
         self.l.effort().map(|v| Jv::Json(v.cloned().unwrap_or(Value::Null))).or_else(|e| thrown(env, e))
     }
     #[napi(getter)]
-    pub fn content(&self, env: &Env) -> Result<Jv> {
+    pub fn content(&self, env: Env) -> Result<Jv> {
         self.l.content().map(maybe).or_else(|e| thrown(env, e))
     }
     #[napi(getter, js_name = "hasResults")]
-    pub fn has_results(&self, env: &Env) -> Result<bool> {
+    pub fn has_results(&self, env: Env) -> Result<bool> {
         self.l.has_results().or_else(|e| thrown(env, e))
     }
     #[napi(getter)]
-    pub fn results(&self, env: &Env) -> Result<Jv> {
+    pub fn results(&self, env: Env) -> Result<Jv> {
         match self.l.results() {
             Ok(None) => Ok(Jv::Json(Value::Null)),
             Ok(Some(rs)) => Ok(Jv::Arr(rs.into_iter().map(|r| Jv::Obj(vec![("id", r.id.into()), ("error", Jv::Bool(r.error))])).collect())),
@@ -82,38 +82,38 @@ impl JsClaudeLine {
         }
     }
     #[napi(getter)]
-    pub fn text(&self, env: &Env) -> Result<String> {
+    pub fn text(&self, env: Env) -> Result<String> {
         self.l.text().or_else(|e| thrown(env, e))
     }
     #[napi(getter)]
-    pub fn interruption(&self, env: &Env) -> Result<bool> {
+    pub fn interruption(&self, env: Env) -> Result<bool> {
         self.l.interruption().or_else(|e| thrown(env, e))
     }
     #[napi(getter)]
-    pub fn message(&self, env: &Env) -> Result<Jv> {
+    pub fn message(&self, env: Env) -> Result<Jv> {
         self.l.message().map(|m| Jv::Json(m.clone())).or_else(|e| thrown(env, e))
     }
     #[napi(getter, js_name = "messageId")]
-    pub fn message_id(&self, env: &Env) -> Result<Jv> {
+    pub fn message_id(&self, env: Env) -> Result<Jv> {
         self.l.message_id().map(maybe).or_else(|e| thrown(env, e))
     }
     #[napi(getter)]
-    pub fn model(&self, env: &Env) -> Result<Jv> {
+    pub fn model(&self, env: Env) -> Result<Jv> {
         self.l.model().map(maybe).or_else(|e| thrown(env, e))
     }
     #[napi(getter)]
-    pub fn usage(&self, env: &Env) -> Result<Jv> {
+    pub fn usage(&self, env: Env) -> Result<Jv> {
         match self.l.usage() {
             Ok(u) => Ok(u.map_or(Jv::Json(Value::Null), usage)),
             Err(e) => thrown(env, e),
         }
     }
     #[napi(getter)]
-    pub fn blocks(&self, env: &Env) -> Result<Jv> {
+    pub fn blocks(&self, env: Env) -> Result<Jv> {
         self.l.blocks().map(|b| Jv::Json(b.clone())).or_else(|e| thrown(env, e))
     }
     #[napi(getter, js_name = "endTurn")]
-    pub fn end_turn(&self, env: &Env) -> Result<bool> {
+    pub fn end_turn(&self, env: Env) -> Result<bool> {
         self.l.end_turn().or_else(|e| thrown(env, e))
     }
 }
@@ -130,23 +130,23 @@ impl JsCodexLine {
         JsCodexLine { l: CodexLine { raw: raw.0 } }
     }
     #[napi(getter)]
-    pub fn kind(&self, env: &Env) -> Result<Jv> {
+    pub fn kind(&self, env: Env) -> Result<Jv> {
         self.l.kind().map(maybe).or_else(|e| thrown(env, e))
     }
     #[napi(getter)]
-    pub fn ts(&self, env: &Env) -> Result<f64> {
+    pub fn ts(&self, env: Env) -> Result<f64> {
         self.l.ts().or_else(|e| thrown(env, e))
     }
     #[napi(getter)]
-    pub fn payload(&self, env: &Env) -> Result<Jv> {
+    pub fn payload(&self, env: Env) -> Result<Jv> {
         self.l.payload().map(|p| Jv::Json(p.clone())).or_else(|e| thrown(env, e))
     }
     #[napi(getter, js_name = "userMessage")]
-    pub fn user_message(&self, env: &Env) -> Result<Option<String>> {
+    pub fn user_message(&self, env: Env) -> Result<Option<String>> {
         self.l.user_message().or_else(|e| thrown(env, e))
     }
     #[napi(getter, js_name = "userEvent")]
-    pub fn user_event(&self, env: &Env) -> Result<Option<String>> {
+    pub fn user_event(&self, env: Env) -> Result<Option<String>> {
         self.l.user_event().or_else(|e| thrown(env, e))
     }
 }
