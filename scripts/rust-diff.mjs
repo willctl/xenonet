@@ -12,6 +12,13 @@
 //   node scripts/rust-diff.mjs --routes a,b     only these routes
 //   node scripts/rust-diff.mjs --bin <file>     the Rust binary
 //                                               (target/debug/xenonet)
+//   node scripts/rust-diff.mjs --js             the JS service against
+//                                               itself, for what differs
+//                                               between any two runs
+//
+// The demo's live sessions keep writing, and its subagents' ids and the
+// stars' names are new each run, so some answers differ between two JS
+// services too: --js shows which.
 //
 // Never point --home at your own: each service gets a copy, but reading a
 // real home folder reads your sessions.
@@ -163,7 +170,7 @@ function differences(a, b, at = "", out = []) {
 
 const [pj, pr] = [await freePort(), await freePort()];
 const js = start("js", process.execPath, ["server/index.js", ...(demo ? ["--demo"] : [])], pj, home("js"));
-const rust = start("rust", bin, ["serve", ...(demo ? ["--demo"] : [])], pr, home("rust"));
+const rust = args.includes("--js") ? start("rust", process.execPath, ["server/index.js", ...(demo ? ["--demo"] : [])], pr, home("rust")) : start("rust", bin, ["serve", ...(demo ? ["--demo"] : [])], pr, home("rust"));
 let same = 0;
 const differ = [];
 try {
