@@ -1,0 +1,25 @@
+[package]
+name = "xenonet-wire-app"
+description = "The binary's drivers for the app, hosts, assistant, components, integrations and doctor, which the twins' JS drives during the port."
+version.workspace = true
+edition.workspace = true
+# It drives the service's cores on tokio (Rust 1.88+, as the service).
+rust-version = "1.88"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+xenonet-base.workspace = true
+xenonet-service.workspace = true
+xenonet-actors.workspace = true
+xenonet-app.workspace = true
+xenonet-assistant.workspace = true
+xenonet-components.workspace = true
+xenonet-doctor.workspace = true
+xenonet-hosts.workspace = true
+xenonet-integrations.workspace = true

@@ -40,6 +40,8 @@ pub struct Config {
     pub launcher_exec: Option<String>,
     pub exec: Option<String>,
     pub runtime_dir: String,
+    /// The demo's made-up world, once it's made (core/demo.js createWorld).
+    pub world: Option<Value>,
 }
 
 /// os.homedir(): HOME (USERPROFILE on Windows), as Node reads it.
@@ -157,6 +159,7 @@ impl Config {
             launcher_exec,
             exec: set("XENONET_EXEC"),
             runtime_dir,
+            world: None,
         }
     }
 
@@ -171,6 +174,7 @@ impl Config {
         take("projectsDir", &mut self.projects_dir);
         take("stateDir", &mut self.state_dir);
         take("cacheDir", &mut self.cache_dir);
+        self.world = Some(world.clone());
     }
 
     /// The demo's folders when its world can't be made yet: the folder it

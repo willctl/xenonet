@@ -158,6 +158,18 @@ pub trait EngineStore: Send + Sync {
     fn actor_token_times(&self) -> R<Vec<Value>> {
         pending("core/engine/store.js")
     }
+    /// `store.expiredActorTokens()`, for the doctor: `[{ slug, name }]`.
+    fn expired_actor_tokens(&self) -> R<Value> {
+        pending("core/engine/store.js")
+    }
+    /// `store.waitingActorRequests(now)`, for the connections' taken slugs.
+    fn waiting_actor_requests(&self, _now: f64) -> R<Vec<Value>> {
+        pending("core/engine/store.js")
+    }
+    /// `store.connection(id)`: a connection's row (its transport_kind).
+    fn connection(&self, _id: &str) -> R<Option<Value>> {
+        pending("core/engine/store.js")
+    }
 }
 
 impl Engine for Pending {}

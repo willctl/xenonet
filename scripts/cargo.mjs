@@ -1,11 +1,12 @@
-// cargo on the toolchain rust-toolchain.toml pins. rustup's own cargo
+// cargo on the toolchain rust-toolchain.toml pins. `npm run cargo -- <args>`
+// runs it as a plain command would, on the pin (cargo test --workspace). rustup's own cargo
 // reads that file, but a PATH can name a toolchain's cargo directly, which
 // doesn't; `rustup run` then picks the pinned one. Without rustup, the
 // cargo on the PATH it is.
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -47,4 +48,12 @@ export function cargoCommand(args, env = process.env) {
 export function cargo(args, options = {}) {
   const [file, argv, env] = cargoCommand(args, options.env ?? process.env);
   return execFileSync(file, argv, { cwd: root, windowsHide: true, ...options, env });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  try {
+    cargo(process.argv.slice(2), { stdio: "inherit" });
+  } catch (err) {
+    process.exitCode = err.status ?? 1;
+  }
 }

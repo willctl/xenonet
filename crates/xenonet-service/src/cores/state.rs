@@ -156,6 +156,50 @@ pub trait State: Send + Sync {
     async fn refresh_after_change(&self) -> R<()> {
         pending(M)
     }
+    // ---------- what the other cores read of the map ----------
+
+    /// The live sessions' ids, each with its last event (the engine's
+    /// liveIds).
+    fn live_ids(&self) -> R<Vec<(String, Value)>> {
+        pending(M)
+    }
+    /// A live session as the engine reads it: `{ observed, lastEventAt,
+    /// endedAt, status, needsYou (its kind), edits: [{ path, ts }] }`, the
+    /// observed runs' too; None when it isn't live.
+    fn live_info(&self, _id: &str, _now: f64) -> R<Option<Value>> {
+        pending(M)
+    }
+    /// `!!state.observed?.live?.(id)`.
+    fn observed_live(&self, _id: &str) -> R<bool> {
+        pending(M)
+    }
+    /// `state.graph?.identities ?? []`.
+    fn identities(&self) -> R<Vec<Value>> {
+        pending(M)
+    }
+    /// mapOf's recentSession(): the live session on the map last at work,
+    /// else the first session on the map.
+    fn recent_session(&self) -> R<Option<String>> {
+        pending(M)
+    }
+    /// The readers' health as the assistant's source reads it: `{ claude,
+    /// codex }`, each sourceOf(state.claudeSessions / codexThreads, the
+    /// live tailer).
+    fn assistant_sources(&self, _now: f64) -> R<Value> {
+        pending(M)
+    }
+    /// How many times the map has been made: a cache keyed on the graph
+    /// (mapOf's places and sessions) is good while this stays the same.
+    fn graph_version(&self) -> u64 {
+        0
+    }
+    /// The layout and identities a hub sends with this machine's map
+    /// (store.getLayout, store.getIdentities), and the layout's ids under a
+    /// prefix taken away (forgetLayout): how many went.
+    fn forget_layout(&self, _prefix: &str) -> R<usize> {
+        pending(M)
+    }
+
     /// `state.start()`: the readers' first refresh and their watches.
     async fn start(&self) -> R<()> {
         pending(M)

@@ -11,6 +11,7 @@ use crate::cores::{CoreError, Cores};
 use crate::ctx::Ctx;
 use crate::http::{node_headers, parse_target, Body, Peer, Reply, ReplyBody, Req};
 use crate::routes;
+use crate::wire::{Emitter, WireEnv};
 use bytes::Bytes;
 use hyper::body::{Frame, Incoming};
 use hyper::server::conn::http1;
@@ -212,6 +213,15 @@ fn holder(port: u16) -> String {
 }
 
 pub fn run(args: &[String], built: &str) -> i32 {
+    run_with(args, built, Box::new(|config, _env| Cores::pending(config.actors, config.assistant, config.hosts)))
+}
+
+/// What makes the service's cores: given the settings (the demo's world
+/// changes its folders) and what the drivers need.
+pub type Builder = Box<dyn FnOnce(&mut Config, &WireEnv) -> Cores + Send>;
+
+/// `xenonet serve` with the cores `build` makes (the binary's drivers).
+pub fn run_with(args: &[String], built: &str, build: Builder) -> i32 {
     let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
         Ok(rt) => rt,
         Err(e) => {
@@ -219,19 +229,28 @@ pub fn run(args: &[String], built: &str) -> i32 {
             return 1;
         }
     };
-    rt.block_on(main(args.to_vec(), built.to_string()))
+    let args = args.to_vec();
+    let built = built.to_string();
+    rt.block_on(async move {
+        let mut config = Config::from_env(&args);
+        let env = WireEnv { version: config.version(&built), emitter: Emitter::new() };
+        // The drivers run on the runtime: some start tasks of their own.
+        let cores = build(&mut config, &env);
+        serve_with(&mut config, cores, &built, env.emitter).await
+    })
 }
 
-/// The service with these cores; serve.rs's own run makes them all pending.
+/// The service with every core pending.
 pub async fn main(args: Vec<String>, built: String) -> i32 {
     let mut config = Config::from_env(&args);
     let cores = Cores::pending(config.actors, config.assistant, config.hosts);
-    serve_with(&mut config, cores, &built).await
+    serve_with(&mut config, cores, &built, Emitter::new()).await
 }
 
-pub async fn serve_with(config: &mut Config, cores: Cores, built: &str) -> i32 {
-    // Demo mode swaps every source for a made-up workspace in a temp folder.
-    if config.demo {
+pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, emitter: Emitter) -> i32 {
+    // Demo mode swaps every source for a made-up workspace in a temp
+    // folder, which the drivers made first when they could.
+    if config.demo && config.world.is_none() {
         match cores.demo.create_world() {
             Ok(world) => config.use_world(&world),
             Err(_) => config.demo_folders(),
@@ -258,6 +277,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str) -> i32 {
     ctx.music.get_mut().unwrap().again = Some(again_tx);
     ctx.drift = Arc::new(Mutex::new(drift));
     let ctx = Arc::new(ctx);
+    emitter.bind(&ctx);
     // The actor gateway (gateway/), for actors outside this machine: off
     // until you turn it on, on a port of its own beside this one.
     if let (Some(actors), Some(registration)) = (ctx.cores.actors.clone(), ctx.cores.registration.clone()) {

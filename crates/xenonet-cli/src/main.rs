@@ -119,10 +119,27 @@ fn log_error(fail: &Fail, argv: &[String]) {
     Log::new(Some(&dir), "cli", None, None, &sys::home(), MAX_BYTES).write("error", &code, Some(&fail.message), Some(&err), None, None, out::now());
 }
 
+/// `xenonet serve`: the service, with each core the binary's own driver
+/// for it (crates/xenonet-wire-*): the map first, whose demo world moves the
+/// folders the rest use, then the engine and actors, then the app's parts.
+fn serve(args: &[String]) -> i32 {
+    xenonet_service::serve::run_with(
+        args,
+        VERSION,
+        Box::new(|config, env| {
+            let mut cores = xenonet_service::cores::Cores::pending(config.actors, config.assistant, config.hosts);
+            xenonet_wire_map::wire(&mut cores, config, env);
+            xenonet_wire_engine::wire(&mut cores, config, env);
+            xenonet_wire_app::wire(&mut cores, config, env);
+            cores
+        }),
+    )
+}
+
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     if argv.first().map(String::as_str) == Some("serve") {
-        std::process::exit(xenonet_service::run(&argv[1..], VERSION));
+        std::process::exit(serve(&argv[1..]));
     }
     let code = match main_of(&argv) {
         Ok(code) => code,

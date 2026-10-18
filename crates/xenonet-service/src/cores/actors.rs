@@ -80,6 +80,15 @@ pub trait Actors: Send + Sync {
     fn targets_of(&self, _id: &str) -> Vec<Value> {
         Vec::new()
     }
+    /// `observers.status()`, for the doctor: what each observer reads.
+    fn observers_status(&self) -> Value {
+        Value::Array(Vec::new())
+    }
+    /// The doctor's look for actors' tokens left in repos
+    /// (createTokenScan(…).look({ byHand })).
+    async fn token_files(&self, _by_hand: bool) -> R<Value> {
+        pending("core/actors/token-file.js")
+    }
     fn start(&self) {}
     fn stop(&self) {}
 }
