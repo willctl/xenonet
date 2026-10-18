@@ -42,15 +42,17 @@ fn secrets() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| {
         Regex::new(&format!(r"(?i-u:sk-)[A-Za-z0-9_-]{{16,}}|(?i-u:bearer)[{SPACE}]+[^{SPACE}]+|(?i-u:password|api[_-]?key|token|secret)[{SPACE}]*[=:][{SPACE}]*[^{SPACE},;]+"))
-            .unwrap()
+            .expect("a fixed pattern")
     })
 }
 
 /// Whether a task carries something that reads as a credential.
 pub fn has_credential(text: &str) -> bool {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(&format!(r"(?i-u:sk-)[A-Za-z0-9_-]{{16,}}|(?i-u:bearer)[{SPACE}]+[^{SPACE}]+|(?i-u:password|api[_-]?key|token|secret)[{SPACE}]*[=:]")).unwrap())
-        .is_match(text)
+    R.get_or_init(|| {
+        Regex::new(&format!(r"(?i-u:sk-)[A-Za-z0-9_-]{{16,}}|(?i-u:bearer)[{SPACE}]+[^{SPACE}]+|(?i-u:password|api[_-]?key|token|secret)[{SPACE}]*[=:]")).expect("a fixed pattern")
+    })
+    .is_match(text)
 }
 
 /// clean(value, max): a value as text, credentials as [redacted], control
@@ -118,6 +120,7 @@ impl Tickets {
 
 // ---------- records ----------
 
+#[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the JS's pattern takes .json in lower case only")]
 fn record_name(n: &str) -> bool {
     n.len() == 41 && n.ends_with(".json") && n[..36].bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c) || c == b'-')
 }
@@ -125,8 +128,8 @@ fn record_name(n: &str) -> bool {
 fn newest_first(a: &Value, b: &Value) -> std::cmp::Ordering {
     let at = |r: &Value| r.get("at").and_then(Value::as_f64).unwrap_or(f64::NAN);
     let d = at(b) - at(a);
-    if d != 0.0 && !d.is_nan() {
-        return d.partial_cmp(&0.0).unwrap();
+    if let Some(o) = d.partial_cmp(&0.0).filter(|o| o.is_ne()) {
+        return o;
     }
     xenonet_app::jstext::locale_compare(&js_string(&a["id"]), &js_string(&b["id"]))
 }
@@ -262,8 +265,8 @@ pub fn query(records: &[Value], q: &Value) -> Value {
         found.sort_by(|a, b| {
             let at = |r: &Value| r.get("at").and_then(Value::as_f64).unwrap_or(f64::NAN);
             let d = at(a) - at(b);
-            if d != 0.0 && !d.is_nan() {
-                return d.partial_cmp(&0.0).unwrap();
+            if let Some(o) = d.partial_cmp(&0.0).filter(|o| o.is_ne()) {
+                return o;
             }
             xenonet_app::jstext::locale_compare(&js_string(&a["id"]), &js_string(&b["id"]))
         });

@@ -12,6 +12,7 @@ use crate::common::{fail, failed, write_new, Fail};
 use regex::Regex;
 use serde_json::{json, Map, Value};
 use std::cell::RefCell;
+use std::fmt::Write;
 use std::rc::Rc;
 use std::sync::OnceLock;
 use xenonet_app::fsx;
@@ -60,10 +61,11 @@ fn excluded_res() -> &'static [Regex; 4] {
     static R: OnceLock<[Regex; 4]> = OnceLock::new();
     R.get_or_init(|| {
         [
-            Regex::new(r"^(?i-u:\.git|node_modules|\.ssh|\.aws|\.azure|\.gnupg|\.venv|venv|__pycache__|\.cache|\.xenonet)$").unwrap(),
-            Regex::new(&format!(r"^(?i-u:\.env)(?:\.{DOT}*)?$")).unwrap(),
-            Regex::new(&format!(r"^(?:(?i-u:\.npmrc|\.pypirc|\.netrc|\.git-credentials|credentials(?:\.json)?|id_rsa|id_ed25519)|(?i-u:secrets?)(?:\.{DOT}*)?)$")).unwrap(),
-            Regex::new(r"\.(?i-u:pem|key|p12|pfx|keystore)$").unwrap(),
+            Regex::new(r"^(?i-u:\.git|node_modules|\.ssh|\.aws|\.azure|\.gnupg|\.venv|venv|__pycache__|\.cache|\.xenonet)$").expect("a fixed pattern"),
+            Regex::new(&format!(r"^(?i-u:\.env)(?:\.{DOT}*)?$")).expect("a fixed pattern"),
+            Regex::new(&format!(r"^(?:(?i-u:\.npmrc|\.pypirc|\.netrc|\.git-credentials|credentials(?:\.json)?|id_rsa|id_ed25519)|(?i-u:secrets?)(?:\.{DOT}*)?)$"))
+                .expect("a fixed pattern"),
+            Regex::new(r"\.(?i-u:pem|key|p12|pfx|keystore)$").expect("a fixed pattern"),
         ]
     })
 }
@@ -180,8 +182,8 @@ pub async fn source_snapshot(io: Io, source: String, env: Map<String, Value>) ->
     // Windows can spell one directory with either short or long names.
     let source = realpath(&source)?;
     let env = git_env(&env);
-    let base: Vec<String> = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=", "-C", &source].iter().map(|s| s.to_string()).collect();
-    let with = |more: &[&str]| -> Vec<String> { base.iter().cloned().chain(more.iter().map(|s| s.to_string())).collect() };
+    let base: Vec<String> = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=", "-C", &source].iter().map(ToString::to_string).collect();
+    let with = |more: &[&str]| -> Vec<String> { base.iter().cloned().chain(more.iter().map(ToString::to_string)).collect() };
     let root = git(&io, with(&["rev-parse", "--show-toplevel"]), &env, 4096).await?;
     if realpath(xenonet_base::text::js_trim(&root))? != source {
         return Err(refused(Fail { status: 400, code: "bad-request".into(), message: "Change review needs the root of a Git working tree.".into() }));
@@ -379,7 +381,7 @@ fn lines(content: &str, prefix: &str) -> String {
     if newline {
         data.pop();
     }
-    let body: String = data.iter().map(|l| format!("{prefix}{l}\n")).collect();
+    let body: String = data.iter().flat_map(|l| [prefix, *l, "\n"]).collect();
     if newline {
         body
     } else {
@@ -445,12 +447,11 @@ pub fn text_patch(before: &[Value], after: &[Value]) -> Value {
         }
         if removed == 0 && added == 0 {
             let blob = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-            diff.push_str(&if status == "added" { format!("index 0000000..{blob}\n") } else { format!("index {blob}..0000000\n") });
+            let _ = if status == "added" { writeln!(diff, "index 0000000..{blob}") } else { writeln!(diff, "index {blob}..0000000") };
         } else {
             let from = if a0.is_some() { quote(&format!("a/{name}")) } else { "/dev/null".into() };
             let to = if b0.is_some() { quote(&format!("b/{name}")) } else { "/dev/null".into() };
-            diff.push_str(&format!("--- {from}\n+++ {to}\n"));
-            diff.push_str(&format!("@@ -{},{removed} +{},{added} @@\n{}{}", usize::from(removed > 0), usize::from(added > 0), lines(&a, "-"), lines(&b, "+")));
+            let _ = write!(diff, "--- {from}\n+++ {to}\n@@ -{},{removed} +{},{added} @@\n{}{}", usize::from(removed > 0), usize::from(added > 0), lines(&a, "-"), lines(&b, "+"));
         }
         patch.push_str(&diff);
         changes.push(json!({ "path": name, "status": status, "added": added, "removed": removed, "diff": diff }));
@@ -479,10 +480,14 @@ impl Reviews {
     }
 
     fn root(&mut self) -> R<String> {
-        if self.dir.is_none() {
-            self.dir = Some(fsx::mkdtemp(&NATIVE.join(&[&std::env::temp_dir().to_string_lossy(), "xenonet-reviews-"]))?);
-        }
-        let d = self.dir.clone().unwrap();
+        let d = match &self.dir {
+            Some(d) => d.clone(),
+            None => {
+                let d = fsx::mkdtemp(&NATIVE.join(&[&std::env::temp_dir().to_string_lossy(), "xenonet-reviews-"]))?;
+                self.dir = Some(d.clone());
+                d
+            }
+        };
         fsx::mkdir_p(&d, Some(0o700))?;
         Ok(d)
     }
@@ -605,8 +610,8 @@ impl Reviews {
             return failed("The isolated Git configuration changed.", "storage-invalid", 409);
         }
         let mut a: Vec<String> =
-            ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=", "-c", &format!("core.excludesFile={empty}"), "-C", folder].iter().map(|s| s.to_string()).collect();
-        a.extend(args.iter().map(|s| s.to_string()));
+            ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=", "-c", &format!("core.excludesFile={empty}"), "-C", folder].iter().map(ToString::to_string).collect();
+        a.extend(args.iter().map(ToString::to_string));
         let mut e = git_env(env);
         e.insert("GIT_CONFIG_NOSYSTEM".into(), json!("1"));
         e.insert("GIT_CONFIG_GLOBAL".into(), json!(empty));

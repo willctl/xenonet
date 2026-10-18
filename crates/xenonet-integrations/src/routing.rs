@@ -78,11 +78,7 @@ pub fn answer_ok(answers: &Value, candidates: &[Value]) -> bool {
     if !candidates.iter().any(|c| xenonet_app::jsv::strict_eq(c.get("id"), a.get("choice"))) {
         return false;
     }
-    let probs = a.get("probabilities").and_then(Value::as_object);
-    if probs.map_or(0, Map::len) != candidates.len() {
-        return false;
-    }
-    let probs = probs.unwrap();
+    let Some(probs) = a.get("probabilities").and_then(Value::as_object).filter(|p| p.len() == candidates.len()) else { return false };
     if candidates.iter().any(|c| prob(probs.get(&xenonet_base::text::js_string(&c["id"]))).is_none()) {
         return false;
     }

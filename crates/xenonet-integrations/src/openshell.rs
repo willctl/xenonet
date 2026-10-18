@@ -254,7 +254,8 @@ pub async fn preview(io: Io, s: Shared, body: Value) -> Result<Value, Failure> {
         return Err(f("Use a container image reference."));
     }
     let provider = if truthy(body.get("provider")) { text(body.get("provider"), "Provider", 80).map_err(failure)? } else { String::new() };
-    if !provider.is_empty() && !(provider.as_bytes()[0].is_ascii_alphanumeric() && provider.bytes().all(|c| c.is_ascii_alphanumeric() || b"_.-".contains(&c))) {
+    let provider_ok = provider.is_empty() || (provider.as_bytes()[0].is_ascii_alphanumeric() && provider.bytes().all(|c| c.is_ascii_alphanumeric() || b"_.-".contains(&c)));
+    if !provider_ok {
         return Err(f("Use an existing OpenShell provider name."));
     }
     let source = if truthy(body.get("source")) { Some(source_dir(body.get("source")).map_err(failure)?) } else { None };
@@ -333,7 +334,10 @@ pub async fn preview(io: Io, s: Shared, body: Value) -> Result<Value, Failure> {
         Value::Object(m)
     });
     let t = now(&io).await?;
-    let issued = match s.borrow_mut().tickets.issue(value, t) {
+    // Issued before the match, so the borrow ends before forgetting the
+    // review awaits.
+    let issued = s.borrow_mut().tickets.issue(value, t);
+    let issued = match issued {
         Ok(i) => i,
         Err(e) => {
             if baseline.is_some() {

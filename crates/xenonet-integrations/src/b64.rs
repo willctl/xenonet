@@ -49,7 +49,7 @@ pub fn byte_length(text: &str) -> usize {
 }
 
 pub fn sha256_hex(data: &[u8]) -> String {
-    Sha256::digest(data).iter().map(|b| format!("{b:02x}")).collect()
+    xenonet_base::jsstr::hex(&Sha256::digest(data))
 }
 
 /// crypto.randomUUID(): a version 4 UUID.
@@ -58,7 +58,7 @@ pub fn uuid() -> String {
     getrandom::fill(&mut b).expect("the system's random numbers");
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
-    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    let h = xenonet_base::jsstr::hex(&b);
     format!("{}-{}-{}-{}-{}", &h[..8], &h[8..12], &h[12..16], &h[16..20], &h[20..])
 }
 
