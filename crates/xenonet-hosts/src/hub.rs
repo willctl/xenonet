@@ -51,7 +51,10 @@ pub fn view(info: &Value, entry: &Value, snapshot: &Value, cached: bool, simulat
     let nodes: Vec<Value> = snapshot.get("graph").and_then(|g| g.get("nodes")).and_then(Value::as_array).cloned().unwrap_or_default();
     let id = entry.get("id").cloned().unwrap_or(Value::Null);
     let hello_id = hello.and_then(|h| h.get("id"));
-    let calls = if truthy(hello_id) && hello_id != Some(&id) { hello_id.cloned().unwrap() } else { field(entry.get("name")) };
+    let calls = match hello_id.filter(|h| truthy(Some(h)) && **h != id) {
+        Some(h) => h.clone(),
+        None => field(entry.get("name")),
+    };
     let mut m = Map::new();
     let put = |m: &mut Map<String, Value>, k: &str, v: Option<&Value>| {
         if let Some(v) = v {

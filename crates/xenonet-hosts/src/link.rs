@@ -73,12 +73,15 @@ pub struct Options {
     pub env: Map<String, Value>,
 }
 
+/// A program to run: (file, args, env).
+pub type Command = (String, Vec<String>, Map<String, Value>);
+
 /// What a link runs: (file, args, env). Fixed words, and values hostEntry
 /// checked, checked again here, since the host's shell parses the remote
 /// command. The destination is the host's id, an alias in XenoNet's own
 /// ssh config, after --, so it can't be an option. The local transport runs
 /// only XenoNet's own relay, with none of this XenoNet's XENONET_ settings.
-pub fn transport(entry: &Value, o: &Options) -> Result<(String, Vec<String>, Map<String, Value>), String> {
+pub fn transport(entry: &Value, o: &Options) -> Result<Command, String> {
     let id = entry.get("id").and_then(Value::as_str).filter(|i| is_host_id(i)).ok_or_else(|| format!("not a host id: {}", show(entry.get("id"))))?;
     let port =
         entry.get("port").and_then(Value::as_f64).filter(|p| p.fract() == 0.0 && (1.0..=65535.0).contains(p)).ok_or_else(|| format!("not a port: {}", show(entry.get("port"))))?;
@@ -121,7 +124,7 @@ pub fn transport(entry: &Value, o: &Options) -> Result<(String, Vec<String>, Map
             let file = bin.remove(0);
             let mut args = bin;
             args.extend(["-F".to_string(), config.clone()]);
-            args.extend(SSH_OPTIONS.iter().map(|s| s.to_string()));
+            args.extend(SSH_OPTIONS.iter().map(ToString::to_string));
             args.extend(["--".to_string(), id.to_string(), command]);
             args.extend(relay);
             Ok((file, args, o.env.clone()))
@@ -179,9 +182,10 @@ fn res() -> &'static [Regex; 3] {
     R.get_or_init(|| {
         let any = r"[^\n\r\x{2028}\x{2029}]*";
         [
-            Regex::new(&format!(r"(?i)host key verification failed|remote host identification has changed|no \S+ host key is known|host key for {any} has changed")).unwrap(),
-            Regex::new(r"(?i)permission denied|too many authentication failures|no supported authentication methods").unwrap(),
-            Regex::new(r"(?i)(^|\s)xenonet: (command )?not found|command not found: xenonet|xenonet: No such file or directory").unwrap(),
+            Regex::new(&format!(r"(?i)host key verification failed|remote host identification has changed|no \S+ host key is known|host key for {any} has changed"))
+                .expect("a fixed pattern"),
+            Regex::new(r"(?i)permission denied|too many authentication failures|no supported authentication methods").expect("a fixed pattern"),
+            Regex::new(r"(?i)(^|\s)xenonet: (command )?not found|command not found: xenonet|xenonet: No such file or directory").expect("a fixed pattern"),
         ]
     })
 }
@@ -197,7 +201,7 @@ pub struct Ended<'a> {
     pub spawn_error: Option<&'a str>,
 }
 
-pub fn why_ended(entry: &Value, e: &Ended, ssh_config: Option<&str>, tilde: &dyn Fn(&str) -> String) -> Why {
+pub fn why_ended(entry: &Value, e: &Ended<'_>, ssh_config: Option<&str>, tilde: &dyn Fn(&str) -> String) -> Why {
     let id = entry.get("id").map(js_string).unwrap_or_default();
     let ssh = entry.get("transport") == Some(&json!("ssh"));
     let named = |text: &str| -> String {
@@ -367,7 +371,7 @@ pub struct Link {
 }
 
 impl Link {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "the JS's Link and its options, which xenonet-node passes one by one")]
     pub fn new(entry: Value, options: Options, now: f64, demo_only: bool, one_shot: bool, hello_ms: f64, stale_ms: f64, backoff: (f64, f64), get_ms: f64) -> Self {
         Link {
             entry,
@@ -476,7 +480,7 @@ impl Link {
     /// A get's time ran out.
     pub fn get_timeout(&mut self, id: u64, timeout_ms: f64) -> Vec<Effect> {
         let mut found = false;
-        for r in self.run.iter_mut() {
+        if let Some(r) = &mut self.run {
             if let Some(i) = r.pending.iter().position(|p| *p == id) {
                 r.pending.remove(i);
                 found = true;
@@ -627,7 +631,10 @@ impl Link {
                 let at = fid.and_then(|f| self.run.as_ref().and_then(|r| r.pending.iter().position(|p| *p == f)));
                 match (fid, at) {
                     (Some(f), Some(i)) => {
-                        self.run.as_mut().unwrap().pending.remove(i);
+                        // `at` was found in the run's pending gets, so there's a run.
+                        if let Some(r) = self.run.as_mut() {
+                            r.pending.remove(i);
+                        }
                         self.fx.push(Effect::Clear { name: format!("get:{f}") });
                         self.heard(now);
                         let status = frame.get("status").and_then(Value::as_f64).filter(|s| s.fract() == 0.0 && (100.0..600.0).contains(s)).unwrap_or(502.0);
@@ -797,7 +804,7 @@ impl Link {
         }
         let rtt = now - sent;
         if self.rtt_ms.is_none_or(|r| rtt <= (r * 2.0).max(250.0)) {
-            self.offset_ms = xenonet_base::units::js_round(host_now - (sent + now) / 2.0);
+            self.offset_ms = xenonet_base::units::js_round(host_now - f64::midpoint(sent, now));
             self.rtt_ms = Some(self.rtt_ms.map_or(rtt, |r| r.min(rtt)));
             let o = self.offset_ms;
             self.emit("offset", xenonet_base::json::number(o));
@@ -855,7 +862,7 @@ impl Link {
     }
 
     /// The run's program ended (or couldn't start).
-    pub fn end(&mut self, run: u64, e: &Ended, now: f64, a: &mut dyn Asks) -> Vec<Effect> {
+    pub fn end(&mut self, run: u64, e: &Ended<'_>, now: f64, a: &mut dyn Asks) -> Vec<Effect> {
         let Some(mut r) = self.run.take() else { return self.take() };
         if r.id != run || r.ended {
             self.run = Some(r);
@@ -932,8 +939,8 @@ mod tests {
         let (file, args, _) = transport(&e, &opts()).unwrap();
         assert_eq!(file, "ssh");
         let mut want: Vec<String> = vec!["-F".into(), "/x/ssh_config".into()];
-        want.extend(SSH_OPTIONS.iter().map(|s| s.to_string()));
-        want.extend(["--", "vm1", "xenonet", "relay", "--port", "47840", "--since", "7d"].iter().map(|s| s.to_string()));
+        want.extend(SSH_OPTIONS.iter().map(ToString::to_string));
+        want.extend(["--", "vm1", "xenonet", "relay", "--port", "47840", "--since", "7d"].iter().map(ToString::to_string));
         assert_eq!(args, want);
         let bad = json!({ "id": "vm1", "transport": "ssh", "port": 47840, "since": "7d", "command": "xenonet; rm" });
         assert!(transport(&bad, &opts()).unwrap_err().contains("not a xenonet command"));

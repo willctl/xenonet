@@ -36,9 +36,9 @@ pub enum Shape {
     Leaf,
 }
 
-/// A table's shape from its JSON: [kind, …]: ["wrap", i], ["same", i],
-/// ["array", i], ["tuple", [i…], rest|null], ["record", i], ["union", [i…]],
-/// ["object", [[name, i]…]], ["any"], ["leaf"].
+/// A table's shape from its JSON: `[kind, …]`: `["wrap", i]`, `["same", i]`,
+/// `["array", i]`, `["tuple", [i…], rest|null]`, `["record", i]`, `["union", [i…]]`,
+/// `["object", [[name, i]…]]`, `["any"]`, `["leaf"]`.
 pub fn shape_of(v: &Value) -> Shape {
     let a = v.as_array();
     let at = |i: usize| a.and_then(|a| a.get(i));

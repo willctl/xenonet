@@ -14,7 +14,7 @@ pub const CACHE_FOLDER: &str = "hosts";
 /// A host's key, as schema/host.js has it.
 pub fn host_key() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new("^[0-9a-f]{32}$").unwrap())
+    R.get_or_init(|| Regex::new("^[0-9a-f]{32}$").expect("a fixed pattern"))
 }
 
 fn file_of(dir: &str, key: &str) -> String {
@@ -37,6 +37,7 @@ pub fn read_cache(dir: Option<&str>, key: &str) -> Option<Value> {
 }
 
 /// Keeps a host's snapshot; whether it could.
+#[expect(clippy::too_many_arguments, reason = "the fields of the snapshot the JS's writeCache takes, which xenonet-node passes one by one")]
 pub fn write_cache(dir: Option<&str>, key: &str, id: &Value, saved_at: &Value, hello: &Value, graph: Option<&Value>, live: Option<&Value>, engine: &Value) -> bool {
     let (Some(dir), Some(graph), Some(live)) =
         (dir.filter(|d| !d.is_empty()), graph.filter(|g| xenonet_app::jsv::truthy(Some(g))), live.filter(|l| xenonet_app::jsv::truthy(Some(l))))
