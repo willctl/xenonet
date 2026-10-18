@@ -84,7 +84,7 @@ pub fn find_client(env: &Map<String, Value>, platform: &str, home: &str, exists:
 /// The version `tunnel-client --version` printed, such as 0.0.16.
 pub fn version_in(stdout: &str) -> Option<String> {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"(\d+\.\d+\.\d+)").unwrap()).captures(stdout).map(|c| c[1].to_string())
+    R.get_or_init(|| Regex::new(r"(\d+\.\d+\.\d+)").expect("a fixed pattern")).captures(stdout).map(|c| c[1].to_string())
 }
 
 /// Where tunnel-client keeps the profiles you made with it.
@@ -113,11 +113,12 @@ pub fn profile_dirs(env: &Map<String, Value>, platform: &str, home: &str) -> Vec
 }
 
 fn value_of(text: &str, key: &str) -> Option<String> {
-    let re = Regex::new(&format!(r#"(?m)^\s*-?\s*{key}:\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^']|'')*)'|([^#\r\n]*?))\s*(?:#.*)?$"#)).unwrap();
+    let re =
+        Regex::new(&format!(r#"(?m)^\s*-?\s*{key}:\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^']|'')*)'|([^#\r\n]*?))\s*(?:#.*)?$"#)).expect("a fixed pattern, and one of the profile's keys");
     let c = re.captures(text)?;
     if let Some(m) = c.get(1) {
         static ESC: OnceLock<Regex> = OnceLock::new();
-        return Some(ESC.get_or_init(|| Regex::new(r"\\(.)").unwrap()).replace_all(m.as_str(), "$1").into_owned());
+        return Some(ESC.get_or_init(|| Regex::new(r"\\(.)").expect("a fixed pattern")).replace_all(m.as_str(), "$1").into_owned());
     }
     if let Some(m) = c.get(2) {
         return Some(m.as_str().replace("''", "'"));
@@ -131,7 +132,7 @@ pub fn read_profile(text: &str) -> Value {
     static GRANT: OnceLock<Regex> = OnceLock::new();
     let command = value_of(text, "command");
     let grant = GRANT
-        .get_or_init(|| Regex::new(r"(?-u:\b)mcp\s+assistant(?-u:\b).*--grant[ =](gr_[0-9a-f]{24})(?-u:\b)").unwrap())
+        .get_or_init(|| Regex::new(r"(?-u:\b)mcp\s+assistant(?-u:\b).*--grant[ =](gr_[0-9a-f]{24})(?-u:\b)").expect("a fixed pattern"))
         .captures(command.as_deref().unwrap_or(""))
         .map(|c| c[1].to_string());
     let tunnel = value_of(text, "tunnel_id");
@@ -139,12 +140,14 @@ pub fn read_profile(text: &str) -> Value {
 }
 
 /// Where profiles are read from.
+#[expect(clippy::result_unit_err, reason = "a profile that can't be read is skipped, whatever went wrong, as the JS's catch did")]
 pub trait Files {
     fn list(&mut self, dir: &str) -> Result<Vec<String>, ()>;
     fn read(&mut self, file: &str) -> Result<String, ()>;
     fn mtime(&mut self, file: &str) -> Result<f64, ()>;
 }
 
+#[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the name is lowered first")]
 fn yaml_name(n: &str) -> Option<&str> {
     let lower = n.to_ascii_lowercase();
     if lower.ends_with(".yaml") {
@@ -246,7 +249,7 @@ pub fn profile_yaml(tunnel_id: &Value, command: &Value, label: Option<&Value>) -
 /// Anything that looks like an OpenAI key, as sk-….
 pub fn mask_keys(s: &str) -> String {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"sk-[A-Za-z0-9_-]{8,}").unwrap()).replace_all(s, "sk-…").into_owned()
+    R.get_or_init(|| Regex::new(r"sk-[A-Za-z0-9_-]{8,}").expect("a fixed pattern")).replace_all(s, "sk-…").into_owned()
 }
 
 /// One line of tunnel-client's log, as XenoNet shows it: its level and

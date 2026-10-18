@@ -68,6 +68,7 @@ fn via(a: &Value) -> Value {
 /// A view at `t`, from the map's nodes (state.index's values), the live
 /// state (state.liveSnapshot()), the registry's actors and the two apps'
 /// sources.
+#[expect(clippy::too_many_arguments, reason = "the JS's view and its inputs, which xenonet-node passes one by one")]
 pub fn view(t: f64, nodes: &[Value], live: &Value, actors: &[Value], has_actors: bool, claude: Value, codex: Value, around: &mut dyn Around) -> Value {
     let mut live_by_id: Map<String, Value> = Map::new();
     for s in live.get("sessions").and_then(Value::as_array).into_iter().flatten() {

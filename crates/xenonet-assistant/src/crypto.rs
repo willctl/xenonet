@@ -9,7 +9,7 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
 }
 
 pub fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    xenonet_base::jsstr::hex(bytes)
 }
 
 /// crypto.createHash("sha256").update(text).digest("hex").
