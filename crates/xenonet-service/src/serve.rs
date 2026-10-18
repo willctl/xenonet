@@ -231,13 +231,17 @@ pub fn run_with(args: &[String], built: &str, build: Builder) -> i32 {
     };
     let args = args.to_vec();
     let built = built.to_string();
-    rt.block_on(async move {
+    let code = rt.block_on(async move {
         let mut config = Config::from_env(&args);
         let env = WireEnv { version: config.version(&built), emitter: Emitter::new(), drift: Arc::new(Mutex::new(DriftLog::default())) };
         // The drivers run on the runtime: some start tasks of their own.
         let cores = build(&mut config, &env);
         serve_with(&mut config, cores, &built, env).await
-    })
+    });
+    // A runtime dropped waits for its blocking tasks, and some wait long
+    // (an inbox's or a Stop hook's wait): stopped, the service goes now.
+    rt.shutdown_timeout(std::time::Duration::from_secs(2));
+    code
 }
 
 /// The service with every core pending.
@@ -493,6 +497,7 @@ async fn signal() {
 fn shutdown(ctx: &Arc<Ctx>) {
     let c = &ctx.cores;
     c.system.stop();
+    c.terminals.kill_all();
     if let Some(t) = &c.tunnels {
         t.stop_all();
     }
