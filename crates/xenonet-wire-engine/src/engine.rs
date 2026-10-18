@@ -228,7 +228,7 @@ impl<'a> EngineCalls<'a> {
             Fail::Bad(m) => CoreError::of(Kind::Error, 400, "bad-request", m),
             Fail::Thrown(t) => {
                 let status = t.handle.and_then(|h| self.refused.iter().find(|(k, _)| *k == h)).map(|(_, s)| *s);
-                let code = t.code.as_ref().and_then(Value::as_str).map(str::to_string);
+                let code = t.code.as_deref().and_then(Value::as_str).map(str::to_string);
                 match status {
                     Some(s) => CoreError { status: Some(s), code, ..CoreError::new(t.message) },
                     None => CoreError { code, ..CoreError::new(t.message) },

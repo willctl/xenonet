@@ -11,7 +11,7 @@ use xenonet_engine::peer::{Result, Thrown};
 use xenonet_engine::sql::Arg;
 
 fn thrown(e: FsError) -> Thrown {
-    Thrown { message: e.message, code: e.code.map(serde_json::Value::String), handle: None, stdout: None }
+    Thrown { message: e.message, code: e.code.map(|c| Box::new(serde_json::Value::String(c))), handle: None, stdout: None }
 }
 
 fn of(e: std::io::Error, syscall: &str, path: &str) -> Thrown {

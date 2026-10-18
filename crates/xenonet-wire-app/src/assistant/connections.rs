@@ -51,7 +51,7 @@ fn value(a: &Arg) -> Value {
 
 fn fs(e: xenonet_base::fs::FsError) -> Thrown {
     let mut t = Thrown::new(e.message);
-    t.code = e.code.map(Value::String);
+    t.code = e.code.map(|c| Box::new(Value::String(c)));
     t
 }
 

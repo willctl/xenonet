@@ -100,7 +100,7 @@ impl ConnectDriver {
         tokio::task::spawn_blocking(move || f(&core, &mut ConnectCalls))
             .await
             .map_err(|e| CoreError::new(e.to_string()))?
-            .map_err(|t| CoreError { code: t.code.as_ref().and_then(Value::as_str).map(str::to_string), ..CoreError::new(t.message) })
+            .map_err(|t| CoreError { code: t.code.as_deref().and_then(Value::as_str).map(str::to_string), ..CoreError::new(t.message) })
     }
 }
 

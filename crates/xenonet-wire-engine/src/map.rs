@@ -24,7 +24,7 @@ fn read<T>(r: R<T>, empty: impl FnOnce() -> T) -> Result<T> {
 }
 
 pub fn thrown(e: CoreError) -> Thrown {
-    Thrown { message: e.message, code: e.code.map(Value::String), handle: None, stdout: None }
+    Thrown { message: e.message, code: e.code.map(|c| Box::new(Value::String(c))), handle: None, stdout: None }
 }
 
 fn field(n: &Value, k: &str) -> Arg {

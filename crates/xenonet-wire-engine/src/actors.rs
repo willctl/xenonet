@@ -98,7 +98,7 @@ fn thrown(f: Fail) -> Thrown {
 }
 
 pub fn core_error(t: Thrown) -> CoreError {
-    CoreError { code: t.code.as_ref().and_then(Value::as_str).map(str::to_string), ..CoreError::new(t.message) }
+    CoreError { code: t.code.as_deref().and_then(Value::as_str).map(str::to_string), ..CoreError::new(t.message) }
 }
 
 /// What's run before an actor's record goes: its remote connections are

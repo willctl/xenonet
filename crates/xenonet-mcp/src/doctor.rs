@@ -281,6 +281,7 @@ fn procs() -> Value {
 }
 
 #[cfg(unix)]
+#[expect(unsafe_code, reason = "access(2), which std doesn't wrap")]
 fn writable(p: &str) -> bool {
     let Ok(c) = std::ffi::CString::new(p) else { return false };
     // SAFETY: `c` is a NUL-terminated string that outlives the call, and
@@ -294,6 +295,7 @@ fn writable(p: &str) -> bool {
 }
 
 #[cfg(unix)]
+#[expect(unsafe_code, reason = "statvfs(3), which std doesn't wrap")]
 fn statfs(p: &str) -> Option<Value> {
     let c = std::ffi::CString::new(p).ok()?;
     // SAFETY: statvfs is a plain C struct of numbers, for which all zeros

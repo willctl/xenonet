@@ -45,7 +45,7 @@ pub struct Failed {
 
 impl Failed {
     pub fn thrown(&self) -> Thrown {
-        Thrown { message: self.message.clone(), code: self.code.clone(), handle: None, stdout: Some(self.stdout.clone()) }
+        Thrown { message: self.message.clone(), code: self.code.clone().map(Box::new), handle: None, stdout: Some(self.stdout.clone()) }
     }
 }
 

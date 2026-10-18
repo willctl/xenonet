@@ -32,13 +32,13 @@ pub fn arg(v: &Value) -> Arg {
 
 pub fn thrown(t: Thrown) -> CoreError {
     let mut e = CoreError::new(t.message);
-    e.code = t.code.as_ref().map(xenonet_base::text::js_string);
+    e.code = t.code.as_deref().map(xenonet_base::text::js_string);
     e
 }
 
 pub fn thrown_of(e: &CoreError) -> Thrown {
     let mut t = Thrown::new(e.message.clone());
-    t.code = e.code.clone().map(Value::String);
+    t.code = e.code.clone().map(|c| Box::new(Value::String(c)));
     t
 }
 

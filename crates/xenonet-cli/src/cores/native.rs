@@ -140,7 +140,7 @@ pub fn text(a: &Arg) -> String {
 }
 
 fn thrown(e: FsError) -> Thrown {
-    Thrown { message: e.message, code: e.code.map(Value::String), handle: None, stdout: None }
+    Thrown { message: e.message, code: e.code.map(|c| Box::new(Value::String(c))), handle: None, stdout: None }
 }
 
 /// A node:fs call a core makes, synchronously: `fs.<method>(...args)`.
