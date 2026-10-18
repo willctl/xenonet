@@ -97,6 +97,10 @@ pub struct MemorySecretsCore {
 }
 
 #[napi]
+// On the impl, not the methods: napi-derive copies a method's attributes
+// onto the two-argument wrapper it generates for it, and an expectation
+// there goes unfulfilled.
+#[expect(clippy::unused_self, reason = "kind is a getter on the JS class, as it was in the JS, though it reads a constant")]
 impl MemorySecretsCore {
     #[napi(constructor)]
     pub fn new() -> Self {

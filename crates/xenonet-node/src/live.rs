@@ -148,6 +148,7 @@ pub struct JsLiveCore {
 // onto the two-argument wrapper it generates for it, and an expectation
 // there goes unfulfilled.
 #[expect(clippy::too_many_arguments, reason = "line and apply take the twin's arguments one by one, as LiveCore's JS methods did")]
+#[expect(clippy::unused_self, reason = "collab is a method of LiveCore, as it was in the JS, though it needs none of its state")]
 impl JsLiveCore {
     /// `roots`: [{ dir, app }], the folders it reads, as real paths.
     #[napi(constructor)]

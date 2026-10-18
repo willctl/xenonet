@@ -77,6 +77,7 @@ fn busy() -> Error {
 impl RegistrationCore {
     // A call that needs none of what's kept, so it may come back in
     // during another (observers asks observing).
+    #[expect(clippy::unused_self, reason = "not touching what's kept is the point; as a method it keeps the exports that call it reading like the ones that call with")]
     fn free<T>(&self, env: Env, deps: &Object<'_>, f: impl FnOnce(&mut SyncCalls) -> registration::Result<T>) -> Result<T> {
         let mut calls = SyncCalls::new(&env, deps);
         match f(&mut calls) {

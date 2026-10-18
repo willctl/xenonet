@@ -35,6 +35,10 @@ fn s(a: &Arg) -> String {
 }
 
 #[napi]
+// On the impl, not the methods: napi-derive copies a method's attributes
+// onto the two-argument wrapper it generates for it, and an expectation
+// there goes unfulfilled.
+#[expect(clippy::unused_self, reason = "mayLook is a method of the JS class, as it was in the JS, though it asks only `me`")]
 impl ObserverCore {
     #[napi(constructor)]
     pub fn new() -> Self {

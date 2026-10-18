@@ -155,6 +155,10 @@ pub struct WindowKey {
 }
 
 #[napi]
+// On the impl, not the methods: napi-derive copies a method's attributes
+// onto the two-argument wrapper it generates for it, and an expectation
+// there goes unfulfilled.
+#[expect(clippy::unused_self, reason = "hidden is a getter on the JS class, as it was in the JS, though it reads a constant")]
 impl WindowKey {
     #[napi(constructor)]
     pub fn new() -> Result<Self> {

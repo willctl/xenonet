@@ -312,6 +312,10 @@ macro_rules! shell_task {
 }
 
 #[napi]
+// On the impl, not the methods: napi-derive copies a method's attributes
+// onto the two-argument wrapper it generates for it, and an expectation
+// there goes unfulfilled.
+#[expect(clippy::unused_self, reason = "review, exportReview and forgetReview are methods of the JS object, as they were in the JS, though they need none of its state")]
 impl IntgOpenShell {
     #[napi(constructor)]
     pub fn new(platform: String, system_root: Option<String>, collect_text: String) -> Self {
