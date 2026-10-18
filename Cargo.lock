@@ -2477,13 +2477,19 @@ name = "xenonet-wire-engine"
 version = "0.2.0"
 dependencies = [
  "async-trait",
+ "libc",
+ "regex",
+ "reqwest",
  "rusqlite",
  "serde_json",
  "tokio",
+ "url",
  "xenonet-actors",
+ "xenonet-app",
  "xenonet-base",
  "xenonet-blocks",
  "xenonet-engine",
+ "xenonet-schema",
  "xenonet-service",
 ]
 

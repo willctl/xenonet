@@ -20,3 +20,18 @@ xenonet-actors.workspace = true
 xenonet-blocks.workspace = true
 xenonet-engine.workspace = true
 rusqlite.workspace = true
+# The checks on what an actor reports, against the schema npm run schemas
+# writes (ReportEvent, ReportTarget).
+xenonet-schema.workspace = true
+# The demo's sessions by title, for its made-up actors' scripts.
+xenonet-app.workspace = true
+# A webhook wake follows no redirect; the service's fetch does.
+reqwest.workspace = true
+# WHATWG URL parsing, for a webhook's URL, as the twin's new URL() read it.
+url.workspace = true
+# The token look's names, shown without the token.
+regex.workspace = true
+
+# Whether a process still runs (kill with signal 0), without a command.
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
