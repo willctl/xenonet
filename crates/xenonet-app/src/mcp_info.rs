@@ -244,10 +244,12 @@ impl Collect {
     }
 
     pub fn from_value(v: Value) -> Self {
-        Collect { state: match v {
-            Value::Object(m) => m,
-            _ => Map::new(),
-        } }
+        Collect {
+            state: match v {
+                Value::Object(m) => m,
+                _ => Map::new(),
+            },
+        }
     }
 
     fn server(&self) -> String {
@@ -295,18 +297,25 @@ impl Collect {
     }
 
     fn codex_used(&self) -> bool {
-        self.using().iter().any(|s| raw(Some(s), "app").and_then(Value::as_str) == Some("codex") || raw(Some(s), "id").and_then(Value::as_str).is_some_and(|id| id.starts_with("codex:")))
+        self.using()
+            .iter()
+            .any(|s| raw(Some(s), "app").and_then(Value::as_str) == Some("codex") || raw(Some(s), "id").and_then(Value::as_str).is_some_and(|id| id.starts_with("codex:")))
     }
 
     fn status_request(&self) -> Next {
-        Next::Request { method: "mcpServerStatus/list", params: json!({ "serverName": self.server(), "detail": "full", "limit": 100, "cursor": self.state.get("cursor").cloned().unwrap_or(Value::Null) }) }
+        Next::Request {
+            method: "mcpServerStatus/list",
+            params: json!({ "serverName": self.server(), "detail": "full", "limit": 100, "cursor": self.state.get("cursor").cloned().unwrap_or(Value::Null) }),
+        }
     }
 
     // After Codex has been asked (or couldn't be): discover the server
     // ourselves unless Codex had its catalog.
     fn discover_or_finish(&mut self, settings: &Settings, read: &mut Read) -> Next {
         let specs = self.specs();
-        let usable = |s: &Value| raw(Some(s), "enabled") != Some(&Value::Bool(false)) && (truthy(raw(Some(s), "command")) || truthy(raw(Some(s), "url")) || truthy(raw(Some(s), "serverUrl")));
+        let usable = |s: &Value| {
+            raw(Some(s), "enabled") != Some(&Value::Bool(false)) && (truthy(raw(Some(s), "command")) || truthy(raw(Some(s), "url")) || truthy(raw(Some(s), "serverUrl")))
+        };
         let selected = specs.iter().find(|s| usable(s)).cloned();
         if selected.is_none() && !specs.is_empty() && specs.iter().all(|s| raw(Some(s), "enabled") == Some(&Value::Bool(false))) {
             self.result().insert("status".into(), json!("disabled"));
@@ -603,7 +612,14 @@ mod tests {
         let Next::Discover(sel) = next else { panic!("{next:?}") };
         assert_eq!(sel["env"]["API_TOKEN"], "private-value");
         assert_eq!(sel["cwd"], "/workspace");
-        let (_, next) = step(c, Answer::Ok(json!({ "serverInfo": { "name": "library", "version": "2" }, "runtimeStatus": "connected", "authStatus": "unsupported", "tools": [], "resources": [], "resourceTemplates": [] })), &settings, &mut read);
+        let (_, next) = step(
+            c,
+            Answer::Ok(
+                json!({ "serverInfo": { "name": "library", "version": "2" }, "runtimeStatus": "connected", "authStatus": "unsupported", "tools": [], "resources": [], "resourceTemplates": [] }),
+            ),
+            &settings,
+            &mut read,
+        );
         let Next::Done(info) = next else { panic!() };
         assert_eq!(info["author"], "Library authors");
         assert_eq!(info["lastCall"], 30);

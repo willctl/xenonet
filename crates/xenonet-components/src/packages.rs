@@ -68,7 +68,13 @@ pub fn package_info(value: Option<&Value>, platform: &str, arch: &str) -> Result
     let v = value.unwrap_or(&Value::Null);
     let is = |k: &str, want: &Value| v.get(k) == Some(want);
     let component_ok = v.get("component").and_then(Value::as_str).is_some_and(|c| COMPONENTS.contains(&c));
-    if !is("format", &json!(1)) || !component_ok || !is_semver(v.get("version")) || v.get("platform").and_then(Value::as_str) != Some(platform) || v.get("arch").and_then(Value::as_str) != Some(arch) || !is("dataSchema", &json!(1)) {
+    if !is("format", &json!(1))
+        || !component_ok
+        || !is_semver(v.get("version"))
+        || v.get("platform").and_then(Value::as_str) != Some(platform)
+        || v.get("arch").and_then(Value::as_str) != Some(arch)
+        || !is("dataSchema", &json!(1))
+    {
         return Err("This component package is not compatible with this XenoNet installation.".into());
     }
     crate::protocol::negotiate(Some(&crate::protocol::api_value(crate::protocol::SERVICE_API)), v.get("api"))?;

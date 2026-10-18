@@ -100,7 +100,9 @@ pub fn realpath(p: &str) -> Result<String, FsError> {
 
 /// fs.readdirSync(p): names in Node's order.
 pub fn read_dir_names(p: &str) -> Result<Vec<String>, FsError> {
-    xenonet_base::paths::read_dir_sorted(Path::new(p)).map(|ents| ents.into_iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).map_err(|e| FsError::of(e, "scandir", p))
+    xenonet_base::paths::read_dir_sorted(Path::new(p))
+        .map(|ents| ents.into_iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+        .map_err(|e| FsError::of(e, "scandir", p))
 }
 
 /// n random bytes from the system, as hex (crypto.randomBytes(n).toString("hex")).

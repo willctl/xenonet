@@ -49,7 +49,8 @@ pub async fn component_updates(io: &Io, env: &Env, m: &Machine) -> Result<Value,
         _ => return Err(Failure::msg("Invalid component update manifest.")),
     };
     let mut out = Vec::new();
-    for item in packages.iter().filter(|i| i.get("platform").and_then(Value::as_str) == Some(m.platform.as_str()) && i.get("arch").and_then(Value::as_str) == Some(m.arch.as_str())) {
+    for item in packages.iter().filter(|i| i.get("platform").and_then(Value::as_str) == Some(m.platform.as_str()) && i.get("arch").and_then(Value::as_str) == Some(m.arch.as_str()))
+    {
         package_info(Some(item), &m.platform, &m.arch).map_err(Failure::msg)?;
         let file = item.get("file").map_or_else(|| "undefined".into(), js_string);
         if !file_re().is_match(&file) || !size_ok(item.get("size")) || !is_sha(item.get("sha256")) {

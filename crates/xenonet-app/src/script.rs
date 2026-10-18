@@ -97,14 +97,20 @@ fn v(x: Value) -> Arg {
 pub enum Then {
     /// Calls `target` (the driver, or one of the control client's own
     /// methods) with these arguments, and resumes with what it answers.
-    Call { target: &'static str, args: Vec<Arg> },
+    Call {
+        target: &'static str,
+        args: Vec<Arg>,
+    },
     /// Waits this many ms and resumes.
     Sleep(f64),
     Done,
     /// Throws the error the last call threw.
     Rethrow,
     /// Throws an Error (a TypeError when `type_error`) with this message.
-    Fail { message: String, type_error: bool },
+    Fail {
+        message: String,
+        type_error: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -437,10 +443,13 @@ fn first_call(r: &mut Run, cmd: &str, arg: &str) -> Then {
 
 /// Takes what the last call came back with and says what's next.
 pub fn resume(state: State, answer: Answer) -> (State, Out) {
-    let mut r = Run { st: match state {
-        Value::Object(m) => m,
-        _ => Map::new(),
-    }, say: Vec::new() };
+    let mut r = Run {
+        st: match state {
+            Value::Object(m) => m,
+            _ => Map::new(),
+        },
+        say: Vec::new(),
+    };
     let then = match resume_in(&mut r, answer) {
         Ok(then) => then,
         Err(message) => type_error(message),
@@ -668,8 +677,48 @@ fn resume_in(r: &mut Run, answer: Answer) -> Result<Then, String> {
 
 /// The steps the switch knows; anything else goes to the driver as a method.
 const KNOWN: [&str; 42] = [
-    "launch", "quit", "status", "state", "find", "select", "deselect", "back", "reset", "next", "prev", "stats", "command", "commands", "simulate", "actors", "feed", "identities", "mask", "hosts", "root", "key", "type", "click", "click2", "hover", "drag",
-    "alt-drag", "scroll", "size", "show", "hide", "minimize", "still", "settle", "shot", "eval", "logs", "listen", "theme", "film", "sleep",
+    "launch",
+    "quit",
+    "status",
+    "state",
+    "find",
+    "select",
+    "deselect",
+    "back",
+    "reset",
+    "next",
+    "prev",
+    "stats",
+    "command",
+    "commands",
+    "simulate",
+    "actors",
+    "feed",
+    "identities",
+    "mask",
+    "hosts",
+    "root",
+    "key",
+    "type",
+    "click",
+    "click2",
+    "hover",
+    "drag",
+    "alt-drag",
+    "scroll",
+    "size",
+    "show",
+    "hide",
+    "minimize",
+    "still",
+    "settle",
+    "shot",
+    "eval",
+    "logs",
+    "listen",
+    "theme",
+    "film",
+    "sleep",
 ];
 
 fn list(x: Option<&Value>) -> Result<Vec<Value>, String> {
@@ -736,7 +785,8 @@ mod tests {
         assert_eq!(out.then, driver("find", vec![v(json!({ "query": "atlas", "limit": 1 }))]));
         let (s, out) = resume(s, Answer::Ok(json!({ "nodes": [{ "id": "project:atlas" }] })));
         assert_eq!(out.then, driver("select", vec![v(json!("project:atlas"))]));
-        let (_, out) = resume(s, Answer::Ok(json!({ "selection": { "id": "project:atlas" }, "gathered": null, "overlays": { "modal": false }, "alerts": [], "motion": { "settled": true } })));
+        let (_, out) =
+            resume(s, Answer::Ok(json!({ "selection": { "id": "project:atlas" }, "gathered": null, "overlays": { "modal": false }, "alerts": [], "motion": { "settled": true } })));
         assert_eq!(out.say, [v(json!({ "selection": "project:atlas", "gathered": null, "overlays": [], "alerts": 0, "settled": true }))]);
         assert_eq!(out.then, Then::Done);
     }

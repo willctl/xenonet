@@ -17,13 +17,26 @@ use crate::nodepath::NATIVE;
 use serde_json::{json, Map, Value};
 use xenonet_base::json::{number_string, stringify};
 use xenonet_base::log::{scrub, summarize, unsafe_text};
-use xenonet_base::text::{join, js_string, js_number};
+use xenonet_base::text::{join, js_number, js_string};
 use xenonet_base::time::iso;
 
 pub const SCHEMA: &str = "diagnostics/bundle/v1";
 
 /// XENONET_ settings whose values say nothing private.
-pub const SHOWN: [&str; 12] = ["XENONET_PORT", "XENONET_INSTANCE", "XENONET_DEMO", "XENONET_ACTORS", "XENONET_ASSISTANT", "XENONET_HOSTS", "XENONET_IDENTITIES", "XENONET_CLAUDE_USAGE", "XENONET_POLL_MS", "XENONET_STANDALONE", "XENONET_HOT", "XENONET_DEBUG"];
+pub const SHOWN: [&str; 12] = [
+    "XENONET_PORT",
+    "XENONET_INSTANCE",
+    "XENONET_DEMO",
+    "XENONET_ACTORS",
+    "XENONET_ASSISTANT",
+    "XENONET_HOSTS",
+    "XENONET_IDENTITIES",
+    "XENONET_CLAUDE_USAGE",
+    "XENONET_POLL_MS",
+    "XENONET_STANDALONE",
+    "XENONET_HOT",
+    "XENONET_DEBUG",
+];
 
 /// What the bundle is made from: what the caller gathered, and about this
 /// machine.
@@ -144,9 +157,15 @@ pub fn make_bundle(g: &Gathered) -> Result<Value, String> {
                 .iter()
                 .map(|a| {
                     let a = Some(a);
-                    let changes: Vec<Value> = list(raw(a, "changes")).iter().map(|ch| Obj::new().put("id", raw(Some(ch), "id").cloned()).put("state", raw(Some(ch), "state").cloned()).done()).collect();
+                    let changes: Vec<Value> =
+                        list(raw(a, "changes")).iter().map(|ch| Obj::new().put("id", raw(Some(ch), "id").cloned()).put("state", raw(Some(ch), "state").cloned()).done()).collect();
                     let scrubbed = |k: &str| -> Vec<Value> { list(raw(a, k)).iter().map(|v| s(Some(v)).unwrap_or(Value::Null)).collect() };
-                    Obj::new().put("app", raw(a, "app").cloned()).set("changes", json!(changes)).set("broken", json!(scrubbed("broken"))).set("notes", json!(scrubbed("notes"))).done()
+                    Obj::new()
+                        .put("app", raw(a, "app").cloned())
+                        .set("changes", json!(changes))
+                        .set("broken", json!(scrubbed("broken")))
+                        .set("notes", json!(scrubbed("notes")))
+                        .done()
                 })
                 .collect();
             Obj::new().put("port", raw(Some(c), "port").cloned()).set("apps", json!(apps)).done()
@@ -161,7 +180,10 @@ pub fn make_bundle(g: &Gathered) -> Result<Value, String> {
     };
     let mut keys: Vec<&String> = g.env.keys().filter(|k| k.starts_with("XENONET_")).collect();
     keys.sort_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()));
-    let settings: Vec<String> = keys.into_iter().map(|k| if SHOWN.contains(&k.as_str()) { format!("{k}={}", g.env.get(k).map(js_string).unwrap_or_else(|| "undefined".into())) } else { k.clone() }).collect();
+    let settings: Vec<String> = keys
+        .into_iter()
+        .map(|k| if SHOWN.contains(&k.as_str()) { format!("{k}={}", g.env.get(k).map(js_string).unwrap_or_else(|| "undefined".into())) } else { k.clone() })
+        .collect();
     let bundle = json!({
         "schema": SCHEMA,
         "at": iso_of(Some(&json!(g.now)))?,
@@ -243,7 +265,15 @@ pub fn bundle_markdown(b: &Value) -> String {
         let e = Some(e);
         let version = raw(e, "version").filter(|v| truthy(Some(v))).map_or(String::new(), |v| format!(", XenoNet {}", js_string(v)));
         let fix = raw(e, "fix").filter(|f| truthy(Some(f))).map_or(String::new(), |f| format!("\n  Fix: {}", js_string(f)));
-        lines.push(format!("- **{}** `{}` ({}, {}×, last {}{version}): {}{fix}", t(raw(e, "level")), t(raw(e, "code")), t(raw(e, "component")), t(raw(e, "count")), t(raw(e, "last")), t(raw(e, "message"))));
+        lines.push(format!(
+            "- **{}** `{}` ({}, {}×, last {}{version}): {}{fix}",
+            t(raw(e, "level")),
+            t(raw(e, "code")),
+            t(raw(e, "component")),
+            t(raw(e, "count")),
+            t(raw(e, "last")),
+            t(raw(e, "message"))
+        ));
     }
     lines.push(String::new());
     lines.push("## Integrations".into());
@@ -294,7 +324,10 @@ pub fn agent_brief(sources: &[String]) -> String {
         "2. Walk them through fixing it, one step at a time, checking with them as you go. Prefer the fixes the doctor and the log already name. `xenonet doctor`, `xenonet logs --errors` and `xenonet status` say more, and are safe to run.".into(),
     ];
     if !sources.is_empty() {
-        lines.push(format!("3. XenoNet's own docs and code are here to read, if you need to know how something works: {}. Start with docs/guide/troubleshooting.md and docs/guide/development.md.", sources.iter().map(|s| format!("`{s}`")).collect::<Vec<_>>().join(", ")));
+        lines.push(format!(
+            "3. XenoNet's own docs and code are here to read, if you need to know how something works: {}. Start with docs/guide/troubleshooting.md and docs/guide/development.md.",
+            sources.iter().map(|s| format!("`{s}`")).collect::<Vec<_>>().join(", ")
+        ));
     }
     lines.extend([
         String::new(),
@@ -369,7 +402,21 @@ mod tests {
     const HOME: &str = "C:\\Users\\nova";
 
     fn gathered<'a>(x: &'a Value, d: Option<&'a Value>, e: &'a [Value], env: &'a Map<String, Value>) -> Gathered<'a> {
-        Gathered { xenonet: Some(x), doctor: d, errors: e, connect: None, launcher: None, env, home: HOME, now: 1791374400000.0, platform: "win32", arch: "x64", release: "10", node: "22", electron: None }
+        Gathered {
+            xenonet: Some(x),
+            doctor: d,
+            errors: e,
+            connect: None,
+            launcher: None,
+            env,
+            home: HOME,
+            now: 1791374400000.0,
+            platform: "win32",
+            arch: "x64",
+            release: "10",
+            node: "22",
+            electron: None,
+        }
     }
 
     #[test]
@@ -391,7 +438,10 @@ mod tests {
     #[test]
     fn asks_read_only() {
         let c = ask_command("codex", Some("gpt-5.1-codex"), &json!("/d"), &["/opt/x".into()]);
-        assert_eq!(c["args"].as_array().unwrap()[..8], [json!("-C"), json!("/d"), json!("-s"), json!("read-only"), json!("-a"), json!("on-request"), json!("-m"), json!("gpt-5.1-codex")]);
+        assert_eq!(
+            c["args"].as_array().unwrap()[..8],
+            [json!("-C"), json!("/d"), json!("-s"), json!("read-only"), json!("-a"), json!("on-request"), json!("-m"), json!("gpt-5.1-codex")]
+        );
         assert_eq!(ask_command("claude", None, &json!("/d"), &[])["args"][1], "plan");
     }
 }

@@ -122,7 +122,11 @@ pub fn answered(body: Option<&Value>, model: &str, kind: &str, questions: usize,
         v => xenonet_base::text::js_string(v),
     };
     let plural = if questions == 1 { "" } else { "s" };
-    let line = LogLine { level: "info", code: format!("decide.{kind}"), message: format!("{by} answered {questions} question{plural} in {} ms, ${}", xenonet_base::json::number_string(ms), to_fixed(cost, 5)) };
+    let line = LogLine {
+        level: "info",
+        code: format!("decide.{kind}"),
+        message: format!("{by} answered {questions} question{plural} in {} ms, ${}", xenonet_base::json::number_string(ms), to_fixed(cost, 5)),
+    };
     let mut out = Map::new();
     out.insert("answers".into(), field("answers").cloned().unwrap_or_else(|| json!({})));
     out.insert("model".into(), answered_by);

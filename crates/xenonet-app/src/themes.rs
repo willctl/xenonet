@@ -133,7 +133,8 @@ fn list_fits(base: &[Value], list: &Value, path: &str) -> bool {
 fn fitting(base: &Value, value: &Value, path: &str) -> Option<Value> {
     match base {
         Value::Object(_) => is_object(Some(value)).then(|| conform(base, Some(value), path)),
-        Value::Array(b) => list_fits(b, value, path).then(|| Value::Array(value.as_array().unwrap().iter().map(|x| if is_hex(x) { Value::String(six_digits(x.as_str().unwrap())) } else { x.clone() }).collect())),
+        Value::Array(b) => list_fits(b, value, path)
+            .then(|| Value::Array(value.as_array().unwrap().iter().map(|x| if is_hex(x) { Value::String(six_digits(x.as_str().unwrap())) } else { x.clone() }).collect())),
         Value::Number(_) => is_number(value).then(|| value.clone()),
         Value::Bool(_) => value.is_boolean().then(|| value.clone()),
         _ => {
@@ -161,7 +162,20 @@ fn is_font_list(v: &Value) -> bool {
 }
 
 /// The names every JS object has, which are never a theme's field.
-pub const OBJECT_PROTOTYPE: [&str; 12] = ["constructor", "__defineGetter__", "__defineSetter__", "hasOwnProperty", "__lookupGetter__", "__lookupSetter__", "isPrototypeOf", "propertyIsEnumerable", "toString", "valueOf", "__proto__", "toLocaleString"];
+pub const OBJECT_PROTOTYPE: [&str; 12] = [
+    "constructor",
+    "__defineGetter__",
+    "__defineSetter__",
+    "hasOwnProperty",
+    "__lookupGetter__",
+    "__lookupSetter__",
+    "isPrototypeOf",
+    "propertyIsEnumerable",
+    "toString",
+    "valueOf",
+    "__proto__",
+    "toLocaleString",
+];
 
 /// `over` on top of `base`, as merge does, but only where a value fits: a
 /// color for a color, a number for a number, a list of the same kind for a
@@ -449,7 +463,8 @@ pub fn ring_colors(theme: &Value) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for ring in own {
         let clear = |c: &str, out: &[String]| meaning.iter().all(|m| color_distance(c, m) >= CLEAR_OF_MEANING) && out.iter().all(|r| color_distance(c, r) >= CLEAR_OF_RINGS);
-        let pick = if clear(&ring, &out) { ring.clone() } else { RING_SPARES.iter().find(|c| !out.iter().any(|o| o == *c) && clear(c, &out)).map_or(ring.clone(), |c| c.to_string()) };
+        let pick =
+            if clear(&ring, &out) { ring.clone() } else { RING_SPARES.iter().find(|c| !out.iter().any(|o| o == *c) && clear(c, &out)).map_or(ring.clone(), |c| c.to_string()) };
         out.push(pick);
     }
     out
@@ -480,7 +495,10 @@ mod tests {
         assert_eq!(t["grid"]["style"], "polar");
         assert_eq!(t["colors"]["accent"], "#aabbcc");
         assert!(t.get("constructor").is_none());
-        assert_eq!(merge(Some(&json!({ "a": { "x": 1, "y": 2 }, "b": [1, 2], "c": 1 })), Some(&json!({ "a": { "y": 3 }, "b": [9] }))), json!({ "a": { "x": 1, "y": 3 }, "b": [9], "c": 1 }));
+        assert_eq!(
+            merge(Some(&json!({ "a": { "x": 1, "y": 2 }, "b": [1, 2], "c": 1 })), Some(&json!({ "a": { "y": 3 }, "b": [9] }))),
+            json!({ "a": { "x": 1, "y": 3 }, "b": [9], "c": 1 })
+        );
     }
 
     #[test]

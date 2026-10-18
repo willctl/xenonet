@@ -68,7 +68,9 @@ impl Rpc {
             if xenonet_base::text::truthy(message.get("reply")) {
                 let error = message.get("error").filter(|e| xenonet_base::text::truthy(Some(e))).map(xenonet_base::text::js_string);
                 out.push(Incoming::Reply { id: get("reply").unwrap(), result: get("result").unwrap_or(Value::Null), error });
-            } else if let (Some(Value::String(method)), Some(id)) = (message.get("method"), message.get("id").and_then(Value::as_f64).filter(|n| n.fract() == 0.0 && n.abs() <= 9007199254740991.0)) {
+            } else if let (Some(Value::String(method)), Some(id)) =
+                (message.get("method"), message.get("id").and_then(Value::as_f64).filter(|n| n.fract() == 0.0 && n.abs() <= 9007199254740991.0))
+            {
                 out.push(Incoming::Request { id, method: method.clone(), params: get("params").unwrap_or(Value::Null) });
             } else if let Some(Value::String(name)) = message.get("event") {
                 if self.events.iter().any(|e| e == name) {

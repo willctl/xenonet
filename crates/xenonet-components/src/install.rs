@@ -390,7 +390,9 @@ async fn activate_locked(io: &Io, file: &str, item: &Value, env: &Env, ctx: &Ctx
     if component == "tools" {
         select_component("tools", &staged, env, m)?;
         install_launcher(env, ctx)?;
-        return Ok(json!({ "component": "tools", "version": staged["version"], "status": "updated", "detail": "New commands use this version. Connected MCP processes keep running." }));
+        return Ok(
+            json!({ "component": "tools", "version": staged["version"], "status": "updated", "detail": "New commands use this version. Connected MCP processes keep running." }),
+        );
     }
     let state = running(io, env).await?;
     if truthy(Some(&state)) && open_terminals(&state)? {
