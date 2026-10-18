@@ -172,7 +172,7 @@ fn git(dir: &str, args: &[&str]) -> bool {
 /// What makes a folder a repo, after its files: the commands, then what
 /// it changes without committing.
 pub fn repo_steps() -> Vec<Vec<String>> {
-    let with = |args: &[&str]| GIT.iter().chain(args).map(|s| s.to_string()).collect::<Vec<_>>();
+    let with = |args: &[&str]| GIT.iter().chain(args).map(ToString::to_string).collect::<Vec<_>>();
     vec![with(&["init", "-q", "-b", "main"]), with(&["add", "-A"]), with(&["commit", "-q", "-m", "chore: initial commit"])]
 }
 
@@ -406,11 +406,11 @@ impl Writer {
         let at = |i: usize| step.get(i).cloned();
         let kind = at(0).and_then(|k| k.as_str().map(String::from)).unwrap_or_default();
         let a = at(1);
-        let a_s = a.as_ref().map(xenonet_base::text::js_string).unwrap_or_else(|| "undefined".into());
+        let a_s = a.as_ref().map_or_else(|| "undefined".into(), xenonet_base::text::js_string);
         let b = at(2);
-        let b_s = b.as_ref().map(xenonet_base::text::js_string).unwrap_or_else(|| "undefined".into());
+        let b_s = b.as_ref().map_or_else(|| "undefined".into(), xenonet_base::text::js_string);
         let c = at(3);
-        let c_s = c.as_ref().map(xenonet_base::text::js_string).unwrap_or_else(|| "undefined".into());
+        let c_s = c.as_ref().map_or_else(|| "undefined".into(), xenonet_base::text::js_string);
         let file = matches!(kind.as_str(), "read" | "edit").then(|| NATIVE.join(&[&self.cwd, &a_s]));
         let title = match kind.as_str() {
             "read" => format!("Read {a_s}"),
@@ -442,14 +442,14 @@ impl Writer {
             "run" => {
                 self.codex_tokens(ts, around);
                 let ok = crate::jsv::truthy(b.as_ref());
-                self.write(&[json!({ "type": "event_msg", "timestamp": iso(ts), "payload": { "type": "item_completed", "item": { "type": "CommandExecution", "command": ["pwsh", "-Command", a.clone().unwrap_or(Value::Null)], "exit_code": if ok { 0 } else { 1 }, "status": if ok { "completed" } else { "failed" }, "aggregatedOutput": if ok { "ok" } else { "1 failed, 23 passed" } } } })]);
+                self.write(&[json!({ "type": "event_msg", "timestamp": iso(ts), "payload": { "type": "item_completed", "item": { "type": "CommandExecution", "command": ["pwsh", "-Command", a.clone().unwrap_or(Value::Null)], "exit_code": i32::from(!ok), "status": if ok { "completed" } else { "failed" }, "aggregatedOutput": if ok { "ok" } else { "1 failed, 23 passed" } } } })]);
             }
             "mcp" => self.write(&[json!({ "type": "event_msg", "timestamp": iso(ts), "payload": { "type": "item_completed", "item": { "type": "McpToolCall", "server": a.clone().unwrap_or(Value::Null), "tool": b.clone().unwrap_or(Value::Null), "arguments": c.clone().unwrap_or(Value::Null), "status": "completed" } } })]),
             _ => {}
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "a script step's kind and arguments, as next took them apart, with its file, time and around")]
     fn claude_act(&mut self, kind: &str, a: &str, b: Option<&Value>, c: Option<&Value>, file: Option<&str>, ts: f64, around: &mut dyn Around) {
         let call_id = format!("toolu_{}", &around.uuid().replace('-', "")[..24]);
         let (name, input) = match kind {
@@ -564,7 +564,7 @@ impl Demo {
     }
 
     // Writes each project's files, and returns the ones that are repos.
-    fn write_files(&self, list: &[Project], at: &dyn Fn(&str) -> String, git_ok: bool) -> Result<Vec<ClientRepo>, fsx::FsError> {
+    fn write_files(list: &[Project], at: &dyn Fn(&str) -> String, git_ok: bool) -> Result<Vec<ClientRepo>, fsx::FsError> {
         for p in list {
             let dir = at(p.name);
             let readme = format!("# {}\n\n{}\n", NATIVE.basename(p.name, None), p.readme);
@@ -593,7 +593,7 @@ impl Demo {
         let git_ok = around.git_available();
         let home = self.world.home.clone();
         let projects = |rel: &str| NATIVE.join(&[&home, "Projects", rel]);
-        for repo in self.write_files(PROJECTS, &projects, git_ok)? {
+        for repo in Self::write_files(PROJECTS, &projects, git_ok)? {
             let ok = git(&repo.dir, &["init", "-q", "-b", "main"]) && git(&repo.dir, &["add", "-A"]) && git(&repo.dir, &["commit", "-q", "-m", "chore: initial commit"]);
             // No git: the projects still show, without repo status.
             if ok {
@@ -603,7 +603,7 @@ impl Demo {
             }
         }
         let clients = |rel: &str| NATIVE.join(&[&home, "Clients", rel]);
-        self.client_repos = self.write_files(CLIENTS, &clients, git_ok)?;
+        self.client_repos = Self::write_files(CLIENTS, &clients, git_ok)?;
         self.sessions = sessions(&self.today);
         self.write_history(now, around)?;
         self.write_wiki(now, around)?;
@@ -834,21 +834,20 @@ impl Demo {
 // The old workspace taken out, or (held open on Windows) a fresh one made
 // beside it.
 fn fresh_root(root: &str, platform: &str) -> Result<String, fsx::FsError> {
-    let mut last = None;
-    for attempt in 0..=crate::demo_root::REMOVE_RETRIES {
+    let mut attempt = 0;
+    let e = loop {
         match fsx::rm_rf(root) {
             Ok(()) => return Ok(root.into()),
             Err(e) => {
                 let retry = matches!(e.code.as_deref(), Some("EBUSY" | "EMFILE" | "ENFILE" | "ENOTEMPTY" | "EPERM"));
-                last = Some(e);
                 if !retry || attempt == crate::demo_root::REMOVE_RETRIES {
-                    break;
+                    break e;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(u64::from(crate::demo_root::REMOVE_RETRY_DELAY_MS) * u64::from(attempt + 1)));
+                attempt += 1;
             }
         }
-    }
-    let e = last.unwrap();
+    };
     if !crate::demo_root::use_sibling(platform, e.code.as_deref()) {
         return Err(e);
     }

@@ -2,6 +2,8 @@
 //! output: encodeURIComponent, URLSearchParams' form encoding, a string's
 //! slice in UTF-16 units, and a URL's host.
 
+use std::fmt::Write as _;
+
 /// encodeURIComponent: everything but A-Z a-z 0-9 - _ . ! ~ * ' ( ) as
 /// %XX of its UTF-8 bytes.
 pub fn encode_uri_component(s: &str) -> String {
@@ -10,7 +12,7 @@ pub fn encode_uri_component(s: &str) -> String {
         if b.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&b) {
             out.push(b as char);
         } else {
-            out.push_str(&format!("%{b:02X}"));
+            let _ = write!(out, "%{b:02X}");
         }
     }
     out
@@ -23,7 +25,7 @@ pub fn encode_uri(s: &str) -> String {
         if b.is_ascii_alphanumeric() || b"-_.!~*'();/?:@&=+$,#".contains(&b) {
             out.push(b as char);
         } else {
-            out.push_str(&format!("%{b:02X}"));
+            let _ = write!(out, "%{b:02X}");
         }
     }
     out
@@ -36,8 +38,9 @@ pub fn path_to_file_url(p: &str) -> String {
     let mut out = String::from("file://");
     for &b in p.as_bytes() {
         match b {
-            b'%' | b'\\' | b'\n' | b'\r' | b'\t' | b' ' | b'"' | b'#' | b'<' | b'>' | b'?' | b'`' | b'{' | b'}' => out.push_str(&format!("%{b:02X}")),
-            0..=0x1f | 0x7f..=0xff => out.push_str(&format!("%{b:02X}")),
+            b'%' | b'\\' | b'\n' | b'\r' | b'\t' | b' ' | b'"' | b'#' | b'<' | b'>' | b'?' | b'`' | b'{' | b'}' | 0..=0x1f | 0x7f..=0xff => {
+                let _ = write!(out, "%{b:02X}");
+            }
             _ => out.push(b as char),
         }
     }
@@ -54,7 +57,7 @@ pub fn form_encode(s: &str) -> String {
         } else if b == b' ' {
             out.push('+');
         } else {
-            out.push_str(&format!("%{b:02X}"));
+            let _ = write!(out, "%{b:02X}");
         }
     }
     out
@@ -129,25 +132,6 @@ pub fn url_host(u: &str) -> Option<String> {
         }
         _ => host,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn as_js_writes_it() {
-        assert_eq!(encode_uri_component("C:\\Users\\me a#é"), "C%3A%5CUsers%5Cme%20a%23%C3%A9");
-        assert_eq!(encode_uri_component("-_.!~*'()"), "-_.!~*'()");
-        assert_eq!(search_params(&[("folder", "C:\\a b"), ("q", "fix & ship\n*~")]), "folder=C%3A%5Ca+b&q=fix+%26+ship%0A*%7E");
-        assert_eq!(slice16("a😀b", 2), "a\u{fffd}");
-        assert_eq!(slice16("a😀b", 3), "a😀");
-        assert_eq!(utf16_len("a😀"), 3);
-        assert_eq!(url_host("https://OpenRouter.ai/api/x").as_deref(), Some("openrouter.ai"));
-        assert_eq!(url_host("http://127.0.0.1:47840/x").as_deref(), Some("127.0.0.1:47840"));
-        assert_eq!(url_host("https://h:443/").as_deref(), Some("h"));
-        assert_eq!(url_host("not a url"), None);
-    }
 }
 
 // Where an ASCII character falls in the root collation (CLDR's, which
@@ -344,4 +328,23 @@ pub fn locale_compare(a: &str, b: &str) -> std::cmp::Ordering {
     let kb: Vec<(u32, u32, u32, u32)> = b.chars().map(collation).collect();
     let primary = |k: &[(u32, u32, u32, u32)]| k.iter().map(|x| (x.0, x.1)).collect::<Vec<_>>();
     primary(&ka).cmp(&primary(&kb)).then_with(|| ka.iter().map(|x| x.2).cmp(kb.iter().map(|x| x.2))).then_with(|| ka.iter().map(|x| x.3).cmp(kb.iter().map(|x| x.3)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn as_js_writes_it() {
+        assert_eq!(encode_uri_component("C:\\Users\\me a#é"), "C%3A%5CUsers%5Cme%20a%23%C3%A9");
+        assert_eq!(encode_uri_component("-_.!~*'()"), "-_.!~*'()");
+        assert_eq!(search_params(&[("folder", "C:\\a b"), ("q", "fix & ship\n*~")]), "folder=C%3A%5Ca+b&q=fix+%26+ship%0A*%7E");
+        assert_eq!(slice16("a😀b", 2), "a\u{fffd}");
+        assert_eq!(slice16("a😀b", 3), "a😀");
+        assert_eq!(utf16_len("a😀"), 3);
+        assert_eq!(url_host("https://OpenRouter.ai/api/x").as_deref(), Some("openrouter.ai"));
+        assert_eq!(url_host("http://127.0.0.1:47840/x").as_deref(), Some("127.0.0.1:47840"));
+        assert_eq!(url_host("https://h:443/").as_deref(), Some("h"));
+        assert_eq!(url_host("not a url"), None);
+    }
 }

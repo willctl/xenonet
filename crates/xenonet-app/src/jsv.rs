@@ -76,7 +76,7 @@ pub fn less(a: Option<&Value>, b: Option<&Value>) -> bool {
         (Some(Value::String(x)), Some(Value::String(y))) => x.encode_utf16().lt(y.encode_utf16()),
         _ => {
             let n = |v: Option<&Value>| match v {
-                Some(Value::Array(_)) | Some(Value::Object(_)) => xenonet_base::text::js_number(Some(&Value::String(v.map(xenonet_base::text::js_string).unwrap_or_default()))),
+                Some(Value::Array(_) | Value::Object(_)) => xenonet_base::text::js_number(Some(&Value::String(v.map(xenonet_base::text::js_string).unwrap_or_default()))),
                 other => xenonet_base::text::js_number(other),
             };
             n(a) < n(b)

@@ -10,12 +10,12 @@ use xenonet_base::text::{js_string, truthy};
 
 fn uuid() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$").unwrap())
+    R.get_or_init(|| Regex::new(r"(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$").expect("a fixed pattern"))
 }
 
 fn desktop_id() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"^local_[A-Za-z0-9-]{1,64}$").unwrap())
+    R.get_or_init(|| Regex::new(r"^local_[A-Za-z0-9-]{1,64}$").expect("a fixed pattern"))
 }
 
 // RegExp.test reads its argument as a string: a missing one as "undefined".
@@ -137,7 +137,7 @@ pub fn url_for(node: &Value, action: &str) -> Option<Value> {
 
 fn drive() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"^[A-Za-z]:/").unwrap())
+    R.get_or_init(|| Regex::new(r"^[A-Za-z]:/").expect("a fixed pattern"))
 }
 
 /// vscode://file/C:/x on Windows, vscode://file/Users/x on macOS and

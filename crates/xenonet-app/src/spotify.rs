@@ -39,12 +39,12 @@ pub const REDIRECT_SHOWN: &str = "http://127.0.0.1/api/spotify/callback";
 
 fn client_id_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(CLIENT_ID).unwrap())
+    R.get_or_init(|| Regex::new(CLIENT_ID).expect("a fixed pattern"))
 }
 
 fn spotify_link() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"^https://open\.spotify\.com/").unwrap())
+    R.get_or_init(|| Regex::new(r"^https://open\.spotify\.com/").expect("a fixed pattern"))
 }
 
 /// base64url without padding.
@@ -402,7 +402,7 @@ impl Spotify {
                 };
                 job.insert("stage".into(), json!("exchanged"));
                 let redirect = self.redirect();
-                let client = self.settings.client_id.clone().map_or_else(|| "null".into(), |c| c);
+                let client = self.settings.client_id.clone().unwrap_or_else(|| "null".into());
                 (
                     Value::Object(job),
                     Self::token_fetch(&[
@@ -454,7 +454,7 @@ impl Spotify {
             Some("previous") => Ok(("POST", format!("/me/player/previous{device}"))),
             Some("volume") => {
                 let v = js_round(js_number(Some(value.unwrap_or(&Value::Null))));
-                if !(v >= 0.0 && v <= 100.0) {
+                if !(0.0..=100.0).contains(&v) {
                     return Err(err(400, "bad-request", "volume is 0 to 100"));
                 }
                 let and = if device.is_empty() { String::new() } else { format!("&{}", &device[1..]) };
@@ -474,7 +474,7 @@ impl Spotify {
         if let Some(a) = &self.access {
             if now < a.until - EARLY_MS {
                 let token = a.token.clone();
-                return self.api_fetch(job, &token);
+                return Self::api_fetch(job, &token);
             }
         }
         if self.settings.client_id.is_none() {
@@ -484,7 +484,7 @@ impl Spotify {
         (Value::Object(job), Ask::SecretGet(REFRESH_TARGET))
     }
 
-    fn api_fetch(&mut self, mut job: Map<String, Value>, token: &Value) -> (Job, Ask) {
+    fn api_fetch(mut job: Map<String, Value>, token: &Value) -> (Job, Ask) {
         let retry = job.get("retry") == Some(&json!(true));
         let method = match job.get("method").and_then(Value::as_str) {
             Some("PUT") => "PUT",
@@ -582,7 +582,7 @@ impl Spotify {
                     }
                     None => {
                         let token = self.access.as_ref().map_or(Value::Null, |a| a.token.clone());
-                        self.api_fetch(job, &token)
+                        Self::api_fetch(job, &token)
                     }
                 },
             },
@@ -590,7 +590,7 @@ impl Spotify {
                 Got::Threw(_) => (Value::Object(job), Ask::Rethrow),
                 _ => {
                     let token = self.access.as_ref().map_or(Value::Null, |a| a.token.clone());
-                    self.api_fetch(job, &token)
+                    Self::api_fetch(job, &token)
                 }
             },
             "api" => {

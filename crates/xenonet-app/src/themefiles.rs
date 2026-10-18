@@ -13,11 +13,12 @@ use std::sync::OnceLock;
 
 fn id_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"^[a-z0-9][a-z0-9-]{0,40}$").unwrap())
+    R.get_or_init(|| Regex::new(r"^[a-z0-9][a-z0-9-]{0,40}$").expect("a fixed pattern"))
 }
 
 /// The themes, yours folded on top of the built-ins, and what was wrong
 /// with the files that couldn't be used.
+#[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the JS's endsWith is case-sensitive, and so is this")]
 pub fn read_themes(dir: &str) -> (Map<String, Value>, Vec<String>) {
     let mut custom = Map::new();
     let mut problems = Vec::new();

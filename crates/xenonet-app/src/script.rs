@@ -168,9 +168,11 @@ fn read<'a>(x: Option<&'a Value>, k: &str) -> Result<Option<&'a Value>, String> 
 }
 
 fn length(x: Option<&Value>) -> Result<Option<Value>, String> {
-    Ok(match read(x, "length").map(|_| x.unwrap())? {
-        Value::Array(a) => Some(json!(a.len())),
-        Value::String(s) => Some(json!(crate::jstext::utf16_len(s))),
+    // read throws for undefined and null, as JS does reading .length.
+    read(x, "length")?;
+    Ok(match x {
+        Some(Value::Array(a)) => Some(json!(a.len())),
+        Some(Value::String(s)) => Some(json!(crate::jstext::utf16_len(s))),
         _ => None,
     })
 }
@@ -217,17 +219,17 @@ fn num(n: f64) -> Value {
 }
 
 // `arg.split(",").map(Number)`, with a part that isn't there undefined.
-fn numbers(arg: &str, n: usize) -> Vec<Arg> {
+fn numbers<const N: usize>(arg: &str) -> [Arg; N] {
     let parts: Vec<&str> = arg.split(',').collect();
-    (0..n).map(|i| parts.get(i).map_or(Arg::Undef, |p| v(num(number(p))))).collect()
+    std::array::from_fn(|i| parts.get(i).map_or(Arg::Undef, |p| v(num(number(p)))))
 }
 
 fn point(arg: &str) -> Arg {
     if let Some(id) = arg.strip_prefix('@') {
         return Arg::Obj(vec![("node", v(json!(id)))]);
     }
-    let mut xy = numbers(arg, 2).into_iter();
-    Arg::Obj(vec![("x", xy.next().unwrap()), ("y", xy.next().unwrap())])
+    let [x, y] = numbers(arg);
+    Arg::Obj(vec![("x", x), ("y", y)])
 }
 
 fn split_list(arg: &str) -> Value {
@@ -406,15 +408,15 @@ fn first_call(r: &mut Run, cmd: &str, arg: &str) -> Then {
         "click" | "click2" => r.next(1, input(Arg::Obj(vec![("click", point(arg)), ("count", v(json!(if cmd == "click2" { 2 } else { 1 })))]))),
         "hover" => r.next(1, input(Arg::Obj(vec![("move", point(arg))]))),
         "drag" | "alt-drag" => {
-            let mut n = numbers(arg, 4).into_iter();
-            let from = Arg::Obj(vec![("x", n.next().unwrap()), ("y", n.next().unwrap())]);
-            let to = Arg::Obj(vec![("x", n.next().unwrap()), ("y", n.next().unwrap())]);
+            let [x1, y1, x2, y2] = numbers(arg);
+            let from = Arg::Obj(vec![("x", x1), ("y", y1)]);
+            let to = Arg::Obj(vec![("x", x2), ("y", y2)]);
             let modifiers = if cmd == "alt-drag" { json!(["Alt"]) } else { json!([]) };
             r.next(1, input(Arg::Obj(vec![("drag", Arg::Obj(vec![("from", from), ("to", to)])), ("modifiers", v(modifiers))])))
         }
         "scroll" => {
-            let mut n = numbers(arg, 3).into_iter();
-            r.next(1, input(Arg::Obj(vec![("scroll", Arg::Obj(vec![("x", n.next().unwrap()), ("y", n.next().unwrap()), ("dy", n.next().unwrap())]))])))
+            let [x, y, dy] = numbers(arg);
+            r.next(1, input(Arg::Obj(vec![("scroll", Arg::Obj(vec![("x", x), ("y", y), ("dy", dy)]))])))
         }
         "size" => r.next(1, window(Arg::Obj(vec![("size", v(if arg == "window" { Value::Null } else { json!(arg) }))]))),
         "show" => r.next(1, window(Arg::Obj(vec![("show", v(json!(if arg.is_empty() { "inactive" } else { arg })))]))),
@@ -515,7 +517,7 @@ fn resume_in(r: &mut Run, answer: Answer) -> Result<Then, String> {
             }
             Then::Done
         }
-        ("select", 1) | ("select", 3) | ("deselect" | "back" | "reset" | "next" | "prev" | "command" | "mask", _) | ("identities" | "hosts", 1) => {
+        ("select" | "identities" | "hosts", 1) | ("select", 3) | ("deselect" | "back" | "reset" | "next" | "prev" | "command" | "mask", _) => {
             r.say_brief(&got)?;
             match kind.as_str() {
                 "identities" | "hosts" => r.next(2, driver(kind.clone(), vec![])),

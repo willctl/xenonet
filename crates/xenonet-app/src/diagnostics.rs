@@ -96,7 +96,7 @@ impl Obj {
 }
 
 /// The bundle, or why it's refused.
-pub fn make_bundle(g: &Gathered) -> Result<Value, String> {
+pub fn make_bundle(g: &Gathered<'_>) -> Result<Value, String> {
     let home = g.home;
     // Strings are scrubbed; anything else stays what it was.
     let s = |v: Option<&Value>| -> Option<Value> {
@@ -180,10 +180,8 @@ pub fn make_bundle(g: &Gathered) -> Result<Value, String> {
     };
     let mut keys: Vec<&String> = g.env.keys().filter(|k| k.starts_with("XENONET_")).collect();
     keys.sort_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()));
-    let settings: Vec<String> = keys
-        .into_iter()
-        .map(|k| if SHOWN.contains(&k.as_str()) { format!("{k}={}", g.env.get(k).map(js_string).unwrap_or_else(|| "undefined".into())) } else { k.clone() })
-        .collect();
+    let settings: Vec<String> =
+        keys.into_iter().map(|k| if SHOWN.contains(&k.as_str()) { format!("{k}={}", g.env.get(k).map_or_else(|| "undefined".into(), js_string)) } else { k.clone() }).collect();
     let bundle = json!({
         "schema": SCHEMA,
         "at": iso_of(Some(&json!(g.now)))?,

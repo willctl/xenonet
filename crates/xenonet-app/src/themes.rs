@@ -86,11 +86,16 @@ const TUPLES: [&str; 6] = ["sky.night", "sky.dawn", "sky.day", "sky.dusk", "star
 
 fn hex_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"(?i)^#(?:[0-9a-f]{3}|[0-9a-f]{6})$").unwrap())
+    R.get_or_init(|| Regex::new(r"(?i)^#(?:[0-9a-f]{3}|[0-9a-f]{6})$").expect("a fixed pattern"))
 }
 
 fn is_hex(v: &Value) -> bool {
-    v.as_str().is_some_and(|s| hex_re().is_match(s))
+    hex_str(v).is_some()
+}
+
+// The color a value is, when it's one.
+fn hex_str(v: &Value) -> Option<&str> {
+    v.as_str().filter(|s| hex_re().is_match(s))
 }
 
 fn six_digits(v: &str) -> String {
@@ -133,8 +138,10 @@ fn list_fits(base: &[Value], list: &Value, path: &str) -> bool {
 fn fitting(base: &Value, value: &Value, path: &str) -> Option<Value> {
     match base {
         Value::Object(_) => is_object(Some(value)).then(|| conform(base, Some(value), path)),
-        Value::Array(b) => list_fits(b, value, path)
-            .then(|| Value::Array(value.as_array().unwrap().iter().map(|x| if is_hex(x) { Value::String(six_digits(x.as_str().unwrap())) } else { x.clone() }).collect())),
+        Value::Array(b) => value
+            .as_array()
+            .filter(|_| list_fits(b, value, path))
+            .map(|items| Value::Array(items.iter().map(|x| hex_str(x).map_or_else(|| x.clone(), |h| Value::String(six_digits(h)))).collect())),
         Value::Number(_) => is_number(value).then(|| value.clone()),
         Value::Bool(_) => value.is_boolean().then(|| value.clone()),
         _ => {
@@ -157,7 +164,7 @@ const FONTS: [&str; 3] = ["fonts.display", "fonts.mono", "fonts.body"];
 
 fn is_font_list(v: &Value) -> bool {
     static R: OnceLock<Regex> = OnceLock::new();
-    let re = R.get_or_init(|| Regex::new(r#"^[\p{L}\p{M}\p{N} ,'"._+&-]+$"#).unwrap());
+    let re = R.get_or_init(|| Regex::new(r#"^[\p{L}\p{M}\p{N} ,'"._+&-]+$"#).expect("a fixed pattern"));
     v.as_str().is_some_and(|s| !xenonet_base::text::js_trim(s).is_empty() && re.is_match(s))
 }
 
@@ -318,7 +325,7 @@ fn parse_hex(s: &str) -> f64 {
     if digits.is_empty() {
         return f64::NAN;
     }
-    let n = digits.chars().fold(0.0, |n, c| n * 16.0 + f64::from(c.to_digit(16).unwrap()));
+    let n = digits.chars().filter_map(|c| c.to_digit(16)).fold(0.0, |n, d| n * 16.0 + f64::from(d));
     if neg {
         -n
     } else {
@@ -354,6 +361,7 @@ pub fn contrast(a: &str, b: &str) -> f64 {
 }
 
 /// Math.cbrt as V8 has it (FreeBSD's s_cbrt.c), to the last bit.
+#[expect(clippy::excessive_precision, reason = "s_cbrt.c's constants as it writes them, so they can be checked against it")]
 pub fn js_cbrt(x: f64) -> f64 {
     const B1: u32 = 715094163;
     const B2: u32 = 696219795;
@@ -455,16 +463,16 @@ const CLEAR_OF_RINGS: f64 = 15.0;
 pub fn ring_colors(theme: &Value) -> Vec<String> {
     let rings: Vec<String> = xenonet()["identities"].as_array().map(|a| a.iter().filter_map(Value::as_str).map(String::from).collect()).unwrap_or_default();
     let colors = theme.get("colors");
-    let meaning: Vec<String> = MEANINGFUL.iter().filter_map(|k| colors.and_then(|c| c.get(*k))).filter(|v| is_hex(v)).map(|v| six_digits(v.as_str().unwrap())).collect();
+    let meaning: Vec<String> = MEANINGFUL.iter().filter_map(|k| colors.and_then(|c| c.get(*k))).filter_map(hex_str).map(six_digits).collect();
     let own: Vec<String> = match theme.get("identities") {
-        Some(Value::Array(a)) if a.len() == rings.len() && a.iter().all(is_hex) => a.iter().map(|v| six_digits(v.as_str().unwrap())).collect(),
+        Some(Value::Array(a)) if a.len() == rings.len() && a.iter().all(is_hex) => a.iter().filter_map(hex_str).map(six_digits).collect(),
         _ => rings.clone(),
     };
     let mut out: Vec<String> = Vec::new();
     for ring in own {
         let clear = |c: &str, out: &[String]| meaning.iter().all(|m| color_distance(c, m) >= CLEAR_OF_MEANING) && out.iter().all(|r| color_distance(c, r) >= CLEAR_OF_RINGS);
         let pick =
-            if clear(&ring, &out) { ring.clone() } else { RING_SPARES.iter().find(|c| !out.iter().any(|o| o == *c) && clear(c, &out)).map_or(ring.clone(), |c| c.to_string()) };
+            if clear(&ring, &out) { ring.clone() } else { RING_SPARES.iter().find(|c| !out.iter().any(|o| o == *c) && clear(c, &out)).map_or(ring.clone(), ToString::to_string) };
         out.push(pick);
     }
     out

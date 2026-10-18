@@ -56,12 +56,12 @@ pub fn cpu_model(model: &str) -> Option<String> {
     static R: OnceLock<[Regex; 6]> = OnceLock::new();
     let r = R.get_or_init(|| {
         [
-            Regex::new(r"(?i)\((?:R|TM|C)\)").unwrap(),
-            Regex::new(r"(?-u:\b)CPU(?-u:\b)").unwrap(),
-            Regex::new(&format!(r"(?i)@{SPACE}*[0-9.]+{SPACE}*GHz")).unwrap(),
-            Regex::new(r"(?i)(?-u:\b)[0-9]+-Core Processor(?-u:\b)").unwrap(),
-            Regex::new(r"(?i)(?-u:\b)Processor(?-u:\b)").unwrap(),
-            Regex::new(&format!("{SPACE}+")).unwrap(),
+            Regex::new(r"(?i)\((?:R|TM|C)\)").expect("a fixed pattern"),
+            Regex::new(r"(?-u:\b)CPU(?-u:\b)").expect("a fixed pattern"),
+            Regex::new(&format!(r"(?i)@{SPACE}*[0-9.]+{SPACE}*GHz")).expect("a fixed pattern"),
+            Regex::new(r"(?i)(?-u:\b)[0-9]+-Core Processor(?-u:\b)").expect("a fixed pattern"),
+            Regex::new(r"(?i)(?-u:\b)Processor(?-u:\b)").expect("a fixed pattern"),
+            Regex::new(&format!("{SPACE}+")).expect("a fixed pattern"),
         ]
     });
     let s = r[0].replace_all(model, "");
@@ -113,8 +113,13 @@ pub fn parse_ioreg(text: &str, total_mem: Option<f64>) -> Option<Value> {
     let vram_used = stat("vramUsedBytes");
     let vram_total = stat("VRAM,totalMB");
     static NAME: OnceLock<[Regex; 3]> = OnceLock::new();
-    let r = NAME
-        .get_or_init(|| [Regex::new(r#""model" = "([^"]+)""#).unwrap(), Regex::new(r#""model" = <"([^"]+)">"#).unwrap(), Regex::new(r#""gpu-core-count" = ([0-9]+)"#).unwrap()]);
+    let r = NAME.get_or_init(|| {
+        [
+            Regex::new(r#""model" = "([^"]+)""#).expect("a fixed pattern"),
+            Regex::new(r#""model" = <"([^"]+)">"#).expect("a fixed pattern"),
+            Regex::new(r#""gpu-core-count" = ([0-9]+)"#).expect("a fixed pattern"),
+        ]
+    });
     let name = r[0].captures(text).or_else(|| r[1].captures(text)).map(|c| c[1].to_string());
     let cores = r[2].captures(text).map(|c| c[1].to_string());
     if let Some(total) = vram_total.filter(|t| *t != 0.0) {
@@ -496,7 +501,7 @@ impl Stats {
     /// The reading: the CPU, memory, the GPUs (None when the reader had
     /// nothing), which reader that was (None when there's none), and the
     /// history, which gains a sample at most every 1.5 s.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "what the machine read this time, as the addon hands it over; xenonet-node calls it this way")]
     pub fn reading(
         &mut self,
         at: f64,

@@ -119,7 +119,7 @@ impl Style {
 
 /// process.cwd(), as Node gives it.
 pub fn cwd() -> String {
-    std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_else(|_| "/".into())
+    std::env::current_dir().map_or_else(|_| "/".into(), |d| d.to_string_lossy().into_owned())
 }
 
 /// path.join for this machine.
@@ -579,7 +579,7 @@ fn win32_resolve(parts: &[&str], cwd: &str) -> String {
                     continue;
                 }
             } else {
-                resolved_device = device.clone();
+                resolved_device.clone_from(device);
             }
         }
         if resolved_absolute {

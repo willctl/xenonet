@@ -91,12 +91,12 @@ pub struct State {
 
 fn batch_runs() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r#"(?mR)^"([^"]+)" "([^"]+)" %\*$"#).unwrap())
+    R.get_or_init(|| Regex::new(r#"(?mR)^"([^"]+)" "([^"]+)" %\*$"#).expect("a fixed pattern"))
 }
 
 fn sh_runs() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"exec '((?:[^']|'\\'')+)' '((?:[^']|'\\'')+)'").unwrap())
+    R.get_or_init(|| Regex::new(r"exec '((?:[^']|'\\'')+)' '((?:[^']|'\\'')+)'").expect("a fixed pattern"))
 }
 
 /// What's there now: whether there's a xenonet, whether it's XenoNet's,
@@ -147,12 +147,12 @@ pub fn reg_query(key: &str) -> Vec<String> {
 
 fn reg_line() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"(?imR)^\s+Path\s+REG_(?:EXPAND_)?SZ\s+([^\r\n\u2028\u2029]*?)\s*$").unwrap())
+    R.get_or_init(|| Regex::new(r"(?imR)^\s+Path\s+REG_(?:EXPAND_)?SZ\s+([^\r\n\u2028\u2029]*?)\s*$").expect("a fixed pattern"))
 }
 
 fn var_ref() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"%([^%]+)%").unwrap())
+    R.get_or_init(|| Regex::new(r"%([^%]+)%").expect("a fixed pattern"))
 }
 
 /// reg query's line for Path, split into folders with %VARS% filled in.
@@ -161,7 +161,7 @@ pub fn reg_path(stdout: &str, env: &Map<String, Value>) -> Vec<String> {
     value
         .split(';')
         .map(|d| {
-            let filled = var_ref().replace_all(d, |c: &regex::Captures| env_value(env, &c[1]).unwrap_or_else(|| c[0].to_string()));
+            let filled = var_ref().replace_all(d, |c: &regex::Captures<'_>| env_value(env, &c[1]).unwrap_or_else(|| c[0].to_string()));
             xenonet_base::text::js_trim(&filled).to_string()
         })
         .filter(|d| !d.is_empty())

@@ -123,7 +123,7 @@ pub struct Opts<'a> {
 }
 
 impl Instance {
-    pub fn new(id: &str, o: &Opts) -> Result<Instance, String> {
+    pub fn new(id: &str, o: &Opts<'_>) -> Result<Instance, String> {
         let Some(i) = instance(id) else {
             let ids: Vec<&str> = INSTANCES.iter().map(|i| i.id).collect();
             return Err(format!("no instance \"{id}\"; there's {}", ids.join(", ")));

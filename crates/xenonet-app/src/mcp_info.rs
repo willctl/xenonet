@@ -48,12 +48,12 @@ fn public_uri(value: Option<&Value>) -> Value {
 
 fn template() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"\{[^}]*\?[^}]*\}").unwrap())
+    R.get_or_init(|| Regex::new(r"\{[^}]*\?[^}]*\}").expect("a fixed pattern"))
 }
 
 fn credential() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"(?i)key|token|secret|auth|password").unwrap())
+    R.get_or_init(|| Regex::new(r"(?i)key|token|secret|auth|password").expect("a fixed pattern"))
 }
 
 /// An http(s) URL with no user, password, query or fragment, or only its
@@ -194,7 +194,7 @@ pub fn display_catalog(raw_v: Option<&Value>) -> Value {
 
 /// The package or plugin manifest beside a local entry point, if there's
 /// one: looking doesn't run the command or install a package.
-fn package_info(spec: &Value, read: &mut Read) -> Map<String, Value> {
+fn package_info(spec: &Value, read: &mut Read<'_>) -> Map<String, Value> {
     let spec_r = Some(spec);
     let args = std::iter::once(raw(spec_r, "command").cloned()).chain(list(raw(spec_r, "args")).into_iter().map(Some));
     for arg in args.flatten() {
@@ -311,7 +311,7 @@ impl Collect {
 
     // After Codex has been asked (or couldn't be): discover the server
     // ourselves unless Codex had its catalog.
-    fn discover_or_finish(&mut self, settings: &Settings, read: &mut Read) -> Next {
+    fn discover_or_finish(&mut self, settings: &Settings, read: &mut Read<'_>) -> Next {
         let specs = self.specs();
         let usable = |s: &Value| {
             raw(Some(s), "enabled") != Some(&Value::Bool(false)) && (truthy(raw(Some(s), "command")) || truthy(raw(Some(s), "url")) || truthy(raw(Some(s), "serverUrl")))
@@ -330,7 +330,7 @@ impl Collect {
         self.finish(read)
     }
 
-    fn finish(&mut self, read: &mut Read) -> Next {
+    fn finish(&mut self, read: &mut Read<'_>) -> Next {
         let server = self.server();
         let specs = self.specs();
         let using = self.using();
@@ -398,7 +398,7 @@ fn plugin_name(server: &str) -> Option<&str> {
 
 /// Starts collecting a server's catalog: what the settings and the files
 /// beside them say, then the first question for Codex.
-pub fn begin(server: &str, sessions: &[Value], settings: &Settings, now: f64, read: &mut Read) -> (Collect, Next) {
+pub fn begin(server: &str, sessions: &[Value], settings: &Settings, now: f64, read: &mut Read<'_>) -> (Collect, Next) {
     let st = Some(settings);
     let using: Vec<Value> = sessions.iter().filter(|s| list(raw(Some(s), "mcp")).iter().any(|m| raw(Some(m), "server").and_then(Value::as_str) == Some(server))).cloned().collect();
     let result = json!({ "server": server, "title": server, "author": null, "status": "unknown", "auth": "unknown", "tools": [], "resources": [], "templates": [], "capabilities": [], "connections": [], "checkedAt": now, "catalog": false });
@@ -484,7 +484,7 @@ pub enum Answer {
 }
 
 /// Takes the answer to what was asked last and says what's next.
-pub fn step(mut c: Collect, answer: Answer, settings: &Settings, read: &mut Read) -> (Collect, Next) {
+pub fn step(mut c: Collect, answer: Answer, settings: &Settings, read: &mut Read<'_>) -> (Collect, Next) {
     let stage = c.state.get("stage").and_then(Value::as_str).unwrap_or("").to_string();
     let next = match stage.as_str() {
         "config" => {

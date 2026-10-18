@@ -19,14 +19,14 @@ pub const MAX_ROWS: usize = 500;
 
 fn var_ref() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}").unwrap())
+    R.get_or_init(|| Regex::new(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}").expect("a fixed pattern"))
 }
 
 /// A configured value with ${VAR}s filled in from this process's
 /// environment ("" for one that isn't set).
 pub fn env_value(v: &Value, env: &Map<String, Value>) -> String {
     let s = js_string(v);
-    var_ref().replace_all(&s, |c: &regex::Captures| env.get(&c[1]).filter(|v| !v.is_null()).map(js_string).unwrap_or_default()).into_owned()
+    var_ref().replace_all(&s, |c: &regex::Captures<'_>| env.get(&c[1]).filter(|v| !v.is_null()).map(js_string).unwrap_or_default()).into_owned()
 }
 
 /// How to reach a server: by URL (Server-Sent Events for type "sse",

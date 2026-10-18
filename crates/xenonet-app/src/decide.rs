@@ -26,7 +26,7 @@ pub const TIMEOUT_MS: f64 = 30000.0;
 
 fn key_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(KEY).unwrap())
+    R.get_or_init(|| Regex::new(KEY).expect("a fixed pattern"))
 }
 
 /// A decision that couldn't be made, as an HTTP answer would say it.
