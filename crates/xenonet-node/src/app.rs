@@ -150,7 +150,7 @@ pub fn app_config(
 ) -> Result<Jv> {
     let env = match env.0 {
         Value::Object(m) => m,
-        _ => Default::default(),
+        _ => serde_json::Map::new(),
     };
     let mut finds = JsFinds { world, context_dir, context_server, claude_desktop_dir, failed: None };
     let c = config::config(&argv, &env, &home, &platform, &mut finds);
@@ -251,7 +251,7 @@ pub fn app_same_place(a: String, b: String, platform: String) -> bool {
 fn env_map(env: Json) -> serde_json::Map<String, Value> {
     match env.0 {
         Value::Object(m) => m,
-        _ => Default::default(),
+        _ => serde_json::Map::new(),
     }
 }
 
@@ -508,7 +508,7 @@ pub fn app_make_bundle(g: Json) -> Jv {
     };
     let env = match v.get("env") {
         Some(Value::Object(m)) => m.clone(),
-        _ => Default::default(),
+        _ => serde_json::Map::new(),
     };
     let text = |k: &str| v.get(k).map(xenonet_base::text::js_string).unwrap_or_default();
     let (home, platform, arch, release, node) = (text("home"), text("platform"), text("arch"), text("release"), text("node"));
@@ -1022,7 +1022,7 @@ pub struct AppGpuStream {
 impl AppGpuStream {
     #[napi(constructor)]
     pub fn new(kind: String) -> Self {
-        AppGpuStream { windows: kind == "windows", proc: Default::default(), nvidia: Default::default(), counters: Default::default() }
+        AppGpuStream { windows: kind == "windows", proc: stats::Streamed::default(), nvidia: stats::NvidiaCards::default(), counters: stats::WindowsReadings::default() }
     }
 
     #[napi(getter)]
@@ -1079,7 +1079,7 @@ pub struct AppPolled {
 impl AppPolled {
     #[napi(constructor)]
     pub fn new() -> Self {
-        AppPolled { inner: Default::default() }
+        AppPolled { inner: stats::Polled::default() }
     }
 
     /// The last reading while it's fresh, else undefined.
@@ -1118,7 +1118,7 @@ pub struct AppSystemStats {
 impl AppSystemStats {
     #[napi(constructor)]
     pub fn new() -> Self {
-        AppSystemStats { inner: Default::default() }
+        AppSystemStats { inner: stats::Stats::default() }
     }
 
     #[napi(js_name = "hasPrev")]
@@ -1199,7 +1199,7 @@ pub fn app_sonar_gap(every: MaybeJson) -> Option<f64> {
 pub fn app_themes(custom: MaybeJson) -> Json {
     let custom = match custom.0 {
         Some(Value::Object(m)) => m,
-        _ => Default::default(),
+        _ => serde_json::Map::new(),
     };
     Json(Value::Object(themes::themes(&custom)))
 }

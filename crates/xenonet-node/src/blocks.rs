@@ -409,7 +409,7 @@ use crate::js::{Field, Fields};
 use xenonet_base::fs::{DirEntry, Fs, FsError, StdFs};
 use xenonet_blocks::scanner::{Breadth, Halt, Last, Limits, Read, Rules, Scanner};
 
-fn last_json(l: &Option<Last>) -> Value {
+fn last_json(l: Option<&Last>) -> Value {
     match l {
         None => Value::Null,
         Some(l) => json!({ "files": l.files, "read": l.read, "seen": l.seen, "truncated": l.truncated, "ms": js_json::number(l.ms) }),
@@ -532,13 +532,13 @@ impl JsScanner {
 
     #[napi(getter)]
     pub fn last(&self) -> Json {
-        Json(last_json(&self.s.last))
+        Json(last_json(self.s.last.as_ref()))
     }
 
     #[napi(getter)]
     pub fn budget(&self) -> Fields {
         let b = self.s.budget;
-        Fields(vec![("depth", Field::Num(b.depth)), ("folders", Field::Num(b.folders)), ("ms", Field::Num(b.ms)), ("last", Field::Json(last_json(&self.s.last)))])
+        Fields(vec![("depth", Field::Num(b.depth)), ("folders", Field::Num(b.folders)), ("ms", Field::Num(b.ms)), ("last", Field::Json(last_json(self.s.last.as_ref())))])
     }
 
     /// A depth-first walk, with the twin's root, limits and rules. Without

@@ -70,7 +70,7 @@ pub struct IntgTickets {
 impl IntgTickets {
     #[napi(constructor)]
     pub fn new() -> Self {
-        IntgTickets { inner: Default::default() }
+        IntgTickets { inner: common::Tickets::default() }
     }
 
     #[napi]
@@ -315,7 +315,7 @@ macro_rules! shell_task {
 impl IntgOpenShell {
     #[napi(constructor)]
     pub fn new(platform: String, system_root: Option<String>, collect_text: String) -> Self {
-        IntgOpenShell { inner: Rc::new(RefCell::new(openshell::OpenShell { tickets: Default::default(), platform, system_root, collect_text })) }
+        IntgOpenShell { inner: Rc::new(RefCell::new(openshell::OpenShell { tickets: common::Tickets::default(), platform, system_root, collect_text })) }
     }
 
     #[napi]

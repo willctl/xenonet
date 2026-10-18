@@ -252,7 +252,7 @@ fn now_of(env: Env, deps: &Object<'_>) -> impl FnMut() -> f64 {
 impl ChannelsCore {
     #[napi(constructor)]
     pub fn new() -> Self {
-        ChannelsCore { inner: RefCell::new(Default::default()) }
+        ChannelsCore { inner: RefCell::new(xenonet_engine::delivery::channel::Channels::default()) }
     }
 
     #[napi]

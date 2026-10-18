@@ -454,7 +454,7 @@ impl AsstService {
             version: t("version"),
             limits: limits_of(c.get("limits").unwrap_or(&Value::Null)),
         };
-        AsstService { cfg: Rc::new(cfg), cursors: cursors.inner.clone(), inflight: Default::default() }
+        AsstService { cfg: Rc::new(cfg), cursors: cursors.inner.clone(), inflight: service::Inflight::default() }
     }
 
     /// { requestId, op, tool, args, no?: { code, reason } }.
@@ -779,7 +779,7 @@ pub struct AsstTunnels {
 impl AsstTunnels {
     #[napi(constructor)]
     pub fn new() -> Self {
-        AsstTunnels { inner: Default::default() }
+        AsstTunnels { inner: tunnels::Tunnels::default() }
     }
 
     #[napi]

@@ -242,7 +242,7 @@ pub fn session_stats(env: Env, session_id: String, files: Json) -> Result<OutJs>
         .map(|f| {
             let mut f = match f {
                 Value::Object(m) => m,
-                _ => Default::default(),
+                _ => serde_json::Map::new(),
             };
             File { agent: f.remove("agentId"), lines: f.remove("lines").map(|l| values(Json(l))).unwrap_or_default() }
         })

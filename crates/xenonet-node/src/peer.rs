@@ -136,12 +136,9 @@ impl peer::Calls for SyncCalls {
 
     fn kind(&mut self, path: &str) -> peer::Result<String> {
         unsafe {
-            let v = match self.at(path) {
-                Ok(v) => v,
-                // Reading through undefined or null is undefined here, as
-                // optional chaining reads it.
-                Err(_) => return Ok("undefined".into()),
-            };
+            // Reading through undefined or null is undefined here, as
+            // optional chaining reads it.
+            let Ok(v) = self.at(path) else { return Ok("undefined".into()) };
             let mut t = 0;
             check(sys::napi_typeof(self.env, v, &raw mut t), "tell a value's type")?;
             use sys::ValueType::{napi_bigint, napi_boolean, napi_function, napi_null, napi_number, napi_string, napi_symbol, napi_undefined};

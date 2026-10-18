@@ -121,7 +121,7 @@ impl Files for JsFiles<'_> {
     }
 }
 
-fn files_of<'a>(io: &'a Option<IoFn<'a>>) -> Box<dyn Files + 'a> {
+fn files_of<'a>(io: Option<&'a IoFn<'a>>) -> Box<dyn Files + 'a> {
     match io {
         Some(io) => Box::new(JsFiles { io }),
         None => Box::new(StdFiles),
@@ -168,7 +168,7 @@ impl JsCopilotCli {
     }
     #[napi]
     pub fn read(&mut self, env: Env, root: Option<String>, now: f64, check: CheckFn<'_>, failed: Unknown<'_>, io: Option<IoFn<'_>>) {
-        let mut files = files_of(&io);
+        let mut files = files_of(io.as_ref());
         self.c.read(root.as_deref(), now, files.as_mut(), &mut |r, v| checked(&env, &check, &failed, r, v));
     }
     #[napi(getter, js_name = "rootState")]
@@ -228,7 +228,7 @@ impl JsGeminiCli {
     }
     #[napi]
     pub fn read(&mut self, env: Env, root: Option<String>, now: f64, check: CheckFn<'_>, failed: Unknown<'_>, io: Option<IoFn<'_>>) {
-        let mut files = files_of(&io);
+        let mut files = files_of(io.as_ref());
         self.g.read(root.as_deref(), now, files.as_mut(), &mut |r, v| checked(&env, &check, &failed, r, v));
     }
     #[napi(getter, js_name = "rootState")]
@@ -279,7 +279,7 @@ impl JsCursor {
     /// True when the vendor check threw (the twin has what it threw).
     #[napi]
     pub fn read(&mut self, env: Env, file: Option<String>, now: f64, check: CheckFn<'_>, failed: Unknown<'_>, io: Option<IoFn<'_>>) -> bool {
-        let mut files = files_of(&io);
+        let mut files = files_of(io.as_ref());
         self.c.read(file.as_deref(), now, files.as_mut(), &mut |r, v| checked(&env, &check, &failed, r, v)).is_err()
     }
     #[napi(getter, js_name = "fileState")]
@@ -401,7 +401,7 @@ fn read_db(
     file: &str,
     since_ms: f64,
     edits_since_ms: f64,
-    query: &Option<QueryFn<'_>>,
+    query: Option<&QueryFn<'_>>,
     ready: &Function<'_, (), Unknown<'_>>,
     missing: &Function<'_, FnArgs<(String, Option<String>)>, Unknown<'_>>,
     check: &CheckFn<'_>,
@@ -435,7 +435,7 @@ pub fn opencode_read_db(
     check: CheckFn<'_>,
     failed: Unknown<'_>,
 ) -> Jv {
-    match read_db(env, exists, &file, since_ms, edits_since_ms, &query, &ready, &missing, &check, &failed) {
+    match read_db(env, exists, &file, since_ms, edits_since_ms, query.as_ref(), &ready, &missing, &check, &failed) {
         Ok(r) => jv(r.out()),
         Err(Threw) => Jv::Bool(true),
     }
@@ -469,7 +469,7 @@ impl JsOpenCode {
     ) -> Jv {
         const DAY_MS: f64 = 24.0 * 3600e3;
         const EDIT_KEEP_MS: f64 = 30.0 * 60e3;
-        match read_db(env, exists, &file, now - DAY_MS, now - EDIT_KEEP_MS, &query, &ready, &missing, &check, &failed) {
+        match read_db(env, exists, &file, now - DAY_MS, now - EDIT_KEEP_MS, query.as_ref(), &ready, &missing, &check, &failed) {
             Err(Threw) => Jv::Bool(true),
             Ok(got) => match self.o.take(&got, now) {
                 Ok(()) => Jv::Undef,
@@ -538,7 +538,7 @@ impl JsNumbat {
     /// The message of a read that failed, or null.
     #[napi]
     pub fn read(&mut self, file: Option<String>, now: f64, io: Option<IoFn<'_>>) -> Option<String> {
-        let mut files = files_of(&io);
+        let mut files = files_of(io.as_ref());
         self.n.read(file.as_deref(), now, files.as_mut()).err()
     }
     #[napi(getter, js_name = "fileState")]

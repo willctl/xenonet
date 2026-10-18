@@ -658,7 +658,7 @@ pub struct HostsCleanOnce {
 impl HostsCleanOnce {
     #[napi(constructor)]
     pub fn new() -> Self {
-        HostsCleanOnce { inner: Default::default() }
+        HostsCleanOnce { inner: merge::CleanOnce::default() }
     }
 
     #[napi]
@@ -1039,7 +1039,7 @@ pub struct HostsOutbox {
 impl HostsOutbox {
     #[napi(constructor)]
     pub fn new() -> Self {
-        HostsOutbox { inner: Default::default() }
+        HostsOutbox { inner: relay::Outbox::default() }
     }
 
     /// The text to write now, or null while the output is busy.

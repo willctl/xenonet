@@ -27,12 +27,12 @@ pub fn hermes_constants() -> Json {
 }
 
 #[napi(js_name = "hermesMsOf")]
-pub fn ms_of(env: Env, deps: Object<'_>, v: MaybeJson) -> Result<Option<f64>> {
+pub fn ms_of(env: Env, deps: Object<'_>, v: MaybeJson) -> Option<f64> {
     let mut c = SyncCalls::new(&env, &deps);
     let mut p = hf::parse_date(&mut c);
     let out = v.0.as_ref().and_then(|v| hf::ms_of(v, &mut p));
     settle(&env);
-    Ok(out)
+    out
 }
 
 #[napi(js_name = "hermesSameStart")]
