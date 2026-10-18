@@ -75,20 +75,12 @@ impl Command for XenonetCommand {
         Ok(state_json(xenonet_app::command::command_state(Some(&self.dir()), std::env::var("PATH").ok().as_deref(), platform())))
     }
 
-    /// The launcher's runtime when there is one; else the desktop app's
-    /// (XENONET_EXEC, Electron as Node); else the Node on your PATH, which
-    /// runs cli/xenonet.js as the JS service's own Node did.
-    fn install(&self, entry: &str, runtime: Option<&str>) -> R<Value> {
+    /// A script that runs the xenonet binary (fx::xenonet_bin: installed
+    /// XenoNet's launcher, or this one). What the route gives, the JS's
+    /// entry and runtime, has no part in it.
+    fn install(&self, _entry: &str, _runtime: Option<&str>) -> R<Value> {
         let path = std::env::var("PATH").ok();
-        let (runtime, run_as_node) = match runtime.filter(|r| !r.is_empty()) {
-            Some(r) => (r.to_string(), false),
-            None => {
-                let node = fx::on_path("node").unwrap_or_else(|| "node".into());
-                let r = xenonet_app::command::current_runtime(fx::env_set("XENONET_EXEC").as_deref(), &node, false, path.as_deref());
-                (r.runtime, r.run_as_node)
-            }
-        };
-        xenonet_app::command::install_command(&self.dir(), &runtime, entry, run_as_node, false, path.as_deref(), platform()).map(state_json).map_err(|e| CoreError::new(e.message))
+        xenonet_app::command::install_command(&self.dir(), &fx::xenonet_bin(&self.home), false, path.as_deref(), platform()).map(state_json).map_err(|e| CoreError::new(e.message))
     }
 }
 
@@ -113,6 +105,7 @@ mod tests {
         assert_eq!(c.state().unwrap()["installed"], false);
         let st = c.install("/x/cli/xenonet.js", Some("/x/node")).unwrap();
         assert_eq!((st["installed"].clone(), st["ours"].clone()), (json!(true), json!(true)));
+        assert_eq!(st["runs"].as_array().map(Vec::len), Some(1), "the binary alone");
         assert!(st["file"].as_str().unwrap().starts_with(&*home.to_string_lossy()));
         std::fs::remove_dir_all(&home).unwrap();
     }

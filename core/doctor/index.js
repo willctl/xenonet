@@ -67,9 +67,21 @@ export function machine(overrides = {}) {
     // What XenoNet's error log has from the last day (core/log.js).
     errors: () => (overrides.paths?.stateDir ? readLogs(logDir(overrides.paths.stateDir), { since: Date.now() - 24 * 3600e3, level: "error" }) : null),
     // The stable launcher hooks and MCP servers run, as it says it is
-    // (launcher.cjs --launcher), or null when there's none here.
+    // (--launcher), or null when there's none here: the xenonet binary, or
+    // the node and launcher.cjs that an earlier XenoNet's entries run.
     async launcher() {
       const dir = path.join(env.XENONET_RUNTIME_DIR || path.join(appDir("state", { env, platform, homeDir: home }), "runtime"), "launcher");
+      const ships = launcherVersion(fs.readFileSync(LAUNCHER_SOURCE, "utf8"));
+      const bin = path.join(dir, platform === "win32" ? "xenonet.exe" : "xenonet");
+      if (fs.existsSync(bin)) {
+        const r = await run(bin, ["--launcher"], 8000);
+        let said = null;
+        try {
+          said = JSON.parse(r.stdout);
+        } catch {}
+        // A copy of the Tools' own, so it's as new as they are.
+        return { dir, said, version: said?.launcher ?? ships, ships };
+      }
       const node = path.join(dir, platform === "win32" ? "node.exe" : "node");
       const entry = path.join(dir, "cli", "xenonet.js");
       if (!fs.existsSync(node) || !fs.existsSync(entry)) return null;
@@ -78,7 +90,7 @@ export function machine(overrides = {}) {
       try {
         said = JSON.parse(r.stdout);
       } catch {}
-      return { dir, said, version: launcherVersion(fs.readFileSync(entry, "utf8")), ships: launcherVersion(fs.readFileSync(LAUNCHER_SOURCE, "utf8")) };
+      return { dir, said, version: launcherVersion(fs.readFileSync(entry, "utf8")), ships };
     },
     stateFile: (dir) => inspectState(dir),
     drift: () => (cacheDir ? (readDriftFile(path.join(cacheDir, DRIFT_FILE)) ?? { file: path.join(cacheDir, DRIFT_FILE), lookedAt: null, records: [] }) : null),
@@ -424,7 +436,7 @@ export const CHECKS = [
       if (l.version < l.ships) return warn(`launcher ${l.version}; this XenoNet ships ${l.ships}`, "XenoNet replaces it the next time it starts.");
       if (!l.said) return fail(`the launcher in ${tilde(l.dir, ctx.home)} doesn't run`, "Open XenoNet, which writes it again, or install XenoNet again.");
       if (!l.said.tools) return fail("the launcher can't find XenoNet's Tools, so the xenonet command and MCP servers don't start (hooks still reach XenoNet)", "Open XenoNet to repair them, or install XenoNet again.");
-      return ok(`launcher ${l.version}, running Tools ${l.said.tools} on Node ${String(l.said.node).replace(/^v/, "")}`);
+      return ok(`launcher ${l.version}, running Tools ${l.said.tools}${l.said.node ? ` on Node ${String(l.said.node).replace(/^v/, "")}` : ""}`);
     },
   },
 

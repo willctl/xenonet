@@ -227,15 +227,9 @@ pub fn app_command_dir(home: String, platform: String, local_app_data: Option<St
     command::command_dir(&home, &platform, local_app_data.as_deref())
 }
 
-#[napi(js_name = "appCurrentRuntime")]
-pub fn app_current_runtime(xenonet_exec: Option<String>, exec_path: String, electron: bool, path_var: Option<String>) -> Json {
-    let r = command::current_runtime(xenonet_exec.as_deref(), &exec_path, electron, path_var.as_deref());
-    Json(json!({ "runtime": r.runtime, "runAsNode": r.run_as_node }))
-}
-
 #[napi(js_name = "appCommandScript")]
-pub fn app_command_script(runtime: String, entry: String, run_as_node: bool, platform: String) -> Jv {
-    answer(command::command_script(&runtime, &entry, run_as_node, &platform).map(s))
+pub fn app_command_script(bin: String, platform: String) -> Jv {
+    answer(command::command_script(&bin, &platform).map(s))
 }
 
 #[napi(js_name = "appCommandState")]
@@ -268,8 +262,8 @@ pub fn app_reg_path(stdout: String, env: Json) -> Vec<String> {
 }
 
 #[napi(js_name = "appInstallCommand")]
-pub fn app_install_command(dir: String, runtime: String, entry: String, run_as_node: bool, force: bool, path_var: Option<String>, platform: String) -> Jv {
-    fs_answer(command::install_command(&dir, &runtime, &entry, run_as_node, force, path_var.as_deref(), &platform).map(state_jv))
+pub fn app_install_command(dir: String, bin: String, force: bool, path_var: Option<String>, platform: String) -> Jv {
+    fs_answer(command::install_command(&dir, &bin, force, path_var.as_deref(), &platform).map(state_jv))
 }
 
 #[napi(js_name = "appUninstallCommand")]

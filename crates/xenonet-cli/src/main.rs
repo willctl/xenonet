@@ -85,6 +85,13 @@ fn main_of(argv: &[String]) -> Done {
         print(if flags.on("json") { xenonet_base::json::stringify(&json!({ "version": VERSION }), 0) } else { format!("xenonet {VERSION}") });
         return Ok(0);
     }
+    // What this binary is as installed XenoNet's launcher, a copy of the
+    // Tools' (docs/design/contracts.md, section 12): launcher 3, with no
+    // node of its own.
+    if flags.on("launcher") && name.is_none() {
+        print(xenonet_base::json::stringify(&json!({ "launcher": 3, "protocol": 1, "tools": VERSION, "node": null }), 0));
+        return Ok(0);
+    }
     let Some(name) = name else {
         if flags.on("help") {
             help();

@@ -371,9 +371,8 @@ pub fn command_dir() -> Res<String> {
     Ok(xenonet_app::command::command_dir(&sys::home(), sys::platform(), std::env::var("LOCALAPPDATA").ok().as_deref()))
 }
 
-/// installCommand(options): the command's state. With a runtime (the
-/// launcher's), a script that runs its node and entry; with only an entry,
-/// this binary, a script that runs it.
+/// installCommand({ dir, bin, force }): the command's state, its script
+/// running `bin`.
 pub fn install_command(opts: &Value) -> Res<Value> {
     command::install(opts)
 }

@@ -11,12 +11,11 @@ use serde_json::json;
 pub const HELP: &str = include_str!("help/install.txt");
 
 pub fn run(_args: &[String], flags: &Flags) -> Done {
-    let entry = std::env::current_exe().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
     let dir = match flags.str("dir") {
         Some(d) => sys::resolve(d),
         None => cores::command_dir()?,
     };
-    let st = cores::install_command(&json!({ "dir": dir, "entry": entry, "force": flags.on("force") })).map_err(|e| {
+    let st = cores::install_command(&json!({ "dir": dir, "bin": cores::xenonet_bin(), "force": flags.on("force") })).map_err(|e| {
         if e.expected {
             e
         } else {

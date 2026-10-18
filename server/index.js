@@ -50,7 +50,7 @@ import { doctorContext } from "../core/doctor/context.js";
 import { createDoctorService } from "../core/doctor/service.js";
 import { summarize, machine } from "../core/doctor/index.js";
 import { createTokenScan } from "../core/actors/token-file.js";
-import { commandState, currentRuntime, installCommand } from "../core/command.js";
+import { commandState, installCommand } from "../core/command.js";
 import { readThemes, copyTheme } from "../core/themefiles.js";
 import { DEFAULT_THEME } from "../core/themes.js";
 import { drift, DRIFT_FILE } from "../core/drift.js";
@@ -753,7 +753,7 @@ async function api(req, res, url) {
     if (req.method === "GET") return send(res, 200, commandState());
     if (req.method === "POST") {
       try {
-        return send(res, 200, installCommand({ entry: path.join(process.env.XENONET_LAUNCHER_ROOT || root, "cli", "xenonet.js"), ...(process.env.XENONET_LAUNCHER_EXEC ? { runtime: process.env.XENONET_LAUNCHER_EXEC } : currentRuntime()) }));
+        return send(res, 200, installCommand({ bin: xenonetBin({ env: process.env, root }) }));
       } catch (err) {
         return send(res, 409, { error: err.message });
       }

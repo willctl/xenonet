@@ -160,6 +160,17 @@ pub fn launcher(source: &str) -> Result<Option<Value>, String> {
     let m = xenonet_components::runtime::Machine { platform: platform().into(), arch: String::new(), home: home() };
     let runtime = xenonet_components::runtime::runtime_dir(&env, &m);
     let dir = xenonet_base::paths::join(&runtime, "launcher");
+    // The xenonet binary first, which entries run now; it's a copy of the
+    // Tools' own, so it's as new as they are.
+    let bin = xenonet_base::paths::join(&dir, if cfg!(windows) { "xenonet.exe" } else { "xenonet" });
+    if std::fs::metadata(&bin).is_ok() {
+        let r = run_program(&bin, &["--launcher".into()], 8000.0, &[], &[]);
+        let said = r["stdout"].as_str().and_then(|s| xenonet_base::json::parse(s).ok()).unwrap_or(Value::Null);
+        let read = |f: &str| std::fs::read(f).map(|b| String::from_utf8_lossy(&b).into_owned()).map_err(|e| xenonet_base::fs::FsError::of(e, "open", f).message);
+        let ships = xenonet_components::install::launcher_version(Some(&read(source)?));
+        let version = said.get("launcher").cloned().unwrap_or_else(|| xenonet_base::json::number(ships));
+        return Ok(Some(json!({ "dir": dir, "said": said, "version": version, "ships": xenonet_base::json::number(ships) })));
+    }
     let node = xenonet_base::paths::join(&dir, if cfg!(windows) { "node.exe" } else { "node" });
     let entry = xenonet_base::paths::join_all(&[&dir, "cli", "xenonet.js"]);
     if std::fs::metadata(&node).is_err() || std::fs::metadata(&entry).is_err() {

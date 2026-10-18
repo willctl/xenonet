@@ -13,7 +13,7 @@
 //! install lock.
 
 use crate::packages::{current_component, lock, newer, node_name, select_component, stage_package, unlock};
-use crate::runtime::{runtime_dir, Env, Machine};
+use crate::runtime::{bin_name, launcher_bin, runtime_dir, Env, Machine};
 use serde_json::{json, Value};
 use std::time::Duration;
 use xenonet_app::fsx::{self, FsError};
@@ -72,28 +72,73 @@ pub fn write_launcher(entry: &str, source: &str) -> Result<bool, FsError> {
     }
 }
 
-/// The launcher: a copy of the Tools' runtime and the launcher script, in
-/// the runtime folder, which never moves (hooks, MCP servers and the
-/// xenonet command run its path). None without Tools.
+/// Copies the Tools' binary to the launcher's, when it isn't the copy of
+/// these Tools already (its .from file says which it is), through a
+/// temporary file and a rename, so a hook starting meanwhile runs the old
+/// or the new. One in use that can't be replaced now (on Windows) is
+/// replaced next time.
+pub fn write_launcher_bin(tools: &Value, to: &str, platform: &str) -> bool {
+    let from = NATIVE.join(&[&js_string(&tools["root"]), "bin", bin_name(platform)]);
+    if !fsx::exists(&from) {
+        return false;
+    }
+    let source = format!("{}-{}", js_string(&tools["version"]), js_string(&tools["sha256"]));
+    let marker = format!("{to}.from");
+    if fsx::read_text(&marker).is_ok_and(|had| had == source) && fsx::exists(to) {
+        return false;
+    }
+    let tmp = format!("{to}.{}.tmp", std::process::id());
+    let copied = std::fs::copy(&from, &tmp).is_ok() && {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).is_ok()
+        }
+        #[cfg(not(unix))]
+        {
+            true
+        }
+    };
+    if copied && fsx::rename(&tmp, to).is_ok() {
+        let _ = fsx::write_file(&marker, source.as_bytes(), None);
+        return true;
+    }
+    let _ = fsx::rm_rf(&tmp);
+    false
+}
+
+/// The launcher, in the runtime folder, which never moves (hooks, MCP
+/// servers and the xenonet command run its path): the Tools' xenonet
+/// binary, copied; and, while the Tools carry a node, the node and the
+/// launcher script that entries an earlier XenoNet wrote run. None without
+/// Tools.
 pub fn install_launcher(env: &Env, ctx: &Ctx) -> Result<Option<Value>, Failure> {
     let m = &ctx.machine;
     let Some(tools) = current_component("tools", env, m)? else { return Ok(None) };
     let dir = NATIVE.join(&[&runtime_dir(env, m), "launcher"]);
-    let entry = NATIVE.join(&[&dir, "cli", "xenonet.js"]);
-    let runtime = NATIVE.join(&[&dir, node_name(&m.platform)]);
-    fsx::mkdir_p(&NATIVE.dirname(&entry), None)?;
-    if !fsx::exists(&runtime) {
-        let from = NATIVE.join(&[&js_string(&tools["root"]), node_name(&m.platform)]);
-        std::fs::copy(&from, &runtime).map_err(|e| FsError::of(e, "copyfile", &from))?;
+    let bin = launcher_bin(env, m);
+    fsx::mkdir_p(&dir, None)?;
+    write_launcher_bin(&tools, &bin, &m.platform);
+    let node = NATIVE.join(&[&js_string(&tools["root"]), node_name(&m.platform)]);
+    let (mut runtime, mut entry) = (Value::Null, Value::Null);
+    if fsx::exists(&node) {
+        let e = NATIVE.join(&[&dir, "cli", "xenonet.js"]);
+        let r = NATIVE.join(&[&dir, node_name(&m.platform)]);
+        fsx::mkdir_p(&NATIVE.dirname(&e), None)?;
+        if !fsx::exists(&r) {
+            std::fs::copy(&node, &r).map_err(|err| FsError::of(err, "copyfile", &node))?;
+        }
+        #[cfg(unix)]
+        if m.platform != "win32" {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&r, std::fs::Permissions::from_mode(0o755)).map_err(|err| FsError::of(err, "chmod", &r))?;
+        }
+        let source = fsx::read_text(&ctx.launcher_source)?;
+        write_launcher(&e, &source)?;
+        (runtime, entry) = (json!(r), json!(e));
     }
-    #[cfg(unix)]
-    if m.platform != "win32" {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o755)).map_err(|e| FsError::of(e, "chmod", &runtime))?;
-    }
-    let source = fsx::read_text(&ctx.launcher_source)?;
-    write_launcher(&entry, &source)?;
-    Ok(Some(json!({ "runtime": runtime, "entry": entry, "root": dir, "runAsNode": false })))
+    let bin = if fsx::exists(&bin) { json!(bin) } else { Value::Null };
+    Ok(Some(json!({ "bin": bin, "runtime": runtime, "entry": entry, "root": dir, "runAsNode": false })))
 }
 
 // Runs a program as spawnSync did: its output, and its exit code (None if
@@ -161,8 +206,13 @@ pub fn installed_runtime(env: &Env, ctx: &Ctx) -> Result<Value, Failure> {
     let mut run_env = env.clone();
     run_env.insert("XENONET_RUNTIME_DIR".into(), json!(runtime_dir(env, m)));
     if let Some(l) = &launcher {
-        run_env.insert("XENONET_LAUNCHER_EXEC".into(), l["runtime"].clone());
-        run_env.insert("XENONET_LAUNCHER_ROOT".into(), l["root"].clone());
+        if !l["bin"].is_null() {
+            run_env.insert("XENONET_LAUNCHER_BIN".into(), l["bin"].clone());
+        }
+        if !l["runtime"].is_null() {
+            run_env.insert("XENONET_LAUNCHER_EXEC".into(), l["runtime"].clone());
+            run_env.insert("XENONET_LAUNCHER_ROOT".into(), l["root"].clone());
+        }
     }
     Ok(json!({ "root": root, "exec": NATIVE.join(&[&root, node_name(&m.platform)]), "env": run_env }))
 }
@@ -356,9 +406,9 @@ async fn install_bundle_locked(io: &Io, bundle: &str, env: &Env, command: bool, 
         select_component(&component, &staged, env, m)?;
     }
     let launcher = install_launcher(env, ctx)?;
-    if let (true, Some(l)) = (command, &launcher) {
+    if let (true, Some(bin)) = (command, launcher.as_ref().and_then(|l| l["bin"].as_str())) {
         let dir = xenonet_app::command::command_dir(&m.home, &m.platform, ctx.local_app_data.as_deref());
-        xenonet_app::command::install_command(&dir, &js_string(&l["runtime"]), &js_string(&l["entry"]), false, false, crate::runtime::var(env, "PATH"), &m.platform)?;
+        xenonet_app::command::install_command(&dir, bin, false, crate::runtime::var(env, "PATH"), &m.platform)?;
     }
     installed_runtime(env, ctx)
 }

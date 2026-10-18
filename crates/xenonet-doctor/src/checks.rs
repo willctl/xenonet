@@ -493,8 +493,9 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
                     Some("Open XenoNet to repair them, or install XenoNet again."),
                 ));
             }
-            let node = s(said.get("node"));
-            Ok(ok(format!("launcher {}, running Tools {} on Node {}", s(l.get("version")), s(said.get("tools")), node.strip_prefix('v').unwrap_or(&node))))
+            // The xenonet binary has no node of its own to name.
+            let node = if truthy(said.get("node")) { format!(" on Node {}", s(said.get("node")).trim_start_matches('v')) } else { String::new() };
+            Ok(ok(format!("launcher {}, running Tools {}{node}", s(l.get("version")), s(said.get("tools")))))
         }
         "agents.claude" | "agents.codex" => {
             let app = &id["agents.".len()..];

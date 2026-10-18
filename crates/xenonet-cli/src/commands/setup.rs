@@ -31,8 +31,8 @@ pub fn run(_args: &[String], _flags: &Flags) -> Done {
     item.insert("size".into(), Value::from(bytes.len()));
     item.insert("sha256".into(), Value::String(cores::digest(&bytes)?));
     let result = cores::activate_package(&package, &Value::Object(item))?;
-    if let Some(launcher) = cores::install_launcher()? {
-        cores::install_command(&launcher)?;
+    if let Some(bin) = cores::install_launcher()?.and_then(|l| l["bin"].as_str().map(str::to_string)) {
+        cores::install_command(&serde_json::json!({ "bin": bin }))?;
     }
     print(xenonet_base::json::stringify(&result, 0));
     Ok(0)
