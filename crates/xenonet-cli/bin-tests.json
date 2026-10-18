@@ -43,8 +43,8 @@
       "failed": []
     },
     "test/launcher.test.js": {
-      "pass": 4,
-      "tests": 4,
+      "pass": 5,
+      "tests": 5,
       "failed": []
     },
     "test/mcp-actor.test.js": {
