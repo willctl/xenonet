@@ -273,7 +273,7 @@ impl GatewayControl {
             let r = self.reach.locked();
             (r["at"].as_f64(), r["state"].clone())
         };
-        let due = woke || at.is_none() || t - at.unwrap() >= if state == "ok" { OK_EVERY_MS } else { FAILING_EVERY_MS };
+        let due = woke || at.is_none_or(|at| t - at >= if state == "ok" { OK_EVERY_MS } else { FAILING_EVERY_MS });
         if !due {
             return;
         }
@@ -357,8 +357,10 @@ impl GatewayControl {
                 "oldAddress": host.is_some() && last_host.is_some() && last_host != host,
                 "refused": refused.get(id).cloned().unwrap_or(Value::Null),
             });
-            for (k, v) in extra.as_object().unwrap() {
-                r[k] = v.clone();
+            if let Value::Object(extra) = extra {
+                for (k, v) in extra {
+                    r[k] = v;
+                }
             }
             r
         };
@@ -482,7 +484,7 @@ impl GatewayControl {
         let mut tunnel = tv.clone();
         match &s.tunnel {
             Some((k, name, given)) => {
-                let kd = kind(k).unwrap();
+                let kd = kind(k).expect("saved() keeps only a tunnel kind that exists");
                 for (key, v) in
                     [("kind", json!(k)), ("label", json!(kd.label)), ("through", json!(kd.through)), ("name", json!(name)), ("given", json!(given)), ("stable", json!(kd.stable))]
                 {
@@ -496,8 +498,10 @@ impl GatewayControl {
             }
         }
         let mut out = json!({ "on": s.on });
-        for (k, v) in g.as_object().unwrap() {
-            out[k] = v.clone();
+        if let Value::Object(g) = g {
+            for (k, v) in g {
+                out[k] = v;
+            }
         }
         out["tunnel"] = tunnel;
         out["reach"] = reach;

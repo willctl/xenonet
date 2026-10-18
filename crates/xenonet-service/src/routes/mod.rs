@@ -361,18 +361,29 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
 
     // With hosts on, other hosts' maps and live state are in them, except
     // for ?hosts=0, this machine's own.
-    let merged = cores.hub.is_some() && req.param("hosts") != Some("0");
-    let hub = cores.hub.clone();
+    let merged = cores.hub.as_ref().filter(|_| req.param("hosts") != Some("0"));
     if m == "GET" && route == "/api/graph" {
         let graph = match cores.state.graph()? {
             Some(g) => g,
             None => cores.state.refresh().await?,
         };
-        return Ok(Reply::json(200, if merged { hub.unwrap().graph(graph) } else { graph }));
+        return Ok(Reply::json(
+            200,
+            match merged {
+                Some(hub) => hub.graph(graph),
+                None => graph,
+            },
+        ));
     }
     if m == "GET" && route == "/api/live" {
         let live = cores.state.live_snapshot()?;
-        return Ok(Reply::json(200, if merged { hub.unwrap().live(live) } else { live }));
+        return Ok(Reply::json(
+            200,
+            match merged {
+                Some(hub) => hub.live(live),
+                None => live,
+            },
+        ));
     }
     // Event history (last 24h) for replay and digests.
     if m == "GET" && route == "/api/history" {
@@ -386,15 +397,12 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         return Ok(Reply::json(200, json!({ "results": results, "status": cores.state.search_status()? })));
     }
     if m == "POST" && route == "/api/ack" {
-        let id = req.json_body().await?.get("sessionId").cloned().unwrap_or(Value::Null);
-        let known = match id.as_str() {
-            Some(s) => cores.state.node(s)?.is_some(),
-            None => false,
+        let body = req.json_body().await?;
+        let id = match body.get("sessionId").and_then(Value::as_str) {
+            Some(s) if cores.state.node(s)?.is_some() => s,
+            _ => return Ok(Reply::error(400, "XenoNet doesn't know that session")),
         };
-        if !known {
-            return Ok(Reply::error(400, "XenoNet doesn't know that session"));
-        }
-        cores.store.ack(id.as_str().unwrap())?;
+        cores.store.ack(id)?;
         ctx.broadcast("live", &cores.state.live_snapshot()?);
         return Ok(Reply::json(200, json!({ "ok": true })));
     }
@@ -433,20 +441,16 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
                 Some(id) => cores.state.node(id)?,
                 None => None,
             };
-            let target = body.get("target").and_then(Value::as_str).filter(|t| ["claude", "codex"].contains(t)).map(str::to_string);
-            let brief = body.get("brief").and_then(Value::as_str).map(str::to_string);
-            let good = node.as_ref().is_some_and(|n| n["kind"] == "session")
-                && target.is_some()
-                && brief.as_ref().is_some_and(|b| !xenonet_base::text::is_blank(b) && b.encode_utf16().count() <= MAX_BRIEF);
-            if !good {
+            let target = body.get("target").and_then(Value::as_str).filter(|t| ["claude", "codex"].contains(t));
+            let brief = body.get("brief").and_then(Value::as_str).filter(|b| !xenonet_base::text::is_blank(b) && b.encode_utf16().count() <= MAX_BRIEF);
+            let (Some(node), Some(target), Some(brief)) = (node.filter(|n| n["kind"] == "session"), target, brief) else {
                 return Ok(Reply::error(400, "bad handoff"));
-            }
+            };
             if ctx.config.demo {
                 return Ok(Reply::error(409, "Demo sessions exist only in XenoNet, so they can't be handed off."));
             }
-            let node = node.unwrap();
             let folder = node.get("worktree").filter(|w| truthy(Some(w))).or_else(|| node.get("cwd")).cloned().unwrap_or(Value::Null);
-            let url = cores.opener.handoff_url(target.as_deref().unwrap(), &folder, brief.as_deref().unwrap())?;
+            let url = cores.opener.handoff_url(target, &folder, brief)?;
             ctx.open(&url).await?;
             return Ok(Reply::json(200, json!({ "ok": true, "target": target })));
         }
@@ -529,9 +533,10 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             Some(h) => h.summary(summary),
             None => summary,
         };
-        let waits = waits_on_you(ctx)?;
-        for (k, v) in waits.as_object().unwrap() {
-            out[k] = v.clone();
+        if let Value::Object(waits) = waits_on_you(ctx)? {
+            for (k, v) in waits {
+                out[k] = v;
+            }
         }
         return Ok(Reply::json(200, out));
     }
@@ -612,11 +617,10 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             Some(id) => cores.state.node(id)?,
             None => None,
         };
-        let available = node.as_ref().and_then(|n| n.get("actions")).and_then(Value::as_array).is_some_and(|a| a.iter().any(|x| x["id"] == action && !truthy(x.get("client"))));
-        if !available {
+        let available = |n: &Value| n.get("actions").and_then(Value::as_array).is_some_and(|a| a.iter().any(|x| x["id"] == action && !truthy(x.get("client"))));
+        let Some(node) = node.filter(available) else {
             return Ok(Reply::error(400, "that action isn't available here"));
-        }
-        let node = node.unwrap();
+        };
         let Some(target) = cores.opener.url_for(&node, action.as_str().unwrap_or(""))? else {
             return Ok(Reply::error(400, "there's nothing to open for this item"));
         };

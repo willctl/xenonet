@@ -137,7 +137,7 @@ impl Rpc {
             && message.get("id").and_then(Value::as_f64).is_some_and(|n| n.fract() == 0.0 && n.abs() <= 9_007_199_254_740_991.0)
         {
             let id = message["id"].clone();
-            let method = message["method"].as_str().unwrap().to_string();
+            let method = message["method"].as_str().expect("the method was checked to be a string above").to_string();
             let params = message.get("params").cloned().unwrap_or(Value::Null);
             let fut = handle(method, params);
             let me = self.clone();

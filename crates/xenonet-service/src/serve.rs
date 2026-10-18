@@ -115,7 +115,7 @@ pub fn answered(ctx: &Ctx, method: &str, path: &str, answer: Result<Reply, CoreE
     match answer {
         Ok(r) => r,
         Err(e) if e.is_pending() => Reply::coded(501, "pending", e.message),
-        Err(e) if e.status.is_some() => Reply::error(e.status.unwrap(), e.message),
+        Err(CoreError { status: Some(status), message, .. }) => Reply::error(status, message),
         Err(e) => {
             eprintln!("{}", e.message);
             let short = shorten(path);
@@ -291,7 +291,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
     let mut ctx = Ctx::new(config.clone(), version.clone(), cores, log);
     ctx.upstream = upstream;
     let (again_tx, again_rx) = mpsc::unbounded_channel();
-    ctx.music.get_mut().unwrap().again = Some(again_tx);
+    ctx.music.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner).again = Some(again_tx);
     ctx.drift = drift;
     let ctx = Arc::new(ctx);
     emitter.bind(&ctx);

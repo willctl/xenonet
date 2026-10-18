@@ -136,7 +136,7 @@ impl ActorRoutes<'_> {
     }
 
     async fn you(&self, req: &mut Req) -> Result<Reply, CoreError> {
-        let actors = self.ctx.cores.actors.as_ref().unwrap();
+        let actors = self.actors();
         // Without a key it's any program asking about you, which gets what
         // the list says.
         if req.method == "GET" && req.header("x-xenonet-window").is_none() {
@@ -197,11 +197,11 @@ impl ActorRoutes<'_> {
     }
 
     fn registration(&self) -> &Arc<dyn crate::cores::Registration> {
-        self.ctx.cores.registration.as_ref().unwrap()
+        self.ctx.cores.registration.as_ref().expect("actors are on, and their registration comes with them")
     }
 
     fn actors(&self) -> &Arc<dyn crate::cores::Actors> {
-        self.ctx.cores.actors.as_ref().unwrap()
+        self.ctx.cores.actors.as_ref().expect("route() answers 503 while actors are off")
     }
 
     async fn actor_of(&self, req: &Req, waiting: bool) -> Result<Value, Reply> {

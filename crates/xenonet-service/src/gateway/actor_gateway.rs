@@ -571,7 +571,7 @@ impl ActorGateway {
                 if !issues.is_empty() {
                     return Self::error(200, &id, -32602, &format!("Invalid tools/call request: {}", json::stringify(&Value::Array(issues), 2)));
                 }
-                let tool = params["name"].as_str().unwrap().to_string();
+                let tool = params["name"].as_str().expect("the name was checked to be a string above").to_string();
                 let Some(def) = self.tools().into_iter().find(|t| t["name"] == json!(tool)) else {
                     return Self::error(200, &id, -32602, &format!("Tool {tool} not found"));
                 };

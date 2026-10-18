@@ -241,11 +241,9 @@ impl EngineRoutes<'_> {
         if req.header("authorization").is_some() {
             return Ok(if name == "channel" { Reply::error(404, "not found") } else { self.as_actor(req, &name).await });
         }
-        let me = req.header("x-xenonet-agent").map(str::to_string);
-        if !is_agent_id(me.as_deref()) {
+        let Some(me) = req.header("x-xenonet-agent").filter(|m| is_agent_id(Some(m))).map(str::to_string) else {
             return Ok(Reply::error(400, "say which session is calling, in x-xenonet-agent (claude:<session id> or codex:<thread id>)"));
-        }
-        let me = me.unwrap();
+        };
         let verdict = self.verify.check(req.peer, &me, false).await;
         if !ok(&verdict) {
             return Ok(Reply::send(403, &json!({ "error": verdict.get("reason").cloned().unwrap_or(Value::Null) }), &[]));

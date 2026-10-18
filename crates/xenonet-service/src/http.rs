@@ -113,7 +113,7 @@ impl Req {
     /// A request made by hand, for tests.
     pub fn fake(method: &str, target: &str, headers: &[(&str, &str)], body: Option<&str>) -> Req {
         let (path, query) = parse_target(target);
-        let addr: SocketAddr = "127.0.0.1:1".parse().unwrap();
+        let addr = SocketAddr::from(([127, 0, 0, 1], 1));
         Req {
             method: method.to_string(),
             path,

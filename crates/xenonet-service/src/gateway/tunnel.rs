@@ -597,11 +597,12 @@ impl Tunnel {
         if self.inner.locked().state.0 != "up" {
             self.set_state("starting", Some("setting up Tailscale Funnel".into()));
         }
-        let (bin, me, why) = self.tailscale().await;
-        if let Some(why) = why {
-            return self.set_state("failed", Some(why));
-        }
-        let (bin, me) = (bin.unwrap(), me.unwrap());
+        // tailscale() names the tool and its status whenever it gives no
+        // reason it can't go on.
+        let (bin, me) = match self.tailscale().await {
+            (Some(bin), Some(me), None) => (bin, me),
+            (_, _, why) => return self.set_state("failed", why),
+        };
         let host = me["host"].as_str().unwrap_or("").to_string();
         (self.hooks.on_host)(&host);
         if me["funnel"] != json!(true) {
@@ -681,7 +682,7 @@ impl Tunnel {
 
     fn child_up(&self, w: Want) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
         Box::pin(async move {
-            let k = kind(&w.kind).unwrap();
+            let k = kind(&w.kind).expect("up() makes a Want only of a kind that exists");
             let tool = k.tool.unwrap_or("");
             let found = self.tool(tool).await;
             if found.is_empty() {
@@ -778,11 +779,13 @@ impl Tunnel {
             if let Some(f) = &self.pid_file {
                 let _ = std::fs::remove_file(f);
             }
-            if i.stopping || i.want.is_none() {
-                drop(i);
-                return self.set_state("off", None);
+            match i.want.clone() {
+                Some(w) if !i.stopping => w,
+                _ => {
+                    drop(i);
+                    return self.set_state("off", None);
+                }
             }
-            i.want.clone().unwrap()
         };
         let t = self.host.now();
         let (count, said) = {
