@@ -1,5 +1,5 @@
 //! core/numbat.js: numbat's event records. Each run numbat records, one per
-//! numbat session id, is a session on the map, "<app>:<id>", with app the
+//! numbat session id, is a session on the map, "`<app>:<id>`", with app the
 //! agent that ran it, marked observed through numbat; its edits count in
 //! the warnings other sessions get, marked observed. The file numbat writes
 //! is tailed: new whole lines are read once, and a file rotated or cut short
@@ -161,12 +161,9 @@ impl Numbat {
     // The new whole lines since the last read. Err when the read failed
     // (what it changed before then stays changed).
     fn lines(&mut self, file: Option<&str>, files: &mut dyn Files) -> Result<Vec<String>, FsError> {
-        let st = match file.map(|f| files.stat(f)) {
-            Some(Ok(st)) => st,
-            _ => {
-                self.file_state = "missing";
-                return Ok(Vec::new());
-            }
+        let Some(Ok(st)) = file.map(|f| files.stat(f)) else {
+            self.file_state = "missing";
+            return Ok(Vec::new());
         };
         let file = file.unwrap_or_default();
         let mut skip_first = false;

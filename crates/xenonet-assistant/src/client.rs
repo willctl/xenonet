@@ -16,7 +16,21 @@ pub const CALL_MS: f64 = 12e3;
 const FIRST: f64 = 2000.0;
 const MAX: f64 = 60e3;
 
-pub const ERROR_CODES: [&str; 13] = ["NOT_AUTHORIZED", "NOT_FOUND", "GRANT_EXPIRED", "GRANT_REVOKED", "DISABLED", "INVALID_ARGUMENT", "CURSOR_EXPIRED", "SOURCE_UNAVAILABLE", "SERVICE_UNAVAILABLE", "RATE_LIMITED", "INCOMPATIBLE_VERSION", "TIMEOUT", "INTERNAL_ERROR"];
+pub const ERROR_CODES: [&str; 13] = [
+    "NOT_AUTHORIZED",
+    "NOT_FOUND",
+    "GRANT_EXPIRED",
+    "GRANT_REVOKED",
+    "DISABLED",
+    "INVALID_ARGUMENT",
+    "CURSOR_EXPIRED",
+    "SOURCE_UNAVAILABLE",
+    "SERVICE_UNAVAILABLE",
+    "RATE_LIMITED",
+    "INCOMPATIBLE_VERSION",
+    "TIMEOUT",
+    "INTERNAL_ERROR",
+];
 
 /// A refusal: its code and what it says (AssistantRefused).
 #[derive(Debug, PartialEq)]
@@ -62,9 +76,13 @@ impl Adapter {
     /// runs; a file a crashed service left names a port anyone could
     /// listen on since, and a credential never goes there.
     pub fn endpoint(&mut self, text: Option<&str>, alive: &mut dyn FnMut(f64) -> bool) -> Result<Endpoint, Refused> {
-        let d = text.and_then(|t| xenonet_base::json::parse(t).ok()).ok_or_else(|| refused("SERVICE_UNAVAILABLE", "XenoNet's endpoint for remote actors isn't listening: XenoNet isn't running, or no grant is active"))?;
+        let d = text
+            .and_then(|t| xenonet_base::json::parse(t).ok())
+            .ok_or_else(|| refused("SERVICE_UNAVAILABLE", "XenoNet's endpoint for remote actors isn't listening: XenoNet isn't running, or no grant is active"))?;
         let int = |v: Option<&Value>| v.and_then(Value::as_f64).filter(|n| n.fract() == 0.0 && n.is_finite());
-        let (Some(port), Some(state)) = (int(d.get("port")), d.get("state").and_then(Value::as_str)) else { return Err(refused("SERVICE_UNAVAILABLE", "XenoNet's endpoint file is unreadable")) };
+        let (Some(port), Some(state)) = (int(d.get("port")), d.get("state").and_then(Value::as_str)) else {
+            return Err(refused("SERVICE_UNAVAILABLE", "XenoNet's endpoint file is unreadable"));
+        };
         self.state_dir = Some(state.to_string());
         let pid = int(d.get("pid")).filter(|p| alive(*p)).ok_or_else(|| refused("SERVICE_UNAVAILABLE", "XenoNet's endpoint file is from a service that isn't running"))?;
         Ok(Endpoint { port, pid })
@@ -74,7 +92,9 @@ impl Adapter {
     /// named, for hello.
     pub fn token(&self) -> Result<String, Refused> {
         let dir = self.state_dir.as_deref().unwrap_or("");
-        read_credential(dir, &self.grant).and_then(|c| c["token"].as_str().map(String::from)).ok_or_else(|| refused("NOT_AUTHORIZED", "this computer has no credential for that grant: it was revoked, or made by another XenoNet"))
+        read_credential(dir, &self.grant)
+            .and_then(|c| c["token"].as_str().map(String::from))
+            .ok_or_else(|| refused("NOT_AUTHORIZED", "this computer has no credential for that grant: it was revoked, or made by another XenoNet"))
     }
 
     pub fn connected(&mut self) {

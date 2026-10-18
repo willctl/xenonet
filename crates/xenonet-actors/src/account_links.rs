@@ -48,13 +48,13 @@ fn refuse<T>(code: &'static str, message: &str) -> Result<T> {
 pub fn new_id(prefix: &str) -> std::result::Result<String, Thrown> {
     let mut b = [0u8; 12];
     getrandom::fill(&mut b).map_err(|e| Thrown::new(format!("no random bytes: {e}")))?;
-    Ok(format!("{prefix}_{}", b.iter().map(|x| format!("{x:02x}")).collect::<String>()))
+    Ok(format!("{prefix}_{}", crate::tokens::hex(&b)))
 }
 
 /// parts.join("\0"), hashed: null and undefined join as nothing.
 fn hash_of(parts: &[Arg]) -> String {
     let joined: Vec<String> = parts.iter().map(|p| if p.is_nullish() { String::new() } else { js_text(p) }).collect();
-    Sha256::digest(joined.join("\0").as_bytes()).iter().map(|x| format!("{x:02x}")).collect()
+    crate::tokens::hex(&Sha256::digest(joined.join("\0").as_bytes()))
 }
 
 /// `a === b` for a column's value and a value given.
@@ -110,7 +110,7 @@ pub fn assert_link(store: &Shared, slug: &Arg, identity: &Arg, provider: &Arg, k
 
 /// What an adapter verified, kept. It names an identity XenoNet knows only
 /// when the assertion maps to exactly that one: an OpenAI workspace to
-/// chatgpt:<workspace>. A verified link under another workspace than the
+/// `chatgpt:<workspace>`. A verified link under another workspace than the
 /// one before means the account changed: the old links lapse, and what was
 /// approved under them is yours to approve again. (identity, switched).
 pub fn record_verified(store: &Shared, slug: &Arg, facts: &Arg, known: &[Arg], now: f64) -> Result<(Option<String>, bool)> {
@@ -204,7 +204,10 @@ mod tests {
 
     fn store() -> Shared {
         let s = Shared::new(EngineStore::open(":memory:", 1000.0).unwrap());
-        s.with(|s| xenonet_engine::sql::exec(s.db().unwrap(), "INSERT INTO actors (slug, kind, name, via, capabilities, created_at) VALUES ('dots', 'agent', 'Dots', '[]', '[]', 0)")).unwrap();
+        s.with(|s| {
+            xenonet_engine::sql::exec(s.db().unwrap(), "INSERT INTO actors (slug, kind, name, via, capabilities, created_at) VALUES ('dots', 'agent', 'Dots', '[]', '[]', 0)")
+        })
+        .unwrap();
         s
     }
 
@@ -217,7 +220,13 @@ mod tests {
         assert!(matches!(assert_link(&s, &slug, &Arg::text("other"), &Arg::text("openai"), Some(&known), &Arg::num(1.0)), Err(LinkFail::Link { code: "unknown-identity", .. })));
         assert_link(&s, &slug, &Arg::text("chatgpt:w"), &Arg::text("openai"), Some(&known), &Arg::num(1.0)).unwrap();
         assert_eq!(link_state(&s, &slug, 2.0).unwrap(), ("owner_asserted", Value::String("chatgpt:w".into())));
-        let facts = Arg::Obj(vec![("state".into(), Arg::text("verified")), ("issuer".into(), Arg::text("i")), ("provider".into(), Arg::text("openai")), ("workspace".into(), Arg::text("w")), ("subject".into(), Arg::text("u"))]);
+        let facts = Arg::Obj(vec![
+            ("state".into(), Arg::text("verified")),
+            ("issuer".into(), Arg::text("i")),
+            ("provider".into(), Arg::text("openai")),
+            ("workspace".into(), Arg::text("w")),
+            ("subject".into(), Arg::text("u")),
+        ]);
         assert_eq!(record_verified(&s, &slug, &facts, &known, 3.0).unwrap(), (Some("chatgpt:w".into()), false));
         assert_eq!(link_state(&s, &slug, 4.0).unwrap().0, "verified");
     }

@@ -236,6 +236,18 @@ impl<T> Ordered<T> {
     fn get_mut(&mut self, k: &Key) -> Option<&mut T> {
         self.at.get(k).map(|&i| &mut self.items[i])
     }
+    /// The item at `k`, added last with `make` when there's none.
+    fn get_or_insert_with(&mut self, k: Key, make: impl FnOnce() -> T) -> &mut T {
+        let i = match self.at.get(&k) {
+            Some(&i) => i,
+            None => {
+                self.at.insert(k, self.items.len());
+                self.items.push(make());
+                self.items.len() - 1
+            }
+        };
+        &mut self.items[i]
+    }
     fn set(&mut self, k: Key, v: T) {
         match self.at.get(&k) {
             Some(&i) => self.items[i] = v,
@@ -397,7 +409,7 @@ pub struct File {
     pub lines: Vec<Value>,
 }
 
-static COMMAND: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\A<command-name>").unwrap());
+static COMMAND: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\A<command-name>").expect("a fixed pattern"));
 
 /// What someone typed: a slash command as /name and its arguments; nothing
 /// for Claude Code's own notes (command output and the like).
@@ -547,7 +559,7 @@ fn type_is(v: Js<'_>, names: &[&str]) -> Result<bool, TypeError> {
     Ok(names.contains(&s.as_str()))
 }
 
-static EMPTY: LazyLock<Value> = LazyLock::new(|| Value::Object(Default::default()));
+static EMPTY: LazyLock<Value> = LazyLock::new(|| Value::Object(serde_json::Map::default()));
 
 /// A Codex rollout's calls, prompts, turn ends and tool calls.
 pub fn codex_events(lines: Vec<Value>, ids: &mut EventIds) -> Result<Vec<Event>, TypeError> {
@@ -765,7 +777,7 @@ pub fn summarize(events: &[Event], app: Js<'_>) -> Result<Out, TypeError> {
         if turns.is_empty() {
             start_turn(&mut turns, e.t, None)?;
         }
-        let turn = turns.last_mut().unwrap();
+        let turn = turns.last_mut().expect("a turn was started above when there was none");
         if !turn.ended || e.kind == Kind::End {
             turn.end = max(turn.end, e.t);
         }
@@ -807,13 +819,16 @@ pub fn summarize(events: &[Event], app: Js<'_>) -> Result<Out, TypeError> {
                         unpriced.set(name.key(), name.clone());
                     }
                 }
-                if !models.has(&name.key()) {
-                    models.set(
-                        name.key(),
-                        ModelSum { name: name.clone(), calls: 0.0, tokens: Prim::Num(0.0), cost: 0.0, priced: parts.is_some(), from: e.t, to: e.t, efforts: Ordered::new() },
-                    );
-                }
-                let m = models.get_mut(&name.key()).unwrap();
+                let m = models.get_or_insert_with(name.key(), || ModelSum {
+                    name: name.clone(),
+                    calls: 0.0,
+                    tokens: Prim::Num(0.0),
+                    cost: 0.0,
+                    priced: parts.is_some(),
+                    from: e.t,
+                    to: e.t,
+                    efforts: Ordered::new(),
+                });
                 m.calls += 1.0;
                 m.tokens = m.tokens.add(&sum);
                 m.cost += paid;
@@ -837,10 +852,15 @@ pub fn summarize(events: &[Event], app: Js<'_>) -> Result<Out, TypeError> {
                     }
                 }
                 if truthy(e.agent.js()) {
-                    if !subagents.has(&e.agent.key()) {
-                        subagents.set(e.agent.key(), SubSum { id: e.agent.clone(), calls: 0.0, tokens: Prim::Num(0.0), cost: 0.0, model: name.clone(), from: e.t, to: e.t });
-                    }
-                    let a = subagents.get_mut(&e.agent.key()).unwrap();
+                    let a = subagents.get_or_insert_with(e.agent.key(), || SubSum {
+                        id: e.agent.clone(),
+                        calls: 0.0,
+                        tokens: Prim::Num(0.0),
+                        cost: 0.0,
+                        model: name.clone(),
+                        from: e.t,
+                        to: e.t,
+                    });
                     a.calls += 1.0;
                     a.tokens = a.tokens.add(&sum);
                     a.cost += paid;
@@ -864,7 +884,7 @@ pub fn summarize(events: &[Event], app: Js<'_>) -> Result<Out, TypeError> {
                         ToolSum { name: e.name.clone(), category: categorize(&name), server: mcp_server_of(&name), calls: 0.0, errors: 0.0, ms: 0.0, timed: 0.0 },
                     );
                 }
-                tools.get_mut(&e.name.key()).unwrap().calls += 1.0;
+                tools.get_mut(&e.name.key()).expect("added above when missing").calls += 1.0;
             }
             Kind::Result => {
                 let Some((name, at)) = open.remove(&e.id.key()) else { continue };
@@ -986,7 +1006,7 @@ fn name_subagents(list: &[&SubSum], spawns: &[&Event], labels: &HashMap<Key, Str
     let mut used = vec![false; spawns.len()];
     let mut out = Vec::new();
     for a in list {
-        let spawn = spawns.iter().enumerate().filter(|(i, sp)| !used[*i] && sp.t <= a.from + 2000.0 && a.from - sp.t < 120e3).last();
+        let spawn = spawns.iter().enumerate().rfind(|(i, sp)| !used[*i] && sp.t <= a.from + 2000.0 && a.from - sp.t < 120e3);
         let label = match spawn {
             Some((i, sp)) => {
                 used[i] = true;
@@ -1030,7 +1050,7 @@ fn thin(points: &[Point], n: usize) -> Vec<Point> {
 
 // ---------- the files ----------
 
-static UUID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").unwrap());
+static UUID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").expect("a fixed pattern"));
 
 // The first UUID in a text, either case, in lowercase.
 fn uuid_in(text: &str) -> Option<String> {
@@ -1250,7 +1270,7 @@ mod tests {
 
     #[test]
     fn thin_keeps_peaks_and_the_last() {
-        let ps: Vec<Point> = (0..10).map(|i| Point { t: i as f64, used: Prim::Num(if i == 3 { 99.0 } else { i as f64 }), window: Out::Null }).collect();
+        let ps: Vec<Point> = (0..10).map(|i| Point { t: f64::from(i), used: Prim::Num(if i == 3 { 99.0 } else { f64::from(i) }), window: Out::Null }).collect();
         let out = thin(&ps, 4);
         assert_eq!(out.iter().map(|p| p.t).collect::<Vec<_>>(), [1.0, 3.0, 6.0, 9.0]);
     }

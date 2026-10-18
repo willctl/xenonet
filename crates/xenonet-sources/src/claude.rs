@@ -35,7 +35,7 @@ fn is_session_file(name: &str) -> bool {
 
 /// Claude desktop's session files under `root` (its claude-code-sessions
 /// folder), in the order a walk finds them: sessions sit in
-/// <account>/<organization>/, so the folders say which Claude account
+/// `<account>/<organization>/`, so the folders say which Claude account
 /// each ran as. A folder that can't be read ends the walk, as the JS's did.
 pub fn desktop_files(root: &str) -> Vec<DesktopFile> {
     fn walk(dir: &str, parts: &[String], out: &mut Vec<DesktopFile>) -> std::io::Result<()> {
@@ -239,8 +239,8 @@ fn block_text(content: Js<'_>) -> Result<String, TypeError> {
 fn message_entries(m: &Value, out: &mut Vec<Obj>) -> Result<(), TypeError> {
     let m = Some(m);
     let stamp = prop(m, "timestamp")?;
-    let ts = if truthy(stamp) {
-        match time::parse_iso(&js_string(stamp.unwrap())) {
+    let ts = if let Some(stamp) = stamp.filter(|s| truthy(Some(s))) {
+        match time::parse_iso(&js_string(stamp)) {
             Some(t) => F::V(json::number(t)),
             None => F::Num(f64::NAN),
         }

@@ -9,6 +9,7 @@ use napi_derive::napi;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use xenonet_actors::secret_store::{self, Command, MemorySecrets, Ran, SecretStore};
+use xenonet_base::sync::Locked;
 use xenonet_base::text::js_string;
 
 struct Bridged<'a>(&'a Asker);
@@ -51,7 +52,7 @@ pub struct SecretStoreCore {
 impl SecretStoreCore {
     /// `on_path`: where secret-tool is, asked only where it's the store.
     #[napi(constructor)]
-    pub fn new(platform: String, on_path: Function<(), Option<String>>) -> Result<Self> {
+    pub fn new(platform: String, on_path: Function<'_, (), Option<String>>) -> Result<Self> {
         let tool = if platform == "darwin" || platform == "win32" { None } else { on_path.call(())? };
         Ok(SecretStoreCore { inner: Arc::new(SecretStore::new(&platform, tool)) })
     }
@@ -97,6 +98,10 @@ pub struct MemorySecretsCore {
 }
 
 #[napi]
+// On the impl, not the methods: napi-derive copies a method's attributes
+// onto the two-argument wrapper it generates for it, and an expectation
+// there goes unfulfilled.
+#[expect(clippy::unused_self, reason = "kind is a getter on the JS class, as it was in the JS, though it reads a constant")]
 impl MemorySecretsCore {
     #[napi(constructor)]
     pub fn new() -> Self {
@@ -110,21 +115,21 @@ impl MemorySecretsCore {
 
     #[napi]
     pub fn has(&self, target: String) -> bool {
-        self.inner.lock().unwrap().has(&target)
+        self.inner.locked().has(&target)
     }
 
     #[napi]
     pub fn get(&self, target: String) -> Option<String> {
-        self.inner.lock().unwrap().get(&target)
+        self.inner.locked().get(&target)
     }
 
     #[napi]
     pub fn set(&self, target: String, secret: String) -> Result<bool> {
-        self.inner.lock().unwrap().set(&target, &secret).map_err(|e| Error::new(Status::GenericFailure, e))
+        self.inner.locked().set(&target, &secret).map_err(|e| Error::new(Status::GenericFailure, e))
     }
 
     #[napi]
     pub fn remove(&self, target: String) -> bool {
-        self.inner.lock().unwrap().remove(&target)
+        self.inner.locked().remove(&target)
     }
 }

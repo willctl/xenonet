@@ -85,10 +85,10 @@ pub struct ActorsCore {
     demo: RefCell<Option<Demo>>,
 }
 
-fn fail(env: &Env, f: Fail) -> Error {
+fn fail(env: Env, f: Fail) -> Error {
     match f {
         Fail::Error(m) => Error::new(Status::GenericFailure, m),
-        Fail::Sql(e) => throw_sql(env, &e),
+        Fail::Sql(e) => throw_sql(&env, &e),
     }
 }
 
@@ -102,7 +102,7 @@ fn store_of(store: &crate::store::EngineStoreCore) -> Shared {
 
 impl ActorsCore {
     // A call on the registry: its answer, then what it told, told.
-    fn call<T>(&self, env: &Env, host: &HostFn, f: impl FnOnce(&mut Actors, &mut JsHost) -> registry::Result<T>) -> Result<T> {
+    fn call<T>(&self, env: Env, host: &HostFn<'_>, f: impl FnOnce(&mut Actors, &mut JsHost<'_, '_>) -> registry::Result<T>) -> Result<T> {
         let mut h = JsHost { f: host, thrown: None };
         let (out, emits, changed) = {
             let mut a = self.inner.try_borrow_mut().map_err(|_| busy())?;
@@ -134,13 +134,13 @@ fn s(a: &Arg) -> String {
 #[napi]
 impl ActorsCore {
     #[napi(constructor)]
-    pub fn new(env: Env, store: &crate::store::EngineStoreCore, demo: bool, host: HostFn) -> Result<Self> {
+    pub fn new(env: Env, store: &crate::store::EngineStoreCore, demo: bool, host: HostFn<'_>) -> Result<Self> {
         let mut h = JsHost { f: &host, thrown: None };
         let a = Actors::new(store_of(store), demo, &mut h);
         if let Some(e) = h.thrown.take() {
             return Err(e);
         }
-        Ok(ActorsCore { inner: RefCell::new(a.map_err(|e| fail(&env, e))?), demo: RefCell::new(None) })
+        Ok(ActorsCore { inner: RefCell::new(a.map_err(|e| fail(env, e))?), demo: RefCell::new(None) })
     }
 
     #[napi]
@@ -149,7 +149,7 @@ impl ActorsCore {
     }
     #[napi]
     pub fn ids(&self) -> Result<Vec<String>> {
-        self.read(|a| a.ids())
+        self.read(Actors::ids)
     }
     #[napi]
     pub fn presence(&self, id: JsArg) -> Result<Option<String>> {
@@ -248,53 +248,53 @@ impl ActorsCore {
     }
 
     #[napi]
-    pub fn upsert(&self, env: Env, host: HostFn, def: JsArg) -> Result<()> {
-        self.call(&env, &host, |a, h| a.upsert(&def.0, h))
+    pub fn upsert(&self, env: Env, host: HostFn<'_>, def: JsArg) -> Result<()> {
+        self.call(env, &host, |a, h| a.upsert(&def.0, h))
     }
     #[napi(js_name = "addVia")]
-    pub fn add_via(&self, env: Env, host: HostFn, id: JsArg, v: JsArg) -> Result<()> {
-        self.call(&env, &host, |a, _| a.add_via(&s(&id.0), &s(&v.0)))
+    pub fn add_via(&self, env: Env, host: HostFn<'_>, id: JsArg, v: JsArg) -> Result<()> {
+        self.call(env, &host, |a, _| a.add_via(&s(&id.0), &s(&v.0)))
     }
     #[napi(js_name = "dropVia")]
-    pub fn drop_via(&self, env: Env, host: HostFn, id: JsArg, v: JsArg) -> Result<()> {
-        self.call(&env, &host, |a, _| a.drop_via(&s(&id.0), &s(&v.0)))
+    pub fn drop_via(&self, env: Env, host: HostFn<'_>, id: JsArg, v: JsArg) -> Result<()> {
+        self.call(env, &host, |a, _| a.drop_via(&s(&id.0), &s(&v.0)))
     }
     #[napi(js_name = "setRemote")]
-    pub fn set_remote(&self, env: Env, host: HostFn, id: JsArg, remote: JsArg) -> Result<()> {
-        self.call(&env, &host, |a, _| a.set_remote(&s(&id.0), &remote.0.to_json()))
+    pub fn set_remote(&self, env: Env, host: HostFn<'_>, id: JsArg, remote: JsArg) -> Result<()> {
+        self.call(env, &host, |a, _| a.set_remote(&s(&id.0), &remote.0.to_json()))
     }
     #[napi(js_name = "slugOf")]
     pub fn slug_of(&self, env: Env, id: JsArg) -> Result<String> {
-        self.read(|a| a.slug_of(&s(&id.0)))?.map_err(|e| fail(&env, e))
+        self.read(|a| a.slug_of(&s(&id.0)))?.map_err(|e| fail(env, e))
     }
     #[napi]
-    pub fn remove(&self, env: Env, host: HostFn, id: JsArg) -> Result<()> {
-        self.call(&env, &host, |a, _| a.remove(&s(&id.0)))
+    pub fn remove(&self, env: Env, host: HostFn<'_>, id: JsArg) -> Result<()> {
+        self.call(env, &host, |a, _| a.remove(&s(&id.0)))
     }
     #[napi(js_name = "forgetYou")]
-    pub fn forget_you(&self, env: Env, host: HostFn) -> Result<()> {
-        self.call(&env, &host, |a, _| a.forget_you())
+    pub fn forget_you(&self, env: Env, host: HostFn<'_>) -> Result<()> {
+        self.call(env, &host, |a, _| a.forget_you())
     }
     #[napi(js_name = "unregisterRevokes")]
     pub fn unregister_revokes(&self, env: Env, id: JsArg, keep_remote: bool) -> Result<bool> {
-        self.read(|a| a.unregister_revokes(&s(&id.0), keep_remote))?.map_err(|e| fail(&env, e))
+        self.read(|a| a.unregister_revokes(&s(&id.0), keep_remote))?.map_err(|e| fail(env, e))
     }
     /// Whether it went for good (the twin then removes it).
     #[napi]
-    pub fn unregister(&self, env: Env, host: HostFn, id: JsArg, revoked: bool) -> Result<bool> {
-        self.call(&env, &host, |a, _| a.unregister(&s(&id.0), revoked))
+    pub fn unregister(&self, env: Env, host: HostFn<'_>, id: JsArg, revoked: bool) -> Result<bool> {
+        self.call(env, &host, |a, _| a.unregister(&s(&id.0), revoked))
     }
     #[napi]
-    pub fn allow(&self, env: Env, host: HostFn, id: JsArg, at: f64) -> Result<()> {
-        self.call(&env, &host, |a, _| a.allow(&s(&id.0), at))
+    pub fn allow(&self, env: Env, host: HostFn<'_>, id: JsArg, at: f64) -> Result<()> {
+        self.call(env, &host, |a, _| a.allow(&s(&id.0), at))
     }
     #[napi(js_name = "setEnabled")]
-    pub fn set_enabled(&self, env: Env, host: HostFn, id: JsArg, on: bool) -> Result<()> {
-        self.call(&env, &host, |a, _| a.set_enabled(&s(&id.0), on))
+    pub fn set_enabled(&self, env: Env, host: HostFn<'_>, id: JsArg, on: bool) -> Result<()> {
+        self.call(env, &host, |a, _| a.set_enabled(&s(&id.0), on))
     }
     #[napi(js_name = "setInstalled")]
-    pub fn set_installed(&self, env: Env, host: HostFn, id: JsArg, installed: bool) -> Result<()> {
-        self.call(&env, &host, |a, _| a.set_installed(&s(&id.0), installed))
+    pub fn set_installed(&self, env: Env, host: HostFn<'_>, id: JsArg, installed: bool) -> Result<()> {
+        self.call(env, &host, |a, _| a.set_installed(&s(&id.0), installed))
     }
     #[napi(js_name = "awaitSession")]
     pub fn await_session(&self, id: JsArg, app: MaybeJson, place: MaybeJson, own: Vec<f64>, at: f64, now: f64) -> Result<bool> {
@@ -304,57 +304,57 @@ impl ActorsCore {
     #[napi(js_name = "watchPid")]
     pub fn watch_pid(&self, env: Env, id: JsArg, pid: JsArg) -> Result<()> {
         let mut a = self.inner.try_borrow_mut().map_err(|_| busy())?;
-        a.watch_pid(&s(&id.0), &pid.0).map_err(|e| fail(&env, e))
+        a.watch_pid(&s(&id.0), &pid.0).map_err(|e| fail(env, e))
     }
     #[napi]
-    pub fn report(&self, env: Env, host: HostFn, id: JsArg, o: JsArg) -> Result<()> {
-        self.call(&env, &host, |a, h| a.report(&s(&id.0), &o.0, h))
+    pub fn report(&self, env: Env, host: HostFn<'_>, id: JsArg, o: JsArg) -> Result<()> {
+        self.call(env, &host, |a, h| a.report(&s(&id.0), &o.0, h))
     }
     #[napi]
-    pub fn record(&self, env: Env, host: HostFn, id: JsArg, o: JsArg) -> Result<Json> {
-        self.call(&env, &host, |a, h| a.record(&s(&id.0), &o.0, h)).map(Json)
+    pub fn record(&self, env: Env, host: HostFn<'_>, id: JsArg, o: JsArg) -> Result<Json> {
+        self.call(env, &host, |a, h| a.record(&s(&id.0), &o.0, h)).map(Json)
     }
     #[napi(js_name = "whereOf")]
-    pub fn where_of(&self, env: Env, host: HostFn, target: MaybeJson) -> Result<Json> {
-        self.call(&env, &host, |a, h| Ok(a.where_of(&target.0.unwrap_or(Value::Null), h))).map(Json)
+    pub fn where_of(&self, env: Env, host: HostFn<'_>, target: MaybeJson) -> Result<Json> {
+        self.call(env, &host, |a, h| Ok(a.where_of(&target.0.unwrap_or(Value::Null), h))).map(Json)
     }
     #[napi]
-    pub fn target(&self, env: Env, host: HostFn, id: JsArg, node: JsArg, relation: JsArg, at: f64) -> Result<()> {
-        self.call(&env, &host, |a, _| a.target(&s(&id.0), &s(&node.0), &s(&relation.0), at))
+    pub fn target(&self, env: Env, host: HostFn<'_>, id: JsArg, node: JsArg, relation: JsArg, at: f64) -> Result<()> {
+        self.call(env, &host, |a, _| a.target(&s(&id.0), &s(&node.0), &s(&relation.0), at))
     }
     #[napi]
-    pub fn untarget(&self, env: Env, host: HostFn, id: JsArg, node: JsArg, relation: JsArg) -> Result<()> {
-        self.call(&env, &host, |a, _| a.untarget(&s(&id.0), &s(&node.0), &s(&relation.0)))
+    pub fn untarget(&self, env: Env, host: HostFn<'_>, id: JsArg, node: JsArg, relation: JsArg) -> Result<()> {
+        self.call(env, &host, |a, _| a.untarget(&s(&id.0), &s(&node.0), &s(&relation.0)))
     }
     #[napi]
-    pub fn snapshot(&self, env: Env, host: HostFn, id: JsArg, view: String, now: f64) -> Result<Json> {
-        self.call(&env, &host, |a, h| a.snapshot(&s(&id.0), &view, Some(now), None, h)).map(Json)
+    pub fn snapshot(&self, env: Env, host: HostFn<'_>, id: JsArg, view: String, now: f64) -> Result<Json> {
+        self.call(env, &host, |a, h| a.snapshot(&s(&id.0), &view, Some(now), None, h)).map(Json)
     }
     /// {names: [[id, name]], starts}.
     #[napi(js_name = "sessionsStarted")]
     pub fn sessions_started(&self, env: Env, now: f64) -> Result<Json> {
-        let (names, starts) = self.read(|a| a.sessions_started(now))?.map_err(|e| fail(&env, e))?;
+        let (names, starts) = self.read(|a| a.sessions_started(now))?.map_err(|e| fail(env, e))?;
         Ok(Json(json!({ "names": names.into_iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>(), "starts": starts })))
     }
     #[napi(js_name = "placeOf")]
-    pub fn place_of(&self, env: Env, host: HostFn, p: MaybeJson) -> Result<Json> {
-        self.call(&env, &host, |a, h| Ok(a.place_of(&p.0.unwrap_or(Value::Null), h))).map(Json)
+    pub fn place_of(&self, env: Env, host: HostFn<'_>, p: MaybeJson) -> Result<Json> {
+        self.call(env, &host, |a, h| Ok(a.place_of(&p.0.unwrap_or(Value::Null), h))).map(Json)
     }
     #[napi(js_name = "engineView")]
-    pub fn engine_view(&self, env: Env, host: HostFn, id: JsArg, now: f64, since: Option<f64>) -> Result<Json> {
-        self.call(&env, &host, |a, h| a.engine_view(&s(&id.0), now, since, h)).map(Json)
+    pub fn engine_view(&self, env: Env, host: HostFn<'_>, id: JsArg, now: f64, since: Option<f64>) -> Result<Json> {
+        self.call(env, &host, |a, h| a.engine_view(&s(&id.0), now, since, h)).map(Json)
     }
     /// {ok, status} or {ok: false, reason}.
     #[napi(js_name = "setStatus")]
-    pub fn set_status(&self, env: Env, host: HostFn, id: JsArg, text: JsArg, via: JsArg, at: f64) -> Result<Json> {
-        self.call(&env, &host, |a, _| a.set_status(&s(&id.0), &text.0, &via.0, at)).map(|r| match r {
+    pub fn set_status(&self, env: Env, host: HostFn<'_>, id: JsArg, text: JsArg, via: JsArg, at: f64) -> Result<Json> {
+        self.call(env, &host, |a, _| a.set_status(&s(&id.0), &text.0, &via.0, at)).map(|r| match r {
             Ok(status) => Json(json!({ "ok": true, "status": status })),
             Err(reason) => Json(json!({ "ok": false, "reason": reason })),
         })
     }
     #[napi]
-    pub fn said(&self, env: Env, host: HostFn, from: JsArg, to: Vec<String>, ts: Option<f64>) -> Result<Json> {
-        self.call(&env, &host, |a, h| a.said(&s(&from.0), &to, ts, h)).map(Json)
+    pub fn said(&self, env: Env, host: HostFn<'_>, from: JsArg, to: Vec<String>, ts: Option<f64>) -> Result<Json> {
+        self.call(env, &host, |a, h| a.said(&s(&from.0), &to, ts, h)).map(Json)
     }
     #[napi(js_name = "engineIds")]
     pub fn engine_ids(&self, since: f64, now: f64) -> Result<Vec<String>> {
@@ -362,50 +362,50 @@ impl ActorsCore {
     }
     #[napi]
     pub fn tokens(&self, env: Env, now: f64) -> Result<Json> {
-        self.read(|a| a.tokens(now))?.map(|t| Json(Value::Array(t))).map_err(|e| fail(&env, e))
+        self.read(|a| a.tokens(now))?.map(|t| Json(Value::Array(t))).map_err(|e| fail(env, e))
     }
     #[napi]
-    pub fn list(&self, env: Env, host: HostFn, view: String, now: f64) -> Result<Json> {
-        self.call(&env, &host, |a, h| a.list(&view, Some(now), h)).map(Json)
+    pub fn list(&self, env: Env, host: HostFn<'_>, view: String, now: f64) -> Result<Json> {
+        self.call(env, &host, |a, h| a.list(&view, Some(now), h)).map(Json)
     }
     #[napi(js_name = "listIfChanged")]
-    pub fn list_if_changed(&self, env: Env, host: HostFn) -> Result<Json> {
-        self.call(&env, &host, |a, h| a.list_if_changed(h)).map(Json)
+    pub fn list_if_changed(&self, env: Env, host: HostFn<'_>) -> Result<Json> {
+        self.call(env, &host, |a, h| a.list_if_changed(h)).map(Json)
     }
     #[napi]
     pub fn events(&self, env: Env, o: JsArg, now: f64) -> Result<Json> {
-        self.read(|a| a.events(&o.0, now))?.map(Json).map_err(|e| fail(&env, e))
+        self.read(|a| a.events(&o.0, now))?.map(Json).map_err(|e| fail(env, e))
     }
     #[napi]
-    pub fn tick(&self, env: Env, host: HostFn, now: f64) -> Result<()> {
-        self.call(&env, &host, |a, h| a.tick(now, h))
+    pub fn tick(&self, env: Env, host: HostFn<'_>, now: f64) -> Result<()> {
+        self.call(env, &host, |a, h| a.tick(now, h))
     }
     #[napi]
-    pub fn prune(&self, env: Env, host: HostFn, now: f64) -> Result<()> {
-        self.call(&env, &host, |a, _| a.prune(now))
+    pub fn prune(&self, env: Env, host: HostFn<'_>, now: f64) -> Result<()> {
+        self.call(env, &host, |a, _| a.prune(now))
     }
     #[napi]
-    pub fn stop(&self, env: Env, host: HostFn) -> Result<()> {
-        self.call(&env, &host, |a, _| a.stop())
+    pub fn stop(&self, env: Env, host: HostFn<'_>) -> Result<()> {
+        self.call(env, &host, |a, _| a.stop())
     }
     #[napi]
-    pub fn simulate(&self, env: Env, host: HostFn, kind: JsArg, a: MaybeJson, b: MaybeJson) -> Result<Json> {
-        self.call(&env, &host, |x, h| x.simulate(&s(&kind.0), a.0.unwrap_or(Value::Null), b.0.unwrap_or(Value::Null), h)).map(Json)
+    pub fn simulate(&self, env: Env, host: HostFn<'_>, kind: JsArg, a: MaybeJson, b: MaybeJson) -> Result<Json> {
+        self.call(env, &host, |x, h| x.simulate(&s(&kind.0), a.0.unwrap_or(Value::Null), b.0.unwrap_or(Value::Null), h)).map(Json)
     }
 
     // ----- you -----
 
     #[napi(js_name = "youReport")]
-    pub fn you_report(&self, env: Env, host: HostFn, body: JsArg, at: f64) -> Result<Json> {
-        self.call(&env, &host, |a, h| a.you_report(&body.0, at, h)).map(Json)
+    pub fn you_report(&self, env: Env, host: HostFn<'_>, body: JsArg, at: f64) -> Result<Json> {
+        self.call(env, &host, |a, h| a.you_report(&body.0, at, h)).map(Json)
     }
     #[napi(js_name = "youWindow")]
-    pub fn you_window(&self, env: Env, host: HostFn, state: JsArg, at: f64) -> Result<()> {
-        self.call(&env, &host, |a, h| a.you_window(&s(&state.0), at, h))
+    pub fn you_window(&self, env: Env, host: HostFn<'_>, state: JsArg, at: f64) -> Result<()> {
+        self.call(env, &host, |a, h| a.you_window(&s(&state.0), at, h))
     }
     #[napi(js_name = "youForget")]
-    pub fn you_forget(&self, env: Env, host: HostFn) -> Result<()> {
-        self.call(&env, &host, |a, _| a.you_forget())
+    pub fn you_forget(&self, env: Env, host: HostFn<'_>) -> Result<()> {
+        self.call(env, &host, |a, _| a.you_forget())
     }
     #[napi(js_name = "youOff")]
     pub fn you_off(&self) -> Result<bool> {
@@ -421,9 +421,9 @@ impl ActorsCore {
     /// The demo's actors added, with `history` ms of their scripts behind
     /// them; demoStep() plays the next turn.
     #[napi(js_name = "addDemo")]
-    pub fn add_demo(&self, env: Env, host: HostFn, history: f64) -> Result<()> {
+    pub fn add_demo(&self, env: Env, host: HostFn<'_>, history: f64) -> Result<()> {
         let mut d = None;
-        self.call(&env, &host, |a, h| {
+        self.call(env, &host, |a, h| {
             d = Some(Demo::add(a, history, h)?);
             Ok(())
         })?;
@@ -431,10 +431,10 @@ impl ActorsCore {
         Ok(())
     }
     #[napi(js_name = "demoStep")]
-    pub fn demo_step(&self, env: Env, host: HostFn) -> Result<Json> {
+    pub fn demo_step(&self, env: Env, host: HostFn<'_>) -> Result<Json> {
         let mut d = self.demo.try_borrow_mut().map_err(|_| busy())?;
         let Some(d) = d.as_mut() else { return Ok(Json(Value::Null)) };
-        self.call(&env, &host, |a, h| d.step(a, h)).map(Json)
+        self.call(env, &host, |a, h| d.step(a, h)).map(Json)
     }
 }
 
@@ -462,7 +462,7 @@ pub fn node_kind(id: MaybeJson) -> Option<&'static str> {
 /// The demo's actors and scripts, as data, their nodes resolved by the
 /// host's "resolve".
 #[napi(js_name = "demoActors")]
-pub fn demo_actors(host: HostFn) -> Result<Json> {
+pub fn demo_actors(host: HostFn<'_>) -> Result<Json> {
     let mut h = JsHost { f: &host, thrown: None };
     let out = demo::demo_actors(&mut h);
     match h.thrown {
@@ -472,7 +472,7 @@ pub fn demo_actors(host: HostFn) -> Result<Json> {
 }
 
 #[napi(js_name = "demoScripts")]
-pub fn demo_scripts(host: HostFn) -> Result<Json> {
+pub fn demo_scripts(host: HostFn<'_>) -> Result<Json> {
     let mut h = JsHost { f: &host, thrown: None };
     let out = demo::demo_scripts(&mut h);
     match h.thrown {

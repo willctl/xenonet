@@ -50,7 +50,8 @@ pub fn request_of(body: Option<&Value>) -> Result<String, Fail> {
     Ok(request)
 }
 
-pub const NOTE: &str = "Only this task and the listed candidate descriptions go to OpenRouter. The saved record contains a task hash, scores and outcome, never task text. No agent starts.";
+pub const NOTE: &str =
+    "Only this task and the listed candidate descriptions go to OpenRouter. The saved record contains a task hash, scores and outcome, never task text. No agent starts.";
 
 /// The preview's outgoing request, as shown before anything goes.
 pub fn outgoing(model: &Value, request: &str, candidates: &[Value]) -> Value {
@@ -77,11 +78,7 @@ pub fn answer_ok(answers: &Value, candidates: &[Value]) -> bool {
     if !candidates.iter().any(|c| xenonet_app::jsv::strict_eq(c.get("id"), a.get("choice"))) {
         return false;
     }
-    let probs = a.get("probabilities").and_then(Value::as_object);
-    if probs.map_or(0, Map::len) != candidates.len() {
-        return false;
-    }
-    let probs = probs.unwrap();
+    let Some(probs) = a.get("probabilities").and_then(Value::as_object).filter(|p| p.len() == candidates.len()) else { return false };
     if candidates.iter().any(|c| prob(probs.get(&xenonet_base::text::js_string(&c["id"]))).is_none()) {
         return false;
     }
@@ -107,7 +104,14 @@ pub fn decision_record(result: &Value, request: &str, metrics: &Value) -> Value 
         .flatten()
         .map(|c| {
             let r = c.get("router");
-            fields(&[("id", c.get("id").cloned()), ("name", c.get("name").cloned()), ("probability", c.get("jev_probability").cloned()), ("filtered", r.and_then(|r| r.get("filtered")).cloned()), ("reason", Some(json!(clean(r.and_then(|r| r.get("filter_reason")), 160)))), ("confirmation", r.and_then(|r| r.get("requires_confirmation")).cloned())])
+            fields(&[
+                ("id", c.get("id").cloned()),
+                ("name", c.get("name").cloned()),
+                ("probability", c.get("jev_probability").cloned()),
+                ("filtered", r.and_then(|r| r.get("filtered")).cloned()),
+                ("reason", Some(json!(clean(r.and_then(|r| r.get("filter_reason")), 160)))),
+                ("confirmation", r.and_then(|r| r.get("requires_confirmation")).cloned()),
+            ])
         })
         .collect();
     fields(&[

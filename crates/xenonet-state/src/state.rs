@@ -78,7 +78,7 @@ pub fn merge_sessions(prev: &[Value], codex: (bool, &[Value]), claude: (bool, &[
             sessions.push(o.clone());
         }
     }
-    for s in sessions.iter_mut() {
+    for s in &mut sessions {
         if let Some(t) = demo_titles.get(&id(s)) {
             if let Some(m) = s.as_object_mut() {
                 m.insert("title".into(), t.clone());
@@ -275,7 +275,9 @@ pub fn live_snapshot(mut snap: Value, hidden: &HashSet<String>, acks: &Value, si
                 let gone = n.as_ref().is_none_or(|n| truthy(get(n, "archived")));
                 let since = js_number(sess.get("needsYou").and_then(|w| get(w, "since")));
                 let acked = nn(get(acks, &id)).map_or(0.0, |v| js_number(Some(v)));
-                let o = sess.as_object_mut().unwrap();
+                // The tailer's sessions are objects; anything else has
+                // nothing to clean.
+                let Some(o) = sess.as_object_mut() else { continue };
                 if let Some(Value::Array(mcp)) = o.get_mut("mcp") {
                     mcp.retain(visible);
                 }
@@ -332,11 +334,10 @@ pub fn summary(snap: &Value, title_of: &mut dyn FnMut(&Value) -> Value, url: &st
     let kind = |s: &Value| waits(s).and_then(|n| get(&n, "kind").cloned());
     let need: Vec<Value> = sessions
         .iter()
-        .filter(|s| waits(s).is_some() && kind(s).as_ref().and_then(Value::as_str) != Some("review"))
-        .map(|s| {
-            let w = waits(s).unwrap();
+        .filter_map(|s| {
+            let w = waits(s).filter(|w| get(w, "kind").and_then(Value::as_str) != Some("review"))?;
             let id = get(s, "id").cloned().unwrap_or(Value::Null);
-            json!({ "id": id, "app": get(s, "app").cloned().unwrap_or(Value::Null), "title": title_of(&id), "kind": get(&w, "kind").cloned().unwrap_or(Value::Null), "text": get(&w, "text").cloned().unwrap_or(Value::Null), "since": nn(get(&w, "since")).cloned().unwrap_or(Value::Null) })
+            Some(json!({ "id": id, "app": get(s, "app").cloned().unwrap_or(Value::Null), "title": title_of(&id), "kind": get(&w, "kind").cloned().unwrap_or(Value::Null), "text": get(&w, "text").cloned().unwrap_or(Value::Null), "since": nn(get(&w, "since")).cloned().unwrap_or(Value::Null) }))
         })
         .collect();
     let stuck: Vec<Value> = sessions
@@ -593,14 +594,14 @@ mod tests {
         assert_eq!(merged[1]["title"], "Mine");
 
         let mut m = Memory::new();
-        assert!(m.updated(&[json!({ "id": "a", "updatedAt": 1 })]).is_empty());
+        assert_eq!(m.updated(&[json!({ "id": "a", "updatedAt": 1 })]), Vec::<Value>::new());
         assert_eq!(m.updated(&[json!({ "id": "a", "updatedAt": 2 })]), [json!("a")]);
         let g = json!({ "nodes": [{ "id": "a" }], "relations": [], "identities": [] });
         assert!(m.changed(&g) && !m.changed(&g));
-        assert!(m.note_signins(&json!({ "claude": { "id": "claude:x:y" }, "gh": [] }), 1.0).is_empty());
+        assert_eq!(m.note_signins(&json!({ "claude": { "id": "claude:x:y" }, "gh": [] }), 1.0), Vec::<Value>::new());
         assert_eq!(m.note_signins(&json!({ "claude": null, "gh": [] }), 2.0)[0]["before"], "claude:x:y");
         let ev = json!({ "kind": "turn-end", "sessionId": "s" });
-        assert!(m.ship_it(&ev, Some(("project:p", &json!("p"), &json!({ "dirty": 1 }))), 1e9).unwrap()["detail"] == "1 uncommitted file in p");
+        assert_eq!(m.ship_it(&ev, Some(("project:p", &json!("p"), &json!({ "dirty": 1 }))), 1e9).unwrap()["detail"], "1 uncommitted file in p");
         assert!(m.ship_it(&ev, Some(("project:p", &json!("p"), &json!({ "dirty": 1 }))), 1e9 + 1.0).is_none());
 
         assert_eq!(

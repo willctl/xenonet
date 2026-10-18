@@ -1,12 +1,12 @@
 //! Ids, as docs/design/contracts.md fixes them (core/schema/ids.js):
 //!
-//! - a schema's $id, https://xenonet.dev/schemas/<path>/v<major>.json, and
-//!   its short form, <path>/v<major>, which data carries as "schema";
+//! - a schema's $id, `https://xenonet.dev/schemas/<path>/v<major>.json`, and
+//!   its short form, `<path>/v<major>`, which data carries as "schema";
 //! - host-qualified ids: an unqualified id is this XenoNet's own host's,
-//!   and one from another host is @<host>:<local id>;
-//! - sessions, <app>:<the run's id>;
-//! - actors, actor:<slug> (the person at the console is actor:you), and
-//!   projects merged across hosts by their git remote, repo:<remote>.
+//!   and one from another host is `@<host>:<local id>`;
+//! - sessions, `<app>:<the run's id>`;
+//! - actors, `actor:<slug>` (the person at the console is actor:you), and
+//!   projects merged across hosts by their git remote, `repo:<remote>`.
 
 pub const SCHEMA_BASE: &str = "https://xenonet.dev/schemas";
 
@@ -32,7 +32,7 @@ pub fn is_schema_path(path: &str) -> bool {
     path.split('/').all(segment) && !path.rsplit('/').next().is_some_and(version_segment)
 }
 
-/// "<path>/v<major>", the form data and XenoNet's registry use.
+/// "`<path>/v<major>`", the form data and XenoNet's registry use.
 pub fn short_id(path: &str, major: f64) -> Result<String, String> {
     if !is_schema_path(path) {
         return Err(format!("not a schema path: {path}"));
@@ -185,7 +185,7 @@ pub fn is_actor_slug(slug: &str) -> bool {
     (1..=32).contains(&b.len()) && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit()) && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
 }
 
-/// actor:<slug> or @<host>:actor:<slug> → (host, slug); None for any other id.
+/// `actor:<slug>` or `@<host>:actor:<slug>` → (host, slug); None for any other id.
 pub fn parse_actor_id(id: &str) -> Option<(Option<&str>, &str)> {
     let (host, local) = parse_qualified(id)?;
     let slug = local.strip_prefix("actor:")?;
@@ -195,7 +195,7 @@ pub fn parse_actor_id(id: &str) -> Option<(Option<&str>, &str)> {
 // ---------- repos ----------
 
 /// A remote as its host and path, the same for every way of writing it:
-/// git@github.com:willctl/xenonet.git and https://user@github.com/willctl/xenonet
+/// `git@github.com:willctl/xenonet.git` and `https://user@github.com/willctl/xenonet`
 /// are both github.com/willctl/xenonet.
 pub fn normalize_remote(url: &str) -> String {
     let mut s = url.to_lowercase();
@@ -232,24 +232,37 @@ fn line_break(c: char) -> bool {
 }
 
 /// A remote's host and the repo's path, as repoKey reads them: a URL
-/// (scheme://[user@]host[:port][/path]) or the scp form ([user@]host:path).
+/// (`scheme://[user@]host[:port][/path]`) or the scp form (`[user@]host:path`).
 /// None for a remote that's a folder on disk (file://, /srv/git/x), which
 /// means something only on its own machine, or that has no path.
 pub fn remote_parts(url: &str) -> Option<(String, String)> {
     let s = crate::text::js_trim(url);
-    let (host, rest) = url_form(s).or_else(|| scp_form(s))??;
+    let (host, rest) = match url_form(s) {
+        UrlForm::Remote(host, rest) => (host, rest),
+        UrlForm::File => return None,
+        UrlForm::No => scp_form(s)?,
+    };
     let repo = rest.trim_start_matches('/').trim_end_matches('/');
     let repo = if repo.len() >= 4 && repo[repo.len() - 4..].eq_ignore_ascii_case(".git") { &repo[..repo.len() - 4] } else { repo };
     (!repo.is_empty()).then(|| (host.to_lowercase(), repo.to_string()))
 }
 
+// What url_form makes of a remote: no URL, a file:// URL, which is no
+// remote, or a URL's host and path.
+enum UrlForm<'a> {
+    No,
+    File,
+    Remote(&'a str, &'a str),
+}
+
 // /^([a-z][a-z0-9+.-]*):\/\/(?:[^@/]*@)?(\[[^\]/]+\]|[^/:]+)(?::\d*)?(\/.*)?$/i
-// Some(None) for a file:// URL, which is no remote.
-fn url_form(s: &str) -> Option<Option<(&str, &str)>> {
-    let (scheme, after) = s.split_once("://")?;
+fn url_form(s: &str) -> UrlForm<'_> {
+    let Some((scheme, after)) = s.split_once("://") else {
+        return UrlForm::No;
+    };
     let b = scheme.as_bytes();
     if b.is_empty() || !b[0].is_ascii_alphabetic() || !b.iter().all(|c| c.is_ascii_alphanumeric() || b"+.-".contains(c)) {
-        return None;
+        return UrlForm::No;
     }
     // The user part, when there's an @ before the first /; else none.
     let tries: Vec<&str> = match after.find(['@', '/']) {
@@ -269,15 +282,15 @@ fn url_form(s: &str) -> Option<Option<(&str, &str)>> {
             continue;
         }
         if scheme.eq_ignore_ascii_case("file") {
-            return Some(None);
+            return UrlForm::File;
         }
-        return Some(Some((host, rest)));
+        return UrlForm::Remote(host, rest);
     }
-    None
+    UrlForm::No
 }
 
 // /^(?:[^@/]+@)?([^:/\\]{2,}):(?!\/\/)(.+)$/
-fn scp_form(s: &str) -> Option<Option<(&str, &str)>> {
+fn scp_form(s: &str) -> Option<(&str, &str)> {
     let mut tries = Vec::new();
     if let Some(i) = s.find(['@', '/']).filter(|&i| i > 0 && s.as_bytes()[i] == b'@') {
         tries.push(&s[i + 1..]);
@@ -292,12 +305,12 @@ fn scp_form(s: &str) -> Option<Option<(&str, &str)>> {
         if rest.starts_with("//") || rest.is_empty() || rest.contains(line_break) {
             continue;
         }
-        return Some(Some((&t[..end], rest)));
+        return Some((&t[..end], rest));
     }
     None
 }
 
-/// repo:<remote> → the normalized remote; None for any other id.
+/// `repo:<remote>` → the normalized remote; None for any other id.
 pub fn parse_repo_id(id: &str) -> Option<&str> {
     id.strip_prefix("repo:").filter(|r| !r.is_empty() && !r.starts_with(line_break))
 }

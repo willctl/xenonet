@@ -5,9 +5,9 @@
 //!
 //! - no file: a fresh document;
 //! - not JSON, not an object, or a version it doesn't know: moved aside to
-//!   <name>.broken-<time>.json, and a fresh document; never replaced by an
+//!   `<name>.broken-<time>.json`, and a fresh document; never replaced by an
 //!   empty one and written over;
-//! - an older version: kept as it was in <name>.v<n>.json, then migrated
+//! - an older version: kept as it was in `<name>.v<n>.json`, then migrated
 //!   and saved;
 //! - a newer version: read as it is and never written back, since this
 //!   XenoNet would write it in an older shape;
@@ -73,7 +73,7 @@ fn join(dir: &Path, name: &str) -> String {
     dir.join(name).to_string_lossy().into_owned()
 }
 
-/// A name beside `file` that isn't taken: <base><ext>, then <base>-<time><ext>.
+/// A name beside `file` that isn't taken: `<base><ext>`, then `<base>-<time><ext>`.
 pub fn free_name(file: &str, base: &str, now: f64, ext: &str) -> String {
     let dir = Path::new(file).parent().unwrap_or(Path::new(""));
     let first = join(dir, &format!("{base}{ext}"));

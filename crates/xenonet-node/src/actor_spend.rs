@@ -63,7 +63,7 @@ pub fn spend_attribute(sessions: Json, starts: Json, known: Option<Vec<String>>,
 /// `names`: [id, name] pairs.
 #[napi(js_name = "spendByActor")]
 pub fn spend_by_actor(spend_: Json, sessions: Json, starts: Json, names: Json, since: MaybeJson) -> Json {
-    let names: Vec<(String, Value)> = list(names).into_iter().filter_map(|p| Some((xenonet_engine::js::template(p.get(0)), p.get(1).cloned().unwrap_or(Value::Null)))).collect();
+    let names: Vec<(String, Value)> = list(names).into_iter().map(|p| (xenonet_engine::js::template(p.get(0)), p.get(1).cloned().unwrap_or(Value::Null))).collect();
     let since = since.0.filter(|v| !v.is_null()).map(|v| v.as_f64().unwrap_or(f64::NAN));
     Json(spend::spend_by_actor(&list(spend_), &list(sessions), &list(starts), &names, since))
 }

@@ -3,6 +3,8 @@
 //! Codex to narrate one is a child process, which the twin runs.
 
 use serde_json::{json, Map, Value};
+use std::collections::hash_map::Entry;
+use std::fmt::Write as _;
 use xenonet_base::json::{number, number_string};
 use xenonet_base::jsstr;
 use xenonet_base::text::{js_number, js_string, truthy};
@@ -59,13 +61,13 @@ pub fn summarize<E>(events: &[Value], since: f64, until: f64, title_of: &mut dyn
         if ts < since || ts > until {
             continue;
         }
-        let key = map_key(get(e, "sessionId"));
-        if !per.contains_key(&key) {
-            let id = get(e, "sessionId").cloned().unwrap_or(Value::Null);
-            let title = title_of(&id)?;
-            per.insert(
-                key.clone(),
-                Per {
+        let s = match per.entry(map_key(get(e, "sessionId"))) {
+            Entry::Occupied(o) => o.into_mut(),
+            Entry::Vacant(v) => {
+                let id = get(e, "sessionId").cloned().unwrap_or(Value::Null);
+                let title = title_of(&id)?;
+                order.push(v.key().clone());
+                v.insert(Per {
                     id,
                     app: get(e, "app").cloned().unwrap_or(Value::Null),
                     title,
@@ -79,11 +81,9 @@ pub fn summarize<E>(events: &[Value], since: f64, until: f64, title_of: &mut dyn
                     first: get(e, "ts").cloned(),
                     last: ts,
                     last_message: Value::Null,
-                },
-            );
-            order.push(key.clone());
-        }
-        let s = per.get_mut(&key).unwrap();
+                })
+            }
+        };
         s.last = if s.last.is_nan() || ts.is_nan() { f64::NAN } else { s.last.max(ts) };
         match get(e, "kind").and_then(Value::as_str) {
             Some("turn-end") => s.turns += 1.0,
@@ -240,8 +240,8 @@ pub fn day_log<E>(events: &[Value], now: f64, hooks: DayHooks<'_, E>, live: Opti
     let waiting = live_sessions.iter().filter(|s| truthy(get(s, "needsYou")) && get(&s["needsYou"], "kind").and_then(Value::as_str) != Some("review")).count();
     let mut out = Map::new();
     out.insert("date".into(), Value::String(long_date(now)));
-    for (k, v) in sum.as_object().unwrap() {
-        out.insert(k.clone(), v.clone());
+    if let Some(fields) = sum.as_object() {
+        out.extend(fields.iter().map(|(k, v)| (k.clone(), v.clone())));
     }
     out.insert("tokens".into(), live.and_then(|l| get(l, "today")).filter(|v| !v.is_null()).cloned().unwrap_or(Value::from(0)));
     out.insert("hours".into(), Value::Array(hours.iter().map(|&h| number(h)).collect()));
@@ -270,16 +270,16 @@ pub fn summary_text(sum: &Value, label: &str) -> String {
             if tools.is_empty() { "none".into() } else { tools }
         );
         if !files.is_empty() {
-            line.push_str(&format!(", edited {}", files.iter().take(6).cloned().collect::<Vec<_>>().join(", ")));
+            let _ = write!(line, ", edited {}", files.iter().take(6).cloned().collect::<Vec<_>>().join(", "));
         }
         if truthy(get(s, "errors")) {
-            line.push_str(&format!(", {} errors", tpl(get(s, "errors"))));
+            let _ = write!(line, ", {} errors", tpl(get(s, "errors")));
         }
         if truthy(get(s, "needsYou")) {
-            line.push_str(&format!("; waiting for you: {}", tpl(get(&s["needsYou"], "text"))));
+            let _ = write!(line, "; waiting for you: {}", tpl(get(&s["needsYou"], "text")));
         }
         if truthy(get(s, "lastMessage")) {
-            line.push_str(&format!("; last said: {}", tpl(get(s, "lastMessage"))));
+            let _ = write!(line, "; last said: {}", tpl(get(s, "lastMessage")));
         }
         lines.push(line);
     }
@@ -349,7 +349,7 @@ pub fn narrate_prompt(text: &str) -> String {
 /// there's one.
 pub fn codex_exec_args(dir: &str, out: &str, schema_file: Option<&str>) -> Vec<String> {
     let mut args: Vec<String> =
-        ["exec", "--ephemeral", "--skip-git-repo-check", "-s", "read-only", "--color", "never", "-C", dir, "-o", out].iter().map(|s| s.to_string()).collect();
+        ["exec", "--ephemeral", "--skip-git-repo-check", "-s", "read-only", "--color", "never", "-C", dir, "-o", out].iter().map(ToString::to_string).collect();
     if let Some(f) = schema_file {
         args.extend(["--output-schema".to_string(), f.to_string()]);
     }

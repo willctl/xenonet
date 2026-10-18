@@ -23,7 +23,7 @@
 //! registers a channel server only on it: server/discover, the 2026-07-28
 //! probe, gets method-not-found, as the JS server answers it, which sends
 //! Claude Code back to `initialize`, where it asks for 2025-11-25. It
-//! offers experimental["claude/channel"], and sends each message the
+//! offers `experimental["claude/channel"]`, and sends each message the
 //! session's long poll of /api/engine/channel brings as
 //! notifications/claude/channel (docs/design/rust-core.md, "Claude Code
 //! channels").
@@ -41,6 +41,8 @@ use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData as McpError, ServerHandler, ServiceExt};
 use serde_json::{json, Map, Value};
 use std::borrow::Cow;
+use std::fmt::Write as _;
+use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use xenonet_actors::token_file::{run_token_command, token_from_env};
@@ -190,7 +192,7 @@ impl Context {
 
     // The agent's own process, so XenoNet can tell when it's gone: Claude
     // Code says which in CLAUDE_PID; Codex is this server's parent.
-    fn whereabouts(&self) -> (String, Value) {
+    fn whereabouts() -> (String, Value) {
         let cwd = process::var("CLAUDE_PROJECT_DIR").unwrap_or_else(process::cwd);
         let pid = js_number(process::var("CLAUDE_PID").map(Value::String).as_ref());
         let pid = if pid == 0.0 || pid.is_nan() { f64::from(process::ppid()) } else { pid };
@@ -203,7 +205,7 @@ impl Context {
         let Caller::Agent(id) = me else {
             return self.as_actor("POST", &route, Some(&Value::Object(body))).await.map(|v| js::stringify(&v, 1));
         };
-        let (cwd, pid) = self.whereabouts();
+        let (cwd, pid) = Self::whereabouts();
         body.insert("cwd".into(), json!(cwd));
         body.insert("pid".into(), pid);
         match self.request("POST", &route, Some(&Value::Object(body)), &[("x-xenonet-agent".into(), id)]).await {
@@ -282,7 +284,7 @@ fn doctor_text(r: &Value) -> String {
     let notes: Vec<Value> = r
         .get("results")
         .and_then(Value::as_array)
-        .map(|a| a.as_slice())
+        .map(Vec::as_slice)
         .unwrap_or_default()
         .iter()
         .filter(|x| x.get("status").and_then(Value::as_str) != Some("ok"))
@@ -311,7 +313,7 @@ fn encode_uri_component(s: &str) -> String {
         if b.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&b) {
             out.push(b as char);
         } else {
-            out.push_str(&format!("%{b:02X}"));
+            let _ = write!(out, "%{b:02X}");
         }
     }
     out
@@ -411,15 +413,16 @@ impl ServerHandler for Sessions {
     // is the only one discover belongs to. A channel session gets
     // method-not-found instead, which sends Claude Code back to the 2025
     // handshake.
-    async fn discover(&self, _context: RequestContext<RoleServer>) -> Result<DiscoverResult, McpError> {
-        if self.channel {
-            return Err(McpError::new(ErrorCode::METHOD_NOT_FOUND, "Method not found", None));
-        }
-        Ok(DiscoverResult::from_server_info(vec![ProtocolVersion::V_2026_07_28], self.get_info()))
+    fn discover(&self, _context: RequestContext<RoleServer>) -> impl Future<Output = Result<DiscoverResult, McpError>> + Send + '_ {
+        std::future::ready(if self.channel {
+            Err(McpError::new(ErrorCode::METHOD_NOT_FOUND, "Method not found", None))
+        } else {
+            Ok(DiscoverResult::from_server_info(vec![ProtocolVersion::V_2026_07_28], self.get_info()))
+        })
     }
 
-    async fn list_tools(&self, _request: Option<PaginatedRequestParams>, context: RequestContext<RoleServer>) -> Result<ListToolsResult, McpError> {
-        Ok(tools::list(&self.defs, &context, "xenonet"))
+    fn list_tools(&self, _request: Option<PaginatedRequestParams>, context: RequestContext<RoleServer>) -> impl Future<Output = Result<ListToolsResult, McpError>> + Send + '_ {
+        std::future::ready(Ok(tools::list(&self.defs, &context, "xenonet")))
     }
 
     async fn call_tool(&self, request: CallToolRequestParams, context: RequestContext<RoleServer>) -> Result<CallToolResponse, McpError> {
@@ -473,9 +476,9 @@ impl ServerHandler for Sessions {
 pub async fn listen<P, PF, N, NF>(poll: P, notify: N, retry: Duration, once: bool)
 where
     P: Fn(Value) -> PF,
-    PF: std::future::Future<Output = Result<Value, String>>,
+    PF: Future<Output = Result<Value, String>>,
     N: Fn(Value) -> NF,
-    NF: std::future::Future<Output = bool>,
+    NF: Future<Output = bool>,
 {
     loop {
         let cwd = process::var("CLAUDE_PROJECT_DIR").unwrap_or_else(process::cwd);

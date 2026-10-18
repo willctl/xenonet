@@ -25,6 +25,7 @@ use crate::sql::Arg;
 use crate::store::js_text;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use xenonet_base::sync::Locked;
 
 pub const ACK_MS: f64 = 60e3;
 const KEEP: usize = 500;
@@ -89,7 +90,7 @@ fn truthy_at(c: &mut dyn Calls, path: &str) -> Result<bool> {
 }
 
 impl Router {
-    fn now(&self, c: &mut dyn Calls) -> Result<f64> {
+    fn now(c: &mut dyn Calls) -> Result<f64> {
         let t = c.call("router", "now", vec![])?;
         Ok(match t {
             Arg::Num(n) => n,
@@ -98,7 +99,7 @@ impl Router {
     }
 
     fn with<T>(&self, key: &str, f: impl FnOnce(&mut Rec) -> T) -> Option<T> {
-        self.inner.lock().unwrap().recs.get_mut(key).map(f)
+        self.inner.locked().recs.get_mut(key).map(f)
     }
 
     fn field(&self, key: &str, k: &str) -> Arg {
@@ -119,7 +120,7 @@ impl Router {
         Ok(())
     }
 
-    fn emit(&self, c: &mut dyn Calls, key: &str) -> Result<()> {
+    fn emit(c: &mut dyn Calls, key: &str) -> Result<()> {
         c.call("", "emit", vec![Arg::text(key)])?;
         Ok(())
     }
@@ -127,7 +128,7 @@ impl Router {
     /// A record let go once it's no longer listed and nothing waits on it.
     fn settle(&self, c: &mut dyn Calls, key: &str) -> Result<()> {
         let gone = {
-            let mut i = self.inner.lock().unwrap();
+            let mut i = self.inner.locked();
             let listed = i.order.iter().any(|k| k == key);
             let free = i.recs.get(key).is_some_and(|r| !r.attempting && !r.timer && !listed);
             if free {
@@ -141,11 +142,11 @@ impl Router {
         Ok(())
     }
 
-    fn usage(&self, c: &mut dyn Calls, app: &str) -> Result<Arg> {
+    fn usage(c: &mut dyn Calls, app: &str) -> Result<Arg> {
         c.call("router", "usage", vec![Arg::text(app)])
     }
 
-    fn consented(&self, c: &mut dyn Calls, id: &Arg, remote: bool) -> Result<bool> {
+    fn consented(c: &mut dyn Calls, id: &Arg, remote: bool) -> Result<bool> {
         Ok(c.call("router.policy", "consented", vec![id.clone(), obj(vec![("remote", Arg::Bool(remote))])])?.truthy())
     }
 
@@ -193,7 +194,7 @@ impl Router {
     /// the same budget as any other wake, spent when allowed.
     pub fn wake(&self, c: &mut dyn Calls, from: &Arg, agent: &Arg) -> Result<Arg> {
         let app = js_text(agent).split(':').next().unwrap_or("").to_string();
-        let usage = self.usage(c, &app)?;
+        let usage = Self::usage(c, &app)?;
         let w = c.call("router.policy", "wakeAllowed", vec![from.clone(), agent.clone(), obj(vec![("usage", usage)])])?;
         if w.field("ok").truthy() {
             c.call("router.policy", "spendWake", vec![from.clone(), agent.clone()])?;
@@ -221,10 +222,10 @@ impl Router {
             return Ok(Some("right away, through its channel"));
         }
         let remote = starts(from, "actor:");
-        if status.as_str() == Some("ended") && self.resumable(c, a)?.truthy() && self.consented(c, &id, remote)? {
+        if status.as_str() == Some("ended") && self.resumable(c, a)?.truthy() && Self::consented(c, &id, remote)? {
             return Ok(Some("right away, in a turn XenoNet resumes it for"));
         }
-        if app.as_str() == Some("opencode") && truthy_at(c, "router.opencode")? && self.consented(c, &id, remote)? {
+        if app.as_str() == Some("opencode") && truthy_at(c, "router.opencode")? && Self::consented(c, &id, remote)? {
             return Ok(Some("right away, through its OpenCode server"));
         }
         Ok(None)
@@ -246,7 +247,7 @@ impl Router {
             if starts(&agent, "actor:") || agent.as_str() == Some("you") {
                 continue;
             }
-            let at = self.now(c)?;
+            let at = Self::now(c)?;
             let key = format!("{}|{}", js_text(&m.field("id")), js_text(&agent));
             let rec = Rec {
                 fields: vec![
@@ -266,8 +267,8 @@ impl Router {
             };
             let first = rec.arg();
             let trimmed = {
-                let mut i = self.inner.lock().unwrap();
-                if !i.order.iter().any(|k| *k == key) {
+                let mut i = self.inner.locked();
+                if !i.order.contains(&key) {
                     i.order.push(key.clone());
                 }
                 i.recs.insert(key.clone(), rec);
@@ -312,7 +313,7 @@ impl Router {
         self.assign(c, key, vec![("fromName", from_name.clone())])?;
         let mut tried: Vec<String> = Vec::new();
         let wake = if idle {
-            let usage = self.usage(c, &app)?;
+            let usage = Self::usage(c, &app)?;
             c.call("router.policy", "wakeAllowed", vec![from.clone(), agent.clone(), obj(vec![("usage", usage)])])?
         } else {
             obj(vec![("ok", Arg::Bool(true))])
@@ -325,10 +326,21 @@ impl Router {
             if idle {
                 c.call("router.policy", "spendWake", vec![from.clone(), agent.clone()])?;
             }
-            let t = me.now(c)?;
+            let t = Self::now(c)?;
             c.call("router.engine.store", "markSeen", vec![agent.clone(), Arg::List(vec![m.field("id")]), Arg::num(t)])?;
-            c.call("router.policy", "audit", vec![obj(vec![("kind", Arg::text("delivered")), ("message", m.field("id")), ("from", from.clone()), ("to", agent.clone()), ("how", Arg::text(how)), ("text", hash.clone())])])?;
-            me.emit(c, key)?;
+            c.call(
+                "router.policy",
+                "audit",
+                vec![obj(vec![
+                    ("kind", Arg::text("delivered")),
+                    ("message", m.field("id")),
+                    ("from", from.clone()),
+                    ("to", agent.clone()),
+                    ("how", Arg::text(how)),
+                    ("text", hash.clone()),
+                ])],
+            )?;
+            Self::emit(c, key)?;
             Ok(true)
         };
         let remote = starts(&from, "actor:");
@@ -336,7 +348,7 @@ impl Router {
         // message over itself, and checks the wake then.
         if opt_call(c, "router.engine.listening", "has", vec![agent.clone()])?.truthy() {
             self.assign(c, key, vec![("state", Arg::text("live")), ("how", Arg::text("listen"))])?;
-            self.emit(c, key)?;
+            Self::emit(c, key)?;
             return Ok(true);
         }
         if !wake.field("ok").truthy() {
@@ -352,12 +364,12 @@ impl Router {
             }
             // 2. OpenCode's own server, with your consent for that session.
             if app == "opencode" && truthy_at(c, "router.opencode")? {
-                if !self.consented(c, &agent, remote)? {
+                if !Self::consented(c, &agent, remote)? {
                     tried.push("opencode: no consent".into());
                 } else {
                     let r = caught(c.call("router.opencode", "deliver", vec![agent.clone(), text.clone()]));
                     if r.field("ok").truthy() {
-                        let t = self.now(c)?;
+                        let t = Self::now(c)?;
                         return success(self, c, "opencode", vec![("ackedAt", Arg::num(t)), ("where", r.field("where"))]);
                     }
                     tried.push(format!("opencode: {}", js_text(&r.field("why"))));
@@ -369,7 +381,7 @@ impl Router {
             if truthy_at(c, "router.tmux")? && idle && !view.field("ended").truthy() && !view.field("needsYou").truthy() {
                 let sender = is_you(&from) || remote;
                 let pid = opt_call(c, "router.engine.store", "contact", vec![agent.clone()])?.field("pid").or(Arg::Null);
-                if !self.consented(c, &agent, remote)? {
+                if !Self::consented(c, &agent, remote)? {
                     tried.push("tmux: no consent".into());
                 } else if !sender {
                     tried.push("tmux: only you or an actor with a token may type".into());
@@ -377,7 +389,20 @@ impl Router {
                     tried.push("tmux: no process known".into());
                 } else {
                     let r = caught(c.call("router.tmux", "deliver", vec![obj(vec![("pid", pid), ("text", text.clone())])]));
-                    c.call("router.policy", "audit", vec![obj(vec![("kind", Arg::text("typed")), ("message", m.field("id")), ("from", from.clone()), ("to", agent.clone()), ("pane", r.field("where").or(Arg::Null)), ("ok", r.field("ok")), ("why", r.field("why").or(Arg::Null)), ("text", hash.clone())])])?;
+                    c.call(
+                        "router.policy",
+                        "audit",
+                        vec![obj(vec![
+                            ("kind", Arg::text("typed")),
+                            ("message", m.field("id")),
+                            ("from", from.clone()),
+                            ("to", agent.clone()),
+                            ("pane", r.field("where").or(Arg::Null)),
+                            ("ok", r.field("ok")),
+                            ("why", r.field("why").or(Arg::Null)),
+                            ("text", hash.clone()),
+                        ])],
+                    )?;
                     if r.field("ok").truthy() {
                         return success(self, c, "tmux", vec![("where", r.field("where"))]);
                     }
@@ -387,11 +412,23 @@ impl Router {
             // 4. A headless resume, for a Claude Code or Codex session whose
             // process has gone, with your consent: never while it runs.
             if truthy_at(c, "router.resume")? && view.field("ended").truthy() && c.call("router.resume", "can", vec![agent.clone()])?.truthy() {
-                if !self.consented(c, &agent, remote)? {
+                if !Self::consented(c, &agent, remote)? {
                     tried.push("resume: no consent".into());
                 } else {
                     let r = caught(c.call("router.resume", "deliver", vec![obj(vec![("agent", agent.clone()), ("cwd", view.field("cwd")), ("text", text.clone())])]));
-                    c.call("router.policy", "audit", vec![obj(vec![("kind", Arg::text("resumed")), ("message", m.field("id")), ("from", from.clone()), ("to", agent.clone()), ("ok", r.field("ok")), ("why", r.field("why").or(Arg::Null)), ("text", hash.clone())])])?;
+                    c.call(
+                        "router.policy",
+                        "audit",
+                        vec![obj(vec![
+                            ("kind", Arg::text("resumed")),
+                            ("message", m.field("id")),
+                            ("from", from.clone()),
+                            ("to", agent.clone()),
+                            ("ok", r.field("ok")),
+                            ("why", r.field("why").or(Arg::Null)),
+                            ("text", hash.clone()),
+                        ])],
+                    )?;
                     if r.field("ok").truthy() {
                         return success(self, c, "resume", vec![("where", r.field("where"))]);
                     }
@@ -401,7 +438,7 @@ impl Router {
         }
         let why = if tried.is_empty() { Arg::Null } else { Arg::text(tried.join("; ")) };
         self.assign(c, key, vec![("state", Arg::text("next-turn")), ("how", Arg::text("hooks")), ("why", why)])?;
-        self.emit(c, key)?;
+        Self::emit(c, key)?;
         Ok(false)
     }
 
@@ -426,7 +463,9 @@ impl Router {
     }
 
     fn expire_inner(&self, c: &mut dyn Calls, key: &str) -> Result<()> {
-        let Some((acked, how, agent, message, from, from_name)) = self.with(key, |r| (r.get("ackedAt").truthy(), r.get("how"), r.get("agent"), r.message.clone(), r.from.clone(), r.get("fromName"))) else {
+        let Some((acked, how, agent, message, from, from_name)) =
+            self.with(key, |r| (r.get("ackedAt").truthy(), r.get("how"), r.get("agent"), r.message.clone(), r.from.clone(), r.get("fromName")))
+        else {
             return Ok(());
         };
         if acked {
@@ -440,7 +479,7 @@ impl Router {
         }
         self.assign(c, key, vec![("state", Arg::text("notified"))])?;
         c.call("router.policy", "audit", vec![obj(vec![("kind", Arg::text("notified")), ("message", message.clone()), ("to", agent.clone())])])?;
-        self.emit(c, key)?;
+        Self::emit(c, key)?;
         let view = c.call("router.engine", "view", vec![agent.clone()]).unwrap_or(Arg::Null);
         let title = view.field("title").or(agent.clone());
         c.call("router", "notify", vec![obj(vec![("message", message), ("agent", agent), ("title", title), ("from", from_name.or(from))])])?;
@@ -451,18 +490,18 @@ impl Router {
         if self.field(key, "ackedAt").truthy() {
             return Ok(());
         }
-        let t = self.now(c)?;
+        let t = Self::now(c)?;
         self.assign(c, key, vec![("ackedAt", Arg::num(t))])?;
         c.call("", "clear", vec![Arg::text(key)])?;
         self.with(key, |r| r.timer = false);
-        self.emit(c, key)
+        Self::emit(c, key)
     }
 
     /// Messages the engine says a session has seen: their records acked.
     pub fn seen(&self, c: &mut dyn Calls, agent: &Arg, ids: &[Arg]) -> Result<()> {
         for id in ids {
             let key = format!("{}|{}", js_text(id), js_text(agent));
-            let listed = self.inner.lock().unwrap().order.iter().any(|k| *k == key);
+            let listed = self.inner.locked().order.contains(&key);
             if listed {
                 self.ack(c, &key)?;
             }
@@ -472,9 +511,11 @@ impl Router {
 
     /// A hook from the session after a push acks it.
     pub fn contact(&self, c: &mut dyn Calls, agent: &Arg) -> Result<()> {
-        let keys: Vec<String> = self.inner.lock().unwrap().order.clone();
+        let keys: Vec<String> = self.inner.locked().order.clone();
         for key in keys {
-            let due = self.with(&key, |r| r.get("agent") == *agent && r.get("state").as_str() == Some("live") && r.get("how").as_str() != Some("listen") && !r.get("ackedAt").truthy()).unwrap_or(false);
+            let due = self
+                .with(&key, |r| r.get("agent") == *agent && r.get("state").as_str() == Some("live") && r.get("how").as_str() != Some("listen") && !r.get("ackedAt").truthy())
+                .unwrap_or(false);
             if due {
                 self.ack(c, &key)?;
             }

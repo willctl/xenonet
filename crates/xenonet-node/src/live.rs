@@ -7,7 +7,7 @@
 //! …], error }, the events in order and what JS would have thrown after
 //! them, for the twin to emit and throw.
 
-use crate::js::{from_js, to_js, type_of, Json, Jv, MaybeJson};
+use crate::js::{from_js, string, to_js, type_of, Json, Jv, MaybeJson};
 use crate::sources::thrown;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -27,31 +27,31 @@ fn check(status: sys::napi_status, what: &str) -> Result<()> {
     }
 }
 
-unsafe fn js_string(env: sys::napi_env, s: &str) -> Result<sys::napi_value> {
-    let mut out = ptr::null_mut();
-    check(unsafe { sys::napi_create_string_utf8(env, s.as_ptr().cast(), s.len() as isize, &mut out) }, "make a string")?;
-    Ok(out)
-}
-
 /// An object with its fields in order, undefined where a field's value is.
 unsafe fn fields_js(env: sys::napi_env, f: &Fields) -> Result<sys::napi_value> {
     let mut out = ptr::null_mut();
-    check(unsafe { sys::napi_create_object(env, &mut out) }, "make an object")?;
+    // SAFETY: env is the call's; napi writes to the local `out`.
+    check(unsafe { sys::napi_create_object(env, &raw mut out) }, "make an object")?;
     for (k, v) in f {
-        let key = unsafe { js_string(env, k)? };
+        // SAFETY: env is the call's.
+        let key = unsafe { string(env, k)? };
         let value = match v {
+            // SAFETY: env is the call's.
             Some(v) => unsafe { to_js(env, v, 0)? },
             None => {
                 let mut u = ptr::null_mut();
-                check(unsafe { sys::napi_get_undefined(env, &mut u) }, "make undefined")?;
+                // SAFETY: env is the call's; napi writes to the local `u`.
+                check(unsafe { sys::napi_get_undefined(env, &raw mut u) }, "make undefined")?;
                 u
             }
         };
         if k == "__proto__" {
             let attributes = sys::PropertyAttributes::writable | sys::PropertyAttributes::enumerable | sys::PropertyAttributes::configurable;
             let d = sys::napi_property_descriptor { utf8name: ptr::null(), name: key, method: None, getter: None, setter: None, value, attributes, data: ptr::null_mut() };
-            check(unsafe { sys::napi_define_properties(env, out, 1, &d) }, "define a key")?;
+            // SAFETY: env and `out` are the call's, `d` is a local napi reads.
+            check(unsafe { sys::napi_define_properties(env, out, 1, &raw const d) }, "define a key")?;
         } else {
+            // SAFETY: env, `out`, `key` and `value` are the call's.
             check(unsafe { sys::napi_set_property(env, out, key, value) }, "fill an object")?;
         }
     }
@@ -62,7 +62,8 @@ unsafe fn fields_js(env: sys::napi_env, f: &Fields) -> Result<sys::napi_value> {
 /// leaves out) as None; None for null or undefined; no fields for another
 /// value.
 unsafe fn js_fields(env: sys::napi_env, v: sys::napi_value) -> Result<Option<Fields>> {
-    use sys::ValueType::*;
+    use sys::ValueType::{napi_function, napi_null, napi_object, napi_symbol, napi_undefined};
+    // SAFETY: env and `v` are the call's.
     let t = unsafe { type_of(env, v)? };
     if t == napi_null || t == napi_undefined {
         return Ok(None);
@@ -72,6 +73,7 @@ unsafe fn js_fields(env: sys::napi_env, v: sys::napi_value) -> Result<Option<Fie
     }
     let mut keys = ptr::null_mut();
     check(
+        // SAFETY: env and `v` are the call's; napi writes to the local `keys`.
         unsafe {
             sys::napi_get_all_property_names(
                 env,
@@ -79,21 +81,27 @@ unsafe fn js_fields(env: sys::napi_env, v: sys::napi_value) -> Result<Option<Fie
                 sys::KeyCollectionMode::own_only,
                 sys::KeyFilter::enumerable | sys::KeyFilter::skip_symbols,
                 sys::KeyConversion::numbers_to_strings,
-                &mut keys,
+                &raw mut keys,
             )
         },
         "list an object's keys",
     )?;
     let mut n = 0u32;
-    check(unsafe { sys::napi_get_array_length(env, keys, &mut n) }, "count an object's keys")?;
+    // SAFETY: env and `keys` are the call's; napi writes to the local `n`.
+    check(unsafe { sys::napi_get_array_length(env, keys, &raw mut n) }, "count an object's keys")?;
     let mut out = Vec::with_capacity(n as usize);
     for i in 0..n {
         let mut key = ptr::null_mut();
-        check(unsafe { sys::napi_get_element(env, keys, i, &mut key) }, "read a key")?;
+        // SAFETY: env and `keys` are the call's; napi writes to the local `key`.
+        check(unsafe { sys::napi_get_element(env, keys, i, &raw mut key) }, "read a key")?;
         let mut item = ptr::null_mut();
-        check(unsafe { sys::napi_get_property(env, v, key, &mut item) }, "read a property")?;
+        // SAFETY: env, `v` and `key` are the call's; napi writes to the local `item`.
+        check(unsafe { sys::napi_get_property(env, v, key, &raw mut item) }, "read a property")?;
+        // SAFETY: env and `item` are the call's.
         let it = unsafe { type_of(env, item)? };
+        // SAFETY: env and `item` are the call's.
         let value = if it == napi_undefined || it == napi_function || it == napi_symbol { None } else { Some(unsafe { from_js(env, item, 0)? }) };
+        // SAFETY: env and `key` are the call's.
         out.push((unsafe { String::from_napi_value(env, key)? }, value));
     }
     Ok(Some(out))
@@ -103,6 +111,8 @@ fn emits(env: &Env, out: Vec<Emit>, error: Option<TypeError>) -> Result<Jv> {
     let mut items = Vec::with_capacity(out.len());
     for e in &out {
         let (name, payload) = match e {
+            // SAFETY: env is the Env of the export under way, as every Env
+            // here is, and the object is handed back to JS in that call.
             Emit::Activity(f) => ("activity", Jv::Raw(unsafe { fields_js(env.raw(), f)? })),
             Emit::Tokens(v) => ("tokens", Jv::Json(v.clone())),
             Emit::Refusal(v) => ("refusal", Jv::Json(v.clone())),
@@ -115,6 +125,8 @@ fn emits(env: &Env, out: Vec<Emit>, error: Option<TypeError>) -> Result<Jv> {
 fn events(env: &Env, list: &[xenonet_sources::live::telemetry::Event]) -> Result<Jv> {
     let mut items = Vec::with_capacity(list.len());
     for e in list {
+        // SAFETY: env is the Env of the export under way, as every Env here
+        // is, and the object is handed back to JS in that call.
         items.push(Jv::Raw(unsafe { fields_js(env.raw(), &e.fields)? }));
     }
     Ok(Jv::Arr(items))
@@ -133,7 +145,7 @@ fn key_of(v: MaybeJson) -> Option<Value> {
     v.0
 }
 
-fn type_error<T>(env: &Env, what: &str) -> Result<T> {
+fn type_error<T>(env: Env, what: &str) -> Result<T> {
     thrown(env, TypeError(what.into()))
 }
 
@@ -144,6 +156,11 @@ pub struct JsLiveCore {
 }
 
 #[napi]
+// On the impl, not the methods: napi-derive copies a method's attributes
+// onto the two-argument wrapper it generates for it, and an expectation
+// there goes unfulfilled.
+#[expect(clippy::too_many_arguments, reason = "line and apply take the twin's arguments one by one, as LiveCore's JS methods did")]
+#[expect(clippy::unused_self, reason = "collab is a method of LiveCore, as it was in the JS, though it needs none of its state")]
 impl JsLiveCore {
     /// `roots`: [{ dir, app }], the folders it reads, as real paths.
     #[napi(constructor)]
@@ -172,30 +189,29 @@ impl JsLiveCore {
 
     /// A line the tailer read (`raw`, as its normalizer gave it): its
     /// refusal, and what it says.
-    #[allow(clippy::too_many_arguments)]
     #[napi]
-    pub fn line(&mut self, env: &Env, codex: bool, session_id: String, agent_id: MaybeJson, file: MaybeJson, raw: MaybeJson, live: bool, now: f64) -> Result<Jv> {
+    pub fn line(&mut self, env: Env, codex: bool, session_id: String, agent_id: MaybeJson, file: MaybeJson, raw: MaybeJson, live: bool, now: f64) -> Result<Jv> {
         let f = Where { session_id, agent_id: or_null(agent_id), file: or_null(file) };
         let mut out = Vec::new();
         let r = self.t.line(codex, &f, or_null(raw), live, now, &mut out);
-        emits(env, out, r.err())
+        emits(&env, out, r.err())
     }
 
     /// A line given straight to applyClaude or applyCodex.
-    #[allow(clippy::too_many_arguments)]
     #[napi]
-    pub fn apply(&mut self, env: &Env, codex: bool, session_id: String, agent_id: MaybeJson, raw: MaybeJson, live: bool, now: f64) -> Result<Jv> {
+    pub fn apply(&mut self, env: Env, codex: bool, session_id: String, agent_id: MaybeJson, raw: MaybeJson, live: bool, now: f64) -> Result<Jv> {
         let f = Where { session_id, agent_id: or_null(agent_id), file: Value::Null };
         let mut out = Vec::new();
         let raw = or_null(raw);
         let r = if codex { self.t.apply_codex(&f, raw, live, now, &mut out) } else { self.t.apply_claude(&f, raw, live, now, &mut out) };
-        emits(env, out, r.err())
+        emits(&env, out, r.err())
     }
 
     /// An event a caller made for a session (made when it's new).
     #[napi]
-    pub fn activity(&mut self, env: &Env, id: String, app: String, ev: Unknown, live: bool, now: f64) -> Result<Jv> {
-        let Some(fields) = (unsafe { js_fields(env.raw(), ev.raw())? }) else { return type_error(env, "Cannot read properties of undefined (reading 'ts')") };
+    pub fn activity(&mut self, env: &Env, id: String, app: String, ev: Unknown<'_>, live: bool, now: f64) -> Result<Jv> {
+        // SAFETY: env and `ev` are what napi-rs passed into this export.
+        let Some(fields) = (unsafe { js_fields(env.raw(), ev.raw())? }) else { return type_error(*env, "Cannot read properties of undefined (reading 'ts')") };
         let i = self.t.session(&id, &app);
         let mut out = Vec::new();
         self.t.note_activity(i, fields, live, now, &mut out);
@@ -203,16 +219,17 @@ impl JsLiveCore {
     }
 
     #[napi(js_name = "noteHook")]
-    pub fn note_hook(&mut self, env: &Env, id: String, body: MaybeJson, now: f64) -> Result<Jv> {
+    pub fn note_hook(&mut self, env: Env, id: String, body: MaybeJson, now: f64) -> Result<Jv> {
         let mut out = Vec::new();
         let r = self.t.note_hook(&id, body.0.as_ref(), now, &mut out);
-        emits(env, out, r.err())
+        emits(&env, out, r.err())
     }
 
     /// A tool call, as noteTool takes it: { name, detail, full, files, ts,
     /// agentId, server, extra, ok }. Gives { emits, tool }.
     #[napi(js_name = "noteTool")]
-    pub fn note_tool(&mut self, env: &Env, id: String, call: Unknown, live: bool, now: f64) -> Result<Jv> {
+    pub fn note_tool(&mut self, env: &Env, id: String, call: Unknown<'_>, live: bool, now: f64) -> Result<Jv> {
+        // SAFETY: env and `call` are what napi-rs passed into this export.
         let fields = unsafe { js_fields(env.raw(), call.raw())? }.unwrap_or_default();
         let get = |k: &str| fields.iter().find(|(key, _)| key == k).map(|(_, v)| v.clone());
         let files = match get("files").flatten() {
@@ -243,18 +260,18 @@ impl JsLiveCore {
     }
 
     #[napi(js_name = "codexItem")]
-    pub fn codex_item(&mut self, env: &Env, id: String, item: MaybeJson, ts: f64, live: bool, now: f64) -> Result<Jv> {
+    pub fn codex_item(&mut self, env: Env, id: String, item: MaybeJson, ts: f64, live: bool, now: f64) -> Result<Jv> {
         let i = self.t.find(&id).unwrap_or_else(|| self.t.session(&id, "codex"));
         let mut out = Vec::new();
         let r = match &item.0 {
             None | Some(Value::Null) => Err(TypeError("Cannot read properties of undefined (reading 'type')".into())),
             Some(it) => self.t.codex_item(i, it, ts, live, now, &mut out),
         };
-        emits(env, out, r.err())
+        emits(&env, out, r.err())
     }
 
     #[napi(js_name = "noteCodexLimits")]
-    pub fn note_codex_limits(&mut self, env: &Env, rl: MaybeJson, ts: f64) -> Result<()> {
+    pub fn note_codex_limits(&mut self, env: Env, rl: MaybeJson, ts: f64) -> Result<()> {
         match &rl.0 {
             None | Some(Value::Null) => type_error(env, "Cannot read properties of undefined (reading 'primary')"),
             Some(v) => {
@@ -276,13 +293,13 @@ impl JsLiveCore {
     }
 
     #[napi]
-    pub fn history(&self, env: &Env) -> Result<Jv> {
-        events(env, self.t.history())
+    pub fn history(&self, env: Env) -> Result<Jv> {
+        events(&env, self.t.history())
     }
 
     #[napi(js_name = "historySince")]
-    pub fn history_since(&self, env: &Env, since: f64) -> Result<Jv> {
-        events(env, self.t.history_since(since))
+    pub fn history_since(&self, env: Env, since: f64) -> Result<Jv> {
+        events(&env, self.t.history_since(since))
     }
 
     // ----- sessions -----
@@ -391,7 +408,7 @@ impl JsLiveCore {
     }
 
     #[napi(js_name = "sessionAddMessage")]
-    pub fn session_add_message(&mut self, env: &Env, id: String, text: MaybeJson, ts: f64) -> Result<()> {
+    pub fn session_add_message(&mut self, env: Env, id: String, text: MaybeJson, ts: f64) -> Result<()> {
         let Some(i) = self.t.find(&id) else { return Ok(()) };
         self.t.at_mut(i).add_message(text.0.as_ref(), ts).or_else(|e| thrown(env, e))
     }
@@ -404,7 +421,7 @@ impl JsLiveCore {
     }
 
     #[napi(js_name = "sessionAddEdits")]
-    pub fn session_add_edits(&mut self, env: &Env, id: String, edits: MaybeJson, ts: f64) -> Result<()> {
+    pub fn session_add_edits(&mut self, env: Env, id: String, edits: MaybeJson, ts: f64) -> Result<()> {
         let Some(i) = self.t.find(&id) else { return Ok(()) };
         match edits.0 {
             Some(Value::Array(list)) => self.t.at_mut(i).add_edits(&list, ts).or_else(|e| thrown(env, e)),
@@ -500,7 +517,7 @@ impl JsLiveCore {
 
     /// Anthropic answered `r`, this time.
     #[napi(js_name = "claudeAsked")]
-    pub fn claude_asked(&mut self, env: &Env, r: MaybeJson, now: f64) -> Result<()> {
+    pub fn claude_asked(&mut self, env: Env, r: MaybeJson, now: f64) -> Result<()> {
         self.t.claude_asked(r.0.as_ref(), now).or_else(|e| thrown(env, e))
     }
 
@@ -551,7 +568,7 @@ impl JsLiveCore {
     }
 
     #[napi]
-    pub fn costs(&self, env: &Env, now: f64, sessions: MaybeJson) -> Result<Json> {
+    pub fn costs(&self, env: Env, now: f64, sessions: MaybeJson) -> Result<Json> {
         match sessions.0 {
             Some(Value::Array(list)) => Ok(Json(self.t.costs(now, &list))),
             _ => type_error(env, "sessions.filter is not a function"),
@@ -636,7 +653,7 @@ pub fn claude_usage_desktop_version(raw: MaybeJson) -> Option<String> {
 }
 
 #[napi(js_name = "claudeUsageDesktopSamples")]
-pub fn claude_usage_desktop_samples(env: &Env, raw: MaybeJson, checked: MaybeJson) -> Result<Json> {
+pub fn claude_usage_desktop_samples(env: Env, raw: MaybeJson, checked: MaybeJson) -> Result<Json> {
     match claude_usage::desktop_samples(raw.0.as_ref(), checked.0.as_ref()) {
         Ok(v) => Ok(Json(v)),
         Err(claude_usage::DesktopError::Plain(m)) => Err(Error::new(Status::GenericFailure, m)),
@@ -657,7 +674,7 @@ pub fn refusal_codex_signal(raw: MaybeJson) -> Json {
 }
 
 #[napi(js_name = "refusalKeyOf")]
-pub fn refusal_key_of(env: &Env, sig: MaybeJson, session_id: MaybeJson) -> Result<String> {
+pub fn refusal_key_of(env: Env, sig: MaybeJson, session_id: MaybeJson) -> Result<String> {
     let session = match &session_id.0 {
         None => "undefined".to_string(),
         Some(v) => xenonet_base::text::js_string(v),

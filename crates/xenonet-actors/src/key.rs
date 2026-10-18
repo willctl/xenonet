@@ -41,7 +41,7 @@ mod tests {
     fn matches_only_itself() {
         let k = WindowKey::new().unwrap();
         assert_eq!(k.reveal().len(), 64);
-        assert!(k.matches(&k.reveal().to_string()));
+        assert!(k.matches(k.reveal()));
         assert!(!k.matches(&k.reveal()[1..]) && !k.matches(""));
         assert_ne!(k.reveal(), WindowKey::new().unwrap().reveal());
     }

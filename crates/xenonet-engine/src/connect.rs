@@ -11,7 +11,7 @@
 //!
 //! XenoNet's hooks are told apart from yours by their URL or command, and a
 //! copy of each settings file is kept the first time XenoNet changes it
-//! (<file>.before-xenonet). Each XenoNet on this machine is told apart by
+//! (`<file>.before-xenonet`). Each XenoNet on this machine is told apart by
 //! its port: connecting or disconnecting one changes its own entries and
 //! leaves another's alone. Entries whose files are gone are anyone's to
 //! clear.
@@ -28,8 +28,17 @@ use serde_json::{json, Map, Value};
 use xenonet_base::json::stringify;
 use xenonet_base::paths::tilde;
 
-const CLAUDE_EVENTS: [(&str, Option<&str>); 7] = [("SessionStart", None), ("UserPromptSubmit", None), ("PreToolUse", Some("Edit|Write|MultiEdit|NotebookEdit")), ("PostToolUse", None), ("Stop", None), ("SessionEnd", None), ("Notification", None)];
-const CODEX_EVENTS: [(&str, Option<&str>); 6] = [("SessionStart", None), ("UserPromptSubmit", None), ("PreToolUse", Some("apply_patch|Edit|Write")), ("PostToolUse", None), ("Stop", None), ("SessionEnd", None)];
+const CLAUDE_EVENTS: [(&str, Option<&str>); 7] = [
+    ("SessionStart", None),
+    ("UserPromptSubmit", None),
+    ("PreToolUse", Some("Edit|Write|MultiEdit|NotebookEdit")),
+    ("PostToolUse", None),
+    ("Stop", None),
+    ("SessionEnd", None),
+    ("Notification", None),
+];
+const CODEX_EVENTS: [(&str, Option<&str>); 6] =
+    [("SessionStart", None), ("UserPromptSubmit", None), ("PreToolUse", Some("apply_patch|Edit|Write")), ("PostToolUse", None), ("Stop", None), ("SessionEnd", None)];
 
 pub type Result<T> = std::result::Result<T, Thrown>;
 
@@ -180,7 +189,13 @@ fn dirname(p: &str) -> String {
         }
     }
     match end {
-        None => if root { p[..1].to_string() } else { ".".into() },
+        None => {
+            if root {
+                p[..1].to_string()
+            } else {
+                ".".into()
+            }
+        }
         Some(1) if root => p[..2].to_string(),
         Some(e) => p[..e].to_string(),
     }
@@ -190,7 +205,7 @@ fn dirname(p: &str) -> String {
 /// and xenonet-console, another's with its instance (xenonet-dev).
 pub fn server_names(port: &Arg, instances: &[Instance]) -> (String, String) {
     let id = instances.iter().find(|i| same_arg(&i.port, port)).map_or_else(|| js_text(port), |i| i.id.clone());
-    let installed = instances.iter().find(|i| i.id == "installed").map(|i| i.port.clone()).unwrap_or(Arg::Undef);
+    let installed = instances.iter().find(|i| i.id == "installed").map_or(Arg::Undef, |i| i.port.clone());
     let base = if same_arg(port, &installed) { "xenonet".to_string() } else { format!("xenonet-{id}") };
     let console = format!("{base}-console");
     (base, console)
@@ -390,7 +405,10 @@ impl Connect {
 
     fn xenonet_hook(kind: Kind, h: &Value) -> bool {
         match kind {
-            Kind::Claude => (h.get("type").and_then(Value::as_str) == Some("http") && crate::re!(r"^http://(127\.0\.0\.1|localhost):[0-9]+/api/hook/claude$").is_match(&text_of(h.get("url")))) || Self::xenonet_command(Kind::Claude, h),
+            Kind::Claude => {
+                (h.get("type").and_then(Value::as_str) == Some("http") && crate::re!(r"^http://(127\.0\.0\.1|localhost):[0-9]+/api/hook/claude$").is_match(&text_of(h.get("url"))))
+                    || Self::xenonet_command(Kind::Claude, h)
+            }
             Kind::Codex => Self::xenonet_command(Kind::Codex, h),
         }
     }
@@ -407,7 +425,7 @@ impl Connect {
     }
 
     /// Only the paths among a command's quoted words.
-    fn hook_files(&self, hooks: Option<&Value>, ours: &mut dyn FnMut(&Value) -> bool) -> Vec<String> {
+    fn hook_files(hooks: Option<&Value>, ours: &mut dyn FnMut(&Value) -> bool) -> Vec<String> {
         let mut out = Vec::new();
         for g in flat(values(hooks)) {
             for h in hooks_of(&g) {
@@ -436,11 +454,11 @@ impl Connect {
             return Ok(false);
         }
         let port = Self::port_of(h);
-        if port.is_some_and(|p| matches!(self.o.port, Arg::Num(q) if q == p)) || port.is_none() {
+        if port.is_none_or(|p| matches!(self.o.port, Arg::Num(q) if q == p)) {
             return Ok(true);
         }
         let one = json!({ "x": [{ "hooks": [h] }] });
-        for f in self.hook_files(Some(&one), &mut |h| Self::xenonet_hook(kind, h)) {
+        for f in Self::hook_files(Some(&one), &mut |h| Self::xenonet_hook(kind, h)) {
             if !Self::exists(c, &f)? {
                 return Ok(true);
             }
@@ -477,7 +495,7 @@ impl Connect {
         let text = match c.call("fs", "readFileSync", vec![Arg::text(file), Arg::text("utf8")]) {
             Ok(t) => js_text(&t),
             Err(e) => {
-                let code = e.code.as_ref().filter(|v| !v.is_null());
+                let code = e.code.as_deref().filter(|v| !v.is_null());
                 if code.and_then(Value::as_str) == Some("ENOENT") {
                     return Ok(json!({}));
                 }
@@ -497,7 +515,7 @@ impl Connect {
         }
     }
 
-    fn write_json(&self, c: &mut dyn Calls, file: &str, data: &Value) -> Result<()> {
+    fn write_json(c: &mut dyn Calls, file: &str, data: &Value) -> Result<()> {
         c.call("fs", "mkdirSync", vec![Arg::text(dirname(file)), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])])?;
         let before = format!("{file}.before-xenonet");
         if Self::exists(c, file)? && !Self::exists(c, &before)? {
@@ -509,11 +527,11 @@ impl Connect {
         Ok(())
     }
 
-    fn cli(&self, c: &mut dyn Calls, name: &str) -> Result<Arg> {
+    fn cli(c: &mut dyn Calls, name: &str) -> Result<Arg> {
         c.call("", "cli", vec![Arg::text(name)])
     }
 
-    fn run(&self, c: &mut dyn Calls, bin: &Arg, args: Vec<String>) -> Result<Arg> {
+    fn run(c: &mut dyn Calls, bin: &Arg, args: Vec<String>) -> Result<Arg> {
         c.call("", "run", vec![bin.clone(), Arg::List(args.into_iter().map(Arg::text).collect())])
     }
 
@@ -536,21 +554,21 @@ impl Connect {
         }
     }
 
-    fn codex_entry(&self, c: &mut dyn Calls, bin: &Arg, name: &str) -> Result<Option<Value>> {
+    fn codex_entry(c: &mut dyn Calls, bin: &Arg, name: &str) -> Option<Value> {
         if !bin.truthy() {
-            return Ok(None);
+            return None;
         }
-        let r = self.run(c, bin, vec!["mcp".into(), "get".into(), name.into(), "--json".into()]).unwrap_or(Arg::Null);
+        let r = Self::run(c, bin, vec!["mcp".into(), "get".into(), name.into(), "--json".into()]).unwrap_or(Arg::Null);
         if !r.truthy() {
-            return Ok(None);
+            return None;
         }
-        Ok(Some(match xenonet_base::json::parse(&js_text(&r)) {
+        Some(match xenonet_base::json::parse(&js_text(&r)) {
             Ok(Value::Null) | Err(_) => json!({ "command": null }),
             Ok(s) => match s.get("transport").filter(|t| !t.is_null()) {
                 Some(t) => t.clone(),
                 None => s,
             },
-        }))
+        })
     }
 
     /// `x.mcpServers?.[name]`.
@@ -593,7 +611,7 @@ impl Connect {
     }
 
     /// Files a connected entry runs that no longer exist.
-    fn gone(&self, c: &mut dyn Calls, entry: &Value) -> Result<Vec<String>> {
+    fn gone(c: &mut dyn Calls, entry: &Value) -> Result<Vec<String>> {
         let mut files = vec![entry.get("command").cloned().unwrap_or(Value::Null)];
         if let Some(Value::Array(args)) = entry.get("args") {
             files.extend(args.iter().filter(|a| crate::re!(r"\.m?js$").is_match(&text_of(Some(a)))).cloned());
@@ -613,7 +631,7 @@ impl Connect {
 
     fn broken(&self, c: &mut dyn Calls, entry: Option<&Value>, hooks: Option<&Value>, kind: Kind) -> Result<Vec<Value>> {
         let mut files = match entry.filter(|e| crate::js::truthy(Some(e))) {
-            Some(e) => self.gone(c, e)?,
+            Some(e) => Self::gone(c, e)?,
             None => Vec::new(),
         };
         // hookFiles with this XenoNet's own entries, which may look at files.
@@ -626,7 +644,7 @@ impl Connect {
             }
         }
         let wrapped = json!({ "x": [{ "hooks": mine_list }] });
-        for f in self.hook_files(Some(&wrapped), &mut |_| true) {
+        for f in Self::hook_files(Some(&wrapped), &mut |_| true) {
             if !Self::exists(c, &f)? {
                 files.push(f);
             }
@@ -653,14 +671,14 @@ impl Connect {
     }
 
     pub fn preview(&self, c: &mut dyn Calls) -> Result<Value> {
-        let claude = self.cli(c, "claude")?;
-        let codex = self.cli(c, "codex")?;
+        let claude = Self::cli(c, "claude")?;
+        let codex = Self::cli(c, "codex")?;
         let (xenonet, console) = self.names.clone();
         let claude_entry = Self::server_in(&self.read_json(c, &self.claude_state)?, &xenonet);
-        let codex_server = self.codex_entry(c, &codex, &xenonet)?;
+        let codex_server = Self::codex_entry(c, &codex, &xenonet);
         let (console_claude, console_codex) = if self.o.console_mcp {
             let a = Self::server_in(&self.read_json(c, &self.claude_state)?, &console);
-            let b = self.codex_entry(c, &codex, &console)?;
+            let b = Self::codex_entry(c, &codex, &console);
             (a, b)
         } else {
             (None, None)
@@ -675,7 +693,9 @@ impl Connect {
             if !self.o.console_mcp {
                 return Vec::new();
             }
-            vec![json!({ "id": "console", "what": format!("The {console} MCP server, to operate Desktop"), "where": format!("{app} user settings"), "state": self.server_state(s, Some(&console_args)), "detail": format!("{command} mcp console (XENONET_PORT={port})") })]
+            vec![
+                json!({ "id": "console", "what": format!("The {console} MCP server, to operate Desktop"), "where": format!("{app} user settings"), "state": self.server_state(s, Some(&console_args)), "detail": format!("{command} mcp console (XENONET_PORT={port})") }),
+            ]
         };
         let events = |list: &[(&str, Option<&str>)]| list.iter().map(|(e, m)| if m.is_some() { format!("{e} (edits)") } else { e.to_string() }).collect::<Vec<_>>().join(", ");
 
@@ -684,7 +704,11 @@ impl Connect {
         let settings = self.read_json(c, &self.claude_settings)?;
         let in_place = self.hooks_in_place(c, &settings, Kind::Claude, &self.claude_hooks)?;
         claude_changes.push(json!({ "id": "hooks", "what": format!("Hooks: {}", events(&CLAUDE_EVENTS)), "where": tilde(&self.claude_settings, home), "state": if in_place { "present" } else { "missing" }, "detail": format!("posting to {}; SessionStart runs {command} hook claude", self.hook_url) }));
-        let mut claude_notes: Vec<Value> = if claude.truthy() { Vec::new() } else { vec![json!("XenoNet can't find the claude command, so it can add the hooks but not the MCP server. Install Claude Code's CLI, or add the server by hand.")] };
+        let mut claude_notes: Vec<Value> = if claude.truthy() {
+            Vec::new()
+        } else {
+            vec![json!("XenoNet can't find the claude command, so it can add the hooks but not the MCP server. Install Claude Code's CLI, or add the server by hand.")]
+        };
         let settings = self.read_json(c, &self.claude_settings)?;
         let others = self.others(c, settings.get("hooks"), Kind::Claude)?;
         claude_notes.extend(self.besides(&others));
@@ -696,7 +720,8 @@ impl Connect {
         let hooks_file = self.read_json(c, &self.codex_hooks)?;
         let in_place = self.hooks_in_place(c, &hooks_file, Kind::Codex, &self.codex_hook_set)?;
         codex_changes.push(json!({ "id": "hooks", "what": format!("Hooks: {}", events(&CODEX_EVENTS)), "where": tilde(&self.codex_hooks, home), "state": if in_place { "present" } else { "missing" }, "detail": format!("running {command} hook codex") }));
-        let mut codex_notes: Vec<Value> = if codex.truthy() { Vec::new() } else { vec![json!("XenoNet can't find the codex command, so it can add the hooks but not the MCP server.")] };
+        let mut codex_notes: Vec<Value> =
+            if codex.truthy() { Vec::new() } else { vec![json!("XenoNet can't find the codex command, so it can add the hooks but not the MCP server.")] };
         codex_notes.push(json!("Codex runs new hooks only once you trust them: run /hooks in Codex and trust XenoNet's."));
         let hooks_file = self.read_json(c, &self.codex_hooks)?;
         let others = self.others(c, hooks_file.get("hooks"), Kind::Codex)?;
@@ -728,22 +753,22 @@ impl Connect {
         if has("claude") {
             let settings = self.read_json(c, &self.claude_settings)?;
             let merged = merge_hooks(c, &settings, &mut |c, h| self.mine(c, Kind::Claude, h), Some(&self.claude_hooks))?;
-            self.write_json(c, &self.claude_settings, &merged)?;
-            let bin = self.cli(c, "claude")?;
+            Self::write_json(c, &self.claude_settings, &merged)?;
+            let bin = Self::cli(c, "claude")?;
             if bin.truthy() {
-                let _ = self.run(c, &bin, vec!["mcp".into(), "remove".into(), xenonet.clone(), "--scope".into(), "user".into()]);
-                self.run(c, &bin, vec!["mcp".into(), "add-json".into(), xenonet.clone(), json_text(&self.mcp), "--scope".into(), "user".into()])?;
+                let _ = Self::run(c, &bin, vec!["mcp".into(), "remove".into(), xenonet.clone(), "--scope".into(), "user".into()]);
+                Self::run(c, &bin, vec!["mcp".into(), "add-json".into(), xenonet.clone(), json_text(&self.mcp), "--scope".into(), "user".into()])?;
                 if self.o.console_mcp {
-                    let _ = self.run(c, &bin, vec!["mcp".into(), "remove".into(), console.clone(), "--scope".into(), "user".into()]);
-                    self.run(c, &bin, vec!["mcp".into(), "add-json".into(), console.clone(), json_text(&console_mcp), "--scope".into(), "user".into()])?;
+                    let _ = Self::run(c, &bin, vec!["mcp".into(), "remove".into(), console.clone(), "--scope".into(), "user".into()]);
+                    Self::run(c, &bin, vec!["mcp".into(), "add-json".into(), console.clone(), json_text(&console_mcp), "--scope".into(), "user".into()])?;
                 }
             }
         }
         if has("codex") {
             let hooks = self.read_json(c, &self.codex_hooks)?;
             let merged = merge_hooks(c, &hooks, &mut |c, h| self.mine(c, Kind::Codex, h), Some(&self.codex_hook_set))?;
-            self.write_json(c, &self.codex_hooks, &merged)?;
-            let bin = self.cli(c, "codex")?;
+            Self::write_json(c, &self.codex_hooks, &merged)?;
+            let bin = Self::cli(c, "codex")?;
             if bin.truthy() {
                 let env: Vec<String> = self.server_env.iter().flat_map(|(k, v)| ["--env".to_string(), format!("{k}={v}")]).collect();
                 let tail = |extra: Option<&str>| {
@@ -754,17 +779,17 @@ impl Connect {
                     }
                     t
                 };
-                let _ = self.run(c, &bin, vec!["mcp".into(), "remove".into(), xenonet.clone()]);
+                let _ = Self::run(c, &bin, vec!["mcp".into(), "remove".into(), xenonet.clone()]);
                 let mut args = vec!["mcp".to_string(), "add".into(), xenonet.clone()];
                 args.extend(env.clone());
                 args.extend(tail(None));
-                self.run(c, &bin, args)?;
+                Self::run(c, &bin, args)?;
                 if self.o.console_mcp {
-                    let _ = self.run(c, &bin, vec!["mcp".into(), "remove".into(), console.clone()]);
+                    let _ = Self::run(c, &bin, vec!["mcp".into(), "remove".into(), console.clone()]);
                     let mut args = vec!["mcp".to_string(), "add".into(), console.clone()];
                     args.extend(env);
                     args.extend(tail(Some("console")));
-                    self.run(c, &bin, args)?;
+                    Self::run(c, &bin, args)?;
                 }
             }
         }
@@ -774,27 +799,27 @@ impl Connect {
     pub fn remove(&self, c: &mut dyn Calls) -> Result<Value> {
         let settings = self.read_json(c, &self.claude_settings)?;
         let merged = merge_hooks(c, &settings, &mut |c, h| self.mine(c, Kind::Claude, h), None)?;
-        self.write_json(c, &self.claude_settings, &merged)?;
+        Self::write_json(c, &self.claude_settings, &merged)?;
         if Self::exists(c, &self.codex_hooks)? {
             let hooks = self.read_json(c, &self.codex_hooks)?;
             let merged = merge_hooks(c, &hooks, &mut |c, h| self.mine(c, Kind::Codex, h), None)?;
-            self.write_json(c, &self.codex_hooks, &merged)?;
+            Self::write_json(c, &self.codex_hooks, &merged)?;
         }
-        let claude = self.cli(c, "claude")?;
-        let codex = self.cli(c, "codex")?;
+        let claude = Self::cli(c, "claude")?;
+        let codex = Self::cli(c, "codex")?;
         let (xenonet, console) = self.names.clone();
         if claude.truthy() {
-            let _ = self.run(c, &claude, vec!["mcp".into(), "remove".into(), xenonet.clone(), "--scope".into(), "user".into()]);
+            let _ = Self::run(c, &claude, vec!["mcp".into(), "remove".into(), xenonet.clone(), "--scope".into(), "user".into()]);
         }
         if codex.truthy() {
-            let _ = self.run(c, &codex, vec!["mcp".into(), "remove".into(), xenonet.clone()]);
+            let _ = Self::run(c, &codex, vec!["mcp".into(), "remove".into(), xenonet.clone()]);
         }
         if self.o.console_mcp {
             if claude.truthy() {
-                let _ = self.run(c, &claude, vec!["mcp".into(), "remove".into(), console.clone(), "--scope".into(), "user".into()]);
+                let _ = Self::run(c, &claude, vec!["mcp".into(), "remove".into(), console.clone(), "--scope".into(), "user".into()]);
             }
             if codex.truthy() {
-                let _ = self.run(c, &codex, vec!["mcp".into(), "remove".into(), console.clone()]);
+                let _ = Self::run(c, &codex, vec!["mcp".into(), "remove".into(), console.clone()]);
             }
         }
         self.preview(c)
@@ -841,14 +866,35 @@ mod tests {
     #[test]
     fn merging_takes_ours_out_and_puts_new_ones_in() {
         let settings = json!({ "model": "x", "hooks": { "Stop": [{ "hooks": [{ "type": "http", "url": "http://127.0.0.1:47840/api/hook/claude" }, { "type": "command", "command": "mine" }] }], "Other": [{ "hooks": [{ "type": "http", "url": "http://127.0.0.1:1/api/hook/claude" }] }] } });
-        let out = merge_hooks(&mut NoCalls, &settings, &mut |_, h| Ok(h.get("type").and_then(Value::as_str) == Some("http")), Some(&json!({ "Stop": { "hooks": [{ "type": "http" }] } }))).unwrap();
+        let out = merge_hooks(
+            &mut NoCalls,
+            &settings,
+            &mut |_, h| Ok(h.get("type").and_then(Value::as_str) == Some("http")),
+            Some(&json!({ "Stop": { "hooks": [{ "type": "http" }] } })),
+        )
+        .unwrap();
         assert_eq!(json_text(&out), r#"{"model":"x","hooks":{"Stop":[{"hooks":[{"type":"command","command":"mine"}]},{"hooks":[{"type":"http"}]}]}}"#);
         assert_eq!(merge_hooks(&mut NoCalls, &json!({ "hooks": {} }), &mut |_, _| Ok(true), None).unwrap(), json!({}));
     }
 
     #[test]
     fn hooks_say_which_xenonet_theyre_for() {
-        let c = Connect::new(Options { port: Arg::num(47842.0), root: "/app".into(), demo: Arg::Bool(false), exec: "/x/node".into(), run_as_node: true, home: "/h".into(), claude_config_dir: None, codex_home: None, console_mcp: false, platform: "darwin".into(), instances: vec![Instance { id: "installed".into(), name: "XenoNet".into(), port: Arg::num(47840.0) }, Instance { id: "dev".into(), name: "XenoNet Dev".into(), port: Arg::num(47842.0) }] });
+        let c = Connect::new(Options {
+            port: Arg::num(47842.0),
+            root: "/app".into(),
+            demo: Arg::Bool(false),
+            exec: "/x/node".into(),
+            run_as_node: true,
+            home: "/h".into(),
+            claude_config_dir: None,
+            codex_home: None,
+            console_mcp: false,
+            platform: "darwin".into(),
+            instances: vec![
+                Instance { id: "installed".into(), name: "XenoNet".into(), port: Arg::num(47840.0) },
+                Instance { id: "dev".into(), name: "XenoNet Dev".into(), port: Arg::num(47842.0) },
+            ],
+        });
         assert_eq!(c.names(), &("xenonet-dev".to_string(), "xenonet-dev-console".to_string()));
         let start = &c.claude_hooks["SessionStart"]["hooks"][0];
         assert_eq!(start["command"], json!("XENONET_PORT=47842 ELECTRON_RUN_AS_NODE=1 '/x/node' '/app/cli/xenonet.js' hook claude"));

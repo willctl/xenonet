@@ -16,9 +16,9 @@ use xenonet_actors::muse::Muse;
 use xenonet_engine::peer::Calls;
 use xenonet_engine::sql::Arg;
 
-fn done<T>(env: &Env, r: xenonet_engine::peer::Result<T>) -> Result<T> {
-    let out = r.map_err(|t| rethrow(env, t));
-    settle(env);
+fn done<T>(env: Env, r: xenonet_engine::peer::Result<T>) -> Result<T> {
+    let out = r.map_err(|t| rethrow(&env, t));
+    settle(&env);
     out
 }
 
@@ -55,16 +55,16 @@ impl AppBundleCore {
         Json(self.inner.plist().map_or(Value::Null, |p| p.json()))
     }
     #[napi(js_name = "where")]
-    pub fn where_(&self, env: Env, me: Object) -> Result<Option<String>> {
-        done(&env, self.inner.where_(&mut SyncCalls::new(&env, &me)))
+    pub fn where_(&self, env: Env, me: Object<'_>) -> Result<Option<String>> {
+        done(env, self.inner.where_(&mut SyncCalls::new(&env, &me)))
     }
     #[napi]
-    pub fn installed(&self, env: Env, me: Object) -> Result<bool> {
-        done(&env, self.inner.installed(&mut SyncCalls::new(&env, &me)))
+    pub fn installed(&self, env: Env, me: Object<'_>) -> Result<bool> {
+        done(env, self.inner.installed(&mut SyncCalls::new(&env, &me)))
     }
     #[napi]
-    pub fn ours(&self, env: Env, me: Object) -> Result<bool> {
-        done(&env, self.inner.ours(&mut SyncCalls::new(&env, &me)))
+    pub fn ours(&self, env: Env, me: Object<'_>) -> Result<bool> {
+        done(env, self.inner.ours(&mut SyncCalls::new(&env, &me)))
     }
     #[napi]
     pub fn read(&self) -> Machine {
@@ -72,12 +72,12 @@ impl AppBundleCore {
         start(move |asker| a.read(&mut AskCalls(asker)).map(|p| crate::args::value_to_arg(&p.json())))
     }
     #[napi]
-    pub fn sources(&self, env: Env, me: Object, home: JsArg) -> Result<Json> {
+    pub fn sources(&self, env: Env, me: Object<'_>, home: JsArg) -> Result<Json> {
         let home = match home.0 {
             Arg::Text(h) => h,
             _ => String::new(),
         };
-        done(&env, self.inner.sources(&mut SyncCalls::new(&env, &me), &home)).map(Json)
+        done(env, self.inner.sources(&mut SyncCalls::new(&env, &me), &home)).map(Json)
     }
 }
 
@@ -95,13 +95,13 @@ impl MuseCore {
     #[napi]
     pub fn look(&self, at: f64) -> Machine {
         let m = self.inner.clone();
-        start(move |asker| m.look(&mut AskCalls(asker), at).map(|_| Arg::Undef))
+        start(move |asker| m.look(&mut AskCalls(asker), at).map(|()| Arg::Undef))
     }
     #[napi]
-    pub fn status(&self, env: Env, me: Object) -> Result<Json> {
+    pub fn status(&self, env: Env, me: Object<'_>) -> Result<Json> {
         let mut c = SyncCalls::new(&env, &me);
         let home = home_of(&mut c);
-        done(&env, self.inner.status(&mut c, &home)).map(Json)
+        done(env, self.inner.status(&mut c, &home)).map(Json)
     }
 }
 
@@ -119,7 +119,7 @@ impl GrokBotCore {
     #[napi]
     pub fn look(&self, at: f64) -> Machine {
         let g = self.inner.clone();
-        start(move |asker| g.look(&mut AskCalls(asker), at).map(|_| Arg::Undef))
+        start(move |asker| g.look(&mut AskCalls(asker), at).map(|()| Arg::Undef))
     }
     /// [[pid, entry]] tracked.
     #[napi]
@@ -131,19 +131,19 @@ impl GrokBotCore {
         self.inner.tracked().1
     }
     #[napi(js_name = "mayPoll")]
-    pub fn may_poll(&self, env: Env, me: Object) -> Result<bool> {
-        done(&env, self.inner.may_poll(&mut SyncCalls::new(&env, &me)))
+    pub fn may_poll(&self, env: Env, me: Object<'_>) -> Result<bool> {
+        done(env, self.inner.may_poll(&mut SyncCalls::new(&env, &me)))
     }
     #[napi]
     pub fn poll(&self, at: f64) -> Machine {
         let g = self.inner.clone();
-        start(move |asker| g.poll(&mut AskCalls(asker), at).map(|_| Arg::Undef))
+        start(move |asker| g.poll(&mut AskCalls(asker), at).map(|()| Arg::Undef))
     }
     #[napi]
-    pub fn status(&self, env: Env, me: Object) -> Result<Json> {
+    pub fn status(&self, env: Env, me: Object<'_>) -> Result<Json> {
         let mut c = SyncCalls::new(&env, &me);
         let home = home_of(&mut c);
-        done(&env, self.inner.status(&mut c, &home)).map(Json)
+        done(env, self.inner.status(&mut c, &home)).map(Json)
     }
 }
 
@@ -165,8 +165,9 @@ pub fn hermes_heartbeat_ms() -> f64 {
 /// A value as String(value ?? "") reads it.
 pub struct MaybeJsonText(pub String);
 
-impl napi::bindgen_prelude::FromNapiValue for MaybeJsonText {
-    unsafe fn from_napi_value(env: napi::sys::napi_env, v: napi::sys::napi_value) -> Result<Self> {
+impl FromNapiValue for MaybeJsonText {
+    unsafe fn from_napi_value(env: sys::napi_env, v: sys::napi_value) -> Result<Self> {
+        // SAFETY: env and `v` are the call's.
         let a = unsafe { crate::args::arg_of(env, v, 0)? };
         Ok(MaybeJsonText(match a {
             Arg::Undef | Arg::Null => String::new(),
@@ -175,16 +176,16 @@ impl napi::bindgen_prelude::FromNapiValue for MaybeJsonText {
     }
 }
 
-impl napi::bindgen_prelude::TypeName for MaybeJsonText {
+impl TypeName for MaybeJsonText {
     fn type_name() -> &'static str {
         "unknown"
     }
-    fn value_type() -> napi::ValueType {
-        napi::ValueType::Unknown
+    fn value_type() -> ValueType {
+        ValueType::Unknown
     }
 }
 
-impl napi::bindgen_prelude::ValidateNapiValue for MaybeJsonText {}
+impl ValidateNapiValue for MaybeJsonText {}
 
 #[napi]
 pub struct HermesCore {
@@ -200,21 +201,21 @@ impl HermesCore {
     #[napi]
     pub fn look(&self, at: f64) -> Machine {
         let h = self.inner.clone();
-        start(move |asker| h.look(&mut AskCalls(asker), at).map(|_| Arg::Undef))
+        start(move |asker| h.look(&mut AskCalls(asker), at).map(|()| Arg::Undef))
     }
     #[napi]
-    pub fn status(&self, env: Env, me: Object) -> Result<Json> {
-        done(&env, self.inner.status(&mut SyncCalls::new(&env, &me))).map(Json)
+    pub fn status(&self, env: Env, me: Object<'_>) -> Result<Json> {
+        done(env, self.inner.status(&mut SyncCalls::new(&env, &me))).map(Json)
     }
 }
 
 /// The observers' look together, through their twin's deps.
 #[napi(js_name = "observersLook")]
 pub fn observers_look() -> Machine {
-    start(move |asker| xenonet_actors::observers::look(&mut AskCalls(asker)).map(|_| Arg::Undef))
+    start(move |asker| xenonet_actors::observers::look(&mut AskCalls(asker)).map(|()| Arg::Undef))
 }
 
 #[napi(js_name = "observersStatus")]
-pub fn observers_status(env: Env, deps: Object) -> Result<Json> {
-    done(&env, xenonet_actors::observers::status(&mut SyncCalls::new(&env, &deps))).map(Json)
+pub fn observers_status(env: Env, deps: Object<'_>) -> Result<Json> {
+    done(env, xenonet_actors::observers::status(&mut SyncCalls::new(&env, &deps))).map(Json)
 }

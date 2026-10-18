@@ -15,14 +15,7 @@ pub(crate) fn is_term(c: char) -> bool {
 }
 
 fn at(chars: &[char], i: usize, lit: &str) -> bool {
-    let mut j = i;
-    for c in lit.chars() {
-        if chars.get(j) != Some(&c) {
-            return false;
-        }
-        j += 1;
-    }
-    true
+    lit.chars().enumerate().all(|(k, c)| chars.get(i + k) == Some(&c))
 }
 
 fn skip_space(chars: &[char], mut i: usize) -> usize {

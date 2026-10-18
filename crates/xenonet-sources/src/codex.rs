@@ -228,7 +228,7 @@ pub fn thread_to_session(t: Js<'_>, archived: bool) -> Result<Obj, TypeError> {
 // ---------- a thread's items ----------
 
 // What a message's content says: its parts' text, an image as "[image]".
-fn text_of(content: Js<'_>) -> Result<String, TypeError> {
+fn text_of(content: Js<'_>) -> String {
     match content {
         Some(Value::Array(parts)) => {
             let mut out = Vec::with_capacity(parts.len());
@@ -242,10 +242,10 @@ fn text_of(content: Js<'_>) -> Result<String, TypeError> {
                     }
                 });
             }
-            Ok(out.join("\n"))
+            out.join("\n")
         }
-        None | Some(Value::Null) => Ok(String::new()),
-        Some(v) => Ok(js_string(v)),
+        None | Some(Value::Null) => String::new(),
+        Some(v) => js_string(v),
     }
 }
 
@@ -299,7 +299,7 @@ pub fn normalize_item(entry: Js<'_>) -> Result<Obj, TypeError> {
     let ty = get("type")?;
     let b = base(F::of(get("id")?), F::or_null(ts), ty);
     Ok(match ty.and_then(Value::as_str) {
-        Some("userMessage") => with(b, vec![("role", F::s("user")), ("text", F::s(text_of(get("content")?)?))]),
+        Some("userMessage") => with(b, vec![("role", F::s("user")), ("text", F::s(text_of(get("content")?)))]),
         Some("agentMessage") => with(b, vec![("role", F::s("assistant")), ("text", F::V(nn(get("text")?).cloned().unwrap_or(Value::String(String::new()))))]),
         Some("reasoning") => {
             let mut parts = spread(get("summary")?, "it.summary")?;
@@ -337,7 +337,7 @@ pub fn normalize_item(entry: Js<'_>) -> Result<Obj, TypeError> {
                 Some(_) => return Err(TypeError("(it.changes ?? []).map is not a function".into())),
             };
             let mut lines = Vec::new();
-            for c in nn(changes).and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]) {
+            for c in nn(changes).and_then(Value::as_array).map_or(&[][..], Vec::as_slice) {
                 let kind = prop(Some(c), "kind")?;
                 let k = nn(opt_prop(kind, "type")).or(nn(kind)).map_or_else(String::new, js_string);
                 lines.push(format!("{k} {}", tpl(prop(Some(c), "path")?)));
@@ -381,8 +381,8 @@ fn rollout_item(it: &Value, ts: F, n: usize) -> Result<Obj, TypeError> {
     };
     let b = base(id, ts, ty);
     Ok(match ty.and_then(Value::as_str) {
-        Some("UserMessage") => with(b, vec![("role", F::s("user")), ("text", F::s(text_of(get("content")?)?))]),
-        Some("AgentMessage") => with(b, vec![("role", F::s("assistant")), ("text", F::s(text_of(get("content")?)?))]),
+        Some("UserMessage") => with(b, vec![("role", F::s("user")), ("text", F::s(text_of(get("content")?)))]),
+        Some("AgentMessage") => with(b, vec![("role", F::s("assistant")), ("text", F::s(text_of(get("content")?)))]),
         Some("Reasoning") => {
             let mut parts = spread(get("summary_text")?, "it.summary_text")?;
             parts.extend(spread(get("raw_content")?, "it.raw_content")?);
@@ -476,7 +476,7 @@ impl RolloutEntries {
                 Some(v) => F::V(v.clone()),
                 None => at,
             };
-            let entry = rollout_item(item.unwrap(), when, self.items.len())?;
+            let entry = rollout_item(item.expect("checked truthy above"), when, self.items.len())?;
             self.items.push(entry);
             self.older.clear();
             return Ok(());
@@ -527,7 +527,7 @@ pub(crate) fn slice_index(i: f64, len: usize) -> usize {
 }
 
 /// A page of `len` entries, newest first: the range to show, and the
-/// cursor further back. `cursor` ("rollout:<n>") counts the items already
+/// cursor further back. `cursor` ("`rollout:<n>`") counts the items already
 /// shown from the end.
 pub fn rollout_page(len: usize, cursor: Js<'_>, limit: f64) -> (usize, usize, Option<String>) {
     let c = match nn(cursor) {
@@ -656,7 +656,7 @@ pub fn other_state_dbs(names: &[String]) -> Vec<String> {
         .iter()
         .filter_map(|n| n.strip_prefix("state_")?.strip_suffix(".sqlite").map(str::to_string))
         .filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
-        .filter(|n| n.parse::<f64>().is_ok_and(|x| x != STATE_DB as f64))
+        .filter(|n| n.parse::<f64>().is_ok_and(|x| x != f64::from(STATE_DB)))
         .collect()
 }
 
@@ -855,7 +855,7 @@ mod tests {
 
     #[test]
     fn lists_other_state_dbs() {
-        let names: Vec<String> = ["state_5.sqlite", "state_6.sqlite", "state_05.sqlite", "state_x.sqlite", "notes"].iter().map(|s| s.to_string()).collect();
+        let names: Vec<String> = ["state_5.sqlite", "state_6.sqlite", "state_05.sqlite", "state_x.sqlite", "notes"].iter().map(ToString::to_string).collect();
         assert_eq!(other_state_dbs(&names), ["6"]);
     }
 }

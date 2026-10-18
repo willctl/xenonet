@@ -5,10 +5,9 @@
 
 use crate::args::JsArg;
 use crate::machine::{start, AskCalls, Machine};
-use crate::peer::{rethrow, settle, SyncCalls};
+use crate::peer::{rethrow, settle, throw_with, SyncCalls};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use std::ptr;
 use std::sync::Arc;
 use xenonet_engine::engine::{self as eng, Engine, Fail};
 use xenonet_engine::peer::{list, Thrown};
@@ -19,40 +18,30 @@ use xenonet_engine::sql::Arg;
 fn outcome(r: eng::Result<Arg>) -> std::result::Result<Arg, Thrown> {
     match r {
         Ok(v) => Ok(Arg::Obj(vec![("done".into(), v)])),
-        Err(Fail::Bad(message)) => Ok(Arg::Obj(vec![("refused".into(), Arg::Obj(vec![("message".into(), Arg::text(message)), ("status".into(), Arg::num(400.0)), ("code".into(), Arg::text("bad-request"))]))])),
+        Err(Fail::Bad(message)) => Ok(Arg::Obj(vec![(
+            "refused".into(),
+            Arg::Obj(vec![("message".into(), Arg::text(message)), ("status".into(), Arg::num(400.0)), ("code".into(), Arg::text("bad-request"))]),
+        )])),
         Err(Fail::Error(message)) => Err(Thrown::new(message)),
         Err(Fail::Thrown(t)) => Err(t),
     }
 }
 
-fn throw(env: &Env, f: Fail) -> Error {
+fn throw(env: Env, f: Fail) -> Error {
     match f {
-        Fail::Thrown(t) => rethrow(env, t),
-        Fail::Error(m) => rethrow(env, Thrown::new(m)),
+        Fail::Thrown(t) => rethrow(&env, t),
+        Fail::Error(m) => rethrow(&env, Thrown::new(m)),
         Fail::Bad(message) => {
-            settle(env);
-            let raw = env.raw();
-            unsafe {
-                let mut msg = ptr::null_mut();
-                sys::napi_create_string_utf8(raw, message.as_ptr().cast(), message.len() as isize, &mut msg);
-                let mut err = ptr::null_mut();
-                sys::napi_create_error(raw, ptr::null_mut(), msg, &mut err);
-                for (k, v) in [(c"status", serde_json::json!(400)), (c"code", serde_json::json!("bad-request"))] {
-                    if let Ok(js) = crate::js::to_js(raw, &v, 0) {
-                        sys::napi_set_named_property(raw, err, k.as_ptr(), js);
-                    }
-                }
-                sys::napi_throw(raw, err);
-            }
-            Error::new(Status::PendingException, message)
+            settle(&env);
+            throw_with(&env, &message, &[(c"status", serde_json::json!(400)), (c"code", serde_json::json!("bad-request"))])
         }
     }
 }
 
-fn done<T>(env: &Env, r: eng::Result<T>) -> Result<T> {
+fn done<T>(env: Env, r: eng::Result<T>) -> Result<T> {
     match r {
         Ok(v) => {
-            settle(env);
+            settle(&env);
             Ok(v)
         }
         Err(f) => Err(throw(env, f)),
@@ -171,23 +160,23 @@ impl EngineCore {
     }
 
     #[napi]
-    pub fn release(&self, env: Env, deps: Object, me: JsArg, paths: JsArg) -> Result<JsArg> {
-        done(&env, self.inner.release(&mut SyncCalls::new(&env, &deps), &me.0, &paths.0)).map(JsArg)
+    pub fn release(&self, env: Env, deps: Object<'_>, me: JsArg, paths: JsArg) -> Result<JsArg> {
+        done(env, self.inner.release(&mut SyncCalls::new(&env, &deps), &me.0, &paths.0)).map(JsArg)
     }
     #[napi(js_name = "setFocus")]
-    pub fn set_focus(&self, env: Env, deps: Object, me: JsArg, text: JsArg) -> Result<JsArg> {
-        done(&env, self.inner.set_focus(&mut SyncCalls::new(&env, &deps), &me.0, &text.0)).map(JsArg)
+    pub fn set_focus(&self, env: Env, deps: Object<'_>, me: JsArg, text: JsArg) -> Result<JsArg> {
+        done(env, self.inner.set_focus(&mut SyncCalls::new(&env, &deps), &me.0, &text.0)).map(JsArg)
     }
     #[napi]
-    pub fn touch(&self, env: Env, deps: Object, me: JsArg, ask: JsArg) -> Result<()> {
-        done(&env, self.inner.touch(&mut SyncCalls::new(&env, &deps), &me.0, &ask.0))
+    pub fn touch(&self, env: Env, deps: Object<'_>, me: JsArg, ask: JsArg) -> Result<()> {
+        done(env, self.inner.touch(&mut SyncCalls::new(&env, &deps), &me.0, &ask.0))
     }
     #[napi]
-    pub fn facts(&self, env: Env, deps: Object, a: JsArg) -> Result<JsArg> {
-        done(&env, self.inner.facts(&mut SyncCalls::new(&env, &deps), &a.0)).map(JsArg)
+    pub fn facts(&self, env: Env, deps: Object<'_>, a: JsArg) -> Result<JsArg> {
+        done(env, self.inner.facts(&mut SyncCalls::new(&env, &deps), &a.0)).map(JsArg)
     }
     #[napi(js_name = "visibleTo")]
-    pub fn visible_to(&self, env: Env, deps: Object, me: JsArg, a: JsArg) -> Result<bool> {
-        done(&env, self.inner.visible_to(&mut SyncCalls::new(&env, &deps), &me.0, &a.0))
+    pub fn visible_to(&self, env: Env, deps: Object<'_>, me: JsArg, a: JsArg) -> Result<bool> {
+        done(env, self.inner.visible_to(&mut SyncCalls::new(&env, &deps), &me.0, &a.0))
     }
 }

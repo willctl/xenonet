@@ -17,3 +17,6 @@ serde_json.workspace = true
 sha2.workspace = true
 xenonet-app.workspace = true
 xenonet-base.workspace = true
+
+[lints]
+workspace = true

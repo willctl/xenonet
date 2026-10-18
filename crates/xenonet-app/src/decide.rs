@@ -26,7 +26,7 @@ pub const TIMEOUT_MS: f64 = 30000.0;
 
 fn key_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(KEY).unwrap())
+    R.get_or_init(|| Regex::new(KEY).expect("a fixed pattern"))
 }
 
 /// A decision that couldn't be made, as an HTTP answer would say it.
@@ -122,7 +122,11 @@ pub fn answered(body: Option<&Value>, model: &str, kind: &str, questions: usize,
         v => xenonet_base::text::js_string(v),
     };
     let plural = if questions == 1 { "" } else { "s" };
-    let line = LogLine { level: "info", code: format!("decide.{kind}"), message: format!("{by} answered {questions} question{plural} in {} ms, ${}", xenonet_base::json::number_string(ms), to_fixed(cost, 5)) };
+    let line = LogLine {
+        level: "info",
+        code: format!("decide.{kind}"),
+        message: format!("{by} answered {questions} question{plural} in {} ms, ${}", xenonet_base::json::number_string(ms), to_fixed(cost, 5)),
+    };
     let mut out = Map::new();
     out.insert("answers".into(), field("answers").cloned().unwrap_or_else(|| json!({})));
     out.insert("model".into(), answered_by);

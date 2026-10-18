@@ -190,7 +190,7 @@ impl Scanner {
         Ok(out)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "each level of the walk passes on what scan was given: the run, the filesystem, the rules and the clock")]
     fn walk(&mut self, dir: &str, level: u32, out: &mut Vec<String>, run: &mut Run, fs: &mut dyn Fs, rules: &mut dyn Rules, now: &mut dyn FnMut() -> f64) -> Result<(), Halt> {
         if run.truncated.is_some() {
             return Ok(());
@@ -271,9 +271,9 @@ impl Scanner {
                 w.run.seen += 1;
             }
             let known = self.folders.get(dir);
-            if let Some(m) = st {
+            if let (Some(m), Some(k)) = (st, known) {
                 if Self::kept(known, m) {
-                    w.slots.push(Slot::Found(Some(Found { files: Vec::new(), subdirs: known.unwrap().subdirs.clone() })));
+                    w.slots.push(Slot::Found(Some(Found { files: Vec::new(), subdirs: k.subdirs.clone() })));
                     continue;
                 }
             }
@@ -442,7 +442,7 @@ mod tests {
         let mut s = Scanner::new("t", &root, Limits::default(), true, 0.0);
         // A clock far from the folders' mtimes: no read is racy.
         let mut now = || 1e15;
-        let mut rules = FnRules(|n: &str, _: &str| n.ends_with(".jsonl"), |_: &str, _: &str, _| true);
+        let mut rules = FnRules(|n: &str, _: &str| std::path::Path::new(n).extension().is_some_and(|e| e == "jsonl"), |_: &str, _: &str, _| true);
         let found = s.scan(&mut StdFs, &mut rules, &mut now).unwrap();
         assert_eq!(found.len(), 3);
         assert_eq!(s.scan(&mut StdFs, &mut rules, &mut now).unwrap().len(), 0, "nothing changed");

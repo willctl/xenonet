@@ -136,7 +136,8 @@ pub fn file_key(p: &str) -> String {
 }
 
 static ASKS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i-u)\b(?:want me to|should i|shall i|do you want|would you like|let me know|which (?:one|option|do you)|can you confirm|please confirm|your call)\b").unwrap()
+    Regex::new(r"(?i-u)\b(?:want me to|should i|shall i|do you want|would you like|let me know|which (?:one|option|do you)|can you confirm|please confirm|your call)\b")
+        .expect("a fixed pattern")
 });
 
 /// Whether the agent's last words before handing the turn back read like
@@ -175,8 +176,8 @@ pub fn looks_like_question(text: &str) -> bool {
 /// for an empty value or no home, else the value as a string with the
 /// home as "~".
 fn tilde_value(v: Option<&Value>, home: Option<&str>) -> Option<Value> {
-    match home.filter(|h| !h.is_empty()) {
-        Some(h) if truthy(v) => Some(Value::String(xenonet_base::paths::tilde(&js_string(v.unwrap()), h))),
+    match (home.filter(|h| !h.is_empty()), v.filter(|v| truthy(Some(v)))) {
+        (Some(h), Some(value)) => Some(Value::String(xenonet_base::paths::tilde(&js_string(value), h))),
         _ => v.cloned(),
     }
 }

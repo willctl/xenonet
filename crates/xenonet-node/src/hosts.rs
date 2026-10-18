@@ -1,5 +1,10 @@
 //! xenonet-hosts for the twins of core/hosts/.
 
+// On the module, not the items: napi-derive copies an item's attributes
+// onto the two-argument wrapper it generates for the export, and an
+// expectation there goes unfulfilled.
+#![expect(clippy::too_many_arguments, reason = "qualifyGraph takes the twin's arguments one by one, as the JS function did")]
+
 use crate::app::{answer, fs_error, s};
 use crate::js::{Json, Jv, MaybeJson};
 use napi::bindgen_prelude::*;
@@ -26,7 +31,9 @@ fn refused(r: std::result::Result<Value, config::Refused>) -> Jv {
 
 #[napi(js_name = "hostsFrameConstants")]
 pub fn hosts_frame_constants() -> Json {
-    Json(json!({ "protocol": frames::PROTOCOL, "maxFrame": frames::MAX_FRAME, "maxRequest": frames::MAX_REQUEST, "fromRelay": frames::FROM_RELAY, "fromConsole": frames::FROM_CONSOLE, "maxDepth": frames::MAX_DEPTH }))
+    Json(
+        json!({ "protocol": frames::PROTOCOL, "maxFrame": frames::MAX_FRAME, "maxRequest": frames::MAX_REQUEST, "fromRelay": frames::FROM_RELAY, "fromConsole": frames::FROM_CONSOLE, "maxDepth": frames::MAX_DEPTH }),
+    )
 }
 
 /// A stream of bytes split into lines, for the twin's lineSplitter.
@@ -69,7 +76,7 @@ pub fn hosts_encode(frame: Json) -> String {
 /// shallow() of a JS value, walked where it is: converting one nested
 /// deep enough would overflow the stack, which is what this guards.
 #[napi(js_name = "hostsShallow")]
-pub fn hosts_shallow(value: Unknown, max: f64) -> Result<bool> {
+pub fn hosts_shallow(value: Unknown<'_>, max: f64) -> Result<bool> {
     let max = if max.is_finite() && max >= 0.0 { max as usize } else { 0 };
     let mut stack = vec![(value, 0usize)];
     while let Some((v, depth)) = stack.pop() {
@@ -79,11 +86,12 @@ pub fn hosts_shallow(value: Unknown, max: f64) -> Result<bool> {
         if v.get_type()? != ValueType::Object {
             continue;
         }
-        let o: Object = unsafe { v.cast()? };
-        let children: Vec<Unknown> = if o.is_array()? {
-            (0..o.get_array_length()?).map(|i| o.get_element::<Unknown>(i)).collect::<Result<_>>()?
+        // SAFETY: `v` is an object, as get_type just said.
+        let o: Object<'_> = unsafe { v.cast()? };
+        let children: Vec<Unknown<'_>> = if o.is_array()? {
+            (0..o.get_array_length()?).map(|i| o.get_element::<Unknown<'_>>(i)).collect::<Result<_>>()?
         } else {
-            Object::keys(&o)?.iter().map(|k| o.get_named_property::<Unknown>(k)).collect::<Result<_>>()?
+            Object::keys(&o)?.iter().map(|k| o.get_named_property::<Unknown<'_>>(k)).collect::<Result<_>>()?
         };
         for x in children {
             if x.get_type()? == ValueType::Object {
@@ -171,7 +179,7 @@ impl HostsShapes {
 
     /// `parses(i, value)` says whether shape i's schema takes the value.
     #[napi]
-    pub fn declared(&self, at: u32, value: MaybeJson, parses: Function<FnArgs<(u32, Json)>, bool>) -> Result<Jv> {
+    pub fn declared(&self, at: u32, value: MaybeJson, parses: Function<'_, FnArgs<(u32, Json)>, bool>) -> Result<Jv> {
         let Some(v) = value.0 else { return Ok(Jv::Undef) };
         let mut failed = None;
         let out = declared::declared(&self.table, at as usize, &v, &mut |i, x| match parses.call((i as u32, Json(x.clone())).into()) {
@@ -210,7 +218,7 @@ pub fn hosts_parse_target(target: MaybeJson) -> Jv {
 
 /// `check(entry)`: what the schema says is wrong with it, or null.
 #[napi(js_name = "hostsEntry")]
-pub fn hosts_entry(input: MaybeJson, now: f64, check: Function<Json, Option<String>>) -> Result<Jv> {
+pub fn hosts_entry(input: MaybeJson, now: f64, check: Function<'_, Json, Option<String>>) -> Result<Jv> {
     let mut failed = None;
     let r = {
         let mut c = checker(&check, &mut failed);
@@ -220,7 +228,7 @@ pub fn hosts_entry(input: MaybeJson, now: f64, check: Function<Json, Option<Stri
 }
 
 #[napi(js_name = "hostsSshConfigText")]
-pub fn hosts_ssh_config_text(hosts: Json, check: Function<Json, Option<String>>) -> Result<String> {
+pub fn hosts_ssh_config_text(hosts: Json, check: Function<'_, Json, Option<String>>) -> Result<String> {
     let mut failed = None;
     let text = {
         let mut c = checker(&check, &mut failed);
@@ -236,7 +244,7 @@ pub fn hosts_version_of(doc: Json) -> Option<f64> {
 
 /// hosts.json as XenoNet keeps it: { self, hosts, dropped }.
 #[napi(js_name = "hostsPrepare")]
-pub fn hosts_prepare(doc: Json, now: f64, check: Function<Json, Option<String>>) -> Result<Json> {
+pub fn hosts_prepare(doc: Json, now: f64, check: Function<'_, Json, Option<String>>) -> Result<Json> {
     let mut failed = None;
     let (self_v, hosts, dropped) = {
         let mut c = checker(&check, &mut failed);
@@ -264,7 +272,9 @@ pub fn hosts_learn(entry: Json, key: MaybeJson, name: MaybeJson) -> Json {
 
 #[napi(js_name = "hostsLinkConstants")]
 pub fn hosts_link_constants() -> Json {
-    Json(json!({ "helloMs": link::HELLO_MS, "staleMs": link::STALE_MS, "backoff": { "min": link::BACKOFF_MIN, "max": link::BACKOFF_MAX }, "getMs": link::GET_MS, "sshOptions": link::SSH_OPTIONS }))
+    Json(
+        json!({ "helloMs": link::HELLO_MS, "staleMs": link::STALE_MS, "backoff": { "min": link::BACKOFF_MIN, "max": link::BACKOFF_MAX }, "getMs": link::GET_MS, "sshOptions": link::SSH_OPTIONS }),
+    )
 }
 
 fn options_of(o: &Value) -> link::Options {
@@ -294,7 +304,7 @@ pub fn hosts_shell_path(p: String) -> String {
 }
 
 #[napi(js_name = "hostsTrustCommand")]
-pub fn hosts_trust_command(id: String, ssh_config: Option<String>, tilde: Option<Function<String, String>>) -> String {
+pub fn hosts_trust_command(id: String, ssh_config: Option<String>, tilde: Option<Function<'_, String, String>>) -> String {
     let t = |p: &str| tilde.as_ref().and_then(|f| f.call(p.to_string()).ok()).unwrap_or_else(|| p.to_string());
     link::trust_command(&id, ssh_config.as_deref(), &t)
 }
@@ -312,7 +322,7 @@ fn why_jv(w: link::Why) -> Json {
 
 /// whyEnded({ entry, exitCode, signal, stderr, bye, spawnError, sshConfig }).
 #[napi(js_name = "hostsWhyEnded")]
-pub fn hosts_why_ended(args: Json, tilde: Option<Function<String, String>>) -> Json {
+pub fn hosts_why_ended(args: Json, tilde: Option<Function<'_, String, String>>) -> Json {
     let a = args.0;
     let t = |p: &str| tilde.as_ref().and_then(|f| f.call(p.to_string()).ok()).unwrap_or_else(|| p.to_string());
     let stderr = a.get("stderr").map(xenonet_base::text::js_string).unwrap_or_default();
@@ -362,7 +372,9 @@ fn effects(fx: Vec<link::Effect>) -> Jv {
     Jv::Arr(
         fx.into_iter()
             .map(|e| match e {
-                link::Effect::Spawn { run, file, args, env } => Jv::Obj(vec![("do", s("spawn")), ("run", Jv::Num(run as f64)), ("file", s(file)), ("args", Jv::Json(json!(args))), ("env", Jv::Json(Value::Object(env)))]),
+                link::Effect::Spawn { run, file, args, env } => {
+                    Jv::Obj(vec![("do", s("spawn")), ("run", Jv::Num(run as f64)), ("file", s(file)), ("args", Jv::Json(json!(args))), ("env", Jv::Json(Value::Object(env)))])
+                }
                 link::Effect::Write { run, text } => Jv::Obj(vec![("do", s("write")), ("run", Jv::Num(run as f64)), ("text", s(text))]),
                 link::Effect::Fail { run } => Jv::Obj(vec![("do", s("fail")), ("run", Jv::Num(run as f64))]),
                 link::Effect::Kill { run } => Jv::Obj(vec![("do", s("kill")), ("run", Jv::Num(run as f64))]),
@@ -371,7 +383,9 @@ fn effects(fx: Vec<link::Effect>) -> Jv {
                 link::Effect::Interval { name, ms } => Jv::Obj(vec![("do", s("interval")), ("name", s(name)), ("ms", Jv::Num(ms))]),
                 link::Effect::Clear { name } => Jv::Obj(vec![("do", s("clear")), ("name", s(name))]),
                 link::Effect::Resolve { id, value } => Jv::Obj(vec![("do", s("resolve")), ("id", Jv::Num(id as f64)), ("value", Jv::Json(value))]),
-                link::Effect::Reject { id, message, status } => Jv::Obj(vec![("do", s("reject")), ("id", Jv::Num(id as f64)), ("message", s(message)), ("status", Jv::Num(f64::from(status)))]),
+                link::Effect::Reject { id, message, status } => {
+                    Jv::Obj(vec![("do", s("reject")), ("id", Jv::Num(id as f64)), ("message", s(message)), ("status", Jv::Num(f64::from(status)))])
+                }
             })
             .collect(),
     )
@@ -400,13 +414,26 @@ impl HostsLink {
     pub fn new(entry: Json, options: Json, settings: Json, now: f64) -> Self {
         let st = settings.0;
         let n = |k: &str, d: f64| st.get(k).and_then(Value::as_f64).unwrap_or(d);
-        let backoff = (st.get("backoff").and_then(|b| b.get("min")).and_then(Value::as_f64).unwrap_or(link::BACKOFF_MIN), st.get("backoff").and_then(|b| b.get("max")).and_then(Value::as_f64).unwrap_or(link::BACKOFF_MAX));
+        let backoff = (
+            st.get("backoff").and_then(|b| b.get("min")).and_then(Value::as_f64).unwrap_or(link::BACKOFF_MIN),
+            st.get("backoff").and_then(|b| b.get("max")).and_then(Value::as_f64).unwrap_or(link::BACKOFF_MAX),
+        );
         let mut e = entry.0;
         if !e.is_object() {
             e = json!({});
         }
         HostsLink {
-            inner: link::Link::new(e, options_of(&options.0), now, xenonet_app::jsv::truthy(st.get("demoOnly")), xenonet_app::jsv::truthy(st.get("once")), n("helloMs", link::HELLO_MS), n("staleMs", link::STALE_MS), backoff, n("getMs", link::GET_MS)),
+            inner: link::Link::new(
+                e,
+                options_of(&options.0),
+                now,
+                xenonet_app::jsv::truthy(st.get("demoOnly")),
+                xenonet_app::jsv::truthy(st.get("once")),
+                n("helloMs", link::HELLO_MS),
+                n("staleMs", link::STALE_MS),
+                backoff,
+                n("getMs", link::GET_MS),
+            ),
         }
     }
 
@@ -451,7 +478,7 @@ impl HostsLink {
     }
 
     #[napi]
-    pub fn start(&mut self, now: f64, random: Function<(), f64>, check: Function<Json, Option<String>>, tilde: Option<Function<String, String>>) -> Result<Jv> {
+    pub fn start(&mut self, now: f64, random: Function<'_, (), f64>, check: Function<'_, Json, Option<String>>, tilde: Option<Function<'_, String, String>>) -> Result<Jv> {
         with_asks!(random, check, tilde, |a| self.inner.start(now, &mut a))
     }
 
@@ -466,12 +493,12 @@ impl HostsLink {
     }
 
     #[napi]
-    pub fn reconnect(&mut self, now: f64, random: Function<(), f64>, check: Function<Json, Option<String>>, tilde: Option<Function<String, String>>) -> Result<Jv> {
+    pub fn reconnect(&mut self, now: f64, random: Function<'_, (), f64>, check: Function<'_, Json, Option<String>>, tilde: Option<Function<'_, String, String>>) -> Result<Jv> {
         with_asks!(random, check, tilde, |a| self.inner.reconnect(now, &mut a))
     }
 
     #[napi]
-    pub fn retry(&mut self, now: f64, random: Function<(), f64>, check: Function<Json, Option<String>>, tilde: Option<Function<String, String>>) -> Result<Jv> {
+    pub fn retry(&mut self, now: f64, random: Function<'_, (), f64>, check: Function<'_, Json, Option<String>>, tilde: Option<Function<'_, String, String>>) -> Result<Jv> {
         with_asks!(random, check, tilde, |a| self.inner.retry(now, &mut a))
     }
 
@@ -490,7 +517,14 @@ impl HostsLink {
     }
 
     #[napi(js_name = "helloTimeout")]
-    pub fn hello_timeout(&mut self, run: f64, now: f64, random: Function<(), f64>, check: Function<Json, Option<String>>, tilde: Option<Function<String, String>>) -> Result<Jv> {
+    pub fn hello_timeout(
+        &mut self,
+        run: f64,
+        now: f64,
+        random: Function<'_, (), f64>,
+        check: Function<'_, Json, Option<String>>,
+        tilde: Option<Function<'_, String, String>>,
+    ) -> Result<Jv> {
         with_asks!(random, check, tilde, |a| self.inner.hello_timeout(run as u64, now, &mut a))
     }
 
@@ -515,16 +549,38 @@ impl HostsLink {
     }
 
     #[napi]
-    pub fn line(&mut self, run: f64, line: String, now: f64, random: Function<(), f64>, check: Function<Json, Option<String>>, tilde: Option<Function<String, String>>) -> Result<Jv> {
+    pub fn line(
+        &mut self,
+        run: f64,
+        line: String,
+        now: f64,
+        random: Function<'_, (), f64>,
+        check: Function<'_, Json, Option<String>>,
+        tilde: Option<Function<'_, String, String>>,
+    ) -> Result<Jv> {
         with_asks!(random, check, tilde, |a| self.inner.line(run as u64, &line, now, &mut a))
     }
 
     /// The run's program ended: { exitCode, signal, spawnError }.
     #[napi]
-    pub fn end(&mut self, run: f64, how: Json, now: f64, random: Function<(), f64>, check: Function<Json, Option<String>>, tilde: Option<Function<String, String>>) -> Result<Jv> {
+    pub fn end(
+        &mut self,
+        run: f64,
+        how: Json,
+        now: f64,
+        random: Function<'_, (), f64>,
+        check: Function<'_, Json, Option<String>>,
+        tilde: Option<Function<'_, String, String>>,
+    ) -> Result<Jv> {
         let h = how.0;
         let spawn_error = h.get("spawnError").filter(|v| !v.is_null()).map(xenonet_base::text::js_string);
-        let e = link::Ended { exit_code: h.get("exitCode").and_then(Value::as_f64), signal: h.get("signal").and_then(Value::as_str).map(String::from), stderr: "", bye: None, spawn_error: spawn_error.as_deref() };
+        let e = link::Ended {
+            exit_code: h.get("exitCode").and_then(Value::as_f64),
+            signal: h.get("signal").and_then(Value::as_str).map(String::from),
+            stderr: "",
+            bye: None,
+            spawn_error: spawn_error.as_deref(),
+        };
         with_asks!(random, check, tilde, |a| self.inner.end(run as u64, &e, now, &mut a))
     }
 }
@@ -538,7 +594,7 @@ struct JsSchemas<'a> {
 }
 
 impl merge::Schemas for JsSchemas<'_> {
-    fn clean(&mut self, kind: merge::Kind, value: &Value) -> Option<Value> {
+    fn clean(&mut self, kind: merge::Kind<'_>, value: &Value) -> Option<Value> {
         let name = match kind {
             merge::Kind::Node(k) => format!("node:{k}"),
             merge::Kind::Identity => "identity".into(),
@@ -603,11 +659,11 @@ pub struct HostsCleanOnce {
 impl HostsCleanOnce {
     #[napi(constructor)]
     pub fn new() -> Self {
-        HostsCleanOnce { inner: Default::default() }
+        HostsCleanOnce { inner: merge::CleanOnce::default() }
     }
 
     #[napi]
-    pub fn clean(&mut self, node: Json, clean: Function<FnArgs<(String, Json)>, Json>, activity: Function<FnArgs<(Json, f64, Json)>, Json>) -> Result<Json> {
+    pub fn clean(&mut self, node: Json, clean: Function<'_, FnArgs<(String, Json)>, Json>, activity: Function<'_, FnArgs<(Json, f64, Json)>, Json>) -> Result<Json> {
         let inner = &mut self.inner;
         with_schemas!(clean, activity, |sc| Json(inner.clean(&mut sc, &node.0).unwrap_or(Value::Null)))
     }
@@ -620,13 +676,23 @@ impl HostsCleanOnce {
 
 fn part_jv(p: merge::Part) -> Json {
     let host_node = p.nodes.first().cloned().unwrap_or(Value::Null);
-    Json(json!({ "hostNode": host_node, "nodes": p.nodes, "links": p.links, "relations": p.relations, "identities": p.identities, "stats": p.stats, "truncated": p.truncated, "dropped": p.dropped }))
+    Json(
+        json!({ "hostNode": host_node, "nodes": p.nodes, "links": p.links, "relations": p.relations, "identities": p.identities, "stats": p.stats, "truncated": p.truncated, "dropped": p.dropped }),
+    )
 }
 
 /// qualifyGraph; `once` is the host's cleanOnce memo, or null.
 #[napi(js_name = "hostsQualifyGraph")]
-#[allow(clippy::too_many_arguments)]
-pub fn hosts_qualify_graph(graph: MaybeJson, host: Json, layout: Json, now: f64, windows: Json, once: Option<&mut HostsCleanOnce>, clean: Function<FnArgs<(String, Json)>, Json>, activity: Function<FnArgs<(Json, f64, Json)>, Json>) -> Result<Json> {
+pub fn hosts_qualify_graph(
+    graph: MaybeJson,
+    host: Json,
+    layout: Json,
+    now: f64,
+    windows: Json,
+    once: Option<&mut HostsCleanOnce>,
+    clean: Function<'_, FnArgs<(String, Json)>, Json>,
+    activity: Function<'_, FnArgs<(Json, f64, Json)>, Json>,
+) -> Result<Json> {
     let g = graph.0.unwrap_or(Value::Null);
     let mut cleaner = match once {
         Some(o) => merge::Cleaner::Once(&mut o.inner),
@@ -642,7 +708,8 @@ pub fn hosts_same_repo(nodes: Json, cap: Option<f64>) -> Json {
 
 #[napi(js_name = "hostsMergeIdentities")]
 pub fn hosts_merge_identities(local: Json, remotes: Json, names: MaybeJson, hidden: MaybeJson) -> Json {
-    let remotes: Vec<(String, Vec<Value>)> = arr(Some(remotes.0)).into_iter().map(|r| (r.get("host").map(xenonet_base::text::js_string).unwrap_or_default(), arr(r.get("identities").cloned()))).collect();
+    let remotes: Vec<(String, Vec<Value>)> =
+        arr(Some(remotes.0)).into_iter().map(|r| (r.get("host").map(xenonet_base::text::js_string).unwrap_or_default(), arr(r.get("identities").cloned()))).collect();
     Json(Value::Array(merge::merge_identities(&arr(Some(local.0)), &remotes, &names.0.unwrap_or_else(|| json!({})), &hidden.0.unwrap_or_else(|| json!({})))))
 }
 
@@ -671,17 +738,35 @@ fn aliases_of(v: &Value) -> HashMap<String, String> {
 /// mergeGraph; `hosts` is [{ info, snapshot }], `memos` each host's
 /// cleanOnce in the same order (or null), and `opts` the rest.
 #[napi(js_name = "hostsMergeGraph")]
-pub fn hosts_merge_graph(local: Json, hosts: Json, mut memos: Vec<Option<&mut HostsCleanOnce>>, opts: Json, clean: Function<FnArgs<(String, Json)>, Json>, activity: Function<FnArgs<(Json, f64, Json)>, Json>) -> Result<Json> {
+pub fn hosts_merge_graph(
+    local: Json,
+    hosts: Json,
+    mut memos: Vec<Option<&mut HostsCleanOnce>>,
+    opts: Json,
+    clean: Function<'_, FnArgs<(String, Json)>, Json>,
+    activity: Function<'_, FnArgs<(Json, f64, Json)>, Json>,
+) -> Result<Json> {
     let o = opts.0;
     let get = |k: &str| o.get(k).cloned().unwrap_or_else(|| json!({}));
-    let mut ins: Vec<merge::HostIn> = Vec::new();
+    let mut ins: Vec<merge::HostIn<'_>> = Vec::new();
     for (i, h) in arr(Some(hosts.0)).into_iter().enumerate() {
-        let memo = memos.get_mut(i).and_then(|m| m.take()).map(|m| &mut m.inner);
+        let memo = memos.get_mut(i).and_then(Option::take).map(|m| &mut m.inner);
         ins.push(merge::HostIn { info: h.get("info").cloned().unwrap_or(Value::Null), snapshot: h.get("snapshot").cloned().unwrap_or(Value::Null), clean: memo });
     }
     let aliases = aliases_of(&o.get("aliases").cloned().unwrap_or(Value::Null));
     let windows = o.get("windows").cloned().unwrap_or_else(|| json!({ "activeWindowMs": 600000, "recentWindowMs": 86400000, "projectActiveMs": 3600000 }));
-    with_schemas!(clean, activity, |sc| Json(merge::merge_graph(&local.0, &mut ins, &get("layout"), o.get("now").and_then(Value::as_f64).unwrap_or(0.0), &windows, &o.get("self").cloned().unwrap_or(Value::Null), &get("names"), &get("hidden"), &aliases, &mut sc)))
+    with_schemas!(clean, activity, |sc| Json(merge::merge_graph(
+        &local.0,
+        &mut ins,
+        &get("layout"),
+        o.get("now").and_then(Value::as_f64).unwrap_or(0.0),
+        &windows,
+        &o.get("self").cloned().unwrap_or(Value::Null),
+        &get("names"),
+        &get("hidden"),
+        &aliases,
+        &mut sc
+    )))
 }
 
 /// mergeLimits: { limits, replaced }, the apps another machine's reading
@@ -697,7 +782,7 @@ fn pairs(hosts: Value) -> Vec<(Value, Value)> {
 }
 
 #[napi(js_name = "hostsMergeLive")]
-pub fn hosts_merge_live(local: Json, hosts: Json, clean: Function<FnArgs<(String, Json)>, Json>, activity: Function<FnArgs<(Json, f64, Json)>, Json>) -> Result<Json> {
+pub fn hosts_merge_live(local: Json, hosts: Json, clean: Function<'_, FnArgs<(String, Json)>, Json>, activity: Function<'_, FnArgs<(Json, f64, Json)>, Json>) -> Result<Json> {
     let hs = pairs(hosts.0);
     with_schemas!(clean, activity, |sc| {
         let (live, replaced) = merge::merge_live_with(&local.0, &hs, &mut sc);
@@ -706,28 +791,41 @@ pub fn hosts_merge_live(local: Json, hosts: Json, clean: Function<FnArgs<(String
 }
 
 #[napi(js_name = "hostsMergeSummary")]
-pub fn hosts_merge_summary(local: Json, hosts: Json, clean: Function<FnArgs<(String, Json)>, Json>, activity: Function<FnArgs<(Json, f64, Json)>, Json>) -> Result<Json> {
+pub fn hosts_merge_summary(local: Json, hosts: Json, clean: Function<'_, FnArgs<(String, Json)>, Json>, activity: Function<'_, FnArgs<(Json, f64, Json)>, Json>) -> Result<Json> {
     let hs = pairs(hosts.0);
     with_schemas!(clean, activity, |sc| Json(merge::merge_summary(&local.0, &hs, &mut sc)))
 }
 
 #[napi(js_name = "hostsQualifyLive")]
-pub fn hosts_qualify_live(live: MaybeJson, host: Json, clean: Function<FnArgs<(String, Json)>, Json>, activity: Function<FnArgs<(Json, f64, Json)>, Json>) -> Result<Json> {
+pub fn hosts_qualify_live(live: MaybeJson, host: Json, clean: Function<'_, FnArgs<(String, Json)>, Json>, activity: Function<'_, FnArgs<(Json, f64, Json)>, Json>) -> Result<Json> {
     let l = live.0.unwrap_or(Value::Null);
     with_schemas!(clean, activity, |sc| {
         let q = merge::qualify_live(&l, &host.0, &mut sc);
-        Json(json!({ "sessions": q.sessions, "collisions": q.collisions, "collab": q.collab, "series": q.series, "at": q.at, "tpm": q.tpm, "today": q.today, "total24h": q.total24h, "readings": q.readings }))
+        Json(
+            json!({ "sessions": q.sessions, "collisions": q.collisions, "collab": q.collab, "series": q.series, "at": q.at, "tpm": q.tpm, "today": q.today, "total24h": q.total24h, "readings": q.readings }),
+        )
     })
 }
 
 #[napi(js_name = "hostsQualifyEvent")]
-pub fn hosts_qualify_event(name: String, data: MaybeJson, host: Json, clean: Function<FnArgs<(String, Json)>, Json>, activity: Function<FnArgs<(Json, f64, Json)>, Json>) -> Result<Json> {
+pub fn hosts_qualify_event(
+    name: String,
+    data: MaybeJson,
+    host: Json,
+    clean: Function<'_, FnArgs<(String, Json)>, Json>,
+    activity: Function<'_, FnArgs<(Json, f64, Json)>, Json>,
+) -> Result<Json> {
     let d = data.0.unwrap_or(Value::Null);
     with_schemas!(clean, activity, |sc| Json(merge::qualify_event(&name, &d, &host.0, &mut sc).unwrap_or(Value::Null)))
 }
 
 #[napi(js_name = "hostsQualifyEngine")]
-pub fn hosts_qualify_engine(engine: MaybeJson, host: Json, clean: Function<FnArgs<(String, Json)>, Json>, activity: Function<FnArgs<(Json, f64, Json)>, Json>) -> Result<Json> {
+pub fn hosts_qualify_engine(
+    engine: MaybeJson,
+    host: Json,
+    clean: Function<'_, FnArgs<(String, Json)>, Json>,
+    activity: Function<'_, FnArgs<(Json, f64, Json)>, Json>,
+) -> Result<Json> {
     let e = engine.0.unwrap_or(Value::Null);
     with_schemas!(clean, activity, |sc| Json(merge::qualify_engine(&e, &host.0, &mut sc)))
 }
@@ -783,7 +881,9 @@ pub fn hosts_probe_snapshot(graph: Json, live: MaybeJson) -> Json {
 
 #[napi(js_name = "hostsRelayConstants")]
 pub fn hosts_relay_constants() -> Json {
-    Json(json!({ "pingMs": relay::PING_MS, "defaultSinceMs": relay::DEFAULT_SINCE_MS, "getTimeoutMs": relay::GET_TIMEOUT_MS, "maxGets": relay::MAX_GETS, "exit": { "done": relay::EXIT_DONE, "failed": relay::EXIT_FAILED, "noXenoNet": relay::EXIT_NO_XENONET, "xenonetGone": relay::EXIT_XENONET_GONE, "oldXenoNet": relay::EXIT_OLD_XENONET } }))
+    Json(
+        json!({ "pingMs": relay::PING_MS, "defaultSinceMs": relay::DEFAULT_SINCE_MS, "getTimeoutMs": relay::GET_TIMEOUT_MS, "maxGets": relay::MAX_GETS, "exit": { "done": relay::EXIT_DONE, "failed": relay::EXIT_FAILED, "noXenoNet": relay::EXIT_NO_XENONET, "xenonetGone": relay::EXIT_XENONET_GONE, "oldXenoNet": relay::EXIT_OLD_XENONET } }),
+    )
 }
 
 #[napi(js_name = "hostsParseSince")]
@@ -856,8 +956,15 @@ fn copier<'a>(scrub: Option<&'a HostsScrubber>, copy: Option<&'a Function<'a, Js
 
 /// shapeGraph: { graph, dropped }.
 #[napi(js_name = "hostsShapeGraph")]
-#[allow(clippy::too_many_arguments)]
-pub fn hosts_shape_graph(input: Json, since_ms: Option<f64>, now: f64, aliases: MaybeJson, detail: bool, scrub: Option<&HostsScrubber>, copy: Option<Function<Json, Json>>) -> Result<Json> {
+pub fn hosts_shape_graph(
+    input: Json,
+    since_ms: Option<f64>,
+    now: f64,
+    aliases: MaybeJson,
+    detail: bool,
+    scrub: Option<&HostsScrubber>,
+    copy: Option<Function<'_, Json, Json>>,
+) -> Result<Json> {
     let mut failed = None;
     let (g, dropped) = {
         let mut c = copier(scrub, copy.as_ref(), &mut failed);
@@ -869,7 +976,7 @@ pub fn hosts_shape_graph(input: Json, since_ms: Option<f64>, now: f64, aliases: 
 }
 
 #[napi(js_name = "hostsShapeLive")]
-pub fn hosts_shape_live(input: Json, dropped: Vec<String>, detail: bool, scrub: Option<&HostsScrubber>, copy: Option<Function<Json, Json>>) -> Result<Json> {
+pub fn hosts_shape_live(input: Json, dropped: Vec<String>, detail: bool, scrub: Option<&HostsScrubber>, copy: Option<Function<'_, Json, Json>>) -> Result<Json> {
     let d: HashSet<String> = dropped.into_iter().collect();
     let mut failed = None;
     let out = {
@@ -880,7 +987,7 @@ pub fn hosts_shape_live(input: Json, dropped: Vec<String>, detail: bool, scrub: 
 }
 
 #[napi(js_name = "hostsShapeEngine")]
-pub fn hosts_shape_engine(input: MaybeJson, detail: bool, scrub: Option<&HostsScrubber>, copy: Option<Function<Json, Json>>) -> Result<Json> {
+pub fn hosts_shape_engine(input: MaybeJson, detail: bool, scrub: Option<&HostsScrubber>, copy: Option<Function<'_, Json, Json>>) -> Result<Json> {
     let mut failed = None;
     let out = {
         let mut c = copier(scrub, copy.as_ref(), &mut failed);
@@ -890,7 +997,7 @@ pub fn hosts_shape_engine(input: MaybeJson, detail: bool, scrub: Option<&HostsSc
 }
 
 #[napi(js_name = "hostsShapeEvent")]
-pub fn hosts_shape_event(name: String, data: MaybeJson, dropped: Vec<String>, detail: bool, scrub: Option<&HostsScrubber>, copy: Option<Function<Json, Json>>) -> Result<Json> {
+pub fn hosts_shape_event(name: String, data: MaybeJson, dropped: Vec<String>, detail: bool, scrub: Option<&HostsScrubber>, copy: Option<Function<'_, Json, Json>>) -> Result<Json> {
     let d: HashSet<String> = dropped.into_iter().collect();
     let mut failed = None;
     let out = {
@@ -933,7 +1040,7 @@ pub struct HostsOutbox {
 impl HostsOutbox {
     #[napi(constructor)]
     pub fn new() -> Self {
-        HostsOutbox { inner: Default::default() }
+        HostsOutbox { inner: relay::Outbox::default() }
     }
 
     /// The text to write now, or null while the output is busy.

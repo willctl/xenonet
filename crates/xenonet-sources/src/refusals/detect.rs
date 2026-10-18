@@ -286,7 +286,7 @@ fn tpl(v: Option<&Value>) -> String {
 pub fn key_of(sig: &Value, session_id: &str) -> String {
     let get = |k: &str| opt_prop(Some(sig), k);
     let nn = |k: &str| get(k).filter(|v| !v.is_null());
-    let id = nn("requestId").or(nn("messageId")).or(nn("uuid")).map(js_string).unwrap_or_else(|| format!("{session_id}@{}", tpl(get("at"))));
+    let id = nn("requestId").or(nn("messageId")).or(nn("uuid")).map_or_else(|| format!("{session_id}@{}", tpl(get("at"))), js_string);
     format!("{}|{}|{id}", tpl(get("provider")), tpl(get("kind")))
 }
 

@@ -63,7 +63,7 @@ fn retry_of(code: &str) -> Option<f64> {
     }
 }
 
-/// REQUEST_ID in core/schema/assistant.js: r_<uuid>.
+/// REQUEST_ID in core/schema/assistant.js: `r_<uuid>`.
 pub fn is_request_id(s: &str) -> bool {
     let Some(u) = s.strip_prefix("r_") else { return false };
     let b = u.as_bytes();
@@ -275,7 +275,7 @@ impl Ctx<'_> {
     }
 }
 
-fn status(c: &Ctx) -> Result<Out, Failure> {
+fn status(c: &Ctx<'_>) -> Out {
     let policy = c.policy;
     let f = p::freshness_of(c.view, c.t, &p::all_sources());
     let or_null = |k: &str| policy.get(k).filter(|v| !v.is_null()).cloned().unwrap_or(Value::Null);
@@ -294,10 +294,10 @@ fn status(c: &Ctx) -> Result<Out, Failure> {
         "transport_scope": policy.get("transportScope"),
         "audience_label": or_null("audienceLabel"),
     });
-    Ok(Out { freshness: f, data, targets: vec![] })
+    Out { freshness: f, data, targets: vec![] }
 }
 
-fn projects(c: &Ctx) -> Result<Out, Failure> {
+fn projects(c: &Ctx<'_>) -> Result<Out, Failure> {
     let policy = c.policy;
     let lb = policy.get("lookbackMs").filter(|v| !v.is_null()).map_or(p::WINDOW_MS, |v| xenonet_base::text::js_number(Some(v)));
     let window_start = c.t - if lb.is_nan() { f64::NAN } else { p::WINDOW_MS.min(lb) };
@@ -349,7 +349,7 @@ fn projects(c: &Ctx) -> Result<Out, Failure> {
     Ok(Out { freshness: f, data: json!({ "window_start": iso(window_start)?, "projects": shown, "next_cursor": c.next(next, "projects", &filters) }), targets: vec![] })
 }
 
-fn sessions(c: &Ctx) -> Result<Out, Failure> {
+fn sessions(c: &Ctx<'_>) -> Result<Out, Failure> {
     let policy = c.policy;
     let project = c.own_project()?;
     let lookback = p::lookback(policy);
@@ -376,26 +376,31 @@ fn sessions(c: &Ctx) -> Result<Out, Failure> {
     }
     let filters = json!({ "project": project, "statuses": sorted_statuses, "since": c.args.get("updated_since").filter(|v| !v.is_null()).cloned().unwrap_or(Value::Null) });
     let after = c.after("sessions", &filters)?;
-    let upd = |v: &Visible| match v.s.get("updatedAt") {
+    let upd = |v: &Visible<'_>| match v.s.get("updatedAt") {
         None | Some(Value::Null) => 0.0,
         other => xenonet_base::text::js_number(other),
     };
-    let mut list: Vec<Visible> = p::visible_sessions(c.view, policy, c.t)
+    let mut list: Vec<Visible<'_>> = p::visible_sessions(c.view, policy, c.t)
         .into_iter()
-        .filter(|v| (!truthy(Some(&project)) || strict_eq(Some(&v.project), Some(&project))) && statuses.as_ref().is_none_or(|s| s.iter().any(|x| x == v.status)) && v.updated >= since)
+        .filter(|v| {
+            (!truthy(Some(&project)) || strict_eq(Some(&v.project), Some(&project))) && statuses.as_ref().is_none_or(|s| s.iter().any(|x| x == v.status)) && v.updated >= since
+        })
         .collect();
     list.sort_by(|a, b| {
         let d = upd(b) - upd(a);
-        if d != 0.0 && !d.is_nan() {
-            return d.partial_cmp(&0.0).unwrap();
+        if let Some(o) = d.partial_cmp(&0.0).filter(|o| o.is_ne()) {
+            return o;
         }
         let (ia, ib) = (a.s.get("id").map(js_string).unwrap_or_default(), b.s.get("id").map(js_string).unwrap_or_default());
         ia.encode_utf16().cmp(ib.encode_utf16())
     });
-    let keyed: Vec<(Visible, Vec<Value>)> = list.into_iter().map(|v| {
-        let k = vec![xenonet_base::json::number(-upd(&v)), v.s.get("id").cloned().unwrap_or(Value::Null)];
-        (v, k)
-    }).collect();
+    let keyed: Vec<(Visible<'_>, Vec<Value>)> = list
+        .into_iter()
+        .map(|v| {
+            let k = vec![xenonet_base::json::number(-upd(&v)), v.s.get("id").cloned().unwrap_or(Value::Null)];
+            (v, k)
+        })
+        .collect();
     let (shown, next) = page(keyed, after.as_ref(), c.limit);
     let f = p::freshness_of(c.view, c.t, &p::all_sources());
     Ok(Out {
@@ -405,7 +410,7 @@ fn sessions(c: &Ctx) -> Result<Out, Failure> {
     })
 }
 
-fn attention(c: &Ctx, id_key: &[u8]) -> Result<Out, Failure> {
+fn attention(c: &Ctx<'_>, id_key: &[u8]) -> Result<Out, Failure> {
     let project = c.own_project()?;
     let kinds: Option<Vec<String>> = c.args.get("kinds").filter(|v| truthy(Some(v))).map(|k| {
         let mut list: Vec<String> = Vec::new();
@@ -427,7 +432,10 @@ fn attention(c: &Ctx, id_key: &[u8]) -> Result<Out, Failure> {
     let index = |k: &str| c.cfg.attention_kinds.iter().position(|x| x == k).map_or(-1.0, |i| i as f64);
     let mut items: Vec<(Value, Vec<Value>)> = p::attention_items(c.view, c.policy, c.t, &id_of)
         .into_iter()
-        .filter(|i| (!truthy(Some(&project)) || strict_eq(i.get("project_id"), Some(&project))) && kinds.as_ref().is_none_or(|k| k.iter().any(|x| Some(x.as_str()) == i.get("kind").and_then(Value::as_str))))
+        .filter(|i| {
+            (!truthy(Some(&project)) || strict_eq(i.get("project_id"), Some(&project)))
+                && kinds.as_ref().is_none_or(|k| k.iter().any(|x| Some(x.as_str()) == i.get("kind").and_then(Value::as_str)))
+        })
         .map(|i| {
             let k = vec![json!(index(i.get("kind").and_then(Value::as_str).unwrap_or(""))), i.get("attention_id").cloned().unwrap_or(Value::Null)];
             (i, k)
@@ -435,8 +443,8 @@ fn attention(c: &Ctx, id_key: &[u8]) -> Result<Out, Failure> {
         .collect();
     items.sort_by(|x, y| {
         let d = x.1[0].as_f64().unwrap_or(0.0) - y.1[0].as_f64().unwrap_or(0.0);
-        if d != 0.0 {
-            return d.partial_cmp(&0.0).unwrap();
+        if let Some(o) = d.partial_cmp(&0.0).filter(|o| o.is_ne()) {
+            return o;
         }
         xenonet_app::jstext::locale_compare(&js_string(&x.1[1]), &js_string(&y.1[1]))
     });
@@ -445,7 +453,7 @@ fn attention(c: &Ctx, id_key: &[u8]) -> Result<Out, Failure> {
     Ok(Out { freshness: f, data: json!({ "items": shown, "next_cursor": c.next(next, "attention", &filters) }), targets: c.targets_of(&project) })
 }
 
-fn actors(c: &Ctx) -> Result<Out, Failure> {
+fn actors(c: &Ctx<'_>) -> Result<Out, Failure> {
     let project = c.own_project()?;
     let filters = json!({ "project": project });
     let after = c.after("actors", &filters)?;
@@ -453,14 +461,14 @@ fn actors(c: &Ctx) -> Result<Out, Failure> {
     let mut list: Vec<(Value, Vec<Value>)> = p::actor_summaries(c.view, c.policy, c.t, Some(&project).filter(|p| !p.is_null()))
         .into_iter()
         .map(|a| {
-            let k = vec![json!(if strict_eq(a.get("actor_id"), me) { 0 } else { 1 }), a.get("actor_id").cloned().unwrap_or(Value::Null)];
+            let k = vec![json!(i32::from(!strict_eq(a.get("actor_id"), me))), a.get("actor_id").cloned().unwrap_or(Value::Null)];
             (a, k)
         })
         .collect();
     list.sort_by(|x, y| {
         let d = x.1[0].as_f64().unwrap_or(0.0) - y.1[0].as_f64().unwrap_or(0.0);
-        if d != 0.0 {
-            return d.partial_cmp(&0.0).unwrap();
+        if let Some(o) = d.partial_cmp(&0.0).filter(|o| o.is_ne()) {
+            return o;
         }
         xenonet_app::jstext::locale_compare(&js_string(&x.1[1]), &js_string(&y.1[1]))
     });
@@ -535,6 +543,7 @@ async fn view_for(io: &Io, policy0: &Value) -> Result<(Value, Value), Failure> {
 
 /// One operation, within its limits, as an envelope, shortened until it
 /// fits: { envelope, bytes, targets, reach, projects }.
+#[expect(clippy::too_many_arguments, reason = "the JS's answer and its request, which xenonet-node passes one by one")]
 pub async fn answer(io: Io, cfg: Rc<Config>, cursors: Rc<Cursors>, op: String, tool: String, args: Value, policy0: Value, request_id: Value) -> Result<Value, Failure> {
     let (view, policy) = view_for(&io, &policy0).await?;
     let fixture_view = truthy(view.get("fixture"));
@@ -552,7 +561,7 @@ pub async fn answer(io: Io, cfg: Rc<Config>, cursors: Rc<Cursors>, op: String, t
         let ct = io.ask(json!({ "op": "cursorNow" })).await.map(|v| xenonet_base::text::js_number(Some(&v))).map_err(|_| Failure::Rethrow)?;
         let c = Ctx { cfg: &cfg, cursors: &cursors, view: &view, policy: &policy, t, ct, args: &args, limit };
         let out = match op.as_str() {
-            "status" => status(&c)?,
+            "status" => status(&c),
             "projects" => projects(&c)?,
             "sessions" => sessions(&c)?,
             "attention" => attention(&c, &id_key)?,

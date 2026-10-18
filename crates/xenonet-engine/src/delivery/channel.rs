@@ -52,7 +52,7 @@ impl Channels {
         if wait.is_nan() {
             return f64::NAN;
         }
-        wait.max(0.0).min(60e3)
+        wait.clamp(0.0, 60e3)
     }
 
     /// Hands an item to the session's poll, or keeps it for the next one.

@@ -7,12 +7,13 @@
 //! shaped like C, a Greek omicron, a Latin alpha, the digit 0) into the
 //! Latin ones they pass for. A name keeps to one script, as Unicode's highly
 //! restrictive profile has it (UTS #39), and holds nothing that draws as
-//! nothing. A slug is the actor's id (actor:<slug>): some are XenoNet's own
+//! nothing. A slug is the actor's id (`actor:<slug>`): some are XenoNet's own
 //! words or its routes', and a product's slug is that product's alone.
 
 use crate::detail::looks_like_key;
 use crate::tokens::hex;
 use regex::Regex;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -20,12 +21,11 @@ use unicode_normalization::UnicodeNormalization;
 use xenonet_base::ids::is_actor_slug;
 use xenonet_base::log::js_slice;
 use xenonet_base::text::js_trim;
-use serde_json::Value;
 use xenonet_engine::js::{template, truthy};
 use xenonet_engine::products::{product_of, product_of_slug};
 
 fn re(p: &str) -> Regex {
-    Regex::new(p).unwrap_or_else(|e| panic!("{p}: {e}"))
+    Regex::new(p).expect("a fixed pattern")
 }
 
 fn letters_or_digits() -> &'static Regex {
@@ -84,11 +84,10 @@ fn lookalikes() -> &'static HashMap<char, &'static str> {
             // capital.
             for &u in *cherokee {
                 cps.push(u);
-                let c = char::from_u32(u).unwrap();
-                cps.push(c.to_lowercase().next().map_or(u, u32::from));
+                cps.push(char::from_u32(u).and_then(|c| c.to_lowercase().next()).map_or(u, u32::from));
             }
-            for cp in cps {
-                m.insert(char::from_u32(cp).unwrap(), *to);
+            for c in cps.into_iter().filter_map(char::from_u32) {
+                m.insert(c, *to);
             }
         }
         m
@@ -107,8 +106,25 @@ pub fn reads_as(s: &str) -> Vec<String> {
     let decomposed: String = s.nfkc().collect::<String>().nfd().collect();
     let bare = marks().replace_all(&decomposed, "");
     let map = lookalikes();
-    let letters: Vec<String> = bare.chars().map(|c| map.get(&c).map_or_else(|| c.to_string(), |s| s.to_string())).collect();
-    let key = |ell: bool| name_key(&letters.iter().map(|c| if c == "I" { if ell { "l" } else { "i" } } else { c.as_str() }).collect::<String>());
+    let letters: Vec<String> = bare.chars().map(|c| map.get(&c).map_or_else(|| c.to_string(), ToString::to_string)).collect();
+    let key = |ell: bool| {
+        name_key(
+            &letters
+                .iter()
+                .map(|c| {
+                    if c == "I" {
+                        if ell {
+                            "l"
+                        } else {
+                            "i"
+                        }
+                    } else {
+                        c.as_str()
+                    }
+                })
+                .collect::<String>(),
+        )
+    };
     let (a, b) = (key(false), key(true));
     if a == b {
         vec![a]
@@ -122,8 +138,54 @@ pub fn reads_as(s: &str) -> Vec<String> {
 // of those, as UTS #39's highly restrictive profile allows. A letter of a
 // script not listed counts as a script of its own.
 const SCRIPTS: [&str; 48] = [
-    "Latin", "Greek", "Cyrillic", "Armenian", "Georgian", "Cherokee", "Coptic", "Glagolitic", "Lisu", "Hebrew", "Arabic", "Syriac", "Thaana", "Nko", "Devanagari", "Bengali", "Gurmukhi", "Gujarati", "Oriya", "Tamil", "Telugu", "Kannada", "Malayalam", "Sinhala", "Thai", "Lao", "Tibetan", "Myanmar", "Khmer",
-    "Mongolian", "Ethiopic", "Canadian_Aboriginal", "Tifinagh", "Vai", "Yi", "Javanese", "Balinese", "Sundanese", "Adlam", "Osage", "Deseret", "Runic", "Ogham", "Hangul", "Hiragana", "Katakana", "Bopomofo", "Han",
+    "Latin",
+    "Greek",
+    "Cyrillic",
+    "Armenian",
+    "Georgian",
+    "Cherokee",
+    "Coptic",
+    "Glagolitic",
+    "Lisu",
+    "Hebrew",
+    "Arabic",
+    "Syriac",
+    "Thaana",
+    "Nko",
+    "Devanagari",
+    "Bengali",
+    "Gurmukhi",
+    "Gujarati",
+    "Oriya",
+    "Tamil",
+    "Telugu",
+    "Kannada",
+    "Malayalam",
+    "Sinhala",
+    "Thai",
+    "Lao",
+    "Tibetan",
+    "Myanmar",
+    "Khmer",
+    "Mongolian",
+    "Ethiopic",
+    "Canadian_Aboriginal",
+    "Tifinagh",
+    "Vai",
+    "Yi",
+    "Javanese",
+    "Balinese",
+    "Sundanese",
+    "Adlam",
+    "Osage",
+    "Deseret",
+    "Runic",
+    "Ogham",
+    "Hangul",
+    "Hiragana",
+    "Katakana",
+    "Bopomofo",
+    "Han",
 ];
 const TOGETHER: [&[&str]; 3] = [&["Latin", "Han", "Hiragana", "Katakana"], &["Latin", "Han", "Bopomofo"], &["Latin", "Han", "Hangul"]];
 
@@ -168,7 +230,17 @@ const APPS: [(&str, &str); 4] = [("claude", "Claude"), ("claudecode", "Claude Co
 const PRODUCT_NAMES: [(&str, &str); 5] = [("hermes", "hermes-agent"), ("hermesagent", "hermes-agent"), ("grokbot", "grok-bot"), ("muse", "muse"), ("dots", "dots")];
 // The makers of those apps and products, and XenoNet's: Anysphere (Cursor)
 // builds and runs Grok Bot for SpaceXAI.
-const MAKERS: [(&str, &str); 9] = [("anthropic", "Anthropic"), ("openai", "OpenAI"), ("nousresearch", "Nous Research"), ("spacexai", "SpaceXAI"), ("xai", "xAI"), ("anysphere", "Anysphere"), ("cursor", "Cursor"), ("meta", "Meta"), ("willctl", "willctl")];
+const MAKERS: [(&str, &str); 9] = [
+    ("anthropic", "Anthropic"),
+    ("openai", "OpenAI"),
+    ("nousresearch", "Nous Research"),
+    ("spacexai", "SpaceXAI"),
+    ("xai", "xAI"),
+    ("anysphere", "Anysphere"),
+    ("cursor", "Cursor"),
+    ("meta", "Meta"),
+    ("willctl", "willctl"),
+];
 
 fn lookup<'a>(table: &'a [(&'a str, &'a str)], key: &str) -> Option<&'a str> {
     table.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)
@@ -248,9 +320,31 @@ pub fn product_word_refusal(text: &str, what: &str) -> Option<String> {
 }
 
 /// Slugs that are XenoNet's own words, or its routes' (/api/actors/me…): a
-/// route is matched before /api/actors/<slug>, so an actor with its word
+/// route is matched before `/api/actors/<slug>`, so an actor with its word
 /// for a slug couldn't be read there.
-pub const RESERVED_SLUGS: [&str; 21] = ["you", "me", "user", "owner", "xenonet", "system", "admin", "root", "claude", "codex", "chatgpt", "anthropic", "openai", "events", "requests", "register", "heartbeat", "targets", "observers", "tokens", "gateway"];
+pub const RESERVED_SLUGS: [&str; 21] = [
+    "you",
+    "me",
+    "user",
+    "owner",
+    "xenonet",
+    "system",
+    "admin",
+    "root",
+    "claude",
+    "codex",
+    "chatgpt",
+    "anthropic",
+    "openai",
+    "events",
+    "requests",
+    "register",
+    "heartbeat",
+    "targets",
+    "observers",
+    "tokens",
+    "gateway",
+];
 
 /// A slug made from a name: lowercase, accents dropped, other characters
 /// made dashes (one for a run of them, none at the ends), cut to 32.
@@ -312,7 +406,7 @@ pub fn suggest_slug<E>(base: &str, product: Option<&str>, taken: &mut dyn FnMut(
 }
 
 /// The actor of a Hermes profile: hermes for the default one, else
-/// hermes-<profile> when the profile's name is a slug as it stands (work),
+/// `hermes-<profile>` when the profile's name is a slug as it stands (work),
 /// and otherwise, or when it's cut to 32, with four hex digits of its name
 /// added (Work, my_work, 工作, a long name). Names that differ only in
 /// case or punctuation, or that have no letters of a-z, would otherwise

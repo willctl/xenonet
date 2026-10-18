@@ -148,13 +148,18 @@ fn obj(fields: Vec<(&str, Value)>) -> Value {
 
 /// A JS object built in order, with `Some` for each field that's there.
 fn obj_opt(fields: Vec<(&str, Option<Value>)>) -> Value {
+    Value::Object(map_opt(fields))
+}
+
+/// obj_opt's fields, as a map.
+fn map_opt(fields: Vec<(&str, Option<Value>)>) -> Map<String, Value> {
     let mut m = Map::new();
     for (k, v) in fields {
         if let Some(v) = v {
             m.insert(k.into(), v);
         }
     }
-    Value::Object(m)
+    m
 }
 
 fn field<'a>(f: &'a Fields, key: &str) -> Option<&'a Value> {
@@ -183,10 +188,12 @@ fn ev(fields: Vec<(&str, Option<Value>)>) -> Fields {
     fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
 }
 
+#[expect(clippy::unnecessary_wraps, reason = "a field of obj_opt or ev, which takes each as an Option, that's always there")]
 fn sv(v: &str) -> Option<Value> {
     Some(Value::String(v.into()))
 }
 
+#[expect(clippy::unnecessary_wraps, reason = "a field of obj_opt or ev, which takes each as an Option, that's always there")]
 fn nv(v: f64) -> Option<Value> {
     Some(number(v))
 }
@@ -246,8 +253,12 @@ fn sset<V>(m: &mut KMap<V>, key: &str, v: V) {
     m.insert(&str_tag(key), (Some(Value::String(key.into())), v));
 }
 
-fn first_tag<V>(m: &KMap<V>) -> Option<String> {
-    m.keys().next().map(String::from)
+/// Takes out the oldest key, as JS's `m.delete(m.keys().next().value)`.
+fn drop_first<V>(m: &mut KMap<V>) {
+    let first = m.keys().next().map(String::from);
+    if let Some(first) = first {
+        m.remove(&first);
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -264,6 +275,7 @@ struct Spend {
 #[derive(Clone, Debug)]
 struct Inflight {
     fields: Map<String, Value>,
+    #[expect(clippy::option_option, reason = "the JS field it stands for can be missing, null or a record, which the snapshot keeps apart")]
     tool: Option<Option<(u64, Map<String, Value>)>>,
 }
 
@@ -443,13 +455,12 @@ impl Session {
         if !self.spend.contains(&tag) {
             sset(&mut self.spend, &day, Spend::default());
             while self.spend.len() > 2 {
-                let first = first_tag(&self.spend).unwrap();
-                self.spend.remove(&first);
+                drop_first(&mut self.spend);
             }
         }
         let name = string_of(Some(model));
         let parts = pricing::cost_parts(&name, Some(ts), &call.tokens, call.fast, call.priority);
-        let d = &mut self.spend.get_mut(&tag).unwrap().1;
+        let d = &mut self.spend.get_mut(&tag).expect("added above when missing, and the newest stays").1;
         match parts {
             None => {
                 let plain = pricing::plain_model(&name);
@@ -547,8 +558,7 @@ impl Session {
             }
             sset(&mut self.edits, &k, list);
             if self.edits.len() > 40 {
-                let first = first_tag(&self.edits).unwrap();
-                self.edits.remove(&first);
+                drop_first(&mut self.edits);
             }
         }
         Ok(())
@@ -673,10 +683,11 @@ impl Session {
                 run += 1;
             }
         }
-        let failed_loop = run >= 3 && last.is_some_and(|lt| truthy(lt.rec.get("loopable"))) && self.error_streak >= 3.0;
-        if failed_loop {
-            reasons.push(Value::String(format!("ran {} {run} times in a row", tpl(last.unwrap().rec.get("label")))));
+        let looped = last.filter(|lt| run >= 3 && truthy(lt.rec.get("loopable")) && self.error_streak >= 3.0);
+        if let Some(lt) = looped {
+            reasons.push(Value::String(format!("ran {} {run} times in a row", tpl(lt.rec.get("label")))));
         }
+        let failed_loop = looped.is_some();
         // A burst of failed parallel calls can be one recoverable attempt.
         // Different calls need sustained failure before we ask for
         // attention.
@@ -878,6 +889,7 @@ impl Telemetry {
 
     /// What a transcript is: { app, sessionId } (with agentId for a Claude
     /// Code subagent's), or None to leave it alone.
+    #[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the JS's endsWith is case-sensitive, and so is this")]
     pub fn classify(&self, file: &str) -> Option<Value> {
         let norm = file.replace('\\', "/");
         if !norm.ends_with(".jsonl") {
@@ -969,7 +981,7 @@ impl Telemetry {
         }
         let (mut lo, mut hi) = (0, h.len());
         while lo < hi {
-            let mid = (lo + hi) >> 1;
+            let mid = usize::midpoint(lo, hi);
             if before(&h[mid]) {
                 lo = mid + 1;
             } else {
@@ -1096,22 +1108,24 @@ impl Telemetry {
         if truthy(Some(&agent)) {
             let tag = key_tag(Some(&agent));
             let s = &mut self.sessions[i];
-            if !s.subagents.contains(&tag) {
-                let m: Map<String, Value> = [
-                    ("id", agent.clone()),
-                    ("label", "subagent".into()),
-                    ("startedAt", number(ts)),
-                    ("lastAt", number(ts)),
-                    ("tools", number(0.0)),
-                    ("done", Value::Bool(false)),
-                    ("announced", Value::Bool(false)),
-                ]
-                .into_iter()
-                .map(|(k, v)| (k.to_string(), v))
-                .collect();
-                s.subagents.insert(&tag, (Some(agent.clone()), m));
-            }
-            let a = &mut s.subagents.get_mut(&tag).unwrap().1;
+            let a = &mut s
+                .subagents
+                .get_or_insert_with(&tag, || {
+                    let m: Map<String, Value> = [
+                        ("id", agent.clone()),
+                        ("label", "subagent".into()),
+                        ("startedAt", number(ts)),
+                        ("lastAt", number(ts)),
+                        ("tools", number(0.0)),
+                        ("done", Value::Bool(false)),
+                        ("announced", Value::Bool(false)),
+                    ]
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v))
+                    .collect();
+                    (Some(agent.clone()), m)
+                })
+                .1;
             let last = js_max(js_number(a.get("lastAt")), ts);
             a.insert("lastAt".into(), number(last));
             sub = Some(tag);
@@ -1119,7 +1133,7 @@ impl Telemetry {
         self.claude_line(i, sub.as_deref(), &agent, &o, ts, live, now, out)?;
         // Announce a subagent once its first line has given it a label.
         if let Some(tag) = sub {
-            let a = &mut self.sessions[i].subagents.get_mut(&tag).unwrap().1;
+            let a = &mut self.sessions[i].subagents.get_mut(&tag).expect("a subagent is added when the first line that names it is read").1;
             if !truthy(a.get("announced")) {
                 a.insert("announced".into(), Value::Bool(true));
                 let label = a.get("label").cloned();
@@ -1129,7 +1143,7 @@ impl Telemetry {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "a line and what claude_lines worked out about it (session, subagent, time), handed down as the JS's closures saw them")]
     fn claude_line(&mut self, i: usize, sub: Option<&str>, agent: &Value, o: &ClaudeLine, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
         let kind = o.kind()?;
         if is_str(kind, "assistant") {
@@ -1143,12 +1157,14 @@ impl Telemetry {
 
     // A reply: its tokens and context fill, its tool calls and text, and
     // the end of a turn (or of a subagent's work).
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "a line and what claude_lines worked out about it (session, subagent, time), handed down as the JS's closures saw them")]
     fn claude_assistant(&mut self, i: usize, sub: Option<&str>, agent: &Value, o: &ClaudeLine, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
         let has_agent = truthy(Some(agent));
         let model = o.model()?.cloned();
-        if truthy(model.as_ref()) && !has_agent {
-            self.sessions[i].model = model.clone().unwrap();
+        if !has_agent {
+            if let Some(m) = model.as_ref().filter(|m| truthy(Some(m))) {
+                self.sessions[i].model = m.clone();
+            }
         }
         // Each of a message's lines repeats its usage: counted once.
         let id = o.message_id()?.cloned();
@@ -1158,8 +1174,7 @@ impl Telemetry {
             let s = &mut self.sessions[i];
             kset(&mut s.seen_messages, id.as_ref(), ());
             if s.seen_messages.len() > 400 {
-                let first = first_tag(&s.seen_messages).unwrap();
-                s.seen_messages.remove(&first);
+                drop_first(&mut s.seen_messages);
             }
             let num = |v: &Value| js_number(Some(v));
             let ctx = num(&u.input) + num(&u.cache_read) + num(&u.cache_write);
@@ -1231,7 +1246,7 @@ impl Telemetry {
             self.activity(i, ev(vec![("kind", sv("refusal")), ("detail", Some(Value::String(clip_value(Some(&why), 160)))), ("ts", nv(ts))]), live, now, out);
         }
         if let Some(tag) = sub {
-            let a = &mut self.sessions[i].subagents.get_mut(tag).unwrap().1;
+            let a = &mut self.sessions[i].subagents.get_mut(tag).expect("a subagent is added when the first line that names it is read").1;
             a.insert("done".into(), Value::Bool(true));
             let label = a.get("label").cloned();
             self.activity(i, ev(vec![("kind", sv("subagent-stop")), ("agentId", Some(agent.clone())), ("label", label), ("ts", nv(ts))]), live, now, out);
@@ -1263,7 +1278,7 @@ impl Telemetry {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "a line and what claude_lines worked out about it (session, subagent, time), handed down as the JS's closures saw them")]
     fn claude_tool_use(&mut self, i: usize, sub: Option<&str>, agent: &Value, b: &Value, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
         let bid = opt_prop(Some(b), "id").cloned();
         let name = opt_prop(Some(b), "name").cloned();
@@ -1276,7 +1291,7 @@ impl Telemetry {
         fields.insert("ts".into(), number(ts));
         let itag = kset(&mut s.inflight, bid.as_ref(), Inflight { fields, tool: None });
         if let Some(tag) = sub {
-            let a = &mut s.subagents.get_mut(tag).unwrap().1;
+            let a = &mut s.subagents.get_mut(tag).expect("a subagent is added when the first line that names it is read").1;
             let tools = js_number(a.get("tools")) + 1.0;
             a.insert("tools".into(), number(tools));
         }
@@ -1328,7 +1343,7 @@ impl Telemetry {
 
     // Tool results, a prompt (in a subagent's file, its task), or your
     // interruption.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "a line and what claude_lines worked out about it (session, subagent, time), handed down as the JS's closures saw them")]
     fn claude_user(&mut self, i: usize, sub: Option<&str>, agent: &Value, o: &ClaudeLine, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
         let has_agent = truthy(Some(agent));
         let results = o.results()?;
@@ -1370,7 +1385,7 @@ impl Telemetry {
             // description is a better label.
             let id = self.sessions[i].id.clone();
             let pending = self.pending_label.clone();
-            let a = &mut self.sessions[i].subagents.get_mut(tag).unwrap().1;
+            let a = &mut self.sessions[i].subagents.get_mut(tag).expect("a subagent is added when the first line that names it is read").1;
             if is_str(a.get("label"), "subagent") {
                 let label = match pending {
                     Some((session, label, at)) if session == id && (ts - at).abs() < 60000.0 => label,
@@ -1419,8 +1434,8 @@ impl Telemetry {
                     s.turn_marks += 1.0;
                     s.turn_active = true;
                     s.turn_started_at = Some(ts);
-                    if truthy(get("model_context_window")) {
-                        s.context_window = get("model_context_window").cloned().unwrap();
+                    if let Some(w) = get("model_context_window").filter(|w| truthy(Some(w))) {
+                        s.context_window = w.clone();
                     }
                     self.activity(i, ev(vec![("kind", sv("turn-start")), ("ts", nv(ts))]), live, now, out);
                 }
@@ -1475,8 +1490,10 @@ impl Telemetry {
             return Ok(());
         }
         let s = &mut self.sessions[i];
-        if is_str(kind.as_ref(), "turn_context") && truthy(get("model")) {
-            s.model = get("model").cloned().unwrap();
+        if is_str(kind.as_ref(), "turn_context") {
+            if let Some(m) = get("model").filter(|m| truthy(Some(m))) {
+                s.model = m.clone();
+            }
         }
         // What prices its calls: the provider, and the tier, said with a
         // turn in older rollouts and in the thread's settings in newer ones.
@@ -1565,12 +1582,12 @@ impl Telemetry {
                 s.context_used = v.clone();
             }
         }
-        if truthy(opt_prop(info, "model_context_window")) {
-            s.context_window = opt_prop(info, "model_context_window").cloned().unwrap();
+        if let Some(w) = opt_prop(info, "model_context_window").filter(|w| truthy(Some(w))) {
+            s.context_window = w.clone();
         }
         let rl = opt_prop(Some(p), "rate_limits").cloned();
-        if truthy(rl.as_ref()) {
-            self.note_codex_limits(rl.as_ref().unwrap(), ts);
+        if let Some(rl) = rl.as_ref().filter(|rl| truthy(Some(rl))) {
+            self.note_codex_limits(rl, ts);
         }
         let s = &mut self.sessions[i];
         s.last_event_at = js_max(s.last_event_at, ts);
@@ -1587,7 +1604,7 @@ impl Telemetry {
         }
         let text = string_of(text.as_ref());
         s.add_prompt(&text, ts);
-        s.event_prompt = Some((s.prompts.last().unwrap().clone(), s.turn_marks));
+        s.event_prompt = Some((s.prompts.last().expect("add_prompt just added one").clone(), s.turn_marks));
         self.activity(i, ev(vec![("kind", sv("prompt")), ("detail", Some(Value::String(clip(&text, 90)))), ("ts", nv(ts))]), live, now, out);
     }
 
@@ -1600,7 +1617,7 @@ impl Telemetry {
                 return Value::Null;
             }
             let numeric = |k: &str| opt_prop(w, k).filter(|v| v.is_number()).cloned().unwrap_or(Value::Null);
-            let resets = opt_prop(w, "resets_at").filter(|v| v.as_f64().is_some_and(|r| r > 0.0)).map_or(Value::Null, |v| number(v.as_f64().unwrap() * 1000.0));
+            let resets = opt_prop(w, "resets_at").and_then(Value::as_f64).filter(|r| *r > 0.0).map_or(Value::Null, |r| number(r * 1000.0));
             obj(vec![("pct", numeric("used_percent")), ("windowMinutes", numeric("window_minutes")), ("resetsAt", resets)])
         };
         let primary = window(opt_prop(Some(rl), "primary"));
@@ -1731,7 +1748,7 @@ impl Telemetry {
                 if !s.subagents.contains(&tag) {
                     let label = nn(get("prompt")).or(nn(get("agent_path"))).or(nn(get("agentPath"))).cloned().unwrap_or_else(|| "subagent".into());
                     let label = Value::String(clip_value(Some(&label), 40));
-                    let m = match obj_opt(vec![
+                    let m = map_opt(vec![
                         ("id", id.clone()),
                         ("label", Some(label.clone())),
                         ("startedAt", nv(ts)),
@@ -1739,14 +1756,11 @@ impl Telemetry {
                         ("tools", nv(0.0)),
                         ("done", Some(Value::Bool(false))),
                         ("announced", Some(Value::Bool(true))),
-                    ]) {
-                        Value::Object(m) => m,
-                        _ => unreachable!(),
-                    };
+                    ]);
                     s.subagents.insert(&tag, (id.clone(), m));
                     self.activity(i, ev(vec![("kind", sv("subagent-start")), ("agentId", id.clone()), ("label", Some(label)), ("ts", nv(ts))]), live, now, out);
                 }
-                let a = &mut self.sessions[i].subagents.get_mut(&tag).unwrap().1;
+                let a = &mut self.sessions[i].subagents.get_mut(&tag).expect("added above when missing").1;
                 a.insert("lastAt".into(), number(ts));
                 // A subagent's activity says what happened to it: started,
                 // interacted (given more to do), interrupted or completed.
@@ -1799,7 +1813,7 @@ impl Telemetry {
     /// Claude desktop's samples, as its file has them now.
     pub fn desktop_read(&mut self, samples: &Value) {
         if let Value::Array(a) = samples {
-            self.desktop_samples = a.clone();
+            self.desktop_samples.clone_from(a);
         }
     }
 
@@ -1908,10 +1922,7 @@ impl Telemetry {
             };
             for f in files {
                 let key = file_key(&tpl(opt_prop(Some(f), "path")));
-                if !by_file.contains(&key) {
-                    by_file.insert(&key, Vec::new());
-                }
-                let ids = by_file.get_mut(&key).unwrap();
+                let ids = by_file.get_or_insert_with(&key, Vec::new);
                 let tag = key_tag(id);
                 if !ids.iter().any(|(t, _)| *t == tag) {
                     ids.push((tag, id.cloned().unwrap_or(Value::Null)));
@@ -1929,14 +1940,13 @@ impl Telemetry {
                     let mut pair = [a, b];
                     pair.sort_by(|x, y| jsstr::cmp_units(x, y));
                     let k = pair.join("|");
-                    if !edges.contains(&k) {
-                        let e: Map<String, Value> = [("a", ids[i].1.clone()), ("b", ids[j].1.clone()), ("kind", "file".into()), ("files", Value::Array(Vec::new()))]
+                    let e = edges.get_or_insert_with(&k, || {
+                        [("a", ids[i].1.clone()), ("b", ids[j].1.clone()), ("kind", "file".into()), ("files", Value::Array(Vec::new()))]
                             .into_iter()
                             .map(|(k, v)| (k.to_string(), v))
-                            .collect();
-                        edges.insert(&k, e);
-                    }
-                    if let Some(Value::Array(files)) = edges.get_mut(&k).unwrap().get_mut("files") {
+                            .collect()
+                    });
+                    if let Some(Value::Array(files)) = e.get_mut("files") {
                         files.push(Value::String(paths::base_name(file)));
                     }
                 }
@@ -1957,10 +1967,7 @@ impl Telemetry {
                 if now - ts > COLLISION_WINDOW_MS {
                     continue;
                 }
-                if !by_file.contains(tag) {
-                    by_file.insert(tag, (string_of(k.as_ref()), Vec::new()));
-                }
-                by_file.get_mut(tag).unwrap().1.push((s.id.clone(), ts, opt_prop(Some(last), "path").cloned().unwrap_or(Value::Null)));
+                by_file.get_or_insert_with(tag, || (string_of(k.as_ref()), Vec::new())).1.push((s.id.clone(), ts, opt_prop(Some(last), "path").cloned().unwrap_or(Value::Null)));
             }
         }
         let mut out: OrderedMap<Map<String, Value>> = OrderedMap::new();
@@ -1972,8 +1979,8 @@ impl Telemetry {
                 for j in i + 1..list.len() {
                     let (a, b) = if jsstr::cmp_units(&list[j].0, &list[i].0) == Ordering::Less { (&list[j], &list[i]) } else { (&list[i], &list[j]) };
                     let key = format!("{}|{}", a.0, b.0);
-                    if !out.contains(&key) {
-                        let c: Map<String, Value> = [
+                    let c = out.get_or_insert_with(&key, || {
+                        [
                             ("a", Value::String(a.0.clone())),
                             ("b", Value::String(b.0.clone())),
                             ("files", Value::Array(Vec::new())),
@@ -1982,10 +1989,8 @@ impl Telemetry {
                         ]
                         .into_iter()
                         .map(|(k, v)| (k.to_string(), v))
-                        .collect();
-                        out.insert(&key, c);
-                    }
-                    let c = out.get_mut(&key).unwrap();
+                        .collect()
+                    });
                     if let Some(Value::Array(files)) = c.get_mut("files") {
                         files.push(Value::String(paths::base_name(&string_of(Some(&a.2)))));
                     }
@@ -2003,11 +2008,12 @@ impl Telemetry {
     /// Both sessions' edits of the files both edited.
     pub fn collision_diffs(&self, a: &str, b: &str) -> Value {
         let (Some(sa), Some(sb)) = (self.find(a).map(|i| &self.sessions[i]), self.find(b).map(|i| &self.sessions[i])) else { return Value::Array(Vec::new()) };
-        let shared = sa.edits.iter().filter(|(tag, _)| sb.edits.contains(tag));
         Value::Array(
-            shared
-                .map(|(tag, (k, list))| {
-                    obj(vec![("file", k.clone().unwrap_or(Value::Null)), ("a", Value::Array(list.clone())), ("b", Value::Array(sb.edits.get(tag).unwrap().1.clone()))])
+            sa.edits
+                .iter()
+                .filter_map(|(tag, (k, list))| {
+                    let (_, theirs) = sb.edits.get(tag)?;
+                    Some(obj(vec![("file", k.clone().unwrap_or(Value::Null)), ("a", Value::Array(list.clone())), ("b", Value::Array(theirs.clone()))]))
                 })
                 .collect(),
         )
@@ -2100,7 +2106,7 @@ impl Telemetry {
     /// use. (The tailer's status is the caller's to add.)
     pub fn snapshot(&mut self, now: f64) -> Value {
         let mut sessions = Vec::new();
-        for s in self.sessions.iter_mut() {
+        for s in &mut self.sessions {
             if now - s.last_event_at < PRIME_WINDOW_MS {
                 sessions.push(s.snapshot(now));
             }
@@ -2337,7 +2343,7 @@ impl Session {
                     // The prompt it names, when it's one of the prompts.
                     let same = self.prompts.iter().find(|q| q.value() == p).cloned();
                     (same.unwrap_or_else(|| self.prompt_of(&p)), num_of(Some(&e), "marks"))
-                })
+                });
             }
             "turnMarks" => self.turn_marks = num(&v),
             "question" => self.question = or_null(v),
@@ -2474,7 +2480,7 @@ impl Session {
             tokens: num_of(v.as_ref(), "tokens"),
             unpriced: list_of(opt_prop(v.as_ref(), "unpriced")).iter().map(js_string).collect(),
         };
-        let seen = |_: &()| Value::Bool(true);
+        let seen = |(): &()| Value::Bool(true);
         let seen_of = |_: Option<Value>| ();
         Some(match map {
             "inflight" => map_op!(&mut self.inflight, op, inflight_value, inflight_of),
@@ -2583,7 +2589,7 @@ mod tests {
         for k in 0..3 {
             codex(
                 &mut t,
-                json!({ "type": "event_msg", "timestamp": at(NOW - 7000.0 + k as f64), "payload": { "type": "item_completed", "item": { "type": "McpToolCall", "server": "s", "tool": "x", "arguments": { "a": 1 }, "status": "failed" } } }),
+                json!({ "type": "event_msg", "timestamp": at(NOW - 7000.0 + f64::from(k)), "payload": { "type": "item_completed", "item": { "type": "McpToolCall", "server": "s", "tool": "x", "arguments": { "a": 1 }, "status": "failed" } } }),
             );
         }
         assert!(t.at(i).stuck(NOW)["reasons"][0].as_str().unwrap().contains("3 times in a row"));
@@ -2644,7 +2650,7 @@ mod tests {
         sort_by_num(&mut v, |a, b| a.0 - b.0);
         assert_eq!(v.iter().map(|x| x.1).collect::<String>().len(), 5);
         let mut w = vec![(2, 'a'), (1, 'b'), (2, 'c'), (1, 'd')];
-        sort_by_num(&mut w, |a, b| (a.0 - b.0) as f64);
+        sort_by_num(&mut w, |a, b| f64::from(a.0 - b.0));
         assert_eq!(w.iter().map(|x| x.1).collect::<String>(), "bdac");
     }
 }

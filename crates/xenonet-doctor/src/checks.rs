@@ -177,7 +177,10 @@ fn list(v: Option<&Value>) -> Vec<Value> {
 }
 
 fn failed_sources(health: Option<&Value>) -> Vec<Value> {
-    list(health.and_then(|h| h.get("sources"))).into_iter().filter(|s| !truthy(s.get("ok")) && !matches!(s.get("name").and_then(Value::as_str), Some("wiki" | "identities"))).collect()
+    list(health.and_then(|h| h.get("sources")))
+        .into_iter()
+        .filter(|s| !truthy(s.get("ok")) && !matches!(s.get("name").and_then(Value::as_str), Some("wiki" | "identities")))
+        .collect()
 }
 
 fn n(v: Option<&Value>) -> f64 {
@@ -188,8 +191,8 @@ fn s(v: Option<&Value>) -> String {
     v.map_or_else(|| "undefined".into(), js_string)
 }
 
-fn version_in(text: &str, re: &'static OnceLock<Regex>, pattern: &str) -> Option<String> {
-    re.get_or_init(|| Regex::new(pattern).unwrap()).find(text).map(|m| m.as_str().to_string())
+fn version_in(text: &str, re: &'static OnceLock<Regex>, pattern: &'static str) -> Option<String> {
+    re.get_or_init(|| Regex::new(pattern).expect("a fixed pattern")).find(text).map(|m| m.as_str().to_string())
 }
 
 /// One check's verdict.
@@ -202,7 +205,9 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
                 let name = me.get("name").filter(|v| !v.is_null()).map_or_else(|| "XenoNet".into(), js_string);
                 return Ok(ok(format!("{name} on port {}", s(me.get("port")))));
             }
-            let Some(base) = f.get("base").filter(|v| truthy(Some(v))) else { return Ok(warn("XenoNet isn't running, so the map, its alerts and the tools sessions use are off", Some("Open XenoNet (or XenoNet Dev)."))) };
+            let Some(base) = f.get("base").filter(|v| truthy(Some(v))) else {
+                return Ok(warn("XenoNet isn't running, so the map, its alerts and the tools sessions use are off", Some("Open XenoNet (or XenoNet Dev).")));
+            };
             let name = f.get("baseName").map_or_else(|| "XenoNet".into(), js_string);
             let b = js_string(base);
             Ok(ok(format!("{name} on {}", b.strip_prefix("http://").unwrap_or(&b))))
@@ -211,7 +216,8 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
             let Some(health) = f.get("health").filter(|v| truthy(Some(v))) else { return Ok(skip("needs XenoNet running")) };
             let bad = failed_sources(Some(health));
             if !bad.is_empty() {
-                let said: Vec<String> = bad.iter().map(|x| format!("{}: {}", s(x.get("name")), x.get("error").filter(|v| !v.is_null()).map_or_else(|| "failed".into(), js_string))).collect();
+                let said: Vec<String> =
+                    bad.iter().map(|x| format!("{}: {}", s(x.get("name")), x.get("error").filter(|v| !v.is_null()).map_or_else(|| "failed".into(), js_string))).collect();
                 return Ok(fail(said.join("; "), Some("Run xenonet doctor again after fixing the checks below; if it stays, xenonet logs --errors says more.")));
             }
             let mut counts: Map<String, Value> = Map::new();
@@ -267,12 +273,17 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
             let looked = d.get("lookedAt").filter(|v| !v.is_null()).map_or(f64::NEG_INFINITY, |v| n(Some(v)));
             let fresh: Vec<&Value> = records.iter().filter(|r| n(r.get("firstSeen")) > looked).collect();
             if fresh.is_empty() {
-                return Ok(ok(if records.is_empty() { "no differences from XenoNet's schemas".to_string() } else { format!("nothing new since you last looked ({} known)", plural(records.len() as f64, "difference", None)) }));
+                return Ok(ok(if records.is_empty() {
+                    "no differences from XenoNet's schemas".to_string()
+                } else {
+                    format!("nothing new since you last looked ({} known)", plural(records.len() as f64, "difference", None))
+                }));
             }
             let addition = |r: &Value| r.get("kind").and_then(Value::as_str).is_some_and(|k| xenonet_schema::drift::ADDITIONS.contains(&k));
             let changes: Vec<&Value> = fresh.iter().copied().filter(|r| !addition(r)).collect();
             let shown: Vec<&Value> = changes.iter().copied().chain(fresh.iter().copied().filter(|r| addition(r))).collect();
-            let named: Vec<String> = shown.iter().take(2).map(|r| format!("{}: {}", xenonet_schema::drift::source_name(&s(r.get("source"))), xenonet_schema::drift::describe(r))).collect();
+            let named: Vec<String> =
+                shown.iter().take(2).map(|r| format!("{}: {}", xenonet_schema::drift::source_name(&s(r.get("source"))), xenonet_schema::drift::describe(r))).collect();
             let more = if shown.len() > 2 { format!("; and {} more", shown.len() - 2) } else { String::new() };
             let say = format!("{}{more}", named.join("; "));
             let file = d.get("file").filter(|v| !v.is_null()).map_or_else(|| xenonet_schema::drift::DRIFT_FILE.to_string(), js_string);
@@ -283,7 +294,12 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
             Ok(info(format!("the apps' data has {} since you last looked: {say}", plural(fresh.len() as f64, "addition", None)), Some(&fix)))
         }
         "claude.cli" => {
-            let Some(bin) = c.which("claude").await? else { return Ok(warn("the claude command isn't on your PATH, and handing off to Claude and connecting Claude Code need it", Some("Install Claude Code: https://claude.com/claude-code"))) };
+            let Some(bin) = c.which("claude").await? else {
+                return Ok(warn(
+                    "the claude command isn't on your PATH, and handing off to Claude and connecting Claude Code need it",
+                    Some("Install Claude Code: https://claude.com/claude-code"),
+                ));
+            };
             let v = c.run(&bin, &["--version"], 4000.0).await?;
             static R: OnceLock<Regex> = OnceLock::new();
             let version = version_in(&s(v.get("stdout")), &R, r"\d+\.\d+\.\d+");
@@ -354,16 +370,14 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
                     break;
                 }
             }
-            let bin = bin.or_else(|| bins.first().cloned());
-            let missing = match &bin {
-                None => true,
-                Some(b) if NATIVE.is_absolute(b) => !c.exists(b).await?,
-                Some(b) => c.which(b).await?.is_none(),
+            let bin = match bin.or_else(|| bins.first().cloned()) {
+                Some(b) if NATIVE.is_absolute(&b) => c.exists(&b).await?.then_some(b),
+                Some(b) => c.which(&b).await?.is_some().then_some(b),
+                None => None,
             };
-            if missing {
+            let Some(bin) = bin else {
                 return Ok(warn("no Codex: neither the ChatGPT app's codex nor a codex command", Some("Install the ChatGPT desktop app or the Codex CLI.")));
-            }
-            let bin = bin.unwrap();
+            };
             let v = c.run(&bin, &["--version"], 4000.0).await?;
             static R: OnceLock<Regex> = OnceLock::new();
             let version = version_in(&s(v.get("stdout")), &R, r"\d+\.\d+\.\d+[A-Za-z0-9_.-]*");
@@ -406,7 +420,11 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
             Ok(match folder(&c, dir.as_deref()).await? {
                 Folder::Missing => fail(
                     format!("{shown} doesn't exist"),
-                    Some(if truthy(f.data.get("projectsDirSet")) { "Make it, or set XENONET_PROJECTS_DIR to the folder that holds your projects." } else { "Make it, or choose the folder that holds your projects: Change the projects folder… in XenoNet's palette, or xenonet root <folder>." }),
+                    Some(if truthy(f.data.get("projectsDirSet")) {
+                        "Make it, or set XENONET_PROJECTS_DIR to the folder that holds your projects."
+                    } else {
+                        "Make it, or choose the folder that holds your projects: Change the projects folder… in XenoNet's palette, or xenonet root <folder>."
+                    }),
                 ),
                 Folder::Denied(code) => fail(format!("can't read {shown} ({code})"), Some(&privacy_fix(f, &shown))),
                 Folder::Ok(count) => ok(format!("{shown}, {} {}", xenonet_base::units::locale(count as f64, 0, 3), if count == 1 { "entry" } else { "entries" })),
@@ -415,7 +433,14 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
         "system.git" => {
             if let Some(avail) = c.call("gitAvailable", json!([])).await.map_err(|_| Failure::Rethrow)? {
                 if !truthy(Some(&avail)) {
-                    return Ok(warn("git isn't installed, so repo status (uncommitted work, branches) is off", Some(if f.platform() == "darwin" { "Run xcode-select --install, or install git with Homebrew, then restart XenoNet." } else { "Install git, then restart XenoNet." })));
+                    return Ok(warn(
+                        "git isn't installed, so repo status (uncommitted work, branches) is off",
+                        Some(if f.platform() == "darwin" {
+                            "Run xcode-select --install, or install git with Homebrew, then restart XenoNet."
+                        } else {
+                            "Install git, then restart XenoNet."
+                        }),
+                    ));
                 }
             }
             Ok(match c.which("git").await? {
@@ -445,9 +470,13 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
                 return Ok(ok("none in the last day"));
             }
             let total: f64 = rows.iter().map(|r| n(r.get("count"))).sum();
-            let shown: Vec<String> = rows.iter().take(3).map(|r| format!("{}{}", s(r.get("code")), if n(r.get("count")) > 1.0 { format!(" ×{}", s(r.get("count"))) } else { String::new() })).collect();
+            let shown: Vec<String> =
+                rows.iter().take(3).map(|r| format!("{}{}", s(r.get("code")), if n(r.get("count")) > 1.0 { format!(" ×{}", s(r.get("count"))) } else { String::new() })).collect();
             let others = if rows.len() > 3 { format!(", and {}", plural((rows.len() - 3) as f64, "other kind", None)) } else { String::new() };
-            Ok(warn(format!("{} in the last day: {}{others}", plural(total, "error", None), shown.join(", ")), Some("xenonet logs --errors shows them, with a fix for each when there's one. xenonet diagnose --ask has a Codex or Claude Code session look at them with you.")))
+            Ok(warn(
+                format!("{} in the last day: {}{others}", plural(total, "error", None), shown.join(", ")),
+                Some("xenonet logs --errors shows them, with a fix for each when there's one. xenonet diagnose --ask has a Codex or Claude Code session look at them with you."),
+            ))
         }
         "xenonet.launcher" => {
             let l = c.call("launcher", json!([])).await.map_err(|_| Failure::Rethrow)?;
@@ -459,7 +488,10 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
                 return Ok(fail(format!("the launcher in {} doesn't run", c.tilde(&s(l.get("dir")))), Some("Open XenoNet, which writes it again, or install XenoNet again.")));
             };
             if !truthy(said.get("tools")) {
-                return Ok(fail("the launcher can't find XenoNet's Tools, so the xenonet command and MCP servers don't start (hooks still reach XenoNet)", Some("Open XenoNet to repair them, or install XenoNet again.")));
+                return Ok(fail(
+                    "the launcher can't find XenoNet's Tools, so the xenonet command and MCP servers don't start (hooks still reach XenoNet)",
+                    Some("Open XenoNet to repair them, or install XenoNet again."),
+                ));
             }
             let node = s(said.get("node"));
             Ok(ok(format!("launcher {}, running Tools {} on Node {}", s(l.get("version")), s(said.get("tools")), node.strip_prefix('v').unwrap_or(&node))))
@@ -471,9 +503,13 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
             let Some(a) = a else { return Ok(skip("needs XenoNet running")) };
             let changes = list(a.get("changes"));
             if changes.iter().all(|x| x.get("state").and_then(Value::as_str) == Some("missing")) {
-                return Ok(info("not connected, so these sessions can't see or message each other through XenoNet", Some("Connect them from XenoNet's palette (Connect Claude Code and Codex to XenoNet), or run xenonet connect.")));
+                return Ok(info(
+                    "not connected, so these sessions can't see or message each other through XenoNet",
+                    Some("Connect them from XenoNet's palette (Connect Claude Code and Codex to XenoNet), or run xenonet connect."),
+                ));
             }
-            let stale: Vec<String> = changes.iter().filter(|x| x.get("state").and_then(Value::as_str) != Some("present")).map(|x| format!("{} {}", s(x.get("id")), s(x.get("state")))).collect();
+            let stale: Vec<String> =
+                changes.iter().filter(|x| x.get("state").and_then(Value::as_str) != Some("present")).map(|x| format!("{} {}", s(x.get("id")), s(x.get("state")))).collect();
             if !stale.is_empty() {
                 return Ok(warn(format!("partly connected ({})", stale.join(", ")), Some("Run xenonet connect again.")));
             }
@@ -492,7 +528,10 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
                 return Ok(warn("netstat doesn't say which process sends a request, so XenoNet takes each session at its word", Some(&unreadable("netstat"))));
             }
             if !truthy(t.get("chain")) {
-                return Ok(warn("ps doesn't say which processes a request comes from, so XenoNet refuses every request in a session's name, and sessions can't use its tools", Some(&unreadable("ps"))));
+                return Ok(warn(
+                    "ps doesn't say which processes a request comes from, so XenoNet refuses every request in a session's name, and sessions can't use its tools",
+                    Some(&unreadable("ps")),
+                ));
             }
             if !c.exists("/usr/bin/codesign").await? {
                 return Ok(warn("codesign is missing, so Claude Code's own hooks can't settle which process holds a session", None));
@@ -511,7 +550,14 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
             let names: Vec<String> = expired.iter().map(|a| format!("\"{}\" (actor:{})", s(a.get("name")), s(a.get("slug")))).collect();
             let said = if names.len() > 2 { format!("{} and {} more", names[..2].join(", "), names.len() - 2) } else { names.join(" and ") };
             let one = expired.len() == 1;
-            Ok(warn(format!("{said} {} expired after 30 days without a call, so {} offline", if one { "has a token that" } else { "have tokens that" }, if one { "it stays" } else { "they stay" }), Some("Give each a new token with New token in XenoNet's Actors panel, or remove the ones you don't use there or with xenonet actor remove <slug>.")))
+            Ok(warn(
+                format!(
+                    "{said} {} expired after 30 days without a call, so {} offline",
+                    if one { "has a token that" } else { "have tokens that" },
+                    if one { "it stays" } else { "they stay" }
+                ),
+                Some("Give each a new token with New token in XenoNet's Actors panel, or remove the ones you don't use there or with xenonet actor remove <slug>."),
+            ))
         }
         "actors.gateway" => gateway(&c).await,
         "actors.wakes" => {
@@ -524,7 +570,13 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
             if hooks.is_empty() {
                 return Ok(ok("no actor is woken by a webhook"));
             }
-            let failing: Vec<String> = hooks.iter().filter(|w| w.get("last").is_some_and(|l| truthy(Some(l)) && !truthy(l.get("ok")))).map(|w| format!("{}'s last wake failed: {}", s(w.get("actor")), w["last"].get("reason").filter(|v| !v.is_null()).map_or_else(|| "it didn't answer".into(), js_string))).collect();
+            let failing: Vec<String> = hooks
+                .iter()
+                .filter(|w| w.get("last").is_some_and(|l| truthy(Some(l)) && !truthy(l.get("ok"))))
+                .map(|w| {
+                    format!("{}'s last wake failed: {}", s(w.get("actor")), w["last"].get("reason").filter(|v| !v.is_null()).map_or_else(|| "it didn't answer".into(), js_string))
+                })
+                .collect();
             if !failing.is_empty() {
                 return Ok(warn(failing.join("; "), Some("In XenoNet's Actors panel, Wake… on the actor sets its webhook again; xenonet actor wake <slug> test tries it now.")));
             }
@@ -547,16 +599,29 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
                 None
             };
             if let Some((why, tool)) = blind {
-                return Ok(warn(format!("{why}, so XenoNet refuses every actor's token, and what only you or its window may do, such as allowing or removing actors"), Some(&unreadable(tool))));
+                return Ok(warn(
+                    format!("{why}, so XenoNet refuses every actor's token, and what only you or its window may do, such as allowing or removing actors"),
+                    Some(&unreadable(tool)),
+                ));
             }
             if t.get("exe") == Some(&json!(false)) {
-                return Ok(warn("lsof doesn't say which program a process runs, so XenoNet refuses Hermes's actor, and what only its window may do, such as allowing actors", Some(&unreadable("lsof"))));
+                return Ok(warn(
+                    "lsof doesn't say which program a process runs, so XenoNet refuses Hermes's actor, and what only its window may do, such as allowing actors",
+                    Some(&unreadable("lsof")),
+                ));
             }
             let observed = if f.actors() == "on" { c.call("actors.observers", json!([])).await.map_err(|_| Failure::Rethrow)? } else { None };
             let unknown: Vec<String> = list(observed.as_ref())
                 .iter()
                 .filter(|o| truthy(o.get("on")) && o.get("recognized").is_some_and(|r| truthy(Some(r)) && n(r.get("found")) < n(r.get("expected"))))
-                .map(|o| format!("{} runs {} processes XenoNet doesn't know as {}'s, so its actor's token would be refused from under them", s(o.get("name")), list(o["recognized"].get("purposes")).iter().map(js_string).collect::<Vec<_>>().join(", "), s(o.get("name"))))
+                .map(|o| {
+                    format!(
+                        "{} runs {} processes XenoNet doesn't know as {}'s, so its actor's token would be refused from under them",
+                        s(o.get("name")),
+                        list(o["recognized"].get("purposes")).iter().map(js_string).collect::<Vec<_>>().join(", "),
+                        s(o.get("name"))
+                    )
+                })
                 .collect();
             if !unknown.is_empty() {
                 return Ok(warn(unknown.join("; "), Some("The product may have moved where it keeps its programs; update XenoNet, or report it.")));
@@ -599,13 +664,19 @@ async fn state(c: &Ctx<'_>) -> Result<Value, Failure> {
     let file_get = |k: &str| file.as_ref().and_then(|x| x.get(k)).filter(|v| !v.is_null());
     let broken = list(file_get("broken"));
     if let Some(last) = broken.last() {
-        return Ok(warn(format!("{} is a state.json XenoNet couldn't read, so it moved it aside and started afresh", c.tilde(&js_string(last))), Some("To get back what was in it, fix it and put it back as state.json while XenoNet is closed; delete it once you don't need it.")));
+        return Ok(warn(
+            format!("{} is a state.json XenoNet couldn't read, so it moved it aside and started afresh", c.tilde(&js_string(last))),
+            Some("To get back what was in it, fix it and put it back as state.json while XenoNet is closed; delete it once you don't need it."),
+        ));
     }
     if let Some(u) = file_get("unreadable").filter(|v| truthy(Some(v))) {
         return Ok(warn(format!("state.json {}, so XenoNet will move it aside and start afresh", js_string(u)), Some("To keep what's in it, fix it before XenoNet next starts.")));
     }
     if file.is_some() && xenonet_app::jsv::less(file_get("known"), file_get("version")) && file_get("version").is_some() && file_get("known").is_some() {
-        return Ok(warn(format!("state.json is from a newer XenoNet (version {}), so this one reads it but doesn't save changes to it", s(file_get("version"))), Some("Use the newer XenoNet, or update this one.")));
+        return Ok(warn(
+            format!("state.json is from a newer XenoNet (version {}), so this one reads it but doesn't save changes to it", s(file_get("version"))),
+            Some("Use the newer XenoNet, or update this one."),
+        ));
     }
     if let Some(l) = loaded.filter(|l| truthy(l.get("readOnly"))) {
         return Ok(warn(format!("{}; changes last only until XenoNet quits", s(l.get("problem"))), Some("Fix the file or its folder, then restart XenoNet.")));
@@ -614,12 +685,23 @@ async fn state(c: &Ctx<'_>) -> Result<Value, Failure> {
     if let Some(first) = issues.first() {
         let path = c.tilde(&first.get("path").map(js_string).unwrap_or_default());
         let message = s(first.get("message"));
-        return Ok(warn(format!("state.json has {} XenoNet can't use, such as {}: {}", plural(issues.len() as f64, "part", None), if path.is_empty() { "the whole file".into() } else { path }, message.strip_prefix("Invalid input: ").unwrap_or(&message)), Some("Fix that part, or move state.json aside while XenoNet is closed to start afresh.")));
+        return Ok(warn(
+            format!(
+                "state.json has {} XenoNet can't use, such as {}: {}",
+                plural(issues.len() as f64, "part", None),
+                if path.is_empty() { "the whole file".into() } else { path },
+                message.strip_prefix("Invalid input: ").unwrap_or(&message)
+            ),
+            Some("Fix that part, or move state.json aside while XenoNet is closed to start afresh."),
+        ));
     }
     if let Ok(Some(st)) = c.call("statfs", json!([dir])).await {
         let free = n(st.get("bavail")) * n(st.get("bsize"));
         if free < 1e9 {
-            return Ok(warn(format!("{} GB free where XenoNet keeps its state", xenonet_base::units::to_fixed(free / 1e9, 1)), Some("Free some disk space; posters and replay clips need room too.")));
+            return Ok(warn(
+                format!("{} GB free where XenoNet keeps its state", xenonet_base::units::to_fixed(free / 1e9, 1)),
+                Some("Free some disk space; posters and replay clips need room too."),
+            ));
         }
     }
     Ok(ok(shown))
@@ -631,7 +713,10 @@ async fn command(c: &Ctx<'_>) -> Result<Value, Failure> {
     let Some(file) = st.get("file").filter(|v| truthy(Some(v))).map(js_string) else { return Ok(skip("not on Windows yet")) };
     let place = c.tilde(&file);
     if !truthy(st.get("installed")) {
-        return Ok(info("not installed; once it is, xenonet doctor, xenonet agents and the rest work in a terminal", Some("Install it from the palette (Install the xenonet command), or run node cli/xenonet.js install in a checkout of XenoNet.")));
+        return Ok(info(
+            "not installed; once it is, xenonet doctor, xenonet agents and the rest work in a terminal",
+            Some("Install it from the palette (Install the xenonet command), or run node cli/xenonet.js install in a checkout of XenoNet."),
+        ));
     }
     if !truthy(st.get("ours")) {
         return Ok(info(format!("{place} is another program's"), None));
@@ -650,7 +735,11 @@ async fn command(c: &Ctx<'_>) -> Result<Value, Failure> {
         }
     }
     if !truthy(st.get("onPath")) {
-        let fix = if win { format!("Run XenoNet's Setup again, which adds it, or add {dir} to your user Path in Windows' Environment Variables. Then open a new terminal.") } else { "Add it in your shell's profile: export PATH=\"$HOME/.local/bin:$PATH\"".to_string() };
+        let fix = if win {
+            format!("Run XenoNet's Setup again, which adds it, or add {dir} to your user Path in Windows' Environment Variables. Then open a new terminal.")
+        } else {
+            "Add it in your shell's profile: export PATH=\"$HOME/.local/bin:$PATH\"".to_string()
+        };
         return Ok(warn(format!("{place} is there, but {dir} isn't on your PATH"), Some(&fix)));
     }
     Ok(ok(place))
@@ -669,7 +758,11 @@ async fn repos(c: &Ctx<'_>) -> Result<Value, Failure> {
             let mut m = Map::new();
             m.insert("at".into(), Value::Null);
             m.insert("repos".into(), json!(repos.len()));
-            let more = if repos.is_empty() { json!({ "checked": 0, "files": [] }) } else { c.io.ask(json!({ "op": "findTokenFiles", "repos": repos })).await.map_err(|_| Failure::Rethrow)? };
+            let more = if repos.is_empty() {
+                json!({ "checked": 0, "files": [] })
+            } else {
+                c.io.ask(json!({ "op": "findTokenFiles", "repos": repos })).await.map_err(|_| Failure::Rethrow)?
+            };
             for (k, v) in more.as_object().into_iter().flatten() {
                 m.insert(k.clone(), v.clone());
             }
@@ -696,7 +789,10 @@ async fn repos(c: &Ctx<'_>) -> Result<Value, Failure> {
     }
     let checked = n(found.get("checked"));
     if checked < count {
-        return Ok(info(format!("none in the {} looked in; the other {} didn't answer in time{when}", plural(checked, "repo", None), xenonet_base::json::number_string(count - checked)), None));
+        return Ok(info(
+            format!("none in the {} looked in; the other {} didn't answer in time{when}", plural(checked, "repo", None), xenonet_base::json::number_string(count - checked)),
+            None,
+        ));
     }
     Ok(ok(format!("none in {}{when}", plural(count, "repo", None))))
 }
@@ -715,7 +811,10 @@ async fn gateway(c: &Ctx<'_>) -> Result<Value, Failure> {
         return Ok(warn(js_string(p), Some(fix)));
     }
     if st.get("reach").and_then(|r| r.get("state")).and_then(Value::as_str) != Some("ok") {
-        return Ok(info(format!("it's on, at {}; XenoNet hasn't checked that address yet", st.get("host").filter(|v| !v.is_null()).map_or_else(|| "no address yet".into(), js_string)), None));
+        return Ok(info(
+            format!("it's on, at {}; XenoNet hasn't checked that address yet", st.get("host").filter(|v| !v.is_null()).map_or_else(|| "no address yet".into(), js_string)),
+            None,
+        ));
     }
     let words = |r: &str| match r {
         "rotated" => "replaced",
@@ -765,12 +864,22 @@ async fn observers(c: &Ctx<'_>) -> Result<Value, Failure> {
     let installed: Vec<&Value> = all.iter().filter(|o| truthy(o.get("installed"))).collect();
     if installed.is_empty() {
         let named = names(&every);
-        return Ok(info(format!("{} {} on this computer, so there's nothing to observe", if named.is_empty() { "No product XenoNet observes".to_string() } else { named }, if all.len() == 1 { "isn't" } else { "aren't" }), None));
+        return Ok(info(
+            format!(
+                "{} {} on this computer, so there's nothing to observe",
+                if named.is_empty() { "No product XenoNet observes".to_string() } else { named },
+                if all.len() == 1 { "isn't" } else { "aren't" }
+            ),
+            None,
+        ));
     }
     let on: Vec<&Value> = installed.iter().copied().filter(|o| truthy(o.get("on"))).collect();
     if on.is_empty() {
         let one = installed.len() == 1;
-        return Ok(info(format!("the {} of {} {} off", if one { "observer" } else { "observers" }, names(&installed), if one { "is" } else { "are" }), Some("Turn one on in XenoNet's Actors panel, or with xenonet actor observe <product> on.")));
+        return Ok(info(
+            format!("the {} of {} {} off", if one { "observer" } else { "observers" }, names(&installed), if one { "is" } else { "are" }),
+            Some("Turn one on in XenoNet's Actors panel, or with xenonet actor observe <product> on."),
+        ));
     }
     let word = |state: &str| match state {
         "denied" => Some("can't be read"),
@@ -788,8 +897,22 @@ async fn observers(c: &Ctx<'_>) -> Result<Value, Failure> {
         }
     }
     if !bad.is_empty() {
-        let fix = if f.platform() == "darwin" { "A file that can't be read is usually macOS privacy or its permissions: check them, then restart XenoNet. One in another shape means the product changed it: update XenoNet, and npm run contracts in a checkout lists what changed." } else { "XenoNet observes these products on macOS for now." };
+        let fix = if f.platform() == "darwin" {
+            "A file that can't be read is usually macOS privacy or its permissions: check them, then restart XenoNet. One in another shape means the product changed it: update XenoNet, and npm run contracts in a checkout lists what changed."
+        } else {
+            "XenoNet observes these products on macOS for now."
+        };
         return Ok(warn(bad.join("; "), Some(fix)));
     }
-    Ok(ok(on.iter().map(|o| format!("{}: {} read", s(o.get("name")), plural(list(o.get("sources")).iter().filter(|x| x.get("state").and_then(Value::as_str) == Some("ok")).count() as f64, "source", None))).collect::<Vec<_>>().join("; ")))
+    Ok(ok(on
+        .iter()
+        .map(|o| {
+            format!(
+                "{}: {} read",
+                s(o.get("name")),
+                plural(list(o.get("sources")).iter().filter(|x| x.get("state").and_then(Value::as_str) == Some("ok")).count() as f64, "source", None)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ")))
 }

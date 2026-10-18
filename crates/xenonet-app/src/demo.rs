@@ -44,18 +44,77 @@ struct Project {
 }
 
 const PROJECTS: &[Project] = &[
-    Project { name: "atlas-api", readme: "Orders, inventory and payments API for the Atlas store.", files: &[("package.json", "{}"), ("tsconfig.json", "{}"), ("src/orders/routes.ts", "export const routes = [];\n"), ("src/orders/refunds.ts", "export function refund() {}\n")], dirty: &[("src/orders/routes.ts", "export const routes = [refundRoute];\n")], git: true },
-    Project { name: "atlas-api-local-db", readme: "Local Postgres and Supabase for atlas-api.", files: &[("docker-compose.yml", "services: {}\n"), ("supabase/config.toml", "")], dirty: &[], git: false },
-    Project { name: "atlas-web", readme: "The Atlas storefront, built with Next.js.", files: &[("package.json", "{}"), ("tsconfig.json", "{}"), ("app/checkout/page.tsx", "export default function Checkout() {}\n")], dirty: &[], git: true },
-    Project { name: "ledger", readme: "Double-entry bookkeeping service with monthly reconciliation.", files: &[("pyproject.toml", "[project]\nname = \"ledger\"\n"), ("ledger/reconcile.py", "def reconcile(): ...\n")], dirty: &[("ledger/reconcile.py", "def reconcile(rounding='half-even'): ...\n")], git: true },
-    Project { name: "pathfinder", readme: "Route planner for delivery vans.", files: &[("Cargo.toml", "[package]\nname = \"pathfinder\"\n"), ("src/solver.rs", "pub fn solve() {}\n")], dirty: &[], git: true },
-    Project { name: "infra", readme: "Terraform modules and deploy scripts for every environment.", files: &[("Dockerfile", "FROM node:22\n"), ("compose.yaml", "services: {}\n")], dirty: &[], git: true },
+    Project {
+        name: "atlas-api",
+        readme: "Orders, inventory and payments API for the Atlas store.",
+        files: &[
+            ("package.json", "{}"),
+            ("tsconfig.json", "{}"),
+            ("src/orders/routes.ts", "export const routes = [];\n"),
+            ("src/orders/refunds.ts", "export function refund() {}\n"),
+        ],
+        dirty: &[("src/orders/routes.ts", "export const routes = [refundRoute];\n")],
+        git: true,
+    },
+    Project {
+        name: "atlas-api-local-db",
+        readme: "Local Postgres and Supabase for atlas-api.",
+        files: &[("docker-compose.yml", "services: {}\n"), ("supabase/config.toml", "")],
+        dirty: &[],
+        git: false,
+    },
+    Project {
+        name: "atlas-web",
+        readme: "The Atlas storefront, built with Next.js.",
+        files: &[("package.json", "{}"), ("tsconfig.json", "{}"), ("app/checkout/page.tsx", "export default function Checkout() {}\n")],
+        dirty: &[],
+        git: true,
+    },
+    Project {
+        name: "ledger",
+        readme: "Double-entry bookkeeping service with monthly reconciliation.",
+        files: &[("pyproject.toml", "[project]\nname = \"ledger\"\n"), ("ledger/reconcile.py", "def reconcile(): ...\n")],
+        dirty: &[("ledger/reconcile.py", "def reconcile(rounding='half-even'): ...\n")],
+        git: true,
+    },
+    Project {
+        name: "pathfinder",
+        readme: "Route planner for delivery vans.",
+        files: &[("Cargo.toml", "[package]\nname = \"pathfinder\"\n"), ("src/solver.rs", "pub fn solve() {}\n")],
+        dirty: &[],
+        git: true,
+    },
+    Project {
+        name: "infra",
+        readme: "Terraform modules and deploy scripts for every environment.",
+        files: &[("Dockerfile", "FROM node:22\n"), ("compose.yaml", "services: {}\n")],
+        dirty: &[],
+        git: true,
+    },
     Project { name: "docs", readme: "Docs site for Atlas and Ledger.", files: &[("package.json", "{}"), ("guides/refunds.md", "# Refunds\n")], dirty: &[], git: true },
     // A folder of experiments: XenoNet shows it as a group around the two
     // repos in it, and leaves the loose snippets out.
-    Project { name: "labs", readme: "Experiments that aren't projects yet.", files: &[("ideas.md", "- geofences per postcode\n- simulate a day of routes\n")], dirty: &[], git: false },
-    Project { name: "labs/geofence", readme: "Delivery zones drawn from postcodes.", files: &[("package.json", "{}"), ("src/zones.ts", "export const zones = [];\n")], dirty: &[("src/zones.ts", "export const zones = loadPostcodes();\n")], git: true },
-    Project { name: "labs/route-sim", readme: "Simulates a day of van routes against pathfinder.", files: &[("pyproject.toml", "[project]\nname = \"route-sim\"\n"), ("sim/day.py", "def run(): ...\n")], dirty: &[], git: true },
+    Project {
+        name: "labs",
+        readme: "Experiments that aren't projects yet.",
+        files: &[("ideas.md", "- geofences per postcode\n- simulate a day of routes\n")],
+        dirty: &[],
+        git: false,
+    },
+    Project {
+        name: "labs/geofence",
+        readme: "Delivery zones drawn from postcodes.",
+        files: &[("package.json", "{}"), ("src/zones.ts", "export const zones = [];\n")],
+        dirty: &[("src/zones.ts", "export const zones = loadPostcodes();\n")],
+        git: true,
+    },
+    Project {
+        name: "labs/route-sim",
+        readme: "Simulates a day of van routes against pathfinder.",
+        files: &[("pyproject.toml", "[project]\nname = \"route-sim\"\n"), ("sim/day.py", "def run(): ...\n")],
+        dirty: &[],
+        git: true,
+    },
     Project { name: "labs/snippets", readme: "Odds and ends.", files: &[("pyproject.toml", "[project]\nname = \"snippets\"\n"), ("csv_to_json.py", "")], dirty: &[], git: false },
 ];
 
@@ -63,11 +122,35 @@ const PROJECTS: &[Project] = &[
 // work in a few repos, and a labs folder whose loose snippets folder has
 // the same path in it as ~/Projects' has. No session runs here.
 const CLIENTS: &[Project] = &[
-    Project { name: "harbor-app", readme: "Berth bookings for the Harbor marina, on the web and in the app.", files: &[("package.json", "{}"), ("tsconfig.json", "{}"), ("src/bookings.ts", "export const bookings = [];\n")], dirty: &[], git: true },
-    Project { name: "harbor-api", readme: "Berths, bookings and invoices for the Harbor marina.", files: &[("go.mod", "module harbor-api\n"), ("berths.go", "package main\n")], dirty: &[("berths.go", "package main\n\n// Tides decide which berths are free.\n")], git: true },
-    Project { name: "kiln", readme: "Firing schedules for a pottery studio's kilns.", files: &[("Cargo.toml", "[package]\nname = \"kiln\"\n"), ("src/main.rs", "fn main() {}\n")], dirty: &[], git: true },
+    Project {
+        name: "harbor-app",
+        readme: "Berth bookings for the Harbor marina, on the web and in the app.",
+        files: &[("package.json", "{}"), ("tsconfig.json", "{}"), ("src/bookings.ts", "export const bookings = [];\n")],
+        dirty: &[],
+        git: true,
+    },
+    Project {
+        name: "harbor-api",
+        readme: "Berths, bookings and invoices for the Harbor marina.",
+        files: &[("go.mod", "module harbor-api\n"), ("berths.go", "package main\n")],
+        dirty: &[("berths.go", "package main\n\n// Tides decide which berths are free.\n")],
+        git: true,
+    },
+    Project {
+        name: "kiln",
+        readme: "Firing schedules for a pottery studio's kilns.",
+        files: &[("Cargo.toml", "[package]\nname = \"kiln\"\n"), ("src/main.rs", "fn main() {}\n")],
+        dirty: &[],
+        git: true,
+    },
     Project { name: "labs", readme: "Experiments for clients.", files: &[], dirty: &[], git: false },
-    Project { name: "labs/glaze", readme: "Glaze recipes, scaled to the batch.", files: &[("pyproject.toml", "[project]\nname = \"glaze\"\n"), ("glaze/scale.py", "def scale(): ...\n")], dirty: &[], git: true },
+    Project {
+        name: "labs/glaze",
+        readme: "Glaze recipes, scaled to the batch.",
+        files: &[("pyproject.toml", "[project]\nname = \"glaze\"\n"), ("glaze/scale.py", "def scale(): ...\n")],
+        dirty: &[],
+        git: true,
+    },
     Project { name: "labs/snippets", readme: "Odds and ends.", files: &[("pyproject.toml", "[project]\nname = \"snippets\"\n"), ("tides.py", "")], dirty: &[], git: false },
 ];
 
@@ -75,13 +158,21 @@ const CLIENTS: &[Project] = &[
 pub const GIT: [&str; 6] = ["-c", "user.name=XenoNet Demo", "-c", "user.email=demo@example.invalid", "-c", "core.autocrlf=false"];
 
 fn git(dir: &str, args: &[&str]) -> bool {
-    std::process::Command::new("git").args(GIT).args(args).current_dir(dir).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success())
+    std::process::Command::new("git")
+        .args(GIT)
+        .args(args)
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
 }
 
 /// What makes a folder a repo, after its files: the commands, then what
 /// it changes without committing.
 pub fn repo_steps() -> Vec<Vec<String>> {
-    let with = |args: &[&str]| GIT.iter().chain(args).map(|s| s.to_string()).collect::<Vec<_>>();
+    let with = |args: &[&str]| GIT.iter().chain(args).map(ToString::to_string).collect::<Vec<_>>();
     vec![with(&["init", "-q", "-b", "main"]), with(&["add", "-A"]), with(&["commit", "-q", "-m", "chore: initial commit"])]
 }
 
@@ -315,11 +406,11 @@ impl Writer {
         let at = |i: usize| step.get(i).cloned();
         let kind = at(0).and_then(|k| k.as_str().map(String::from)).unwrap_or_default();
         let a = at(1);
-        let a_s = a.as_ref().map(xenonet_base::text::js_string).unwrap_or_else(|| "undefined".into());
+        let a_s = a.as_ref().map_or_else(|| "undefined".into(), xenonet_base::text::js_string);
         let b = at(2);
-        let b_s = b.as_ref().map(xenonet_base::text::js_string).unwrap_or_else(|| "undefined".into());
+        let b_s = b.as_ref().map_or_else(|| "undefined".into(), xenonet_base::text::js_string);
         let c = at(3);
-        let c_s = c.as_ref().map(xenonet_base::text::js_string).unwrap_or_else(|| "undefined".into());
+        let c_s = c.as_ref().map_or_else(|| "undefined".into(), xenonet_base::text::js_string);
         let file = matches!(kind.as_str(), "read" | "edit").then(|| NATIVE.join(&[&self.cwd, &a_s]));
         let title = match kind.as_str() {
             "read" => format!("Read {a_s}"),
@@ -335,7 +426,9 @@ impl Writer {
             _ => String::new(),
         };
         let failed = kind == "run" && b == Some(Value::Bool(false));
-        self.entries.push(json!({ "id": around.uuid(), "ts": n(ts), "role": "tool", "kind": "tool_use", "title": title, "text": text, "status": if failed { "failed" } else { "completed" } }));
+        self.entries.push(
+            json!({ "id": around.uuid(), "ts": n(ts), "role": "tool", "kind": "tool_use", "title": title, "text": text, "status": if failed { "failed" } else { "completed" } }),
+        );
         if self.app == "claude" {
             return self.claude_act(&kind, &a_s, b.as_ref(), c.as_ref(), file.as_deref(), ts, around);
         }
@@ -349,21 +442,23 @@ impl Writer {
             "run" => {
                 self.codex_tokens(ts, around);
                 let ok = crate::jsv::truthy(b.as_ref());
-                self.write(&[json!({ "type": "event_msg", "timestamp": iso(ts), "payload": { "type": "item_completed", "item": { "type": "CommandExecution", "command": ["pwsh", "-Command", a.clone().unwrap_or(Value::Null)], "exit_code": if ok { 0 } else { 1 }, "status": if ok { "completed" } else { "failed" }, "aggregatedOutput": if ok { "ok" } else { "1 failed, 23 passed" } } } })]);
+                self.write(&[json!({ "type": "event_msg", "timestamp": iso(ts), "payload": { "type": "item_completed", "item": { "type": "CommandExecution", "command": ["pwsh", "-Command", a.clone().unwrap_or(Value::Null)], "exit_code": i32::from(!ok), "status": if ok { "completed" } else { "failed" }, "aggregatedOutput": if ok { "ok" } else { "1 failed, 23 passed" } } } })]);
             }
             "mcp" => self.write(&[json!({ "type": "event_msg", "timestamp": iso(ts), "payload": { "type": "item_completed", "item": { "type": "McpToolCall", "server": a.clone().unwrap_or(Value::Null), "tool": b.clone().unwrap_or(Value::Null), "arguments": c.clone().unwrap_or(Value::Null), "status": "completed" } } })]),
             _ => {}
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "a script step's kind and arguments, as next took them apart, with its file, time and around")]
     fn claude_act(&mut self, kind: &str, a: &str, b: Option<&Value>, c: Option<&Value>, file: Option<&str>, ts: f64, around: &mut dyn Around) {
         let call_id = format!("toolu_{}", &around.uuid().replace('-', "")[..24]);
         let (name, input) = match kind {
             "read" => ("Read".to_string(), json!({ "file_path": file })),
             "edit" => ("Edit".to_string(), json!({ "file_path": file, "old_string": b, "new_string": c })),
             "run" => ("Bash".to_string(), json!({ "command": a })),
-            "mcp" => (format!("mcp__{a}__{}", b.map_or_else(|| "undefined".into(), xenonet_base::text::js_string)), c.filter(|x| !x.is_null()).cloned().unwrap_or_else(|| json!({}))),
+            "mcp" => {
+                (format!("mcp__{a}__{}", b.map_or_else(|| "undefined".into(), xenonet_base::text::js_string)), c.filter(|x| !x.is_null()).cloned().unwrap_or_else(|| json!({})))
+            }
             "agent" => ("Task".to_string(), json!({ "description": a, "prompt": a })),
             _ => ("AskUserQuestion".to_string(), json!({ "questions": [{ "question": a }] })),
         };
@@ -387,7 +482,9 @@ impl Writer {
         let u = json!({ "input_tokens": 30, "cache_read_input_tokens": 9000, "cache_creation_input_tokens": 0, "output_tokens": 400 });
         let msg = format!("msg_{}", around.uuid());
         let text = line(&json!({ "type": "user", "timestamp": iso(ts), "isSidechain": true, "message": { "role": "user", "content": task } }))
-            + &line(&json!({ "type": "assistant", "timestamp": iso(ts + 2000.0), "isSidechain": true, "message": { "id": msg, "model": MODEL_CLAUDE, "stop_reason": "tool_use", "usage": u, "content": [{ "type": "tool_use", "id": "toolu_sub1", "name": "Bash", "input": { "command": "cargo flamegraph --bench solver" } }] } }));
+            + &line(
+                &json!({ "type": "assistant", "timestamp": iso(ts + 2000.0), "isSidechain": true, "message": { "id": msg, "model": MODEL_CLAUDE, "stop_reason": "tool_use", "usage": u, "content": [{ "type": "tool_use", "id": "toolu_sub1", "name": "Bash", "input": { "command": "cargo flamegraph --bench solver" } }] } }),
+            );
         use std::io::Write;
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&file) {
             let _ = f.write_all(text.as_bytes());
@@ -467,7 +564,7 @@ impl Demo {
     }
 
     // Writes each project's files, and returns the ones that are repos.
-    fn write_files(&self, list: &[Project], at: &dyn Fn(&str) -> String, git_ok: bool) -> Result<Vec<ClientRepo>, fsx::FsError> {
+    fn write_files(list: &[Project], at: &dyn Fn(&str) -> String, git_ok: bool) -> Result<Vec<ClientRepo>, fsx::FsError> {
         for p in list {
             let dir = at(p.name);
             let readme = format!("# {}\n\n{}\n", NATIVE.basename(p.name, None), p.readme);
@@ -496,7 +593,7 @@ impl Demo {
         let git_ok = around.git_available();
         let home = self.world.home.clone();
         let projects = |rel: &str| NATIVE.join(&[&home, "Projects", rel]);
-        for repo in self.write_files(PROJECTS, &projects, git_ok)? {
+        for repo in Self::write_files(PROJECTS, &projects, git_ok)? {
             let ok = git(&repo.dir, &["init", "-q", "-b", "main"]) && git(&repo.dir, &["add", "-A"]) && git(&repo.dir, &["commit", "-q", "-m", "chore: initial commit"]);
             // No git: the projects still show, without repo status.
             if ok {
@@ -506,7 +603,7 @@ impl Demo {
             }
         }
         let clients = |rel: &str| NATIVE.join(&[&home, "Clients", rel]);
-        self.client_repos = self.write_files(CLIENTS, &clients, git_ok)?;
+        self.client_repos = Self::write_files(CLIENTS, &clients, git_ok)?;
         self.sessions = sessions(&self.today);
         self.write_history(now, around)?;
         self.write_wiki(now, around)?;
@@ -554,7 +651,13 @@ impl Demo {
 
     fn write_wiki(&self, now: f64, around: &mut dyn Around) -> Result<(), fsx::FsError> {
         let wiki = &self.world.wiki_dir;
-        let page = |slug: &str, title: &str, body: &str, tags: &[&str]| fsx::write_file(&NATIVE.join(&[wiki, "pages", &format!("{slug}.md")]), format!("---\ntitle: \"{title}\"\ntype: project\ntags: {}\nupdated: {}\n---\n\n{body}\n", stringify(&json!(tags), 0), iso(now - 30.0 * MIN)).as_bytes(), None);
+        let page = |slug: &str, title: &str, body: &str, tags: &[&str]| {
+            fsx::write_file(
+                &NATIVE.join(&[wiki, "pages", &format!("{slug}.md")]),
+                format!("---\ntitle: \"{title}\"\ntype: project\ntags: {}\nupdated: {}\n---\n\n{body}\n", stringify(&json!(tags), 0), iso(now - 30.0 * MIN)).as_bytes(),
+                None,
+            )
+        };
         let [year, ..] = around.local(now);
         for d in ["pages".to_string(), "inbox".to_string(), NATIVE.join(&["log", &year.to_string()])] {
             fsx::mkdir_p(&NATIVE.join(&[wiki, &d]), None)?;
@@ -566,13 +669,19 @@ impl Demo {
         page("q4-close", "Q4 close", "The checklist for closing the year in [[ledger]].", &[])?;
         let t = now - 40.0 * MIN;
         let [y, m, d, h, min] = around.local(t);
-        fsx::write_file(&NATIVE.join(&[wiki, "log", &y.to_string(), &format!("{y:04}-{m:02}-{d:02}.md")]), format!("## {h}:{min:02} · claude-code · Recorded the refund rules\n\npages: [[refunds]], [[atlas-api]]\n").as_bytes(), None)?;
+        fsx::write_file(
+            &NATIVE.join(&[wiki, "log", &y.to_string(), &format!("{y:04}-{m:02}-{d:02}.md")]),
+            format!("## {h}:{min:02} · claude-code · Recorded the refund rules\n\npages: [[refunds]], [[atlas-api]]\n").as_bytes(),
+            None,
+        )?;
         fsx::write_file(&NATIVE.join(&[wiki, "inbox", "note-1.md"]), b"---\ntitle: Solver benchmark results\napp: codex\n---\n", None)
     }
 
     fn write_claude_limits(&self, now: f64) -> Result<(), fsx::FsError> {
         fsx::mkdir_p(&self.world.claude_desktop_dir, None)?;
-        let samples: Vec<Value> = (0..30).map(|k| json!({ "t": n(now - f64::from(29 - k) * 10.0 * MIN), "u": { "fh": n((12.0 + f64::from(k) * 2.1).min(95.0)), "sd": n(44.0 + f64::from(k) * 0.4) } })).collect();
+        let samples: Vec<Value> = (0..30)
+            .map(|k| json!({ "t": n(now - f64::from(29 - k) * 10.0 * MIN), "u": { "fh": n((12.0 + f64::from(k) * 2.1).min(95.0)), "sd": n(44.0 + f64::from(k) * 0.4) } }))
+            .collect();
         fsx::write_file(&NATIVE.join(&[&self.world.claude_desktop_dir, "plan-usage-history.json"]), stringify(&json!({ "samples": samples }), 0).as_bytes(), None)
     }
 
@@ -587,11 +696,23 @@ impl Demo {
             fsx::mkdir_p(&NATIVE.dirname(&f), None)?;
             fsx::write_file(&f, text.as_bytes(), None)
         };
-        home_file(".claude.json", &stringify(&json!({ "oauthAccount": { "accountUuid": CLAUDE_PERSONAL.0, "organizationUuid": CLAUDE_PERSONAL.1, "emailAddress": "nova@example.com", "organizationName": "nova@example.com's Organization", "organizationType": "claude_max" } }), 0))?;
+        home_file(
+            ".claude.json",
+            &stringify(
+                &json!({ "oauthAccount": { "accountUuid": CLAUDE_PERSONAL.0, "organizationUuid": CLAUDE_PERSONAL.1, "emailAddress": "nova@example.com", "organizationName": "nova@example.com's Organization", "organizationType": "claude_max" } }),
+                0,
+            ),
+        )?;
         // An ID token in the shape Codex keeps, unsigned, and no real tokens.
         let jwt = |claims: &Value| format!("e30.{}.demo", b64url(stringify(claims, 0).as_bytes()));
         let signed_in = ((now - 20.0 * 86400e3) / 1000.0).floor();
-        home_file(&NATIVE.join(&[".codex", "auth.json"]), &stringify(&json!({ "auth_mode": "chatgpt", "OPENAI_API_KEY": null, "tokens": { "id_token": jwt(&json!({ "email": "nova@example.com", "auth_time": n(signed_in), "https://api.openai.com/auth": { "chatgpt_account_id": "demo-workspace", "chatgpt_plan_type": "plus" } })), "access_token": "demo", "refresh_token": "demo", "account_id": "demo-workspace" } }), 0))?;
+        home_file(
+            &NATIVE.join(&[".codex", "auth.json"]),
+            &stringify(
+                &json!({ "auth_mode": "chatgpt", "OPENAI_API_KEY": null, "tokens": { "id_token": jwt(&json!({ "email": "nova@example.com", "auth_time": n(signed_in), "https://api.openai.com/auth": { "chatgpt_account_id": "demo-workspace", "chatgpt_plan_type": "plus" } })), "access_token": "demo", "refresh_token": "demo", "account_id": "demo-workspace" } }),
+                0,
+            ),
+        )?;
         home_file(&NATIVE.join(&[".config", "gh", "hosts.yml"]), "github.com:\n    git_protocol: https\n    users:\n        nova-dev:\n        orbitworks:\n    user: nova-dev\n")?;
         home_file(&NATIVE.join(&[".ssh", "config"]), "Host gh-orbit\n    HostName github.com\n    IdentityFile ~/.ssh/orbitworks\n")?;
         home_file(".gitconfig", &format!("[user]\n\tname = Nova\n\temail = nova@example.com\n[credential \"https://github.com\"]\n\thelper = !gh auth git-credential\n[includeIf \"gitdir:{}/\"]\n\tpath = ~/.gitconfig-orbit\n", self.p("labs").replace('\\', "/")))?;
@@ -626,7 +747,11 @@ impl Demo {
         known.insert(work.clone(), json!({ "kind": "claude", "handle": "nova@atlas.example", "detail": { "plan": "Team", "org": "Atlas" }, "firstSeen": n(now - 30.0 * 86400e3), "lastSeen": n(now - 8.0 * 3600e3) }));
         let signins = json!({ "claude": [{ "id": work, "from": n(now - 30.0 * 86400e3), "to": n(now - 8.0 * 3600e3) }, { "id": personal, "from": n(now - 8.0 * 3600e3), "to": n(now - 3600e3) }] });
         fsx::mkdir_p(&self.world.state_dir, None)?;
-        fsx::write_file(&NATIVE.join(&[&self.world.state_dir, "state.json"]), stringify(&json!({ "identities": { "names": names, "known": known, "signins": signins } }), 2).as_bytes(), None)
+        fsx::write_file(
+            &NATIVE.join(&[&self.world.state_dir, "state.json"]),
+            stringify(&json!({ "identities": { "names": names, "known": known, "signins": signins } }), 2).as_bytes(),
+            None,
+        )
     }
 
     /// The sessions of an app as its adapter would return them.
@@ -709,21 +834,20 @@ impl Demo {
 // The old workspace taken out, or (held open on Windows) a fresh one made
 // beside it.
 fn fresh_root(root: &str, platform: &str) -> Result<String, fsx::FsError> {
-    let mut last = None;
-    for attempt in 0..=crate::demo_root::REMOVE_RETRIES {
+    let mut attempt = 0;
+    let e = loop {
         match fsx::rm_rf(root) {
             Ok(()) => return Ok(root.into()),
             Err(e) => {
                 let retry = matches!(e.code.as_deref(), Some("EBUSY" | "EMFILE" | "ENFILE" | "ENOTEMPTY" | "EPERM"));
-                last = Some(e);
                 if !retry || attempt == crate::demo_root::REMOVE_RETRIES {
-                    break;
+                    break e;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(u64::from(crate::demo_root::REMOVE_RETRY_DELAY_MS) * u64::from(attempt + 1)));
+                attempt += 1;
             }
         }
-    }
-    let e = last.unwrap();
+    };
     if !crate::demo_root::use_sibling(platform, e.code.as_deref()) {
         return Err(e);
     }
@@ -732,7 +856,9 @@ fn fresh_root(root: &str, platform: &str) -> Result<String, fsx::FsError> {
 
 /// What "Ask Codex which folders are projects" decides in the demo.
 pub fn demo_picks(outline: &Value) -> Value {
-    let hit = outline.as_array().is_some_and(|a| a.iter().any(|f| f.get("path").and_then(Value::as_str) == Some("labs/snippets") && f.get("xenonet").and_then(Value::as_str) == Some("folder")));
+    let hit = outline
+        .as_array()
+        .is_some_and(|a| a.iter().any(|f| f.get("path").and_then(Value::as_str) == Some("labs/snippets") && f.get("xenonet").and_then(Value::as_str) == Some("folder")));
     if hit {
         json!([{ "path": "labs/snippets", "as": "project", "reason": "Its own pyproject.toml and code, apart from the other experiments." }])
     } else {

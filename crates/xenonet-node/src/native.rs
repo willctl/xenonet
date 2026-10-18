@@ -6,6 +6,14 @@
 //! throw into Rust: a check that threw returns `failed`, and `files` and a
 //! handle answer [value] or { code, message }.
 
+// On the module, not the items: napi-derive copies an item's attributes
+// onto the two-argument wrapper it generates for the export, and an
+// expectation there goes unfulfilled.
+#![expect(
+    clippy::too_many_arguments,
+    reason = "opencodeReadDb and OpenCodeCore.read take readDb's arguments and callbacks from the twin one by one, as the JS did, and read_db passes them on"
+)]
+
 use crate::js::{from_js, to_js, Json, Jv, MaybeJson};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -30,9 +38,11 @@ fn list(items: Vec<Out>) -> Jv {
     Jv::Arr(items.into_iter().map(jv).collect())
 }
 
-fn same(env: &Env, a: &Unknown, b: &Unknown) -> bool {
+fn same(env: &Env, a: &Unknown<'_>, b: &Unknown<'_>) -> bool {
     let mut is = false;
-    unsafe { sys::napi_strict_equals(env.raw(), a.raw(), b.raw(), &mut is) };
+    // SAFETY: env, `a` and `b` are the export's, as every Env and Unknown
+    // here are; napi writes to the local `is`.
+    unsafe { sys::napi_strict_equals(env.raw(), a.raw(), b.raw(), &raw mut is) };
     is
 }
 
@@ -42,8 +52,10 @@ fn same(env: &Env, a: &Unknown, b: &Unknown) -> bool {
 /// gave back, or `failed` when it threw.
 type CheckFn<'a> = Function<'a, FnArgs<(Unknown<'a>, Option<String>)>, Unknown<'a>>;
 
-fn checked(env: &Env, check: &CheckFn, failed: &Unknown, record: &Value, version: Option<&str>) -> std::result::Result<Checked, Threw> {
+fn checked(env: &Env, check: &CheckFn<'_>, failed: &Unknown<'_>, record: &Value, version: Option<&str>) -> std::result::Result<Checked, Threw> {
+    // SAFETY: env is the export's, as every Env here is.
     let raw = unsafe { to_js(env.raw(), record, 0) }.map_err(|_| Threw)?;
+    // SAFETY: `raw` is a value napi made in that env just above.
     let arg = unsafe { Unknown::from_raw_unchecked(env.raw(), raw) };
     let out = check.call(FnArgs::from((arg, version.map(str::to_string)))).map_err(|_| Threw)?;
     if same(env, &out, failed) {
@@ -55,6 +67,7 @@ fn checked(env: &Env, check: &CheckFn, failed: &Unknown, record: &Value, version
     if matches!(out.get_type(), Ok(ValueType::Null | ValueType::Undefined)) {
         return Ok(Checked::Null);
     }
+    // SAFETY: env is the export's, and `out` is what check answered in it.
     Ok(Checked::Other(unsafe { from_js(env.raw(), out.raw(), 0) }.map_err(|_| Threw)?))
 }
 
@@ -113,7 +126,7 @@ impl Files for JsFiles<'_> {
     }
 }
 
-fn files_of<'a>(io: &'a Option<IoFn<'a>>) -> Box<dyn Files + 'a> {
+fn files_of<'a>(io: Option<&'a IoFn<'a>>) -> Box<dyn Files + 'a> {
     match io {
         Some(io) => Box::new(JsFiles { io }),
         None => Box::new(StdFiles),
@@ -134,7 +147,7 @@ pub fn copilot_edited_by(tool: MaybeJson, args: MaybeJson) -> Vec<String> {
 
 /// The log, null, or `failed` when the check threw.
 #[napi(js_name = "copilotReadEvents")]
-pub fn copilot_read_events(env: &Env, text: String, check: CheckFn, failed: Unknown) -> Jv {
+pub fn copilot_read_events(env: &Env, text: String, check: CheckFn<'_>, failed: Unknown<'_>) -> Jv {
     match copilot_cli::read_events(&text, &mut |r| checked(env, &check, &failed, r, None)) {
         Ok(Some(l)) => jv(copilot_cli::log_out(&l)),
         Ok(None) => Jv::Json(Value::Null),
@@ -155,14 +168,13 @@ pub struct JsCopilotCli {
 #[napi]
 impl JsCopilotCli {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsCopilotCli { c: copilot_cli::CopilotCli::new() }
     }
     #[napi]
-    pub fn read(&mut self, env: &Env, root: Option<String>, now: f64, check: CheckFn, failed: Unknown, io: Option<IoFn>) {
-        let mut files = files_of(&io);
-        self.c.read(root.as_deref(), now, files.as_mut(), &mut |r, v| checked(env, &check, &failed, r, v));
+    pub fn read(&mut self, env: Env, root: Option<String>, now: f64, check: CheckFn<'_>, failed: Unknown<'_>, io: Option<IoFn<'_>>) {
+        let mut files = files_of(io.as_ref());
+        self.c.read(root.as_deref(), now, files.as_mut(), &mut |r, v| checked(&env, &check, &failed, r, v));
     }
     #[napi(getter, js_name = "rootState")]
     pub fn root_state(&self) -> &'static str {
@@ -195,7 +207,7 @@ pub fn gemini_session_id_of(id: String) -> Option<String> {
 
 /// The chat, null, or `failed` when the check threw.
 #[napi(js_name = "geminiReadChat")]
-pub fn gemini_read_chat(env: &Env, text: String, check: CheckFn, failed: Unknown) -> Jv {
+pub fn gemini_read_chat(env: &Env, text: String, check: CheckFn<'_>, failed: Unknown<'_>) -> Jv {
     match gemini_cli::read_chat(&text, &mut |r| checked(env, &check, &failed, r, None)) {
         Ok(Some(c)) => jv(gemini_cli::chat_out(&c)),
         Ok(None) => Jv::Json(Value::Null),
@@ -216,14 +228,13 @@ pub struct JsGeminiCli {
 #[napi]
 impl JsGeminiCli {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsGeminiCli { g: gemini_cli::GeminiCli::new() }
     }
     #[napi]
-    pub fn read(&mut self, env: &Env, root: Option<String>, now: f64, check: CheckFn, failed: Unknown, io: Option<IoFn>) {
-        let mut files = files_of(&io);
-        self.g.read(root.as_deref(), now, files.as_mut(), &mut |r, v| checked(env, &check, &failed, r, v));
+    pub fn read(&mut self, env: Env, root: Option<String>, now: f64, check: CheckFn<'_>, failed: Unknown<'_>, io: Option<IoFn<'_>>) {
+        let mut files = files_of(io.as_ref());
+        self.g.read(root.as_deref(), now, files.as_mut(), &mut |r, v| checked(&env, &check, &failed, r, v));
     }
     #[napi(getter, js_name = "rootState")]
     pub fn root_state(&self) -> &'static str {
@@ -267,15 +278,14 @@ pub struct JsCursor {
 #[napi]
 impl JsCursor {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsCursor { c: cursor::Cursor::new() }
     }
     /// True when the vendor check threw (the twin has what it threw).
     #[napi]
-    pub fn read(&mut self, env: &Env, file: Option<String>, now: f64, check: CheckFn, failed: Unknown, io: Option<IoFn>) -> bool {
-        let mut files = files_of(&io);
-        self.c.read(file.as_deref(), now, files.as_mut(), &mut |r, v| checked(env, &check, &failed, r, v)).is_err()
+    pub fn read(&mut self, env: Env, file: Option<String>, now: f64, check: CheckFn<'_>, failed: Unknown<'_>, io: Option<IoFn<'_>>) -> bool {
+        let mut files = files_of(io.as_ref());
+        self.c.read(file.as_deref(), now, files.as_mut(), &mut |r, v| checked(&env, &check, &failed, r, v)).is_err()
     }
     #[napi(getter, js_name = "fileState")]
     pub fn file_state(&self) -> &'static str {
@@ -390,20 +400,19 @@ impl Vendor for JsVendor<'_> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn read_db(
-    env: &Env,
+    env: Env,
     exists: bool,
     file: &str,
     since_ms: f64,
     edits_since_ms: f64,
-    query: &Option<QueryFn>,
-    ready: &Function<(), Unknown>,
-    missing: &Function<FnArgs<(String, Option<String>)>, Unknown>,
-    check: &CheckFn,
-    failed: &Unknown,
+    query: Option<&QueryFn<'_>>,
+    ready: &Function<'_, (), Unknown<'_>>,
+    missing: &Function<'_, FnArgs<(String, Option<String>)>, Unknown<'_>>,
+    check: &CheckFn<'_>,
+    failed: &Unknown<'_>,
 ) -> std::result::Result<opencode::Read, Threw> {
-    let mut vendor = JsVendor { env, ready, missing, check, failed };
+    let mut vendor = JsVendor { env: &env, ready, missing, check, failed };
     let mut open = || -> std::result::Result<Box<dyn Db + '_>, String> {
         match query {
             Some(q) => {
@@ -418,21 +427,20 @@ fn read_db(
 }
 
 /// readDb's answer, or true when getting the vendor reader threw.
-#[allow(clippy::too_many_arguments)]
 #[napi(js_name = "opencodeReadDb")]
 pub fn opencode_read_db(
-    env: &Env,
+    env: Env,
     exists: bool,
     file: String,
     since_ms: f64,
     edits_since_ms: f64,
-    query: Option<QueryFn>,
-    ready: Function<(), Unknown>,
-    missing: Function<FnArgs<(String, Option<String>)>, Unknown>,
-    check: CheckFn,
-    failed: Unknown,
+    query: Option<QueryFn<'_>>,
+    ready: Function<'_, (), Unknown<'_>>,
+    missing: Function<'_, FnArgs<(String, Option<String>)>, Unknown<'_>>,
+    check: CheckFn<'_>,
+    failed: Unknown<'_>,
 ) -> Jv {
-    match read_db(env, exists, &file, since_ms, edits_since_ms, &query, &ready, &missing, &check, &failed) {
+    match read_db(env, exists, &file, since_ms, edits_since_ms, query.as_ref(), &ready, &missing, &check, &failed) {
         Ok(r) => jv(r.out()),
         Err(Threw) => Jv::Bool(true),
     }
@@ -446,29 +454,27 @@ pub struct JsOpenCode {
 #[napi]
 impl JsOpenCode {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsOpenCode { o: OpenCode::new() }
     }
     /// undefined, true when getting the vendor reader threw, or a
     /// TypeError's message.
-    #[allow(clippy::too_many_arguments)]
     #[napi]
     pub fn read(
         &mut self,
-        env: &Env,
+        env: Env,
         now: f64,
         exists: bool,
         file: String,
-        query: Option<QueryFn>,
-        ready: Function<(), Unknown>,
-        missing: Function<FnArgs<(String, Option<String>)>, Unknown>,
-        check: CheckFn,
-        failed: Unknown,
+        query: Option<QueryFn<'_>>,
+        ready: Function<'_, (), Unknown<'_>>,
+        missing: Function<'_, FnArgs<(String, Option<String>)>, Unknown<'_>>,
+        check: CheckFn<'_>,
+        failed: Unknown<'_>,
     ) -> Jv {
         const DAY_MS: f64 = 24.0 * 3600e3;
         const EDIT_KEEP_MS: f64 = 30.0 * 60e3;
-        match read_db(env, exists, &file, now - DAY_MS, now - EDIT_KEEP_MS, &query, &ready, &missing, &check, &failed) {
+        match read_db(env, exists, &file, now - DAY_MS, now - EDIT_KEEP_MS, query.as_ref(), &ready, &missing, &check, &failed) {
             Err(Threw) => Jv::Bool(true),
             Ok(got) => match self.o.take(&got, now) {
                 Ok(()) => Jv::Undef,
@@ -531,14 +537,13 @@ pub struct JsNumbat {
 #[napi]
 impl JsNumbat {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsNumbat { n: numbat::Numbat::new() }
     }
     /// The message of a read that failed, or null.
     #[napi]
-    pub fn read(&mut self, file: Option<String>, now: f64, io: Option<IoFn>) -> Option<String> {
-        let mut files = files_of(&io);
+    pub fn read(&mut self, file: Option<String>, now: f64, io: Option<IoFn<'_>>) -> Option<String> {
+        let mut files = files_of(io.as_ref());
         self.n.read(file.as_deref(), now, files.as_mut()).err()
     }
     #[napi(getter, js_name = "fileState")]
@@ -605,14 +610,13 @@ pub struct JsReportedRuns {
 #[napi]
 impl JsReportedRuns {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsReportedRuns { r: reported_runs::ReportedRuns::new() }
     }
     /// { ok, id } or { ok: false, error }. `now` is asked only for a
     /// report that's good, and what it throws goes on to the caller.
     #[napi]
-    pub fn report(&mut self, actor: String, run: Option<String>, app: String, title: Option<String>, presence: Option<String>, now: Function<(), f64>) -> Result<Jv> {
+    pub fn report(&mut self, actor: String, run: Option<String>, app: String, title: Option<String>, presence: Option<String>, now: Function<'_, (), f64>) -> Result<Jv> {
         let answer = |r: std::result::Result<String, String>| match r {
             Ok(id) => Jv::Obj(vec![("ok", Jv::Bool(true)), ("id", Jv::Json(Value::String(id)))]),
             Err(error) => Jv::Obj(vec![("ok", Jv::Bool(false)), ("error", Jv::Json(Value::String(error)))]),

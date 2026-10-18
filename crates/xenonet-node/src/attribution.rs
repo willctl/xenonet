@@ -12,6 +12,7 @@ use napi_derive::napi;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use xenonet_actors::attribution::{self, Candidate, Paths, Pending, Proc, Spawns};
+use xenonet_base::sync::Locked;
 use xenonet_engine::peer::{list, Calls, Thrown};
 use xenonet_engine::sql::Arg;
 
@@ -32,7 +33,7 @@ fn thrown(e: Error) -> Thrown {
 /// the table's [pid, row] pairs, `of(row)` what the census says a row is,
 /// `is_root(row)` whether it's one of the product's.
 #[napi(js_name = "attrStartedUnder")]
-pub fn started_under(rows: JsArg, of: Function<JsArg, JsArg>, is_root: Function<JsArg, bool>) -> Result<Json> {
+pub fn started_under(rows: JsArg, of: Function<'_, JsArg, JsArg>, is_root: Function<'_, JsArg, bool>) -> Result<Json> {
     let table = pairs(rows.0);
     let row = |i: usize| JsArg(crate::args::value_to_arg(&table[i].row));
     let mut failed: Option<Error> = None;
@@ -58,7 +59,13 @@ pub fn started_under(rows: JsArg, of: Function<JsArg, JsArg>, is_root: Function<
         return Err(e);
     }
     let out = out.map_err(|t| Error::new(Status::GenericFailure, t.message))?;
-    Ok(Json(Value::Array(out.into_iter().map(|s| json!({ "pid": xenonet_base::json::number(s.pid), "start": xenonet_base::json::number(s.start), "agent": s.agent, "root": xenonet_base::json::number(s.root) })).collect())))
+    Ok(Json(Value::Array(
+        out.into_iter()
+            .map(
+                |s| json!({ "pid": xenonet_base::json::number(s.pid), "start": xenonet_base::json::number(s.start), "agent": s.agent, "root": xenonet_base::json::number(s.root) }),
+            )
+            .collect(),
+    )))
 }
 
 fn pending_of(a: &Arg) -> Pending {
@@ -90,23 +97,23 @@ impl SpawnsCore {
     /// [key, record] pairs.
     #[napi]
     pub fn pending(&self) -> Json {
-        Json(Value::Array(self.state.lock().unwrap().pending.iter().map(|(k, p)| json!([k, p.json()])).collect()))
+        Json(Value::Array(self.state.locked().pending.iter().map(|(k, p)| json!([k, p.json()])).collect()))
     }
     #[napi]
     pub fn done(&self) -> Vec<String> {
-        self.state.lock().unwrap().done.items().to_vec()
+        self.state.locked().done.items().to_vec()
     }
     #[napi]
     pub fn claimed(&self) -> Vec<String> {
-        self.state.lock().unwrap().claimed.items().to_vec()
+        self.state.locked().claimed.items().to_vec()
     }
     #[napi]
     pub fn claim(&self, id: String) {
-        self.state.lock().unwrap().claimed.add(id);
+        self.state.locked().claimed.add(id);
     }
     #[napi(js_name = "clearPending")]
     pub fn clear_pending(&self) {
-        self.state.lock().unwrap().pending.clear();
+        self.state.locked().pending.clear();
     }
 
     /// Agent processes the actor started, each taken once, with the folder
@@ -122,7 +129,7 @@ impl SpawnsCore {
     }
 
     #[napi(js_name = "sessionOf")]
-    pub fn session_of(&self, env: Env, deps: Object, s: JsArg) -> Result<Option<String>> {
+    pub fn session_of(&self, env: Env, deps: Object<'_>, s: JsArg) -> Result<Option<String>> {
         let out = attribution::session_of(&self.state, &mut SyncCalls::new(&env, &deps), &Paths::default(), &pending_of(&s.0));
         let out = out.map_err(|t| rethrow(&env, t));
         settled(&env);
@@ -132,14 +139,19 @@ impl SpawnsCore {
     /// The processes settled now. `alive(record)`, when given, says
     /// whether one still runs.
     #[napi]
-    pub fn settle(&self, env: Env, deps: Object, at: f64, alive: Option<Function<JsArg, JsArg>>) -> Result<Json> {
+    pub fn settle(&self, env: Env, deps: Object<'_>, at: f64, alive: Option<Function<'_, JsArg, JsArg>>) -> Result<Json> {
         let mut calls = SyncCalls::new(&env, &deps);
-        let mut check = |_: &mut dyn Calls, p: &Pending| -> xenonet_engine::peer::Result<bool> {
-            let f = alive.as_ref().unwrap();
-            f.call(JsArg(crate::args::value_to_arg(&p.json()))).map(|v| v.0.truthy()).map_err(|e| Thrown::new(e.reason.clone()))
+        let mut check = alive.as_ref().map(|f| {
+            move |_: &mut dyn Calls, p: &Pending| -> xenonet_engine::peer::Result<bool> {
+                f.call(JsArg(crate::args::value_to_arg(&p.json()))).map(|v| v.0.truthy()).map_err(|e| Thrown::new(e.reason.clone()))
+            }
+        });
+        let alive: attribution::Alive<'_> = match &mut check {
+            Some(c) => Some(c),
+            None => None,
         };
-        let out = attribution::settle(&self.state, &mut calls, &Paths::default(), at, if alive.is_some() { Some(&mut check) } else { None });
-        let out = out.map(|v| Json(Value::Array(v.iter().map(|s| s.json()).collect()))).map_err(|t| rethrow(&env, t));
+        let out = attribution::settle(&self.state, &mut calls, &Paths::default(), at, alive);
+        let out = out.map(|v| Json(Value::Array(v.iter().map(attribution::Settled::json).collect()))).map_err(|t| rethrow(&env, t));
         settled(&env);
         out
     }

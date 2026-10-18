@@ -40,7 +40,7 @@ impl Cursors {
     }
 
     /// A token for the page after `after`.
-    pub fn make(&self, f: &For, after: Option<&Value>, now: f64) -> String {
+    pub fn make(&self, f: &For<'_>, after: Option<&Value>, now: f64) -> String {
         let mut p = Map::new();
         p.insert("v".into(), Value::from(1));
         for (k, v) in [("g", f.grant), ("r", f.revision), ("o", f.op)] {
@@ -62,7 +62,7 @@ impl Cursors {
     /// have), or the code it's refused with: INVALID_ARGUMENT for one that
     /// was changed, made up, or is for another grant, tool or filters;
     /// CURSOR_EXPIRED for one too old or from before the grant changed.
-    pub fn read(&self, cursor: &str, f: &For, now: f64) -> Result<Option<Value>, &'static str> {
+    pub fn read(&self, cursor: &str, f: &For<'_>, now: f64) -> Result<Option<Value>, &'static str> {
         let bad = Err("INVALID_ARGUMENT");
         let mut parts = cursor.split('.');
         let (payload, mac) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));

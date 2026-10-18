@@ -61,7 +61,7 @@ fn uuid() -> Result<String, Thrown> {
     getrandom::fill(&mut b).map_err(|e| Thrown::new(format!("no random bytes: {e}")))?;
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
-    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    let h = xenonet_base::jsstr::hex(&b);
     Ok(format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32]))
 }
 
@@ -97,7 +97,10 @@ pub fn attest(sender: &Arg, method: &Arg, verdict: &Arg, home: &Arg, now: &Arg, 
         ("schema", Arg::text(SCHEMA)),
         ("mid", Arg::text(format!("msg_{}", uuid()?))),
         ("at", now.clone()),
-        ("sender", obj(vec![("id", sender.field("id")), ("kind", sender.field("kind")), ("name", sender.field("name").or(Arg::Null)), ("product", sender.field("product").or(Arg::Null))])),
+        (
+            "sender",
+            obj(vec![("id", sender.field("id")), ("kind", sender.field("kind")), ("name", sender.field("name").or(Arg::Null)), ("product", sender.field("product").or(Arg::Null))]),
+        ),
         ("auth", obj(vec![("method", method.clone()), ("process", Arg::text(process)), ("strength", Arg::text(strength))])),
         ("client", client),
         ("transport", Arg::text(transport)),

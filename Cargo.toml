@@ -32,7 +32,6 @@ xenonet-integrations = { path = "crates/xenonet-integrations" }
 xenonet-doctor = { path = "crates/xenonet-doctor" }
 # JS keeps an object's keys in the order they were added, and so do the
 # files and answers XenoNet writes: preserve_order keeps that order here.
-serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 # Where the JS matches with a regular expression that has no lookaround
 # (the log's key patterns); lookarounds are written out by hand.
@@ -96,3 +95,61 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 [profile.release]
 lto = "thin"
 codegen-units = 4
+
+# What the compiler and clippy hold the Rust core to (docs/design/rust-core.md,
+# "Static analysis"). Each crate takes these with `[lints] workspace = true`,
+# and CI fails on any warning. Code that needs an exception says why where it
+# makes it, with #[expect(lint, reason = "...")].
+[workspace.lints.rust]
+# unsafe only where a crate or module says why: the Node-API addon, a libc
+# call.
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+# The default groups (correctness, suspicious, style, complexity, perf) and
+# pedantic, less the pedantic checks below that are taste rather than bugs.
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+doc_markdown = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+needless_pass_by_value = "allow"
+too_many_lines = "allow"
+similar_names = "allow"
+many_single_char_names = "allow"
+items_after_statements = "allow"
+struct_excessive_bools = "allow"
+fn_params_excessive_bools = "allow"
+unreadable_literal = "allow"
+single_match_else = "allow"
+if_not_else = "allow"
+match_same_arms = "allow"
+implicit_hasher = "allow"
+# The port computes as the JS does: numbers are f64, compared exactly and
+# cast where JS truncates, on purpose.
+float_cmp = "allow"
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+# The service runs for days, so nothing a person or a file can reach may
+# panic it. expect stays for a real invariant, with the reason as its
+# message. Tests may do all of these (clippy.toml).
+unwrap_used = "warn"
+panic = "warn"
+todo = "warn"
+unimplemented = "warn"
+dbg_macro = "warn"
+# stdout is the MCP servers' protocol and the command's output, so nothing
+# else prints there. stderr is the log.
+print_stdout = "warn"
+undocumented_unsafe_blocks = "warn"
+# #[expect] rather than #[allow], so an exception no longer needed shows,
+# and each one says why.
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"

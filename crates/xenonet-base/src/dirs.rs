@@ -26,7 +26,7 @@ pub fn app_dir(kind: &str, xdg: Option<&str>, local_app_data: Option<&str>, plat
     }
     match platform {
         "win32" => {
-            let local = local_app_data.map(str::to_string).unwrap_or_else(|| join_all(&[home, "AppData", "Local"]));
+            let local = local_app_data.map_or_else(|| join_all(&[home, "AppData", "Local"]), str::to_string);
             if state {
                 join_all(&[&local, name])
             } else {

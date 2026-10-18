@@ -97,14 +97,20 @@ fn v(x: Value) -> Arg {
 pub enum Then {
     /// Calls `target` (the driver, or one of the control client's own
     /// methods) with these arguments, and resumes with what it answers.
-    Call { target: &'static str, args: Vec<Arg> },
+    Call {
+        target: &'static str,
+        args: Vec<Arg>,
+    },
     /// Waits this many ms and resumes.
     Sleep(f64),
     Done,
     /// Throws the error the last call threw.
     Rethrow,
     /// Throws an Error (a TypeError when `type_error`) with this message.
-    Fail { message: String, type_error: bool },
+    Fail {
+        message: String,
+        type_error: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -162,9 +168,11 @@ fn read<'a>(x: Option<&'a Value>, k: &str) -> Result<Option<&'a Value>, String> 
 }
 
 fn length(x: Option<&Value>) -> Result<Option<Value>, String> {
-    Ok(match read(x, "length").map(|_| x.unwrap())? {
-        Value::Array(a) => Some(json!(a.len())),
-        Value::String(s) => Some(json!(crate::jstext::utf16_len(s))),
+    // read throws for undefined and null, as JS does reading .length.
+    read(x, "length")?;
+    Ok(match x {
+        Some(Value::Array(a)) => Some(json!(a.len())),
+        Some(Value::String(s)) => Some(json!(crate::jstext::utf16_len(s))),
         _ => None,
     })
 }
@@ -211,17 +219,17 @@ fn num(n: f64) -> Value {
 }
 
 // `arg.split(",").map(Number)`, with a part that isn't there undefined.
-fn numbers(arg: &str, n: usize) -> Vec<Arg> {
+fn numbers<const N: usize>(arg: &str) -> [Arg; N] {
     let parts: Vec<&str> = arg.split(',').collect();
-    (0..n).map(|i| parts.get(i).map_or(Arg::Undef, |p| v(num(number(p))))).collect()
+    std::array::from_fn(|i| parts.get(i).map_or(Arg::Undef, |p| v(num(number(p)))))
 }
 
 fn point(arg: &str) -> Arg {
     if let Some(id) = arg.strip_prefix('@') {
         return Arg::Obj(vec![("node", v(json!(id)))]);
     }
-    let mut xy = numbers(arg, 2).into_iter();
-    Arg::Obj(vec![("x", xy.next().unwrap()), ("y", xy.next().unwrap())])
+    let [x, y] = numbers(arg);
+    Arg::Obj(vec![("x", x), ("y", y)])
 }
 
 fn split_list(arg: &str) -> Value {
@@ -400,15 +408,15 @@ fn first_call(r: &mut Run, cmd: &str, arg: &str) -> Then {
         "click" | "click2" => r.next(1, input(Arg::Obj(vec![("click", point(arg)), ("count", v(json!(if cmd == "click2" { 2 } else { 1 })))]))),
         "hover" => r.next(1, input(Arg::Obj(vec![("move", point(arg))]))),
         "drag" | "alt-drag" => {
-            let mut n = numbers(arg, 4).into_iter();
-            let from = Arg::Obj(vec![("x", n.next().unwrap()), ("y", n.next().unwrap())]);
-            let to = Arg::Obj(vec![("x", n.next().unwrap()), ("y", n.next().unwrap())]);
+            let [x1, y1, x2, y2] = numbers(arg);
+            let from = Arg::Obj(vec![("x", x1), ("y", y1)]);
+            let to = Arg::Obj(vec![("x", x2), ("y", y2)]);
             let modifiers = if cmd == "alt-drag" { json!(["Alt"]) } else { json!([]) };
             r.next(1, input(Arg::Obj(vec![("drag", Arg::Obj(vec![("from", from), ("to", to)])), ("modifiers", v(modifiers))])))
         }
         "scroll" => {
-            let mut n = numbers(arg, 3).into_iter();
-            r.next(1, input(Arg::Obj(vec![("scroll", Arg::Obj(vec![("x", n.next().unwrap()), ("y", n.next().unwrap()), ("dy", n.next().unwrap())]))])))
+            let [x, y, dy] = numbers(arg);
+            r.next(1, input(Arg::Obj(vec![("scroll", Arg::Obj(vec![("x", x), ("y", y), ("dy", dy)]))])))
         }
         "size" => r.next(1, window(Arg::Obj(vec![("size", v(if arg == "window" { Value::Null } else { json!(arg) }))]))),
         "show" => r.next(1, window(Arg::Obj(vec![("show", v(json!(if arg.is_empty() { "inactive" } else { arg })))]))),
@@ -437,10 +445,13 @@ fn first_call(r: &mut Run, cmd: &str, arg: &str) -> Then {
 
 /// Takes what the last call came back with and says what's next.
 pub fn resume(state: State, answer: Answer) -> (State, Out) {
-    let mut r = Run { st: match state {
-        Value::Object(m) => m,
-        _ => Map::new(),
-    }, say: Vec::new() };
+    let mut r = Run {
+        st: match state {
+            Value::Object(m) => m,
+            _ => Map::new(),
+        },
+        say: Vec::new(),
+    };
     let then = match resume_in(&mut r, answer) {
         Ok(then) => then,
         Err(message) => type_error(message),
@@ -506,7 +517,7 @@ fn resume_in(r: &mut Run, answer: Answer) -> Result<Then, String> {
             }
             Then::Done
         }
-        ("select", 1) | ("select", 3) | ("deselect" | "back" | "reset" | "next" | "prev" | "command" | "mask", _) | ("identities" | "hosts", 1) => {
+        ("select" | "identities" | "hosts", 1) | ("select", 3) | ("deselect" | "back" | "reset" | "next" | "prev" | "command" | "mask", _) => {
             r.say_brief(&got)?;
             match kind.as_str() {
                 "identities" | "hosts" => r.next(2, driver(kind.clone(), vec![])),
@@ -668,8 +679,48 @@ fn resume_in(r: &mut Run, answer: Answer) -> Result<Then, String> {
 
 /// The steps the switch knows; anything else goes to the driver as a method.
 const KNOWN: [&str; 42] = [
-    "launch", "quit", "status", "state", "find", "select", "deselect", "back", "reset", "next", "prev", "stats", "command", "commands", "simulate", "actors", "feed", "identities", "mask", "hosts", "root", "key", "type", "click", "click2", "hover", "drag",
-    "alt-drag", "scroll", "size", "show", "hide", "minimize", "still", "settle", "shot", "eval", "logs", "listen", "theme", "film", "sleep",
+    "launch",
+    "quit",
+    "status",
+    "state",
+    "find",
+    "select",
+    "deselect",
+    "back",
+    "reset",
+    "next",
+    "prev",
+    "stats",
+    "command",
+    "commands",
+    "simulate",
+    "actors",
+    "feed",
+    "identities",
+    "mask",
+    "hosts",
+    "root",
+    "key",
+    "type",
+    "click",
+    "click2",
+    "hover",
+    "drag",
+    "alt-drag",
+    "scroll",
+    "size",
+    "show",
+    "hide",
+    "minimize",
+    "still",
+    "settle",
+    "shot",
+    "eval",
+    "logs",
+    "listen",
+    "theme",
+    "film",
+    "sleep",
 ];
 
 fn list(x: Option<&Value>) -> Result<Vec<Value>, String> {
@@ -736,7 +787,8 @@ mod tests {
         assert_eq!(out.then, driver("find", vec![v(json!({ "query": "atlas", "limit": 1 }))]));
         let (s, out) = resume(s, Answer::Ok(json!({ "nodes": [{ "id": "project:atlas" }] })));
         assert_eq!(out.then, driver("select", vec![v(json!("project:atlas"))]));
-        let (_, out) = resume(s, Answer::Ok(json!({ "selection": { "id": "project:atlas" }, "gathered": null, "overlays": { "modal": false }, "alerts": [], "motion": { "settled": true } })));
+        let (_, out) =
+            resume(s, Answer::Ok(json!({ "selection": { "id": "project:atlas" }, "gathered": null, "overlays": { "modal": false }, "alerts": [], "motion": { "settled": true } })));
         assert_eq!(out.say, [v(json!({ "selection": "project:atlas", "gathered": null, "overlays": [], "alerts": 0, "settled": true }))]);
         assert_eq!(out.then, Then::Done);
     }

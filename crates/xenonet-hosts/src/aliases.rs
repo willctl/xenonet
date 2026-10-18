@@ -7,7 +7,10 @@ use xenonet_app::nodepath::NATIVE;
 /// When to read ~/.ssh/config again: the stamp (its mtime) it had.
 pub struct AliasReader {
     pub file: Option<String>,
-    stamp: Option<Option<f64>>,
+    // Whether it has looked yet, and the file's mtime when it last did
+    // (None: there was no file).
+    looked: bool,
+    stamp: Option<f64>,
 }
 
 /// What to do now: nothing (what was read stands), forget the aliases
@@ -21,16 +24,17 @@ pub enum Look {
 
 impl AliasReader {
     pub fn new(home: Option<&str>) -> Self {
-        AliasReader { file: home.filter(|h| !h.is_empty()).map(|h| NATIVE.join(&[h, ".ssh", "config"])), stamp: None }
+        AliasReader { file: home.filter(|h| !h.is_empty()).map(|h| NATIVE.join(&[h, ".ssh", "config"])), looked: false, stamp: None }
     }
 
     pub fn look(&mut self) -> Look {
         let Some(file) = &self.file else { return Look::None };
         let now = std::fs::metadata(file).ok().and_then(|m| xenonet_base::fs::mtime_ms_of(&m).ok());
-        if self.stamp == Some(now) {
+        if self.looked && self.stamp == now {
             return Look::Same;
         }
-        self.stamp = Some(now);
+        self.looked = true;
+        self.stamp = now;
         match now {
             None => Look::None,
             Some(_) => Look::Read(file.clone()),

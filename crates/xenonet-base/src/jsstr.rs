@@ -154,7 +154,11 @@ pub fn hex(bytes: &[u8]) -> String {
 /// Whether a key is an array index, which a JS object lists before its
 /// other keys, in numeric order: "0", "7", "4294967294", not "07" or "-1".
 pub fn is_array_index(key: &str) -> bool {
-    !key.is_empty() && (key == "0" || !key.starts_with('0')) && key.len() <= 10 && key.bytes().all(|b| b.is_ascii_digit()) && key.parse::<u64>().is_ok_and(|n| n < u32::MAX as u64)
+    !key.is_empty()
+        && (key == "0" || !key.starts_with('0'))
+        && key.len() <= 10
+        && key.bytes().all(|b| b.is_ascii_digit())
+        && key.parse::<u64>().is_ok_and(|n| n < u64::from(u32::MAX))
 }
 
 /// An object's keys in the order a JS object made from them in this order
@@ -192,7 +196,7 @@ fn weights(c: char, out: &mut Vec<(u32, u32, u32)>) {
     }
     // Other punctuation from Latin-1 and General Punctuation that's common
     // in text: placed beside the ASCII it reads like.
-    let near = |ascii: char, extra: u32| (1 + PUNCT.find(ascii).unwrap() as u32, COMMON, LOWER + extra);
+    let near = |ascii: char, extra: u32| (1 + PUNCT.find(ascii).expect("near is given only characters in PUNCT") as u32, COMMON, LOWER + extra);
     match c {
         '\u{a0}' => return out.push(near(' ', 1)),
         '\u{2010}'..='\u{2015}' => return out.push(near('-', 1 + (c as u32 - 0x2010))),
@@ -215,15 +219,17 @@ fn weights(c: char, out: &mut Vec<(u32, u32, u32)>) {
             // ß, æ and œ are two letters each (ss, ae, oe), with a mark
             // between them that weighs at the second level.
             "ss" | "ae" | "oe" => {
-                let mut two = base.chars();
-                out.push((primary(two.next().unwrap()), COMMON, case(upper) + 2));
-                out.push((0, 100, 4));
-                out.push((primary(two.next().unwrap()), COMMON, case(upper) + 2));
+                for (i, letter) in base.chars().enumerate() {
+                    if i > 0 {
+                        out.push((0, 100, 4));
+                    }
+                    out.push((primary(letter), COMMON, case(upper) + 2));
+                }
             }
             // þ comes after z.
             "th" => out.push((primary('z') + 2, COMMON, case(upper))),
             _ => {
-                out.push((primary(base.chars().next().unwrap()), COMMON, case(upper)));
+                out.push((primary(base.chars().next().expect("latin's base letters aren't empty")), COMMON, case(upper)));
                 out.push((0, 2 + accent, LOWER));
             }
         };
@@ -346,6 +352,7 @@ extern "C" {
 
 /// How far local time is ahead of UTC at a time, in ms.
 #[cfg(unix)]
+#[expect(unsafe_code, reason = "tzset and localtime_r, which std doesn't wrap")]
 pub fn local_offset_ms(ms: f64) -> f64 {
     if !ms.is_finite() {
         return 0.0;
@@ -356,7 +363,7 @@ pub fn local_offset_ms(ms: f64) -> f64 {
     unsafe {
         let mut tm: libc::tm = std::mem::zeroed();
         tzset();
-        if libc::localtime_r(&t, &mut tm).is_null() {
+        if libc::localtime_r(&raw const t, &raw mut tm).is_null() {
             return 0.0;
         }
         tm.tm_gmtoff as f64 * 1000.0

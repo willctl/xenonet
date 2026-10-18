@@ -57,18 +57,17 @@ impl Rpc {
         while let Some(end) = self.buffer.find('\n') {
             let line: String = self.buffer.drain(..=end).collect();
             let line = &line[..line.len() - 1];
-            let message = match xenonet_base::json::parse(line) {
-                Ok(m @ (Value::Object(_) | Value::Array(_))) => m,
-                _ => {
-                    out.push(Incoming::Destroy);
-                    break;
-                }
+            let Ok(message @ (Value::Object(_) | Value::Array(_))) = xenonet_base::json::parse(line) else {
+                out.push(Incoming::Destroy);
+                break;
             };
             let get = |k: &str| message.get(k).cloned();
-            if xenonet_base::text::truthy(message.get("reply")) {
+            if let Some(id) = message.get("reply").filter(|r| xenonet_base::text::truthy(Some(r))) {
                 let error = message.get("error").filter(|e| xenonet_base::text::truthy(Some(e))).map(xenonet_base::text::js_string);
-                out.push(Incoming::Reply { id: get("reply").unwrap(), result: get("result").unwrap_or(Value::Null), error });
-            } else if let (Some(Value::String(method)), Some(id)) = (message.get("method"), message.get("id").and_then(Value::as_f64).filter(|n| n.fract() == 0.0 && n.abs() <= 9007199254740991.0)) {
+                out.push(Incoming::Reply { id: id.clone(), result: get("result").unwrap_or(Value::Null), error });
+            } else if let (Some(Value::String(method)), Some(id)) =
+                (message.get("method"), message.get("id").and_then(Value::as_f64).filter(|n| n.fract() == 0.0 && n.abs() <= 9007199254740991.0))
+            {
                 out.push(Incoming::Request { id, method: method.clone(), params: get("params").unwrap_or(Value::Null) });
             } else if let Some(Value::String(name)) = message.get("event") {
                 if self.events.iter().any(|e| e == name) {

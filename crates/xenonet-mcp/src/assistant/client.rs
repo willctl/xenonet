@@ -44,7 +44,6 @@ const DISCONNECTED: &str = "XenoNet disconnected; the action was not retried.";
 // ---------- where the endpoint is, and the grant's files ----------
 
 fn home() -> String {
-    #[allow(deprecated)]
     std::env::home_dir().map(|h| h.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
@@ -300,7 +299,7 @@ struct State {
     retry_at: f64,
     // The state folder the endpoint named last, for standing() when it's
     // gone.
-    state_dir: Option<String>,
+    endpoint_dir: Option<String>,
     // Each open that finished, and how, so callers that waited on it share
     // its outcome, as they share the JS client's promise.
     opened: u64,
@@ -363,7 +362,7 @@ impl Client {
         let (Some(port), Some(Value::String(state))) = (int("port"), descriptor.get("state")) else {
             return Err(refused("SERVICE_UNAVAILABLE", "XenoNet's endpoint file is unreadable"));
         };
-        self.state().state_dir = Some(state.clone());
+        self.state().endpoint_dir = Some(state.clone());
         if !int("pid").is_some_and(process::alive) {
             return Err(refused("SERVICE_UNAVAILABLE", "XenoNet's endpoint file is from a service that isn't running"));
         }
@@ -473,7 +472,7 @@ impl Client {
     /// tombstone), not expired, cloud access not turned off, and at which
     /// revision (None when there's no record of one).
     pub fn standing(&self) -> Standing {
-        let Some(dir) = self.state().state_dir.clone() else { return Standing::Not("SERVICE_UNAVAILABLE") };
+        let Some(dir) = self.state().endpoint_dir.clone() else { return Standing::Not("SERVICE_UNAVAILABLE") };
         if is_disabled(&dir) {
             return Standing::Not("DISABLED");
         }

@@ -50,7 +50,7 @@ pub fn descriptor_file(env: &Env, m: &Machine) -> String {
 
 fn token_re() -> &'static regex::Regex {
     static R: OnceLock<regex::Regex> = OnceLock::new();
-    R.get_or_init(|| regex::Regex::new("^[a-f0-9]{64}$").unwrap())
+    R.get_or_init(|| regex::Regex::new("^[a-f0-9]{64}$").expect("a fixed pattern"))
 }
 
 /// The service's descriptor: its port and the token its hello wants.
@@ -93,7 +93,9 @@ pub async fn ensure_service(io: &Io, root: &str, exec: &str, env: &Env, timeout:
     child_env.insert("XENONET_STANDALONE".into(), json!("1"));
     child_env.shift_remove("ELECTRON_RUN_AS_NODE");
     child_env.shift_remove("XENONET_EXEC");
-    io.ask(json!({ "op": "spawn", "command": exec, "args": [NATIVE.join(&[root, "server", "index.js"])], "cwd": root, "env": child_env, "log": log })).await.map_err(|_| Failure::Rethrow)?;
+    io.ask(json!({ "op": "spawn", "command": exec, "args": [NATIVE.join(&[root, "server", "index.js"])], "cwd": root, "env": child_env, "log": log }))
+        .await
+        .map_err(|_| Failure::Rethrow)?;
     let until = now_ms() + timeout;
     while now_ms() < until {
         if io.ask(json!({ "op": "connect", "env": env })).await.is_ok() {

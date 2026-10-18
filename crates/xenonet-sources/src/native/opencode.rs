@@ -1,5 +1,5 @@
 //! core/native/opencode.js: OpenCode's database. Each OpenCode session in
-//! opencode.db is a session on the map, "opencode:<id>", and the edit, write,
+//! opencode.db is a session on the map, "`opencode:<id>`", and the edit, write,
 //! multiedit and apply_patch tools' files are its edits. The database is
 //! opened read only for each read and closed after it, and SQLite takes the
 //! edits out: a part's other fields never leave the database, apart from
@@ -94,7 +94,7 @@ impl Sqlite {
 // A column's value as node:sqlite reads it: an integer past what a double
 // holds exactly is an error, a blob is its bytes (by index, as a
 // Uint8Array crosses), and a REAL that isn't finite is null (JSON's).
-fn value_of(v: rusqlite::types::ValueRef) -> Result<Value, String> {
+fn value_of(v: rusqlite::types::ValueRef<'_>) -> Result<Value, String> {
     use rusqlite::types::ValueRef;
     const MAX_SAFE: i64 = (1 << 53) - 1;
     Ok(match v {
@@ -111,7 +111,7 @@ impl Sqlite {
     fn rows(&mut self, sql: &str, param: Option<f64>, first_only: bool) -> Result<Vec<Value>, String> {
         let conn = self.0.as_ref().ok_or("database is closed")?;
         let mut st = conn.prepare(sql).map_err(|e| e.to_string())?;
-        let names: Vec<String> = st.column_names().iter().map(|s| s.to_string()).collect();
+        let names: Vec<String> = st.column_names().iter().map(ToString::to_string).collect();
         let mut rows = match param {
             Some(p) => st.query([p]),
             None => st.query([]),
@@ -353,7 +353,7 @@ impl OpenCode {
     /// what can't be read.
     pub fn take(&mut self, got: &Read, now: f64) -> Result<(), String> {
         self.file_state = got.state;
-        self.version = got.version.clone();
+        self.version.clone_from(&got.version);
         if got.state != "ok" {
             if got.state != "unreadable" {
                 self.runs.clear();
@@ -495,7 +495,7 @@ mod tests {
         let r = o.runs.get("opencode:ses-a").unwrap();
         assert_eq!(r.edits.keys().collect::<Vec<_>>(), ["/w/atlas/src/app.ts", "/w/atlas/src/lib.ts"]);
         assert_eq!(r.updated_at, Stamp::Num(now - 60e3));
-        assert!(v.0.is_empty());
+        assert_eq!(v.0, Vec::<String>::new());
         std::fs::remove_dir_all(&dir).unwrap();
         let (dir, file) = db("CREATE TABLE session (id text, title text);");
         let got = read_db(true, &mut || Sqlite::open(&file).map(|d| Box::new(d) as Box<dyn Db>), &mut v, 0.0, 0.0).unwrap();
@@ -514,6 +514,6 @@ mod tests {
         assert_eq!(opencode_db_path("/home/ada", None, Some("o.db")), "/home/ada/.local/share/opencode/o.db");
         assert_eq!(opencode_db_path("/home/ada", None, Some(":memory:")), "/home/ada/.local/share/opencode/opencode.db");
         assert_eq!(patch_files(Some(&Value::from("*** Begin Patch\n*** Add File: a.txt\n*** Move to: c.txt\n*** End Patch"))), ["a.txt", "c.txt"]);
-        assert!(patch_files(None).is_empty());
+        assert_eq!(patch_files(None), Vec::<String>::new());
     }
 }

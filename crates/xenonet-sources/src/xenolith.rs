@@ -51,7 +51,7 @@ fn config_dir(p: &Product, env: &Env, home: &str, platform: &str) -> String {
         return paths::resolve(dir);
     }
     if platform == "win32" {
-        let appdata = var(env, "APPDATA").map(String::from).unwrap_or_else(|| paths::join_all(&[home, "AppData", "Roaming"]));
+        let appdata = var(env, "APPDATA").map_or_else(|| paths::join_all(&[home, "AppData", "Roaming"]), String::from);
         return paths::join(&appdata, p.windows);
     }
     let xdg = var(env, "XDG_CONFIG_HOME").filter(|v| is_absolute(v));
@@ -61,7 +61,7 @@ fn config_dir(p: &Product, env: &Env, home: &str, platform: &str) -> String {
             None => paths::join_all(&[home, "Library", "Application Support", p.mac]),
         };
     }
-    paths::join(&xdg.map(String::from).unwrap_or_else(|| paths::join(home, ".config")), p.xdg)
+    paths::join(&xdg.map_or_else(|| paths::join(home, ".config"), String::from), p.xdg)
 }
 
 fn exists(p: &str) -> bool {

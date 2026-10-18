@@ -37,7 +37,7 @@ pub fn is_secret(s: &str) -> bool {
 /// Windows: Credential Manager's generic credentials, through CredRead,
 /// CredWrite and CredDelete, in PowerShell. The request (and a secret to
 /// keep) comes on standard input as JSON; the script itself holds none.
-pub const WINDOWS: &str = r##"
+pub const WINDOWS: &str = r#"
 $ErrorActionPreference = 'Stop'
 $req = [Console]::In.ReadToEnd() | ConvertFrom-Json
 Add-Type -TypeDefinition @'
@@ -88,7 +88,7 @@ switch ($req.op) {
   'remove' { if (-not [XenoNetSecret]::Delete($req.target)) { exit 3 } }
 }
 exit 0
-"##;
+"#;
 
 /// A run of the store's program: what goes on its standard input, if
 /// anything.
@@ -192,7 +192,7 @@ impl SecretStore {
 
     fn command(&self, op: Op, target: &str, secret: Option<&str>, comment: &str) -> Command {
         let tool = self.tool.clone().unwrap_or_default();
-        let c = |args: &[&str], input: Option<String>| Command { file: tool.clone(), args: args.iter().map(|s| s.to_string()).collect(), input };
+        let c = |args: &[&str], input: Option<String>| Command { file: tool.clone(), args: args.iter().map(ToString::to_string).collect(), input };
         match self.platform.as_str() {
             "win32" => {
                 let input = format!(
@@ -257,7 +257,7 @@ impl SecretStore {
             return Ok(None);
         }
         // The keychain ends what it prints with a newline; a secret has none.
-        let s = r.stdout.strip_suffix('\n').map(|s| s.strip_suffix('\r').unwrap_or(s)).unwrap_or(&r.stdout);
+        let s = r.stdout.strip_suffix('\n').map_or(r.stdout.as_str(), |s| s.strip_suffix('\r').unwrap_or(s));
         Ok((!s.is_empty()).then(|| s.to_string()))
     }
 

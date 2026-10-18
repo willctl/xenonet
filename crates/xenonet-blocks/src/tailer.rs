@@ -195,7 +195,7 @@ mod tests {
         assert_eq!(t.plan_take("a", 10, None), None, "nothing new");
         assert_eq!(t.took("a", b":2}\n \n", 16), ["{\"b\":2}"]);
         assert_eq!(t.plan_take("a", 4, None), Some((0, 4)), "shorter: written again");
-        assert!(t.files.get("a").unwrap().rest.is_empty());
+        assert_eq!(t.files.get("a").unwrap().rest, b"");
     }
 
     #[test]

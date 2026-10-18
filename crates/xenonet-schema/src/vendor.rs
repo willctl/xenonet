@@ -61,7 +61,7 @@ fn locale_cmp(a: &str, b: &str) -> Ordering {
     a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| b.cmp(a))
 }
 
-fn compare_pre(a: &Option<String>, b: &Option<String>) -> Ordering {
+fn compare_pre(a: Option<&str>, b: Option<&str>) -> Ordering {
     match (a, b) {
         (x, y) if x == y => Ordering::Equal,
         (None, _) => Ordering::Greater,
@@ -87,7 +87,7 @@ fn compare_pre(a: &Option<String>, b: &Option<String>) -> Ordering {
 }
 
 pub fn compare_versions(a: &Version, b: &Version) -> Ordering {
-    a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.total_cmp(&b.2)).then_with(|| compare_pre(&a.3, &b.3))
+    a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.total_cmp(&b.2)).then_with(|| compare_pre(a.3.as_deref(), b.3.as_deref()))
 }
 
 type Comparator = (&'static str, Version);
@@ -150,7 +150,7 @@ fn parse_range(range: &str) -> Option<Vec<Vec<Comparator>>> {
                 }
                 "~" => {
                     set.push((">=", v.clone()));
-                    set.push(("<", bump(if exact || g > 1 { 1 } else { 0 })?));
+                    set.push(("<", bump(usize::from(exact || g > 1))?));
                 }
                 "" | "=" if !exact => {
                     if g > 0 {
@@ -191,7 +191,7 @@ pub fn satisfies(version: &str, range: &str) -> bool {
     })
 }
 
-/// Codex's version, from the app-server's user agent: <client>/<version> (…).
+/// Codex's version, from the app-server's user agent: `<client>/<version>` (…).
 pub fn codex_version_of(user_agent: &str) -> Option<String> {
     // /\/(\d+\.\d+\.\d+[\w.+-]*)/
     let b = user_agent.as_bytes();
@@ -259,7 +259,7 @@ pub fn json_error_at(text: &str) -> Option<(usize, usize)> {
         Some((line, i - start + 1))
     };
     let space = |i: &mut usize| {
-        while *i < n && [b' ', b'\t', b'\n', b'\r'].iter().any(|c| s[*i] == u16::from(*c)) {
+        while *i < n && b" \t\n\r".iter().any(|c| s[*i] == u16::from(*c)) {
             *i += 1;
         }
     };
@@ -369,9 +369,9 @@ pub fn json_error_at(text: &str) -> Option<(usize, usize)> {
                                 j += 1;
                             }
                         }
-                        if matches!(s.get(j), Some(&0x65) | Some(&0x45)) {
+                        if matches!(s.get(j), Some(&0x65 | &0x45)) {
                             let mut k = j + 1;
-                            if matches!(s.get(k), Some(&0x2b) | Some(&0x2d)) {
+                            if matches!(s.get(k), Some(&0x2b | &0x2d)) {
                                 k += 1;
                             }
                             if digit(k) {
@@ -493,7 +493,7 @@ impl VendorReader {
         let n = self.stats.versions.get(k).copied().unwrap_or(0);
         self.stats.versions.insert(k, n + 1);
         let Some(i) = self.pick(v.as_deref(), log, now) else { return Checked::Same };
-        let schema = self.majors.as_ref().unwrap()[i].schema.clone();
+        let schema = self.majors()[i].schema.clone();
         let found = schema.inspect(record);
         for f in &found.findings {
             self.keep(f, v.as_deref(), log, now);
@@ -508,7 +508,7 @@ impl VendorReader {
                     continue;
                 }
                 let list = self.careful.entry(kind.clone()).or_default();
-                let same = |c: &Careful| c.path == *path && variant_string(&c.variant) == variant_string(variant);
+                let same = |c: &Careful| c.path == *path && variant_string(c.variant.as_deref()) == variant_string(variant.as_deref());
                 if !list.iter().any(same) {
                     list.push(Careful { path: path.clone(), variant: variant.clone(), segments: segments.clone(), spec: spec.clone(), major: i });
                 }
@@ -527,12 +527,13 @@ impl VendorReader {
         self.fix(record, Vec::new(), kind, v.as_deref(), log, now)
     }
 
+    #[expect(clippy::ref_option, reason = "kind is the careful map's key, which get borrows as it is")]
     fn fix(&mut self, record: &Value, paths: Vec<Vec<Key>>, kind: &Option<String>, v: Option<&str>, log: &mut DriftLog, now: f64) -> Checked {
         let mut all = paths;
         if let Some(careful) = self.careful.get(kind).cloned() {
             let mut seen: Vec<Vec<Key>> = all.clone();
             for c in careful {
-                let schema = self.majors.as_ref().unwrap()[c.major].schema.clone();
+                let schema = self.majors()[c.major].schema.clone();
                 for keys in schema.recheck(record, &c.segments, &c.spec) {
                     if seen.contains(&keys) {
                         continue;
@@ -579,7 +580,7 @@ impl VendorReader {
         match f {
             Finding::NewField { path, variant, value, data } => lazy(log, base("new-field", path, variant), value, !data),
             Finding::TypeChange { path, variant, value, data, .. } => {
-                lazy(log, Piece { type_: Value::String(json_type(value).into()), ..base("type-change", path, variant) }, value, !data)
+                lazy(log, Piece { type_: Value::String(json_type(value).into()), ..base("type-change", path, variant) }, value, !data);
             }
             Finding::NewVariant { path, variant, value } => {
                 log.record(&Piece { shape: Value::String(variant_shape(value)), ..base("new-variant", path, variant) }, now);
@@ -612,9 +613,9 @@ impl VendorReader {
     }
 }
 
-fn variant_string(v: &Option<Vec<Value>>) -> String {
+fn variant_string(v: Option<&[Value]>) -> String {
     // String(variant), as the JS compares them: a list joined with commas.
-    v.as_ref().map_or("null".into(), |v| v.iter().map(|x| xenonet_base::text::join_item(Some(x))).collect::<Vec<_>>().join(","))
+    v.map_or("null".into(), |v| v.iter().map(|x| xenonet_base::text::join_item(Some(x))).collect::<Vec<_>>().join(","))
 }
 
 fn value_at<'a>(record: &'a Value, keys: &[Key]) -> Option<&'a Value> {
@@ -639,7 +640,7 @@ impl Sampling {
     pub fn whole(&mut self, kind: &str) -> bool {
         let n = self.counts.get(kind).copied().unwrap_or(0) + 1;
         self.counts.insert(kind.to_string(), n);
-        n & (n - 1) == 0
+        n.is_power_of_two()
     }
 }
 

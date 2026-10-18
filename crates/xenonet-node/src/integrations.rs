@@ -70,7 +70,7 @@ pub struct IntgTickets {
 impl IntgTickets {
     #[napi(constructor)]
     pub fn new() -> Self {
-        IntgTickets { inner: Default::default() }
+        IntgTickets { inner: common::Tickets::default() }
     }
 
     #[napi]
@@ -99,7 +99,9 @@ pub struct IntgRecords {
 impl IntgRecords {
     #[napi(factory)]
     pub fn of(dir: Option<String>, limit: f64) -> napi::Result<Self> {
-        common::Records::new(dir, if limit.is_finite() { limit.max(0.0) as usize } else { usize::MAX }).map(|inner| IntgRecords { inner }).map_err(|f| napi::Error::from_reason(f.message))
+        common::Records::new(dir, if limit.is_finite() { limit.max(0.0) as usize } else { usize::MAX })
+            .map(|inner| IntgRecords { inner })
+            .map_err(|f| napi::Error::from_reason(f.message))
     }
 
     #[napi]
@@ -310,10 +312,14 @@ macro_rules! shell_task {
 }
 
 #[napi]
+// On the impl, not the methods: napi-derive copies a method's attributes
+// onto the two-argument wrapper it generates for it, and an expectation
+// there goes unfulfilled.
+#[expect(clippy::unused_self, reason = "review, exportReview and forgetReview are methods of the JS object, as they were in the JS, though they need none of its state")]
 impl IntgOpenShell {
     #[napi(constructor)]
     pub fn new(platform: String, system_root: Option<String>, collect_text: String) -> Self {
-        IntgOpenShell { inner: Rc::new(RefCell::new(openshell::OpenShell { tickets: Default::default(), platform, system_root, collect_text })) }
+        IntgOpenShell { inner: Rc::new(RefCell::new(openshell::OpenShell { tickets: common::Tickets::default(), platform, system_root, collect_text })) }
     }
 
     #[napi]

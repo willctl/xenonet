@@ -308,7 +308,9 @@ pub fn take_events(c: &mut dyn Calls, id: &Arg, events: &[Arg], now: &Arg) -> Re
             at = now.clone();
         }
         let reference = e.field("ref");
-        if !reference.is_nullish() && (refs.iter().any(|r| same_value_zero(r, &reference)) || c.call("actors.store", "hasActorRef", vec![id.clone(), reference.clone(), Arg::num(n - DAY_MS)])?.truthy()) {
+        if !reference.is_nullish()
+            && (refs.iter().any(|r| same_value_zero(r, &reference)) || c.call("actors.store", "hasActorRef", vec![id.clone(), reference.clone(), Arg::num(n - DAY_MS)])?.truthy())
+        {
             drop("an event with that ref was reported already".into());
             continue;
         }
@@ -418,7 +420,14 @@ pub fn take_targets(c: &mut dyn Calls, id: &Arg, targets: &[Arg], replace: bool,
         let relation = t.field("relation").or(Arg::text("works-on"));
         let name = js_text(&relation);
         let Some(points) = points_at(&name) else {
-            drop(if relation.as_str() == Some("messaged") { "messaged is the engine's to set, when the actor sends a message" } else { "an actor sets works-on, spawned, edited, watches or reviews" }.into());
+            drop(
+                if relation.as_str() == Some("messaged") {
+                    "messaged is the engine's to set, when the actor sends a message"
+                } else {
+                    "an actor sets works-on, spawned, edited, watches or reviews"
+                }
+                .into(),
+            );
             continue;
         };
         if let Some(need) = needs(&name) {

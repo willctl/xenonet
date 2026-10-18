@@ -1,7 +1,7 @@
 //! core/hosts/merge.js: other machines in this XenoNet's view, as pure
 //! functions over what hosts sent and what this XenoNet has.
 //!
-//! Every id from a host becomes @<host>:<its id>. An id that already
+//! Every id from a host becomes `@<host>:<its id>`. An id that already
 //! starts with @ is dropped, with anything that points at it, so a host
 //! can't pass on another host's nodes or pose as this machine; the host's
 //! core becomes its host node, and everything else it sent hangs from that
@@ -51,7 +51,7 @@ pub enum Kind<'a> {
 pub trait Schemas {
     /// The value checked against the schema, and copied with only what it
     /// declares; None when it doesn't pass, or there's no such schema.
-    fn clean(&mut self, kind: Kind, value: &Value) -> Option<Value>;
+    fn clean(&mut self, kind: Kind<'_>, value: &Value) -> Option<Value>;
     /// activityOf(updatedAt, now, windows).
     fn activity(&mut self, updated_at: &Value, now: f64, windows: &Value) -> Value;
 }
@@ -226,7 +226,7 @@ impl Shift {
     }
 }
 
-pub fn qualify_graph(graph: &Value, host: &Value, layout: &Value, now: f64, windows: &Value, clean: &mut Cleaner, schemas: &mut dyn Schemas) -> Part {
+pub fn qualify_graph(graph: &Value, host: &Value, layout: &Value, now: f64, windows: &Value, clean: &mut Cleaner<'_>, schemas: &mut dyn Schemas) -> Part {
     let h = s(host, "id").unwrap_or_default();
     let shift = Shift::of(host);
     let stale = host.get("state").and_then(Value::as_str) != Some("live");
@@ -330,7 +330,7 @@ pub fn qualify_graph(graph: &Value, host: &Value, layout: &Value, now: f64, wind
     let core_r = core.as_ref();
     let hello = host.get("hello");
     let hello_id = hello.and_then(|x| x.get("id"));
-    let calls = if truthy(hello_id) && hello_id != Some(&json!(h)) { hello_id.cloned().unwrap() } else { Value::Null };
+    let calls = hello_id.filter(|x| truthy(Some(x)) && **x != json!(h)).cloned().unwrap_or(Value::Null);
     let field = |v: Option<&Value>| v.filter(|x| !x.is_null()).cloned().unwrap_or(Value::Null);
     let mut hn = Map::new();
     hn.insert("id".into(), json!(host_id));
@@ -436,13 +436,14 @@ pub fn qualify_graph(graph: &Value, host: &Value, layout: &Value, now: f64, wind
     }
 
     // What's active, by this machine's clock.
-    for (_, x) in nodes.iter_mut() {
+    for (_, x) in &mut nodes {
         if x.get("kind") != Some(&json!("session")) {
             x["activeCount"] = json!(0);
         }
     }
     let up: HashMap<String, String> = parent_of.values().map(|l| (js_string(&l["target"]), js_string(&l["source"]))).collect();
-    let actives: Vec<String> = nodes.iter().filter(|(_, x)| x.get("kind") == Some(&json!("session")) && x.get("activity") == Some(&json!("active"))).map(|(id, _)| id.clone()).collect();
+    let actives: Vec<String> =
+        nodes.iter().filter(|(_, x)| x.get("kind") == Some(&json!("session")) && x.get("activity") == Some(&json!("active"))).map(|(id, _)| id.clone()).collect();
     for sid in actives {
         let mut seen: HashSet<String> = HashSet::new();
         let mut cur = up.get(&sid).cloned();
@@ -461,7 +462,7 @@ pub fn qualify_graph(graph: &Value, host: &Value, layout: &Value, now: f64, wind
         }
     }
     let project_ms = finite(windows.get("projectActiveMs")).unwrap_or(3600e3);
-    for (_, x) in nodes.iter_mut() {
+    for (_, x) in &mut nodes {
         if matches!(x.get("kind").and_then(Value::as_str), Some("project" | "native" | "zone")) {
             let last = x.get("lastSessionAt").filter(|v| !v.is_null()).map(|v| js_number(Some(v)));
             x["active"] = json!(last.is_some_and(|l| now - l <= project_ms));
@@ -499,20 +500,23 @@ pub fn qualify_graph(graph: &Value, host: &Value, layout: &Value, now: f64, wind
 /// Bridges: a same-repo relation between checkouts of one repo on
 /// different machines, by repo key; one repo gets a few at most.
 pub fn same_repo(nodes: &[Value], cap: usize) -> Vec<Value> {
-    let mut repos: Vec<(String, Vec<(String, Vec<Value>)>)> = Vec::new();
+    // By repo key, then by host: the ids of the repo's checkouts there.
+    type ByHost = Vec<(String, Vec<Value>)>;
+    let mut repos: Vec<(String, ByHost)> = Vec::new();
     for x in nodes {
         if x.get("kind") != Some(&json!("project")) || truthy(x.get("group")) || truthy(x.get("satelliteOf")) {
             continue;
         }
         let Some(key) = x.get("repoKey").and_then(Value::as_str).filter(|k| !k.is_empty()) else { continue };
         let host = x.get("host").filter(|h| !h.is_null()).map_or_else(String::new, js_string);
-        let by_host = match repos.iter_mut().position(|(k, _)| k == key) {
-            Some(i) => &mut repos[i].1,
+        let at = match repos.iter().position(|(k, _)| k == key) {
+            Some(i) => i,
             None => {
                 repos.push((key.to_string(), Vec::new()));
-                &mut repos.last_mut().unwrap().1
+                repos.len() - 1
             }
         };
+        let by_host = &mut repos[at].1;
         match by_host.iter_mut().find(|(hh, _)| *hh == host) {
             Some((_, ids)) => ids.push(x.get("id").cloned().unwrap_or(Value::Null)),
             None => by_host.push((host, vec![x.get("id").cloned().unwrap_or(Value::Null)])),
@@ -664,8 +668,19 @@ pub fn repo_key(origin: Option<&Value>, aliases: &HashMap<String, String>) -> Op
 
 /// This XenoNet's map with every host's in it. With no hosts, the map is
 /// this XenoNet's own.
-#[allow(clippy::too_many_arguments)]
-pub fn merge_graph(local: &Value, hosts: &mut [HostIn], layout: &Value, now: f64, windows: &Value, self_id: &Value, names: &Value, hidden: &Value, aliases: &HashMap<String, String>, schemas: &mut dyn Schemas) -> Value {
+#[expect(clippy::too_many_arguments, reason = "the JS's mergeGraph and its options, which xenonet-node passes one by one")]
+pub fn merge_graph(
+    local: &Value,
+    hosts: &mut [HostIn<'_>],
+    layout: &Value,
+    now: f64,
+    windows: &Value,
+    self_id: &Value,
+    names: &Value,
+    hidden: &Value,
+    aliases: &HashMap<String, String>,
+    schemas: &mut dyn Schemas,
+) -> Value {
     if hosts.is_empty() {
         return local.clone();
     }
@@ -759,7 +774,9 @@ fn pair_of(c: &Value, h: &str, shift: &Shift, shared: bool) -> Option<Value> {
         Value::Null => json!(or),
         t => t,
     };
-    Some(json!({ "a": a, "b": b, "files": strings(c.get("files")), "paths": strings(c.get("paths")), "ts": ts, "branches": [branch(0), branch(1)], "sameBranch": c.get("sameBranch") == Some(&json!(true)), "titles": [title(0, &a), title(1, &b)] }))
+    Some(
+        json!({ "a": a, "b": b, "files": strings(c.get("files")), "paths": strings(c.get("paths")), "ts": ts, "branches": [branch(0), branch(1)], "sameBranch": c.get("sameBranch") == Some(&json!(true)), "titles": [title(0, &a), title(1, &b)] }),
+    )
 }
 
 // A host's plan limit reading, rebuilt from the fields that fit, with its
@@ -779,7 +796,9 @@ fn reading_of(app: &str, r: &Value, shift: &Shift) -> Option<Value> {
     if app == "claude" {
         let resets = r.get("resets");
         let source = if r.get("source") == Some(&json!("claude-desktop")) { "claude-desktop" } else { "anthropic" };
-        return Some(json!({ "fiveHour": nn(r.get("fiveHour")), "sevenDay": nn(r.get("sevenDay")), "resets": { "fiveHour": shift.at(resets.and_then(|x| x.get("fiveHour"))), "sevenDay": shift.at(resets.and_then(|x| x.get("sevenDay"))) }, "observedAt": observed, "source": source }));
+        return Some(
+            json!({ "fiveHour": nn(r.get("fiveHour")), "sevenDay": nn(r.get("sevenDay")), "resets": { "fiveHour": shift.at(resets.and_then(|x| x.get("fiveHour"))), "sevenDay": shift.at(resets.and_then(|x| x.get("sevenDay"))) }, "observedAt": observed, "source": source }),
+        );
     }
     let window = |w: Option<&Value>| match w {
         Some(w @ Value::Object(_)) => json!({ "pct": nn(w.get("pct")), "windowMinutes": nn(w.get("windowMinutes")), "resetsAt": shift.at(w.get("resetsAt")) }),
@@ -1093,7 +1112,9 @@ pub fn qualify_event(name: &str, data: &Value, host: &Value, schemas: &mut dyn S
         "tokens" => {
             let session = remote_id(&h, data.get("sessionId"))?;
             let tokens = finite(data.get("n"))?;
-            Some(json!({ "sessionId": session, "app": if data.get("app") == Some(&json!("codex")) { "codex" } else { "claude" }, "n": n(tokens), "ts": shift.at(data.get("ts")), "host": h }))
+            Some(
+                json!({ "sessionId": session, "app": if data.get("app") == Some(&json!("codex")) { "codex" } else { "claude" }, "n": n(tokens), "ts": shift.at(data.get("ts")), "host": h }),
+            )
         }
         "pulse" => {
             let node = if data.get("nodeId") == Some(&json!("core")) { Some(format!("@{h}:core")) } else { remote_id(&h, data.get("nodeId")) }?;
@@ -1115,7 +1136,9 @@ pub fn qualify_event(name: &str, data: &Value, host: &Value, schemas: &mut dyn S
                 Value::Null => json!(""),
                 t => t,
             };
-            Some(json!({ "id": format!("@{h}:{}", slice16(&js_string(id), 64)), "from": from, "to": to, "target": str_of(data.get("target"), 200), "text": text, "ts": shift.at(data.get("ts")), "host": h }))
+            Some(
+                json!({ "id": format!("@{h}:{}", slice16(&js_string(id), 64)), "from": from, "to": to, "target": str_of(data.get("target"), 200), "text": text, "ts": shift.at(data.get("ts")), "host": h }),
+            )
         }
         _ => None,
     }
@@ -1139,7 +1162,7 @@ pub fn qualify_engine(engine: &Value, host: &Value, schemas: &mut dyn Schemas) -
         let Some(Value::Object(mut kept)) = schemas.clean(Kind::EngineMessage, &m) else { continue };
         let to: Vec<Value> = list(kept.get("to"), usize::MAX)
             .into_iter()
-            .filter(|d| d.is_object())
+            .filter(Value::is_object)
             .filter_map(|d| {
                 let id = remote_id(&h, d.get("id"))?;
                 let mut x = d.as_object().cloned().unwrap_or_default();

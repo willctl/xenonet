@@ -49,7 +49,10 @@ impl From<Arg> for Done {
     }
 }
 
-// Jv holds raw napi values only when built on JS's thread, which these never are.
+// SAFETY: an Out goes from the function's thread to JS's. All that isn't
+// Send in it is a Jv::Raw, a napi value, and the function's thread can't
+// make one: it has no env, and start() takes only a Send closure, which
+// can't carry one in.
 unsafe impl Send for Out {}
 
 /// What the twin answered: the value, or what it threw.
@@ -77,7 +80,7 @@ fn thrown_of(e: Arg) -> Thrown {
     };
     let handle = e.field("handle").as_f64().map(|h| h as u64);
     let stdout = e.field("stdout").as_str().map(str::to_string);
-    Thrown { message, code, handle, stdout }
+    Thrown { message, code: code.map(Box::new), handle, stdout }
 }
 
 fn answer_arg(v: Arg) -> std::result::Result<Arg, Thrown> {
@@ -91,7 +94,7 @@ impl Asker {
     /// Asks the twin one thing, as JS values.
     pub fn ask_arg(&self, question: Arg) -> std::result::Result<Arg, Thrown> {
         self.out.send(Out::Ask(question)).map_err(|_| gone())?;
-        self.answers.recv().map(answer_arg).unwrap_or_else(|_| Err(gone()))
+        self.answers.recv().map_or_else(|_| Err(gone()), answer_arg)
     }
 
     /// Asks several things at once (the twin answers them together, as
@@ -127,7 +130,7 @@ impl Asker {
 fn thrown_json(t: &Thrown) -> Value {
     let mut o = json!({ "message": t.message });
     if let Some(c) = &t.code {
-        o["code"] = c.clone();
+        o["code"] = (**c).clone();
     }
     if let Some(s) = &t.stdout {
         o["stdout"] = Value::String(s.clone());
@@ -146,7 +149,12 @@ impl peer::Calls for AskCalls<'_> {
         self.0.ask_arg(Arg::Obj(vec![("op".into(), Arg::text("get")), ("path".into(), Arg::text(path))]))
     }
     fn call_all(&mut self, calls: Vec<(&str, &str, Vec<Arg>)>) -> Vec<peer::Result<Arg>> {
-        let questions = calls.into_iter().map(|(path, method, args)| Arg::Obj(vec![("op".into(), Arg::text("call")), ("path".into(), Arg::text(path)), ("method".into(), Arg::text(method)), ("args".into(), Arg::List(args))])).collect();
+        let questions = calls
+            .into_iter()
+            .map(|(path, method, args)| {
+                Arg::Obj(vec![("op".into(), Arg::text("call")), ("path".into(), Arg::text(path)), ("method".into(), Arg::text(method)), ("args".into(), Arg::List(args))])
+            })
+            .collect();
         self.0.ask_all_arg(questions)
     }
     fn kind(&mut self, path: &str) -> peer::Result<String> {
@@ -178,7 +186,10 @@ where
         let done = match catch_unwind(AssertUnwindSafe(|| f(&asker))) {
             Ok(Ok(v)) => Out::Done(v.into()),
             Ok(Err(t)) => Out::Fail(t),
-            Err(p) => Out::Fail(Thrown::new(format!("XenoNet's Rust core failed: {}", p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()))),
+            Err(p) => Out::Fail(Thrown::new(format!(
+                "XenoNet's Rust core failed: {}",
+                p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(ToString::to_string)).unwrap_or_default()
+            ))),
         };
         let _ = asker.out.send(done);
     });
@@ -200,22 +211,27 @@ impl Machine {
         }
         self.started = true;
         let out = self.from.recv().map_err(|_| Error::new(Status::GenericFailure, "the Rust side went away".to_string()))?;
+        // SAFETY: env is what napi-rs passed into this export, and the
+        // value is handed back to JS in it.
         let raw = |a: &Arg| -> Result<Jv> { Ok(Jv::Raw(unsafe { arg_to_js(env.raw(), a)? })) };
         Ok(match out {
             Out::Ask(q) => Jv::Obj(vec![("ask", raw(&q)?)]),
             Out::All(qs) => Jv::Obj(vec![("all", raw(&Arg::List(qs))?)]),
             Out::Done(d) => {
                 self.over = true;
-                Jv::Obj(vec![("done", match d {
-                    Done::Jv(v) => v,
-                    Done::Arg(a) => raw(&a)?,
-                })])
+                Jv::Obj(vec![(
+                    "done",
+                    match d {
+                        Done::Jv(v) => v,
+                        Done::Arg(a) => raw(&a)?,
+                    },
+                )])
             }
             Out::Fail(t) => {
                 self.over = true;
                 let mut o = vec![("error", Jv::Json(Value::String(t.message)))];
                 if let Some(c) = t.code {
-                    o.push(("code", Jv::Json(c)));
+                    o.push(("code", Jv::Json(*c)));
                 }
                 if let Some(h) = t.handle {
                     o.push(("handle", Jv::Num(h as f64)));

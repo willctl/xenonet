@@ -1,5 +1,5 @@
 //! core/wiki.js: the shared context's folder (Xenolith's, or Agent Wiki's)
-//! read for the map: its pages, their [[links]] and the projects they
+//! read for the map: its pages, their `[[links]]` and the projects they
 //! mention, the last two days' activity log, and the notes still waiting in
 //! the inbox for the curator.
 //!
@@ -203,7 +203,7 @@ fn date_parse(s: &str) -> Option<f64> {
     (utc.abs() <= 8.64e15).then_some(utc)
 }
 
-/// The pages a text links to as [[slug]], each once, in lowercase.
+/// The pages a text links to as `[[slug]]`, each once, in lowercase.
 pub fn wiki_links(text: &str) -> Vec<String> {
     let b = text.as_bytes();
     let mut out: Vec<String> = Vec::new();
@@ -279,7 +279,7 @@ fn items<'a>(v: Option<&'a Value>, method: &str) -> Result<&'a [Value], TypeErro
 }
 
 /// The projects a page talks about, by key: explicit paths into the
-/// projects folder, <folder>/<path> where <folder> is the folder's own name
+/// projects folder, `<folder>/<path>` where `<folder>` is the folder's own name
 /// (Projects for ~/Projects, code for ~/code), or tags. A path into a
 /// project inside a group names that project, not the group too. Without
 /// `root`, the folder is taken to be called Projects.
@@ -292,7 +292,7 @@ pub fn mentioned_projects(text: &str, tags: Option<&Value>, projects: Option<&Va
         }
     }
     let root = to_str_or_empty(root)?;
-    let folder = root.split(['\\', '/']).filter(|s| !s.is_empty()).last().unwrap_or("projects").to_lowercase();
+    let folder = root.split(['\\', '/']).rfind(|s| !s.is_empty()).unwrap_or("projects").to_lowercase();
     let list = items(projects, "filter")?;
     let mut hits: Vec<usize> = Vec::new();
     for (i, p) in list.iter().enumerate() {
@@ -358,12 +358,12 @@ const S: &str = r"[\t\n\x0B\x0C\r \x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029
 const DOT: &str = r"[^\n\r\x{2028}\x{2029}]";
 
 fn entry(lead: &str) -> Regex {
-    Regex::new(&format!(r"\A{lead}{S}+([0-9]{{1,2}}):([0-9]{{2}}){S}+·{S}+([^·]+?){S}+·{S}+({DOT}+)\z")).unwrap()
+    Regex::new(&format!(r"\A{lead}{S}+([0-9]{{1,2}}):([0-9]{{2}}){S}+·{S}+([^·]+?){S}+·{S}+({DOT}+)\z")).expect("a pattern of fixed parts")
 }
 
 static HEADING: LazyLock<Regex> = LazyLock::new(|| entry("##"));
 static BULLET: LazyLock<Regex> = LazyLock::new(|| entry("-"));
-static LINK_AT_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"{S}*\[\[[^\]]+\]\]{S}*\z")).unwrap());
+static LINK_AT_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"{S}*\[\[[^\]]+\]\]{S}*\z")).expect("a pattern of fixed parts"));
 
 // new Date(y, m, d, h, min).getTime(): a local time, as JS works it out
 // from its parts.
@@ -402,8 +402,8 @@ fn date_parts(date: Option<&Value>) -> Result<[f64; 3], TypeError> {
 }
 
 /// A day's log (`date` is YYYY-MM-DD): entries like "## 13:27 · codex ·
-/// Title" with a "pages: [[a]]" line, and curator one-liners like "- 13:53
-/// · curator · Page updated: Title [[slug]]".
+/// Title" with a "pages: `[[a]]`" line, and curator one-liners like "- 13:53
+/// · curator · Page updated: Title `[[slug]]`".
 pub fn parse_log(text: &str, date: Option<&Value>) -> Result<Vec<LogEntry>, TypeError> {
     let mut out: Vec<LogEntry> = Vec::new();
     let mut cur: Option<usize> = None;
@@ -458,6 +458,7 @@ fn or(v: Option<&Value>, fallback: Out) -> Out {
 /// mention, paths under `root`, the projects folder), the last two days'
 /// log, as of `now`, and the inbox. `server` is the MCP server that owns
 /// it.
+#[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the JS's endsWith is case-sensitive, and so is this")]
 pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now: f64, server: Out) -> Result<Out, TypeError> {
     struct Page {
         slug: String,

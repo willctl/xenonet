@@ -286,7 +286,7 @@ impl Registration {
         if let Some(why) = slug_refusal(slug.as_str(), known.map(|k| k.id)) {
             return bad(why);
         }
-        let slug = slug.as_str().unwrap().to_string();
+        let slug = slug.as_str().expect("slug_refusal refuses anything but a text").to_string();
         let mut asked: Vec<String> = Vec::new();
         for c in xenonet_engine::peer::list(def_null(body.field("capabilities")).or(Arg::List(vec![]))) {
             let c = text(&c);
@@ -347,7 +347,12 @@ impl Registration {
             return Err(e);
         }
         let suggest = suggest?;
-        fail(409.0, "taken", format!("actor:{slug} is taken{}", if registered { "; to give it a new token, use New token in XenoNet's Actors panel" } else { "" }), json!({ "suggest": suggest }))
+        fail(
+            409.0,
+            "taken",
+            format!("actor:{slug} is taken{}", if registered { "; to give it a new token, use New token in XenoNet's Actors panel" } else { "" }),
+            json!({ "suggest": suggest }),
+        )
     }
 
     fn full(c: &mut dyn Calls, id: &str) -> Result<bool> {
@@ -361,7 +366,7 @@ impl Registration {
     // What the card shows of who asked: the program, its parents up to the
     // first app or terminal, and its folder, with ~ for the home folder.
     fn asker_of(&self, chain: &[Value], cwd: &Value) -> Value {
-        let file = |p: &Value| p.get("exe").filter(|e| !e.is_null()).or(p.get("program")).map(|v| xenonet_engine::js::template(Some(v))).unwrap_or_else(|| "undefined".into());
+        let file = |p: &Value| p.get("exe").filter(|e| !e.is_null()).or(p.get("program")).map_or_else(|| "undefined".into(), |v| xenonet_engine::js::template(Some(v)));
         let mut parents = Vec::new();
         for p in chain.iter().skip(1) {
             let f = file(p);
@@ -435,7 +440,11 @@ impl Registration {
             // request's place, and the old token stops working.
             let program_of = |who: &Value| if truthy(Some(who)) { Some(xenonet_base::json::stringify(&json!([who.get("program"), who.get("parents")]), 0)) } else { None };
             let mine = program_of(asker);
-            let same = waiting.iter().position(|r| r.text("slug") == Some(ask.slug.as_str()) && parse(r.text("ask")).get("name").and_then(Value::as_str) == Some(ask.name.as_str()) && program_of(&parse(r.text("asker"))) == mine);
+            let same = waiting.iter().position(|r| {
+                r.text("slug") == Some(ask.slug.as_str())
+                    && parse(r.text("ask")).get("name").and_then(Value::as_str) == Some(ask.name.as_str())
+                    && program_of(&parse(r.text("asker"))) == mine
+            });
             let product = ask.product_id();
             if me.taken_by(c, &ask.slug, product.as_deref(), same.and_then(|i| waiting[i].text("id")), Some(t))? {
                 return me.taken(c, &ask.slug, product.as_deref());
@@ -469,7 +478,10 @@ impl Registration {
                 ("expires_at".into(), Arg::Num(t + REQUEST_MS)),
             ]);
             me.store.with(|s| s.add_actor_request(&row))?;
-            Ok((id, json!({ "schema": "actor/credentials/v1", "id": id_of(&ask.slug), "token": token, "state": "waiting", "expiresAt": num(t + REQUEST_MS), "ignored": ask.ignored })))
+            Ok((
+                id,
+                json!({ "schema": "actor/credentials/v1", "id": id_of(&ask.slug), "token": token, "state": "waiting", "expiresAt": num(t + REQUEST_MS), "ignored": ask.ignored }),
+            ))
         })
     }
 
@@ -676,7 +688,12 @@ impl Registration {
                 None => "its switch under observers in XenoNet's Actors panel".into(),
             };
             let name = xenonet_engine::js::template(a.get("name"));
-            return fail(409.0, "observed", format!("XenoNet only observes {name}, so it can't be removed; turn off its observer instead, with {how}"), product.map_or(json!({}), |p| json!({ "product": p.id })));
+            return fail(
+                409.0,
+                "observed",
+                format!("XenoNet only observes {name}, so it can't be removed; turn off its observer instead, with {how}"),
+                product.map_or(json!({}), |p| json!({ "product": p.id })),
+            );
         }
         let t = Self::now(c)?;
         let registered = Self::is_registered(c, &id)?;
@@ -738,7 +755,9 @@ impl Registration {
         }
         if let Some(revoked) = self.store.with(|s| s.revoked_actor_token(Arg::text(&hash)))? {
             let reason = revoked.text("reason").unwrap_or("").to_string();
-            return Ok(json!({ "ok": false, "status": 401, "code": "revoked", "reason": revoked.get("reason").to_json(), "error": revoked_words(&reason).unwrap_or("that token was revoked") }));
+            return Ok(
+                json!({ "ok": false, "status": 401, "code": "revoked", "reason": revoked.get("reason").to_json(), "error": revoked_words(&reason).unwrap_or("that token was revoked") }),
+            );
         }
         if let Some(r) = self.store.with(|s| s.actor_request_by_token(Arg::text(&hash)))?.filter(|r| !truthy(Some(&r.get("decision").to_json()))) {
             let slug = r.text("slug").unwrap_or("").to_string();
@@ -778,7 +797,12 @@ impl Registration {
                     _ => Arg::List(vec![Arg::text("message-agents")]),
                 };
                 let hb = def_null(body.field("heartbeatMs")).or(Arg::Num(HEARTBEAT_MAX));
-                let ask_body = Arg::Obj(vec![("name".into(), there.get("name").map_or(Arg::Undef, value_arg)), ("product".into(), Arg::Obj(vec![("id".into(), Arg::text(product.id))])), ("capabilities".into(), caps), ("heartbeatMs".into(), hb)]);
+                let ask_body = Arg::Obj(vec![
+                    ("name".into(), there.get("name").map_or(Arg::Undef, value_arg)),
+                    ("product".into(), Arg::Obj(vec![("id".into(), Arg::text(product.id))])),
+                    ("capabilities".into(), caps),
+                    ("heartbeatMs".into(), hb),
+                ]);
                 let ask = Self::read_ask(&ask_body, true)?;
                 let def = Arg::Obj(vec![
                     ("id".into(), Arg::text(&id)),
@@ -832,7 +856,12 @@ impl Registration {
         self.ask_times.retain(|at| *at > t - HOUR_MS);
         if self.ask_times.len() >= REQUESTS_PER_HOUR {
             let first = self.ask_times[0];
-            return fail(429.0, "too-many", format!("XenoNet takes at most {REQUESTS_PER_HOUR} asks for a gateway token an hour"), json!({ "retryAfterMs": num(first + HOUR_MS - t) }));
+            return fail(
+                429.0,
+                "too-many",
+                format!("XenoNet takes at most {REQUESTS_PER_HOUR} asks for a gateway token an hour"),
+                json!({ "retryAfterMs": num(first + HOUR_MS - t) }),
+            );
         }
         self.ask_times.push(t);
         let ask = GatewayAsk { id: format!("gw-{}", random_id(9)?), slug: slug.clone(), asker: self.asker(checked, chain, cwd), at: t, expires_at: t + REQUEST_MS };
@@ -869,7 +898,9 @@ impl Registration {
         let unknown = json!({ "ok": false, "status": 401, "code": "bad-token", "error": "XenoNet doesn't know that gateway token" });
         let token_text = token.as_str();
         if token_text.is_some_and(is_token) {
-            return Ok(json!({ "ok": false, "status": 401, "code": "wrong-token", "error": "that's an actor's own token, which works only on this machine; the gateway takes a gateway token, made in XenoNet's window" }));
+            return Ok(
+                json!({ "ok": false, "status": 401, "code": "wrong-token", "error": "that's an actor's own token, which works only on this machine; the gateway takes a gateway token, made in XenoNet's window" }),
+            );
         }
         let Some(token) = token_text.filter(|t| is_gateway_token(t)) else { return Ok(unknown) };
         let hash = hash_token(token);
@@ -893,7 +924,9 @@ impl Registration {
         }
         if let Some(revoked) = self.store.with(|s| s.revoked_actor_token(Arg::text(&hash)))? {
             let reason = revoked.text("reason").unwrap_or("").to_string();
-            return Ok(json!({ "ok": false, "status": 401, "code": "revoked", "reason": revoked.get("reason").to_json(), "actor": revoked.get("actor").to_json(), "error": revoked_words(&reason).unwrap_or("that token was revoked") }));
+            return Ok(
+                json!({ "ok": false, "status": 401, "code": "revoked", "reason": revoked.get("reason").to_json(), "actor": revoked.get("actor").to_json(), "error": revoked_words(&reason).unwrap_or("that token was revoked") }),
+            );
         }
         Ok(unknown)
     }

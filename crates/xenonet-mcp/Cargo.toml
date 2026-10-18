@@ -43,3 +43,6 @@ xenonet-assistant.workspace = true
 # Whether a pid still runs (kill with signal 0), as process.kill(pid, 0).
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[lints]
+workspace = true

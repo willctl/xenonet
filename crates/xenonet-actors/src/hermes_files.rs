@@ -35,14 +35,14 @@ pub const SOURCE: [(&str, &str); 7] = [
 ];
 
 fn source(k: &str) -> &'static str {
-    SOURCE.iter().find(|(n, _)| *n == k).map(|(_, s)| *s).unwrap()
+    SOURCE.iter().find(|(n, _)| *n == k).map(|(_, s)| *s).expect("one of the sources above")
 }
 
 /// The tool names whose `path` argument is a file Hermes changed.
 pub const EDIT_TOOLS: [&str; 2] = ["write_file", "patch"];
 
 fn code_of(t: &Thrown) -> Option<&str> {
-    t.code.as_ref().and_then(Value::as_str)
+    t.code.as_deref().and_then(Value::as_str)
 }
 
 // What a failed read says, by the error's code.
@@ -89,38 +89,44 @@ enum Read {
     Failed(&'static str, Value),
 }
 
-fn read_text(c: &mut dyn Calls, file: &str) -> Result<Read> {
-    Ok(match c.call("files", "readFileSync", vec![Arg::text(file), Arg::text("utf8")]) {
+fn read_text(c: &mut dyn Calls, file: &str) -> Read {
+    match c.call("files", "readFileSync", vec![Arg::text(file), Arg::text("utf8")]) {
         Ok(v) => Read::Ok(xenonet_engine::store::js_text(&v)),
-        Err(t) => Read::Failed(state_of(&t), t.code.clone().unwrap_or(Value::Null)),
-    })
+        Err(t) => Read::Failed(state_of(&t), t.code.as_deref().cloned().unwrap_or(Value::Null)),
+    }
 }
 
 fn vendor(c: &mut dyn Calls, op: &str, args: Vec<Arg>) -> Result<Arg> {
     c.call("vendor", op, args)
 }
 
-fn version_arg(v: &Option<String>) -> Arg {
-    v.as_deref().map_or(Arg::Null, Arg::text)
+fn version_arg(v: Option<&str>) -> Arg {
+    v.map_or(Arg::Null, Arg::text)
 }
+
+// A JSON file's value, or why it can't be had: (state, code).
+type Checked = std::result::Result<Value, (&'static str, Value)>;
+
+// The version a file's own value names.
+type VersionOf<'a> = &'a dyn Fn(&Value) -> Option<String>;
 
 // A JSON file read against its source's schema: Ok(value) or Err((state,
 // code)).
-fn read_json(c: &mut dyn Calls, file: &str, src: &str, version: Option<String>, version_of: Option<&dyn Fn(&Value) -> Option<String>>) -> Result<std::result::Result<Value, (&'static str, Value)>> {
-    let text = match read_text(c, file)? {
+fn read_json(c: &mut dyn Calls, file: &str, src: &str, version: Option<String>, version_of: Option<VersionOf<'_>>) -> Result<Checked> {
+    let text = match read_text(c, file) {
         Read::Ok(t) => t,
         Read::Failed(state, code) => return Ok(Err((state, code))),
     };
     // Hermes reads its files as utf-8-sig, so one may start with a BOM.
     let Ok(value) = xenonet_base::json::parse(text.strip_prefix('\u{feff}').unwrap_or(&text)) else {
-        vendor(c, "unparsable", vec![Arg::text(src), version_arg(&version)])?;
+        vendor(c, "unparsable", vec![Arg::text(src), version_arg(version.as_deref())])?;
         return Ok(Err(("unreadable", json!("not JSON"))));
     };
     let v = match version_of {
         Some(f) => f(&value),
         None => version,
     };
-    let checked = vendor(c, "check", vec![Arg::text(src), value_arg(&value), version_arg(&v)])?;
+    let checked = vendor(c, "check", vec![Arg::text(src), value_arg(&value), version_arg(v.as_deref())])?;
     Ok(if checked.is_nullish() { Err(("unreadable", json!("not what XenoNet reads"))) } else { Ok(checked.to_json()) })
 }
 
@@ -135,18 +141,6 @@ fn text(v: Option<&Value>) -> Value {
 fn ms(c: &mut dyn Calls, v: Option<&Value>) -> Value {
     let mut p = parse_date(c);
     v.and_then(|v| ms_of(v, &mut p)).map_or(Value::Null, xenonet_base::json::number)
-}
-
-fn failed(state: &str, code: &Value, rest: Value) -> Value {
-    let mut o = Map::new();
-    o.insert("state".into(), json!(state));
-    if !code.is_null() || state != "ok" {
-        let _ = code;
-    }
-    if let Value::Object(r) = rest {
-        o.extend(r);
-    }
-    Value::Object(o)
 }
 
 // ---------- the install ----------
@@ -186,7 +180,9 @@ pub fn installed(c: &mut dyn Calls, root: &str) -> Result<bool> {
 /// The build stamp: the release this build is of (baseVersion).
 pub fn read_stamp(c: &mut dyn Calls, root: &str) -> Result<Value> {
     let file = join(&join(root, "hermes-agent"), "install-stamp.json");
-    let of = |v: &Value| v.get("schemaVersion").filter(|s| s.as_f64().is_some_and(f64::is_finite)).and_then(|s| clean_version(&xenonet_engine::js::template(Some(s))).map(str::to_string));
+    let of = |v: &Value| {
+        v.get("schemaVersion").filter(|s| s.as_f64().is_some_and(f64::is_finite)).and_then(|s| clean_version(&xenonet_engine::js::template(Some(s))).map(str::to_string))
+    };
     Ok(match read_json(c, &file, source("stamp"), None, Some(&of))? {
         Ok(v) => json!({ "state": "ok", "version": v.get("baseVersion").and_then(Value::as_str).filter(|s| !s.is_empty()).and_then(clean_version) }),
         Err((state, _)) => json!({ "state": state, "version": null }),
@@ -233,8 +229,8 @@ pub fn read_gateway(c: &mut dyn Calls, home: &str, version: Option<String>) -> R
 /// The scheduler's ticker: { at, pid, lastSuccess }, or null.
 pub fn read_ticker(c: &mut dyn Calls, home: &str, version: Option<String>) -> Result<Value> {
     let cron = join(home, "cron");
-    let beat = read_text(c, &join(&cron, "ticker_heartbeat"))?;
-    let success = read_text(c, &join(&cron, "ticker_last_success"))?;
+    let beat = read_text(c, &join(&cron, "ticker_heartbeat"));
+    let success = read_text(c, &join(&cron, "ticker_last_success"));
     let state = |r: &Read| match r {
         Read::Ok(_) => "ok",
         Read::Failed(s, _) => s,
@@ -249,14 +245,14 @@ pub fn read_ticker(c: &mut dyn Calls, home: &str, version: Option<String>) -> Re
     let words = |r: &Read| -> Vec<String> {
         match r {
             Read::Ok(t) => js(r"\s+", false).split(xenonet_base::text::js_trim(t)).map(str::to_string).collect(),
-            _ => Vec::new(),
+            Read::Failed(..) => Vec::new(),
         }
     };
     let number = |w: Option<&String>| -> Option<f64> { w.filter(|w| js(r"^\d+(\.\d+)?$", false).is_match(w)).map(|w| w.parse::<f64>().unwrap_or(f64::NAN)) };
     let (b, s) = (words(&beat), words(&success));
     let (at, pid, last) = (b.first(), b.get(1), s.first());
     if (state(&beat) == "ok" && number(at).is_none()) || (state(&success) == "ok" && number(last).is_none()) {
-        vendor(c, "unparsable", vec![Arg::text(source("ticker")), version_arg(&version)])?;
+        vendor(c, "unparsable", vec![Arg::text(source("ticker")), version_arg(version.as_deref())])?;
         return Ok(json!({ "state": "unreadable", "ticker": null }));
     }
     let n = |x: Option<f64>| x.map_or(Value::Null, xenonet_base::json::number);
@@ -270,10 +266,12 @@ pub fn read_ticker(c: &mut dyn Calls, home: &str, version: Option<String>) -> Re
         Value::Null
     };
     let record = json!({ "heartbeat": heartbeat, "last_success": if state(&success) == "ok" { json!({ "at": n(number(last)) }) } else { Value::Null } });
-    let checked = vendor(c, "check", vec![Arg::text(source("ticker")), value_arg(&record), version_arg(&version)])?.to_json();
+    let checked = vendor(c, "check", vec![Arg::text(source("ticker")), value_arg(&record), version_arg(version.as_deref())])?.to_json();
     let checked = if checked.is_null() { json!({}) } else { checked };
     let hb = checked.get("heartbeat");
-    Ok(json!({ "state": "ok", "ticker": { "at": ms(c, hb.and_then(|h| h.get("at"))), "pid": num(hb.and_then(|h| h.get("pid"))), "lastSuccess": ms(c, checked.get("last_success").and_then(|l| l.get("at"))) } }))
+    Ok(
+        json!({ "state": "ok", "ticker": { "at": ms(c, hb.and_then(|h| h.get("at"))), "pid": num(hb.and_then(|h| h.get("pid"))), "lastSuccess": ms(c, checked.get("last_success").and_then(|l| l.get("at"))) } }),
+    )
 }
 
 /// The background processes Hermes's terminal tool runs. Never their
@@ -316,11 +314,13 @@ pub fn read_jobs(c: &mut dyn Calls, home: &str, version: Option<String>) -> Resu
 
 // ---------- a profile's state.db ----------
 
-const SESSION_COLUMNS: [&str; 12] = ["id", "source", "parent_session_id", "started_at", "ended_at", "end_reason", "cwd", "git_repo_root", "last_activity_at", "last_activity_description", "archived", "hidden"];
+const SESSION_COLUMNS: [&str; 12] =
+    ["id", "source", "parent_session_id", "started_at", "ended_at", "end_reason", "cwd", "git_repo_root", "last_activity_at", "last_activity_description", "archived", "hidden"];
 const MESSAGE_COLUMNS: [&str; 6] = ["id", "session_id", "role", "tool_name", "timestamp", "active"];
 const HEARTBEAT_COLUMNS: [&str; 4] = ["pid", "started_at", "last_heartbeat", "profile"];
 // The columns XenoNet can't do without: one that's gone is drift.
-const NEEDED: [(&str, &[&str]); 2] = [("sessions", &["id", "source", "started_at", "ended_at", "cwd"]), ("messages", &["id", "session_id", "role", "tool_name", "timestamp", "tool_calls"])];
+const NEEDED: [(&str, &[&str]); 2] =
+    [("sessions", &["id", "source", "started_at", "ended_at", "cwd"]), ("messages", &["id", "session_id", "role", "tool_name", "timestamp", "tool_calls"])];
 // New messages read at once at most; the rest wait for the next look.
 const MESSAGES_MAX: usize = 5000;
 // On a first read, how far back to start, at most.
@@ -386,7 +386,7 @@ pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: 
     }
     if let Err(t) = c.call("db", "open", vec![Arg::text(file)]) {
         let denied = js(r"permission|EACCES|EPERM|authoriz", true).is_match(&t.message);
-        return Ok(with_state(if denied { "denied" } else { "unreadable" }, Some(t.code.clone().unwrap_or(Value::Null)), empty(after_id)));
+        return Ok(with_state(if denied { "denied" } else { "unreadable" }, Some(t.code.as_deref().cloned().unwrap_or(Value::Null)), empty(after_id)));
     }
     let out = (|| -> Result<Value> {
         let src = source("stateDb");
@@ -406,11 +406,11 @@ pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: 
         };
         for (table, needed) in NEEDED {
             if cols(table).is_empty() {
-                vendor(c, "missing", vec![Arg::text(src), Arg::text(table), version_arg(&version)])?;
+                vendor(c, "missing", vec![Arg::text(src), Arg::text(table), version_arg(version.as_deref())])?;
             } else {
                 for col in needed {
                     if !has_col(table, col) {
-                        vendor(c, "missing", vec![Arg::text(src), Arg::text(format!("{table}[].{col}")), version_arg(&version)])?;
+                        vendor(c, "missing", vec![Arg::text(src), Arg::text(format!("{table}[].{col}")), version_arg(version.as_deref())])?;
                     }
                 }
             }
@@ -421,7 +421,7 @@ pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: 
             return Ok(v);
         }
         let since = since_ms.as_f64().unwrap_or(0.0) / 1000.0;
-        let pick = |wanted: &[&str], table: &str| -> Vec<String> { wanted.iter().filter(|c| has_col(table, c)).map(|c| c.to_string()).collect() };
+        let pick = |wanted: &[&str], table: &str| -> Vec<String> { wanted.iter().filter(|c| has_col(table, c)).map(ToString::to_string).collect() };
         // The messages since the last read: from the last one read, or on
         // a first read (or after the file was made again) the recent ones
         // among the last few thousand.
@@ -441,7 +441,10 @@ pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: 
             args.push(Arg::Num(since));
         }
         let messages = rows(c, &format!("SELECT {} FROM messages WHERE id > ?{time} ORDER BY id LIMIT {MESSAGES_MAX}", msg_cols.join(", ")), args)?;
-        let last_id = if messages.len() == MESSAGES_MAX { messages.last().unwrap()["id"].clone() } else { xenonet_base::json::number(max_id) };
+        let last_id = match messages.last() {
+            Some(m) if messages.len() == MESSAGES_MAX => m["id"].clone(),
+            _ => xenonet_base::json::number(max_id),
+        };
         let tool_paths = if has_col("messages", "tool_calls") && has_col("messages", "role") {
             let mut args = vec![Arg::Num(from), value_arg(&last_id)];
             if timed {
@@ -454,7 +457,12 @@ pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: 
         // The sessions those belong to, the ones open and active since
         // then, and the ones that ended since then.
         let mut ids: Vec<Value> = Vec::new();
-        for id in session_ids.iter().cloned().chain(messages.iter().map(|m| m.get("session_id").cloned().unwrap_or(Value::Null))).chain(tool_paths.iter().map(|t| t.get("session_id").cloned().unwrap_or(Value::Null))) {
+        for id in session_ids
+            .iter()
+            .cloned()
+            .chain(messages.iter().map(|m| m.get("session_id").cloned().unwrap_or(Value::Null)))
+            .chain(tool_paths.iter().map(|t| t.get("session_id").cloned().unwrap_or(Value::Null)))
+        {
             if id.is_string() && !ids.contains(&id) {
                 ids.push(id);
             }
@@ -472,31 +480,33 @@ pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: 
         if ended {
             args.push(Arg::Num(since));
         }
-        let sessions = rows(c, &format!("SELECT {} FROM sessions WHERE {} ORDER BY started_at DESC LIMIT 500", pick(&SESSION_COLUMNS, "sessions").join(", "), wheres.join(" OR ")), args)?;
-        let heartbeats = if has_col("gateway_heartbeats", "pid") { rows(c, &format!("SELECT {} FROM gateway_heartbeats", pick(&HEARTBEAT_COLUMNS, "gateway_heartbeats").join(", ")), vec![])? } else { Vec::new() };
+        let sessions =
+            rows(c, &format!("SELECT {} FROM sessions WHERE {} ORDER BY started_at DESC LIMIT 500", pick(&SESSION_COLUMNS, "sessions").join(", "), wheres.join(" OR ")), args)?;
+        let heartbeats = if has_col("gateway_heartbeats", "pid") {
+            rows(c, &format!("SELECT {} FROM gateway_heartbeats", pick(&HEARTBEAT_COLUMNS, "gateway_heartbeats").join(", ")), vec![])?
+        } else {
+            Vec::new()
+        };
         let schema_version = match &version {
             Some(v) => json!([{ "version": xenonet_base::text::js_number(Some(&Value::String(v.clone()))) }]),
             None => json!([]),
         };
         let record = json!({ "schema_version": schema_version, "sessions": sessions, "messages": messages, "tool_paths": tool_paths, "gateway_heartbeats": heartbeats });
-        let checked = vendor(c, "check", vec![Arg::text(src), value_arg(&record), version_arg(&version)])?.to_json();
+        let checked = vendor(c, "check", vec![Arg::text(src), value_arg(&record), version_arg(version.as_deref())])?.to_json();
         let checked = if checked.is_null() { json!({}) } else { checked };
         let arr = |k: &str| checked.get(k).filter(|v| !v.is_null()).cloned().unwrap_or(json!([]));
         // Archived compaction generations are history, not new work.
         let messages: Vec<Value> = arr("messages").as_array().cloned().unwrap_or_default().into_iter().filter(|m| m.get("active").and_then(Value::as_f64) != Some(0.0)).collect();
-        Ok(json!({ "state": "ok", "version": version, "sessions": arr("sessions"), "messages": messages, "toolPaths": arr("tool_paths"), "heartbeats": arr("gateway_heartbeats"), "lastId": last_id }))
+        Ok(
+            json!({ "state": "ok", "version": version, "sessions": arr("sessions"), "messages": messages, "toolPaths": arr("tool_paths"), "heartbeats": arr("gateway_heartbeats"), "lastId": last_id }),
+        )
     })();
     let _ = c.call("db", "close", vec![]);
     match out {
         Ok(v) => Ok(v),
         Err(t) => {
             let busy = js(r"SQLITE_BUSY|locked", true).is_match(&t.message);
-            Ok(with_state(if busy { "busy" } else { "unreadable" }, Some(t.code.clone().unwrap_or(Value::Null)), empty(after_id)))
+            Ok(with_state(if busy { "busy" } else { "unreadable" }, Some(t.code.as_deref().cloned().unwrap_or(Value::Null)), empty(after_id)))
         }
     }
-}
-
-#[allow(dead_code)]
-fn unused() -> Value {
-    failed("ok", &Value::Null, Value::Null)
 }

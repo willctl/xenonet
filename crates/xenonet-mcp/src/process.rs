@@ -4,6 +4,7 @@
 //! agent that started the server (Claude Code, Codex or an actor), which
 //! XenoNet watches, so this works on every platform the binary is built
 //! for.
+#![expect(unsafe_code, reason = "kill(2) and the Windows process calls, which std doesn't wrap")]
 
 /// A variable as `process.env.X` reads it: None when it isn't set (an
 /// empty one is "", as in JS).
@@ -105,7 +106,7 @@ mod windows {
     // The few kernel32 calls this needs, declared here rather than through
     // a crate of bindings.
     #[repr(C)]
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case, reason = "the fields keep the names PROCESSENTRY32W has in Windows's headers")]
     struct ProcessEntry32W {
         dwSize: u32,
         cntUsage: u32,
@@ -187,6 +188,6 @@ mod tests {
         assert!(!alive(2f64.powi(30)), "a pid nobody has");
         assert!(!alive(1.5) && !alive(2f64.powi(40)));
         #[cfg(any(target_os = "linux", target_os = "macos"))]
-        assert!(!cmdline(f64::from(std::process::id())).is_empty());
+        assert_ne!(cmdline(f64::from(std::process::id())), "");
     }
 }

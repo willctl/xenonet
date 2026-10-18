@@ -4,6 +4,8 @@
 // handshake with experimental["claude/channel"], and each message its long
 // poll brings as notifications/claude/channel. A fake XenoNet stands in.
 
+#![expect(clippy::unwrap_used, clippy::panic, reason = "a test fails where its helpers unwrap")]
+
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;

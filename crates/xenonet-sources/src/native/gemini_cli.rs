@@ -1,7 +1,7 @@
 //! core/native/gemini-cli.js: Gemini CLI's chat records. Each session in
-//! <gemini home>/.gemini/tmp/<project>/chats/session-*.jsonl is a session on
-//! the map, "gemini-cli:<sessionId>", with a subagent's run
-//! (chats/<parent>/<id>.jsonl) under the session that started it, and its
+//! `<gemini home>/.gemini/tmp/<project>/chats/session-*.jsonl` is a session on
+//! the map, "`gemini-cli:<sessionId>`", with a subagent's run
+//! (`chats/<parent>/<id>.jsonl`) under the session that started it, and its
 //! write_file and replace calls' files as its edits.
 
 use super::files::Files;
@@ -176,6 +176,7 @@ struct Found {
     size: f64,
 }
 
+#[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the JS's endsWith is case-sensitive, and so is this")]
 fn chat_file(name: &str) -> bool {
     name.ends_with(".json") || name.ends_with(".jsonl")
 }
@@ -242,7 +243,7 @@ impl GeminiCli {
         out
     }
 
-    pub fn read(&mut self, root: Option<&str>, now: f64, files: &mut dyn Files, check: &mut Check) {
+    pub fn read(&mut self, root: Option<&str>, now: f64, files: &mut dyn Files, check: &mut Check<'_>) {
         let found = self.found(root, now, files);
         let mut runs: OrderedMap<Run> = OrderedMap::new();
         let mut seen = HashSet::new();
@@ -344,6 +345,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[expect(clippy::unnecessary_wraps, reason = "it stands in for a schema check, so it has a check's type")]
     fn same(_: &Value) -> Result<Checked, Threw> {
         Ok(Checked::Same)
     }

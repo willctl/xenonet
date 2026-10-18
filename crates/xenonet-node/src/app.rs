@@ -1,6 +1,11 @@
 //! xenonet-app for the twins of core/config.js, instances.js, version.js,
 //! environments.js, demo-root.js and the other small modules of core/.
 
+// On the module, not the items: napi-derive copies an item's attributes
+// onto the two-argument wrapper it generates for the export, and an
+// expectation there goes unfulfilled.
+#![expect(clippy::too_many_arguments, reason = "appConfig, reading and createWorld take the twin's arguments one by one, as their JS functions did")]
+
 use crate::js::{Json, Jv, MaybeJson};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -133,20 +138,19 @@ impl config::Finds for JsFinds<'_> {
 /// The settings, with readers and hiddenResources as arrays for the twin
 /// to make Sets of.
 #[napi(js_name = "appConfig")]
-#[allow(clippy::too_many_arguments)]
 pub fn app_config(
     argv: Vec<String>,
     env: Json,
     home: String,
     platform: String,
-    world: Function<(), Json>,
-    context_dir: Function<(), Option<String>>,
-    context_server: Function<Option<String>, Json>,
-    claude_desktop_dir: Function<(), Option<String>>,
+    world: Function<'_, (), Json>,
+    context_dir: Function<'_, (), Option<String>>,
+    context_server: Function<'_, Option<String>, Json>,
+    claude_desktop_dir: Function<'_, (), Option<String>>,
 ) -> Result<Jv> {
     let env = match env.0 {
         Value::Object(m) => m,
-        _ => Default::default(),
+        _ => serde_json::Map::new(),
     };
     let mut finds = JsFinds { world, context_dir, context_server, claude_desktop_dir, failed: None };
     let c = config::config(&argv, &env, &home, &platform, &mut finds);
@@ -247,7 +251,7 @@ pub fn app_same_place(a: String, b: String, platform: String) -> bool {
 fn env_map(env: Json) -> serde_json::Map<String, Value> {
     match env.0 {
         Value::Object(m) => m,
-        _ => Default::default(),
+        _ => serde_json::Map::new(),
     }
 }
 
@@ -326,7 +330,9 @@ fn log_line(l: &decide::LogLine) -> Jv {
 
 #[napi(js_name = "appDecideConstants")]
 pub fn app_decide_constants() -> Json {
-    Json(json!({ "url": decide::DECISIONS_URL, "model": decide::DEFAULT_MODEL, "keyTarget": decide::KEY_TARGET, "key": decide::KEY, "keyComment": decide::KEY_COMMENT, "timeoutMs": decide::TIMEOUT_MS }))
+    Json(
+        json!({ "url": decide::DECISIONS_URL, "model": decide::DEFAULT_MODEL, "keyTarget": decide::KEY_TARGET, "key": decide::KEY, "keyComment": decide::KEY_COMMENT, "timeoutMs": decide::TIMEOUT_MS }),
+    )
 }
 
 #[napi(js_name = "appDecideSettings")]
@@ -423,7 +429,7 @@ pub fn app_mcp_display_catalog(raw: MaybeJson) -> Json {
 }
 
 #[napi(js_name = "appMcpBegin")]
-pub fn app_mcp_begin(server: String, sessions: Json, settings: Json, now: f64, read: Option<Function<Option<String>, Json>>) -> Result<Jv> {
+pub fn app_mcp_begin(server: String, sessions: Json, settings: Json, now: f64, read: Option<Function<'_, Option<String>, Json>>) -> Result<Jv> {
     let sessions = match sessions.0 {
         Value::Array(a) => a,
         _ => Vec::new(),
@@ -437,7 +443,7 @@ pub fn app_mcp_begin(server: String, sessions: Json, settings: Json, now: f64, r
 }
 
 #[napi(js_name = "appMcpStep")]
-pub fn app_mcp_step(state: Json, answer: Json, settings: Json, read: Option<Function<Option<String>, Json>>) -> Result<Jv> {
+pub fn app_mcp_step(state: Json, answer: Json, settings: Json, read: Option<Function<'_, Option<String>, Json>>) -> Result<Jv> {
     let answer = match answer.0.get("error") {
         Some(e) => mcp_info::Answer::Failed { name: e.get("name").and_then(Value::as_str).map(String::from), code: e.get("code").filter(|c| !c.is_null()).cloned() },
         None => mcp_info::Answer::Ok(answer.0.get("ok").cloned().unwrap_or(Value::Null)),
@@ -502,7 +508,7 @@ pub fn app_make_bundle(g: Json) -> Jv {
     };
     let env = match v.get("env") {
         Some(Value::Object(m)) => m.clone(),
-        _ => Default::default(),
+        _ => serde_json::Map::new(),
     };
     let text = |k: &str| v.get(k).map(xenonet_base::text::js_string).unwrap_or_default();
     let (home, platform, arch, release, node) = (text("home"), text("platform"), text("arch"), text("release"), text("node"));
@@ -613,7 +619,9 @@ fn ask_jv(job: spotify::Job, ask: spotify::Ask) -> Jv {
         spotify::Ask::SecretGet(t) => Jv::Obj(vec![("secret", Jv::Obj(vec![("op", s("get")), ("target", s(t))]))]),
         spotify::Ask::SecretHas(t) => Jv::Obj(vec![("secret", Jv::Obj(vec![("op", s("has")), ("target", s(t))]))]),
         spotify::Ask::SecretRemove(t) => Jv::Obj(vec![("secret", Jv::Obj(vec![("op", s("remove")), ("target", s(t))]))]),
-        spotify::Ask::SecretSet { target, value, comment } => Jv::Obj(vec![("secret", Jv::Obj(vec![("op", s("set")), ("target", s(target)), ("value", s(value)), ("comment", s(comment))]))]),
+        spotify::Ask::SecretSet { target, value, comment } => {
+            Jv::Obj(vec![("secret", Jv::Obj(vec![("op", s("set")), ("target", s(target)), ("value", s(value)), ("comment", s(comment))]))])
+        }
         spotify::Ask::Fetch { url, method, headers, body, timeout_ms, fallback, skip } => {
             let mut f = vec![("url", s(url)), ("method", s(method)), ("headers", Jv::Obj(headers.into_iter().map(|(k, v)| (k, s(v))).collect()))];
             if let Some(b) = body {
@@ -821,7 +829,19 @@ pub fn app_lock_holder(dir: String) -> AppTask {
 
 #[napi(js_name = "appControlCheck")]
 pub fn app_control_check(id: String) -> Option<String> {
-    let o = control::Opts { port: None, user_data: Some(""), log_dir: Some(""), settle_ms: 0.0, term_ms: 0.0, root: "", tmpdir: "", platform: "", appdata: None, xdg_config_home: None, home: "" };
+    let o = control::Opts {
+        port: None,
+        user_data: Some(""),
+        log_dir: Some(""),
+        settle_ms: 0.0,
+        term_ms: 0.0,
+        root: "",
+        tmpdir: "",
+        platform: "",
+        appdata: None,
+        xdg_config_home: None,
+        home: "",
+    };
     control::Instance::new(&id, &o).err()
 }
 
@@ -837,7 +857,16 @@ impl AppControl {
     pub fn new(id: String, opts: Json) -> Result<Self> {
         let o = opts.0;
         let text = |k: &str| o.get(k).and_then(Value::as_str).map(String::from);
-        let (user_data, log_dir, root, tmpdir, platform, appdata, xdg, home) = (text("userData"), text("logDir"), text("root").unwrap_or_default(), text("tmpdir").unwrap_or_default(), text("platform").unwrap_or_default(), text("appdata"), text("xdgConfigHome"), text("home").unwrap_or_default());
+        let (user_data, log_dir, root, tmpdir, platform, appdata, xdg, home) = (
+            text("userData"),
+            text("logDir"),
+            text("root").unwrap_or_default(),
+            text("tmpdir").unwrap_or_default(),
+            text("platform").unwrap_or_default(),
+            text("appdata"),
+            text("xdgConfigHome"),
+            text("home").unwrap_or_default(),
+        );
         let num = |k: &str, d: f64| o.get(k).and_then(Value::as_f64).unwrap_or(d);
         let opts = control::Opts {
             port: o.get("port").cloned(),
@@ -903,7 +932,9 @@ use xenonet_app::system_stats as stats;
 
 #[napi(js_name = "appSystemConstants")]
 pub fn app_system_constants() -> Json {
-    Json(json!({ "history": stats::HISTORY, "freshMs": stats::FRESH_MS, "idleMs": stats::IDLE_MS, "staleMs": stats::STALE_MS, "nvidiaQuery": stats::NVIDIA_QUERY, "nvidiaArgs": stats::nvidia_args() }))
+    Json(
+        json!({ "history": stats::HISTORY, "freshMs": stats::FRESH_MS, "idleMs": stats::IDLE_MS, "staleMs": stats::STALE_MS, "nvidiaQuery": stats::NVIDIA_QUERY, "nvidiaArgs": stats::nvidia_args() }),
+    )
 }
 
 #[napi(js_name = "appCpuModel")]
@@ -932,7 +963,9 @@ fn adapters_of(v: &Value) -> Vec<(String, f64)> {
 #[napi(js_name = "appParseWindowsGpu")]
 pub fn app_parse_windows_gpu(line: String, adapters: Json) -> Json {
     Json(match stats::parse_windows_gpu(&line, &adapters_of(&adapters.0)) {
-        stats::WindowsLine::Adapters(a) => json!({ "adapters": a.into_iter().map(|(name, mem)| json!({ "name": name, "mem": xenonet_base::json::number(mem) })).collect::<Vec<_>>() }),
+        stats::WindowsLine::Adapters(a) => {
+            json!({ "adapters": a.into_iter().map(|(name, mem)| json!({ "name": name, "mem": xenonet_base::json::number(mem) })).collect::<Vec<_>>() })
+        }
         stats::WindowsLine::Latest(l) => json!({ "latest": l }),
         stats::WindowsLine::Nothing => json!({}),
     })
@@ -949,7 +982,14 @@ pub fn app_windows_gpu_command(system_root: Option<String>, parent: f64) -> Json
 }
 
 #[napi(js_name = "appFindNvidiaSmi")]
-pub fn app_find_nvidia_smi(platform: String, path_var: String, pathext: Option<String>, system_root: Option<String>, program_files: Option<String>, exists: Function<String, bool>) -> Option<String> {
+pub fn app_find_nvidia_smi(
+    platform: String,
+    path_var: String,
+    pathext: Option<String>,
+    system_root: Option<String>,
+    program_files: Option<String>,
+    exists: Function<'_, String, bool>,
+) -> Option<String> {
     stats::find_nvidia_smi(&platform, &path_var, pathext.as_deref(), system_root.as_deref(), program_files.as_deref(), &mut |f| exists.call(f.to_string()).unwrap_or(false))
 }
 
@@ -982,7 +1022,7 @@ pub struct AppGpuStream {
 impl AppGpuStream {
     #[napi(constructor)]
     pub fn new(kind: String) -> Self {
-        AppGpuStream { windows: kind == "windows", proc: Default::default(), nvidia: Default::default(), counters: Default::default() }
+        AppGpuStream { windows: kind == "windows", proc: stats::Streamed::default(), nvidia: stats::NvidiaCards::default(), counters: stats::WindowsReadings::default() }
     }
 
     #[napi(getter)]
@@ -1039,7 +1079,7 @@ pub struct AppPolled {
 impl AppPolled {
     #[napi(constructor)]
     pub fn new() -> Self {
-        AppPolled { inner: Default::default() }
+        AppPolled { inner: stats::Polled::default() }
     }
 
     /// The last reading while it's fresh, else undefined.
@@ -1078,7 +1118,7 @@ pub struct AppSystemStats {
 impl AppSystemStats {
     #[napi(constructor)]
     pub fn new() -> Self {
-        AppSystemStats { inner: Default::default() }
+        AppSystemStats { inner: stats::Stats::default() }
     }
 
     #[napi(js_name = "hasPrev")]
@@ -1102,7 +1142,6 @@ impl AppSystemStats {
     }
 
     #[napi]
-    #[allow(clippy::too_many_arguments)]
     pub fn reading(&mut self, at: f64, platform: String, arch: Option<String>, uptime: f64, cpu: Json, total: f64, free: f64, gpus: MaybeJson, reader: Option<String>) -> Json {
         let gpus = match gpus.0 {
             Some(Value::Array(a)) => Some(a),
@@ -1160,7 +1199,7 @@ pub fn app_sonar_gap(every: MaybeJson) -> Option<f64> {
 pub fn app_themes(custom: MaybeJson) -> Json {
     let custom = match custom.0 {
         Some(Value::Object(m)) => m,
-        _ => Default::default(),
+        _ => serde_json::Map::new(),
     };
     Json(Value::Object(themes::themes(&custom)))
 }
@@ -1283,19 +1322,18 @@ impl AppDemo {
     }
 
     #[napi(js_name = "createWorld")]
-    #[allow(clippy::too_many_arguments)]
     pub fn create_world(
         &mut self,
         now: f64,
         platform: String,
-        git: Function<(), bool>,
-        local: Function<f64, Vec<f64>>,
-        claude: Function<FnArgs<(String, String)>, String>,
-        github: Function<FnArgs<(String, String)>, String>,
-        git_id: Function<String, String>,
-        random: Function<(), f64>,
-        uuid: Function<(), String>,
-        clock: Function<(), f64>,
+        git: Function<'_, (), bool>,
+        local: Function<'_, f64, Vec<f64>>,
+        claude: Function<'_, FnArgs<(String, String)>, String>,
+        github: Function<'_, FnArgs<(String, String)>, String>,
+        git_id: Function<'_, String, String>,
+        random: Function<'_, (), f64>,
+        uuid: Function<'_, (), String>,
+        clock: Function<'_, (), f64>,
     ) -> Result<Jv> {
         let mut around = JsAround { git: Some(git), local: Some(local), claude: Some(claude), github: Some(github), git_id: Some(git_id), random, uuid, now: clock, failed: None };
         let r = self.inner.create_world(now, &mut around, &platform);
@@ -1314,7 +1352,7 @@ impl AppDemo {
             self.inner
                 .client_repos
                 .iter()
-                .map(|r| json!({ "dir": r.dir, "steps": steps, "dirty": r.dirty.iter().map(|(rel, t)| json!([xenonet_app::nodepath::NATIVE.join(&[&r.dir, rel]), t])).collect::<Vec<_>>() }))
+                .map(|r| json!({ "dir": r.dir, "steps": steps, "dirty": r.dirty.iter().map(|(rel, t)| json!([nodepath::NATIVE.join(&[&r.dir, rel]), t])).collect::<Vec<_>>() }))
                 .collect(),
         ))
     }
@@ -1340,7 +1378,7 @@ impl AppDemo {
     }
 
     #[napi(js_name = "stepLive")]
-    pub fn step_live(&mut self, k: u32, now: f64, random: Function<(), f64>, uuid: Function<(), String>, clock: Function<(), f64>) -> Result<()> {
+    pub fn step_live(&mut self, k: u32, now: f64, random: Function<'_, (), f64>, uuid: Function<'_, (), String>, clock: Function<'_, (), f64>) -> Result<()> {
         let mut around = JsAround { git: None, local: None, claude: None, github: None, git_id: None, random, uuid, now: clock, failed: None };
         self.inner.step_live(k as usize, now, &mut around);
         around.failed.map_or(Ok(()), Err)

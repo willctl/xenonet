@@ -78,7 +78,7 @@ fn nn(v: Js<'_>) -> Js<'_> {
     v.filter(|x| !x.is_null())
 }
 
-static EMPTY: LazyLock<Value> = LazyLock::new(|| Value::Object(Default::default()));
+static EMPTY: LazyLock<Value> = LazyLock::new(|| Value::Object(serde_json::Map::default()));
 
 /// A searchable record: whose words (user, assistant or subagent), what
 /// they said, and when.
@@ -206,7 +206,7 @@ pub fn holds_user_messages(text: &str) -> bool {
     false
 }
 
-static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[\p{L}\p{N}_]+").unwrap());
+static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[\p{L}\p{N}_]+").expect("a fixed pattern"));
 
 /// FTS5 query from free text: every word must match, as a prefix.
 pub fn fts_query(q: &str) -> String {
@@ -214,8 +214,8 @@ pub fn fts_query(q: &str) -> String {
 }
 
 // Matched on the path in ASCII lowercase, as JS's /i matches it.
-static SUBAGENT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"/([0-9a-f-]{36})/subagents/[^/]+\.jsonl\z").unwrap());
-static UUID_FILE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(\.zst)?\z").unwrap());
+static SUBAGENT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"/([0-9a-f-]{36})/subagents/[^/]+\.jsonl\z").expect("a fixed pattern"));
+static UUID_FILE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(\.zst)?\z").expect("a fixed pattern"));
 
 /// The session a transcript is of: a Claude Code subagent's file is its
 /// session's, and a Codex file is one only when it's a rollout.
@@ -223,17 +223,18 @@ pub fn session_of(file: &str, app: &str) -> Option<String> {
     let norm = file.replace('\\', "/");
     let low = norm.to_ascii_lowercase();
     if app == "claude" {
-        if let Some(c) = SUBAGENT.captures(&low) {
-            return Some(format!("claude:{}", &norm[c.get(1).unwrap().range()]));
+        if let Some(m) = SUBAGENT.captures(&low).and_then(|c| c.get(1)) {
+            return Some(format!("claude:{}", &norm[m.range()]));
         }
     } else if !norm.contains("rollout-") {
         return None;
     }
-    UUID_FILE.captures(&low).map(|c| format!("{app}:{}", &norm[c.get(1).unwrap().range()]))
+    UUID_FILE.captures(&low).and_then(|c| c.get(1)).map(|m| format!("{app}:{}", &norm[m.range()]))
 }
 
 /// The transcripts under a folder the index reads: *.jsonl and
 /// *.jsonl.zst, six folders down.
+#[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the JS's endsWith is case-sensitive, and so is this")]
 pub fn list_transcripts(dir: &str) -> Vec<String> {
     xenonet_base::paths::list_files(dir, &mut |name| name.ends_with(".jsonl") || name.ends_with(".jsonl.zst"), 6)
 }
@@ -458,6 +459,7 @@ impl Search {
 
     /// What reading a file takes, or None when there's nothing to index:
     /// it's no session's, it's gone, or it's as it was.
+    #[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the JS's endsWith is case-sensitive, and so is this")]
     pub fn plan(&self, file: &str, app: &str) -> Result<Option<Plan>, Error> {
         let Some(session_id) = session_of(file, app) else { return Ok(None) };
         let Ok(st) = std::fs::metadata(file) else { return Ok(None) };
@@ -466,8 +468,8 @@ impl Search {
             db.prepare_cached("select size, mtime, offset, items from files where path = ?")?.query_row([file], |r| Ok([r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?])).optional()?;
         let size = st.len() as f64;
         let mtime = xfs::mtime_ms_of(&st).map_or(f64::NAN, f64::floor);
-        if let Some(r) = &row {
-            if sql_is(&r[0], size) && sql_is(&r[1], mtime) {
+        if let Some([size_was, mtime_was, ..]) = &row {
+            if sql_is(size_was, size) && sql_is(mtime_was, mtime) {
                 return Ok(None);
             }
         }
@@ -591,14 +593,15 @@ impl Search {
             let [session_id, app, role, ts, snip, score] = row?;
             let score = sql_number(&score);
             let k = sql_key(&session_id, i);
-            let s = match at.get(&k) {
-                Some(&j) => &mut by[j],
+            let j = match at.get(&k) {
+                Some(&j) => j,
                 None => {
                     at.insert(k, by.len());
                     by.push(Hit { session_id, app, score, hits: 0.0, snippets: Vec::new() });
-                    by.last_mut().unwrap()
+                    by.len() - 1
                 }
             };
+            let s = &mut by[j];
             s.hits += 1.0;
             s.score = if s.score.is_nan() || score.is_nan() { f64::NAN } else { s.score.min(score) };
             if s.snippets.len() < 3 {

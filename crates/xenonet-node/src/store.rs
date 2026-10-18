@@ -30,7 +30,7 @@ fn row(r: sql::Result<Option<sql::Row>>) -> sql::Result<Out> {
 }
 
 fn unit(r: sql::Result<()>) -> sql::Result<Out> {
-    r.map(|_| Out::Undef)
+    r.map(|()| Out::Undef)
 }
 
 fn dispatch(s: &mut EngineStore, name: &str, v: &[Arg]) -> sql::Result<Out> {
@@ -195,7 +195,7 @@ impl EngineStoreCore {
 
     /// A place's own id, made by `make` the first time it's asked for.
     #[napi(js_name = "projectIdOf")]
-    pub fn project_id_of(&self, env: Env, place: JsArg, make: Function<(), JsArg>, now: JsArg) -> Result<Json> {
+    pub fn project_id_of(&self, env: Env, place: JsArg, make: Function<'_, (), JsArg>, now: JsArg) -> Result<Json> {
         match self.inner.with(|s| s.project_id_for(place.0.clone())) {
             Ok(Value::Null) => {}
             Ok(v) => return Ok(Json(v)),
@@ -245,7 +245,7 @@ pub fn engine_version() -> u32 {
 /// The statements migration step `i` runs, asking `has_column(table,
 /// column)` of the database it's for.
 #[napi(js_name = "engineStep")]
-pub fn engine_step_sql(i: u32, has_column: Function<FnArgs<(String, String)>, bool>) -> Result<Vec<&'static str>> {
+pub fn engine_step_sql(i: u32, has_column: Function<'_, FnArgs<(String, String)>, bool>) -> Result<Vec<&'static str>> {
     engine_step(i as usize, &mut |t, c| has_column.call(FnArgs::from((t.to_string(), c.to_string()))))
 }
 
@@ -256,7 +256,7 @@ pub struct EngineBlockCore {
     life: xenonet_blocks::lifecycle::Lifecycle,
 }
 
-impl crate::blocks::HasLife for EngineBlockCore {
+impl HasLife for EngineBlockCore {
     fn life(&self) -> &xenonet_blocks::lifecycle::Lifecycle {
         &self.life
     }

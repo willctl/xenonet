@@ -2439,7 +2439,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "xenonet-base",
- "xenonet-blocks",
  "xenonet-schema",
 ]
 
@@ -2453,8 +2452,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "xenonet-base",
- "xenonet-blocks",
- "xenonet-schema",
  "xenonet-sources",
 ]
 

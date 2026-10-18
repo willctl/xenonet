@@ -89,7 +89,7 @@ pub fn query_refusals(records: &[Value], q: &Value) -> Value {
         .iter()
         .copied()
         .filter(|r| {
-            let t = at_of(r).unwrap();
+            let t = at_of(r).expect("all has only records with an at");
             if t < since || t > until {
                 return false;
             }
@@ -153,7 +153,7 @@ pub fn query_refusals(records: &[Value], q: &Value) -> Value {
             };
             locale_compare(&text(f(a).as_ref()), &text(f(b).as_ref()))
         };
-        let (ta, tb) = (at_of(a).unwrap(), at_of(b).unwrap());
+        let (ta, tb) = (at_of(a).expect("all has only records with an at"), at_of(b).expect("all has only records with an at"));
         let by_time = if sort == "oldest" { ta.partial_cmp(&tb) } else { tb.partial_cmp(&ta) }.unwrap_or(Ordering::Equal);
         by_field.then(by_time).then_with(|| locale_compare(&id(a), &id(b)))
     });
@@ -189,6 +189,6 @@ mod tests {
         assert_eq!(query_refusals(&records, &json!({ "sort": "oldest" }))["records"][0]["id"], records[3]["id"]);
         assert_eq!(query_refusals(&records, &json!({ "limit": "2", "offset": 3 }))["records"].as_array().unwrap().len(), 1);
         let shown = &all["records"][0];
-        assert_eq!(shown.as_object().unwrap().keys().last().unwrap(), "source");
+        assert_eq!(shown.as_object().unwrap().keys().next_back().unwrap(), "source");
     }
 }

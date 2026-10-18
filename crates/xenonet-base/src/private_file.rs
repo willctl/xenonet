@@ -61,8 +61,8 @@ pub fn run_command(file: &str, args: &[&str], timeout: Duration) -> Result<Strin
             String::from_utf8_lossy(&buf).into_owned()
         })
     };
-    let out = read(Box::new(child.stdout.take().unwrap()));
-    let err = read(Box::new(child.stderr.take().unwrap()));
+    let out = read(Box::new(child.stdout.take().expect("stdout is piped above")));
+    let err = read(Box::new(child.stderr.take().expect("stderr is piped above")));
     let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
@@ -89,13 +89,13 @@ pub fn run_private(file: &str, args: &[&str]) -> Result<String, String> {
     run_command(file, args, Duration::from_millis(PRIVATE_COMMAND_MS))
 }
 
-static SID_LINE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?mR)"(S-1-[0-9-]+)"\s*$"#).unwrap());
-static ACL_LINE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"D:[A-Z]*(\(|NO_ACCESS_CONTROL)").unwrap());
-static NO_ACL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"D:[A-Z]*NO_ACCESS_CONTROL").unwrap());
-static ACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\(([^)]*)\)").unwrap());
+static SID_LINE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?mR)"(S-1-[0-9-]+)"\s*$"#).expect("a fixed pattern"));
+static ACL_LINE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"D:[A-Z]*(\(|NO_ACCESS_CONTROL)").expect("a fixed pattern"));
+static NO_ACL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"D:[A-Z]*NO_ACCESS_CONTROL").expect("a fixed pattern"));
+static ACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\(([^)]*)\)").expect("a fixed pattern"));
 
 /// Your account's SID, from whoami /user: the last field of its CSV line.
-pub fn user_sid(run: &mut Run) -> Result<String, Error> {
+pub fn user_sid(run: &mut Run<'_>) -> Result<String, Error> {
     let out = run("whoami", &["/user", "/fo", "csv", "/nh"]).map_err(Error::Run)?;
     SID_LINE.captures(&out).map(|c| c[1].to_string()).ok_or_else(|| Error::Said("whoami didn't say which account this is".into()))
 }
@@ -119,7 +119,7 @@ fn read_text(raw: &[u8]) -> String {
 /// A file's ACL as SDDL, which names accounts by SID in any language:
 /// icacls /save writes it to a file of its own (in UTF-16, after a line
 /// with the file's name), which is read and taken away.
-pub fn acl_of(file: &str, run: &mut Run) -> Result<String, Error> {
+pub fn acl_of(file: &str, run: &mut Run<'_>) -> Result<String, Error> {
     let out = std::env::temp_dir().join(format!("xenonet-acl-{}-{}.txt", std::process::id(), random_hex()));
     let out_s = out.to_string_lossy().into_owned();
     let found = (|| {
@@ -128,7 +128,7 @@ pub fn acl_of(file: &str, run: &mut Run) -> Result<String, Error> {
         let text = read_text(&raw);
         let line =
             text.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l)).find(|l| ACL_LINE.is_match(l)).ok_or_else(|| Error::Said(format!("icacls gave no ACL for {file}")))?;
-        Ok(line[line.find("D:").unwrap()..].to_string())
+        Ok(line[line.find("D:").expect("the line matched ACL_LINE, so it has a D:")..].to_string())
     })();
     let _ = std::fs::remove_file(&out);
     found
@@ -180,7 +180,7 @@ pub fn mode_of(m: &std::fs::Metadata) -> u32 {
 
 /// Who besides you can read a file: the accounts its ACL names, on
 /// Windows, and elsewhere "others" when its mode lets anyone else in.
-pub fn other_readers(file: &str, windows: bool, run: &mut Run) -> Result<Vec<String>, Error> {
+pub fn other_readers(file: &str, windows: bool, run: &mut Run<'_>) -> Result<Vec<String>, Error> {
     if windows {
         let acl = acl_of(file, run)?;
         return Ok(others_in(&acl, &user_sid(run)?));
@@ -190,6 +190,7 @@ pub fn other_readers(file: &str, windows: bool, run: &mut Run) -> Result<Vec<Str
 }
 
 /// chmod 600, as Node does it: on Windows only the read-only flag.
+#[cfg_attr(not(unix), expect(clippy::permissions_set_readonly_false, reason = "Windows has no world-writable bit: clearing read-only is all chmod 600 does there, as in Node"))]
 pub fn chmod_600(file: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -206,7 +207,7 @@ pub fn chmod_600(file: &Path) -> std::io::Result<()> {
 
 /// Makes a file yours alone: on Windows nothing inherited and your account
 /// alone in its ACL, elsewhere mode 0600.
-pub fn protect_file(file: &str, windows: bool, run: &mut Run) -> Result<(), Error> {
+pub fn protect_file(file: &str, windows: bool, run: &mut Run<'_>) -> Result<(), Error> {
     if windows {
         let grant = format!("*{}:F", user_sid(run)?);
         run("icacls", &[file, "/inheritance:r", "/grant:r", &grant, "/q"]).map_err(Error::Run)?;

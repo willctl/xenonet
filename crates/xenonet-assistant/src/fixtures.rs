@@ -89,7 +89,7 @@ pub fn fixture_policy(policy: &Value) -> Value {
 pub fn fixture_stats(id: &str) -> Value {
     let seed = sha256(id.as_bytes());
     let n = |i: usize, scale: u32| (u32::from(seed[i]) * 256 + u32::from(seed[i + 1])) % scale;
-    let turns: Vec<Value> = (0..1 + n(10, 9)).map(|_| json!({})).collect();
+    let turns: Vec<Value> = (0..=n(10, 9)).map(|_| json!({})).collect();
     json!({ "totals": { "input": 2000 + n(0, 9000), "cacheWrite": n(2, 4000), "cacheRead": 40000 + n(4, 90000), "output": 1500 + n(6, 6000) }, "tools": [{ "calls": 3 + n(8, 40) }], "turns": turns })
 }
 

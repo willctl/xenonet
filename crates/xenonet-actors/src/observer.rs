@@ -20,11 +20,10 @@
 
 use crate::attribution::Ordered;
 use crate::registration::CAPABILITIES;
-use crate::registry::value_arg;
 use crate::tokens::hex;
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::sync::Mutex;
+use xenonet_base::sync::Locked;
 use xenonet_engine::peer::{Calls, Result};
 use xenonet_engine::sql::Arg;
 
@@ -113,7 +112,7 @@ fn eq(a: &Arg, b: &Arg) -> bool {
 
 impl Observer {
     fn s(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner())
+        self.state.locked()
     }
 
     /// The actor itself, made once and kept current (`o`: name, version,
@@ -167,7 +166,14 @@ impl Observer {
         }
         let registered = c.call("actors", "isRegistered", vec![Arg::text(id)])?.truthy();
         let f = |k: &str| info.field(k);
-        let was = Arg::Obj(vec![("name".into(), f("name")), ("product".into(), f("product")), ("via".into(), f("via")), ("heartbeatMs".into(), f("heartbeatMs")), ("capabilities".into(), f("capabilities")), ("identity".into(), f("identity"))]);
+        let was = Arg::Obj(vec![
+            ("name".into(), f("name")),
+            ("product".into(), f("product")),
+            ("via".into(), f("via")),
+            ("heartbeatMs".into(), f("heartbeatMs")),
+            ("capabilities".into(), f("capabilities")),
+            ("identity".into(), f("identity")),
+        ]);
         // A version XenoNet can't read just now (an update under way) isn't
         // a version gone.
         let version = if version.is_nullish() { f("product").field("version").or(Arg::Null) } else { version };
@@ -303,7 +309,10 @@ impl Observer {
         let i = match s.buckets.iter().position(|(k, _)| *k == key) {
             Some(i) => i,
             None => {
-                s.buckets.push((key, Bucket { id: id.into(), kind: o.field("kind"), target, platform: o.field("platform"), subject: o.field("subject"), minute, count: 0.0, paths: vec![], at }));
+                s.buckets.push((
+                    key,
+                    Bucket { id: id.into(), kind: o.field("kind"), target, platform: o.field("platform"), subject: o.field("subject"), minute, count: 0.0, paths: vec![], at },
+                ));
                 s.buckets.len() - 1
             }
         };
@@ -332,7 +341,13 @@ impl Observer {
             };
             let opt = |a: &Arg| if a.is_nullish() { String::new() } else { text(a) };
             let r = format!("o:{}:{}:{}", text(&b.kind), xenonet_base::json::number_string(b.minute), tag(&format!("{}|{}", opt(&b.target), opt(&b.platform))));
-            let mut o = vec![("ref".to_string(), Arg::text(r)), ("kind".to_string(), b.kind), ("target".to_string(), b.target), ("at".to_string(), Arg::Num(b.at)), ("count".to_string(), Arg::Num(b.count))];
+            let mut o = vec![
+                ("ref".to_string(), Arg::text(r)),
+                ("kind".to_string(), b.kind),
+                ("target".to_string(), b.target),
+                ("at".to_string(), Arg::Num(b.at)),
+                ("count".to_string(), Arg::Num(b.count)),
+            ];
             if !b.paths.is_empty() {
                 o.push(("paths".into(), Arg::List(b.paths)));
             }
@@ -399,9 +414,4 @@ impl Observer {
         }
         Ok(true)
     }
-}
-
-#[allow(dead_code)]
-fn unused(v: &Value) -> Arg {
-    value_arg(v)
 }

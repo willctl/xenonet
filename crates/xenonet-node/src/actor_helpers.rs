@@ -7,6 +7,7 @@ use napi_derive::napi;
 use serde_json::{json, Value};
 use std::sync::Mutex;
 use xenonet_actors::{detail, handoff, key, limits, names};
+use xenonet_base::sync::Locked;
 use xenonet_engine::js::{template, truthy};
 use xenonet_engine::products;
 
@@ -137,7 +138,7 @@ pub fn names_slug_refusal(slug: MaybeJson, product: MaybeJson) -> Option<String>
 }
 
 #[napi(js_name = "namesSuggestSlug")]
-pub fn names_suggest_slug(base: String, product: MaybeJson, taken: Function<String, bool>) -> Result<Option<String>> {
+pub fn names_suggest_slug(base: String, product: MaybeJson, taken: Function<'_, String, bool>) -> Result<Option<String>> {
     let product = product.0.as_ref().and_then(Value::as_str).map(str::to_string);
     names::suggest_slug(&base, product.as_deref(), &mut |s| taken.call(s.to_string()))
 }
@@ -155,6 +156,10 @@ pub struct WindowKey {
 }
 
 #[napi]
+// On the impl, not the methods: napi-derive copies a method's attributes
+// onto the two-argument wrapper it generates for it, and an expectation
+// there goes unfulfilled.
+#[expect(clippy::unused_self, reason = "hidden is a getter on the JS class, as it was in the JS, though it reads a constant")]
 impl WindowKey {
     #[napi(constructor)]
     pub fn new() -> Result<Self> {
@@ -193,12 +198,12 @@ impl Bucket {
 
     #[napi]
     pub fn take(&self, n: f64, now: f64) -> f64 {
-        self.inner.lock().unwrap().take(n, now)
+        self.inner.locked().take(n, now)
     }
 
     #[napi(js_name = "fullIn")]
     pub fn full_in(&self, now: f64) -> f64 {
-        self.inner.lock().unwrap().full_in(now)
+        self.inner.locked().full_in(now)
     }
 }
 
@@ -211,22 +216,30 @@ pub struct Buckets {
 impl Buckets {
     #[napi(constructor)]
     pub fn new(max: f64) -> Self {
-        Buckets { inner: Mutex::new(limits::Buckets::new(if max.is_finite() && max > 0.0 { max as usize } else if max > 0.0 { usize::MAX } else { 0 })) }
+        Buckets {
+            inner: Mutex::new(limits::Buckets::new(if max.is_finite() && max > 0.0 {
+                max as usize
+            } else if max > 0.0 {
+                usize::MAX
+            } else {
+                0
+            })),
+        }
     }
 
     #[napi]
     pub fn take(&self, key: String, rate: f64, burst: f64, n: f64, now: f64) -> f64 {
-        self.inner.lock().unwrap().take(&key, rate, burst, n, now)
+        self.inner.locked().take(&key, rate, burst, n, now)
     }
 
     #[napi]
     pub fn forget(&self, prefix: String) {
-        self.inner.lock().unwrap().forget(&prefix)
+        self.inner.locked().forget(&prefix);
     }
 
     #[napi(getter)]
     pub fn size(&self) -> u32 {
-        self.inner.lock().unwrap().size() as u32
+        self.inner.locked().size() as u32
     }
 }
 

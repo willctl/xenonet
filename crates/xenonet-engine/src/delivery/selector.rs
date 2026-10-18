@@ -34,7 +34,10 @@ pub struct Selector {
 
 impl Selector {
     pub fn to_arg(&self) -> Arg {
-        Arg::Obj(vec![("terms".into(), Arg::List(self.terms.iter().map(|t| Arg::Obj(vec![("key".into(), Arg::text(t.key.clone())), ("value".into(), Arg::text(t.value.clone()))])).collect()))])
+        Arg::Obj(vec![(
+            "terms".into(),
+            Arg::List(self.terms.iter().map(|t| Arg::Obj(vec![("key".into(), Arg::text(t.key.clone())), ("value".into(), Arg::text(t.value.clone()))])).collect()),
+        )])
     }
 
     /// A selector as JS passed it ({ terms: [{ key, value }] }), or None
@@ -50,7 +53,11 @@ impl Selector {
 
 /// The JS's white space, for `[\s+]` and `\s`.
 fn js_space(c: char) -> bool {
-    matches!(c, '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}')
+    matches!(
+        c,
+        '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
+            ..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'
+    )
 }
 
 /// A term, `key:value`, as the JS's /^(keys):([^\s+]+)$/i takes it: the key

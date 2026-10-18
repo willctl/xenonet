@@ -8,6 +8,7 @@
 //! Not counted: batch (half price), data residency (1.1x), and Codex models
 //! OpenAI doesn't price (codex-auto-review, gpt-5.3-codex-spark).
 
+use crate::sync::Locked;
 use crate::time::parse_iso;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -68,18 +69,18 @@ pub struct Price {
 
 type Row = (&'static str, &'static str, f64, f64, Option<f64>, Option<f64>, f64, Option<LongContext>, Option<Fast>);
 
-const fn lc_until(from: Option<&'static str>, until: &'static str, input: f64, output: f64) -> Option<LongContext> {
-    Some(LongContext { over: 200_000.0, from, until: Some(until), input, output, scale_cache: None })
+const fn lc_until(from: Option<&'static str>, until: &'static str, input: f64, output: f64) -> LongContext {
+    LongContext { over: 200_000.0, from, until: Some(until), input, output, scale_cache: None }
 }
 
 // OpenAI's long context: above 272K input tokens the whole call costs 2x for
 // input, cached input and cache writes, and 1.5x for output.
-fn lc(input: f64, output: f64) -> Option<LongContext> {
-    Some(LongContext { over: 272_000.0, from: None, until: None, input: input * 2.0, output: output * 1.5, scale_cache: Some(2.0) })
+fn lc(input: f64, output: f64) -> LongContext {
+    LongContext { over: 272_000.0, from: None, until: None, input: input * 2.0, output: output * 1.5, scale_cache: Some(2.0) }
 }
 
-const fn fast(input: f64, output: f64) -> Option<Fast> {
-    Some(Fast { input, output })
+const fn fast(input: f64, output: f64) -> Fast {
+    Fast { input, output }
 }
 
 fn anthropic() -> Vec<Row> {
@@ -97,22 +98,22 @@ fn anthropic() -> Vec<Row> {
             Some(3.75),
             Some(6.0),
             0.3,
-            lc_until(Some("2025-08-12"), "2026-04-29", 6.0, 22.5),
+            Some(lc_until(Some("2025-08-12"), "2026-04-29", 6.0, 22.5)),
             None,
         ),
         ("claude-opus-4-1-20250805|claude-opus-4-1", "2025-08-05", 15.0, 75.0, Some(18.75), Some(30.0), 1.5, None, None),
-        ("claude-sonnet-4-5-20250929|claude-sonnet-4-5", "2025-09-29", 3.0, 15.0, Some(3.75), Some(6.0), 0.3, lc_until(None, "2026-04-29", 6.0, 22.5), None),
+        ("claude-sonnet-4-5-20250929|claude-sonnet-4-5", "2025-09-29", 3.0, 15.0, Some(3.75), Some(6.0), 0.3, Some(lc_until(None, "2026-04-29", 6.0, 22.5)), None),
         ("claude-haiku-4-5-20251001|claude-haiku-4-5", "2025-10-15", 1.0, 5.0, Some(1.25), Some(2.0), 0.1, None, None),
         ("claude-opus-4-5-20251101|claude-opus-4-5", "2025-11-24", 5.0, 25.0, Some(6.25), Some(10.0), 0.5, None, None),
-        ("claude-opus-4-6", "2026-02-05", 5.0, 25.0, Some(6.25), Some(10.0), 0.5, lc_until(None, "2026-03-12", 10.0, 37.5), fast(30.0, 150.0)),
-        ("claude-sonnet-4-6", "2026-02-17", 3.0, 15.0, Some(3.75), Some(6.0), 0.3, lc_until(None, "2026-03-12", 6.0, 22.5), None),
-        ("claude-opus-4-7", "2026-04-16", 5.0, 25.0, Some(6.25), Some(10.0), 0.5, None, fast(30.0, 150.0)),
-        ("claude-opus-4-8", "2026-05-28", 5.0, 25.0, Some(6.25), Some(10.0), 0.5, None, fast(10.0, 50.0)),
+        ("claude-opus-4-6", "2026-02-05", 5.0, 25.0, Some(6.25), Some(10.0), 0.5, Some(lc_until(None, "2026-03-12", 10.0, 37.5)), Some(fast(30.0, 150.0))),
+        ("claude-sonnet-4-6", "2026-02-17", 3.0, 15.0, Some(3.75), Some(6.0), 0.3, Some(lc_until(None, "2026-03-12", 6.0, 22.5)), None),
+        ("claude-opus-4-7", "2026-04-16", 5.0, 25.0, Some(6.25), Some(10.0), 0.5, None, Some(fast(30.0, 150.0))),
+        ("claude-opus-4-8", "2026-05-28", 5.0, 25.0, Some(6.25), Some(10.0), 0.5, None, Some(fast(10.0, 50.0))),
         ("claude-fable-5|claude-mythos-5", "2026-06-09", 10.0, 50.0, Some(12.5), Some(20.0), 1.0, None, None),
         ("claude-sonnet-5", "2026-06-30", 2.0, 10.0, Some(2.5), Some(4.0), 0.2, None, None),
-        ("claude-opus-5", "2026-07-24", 5.0, 25.0, Some(6.25), Some(10.0), 0.5, None, fast(10.0, 50.0)),
+        ("claude-opus-5", "2026-07-24", 5.0, 25.0, Some(6.25), Some(10.0), 0.5, None, Some(fast(10.0, 50.0))),
         ("claude-fable-5-1|claude-mythos-5-1", "2026-09-01", 10.0, 50.0, Some(12.5), Some(20.0), 0.25, None, None),
-        ("claude-opus-5-5", "2026-09-22", 4.0, 20.0, Some(5.0), Some(8.0), 0.2, None, fast(8.0, 40.0)),
+        ("claude-opus-5-5", "2026-09-22", 4.0, 20.0, Some(5.0), Some(8.0), 0.2, None, Some(fast(8.0, 40.0))),
         ("claude-sonnet-5-5", "2026-09-28", 2.0, 10.0, Some(2.5), Some(4.0), 0.2, None, None),
     ]
 }
@@ -133,19 +134,19 @@ fn openai() -> Vec<Row> {
         ("gpt-5.2", "2025-12-11", 1.75, 14.0, None, None, 0.175, None, None),
         ("gpt-5.2-codex", "2025-12-18", 1.75, 14.0, None, None, 0.175, None, None),
         ("gpt-5.3-codex", "2026-02-05", 1.75, 14.0, None, None, 0.175, None, None),
-        ("gpt-5.4", "2026-03-05", 2.5, 15.0, None, None, 0.25, lc(2.5, 15.0), None),
+        ("gpt-5.4", "2026-03-05", 2.5, 15.0, None, None, 0.25, Some(lc(2.5, 15.0)), None),
         ("gpt-5.4-mini", "2026-03-17", 0.75, 4.5, None, None, 0.075, None, None),
-        ("gpt-5.5", "2026-04-23", 5.0, 30.0, None, None, 0.5, lc(5.0, 30.0), None),
-        ("gpt-5.6-sol|gpt-5.6", "2026-07-09", 5.0, 30.0, Some(6.25), None, 0.5, lc(5.0, 30.0), None),
-        ("gpt-5.6-sol|gpt-5.6", "2026-08-21", 4.0, 20.0, Some(5.0), None, 0.4, lc(4.0, 20.0), None),
-        ("gpt-5.6-terra", "2026-07-09", 2.5, 15.0, Some(3.125), None, 0.25, lc(2.5, 15.0), None),
-        ("gpt-5.6-terra", "2026-07-30", 2.0, 12.0, Some(2.5), None, 0.2, lc(2.0, 12.0), None),
-        ("gpt-5.6-luna", "2026-07-09", 1.0, 6.0, Some(1.25), None, 0.1, lc(1.0, 6.0), None),
-        ("gpt-5.6-luna", "2026-07-30", 0.2, 1.2, Some(0.25), None, 0.02, lc(0.2, 1.2), None),
-        ("gpt-6-astra", "2026-09-03", 10.0, 50.0, Some(12.5), None, 1.0, lc(10.0, 50.0), None),
-        ("gpt-6-sol", "2026-09-22", 2.0, 10.0, Some(2.5), None, 0.2, lc(2.0, 10.0), None),
-        ("gpt-6-luna", "2026-09-22", 0.1, 0.5, Some(0.125), None, 0.01, lc(0.1, 0.5), None),
-        ("gpt-6.1-sol", "2026-09-29", 2.0, 10.0, Some(2.5), None, 0.1, lc(2.0, 10.0), None),
+        ("gpt-5.5", "2026-04-23", 5.0, 30.0, None, None, 0.5, Some(lc(5.0, 30.0)), None),
+        ("gpt-5.6-sol|gpt-5.6", "2026-07-09", 5.0, 30.0, Some(6.25), None, 0.5, Some(lc(5.0, 30.0)), None),
+        ("gpt-5.6-sol|gpt-5.6", "2026-08-21", 4.0, 20.0, Some(5.0), None, 0.4, Some(lc(4.0, 20.0)), None),
+        ("gpt-5.6-terra", "2026-07-09", 2.5, 15.0, Some(3.125), None, 0.25, Some(lc(2.5, 15.0)), None),
+        ("gpt-5.6-terra", "2026-07-30", 2.0, 12.0, Some(2.5), None, 0.2, Some(lc(2.0, 12.0)), None),
+        ("gpt-5.6-luna", "2026-07-09", 1.0, 6.0, Some(1.25), None, 0.1, Some(lc(1.0, 6.0)), None),
+        ("gpt-5.6-luna", "2026-07-30", 0.2, 1.2, Some(0.25), None, 0.02, Some(lc(0.2, 1.2)), None),
+        ("gpt-6-astra", "2026-09-03", 10.0, 50.0, Some(12.5), None, 1.0, Some(lc(10.0, 50.0)), None),
+        ("gpt-6-sol", "2026-09-22", 2.0, 10.0, Some(2.5), None, 0.2, Some(lc(2.0, 10.0)), None),
+        ("gpt-6-luna", "2026-09-22", 0.1, 0.5, Some(0.125), None, 0.01, Some(lc(0.1, 0.5)), None),
+        ("gpt-6.1-sol", "2026-09-29", 2.0, 10.0, Some(2.5), None, 0.1, Some(lc(2.0, 10.0)), None),
     ]
 }
 
@@ -214,9 +215,9 @@ fn strip_provider(s: &str) -> &str {
         matches!(t.as_bytes().get(p.len()), Some(b'.' | b'/')).then_some(p.len() + 1)
     };
     let b = s.as_bytes();
-    let region = (2..=4).find(|&n| b.len() > n && b[..n].iter().all(u8::is_ascii_lowercase) && b[n] == b'.' && after_provider(&s[n + 1..]).is_some());
-    if let Some(n) = region {
-        return &s[n + 1 + after_provider(&s[n + 1..]).unwrap()..];
+    let region = (2..=4).filter(|&n| b.len() > n && b[..n].iter().all(u8::is_ascii_lowercase) && b[n] == b'.').find_map(|n| after_provider(&s[n + 1..]).map(|p| n + 1 + p));
+    if let Some(start) = region {
+        return &s[start..];
     }
     after_provider(s).map_or(s, |n| &s[n..])
 }
@@ -243,7 +244,7 @@ fn strip_version(s: &str) -> &str {
 }
 
 /// A model id as the transcripts write it, plain: no provider or region
-/// prefix (Bedrock's us.anthropic.…-v1:0, Vertex's …@date), no [1m] flag.
+/// prefix (Bedrock's us.anthropic.…-v1:0, Vertex's …@date), no `[1m]` flag.
 pub fn plain_model(model: &str) -> String {
     let s = model.to_lowercase();
     let s = strip_flag(&s);
@@ -264,7 +265,7 @@ fn price_rows(id: &str) -> Option<&'static [usize]> {
     type Kept = Mutex<HashMap<String, Option<&'static [usize]>>>;
     static KEPT: OnceLock<Kept> = OnceLock::new();
     let kept = KEPT.get_or_init(Default::default);
-    if let Some(v) = kept.lock().unwrap().get(id) {
+    if let Some(v) = kept.locked().get(id) {
         return *v;
     }
     let all = rows();
@@ -282,7 +283,7 @@ fn price_rows(id: &str) -> Option<&'static [usize]> {
         idx.sort_by(|&a, &b| all[a].from.total_cmp(&all[b].from));
         &*Box::leak(idx.into_boxed_slice())
     });
-    let mut kept = kept.lock().unwrap();
+    let mut kept = kept.locked();
     if kept.len() >= 500 {
         kept.clear();
     }

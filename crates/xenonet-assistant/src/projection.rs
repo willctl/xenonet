@@ -60,15 +60,18 @@ fn res() -> &'static Res {
     static R: OnceLock<Res> = OnceLock::new();
     R.get_or_init(|| Res {
         // \b and /i as JS has them without /u: ASCII words, ASCII case.
-        bearer: Regex::new(&format!(r"(?-u:\b)((?i-u:bearer|token|password|passwd|secret|api[_-]?key))(?-u:\b)[{SPACE}]*[:=][{SPACE}]*[^{SPACE}]+")).unwrap(),
-        key: Regex::new(r"(?:sk-|sk_|pk_|rk_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[abprs]-|AKIA|ASIA|AIza|npm_|pypi-|hf_|xenonet_actor_|xenonet_assistant_)[A-Za-z0-9_-]*").unwrap(),
-        email: Regex::new(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}").unwrap(),
+        bearer: Regex::new(&format!(r"(?-u:\b)((?i-u:bearer|token|password|passwd|secret|api[_-]?key))(?-u:\b)[{SPACE}]*[:=][{SPACE}]*[^{SPACE}]+")).expect("a fixed pattern"),
+        key: Regex::new(
+            r"(?:sk-|sk_|pk_|rk_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[abprs]-|AKIA|ASIA|AIza|npm_|pypi-|hf_|xenonet_actor_|xenonet_assistant_)[A-Za-z0-9_-]*",
+        )
+        .expect("a fixed pattern"),
+        email: Regex::new(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}").expect("a fixed pattern"),
         // Followed by a separator or the end, checked after (a lookahead).
-        user_folder: Regex::new(r#"(?:[A-Za-z]:)?[\\/](?i-u:Users|home)[\\/][^\\/"'`]+"#).unwrap(),
-        windows_path: Regex::new(&format!(r#"[A-Za-z]:[\\/][^{SPACE}"'`<>|]*"#)).unwrap(),
-        posix_path: Regex::new(r"/(?:[A-Za-z0-9_.@+-]+/)+[A-Za-z0-9_.@+-]*").unwrap(),
-        run: Regex::new(r"[A-Za-z0-9+/=_-]{32,}").unwrap(),
-        spaces: Regex::new(&format!("[{SPACE}]+")).unwrap(),
+        user_folder: Regex::new(r#"(?:[A-Za-z]:)?[\\/](?i-u:Users|home)[\\/][^\\/"'`]+"#).expect("a fixed pattern"),
+        windows_path: Regex::new(&format!(r#"[A-Za-z]:[\\/][^{SPACE}"'`<>|]*"#)).expect("a fixed pattern"),
+        posix_path: Regex::new(r"/(?:[A-Za-z0-9_.@+-]+/)+[A-Za-z0-9_.@+-]*").expect("a fixed pattern"),
+        run: Regex::new(r"[A-Za-z0-9+/=_-]{32,}").expect("a fixed pattern"),
+        spaces: Regex::new(&format!("[{SPACE}]+")).expect("a fixed pattern"),
     })
 }
 
@@ -80,12 +83,12 @@ fn char_len_at(s: &str, i: usize) -> usize {
 // may not be the character before) and a lookahead (`after` must hold of
 // the character after, None at the end). A match that fails either is
 // tried again a character on, as JS's search would.
-fn replace_around(re: &Regex, s: &str, before: impl Fn(char) -> bool, after: impl Fn(Option<char>) -> bool, mut with: impl FnMut(&Captures) -> String) -> String {
+fn replace_around(re: &Regex, s: &str, before: impl Fn(char) -> bool, after: impl Fn(Option<char>) -> bool, mut with: impl FnMut(&Captures<'_>) -> String) -> String {
     let mut out = String::with_capacity(s.len());
     let (mut last, mut at) = (0, 0);
     while at <= s.len() {
         let Some(c) = re.captures_at(s, at) else { break };
-        let m = c.get(0).unwrap();
+        let m = c.get(0).expect("group 0 is the whole match");
         let ok = !s[..m.start()].chars().next_back().is_some_and(&before) && after(s[m.end()..].chars().next());
         if !ok {
             if m.start() >= s.len() {
@@ -122,7 +125,7 @@ pub fn clean_label(text: &str) -> Option<String> {
     let s = replace_around(&r.user_folder, &s, |_| false, |c| matches!(c, None | Some('/' | '\\')), |_| "~".into());
     let s = replace_around(&r.windows_path, &s, alnum, |_| true, |_| "[path]".into());
     let s = replace_around(&r.posix_path, &s, |c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '~'), |_| true, |_| "[path]".into());
-    let s = r.run.replace_all(&s, |c: &Captures| {
+    let s = r.run.replace_all(&s, |c: &Captures<'_>| {
         let run = &c[0];
         if run.bytes().any(|b| b.is_ascii_alphabetic()) && run.bytes().any(|b| b.is_ascii_digit()) {
             "[withheld]".to_string()
@@ -188,7 +191,7 @@ pub fn stall_reason(reasons: Option<&Value>) -> &'static str {
     }
 }
 
-/// SESSION_ID in core/schema/assistant.js: (claude|codex):<uuid>.
+/// SESSION_ID in core/schema/assistant.js: `(claude|codex):<uuid>`.
 pub fn is_session_id(s: &str) -> bool {
     let Some(u) = s.strip_prefix("claude:").or_else(|| s.strip_prefix("codex:")) else { return false };
     let b = u.as_bytes();
@@ -260,7 +263,7 @@ pub fn visible_sessions<'a>(view: &'a Value, policy: &Value, now: f64) -> Vec<Vi
     out
 }
 
-pub fn session_summary(v: &Visible, policy: &Value) -> Value {
+pub fn session_summary(v: &Visible<'_>, policy: &Value) -> Value {
     json!({
         "session_id": v.s.get("id"),
         "project_id": v.project,
@@ -318,7 +321,7 @@ pub fn freshness_of(view: &Value, now: f64, names: &[String]) -> Freshness {
 }
 
 pub fn all_sources() -> Vec<String> {
-    SOURCE_NAMES.iter().map(|s| s.to_string()).collect()
+    SOURCE_NAMES.iter().map(ToString::to_string).collect()
 }
 
 fn put(m: &mut Map<String, Value>, k: &str, v: Option<&Value>) {
@@ -355,7 +358,7 @@ pub fn sources_data(view: &Value) -> Value {
 /// `id_of(parts)` makes an item's id. Nothing here clears anything.
 pub fn attention_items(view: &Value, policy: &Value, now: f64, id_of: &dyn Fn(&str) -> String) -> Vec<Value> {
     let visible = visible_sessions(view, policy, now);
-    let by_id: HashMap<String, &Visible> = visible.iter().map(|v| (key(v.s.get("id")), v)).collect();
+    let by_id: HashMap<String, &Visible<'_>> = visible.iter().map(|v| (key(v.s.get("id")), v)).collect();
     let at = view.get("at").cloned().unwrap_or(Value::Null);
     let or_null = |v: Option<&Value>| v.filter(|x| !x.is_null()).cloned().unwrap_or(Value::Null);
     struct Item {
@@ -380,7 +383,14 @@ pub fn attention_items(view: &Value, policy: &Value, now: f64, id_of: &dyn Fn(&s
             items.push(Item { kind: "waiting", sessions: vec![id], project: v.project.clone(), first: or_null(need.and_then(|n| n.get("since"))), reason, files: None });
         } else if truthy(live.get("stuck")) {
             let first = or_null(live.get("turnStartedAt").filter(|x| !x.is_null()).or_else(|| live.get("lastEventAt")));
-            items.push(Item { kind: "stalled", sessions: vec![id], project: v.project.clone(), first, reason: stall_reason(live.get("stuck").and_then(|s| s.get("reasons"))), files: None });
+            items.push(Item {
+                kind: "stalled",
+                sessions: vec![id],
+                project: v.project.clone(),
+                first,
+                reason: stall_reason(live.get("stuck").and_then(|s| s.get("reasons"))),
+                files: None,
+            });
         } else if kind == Some("review") {
             let first = or_null(live.get("lastTurnEndAt").filter(|x| !x.is_null()).or_else(|| need.and_then(|n| n.get("since"))));
             items.push(Item { kind: "turn_completed", sessions: vec![id], project: v.project.clone(), first, reason: "turn_ended", files: None });
@@ -393,7 +403,14 @@ pub fn attention_items(view: &Value, policy: &Value, now: f64, id_of: &dyn Fn(&s
         }
         let mut sessions = vec![c.get("a").cloned().unwrap_or(Value::Null), c.get("b").cloned().unwrap_or(Value::Null)];
         sessions.sort_by(|x, y| js_string(x).encode_utf16().cmp(js_string(y).encode_utf16()));
-        items.push(Item { kind: "collision", sessions, project: a.project.clone(), first: or_null(c.get("ts")), reason: "recent_overlap", files: Some(c.get("files").cloned().unwrap_or(Value::Null)) });
+        items.push(Item {
+            kind: "collision",
+            sessions,
+            project: a.project.clone(),
+            first: or_null(c.get("ts")),
+            reason: "recent_overlap",
+            files: Some(c.get("files").cloned().unwrap_or(Value::Null)),
+        });
     }
     items
         .into_iter()
