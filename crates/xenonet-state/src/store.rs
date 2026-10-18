@@ -32,7 +32,7 @@ pub fn prepare(state: &mut Map<String, Value>) -> Vec<String> {
             }
             _ => {}
         }
-        parent.get_mut(key).and_then(Value::as_object_mut).unwrap()
+        parent.get_mut(key).and_then(Value::as_object_mut).expect("made an object above when it wasn't one")
     }
     part(state, "workspace", "workspace", json!({ "root": null }), &mut repaired);
     for k in ["layout", "acks", "marks"] {
@@ -61,9 +61,9 @@ pub fn layout_changes(positions: Option<&Value>) -> Vec<(String, Option<Value>)>
             continue;
         }
         let xyz: Vec<Option<f64>> = ["x", "y", "z"].iter().map(|k| p.get(*k).and_then(Value::as_f64).filter(|n| n.is_finite())).collect();
-        if xyz.iter().all(Option::is_some) {
+        if let [Some(x), Some(y), Some(z)] = xyz[..] {
             let fixed = |n: f64| xenonet_base::json::number(to_fixed(n, 2).parse::<f64>().unwrap_or(f64::NAN) + 0.0);
-            out.push((id, Some(json!({ "x": fixed(xyz[0].unwrap()), "y": fixed(xyz[1].unwrap()), "z": fixed(xyz[2].unwrap()) }))));
+            out.push((id, Some(json!({ "x": fixed(x), "y": fixed(y), "z": fixed(z) }))));
         }
     }
     out

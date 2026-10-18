@@ -79,15 +79,15 @@ pub fn needs_you_queue(input: &Value) -> Vec<Value> {
     let can_decide = truthy(get("canDecide"));
     let mut out: Vec<Value> = Vec::new();
     for s in items(get("sessions")) {
-        let kind = s.get("kind").and_then(Value::as_str);
-        if !truthy(s.get("id")) || !matches!(kind, Some("question" | "permission")) {
-            continue;
-        }
+        let kind = match s.get("kind").and_then(Value::as_str) {
+            Some(k @ ("question" | "permission")) if truthy(s.get("id")) => k,
+            _ => continue,
+        };
         let id = s.get("id").cloned().unwrap_or(Value::Null);
         let local = !truthy(s.get("host"));
         let mut m = Map::new();
         m.insert("key".into(), Value::String(format!("session:{}", js_string(&id))));
-        m.insert("kind".into(), Value::String(kind.unwrap().into()));
+        m.insert("kind".into(), Value::String(kind.into()));
         m.insert("id".into(), id.clone());
         m.insert("title".into(), or_id(str_of(s.get("title")), &id));
         m.insert("app".into(), str_of(s.get("app")));
@@ -103,11 +103,10 @@ pub fn needs_you_queue(input: &Value) -> Vec<Value> {
         out.push(Value::Object(m));
     }
     for a in items(get("actors")) {
-        let need = a.get("needsYou");
-        if !truthy(need) || a.get("kind").and_then(s) == Some("human") || a.get("id").and_then(s) == Some("actor:you") {
+        let Some(need) = a.get("needsYou").filter(|n| truthy(Some(n))) else { continue };
+        if a.get("kind").and_then(s) == Some("human") || a.get("id").and_then(s) == Some("actor:you") {
             continue;
         }
-        let need = need.unwrap();
         let id = a.get("id").cloned().unwrap_or(Value::Null);
         let text = match str_of(need.get("text")) {
             Value::String(t) if !t.is_empty() => Value::String(t),

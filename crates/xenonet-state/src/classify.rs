@@ -193,11 +193,11 @@ pub fn picks_from_answers(answers: &Value, folders: &[Value], offset: f64) -> Ve
         let key = format!("f{}", xenonet_base::json::number_string(offset + j as f64));
         let Some(a) = get(answers, &key).filter(|a| xenonet_base::text::truthy(Some(a))) else { continue };
         let choice = get(a, "choice").and_then(Value::as_str);
-        let confidence = get(a, "confidence").and_then(Value::as_f64);
-        if !matches!(choice, Some("project" | "group")) || choice == get(f, "xenonet").and_then(Value::as_str) || !confidence.is_some_and(|c| c >= CONFIDENT) {
+        let Some(confidence) = get(a, "confidence").and_then(Value::as_f64).filter(|c| *c >= CONFIDENT) else { continue };
+        if !matches!(choice, Some("project" | "group")) || choice == get(f, "xenonet").and_then(Value::as_str) {
             continue;
         }
-        let pct = xenonet_base::units::js_round(confidence.unwrap() * 100.0);
+        let pct = xenonet_base::units::js_round(confidence * 100.0);
         picks.push(json!({ "path": field(f, "path"), "as": choice, "reason": format!("the decision model was {}% sure", xenonet_base::json::number_string(pct)) }));
     }
     picks

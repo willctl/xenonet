@@ -122,7 +122,7 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
     };
     g.set("core", obj(json!({ "id": "core", "kind": "core", "name": root_name, "path": projects_dir, "home": home_dir })));
 
-    let pkey = |p: &Value| get(p, "key").map(js_string).unwrap_or_else(|| "undefined".into());
+    let pkey = |p: &Value| get(p, "key").map_or_else(|| "undefined".into(), js_string);
     for p in projects {
         let k = pkey(p);
         let id = format!("project:{k}");
@@ -173,7 +173,7 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
     // Codex desktop projects sit inside the project that holds their root.
     let mut native_ids: HashSet<String> = HashSet::new();
     for np in native_projects {
-        let raw = get(np, "id").map(js_string).unwrap_or_else(|| "undefined".into());
+        let raw = get(np, "id").map_or_else(|| "undefined".into(), js_string);
         let id = format!("native:codex:{raw}");
         let home = items(get(np, "roots")).iter().find_map(|r| key_of(Some(r)).and_then(|k| project_for_key(&k)));
         let home_id = home.map(|h| format!("project:{}", pkey(h)));
@@ -229,7 +229,7 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
         zone_for(g, key.as_deref(), get(s, "cwd"))
     };
 
-    let sid = |s: &Value| get(s, "id").map(js_string).unwrap_or_else(|| "undefined".into());
+    let sid = |s: &Value| get(s, "id").map_or_else(|| "undefined".into(), js_string);
     let mut by_id: HashMap<String, &Value> = HashMap::new();
     for s in sessions {
         by_id.insert(sid(s), s);
@@ -283,7 +283,7 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
         let slugs: HashSet<String> = pages.iter().map(|p| get(p, "slug").map(js_string).unwrap_or_default()).collect();
         let mut seen: HashSet<String> = HashSet::new();
         for p in pages {
-            let slug = get(p, "slug").map(js_string).unwrap_or_else(|| "undefined".into());
+            let slug = get(p, "slug").map_or_else(|| "undefined".into(), js_string);
             let id = format!("wiki:{slug}");
             let writes: Vec<Value> = items(get(p, "writes")).iter().rev().take(6).rev().cloned().collect();
             let f = |k: &str| get(p, k).cloned().unwrap_or(Value::Null);
@@ -322,7 +322,7 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
     }
 
     // Positions you dragged into place stay put.
-    for (id, n) in g.nodes.iter_mut() {
+    for (id, n) in &mut g.nodes {
         let p = get(layout, id).filter(|p| truthy(Some(p)));
         let (fx, fy, fz, pinned) = match p {
             Some(p) => (get(p, "x").cloned().unwrap_or(Value::Null), get(p, "y").cloned().unwrap_or(Value::Null), get(p, "z").cloned().unwrap_or(Value::Null), true),
@@ -335,7 +335,7 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
     }
 
     // Session counts and the latest activity rolled up the tree.
-    for (_, n) in g.nodes.iter_mut() {
+    for (_, n) in &mut g.nodes {
         if n.get("kind").and_then(Value::as_str) != Some("session") {
             let last = n.get("lastActivity").filter(|v| !v.is_null()).or(n.get("modifiedAt").filter(|v| !v.is_null())).cloned().unwrap_or(Value::Null);
             n.insert("sessionCount".into(), Value::from(0));
@@ -347,7 +347,7 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
     for s in sessions {
         let id = sid(s);
         let active = g.get(&id).and_then(|n| n.get("activity")).and_then(Value::as_str) == Some("active");
-        let updated = get(s, "updatedAt").filter(|v| truthy(Some(v))).map(|v| js_number(Some(v)));
+        let updated = get(s, "updatedAt").filter(|v| truthy(Some(v))).map(|v| (v, js_number(Some(v))));
         let mut cur = g.parent_of_node.get(&id).cloned();
         let mut seen: HashSet<String> = HashSet::new();
         while let Some(c) = cur.filter(|c| !seen.contains(c)) {
@@ -360,11 +360,11 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
                     let ac = count(n, "activeCount") + 1.0;
                     n.insert("activeCount".into(), number(ac));
                 }
-                if let Some(u) = updated {
+                if let Some((at, u)) = updated {
                     for k in ["lastActivity", "lastSessionAt"] {
                         let was = n.get(k).filter(|v| !v.is_null()).map_or(0.0, |v| js_number(Some(v)));
                         if u > was {
-                            n.insert(k.into(), get(s, "updatedAt").cloned().unwrap());
+                            n.insert(k.into(), at.clone());
                         }
                     }
                 }
@@ -374,7 +374,7 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
     }
     // Places where a session ran lately are active.
     let active_ms = windows.and_then(|w| get(w, "projectActiveMs")).filter(|v| !v.is_null()).map_or(3600e3, |v| js_number(Some(v)));
-    for (_, n) in g.nodes.iter_mut() {
+    for (_, n) in &mut g.nodes {
         if matches!(n.get("kind").and_then(Value::as_str), Some("project" | "native" | "zone")) {
             let last = n.get("lastSessionAt").filter(|v| !v.is_null()).map(|v| js_number(Some(v)));
             n.insert("active".into(), Value::Bool(last.is_some_and(|l| now - l <= active_ms)));
