@@ -5,7 +5,8 @@
 use crate::ctx::Ctx;
 use crate::glue::{self, From};
 use serde_json::Value;
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
+use xenonet_schema::drift::DriftLog;
 
 /// Where a core's events go: server/index.js's handlers (glue.rs), once the
 /// service is up. An event before that has no page to reach and is let go.
@@ -46,4 +47,9 @@ impl Emitter {
 pub struct WireEnv {
     pub version: String,
     pub emitter: Emitter,
+    /// The drift log (core/drift.js's one log): the readers record what
+    /// they find in it, and the service's routes and the doctor read it.
+    /// A driver that knows the cache folder first opens it there
+    /// (`cache_dir/drift.json`); the service opens it otherwise.
+    pub drift: Arc<Mutex<DriftLog>>,
 }

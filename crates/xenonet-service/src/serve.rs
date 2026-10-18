@@ -233,10 +233,10 @@ pub fn run_with(args: &[String], built: &str, build: Builder) -> i32 {
     let built = built.to_string();
     rt.block_on(async move {
         let mut config = Config::from_env(&args);
-        let env = WireEnv { version: config.version(&built), emitter: Emitter::new() };
+        let env = WireEnv { version: config.version(&built), emitter: Emitter::new(), drift: Arc::new(Mutex::new(DriftLog::default())) };
         // The drivers run on the runtime: some start tasks of their own.
         let cores = build(&mut config, &env);
-        serve_with(&mut config, cores, &built, env.emitter).await
+        serve_with(&mut config, cores, &built, env).await
     })
 }
 
@@ -244,10 +244,11 @@ pub fn run_with(args: &[String], built: &str, build: Builder) -> i32 {
 pub async fn main(args: Vec<String>, built: String) -> i32 {
     let mut config = Config::from_env(&args);
     let cores = Cores::pending(config.actors, config.assistant, config.hosts);
-    serve_with(&mut config, cores, &built, Emitter::new()).await
+    serve_with(&mut config, cores, &built, WireEnv { version: String::new(), emitter: Emitter::new(), drift: Arc::new(Mutex::new(DriftLog::default())) }).await
 }
 
-pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, emitter: Emitter) -> i32 {
+pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: WireEnv) -> i32 {
+    let emitter = env.emitter.clone();
     // Demo mode swaps every source for a made-up workspace in a temp
     // folder, which the drivers made first when they could.
     if config.demo && config.world.is_none() {
@@ -261,8 +262,16 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, emitter:
     // in its console.
     let dir = log_dir(&config.state_dir);
     let log = Log::new(if config.demo { None } else { Some(&dir) }, "service", config.instance.as_deref(), Some(&version), &config.home, MAX_BYTES);
-    let mut drift = DriftLog::default();
-    drift.open(&Path::new(&config.cache_dir).join(DRIFT_FILE).to_string_lossy());
+    // What the lenient readers find in other apps' data, kept in the cache
+    // folder for npm run contracts and the doctor: the log the drivers
+    // were given, opened there unless one of them did.
+    let drift = env.drift.clone();
+    {
+        let mut d = drift.lock().unwrap();
+        if d.view().0.is_none() {
+            d.open(&Path::new(&config.cache_dir).join(DRIFT_FILE).to_string_lossy());
+        }
+    }
     // XenoNet Dev reading another XenoNet, read-only: development only.
     let upstream = match crate::upstream::upstream_of(config.upstream.as_deref()) {
         Ok(u) => u,
@@ -275,7 +284,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, emitter:
     ctx.upstream = upstream;
     let (again_tx, again_rx) = mpsc::unbounded_channel();
     ctx.music.get_mut().unwrap().again = Some(again_tx);
-    ctx.drift = Arc::new(Mutex::new(drift));
+    ctx.drift = drift;
     let ctx = Arc::new(ctx);
     emitter.bind(&ctx);
     // The actor gateway (gateway/), for actors outside this machine: off
