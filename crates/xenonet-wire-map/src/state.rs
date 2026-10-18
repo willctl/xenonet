@@ -1418,6 +1418,9 @@ impl State for MapState {
     fn session_costs(&self, now: f64) -> R<Vec<Value>> {
         Ok(items(Some(&lock(&self.live.telemetry).session_costs(now))).to_vec())
     }
+    async fn codex_request(&self, method: &str, params: Value) -> R<Value> {
+        self.codex.request(method, params).await.map_err(|e| CoreError::new(e.message).with_extra(e.rpc.map_or(Value::Null, |rpc| json!({ "rpc": rpc }))))
+    }
     fn add_block(&self, health: Arc<dyn Fn() -> Value + Send + Sync>, source: Option<String>) -> R<()> {
         self.blocks.add(Arc::new(Reported(health)), source.as_deref()).map_err(err)
     }
