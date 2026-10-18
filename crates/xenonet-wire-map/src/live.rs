@@ -322,6 +322,16 @@ impl Live {
             }
         }
         lock(&self.status).files = t.tailer.files.len();
+        // A dormant file written to again: what a watch event would read,
+        // what it held then as history and its new lines after.
+        if count {
+            let woken: Vec<String> = t.tailer.dormant.iter().filter(|(f, held)| stat(f).is_some_and(|(_, size)| size != **held)).map(|(f, _)| f.to_string()).collect();
+            for file in woken {
+                if let Err(e) = self.read(&mut t, &file, false, &mut out) {
+                    self.error(&mut t, &e);
+                }
+            }
+        }
         if discover {
             if walk {
                 t.tailer.life.count("walks", 1.0);
@@ -677,6 +687,17 @@ mod tests {
         assert!(lock(&heard).iter().any(|e| matches!(e, Event::NewFile(f) if f["sessionId"] == "claude:0190d3e0-0000-7000-8000-000000000002")));
         let h = live.block().health();
         assert_eq!((h["state"].as_str(), h["counters"]["files"].as_f64()), (Some("running"), Some(2.0)));
+        // A transcript too old to read at start waits, dormant, until it's
+        // written to: then what it held is history, and what's new is live.
+        let old = root.join("0190d3e0-0000-7000-8000-000000000003.jsonl");
+        assert_eq!(lock(&live.tail).tailer.dormant.len(), 0);
+        {
+            let mut t = lock(&live.tail);
+            t.tailer.dormant.insert(&old.to_string_lossy(), 0);
+        }
+        std::fs::write(&old, line(json!({ "type": "user", "timestamp": ts(0.0), "message": { "role": "user", "content": "Back again" } }))).unwrap();
+        live.sweep(false).await;
+        assert!(live.snapshot()["sessions"].as_array().unwrap().iter().any(|s| s["id"] == "claude:0190d3e0-0000-7000-8000-000000000003"), "followed once it's written to");
         live.stop();
         std::fs::remove_dir_all(&home).unwrap();
     }
