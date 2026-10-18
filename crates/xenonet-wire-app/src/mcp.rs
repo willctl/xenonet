@@ -245,7 +245,7 @@ fn default_env() -> Vec<(String, String)> {
     names.iter().filter_map(|n| std::env::var(n).ok().filter(|v| !v.starts_with("()")).map(|v| (n.to_string(), v))).collect()
 }
 
-async fn open(how: &Value) -> Result<Box<dyn Channel>, Why> {
+fn open(how: &Value) -> Result<Box<dyn Channel>, Why> {
     match how["kind"].as_str() {
         Some("stdio") => {
             let command = how["command"].as_str().filter(|c| !c.is_empty()).ok_or_else(|| why("Error", None))?;
@@ -298,7 +298,7 @@ async fn pages(ch: &mut dyn Channel, method: &str, key: &str) -> Result<Vec<Valu
 pub async fn discover(spec: &Value, version: &str) -> Result<Value, Why> {
     let how = discovery::transport(spec, &fx::env_map());
     let by_url = how["kind"] != "stdio";
-    let mut ch = open(&how).await?;
+    let mut ch = open(&how)?;
     let talk = async {
         let init =
             ch.request("initialize", json!({ "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": { "name": "xenonet-inspector", "version": version } })).await?;

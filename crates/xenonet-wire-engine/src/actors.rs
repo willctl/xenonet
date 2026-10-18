@@ -143,7 +143,7 @@ impl ActorSide {
     }
 
     /// A call on the registry, with what it told told once it's let go.
-    pub fn with<T>(&self, w: &World, f: impl FnOnce(&mut Registry, &mut ActorHost) -> registry::Result<T>) -> Result<T> {
+    pub fn with<T>(&self, w: &World, f: impl FnOnce(&mut Registry, &mut ActorHost<'_>) -> registry::Result<T>) -> Result<T> {
         let (out, told) = {
             let mut reg = self.reg.locked();
             let mut host = ActorHost { map: &w.map, names: &self.names };
@@ -208,7 +208,7 @@ impl ActorSide {
         };
         Ok(match method {
             "has" => Arg::Bool(self.read(|r| r.has(&s(0)))),
-            "ids" => Arg::List(self.read(|r| r.ids()).into_iter().map(Arg::Text).collect()),
+            "ids" => Arg::List(self.read(registry::Actors::ids).into_iter().map(Arg::Text).collect()),
             "presence" => self.read(|r| r.presence(&s(0))).map_or(Arg::Null, Arg::Text),
             "presenceSince" => arg(&self.read(|r| r.presence_since(&s(0)))),
             "isPublic" => Arg::Bool(self.read(|r| r.is_public(&s(0)))),
@@ -220,7 +220,7 @@ impl ActorSide {
             "targetsOf" => Arg::List(self.read(|r| r.targets_of(&s(0))).iter().map(arg).collect()),
             "pidsOf" => Arg::List(self.read(|r| r.pids_of(&s(0))).into_iter().map(Arg::Num).collect()),
             "info" => arg(&self.read(|r| r.info(&s(0)))),
-            "registeredCount" => Arg::Num(self.read(|r| r.registered_count()) as f64),
+            "registeredCount" => Arg::Num(self.read(registry::Actors::registered_count) as f64),
             "ofProduct" => Arg::List(self.read(|r| r.of_product(crate::js::opt_json(&x(0)).as_ref())).into_iter().map(Arg::Text).collect()),
             "isRemote" => Arg::Bool(self.read(|r| r.is_remote(&s(0)))),
             "remoteOf" => arg(&self.read(|r| r.remote_of(&s(0)))),
@@ -612,7 +612,7 @@ impl Actors for ActorsDriver {
         self.side().is_ok_and(|a| a.is_demo)
     }
     fn ids(&self) -> Vec<String> {
-        self.side().map(|a| a.read(|r| r.ids())).unwrap_or_default()
+        self.side().map(|a| a.read(registry::Actors::ids)).unwrap_or_default()
     }
     fn remote_of(&self, id: &str) -> Option<Value> {
         let v = self.side().ok()?.read(|r| r.remote_of(id));

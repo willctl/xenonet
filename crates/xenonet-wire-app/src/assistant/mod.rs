@@ -59,6 +59,7 @@ pub fn connection_error(f: xenonet_actors::connections::Fail) -> CoreError {
 
 /// os.hostname() and os.userInfo().username, which a device's fingerprint
 /// is made from.
+#[cfg_attr(unix, expect(unsafe_code, reason = "gethostname(3) and getpwuid(3), which std doesn't wrap"))]
 pub fn host_and_user() -> (String, String) {
     #[cfg(unix)]
     {

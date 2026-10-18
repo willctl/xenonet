@@ -72,7 +72,7 @@ impl RegSide {
     }
 
     /// A call that holds what's kept, with what it told told once it's done.
-    fn with<T>(&self, w: &World, f: impl FnOnce(&mut Core, &mut RegCalls) -> std::result::Result<T, Fail>) -> std::result::Result<T, Fail> {
+    fn with<T>(&self, w: &World, f: impl FnOnce(&mut Core, &mut RegCalls<'_>) -> std::result::Result<T, Fail>) -> std::result::Result<T, Fail> {
         let (out, emits) = {
             let mut core = self.core.locked();
             let out = f(&mut core, &mut RegCalls { w });
@@ -86,7 +86,7 @@ impl RegSide {
 
     /// A call that needs none of what's kept (observers asks observing
     /// while another runs).
-    fn free<T>(&self, w: &World, f: impl FnOnce(&mut RegCalls) -> std::result::Result<T, Fail>) -> std::result::Result<T, Fail> {
+    fn free<T>(w: &World, f: impl FnOnce(&mut RegCalls<'_>) -> std::result::Result<T, Fail>) -> std::result::Result<T, Fail> {
         f(&mut RegCalls { w })
     }
 
@@ -96,7 +96,7 @@ impl RegSide {
 
     /// Whether the observer of a product is on, as the observers ask.
     pub fn observing(&self, w: &World, product: &str) -> bool {
-        self.free(w, |c| Core::observing(c, &Arg::text(product))).unwrap_or(true)
+        Self::free(w, |c| Core::observing(c, &Arg::text(product))).unwrap_or(true)
     }
 }
 
@@ -114,7 +114,7 @@ impl RegistrationDriver {
         self.0.registration.as_ref().ok_or_else(|| CoreError::pending("core/actors/registration.js"))
     }
 
-    fn run(&self, f: impl FnOnce(&mut Core, &mut RegCalls) -> std::result::Result<Value, Fail>) -> R<Value> {
+    fn run(&self, f: impl FnOnce(&mut Core, &mut RegCalls<'_>) -> std::result::Result<Value, Fail>) -> R<Value> {
         self.side()?.with(&self.0, f).map_err(actor_error)
     }
 }
@@ -145,7 +145,7 @@ impl Registration for RegistrationDriver {
     fn product_of(&self, auth: &Value) -> Value {
         let a = arg(auth);
         match self.side() {
-            Ok(s) => s.free(&self.0, |c| Core::product_of(c, &a)).unwrap_or(Value::Null),
+            Ok(_) => RegSide::free(&self.0, |c| Core::product_of(c, &a)).unwrap_or(Value::Null),
             Err(_) => Value::Null,
         }
     }
@@ -196,11 +196,13 @@ impl Registration for RegistrationDriver {
         self.run(|r, c| r.requests(c))
     }
     fn observers(&self) -> R<Value> {
-        self.side()?.free(&self.0, |c| Core::observers(c)).map_err(actor_error)
+        self.side()?;
+        RegSide::free(&self.0, |c| Core::observers(c)).map_err(actor_error)
     }
     fn observe(&self, product: &Value, on: &Value) -> R<Value> {
         let (p, o) = (arg(product), arg(on));
-        self.side()?.free(&self.0, |c| Core::observe(c, &p, &o)).map_err(actor_error)
+        self.side()?;
+        RegSide::free(&self.0, |c| Core::observe(c, &p, &o)).map_err(actor_error)
     }
     fn waiting(&self) -> usize {
         self.side().ok().and_then(|s| s.with(&self.0, |r, _| r.waiting(now_ms())).ok()).unwrap_or(0)

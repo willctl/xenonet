@@ -127,7 +127,7 @@ pub fn platform() -> &'static str {
 
 /// Date.now().
 pub fn now_ms() -> f64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64() * 1000.0).unwrap_or(0.0).floor()
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64() * 1000.0).floor()
 }
 
 /// The JSON of a value that might be a number written as an integer.
@@ -151,8 +151,9 @@ pub fn type_of(a: &Arg) -> &'static str {
 
 /// Whether a process still runs: signal 0 only checks, and a process of
 /// another user's (EPERM) is still there.
+#[cfg_attr(unix, expect(unsafe_code, reason = "kill(2) with signal 0, which std doesn't wrap"))]
 pub fn alive(pid: f64) -> bool {
-    if !(pid.is_finite() && pid.fract() == 0.0 && pid > 0.0 && pid <= i32::MAX as f64) {
+    if !(pid.is_finite() && pid.fract() == 0.0 && pid > 0.0 && pid <= f64::from(i32::MAX)) {
         return false;
     }
     #[cfg(unix)]
@@ -224,7 +225,7 @@ mod tests {
 
     #[test]
     fn this_process_is_alive_and_nonsense_is_not() {
-        assert!(alive(std::process::id() as f64));
+        assert!(alive(f64::from(std::process::id())));
         assert!(!alive(-1.0));
         assert!(!alive(f64::NAN));
     }

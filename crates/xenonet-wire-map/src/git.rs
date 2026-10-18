@@ -146,7 +146,7 @@ impl RepoWatch {
             g.sources.retain(|k, _| queue.iter().any(|(q, _)| q == k));
             for (key, path) in &queue {
                 let entry = g.sources.entry(key.clone()).or_insert_with(|| (path.clone(), Arc::new(Gather::new("git-status:repo", Options { keep: true, ..Default::default() }))));
-                entry.0 = path.clone();
+                entry.0.clone_from(path);
             }
         }
         let queue = Arc::new(Mutex::new(std::collections::VecDeque::from(queue)));

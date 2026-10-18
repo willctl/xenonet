@@ -2507,7 +2507,6 @@ version = "0.2.0"
 dependencies = [
  "async-trait",
  "getrandom 0.3.4",
- "rusqlite",
  "serde_json",
  "tokio",
  "xenonet-app",

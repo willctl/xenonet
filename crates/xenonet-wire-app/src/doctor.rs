@@ -63,9 +63,11 @@ impl Parts {
 // ---------- the machine, as the checks ask it ----------
 
 #[cfg(unix)]
+#[expect(unsafe_code, reason = "access(2), which std doesn't wrap")]
 fn writable(p: &str) -> bool {
     let Ok(c) = std::ffi::CString::new(p) else { return false };
-    // SAFETY: access() reads the path given.
+    // SAFETY: access() only reads the NUL-terminated path, which outlives
+    // the call.
     unsafe { libc::access(c.as_ptr(), libc::W_OK) == 0 }
 }
 
@@ -75,16 +77,22 @@ fn writable(p: &str) -> bool {
 }
 
 #[cfg(unix)]
+#[expect(unsafe_code, reason = "statvfs(3), which std doesn't wrap")]
 fn statfs(p: &str) -> Option<Value> {
+    // Its counts are 32 bits on macOS and 64 on Linux; JS numbers either way.
+    fn n(v: impl Into<u64>) -> f64 {
+        v.into() as f64
+    }
     let c = std::ffi::CString::new(p).ok()?;
-    // SAFETY: statvfs fills the struct given for the path given.
+    // SAFETY: statvfs is a plain C struct of numbers, for which all zeros is
+    // a valid value.
     let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
-    if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
+    // SAFETY: the path is NUL-terminated and `st` a struct statvfs(3) may
+    // write, both alive for the call.
+    if unsafe { libc::statvfs(c.as_ptr(), &raw mut st) } != 0 {
         return None;
     }
-    Some(
-        json!({ "bsize": st.f_frsize as f64, "blocks": st.f_blocks as f64, "bfree": st.f_bfree as f64, "bavail": st.f_bavail as f64, "files": st.f_files as f64, "ffree": st.f_ffree as f64 }),
-    )
+    Some(json!({ "bsize": n(st.f_frsize), "blocks": n(st.f_blocks), "bfree": n(st.f_bfree), "bavail": n(st.f_bavail), "files": n(st.f_files), "ffree": n(st.f_ffree) }))
 }
 
 #[cfg(not(unix))]
@@ -275,8 +283,8 @@ fn procs_self_test() -> Value {
     let me = f64::from(std::process::id());
     let (pid, first) = match &accepted {
         Some((socket, _)) => {
-            let local = socket.local_addr().map(|a| json!(a.port())).unwrap_or(Value::Null);
-            let remote = socket.peer_addr().map(|a| json!(a.port())).unwrap_or(Value::Null);
+            let local = socket.local_addr().map_or(Value::Null, |a| json!(a.port()));
+            let remote = socket.peer_addr().map_or(Value::Null, |a| json!(a.port()));
             let (pid, _) = p.peer(&mut Run, Some(&local), Some(&remote), None);
             let pid = pid.as_f64();
             let first = pid.and_then(|pid| p.chain(&mut Run, Some(pid), true, true).ok()).and_then(|c| c.into_iter().next());
@@ -292,6 +300,7 @@ fn procs_self_test() -> Value {
 
 /// `toLocaleString("en-US", { weekday: "short", hour: "numeric", minute:
 /// "2-digit" })`, in this machine's time zone: Sat 8:48 PM.
+#[cfg_attr(unix, expect(unsafe_code, reason = "localtime_r(3), which std doesn't wrap"))]
 pub fn local_time(ms: f64) -> String {
     const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     if !ms.is_finite() || ms.abs() > 8.64e15 {
@@ -300,9 +309,12 @@ pub fn local_time(ms: f64) -> String {
     #[cfg(unix)]
     {
         let t = (ms / 1000.0).floor() as libc::time_t;
-        // SAFETY: localtime_r reads the time given and fills the tm given.
+        // SAFETY: tm is a plain C struct, for which all zeros is a valid
+        // value.
         let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-        if !unsafe { libc::localtime_r(&t, &mut tm) }.is_null() {
+        // SAFETY: localtime_r only reads `t` and fills `tm`, both alive for
+        // the call.
+        if !unsafe { libc::localtime_r(&raw const t, &raw mut tm) }.is_null() {
             let h = match tm.tm_hour % 12 {
                 0 => 12,
                 h => h,
@@ -615,7 +627,7 @@ impl DoctorService {
         let file = (!demo).then(|| std::path::Path::new(&parts.config.state_dir).join("doctor.json").to_string_lossy().into_owned());
         let before = run::read_run(file.as_deref()).unwrap_or(Value::Null);
         Arc::new(DoctorService {
-            only: demo.then(|| DEMO_ONLY.iter().map(|s| s.to_string()).collect()),
+            only: demo.then(|| DEMO_ONLY.iter().map(ToString::to_string).collect()),
             file,
             before,
             parts,
@@ -747,12 +759,15 @@ pub struct Diagnose {
 }
 
 /// os.release().
+#[cfg_attr(unix, expect(unsafe_code, reason = "uname(3), which std doesn't wrap"))]
 fn release() -> String {
     #[cfg(unix)]
     {
-        // SAFETY: uname fills the struct given.
+        // SAFETY: utsname is a plain C struct, for which all zeros is a
+        // valid value.
         let mut u: libc::utsname = unsafe { std::mem::zeroed() };
-        if unsafe { libc::uname(&mut u) } == 0 {
+        // SAFETY: uname only fills `u`, which is alive for the call.
+        if unsafe { libc::uname(&raw mut u) } == 0 {
             // SAFETY: release is a NUL-terminated string uname wrote.
             return unsafe { std::ffi::CStr::from_ptr(u.release.as_ptr()) }.to_string_lossy().into_owned();
         }

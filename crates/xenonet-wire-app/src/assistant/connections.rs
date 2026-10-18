@@ -69,8 +69,8 @@ impl disk::Private for Private {
 }
 
 impl Base<'_> {
-    fn disk(&self, method: &str, args: &[Arg]) -> CallResult<Arg> {
-        let a = |i: usize| args.get(i).map(value).unwrap_or(Value::Null);
+    fn disk(method: &str, args: &[Arg]) -> CallResult<Arg> {
+        let a = |i: usize| args.get(i).map_or(Value::Null, value);
         let dir = || args.first().map(text).unwrap_or_default();
         Ok(match method {
             "hashToken" => Arg::text(disk::hash_token(&text(args.first().unwrap_or(&Arg::Undef)))),
@@ -114,11 +114,11 @@ impl Calls for Base<'_> {
         let r = self.r;
         match (path, method) {
             ("actors", m) => r.actors.registry(m, args.iter().map(value).collect()).map(|v| arg(&v)).map_err(|e| thrown_of(&e)),
-            ("disk", m) => self.disk(m, &args),
+            ("disk", m) => Self::disk(m, &args),
             ("", "now" | "wall") => Ok(Arg::num(now_ms())),
             ("", "emit") => {
                 let name = args.first().map(text).unwrap_or_default();
-                r.emit(&name, args.get(1).map(value).unwrap_or(Value::Null));
+                r.emit(&name, args.get(1).map_or(Value::Null, value));
                 Ok(Arg::Undef)
             }
             ("", "describe") => {
@@ -126,7 +126,7 @@ impl Calls for Base<'_> {
                 Ok(r.state.node(&place).ok().flatten().and_then(|n| n.get("name").cloned()).map_or(Arg::Null, |n| arg(&n)))
             }
             ("", "taken") => {
-                let slug = args.first().map(value).unwrap_or(Value::Null);
+                let slug = args.first().map_or(Value::Null, value);
                 Ok(Arg::Bool(r.engine_store.waiting_actor_requests(now_ms()).unwrap_or_default().iter().any(|q| q.get("slug") == Some(&slug))))
             }
             ("", "adapterFor") => {
@@ -145,7 +145,7 @@ impl Calls for Base<'_> {
                 Ok(Arg::List(ADAPTERS.get(i).map(|a| a.capabilities.iter().map(|c| Arg::text(*c)).collect()).unwrap_or_default()))
             }
             ("", "writeCredential") => {
-                let c = args.first().map(value).unwrap_or(Value::Null);
+                let c = args.first().map_or(Value::Null, value);
                 let file = disk::write_credential(&r.dir, &c["grant"], &c["token"], c.get("device"), c.get("expiresAt").unwrap_or(&Value::Null), &mut Private).map_err(fs)?;
                 Ok(Arg::text(file))
             }
@@ -369,7 +369,7 @@ mod tests {
                 "ids" => json!(known.keys().cloned().collect::<Vec<_>>()),
                 "has" => json!(known.contains_key(&id)),
                 "info" => known.get(&id).cloned().unwrap_or(Value::Null),
-                "remoteOf" => known.get(&id).map(|a| a["remote"].clone()).unwrap_or(Value::Null),
+                "remoteOf" => known.get(&id).map_or(Value::Null, |a| a["remote"].clone()),
                 "isRemote" => json!(known.get(&id).is_some_and(|a| a["via"].as_array().is_some_and(|v| v.contains(&json!("remote"))))),
                 "setRemote" => {
                     if let Some(a) = known.get_mut(&id) {

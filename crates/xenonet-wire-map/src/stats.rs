@@ -15,6 +15,7 @@ use xenonet_state::stats::{self, File, Kept, Transcripts};
 
 /// A whole transcript's records, through its app's normalizer (lines.js's
 /// readLines): a last line without a newline too.
+#[expect(clippy::case_sensitive_file_extension_comparisons, reason = "as the JS's endsWith, which tells .zst from .ZST")]
 pub fn read_lines(vendor: &Vendor, file: &str, codex: bool) -> std::io::Result<Vec<Value>> {
     if file.ends_with(".zst") {
         return Err(std::io::Error::other("XenoNet can't read a compressed archive here yet"));
@@ -104,7 +105,7 @@ mod tests {
             json!({ "type": "user", "timestamp": "2026-10-17T10:00:00.000Z", "message": { "role": "user", "content": "Go" } }),
             json!({ "type": "assistant", "timestamp": "2026-10-17T10:00:05.000Z", "message": { "id": "m1", "model": "claude-sonnet-4-5", "stop_reason": "end_turn", "usage": { "input_tokens": 10, "output_tokens": 20 }, "content": [{ "type": "text", "text": "Done" }] } }),
         ];
-        let text: String = lines.iter().map(|l| format!("{}\n", xenonet_base::json::stringify(l, 0))).collect();
+        let text: String = lines.iter().map(|l| xenonet_base::json::stringify(l, 0) + "\n").collect();
         std::fs::write(p.join(format!("{id}.jsonl")), text).expect("a transcript");
         let vendor = Vendor::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas"), Arc::new(Mutex::new(DriftLog::default())));
         let s = Stats::new(&dir.to_string_lossy(), &[], vendor);

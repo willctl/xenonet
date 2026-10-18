@@ -320,6 +320,7 @@ impl CodexClient {
 
     /// A page of a thread from its rollout file: newest first, `cursor`
     /// ("rollout:<n>") continuing further back.
+    #[expect(clippy::case_sensitive_file_extension_comparisons, reason = "as the JS's endsWith, which tells .zst from .ZST")]
     pub fn rollout_page(&self, file: &str, cursor: Option<&str>, limit: f64) -> Result<Value, String> {
         let mut slot = lock(&self.rollout);
         if slot.as_ref().is_none_or(|r| r.file != file) {
@@ -443,7 +444,7 @@ mod tests {
         let c = CodexClient::new("/nowhere/codex".into(), "0.0.0".into(), vendor.clone());
         assert!(c.threads().await.is_err());
         assert_eq!(c.health()["state"], "failed");
-        assert!(native_projects("/nowhere", &vendor).is_empty());
+        assert_eq!(native_projects("/nowhere", &vendor), [] as [Value; 0]);
     }
 
     #[test]

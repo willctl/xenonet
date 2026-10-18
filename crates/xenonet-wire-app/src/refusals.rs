@@ -85,7 +85,7 @@ mod tests {
         assert_eq!(r.list().unwrap(), json!([]));
         assert_eq!(r.get("20261017-0000abcd").unwrap(), None);
         let demo = r.demo_records().unwrap();
-        assert!(!demo.as_array().unwrap().is_empty());
+        assert_ne!(demo.as_array().unwrap(), &[] as &[Value]);
         let q = r.query(&demo, &json!({})).unwrap();
         assert!(q.is_object());
         assert!(r.dir().ends_with("refusals"));

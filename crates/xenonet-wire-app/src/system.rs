@@ -26,16 +26,17 @@ pub mod os {
     }
 
     #[cfg(target_os = "macos")]
+    #[expect(unsafe_code, reason = "sysctlbyname(3), which std doesn't wrap")]
     fn sysctl_bytes(name: &str) -> Option<Vec<u8>> {
         let c = std::ffi::CString::new(name).ok()?;
         let mut len: libc::size_t = 0;
         // SAFETY: a size query, then a read into a buffer of that size.
         unsafe {
-            if libc::sysctlbyname(c.as_ptr(), std::ptr::null_mut(), &mut len, std::ptr::null_mut(), 0) != 0 || len == 0 {
+            if libc::sysctlbyname(c.as_ptr(), std::ptr::null_mut(), &raw mut len, std::ptr::null_mut(), 0) != 0 || len == 0 {
                 return None;
             }
             let mut buf = vec![0u8; len];
-            if libc::sysctlbyname(c.as_ptr(), buf.as_mut_ptr().cast(), &mut len, std::ptr::null_mut(), 0) != 0 {
+            if libc::sysctlbyname(c.as_ptr(), buf.as_mut_ptr().cast(), &raw mut len, std::ptr::null_mut(), 0) != 0 {
                 return None;
             }
             buf.truncate(len);
@@ -54,6 +55,7 @@ pub mod os {
     }
 
     #[cfg(target_os = "macos")]
+    #[expect(unsafe_code, reason = "host_processor_info and vm_deallocate, the Mach calls for each CPU's ticks")]
     pub fn cpus() -> Cpus {
         let model = sysctl_bytes("machdep.cpu.brand_string").map(|b| String::from_utf8_lossy(&b).trim_end_matches('\0').to_string());
         let speed = sysctl_u64("hw.cpufrequency").map(|hz| (hz / 1_000_000) as f64);
@@ -65,7 +67,7 @@ pub mod os {
             let mut count: libc::natural_t = 0;
             let mut info: libc::processor_info_array_t = std::ptr::null_mut();
             let mut info_count: libc::mach_msg_type_number_t = 0;
-            if libc::host_processor_info(libc::mach_host_self(), libc::PROCESSOR_CPU_LOAD_INFO, &mut count, &mut info, &mut info_count) == libc::KERN_SUCCESS {
+            if libc::host_processor_info(libc::mach_host_self(), libc::PROCESSOR_CPU_LOAD_INFO, &raw mut count, &raw mut info, &raw mut info_count) == libc::KERN_SUCCESS {
                 let ticks = libc::sysconf(libc::_SC_CLK_TCK).max(1) as f64;
                 let k = 1000.0 / ticks;
                 let all = std::slice::from_raw_parts(info, info_count as usize);
@@ -73,7 +75,7 @@ pub mod os {
                     let at = |s: i32| f64::from(all.get(c * libc::CPU_STATE_MAX as usize + s as usize).copied().unwrap_or(0) as u32) * k;
                     times.push(Times { user: at(libc::CPU_STATE_USER), nice: at(libc::CPU_STATE_NICE), sys: at(libc::CPU_STATE_SYSTEM), idle: at(libc::CPU_STATE_IDLE), irq: 0.0 });
                 }
-                libc::vm_deallocate(libc::mach_task_self(), info as libc::vm_address_t, (info_count as usize * std::mem::size_of::<libc::integer_t>()) as libc::vm_size_t);
+                libc::vm_deallocate(libc::mach_task_self(), info as libc::vm_address_t, (info_count as usize * size_of::<libc::integer_t>()) as libc::vm_size_t);
             }
         }
         Cpus { model, speed, times }
@@ -85,6 +87,7 @@ pub mod os {
     }
 
     #[cfg(target_os = "macos")]
+    #[expect(unsafe_code, reason = "host_statistics64, the Mach call for free memory")]
     pub fn freemem() -> f64 {
         // SAFETY: host_statistics64 fills the struct it's given, within the
         // count given.
@@ -92,7 +95,7 @@ pub mod os {
         unsafe {
             let mut info: libc::vm_statistics64 = std::mem::zeroed();
             let mut count = libc::HOST_VM_INFO64_COUNT;
-            if libc::host_statistics64(libc::mach_host_self(), libc::HOST_VM_INFO64, (&mut info as *mut libc::vm_statistics64).cast(), &mut count) != libc::KERN_SUCCESS {
+            if libc::host_statistics64(libc::mach_host_self(), libc::HOST_VM_INFO64, (&raw mut info).cast(), &raw mut count) != libc::KERN_SUCCESS {
                 return 0.0;
             }
             f64::from(info.free_count) * libc::sysconf(libc::_SC_PAGESIZE) as f64
@@ -110,7 +113,9 @@ pub mod os {
     }
 
     #[cfg(target_os = "linux")]
+    #[expect(unsafe_code, reason = "sysconf(3), which std doesn't wrap")]
     pub fn cpus() -> Cpus {
+        // SAFETY: sysconf takes a constant and reads nothing of ours.
         let k = 1000.0 / unsafe { libc::sysconf(libc::_SC_CLK_TCK) }.max(1) as f64;
         let stat = std::fs::read_to_string("/proc/stat").unwrap_or_default();
         let times = stat
@@ -312,7 +317,7 @@ impl Gpu {
 fn pick() -> Option<Gpu> {
     let plat = platform();
     if plat == "darwin" {
-        return Some(Gpu::Ioreg(Mutex::new(Default::default())));
+        return Some(Gpu::Ioreg(Mutex::new(stats::Polled::default())));
     }
     let env = |k: &str| std::env::var(k).ok();
     let smi = stats::find_nvidia_smi(
@@ -327,7 +332,13 @@ fn pick() -> Option<Gpu> {
         source,
         file,
         args,
-        st: Arc::new(Mutex::new(Stream { windows, proc: Default::default(), nvidia: Default::default(), counters: Default::default(), child: None })),
+        st: Arc::new(Mutex::new(Stream {
+            windows,
+            proc: stats::Streamed::default(),
+            nvidia: stats::NvidiaCards::default(),
+            counters: stats::WindowsReadings::default(),
+            child: None,
+        })),
     };
     if let Some(smi) = smi {
         return Some(stream("nvidia-smi", false, smi, stats::nvidia_args()));
@@ -337,7 +348,7 @@ fn pick() -> Option<Gpu> {
         let names: Vec<String> = std::fs::read_dir(base).map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
         let cards: Vec<String> =
             stats::drm_cards(&names).into_iter().map(|n| format!("{base}/{n}/device")).filter(|dev| std::fs::read_to_string(format!("{dev}/gpu_busy_percent")).is_ok()).collect();
-        return (!cards.is_empty()).then(|| Gpu::Amd { cards, polled: Mutex::new(Default::default()) });
+        return (!cards.is_empty()).then(|| Gpu::Amd { cards, polled: Mutex::new(stats::Polled::default()) });
     }
     if plat == "win32" {
         let file = stats::windows_powershell(env("SystemRoot").or_else(|| env("SYSTEMROOT")).as_deref());
@@ -356,7 +367,7 @@ pub struct System {
 
 impl System {
     pub fn new() -> Arc<Self> {
-        Arc::new(System { core: Mutex::new(Default::default()), gpu: tokio::sync::OnceCell::new(), last: Mutex::new(None), idle: Mutex::new(None) })
+        Arc::new(System { core: Mutex::new(stats::Stats::default()), gpu: tokio::sync::OnceCell::new(), last: Mutex::new(None), idle: Mutex::new(None) })
     }
 
     async fn cpu(&self) -> Value {

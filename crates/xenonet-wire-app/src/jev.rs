@@ -188,7 +188,7 @@ pub fn route(candidates: &[Value], actor_permissions: &[String], raw: Result<Val
     let by_rank = |a: &Value, b: &Value| p(b).total_cmp(&p(a)).then_with(|| xenonet_app::jstext::locale_compare(&id_of(a), &id_of(b)));
     let mut ranked = all.clone();
     ranked.sort_by(by_rank);
-    for c in all.iter_mut() {
+    for c in &mut all {
         let id = id_of(c);
         c["router_rank"] = ranked.iter().position(|r| id_of(r) == id).map_or(Value::Null, |i| json!(i + 1));
     }

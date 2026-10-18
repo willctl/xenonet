@@ -99,7 +99,7 @@ impl PolicySide {
     /// `policy.<method>(...args)`, as the DeliveryPolicy object answers.
     pub fn call(&self, method: &str, args: &[Arg]) -> std::result::Result<Arg, Fail> {
         let c = &mut PolicyCalls { side: self };
-        let mut p = self.core.lock().unwrap_or_else(|e| e.into_inner());
+        let mut p = self.core.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let x = |i| at(args, i);
         match method {
             "paused" => Ok(Arg::Bool(p.paused())),
@@ -118,7 +118,7 @@ impl PolicySide {
                     Arg::Undef => 0.0,
                     d => crate::js::num(&d),
                 };
-                p.check_send(c, &o.field("sender"), &list(o.field("recipients")), &o.field("text"), depth).map(|_| Arg::Undef)
+                p.check_send(c, &o.field("sender"), &list(o.field("recipients")), &o.field("text"), depth).map(|()| Arg::Undef)
             }
             "textFor" => {
                 let o = x(0);
@@ -129,10 +129,10 @@ impl PolicySide {
                 let o = x(1);
                 p.allow(c, &x(0), o.field("remote").truthy(), opt(o.field("ttlMs")).as_ref(), &by(o.field("by")))
             }
-            "disallow" => p.disallow(c, &x(0), &by(x(1))).map(|_| Arg::Undef),
+            "disallow" => p.disallow(c, &x(0), &by(x(1))).map(|()| Arg::Undef),
             "consented" => p.consented(c, &x(0), x(1).field("remote").truthy()),
             "wakeAllowed" => p.wake_allowed(c, &x(0), &x(1), &x(2).field("usage").or(Arg::Null)),
-            "spendWake" => p.spend_wake(c, &x(0), &x(1)).map(|_| Arg::Undef),
+            "spendWake" => p.spend_wake(c, &x(0), &x(1)).map(|()| Arg::Undef),
             "audit" => p.audit(c, x(0)),
             "readAudit" => p.read_audit(
                 c,
@@ -146,7 +146,7 @@ impl PolicySide {
     }
 
     pub fn data(&self) -> Arg {
-        self.core.lock().unwrap_or_else(|e| e.into_inner()).data_arg()
+        self.core.lock().unwrap_or_else(std::sync::PoisonError::into_inner).data_arg()
     }
 
     /// A policy call as a collaborator's, its refusals coded.
@@ -445,7 +445,7 @@ impl Calls for OpenCodeCalls<'_> {
             ("", "now") => Ok(Arg::Num(now_ms())),
             ("", "processes") => {
                 let ps = oc::open_code_processes(&mut PsCalls, windows())?;
-                Ok(Arg::List(ps.iter().map(|p| p.to_arg()).collect()))
+                Ok(Arg::List(ps.iter().map(xenonet_engine::delivery::opencode::Proc::to_arg).collect()))
             }
             ("", "ports") => {
                 let ports = oc::listening_ports(&mut PsCalls, crate::js::num(&x(0)), crate::js::platform())?;

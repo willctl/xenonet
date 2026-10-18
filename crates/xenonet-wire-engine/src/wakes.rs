@@ -138,7 +138,7 @@ fn parse_url(s: &str) -> Arg {
 /// The addresses a host name has, as dns.lookup({ all: true }) gives them.
 fn resolve(host: &str) -> Arg {
     use std::net::ToSocketAddrs;
-    let addrs = (host, 0).to_socket_addrs().map(|a| a.collect::<Vec<_>>()).unwrap_or_default();
+    let addrs = (host, 0).to_socket_addrs().map(Iterator::collect::<Vec<_>>).unwrap_or_default();
     Arg::List(addrs.iter().map(|a| obj(vec![("address", Arg::text(a.ip().to_string())), ("family", Arg::Num(if a.is_ipv4() { 4.0 } else { 6.0 }))])).collect())
 }
 
@@ -314,7 +314,7 @@ impl WakeSide {
         let _ = self.core.arrived(&mut WakeCalls { w, side: self }, id);
     }
 
-    fn run<T>(&self, w: &World, f: impl FnOnce(&Core, &mut WakeCalls) -> std::result::Result<T, Fail>) -> R<T> {
+    fn run<T>(&self, w: &World, f: impl FnOnce(&Core, &mut WakeCalls<'_>) -> std::result::Result<T, Fail>) -> R<T> {
         f(&self.core, &mut WakeCalls { w, side: self }).map_err(wake_error)
     }
 
@@ -379,7 +379,7 @@ impl Wakes for WakesDriver {
         self.0.rt.spawn(async move {
             // The stream's reader went, or the wakes ended it.
             tokio::select! {
-                _ = tx.closed() => {}
+                () = tx.closed() => {}
                 _ = end_rx => {}
             }
             drop(tx);

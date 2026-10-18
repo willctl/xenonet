@@ -18,7 +18,7 @@ const C: &str = "claude:cccccccc-0003";
 const D: &str = "codex:dddddddd-0004";
 
 fn now() -> f64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as f64).unwrap_or(0.0)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_millis() as f64)
 }
 
 /// A made-up session: its id, title, folder, last event, edits and status.
@@ -100,7 +100,7 @@ fn world(name: &str) -> (Arc<World>, std::path::PathBuf) {
     let mut config = Config::from(&[], &get);
     let mut cores = Cores::pending(false, false, false);
     cores.state = Arc::new(Fake { at: now() });
-    let env = WireEnv { version: "0.0.0".into(), emitter: Emitter::new(), drift: Default::default() };
+    let env = WireEnv { version: "0.0.0".into(), emitter: Emitter::new(), drift: Arc::default() };
     let w = xenonet_wire_engine::world(&cores, &mut config, &env).expect("the engine's parts");
     (w, dir)
 }
@@ -167,7 +167,7 @@ async fn a_listening_stop_hook_hands_mail_over_and_stops_when_the_hook_goes() {
     drop(gone_tx);
     assert_eq!(listening.await.unwrap().unwrap(), None);
     assert!(started.elapsed() < Duration::from_secs(2));
-    assert!(e.listening().unwrap().is_empty());
+    assert_eq!(e.listening().unwrap(), [] as [(String, Value); 0]);
     // A message while it listens: handed over as a block, the session's
     // turn going on.
     let (_keep, gone_rx) = tokio::sync::watch::channel(false);

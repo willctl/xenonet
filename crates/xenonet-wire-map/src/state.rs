@@ -281,7 +281,7 @@ impl MapState {
             return None;
         }
         let g = lock(&self.inner);
-        let nodes = g.map.graph.as_ref().map(|gr| items(gr.get("nodes"))).unwrap_or(&[]);
+        let nodes = g.map.graph.as_ref().map_or(&[][..], |gr| items(gr.get("nodes")));
         let mut kind_of = |cur: &str| g.map.index.get(cur).and_then(|&i| nodes.get(i)).map(|n| n.get("kind").map_or_else(|| "undefined".into(), js_string));
         let mut parent_of = |cur: &str| g.map.parent.get(cur).cloned();
         decide::home_of(id, &mut kind_of, &mut parent_of)
@@ -387,7 +387,7 @@ impl MapState {
         // Where sessions ran is evidence of where the projects are, so the
         // scan comes after the session lists.
         let session_dirs = decide::session_dirs(&sessions);
-        lock(&self.inner).map.session_dirs = session_dirs.clone();
+        lock(&self.inner).map.session_dirs.clone_from(&session_dirs);
         let rules = self.project_rules(true, &root);
         let t0 = now_ms();
         let scanned = self.projects_scan.scan(&root, session_dirs, rules.clone(), self.cfg.project_limits.clone(), false, None).await;
@@ -398,7 +398,7 @@ impl MapState {
             }
             Err(e) => (Vec::new(), None, decide::source_status("projects", false, Some(&num(now_ms() - t0)), None, Some(&json!(e)))),
         };
-        for p in projects.iter_mut() {
+        for p in &mut projects {
             let key = p.get("key").map(js_string).unwrap_or_default();
             if let Some(m) = p.as_object_mut() {
                 m.insert("rule".into(), rules.get(&key).cloned().unwrap_or(Value::Null));
@@ -410,8 +410,8 @@ impl MapState {
         }
         let repo_pass = {
             let mut g = lock(&self.inner);
-            g.map.projects = projects.clone();
-            g.map.scan = scan.clone();
+            g.map.projects.clone_from(&projects);
+            g.map.scan.clone_from(&scan);
             let key = path_key(&root);
             let now = g.repo_pass_for.is_some() && g.repo_pass_for == key;
             if now {
@@ -598,7 +598,7 @@ impl MapState {
         let signed_in = lock(&self.inner).memory.signed_in();
         let hidden = self.cfg.hidden();
         let g = lock(&self.inner);
-        let nodes = g.map.graph.as_ref().map(|gr| items(gr.get("nodes"))).unwrap_or(&[]);
+        let nodes = g.map.graph.as_ref().map_or(&[][..], |gr| items(gr.get("nodes")));
         let mut node = |id: &str| g.map.index.get(id).and_then(|&i| nodes.get(i)).cloned();
         decide::live_snapshot(snap, &hidden, &acks, signed_in.as_ref(), &mut node)
     }
@@ -974,7 +974,7 @@ fn wiki_stamp(dir: &str) -> String {
     xenonet_base::paths::list_files(dir, &mut pick, 3)
         .into_iter()
         .map(|f| match std::fs::metadata(&f) {
-            Ok(m) => format!("{f}:{}:{}", m.len(), xenonet_base::fs::mtime_ms_of(&m).map_or(0.0, |t| t)),
+            Ok(m) => format!("{f}:{}:{}", m.len(), xenonet_base::fs::mtime_ms_of(&m).unwrap_or(0.0)),
             Err(_) => f,
         })
         .collect::<Vec<_>>()
@@ -1319,7 +1319,7 @@ impl State for MapState {
         let changed = path_key(&before) != path_key(&after);
         {
             let mut g = lock(&self.inner);
-            g.projects_dir = after.clone();
+            g.projects_dir.clone_from(&after);
             if changed {
                 g.repo_pass_for = path_key(&after);
             }

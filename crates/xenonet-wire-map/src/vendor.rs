@@ -169,7 +169,7 @@ impl Hooks<Value, Value, ()> for Transcript<'_> {
         xenonet_base::json::parse(text).map_err(|e| e.to_string())
     }
 
-    fn inspect(&mut self, raw: Value, _: &()) -> Result<Option<Value>, String> {
+    fn inspect(&mut self, raw: Value, (): &()) -> Result<Option<Value>, String> {
         let source = self.source();
         let codex = self.codex;
         let sampling = &mut *self.sampling;
@@ -185,7 +185,7 @@ impl Hooks<Value, Value, ()> for Transcript<'_> {
                 xenonet_sources::lines::claude_version_of(field(&raw, "version"), sampling.version.clone())
             };
             if version != sampling.version {
-                sampling.version = version.clone();
+                sampling.version.clone_from(&version);
                 r.pick(version.as_deref(), log, now);
             }
             let kind = if codex {
@@ -210,14 +210,14 @@ impl Hooks<Value, Value, ()> for Transcript<'_> {
         Ok(out(c, raw))
     }
 
-    fn unparsable(&mut self, _text: &str, _: &(), _why: &str) {
+    fn unparsable(&mut self, _text: &str, (): &(), _why: &str) {
         let source = self.source();
         let version = self.sampling.version.clone();
         self.vendor.reader(source, |r, _| r.stats.records += 1);
         self.vendor.unparsable(source, version.as_deref());
     }
 
-    fn normalize(&mut self, raw: Value, _: &()) -> Result<Value, String> {
+    fn normalize(&mut self, raw: Value, (): &()) -> Result<Value, String> {
         Ok(raw)
     }
 }

@@ -19,7 +19,7 @@ fn many(r: sql::Result<Vec<sql::Row>>) -> sql::Result<Arg> {
 }
 
 fn unit(r: sql::Result<()>) -> sql::Result<Arg> {
-    r.map(|_| Arg::Undef)
+    r.map(|()| Arg::Undef)
 }
 
 fn json(r: sql::Result<Value>) -> sql::Result<Arg> {
@@ -35,7 +35,7 @@ fn dispatch(s: &mut EngineStore, name: &str, v: &[Arg]) -> sql::Result<Arg> {
         a => a,
     };
     match name {
-        "prune" => s.prune(now(0).as_f64().unwrap_or(f64::NAN)).map(|_| Arg::Undef),
+        "prune" => s.prune(now(0).as_f64().unwrap_or(f64::NAN)).map(|()| Arg::Undef),
         "pruneAudit" => unit(s.prune_audit(now(0).as_f64().unwrap_or(f64::NAN))),
         "touch" => unit(s.touch(x(0), &x(1), now(2))),
         "ended" => unit(s.ended(x(0), now(1))),
@@ -334,6 +334,6 @@ mod tests {
         t.set_meta("gateway", "{}").unwrap();
         assert_eq!(t.meta("gateway").unwrap().as_deref(), Some("{}"));
         assert_eq!(t.meta("none").unwrap(), None);
-        assert!(t.waiting_actor_requests(0.0).unwrap().is_empty());
+        assert_eq!(t.waiting_actor_requests(0.0).unwrap(), [] as [Value; 0]);
     }
 }

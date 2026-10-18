@@ -298,7 +298,7 @@ mod tests {
         assert_eq!(again.list().len(), 1);
         assert_eq!(again.self_entry()["id"], "lab");
         assert!(again.remove("studio").unwrap().is_some());
-        assert!(again.list().is_empty());
+        assert_eq!(again.list(), [] as [Value; 0]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -307,7 +307,7 @@ mod tests {
         let (s, dir) = store("broken");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("hosts.json"), "{ nope").unwrap();
-        assert!(s.list().is_empty());
+        assert_eq!(s.list(), [] as [Value; 0]);
         assert!(std::fs::read_dir(&dir).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with("hosts.broken-")));
         std::fs::remove_dir_all(&dir).unwrap();
     }

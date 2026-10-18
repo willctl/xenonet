@@ -41,6 +41,7 @@ fn read_from(file: &str, offset: f64, size: f64) -> std::io::Result<String> {
     Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
+#[expect(clippy::case_sensitive_file_extension_comparisons, reason = "as the JS's endsWith, which tells .zst from .ZST")]
 fn read_whole(file: &str) -> std::io::Result<String> {
     if file.ends_with(".zst") {
         return Err(std::io::Error::other("XenoNet can't read a compressed archive here yet"));
@@ -66,7 +67,7 @@ impl TranscriptSearch {
         })
     }
 
-    fn open(&self, core: &mut Search) -> Result<(), String> {
+    fn open(core: &mut Search) -> Result<(), String> {
         if core.is_open() {
             return Ok(());
         }
@@ -108,11 +109,12 @@ impl TranscriptSearch {
         Ok(run.n)
     }
 
+    #[expect(clippy::case_sensitive_file_extension_comparisons, reason = "as the JS's endsWith, which tells .zst from .ZST")]
     fn index_now(&self) {
         let t0 = now_ms();
         let roots = {
             let mut core = lock(&self.core);
-            if let Err(e) = self.open(&mut core) {
+            if let Err(e) = Self::open(&mut core) {
                 let mut st = lock(&self.status);
                 st.errors = Some(st.errors.unwrap_or(0.0) + 1.0);
                 st.last_index_at = now_ms();
@@ -160,7 +162,7 @@ impl TranscriptSearch {
         let q = q.to_string();
         blocking(move || {
             let mut core = lock(&me.core);
-            me.open(&mut core)?;
+            Self::open(&mut core)?;
             let hits = core.search(&q, limit).map_err(message)?;
             Ok(hits.iter().filter_map(wiki_out).collect())
         })

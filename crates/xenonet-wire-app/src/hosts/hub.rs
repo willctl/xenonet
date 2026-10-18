@@ -483,7 +483,7 @@ impl HostHub {
                         // A host's own doctor feeds its state here, never this XenoNet's.
                         if ename == "doctor" {
                             rt.doctor = core::doctor_of(&edata);
-                            let page = self.for_page(st);
+                            let page = Self::for_page(st);
                             return self.emit("hosts", page);
                         }
                         let info = Self::info_of(rt);
@@ -510,13 +510,13 @@ impl HostHub {
                 probe.got = Some(core::probe_snapshot(data.get("graph").unwrap_or(&Value::Null), data.get("live").unwrap_or(&Value::Null)));
                 // The clock's answer is on its way; a moment more for it.
                 if !probe.link.core.info()["offsetMs"].is_null() {
-                    self.finish(st, p, true);
+                    Self::finish(st, p, true);
                 } else {
                     self.probe_timer(st, p, 2000, true);
                 }
             }
-            "offset" if probe.got.is_some() => self.finish(st, p, true),
-            "state" if matches!(data.get("state").and_then(Value::as_str), Some("offline" | "error")) => self.finish(st, p, false),
+            "offset" if probe.got.is_some() => Self::finish(st, p, true),
+            "state" if matches!(data.get("state").and_then(Value::as_str), Some("offline" | "error")) => Self::finish(st, p, false),
             _ => {}
         }
     }
@@ -531,12 +531,12 @@ impl HostHub {
             tokio::time::sleep(Duration::from_millis(ms)).await;
             if let Some(hub) = me.upgrade() {
                 let mut st = hub.st.locked();
-                hub.finish(&mut st, p, ok);
+                HostHub::finish(&mut st, p, ok);
             }
         }));
     }
 
-    fn finish(&self, st: &mut HubState, p: u64, ok: bool) {
+    fn finish(st: &mut HubState, p: u64, ok: bool) {
         let Some(mut probe) = st.probes.remove(&p) else { return };
         if let Some(t) = probe.timer.take() {
             t.abort();
@@ -569,12 +569,12 @@ impl HostHub {
         st.runtimes.iter().map(|(_, rt)| Self::view(rt)).collect()
     }
 
-    fn for_page(&self, st: &HubState) -> Value {
+    fn for_page(st: &HubState) -> Value {
         Value::Array(Self::list_of(st).iter().map(core::for_page).collect())
     }
 
     fn hosts_changed(&self, st: &mut HubState) {
-        let page = self.for_page(st);
+        let page = Self::for_page(st);
         self.emit("hosts", page);
         self.graph_soon(st);
         self.live_soon(st);
@@ -646,7 +646,7 @@ impl HostHub {
             st.alias_map = a;
         }
         let alias_map = st.alias_map.clone();
-        let mut ins: Vec<merge::HostIn> = Vec::new();
+        let mut ins: Vec<merge::HostIn<'_>> = Vec::new();
         let infos: Vec<(Value, Value)> = st.runtimes.iter().map(|(_, rt)| (Self::info_of(rt), rt.snapshot.clone().unwrap_or(Value::Null))).collect();
         for ((_, rt), (info, snapshot)) in st.runtimes.iter_mut().zip(infos) {
             ins.push(merge::HostIn { info, snapshot, clean: Some(&mut rt.clean) });
@@ -777,7 +777,7 @@ impl HostHub {
         }
     }
 
-    fn take(&self, st: &mut HubState, id: &str) -> Option<Rt> {
+    fn take(st: &mut HubState, id: &str) -> Option<Rt> {
         let at = st.runtimes.iter().position(|(k, _)| k == id)?;
         Some(st.runtimes.remove(at).1)
     }
@@ -825,7 +825,7 @@ impl Hub for HubCore {
         let entry = hub.parts.hosts.add(body, replace)?;
         let id = s(entry.get("id")).unwrap_or_default();
         let mut st = hub.st.locked();
-        if let Some(mut old) = hub.take(&mut st, &id) {
+        if let Some(mut old) = HostHub::take(&mut st, &id) {
             hub.stop_one(&mut old, &id, false);
             hub.forget_cache(&st, &old);
         }
@@ -852,7 +852,7 @@ impl Hub for HubCore {
         let simulated = {
             let mut st = hub.st.locked();
             HostHub::need(&mut st, id)?;
-            let Some(mut rt) = hub.take(&mut st, id) else { return Err(fail(format!("there's no host called {id}"), 404)) };
+            let Some(mut rt) = HostHub::take(&mut st, id) else { return Err(fail(format!("there's no host called {id}"), 404)) };
             hub.stop_one(&mut rt, id, false);
             hub.forget_cache(&st, &rt);
             rt.simulated
@@ -982,7 +982,7 @@ impl Hub for HubCore {
             t.abort();
         }
         let mut all = std::mem::take(&mut st.runtimes);
-        for (id, rt) in all.iter_mut() {
+        for (id, rt) in &mut all {
             hub.stop_one(rt, id, true);
         }
         for (_, mut p) in st.probes.drain() {

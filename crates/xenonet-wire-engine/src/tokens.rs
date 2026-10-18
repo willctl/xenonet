@@ -22,7 +22,7 @@ const TOGETHER: usize = 4;
 /// One git grep: its exit code (None for a timeout or one that couldn't
 /// run) and the names it gave.
 fn grep(repo: &str, more: &[String], ms: f64) -> (Option<i32>, String) {
-    let mut args: Vec<String> = ["--no-optional-locks", "-C", repo, "-c", "core.fsmonitor=false", "grep", "-l", "-I", "--untracked"].iter().map(|s| s.to_string()).collect();
+    let mut args: Vec<String> = ["--no-optional-locks", "-C", repo, "-c", "core.fsmonitor=false", "grep", "-l", "-I", "--untracked"].iter().map(ToString::to_string).collect();
     args.extend(more.iter().cloned());
     match exec::run(&Spec::new("git", &args, ms.max(1.0) as u64)) {
         Ok(out) => (Some(0), out),
@@ -56,7 +56,7 @@ pub fn find_token_files(repos: &[String]) -> Value {
         } else if left <= 0.0 {
             (None, String::new())
         } else {
-            let mut more: Vec<String> = ["--no-exclude-standard", "-E", "-e", TOKEN_GREP, "--", "."].iter().map(|s| s.to_string()).collect();
+            let mut more: Vec<String> = ["--no-exclude-standard", "-E", "-e", TOKEN_GREP, "--", "."].iter().map(ToString::to_string).collect();
             more.extend(HEAVY_FOLDERS.iter().map(|d| format!(":(exclude,glob)**/{d}/**")));
             grep(&repo, &more, left)
         };
@@ -78,7 +78,7 @@ pub fn find_token_files(repos: &[String]) -> Value {
         for n in names {
             let full = xenonet_base::paths::join(&repo, &n);
             let shown = match &anywhere {
-                Some(re) => re.replace_all(&full, |m: &regex::Captures| {
+                Some(re) => re.replace_all(&full, |m: &regex::Captures<'_>| {
                     let t = &m[0];
                     format!("{}…", &t[..t.rfind('_').map_or(0, |i| i + 1)])
                 }),

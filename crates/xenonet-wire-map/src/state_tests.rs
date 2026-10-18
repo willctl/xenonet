@@ -72,7 +72,7 @@ async fn a_refresh_maps_the_world_and_says_so_once() {
     assert_eq!(s.graph_version(), 2);
     // A session written to since pulses.
     let file = s.stats.files(SESSION1)[0].0.clone();
-    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::thread::sleep(Duration::from_millis(20));
     let mut f = std::fs::OpenOptions::new().append(true).open(&file).expect("its transcript");
     std::io::Write::write_all(&mut f, b"{}\n").expect("a line");
     s.refresh_map().await.expect("a map");
@@ -127,7 +127,7 @@ async fn the_projects_folders_rules_a_fresh_scan_and_codexs_pass() {
     assert_eq!(s.clear_project_rules(false).await.expect("cleared")["rules"], json!([]));
     assert_eq!(s.rescan_projects().await.expect("scanned")["scan"]["ok"], true);
     let outline = s.codex_outline().await.expect("an outline");
-    assert!(!items(outline.get("outline")).is_empty());
+    assert_ne!(items(outline.get("outline")), &[] as &[Value]);
     let stale = s.ask_codex_about_projects(json!("stale"), false).await.map_err(|e| e.status).err();
     assert_eq!(stale, Some(Some(409)));
     let asked = s.ask_codex_about_projects(outline["fingerprint"].clone(), false).await.expect("picks");
@@ -176,7 +176,7 @@ fn identities_read_again_without_waiting_on_themselves() {
             let _ = tx.send(!items(s.identity_detection().expect("identities").get("identities")).is_empty());
         });
     });
-    assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(60)), Ok(true), "the repos' passes never ended, or found no identity");
+    assert_eq!(rx.recv_timeout(Duration::from_secs(60)), Ok(true), "the repos' passes never ended, or found no identity");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -196,7 +196,7 @@ async fn identities_named_hidden_pinned_and_found_again() {
     assert_eq!(items(pinned.get("pins")).iter().find(|p| p["node"] == SESSION1).map(|p| p["identity"].clone()), Some(id.clone()));
     assert!(s.pin_identity(json!("core"), id.clone()).await.is_err(), "only a session or a project");
     assert_eq!(s.pin_identity(json!(SESSION1), Value::Null).await.expect("unpinned")["pins"], json!([]));
-    assert!(!items(s.rescan_identities().await.expect("again").get("identities")).is_empty());
+    assert_ne!(items(s.rescan_identities().await.expect("again").get("identities")), &[] as &[Value]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -215,7 +215,7 @@ async fn the_consoles_simulations_and_clear() {
             assert!(items(live.get("sessions")).iter().any(|x| items(x["stuck"].get("reasons")).iter().any(|r| r == "4 failed tool calls in a row")), "{}", live["sessions"]);
         }
         if kind == "collision" {
-            assert!(!items(live.get("collisions")).is_empty());
+            assert_ne!(items(live.get("collisions")), &[] as &[Value]);
         }
     }
     assert_eq!(s.simulate_live("clear", None, None), Some(json!({ "ok": true, "kind": "clear" })));
@@ -234,7 +234,7 @@ async fn a_handoff_brief_from_what_the_tailer_saw() {
     assert!(h["folder"].as_str().is_some_and(|f| f.ends_with("atlas-api")));
     assert_eq!(s.handoff(Some("core"), "codex").await.map_err(|e| e.message).err().as_deref(), Some("unknown session"));
     let t = s.read_transcript(&s.node_of(SESSION1).expect("its node"), None, 20.0).await.expect("a transcript");
-    assert!(!items(t.get("entries")).is_empty());
+    assert_ne!(items(t.get("entries")), &[] as &[Value]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -328,7 +328,7 @@ async fn a_home_folders_own_sessions_and_projects() {
         json!({ "type": "user", "uuid": "u1", "parentUuid": null, "sessionId": id, "cwd": cwd, "gitBranch": "main", "version": "2.0.1", "timestamp": ts(60e3), "message": { "role": "user", "content": "Add a health check route" } }),
         json!({ "type": "assistant", "uuid": "a1", "parentUuid": "u1", "sessionId": id, "cwd": cwd, "version": "2.0.1", "timestamp": ts(50e3), "message": { "id": "m1", "role": "assistant", "model": "claude-sonnet-4-5", "stop_reason": "end_turn", "usage": { "input_tokens": 10, "output_tokens": 20 }, "content": [{ "type": "text", "text": "Added GET /health." }] } }),
     ];
-    let text: String = lines.iter().map(|l| format!("{}\n", xenonet_base::json::stringify(l, 0))).collect();
+    let text: String = lines.iter().map(|l| xenonet_base::json::stringify(l, 0) + "\n").collect();
     std::fs::write(folder.join(format!("{id}.jsonl")), text).expect("a transcript");
     let mut env = process_env();
     env.insert("XENONET_CODEX_BIN".into(), json!("/nonexistent/codex"));

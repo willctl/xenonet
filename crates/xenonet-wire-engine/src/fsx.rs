@@ -167,7 +167,7 @@ mod tests {
         let d = tmp("rw");
         call("mkdirSync", &[Arg::text(format!("{d}/a/b")), obj(vec![("recursive", Arg::Bool(true))])]).unwrap();
         let f = format!("{d}/a/b/x.json");
-        call("writeFileSync", &[Arg::text(&f), Arg::text("{}"), obj(vec![("mode", Arg::Num(0o600 as f64))])]).unwrap();
+        call("writeFileSync", &[Arg::text(&f), Arg::text("{}"), obj(vec![("mode", Arg::Num(f64::from(0o600)))])]).unwrap();
         call("appendFileSync", &[Arg::text(&f), Arg::text("\n")]).unwrap();
         assert_eq!(call("readFileSync", &[Arg::text(&f), Arg::text("utf8")]).unwrap(), Arg::text("{}\n"));
         assert_eq!(call("existsSync", &[Arg::text(&f)]).unwrap(), Arg::Bool(true));

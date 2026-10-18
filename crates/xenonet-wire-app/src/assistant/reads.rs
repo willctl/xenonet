@@ -47,7 +47,7 @@ const RATE: (f64, f64) = (1.0, 10.0);
 fn config(version: &str) -> Config {
     Config {
         operations: OPERATIONS.iter().map(|(t, o)| (t.to_string(), o.to_string())).collect(),
-        attention_kinds: ATTENTION_KINDS.iter().map(|k| k.to_string()).collect(),
+        attention_kinds: ATTENTION_KINDS.iter().map(ToString::to_string).collect(),
         result_schema: RESULT_SCHEMA.into(),
         error_schema: ERROR_SCHEMA.into(),
         version: version.into(),
@@ -79,7 +79,7 @@ pub fn input_ok(tool: &str, args: &Value) -> bool {
     let iso = |v: &Value| v.as_str().is_some_and(|s| re(&ISO, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?Z$").is_match(s));
     let list_of =
         |v: &Value, allowed: &[&str]| v.as_array().is_some_and(|a| !a.is_empty() && a.len() <= allowed.len() && a.iter().all(|x| x.as_str().is_some_and(|s| allowed.contains(&s))));
-    let fields: &[Field] = match tool {
+    let fields: &[Field<'_>] = match tool {
         "xenonet_status" => &[],
         "xenonet_projects" => &[("cursor", &cursor), ("limit", &limit)],
         "xenonet_sessions" => &[("project_id", &project), ("statuses", &|v| list_of(v, &STATUSES)), ("updated_since", &iso), ("cursor", &cursor), ("limit", &limit)],
@@ -94,14 +94,14 @@ pub fn input_ok(tool: &str, args: &Value) -> bool {
     o.iter().all(|(k, v)| fields.iter().find(|(f, _)| f == k).is_some_and(|(_, ok)| ok(v)))
 }
 
-fn result_checker() -> &'static Option<Checker> {
+fn result_checker() -> Option<&'static Checker> {
     static C: OnceLock<Option<Checker>> = OnceLock::new();
-    C.get_or_init(|| xenonet_base::json::parse(RESULT_DOC).ok().and_then(|d| compile(&[d]).ok()))
+    C.get_or_init(|| xenonet_base::json::parse(RESULT_DOC).ok().and_then(|d| compile(&[d]).ok())).as_ref()
 }
 
 /// RESULTS[tool].safeParse(envelope): the answer against the contract's.
 fn result_ok(envelope: &Value) -> bool {
-    result_checker().as_ref().is_some_and(|c| c.check(c.root(0), &Data::from(envelope), false).ok())
+    result_checker().is_some_and(|c| c.check(c.root(0), &Data::from(envelope), false).ok())
 }
 
 fn key() -> Vec<u8> {
@@ -202,7 +202,7 @@ impl Calls for PresenceCalls<'_> {
                 a.registry(m, args.iter().map(Arg::to_json).collect()).map(|v| arg(&v)).map_err(|e| super::thrown_of(&e))
             }
             ("", "onRead") => {
-                let read = args.first().map(Arg::to_json).unwrap_or(Value::Null);
+                let read = args.first().map_or(Value::Null, Arg::to_json);
                 let connection = xenonet_base::text::js_string(&read["connection"]);
                 let transport = self.r.engine_store.connection(&connection).ok().flatten().and_then(|c| c.get("transport_kind").cloned()).unwrap_or(Value::Null);
                 if let Some(ctx) = self.r.emitter.ctx() {
@@ -365,10 +365,7 @@ impl Reads {
                 return no("INVALID_ARGUMENT", "bad-arguments", Map::new());
             }
             for _ in 0..2 {
-                let policy = match remote.policy_of(&standing) {
-                    Ok(p) => p,
-                    Err(_) => return no("INTERNAL_ERROR", "exception", Map::new()),
-                };
+                let Ok(policy) = remote.policy_of(&standing) else { return no("INTERNAL_ERROR", "exception", Map::new()) };
                 let running = tokio::spawn(answer(
                     World::Real(self.clone()),
                     self.version.clone(),
@@ -489,11 +486,11 @@ impl Reads {
             .iter()
             .map(|(p, place)| {
                 let label = if labels { place_name(place).and_then(|n| projection::clean_label(&n)).map_or(Value::Null, Value::String) } else { Value::Null };
-                json!({ "project_id": p, "label": label, "session_counts": counts.iter().find(|(k, _)| k == p).map(|(_, c)| Value::Object(c.clone())).unwrap_or_else(|| json!({})) })
+                json!({ "project_id": p, "label": label, "session_counts": counts.iter().find(|(k, _)| k == p).map_or_else(|| json!({}), |(_, c)| Value::Object(c.clone())) })
             })
             .collect();
         visible.sort_by(|a, b| {
-            let u = |v: &projection::Visible| v.s.get("updatedAt").and_then(Value::as_f64).unwrap_or(0.0);
+            let u = |v: &projection::Visible<'_>| v.s.get("updatedAt").and_then(Value::as_f64).unwrap_or(0.0);
             u(b).total_cmp(&u(a))
         });
         let sessions: Vec<Value> = visible.iter().take(20).map(|v| projection::session_summary(v, &policy)).collect();

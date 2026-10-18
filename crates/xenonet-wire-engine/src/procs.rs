@@ -246,7 +246,7 @@ mod tests {
     #[test]
     fn this_process_and_the_ones_above_it() {
         let sys = System::new();
-        let me = std::process::id() as f64;
+        let me = f64::from(std::process::id());
         let chain = crate::js::list(call(&sys, "chain", &[Arg::Num(me), obj(vec![("exe", Arg::Bool(true))])]).unwrap());
         assert_eq!(chain[0].field("pid"), Arg::Num(me));
         assert!(chain[0].field("exe").as_str().is_some(), "{chain:?}");

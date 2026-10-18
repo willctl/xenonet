@@ -62,7 +62,7 @@ impl SpotifyRemote {
                             Got::Response { ok: res.ok(), status: res.status, body, retry_after: res.header("retry-after").map(str::to_string) }
                         }
                         Err(m) => {
-                            thrown = m.clone();
+                            thrown.clone_from(&m);
                             Got::Threw(m)
                         }
                     }
@@ -70,7 +70,7 @@ impl SpotifyRemote {
                 secret => match self.secret(secret).await {
                     Ok(v) => Got::Value(v),
                     Err(m) => {
-                        thrown = m.clone();
+                        thrown.clone_from(&m);
                         Got::Threw(m)
                     }
                 },

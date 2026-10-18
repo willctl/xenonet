@@ -66,7 +66,7 @@ impl Decisions {
             self.say(&line);
             return Err(decision_error(e));
         }
-        let n = questions.as_object().map_or(0, |q| q.len());
+        let n = questions.as_object().map_or(0, serde_json::Map::len);
         let (line, d) = decide::answered(body.as_ref(), &self.model, kind, n, now_ms() - started);
         self.say(&line);
         Ok(d)

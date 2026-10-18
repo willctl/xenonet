@@ -266,7 +266,7 @@ impl Calls for ObsCalls<'_> {
             ("", "observing") => Ok(Arg::Bool(self.observing())),
             ("", "look") => {
                 let t = x(0).as_f64().unwrap_or_else(now_ms);
-                self.look(t).map(|_| Arg::Undef)
+                self.look(t).map(|()| Arg::Undef)
             }
             ("", "ok") => {
                 o.life.locked().ok(x(0).as_f64().unwrap_or_else(now_ms));
@@ -276,7 +276,7 @@ impl Calls for ObsCalls<'_> {
                 o.life.locked().problem(&text(&x(0)), x(1).as_f64().unwrap_or_else(now_ms));
                 Ok(Arg::Undef)
             }
-            ("", "keep") => o.core.keep(self, &text(&x(0)), &x(1)).map(|_| Arg::Undef),
+            ("", "keep") => o.core.keep(self, &text(&x(0)), &x(1)).map(|()| Arg::Undef),
             ("", "say") => o.core.say(self, &text(&x(0)), &x(1)).map(Arg::Bool),
             ("", "happened") => o.core.happened(self, &text(&x(0)), &x(1)),
             ("", "gather") => {
@@ -288,7 +288,7 @@ impl Calls for ObsCalls<'_> {
                     Arg::Undef => Arg::Num(now_ms()),
                     t => t,
                 };
-                o.core.touch(self, &text(&x(0)), &x(1), &x(2), &t).map(|_| Arg::Undef)
+                o.core.touch(self, &text(&x(0)), &x(1), &x(2), &t).map(|()| Arg::Undef)
             }
             ("", "__census" | "census") => crate::procs::census(&w.sys).map(|v| arg(&v)),
             ("", "alive") => Ok(Arg::Bool(x(0).as_f64().is_some_and(crate::js::alive))),

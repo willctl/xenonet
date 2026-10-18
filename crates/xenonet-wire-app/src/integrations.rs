@@ -64,7 +64,7 @@ fn local(id: u64, platform: &str, collect: &str, reviews_dir: Option<String>, de
         let mut l = l.borrow_mut();
         let made = l.entry(id).or_insert_with(|| Local {
             shell: Rc::new(RefCell::new(openshell::OpenShell {
-                tickets: Default::default(),
+                tickets: Tickets::default(),
                 platform: platform.into(),
                 system_root: fx::env_set("SystemRoot"),
                 collect_text: collect.into(),
@@ -130,7 +130,7 @@ impl Integrated {
     // runs on the sandbox's Node, as reviews.js makes it from its own
     // functions; the binary carries it.
     fn collect_text() -> String {
-        xenonet_integrations::reviews::COLLECT_TEXT.to_string()
+        reviews::COLLECT_TEXT.to_string()
     }
 
     fn shared(&self, collect: String) -> impl FnOnce() -> (openshell::Shared, reviews::Shared) + Send + 'static {
@@ -172,8 +172,8 @@ impl Integrated {
                 }
                 Ok::<(), CoreError>(())
             })
-            .await
-            .map(|_| ())
+            .await?;
+        Ok(())
     }
 
     /// What the shell's and reviews' tasks ask for.

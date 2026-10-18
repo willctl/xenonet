@@ -326,7 +326,7 @@ impl Default for HostSchemas {
 pub struct MergeSchemas<'a>(pub &'a HostSchemas);
 
 impl merge::Schemas for MergeSchemas<'_> {
-    fn clean(&mut self, kind: merge::Kind, value: &Value) -> Option<Value> {
+    fn clean(&mut self, kind: merge::Kind<'_>, value: &Value) -> Option<Value> {
         let name = match kind {
             merge::Kind::Node(k) => format!("node:{k}"),
             merge::Kind::Identity => "identity".into(),

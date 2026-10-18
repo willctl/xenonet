@@ -74,20 +74,20 @@ impl Secrets {
         Secrets::Memory(Mutex::new(MemorySecrets::default()))
     }
 
-    fn store(platform: &str, tool: &Option<String>) -> SecretStore {
-        SecretStore::new(platform, tool.clone())
+    fn store(platform: &str, tool: Option<&String>) -> SecretStore {
+        SecretStore::new(platform, tool.cloned())
     }
 
     pub fn kind(&self) -> &'static str {
         match self {
-            Secrets::Store { platform, tool } => Self::store(platform, tool).kind(),
+            Secrets::Store { platform, tool } => Self::store(platform, tool.as_ref()).kind(),
             Secrets::Memory(_) => MemorySecrets::KIND,
         }
     }
 
     pub fn available(&self) -> bool {
         match self {
-            Secrets::Store { platform, tool } => Self::store(platform, tool).available(),
+            Secrets::Store { platform, tool } => Self::store(platform, tool.as_ref()).available(),
             Secrets::Memory(_) => true,
         }
     }
@@ -96,7 +96,7 @@ impl Secrets {
     // (the keychain may ask you first).
     async fn blocking<T: Send + 'static>(
         platform: &str,
-        tool: &Option<String>,
+        tool: Option<&String>,
         f: impl FnOnce(&SecretStore, &mut Runner) -> Result<T, String> + Send + 'static,
     ) -> Result<T, String> {
         let store = Self::store(platform, tool);
@@ -108,7 +108,7 @@ impl Secrets {
             Secrets::Memory(m) => Ok(m.locked().has(target)),
             Secrets::Store { platform, tool } => {
                 let t = target.to_string();
-                Self::blocking(platform, tool, move |s, r| s.has(r, &t)).await
+                Self::blocking(platform, tool.as_ref(), move |s, r| s.has(r, &t)).await
             }
         }
     }
@@ -118,7 +118,7 @@ impl Secrets {
             Secrets::Memory(m) => Ok(m.locked().get(target)),
             Secrets::Store { platform, tool } => {
                 let t = target.to_string();
-                Self::blocking(platform, tool, move |s, r| s.get(r, &t)).await
+                Self::blocking(platform, tool.as_ref(), move |s, r| s.get(r, &t)).await
             }
         }
     }
@@ -128,7 +128,7 @@ impl Secrets {
             Secrets::Memory(m) => m.locked().set(target, secret),
             Secrets::Store { platform, tool } => {
                 let (t, s, c) = (target.to_string(), secret.to_string(), comment.to_string());
-                Self::blocking(platform, tool, move |st, r| st.set(r, &t, &s, &c)).await
+                Self::blocking(platform, tool.as_ref(), move |st, r| st.set(r, &t, &s, &c)).await
             }
         }
     }
@@ -138,7 +138,7 @@ impl Secrets {
             Secrets::Memory(m) => Ok(m.locked().remove(target)),
             Secrets::Store { platform, tool } => {
                 let t = target.to_string();
-                Self::blocking(platform, tool, move |s, r| s.remove(r, &t)).await
+                Self::blocking(platform, tool.as_ref(), move |s, r| s.remove(r, &t)).await
             }
         }
     }

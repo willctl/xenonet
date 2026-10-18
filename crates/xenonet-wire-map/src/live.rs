@@ -107,6 +107,7 @@ fn stat(file: &str) -> Option<(f64, u64)> {
     Some((xenonet_base::fs::mtime_ms_of(&m).unwrap_or(f64::NAN), m.len()))
 }
 
+#[expect(clippy::case_sensitive_file_extension_comparisons, reason = "as the JS's endsWith, which tells .jsonl from .JSONL")]
 fn transcript(name: &str) -> bool {
     name.ends_with(".jsonl")
 }
@@ -251,7 +252,7 @@ impl Live {
     fn walk(t: &mut Tail) -> Vec<String> {
         let mut files = Vec::new();
         let mut rules = FnRules(|name: &str, _: &str| transcript(name), |_: &str, _: &str, _: u32| true);
-        for s in t.scanners.iter_mut() {
+        for s in &mut t.scanners {
             if let Ok(found) = s.scan(&mut StdFs, &mut rules, &mut now_ms) {
                 files.extend(found);
             }

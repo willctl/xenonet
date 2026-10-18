@@ -151,7 +151,7 @@ impl IdentityWatch {
     }
 
     async fn git_config(&self, dir: &str) -> Option<Value> {
-        let args: Vec<String> = ["-C", dir, "config", "--get-regexp", "^(user\\.(name|email)|credential\\..*)$"].iter().map(|s| s.to_string()).collect();
+        let args: Vec<String> = ["-C", dir, "config", "--get-regexp", "^(user\\.(name|email)|credential\\..*)$"].iter().map(ToString::to_string).collect();
         let (env, clear): (Vec<(String, String)>, bool) = match &self.git_env {
             Some(e) => (e.iter().filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string()))).collect(), true),
             None => (Vec::new(), false),

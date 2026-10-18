@@ -22,7 +22,6 @@ xenonet-schema.workspace = true
 xenonet-sources.workspace = true
 xenonet-state.workspace = true
 xenonet-app.workspace = true
-rusqlite.workspace = true
 
 [lints]
 workspace = true

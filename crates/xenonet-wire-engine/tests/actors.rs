@@ -30,7 +30,7 @@ impl State for Empty {
         Ok(None)
     }
     fn add_block(&self, health: Arc<dyn Fn() -> Value + Send + Sync>, _source: Option<String>) -> R<()> {
-        self.blocks.lock().unwrap().push(health);
+        self.blocks.lock().expect("the blocks the test keeps").push(health);
         Ok(())
     }
 }
@@ -60,7 +60,7 @@ fn world(name: &str, demo: bool) -> (Arc<World>, Arc<Empty>, std::path::PathBuf)
     let empty = Arc::new(Empty::default());
     let mut cores = Cores::pending(true, false, false);
     cores.state = empty.clone();
-    let env = WireEnv { version: "0.0.0".into(), emitter: Emitter::new(), drift: Default::default() };
+    let env = WireEnv { version: "0.0.0".into(), emitter: Emitter::new(), drift: Arc::default() };
     let w = xenonet_wire_engine::world(&cores, &mut config, &env).expect("the area's parts");
     (w, empty, dir)
 }
@@ -75,7 +75,7 @@ async fn the_demos_actors_their_simulations_and_its_made_up_request() {
     assert_eq!(ids, vec!["actor:you", "actor:wren", "actor:kestrel", "actor:moth"]);
     assert_eq!(actors.snapshot("actor:kestrel", None, true).unwrap().unwrap()["name"], "Kestrel");
     assert!(actors.snapshot("actor:nobody", None, true).unwrap().is_none());
-    assert!(!actors.events(Some(0.0), None, None, 1000.0).unwrap()["events"].as_array().unwrap().is_empty());
+    assert_ne!(actors.events(Some(0.0), None, None, 1000.0).unwrap()["events"].as_array().unwrap(), &[] as &[Value]);
     assert!(actors.is_demo());
     for kind in ["actor-spawn", "actor-edit", "actor-message", "actor-offline", "actor-online"] {
         assert_eq!(actors.simulate(kind, Some("actor:moth".into()), None).unwrap().unwrap()["kind"], kind);

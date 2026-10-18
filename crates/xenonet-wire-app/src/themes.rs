@@ -32,7 +32,7 @@ fn signature(dir: &Path) -> Vec<(String, u64, u128)> {
                 .flatten()
                 .map(|e| {
                     let meta = e.metadata().ok();
-                    let size = meta.as_ref().map_or(0, |m| m.len());
+                    let size = meta.as_ref().map_or(0, std::fs::Metadata::len);
                     let at = meta.and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
                     (e.file_name().to_string_lossy().into_owned(), size, at)
                 })

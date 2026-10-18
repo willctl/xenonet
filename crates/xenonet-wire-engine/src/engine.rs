@@ -49,7 +49,7 @@ impl Waiter {
             if left.is_zero() {
                 return;
             }
-            done = self.woke.wait_timeout(done, left).map(|(g, _)| g).unwrap_or_else(|e| e.into_inner().0);
+            done = self.woke.wait_timeout(done, left).map_or_else(|e| e.into_inner().0, |(g, _)| g);
         }
     }
 }
@@ -155,7 +155,7 @@ impl Repos {
             *n += 1;
         }
         let args: Vec<String> =
-            ["-C", cwd, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir", "--abbrev-ref", "HEAD"].iter().map(|s| s.to_string()).collect();
+            ["-C", cwd, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir", "--abbrev-ref", "HEAD"].iter().map(ToString::to_string).collect();
         let out = crate::exec::run(&crate::exec::Spec::new("git", &args, 3000));
         *self.running.locked() -= 1;
         self.room.notify_one();
@@ -287,10 +287,8 @@ pub fn told(w: &World, name: &str, payload: &Arg) {
             w.mail.seen(&text(&agent));
             delivery::seen(w, &agent, &list(payload.field("ids")));
         }
-        "contact" => {
-            if payload.field("via").as_str() == Some("hook") {
-                delivery::contact(w, &payload.field("agent"));
-            }
+        "contact" if payload.field("via").as_str() == Some("hook") => {
+            delivery::contact(w, &payload.field("agent"));
         }
         _ => {}
     }
@@ -411,7 +409,7 @@ pub struct EngineDriver(pub Arc<World>);
 
 impl EngineDriver {
     /// An engine call on a blocking thread.
-    async fn run<T: Send + 'static>(&self, signal: Option<Arc<Signal>>, f: impl FnOnce(&World, &mut EngineCalls) -> std::result::Result<T, Fail> + Send + 'static) -> R<T> {
+    async fn run<T: Send + 'static>(&self, signal: Option<Arc<Signal>>, f: impl FnOnce(&World, &mut EngineCalls<'_>) -> std::result::Result<T, Fail> + Send + 'static) -> R<T> {
         let w = self.0.clone();
         let out = tokio::task::spawn_blocking(move || {
             let mut c = EngineCalls::new(&w, signal);
@@ -421,7 +419,7 @@ impl EngineDriver {
         out.map_err(|e| CoreError::new(e.to_string()))?
     }
 
-    fn now<T>(&self, f: impl FnOnce(&World, &mut EngineCalls) -> std::result::Result<T, Fail>) -> R<T> {
+    fn now<T>(&self, f: impl FnOnce(&World, &mut EngineCalls<'_>) -> std::result::Result<T, Fail>) -> R<T> {
         let mut c = EngineCalls::new(&self.0, None);
         f(&self.0, &mut c).map_err(|e| c.error(e))
     }

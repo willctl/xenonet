@@ -71,7 +71,7 @@ fn head_tail(file: &Path) -> Option<HeadTail> {
     if head.is_empty() {
         return None;
     }
-    let mtime = xenonet_base::fs::mtime_ms_of(&meta).map(f64::floor).unwrap_or(0.0);
+    let mtime = xenonet_base::fs::mtime_ms_of(&meta).map_or(0.0, f64::floor);
     let head_text = String::from_utf8_lossy(&head).into_owned();
     let tail = if size > CHUNK { String::from_utf8_lossy(&read_at(&mut f, size - CHUNK, CHUNK).ok()?).into_owned() } else { head_text.clone() };
     Some(HeadTail { mtime, size, head: head_text, tail })
@@ -505,7 +505,7 @@ fn chain(entries: &mut [Value]) -> Vec<usize> {
                     let mut prev = anchor.clone();
                     for u in &list {
                         entries[by[u]]["parentUuid"] = json!(prev);
-                        prev = u.clone();
+                        prev.clone_from(u);
                     }
                     let first = list[0].clone();
                     for e in entries.iter_mut() {
@@ -618,7 +618,7 @@ fn chain(entries: &mut [Value]) -> Vec<usize> {
         let Some(last) = out.iter().rposition(|&i| msg_id(&entries[i]) == Some(m.as_str())) else { continue };
         let insert: Vec<usize> = missing.into_iter().chain(direct).collect();
         added.extend(insert.iter().copied());
-        out.splice(last + 1..last + 1, insert);
+        out.splice((last + 1)..=last, insert);
     }
     out
 }
@@ -686,7 +686,7 @@ pub fn session_messages(projects_dir: &str, id: &str) -> Vec<Value> {
     let mut list: Vec<Value> = order.iter().map(|&i| entries[i].clone()).collect();
     // A local command's records, after its caveat, until the next reply.
     let mut marking = false;
-    for e in list.iter_mut() {
+    for e in &mut list {
         if kind(e) == "assistant" {
             marking = false;
             continue;
@@ -806,7 +806,7 @@ mod tests {
 
     fn write(dir: &Path, id: &str, lines: &[Value]) {
         std::fs::create_dir_all(dir).expect("a folder");
-        let text: String = lines.iter().map(|l| format!("{}\n", xenonet_base::json::stringify(l, 0))).collect();
+        let text: String = lines.iter().map(|l| xenonet_base::json::stringify(l, 0) + "\n").collect();
         std::fs::write(dir.join(format!("{id}.jsonl")), text).expect("a transcript");
     }
 

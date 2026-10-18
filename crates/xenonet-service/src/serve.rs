@@ -248,7 +248,7 @@ pub fn run_with(args: &[String], built: &str, build: Builder) -> i32 {
     });
     // A runtime dropped waits for its blocking tasks, and some wait long
     // (an inbox's or a Stop hook's wait): stopped, the service goes now.
-    rt.shutdown_timeout(std::time::Duration::from_secs(2));
+    rt.shutdown_timeout(Duration::from_secs(2));
     code
 }
 

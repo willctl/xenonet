@@ -66,7 +66,7 @@ impl Checks {
         Checks { verifier: Arc::new(Verifier::new(store, Arg::Null)), sys }
     }
 
-    async fn run(&self, peer: Option<Peer>, f: impl FnOnce(&Verifier, &mut VerifyCalls) -> Result<Arg> + Send + 'static) -> Value {
+    async fn run(&self, peer: Option<Peer>, f: impl FnOnce(&Verifier, &mut VerifyCalls<'_>) -> Result<Arg> + Send + 'static) -> Value {
         let (v, sys) = (self.verifier.clone(), self.sys.clone());
         let out = tokio::task::spawn_blocking(move || {
             let mut c = VerifyCalls { sys: &sys, peer };
@@ -174,9 +174,9 @@ mod tests {
             (300, 100, "/Users/me/.local/share/claude/versions/2.1.288"),
             (400, 1, "/bin/zsh"),
         ];
-        let ps: String = rows.iter().map(|(pid, ppid, p)| format!("{pid:>5} {ppid:>5} Fri Oct  3 16:34:29 2026 {p}\n")).collect();
+        let ps = rows.iter().map(|(pid, ppid, p)| format!("{pid:>5} {ppid:>5} Fri Oct  3 16:34:29 2026 {p}\n")).collect::<Vec<_>>().concat();
         let by_port = [(51000, 220), (51001, 400), (51002, 300), (51003, 200)];
-        let netstat: String = by_port.iter().map(|(port, pid)| format!("tcp4       0      0  127.0.0.1.{port}        127.0.0.1.47842        ESTABLISHED    111   2970  406912  146988 proc:{pid}            00102 00000104 0000000003bca9cb\n")).collect();
+        let netstat = by_port.iter().map(|(port, pid)| format!("tcp4       0      0  127.0.0.1.{port}        127.0.0.1.47842        ESTABLISHED    111   2970  406912  146988 proc:{pid}            00102 00000104 0000000003bca9cb\n")).collect::<Vec<_>>().concat();
         System::with(
             "darwin",
             Box::new(move |c| match c.file.as_str() {
