@@ -157,6 +157,28 @@ async fn another_projects_folder_and_back() {
     assert_eq!((back["source"].as_str(), back["changed"].as_bool(), back["path"].clone()), (Some("default"), Some(true), before["path"].clone()));
 }
 
+// A second pass over repos already read, which once took a gatherer's lock
+// while it held it, and hung the service a minute after it started. A
+// deadlock leaves its runtime nothing to time out with, so the passes run
+// on a runtime of their own, and the test waits from outside it.
+#[test]
+fn identities_read_again_without_waiting_on_themselves() {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("a runtime");
+        rt.block_on(async {
+            let w = world();
+            let s = &w.state;
+            s.refresh_map().await.expect("a map");
+            for _ in 0..3 {
+                s.refresh_repos().await;
+            }
+            let _ = tx.send(!items(s.identity_detection().expect("identities").get("identities")).is_empty());
+        });
+    });
+    assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(60)), Ok(true), "the repos' passes never ended, or found no identity");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn identities_named_hidden_pinned_and_found_again() {
     let w = world();

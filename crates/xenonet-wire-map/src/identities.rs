@@ -195,7 +195,10 @@ impl IdentityWatch {
                 }
             };
             let stamp = format!("{global}|{}|{}", ids::repo_config_mtime(&path).map_or_else(|| "null".into(), xenonet_base::json::number_string), origin.as_str().unwrap_or(""));
-            let before = { lock(&source.state).good() }.then(|| source.value());
+            // The guard goes before value() takes the same lock: in a block's
+            // tail, as the guard was, it would last the whole statement.
+            let good = lock(&source.state).good();
+            let before = good.then(|| source.value());
             let home = self.at.home.clone();
             let p2 = path.clone();
             let ssh2 = ssh.clone();
