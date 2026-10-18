@@ -54,7 +54,7 @@ impl Fixture {
     fn config(&self) -> Config {
         Config {
             operations: schema::OPERATIONS.iter().map(|(t, o)| (t.to_string(), o.to_string())).collect(),
-            attention_kinds: schema::ATTENTION_KINDS.iter().map(|k| k.to_string()).collect(),
+            attention_kinds: schema::ATTENTION_KINDS.iter().map(ToString::to_string).collect(),
             result_schema: schema::RESULT_SCHEMA.into(),
             error_schema: schema::ERROR_SCHEMA.into(),
             version: self.version.clone(),
@@ -62,7 +62,7 @@ impl Fixture {
         }
     }
 
-    fn no(&self, request_id: &Value, code: &str, retry_after_ms: Option<f64>) -> Answer {
+    fn no(request_id: &Value, code: &str, retry_after_ms: Option<f64>) -> Answer {
         Answer { ok: false, envelope: service::error_envelope(schema::ERROR_SCHEMA, Some(request_id), code, retry_after_ms) }
     }
 
@@ -71,24 +71,24 @@ impl Fixture {
         let cfg = self.config();
         let b = service::begin(&cfg, &json!({ "request_id": request_id, "operation": operation, "arguments": args }));
         if let Some(no) = &b.no {
-            return self.no(&b.request_id, no.code, None);
+            return Self::no(&b.request_id, no.code, None);
         }
-        let (Some(op), Some(tool)) = (b.op.clone(), b.tool.clone()) else { return self.no(&b.request_id, "INVALID_ARGUMENT", None) };
+        let (Some(op), Some(tool)) = (b.op.clone(), b.tool.clone()) else { return Self::no(&b.request_id, "INVALID_ARGUMENT", None) };
         {
             let mut s = self.state.lock().expect("the service's state");
             let wait = s.buckets.take(GRANT, RATE.0, RATE.1, 1.0, now());
             if wait != 0.0 {
-                return self.no(&b.request_id, "RATE_LIMITED", Some(wait));
+                return Self::no(&b.request_id, "RATE_LIMITED", Some(wait));
             }
             if !s.inflight.enter(GRANT, cfg.limits.concurrent) {
-                return self.no(&b.request_id, "RATE_LIMITED", Some(1000.0));
+                return Self::no(&b.request_id, "RATE_LIMITED", Some(1000.0));
             }
         }
         let out = self.answer(cfg, &op, &tool, &b.args, &b.request_id);
         self.state.lock().expect("the service's state").inflight.leave(GRANT);
         match out {
             Ok(envelope) => Answer { ok: true, envelope },
-            Err(code) => self.no(&b.request_id, &code, None),
+            Err(code) => Self::no(&b.request_id, &code, None),
         }
     }
 

@@ -265,8 +265,8 @@ fn procs() -> Value {
     let me = f64::from(std::process::id());
     let (pid, first) = match &accepted {
         Some((socket, _)) => {
-            let local = socket.local_addr().map(|a| json!(a.port())).unwrap_or(Value::Null);
-            let remote = socket.peer_addr().map(|a| json!(a.port())).unwrap_or(Value::Null);
+            let local = socket.local_addr().map_or(Value::Null, |a| json!(a.port()));
+            let remote = socket.peer_addr().map_or(Value::Null, |a| json!(a.port()));
             let (pid, _) = p.peer(&mut Run, Some(&local), Some(&remote), None);
             let pid = pid.as_f64();
             let first = pid.and_then(|pid| p.chain(&mut Run, Some(pid), true, true).ok()).and_then(|c| c.into_iter().next());
@@ -303,12 +303,14 @@ fn statfs(p: &str) -> Option<Value> {
     let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
     // SAFETY: `c` is a NUL-terminated string and `st` a struct statvfs(3)
     // may write, both alive for the call.
-    if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
+    if unsafe { libc::statvfs(c.as_ptr(), &raw mut st) } != 0 {
         return None;
     }
-    Some(
-        json!({ "bsize": st.f_frsize as f64, "blocks": st.f_blocks as f64, "bfree": st.f_bfree as f64, "bavail": st.f_bavail as f64, "files": st.f_files as f64, "ffree": st.f_ffree as f64 }),
-    )
+    // Its counts are 32 bits on macOS and 64 on Linux; JS numbers either way.
+    fn n(v: impl Into<u64>) -> f64 {
+        v.into() as f64
+    }
+    Some(json!({ "bsize": n(st.f_frsize), "blocks": n(st.f_blocks), "bfree": n(st.f_bfree), "bavail": n(st.f_bavail), "files": n(st.f_files), "ffree": n(st.f_ffree) }))
 }
 
 #[cfg(not(unix))]
