@@ -415,10 +415,13 @@ impl TunnelHost for SystemHost {
     }
     fn kill_pid(&self, pid: u32) {
         #[cfg(unix)]
+        #[expect(unsafe_code, reason = "kill(2), which std doesn't wrap, for the JS's process.kill(pid, \"SIGTERM\")")]
         {
             extern "C" {
                 fn kill(pid: i32, sig: i32) -> i32;
             }
+            // SAFETY: kill only sends a signal, here SIGTERM to a pid ps
+            // has just named as the tool; it touches no memory of ours.
             unsafe {
                 kill(pid as i32, 15);
             }
