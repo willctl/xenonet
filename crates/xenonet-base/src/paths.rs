@@ -287,16 +287,20 @@ pub fn can_run(file: &str) -> bool {
     {
         use std::os::unix::ffi::OsStrExt;
         let Ok(c) = std::ffi::CString::new(Path::new(file).as_os_str().as_bytes()) else { return false };
-        extern "C" {
-            fn access(path: *const std::os::raw::c_char, mode: std::os::raw::c_int) -> std::os::raw::c_int;
-        }
-        // X_OK is 1 on every unix.
-        unsafe { access(c.as_ptr(), 1) == 0 }
+        may_run(&c)
     }
     #[cfg(not(unix))]
     {
         Path::new(file).exists()
     }
+}
+
+#[cfg(unix)]
+#[expect(unsafe_code, reason = "access(2), which std doesn't wrap")]
+fn may_run(path: &std::ffi::CStr) -> bool {
+    // SAFETY: `path` is a NUL-terminated string that outlives the call, and
+    // access only reads it.
+    unsafe { libc::access(path.as_ptr(), libc::X_OK) == 0 }
 }
 
 /// A folder's entries as Node's readdir lists them: by name, byte for byte,

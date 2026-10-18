@@ -346,6 +346,7 @@ extern "C" {
 
 /// How far local time is ahead of UTC at a time, in ms.
 #[cfg(unix)]
+#[expect(unsafe_code, reason = "tzset and localtime_r, which std doesn't wrap")]
 pub fn local_offset_ms(ms: f64) -> f64 {
     if !ms.is_finite() {
         return 0.0;

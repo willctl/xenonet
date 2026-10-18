@@ -4,6 +4,7 @@
 //! agent that started the server (Claude Code, Codex or an actor), which
 //! XenoNet watches, so this works on every platform the binary is built
 //! for.
+#![expect(unsafe_code, reason = "kill(2) and the Windows process calls, which std doesn't wrap")]
 
 /// A variable as `process.env.X` reads it: None when it isn't set (an
 /// empty one is "", as in JS).

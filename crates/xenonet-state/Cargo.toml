@@ -19,3 +19,6 @@ xenonet-base.workspace = true
 xenonet-blocks.workspace = true
 xenonet-schema.workspace = true
 xenonet-sources.workspace = true
+
+[lints]
+workspace = true

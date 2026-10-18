@@ -18,3 +18,6 @@ sha2.workspace = true
 xenonet-app.workspace = true
 xenonet-base.workspace = true
 xenonet-components.workspace = true
+
+[lints]
+workspace = true

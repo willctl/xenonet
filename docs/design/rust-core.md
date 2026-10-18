@@ -370,6 +370,43 @@ on 1.85. A PATH can name a toolchain's own `cargo` rather than rustup's,
 which ignores the pin, so the scripts run cargo through
 `scripts/cargo.mjs`, which finds the pinned toolchain.
 
+### Static analysis
+
+`npm run lint:rust` runs what every change to the Rust core passes, in CI
+as well (`scripts/rust-lint.mjs`):
+
+- **Format.** `cargo fmt --check`, with `rustfmt.toml`'s settings.
+- **Lints.** `cargo clippy --workspace --all-targets -- -D warnings`. The
+  lints are in the root `Cargo.toml`'s `[workspace.lints]`, which each
+  crate takes with `[lints] workspace = true`: clippy's default groups and
+  `pedantic`, less the pedantic checks that are taste rather than bugs, and
+  less the casts and exact float comparisons the port makes on purpose to
+  compute as the JS does. On top of those, for a service that runs for
+  days: no `unwrap`, `panic!`, `todo!`, `unimplemented!` or `dbg!` outside
+  tests (`expect` stays for a real invariant, its message saying why),
+  nothing on stdout but the command's own output, since stdout is also the
+  MCP servers' protocol, and a `// SAFETY:` comment on every `unsafe`
+  block. `unsafe` is denied except in a crate or module that says why.
+  An exception is `#[expect(lint, reason = "…")]`, never `#[allow]`, so one
+  no longer needed shows.
+- **Docs.** `cargo doc --no-deps` with warnings as errors, so doc links
+  resolve.
+- **Dependencies.** `cargo deny check` (`deny.toml`): no RustSec advisory
+  (vulnerable, unsound, unmaintained or yanked), licenses that fit MIT, no
+  wildcard versions, crates only from crates.io. `cargo shear`: no
+  dependency a crate doesn't use.
+
+Locks go through `xenonet_base::sync` (`locked()`, `reading()`,
+`writing()`) rather than `lock().unwrap()`. std poisons a lock whose
+holder panicked, and every later `unwrap` would panic too, taking the
+service down with one bad request; the state under XenoNet's locks is
+plain data each call leaves whole, as the JS did when a request threw.
+
+Miri doesn't apply: the core's `unsafe` is FFI (Node-API in
+`xenonet-node`, a few libc calls), which Miri can't run. The JS tests
+exercise it instead, against the twins (`test:rust`) and the binary
+(`test:bin`), on macOS, Linux and Windows.
+
 ## Hooks
 
 `xenonet hook <app>` stays what it is: it reads the hook's JSON on stdin,

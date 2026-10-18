@@ -3,6 +3,7 @@
 //! this calls the crates. Nothing here decides anything a crate doesn't:
 //! it converts arguments, calls back into what a test passed in, and
 //! converts the answers.
+#![expect(unsafe_code, reason = "Node-API is a C interface: values cross it through raw handles")]
 
 mod account_links;
 mod actor_helpers;

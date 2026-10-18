@@ -1,0 +1,9 @@
+# clippy's settings. The lints themselves are in Cargo.toml's
+# [workspace.lints]; the oldest Rust each crate builds on comes from its
+# rust-version. Tests may unwrap, expect, panic, print and dbg!: a failing
+# test should say where.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-dbg-in-tests = true
+allow-print-in-tests = true

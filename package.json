@@ -21,6 +21,7 @@
     "test:real": "node --test --test-concurrency=1 \"test/real/*.test.js\"",
     "test:rust": "node scripts/rust-parity.mjs",
     "test:bin": "node scripts/rust-bin-tests.mjs",
+    "lint:rust": "node scripts/rust-lint.mjs",
     "rust:build": "node scripts/rust-build.mjs",
     "drive": "node cli/xenonet.js console",
     "contracts": "node scripts/check-contracts.mjs",
