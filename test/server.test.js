@@ -165,7 +165,14 @@ test("the map, its live state, history, summary and digests", async () => {
   assert.ok(summary.needsYou.some((n) => n.kind === "question"));
   assert.ok(summary.needsYou.every((n) => Number.isFinite(n.since)), "each wait says since when, for the queue's order");
   assert.ok(Array.isArray(summary.actorsNeedYou) && Number.isInteger(summary.requests));
-  assert.ok((await get(`/api/digest?since=${Date.now() - 6 * 3600e3}`)).data.totals.sessions > 0);
+  // The demo's history is still being read for a moment after the map shows
+  // its first session, so the digest gets that moment to fill in.
+  let digest;
+  for (const until = Date.now() + 10000; Date.now() < until; await new Promise((r) => setTimeout(r, 100))) {
+    digest = (await get(`/api/digest?since=${Date.now() - 6 * 3600e3}`)).data;
+    if (digest.totals.sessions > 0) break;
+  }
+  assert.ok(digest.totals.sessions > 0);
   const log = (await get("/api/daylog")).data;
   assert.equal(log.hours.length, 24);
   // What a poster or film gets: star names, never the projects' own, and
@@ -175,7 +182,9 @@ test("the map, its live state, history, summary and digests", async () => {
   assert.ok(!log.topProjects.some((p) => stars.stars.some((s) => s.name === p.name)));
   assert.ok(!("hours" in stars) && !("busiestHour" in stars) && !("sessions" in stars));
   assert.deepEqual((await get("/api/constellation?names=1")).data.stars.map((s) => s.project), log.topProjects.map((p) => p.name));
-  assert.deepEqual((await get("/api/constellation")).data.stars, stars.stars, "the same names again");
+  // Names only: the demo's live sessions keep adding tool calls, so a star's
+  // counts can move between two reads.
+  assert.deepEqual((await get("/api/constellation")).data.stars.map((s) => s.name), stars.stars.map((s) => s.name), "the same names again");
   assert.match((await post("/api/narrate", { kind: "day" })).data.text, /While you were away/);
   assert.match((await post("/api/narrate", {})).data.text, /While you were away/);
 });
