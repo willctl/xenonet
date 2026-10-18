@@ -295,7 +295,10 @@ async function startServer() {
   // Only the window's own API requests carry this through Desktop, which
   // the service takes for the window's (electron/desktop-server.js).
   const secret = crypto.randomBytes(32).toString("hex");
-  frontendServer = await desktopServer({ root, port: Number(process.env.XENONET_DESKTOP_PORT || PORT + 1000), service: SERVICE_BASE, secret, dev: dev ? { hot: !instance?.frozen } : null });
+  // The page's port, beside the service's, or any free one when that would
+  // be past the last port (a test instance on a high port).
+  const pagePort = Number(process.env.XENONET_DESKTOP_PORT || (PORT + 1000 <= 65535 ? PORT + 1000 : 0));
+  frontendServer = await desktopServer({ root, port: pagePort, service: SERVICE_BASE, secret, dev: dev ? { hot: !instance?.frozen } : null });
   BASE = frontendServer.base;
   pageHeaders(session.defaultSession, { base: BASE, secret });
   const dir = runtimeDir(env);
@@ -893,11 +896,11 @@ if (iconsArg >= 0) {
     try {
       const how = await startServer();
       console.log(`[xenonet] server ${how} at ${BASE}`);
-      // The control channel comes through a server this app started.
-      if (control && how === "reused") console.log(`[xenonet] the server at ${BASE} was already running, so scripts and agents can't control this window; stop that server and restart ${app.name}`);
     } catch (err) {
-      const { dialog } = await import("electron");
-      dialog.showErrorBox("XenoNet couldn't start its server", String(err.message ?? err));
+      // A window that's never shown (a test's) has no one to read a dialog,
+      // which would hold it open for good: it says why on stderr instead.
+      if (offscreen) console.error(`[xenonet] couldn't start its server: ${err.message ?? err}`);
+      else (await import("electron")).dialog.showErrorBox("XenoNet couldn't start its server", String(err.message ?? err));
       app.exit(1);
       return;
     }

@@ -21,11 +21,14 @@ const same = (a, b) => typeof a === "string" && a.length === b.length && crypto.
 // keeps it as it loaded (XenoNet Dev's test instance).
 export async function desktopServer({ root, port, service, secret, dev = null }) {
   if (!/^[a-f0-9]{64}$/.test(secret ?? "")) throw new Error("Desktop's frontend needs a secret for its page.");
-  const base = `http://127.0.0.1:${port}`;
+  // Port 0 asks for any free port; base and the host check follow the one
+  // it gets.
+  let host = `127.0.0.1:${port}`;
+  let base = `http://${host}`;
   let vite = null;
   const server = http.createServer((req, res) => {
     const refuse = (status) => { res.writeHead(status); res.end(); };
-    if (req.headers.host !== `127.0.0.1:${port}`) return refuse(421);
+    if (req.headers.host !== host) return refuse(421);
     if (req.headers.origin && req.headers.origin !== base) return refuse(403);
     const url = new URL(req.url, base);
     if (url.pathname.startsWith("/api/")) {
@@ -52,6 +55,8 @@ export async function desktopServer({ root, port, service, secret, dev = null })
     vite = await createServer({ root, server: { middlewareMode: true, ws: { server }, ...(dev.hot === false ? { hmr: false, watch: null } : {}) }, appType: "spa" });
   }
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(port, "127.0.0.1", resolve); });
+  host = `127.0.0.1:${server.address().port}`;
+  base = `http://${host}`;
   return { base, close: () => { vite?.close(); server.closeAllConnections(); server.close(); } };
 }
 
