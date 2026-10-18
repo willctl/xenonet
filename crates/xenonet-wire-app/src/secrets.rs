@@ -3,6 +3,7 @@
 //! secret only ever on its standard input, and the memory store the demo
 //! and test instances keep theirs in, so nothing reaches yours from them.
 
+use crate::fx::Locked;
 use std::io::{Read, Write};
 use std::process::{Command as Proc, Stdio};
 use std::sync::Mutex;
@@ -93,48 +94,51 @@ impl Secrets {
 
     // The store's program runs on a blocking thread: it can take a while
     // (the keychain may ask you first).
-    async fn blocking<T: Send + 'static>(&self, f: impl FnOnce(&SecretStore, &mut Runner) -> Result<T, String> + Send + 'static) -> Result<T, String> {
-        let Secrets::Store { platform, tool } = self else { unreachable!() };
+    async fn blocking<T: Send + 'static>(
+        platform: &str,
+        tool: &Option<String>,
+        f: impl FnOnce(&SecretStore, &mut Runner) -> Result<T, String> + Send + 'static,
+    ) -> Result<T, String> {
         let store = Self::store(platform, tool);
         tokio::task::spawn_blocking(move || f(&store, &mut Runner)).await.map_err(|e| e.to_string())?
     }
 
     pub async fn has(&self, target: &str) -> Result<bool, String> {
         match self {
-            Secrets::Memory(m) => Ok(m.lock().unwrap().has(target)),
-            Secrets::Store { .. } => {
+            Secrets::Memory(m) => Ok(m.locked().has(target)),
+            Secrets::Store { platform, tool } => {
                 let t = target.to_string();
-                self.blocking(move |s, r| s.has(r, &t)).await
+                Self::blocking(platform, tool, move |s, r| s.has(r, &t)).await
             }
         }
     }
 
     pub async fn get(&self, target: &str) -> Result<Option<String>, String> {
         match self {
-            Secrets::Memory(m) => Ok(m.lock().unwrap().get(target)),
-            Secrets::Store { .. } => {
+            Secrets::Memory(m) => Ok(m.locked().get(target)),
+            Secrets::Store { platform, tool } => {
                 let t = target.to_string();
-                self.blocking(move |s, r| s.get(r, &t)).await
+                Self::blocking(platform, tool, move |s, r| s.get(r, &t)).await
             }
         }
     }
 
     pub async fn set(&self, target: &str, secret: &str, comment: &str) -> Result<bool, String> {
         match self {
-            Secrets::Memory(m) => m.lock().unwrap().set(target, secret),
-            Secrets::Store { .. } => {
+            Secrets::Memory(m) => m.locked().set(target, secret),
+            Secrets::Store { platform, tool } => {
                 let (t, s, c) = (target.to_string(), secret.to_string(), comment.to_string());
-                self.blocking(move |st, r| st.set(r, &t, &s, &c)).await
+                Self::blocking(platform, tool, move |st, r| st.set(r, &t, &s, &c)).await
             }
         }
     }
 
     pub async fn remove(&self, target: &str) -> Result<bool, String> {
         match self {
-            Secrets::Memory(m) => Ok(m.lock().unwrap().remove(target)),
-            Secrets::Store { .. } => {
+            Secrets::Memory(m) => Ok(m.locked().remove(target)),
+            Secrets::Store { platform, tool } => {
                 let t = target.to_string();
-                self.blocking(move |s, r| s.remove(r, &t)).await
+                Self::blocking(platform, tool, move |s, r| s.remove(r, &t)).await
             }
         }
     }

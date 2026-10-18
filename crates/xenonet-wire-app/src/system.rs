@@ -5,6 +5,7 @@
 //! times, memory, uptime), starts and stops the programs the GPU readers
 //! keep running, and keeps the idle timer. The demo's computer is made up.
 
+use crate::fx::Locked;
 use crate::fx::{self, now_ms, platform, RunOptions};
 use async_trait::async_trait;
 use serde_json::Value;
@@ -59,7 +60,7 @@ pub mod os {
         let mut times = Vec::new();
         // SAFETY: host_processor_info hands back an array it allocated,
         // read within its count and given back with vm_deallocate.
-        #[allow(deprecated)]
+        #[expect(deprecated, reason = "libc points its mach calls to the mach2 crate, a dependency for two calls")]
         unsafe {
             let mut count: libc::natural_t = 0;
             let mut info: libc::processor_info_array_t = std::ptr::null_mut();
@@ -87,7 +88,7 @@ pub mod os {
     pub fn freemem() -> f64 {
         // SAFETY: host_statistics64 fills the struct it's given, within the
         // count given.
-        #[allow(deprecated)]
+        #[expect(deprecated, reason = "libc points its mach calls to the mach2 crate, a dependency for two calls")]
         unsafe {
             let mut info: libc::vm_statistics64 = std::mem::zeroed();
             let mut count = libc::HOST_VM_INFO64_COUNT;
@@ -210,15 +211,15 @@ impl Gpu {
 
     fn start(&self) {
         let Gpu::Stream { file, args, st, .. } = self else { return };
-        let Some(generation) = st.lock().unwrap().proc.start(now_ms()) else { return };
+        let Some(generation) = st.locked().proc.start(now_ms()) else { return };
         let mut cmd = tokio::process::Command::new(file);
         cmd.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).kill_on_drop(true);
         let Ok(mut child) = cmd.spawn() else {
-            st.lock().unwrap().proc.spawn_failed(now_ms());
+            st.locked().proc.spawn_failed(now_ms());
             return;
         };
         let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel();
-        st.lock().unwrap().child = Some(stop_tx);
+        st.locked().child = Some(stop_tx);
         let st = st.clone();
         let mut out = child.stdout.take();
         tokio::spawn(async move {
@@ -234,7 +235,7 @@ impl Gpu {
                     n = read => {
                         if n == 0 { break; }
                         let chunk = String::from_utf8_lossy(&buf[..n]).into_owned();
-                        let mut s = st.lock().unwrap();
+                        let mut s = st.locked();
                         let now = now_ms();
                         for line in s.proc.data(&chunk) {
                             if s.windows { s.counters.line(&line, now) } else { s.nvidia.line(&line, now) }
@@ -247,13 +248,13 @@ impl Gpu {
                 }
             }
             let _ = child.wait().await;
-            st.lock().unwrap().proc.gone(generation, now_ms());
+            st.locked().proc.gone(generation, now_ms());
         });
     }
 
     fn stop(&self) {
         if let Gpu::Stream { st, .. } = self {
-            let mut s = st.lock().unwrap();
+            let mut s = st.locked();
             let child = s.child.take();
             if s.proc.stop() {
                 if let Some(c) = child {
@@ -267,24 +268,24 @@ impl Gpu {
         match self {
             Gpu::Stream { st, .. } => {
                 self.start();
-                let s = st.lock().unwrap();
+                let s = st.locked();
                 if s.proc.dead() {
                     return None;
                 }
                 Some(if s.windows { s.counters.read(now_ms()) } else { s.nvidia.read(now_ms()) })
             }
             Gpu::Ioreg(p) => {
-                if let Some(hit) = p.lock().unwrap().fresh(now_ms()) {
+                if let Some(hit) = p.locked().fresh(now_ms()) {
                     return hit.as_array().cloned();
                 }
                 let r = fx::exec_file("/usr/sbin/ioreg", &["-r", "-d", "1", "-w", "0", "-c", "IOAccelerator"].map(String::from), 3000, RunOptions::default()).await;
                 let g = if r.ok() { stats::parse_ioreg(&r.stdout, Some(os::totalmem())) } else { None };
                 let v = Value::Array(g.into_iter().collect());
-                p.lock().unwrap().set(v.clone(), now_ms());
+                p.locked().set(v.clone(), now_ms());
                 v.as_array().cloned()
             }
             Gpu::Amd { cards, polled } => {
-                if let Some(hit) = polled.lock().unwrap().fresh(now_ms()) {
+                if let Some(hit) = polled.locked().fresh(now_ms()) {
                     return hit.as_array().cloned();
                 }
                 let read = |dev: &str, f: &str| std::fs::read_to_string(format!("{dev}/{f}")).ok().map(|s| s.trim().to_string());
@@ -301,7 +302,7 @@ impl Gpu {
                         )
                     })
                     .collect();
-                polled.lock().unwrap().set(Value::Array(v.clone()), now_ms());
+                polled.locked().set(Value::Array(v.clone()), now_ms());
                 Some(v)
             }
         }
@@ -359,12 +360,12 @@ impl System {
     }
 
     async fn cpu(&self) -> Value {
-        if !self.core.lock().unwrap().has_prev() {
-            self.core.lock().unwrap().set_prev(&os::cpus().times);
+        if !self.core.locked().has_prev() {
+            self.core.locked().set_prev(&os::cpus().times);
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
         let c = os::cpus();
-        self.core.lock().unwrap().cpu(c.model.as_deref(), c.speed, c.times.len(), &c.times)
+        self.core.locked().cpu(c.model.as_deref(), c.speed, c.times.len(), &c.times)
     }
 }
 
@@ -376,7 +377,7 @@ impl SystemStats for SystemPanel {
     async fn read(&self) -> R<Value> {
         let me = self.0.clone();
         {
-            let mut idle = me.idle.lock().unwrap();
+            let mut idle = me.idle.locked();
             if let Some(t) = idle.take() {
                 t.abort();
             }
@@ -388,7 +389,7 @@ impl SystemStats for SystemPanel {
                 }
             }));
         }
-        if let Some(last) = me.last.lock().unwrap().clone().filter(|_| me.core.lock().unwrap().fresh(now_ms())) {
+        if let Some(last) = me.last.locked().clone().filter(|_| me.core.locked().fresh(now_ms())) {
             return Ok(last);
         }
         let gpu = me.gpu.get_or_init(|| async { pick() }).await;
@@ -398,13 +399,13 @@ impl SystemStats for SystemPanel {
                 None => None,
             }
         });
-        let reading = me.core.lock().unwrap().reading(now_ms(), platform(), Some(os::arch()), os::uptime(), c, os::totalmem(), os::freemem(), g, gpu.as_ref().map(Gpu::source));
-        *me.last.lock().unwrap() = Some(reading.clone());
+        let reading = me.core.locked().reading(now_ms(), platform(), Some(os::arch()), os::uptime(), c, os::totalmem(), os::freemem(), g, gpu.as_ref().map(Gpu::source));
+        *me.last.locked() = Some(reading.clone());
         Ok(reading)
     }
 
     fn stop(&self) {
-        if let Some(t) = self.0.idle.lock().unwrap().take() {
+        if let Some(t) = self.0.idle.locked().take() {
             t.abort();
         }
         if let Some(Some(g)) = self.0.gpu.get() {

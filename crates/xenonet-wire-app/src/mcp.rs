@@ -11,6 +11,7 @@
 //! Codex's app-server belongs to the map's readers, so Codex isn't asked
 //! here: the catalog comes from the configuration and the server itself.
 
+use crate::fx::Locked;
 use crate::fx::{self, now_ms};
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -69,23 +70,23 @@ impl Catalog {
 #[async_trait]
 impl McpInfo for Catalog {
     async fn get(&self, server: &str, sessions: &Value, refresh: bool) -> R<Value> {
-        let hit = || self.cache.lock().unwrap().get(server).cloned().filter(|h| info::fresh(h["checkedAt"].as_f64().unwrap_or(0.0), now_ms()));
+        let hit = || self.cache.locked().get(server).cloned().filter(|h| info::fresh(h["checkedAt"].as_f64().unwrap_or(0.0), now_ms()));
         if !refresh {
             if let Some(h) = hit() {
                 return Ok(h);
             }
         }
         // One collection a server at a time: an ask meanwhile gets its result.
-        let lock = self.pending.lock().unwrap().entry(server.to_string()).or_default().clone();
+        let lock = self.pending.locked().entry(server.to_string()).or_default().clone();
         let was_busy = lock.try_lock().is_err();
         let _one = lock.lock().await;
         if was_busy {
-            if let Some(h) = self.cache.lock().unwrap().get(server).cloned() {
+            if let Some(h) = self.cache.locked().get(server).cloned() {
                 return Ok(h);
             }
         }
         let r = self.collect(server, sessions.as_array().map_or(&[][..], Vec::as_slice)).await;
-        self.cache.lock().unwrap().insert(server.to_string(), r.clone());
+        self.cache.locked().insert(server.to_string(), r.clone());
         Ok(r)
     }
 

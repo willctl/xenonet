@@ -6,6 +6,7 @@
 //! The demo's player is made up, and nothing reaches Spotify from it.
 
 use crate::fx::now_ms;
+use crate::fx::Locked;
 use crate::secrets::Secrets;
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -42,7 +43,7 @@ impl SpotifyRemote {
 
     // A job: what the Rust asks for, done here, until it's over.
     async fn run(&self, kind: &str, args: Value) -> R<Value> {
-        let (mut job, mut ask) = self.core.lock().unwrap().start(kind, &args, now_ms());
+        let (mut job, mut ask) = self.core.locked().start(kind, &args, now_ms());
         let mut thrown = String::new();
         loop {
             let got = match &ask {
@@ -74,11 +75,12 @@ impl SpotifyRemote {
                     }
                 },
             };
-            (job, ask) = self.core.lock().unwrap().resume(job, got, now_ms());
+            (job, ask) = self.core.locked().resume(job, got, now_ms());
         }
     }
 }
 
+#[expect(clippy::result_large_err, reason = "a core's error, as the routes take it")]
 fn settle<T>(r: Result<T, Failed>) -> R<T> {
     r.map_err(|f| match f {
         Failed::Spotify(e) => spotify_error(e),
@@ -110,18 +112,18 @@ impl Spotify for SpotifyRemote {
 
     fn set_app(&self, client_id: &Value) -> R<Value> {
         let id = if client_id.is_null() { String::new() } else { xenonet_base::text::js_string(client_id) };
-        settle(self.core.lock().unwrap().set_app(&id))
+        settle(self.core.locked().set_app(&id))
     }
 
     fn begin(&self) -> R<Value> {
-        self.core.lock().unwrap().begin(now_ms()).map_err(spotify_error)
+        self.core.locked().begin(now_ms()).map_err(spotify_error)
     }
 
     fn set(&self, device: &Value, duck: &Value) -> R<Value> {
         // undefined (left out) leaves each as it is; the routes pass null for it.
         let opt = |v: &Value| (!v.is_null()).then_some(v.clone());
         let (device, duck) = (opt(device), opt(duck));
-        self.core.lock().unwrap().set(device.as_ref(), duck.as_ref()).map_err(|e| CoreError::new(e.message))
+        self.core.locked().set(device.as_ref(), duck.as_ref()).map_err(|e| CoreError::new(e.message))
     }
 
     fn duck_plan(&self, waiting: bool, player: &Value, device: &Value, held: &Value) -> R<Value> {
@@ -164,16 +166,16 @@ impl Default for DemoSpotify {
 #[async_trait]
 impl Spotify for DemoSpotify {
     async fn status(&self) -> R<Value> {
-        let s = self.settings.lock().unwrap().clone();
+        let s = self.settings.locked().clone();
         Ok(json!({ "app": true, "connected": true, "device": s["device"], "duck": s["duck"], "redirect": core::REDIRECT_SHOWN, "demo": true }))
     }
 
     async fn player(&self) -> R<Value> {
-        Ok(self.player.lock().unwrap().clone())
+        Ok(self.player.locked().clone())
     }
 
     async fn command(&self, op: &str, value: &Value) -> R<()> {
-        let mut p = self.player.lock().unwrap();
+        let mut p = self.player.locked();
         core::demo_command(&mut p, Some(op), (!value.is_null()).then_some(value));
         Ok(())
     }
@@ -195,7 +197,7 @@ impl Spotify for DemoSpotify {
     }
 
     fn set(&self, device: &Value, duck: &Value) -> R<Value> {
-        let mut s = self.settings.lock().unwrap();
+        let mut s = self.settings.locked();
         if !device.is_null() {
             s["device"] = device.clone();
         }

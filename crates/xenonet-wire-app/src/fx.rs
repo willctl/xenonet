@@ -20,6 +20,18 @@ use xenonet_app::task::{Done, Failure, Io, Outcome, Reply, Task};
 
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
+/// A lock taken whatever a panic elsewhere left in it: what's kept behind
+/// these locks is whole between statements, so it's still good to read.
+pub trait Locked<T> {
+    fn locked(&self) -> std::sync::MutexGuard<'_, T>;
+}
+
+impl<T> Locked<T> for std::sync::Mutex<T> {
+    fn locked(&self) -> std::sync::MutexGuard<'_, T> {
+        self.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
 /// What answers a task's requests ({ op, … }): its reply, or what it threw
 /// (`{ message, code?, … }`, as task.js's describe() has it).
 pub type Perform = Arc<dyn Fn(Value) -> BoxFuture<Reply> + Send + Sync>;

@@ -4,6 +4,7 @@
 //! and the demo's made up.
 
 use crate::fx::now_ms;
+use crate::fx::Locked;
 use serde_json::Value;
 use std::path::Path;
 use std::sync::Mutex;
@@ -35,7 +36,7 @@ fn err(e: store::StoreError) -> CoreError {
 
 impl Refusals for RefusalStore {
     fn record(&self, signal: &Value, event: &Value) -> R<Option<Value>> {
-        let mut core = self.core.lock().unwrap();
+        let mut core = self.core.locked();
         if core.known(signal, event) {
             return Ok(None);
         }
@@ -43,11 +44,11 @@ impl Refusals for RefusalStore {
     }
 
     fn list(&self) -> R<Value> {
-        Ok(Value::Array(self.core.lock().unwrap().list(0.0, None, None)))
+        Ok(Value::Array(self.core.locked().list(0.0, None, None)))
     }
 
     fn get(&self, id: &str) -> R<Option<Value>> {
-        Ok(self.core.lock().unwrap().get(id))
+        Ok(self.core.locked().get(id))
     }
 
     fn dir(&self) -> String {

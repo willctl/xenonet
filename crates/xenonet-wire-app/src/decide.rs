@@ -5,6 +5,7 @@
 //! a request's header. The Rust builds each request and reads each answer;
 //! the waiting is here.
 
+use crate::fx::Locked;
 use crate::fx::{now_ms, BoxFuture};
 use crate::secrets::Secrets;
 use async_trait::async_trait;
@@ -40,7 +41,7 @@ impl Decisions {
 
     async fn key(&self) -> Option<String> {
         let k = self.secrets.get(decide::KEY_TARGET).await.ok().flatten();
-        *self.has_key.lock().unwrap() = Some(k.is_some());
+        *self.has_key.locked() = Some(k.is_some());
         k
     }
 
@@ -79,12 +80,12 @@ impl Decisions {
 #[async_trait]
 impl Decider for Decisions {
     async fn status(&self) -> R<Value> {
-        let known = *self.has_key.lock().unwrap();
+        let known = *self.has_key.locked();
         let has = match known {
             Some(h) => h,
             None => {
                 let h = self.secrets.has(decide::KEY_TARGET).await.unwrap_or(false);
-                *self.has_key.lock().unwrap() = Some(h);
+                *self.has_key.locked() = Some(h);
                 h
             }
         };
@@ -98,13 +99,13 @@ impl Decider for Decisions {
         };
         let checked = decide::check_key(&given).map_err(decision_error)?;
         self.secrets.set(decide::KEY_TARGET, &checked, decide::KEY_COMMENT).await.map_err(CoreError::new)?;
-        *self.has_key.lock().unwrap() = Some(true);
+        *self.has_key.locked() = Some(true);
         Ok(json!({ "key": "stored", "store": self.secrets.kind() }))
     }
 
     async fn forget_key(&self) -> R<Value> {
         let _ = self.secrets.remove(decide::KEY_TARGET).await;
-        *self.has_key.lock().unwrap() = Some(false);
+        *self.has_key.locked() = Some(false);
         Ok(json!({ "key": "missing" }))
     }
 }
@@ -139,7 +140,7 @@ impl Spent {
     }
 
     fn fresh(&self) -> Option<Value> {
-        self.last.lock().unwrap().as_ref().filter(|(_, at)| usage::fresh(*at, now_ms())).map(|(v, _)| v.clone())
+        self.last.locked().as_ref().filter(|(_, at)| usage::fresh(*at, now_ms())).map(|(v, _)| v.clone())
     }
 }
 
@@ -155,13 +156,13 @@ impl OpenRouter for Spent {
             return Ok(v);
         }
         let r = self.read().await;
-        *self.last.lock().unwrap() = Some((r.clone(), now_ms()));
+        *self.last.locked() = Some((r.clone(), now_ms()));
         Ok(r)
     }
 
     // A new key, or none: read again on the next ask.
     fn forget(&self) {
-        *self.last.lock().unwrap() = None;
+        *self.last.locked() = None;
     }
 }
 
