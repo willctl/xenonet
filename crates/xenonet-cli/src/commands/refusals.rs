@@ -9,9 +9,9 @@ use super::logs::since_of;
 use crate::args::Flags;
 use crate::clock::date_hour_minute as when;
 use crate::config;
+use crate::cores;
 use crate::js::{have, num, on, str, t};
 use crate::out::{c, now, print, write, write_bytes, Done, Fail};
-use crate::pending;
 use crate::sys;
 use serde_json::{json, Map, Value};
 use xenonet_base::json::stringify;
@@ -66,20 +66,20 @@ fn scan(dir: &str, flags: &Flags) -> Done {
             }
             for line in text.split('\n').filter(|l| may_hold(l)) {
                 let Ok(raw) = xenonet_base::json::parse(line) else { continue };
-                let Some(sig) = pending::refusal_signal(app, &raw)?.filter(|s| !s.is_null()) else { continue };
+                let Some(sig) = cores::refusal_signal(app, &raw)?.filter(|s| !s.is_null()) else { continue };
                 if on(&sig, "at") && num(&sig, "at") < from {
                     continue;
                 }
                 let agent = if file.contains("subagents") { json!(sys::base_name(&file).trim_end_matches(".jsonl")) } else { Value::Null };
                 let cwd = raw.get("cwd").filter(|c| c.is_string()).cloned().unwrap_or(Value::Null);
                 let at = json!({ "sessionId": session_of(app, &file), "app": app, "agentId": agent, "file": file, "cwd": cwd });
-                if pending::refusals_record(dir, &sig, &at)?.is_some_and(|r| !r.is_null()) {
+                if cores::refusals_record(dir, &sig, &at)?.is_some_and(|r| !r.is_null()) {
                     found += 1;
                 }
             }
         }
     }
-    let without = if found > 0 && !pending::refusals_context_on(dir)? { c::dim(" (without context: xenonet refusals context on, then capture --all)") } else { String::new() };
+    let without = if found > 0 && !cores::refusals_context_on(dir)? { c::dim(" (without context: xenonet refusals context on, then capture --all)") } else { String::new() };
     print(format!("{} Looked through {}; kept {} XenoNet didn't have{without}.", c::green("✓"), plural_s(files, "transcript"), plural_s(found, "refusal")));
     Ok(0)
 }
@@ -99,11 +99,11 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
     match sub {
         "context" => {
             let Some(want) = id.filter(|x| *x == "on" || *x == "off") else {
-                let now_on = pending::refusals_context_on(&dir)?;
+                let now_on = cores::refusals_context_on(&dir)?;
                 print(format!("Keeping context is {}. xenonet refusals context on|off changes it.", if now_on { c::green("on") } else { "off".into() }));
                 return Ok(0);
             };
-            pending::refusals_set_context(&dir, want == "on")?;
+            cores::refusals_set_context(&dir, want == "on")?;
             print(if want == "on" {
                 format!("{} XenoNet keeps each new refusal's context: the transcript up to it, in its state folder. Transcripts can hold secrets; export --scrub takes home folders and keys out.", c::green("✓"))
             } else {
@@ -112,7 +112,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             Ok(0)
         }
         "list" => {
-            let all = pending::refusals_list(&dir, since, provider.as_deref())?;
+            let all = cores::refusals_list(&dir, since, provider.as_deref())?;
             if flags.on("json") {
                 let lines: Vec<String> = all
                     .iter()
@@ -131,7 +131,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
                 return Ok(0);
             }
             if all.is_empty() {
-                print(c::dim(format!("No refusals kept{}. Keeping context is {}.", if since != 0.0 { " in that time" } else { "" }, on_off(pending::refusals_context_on(&dir)?))));
+                print(c::dim(format!("No refusals kept{}. Keeping context is {}.", if since != 0.0 { " in that time" } else { "" }, on_off(cores::refusals_context_on(&dir)?))));
                 return Ok(0);
             }
             for r in &all {
@@ -147,12 +147,12 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
                 let who = have(r, "app").map_or_else(|| t(r, "provider"), |a| crate::js::text(Some(a)));
                 print(format!("{}  {}  {who} {}{category}{model}{context}\n  {}", c::dim(when(num(r, "at"))), c::bold(t(r, "id")), kind_words(&t(r, "kind")), c::dim(said)));
             }
-            print(c::dim(format!("\n{} kept. Keeping context is {}.", all.len(), on_off(pending::refusals_context_on(&dir)?))));
+            print(c::dim(format!("\n{} kept. Keeping context is {}.", all.len(), on_off(cores::refusals_context_on(&dir)?))));
             Ok(0)
         }
         "show" => {
             let r = match id {
-                Some(id) => pending::refusals_get(&dir, id)?.filter(|r| xenonet_base::text::truthy(Some(r))),
+                Some(id) => cores::refusals_get(&dir, id)?.filter(|r| xenonet_base::text::truthy(Some(r))),
                 None => None,
             };
             let Some(r) = r else { return Err(Fail::error(format!("no refusal {}; xenonet refusals lists them", id.map_or("", String::as_str)))) };
@@ -160,7 +160,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
                 if !on(&r, "context") {
                     return Err(Fail::error("it was kept without context; xenonet refusals capture adds it while its transcript is still there"));
                 }
-                write_bytes(&pending::refusals_context(&dir, &t(&r, "id"))?);
+                write_bytes(&cores::refusals_context(&dir, &t(&r, "id"))?);
                 return Ok(0);
             }
             let mut rest = r.as_object().cloned().unwrap_or_default();
@@ -170,7 +170,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         }
         "export" => {
             let lines =
-                pending::refusals_export_lines(&dir, &json!({ "since": since, "provider": provider, "withContext": flags.on("withContext"), "scrubbed": flags.on("scrub") }))?;
+                cores::refusals_export_lines(&dir, &json!({ "since": since, "provider": provider, "withContext": flags.on("withContext"), "scrubbed": flags.on("scrub") }))?;
             let text = lines.iter().map(|l| stringify(l, 0)).collect::<Vec<_>>().join("\n") + if lines.is_empty() { "" } else { "\n" };
             let Some(out) = flags.text("out") else {
                 write(&text);
@@ -182,7 +182,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         }
         "capture" => {
             let ids: Vec<String> = if flags.on("all") {
-                pending::refusals_list(&dir, 0.0, None)?.iter().filter(|r| !on(r, "context")).map(|r| t(r, "id")).collect()
+                cores::refusals_list(&dir, 0.0, None)?.iter().filter(|r| !on(r, "context")).map(|r| t(r, "id")).collect()
             } else {
                 id.map(|x| vec![x.clone()]).unwrap_or_default()
             };
@@ -191,7 +191,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             }
             let mut added = 0;
             for x in &ids {
-                let r = pending::refusals_capture(&dir, x)?;
+                let r = cores::refusals_capture(&dir, x)?;
                 if on(&r, "ok") && !on(&r, "already") {
                     added += 1;
                 } else if !on(&r, "ok") && !flags.on("all") {

@@ -5,9 +5,9 @@
 //! process list.
 
 use crate::args::Flags;
+use crate::cores;
 use crate::js::t;
 use crate::out::{c, print, write, Done, Fail};
-use crate::pending;
 use std::io::{IsTerminal, Read};
 
 pub const HELP: &str = include_str!("help/decide.txt");
@@ -33,18 +33,18 @@ fn read_key() -> String {
 pub fn run(args: &[String], _flags: &Flags) -> Done {
     match args.first().map_or("status", String::as_str) {
         "status" => {
-            let s = pending::decider_status()?;
+            let s = cores::decider_status()?;
             let key = if crate::js::str(&s, "key") == Some("stored") { c::green(format!("a key is kept in {}", t(&s, "store"))) } else { "no key yet: xenonet decide key".into() };
             print(format!("{} · {key}", t(&s, "model")));
             Ok(0)
         }
         "key" => {
-            let r = pending::decider_store_key(&read_key())?;
+            let r = cores::decider_store_key(&read_key())?;
             print(format!("{} The key is kept in {}. XenoNet uses it only when you send something to the decision model.", c::green("✓"), t(&r, "store")));
             Ok(0)
         }
         "forget" => {
-            pending::decider_forget_key()?;
+            cores::decider_forget_key()?;
             print(format!("{} XenoNet forgot the key.", c::green("✓")));
             Ok(0)
         }

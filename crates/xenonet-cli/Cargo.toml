@@ -15,13 +15,27 @@ name = "xenonet"
 path = "src/main.rs"
 
 [dependencies]
+# The refusals' gzipped context, and the package xenonet setup makes.
+flate2.workspace = true
+# The demo's ids and randomness, as crypto.randomUUID and Math.random.
+getrandom.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+# URLs as fetch reads them, for the reads the cores ask for.
+url.workspace = true
 xenonet-actors.workspace = true
 xenonet-base.workspace = true
 xenonet-mcp.workspace = true
 xenonet-schema.workspace = true
 xenonet-service.workspace = true
+# The cores the commands call, run natively (src/cores).
+xenonet-app.workspace = true
+xenonet-assistant.workspace = true
+xenonet-components.workspace = true
+xenonet-engine.workspace = true
+xenonet-hosts.workspace = true
+xenonet-sources.workspace = true
+xenonet-state.workspace = true
 xenonet-wire-app.workspace = true
 xenonet-wire-engine.workspace = true
 xenonet-wire-map.workspace = true

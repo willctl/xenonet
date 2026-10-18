@@ -1,17 +1,22 @@
 //! The parts of core/config.js the command reads: whether it stands for
 //! the demo, and XenoNet's folders, as config.js finds them in the
-//! command's own process. The demo's are a made-up world's
-//! (core/demo.js), which isn't in Rust yet.
+//! command's own process. The demo's are a made-up world's (core/demo.js),
+//! made the first time they're asked for, as config.js made it when it
+//! was first imported.
 
+use crate::cores;
 use crate::out::Fail;
-use crate::pending;
 use crate::sys;
+use std::sync::OnceLock;
 
 /// The folders, and the home folder they're shown under.
+#[derive(Clone, Debug)]
 pub struct Config {
     pub state_dir: String,
     pub cache_dir: String,
     pub home_dir: String,
+    pub claude_projects_dir: String,
+    pub codex_home: String,
 }
 
 fn argv_has(flag: &str) -> bool {
@@ -23,10 +28,11 @@ pub fn demo() -> bool {
     argv_has("--demo") || std::env::var("XENONET_DEMO").is_ok_and(|v| v == "1")
 }
 
-/// The config, or the pending demo world's for --demo.
+/// The config: the demo world's for --demo, made once.
 pub fn config() -> Result<Config, Fail> {
     if demo() {
-        return Err(pending::create_world());
+        static WORLD: OnceLock<Result<Config, (String, i32)>> = OnceLock::new();
+        return WORLD.get_or_init(|| cores::create_world().map_err(|f| (f.message, f.code))).clone().map_err(|(m, code)| Fail { message: m, code, expected: false, status: None });
     }
     // The command with --dev, and no XENONET_PORT, is XenoNet Dev's.
     let server_dev = argv_has("--dev") && sys::var("XENONET_PORT").is_none();
@@ -34,7 +40,13 @@ pub fn config() -> Result<Config, Fail> {
         Ok(set) => sys::resolve(&set),
         Err(_) => sys::resolve(&sys::app_dir(kind, if server_dev { "XenoNet Dev" } else { "XenoNet" })),
     };
-    Ok(Config { state_dir: dir("state", "XENONET_STATE_DIR"), cache_dir: dir("cache", "XENONET_CACHE_DIR"), home_dir: sys::home() })
+    Ok(Config {
+        state_dir: dir("state", "XENONET_STATE_DIR"),
+        cache_dir: dir("cache", "XENONET_CACHE_DIR"),
+        home_dir: sys::home(),
+        claude_projects_dir: claude_projects_dir(),
+        codex_home: codex_home(),
+    })
 }
 
 /// config.claudeProjectsDir: Claude Code's transcripts.

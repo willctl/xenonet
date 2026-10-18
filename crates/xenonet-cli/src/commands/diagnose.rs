@@ -5,9 +5,9 @@
 
 use super::doctor::checkup;
 use crate::args::Flags;
+use crate::cores;
 use crate::js::{list, str};
 use crate::out::{c, eprint, now, print, write, Done, Fail};
-use crate::pending;
 use crate::reach::find;
 use crate::sys;
 use serde_json::{json, Value};
@@ -24,7 +24,7 @@ pub fn gather(flags: &Flags) -> Result<(String, Value), Fail> {
     let state_dir = sys::state_dir(flags.on("dev"));
     let doctor = checkup(flags, None).ok();
     let connect = s.as_ref().and_then(|s| s.get("/api/engine/connect").ok());
-    let launcher = pending::machine_launcher().ok();
+    let launcher = cores::machine_launcher().ok();
     let health = s.as_ref().map(|s| s.health.clone()).unwrap_or(Value::Null);
     let instance = crate::js::have(&health, "instance").cloned().unwrap_or_else(|| if flags.on("dev") { json!("dev") } else { Value::Null });
     let xenonet = json!({
@@ -34,14 +34,14 @@ pub fn gather(flags: &Flags) -> Result<(String, Value), Fail> {
         "running": s.is_some(),
     });
     let errors = read_logs(Path::new(&log_dir(&state_dir)), now() - 24.0 * 3600e3, "warn", None, None, 500);
-    let bundle = pending::make_bundle(&json!({ "xenonet": xenonet, "doctor": doctor, "errors": errors, "connect": connect, "launcher": launcher }))?;
+    let bundle = cores::make_bundle(&json!({ "xenonet": xenonet, "doctor": doctor, "errors": errors, "connect": connect, "launcher": launcher }))?;
     Ok((state_dir, bundle))
 }
 
 pub fn run(_args: &[String], flags: &Flags) -> Done {
     let (state_dir, bundle) = gather(flags)?;
     if !flags.on("ask") {
-        let text = if flags.on("json") { format!("{}\n", xenonet_base::json::stringify(&bundle, 2)) } else { pending::bundle_markdown(&bundle)? };
+        let text = if flags.on("json") { format!("{}\n", xenonet_base::json::stringify(&bundle, 2)) } else { cores::bundle_markdown(&bundle)? };
         if let Some(out) = flags.text("out") {
             std::fs::write(&out, &text).map_err(|e| Fail::error(xenonet_base::fs::FsError::of(e, "open", &out).message))?;
             print(format!("{} Wrote {out}. It's safe to share: no transcripts, titles, names or keys.", c::green("✓")));
@@ -60,8 +60,8 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
         return Err(Fail::error(format!("{named} isn't on your PATH; install it, or use --app {}.", if app == "claude" { "codex" } else { "claude" })));
     };
     let root = sys::xenonet_root();
-    let dir = pending::write_look(&state_dir, &bundle, std::slice::from_ref(&root))?;
-    let cmd = pending::ask_command(app, model.as_deref(), &dir, &[root])?;
+    let dir = cores::write_look(&state_dir, &bundle, std::slice::from_ref(&root))?;
+    let cmd = cores::ask_command(app, model.as_deref(), &dir, &[root])?;
     print(format!(
         "{}\n{}\n",
         c::dim(format!("XenoNet wrote what it could tell to {dir}.")),

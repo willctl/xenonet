@@ -2,9 +2,9 @@
 //! your PATH (core/command.js): a small script that runs this binary.
 
 use crate::args::Flags;
+use crate::cores;
 use crate::js::{on, t};
 use crate::out::{c, json, print, Done, Fail};
-use crate::pending;
 use crate::sys;
 use serde_json::json;
 
@@ -14,9 +14,9 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
     let entry = std::env::current_exe().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
     let dir = match flags.str("dir") {
         Some(d) => sys::resolve(d),
-        None => pending::command_dir()?,
+        None => cores::command_dir()?,
     };
-    let st = pending::install_command(&json!({ "dir": dir, "entry": entry, "force": flags.on("force") })).map_err(|e| {
+    let st = cores::install_command(&json!({ "dir": dir, "entry": entry, "force": flags.on("force") })).map_err(|e| {
         if e.expected {
             e
         } else {

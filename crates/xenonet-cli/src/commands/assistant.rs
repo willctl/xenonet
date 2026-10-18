@@ -8,9 +8,9 @@
 
 use crate::args::Flags;
 use crate::config::instance_dir;
+use crate::cores;
 use crate::js::{have, list, num, on, str, t};
 use crate::out::{ago, c, json, json_at, now, print, table, Done, Fail, Layout};
-use crate::pending;
 use crate::reach::find;
 use crate::sys;
 use serde_json::{json, Value};
@@ -120,8 +120,8 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         "list" | "status" => {
             let Some(s) = s else {
                 let dir = assistant_dir(&state_dir(flags));
-                let disabled = pending::is_disabled(&dir)?;
-                let revoked = pending::marked_revoked(&dir)?;
+                let disabled = cores::is_disabled(&dir)?;
+                let revoked = cores::marked_revoked(&dir)?;
                 let words = format!(
                     "XenoNet isn't running. Cloud access is {} as XenoNet's state folder says{}.",
                     if disabled { "off" } else { "on, for its active grants," },
@@ -173,7 +173,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         }
         "disable" => {
             // The tombstone first, so it holds whatever happens next.
-            pending::mark_disabled(&assistant_dir(&state_dir(flags)))?;
+            cores::mark_disabled(&assistant_dir(&state_dir(flags)))?;
             if let Some(s) = &s {
                 if let Err(e) = s.post("/api/assistant/disable", &json!({}), &[]) {
                     print(c::yellow(format!("XenoNet didn't take it at once ({}); it will within two seconds.", e.message)));
@@ -188,8 +188,8 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         "revoke" => {
             let grant = grant.filter(|g| is_grant_id(g)).ok_or_else(|| Fail::new("xenonet assistant revoke takes a grant's id (gr_…), as xenonet assistant lists them.", 2))?;
             let dir = assistant_dir(&state_dir(flags));
-            pending::mark_revoked(&dir, &grant)?;
-            pending::delete_credential(&dir, &grant)?;
+            cores::mark_revoked(&dir, &grant)?;
+            cores::delete_credential(&dir, &grant)?;
             if let Some(s) = &s {
                 match s.post(&format!("/api/assistant/{grant}/revoke"), &json!({}), &[]) {
                     Err(e) if e.status != Some(404) => return Err(e.into()),

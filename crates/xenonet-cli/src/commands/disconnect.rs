@@ -6,9 +6,9 @@
 
 use super::connect::{local_options, render};
 use crate::args::Flags;
+use crate::cores;
 use crate::js::{list, str, t};
 use crate::out::{c, print, Done};
-use crate::pending;
 use crate::prompt::confirm;
 use crate::reach::{candidates, find};
 use serde_json::{json, Map, Value};
@@ -22,7 +22,7 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
     let opts = local_options(candidates(flags)[0]);
     let preview = match &s {
         Some(s) => s.get("/api/engine/connect")?,
-        None => pending::connect_preview(&opts)?,
+        None => cores::connect_preview(&opts)?,
     };
     let there: Vec<&Value> = list(&preview, "apps").iter().filter(|a| list(a, "changes").iter().any(|ch| str(ch, "state") != Some("missing"))).collect();
     if there.is_empty() {
@@ -59,7 +59,7 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
             s.del("/api/engine/connect")?;
         }
         None => {
-            pending::connect_remove(&opts)?;
+            cores::connect_remove(&opts)?;
         }
     }
     let keeps = s.as_ref().map_or(String::new(), |s| format!(" ({} keeps running)", name_of(s)));

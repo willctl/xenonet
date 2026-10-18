@@ -3,9 +3,9 @@
 //! (core/doctor/checkup.js).
 
 use crate::args::Flags;
+use crate::cores;
 use crate::js::{list, num, on, str, t};
 use crate::out::{c, json, plural, print, table, Done, Fail, Layout};
-use crate::pending;
 use crate::reach::find;
 use serde_json::{json, Map, Value};
 use xenonet_base::client::name_of;
@@ -57,7 +57,7 @@ pub fn summarize(results: &[Value]) -> Value {
 /// skipped. `only` keeps the checks whose id starts with one of its
 /// entries.
 pub fn checkup(flags: &Flags, only: Option<&[String]>) -> Result<Value, Fail> {
-    let Some(s) = find(flags) else { return pending::checkup_here(&Value::Object(flags.0.clone()), only) };
+    let Some(s) = find(flags) else { return cores::checkup_here(flags, only) };
     let result = s.post("/api/doctor", &json!({}), &[])?;
     let all = list(&result, "results");
     let results: Vec<Value> = match only {
@@ -83,8 +83,8 @@ fn live(flags: &Flags) -> Done {
             47840
         })
     });
-    let listen_file = crate::config::config().ok().and_then(|cfg| pending::write_listen_settings(&cfg.state_dir, &port).ok());
-    let r = pending::live_setup(&port, listen_file.as_deref())?;
+    let listen_file = crate::config::config().ok().and_then(|cfg| cores::write_listen_settings(&cfg.state_dir, &port).ok());
+    let r = cores::live_setup(&port, listen_file.as_deref())?;
     if flags.on("json") {
         json(&r);
         return Ok(0);

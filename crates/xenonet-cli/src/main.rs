@@ -1,14 +1,15 @@
 //! The xenonet command, in Rust (cli/xenonet.js; docs/design/rust-core.md).
 //! Each command lives in commands/. Commands share the core with the
 //! service and the MCP servers: they call it directly, or a running
-//! XenoNet over its HTTP API. What needs a part of the core that isn't in
-//! Rust yet goes through pending.rs, which says so. `xenonet serve` is the
+//! XenoNet over its HTTP API. The core's functions they call are in
+//! cores/, which drives each slice's Rust natively. `xenonet serve` is the
 //! service itself.
 
 mod args;
 mod clock;
 mod commands;
 mod config;
+mod cores;
 mod handoff;
 mod instances;
 mod js;
