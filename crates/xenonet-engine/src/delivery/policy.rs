@@ -419,7 +419,7 @@ impl Policy {
 
     /// Whether `caller` may see or reach an agent with these facts.
     /// Another actor is visible to an actor only if a grant names it
-    /// (by:<slug>).
+    /// (`by:<slug>`).
     pub fn visible(&self, c: &mut dyn Calls, caller: &Arg, facts: &Arg) -> Result<bool> {
         let scope = match self.scope_of(c, caller)? {
             Scope::Free => return Ok(true),

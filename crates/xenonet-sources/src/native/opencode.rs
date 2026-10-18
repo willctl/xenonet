@@ -1,5 +1,5 @@
 //! core/native/opencode.js: OpenCode's database. Each OpenCode session in
-//! opencode.db is a session on the map, "opencode:<id>", and the edit, write,
+//! opencode.db is a session on the map, "`opencode:<id>`", and the edit, write,
 //! multiedit and apply_patch tools' files are its edits. The database is
 //! opened read only for each read and closed after it, and SQLite takes the
 //! edits out: a part's other fields never leave the database, apart from

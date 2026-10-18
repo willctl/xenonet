@@ -1,7 +1,7 @@
 //! Hermes Agent's observer (core/actors/hermes.js;
 //! docs/design/actors/hermes.md): observed and attributed only, with no
 //! installs and no change to Hermes's settings. One actor per profile:
-//! actor:hermes for the default one, actor:hermes-<profile> for each named
+//! actor:hermes for the default one, `actor:hermes-<profile>` for each named
 //! one.
 //!
 //! What it reads (hermes_files, metadata only): Hermes's processes in the

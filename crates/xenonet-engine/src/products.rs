@@ -33,8 +33,8 @@ pub fn product_of(id: &str) -> Option<&'static Product> {
 /// Why a product's actor can't report itself, for those that can't.
 pub const WHY_NOT: [(&str, &str); 1] = [("dots", "OpenAI's dots don't report themselves to XenoNet")];
 
-/// Whether a slug is a product's own: hermes and hermes-<profile> are
-/// Hermes's (one actor per profile), dots and dots-<suffix> OpenAI's dots
+/// Whether a slug is a product's own: hermes and `hermes-<profile>` are
+/// Hermes's (one actor per profile), dots and `dots-<suffix>` OpenAI's dots
 /// (one actor per dot you pair), the others their own slug.
 pub fn product_of_slug(slug: &str) -> Option<&'static str> {
     if slug == "hermes" || slug.starts_with("hermes-") {

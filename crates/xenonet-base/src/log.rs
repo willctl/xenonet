@@ -1,6 +1,6 @@
 //! XenoNet's error log (core/log.js): what went wrong in each part of
 //! XenoNet, kept where you can find it. Each part writes its own file of JSON
-//! lines, log/entry/v1, under <state>/logs (service.ndjson, desktop.ndjson,
+//! lines, log/entry/v1, under `<state>/logs` (service.ndjson, desktop.ndjson,
 //! cli.ndjson).
 //!
 //! An entry has a code that says what it is, XenoNet's words, the fix when

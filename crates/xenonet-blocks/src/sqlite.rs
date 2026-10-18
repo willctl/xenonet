@@ -3,7 +3,7 @@
 //! transaction of its own with the version it reaches. A database a newer
 //! XenoNet has moved further is left at its version. With `backup`, a
 //! database about to be migrated is copied first (VACUUM INTO
-//! <name>.v<n>.sqlite), and the copy is deleted a week later: it holds what
+//! `<name>.v<n>.sqlite`), and the copy is deleted a week later: it holds what
 //! the database itself keeps only so long (agents' messages, actors'
 //! events), so it doesn't keep them for good.
 
@@ -135,8 +135,8 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Deletes the copies made before migrations (<name>.v<n>.sqlite, or
-    /// <name>.v<n>-<time>.sqlite when that name was taken) that are
+    /// Deletes the copies made before migrations (`<name>.v<n>.sqlite`, or
+    /// `<name>.v<n>-<time>.sqlite` when that name was taken) that are
     /// `keep_backup_ms` old, by when they were written. Returns the files
     /// deleted.
     pub fn prune_backups(&mut self, now: f64) -> Vec<String> {

@@ -1,5 +1,5 @@
 //! core/themefiles.js: your own themes, JSON files in the themes folder of
-//! XenoNet's state folder, one a theme (<id>.json), with the fields of a
+//! XenoNet's state folder, one a theme (`<id>.json`), with the fields of a
 //! theme and "extends" naming the theme they start from. A file named for
 //! a built-in takes its place. Read fresh each time, so an edit shows on
 //! the next look; a file that isn't a JSON object is skipped and reported.
@@ -42,7 +42,7 @@ pub fn read_themes(dir: &str) -> (Map<String, Value>, Vec<String>) {
 }
 
 /// A theme of your own to start from: `from` with nothing changed yet,
-/// saved as <id>.json. Returns its file.
+/// saved as `<id>.json`. Returns its file.
 pub fn copy_theme(dir: &str, from: Option<&str>, id: &str, name: Option<&Value>) -> Result<String, FsError> {
     if !id_re().is_match(id) {
         return Err(fsx::said("a theme's id is lowercase letters, digits and dashes"));

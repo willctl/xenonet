@@ -527,7 +527,7 @@ pub(crate) fn slice_index(i: f64, len: usize) -> usize {
 }
 
 /// A page of `len` entries, newest first: the range to show, and the
-/// cursor further back. `cursor` ("rollout:<n>") counts the items already
+/// cursor further back. `cursor` ("`rollout:<n>`") counts the items already
 /// shown from the end.
 pub fn rollout_page(len: usize, cursor: Js<'_>, limit: f64) -> (usize, usize, Option<String>) {
     let c = match nn(cursor) {

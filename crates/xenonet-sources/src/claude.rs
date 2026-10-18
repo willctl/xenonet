@@ -35,7 +35,7 @@ fn is_session_file(name: &str) -> bool {
 
 /// Claude desktop's session files under `root` (its claude-code-sessions
 /// folder), in the order a walk finds them: sessions sit in
-/// <account>/<organization>/, so the folders say which Claude account
+/// `<account>/<organization>/`, so the folders say which Claude account
 /// each ran as. A folder that can't be read ends the walk, as the JS's did.
 pub fn desktop_files(root: &str) -> Vec<DesktopFile> {
     fn walk(dir: &str, parts: &[String], out: &mut Vec<DesktopFile>) -> std::io::Result<()> {

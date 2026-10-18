@@ -191,7 +191,7 @@ pub fn stall_reason(reasons: Option<&Value>) -> &'static str {
     }
 }
 
-/// SESSION_ID in core/schema/assistant.js: (claude|codex):<uuid>.
+/// SESSION_ID in core/schema/assistant.js: `(claude|codex):<uuid>`.
 pub fn is_session_id(s: &str) -> bool {
     let Some(u) = s.strip_prefix("claude:").or_else(|| s.strip_prefix("codex:")) else { return false };
     let b = u.as_bytes();

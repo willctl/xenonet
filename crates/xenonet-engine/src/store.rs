@@ -8,7 +8,7 @@
 //! grants, with the bounded log of what they read. One writer, the
 //! service; agents and actors never touch the file. The store block
 //! (xenonet_blocks::sqlite) opens it and keeps its version, and copies a
-//! file with data in it before taking it a step up (engine.v<n>.sqlite
+//! file with data in it before taking it a step up (`engine.v<n>.sqlite`
 //! beside it).
 //!
 //! Every call binds and reads as node:sqlite does (`sql`), with the
@@ -716,7 +716,7 @@ impl EngineStore {
         self.run("INSERT INTO assistant_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", &[key, Arg::Text(js_text(&value))])?;
         Ok(())
     }
-    /// A place's own id for remote readers (prj_<uuid>), made the first
+    /// A place's own id for remote readers (`prj_<uuid>`), made the first
     /// time it's asked for; `make` makes one.
     pub fn project_id_of<E: From<SqlError>>(&self, place: Arg, make: &mut dyn FnMut() -> std::result::Result<Arg, E>, now: Arg) -> std::result::Result<Value, E> {
         if let Some(had) = self.get("SELECT project_id FROM assistant_places WHERE place = ?", std::slice::from_ref(&place))? {

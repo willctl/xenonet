@@ -1,6 +1,6 @@
 //! core/reported-runs.js: runs an actor reports through the actor gateway
 //! (its report_run tool), such as a harness running in a sandbox. Each run
-//! is a session on the map, "<app>:<id>" with app its harness, marked
+//! is a session on the map, "`<app>:<id>`" with app its harness, marked
 //! observed through the gateway and reported by its actor. Kept in memory:
 //! a run goes when it hasn't reported for an hour, or ten minutes after it
 //! ended, and with the actor's gateway token.

@@ -341,7 +341,7 @@ pub fn agent_brief(sources: &[String]) -> String {
 
 const WEEK_MS: f64 = 7.0 * 86400e3;
 
-/// The folder for one look, <state>/diagnostics/<now>-<random>, with
+/// The folder for one look, `<state>/diagnostics/<now>-<random>`, with
 /// bundle.md, bundle.json and the brief; looks older than a week go when
 /// the next is made. Returns the folder.
 pub fn write_look(state_dir: &str, bundle: &Value, sources: &[String], now: f64) -> Result<String, FsError> {

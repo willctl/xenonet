@@ -110,7 +110,7 @@ pub fn assert_link(store: &Shared, slug: &Arg, identity: &Arg, provider: &Arg, k
 
 /// What an adapter verified, kept. It names an identity XenoNet knows only
 /// when the assertion maps to exactly that one: an OpenAI workspace to
-/// chatgpt:<workspace>. A verified link under another workspace than the
+/// `chatgpt:<workspace>`. A verified link under another workspace than the
 /// one before means the account changed: the old links lapse, and what was
 /// approved under them is yours to approve again. (identity, switched).
 pub fn record_verified(store: &Shared, slug: &Arg, facts: &Arg, known: &[Arg], now: f64) -> Result<(Option<String>, bool)> {

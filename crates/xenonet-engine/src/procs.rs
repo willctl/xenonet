@@ -12,7 +12,7 @@
 //! connection's process, a program's signature, its executable, a bundle's
 //! id and what a Node or Python process runs are looked up once.
 //!
-//! The program ps names is argv[0], which a process sets itself (exec -a).
+//! The program ps names is `argv[0]`, which a process sets itself (exec -a).
 //! Where a check rests on a path (Hermes's hosts, XenoNet's own bundle), the
 //! executable's real path decides instead (chain's `exe`).
 //!
@@ -95,7 +95,7 @@ pub trait Io {
 }
 
 /// A process as ps lists it: its pid, its parent's, when it started (ms,
-/// UTC) and its program (argv[0]).
+/// UTC) and its program (`argv[0]`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row {
     pub pid: f64,
@@ -335,7 +335,7 @@ fn pid_of(s: &str) -> Option<f64> {
     (n != 0.0 && !n.is_nan()).then_some(n)
 }
 
-/// What lsof -a -p <pids> -d txt -Fn says of several processes: each one's
+/// What `lsof -a -p <pids> -d txt -Fn` says of several processes: each one's
 /// executable, by pid, as its real path. lsof lists a process's program
 /// text in the order it's mapped, and the executable is mapped first,
 /// before dyld and the libraries.
@@ -359,13 +359,13 @@ pub fn parse_texts(text: &str) -> PidMap<String> {
     out
 }
 
-/// What lsof -a -p <pid> -d cwd -Fn says of a process's folder: its "n"
+/// What `lsof -a -p <pid> -d cwd -Fn` says of a process's folder: its "n"
 /// line, or None.
 pub fn parse_cwd(text: &str) -> Option<String> {
     text.split('\n').find(|l| l.starts_with("n/")).map(|l| l[1..].to_string())
 }
 
-/// What lsof -a -p <pids> -d cwd -Fpn says of several processes' folders.
+/// What `lsof -a -p <pids> -d cwd -Fpn` says of several processes' folders.
 pub fn parse_cwds(text: &str) -> PidMap<String> {
     let mut out = PidMap::default();
     let mut pid = None;
@@ -381,7 +381,7 @@ pub fn parse_cwds(text: &str) -> PidMap<String> {
     out
 }
 
-/// What ps -o pid=,command= -p <pids> says: each process's command line.
+/// What `ps -o pid=,command= -p <pids>` says: each process's command line.
 pub fn parse_commands(text: &str) -> PidMap<String> {
     let mut out = PidMap::default();
     for line in text.split('\n') {
@@ -434,8 +434,8 @@ pub fn parse_ps(text: &str) -> Table {
 }
 
 /// The process holding the client's end of a connection to 127.0.0.1:
-/// netstat -anv -p tcp lines read "tcp4 … <local> <foreign> <state>
-/// <4 counters> <name>:<pid> <flags> …", and the name may have spaces, or
+/// `netstat -anv -p tcp` lines read `tcp4 … <local> <foreign> <state>
+/// <4 counters> <name>:<pid> <flags> …`, and the name may have spaces, or
 /// be empty once the process has exited (the pid is still the last one
 /// that held the socket). While XenoNet is answering, its own end is open,
 /// so the client's end is ESTABLISHED, or FIN_WAIT_1 or FIN_WAIT_2 when the
@@ -575,7 +575,7 @@ impl Procs {
     /// (`again`: false for a process seen before, such as a session's pin).
     ///
     /// `exe`: each process also gets its executable's real path, and what
-    /// it is goes by that path rather than by argv[0]. An agent host is one
+    /// it is goes by that path rather than by `argv[0]`. An agent host is one
     /// only by its real path.
     pub fn chain(&self, io: &mut dyn Io, pid: Option<f64>, again: bool, exe: bool) -> Result<Vec<Link>, String> {
         let t = self.snapshot(io)?;

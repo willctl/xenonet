@@ -1,6 +1,6 @@
 //! core/native/copilot-cli.js: GitHub Copilot CLI's session events. Each
-//! session's event log (~/.copilot/session-state/<id>/events.jsonl, or
-//! <id>.jsonl before 1.0.11) is a session on the map, "copilot:<id>", with
+//! session's event log (`~/.copilot/session-state/<id>/events.jsonl`, or
+//! `<id>.jsonl` before 1.0.11) is a session on the map, "`copilot:<id>`", with
 //! its edit tools' files and its shutdown's changed files as its edits.
 
 use super::files::Files;

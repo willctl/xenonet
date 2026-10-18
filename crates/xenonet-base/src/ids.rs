@@ -1,12 +1,12 @@
 //! Ids, as docs/design/contracts.md fixes them (core/schema/ids.js):
 //!
-//! - a schema's $id, https://xenonet.dev/schemas/<path>/v<major>.json, and
-//!   its short form, <path>/v<major>, which data carries as "schema";
+//! - a schema's $id, `https://xenonet.dev/schemas/<path>/v<major>.json`, and
+//!   its short form, `<path>/v<major>`, which data carries as "schema";
 //! - host-qualified ids: an unqualified id is this XenoNet's own host's,
-//!   and one from another host is @<host>:<local id>;
-//! - sessions, <app>:<the run's id>;
-//! - actors, actor:<slug> (the person at the console is actor:you), and
-//!   projects merged across hosts by their git remote, repo:<remote>.
+//!   and one from another host is `@<host>:<local id>`;
+//! - sessions, `<app>:<the run's id>`;
+//! - actors, `actor:<slug>` (the person at the console is actor:you), and
+//!   projects merged across hosts by their git remote, `repo:<remote>`.
 
 pub const SCHEMA_BASE: &str = "https://xenonet.dev/schemas";
 
@@ -32,7 +32,7 @@ pub fn is_schema_path(path: &str) -> bool {
     path.split('/').all(segment) && !path.rsplit('/').next().is_some_and(version_segment)
 }
 
-/// "<path>/v<major>", the form data and XenoNet's registry use.
+/// "`<path>/v<major>`", the form data and XenoNet's registry use.
 pub fn short_id(path: &str, major: f64) -> Result<String, String> {
     if !is_schema_path(path) {
         return Err(format!("not a schema path: {path}"));
@@ -185,7 +185,7 @@ pub fn is_actor_slug(slug: &str) -> bool {
     (1..=32).contains(&b.len()) && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit()) && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
 }
 
-/// actor:<slug> or @<host>:actor:<slug> → (host, slug); None for any other id.
+/// `actor:<slug>` or `@<host>:actor:<slug>` → (host, slug); None for any other id.
 pub fn parse_actor_id(id: &str) -> Option<(Option<&str>, &str)> {
     let (host, local) = parse_qualified(id)?;
     let slug = local.strip_prefix("actor:")?;
@@ -195,7 +195,7 @@ pub fn parse_actor_id(id: &str) -> Option<(Option<&str>, &str)> {
 // ---------- repos ----------
 
 /// A remote as its host and path, the same for every way of writing it:
-/// git@github.com:willctl/xenonet.git and https://user@github.com/willctl/xenonet
+/// `git@github.com:willctl/xenonet.git` and `https://user@github.com/willctl/xenonet`
 /// are both github.com/willctl/xenonet.
 pub fn normalize_remote(url: &str) -> String {
     let mut s = url.to_lowercase();
@@ -232,7 +232,7 @@ fn line_break(c: char) -> bool {
 }
 
 /// A remote's host and the repo's path, as repoKey reads them: a URL
-/// (scheme://[user@]host[:port][/path]) or the scp form ([user@]host:path).
+/// (`scheme://[user@]host[:port][/path]`) or the scp form (`[user@]host:path`).
 /// None for a remote that's a folder on disk (file://, /srv/git/x), which
 /// means something only on its own machine, or that has no path.
 pub fn remote_parts(url: &str) -> Option<(String, String)> {
@@ -310,7 +310,7 @@ fn scp_form(s: &str) -> Option<(&str, &str)> {
     None
 }
 
-/// repo:<remote> → the normalized remote; None for any other id.
+/// `repo:<remote>` → the normalized remote; None for any other id.
 pub fn parse_repo_id(id: &str) -> Option<&str> {
     id.strip_prefix("repo:").filter(|r| !r.is_empty() && !r.starts_with(line_break))
 }

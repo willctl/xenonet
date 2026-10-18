@@ -1,7 +1,7 @@
 //! core/native/gemini-cli.js: Gemini CLI's chat records. Each session in
-//! <gemini home>/.gemini/tmp/<project>/chats/session-*.jsonl is a session on
-//! the map, "gemini-cli:<sessionId>", with a subagent's run
-//! (chats/<parent>/<id>.jsonl) under the session that started it, and its
+//! `<gemini home>/.gemini/tmp/<project>/chats/session-*.jsonl` is a session on
+//! the map, "`gemini-cli:<sessionId>`", with a subagent's run
+//! (`chats/<parent>/<id>.jsonl`) under the session that started it, and its
 //! write_file and replace calls' files as its edits.
 
 use super::files::Files;

@@ -11,7 +11,7 @@
 //!
 //! XenoNet's hooks are told apart from yours by their URL or command, and a
 //! copy of each settings file is kept the first time XenoNet changes it
-//! (<file>.before-xenonet). Each XenoNet on this machine is told apart by
+//! (`<file>.before-xenonet`). Each XenoNet on this machine is told apart by
 //! its port: connecting or disconnecting one changes its own entries and
 //! leaves another's alone. Entries whose files are gone are anyone's to
 //! clear.

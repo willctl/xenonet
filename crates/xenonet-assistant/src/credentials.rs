@@ -1,12 +1,12 @@
 //! core/assistant/credentials.js: grant credentials and tombstones on
 //! disk, in the instance's state folder under assistant/:
 //!
-//!   credentials/<grant>.json  a grant's credential, written once at your
+//!   `credentials/<grant>.json`  a grant's credential, written once at your
 //!                             approval, readable only by your account, and
 //!                             deleted when the grant is revoked; XenoNet
 //!                             keeps only its SHA-256
-//!   revoked/<grant>           a grant revoked, whatever engine.sqlite says
-//!   revisions/<grant>         a grant's revision now
+//!   `revoked/<grant>`           a grant revoked, whatever engine.sqlite says
+//!   `revisions/<grant>`         a grant's revision now
 //!   disabled                  every cloud connection off
 //!
 //! A credential never goes in a tool's arguments, an environment variable

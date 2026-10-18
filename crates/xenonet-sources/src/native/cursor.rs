@@ -1,6 +1,6 @@
 //! core/native/cursor.js: Cursor's hook inputs, as XenoNet's Cursor hook
 //! (scripts/cursor/hook.mjs) writes them. Each Cursor agent conversation is
-//! a session on the map, "cursor:<conversation id>", with Cursor's
+//! a session on the map, "`cursor:<conversation id>`", with Cursor's
 //! afterFileEdit files as its edits, ended at its sessionEnd.
 
 use super::files::Files;

@@ -1,6 +1,6 @@
 //! core/graph.js: the hierarchy the page renders:
-//!   core (the projects folder) → [groups] → projects → [Codex native
-//!   project] → sessions → spawned or forked sessions
+//!   core (the projects folder) → `[groups]` → projects →
+//!   `[Codex native project]` → sessions → spawned or forked sessions
 //! plus zones for sessions whose folder is outside the projects folder, the
 //! shared context's wiki as its own constellation, and the shared systems
 //! sessions reach through MCP. A group is a project node with `group` set.

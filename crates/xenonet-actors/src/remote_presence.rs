@@ -3,7 +3,7 @@
 //! without taking their place: core/actors/remote-presence.js.
 //!
 //!   - a read that went out says the actor was at work then: its
-//!     connection's own instance (remote-<connection>) says working, for a
+//!     connection's own instance (`remote-<connection>`) says working, for a
 //!     read's lease (REMOTE_LEASE_MS), then it's out of sight (unknown),
 //!     never offline. An observer that sees it at work, or a registration
 //!     that reports it, outranks a lapsed lease, as the most present

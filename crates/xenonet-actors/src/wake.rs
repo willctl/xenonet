@@ -169,7 +169,7 @@ fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
 }
 
 /// Standard Webhooks' signature: v1, then the base64 HMAC-SHA256 of
-/// "<id>.<timestamp>.<body>" with the secret's bytes (a whsec_ secret is
+/// "`<id>.<timestamp>.<body>`" with the secret's bytes (a whsec_ secret is
 /// base64 after its prefix).
 pub fn wake_signature(secret: &str, id: &str, timestamp: &str, body: &str) -> String {
     let key = match secret.strip_prefix("whsec_") {

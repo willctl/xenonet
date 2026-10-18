@@ -227,7 +227,7 @@ impl Scrubber {
 }
 
 /// The folder named for a person that a path is in, when it isn't the home
-/// folder: /Users/<name> or /home/<name>, after a drive if there is one
+/// folder: `/Users/<name>` or `/home/<name>`, after a drive if there is one
 /// (C:\Users\nova, /c/Users/nova, or WSL's /mnt/c/Users/nova).
 pub fn user_folder_of(p: Option<&Value>, home: Option<&str>) -> Option<String> {
     let s = p.and_then(Value::as_str).unwrap_or("");

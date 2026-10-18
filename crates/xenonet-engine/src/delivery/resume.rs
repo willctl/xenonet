@@ -2,8 +2,10 @@
 //! is started again for one turn, with the message as its prompt:
 //! core/delivery/resume.js.
 //!
-//!   claude -p --resume <id> [--settings <listen file>]
-//!   codex exec resume <id> -
+//! ```text
+//! claude -p --resume <id> [--settings <listen file>]
+//! codex exec resume <id> -
+//! ```
 //!
 //! The router uses this only for a session you allowed, since a turn
 //! spends its plan, and never while the session's own process runs. The

@@ -55,7 +55,7 @@ pub fn has_credential(text: &str) -> bool {
     .is_match(text)
 }
 
-/// clean(value, max): a value as text, credentials as [redacted], control
+/// clean(value, max): a value as text, credentials as `[redacted]`, control
 /// characters as spaces, at most `max` UTF-16 units.
 pub fn clean(value: Option<&Value>, max: usize) -> String {
     let s = value.filter(|v| !v.is_null()).map_or_else(String::new, js_string);

@@ -7,7 +7,7 @@
 //! shaped like C, a Greek omicron, a Latin alpha, the digit 0) into the
 //! Latin ones they pass for. A name keeps to one script, as Unicode's highly
 //! restrictive profile has it (UTS #39), and holds nothing that draws as
-//! nothing. A slug is the actor's id (actor:<slug>): some are XenoNet's own
+//! nothing. A slug is the actor's id (`actor:<slug>`): some are XenoNet's own
 //! words or its routes', and a product's slug is that product's alone.
 
 use crate::detail::looks_like_key;
@@ -320,7 +320,7 @@ pub fn product_word_refusal(text: &str, what: &str) -> Option<String> {
 }
 
 /// Slugs that are XenoNet's own words, or its routes' (/api/actors/me…): a
-/// route is matched before /api/actors/<slug>, so an actor with its word
+/// route is matched before `/api/actors/<slug>`, so an actor with its word
 /// for a slug couldn't be read there.
 pub const RESERVED_SLUGS: [&str; 21] = [
     "you",
@@ -406,7 +406,7 @@ pub fn suggest_slug<E>(base: &str, product: Option<&str>, taken: &mut dyn FnMut(
 }
 
 /// The actor of a Hermes profile: hermes for the default one, else
-/// hermes-<profile> when the profile's name is a slug as it stands (work),
+/// `hermes-<profile>` when the profile's name is a slug as it stands (work),
 /// and otherwise, or when it's cut to 32, with four hex digits of its name
 /// added (Work, my_work, 工作, a long name). Names that differ only in
 /// case or punctuation, or that have no letters of a-z, would otherwise

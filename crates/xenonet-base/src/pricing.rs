@@ -244,7 +244,7 @@ fn strip_version(s: &str) -> &str {
 }
 
 /// A model id as the transcripts write it, plain: no provider or region
-/// prefix (Bedrock's us.anthropic.…-v1:0, Vertex's …@date), no [1m] flag.
+/// prefix (Bedrock's us.anthropic.…-v1:0, Vertex's …@date), no `[1m]` flag.
 pub fn plain_model(model: &str) -> String {
     let s = model.to_lowercase();
     let s = strip_flag(&s);

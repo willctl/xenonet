@@ -1,5 +1,5 @@
 //! core/refusals/store.js: every refusal XenoNet sees, kept on this
-//! computer to build a dataset from: a folder each under <state>/refusals,
+//! computer to build a dataset from: a folder each under `<state>/refusals`,
 //! with record.json (refusal/record/v1) and, when you've turned on keeping
 //! context, what the model had been given up to it (context.jsonl.gz, the
 //! transcript's own lines, and request.json, the same as a request would
@@ -201,7 +201,7 @@ pub fn codex_context(all: &[Value], sig: &Value) -> Result<Context, String> {
 }
 
 /// Whether to keep context: XENONET_REFUSAL_CONTEXT (on or off) when set,
-/// else your choice in <state>/refusals/settings.json (off until you turn
+/// else your choice in `<state>/refusals/settings.json` (off until you turn
 /// it on).
 pub fn context_on(dir: &Path, env_value: Option<&str>) -> bool {
     if let Some(v @ ("on" | "off")) = env_value {

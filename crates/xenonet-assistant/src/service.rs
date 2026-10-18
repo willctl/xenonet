@@ -63,7 +63,7 @@ fn retry_of(code: &str) -> Option<f64> {
     }
 }
 
-/// REQUEST_ID in core/schema/assistant.js: r_<uuid>.
+/// REQUEST_ID in core/schema/assistant.js: `r_<uuid>`.
 pub fn is_request_id(s: &str) -> bool {
     let Some(u) = s.strip_prefix("r_") else { return false };
     let b = u.as_bytes();

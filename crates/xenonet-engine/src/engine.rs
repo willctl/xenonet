@@ -7,8 +7,8 @@
 //! through Claude Code's and Codex's hooks, which put what concerns them in
 //! front of them without their asking.
 //!
-//! An agent is a session ("claude:<session id>", "codex:<thread id>"). An
-//! actor that registered calls the engine as "actor:<slug>", with its
+//! An agent is a session ("`claude:<session id>`", "`codex:<thread id>`"). An
+//! actor that registered calls the engine as "`actor:<slug>`", with its
 //! token, and agents see it among them; its word carries no more weight,
 //! nothing an actor sends is ever framed as your user's, and nothing in the
 //! engine can be approved. An actor XenoNet only observes holds no token,

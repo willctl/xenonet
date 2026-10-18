@@ -1,7 +1,7 @@
 //! core/hosts/merge.js: other machines in this XenoNet's view, as pure
 //! functions over what hosts sent and what this XenoNet has.
 //!
-//! Every id from a host becomes @<host>:<its id>. An id that already
+//! Every id from a host becomes `@<host>:<its id>`. An id that already
 //! starts with @ is dropped, with anything that points at it, so a host
 //! can't pass on another host's nodes or pose as this machine; the host's
 //! core becomes its host node, and everything else it sent hangs from that

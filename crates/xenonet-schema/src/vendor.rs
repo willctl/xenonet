@@ -191,7 +191,7 @@ pub fn satisfies(version: &str, range: &str) -> bool {
     })
 }
 
-/// Codex's version, from the app-server's user agent: <client>/<version> (…).
+/// Codex's version, from the app-server's user agent: `<client>/<version>` (…).
 pub fn codex_version_of(user_agent: &str) -> Option<String> {
     // /\/(\d+\.\d+\.\d+[\w.+-]*)/
     let b = user_agent.as_bytes();
