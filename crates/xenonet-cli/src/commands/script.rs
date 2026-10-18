@@ -4,9 +4,9 @@
 
 use super::console::said;
 use crate::args::Flags;
+use crate::cores;
 use crate::js::{list, t};
 use crate::out::{c, json, print, Done, Fail};
-use crate::pending;
 use crate::sys;
 use serde_json::{json, Map, Value};
 
@@ -38,7 +38,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
     };
     let verb = args.first().map(String::as_str);
     if verb == Some("record") {
-        let ops = pending::control_driver(&instance, "ops", &Value::Null)?;
+        let ops = cores::control_driver(&instance, "ops", &Value::Null)?;
         let ops = ops.as_array().cloned().unwrap_or_default();
         let last = flags.number("last");
         let n = if last == 0.0 || last.is_nan() { ops.len() as f64 } else { last.trunc() };
@@ -47,7 +47,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         let steps: Vec<Value> =
             ops[from..].iter().map(|o| json!({ "op": o.get("op").cloned().unwrap_or(Value::Null), "args": o.get("args").cloned().unwrap_or(Value::Null) })).collect();
         if flags.on("clear") {
-            pending::control_driver(&instance, "clearOps", &Value::Null)?;
+            cores::control_driver(&instance, "clearOps", &Value::Null)?;
         }
         json(&Value::Array(steps));
         return Ok(0);
@@ -58,17 +58,17 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
     if !std::path::Path::new(&full).exists() {
         return Err(Fail::new(format!("there's no {file}"), 1));
     }
-    pending::control_launch(&instance, &json!({ "show": if flags.on("hidden") { "hidden" } else { "inactive" } }))?;
+    cores::control_launch(&instance, &json!({ "show": if flags.on("hidden") { "hidden" } else { "inactive" } }))?;
     let module = [".js", ".mjs", ".cjs"].iter().any(|ext| full.ends_with(ext));
     if module {
-        pending::run_module(&full, &instance)?;
+        cores::run_module(&full, file, &instance, quiet, !crate::out::color())?;
     } else {
         let text = std::fs::read_to_string(&full).map_err(|e| Fail::error(xenonet_base::fs::FsError::of(e, "open", &full).message))?;
         let steps = xenonet_base::json::parse(&text).map_err(|e| Fail::new(format!("{file} isn't JSON: {e}"), 1))?;
         let Some(steps) = steps.as_array() else { return Err(Fail::new(format!("{file} should be a list of steps"), 1)) };
-        pending::run_script(&instance, steps, &mut say)?;
+        cores::run_script(&instance, steps, &mut say)?;
     }
-    let st = brief(&pending::control_driver(&instance, "state", &Value::Null)?);
+    let st = brief(&cores::control_driver(&instance, "state", &Value::Null)?);
     if flags.on("json") {
         json(&st);
         return Ok(0);

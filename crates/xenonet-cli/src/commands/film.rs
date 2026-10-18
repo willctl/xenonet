@@ -4,10 +4,10 @@
 //! Needs a checkout of XenoNet and ffmpeg.
 
 use crate::args::Flags;
+use crate::cores;
 use crate::instances::instance;
 use crate::js::{have, on, t};
 use crate::out::{c, json, now, print, Done, Fail};
-use crate::pending;
 use crate::reach::find;
 use crate::sys;
 use serde_json::{json, Map, Value};
@@ -45,7 +45,7 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
     let Some((w, h)) = frame(flags.get("size")) else { return Err(Fail::new("--size is WIDTHxHEIGHT, such as 1080x1920", 2)) };
     let name = instance(&id).map_or("undefined", |i| i.name);
     print(c::dim(format!("Starting {name}, hidden…")));
-    pending::control_launch(&id, &json!({ "show": "hidden" }))?;
+    cores::control_launch(&id, &json!({ "show": "hidden" }))?;
 
     // The look: the one asked for, or XenoNet Dev's.
     let mut dev_flags = Flags::default();
@@ -60,7 +60,7 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
         let port = instance(&id).map_or(f64::NAN, |i| f64::from(i.port));
         let shown = xenonet_base::client::request(port, "XenoNet", "GET", "/api/theme", None, &[])?;
         if shown.get("id") != Some(theme) {
-            pending::control_driver(&id, "theme", theme)?;
+            cores::control_driver(&id, "theme", theme)?;
         }
     }
 
@@ -71,15 +71,15 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
     if let Some(out) = flags.get("out").filter(|o| xenonet_base::text::truthy(Some(o))) {
         start.insert("file".into(), out.clone());
     }
-    let started = pending::control_record(&id, &Value::Object(start))?;
+    let started = cores::control_record(&id, &Value::Object(start))?;
     print(c::dim(format!("Recording {} seconds…", xenonet_base::json::number_string(total))));
     let filmed = (|| -> Result<(), Fail> {
-        pending::control_driver(&id, "film", &json!({ "seconds": seconds, "reveal": reveal }))?;
+        cores::control_driver(&id, "film", &json!({ "seconds": seconds, "reveal": reveal }))?;
         // Until the end card has come and gone.
         let deadline = now() + (total + 40.0) * 1000.0;
         let mut seen = false;
         loop {
-            let st = pending::control_driver(&id, "state", &Value::Null)?;
+            let st = cores::control_driver(&id, "state", &Value::Null)?;
             if st.get("overlays").is_some_and(|o| on(o, "film")) {
                 seen = true;
             } else if seen {
@@ -91,9 +91,9 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
             std::thread::sleep(Duration::from_millis(500));
         }
     })();
-    let result = pending::control_record(&id, &json!({ "action": "stop" })).unwrap_or_else(|e| json!({ "error": e.message }));
+    let result = cores::control_record(&id, &json!({ "action": "stop" })).unwrap_or_else(|e| json!({ "error": e.message }));
     if !flags.on("keep") {
-        let _ = pending::control_quit(&id);
+        let _ = cores::control_quit(&id);
     }
     filmed?;
     if on(&result, "error") {
