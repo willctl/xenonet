@@ -85,16 +85,33 @@ test("server: the control route needs XenoNet Dev's window, JSON and the right h
 function mcpClient() {
   const proc = spawn(...command(["mcp", "console"]), { cwd: root, stdio: ["pipe", "pipe", "inherit"] });
   const waiting = new Map();
-  let buf = "", id = 0;
+  let buf = "", id = 0, gone = null;
+  // A server that exits, or never starts, fails the calls still waiting
+  // rather than leaving the test waiting for an answer that can't come.
+  const fail = (err) => {
+    gone ??= err;
+    for (const { reject } of waiting.values()) reject(gone);
+    waiting.clear();
+  };
+  proc.on("error", fail);
+  proc.on("close", (code, signal) => fail(new Error(`xenonet mcp console exited (${signal ?? code}) before it answered`)));
+  // Writing to a server that has exited fails with EPIPE; its exit says why.
+  proc.stdin.on("error", () => {});
   proc.stdout.on("data", (d) => {
     buf += d;
     for (let i; (i = buf.indexOf("\n")) >= 0; buf = buf.slice(i + 1)) {
       const msg = JSON.parse(buf.slice(0, i));
-      waiting.get(msg.id)?.(msg);
+      waiting.get(msg.id)?.resolve(msg);
+      waiting.delete(msg.id);
     }
   });
   return {
-    rpc: (method, params = {}) => new Promise((resolve) => (waiting.set(++id, resolve), proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n"))),
+    rpc: (method, params = {}) =>
+      new Promise((resolve, reject) => {
+        if (gone) return reject(gone);
+        waiting.set(++id, { resolve, reject });
+        proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+      }),
     notify: (method) => proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", method }) + "\n"),
     close: () => proc.kill(),
   };
