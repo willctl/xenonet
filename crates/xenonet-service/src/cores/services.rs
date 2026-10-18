@@ -113,6 +113,12 @@ pub trait Decider: Send + Sync {
     async fn forget_key(&self) -> R<Value> {
         pending(DECIDE)
     }
+    /// `decider.decide({ kind, state, questions })`: `{ answers, model,
+    /// provider, cost, ms }`, for the projects folder's pass by a decision
+    /// model (core/classify.js's askDeciderForPicks).
+    async fn decide(&self, _request: Value) -> R<Value> {
+        pending(DECIDE)
+    }
 }
 
 #[async_trait]
