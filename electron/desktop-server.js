@@ -16,9 +16,13 @@ export const PAGE_HEADER = "x-xenonet-desktop";
 
 const same = (a, b) => typeof a === "string" && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
-export async function desktopServer({ root, port, service, secret }) {
+// `dev` (XenoNet Dev, from a checkout): the page comes from Vite, which
+// reloads it as src/ is edited, rather than from dist/; `dev.hot` false
+// keeps it as it loaded (XenoNet Dev's test instance).
+export async function desktopServer({ root, port, service, secret, dev = null }) {
   if (!/^[a-f0-9]{64}$/.test(secret ?? "")) throw new Error("Desktop's frontend needs a secret for its page.");
   const base = `http://127.0.0.1:${port}`;
+  let vite = null;
   const server = http.createServer((req, res) => {
     const refuse = (status) => { res.writeHead(status); res.end(); };
     if (req.headers.host !== `127.0.0.1:${port}`) return refuse(421);
@@ -37,13 +41,18 @@ export async function desktopServer({ root, port, service, secret }) {
       req.pipe(upstream);
       return;
     }
+    if (vite) return vite.middlewares(req, res);
     const found = staticFile(path.join(root, "dist"), url.pathname);
     if (found.status) return refuse(found.status);
     res.writeHead(200, { "content-type": found.type, ...found.headers });
     fs.createReadStream(found.file).pipe(res);
   });
+  if (dev) {
+    const { createServer } = await import("vite");
+    vite = await createServer({ root, server: { middlewareMode: true, ws: { server }, ...(dev.hot === false ? { hmr: false, watch: null } : {}) }, appType: "spa" });
+  }
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(port, "127.0.0.1", resolve); });
-  return { base, close: () => { server.closeAllConnections(); server.close(); } };
+  return { base, close: () => { vite?.close(); server.closeAllConnections(); server.close(); } };
 }
 
 // Adds the secret to the window's API requests to `base`, in the session
