@@ -317,7 +317,7 @@ impl Integrated {
         let candidates = held["candidates"].as_array().cloned().unwrap_or_default();
         let mut metrics = json!({ "model": self.model(), "cost": 0, "ms": 0 });
         let payload = routing::payload(&request, &candidates);
-        let decided = if self.parts.demo { Ok(index::demo_decision()) } else { self.parts.decider.decide("routing", &payload["state"], &payload["questions"]).await };
+        let decided = if self.parts.demo { Ok(index::demo_decision()) } else { self.parts.decider.decide_on("routing", &payload["state"], &payload["questions"]).await };
         let raw = match decided {
             Ok(response) => {
                 metrics = response.clone();

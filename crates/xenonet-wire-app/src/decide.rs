@@ -47,7 +47,7 @@ impl Decisions {
 
     /// `decider.decide({ kind, state, questions })`: the decision, or why
     /// there's none, as a DecisionError.
-    pub async fn decide(&self, kind: &str, state: &Value, questions: &Value) -> R<Value> {
+    pub async fn decide_on(&self, kind: &str, state: &Value, questions: &Value) -> R<Value> {
         let Some(k) = self.key().await else { return Err(decision_error(decide::no_key())) };
         let started = now_ms();
         let (headers, body) = decide::request(&self.model, &k, Some(state), Some(questions));
@@ -107,6 +107,11 @@ impl Decider for Decisions {
         let _ = self.secrets.remove(decide::KEY_TARGET).await;
         *self.has_key.locked() = Some(false);
         Ok(json!({ "key": "missing" }))
+    }
+
+    async fn decide(&self, request: Value) -> R<Value> {
+        let kind = request.get("kind").map(xenonet_base::text::js_string).unwrap_or_default();
+        self.decide_on(&kind, request.get("state").unwrap_or(&Value::Null), request.get("questions").unwrap_or(&Value::Null)).await
     }
 }
 
@@ -182,7 +187,7 @@ pub type Decide = Arc<dyn Fn(String, Value, Value) -> BoxFuture<R<Value>> + Send
 pub fn decide_fn(d: Arc<Decisions>) -> Decide {
     Arc::new(move |kind, state, questions| {
         let d = d.clone();
-        Box::pin(async move { d.decide(&kind, &state, &questions).await })
+        Box::pin(async move { d.decide_on(&kind, &state, &questions).await })
     })
 }
 
@@ -201,7 +206,8 @@ mod tests {
         assert_eq!(d.store_key(&json!(made_up)).await.unwrap()["key"], "stored");
         assert_eq!(d.status().await.unwrap()["key"], "stored");
         assert_eq!(d.forget_key().await.unwrap()["key"], "missing");
-        assert!(d.decide("x", &json!({}), &json!({})).await.unwrap_err().is(Kind::Decision), "no key, no decision");
+        assert!(d.decide_on("x", &json!({}), &json!({})).await.unwrap_err().is(Kind::Decision), "no key, no decision");
+        assert!(Decider::decide(&d, json!({ "kind": "projects", "state": {}, "questions": {} })).await.unwrap_err().is(Kind::Decision));
         let spent = Spent::new(s, Emitter::new());
         assert_eq!(spent.status().await.unwrap(), json!({ "key": "missing" }));
         assert_eq!(DemoSpent.status().await.unwrap()["key"], "stored");
