@@ -47,17 +47,24 @@ test("install: writes XenoNet's script, replaces only its own, and takes it out"
   const dir = path.join(tmp(), "bin");
   const env = { PATH: `/usr/bin${path.delimiter}${dir}` };
   assert.equal(commandState({ platform: "linux", dir, env }).installed, false);
-  const st = installCommand({ platform: "linux", dir, env, runtime: "/opt/node's/bin/node", entry: "/src/xenonet/cli/xenonet.js" });
-  assert.deepEqual([st.installed, st.ours, st.onPath, st.runs], [true, true, true, ["/opt/node's/bin/node", "/src/xenonet/cli/xenonet.js"]]);
-  assert.equal(st.broken, true, "those files don't exist here");
+  const st = installCommand({ platform: "linux", dir, env, bin: "/opt/xenonet's/launcher/xenonet" });
+  assert.deepEqual([st.installed, st.ours, st.onPath, st.runs], [true, true, true, ["/opt/xenonet's/launcher/xenonet"]]);
+  assert.equal(st.broken, true, "the binary doesn't exist here");
   if (process.platform !== "win32") assert.equal(fs.statSync(st.file).mode & 0o111, 0o111);
-  assert.match(commandScript({ platform: "linux", runtime: "/a/Electron", entry: "/b/xenonet.js", runAsNode: true }), /^#!\/bin\/sh\n# Added by XenoNet.*\nELECTRON_RUN_AS_NODE=1 exec '\/a\/Electron' '\/b\/xenonet\.js' "\$@"\n$/);
+  assert.match(commandScript({ platform: "linux", bin: "/a/xenonet" }), /^#!\/bin\/sh\n# Added by XenoNet.*\nexec '\/a\/xenonet' "\$@"\n$/);
+  assert.match(commandScript({ platform: "win32", bin: "C:\\x\\xenonet.exe" }), /\n"C:\\x\\xenonet\.exe" %\*\n$/);
   assert.equal(uninstallCommand({ platform: "linux", dir, env }).installed, false);
 
+  // An earlier XenoNet's script, which ran a node and cli/xenonet.js, is
+  // still XenoNet's: read as such, and replaced by installing.
+  fs.writeFileSync(path.join(dir, "xenonet"), "#!/bin/sh\n# Added by XenoNet: the xenonet command. xenonet uninstall takes it out.\nELECTRON_RUN_AS_NODE=1 exec '/a/Electron' '/b/xenonet.js' \"$@\"\n");
+  assert.deepEqual([commandState({ platform: "linux", dir, env }).ours, commandState({ platform: "linux", dir, env }).runs], [true, ["/a/Electron", "/b/xenonet.js"]]);
+  assert.deepEqual(installCommand({ platform: "linux", dir, env, bin: "/b" }).runs, ["/b"]);
+
   fs.writeFileSync(path.join(dir, "xenonet"), "#!/bin/sh\necho someone else's\n");
-  assert.throws(() => installCommand({ platform: "linux", dir, env, runtime: "/n", entry: "/e" }), /isn't XenoNet's/);
+  assert.throws(() => installCommand({ platform: "linux", dir, env, bin: "/b" }), /isn't XenoNet's/);
   assert.throws(() => uninstallCommand({ platform: "linux", dir, env }), /leaves it alone/);
-  assert.equal(installCommand({ platform: "linux", dir, env, runtime: "/n", entry: "/e", force: true }).ours, true);
+  assert.equal(installCommand({ platform: "linux", dir, env, bin: "/b", force: true }).ours, true);
 });
 
 // A stand-in XenoNet: `routes` maps "GET /api/x" to (url, body) => [status,

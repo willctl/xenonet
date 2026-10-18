@@ -13,7 +13,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as tar from "tar";
-import { activatePackage, checkRuntime, installBundle, recoverServiceUpdate, writeLauncher } from "../core/components/install.js";
+import { activatePackage, checkRuntime, installBundle, installedRuntime, installLauncher, recoverServiceUpdate, writeLauncher } from "../core/components/install.js";
 import { currentComponent, digest, selectComponent, stagePackage } from "../core/components/packages.js";
 
 const NODE = process.platform === "win32" ? "node.exe" : "node";
@@ -38,7 +38,7 @@ function workspace(t) {
 
 // A component package in `out`: { file, item } as a release manifest
 // lists it.
-async function pack(out, component, version, { fail = null, platform = process.platform, arch = process.arch } = {}) {
+async function pack(out, component, version, { fail = null, platform = process.platform, arch = process.arch, bin = null } = {}) {
   const app = fs.mkdtempSync(path.join(out, `${component}-${version}-`));
   const meta = { format: 1, component, version, platform, arch, dataSchema: 1, api: { min: 1, max: 1 } };
   fs.writeFileSync(path.join(app, "component.json"), JSON.stringify(meta));
@@ -47,6 +47,11 @@ async function pack(out, component, version, { fail = null, platform = process.p
   fs.mkdirSync(path.join(app, "cli"));
   fs.writeFileSync(path.join(app, "server", "index.js"), "// a made-up service");
   fs.writeFileSync(path.join(app, "cli", "xenonet.js"), "// made-up tools");
+  // The xenonet binary, as made-up text.
+  if (bin != null) {
+    fs.mkdirSync(path.join(app, "bin"));
+    fs.writeFileSync(path.join(app, "bin", process.platform === "win32" ? "xenonet.exe" : "xenonet"), bin, { mode: 0o755 });
+  }
   const name = `XenoNet-${component}-${version}-${platform}-${arch}.tar.gz`;
   const file = path.join(out, name);
   await tar.c({ file, cwd: app, gzip: true }, fs.readdirSync(app));
@@ -233,4 +238,26 @@ test("a launcher that can't be replaced now is left as it is, with nothing half-
   fs.rmSync(entry, { recursive: true });
   assert.equal(writeLauncher(entry, { source: "// xenonet-launcher 7\n" }), true);
   assert.equal(fs.readFileSync(entry, "utf8"), "// xenonet-launcher 7\n");
+});
+
+test("the launcher's xenonet is a copy of the Tools' binary, made again only when the Tools change, and the service is told of it", async (t) => {
+  const { dir, env } = workspace(t);
+  const svc = await pack(dir, "service", "1.0.0");
+  selectComponent("service", await stagePackage(svc.file, svc.item, { env }), env);
+  const first = await pack(dir, "tools", "1.0.0", { bin: "binary 1.0.0" });
+  selectComponent("tools", await stagePackage(first.file, first.item, { env }), env);
+  const bin = path.join(env.XENONET_RUNTIME_DIR, "launcher", process.platform === "win32" ? "xenonet.exe" : "xenonet");
+  assert.equal(installLauncher(env).bin, bin);
+  assert.equal(fs.readFileSync(bin, "utf8"), "binary 1.0.0");
+  if (process.platform !== "win32") assert.ok(fs.statSync(bin).mode & 0o100, "and it can run");
+  assert.equal(installedRuntime(env).env.XENONET_LAUNCHER_BIN, bin);
+  // The same Tools again: the copy is left as it is.
+  fs.writeFileSync(bin, "the copy, as it was");
+  installLauncher(env);
+  assert.equal(fs.readFileSync(bin, "utf8"), "the copy, as it was");
+  // Newer Tools: copied again, with no temporary file left.
+  const next = await pack(dir, "tools", "1.1.0", { bin: "binary 1.1.0" });
+  await activatePackage(next.file, next.item, { env, operations: service(env, { version: "1.0.0" }).operations });
+  assert.equal(fs.readFileSync(bin, "utf8"), "binary 1.1.0");
+  assert.ok(!fs.readdirSync(path.dirname(bin)).some((f) => f.endsWith(".tmp")));
 });
