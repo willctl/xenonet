@@ -77,7 +77,7 @@ pub fn port() -> f64 {
 
 /// The server's name in Claude Code's list (core/delivery/setup.js):
 /// xenonet for XenoNet's port, xenonet-dev for XenoNet Dev's,
-/// xenonet-<port> for the others.
+/// `xenonet-<port>` for the others.
 pub fn server_name(port: f64) -> String {
     if port == 0.0 || port.is_nan() || port == 47840.0 {
         "xenonet".into()
