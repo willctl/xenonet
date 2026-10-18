@@ -25,7 +25,7 @@ use crate::fields::is_field;
 use serde_json::{Map, Value};
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
-use std::rc::Rc;
+use std::sync::Arc;
 use xenonet_base::json;
 
 /// `typeof`, as JSON sees a value: null, array, object, boolean, number,
@@ -218,7 +218,7 @@ pub struct Major {
     pub id: String,
     pub major: u32,
     pub range: Value,
-    pub schema: Rc<Schema>,
+    pub schema: Arc<Schema>,
 }
 
 /// The majors of a vendor source's schema in `dir`, newest first; none
@@ -237,7 +237,7 @@ pub fn load_vendor(source: &str, dir: &Path) -> Vec<Major> {
             let text = std::fs::read_to_string(folder.join(&name)).ok()?;
             let file = json::parse(&text).ok()?;
             let range = file.get("x-xenonet").and_then(|x| x.get("vendorVersions")).filter(|v| !v.is_null()).cloned().unwrap_or_else(|| Value::String("*".into()));
-            Some(Major { id: format!("vendor/{source}/v{n}"), major: n.parse().ok()?, range, schema: Rc::new(compile(&file)) })
+            Some(Major { id: format!("vendor/{source}/v{n}"), major: n.parse().ok()?, range, schema: Arc::new(compile(&file)) })
         })
         .collect();
     out.sort_by(|a, b| b.major.cmp(&a.major));

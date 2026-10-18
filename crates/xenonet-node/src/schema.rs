@@ -7,12 +7,12 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde_json::Value;
 use std::path::Path;
-use std::rc::Rc;
+use std::sync::Arc;
 use xenonet_schema::lenient::{self, Finding, Key, Schema, SpecRef, Step};
 
 #[napi(js_name = "SchemaSpec")]
 pub struct JsSpec {
-    pub(crate) schema: Rc<Schema>,
+    pub(crate) schema: Arc<Schema>,
     at: SpecRef,
 }
 
@@ -46,7 +46,7 @@ fn keys_of(v: &Value) -> Vec<Key> {
         .unwrap_or_default()
 }
 
-fn spec_raw(env: &Env, schema: &Rc<Schema>, at: SpecRef) -> Result<Jv> {
+fn spec_raw(env: &Env, schema: &Arc<Schema>, at: SpecRef) -> Result<Jv> {
     let instance = JsSpec { schema: schema.clone(), at }.into_instance(env)?;
     Ok(Jv::Raw(unsafe { ToNapiValue::to_napi_value(env.raw(), instance)? }))
 }
@@ -59,7 +59,7 @@ fn variant(v: &Option<Vec<Value>>) -> Jv {
     Jv::Json(v.clone().map_or(Value::Null, Value::Array))
 }
 
-fn finding(env: &Env, schema: &Rc<Schema>, f: &Finding) -> Result<Jv> {
+fn finding(env: &Env, schema: &Arc<Schema>, f: &Finding) -> Result<Jv> {
     let kind = |k: &str| ("kind", Jv::Json(Value::String(k.into())));
     Ok(Jv::Obj(match f {
         Finding::MissingField { path, variant: v } => vec![kind("missing-field"), ("path", opt_str(path)), ("variant", variant(v))],
@@ -99,7 +99,7 @@ impl JsSpec {
 
 #[napi(js_name = "compileSchema")]
 pub fn compile_schema(root: Json) -> JsSpec {
-    let schema = Rc::new(lenient::compile(&root.0));
+    let schema = Arc::new(lenient::compile(&root.0));
     let at = SpecRef::Node(schema.root);
     JsSpec { schema, at }
 }
