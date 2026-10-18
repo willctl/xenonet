@@ -4,6 +4,10 @@
 //! it converts arguments, calls back into what a test passed in, and
 //! converts the answers.
 #![expect(unsafe_code, reason = "Node-API is a C interface: values cross it through raw handles")]
+#![cfg_attr(
+    test,
+    expect(dead_code, reason = "napi-rs registers the #[napi] exports only outside test builds, so a test build sees every export, and what only they call, as unused")
+)]
 
 mod account_links;
 mod actor_helpers;
