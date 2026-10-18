@@ -91,6 +91,16 @@ pub trait Actors: Send + Sync {
     }
     fn start(&self) {}
     fn stop(&self) {}
+    /// The registry's own methods by their JS names (upsert, addVia, has,
+    /// ids, info, isRemote, remoteOf, setRemote, isRegistered), JSON in and
+    /// out, for the remote actors' connections (core/actors/connections.js
+    /// calls them on `actors`).
+    fn registry(&self, _method: &str, _args: Vec<Value>) -> R<Value> {
+        pending(ACTORS)
+    }
+    /// `actors.beforeRemove.push(hook)`: run with an actor's slug before
+    /// its record goes (its remote connections are revoked first).
+    fn before_remove(&self, _hook: std::sync::Arc<dyn Fn(&str) + Send + Sync>) {}
 }
 
 #[async_trait]

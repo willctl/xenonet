@@ -170,6 +170,13 @@ pub trait EngineStore: Send + Sync {
     fn connection(&self, _id: &str) -> R<Option<Value>> {
         pending("core/engine/store.js")
     }
+    /// The store itself, xenonet-engine's `store::Shared` as `Any`, for the
+    /// cores in other crates that keep their tables in engine.sqlite as the
+    /// JS's did (the remote actors' connections and grants, their audit,
+    /// the tunnels' bindings), which take it whole. None until it's in Rust.
+    fn native(&self) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>> {
+        None
+    }
 }
 
 impl Engine for Pending {}
