@@ -211,7 +211,7 @@ pub fn clean_version(v: &str) -> Option<&str> {
 
 fn root_type(shape: Option<&str>) -> String {
     let s = shape.unwrap_or("");
-    let t: String = s.chars().take_while(|c| c.is_ascii_lowercase()).collect();
+    let t: String = s.chars().take_while(char::is_ascii_lowercase).collect();
     if t == "record" {
         "object".into()
     } else {

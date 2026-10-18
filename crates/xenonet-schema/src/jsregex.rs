@@ -103,7 +103,7 @@ fn count_groups(s: &[u16]) -> usize {
             0x5b => in_class = true,
             0x5d => in_class = false,
             0x28 if !in_class => {
-                let named = s.get(i + 1) == Some(&0x3f) && s.get(i + 2) == Some(&0x3c) && !matches!(s.get(i + 3), Some(&0x3d) | Some(&0x21));
+                let named = s.get(i + 1) == Some(&0x3f) && s.get(i + 2) == Some(&0x3c) && !matches!(s.get(i + 3), Some(&0x3d | &0x21));
                 if s.get(i + 1) != Some(&0x3f) || named {
                     n += 1;
                 }
@@ -146,7 +146,7 @@ impl Parser<'_> {
 
     fn alternation(&mut self) -> Result<Node, String> {
         let mut options = vec![self.sequence()?];
-        while self.eat(b'|' as u16) {
+        while self.eat(u16::from(b'|')) {
             options.push(self.sequence()?);
         }
         Ok(if options.len() == 1 { options.pop().unwrap_or(Node::Empty) } else { Node::Alt(options) })
@@ -155,7 +155,7 @@ impl Parser<'_> {
     fn sequence(&mut self) -> Result<Node, String> {
         let mut items = Vec::new();
         while let Some(u) = self.peek() {
-            if u == b'|' as u16 || u == b')' as u16 {
+            if u == u16::from(b'|') || u == u16::from(b')') {
                 break;
             }
             let atom = self.term()?;
@@ -179,7 +179,7 @@ impl Parser<'_> {
                 self.i += 1;
                 return Ok(Node::End);
             }
-            0x5c if matches!(self.s.get(self.i + 1), Some(&0x62) | Some(&0x42)) => {
+            0x5c if matches!(self.s.get(self.i + 1), Some(&0x62 | &0x42)) => {
                 let yes = self.s[self.i + 1] == 0x62;
                 self.i += 2;
                 return Ok(Node::WordBoundary(yes));
@@ -518,7 +518,7 @@ fn repeat_one(node: &Node, min: u32, max: Option<u32>, greedy: bool, s: &[u16], 
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "a backtracking repeat's whole state, handed to each iteration as it recurses")]
 fn repeat(node: &Node, min: u32, max: Option<u32>, greedy: bool, done: u32, s: &[u16], i: usize, k: &mut dyn FnMut(usize) -> bool) -> bool {
     if max.is_some_and(|m| done >= m) {
         return k(i);
@@ -528,11 +528,12 @@ fn repeat(node: &Node, min: u32, max: Option<u32>, greedy: bool, done: u32, s: &
     if done < min {
         return more(k);
     }
+    // Greedy tries one more iteration before the rest of the pattern, lazy
+    // the rest first.
     if greedy {
-        more(k) || k(i)
-    } else {
-        k(i) || more(k)
+        return more(k) || k(i);
     }
+    k(i) || more(k)
 }
 
 #[cfg(test)]

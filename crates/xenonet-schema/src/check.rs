@@ -29,6 +29,7 @@
 use crate::jsregex::{self, Regex};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use xenonet_base::{json, text};
 
 // ---------- values ----------
@@ -191,19 +192,23 @@ fn is_ident(k: &str) -> bool {
     !b.is_empty() && head(b[0]) && b[1..].iter().all(|&c| rest(c))
 }
 
-/// A path as it reads in a message: nodes[3].ranAs.id, layout["project:/x"].
+/// A path as it reads in a message: `nodes[3].ranAs.id`, `layout["project:/x"]`.
 pub fn path_text(path: &[PathKey]) -> String {
     let mut out = String::new();
     for key in path {
         match key {
-            PathKey::Num(n) => out.push_str(&format!("[{}]", json::number_string(*n))),
+            PathKey::Num(n) => {
+                let _ = write!(out, "[{}]", json::number_string(*n));
+            }
             PathKey::Key(k) if is_ident(k) => {
                 if !out.is_empty() {
                     out.push('.');
                 }
                 out.push_str(k);
             }
-            PathKey::Key(k) => out.push_str(&format!("[{}]", json::stringify(&Value::String(k.clone()), 0))),
+            PathKey::Key(k) => {
+                let _ = write!(out, "[{}]", json::stringify(&Value::String(k.clone()), 0));
+            }
         }
     }
     out
@@ -563,12 +568,12 @@ impl<'a> Compiler<'a> {
     }
 
     fn go(&mut self, doc: usize, node: &'a Value) -> Result<usize, String> {
-        if let Some(&i) = self.seen.get(&(node as *const Value)) {
+        if let Some(&i) = self.seen.get(&std::ptr::from_ref::<Value>(node)) {
             return Ok(i);
         }
         let at = self.nodes.len();
         self.nodes.push(Kind::Any);
-        self.seen.insert(node as *const Value, at);
+        self.seen.insert(std::ptr::from_ref::<Value>(node), at);
         let kind = self.kind(doc, node)?;
         self.nodes[at] = kind;
         Ok(at)
@@ -643,8 +648,8 @@ impl<'a> Compiler<'a> {
                 Ok(Kind::Types(types))
             }
             Some(Value::String(t)) => match t.as_str() {
-                "string" => self.string(m),
-                "number" | "integer" => Ok(self.number(m, t == "integer")),
+                "string" => Self::string(m),
+                "number" | "integer" => Ok(Self::number(m, t == "integer")),
                 "boolean" => Ok(Kind::Bool),
                 "null" => Ok(Kind::Null),
                 "array" => self.array(doc, m),
@@ -656,7 +661,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn string(&mut self, m: &'a Map<String, Value>) -> Result<Kind, String> {
+    fn string(m: &Map<String, Value>) -> Result<Kind, String> {
         let mut patterns: Vec<String> = m.get("pattern").and_then(Value::as_str).map(str::to_string).into_iter().collect();
         for p in m.get("allOf").and_then(Value::as_array).into_iter().flatten() {
             if let Some(p) = p.get("pattern").and_then(Value::as_str) {
@@ -691,7 +696,7 @@ impl<'a> Compiler<'a> {
         Ok(Kind::Str(checks))
     }
 
-    fn number(&mut self, m: &'a Map<String, Value>, int: bool) -> Kind {
+    fn number(m: &Map<String, Value>, int: bool) -> Kind {
         let mut checks = Vec::new();
         if int {
             checks.push(Check::Int);
@@ -1048,7 +1053,7 @@ impl Checker {
             }
             Kind::Tuple { items, rest, min, closed } => self.tuple(items, *rest, *min, *closed, v),
             Kind::Object { props, index, extra, .. } => self.object(props, index, extra, v),
-            Kind::Record { key, value, keys, exhaustive } => self.record(*key, *value, keys, *exhaustive, v),
+            Kind::Record { key, value, keys, exhaustive } => self.record(*key, *value, keys.as_deref(), *exhaustive, v),
             Kind::Nullable(inner) => match v {
                 Data::Null => Vec::new(),
                 _ => self.run(*inner, v),
@@ -1180,7 +1185,7 @@ impl Checker {
         issues
     }
 
-    fn record(&self, key: usize, value: usize, keys: &Option<Vec<Value>>, exhaustive: bool, v: &Data) -> Vec<Issue> {
+    fn record(&self, key: usize, value: usize, keys: Option<&[Value]>, exhaustive: bool, v: &Data) -> Vec<Issue> {
         let o = match v {
             Data::Obj(o) if o.plain => o,
             _ => return vec![invalid_type("record", v)],
@@ -1470,13 +1475,13 @@ fn run_check(c: &Check, v: &Data, issues: &mut Vec<Issue>) {
         Check::MinLen(min) => {
             // A length that isn't a number (NaN) fails, as JS's >= says.
             let len = length_of(v).unwrap_or(f64::NAN);
-            if len.partial_cmp(min).is_none_or(|o| o.is_lt()) {
+            if len.partial_cmp(min).is_none_or(std::cmp::Ordering::is_lt) {
                 push(issues, What::TooSmall { origin: length_origin(v), minimum: *min, inclusive: true, exact: false });
             }
         }
         Check::MaxLen(max) => {
             let len = length_of(v).unwrap_or(f64::NAN);
-            if len.partial_cmp(max).is_none_or(|o| o.is_gt()) {
+            if len.partial_cmp(max).is_none_or(std::cmp::Ordering::is_gt) {
                 push(issues, What::TooBig { origin: length_origin(v), maximum: *max, inclusive: true, exact: false });
             }
         }
@@ -1573,7 +1578,7 @@ mod tests {
     fn says_what_zod_says() {
         let c = checker(leaf());
         assert_eq!(found(&c, json!({ "at": 1, "tag": "z" }), true), []);
-        assert_eq!(found(&c, json!(null), false), [("".into(), "Invalid input: expected object, received null".into())]);
+        assert_eq!(found(&c, json!(null), false), [(String::new(), "Invalid input: expected object, received null".into())]);
         assert_eq!(
             found(&c, json!({ "at": "soon" }), false),
             [("at".into(), "Invalid input: expected number, received string".into()), ("tag".into(), "Invalid option: expected one of \"a\"|\"b\"".into())]
@@ -1615,9 +1620,9 @@ mod tests {
         ] }));
         assert_eq!(found(&c, json!({ "a": "x", "n": "1" }), false), [("n".into(), "Invalid input: expected number, received string".into())]);
         let short = checker(json!({ "anyOf": [{ "type": "string", "maxLength": 2 }, { "type": "number" }] }));
-        assert_eq!(found(&short, json!("abc"), false), [("".into(), "Too big: expected string to have <=2 characters".into())], "the one option that got to its checks");
+        assert_eq!(found(&short, json!("abc"), false), [(String::new(), "Too big: expected string to have <=2 characters".into())], "the one option that got to its checks");
         let types = checker(json!({ "type": ["string", "null"] }));
-        assert_eq!(found(&types, json!(1), false), [("".into(), "Invalid input: expected string, received number".into())]);
+        assert_eq!(found(&types, json!(1), false), [(String::new(), "Invalid input: expected string, received number".into())]);
     }
 
     #[test]
@@ -1631,12 +1636,12 @@ mod tests {
         // An int that isn't one stops even the length check of the array it's in.
         let ints = checker(json!({ "type": "array", "items": { "type": "integer", "minimum": -9007199254740991_i64, "maximum": 9007199254740991_i64 }, "maxItems": 1 }));
         assert_eq!(found(&ints, json!([1.5, 2]), false), [("[0]".into(), "Invalid input: expected int, received number".into())]);
-        assert_eq!(found(&ints, json!([1, 2]), false), [("".into(), "Too big: expected array to have <=1 items".into())]);
+        assert_eq!(found(&ints, json!([1, 2]), false), [(String::new(), "Too big: expected array to have <=1 items".into())]);
         // A tuple's items past its least may be left out.
         let pair = checker(json!({ "type": "array", "prefixItems": [{ "type": "string" }, { "type": "number" }], "items": false, "minItems": 1, "maxItems": 2 }));
         assert_eq!(found(&pair, json!(["a"]), false), []);
-        assert_eq!(found(&pair, json!([]), false), [("".into(), "Too small: expected array to have >=1 items".into())]);
-        assert_eq!(found(&pair, json!(["a", 1, 2]), false), [("".into(), "Too big: expected array to have <=2 items".into())], "and none past its most");
+        assert_eq!(found(&pair, json!([]), false), [(String::new(), "Too small: expected array to have >=1 items".into())]);
+        assert_eq!(found(&pair, json!(["a", 1, 2]), false), [(String::new(), "Too big: expected array to have <=2 items".into())], "and none past its most");
     }
 
     #[test]
@@ -1645,6 +1650,6 @@ mod tests {
         assert_eq!(p(&[PathKey::Key("nodes".into()), PathKey::Num(3.0), PathKey::Key("ranAs".into())]), "nodes[3].ranAs");
         assert_eq!(p(&[PathKey::Key("layout".into()), PathKey::Key("project:/x".into())]), "layout[\"project:/x\"]");
         assert_eq!(p(&[PathKey::Num(0.0), PathKey::Key("a".into())]), "[0].a");
-        assert_eq!(explain(&[("".into(), "m".into())], &["a.b".into()]), "(the value): m\na.b: not in the schema");
+        assert_eq!(explain(&[(String::new(), "m".into())], &["a.b".into()]), "(the value): m\na.b: not in the schema");
     }
 }
