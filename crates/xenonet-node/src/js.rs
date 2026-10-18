@@ -28,7 +28,7 @@ fn check(status: sys::napi_status, what: &str) -> Result<()> {
     }
 }
 
-unsafe fn string(env: sys::napi_env, s: &str) -> Result<sys::napi_value> {
+pub(crate) unsafe fn string(env: sys::napi_env, s: &str) -> Result<sys::napi_value> {
     let mut out = ptr::null_mut();
     check(unsafe { sys::napi_create_string_utf8(env, s.as_ptr().cast(), s.len() as isize, &raw mut out) }, "make a string")?;
     Ok(out)

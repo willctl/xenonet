@@ -7,7 +7,7 @@
 //! …], error }, the events in order and what JS would have thrown after
 //! them, for the twin to emit and throw.
 
-use crate::js::{from_js, to_js, type_of, Json, Jv, MaybeJson};
+use crate::js::{from_js, string, to_js, type_of, Json, Jv, MaybeJson};
 use crate::sources::thrown;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -27,18 +27,12 @@ fn check(status: sys::napi_status, what: &str) -> Result<()> {
     }
 }
 
-unsafe fn js_string(env: sys::napi_env, s: &str) -> Result<sys::napi_value> {
-    let mut out = ptr::null_mut();
-    check(unsafe { sys::napi_create_string_utf8(env, s.as_ptr().cast(), s.len() as isize, &raw mut out) }, "make a string")?;
-    Ok(out)
-}
-
 /// An object with its fields in order, undefined where a field's value is.
 unsafe fn fields_js(env: sys::napi_env, f: &Fields) -> Result<sys::napi_value> {
     let mut out = ptr::null_mut();
     check(unsafe { sys::napi_create_object(env, &raw mut out) }, "make an object")?;
     for (k, v) in f {
-        let key = unsafe { js_string(env, k)? };
+        let key = unsafe { string(env, k)? };
         let value = match v {
             Some(v) => unsafe { to_js(env, v, 0)? },
             None => {

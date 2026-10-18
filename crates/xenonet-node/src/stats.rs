@@ -1,7 +1,7 @@
 //! xenonet-state's stats and search, and xenonet-sources' wiki, for their
 //! twins (core/stats.js, core/search.js, core/wiki.js).
 
-use crate::js::{Json, MaybeJson};
+use crate::js::{string, Json, MaybeJson};
 use crate::sources::thrown;
 use napi::bindgen_prelude::*;
 use napi::sys;
@@ -24,12 +24,6 @@ fn check(status: sys::napi_status, what: &str) -> Result<()> {
     } else {
         Err(Error::new(Status::GenericFailure, format!("couldn't {what} ({status})")))
     }
-}
-
-unsafe fn string(env: sys::napi_env, s: &str) -> Result<sys::napi_value> {
-    let mut out = ptr::null_mut();
-    check(unsafe { sys::napi_create_string_utf8(env, s.as_ptr().cast(), s.len() as isize, &raw mut out) }, "make a string")?;
-    Ok(out)
 }
 
 unsafe fn build(env: sys::napi_env, v: &Out) -> Result<sys::napi_value> {
