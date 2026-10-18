@@ -181,10 +181,12 @@ test("the map, its live state, history, summary and digests", async () => {
   assert.ok(stars.stars.length > 0 && stars.stars.every((s) => /^[A-Z][a-z]+( \d+)?$/.test(s.name) && !("project" in s)));
   assert.ok(!log.topProjects.some((p) => stars.stars.some((s) => s.name === p.name)));
   assert.ok(!("hours" in stars) && !("busiestHour" in stars) && !("sessions" in stars));
-  assert.deepEqual((await get("/api/constellation?names=1")).data.stars.map((s) => s.project), log.topProjects.map((p) => p.name));
-  // Names only: the demo's live sessions keep adding tool calls, so a star's
-  // counts can move between two reads.
-  assert.deepEqual((await get("/api/constellation")).data.stars.map((s) => s.name), stars.stars.map((s) => s.name), "the same names again");
+  // The demo's live sessions keep adding tool calls between two reads, which
+  // can change a star's counts and swap projects whose counts are close, so
+  // these compare which names, not their order or counts.
+  const sorted = (names) => [...names].sort();
+  assert.deepEqual(sorted((await get("/api/constellation?names=1")).data.stars.map((s) => s.project)), sorted(log.topProjects.map((p) => p.name)));
+  assert.deepEqual(sorted((await get("/api/constellation")).data.stars.map((s) => s.name)), sorted(stars.stars.map((s) => s.name)), "the same names again");
   assert.match((await post("/api/narrate", { kind: "day" })).data.text, /While you were away/);
   assert.match((await post("/api/narrate", {})).data.text, /While you were away/);
 });
