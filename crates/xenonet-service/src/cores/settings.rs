@@ -43,6 +43,12 @@ pub trait Store: Send + Sync {
     fn load_report(&self) -> R<Value> {
         pending(STORE)
     }
+    /// `store.getIdentities()`: the names you gave identities and the ones
+    /// you hid (`{ names, hidden, … }`), which a hub's merged map applies to
+    /// other hosts' identities too.
+    fn identities(&self) -> R<Value> {
+        pending(STORE)
+    }
 }
 
 pub trait Themes: Send + Sync {
