@@ -33,6 +33,9 @@ xenonet-schema.workspace = true
 # aliases' reading, for a hub's merged map.
 xenonet-blocks.workspace = true
 xenonet-state.workspace = true
+# The assistant contract's id patterns (core/schema/assistant.js), which a
+# remote actor's arguments are checked against.
+regex.workspace = true
 
 # os.cpus(), os.totalmem() and os.freemem(), as Node reads them: the mach
 # calls on macOS (and /proc on Linux, read as files).

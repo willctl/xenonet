@@ -13,6 +13,7 @@
 // each driver wordier, as in the service itself.
 #![expect(clippy::result_large_err, reason = "a core's error is the routes' own, and rare")]
 
+pub mod assistant;
 pub mod decide;
 pub mod doctor;
 pub mod fx;
@@ -98,6 +99,41 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
         cores.hub = Some(Arc::new(hosts::hub::HubCore(hosts::hub::HostHub::new(parts))));
         let block = host_store.clone();
         let _ = cores.state.add_block(Arc::new(move || block.health()), None);
+    }
+
+    // Remote actors: their connections, reads, audit and tunnels, over
+    // the engine's own store, with actors and the assistant both on. The
+    // reads' source needs no store, so it's real either way.
+    if cores.connections.is_some() {
+        let reads_of =
+            |remote, store| assistant::reads::Reads::new(remote, cores.state.clone(), cores.actors.clone(), cores.engine_store.clone(), store, &env.version, env.emitter.clone());
+        let native = cores.engine_store.native().and_then(|a| a.downcast_ref::<xenonet_engine::store::Shared>().cloned());
+        cores.assistant_source = Some(Arc::new(assistant::reads::SourceCore(reads_of(None, None))));
+        if let (Some(store), Some(actors)) = (native, cores.actors.clone()) {
+            let dir = xenonet_assistant::credentials::assistant_dir(&state_dir);
+            match assistant::connections::Remote::start(store.clone(), &dir, &state_dir, config.port, actors, cores.engine_store.clone(), cores.state.clone()) {
+                Ok(remote) => {
+                    let reads = reads_of(Some(remote.clone()), Some(store.clone()));
+                    cores.connections = Some(Arc::new(assistant::connections::ConnectionsCore(remote.clone())));
+                    cores.assistant_source = Some(Arc::new(assistant::reads::SourceCore(reads.clone())));
+                    cores.assistant = Some(Arc::new(assistant::reads::ServiceCore(reads.clone())));
+                    cores.audit = Some(Arc::new(assistant::reads::AuditCore(reads)));
+                    // tunnel-client runs XenoNet's launcher as the adapter, as
+                    // the hooks do.
+                    let (launcher, exec) = (fx::env_set("XENONET_LAUNCHER_EXEC"), fx::env_set("XENONET_EXEC"));
+                    let launch = assistant::tunnels::Launch {
+                        run_as_node: launcher.is_none() && exec.is_some(),
+                        exec: launcher.or(exec).or_else(|| fx::on_path("node")).unwrap_or_else(|| "node".into()),
+                        entry: config.cli_entry().to_string_lossy().into_owned(),
+                        port: config.port,
+                    };
+                    let secrets = Arc::new(if demo { Secrets::memory() } else { Secrets::real() });
+                    let runner = assistant::tunnels::Runner::new(remote, store, &dir, secrets, launch, &config.home, demo, env.emitter.clone());
+                    cores.tunnels = Some(Arc::new(assistant::tunnels::TunnelsCore(runner)));
+                }
+                Err(e) => env.emitter.log("error", "assistant.start", &format!("remote actors' connections couldn't start: {}", e.message)),
+            }
+        }
     }
 
     // Integrations: their records in the state folder, the demo's in memory.

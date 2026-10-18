@@ -2464,6 +2464,7 @@ version = "0.2.0"
 dependencies = [
  "async-trait",
  "libc",
+ "regex",
  "serde_json",
  "tokio",
  "xenonet-actors",
