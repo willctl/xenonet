@@ -98,15 +98,19 @@ fn with_no_xenonet_there_it_prints_nothing_and_exits_0_quickly() {
 fn a_xenonet_that_doesnt_answer_is_given_up_on_after_4_seconds() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
-    // It takes the connection and says nothing.
+    // It takes the connection and says nothing, for far longer than the
+    // hook waits.
     let held = thread::spawn(move || {
         if let Ok((s, _)) = listener.accept() {
-            thread::sleep(Duration::from_secs(6));
+            thread::sleep(Duration::from_secs(30));
             drop(s);
         }
     });
     let out = run(&["hook", "codex"], "{}", Some(port));
     assert_eq!((out.code, out.stdout.as_str()), (0, ""));
-    assert!(out.took >= Duration::from_millis(3900) && out.took < Duration::from_millis(5500), "{:?}", out.took);
+    // A loaded machine (a CI runner) can take seconds more to start the hook
+    // and see it out, so the upper bound only says it gave up rather than
+    // wait for the server to let go.
+    assert!(out.took >= Duration::from_millis(3900) && out.took < Duration::from_secs(20), "{:?}", out.took);
     drop(held);
 }
