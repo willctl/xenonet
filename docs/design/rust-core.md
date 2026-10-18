@@ -490,6 +490,11 @@ Each step leaves `npm test` passing on JS, and adds to `parity.json`.
   (`crates/xenonet-mcp/src/pending.rs`) do the same for the core functions
   they call. When a core lands, an adapter implements its trait, and
   `Cores::pending()` gives way to it.
+- **Terminals live in the service**, as the standalone JS service's do:
+  `crates/xenonet-service/src/terminals.rs`, on `portable-pty` (a pty, and
+  ConPTY on Windows, as node-pty is for the JS). The service owns the
+  shells and Desktop only reads their output, so they keep running while
+  Desktop restarts, which a pty in Electron couldn't do.
 - **The console operator stays JS for now**: `node mcp/console.js`, which
   the binary's `xenonet mcp console` says to run. It drives Desktop through
   `core/control.js`, which stays JS for `electron/`, the end-to-end tests
@@ -500,9 +505,6 @@ Each step leaves `npm test` passing on JS, and adds to `parity.json`.
 
 ## Not decided yet
 
-- Where terminals live: in the Rust service (with a pty crate), or in
-  Electron, as Desktop's own already do. Until then the Rust service's
-  component service answers the terminal requests pending.
 - The DNS resolver and TLS the actor gateway's check of a public address
   needs (`hickory-resolver` and `rustls`, say). The check on this computer
   alone is in Rust.

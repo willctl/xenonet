@@ -29,6 +29,7 @@ pub mod routes;
 pub mod rpc;
 pub mod serve;
 pub mod static_files;
+pub mod terminals;
 pub mod upstream;
 pub mod window_key;
 pub mod wire;

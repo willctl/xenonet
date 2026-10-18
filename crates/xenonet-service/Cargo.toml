@@ -23,6 +23,9 @@ getrandom.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
+# The terminal drawer's shells: a pty, ConPTY on Windows (server/terminals.js
+# has node-pty).
+portable-pty = "0.9"
 reqwest.workspace = true
 rustls.workspace = true
 serde_json.workspace = true
