@@ -188,6 +188,6 @@ mod tests {
         assert!(!alive(2f64.powi(30)), "a pid nobody has");
         assert!(!alive(1.5) && !alive(2f64.powi(40)));
         #[cfg(any(target_os = "linux", target_os = "macos"))]
-        assert!(!cmdline(f64::from(std::process::id())).is_empty());
+        assert_ne!(cmdline(f64::from(std::process::id())), "");
     }
 }

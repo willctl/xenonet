@@ -12,6 +12,8 @@
 // It needs node and the checkout's node_modules; without them it says so
 // and passes.
 
+#![expect(clippy::unwrap_used, clippy::panic, reason = "a test fails where its helpers unwrap")]
+
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};

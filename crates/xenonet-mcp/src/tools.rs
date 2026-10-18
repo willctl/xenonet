@@ -43,7 +43,7 @@ impl Def {
 /// how the SDK answers instead: a protocol error for a tool there isn't,
 /// and a tool error for arguments that don't fit. (The answer is as big as
 /// rmcp's own, which is what a handler returns anyway.)
-#[allow(clippy::result_large_err)]
+#[expect(clippy::result_large_err, reason = "the error is rmcp's own answer, which a handler returns as it is")]
 pub fn check<'a>(defs: &'a [Def], name: &str, arguments: Option<Map<String, Value>>) -> Result<(&'a Def, Value), Result<CallToolResult, McpError>> {
     let Some(def) = defs.iter().find(|d| d.name == name) else {
         return Err(Err(McpError::invalid_params(format!("Tool {name} not found"), None)));
