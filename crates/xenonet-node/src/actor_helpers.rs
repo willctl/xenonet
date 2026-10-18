@@ -7,6 +7,7 @@ use napi_derive::napi;
 use serde_json::{json, Value};
 use std::sync::Mutex;
 use xenonet_actors::{detail, handoff, key, limits, names};
+use xenonet_base::sync::Locked;
 use xenonet_engine::js::{template, truthy};
 use xenonet_engine::products;
 
@@ -197,12 +198,12 @@ impl Bucket {
 
     #[napi]
     pub fn take(&self, n: f64, now: f64) -> f64 {
-        self.inner.lock().unwrap().take(n, now)
+        self.inner.locked().take(n, now)
     }
 
     #[napi(js_name = "fullIn")]
     pub fn full_in(&self, now: f64) -> f64 {
-        self.inner.lock().unwrap().full_in(now)
+        self.inner.locked().full_in(now)
     }
 }
 
@@ -228,17 +229,17 @@ impl Buckets {
 
     #[napi]
     pub fn take(&self, key: String, rate: f64, burst: f64, n: f64, now: f64) -> f64 {
-        self.inner.lock().unwrap().take(&key, rate, burst, n, now)
+        self.inner.locked().take(&key, rate, burst, n, now)
     }
 
     #[napi]
     pub fn forget(&self, prefix: String) {
-        self.inner.lock().unwrap().forget(&prefix);
+        self.inner.locked().forget(&prefix);
     }
 
     #[napi(getter)]
     pub fn size(&self) -> u32 {
-        self.inner.lock().unwrap().size() as u32
+        self.inner.locked().size() as u32
     }
 }
 

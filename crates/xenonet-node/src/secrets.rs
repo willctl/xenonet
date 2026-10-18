@@ -9,6 +9,7 @@ use napi_derive::napi;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use xenonet_actors::secret_store::{self, Command, MemorySecrets, Ran, SecretStore};
+use xenonet_base::sync::Locked;
 use xenonet_base::text::js_string;
 
 struct Bridged<'a>(&'a Asker);
@@ -114,21 +115,21 @@ impl MemorySecretsCore {
 
     #[napi]
     pub fn has(&self, target: String) -> bool {
-        self.inner.lock().unwrap().has(&target)
+        self.inner.locked().has(&target)
     }
 
     #[napi]
     pub fn get(&self, target: String) -> Option<String> {
-        self.inner.lock().unwrap().get(&target)
+        self.inner.locked().get(&target)
     }
 
     #[napi]
     pub fn set(&self, target: String, secret: String) -> Result<bool> {
-        self.inner.lock().unwrap().set(&target, &secret).map_err(|e| Error::new(Status::GenericFailure, e))
+        self.inner.locked().set(&target, &secret).map_err(|e| Error::new(Status::GenericFailure, e))
     }
 
     #[napi]
     pub fn remove(&self, target: String) -> bool {
-        self.inner.lock().unwrap().remove(&target)
+        self.inner.locked().remove(&target)
     }
 }

@@ -12,6 +12,7 @@ use napi_derive::napi;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use xenonet_actors::attribution::{self, Candidate, Paths, Pending, Proc, Spawns};
+use xenonet_base::sync::Locked;
 use xenonet_engine::peer::{list, Calls, Thrown};
 use xenonet_engine::sql::Arg;
 
@@ -96,23 +97,23 @@ impl SpawnsCore {
     /// [key, record] pairs.
     #[napi]
     pub fn pending(&self) -> Json {
-        Json(Value::Array(self.state.lock().unwrap().pending.iter().map(|(k, p)| json!([k, p.json()])).collect()))
+        Json(Value::Array(self.state.locked().pending.iter().map(|(k, p)| json!([k, p.json()])).collect()))
     }
     #[napi]
     pub fn done(&self) -> Vec<String> {
-        self.state.lock().unwrap().done.items().to_vec()
+        self.state.locked().done.items().to_vec()
     }
     #[napi]
     pub fn claimed(&self) -> Vec<String> {
-        self.state.lock().unwrap().claimed.items().to_vec()
+        self.state.locked().claimed.items().to_vec()
     }
     #[napi]
     pub fn claim(&self, id: String) {
-        self.state.lock().unwrap().claimed.add(id);
+        self.state.locked().claimed.add(id);
     }
     #[napi(js_name = "clearPending")]
     pub fn clear_pending(&self) {
-        self.state.lock().unwrap().pending.clear();
+        self.state.locked().pending.clear();
     }
 
     /// Agent processes the actor started, each taken once, with the folder
