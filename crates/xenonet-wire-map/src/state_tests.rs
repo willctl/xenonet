@@ -191,7 +191,7 @@ fn identities_read_while_their_health_and_the_map_are_asked_for() {
             let w = world();
             let s = w.state.clone();
             s.refresh_map().await.expect("a map");
-            let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let stop = Arc::new(AtomicBool::new(false));
             let mut askers = Vec::new();
             for _ in 0..3 {
                 let (s, stop) = (s.clone(), stop.clone());
