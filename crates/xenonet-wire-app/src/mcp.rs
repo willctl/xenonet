@@ -8,8 +8,8 @@
 //!
 //! The listing is a small MCP client of its own, over a program's standard
 //! input and output or Streamable HTTP, where the JS had the MCP SDK's.
-//! Codex's app-server belongs to the map's readers, so Codex isn't asked
-//! here: the catalog comes from the configuration and the server itself.
+//! Codex is asked through the app-server the map's Codex reader runs
+//! (State::codex_request); while that's pending, as Codex not answering.
 
 use crate::fx::Locked;
 use crate::fx::{self, now_ms};
@@ -20,9 +20,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use xenonet_app::{mcp_discovery as discovery, mcp_info as info};
-use xenonet_service::cores::{McpInfo, R};
+use xenonet_service::cores::{McpInfo, State, R};
 
 pub struct Catalog {
+    state: Arc<dyn State>,
     settings: Value,
     version: String,
     cache: Mutex<HashMap<String, Value>>,
@@ -44,8 +45,8 @@ fn read_file(f: Option<&str>) -> Value {
 }
 
 impl Catalog {
-    pub fn new(config: &Value, version: &str) -> Self {
-        Catalog { settings: settings_of(config), version: version.into(), cache: Mutex::new(HashMap::new()), pending: Mutex::new(HashMap::new()) }
+    pub fn new(config: &Value, version: &str, state: Arc<dyn State>) -> Self {
+        Catalog { state, settings: settings_of(config), version: version.into(), cache: Mutex::new(HashMap::new()), pending: Mutex::new(HashMap::new()) }
     }
 
     async fn collect(&self, server: &str, sessions: &[Value]) -> Value {
@@ -55,8 +56,10 @@ impl Catalog {
         loop {
             let answer = match next {
                 info::Next::Done(r) => return r,
-                // Codex isn't asked here (see above): as if it couldn't be.
-                info::Next::Request { .. } => info::Answer::Failed { name: None, code: Some(json!("unavailable")) },
+                info::Next::Request { method, params } => match self.state.codex_request(method, params).await {
+                    Ok(v) => info::Answer::Ok(v),
+                    Err(e) => info::Answer::Failed { name: None, code: Some(json!(e.code.unwrap_or_else(|| "unavailable".into()))) },
+                },
                 info::Next::Discover(spec) => match discover(&spec, &self.version).await {
                     Ok(found) => info::Answer::Ok(found),
                     Err((name, code)) => info::Answer::Failed { name, code },
@@ -331,7 +334,7 @@ mod tests {
 
     #[test]
     fn the_demos_catalog_is_made_up() {
-        let c = Catalog::new(&json!({ "homeDir": "/nowhere" }), "0.0.0");
+        let c = Catalog::new(&json!({ "homeDir": "/nowhere" }), "0.0.0", Arc::new(xenonet_service::cores::Pending));
         let d = c.demo("agent-wiki").unwrap();
         assert_eq!(d["server"], "agent-wiki");
     }
@@ -357,7 +360,7 @@ done"#;
     #[tokio::test]
     async fn a_server_no_one_configured_is_from_what_the_sessions_show() {
         let home = std::env::temp_dir().join(format!("xenonet-wire-mcp-{}", std::process::id()));
-        let c = Catalog::new(&json!({ "homeDir": home, "claudeConfigFile": home.join(".claude.json") }), "0.0.0");
+        let c = Catalog::new(&json!({ "homeDir": home, "claudeConfigFile": home.join(".claude.json") }), "0.0.0", Arc::new(xenonet_service::cores::Pending));
         let sessions = json!([{ "id": "claude:a", "app": "claude", "title": "t", "status": "idle", "mcp": [{ "server": "nowhere", "ts": 5 }] }]);
         let r = c.get("nowhere", &sessions, false).await.unwrap();
         assert_eq!((r["server"].clone(), r["lastCall"].clone(), r["catalog"].clone()), (json!("nowhere"), json!(5), json!(false)));

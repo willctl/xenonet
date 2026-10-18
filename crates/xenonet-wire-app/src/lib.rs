@@ -71,7 +71,7 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
         Arc::new(spotify::SpotifyRemote::new(&file, config.port, Arc::new(Secrets::real()), env.emitter.clone()))
     };
     cores.system = if demo { Arc::new(system::DemoSystem) } else { Arc::new(system::SystemPanel(system::System::new())) };
-    cores.mcp_info = Arc::new(mcp::Catalog::new(&js, &env.version));
+    cores.mcp_info = Arc::new(mcp::Catalog::new(&js, &env.version, cores.state.clone()));
 
     // Hosts: this XenoNet as one, which needs no flag, and with
     // XENONET_HOSTS=1 the hub, whose hosts' file is one of the map's
