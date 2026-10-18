@@ -37,6 +37,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use xenonet_base::json::stringify;
+use xenonet_base::sync::Locked;
 use xenonet_engine::js::{base64, base64_bytes};
 use xenonet_engine::peer::{list, Calls, Thrown};
 use xenonet_engine::re;
@@ -181,7 +182,7 @@ pub fn wake_signature(secret: &str, id: &str, timestamp: &str, body: &str) -> St
 fn random_hex(n: usize) -> std::result::Result<String, Thrown> {
     let mut b = vec![0u8; n];
     getrandom::fill(&mut b).map_err(|e| Thrown::new(format!("no random bytes: {e}")))?;
-    Ok(b.iter().map(|x| format!("{x:02x}")).collect())
+    Ok(crate::tokens::hex(&b))
 }
 
 /// A value for JSON.stringify: undefined left out of an object.
@@ -288,6 +289,26 @@ struct State {
     tokens_at: f64,
 }
 
+// An actor's state before its first wake, made at `t`.
+fn new_state(t: f64) -> State {
+    State {
+        timer: false,
+        notify_timer: false,
+        in_flight: false,
+        again: false,
+        testing: false,
+        last_at: None,
+        last: None,
+        failures: 0.0,
+        not_before: 0.0,
+        notified_at: 0.0,
+        tested_at: 0.0,
+        woke: None,
+        tokens: PER_ACTOR_BURST,
+        tokens_at: t,
+    }
+}
+
 #[derive(Default)]
 struct Inner {
     /// By actor id, in the order they came.
@@ -331,38 +352,22 @@ impl Wakes {
         Wakes { store, version, inner: Mutex::new(Inner { all_tokens: ALL_BURST, all_at: now, ..Inner::default() }) }
     }
 
-    fn now(&self, c: &mut dyn Calls) -> Result<f64> {
+    fn now(c: &mut dyn Calls) -> Result<f64> {
         Ok(to_number(&c.call("", "now", vec![])?))
     }
 
-    fn log(&self, c: &mut dyn Calls, detail: String) -> Result<()> {
+    fn log(c: &mut dyn Calls, detail: String) -> Result<()> {
         c.call("", "log", vec![Arg::text("actor.wake"), Arg::text(detail)])?;
         Ok(())
     }
 
     /// The actor's state, made when it has none.
     fn st(&self, c: &mut dyn Calls, id: &str) -> Result<()> {
-        if self.inner.lock().unwrap().state.iter().any(|(k, _)| k == id) {
+        if self.inner.locked().state.iter().any(|(k, _)| k == id) {
             return Ok(());
         }
-        let t = self.now(c)?;
-        let s = State {
-            timer: false,
-            notify_timer: false,
-            in_flight: false,
-            again: false,
-            testing: false,
-            last_at: None,
-            last: None,
-            failures: 0.0,
-            not_before: 0.0,
-            notified_at: 0.0,
-            tested_at: 0.0,
-            woke: None,
-            tokens: PER_ACTOR_BURST,
-            tokens_at: t,
-        };
-        let mut inner = self.inner.lock().unwrap();
+        let s = new_state(Self::now(c)?);
+        let mut inner = self.inner.locked();
         if !inner.state.iter().any(|(k, _)| k == id) {
             inner.state.push((id.to_string(), s));
         }
@@ -370,7 +375,7 @@ impl Wakes {
     }
 
     fn with<T>(&self, id: &str, f: impl FnOnce(&mut State) -> T) -> Option<T> {
-        self.inner.lock().unwrap().state.iter_mut().find(|(k, _)| k == id).map(|(_, s)| f(s))
+        self.inner.locked().state.iter_mut().find(|(k, _)| k == id).map(|(_, s)| f(s))
     }
 
     fn configs(&self) -> Result<Value> {
@@ -421,8 +426,8 @@ impl Wakes {
     }
 
     fn take_all(&self, c: &mut dyn Calls) -> Result<bool> {
-        let t = self.now(c)?;
-        let mut i = self.inner.lock().unwrap();
+        let t = Self::now(c)?;
+        let mut i = self.inner.locked();
         i.all_tokens = ALL_BURST.min(i.all_tokens + ((t - i.all_at) / 1000.0) * ALL_RATE);
         i.all_at = t;
         if i.all_tokens < 1.0 || i.all_tokens.is_nan() {
@@ -432,12 +437,12 @@ impl Wakes {
         Ok(true)
     }
 
-    fn registered(&self, c: &mut dyn Calls, id: &str) -> Result<bool> {
+    fn registered(c: &mut dyn Calls, id: &str) -> Result<bool> {
         Ok(c.call("actors", "isRegistered", vec![Arg::text(id)])?.truthy())
     }
 
     fn set_of(&self, id: &str) -> Vec<u64> {
-        let i = self.inner.lock().unwrap();
+        let i = self.inner.locked();
         i.streams.iter().find(|(k, _)| k == id).and_then(|(_, n)| i.sets.get(n)).cloned().unwrap_or_default()
     }
 
@@ -449,7 +454,7 @@ impl Wakes {
 
     pub fn arrived(&self, c: &mut dyn Calls, id: &Arg) -> Result<()> {
         let id = js_text(id);
-        if !id.starts_with("actor:") || !self.registered(c, &id)? {
+        if !id.starts_with("actor:") || !Self::registered(c, &id)? {
             return Ok(());
         }
         let n = self.unread(&id)?;
@@ -475,7 +480,11 @@ impl Wakes {
     fn next_at(&self, c: &mut dyn Calls, id: &str) -> Result<f64> {
         self.st(c, id)?;
         let unseen = self.unseen(id)?;
-        let s = self.with(id, |s| s.clone()).unwrap();
+        // Forgotten since st() made it sure: as st() would make it again.
+        let s = match self.with(id, |s| s.clone()) {
+            Some(s) => s,
+            None => new_state(Self::now(c)?),
+        };
         let same = |a: &Cell, b: &Cell| match (a.as_f64(), b.as_f64()) {
             (Some(x), Some(y)) => x == y,
             _ => a == b,
@@ -485,14 +494,14 @@ impl Wakes {
             _ => 0.0,
         };
         let refill = if s.tokens >= 1.0 { 0.0 } else { s.tokens_at + ((1.0 - s.tokens) / PER_ACTOR_RATE) * 1000.0 };
-        let t = self.now(c)?;
+        let t = Self::now(c)?;
         let all = [t + COALESCE_MS, s.last_at.unwrap_or(0.0) + MIN_GAP_MS, s.not_before, held, refill];
         Ok(if all.iter().any(|x| x.is_nan()) { f64::NAN } else { all.iter().copied().fold(f64::NEG_INFINITY, f64::max) })
     }
 
     fn schedule(&self, c: &mut dyn Calls, id: &str) -> Result<()> {
         self.st(c, id)?;
-        let (in_flight, timer) = self.with(id, |s| (s.in_flight, s.timer)).unwrap();
+        let (in_flight, timer) = self.with(id, |s| (s.in_flight, s.timer)).unwrap_or((false, false));
         if in_flight {
             self.with(id, |s| s.again = true);
             return Ok(());
@@ -501,7 +510,7 @@ impl Wakes {
             return Ok(());
         }
         let at = self.next_at(c, id)?;
-        let ms = at - self.now(c)?;
+        let ms = at - Self::now(c)?;
         let set = c.call("", "setTimer", vec![Arg::text("wake"), Arg::text(id), Arg::num(ms)])?.truthy();
         self.with(id, |s| s.timer = set);
         Ok(())
@@ -509,7 +518,7 @@ impl Wakes {
 
     fn schedule_notify(&self, c: &mut dyn Calls, id: &str) -> Result<()> {
         self.st(c, id)?;
-        if self.with(id, |s| s.notify_timer).unwrap() {
+        if self.with(id, |s| s.notify_timer).unwrap_or(false) {
             return Ok(());
         }
         let set = c.call("", "setTimer", vec![Arg::text("notify"), Arg::text(id), Arg::num(NOTIFY_AFTER_MS)])?.truthy();
@@ -536,8 +545,8 @@ impl Wakes {
         let id = js_text(id);
         self.with(&id, |s| s.notify_timer = false);
         let n = self.unread(&id)?;
-        let t = self.now(c)?;
-        if n == 0 || !self.registered(c, &id)? || t - self.with(&id, |s| s.notified_at).unwrap_or(0.0) < NOTIFY_EVERY_MS {
+        let t = Self::now(c)?;
+        if n == 0 || !Self::registered(c, &id)? || t - self.with(&id, |s| s.notified_at).unwrap_or(0.0) < NOTIFY_EVERY_MS {
             return Ok(());
         }
         self.with(&id, |s| s.notified_at = t);
@@ -550,7 +559,7 @@ impl Wakes {
 
     /// One of the actor's own wakes.
     fn take_one(&self, c: &mut dyn Calls, id: &str) -> Result<bool> {
-        let t = self.now(c)?;
+        let t = Self::now(c)?;
         Ok(self
             .with(id, |s| {
                 s.tokens = PER_ACTOR_BURST.min(s.tokens + ((t - s.tokens_at) / 1000.0) * PER_ACTOR_RATE);
@@ -591,16 +600,17 @@ impl Wakes {
         };
         let wanted = set_host(self)?;
         let key_text = js_text(&key);
-        let same_host = checked.as_ref().is_some_and(|(_, h)| wanted.as_str() == Some(h.as_str()));
-        if !same_host || !secret_ok(&key_text) {
-            return Ok(out(
-                false,
-                None,
-                Some("the webhook in your credential store isn't the one set in XenoNet's window; set its wake again".into()),
-                Some("its webhook changed outside XenoNet".into()),
-            ));
-        }
-        let (checked_url, _) = checked.unwrap();
+        let checked_url = match checked {
+            Some((url, h)) if wanted.as_str() == Some(h.as_str()) && secret_ok(&key_text) => url,
+            _ => {
+                return Ok(out(
+                    false,
+                    None,
+                    Some("the webhook in your credential store isn't the one set in XenoNet's window; set its wake again".into()),
+                    Some("its webhook changed outside XenoNet".into()),
+                ))
+            }
+        };
         let bare = match parse_url(c, &checked_url)? {
             Some(u) => unbracket(&u.hostname).to_string(),
             None => return Err(Thrown::new("Invalid URL").into()),
@@ -654,7 +664,7 @@ impl Wakes {
             }
         });
         if !ok {
-            self.log(c, format!("{id}: {}", js_text(&out.field("why"))))?;
+            Self::log(c, format!("{id}: {}", js_text(&out.field("why"))))?;
         }
         Ok(out)
     }
@@ -687,13 +697,13 @@ impl Wakes {
 
     fn fire_inner(&self, c: &mut dyn Calls, id: &str, slug: &str) -> Result<()> {
         let unseen = self.unseen(id)?;
-        if unseen.is_empty() || self.kind_of(slug)? != "webhook" || !self.registered(c, id)? {
+        if unseen.is_empty() || self.kind_of(slug)? != "webhook" || !Self::registered(c, id)? {
             return Ok(());
         }
         // Its time may have moved since it was set: the actor's own limit,
         // or the messages it was last woken for still unread.
         let at = self.next_at(c, id)?;
-        if at > self.now(c)? + COALESCE_MS {
+        if at > Self::now(c)? + COALESCE_MS {
             self.with(id, |s| s.again = true);
             return Ok(());
         }
@@ -702,11 +712,11 @@ impl Wakes {
             return Ok(());
         }
         if !self.take_all(c)? {
-            let t = self.now(c)?;
+            let t = Self::now(c)?;
             self.record(c, id, t, out(false, None, Some("XenoNet sends at most 120 wakes an hour".into()), Some("XenoNet's limit of 120 wakes an hour".into())), false)?;
             return Ok(());
         }
-        let t = self.now(c)?;
+        let t = Self::now(c)?;
         let went = self.call(c, id, slug, unseen.len(), t)?;
         let went = self.record(c, id, t, went, false)?;
         if went.field("ok").truthy() {
@@ -719,16 +729,16 @@ impl Wakes {
     /// the next wake back, nor stop one on its way.
     fn fire_test(&self, c: &mut dyn Calls, id: &str) -> Result<Arg> {
         self.st(c, id)?;
-        if self.with(id, |s| s.testing).unwrap() {
+        if self.with(id, |s| s.testing).unwrap_or(false) {
             return fail(429.0, "too-many", "a test is on its way");
         }
         self.with(id, |s| s.testing = true);
         let r = (|| -> Result<Arg> {
             if !self.take_all(c)? {
-                let t = self.now(c)?;
+                let t = Self::now(c)?;
                 return self.record(c, id, t, out(false, None, Some("XenoNet sends at most 120 wakes an hour".into()), Some("XenoNet's limit of 120 wakes an hour".into())), true);
             }
-            let t = self.now(c)?;
+            let t = Self::now(c)?;
             let n = self.unread(id)?;
             let went = self.call(c, id, &slug_of(id), n, t)?;
             self.record(c, id, t, went, true)
@@ -766,12 +776,12 @@ impl Wakes {
     }
 
     fn forget_state(&self, c: &mut dyn Calls, id: &str) -> Result<()> {
-        let had = self.inner.lock().unwrap().state.iter().any(|(k, _)| k == id);
+        let had = self.inner.locked().state.iter().any(|(k, _)| k == id);
         if !had {
             return Ok(());
         }
         c.call("", "clearTimers", vec![Arg::text(id)])?;
-        self.inner.lock().unwrap().state.retain(|(k, _)| k != id);
+        self.inner.locked().state.retain(|(k, _)| k != id);
         Ok(())
     }
 
@@ -794,13 +804,13 @@ impl Wakes {
             }
         }
         let (streams, state): (Vec<String>, Vec<String>) = {
-            let i = self.inner.lock().unwrap();
+            let i = self.inner.locked();
             (i.streams.iter().map(|(k, _)| k.clone()).collect(), i.state.iter().map(|(k, _)| k.clone()).collect())
         };
         streams.into_iter().chain(state).for_each(&mut add);
         let mut out = Vec::new();
         for id in ids {
-            if self.registered(c, &id)? {
+            if Self::registered(c, &id)? {
                 out.push(self.view(&Arg::text(id))?);
             }
         }
@@ -812,7 +822,7 @@ impl Wakes {
     pub fn set(&self, c: &mut dyn Calls, slug: &Arg, ask: &Arg) -> Result<Arg> {
         let slug = js_text(slug);
         let id = format!("actor:{slug}");
-        if !self.registered(c, &id)? {
+        if !Self::registered(c, &id)? {
             return fail(404.0, "not-found", "XenoNet has no actor by that slug that reports itself");
         }
         let kind = ask.field("kind");
@@ -846,11 +856,11 @@ impl Wakes {
                 "set",
                 vec![Arg::text(wake_target(&slug, "key")), Arg::text(key.clone()), Arg::Obj(vec![("comment".into(), Arg::text("The key XenoNet sends with an actor's wake"))])],
             )?;
-            let t = self.now(c)?;
+            let t = Self::now(c)?;
             json!({ "kind": kind, "host": host, "signed": key.starts_with("whsec_"), "at": xenonet_base::json::number(t) })
         } else {
             let _ = c.call_all(vec![("secrets", "remove", vec![Arg::text(wake_target(&slug, "url"))]), ("secrets", "remove", vec![Arg::text(wake_target(&slug, "key"))])]);
-            let t = self.now(c)?;
+            let t = Self::now(c)?;
             json!({ "kind": kind, "at": xenonet_base::json::number(t) })
         };
         if let Value::Object(m) = &mut configs {
@@ -865,18 +875,18 @@ impl Wakes {
     pub fn test(&self, c: &mut dyn Calls, slug: &Arg) -> Result<Arg> {
         let slug = js_text(slug);
         let id = format!("actor:{slug}");
-        if !self.registered(c, &id)? {
+        if !Self::registered(c, &id)? {
             return fail(404.0, "not-found", "XenoNet has no actor by that slug that reports itself");
         }
         if self.kind_of(&slug)? != "webhook" {
             return fail(409.0, "no-webhook", "it has no webhook to call");
         }
         self.st(c, &id)?;
-        let t = self.now(c)?;
-        if t - self.with(&id, |s| s.tested_at).unwrap() < TEST_GAP_MS {
+        let t = Self::now(c)?;
+        if t - self.with(&id, |s| s.tested_at).unwrap_or(0.0) < TEST_GAP_MS {
             return fail(429.0, "too-many", "one test every five seconds");
         }
-        let t = self.now(c)?;
+        let t = Self::now(c)?;
         self.with(&id, |s| s.tested_at = t);
         let went = self.fire_test(c, &id)?;
         let mut fields = match went {
@@ -904,7 +914,7 @@ impl Wakes {
         for sink in self.set_of(&id) {
             c.call("", "end", vec![Arg::num(sink as f64)])?;
         }
-        self.inner.lock().unwrap().streams.retain(|(k, _)| *k != id);
+        self.inner.locked().streams.retain(|(k, _)| *k != id);
         Ok(())
     }
 
@@ -914,7 +924,7 @@ impl Wakes {
     pub fn subscribe(&self, c: &mut dyn Calls, id: &Arg, sink: u64) -> Result<u64> {
         let id = js_text(id);
         let set = {
-            let mut i = self.inner.lock().unwrap();
+            let mut i = self.inner.locked();
             let existing = i.streams.iter().find(|(k, _)| *k == id).map(|(_, n)| *n);
             let set = match existing {
                 Some(n) => n,
@@ -947,7 +957,7 @@ impl Wakes {
     /// gone with the last of them.
     pub fn unsubscribe(&self, id: &Arg, set: u64, sink: u64) {
         let id = js_text(id);
-        let mut i = self.inner.lock().unwrap();
+        let mut i = self.inner.locked();
         let empty = match i.sets.get_mut(&set) {
             Some(m) => {
                 m.retain(|s| *s != sink);
@@ -963,18 +973,18 @@ impl Wakes {
     }
 
     pub fn stop(&self, c: &mut dyn Calls) -> Result<()> {
-        let ids: Vec<String> = self.inner.lock().unwrap().state.iter().map(|(k, _)| k.clone()).collect();
+        let ids: Vec<String> = self.inner.locked().state.iter().map(|(k, _)| k.clone()).collect();
         for id in ids {
             self.forget_state(c, &id)?;
         }
         let sinks: Vec<u64> = {
-            let i = self.inner.lock().unwrap();
+            let i = self.inner.locked();
             i.streams.iter().flat_map(|(_, n)| i.sets.get(n).cloned().unwrap_or_default()).collect()
         };
         for sink in sinks {
             c.call("", "end", vec![Arg::num(sink as f64)])?;
         }
-        self.inner.lock().unwrap().streams.clear();
+        self.inner.locked().streams.clear();
         Ok(())
     }
 }
@@ -1005,7 +1015,7 @@ mod tests {
     #[test]
     fn base64_reads_as_node_reads_it() {
         for (s, hex) in [("YQ==", "61"), ("YQ==YQ==", "61"), ("Y Q", "61"), ("Y$Q", "61"), ("-_8", "fbff"), ("+/8", "fbff"), ("YWJjZA", "61626364"), ("Y", ""), ("YW=Jj", "61")] {
-            let got: String = base64_bytes(s).iter().map(|b| format!("{b:02x}")).collect();
+            let got = crate::tokens::hex(&base64_bytes(s));
             assert_eq!(got, hex, "{s}");
         }
         assert_eq!(base64(b"abcd"), "YWJjZA==");

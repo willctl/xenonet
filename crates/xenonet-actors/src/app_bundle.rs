@@ -13,6 +13,7 @@
 use serde_json::{json, Value};
 use std::sync::Mutex;
 use xenonet_base::paths::tilde;
+use xenonet_base::sync::Locked;
 use xenonet_engine::js::join_style;
 use xenonet_engine::jsre::js;
 use xenonet_engine::peer::{list, Calls, Result, Thrown};
@@ -72,13 +73,13 @@ pub struct AppBundle {
 
 impl AppBundle {
     pub fn plist(&self) -> Option<Plist> {
-        self.plist.lock().unwrap().clone()
+        self.plist.locked().clone()
     }
 
     /// Where the app is, or None.
     pub fn where_(&self, c: &mut dyn Calls) -> Result<Option<String>> {
         for p in list(c.get("apps")?) {
-            if c.call("files", "existsSync", vec![p.clone()]).map(|r| r.truthy()).unwrap_or(false) {
+            if c.call("files", "existsSync", vec![p.clone()]).is_ok_and(|r| r.truthy()) {
                 return Ok(Some(xenonet_engine::store::js_text(&p)));
             }
         }
@@ -129,7 +130,7 @@ impl AppBundle {
             }
         }
         let mut read = Plist { file: file.clone(), stamp, version: None, id: None, state: failed.as_ref().map_or("missing", |e| why(code_of(e).as_deref())).into() };
-        *self.plist.lock().unwrap() = Some(read.clone());
+        *self.plist.locked() = Some(read.clone());
         let Some(file) = file.filter(|_| failed.is_none()) else { return Ok(read) };
         let done = (|| -> Result<()> {
             let bytes = match c.call("files", "readFileSync", vec![Arg::text(&file)])? {
@@ -148,7 +149,7 @@ impl AppBundle {
             };
             let version = key(c, "CFBundleShortVersionString")?;
             read.version = version.filter(|v| version_ok(v));
-            *self.plist.lock().unwrap() = Some(read.clone());
+            *self.plist.locked() = Some(read.clone());
             if c.get("id")?.truthy() {
                 let id = key(c, "CFBundleIdentifier")?;
                 read.id = id.filter(|i| bundle_id_ok(i));
@@ -159,7 +160,7 @@ impl AppBundle {
         if let Err(e) = done {
             read.state = why(code_of(&e).as_deref()).into();
         }
-        *self.plist.lock().unwrap() = Some(read.clone());
+        *self.plist.locked() = Some(read.clone());
         Ok(read)
     }
 

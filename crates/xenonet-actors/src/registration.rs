@@ -286,7 +286,7 @@ impl Registration {
         if let Some(why) = slug_refusal(slug.as_str(), known.map(|k| k.id)) {
             return bad(why);
         }
-        let slug = slug.as_str().unwrap().to_string();
+        let slug = slug.as_str().expect("slug_refusal refuses anything but a text").to_string();
         let mut asked: Vec<String> = Vec::new();
         for c in xenonet_engine::peer::list(def_null(body.field("capabilities")).or(Arg::List(vec![]))) {
             let c = text(&c);
@@ -366,7 +366,7 @@ impl Registration {
     // What the card shows of who asked: the program, its parents up to the
     // first app or terminal, and its folder, with ~ for the home folder.
     fn asker_of(&self, chain: &[Value], cwd: &Value) -> Value {
-        let file = |p: &Value| p.get("exe").filter(|e| !e.is_null()).or(p.get("program")).map(|v| xenonet_engine::js::template(Some(v))).unwrap_or_else(|| "undefined".into());
+        let file = |p: &Value| p.get("exe").filter(|e| !e.is_null()).or(p.get("program")).map_or_else(|| "undefined".into(), |v| xenonet_engine::js::template(Some(v)));
         let mut parents = Vec::new();
         for p in chain.iter().skip(1) {
             let f = file(p);

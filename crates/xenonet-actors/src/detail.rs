@@ -75,8 +75,8 @@ fn plural(n: &Value, one: &str, many: &str) -> String {
 
 // A count as a detail says it: a whole number above 0, or 1.
 fn count(n: Option<&Value>) -> Value {
-    match n.and_then(Value::as_f64) {
-        Some(f) if f.is_finite() && f.trunc() == f && f > 0.0 => n.cloned().unwrap(),
+    match n {
+        Some(v) if v.as_f64().is_some_and(|f| f.is_finite() && f.trunc() == f && f > 0.0) => v.clone(),
         _ => Value::from(1),
     }
 }
@@ -101,7 +101,7 @@ pub fn session_words(app: Option<&Value>, place: Option<&Value>) -> String {
 // project's to name. One that reads like a key is just "a file".
 fn file_name(p: &Value) -> String {
     let s = template(Some(p));
-    let last = s.split(['\\', '/']).filter(|x| !x.is_empty()).last().unwrap_or("");
+    let last = s.split(['\\', '/']).rfind(|x| !x.is_empty()).unwrap_or("");
     let name = clip(&one_line(last), 60);
     if !name.is_empty() && looks_like_key(&name) {
         "a file".into()
@@ -119,7 +119,10 @@ fn file_words(paths: Option<&Value>, n: Option<&Value>) -> Result<String, String
     if !names.is_empty() {
         return Ok(if names.len() == 1 { names[0].clone() } else { format!("{} and {}", names[0], plural(&Value::from(names.len() - 1), "1 more file", "more files")) });
     }
-    Ok(if truthy(n) { plural(n.unwrap(), "a file", "files") } else { "files".into() })
+    Ok(match n.filter(|n| truthy(Some(n))) {
+        Some(n) => plural(n, "a file", "files"),
+        None => "files".into(),
+    })
 }
 
 /// A presence that changed, from what it was.
@@ -256,7 +259,7 @@ fn key_prefix() -> &'static regex::Regex {
         regex::Regex::new(
             r"(?:^|[^A-Za-z0-9])(?:sk-|sk_|pk_|rk_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[abprs]-|AKIA|ASIA|AIza|npm_|pypi-|hf_|xenonet_actor_|xenonet_assistant_)",
         )
-        .unwrap()
+        .expect("a fixed pattern")
     })
 }
 
@@ -293,7 +296,7 @@ pub fn place_name(name: &str, kind: Option<&str>) -> String {
     let line = one_line(name);
     if looks_like_key(&line) {
         match kind {
-            Some("project") | Some("native") => "a project",
+            Some("project" | "native") => "a project",
             Some("zone") => "a folder",
             _ => "a place",
         }

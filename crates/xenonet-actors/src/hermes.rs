@@ -42,6 +42,7 @@ use crate::registry::value_arg;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use xenonet_base::paths::{is_under, path_key, tilde};
+use xenonet_base::sync::Locked;
 use xenonet_engine::js::{template, truthy};
 use xenonet_engine::jsre::js;
 use xenonet_engine::peer::{list, Calls, Result};
@@ -149,15 +150,15 @@ fn text_of(v: Option<&Value>) -> String {
 
 // A file read again only when it changes: its mtime and size, or why it
 // can't be had.
-fn stamp_of(c: &mut dyn Calls, paths: &[String]) -> Result<String> {
+fn stamp_of(c: &mut dyn Calls, paths: &[String]) -> String {
     let mut out = Vec::new();
     for p in paths {
         out.push(match c.call("files", "statSync", vec![Arg::text(p)]) {
             Ok(st) => format!("{}:{}", xenonet_engine::store::js_text(&st.field("mtimeMs")), xenonet_engine::store::js_text(&st.field("size"))),
-            Err(e) => e.code.as_ref().map(|c| template(Some(c))).unwrap_or_else(|| "?".into()),
+            Err(e) => e.code.as_ref().map_or_else(|| "?".into(), |c| template(Some(c))),
         });
     }
-    Ok(out.join("|"))
+    out.join("|")
 }
 
 fn join(base: &str, parts: &[&str]) -> String {
@@ -255,12 +256,12 @@ impl Hermes {
     }
 
     fn s(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner())
+        self.state.locked()
     }
 
     // A source read again only when its files change.
     fn stamped(&self, c: &mut dyn Calls, key: &str, paths: &[String], read: &mut dyn FnMut(&mut dyn Calls) -> Result<Value>) -> Result<Value> {
-        let stamp = stamp_of(c, paths)?;
+        let stamp = stamp_of(c, paths);
         if let Some((_, s, v)) = self.s().cache.iter().find(|(k, _, _)| k == key) {
             if *s == stamp {
                 return Ok(v.clone());
@@ -326,7 +327,7 @@ impl Hermes {
             let list = hf::list_profiles(c, &self.root)?;
             let mut s = self.s();
             s.profiles_at = Some(at);
-            s.profile_list = list.as_array().unwrap().iter().map(|p| text_of(p.get("name"))).collect();
+            s.profile_list = list.as_array().into_iter().flatten().map(|p| text_of(p.get("name"))).collect();
         }
         let mut names = self.s().profile_list.clone();
         // Only a plain name, so a profile's folder stays inside Hermes's.
@@ -347,7 +348,7 @@ impl Hermes {
         let s = self.s();
         let Some(pid) = pid.and_then(Value::as_f64).filter(|p| *p != 0.0) else { return false };
         let Some(row) = s.table.as_ref().and_then(|t| t.get(pid)) else { return false };
-        start.is_none_or(Value::is_null) || same_start(start.unwrap(), &xenonet_base::json::number(row.start), 2000.0)
+        start.filter(|s| !s.is_null()).is_none_or(|s| same_start(s, &xenonet_base::json::number(row.start), 2000.0))
     }
 
     // Where a session works, as a place on the map: its repo's root, else
@@ -381,7 +382,7 @@ impl Hermes {
     }
 
     fn exists(&self, c: &mut dyn Calls, p: &str) -> Result<bool> {
-        let dir = std::path::Path::new(p).parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_else(|| ".".into());
+        let dir = std::path::Path::new(p).parent().map_or_else(|| ".".into(), |d| d.to_string_lossy().into_owned());
         Ok(self.stamped(c, &format!("exists:{p}"), &[dir], &mut |c| Ok(json!(c.call("files", "existsSync", vec![Arg::text(p)])?.truthy())))?.as_bool().unwrap_or(false))
     }
 
@@ -401,10 +402,10 @@ impl Hermes {
 
     // A profile's files, each read again only when it changes, and what's
     // new in its session database.
-    fn read_profile(&self, c: &mut dyn Calls, p: &mut Profile, version: &Option<String>, at: f64) -> Result<Read> {
+    fn read_profile(&self, c: &mut dyn Calls, p: &mut Profile, version: Option<&str>, at: f64) -> Result<Read> {
         let f = |parts: &[&str]| join(&p.home, parts);
         let home = p.home.clone();
-        let v = version.clone();
+        let v = version.map(str::to_string);
         let gateway = self.stamped(c, &format!("{}:gateway", p.name), &[f(&["gateway_state.json"])], &mut |c| hf::read_gateway(c, &home, v.clone()))?;
         let ticker = self
             .stamped(c, &format!("{}:ticker", p.name), &[f(&["cron", "ticker_heartbeat"]), f(&["cron", "ticker_last_success"])], &mut |c| hf::read_ticker(c, &home, v.clone()))?;
@@ -417,7 +418,7 @@ impl Hermes {
         self.source(&format!("scheduled jobs{label}"), &f(&["cron", "jobs.json"]), &jobs["state"]);
         // The session database, when it or its log changed.
         let db_file = f(&["state.db"]);
-        let stamp = stamp_of(c, &[db_file.clone(), format!("{db_file}-wal")])?;
+        let stamp = stamp_of(c, &[db_file.clone(), format!("{db_file}-wal")]);
         let mut fresh = None;
         if Some(&stamp) != p.db.stamp.as_ref() {
             let since = at - if p.db.read { HISTORY_MS } else { REPLAY_MS };
@@ -524,8 +525,8 @@ impl Hermes {
             }
         }
         let mut read: Vec<(String, Read)> = Vec::new();
-        for p in profiles.iter_mut() {
-            let r = self.read_profile(c, p, &version, at)?;
+        for p in &mut profiles {
+            let r = self.read_profile(c, p, version.as_deref(), at)?;
             self.put(p);
             if r.gateway_alive {
                 set(n(r.gateway.get("pid")).unwrap_or(f64::NAN), &p.name, &mut profile_of);
@@ -568,11 +569,11 @@ impl Hermes {
                 .map_or_else(|| "default".to_string(), |p| template(Some(p)));
             add(&mut apps_of, profile, a);
         }
-        for p in profiles.iter_mut() {
-            let r = read.iter().find(|(n, _)| *n == p.name).map(|(_, r)| r).unwrap();
+        for p in &mut profiles {
+            let r = read.iter().find(|(n, _)| *n == p.name).map(|(_, r)| r).expect("each profile was read above");
             let procs = running.iter().find(|(n, _)| *n == p.name).map_or(0, |(_, l)| l.len());
             let app_count = apps_of.iter().find(|(n, _)| *n == p.name).map_or(0, |(_, l)| l.len());
-            self.observe(c, p, r, procs, app_count, &version, at, is_installed)?;
+            self.observe(c, p, r, procs, app_count, version.as_deref(), at, is_installed)?;
             self.put(p);
         }
         // The sessions Hermes started.
@@ -581,13 +582,14 @@ impl Hermes {
 
     // What a profile's database says, its presence and status, and the
     // events and targets they make.
-    #[allow(clippy::too_many_arguments)]
-    fn observe(&self, c: &mut dyn Calls, p: &mut Profile, r: &Read, processes: usize, apps: usize, version: &Option<String>, at: f64, is_installed: bool) -> Result<()> {
+    #[expect(clippy::too_many_arguments, reason = "the JS's observe and what one look found, one argument each")]
+    fn observe(&self, c: &mut dyn Calls, p: &mut Profile, r: &Read, processes: usize, apps: usize, version: Option<&str>, at: f64, is_installed: bool) -> Result<()> {
         let there = processes > 0 || r.gateway_alive || r.ticker_alive;
         let fresh_ok = r.fresh.as_ref().filter(|f| f["state"].as_str() == Some("ok"));
         // A named profile is an actor once something of it has run; the
         // default one is while Hermes is installed.
-        if !there && apps == 0 && !c.call("actors", "has", vec![Arg::text(&p.id)])?.truthy() && !(p.name == "default" && is_installed) {
+        let installed_default = p.name == "default" && is_installed;
+        if !there && apps == 0 && !c.call("actors", "has", vec![Arg::text(&p.id)])?.truthy() && !installed_default {
             if let Some(f) = fresh_ok {
                 self.take(c, p, f, at, false)?;
             }
@@ -607,7 +609,7 @@ impl Hermes {
         let installed = is_installed && self.s().profile_list.contains(&p.name);
         let keep = Arg::Obj(vec![
             ("name".into(), Arg::text(&p.title)),
-            ("version".into(), version.as_deref().map_or(Arg::Null, Arg::text)),
+            ("version".into(), version.map_or(Arg::Null, Arg::text)),
             ("via".into(), Arg::List(vec![Arg::text("observed"), Arg::text("attributed")])),
             ("heartbeatMs".into(), Arg::Num(HERMES_HEARTBEAT_MS)),
             ("capabilities".into(), Arg::List(capabilities.iter().map(|c| Arg::text(*c)).collect())),
@@ -723,7 +725,7 @@ impl Hermes {
         let sessions = fresh["sessions"].as_array().cloned().unwrap_or_default();
         for s in &sessions {
             let id = text_of(s.get("id"));
-            let was = p.sessions.iter().find(|(k, _)| *k == id).map(|(_, x)| x.last_message_at).flatten();
+            let was = p.sessions.iter().find(|(k, _)| *k == id).and_then(|(_, x)| x.last_message_at);
             let opt = |k: &str| s.get(k).cloned().unwrap_or(Value::Null);
             let session = Session {
                 id: id.clone(),
@@ -752,11 +754,10 @@ impl Hermes {
                 s.last_message_at = Some(s.last_message_at.unwrap_or(0.0).max(when));
             }
             let s = p.sessions.iter().find(|(k, _)| *k == sid).map(|(_, s)| s.clone());
-            let tool = m.get("tool_name").filter(|t| truthy(Some(t))).map(|t| template(Some(t)));
-            if m["role"].as_str() == Some("tool") && tool.is_some() {
-                let tool = tool.unwrap();
+            let tool = m.get("tool_name").filter(|t| truthy(Some(t))).map(|t| template(Some(t))).filter(|_| m["role"].as_str() == Some("tool"));
+            if let Some(tool) = tool {
                 match p.last_tool.iter_mut().find(|(k, _)| *k == sid) {
-                    Some(slot) => slot.1 = tool.clone(),
+                    Some(slot) => slot.1.clone_from(&tool),
                     None => p.last_tool.push((sid.clone(), tool.clone())),
                 }
                 if record {
@@ -794,7 +795,7 @@ impl Hermes {
                 None => Value::Null,
             };
             let target = if truthy(Some(&place)) { place.clone() } else { Self::place_of_session(c, s.as_ref())? };
-            let paths = if truthy(Some(&place)) { Arg::List(vec![Arg::text(file.unwrap())]) } else { Arg::List(vec![]) };
+            let paths = Arg::List(file.filter(|_| truthy(Some(&place))).map(Arg::text).into_iter().collect());
             c.call(
                 "",
                 "gather",
@@ -848,7 +849,7 @@ impl Hermes {
                 if self.alive(e.get("pid"), e.get("startTime")) {
                     let pid = n(e.get("pid")).unwrap_or(f64::NAN);
                     match background.iter_mut().find(|(p, _)| *p == pid) {
-                        Some(slot) => slot.1 = name.clone(),
+                        Some(slot) => slot.1.clone_from(name),
                         None => background.push((pid, name.clone())),
                     }
                 }
@@ -860,7 +861,7 @@ impl Hermes {
         let started = attribution::started_under(&census.table, &mut agent_of, &mut is_root)?;
         let mut by_actor: Vec<(String, Vec<attribution::Candidate>)> = Vec::new();
         for s in started {
-            let profile = background.iter().find(|(p, _)| *p == s.root).map(|(_, n)| n.clone()).unwrap_or_else(|| profile_of_host(census.get(s.root).map_or(f64::NAN, |r| r.pid)));
+            let profile = background.iter().find(|(p, _)| *p == s.root).map_or_else(|| profile_of_host(census.get(s.root).map_or(f64::NAN, |r| r.pid)), |(_, n)| n.clone());
             let id = self.profile(&profile).id;
             if !c.call("actors", "has", vec![Arg::text(&id)])?.truthy() || !c.call("actors", "enabled", vec![Arg::text(&id)])?.truthy() {
                 continue;
@@ -899,7 +900,7 @@ impl Hermes {
             let mine = (s.field("app").as_str() == Some("codex") && s.field("originator").as_str() == Some("hermes")) || under(key("cwd")) || under(key("worktree"));
             if mine {
                 let sid = xenonet_engine::store::js_text(&s.field("id"));
-                self.spawns.lock().unwrap().claimed.add(sid.clone());
+                self.spawns.locked().claimed.add(sid.clone());
                 let o = Arg::Obj(vec![
                     ("ref".into(), Arg::text(format!("spawned:{sid}"))),
                     ("kind".into(), Arg::text("spawned")),

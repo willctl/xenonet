@@ -25,7 +25,7 @@ use xenonet_engine::js::{template, truthy};
 use xenonet_engine::products::{product_of, product_of_slug};
 
 fn re(p: &str) -> Regex {
-    Regex::new(p).unwrap_or_else(|e| panic!("{p}: {e}"))
+    Regex::new(p).expect("a fixed pattern")
 }
 
 fn letters_or_digits() -> &'static Regex {
@@ -84,11 +84,10 @@ fn lookalikes() -> &'static HashMap<char, &'static str> {
             // capital.
             for &u in *cherokee {
                 cps.push(u);
-                let c = char::from_u32(u).unwrap();
-                cps.push(c.to_lowercase().next().map_or(u, u32::from));
+                cps.push(char::from_u32(u).and_then(|c| c.to_lowercase().next()).map_or(u, u32::from));
             }
-            for cp in cps {
-                m.insert(char::from_u32(cp).unwrap(), *to);
+            for c in cps.into_iter().filter_map(char::from_u32) {
+                m.insert(c, *to);
             }
         }
         m
@@ -107,7 +106,7 @@ pub fn reads_as(s: &str) -> Vec<String> {
     let decomposed: String = s.nfkc().collect::<String>().nfd().collect();
     let bare = marks().replace_all(&decomposed, "");
     let map = lookalikes();
-    let letters: Vec<String> = bare.chars().map(|c| map.get(&c).map_or_else(|| c.to_string(), |s| s.to_string())).collect();
+    let letters: Vec<String> = bare.chars().map(|c| map.get(&c).map_or_else(|| c.to_string(), ToString::to_string)).collect();
     let key = |ell: bool| {
         name_key(
             &letters

@@ -20,11 +20,10 @@
 
 use crate::attribution::Ordered;
 use crate::registration::CAPABILITIES;
-use crate::registry::value_arg;
 use crate::tokens::hex;
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::sync::Mutex;
+use xenonet_base::sync::Locked;
 use xenonet_engine::peer::{Calls, Result};
 use xenonet_engine::sql::Arg;
 
@@ -113,7 +112,7 @@ fn eq(a: &Arg, b: &Arg) -> bool {
 
 impl Observer {
     fn s(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner())
+        self.state.locked()
     }
 
     /// The actor itself, made once and kept current (`o`: name, version,
@@ -415,9 +414,4 @@ impl Observer {
         }
         Ok(true)
     }
-}
-
-#[allow(dead_code)]
-fn unused(v: &Value) -> Arg {
-    value_arg(v)
 }

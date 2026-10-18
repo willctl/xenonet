@@ -48,13 +48,13 @@ fn refuse<T>(code: &'static str, message: &str) -> Result<T> {
 pub fn new_id(prefix: &str) -> std::result::Result<String, Thrown> {
     let mut b = [0u8; 12];
     getrandom::fill(&mut b).map_err(|e| Thrown::new(format!("no random bytes: {e}")))?;
-    Ok(format!("{prefix}_{}", b.iter().map(|x| format!("{x:02x}")).collect::<String>()))
+    Ok(format!("{prefix}_{}", crate::tokens::hex(&b)))
 }
 
 /// parts.join("\0"), hashed: null and undefined join as nothing.
 fn hash_of(parts: &[Arg]) -> String {
     let joined: Vec<String> = parts.iter().map(|p| if p.is_nullish() { String::new() } else { js_text(p) }).collect();
-    Sha256::digest(joined.join("\0").as_bytes()).iter().map(|x| format!("{x:02x}")).collect()
+    crate::tokens::hex(&Sha256::digest(joined.join("\0").as_bytes()))
 }
 
 /// `a === b` for a column's value and a value given.

@@ -18,6 +18,7 @@
 use crate::attribution::Census;
 use serde_json::{json, Value};
 use std::sync::Mutex;
+use xenonet_base::sync::Locked;
 use xenonet_engine::peer::{Calls, Result};
 use xenonet_engine::sql::Arg;
 
@@ -31,7 +32,7 @@ const CAPABILITIES: [&str; 4] = ["browse", "message-people", "schedule", "use-co
 struct State {
     looked_at: Option<f64>,
     was_installed: bool,
-    table_state: Option<String>,
+    table_status: Option<String>,
 }
 
 #[derive(Default)]
@@ -71,7 +72,7 @@ impl Muse {
         // Not installed where apps go and not seen before: the process table
         // is read only once a minute, for an app run from somewhere else.
         if !known && !c.call("app", "installed", vec![])?.truthy() {
-            let mut s = self.state.lock().unwrap();
+            let mut s = self.state.locked();
             if at - s.looked_at.unwrap_or(f64::NEG_INFINITY) < STRAY_MS {
                 return Ok(());
             }
@@ -79,7 +80,7 @@ impl Muse {
         }
         let mut table_state = None;
         let census = census(c, &mut table_state);
-        self.state.lock().unwrap().table_state = table_state;
+        self.state.locked().table_status = table_state;
         let census = census?;
         let open = census.table.iter().enumerate().any(|(i, p)| {
             let pr = &census.products[i];
@@ -88,7 +89,7 @@ impl Muse {
                 && xenonet_engine::js::template(p.row.get("program").filter(|v| !v.is_null()).or(Some(&json!("")))).ends_with(MAIN)
         });
         let installed = open || c.call("app", "installed", vec![])?.truthy();
-        self.state.lock().unwrap().was_installed = installed;
+        self.state.locked().was_installed = installed;
         if !installed && !known {
             return Ok(());
         }
@@ -117,8 +118,8 @@ impl Muse {
     /// observer reads.
     pub fn status(&self, c: &mut dyn Calls, home: &str) -> Result<Value> {
         let (was, table) = {
-            let s = self.state.lock().unwrap();
-            (s.was_installed, s.table_state.clone().unwrap_or_else(|| "ok".into()))
+            let s = self.state.locked();
+            (s.was_installed, s.table_status.clone().unwrap_or_else(|| "ok".into()))
         };
         let installed = c.call("app", "installed", vec![])?.truthy() || was;
         let mut sources = vec![json!({ "name": "processes", "file": null, "state": table })];

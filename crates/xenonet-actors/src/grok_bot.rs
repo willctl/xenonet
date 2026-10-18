@@ -28,6 +28,7 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use xenonet_base::log::js_slice;
 use xenonet_base::paths::path_key;
+use xenonet_base::sync::Locked;
 use xenonet_engine::peer::{list, Calls, Result};
 use xenonet_engine::procs::{agent_of, wants_args};
 use xenonet_engine::sql::Arg;
@@ -90,7 +91,7 @@ struct State {
     tracked: Vec<(f64, Entry)>,
     busy_at: Option<f64>,
     was_installed: bool,
-    table_state: Option<String>,
+    table_status: Option<String>,
     looked_at: Option<f64>,
 }
 
@@ -160,7 +161,7 @@ impl GrokBot {
     }
 
     fn s(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner())
+        self.state.locked()
     }
 
     // The new commands' places (one lsof for them all), each counted as ran
@@ -214,7 +215,8 @@ impl GrokBot {
                 }
             }
         }
-        let list: Vec<Candidate> = sessions.iter().map(|(pid, e)| Candidate { pid: *pid, start: e.start, agent: e.agent.name().unwrap().into(), cwd: e.cwd.clone() }).collect();
+        let list: Vec<Candidate> =
+            sessions.iter().filter_map(|(pid, e)| Some(Candidate { pid: *pid, start: e.start, agent: e.agent.name()?.into(), cwd: e.cwd.clone() })).collect();
         attribution::saw(&self.spawns, c, &paths(), ID, &list, at)
     }
 
@@ -233,7 +235,7 @@ impl GrokBot {
         }
         let mut table_state = None;
         let census = census(c, &mut table_state);
-        self.s().table_state = table_state;
+        self.s().table_status = table_state;
         let census: Census = census?;
         let is_app =
             |i: usize| census.products[i].get("product").and_then(Value::as_str) == Some("grok-bot") && census.products[i].get("role").and_then(Value::as_str) == Some("app");
@@ -288,12 +290,13 @@ impl GrokBot {
                     }
                     // One the poll saw first may be a Node or Bun process it
                     // couldn't tell: the census has read its arguments.
-                    let e = s.entry(child.pid).unwrap();
-                    if e.agent == Agent::Unknown {
-                        e.agent = agent;
-                    }
-                    if e.agent.name().is_some() && !e.handed {
-                        candidates.push(child.pid);
+                    if let Some(e) = s.entry(child.pid) {
+                        if e.agent == Agent::Unknown {
+                            e.agent = agent;
+                        }
+                        if e.agent.name().is_some() && !e.handed {
+                            candidates.push(child.pid);
+                        }
                     }
                 }
                 i += 1;
@@ -463,7 +466,7 @@ impl GrokBot {
     pub fn status(&self, c: &mut dyn Calls, home: &str) -> Result<Value> {
         let (was, table) = {
             let s = self.s();
-            (s.was_installed, s.table_state.clone().unwrap_or_else(|| "ok".into()))
+            (s.was_installed, s.table_status.clone().unwrap_or_else(|| "ok".into()))
         };
         let installed = c.call("app", "installed", vec![])?.truthy() || was;
         let mut sources = vec![json!({ "name": "processes", "file": null, "state": table })];

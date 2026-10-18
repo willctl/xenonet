@@ -162,9 +162,12 @@ fn plain(id: Option<(&str, &Value)>, p: &Part) -> Value {
 pub fn spend_by_actor(spend: &[Value], sessions: &[Value], starts: &[Value], names: &[(String, Value)], since: Option<f64>) -> Value {
     let known: HashSet<String> = names.iter().map(|(k, _)| k.clone()).collect();
     let name_of = |id: &str| names.iter().rev().find(|(k, _)| k == id).map(|(_, v)| v.clone()).filter(|v| !v.is_null()).unwrap_or_else(|| json!(id));
-    let list: Vec<&Value> = spend.iter().filter(|s| s.get("id").is_some_and(Value::is_string) && finite(s.get("cost")).is_some()).collect();
-    let runs: Vec<&Value> = sessions.iter().filter(|s| s.get("observed").and_then(Value::as_str) == Some("gateway") && s.get("id").is_some_and(Value::is_string)).collect();
-    let ids: Vec<Value> = list.iter().map(|s| s["id"].clone()).chain(runs.iter().map(|s| s["id"].clone())).collect();
+    // Each session's calls with its id and cost, and each run reported
+    // from elsewhere with its id.
+    let list: Vec<(&str, f64, &Value)> = spend.iter().filter_map(|s| Some((s.get("id")?.as_str()?, finite(s.get("cost"))?, s))).collect();
+    let runs: Vec<(&str, &Value)> =
+        sessions.iter().filter(|s| s.get("observed").and_then(Value::as_str) == Some("gateway")).filter_map(|s| Some((s.get("id")?.as_str()?, s))).collect();
+    let ids: Vec<Value> = list.iter().map(|(id, _, _)| json!(id)).chain(runs.iter().map(|(id, _)| json!(id))).collect();
     let who: HashMap<String, Who> = attribute(sessions, starts, Some(&known), Some(&ids)).into_iter().map(|(k, w)| (template(Some(&k)), w)).collect();
     let mut rows: Vec<(String, Part)> = Vec::new();
     let row_index = |rows: &mut Vec<(String, Part)>, id: &str| -> usize {
@@ -179,8 +182,7 @@ pub fn spend_by_actor(spend: &[Value], sessions: &[Value], starts: &[Value], nam
     let mut none = Part::default();
     let mut counted: HashSet<String> = HashSet::new();
     let mut total = 0.0;
-    for s in &list {
-        let id = s["id"].as_str().unwrap();
+    for &(id, cost, s) in &list {
         if !counted.insert(id.to_string()) {
             continue;
         }
@@ -191,7 +193,6 @@ pub fn spend_by_actor(spend: &[Value], sessions: &[Value], starts: &[Value], nam
             }
             None => &mut none,
         };
-        let cost = finite(s.get("cost")).unwrap();
         r.cost += cost;
         r.tokens += finite(s.get("tokens")).unwrap_or(0.0);
         r.sessions += 1.0;
@@ -202,8 +203,7 @@ pub fn spend_by_actor(spend: &[Value], sessions: &[Value], starts: &[Value], nam
         }
         total += cost;
     }
-    for s in &runs {
-        let id = s["id"].as_str().unwrap();
+    for &(id, s) in &runs {
         let today = match since {
             None => true,
             Some(since) => s.get("updatedAt").and_then(Value::as_f64).is_some_and(|u| u >= since),

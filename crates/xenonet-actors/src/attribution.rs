@@ -20,6 +20,7 @@
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use xenonet_base::paths::path_key;
+use xenonet_base::sync::Locked;
 use xenonet_engine::js::truthy;
 use xenonet_engine::peer::{list, Calls, Result};
 use xenonet_engine::sql::Arg;
@@ -270,7 +271,7 @@ pub type SpawnsState = std::sync::Mutex<Spawns>;
 /// the process was seen gone, and that no other process is pinned to (a
 /// session of yours, say, begun nearby while the actor's process ran).
 pub fn session_of(state: &SpawnsState, calls: &mut dyn Calls, paths: &Paths, s: &Pending) -> Result<Option<String>> {
-    let claimed = |id: &str| state.lock().unwrap().claimed.has(id);
+    let claimed = |id: &str| state.locked().claimed.has(id);
     let mut pins: Vec<Arg> = list(calls.call(&paths.store, "pinnedTo", vec![Arg::Num(s.pid)])?)
         .into_iter()
         .filter(|pin| {
@@ -332,16 +333,16 @@ pub type Alive<'a> = Option<&'a mut dyn FnMut(&mut dyn Calls, &Pending) -> Resul
 /// The processes settled now: those whose session is known, and those that
 /// waited two minutes without, which count only if they ran long enough to
 /// hold one.
-pub fn settle(state: &SpawnsState, calls: &mut dyn Calls, paths: &Paths, at: f64, mut alive: Alive) -> Result<Vec<Settled>> {
+pub fn settle(state: &SpawnsState, calls: &mut dyn Calls, paths: &Paths, at: f64, mut alive: Alive<'_>) -> Result<Vec<Settled>> {
     let mut out = Vec::new();
-    let keys: Vec<String> = state.lock().unwrap().pending.iter().map(|(k, _)| k.clone()).collect();
+    let keys: Vec<String> = state.locked().pending.iter().map(|(k, _)| k.clone()).collect();
     for k in keys {
-        let Some(mut s) = state.lock().unwrap().pending.iter().find(|(x, _)| *x == k).map(|(_, p)| p.clone()) else { continue };
+        let Some(mut s) = state.locked().pending.iter().find(|(x, _)| *x == k).map(|(_, p)| p.clone()) else { continue };
         if s.gone_at.is_none() {
             if let Some(f) = alive.as_mut() {
                 if !f(calls, &s)? {
                     s.gone_at = Some(at);
-                    if let Some(slot) = state.lock().unwrap().pending.iter_mut().find(|(x, _)| *x == k) {
+                    if let Some(slot) = state.locked().pending.iter_mut().find(|(x, _)| *x == k) {
                         slot.1.gone_at = Some(at);
                     }
                 }
@@ -352,7 +353,7 @@ pub fn settle(state: &SpawnsState, calls: &mut dyn Calls, paths: &Paths, at: f64
             continue;
         }
         {
-            let mut st = state.lock().unwrap();
+            let mut st = state.locked();
             st.pending.retain(|(x, _)| *x != k);
             st.done.add(k);
             if let Some(id) = &session {
@@ -364,7 +365,7 @@ pub fn settle(state: &SpawnsState, calls: &mut dyn Calls, paths: &Paths, at: f64
         }
         out.push(Settled { actor: s.actor, agent: s.agent, cwd: s.cwd, start: s.start, session });
     }
-    let mut st = state.lock().unwrap();
+    let mut st = state.locked();
     st.done.trim();
     st.claimed.trim();
     Ok(out)
@@ -373,13 +374,13 @@ pub fn settle(state: &SpawnsState, calls: &mut dyn Calls, paths: &Paths, at: f64
 /// The agent processes the actor started, as startedUnder finds them: each
 /// taken once, with the folder it works in.
 pub fn saw(state: &SpawnsState, calls: &mut dyn Calls, paths: &Paths, actor: &str, list: &[Candidate], at: f64) -> Result<()> {
-    let fresh = state.lock().unwrap().fresh(list);
+    let fresh = state.locked().fresh(list);
     if fresh.is_empty() {
         return Ok(());
     }
     let unknown: Vec<Arg> = fresh.iter().filter(|p| p.cwd.is_none()).map(|p| Arg::Num(p.pid)).collect();
     let cwds = if unknown.is_empty() { Vec::new() } else { list_of(calls.call(&paths.procs, "cwds", vec![Arg::List(unknown)])?) };
-    state.lock().unwrap().take(actor, fresh, &cwds, at);
+    state.locked().take(actor, fresh, &cwds, at);
     Ok(())
 }
 
@@ -470,7 +471,7 @@ fn waits(a: Arg) -> Vec<Wait> {
 pub fn reported_look(state: &std::sync::Mutex<Spawns>, calls: &mut dyn Calls, paths: &Paths, at: f64) -> Result<()> {
     let waiting = waits(calls.call("actors", "expireWaiting", vec![Arg::Num(at)])?);
     if waiting.is_empty() {
-        state.lock().unwrap().pending.clear();
+        state.locked().pending.clear();
         return Ok(());
     }
     let census = Census::of(&calls.call("", "census", vec![])?);
