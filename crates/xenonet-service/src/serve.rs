@@ -212,6 +212,13 @@ fn holder(port: u16) -> String {
     }
 }
 
+/// A line of the service's own on stdout: where it listens, its mode, and
+/// the endpoint's and the gateway's news, as server/index.js logs them.
+#[expect(clippy::print_stdout, reason = "the service's ready line and its notes are its output on stdout, as the JS's console.log")]
+fn say(line: &str) {
+    println!("[xenonet] {line}");
+}
+
 pub fn run(args: &[String], built: &str) -> i32 {
     run_with(args, built, Box::new(|config, _env| Cores::pending(config.actors, config.assistant, config.hosts)))
 }
@@ -381,27 +388,21 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
         }
     }
 
-    println!("[xenonet] http://{}:{port}{}", config.host, if config.dev { "  (dev)" } else { "" });
-    println!("[xenonet] projects: {}", config.projects_dir);
+    say(&format!("http://{}:{port}{}", config.host, if config.dev { "  (dev)" } else { "" }));
+    say(&format!("projects: {}", config.projects_dir));
     if config.demo {
-        println!("[xenonet] demo mode: made-up projects and sessions, nothing real is read");
+        say("demo mode: made-up projects and sessions, nothing real is read");
     }
     if let Some(up) = &ctx.upstream {
-        println!("[xenonet] the page reads {}, and changes nothing there", up.host);
+        say(&format!("the page reads {}, and changes nothing there", up.host));
     } else if std::env::var("XENONET_UPSTREAM").is_ok_and(|u| !u.is_empty()) {
-        println!("[xenonet] XENONET_UPSTREAM is for XenoNet Dev (--dev) only; this XenoNet reads its own");
+        say("XENONET_UPSTREAM is for XenoNet Dev (--dev) only; this XenoNet reads its own");
     }
 
     // Remote actors' private endpoint, listening while a grant could be
     // used, and the connections' clock.
     if let (Some(connections), Some(service)) = (ctx.cores.connections.clone(), ctx.cores.assistant.clone()) {
-        let e = crate::assistant_endpoint::Endpoint::new(
-            connections.clone(),
-            service,
-            ctx.cores.audit.clone(),
-            config.endpoint_file(),
-            Arc::new(|line: &str| println!("[xenonet] {line}")),
-        );
+        let e = crate::assistant_endpoint::Endpoint::new(connections.clone(), service, ctx.cores.audit.clone(), config.endpoint_file(), Arc::new(say));
         *ctx.endpoint.lock().unwrap() = Some(Arc::new(e.clone()));
         tokio::spawn(async move { e.sync().await });
         tokio::spawn(async move {
@@ -424,7 +425,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
         tokio::spawn(async move {
             g.init().await;
             if g.gateway().listening() {
-                println!("[xenonet] the actor gateway listens on 127.0.0.1:{}", g.gateway().port());
+                say(&format!("the actor gateway listens on 127.0.0.1:{}", g.gateway().port()));
             }
         });
     }
