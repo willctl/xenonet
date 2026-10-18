@@ -2,7 +2,7 @@
 //! the JS reaches through @anthropic-ai/claude-agent-sdk 0.3.287: its
 //! listSessions(), getSessionMessages(id) and renameSession(id, title), as
 //! XenoNet calls them (no options). Each session is a transcript,
-//! <projects>/<folder>/<session>.jsonl. The listing reads only the first
+//! `<projects>/<folder>/<session>.jsonl`. The listing reads only the first
 //! and last 64 KB of each, and finds what it shows by scanning their text
 //! for keys, as the SDK does; a session's messages are its chain of
 //! entries from the last one back to the first.

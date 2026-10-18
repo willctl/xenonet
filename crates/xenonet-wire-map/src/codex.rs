@@ -319,7 +319,7 @@ impl CodexClient {
     }
 
     /// A page of a thread from its rollout file: newest first, `cursor`
-    /// ("rollout:<n>") continuing further back.
+    /// (`"rollout:<n>"`) continuing further back.
     #[expect(clippy::case_sensitive_file_extension_comparisons, reason = "as the JS's endsWith, which tells .zst from .ZST")]
     pub fn rollout_page(&self, file: &str, cursor: Option<&str>, limit: f64) -> Result<Value, String> {
         let mut slot = lock(&self.rollout);

@@ -64,7 +64,7 @@ const UUID: &str = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 // A field of a tool's arguments, and its check.
 type Field<'a> = (&'a str, &'a dyn Fn(&Value) -> bool);
 
-/// INPUTS[tool].safeParse(args) (core/schema/assistant.js): each tool's
+/// `INPUTS[tool].safeParse(args)` (core/schema/assistant.js): each tool's
 /// arguments, a strict object of the fields it names.
 pub fn input_ok(tool: &str, args: &Value) -> bool {
     static CURSOR: OnceLock<Regex> = OnceLock::new();
