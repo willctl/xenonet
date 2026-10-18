@@ -2,6 +2,7 @@
 //! all the command and its clients need, within a deadline (when there's
 //! one) that covers connecting, sending and the whole answer.
 
+use std::fmt::Write as _;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::time::{Duration, Instant};
@@ -43,10 +44,10 @@ pub fn request(port: u16, method: &str, path: &str, headers: &[(String, String)]
     // XenoNet answers only to its own address in Host, and to no Origin.
     let mut head = format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n");
     for (k, v) in headers {
-        head.push_str(&format!("{k}: {v}\r\n"));
+        let _ = write!(head, "{k}: {v}\r\n");
     }
     if let Some(b) = body {
-        head.push_str(&format!("Content-Length: {}\r\n", b.len()));
+        let _ = write!(head, "Content-Length: {}\r\n", b.len());
     }
     head.push_str("Connection: close\r\n\r\n");
     s.write_all(head.as_bytes())?;

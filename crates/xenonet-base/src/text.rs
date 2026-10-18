@@ -76,11 +76,10 @@ fn string_number(s: &str) -> f64 {
     }
     for (prefix, radix) in [("0x", 16), ("0X", 16), ("0o", 8), ("0O", 8), ("0b", 2), ("0B", 2)] {
         if let Some(d) = t.strip_prefix(prefix) {
-            return if !d.is_empty() && d.chars().all(|c| c.is_digit(radix)) {
-                d.chars().fold(0.0, |n, c| n * f64::from(radix) + f64::from(c.to_digit(radix).unwrap()))
-            } else {
-                f64::NAN
-            };
+            if d.is_empty() {
+                return f64::NAN;
+            }
+            return d.chars().try_fold(0.0, |n, c| Some(n * f64::from(radix) + f64::from(c.to_digit(radix)?))).unwrap_or(f64::NAN);
         }
     }
     let (sign, body) = match t.as_bytes()[0] {
