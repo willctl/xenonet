@@ -16,6 +16,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot, watch};
 use xenonet_base::json;
+use xenonet_base::sync::Locked;
 
 pub const MAX_LINE: usize = 16 << 20;
 const BUSY: usize = 16 << 20;
@@ -125,7 +126,7 @@ impl Rpc {
     fn take(&self, message: Value, handle: &Handler, incoming: &[&str], events: &mpsc::UnboundedSender<(String, Value)>) {
         if xenonet_base::text::truthy(message.get("reply")) {
             let id = message["reply"].as_i64().unwrap_or(-1);
-            if let Some(p) = self.shared.pending.lock().unwrap().remove(&id) {
+            if let Some(p) = self.shared.pending.locked().remove(&id) {
                 let _ = p.send(if xenonet_base::text::truthy(message.get("error")) {
                     Err(xenonet_base::text::js_string(&message["error"]))
                 } else {
@@ -136,7 +137,7 @@ impl Rpc {
             && message.get("id").and_then(Value::as_f64).is_some_and(|n| n.fract() == 0.0 && n.abs() <= 9_007_199_254_740_991.0)
         {
             let id = message["id"].clone();
-            let method = message["method"].as_str().unwrap().to_string();
+            let method = message["method"].as_str().expect("the method was checked to be a string above").to_string();
             let params = message.get("params").cloned().unwrap_or(Value::Null);
             let fut = handle(method, params);
             let me = self.clone();
@@ -171,16 +172,16 @@ impl Rpc {
     pub async fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
         let id = self.shared.sequence.fetch_add(1, Ordering::SeqCst) + 1;
         let (tx, rx) = oneshot::channel();
-        self.shared.pending.lock().unwrap().insert(id, tx);
+        self.shared.pending.locked().insert(id, tx);
         if let Err(e) = self.send(&json!({ "id": id, "method": method, "params": params })) {
-            self.shared.pending.lock().unwrap().remove(&id);
+            self.shared.pending.locked().remove(&id);
             return Err(e);
         }
         match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(answer)) => answer,
             Ok(Err(_)) => Err(DISCONNECTED.into()),
             Err(_) => {
-                self.shared.pending.lock().unwrap().remove(&id);
+                self.shared.pending.locked().remove(&id);
                 Err(format!("{method} did not answer; the action was not retried."))
             }
         }
@@ -202,7 +203,7 @@ impl Rpc {
         if self.shared.closed.swap(true, Ordering::SeqCst) {
             return;
         }
-        for (_, p) in self.shared.pending.lock().unwrap().drain() {
+        for (_, p) in self.shared.pending.locked().drain() {
             let _ = p.send(Err(DISCONNECTED.into()));
         }
         let _ = self.shared.gone.send(true);
@@ -225,7 +226,7 @@ pub fn negotiate(local: (u32, u32), remote: &Value) -> Result<u32, String> {
     let (Some(rmin), Some(rmax)) = (remote.get("min").and_then(int), remote.get("max").and_then(int)) else {
         return Err("XenoNet did not report a supported interface version. Update the service first.".into());
     };
-    let (lmin, lmax) = (local.0 as f64, local.1 as f64);
+    let (lmin, lmax) = (f64::from(local.0), f64::from(local.1));
     let version = lmax.min(rmax);
     if lmin > lmax || rmin > rmax || version < lmin.max(rmin) {
         return Err("These XenoNet components use incompatible interfaces. Open Updates or run xenonet update.".into());

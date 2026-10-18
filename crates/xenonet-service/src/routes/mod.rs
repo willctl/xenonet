@@ -28,6 +28,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use xenonet_base::ids::YOU;
 use xenonet_base::log::{log_dir, read_logs, summarize, LEVELS};
+use xenonet_base::sync::Locked;
 use xenonet_base::text::{js_number, js_string, truthy};
 
 pub const SERVICE_API: (u32, u32) = (1, 1);
@@ -113,7 +114,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
 
     if m == "GET" && route == "/api/health" {
         // What it has: a source not read yet (its core not in Rust) is none.
-        let components = ctx.components.lock().unwrap().is_some();
+        let components = ctx.components.locked().is_some();
         return Ok(Reply::json(
             200,
             json!({
@@ -360,18 +361,29 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
 
     // With hosts on, other hosts' maps and live state are in them, except
     // for ?hosts=0, this machine's own.
-    let merged = cores.hub.is_some() && req.param("hosts") != Some("0");
-    let hub = cores.hub.clone();
+    let merged = cores.hub.as_ref().filter(|_| req.param("hosts") != Some("0"));
     if m == "GET" && route == "/api/graph" {
         let graph = match cores.state.graph()? {
             Some(g) => g,
             None => cores.state.refresh().await?,
         };
-        return Ok(Reply::json(200, if merged { hub.unwrap().graph(graph) } else { graph }));
+        return Ok(Reply::json(
+            200,
+            match merged {
+                Some(hub) => hub.graph(graph),
+                None => graph,
+            },
+        ));
     }
     if m == "GET" && route == "/api/live" {
         let live = cores.state.live_snapshot()?;
-        return Ok(Reply::json(200, if merged { hub.unwrap().live(live) } else { live }));
+        return Ok(Reply::json(
+            200,
+            match merged {
+                Some(hub) => hub.live(live),
+                None => live,
+            },
+        ));
     }
     // Event history (last 24h) for replay and digests.
     if m == "GET" && route == "/api/history" {
@@ -385,15 +397,12 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         return Ok(Reply::json(200, json!({ "results": results, "status": cores.state.search_status()? })));
     }
     if m == "POST" && route == "/api/ack" {
-        let id = req.json_body().await?.get("sessionId").cloned().unwrap_or(Value::Null);
-        let known = match id.as_str() {
-            Some(s) => cores.state.node(s)?.is_some(),
-            None => false,
+        let body = req.json_body().await?;
+        let id = match body.get("sessionId").and_then(Value::as_str) {
+            Some(s) if cores.state.node(s)?.is_some() => s,
+            _ => return Ok(Reply::error(400, "XenoNet doesn't know that session")),
         };
-        if !known {
-            return Ok(Reply::error(400, "XenoNet doesn't know that session"));
-        }
-        cores.store.ack(id.as_str().unwrap())?;
+        cores.store.ack(id)?;
         ctx.broadcast("live", &cores.state.live_snapshot()?);
         return Ok(Reply::json(200, json!({ "ok": true })));
     }
@@ -432,20 +441,16 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
                 Some(id) => cores.state.node(id)?,
                 None => None,
             };
-            let target = body.get("target").and_then(Value::as_str).filter(|t| ["claude", "codex"].contains(t)).map(str::to_string);
-            let brief = body.get("brief").and_then(Value::as_str).map(str::to_string);
-            let good = node.as_ref().is_some_and(|n| n["kind"] == "session")
-                && target.is_some()
-                && brief.as_ref().is_some_and(|b| !xenonet_base::text::is_blank(b) && b.encode_utf16().count() <= MAX_BRIEF);
-            if !good {
+            let target = body.get("target").and_then(Value::as_str).filter(|t| ["claude", "codex"].contains(t));
+            let brief = body.get("brief").and_then(Value::as_str).filter(|b| !xenonet_base::text::is_blank(b) && b.encode_utf16().count() <= MAX_BRIEF);
+            let (Some(node), Some(target), Some(brief)) = (node.filter(|n| n["kind"] == "session"), target, brief) else {
                 return Ok(Reply::error(400, "bad handoff"));
-            }
+            };
             if ctx.config.demo {
                 return Ok(Reply::error(409, "Demo sessions exist only in XenoNet, so they can't be handed off."));
             }
-            let node = node.unwrap();
             let folder = node.get("worktree").filter(|w| truthy(Some(w))).or_else(|| node.get("cwd")).cloned().unwrap_or(Value::Null);
-            let url = cores.opener.handoff_url(target.as_deref().unwrap(), &folder, brief.as_deref().unwrap())?;
+            let url = cores.opener.handoff_url(target, &folder, brief)?;
             ctx.open(&url).await?;
             return Ok(Reply::json(200, json!({ "ok": true, "target": target })));
         }
@@ -528,9 +533,10 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             Some(h) => h.summary(summary),
             None => summary,
         };
-        let waits = waits_on_you(ctx)?;
-        for (k, v) in waits.as_object().unwrap() {
-            out[k] = v.clone();
+        if let Value::Object(waits) = waits_on_you(ctx)? {
+            for (k, v) in waits {
+                out[k] = v;
+            }
         }
         return Ok(Reply::json(200, out));
     }
@@ -611,11 +617,10 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             Some(id) => cores.state.node(id)?,
             None => None,
         };
-        let available = node.as_ref().and_then(|n| n.get("actions")).and_then(Value::as_array).is_some_and(|a| a.iter().any(|x| x["id"] == action && !truthy(x.get("client"))));
-        if !available {
+        let available = |n: &Value| n.get("actions").and_then(Value::as_array).is_some_and(|a| a.iter().any(|x| x["id"] == action && !truthy(x.get("client"))));
+        let Some(node) = node.filter(available) else {
             return Ok(Reply::error(400, "that action isn't available here"));
-        }
-        let node = node.unwrap();
+        };
         let Some(target) = cores.opener.url_for(&node, action.as_str().unwrap_or(""))? else {
             return Ok(Reply::error(400, "there's nothing to open for this item"));
         };
@@ -694,7 +699,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     if ctx.config.dev && m == "POST" && route == "/api/dev/simulate" {
         let body = req.json_body().await?;
         let kind = body.get("kind").cloned().unwrap_or(Value::Null);
-        let done = simulate(ctx, &kind, &body).await?;
+        let done = simulate(ctx, &kind, &body)?;
         if let Some(e) = done.as_ref().and_then(|d| d.get("error")).filter(|e| truthy(Some(e))) {
             return Ok(Reply::send(400, &json!({ "error": e }), &[]));
         }
@@ -708,7 +713,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     // the component service's socket. JSON only, which a cross-site form
     // can't send.
     if m == "POST" && route == "/api/dev/control" {
-        let components = ctx.components.lock().unwrap().clone();
+        let components = ctx.components.locked().clone();
         let Some(components) = components.filter(|_| ctx.config.control) else {
             return Ok(Reply::error(503, "this server has no window to control: it isn't running inside XenoNet Dev (npm run app, or npm run drive -- launch)"));
         };
@@ -768,14 +773,14 @@ fn model_ok(s: &str) -> bool {
 
 fn base64_decode(s: &str) -> Vec<u8> {
     let val = |c: u8| -> Option<u32> {
-        Some(match c {
+        Some(u32::from(match c {
             b'A'..=b'Z' => c - b'A',
             b'a'..=b'z' => c - b'a' + 26,
             b'0'..=b'9' => c - b'0' + 52,
             b'+' | b'-' => 62,
             b'/' | b'_' => 63,
             _ => return None,
-        } as u32)
+        }))
     };
     let mut out = Vec::with_capacity(s.len() * 3 / 4);
     let (mut acc, mut bits) = (0u32, 0);
@@ -994,7 +999,7 @@ async fn spotify(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreErr
                 "/api/spotify/player" => {
                     let op = body.get("op").filter(|o| !o.is_null()).map(js_string).unwrap_or_default();
                     s.command(&op, body.get("value").unwrap_or(&Value::Null)).await?;
-                    ctx.music.lock().unwrap().last.clear();
+                    ctx.music.locked().last.clear();
                     crate::serve::poll_spotify_soon(ctx, 400);
                     return Ok(Some(Reply::json(200, json!({ "ok": true }))));
                 }
@@ -1013,7 +1018,7 @@ async fn spotify(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreErr
 /// Dev only: puts sessions into states that are otherwise rare, so the
 /// visuals can be checked (server/index.js's simulate). What it did, or
 /// None for an unknown simulation or session.
-async fn simulate(ctx: &Arc<Ctx>, kind: &Value, body: &Value) -> Result<Option<Value>, CoreError> {
+fn simulate(ctx: &Arc<Ctx>, kind: &Value, body: &Value) -> Result<Option<Value>, CoreError> {
     let cores = &ctx.cores;
     let kind_s = match kind {
         Value::String(s) => s.clone(),

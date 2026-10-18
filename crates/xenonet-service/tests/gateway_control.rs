@@ -3,6 +3,8 @@
 // address checked on this computer alone (as XENONET_GATEWAY_PROBE=local
 // checks it), the settings kept, a tunnel it doesn't know refused, and off.
 
+#![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
+
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -116,5 +118,5 @@ async fn on_with_a_tunnel_of_your_own_checked_here_kept_and_off() {
 
     let off = c.set(Some(false), None, false, false).await.unwrap();
     assert_eq!((off["on"].clone(), off["listening"].clone(), off["reach"]["state"].clone()), (json!(false), json!(false), json!("off")));
-    c.stop().await;
+    c.stop();
 }

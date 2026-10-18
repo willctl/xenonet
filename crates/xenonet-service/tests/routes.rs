@@ -3,6 +3,8 @@
 // hosts-routes, environments, integrations-routes): the same cases, through
 // the whole API's dispatch, with what each core was asked recorded.
 
+#![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
+
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
@@ -358,7 +360,7 @@ async fn an_agents_calls_say_who_it_is_are_checked_and_note_that_its_in_touch() 
     *f.check.lock().unwrap() = json!({ "ok": false, "reason": "not you" });
     let r = go(&ctx, "POST", "/api/engine/send", &[AGENT], Some(json!({ "to": "all", "text": "hi" }))).await;
     assert_eq!(status_error(&r), (403, json!("not you")));
-    assert!(f.was("send").is_empty());
+    assert_eq!(f.was("send"), Vec::<Value>::new());
 }
 
 #[tokio::test]
@@ -488,7 +490,7 @@ async fn this_xenonet_as_a_host_needs_no_flag() {
     *f.person.lock().unwrap() = json!({ "ok": false, "reason": "this is yours to do, and it came from under a Claude Code process" });
     let r = go(&ctx, "POST", "/api/hosts/self", &[], Some(json!({ "id": "lab" }))).await;
     assert_eq!(status_error(&r), (403, json!("this is yours to do, and it came from under a Claude Code process")));
-    assert!(f.was("setSelf").is_empty());
+    assert_eq!(f.was("setSelf"), Vec::<Value>::new());
 }
 
 #[tokio::test]
@@ -682,7 +684,7 @@ async fn the_windows_message_to_an_actor_needs_its_key_and_an_actor() {
 async fn claude_codes_hooks_are_checked_against_the_sessions_process() {
     let (ctx, f) = service(false);
     assert_eq!(go(&ctx, "POST", "/api/hook/claude", &[], Some(json!({ "session_id": "not-a-session" }))).await.status, 204);
-    assert!(f.was("check").is_empty());
+    assert_eq!(f.was("check"), Vec::<Value>::new());
     *f.check.lock().unwrap() = json!({ "ok": false, "reason": "that's another process's session" });
     let r = go(&ctx, "POST", "/api/hook/claude", &[], Some(json!({ "session_id": "11111111-2222-3333-4444-555555555555", "hook_event_name": "Stop" }))).await;
     assert_eq!(status_error(&r), (403, json!("that's another process's session")));

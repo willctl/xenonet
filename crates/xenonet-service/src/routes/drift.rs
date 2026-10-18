@@ -9,10 +9,11 @@ use crate::ctx::Ctx;
 use crate::http::{Reply, Req};
 use serde_json::{json, Value};
 use std::sync::Arc;
+use xenonet_base::sync::Locked;
 
 pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Reply, CoreError> {
     if req.method == "GET" && req.path == "/api/drift" {
-        let mut log = ctx.drift.lock().unwrap();
+        let mut log = ctx.drift.locked();
         return Ok(Reply::json(200, ctx.cores.drift.report(&mut log, req.param("all") == Some("1"), &ctx.config.home, ctx.now())?));
     }
     if req.method == "POST" && req.path == "/api/drift/seen" {
@@ -26,7 +27,7 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Reply, CoreError> {
         // Never past now: drift that turns up later is still new.
         let now = ctx.now();
         let looked = {
-            let mut log = ctx.drift.lock().unwrap();
+            let mut log = ctx.drift.locked();
             log.looked(at.and_then(Value::as_f64).unwrap_or(now).min(now));
             log.flush();
             log.view().1

@@ -9,6 +9,7 @@
 use crate::http::{Reply, ReplyBody};
 use bytes::Bytes;
 use serde_json::json;
+use std::fmt::Write as _;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -90,9 +91,9 @@ impl Upstream {
         // HTTP/1.1, as Node's request writes it, the answer read as it comes.
         let mut head = format!("{method} {target} HTTP/1.1\r\n");
         for (k, v) in headers.iter().filter(|(k, _)| !DROP.contains(&k.as_str())) {
-            head.push_str(&format!("{k}: {v}\r\n"));
+            let _ = write!(head, "{k}: {v}\r\n");
         }
-        head.push_str(&format!("host: {}\r\nconnection: close\r\n\r\n", self.host));
+        let _ = write!(head, "host: {}\r\nconnection: close\r\n\r\n", self.host);
         let mut stream = stream;
         if let Err(e) = stream.write_all(head.as_bytes()).await {
             return didnt(e.to_string());

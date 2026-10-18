@@ -6,6 +6,7 @@
 use bytes::Bytes;
 use http_body_util::BodyExt;
 use serde_json::Value;
+use std::fmt::Write as _;
 use std::net::SocketAddr;
 use tokio::sync::mpsc;
 use xenonet_base::json;
@@ -97,7 +98,7 @@ impl Req {
     pub async fn json(&mut self, limit: usize) -> Result<Value, BodyError> {
         let bytes = self.bytes(limit).await?;
         if bytes.is_empty() {
-            return Ok(Value::Object(Default::default()));
+            return Ok(Value::Object(serde_json::Map::default()));
         }
         // Buffer.toString("utf8") puts U+FFFD for bytes that aren't UTF-8.
         let text = String::from_utf8_lossy(&bytes);
@@ -112,7 +113,7 @@ impl Req {
     /// A request made by hand, for tests.
     pub fn fake(method: &str, target: &str, headers: &[(&str, &str)], body: Option<&str>) -> Req {
         let (path, query) = parse_target(target);
-        let addr: SocketAddr = "127.0.0.1:1".parse().unwrap();
+        let addr = SocketAddr::from(([127, 0, 0, 1], 1));
         Req {
             method: method.to_string(),
             path,
@@ -338,7 +339,7 @@ fn normalize_path(raw: &str) -> String {
             let mut s = String::new();
             for &b in seg.as_bytes() {
                 if path_encode(b) {
-                    s.push_str(&format!("%{b:02X}"));
+                    let _ = write!(s, "%{b:02X}");
                 } else {
                     s.push(b as char);
                 }
@@ -399,7 +400,7 @@ mod tests {
                 ("a".into(), "1".into()),
                 ("b".into(), "two words".into()),
                 ("c".into(), "✓".into()),
-                ("d".into(), "".into()),
+                ("d".into(), String::new()),
                 ("a".into(), "2".into()),
                 ("e".into(), "%zz".into())
             ]

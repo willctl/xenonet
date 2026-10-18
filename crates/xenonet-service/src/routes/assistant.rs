@@ -11,6 +11,7 @@ use crate::ctx::{fail, pending_reply, Ctx};
 use crate::http::{Reply, Req};
 use serde_json::{json, Value};
 use std::sync::Arc;
+use xenonet_base::sync::Locked;
 
 const BODY: usize = 16 << 10;
 const WINDOW_MS: f64 = 7.0 * 24.0 * 3600e3;
@@ -120,7 +121,7 @@ impl AssistantRoutes<'_> {
             if let Some(r) = self.guard(req, false).await {
                 return Ok(r);
             }
-            let listening = self.ctx.endpoint.lock().unwrap().clone().map(|e| e.info());
+            let listening = self.ctx.endpoint.locked().clone().map(|e| e.info());
             let sources = match &self.ctx.cores.assistant_source {
                 Some(s) => s.sources_data()?,
                 None => Value::Null,

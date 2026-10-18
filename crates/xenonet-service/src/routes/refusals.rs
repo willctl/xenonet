@@ -48,11 +48,9 @@ pub async fn route(ctx: &Ctx, req: &mut Req) -> Result<Option<Reply>, CoreError>
             Some(d) => d.as_array().and_then(|l| l.iter().find(|r| r["id"] == json!(id)).cloned()),
             None => refusals.get(id)?,
         };
-        let has_context = record.as_ref().is_some_and(|r| xenonet_base::text::truthy(r.get("context")));
-        if !has_context {
+        let Some(record) = record.filter(|r| xenonet_base::text::truthy(r.get("context"))) else {
             return Ok(Some(Reply::error(404, "No saved request for this record.")));
-        }
-        let record = record.unwrap();
+        };
         if demo.is_some() {
             return Ok(Some(Reply::json(
                 200,
