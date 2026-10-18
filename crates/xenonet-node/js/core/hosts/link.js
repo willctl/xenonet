@@ -11,6 +11,8 @@ import { spawn as childSpawn } from "node:child_process";
 import { native } from "../../index.js";
 import { peer } from "../../peer.js";
 import { settle } from "../../settle.js";
+import fs from "node:fs";
+import { pathStyle } from "../paths.js";
 import { xenonetBin } from "../components/runtime.js";
 import { MAX_FRAME, lineSplitter } from "./frames.js";
 
@@ -25,7 +27,16 @@ export const STALE_MS = C.staleMs;
 export const BACKOFF = { min: C.backoff.min, max: C.backoff.max };
 export const SSH_OPTIONS = C.sshOptions;
 
-const optionsOf = ({ sshBin = "ssh", sshConfig = null, root, env = process.env, bin = null } = {}) => ({ sshBin: [].concat(sshBin).map(String), sshConfig: sshConfig == null ? null : String(sshConfig), bin: String(bin ?? xenonetBin({ env, root })), env: { ...env } });
+// The JS service in a checkout with no binary built yet (npm test, before
+// cargo build) runs the checkout's own relay on this Node.
+function localRun({ root, env, bin }) {
+  if (bin != null) return { bin: String(bin), entry: null };
+  const built = xenonetBin({ env, root });
+  const js = root ? pathStyle(root).join(String(root), "cli", "xenonet.js") : null;
+  return !fs.existsSync(built) && js && fs.existsSync(js) ? { bin: process.execPath, entry: js } : { bin: built, entry: null };
+}
+
+const optionsOf = ({ sshBin = "ssh", sshConfig = null, root, env = process.env, bin = null } = {}) => ({ sshBin: [].concat(sshBin).map(String), sshConfig: sshConfig == null ? null : String(sshConfig), ...localRun({ root, env, bin }), env: { ...env } });
 
 export const transport = (entry, options = {}) => settle(native.hostsTransport(entry, optionsOf(options)));
 

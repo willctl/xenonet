@@ -68,6 +68,9 @@ pub struct Options {
     pub ssh_bin: Vec<String>,
     /// The xenonet binary a local link runs `relay` with.
     pub bin: String,
+    /// A script `bin` runs first: the JS service's, in a checkout with no
+    /// binary built, is its cli/xenonet.js on Node. The binary sets none.
+    pub entry: Option<String>,
     pub env: Map<String, Value>,
 }
 
@@ -97,7 +100,7 @@ pub fn transport(entry: &Value, o: &Options) -> Result<Command, String> {
     match entry.get("transport").and_then(Value::as_str) {
         Some("local") => {
             let env: Map<String, Value> = o.env.iter().filter(|(k, _)| !k.starts_with("XENONET_")).map(|(k, v)| (k.clone(), v.clone())).collect();
-            Ok((o.bin.clone(), relay, env))
+            Ok((o.bin.clone(), o.entry.iter().cloned().chain(relay).collect(), env))
         }
         Some("ssh") => {
             let command = entry.get("command").map_or_else(|| "undefined".into(), js_string);
@@ -918,7 +921,7 @@ mod tests {
     use super::*;
 
     fn opts() -> Options {
-        Options { ssh_config: Some("/x/ssh_config".into()), ssh_bin: vec!["ssh".into()], bin: "/x/xenonet".into(), env: Map::new() }
+        Options { ssh_config: Some("/x/ssh_config".into()), ssh_bin: vec!["ssh".into()], bin: "/x/xenonet".into(), entry: None, env: Map::new() }
     }
 
     #[test]

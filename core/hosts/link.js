@@ -19,6 +19,8 @@
 import { EventEmitter } from "node:events";
 import { spawn as childSpawn } from "node:child_process";
 import path from "node:path";
+import fs from "node:fs";
+import { pathStyle } from "../paths.js";
 import { xenonetBin } from "../components/runtime.js";
 import { systemClock } from "../blocks/clock.js";
 import { check, explain } from "../schema/check.js";
@@ -53,7 +55,12 @@ export function transport(entry, { sshBin = "ssh", sshConfig = null, root, env =
   const relay = ["relay", "--port", String(entry.port), "--since", entry.since, ...(entry.detail === true ? ["--detail"] : []), ...(entry.start === true ? ["--start"] : [])];
   if (entry.transport === "local") {
     const clean = Object.fromEntries(Object.entries(env).filter(([k]) => !k.startsWith("XENONET_")));
-    return { file: bin ?? xenonetBin({ env, root }), args: relay, env: clean };
+    const file = bin ?? xenonetBin({ env, root });
+    // The JS service in a checkout with no binary built yet (npm test,
+    // before cargo build) runs the checkout's own relay on this Node.
+    const js = root ? pathStyle(root).join(root, "cli", "xenonet.js") : null;
+    if (bin == null && !fs.existsSync(file) && js && fs.existsSync(js)) return { file: process.execPath, args: [js, ...relay], env: clean };
+    return { file, args: relay, env: clean };
   }
   if (entry.transport !== "ssh") throw new Error(`not a transport: ${JSON.stringify(entry.transport)}`);
   if (!XENONET_COMMAND.test(String(entry.command))) throw new Error(`not a xenonet command: ${JSON.stringify(entry.command)}`);

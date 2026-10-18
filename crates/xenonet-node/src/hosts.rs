@@ -287,6 +287,7 @@ fn options_of(o: &Value) -> link::Options {
         ssh_config: o.get("sshConfig").and_then(Value::as_str).filter(|c| !c.is_empty()).map(String::from),
         ssh_bin,
         bin: o.get("bin").map(xenonet_base::text::js_string).unwrap_or_default(),
+        entry: o.get("entry").and_then(Value::as_str).map(String::from),
         env: o.get("env").and_then(Value::as_object).cloned().unwrap_or_default(),
     }
 }

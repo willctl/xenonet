@@ -192,7 +192,7 @@ impl HostHub {
     }
 
     fn options(&self) -> link::Options {
-        link::Options { ssh_config: Some(self.parts.hosts.ssh_config_file()), ssh_bin: self.parts.ssh_bin.clone(), bin: self.parts.bin.clone(), env: env_map() }
+        link::Options { ssh_config: Some(self.parts.hosts.ssh_config_file()), ssh_bin: self.parts.ssh_bin.clone(), bin: self.parts.bin.clone(), entry: None, env: env_map() }
     }
 
     fn new_link(&self, entry: Value, once: bool) -> LinkRt {
