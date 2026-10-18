@@ -188,6 +188,43 @@ async fn a_listening_stop_hook_hands_mail_over_and_stops_when_the_hook_goes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn delivery_records_a_message_handed_to_a_listening_hook_and_the_pause_switch_holds_the_rest() {
+    let (w, dir) = world("delivery");
+    let e = engine(&w);
+    let router = xenonet_wire_engine::delivery::RouterDriver(w.clone());
+    let policy = xenonet_wire_engine::delivery::PolicyDriver(w.clone());
+    let (_keep, gone_rx) = tokio::sync::watch::channel(false);
+    let listening = {
+        let e = engine(&w);
+        tokio::spawn(async move { e.listen(C, Duration::from_secs(10), gone_rx).await })
+    };
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let sent = e.send(A, json!({ "to": C, "text": "ping" }), None).await.unwrap();
+    assert_eq!(sent["to"][0]["delivery"], "right away: it's listening for messages", "{sent}");
+    listening.await.unwrap().unwrap().expect("handed over");
+    // The router's record, once its route has run.
+    let mut recent = Value::Null;
+    for _ in 0..50 {
+        recent = router.list(50).unwrap();
+        if recent.as_array().is_some_and(|l| !l.is_empty()) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!((recent[0]["agent"].clone(), recent[0]["state"].clone(), recent[0]["how"].clone()), (json!(C), json!("live"), json!("listen")), "{recent}");
+    // Paused: kept in delivery.json, and a session's message refused.
+    use xenonet_service::cores::{Policy, Router};
+    policy.set_paused(true).unwrap();
+    assert!(policy.paused().unwrap());
+    let kept = std::fs::read_to_string(dir.join("state").join("delivery.json")).unwrap();
+    assert!(kept.contains("\"paused\": true"), "{kept}");
+    let held = e.send(A, json!({ "to": C, "text": "while paused" }), None).await.unwrap_err();
+    assert_eq!((held.status, held.code.as_deref()), (Some(429), Some("paused")));
+    assert_eq!(policy.read_audit(10.0).unwrap().as_array().unwrap().last().unwrap()["kind"], "refused");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn hooks_brief_a_starting_session_and_warn_before_an_edit() {
     let (w, dir) = world("hooks");
     let e = engine(&w);

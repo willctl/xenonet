@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use xenonet_service::config::Config;
-use xenonet_service::cores::{Actors, Cores, Registration, Reports, State, R};
+use xenonet_service::cores::{Actors, Cores, Engine, Registration, Reports, State, Wakes, R};
 use xenonet_service::wire::{Emitter, WireEnv};
 use xenonet_wire_engine::world::World;
 
@@ -124,6 +124,17 @@ async fn registering_an_actor_allowing_it_and_taking_what_it_reports() {
     assert_eq!(reports.status_line(&json!("a status"))["ok"], true);
     let me = reg.me(&auth, None).unwrap();
     assert_eq!(me["schema"], "actor/me/v1");
+    // A program of its own holds a stream open, and hears at once that a
+    // message waits: how many, never what it says.
+    let wakes = xenonet_wire_engine::wakes::WakesDriver(w.clone());
+    let mut stream = wakes.subscribe("actor:kite").unwrap();
+    let engine = xenonet_wire_engine::engine::EngineDriver(w.clone());
+    let sent = engine.send("claude:0190d3e0-0000-7000-8000-00000000000b", json!({ "to": "actor:kite", "text": "the build is red" }), None).await.unwrap();
+    assert_eq!(sent["to"][0]["id"], "actor:kite", "{sent}");
+    let (event, data) = tokio::time::timeout(std::time::Duration::from_secs(5), stream.recv()).await.unwrap().unwrap();
+    assert_eq!((event.as_str(), data), ("inbox", json!({ "unread": 1 })));
+    let inbox = engine.inbox("actor:kite", std::time::Duration::ZERO).await.unwrap();
+    assert_eq!(inbox[0]["text"], "the build is red");
     // Taken out again: its token stops working.
     reg.remove("kite", None).unwrap();
     assert!(!actors.ids().contains(&"actor:kite".to_string()));
