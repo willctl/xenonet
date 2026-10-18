@@ -211,6 +211,13 @@ pub trait State: Send + Sync {
     fn session_costs(&self, _now: f64) -> R<Vec<Value>> {
         pending(M)
     }
+    /// `state.blocks.add(block, { source })`: a building block another part
+    /// of XenoNet keeps (the engine's store, an observer, the hosts' file),
+    /// listed with the map's in /api/health and the doctor. `health` gives
+    /// `{ name, kind, state, since, lastOk, lastError, counters, budget }`.
+    fn add_block(&self, _health: std::sync::Arc<dyn Fn() -> Value + Send + Sync>, _source: Option<String>) -> R<()> {
+        pending(M)
+    }
 }
 
 impl State for Pending {}
