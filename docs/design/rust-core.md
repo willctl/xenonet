@@ -416,10 +416,21 @@ command at all and don't change.
 
 What changes is the command XenoNet writes into Claude Code's and Codex's
 settings and MCP lists: the binary instead of `'<node>' '<entry>'`, and
-no `ELECTRON_RUN_AS_NODE`. `connect` recognizes both forms as its own, so
-connecting again replaces the old entries, and `disconnect` takes out
-either. Until then the preview shows the old entries as different, and
+no `ELECTRON_RUN_AS_NODE` (`XENONET_PORT=<port> '<bin>' hook <app>`, and
+`<bin> mcp`). `connect` recognizes both forms as its own, so connecting
+again replaces the old entries, and `disconnect` takes out either. Until
+then the preview shows the old entries as different, with a note, and
 the doctor says to connect again.
+
+The same goes for everything else XenoNet writes into other programs or
+starts for you: the `xenonet` command install puts on PATH, a local
+host's `relay`, and tunnel-client's adapter (`mcp assistant`). Which
+binary each runs is one rule (`xenonetBin` in
+`core/components/runtime.js`, `xenonet_bin` in
+`xenonet-components/src/runtime.rs`): `XENONET_BIN` when it's set;
+installed XenoNet's launcher, `<state>/runtime/launcher/xenonet`, a copy
+of the Tools' binary that never moves (docs/design/contracts.md, section
+12); else the running binary, or the checkout's build for the JS.
 
 ## What stays compatible
 
@@ -524,27 +535,43 @@ Each step leaves `npm test` passing on JS, and adds to `parity.json`.
   through a trait shaped after the JS object `server/index.js` hands them
   (`crates/xenonet-service/src/cores`: `State`, `Engine`, `Verify`,
   `Actors`…), JSON in and out. A core not in Rust yet answers 501 with
-  `{ error, code: "pending" }`, and a check that can't run refuses. The
-  command (`crates/xenonet-cli/src/pending.rs`) and the MCP servers
-  (`crates/xenonet-mcp/src/pending.rs`) do the same for the core functions
-  they call. When a core lands, an adapter implements its trait, and
-  `Cores::pending()` gives way to it.
+  `{ error, code: "pending" }`, and a check that can't run refuses, until
+  a driver puts the real core in its place.
+- **The binary drives the cores itself.** The slices' Rust decides, and
+  each twin's JS did the waiting around it: processes, timers, fetch,
+  watches, events. In the binary, crates of drivers do that natively, on
+  tokio: `xenonet-wire-map` (the state, the readers, the store, the demo's
+  world, the schema checks and drift), `xenonet-wire-engine` (the engine,
+  delivery, verify and the actors) and `xenonet-wire-app` (hosts and the
+  hub, the assistant, the doctor, integrations and the app's own parts).
+  `xenonet serve` runs them in that order, the map first, since the demo's
+  world moves the folders the rest read; they reach each other only
+  through the traits. A core's events go through an `Emitter` to
+  `server/index.js`'s handlers (`glue.rs`), fetch through one HTTPS client
+  (`net.rs`: reqwest on rustls, with the system's certificates), and a
+  task of the hosts slice runs on a thread of its own, its requests
+  answered on the service's runtime. The command's drivers
+  (`crates/xenonet-cli/src/cores`) do the same for the commands.
 - **Terminals live in the service**, as the standalone JS service's do:
   `crates/xenonet-service/src/terminals.rs`, on `portable-pty` (a pty, and
   ConPTY on Windows, as node-pty is for the JS). The service owns the
   shells and Desktop only reads their output, so they keep running while
   Desktop restarts, which a pty in Electron couldn't do.
-- **The console operator stays JS for now**: `node mcp/console.js`, which
-  the binary's `xenonet mcp console` says to run. It drives Desktop through
-  `core/control.js`, which stays JS for `electron/`, the end-to-end tests
-  and the scripts, and its development instances run the checkout's
-  Electron, so Node is there whenever they are. Installed Tools without
-  Node need only its "installed" target over the component service's
-  socket, which can move to Rust then.
+- **The console operator is in Rust too**: `xenonet mcp console`
+  (`crates/xenonet-mcp/src/console.rs`) declares `mcp/console.js`'s tools
+  and runs each through the command's driver of `core/control.js`, the
+  one `xenonet console`, `script` and `film` use. `core/control.js` itself
+  stays JS for `electron/`, the end-to-end tests and the scripts.
 
 ## Not decided yet
 
 - Signing on Windows.
+- A file watcher for the binary's readers. They poll for now, with no
+  new crate: the tailer every 250 ms, a sweep for new and woken
+  transcripts every 2 seconds, the wiki's and themes' folders every
+  second or half second.
+- Codex's compressed archives (`.jsonl.zst`), which the binary's search,
+  stats and rollout pages skip, since reading them needs a zstd crate.
 - Whether a release ships Rust subsystems inside the JS service (twins in
   place) before the binary replaces the service.
 
@@ -634,10 +661,12 @@ place. This table follows it.
 | `core/integrations/` (common, routing, pi, reviews, openshell, index) | `xenonet-integrations`: credentials redacted, tickets and records, the routing answer's check, Pi metadata, the frozen text snapshot (O_NOFOLLOW reads, stamps before and after), what a sandbox returns validated as untrusted, the patch, and OpenShell's argv and flows as tasks; JevRouter, git and the in-sandbox collector (JS run inside the sandbox) stay in the twins | `integrations`, `integrations-routes`, `sandbox-reviews` pass |
 | `core/doctor/` (index, service, checkup, context) | `xenonet-doctor`: each check's verdict and words as a task asking the twin's ctx (files, processes, XenoNet's state) for what it reads, the hosts' checks, the summary, new problems and the last run's file; machine(), the runner's time limits and the schedule stay in the twins | `doctor`, `observers`, `token-files`, `hosts-doctor`, `schema-output` pass |
 | `xenonet mcp` (`mcp/xenonet.js`), for sessions, actors and channel sessions | `xenonet-mcp`, on rmcp | Contract tests against the JS server (initialize, `tools/list`, the probe, in each kind of session); `mcp-actor`, `engine` pass against the binary |
-| `xenonet mcp assistant` (`mcp/assistant.js`, with `core/assistant/client.js`) | `xenonet-mcp` | `assistant-endpoint` but `--fixture` (pending on `core/assistant/service.js`), `e2e/assistant` pass against the binary |
-| `xenonet hook` and every other command (`cli/`) | `xenonet-cli`, the `xenonet` binary | `cli`, `cli-actor`, `cli-gateway`, `cli-status-agents`, `hosts-cli`, `launcher` pass against the binary, but the cases that reach a pending core |
-| `xenonet serve` (`server/index.js`, `server/routes/`, `component-service.js`, `static.js`, `upstream.js`) | `xenonet-service` | The JS route tests' cases as Rust tests of the routes; `control` passes against the binary; `server`, `hosts-server` wait on the map's core |
-| The actor gateway, its switch and tunnels (`server/actor-gateway.js`, `gateway-control.js`, `gateway-tunnel.js`, `gateway-reach.js`) | `xenonet-service/src/gateway` | 69 of the JS gateway's answers, byte for byte; `gateway-tunnel`'s cases; the public address check waits on a DNS and TLS decision |
+| `xenonet mcp assistant` (`mcp/assistant.js`, with `core/assistant/client.js`) | `xenonet-mcp` | Contract tests against the JS server, for a grant and against its `--fixture`; `assistant-endpoint`, `e2e/assistant` pass against the binary |
+| `xenonet mcp console` (`mcp/console.js`, over `core/control.js`) | `xenonet-mcp/src/console.rs`, through `xenonet-cli/src/cores/control.rs` | Contract tests against the JS server (the handshake, `tools/list` key for key, its refusals, in both revisions); `control` passes against the binary |
+| `xenonet hook` and every other command (`cli/`) | `xenonet-cli`, the `xenonet` binary, its cores driven in `src/cores` | `cli`, `cli-actor`, `cli-gateway`, `cli-status-agents`, `hosts-cli`, `launcher` pass against the binary |
+| `xenonet serve` (`server/index.js`, `server/routes/`, `component-service.js`, `static.js`, `upstream.js`) | `xenonet-service`, its cores driven by `xenonet-wire-map`, `-engine` and `-app` | The JS route tests' cases as Rust tests of the routes; `server`, `hosts-server`, `engine`, `control` pass against the binary; `scripts/rust-diff.mjs` asks it and the JS service the same reads side by side |
+| The actor gateway, its switch and tunnels (`server/actor-gateway.js`, `gateway-control.js`, `gateway-tunnel.js`, `gateway-reach.js`) | `xenonet-service/src/gateway`, the public address check over its own DNS (`reach.rs`) | 69 of the JS gateway's answers, byte for byte; `gateway-tunnel`'s cases |
+| The terminal drawer's shells (`server/terminals.js`) | `xenonet-service/src/terminals.rs`, on portable-pty | Its own Rust tests, a real shell's among them |
 | The assistant's endpoint (`server/assistant-endpoint.js`) | `xenonet-service` | Its hello, read and sweep, as a Rust test |
 
 With every twin in place, all 131 test files that reach one pass (of 170; the other 39 load no module that has a twin). The
@@ -654,7 +683,7 @@ since each record crosses between JS and Rust several times while the
 vendor checks are still JS. The readers gain from Rust once they're Rust
 from the file to the answer.
 
-The readers and the schemas (step 2) are ported: every module of `core/` that reads a source, the map and its state, and `core/schema/`. Through the twins they're slower than the JS (a map of 3,000 sessions takes about 26 ms against 5 ms, a session's stats about 6 times as long), since every value crosses between JS and Rust; they gain once they're Rust from the file to the answer. Not ported yet: the engine and what follows it, in the order above.
+The readers and the schemas (step 2) are ported: every module of `core/` that reads a source, the map and its state, and `core/schema/`. Through the twins they're slower than the JS (a map of 3,000 sessions takes about 26 ms against 5 ms, a session's stats about 6 times as long), since every value crosses between JS and Rust; they gain once they're Rust from the file to the answer. The engine and what follows it are ported too, so every core is in Rust; in the binary, crates of drivers run them natively (see "Decided along the way").
 
 `npm run test:bin` builds the binary and runs every JS test that starts
 the service, the command or an MCP server against it
