@@ -358,11 +358,13 @@ the 2025 handshake. The Rust server keeps that behavior:
 
 ### Toolchain
 
+`rust-toolchain.toml` pins the latest stable Rust, 1.99.1 (rustup installs
+it for the checkout without changing anyone's default), so builds are the
+same everywhere and clippy has its latest checks. It moves to each new
+stable release once the workspace builds, tests and lints clean on it.
 Every current `rmcp` release needs Rust 1.88 or later (through let-chains
-and `darling` 0.23). `rust-toolchain.toml` pins Rust 1.90.0 for the
-checkout (rustup installs it there without changing anyone's default), so
-`crates/xenonet-mcp` is a member of the workspace and builds into the one
-binary. The crates that hold `rmcp` or `tokio` (`xenonet-mcp`,
+and `darling` 0.23), so `crates/xenonet-mcp` builds into the one binary
+with the rest. The crates that hold `rmcp` or `tokio` (`xenonet-mcp`,
 `xenonet-service`, `xenonet-cli`) declare Rust 1.88; the rest still build
 on 1.85. A PATH can name a toolchain's own `cargo` rather than rustup's,
 which ignores the pin, so the scripts run cargo through
