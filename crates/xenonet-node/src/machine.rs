@@ -146,7 +146,12 @@ impl peer::Calls for AskCalls<'_> {
         self.0.ask_arg(Arg::Obj(vec![("op".into(), Arg::text("get")), ("path".into(), Arg::text(path))]))
     }
     fn call_all(&mut self, calls: Vec<(&str, &str, Vec<Arg>)>) -> Vec<peer::Result<Arg>> {
-        let questions = calls.into_iter().map(|(path, method, args)| Arg::Obj(vec![("op".into(), Arg::text("call")), ("path".into(), Arg::text(path)), ("method".into(), Arg::text(method)), ("args".into(), Arg::List(args))])).collect();
+        let questions = calls
+            .into_iter()
+            .map(|(path, method, args)| {
+                Arg::Obj(vec![("op".into(), Arg::text("call")), ("path".into(), Arg::text(path)), ("method".into(), Arg::text(method)), ("args".into(), Arg::List(args))])
+            })
+            .collect();
         self.0.ask_all_arg(questions)
     }
     fn kind(&mut self, path: &str) -> peer::Result<String> {
@@ -178,7 +183,10 @@ where
         let done = match catch_unwind(AssertUnwindSafe(|| f(&asker))) {
             Ok(Ok(v)) => Out::Done(v.into()),
             Ok(Err(t)) => Out::Fail(t),
-            Err(p) => Out::Fail(Thrown::new(format!("XenoNet's Rust core failed: {}", p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()))),
+            Err(p) => Out::Fail(Thrown::new(format!(
+                "XenoNet's Rust core failed: {}",
+                p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+            ))),
         };
         let _ = asker.out.send(done);
     });
@@ -206,10 +214,13 @@ impl Machine {
             Out::All(qs) => Jv::Obj(vec![("all", raw(&Arg::List(qs))?)]),
             Out::Done(d) => {
                 self.over = true;
-                Jv::Obj(vec![("done", match d {
-                    Done::Jv(v) => v,
-                    Done::Arg(a) => raw(&a)?,
-                })])
+                Jv::Obj(vec![(
+                    "done",
+                    match d {
+                        Done::Jv(v) => v,
+                        Done::Arg(a) => raw(&a)?,
+                    },
+                )])
             }
             Out::Fail(t) => {
                 self.over = true;

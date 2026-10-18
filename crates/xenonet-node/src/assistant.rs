@@ -299,7 +299,10 @@ fn status_name(v: Option<&Value>) -> &'static str {
 }
 
 fn basis_name(v: Option<&Value>) -> &'static str {
-    ["observed_turn_active", "observed_wait", "observed_turn_end", "observed_idle", "observed_interrupt", "observed_inactive", "inferred_stall", "source_unavailable"].into_iter().find(|n| v.and_then(Value::as_str) == Some(n)).unwrap_or("source_unavailable")
+    ["observed_turn_active", "observed_wait", "observed_turn_end", "observed_idle", "observed_interrupt", "observed_inactive", "inferred_stall", "source_unavailable"]
+        .into_iter()
+        .find(|n| v.and_then(Value::as_str) == Some(n))
+        .unwrap_or("source_unavailable")
 }
 
 #[napi(js_name = "asstFreshnessOf")]
@@ -387,7 +390,16 @@ pub fn asst_view(x: Json, home_of: Function<Json, Json>, product_of: Function<Js
     let x = x.0;
     let mut a = JsAround { home_of: &home_of, product_of: &product_of, registered: &registered, failed: None };
     let get = |k: &str| x.get(k).cloned().unwrap_or(Value::Null);
-    let v = source::view(x.get("t").and_then(Value::as_f64).unwrap_or(0.0), &arr(x.get("nodes").cloned()), &get("live"), &arr(x.get("actors").cloned()), x.get("hasActors") == Some(&json!(true)), get("claude"), get("codex"), &mut a);
+    let v = source::view(
+        x.get("t").and_then(Value::as_f64).unwrap_or(0.0),
+        &arr(x.get("nodes").cloned()),
+        &get("live"),
+        &arr(x.get("actors").cloned()),
+        x.get("hasActors") == Some(&json!(true)),
+        get("claude"),
+        get("codex"),
+        &mut a,
+    );
     a.failed.map_or(Ok(Json(v)), Err)
 }
 
@@ -410,7 +422,14 @@ pub struct AsstService {
 fn limits_of(l: &Value) -> service::Limits {
     let d = &service::LIMITS;
     let n = |k: &str, v: f64| l.get(k).and_then(Value::as_f64).unwrap_or(v);
-    service::Limits { input_bytes: n("inputBytes", d.input_bytes as f64) as usize, output_bytes: n("outputBytes", d.output_bytes as f64) as usize, concurrent: n("concurrent", d.concurrent), timeout_ms: n("timeoutMs", d.timeout_ms), page: n("page", d.page), page_max: n("pageMax", d.page_max) }
+    service::Limits {
+        input_bytes: n("inputBytes", d.input_bytes as f64) as usize,
+        output_bytes: n("outputBytes", d.output_bytes as f64) as usize,
+        concurrent: n("concurrent", d.concurrent),
+        timeout_ms: n("timeoutMs", d.timeout_ms),
+        page: n("page", d.page),
+        page_max: n("pageMax", d.page_max),
+    }
 }
 
 #[napi]
@@ -422,7 +441,13 @@ impl AsstService {
         let c = config.0;
         let t = |k: &str| c.get(k).map(xenonet_base::text::js_string).unwrap_or_default();
         let cfg = service::Config {
-            operations: c.get("operations").and_then(Value::as_array).into_iter().flatten().filter_map(|p| Some((p.get(0)?.as_str()?.to_string(), p.get(1)?.as_str()?.to_string()))).collect(),
+            operations: c
+                .get("operations")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|p| Some((p.get(0)?.as_str()?.to_string(), p.get(1)?.as_str()?.to_string())))
+                .collect(),
             attention_kinds: c.get("attentionKinds").and_then(Value::as_array).into_iter().flatten().map(xenonet_base::text::js_string).collect(),
             result_schema: t("resultSchema"),
             error_schema: t("errorSchema"),

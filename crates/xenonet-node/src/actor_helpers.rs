@@ -211,7 +211,15 @@ pub struct Buckets {
 impl Buckets {
     #[napi(constructor)]
     pub fn new(max: f64) -> Self {
-        Buckets { inner: Mutex::new(limits::Buckets::new(if max.is_finite() && max > 0.0 { max as usize } else if max > 0.0 { usize::MAX } else { 0 })) }
+        Buckets {
+            inner: Mutex::new(limits::Buckets::new(if max.is_finite() && max > 0.0 {
+                max as usize
+            } else if max > 0.0 {
+                usize::MAX
+            } else {
+                0
+            })),
+        }
     }
 
     #[napi]

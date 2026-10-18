@@ -76,7 +76,16 @@ pub(crate) unsafe fn arg_of(env: sys::napi_env, v: sys::napi_value, depth: usize
             }
             let mut keys = ptr::null_mut();
             check(
-                unsafe { sys::napi_get_all_property_names(env, v, sys::KeyCollectionMode::own_only, sys::KeyFilter::enumerable | sys::KeyFilter::skip_symbols, sys::KeyConversion::numbers_to_strings, &mut keys) },
+                unsafe {
+                    sys::napi_get_all_property_names(
+                        env,
+                        v,
+                        sys::KeyCollectionMode::own_only,
+                        sys::KeyFilter::enumerable | sys::KeyFilter::skip_symbols,
+                        sys::KeyConversion::numbers_to_strings,
+                        &mut keys,
+                    )
+                },
                 "list an object's keys",
             )?;
             let mut n = 0u32;

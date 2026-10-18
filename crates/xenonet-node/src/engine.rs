@@ -19,7 +19,10 @@ use xenonet_engine::sql::Arg;
 fn outcome(r: eng::Result<Arg>) -> std::result::Result<Arg, Thrown> {
     match r {
         Ok(v) => Ok(Arg::Obj(vec![("done".into(), v)])),
-        Err(Fail::Bad(message)) => Ok(Arg::Obj(vec![("refused".into(), Arg::Obj(vec![("message".into(), Arg::text(message)), ("status".into(), Arg::num(400.0)), ("code".into(), Arg::text("bad-request"))]))])),
+        Err(Fail::Bad(message)) => Ok(Arg::Obj(vec![(
+            "refused".into(),
+            Arg::Obj(vec![("message".into(), Arg::text(message)), ("status".into(), Arg::num(400.0)), ("code".into(), Arg::text("bad-request"))]),
+        )])),
         Err(Fail::Error(message)) => Err(Thrown::new(message)),
         Err(Fail::Thrown(t)) => Err(t),
     }

@@ -58,7 +58,13 @@ pub fn started_under(rows: JsArg, of: Function<JsArg, JsArg>, is_root: Function<
         return Err(e);
     }
     let out = out.map_err(|t| Error::new(Status::GenericFailure, t.message))?;
-    Ok(Json(Value::Array(out.into_iter().map(|s| json!({ "pid": xenonet_base::json::number(s.pid), "start": xenonet_base::json::number(s.start), "agent": s.agent, "root": xenonet_base::json::number(s.root) })).collect())))
+    Ok(Json(Value::Array(
+        out.into_iter()
+            .map(
+                |s| json!({ "pid": xenonet_base::json::number(s.pid), "start": xenonet_base::json::number(s.start), "agent": s.agent, "root": xenonet_base::json::number(s.root) }),
+            )
+            .collect(),
+    )))
 }
 
 fn pending_of(a: &Arg) -> Pending {

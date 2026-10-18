@@ -58,4 +58,3 @@ pub fn link_state(env: Env, store: &EngineStoreCore, slug: JsArg, now: f64) -> R
 pub fn add_external_ref(env: Env, store: &EngineStoreCore, slug: JsArg, adapter_id: JsArg, facts: JsArg, now: JsArg) -> Result<Json> {
     links::add_external_ref(&store.inner, &slug.0, &adapter_id.0, &facts.0, &now.0).map(Json).map_err(|f| fail(&env, f))
 }
-

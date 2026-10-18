@@ -32,7 +32,9 @@ fn ctx_of(c: &Json) -> install::Ctx {
 
 #[napi(js_name = "compConstants")]
 pub fn comp_constants() -> Json {
-    Json(json!({ "serviceApi": protocol::api_value(protocol::SERVICE_API), "consoleApi": protocol::api_value(protocol::CONSOLE_API), "capabilities": protocol::CAPABILITIES, "components": packages::COMPONENTS, "maxLine": rpc::MAX_LINE }))
+    Json(
+        json!({ "serviceApi": protocol::api_value(protocol::SERVICE_API), "consoleApi": protocol::api_value(protocol::CONSOLE_API), "capabilities": protocol::CAPABILITIES, "components": packages::COMPONENTS, "maxLine": rpc::MAX_LINE }),
+    )
 }
 
 #[napi(js_name = "compNegotiate")]
@@ -349,7 +351,9 @@ impl CompConsole {
                     let show = a.get("show").map_or_else(|| "inactive".to_string(), xenonet_base::text::js_string);
                     c.launch(&io, &show, xenonet_app::jsv::truthy(a.get("restart")), a.get("timeout").and_then(Value::as_f64).unwrap_or(60000.0)).await
                 }
-                "driver" => c.call(&io, &json!({ "op": "driver", "method": a.get("method").cloned().unwrap_or(Value::Null), "args": a.get("args").cloned().unwrap_or(json!([])) })).await,
+                "driver" => {
+                    c.call(&io, &json!({ "op": "driver", "method": a.get("method").cloned().unwrap_or(Value::Null), "args": a.get("args").cloned().unwrap_or(json!([])) })).await
+                }
                 "screenshot" | "input" | "window" | "logs" | "record" => c.call(&io, &with(&kind)).await,
                 "api" => c.api(&io, a.get("route").and_then(Value::as_str).unwrap_or("")).await,
                 _ => Err(xenonet_app::task::Failure::msg(format!("no console task {kind}"))),
@@ -362,4 +366,3 @@ impl CompConsole {
 pub fn comp_only_dev() -> &'static str {
     "This action is available only in development instances."
 }
-

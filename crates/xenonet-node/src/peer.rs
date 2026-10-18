@@ -102,7 +102,10 @@ impl peer::Calls for SyncCalls {
             let mut t = 0;
             check(sys::napi_typeof(self.env, target, &mut t), "tell a value's type")?;
             if t != sys::ValueType::napi_object && t != sys::ValueType::napi_function {
-                return Err(Thrown::coded(format!("Cannot read properties of {} (reading '{method}')", if t == sys::ValueType::napi_null { "null" } else { "undefined" }), "TypeError"));
+                return Err(Thrown::coded(
+                    format!("Cannot read properties of {} (reading '{method}')", if t == sys::ValueType::napi_null { "null" } else { "undefined" }),
+                    "TypeError",
+                ));
             }
             let mut f = ptr::null_mut();
             check(sys::napi_get_named_property(self.env, target, key.as_ptr(), &mut f), "read a method")?;

@@ -26,7 +26,9 @@ fn refused(r: std::result::Result<Value, config::Refused>) -> Jv {
 
 #[napi(js_name = "hostsFrameConstants")]
 pub fn hosts_frame_constants() -> Json {
-    Json(json!({ "protocol": frames::PROTOCOL, "maxFrame": frames::MAX_FRAME, "maxRequest": frames::MAX_REQUEST, "fromRelay": frames::FROM_RELAY, "fromConsole": frames::FROM_CONSOLE, "maxDepth": frames::MAX_DEPTH }))
+    Json(
+        json!({ "protocol": frames::PROTOCOL, "maxFrame": frames::MAX_FRAME, "maxRequest": frames::MAX_REQUEST, "fromRelay": frames::FROM_RELAY, "fromConsole": frames::FROM_CONSOLE, "maxDepth": frames::MAX_DEPTH }),
+    )
 }
 
 /// A stream of bytes split into lines, for the twin's lineSplitter.
@@ -264,7 +266,9 @@ pub fn hosts_learn(entry: Json, key: MaybeJson, name: MaybeJson) -> Json {
 
 #[napi(js_name = "hostsLinkConstants")]
 pub fn hosts_link_constants() -> Json {
-    Json(json!({ "helloMs": link::HELLO_MS, "staleMs": link::STALE_MS, "backoff": { "min": link::BACKOFF_MIN, "max": link::BACKOFF_MAX }, "getMs": link::GET_MS, "sshOptions": link::SSH_OPTIONS }))
+    Json(
+        json!({ "helloMs": link::HELLO_MS, "staleMs": link::STALE_MS, "backoff": { "min": link::BACKOFF_MIN, "max": link::BACKOFF_MAX }, "getMs": link::GET_MS, "sshOptions": link::SSH_OPTIONS }),
+    )
 }
 
 fn options_of(o: &Value) -> link::Options {
@@ -362,7 +366,9 @@ fn effects(fx: Vec<link::Effect>) -> Jv {
     Jv::Arr(
         fx.into_iter()
             .map(|e| match e {
-                link::Effect::Spawn { run, file, args, env } => Jv::Obj(vec![("do", s("spawn")), ("run", Jv::Num(run as f64)), ("file", s(file)), ("args", Jv::Json(json!(args))), ("env", Jv::Json(Value::Object(env)))]),
+                link::Effect::Spawn { run, file, args, env } => {
+                    Jv::Obj(vec![("do", s("spawn")), ("run", Jv::Num(run as f64)), ("file", s(file)), ("args", Jv::Json(json!(args))), ("env", Jv::Json(Value::Object(env)))])
+                }
                 link::Effect::Write { run, text } => Jv::Obj(vec![("do", s("write")), ("run", Jv::Num(run as f64)), ("text", s(text))]),
                 link::Effect::Fail { run } => Jv::Obj(vec![("do", s("fail")), ("run", Jv::Num(run as f64))]),
                 link::Effect::Kill { run } => Jv::Obj(vec![("do", s("kill")), ("run", Jv::Num(run as f64))]),
@@ -371,7 +377,9 @@ fn effects(fx: Vec<link::Effect>) -> Jv {
                 link::Effect::Interval { name, ms } => Jv::Obj(vec![("do", s("interval")), ("name", s(name)), ("ms", Jv::Num(ms))]),
                 link::Effect::Clear { name } => Jv::Obj(vec![("do", s("clear")), ("name", s(name))]),
                 link::Effect::Resolve { id, value } => Jv::Obj(vec![("do", s("resolve")), ("id", Jv::Num(id as f64)), ("value", Jv::Json(value))]),
-                link::Effect::Reject { id, message, status } => Jv::Obj(vec![("do", s("reject")), ("id", Jv::Num(id as f64)), ("message", s(message)), ("status", Jv::Num(f64::from(status)))]),
+                link::Effect::Reject { id, message, status } => {
+                    Jv::Obj(vec![("do", s("reject")), ("id", Jv::Num(id as f64)), ("message", s(message)), ("status", Jv::Num(f64::from(status)))])
+                }
             })
             .collect(),
     )
@@ -400,13 +408,26 @@ impl HostsLink {
     pub fn new(entry: Json, options: Json, settings: Json, now: f64) -> Self {
         let st = settings.0;
         let n = |k: &str, d: f64| st.get(k).and_then(Value::as_f64).unwrap_or(d);
-        let backoff = (st.get("backoff").and_then(|b| b.get("min")).and_then(Value::as_f64).unwrap_or(link::BACKOFF_MIN), st.get("backoff").and_then(|b| b.get("max")).and_then(Value::as_f64).unwrap_or(link::BACKOFF_MAX));
+        let backoff = (
+            st.get("backoff").and_then(|b| b.get("min")).and_then(Value::as_f64).unwrap_or(link::BACKOFF_MIN),
+            st.get("backoff").and_then(|b| b.get("max")).and_then(Value::as_f64).unwrap_or(link::BACKOFF_MAX),
+        );
         let mut e = entry.0;
         if !e.is_object() {
             e = json!({});
         }
         HostsLink {
-            inner: link::Link::new(e, options_of(&options.0), now, xenonet_app::jsv::truthy(st.get("demoOnly")), xenonet_app::jsv::truthy(st.get("once")), n("helloMs", link::HELLO_MS), n("staleMs", link::STALE_MS), backoff, n("getMs", link::GET_MS)),
+            inner: link::Link::new(
+                e,
+                options_of(&options.0),
+                now,
+                xenonet_app::jsv::truthy(st.get("demoOnly")),
+                xenonet_app::jsv::truthy(st.get("once")),
+                n("helloMs", link::HELLO_MS),
+                n("staleMs", link::STALE_MS),
+                backoff,
+                n("getMs", link::GET_MS),
+            ),
         }
     }
 
@@ -515,7 +536,15 @@ impl HostsLink {
     }
 
     #[napi]
-    pub fn line(&mut self, run: f64, line: String, now: f64, random: Function<(), f64>, check: Function<Json, Option<String>>, tilde: Option<Function<String, String>>) -> Result<Jv> {
+    pub fn line(
+        &mut self,
+        run: f64,
+        line: String,
+        now: f64,
+        random: Function<(), f64>,
+        check: Function<Json, Option<String>>,
+        tilde: Option<Function<String, String>>,
+    ) -> Result<Jv> {
         with_asks!(random, check, tilde, |a| self.inner.line(run as u64, &line, now, &mut a))
     }
 
@@ -524,7 +553,13 @@ impl HostsLink {
     pub fn end(&mut self, run: f64, how: Json, now: f64, random: Function<(), f64>, check: Function<Json, Option<String>>, tilde: Option<Function<String, String>>) -> Result<Jv> {
         let h = how.0;
         let spawn_error = h.get("spawnError").filter(|v| !v.is_null()).map(xenonet_base::text::js_string);
-        let e = link::Ended { exit_code: h.get("exitCode").and_then(Value::as_f64), signal: h.get("signal").and_then(Value::as_str).map(String::from), stderr: "", bye: None, spawn_error: spawn_error.as_deref() };
+        let e = link::Ended {
+            exit_code: h.get("exitCode").and_then(Value::as_f64),
+            signal: h.get("signal").and_then(Value::as_str).map(String::from),
+            stderr: "",
+            bye: None,
+            spawn_error: spawn_error.as_deref(),
+        };
         with_asks!(random, check, tilde, |a| self.inner.end(run as u64, &e, now, &mut a))
     }
 }
@@ -620,13 +655,24 @@ impl HostsCleanOnce {
 
 fn part_jv(p: merge::Part) -> Json {
     let host_node = p.nodes.first().cloned().unwrap_or(Value::Null);
-    Json(json!({ "hostNode": host_node, "nodes": p.nodes, "links": p.links, "relations": p.relations, "identities": p.identities, "stats": p.stats, "truncated": p.truncated, "dropped": p.dropped }))
+    Json(
+        json!({ "hostNode": host_node, "nodes": p.nodes, "links": p.links, "relations": p.relations, "identities": p.identities, "stats": p.stats, "truncated": p.truncated, "dropped": p.dropped }),
+    )
 }
 
 /// qualifyGraph; `once` is the host's cleanOnce memo, or null.
 #[napi(js_name = "hostsQualifyGraph")]
 #[allow(clippy::too_many_arguments)]
-pub fn hosts_qualify_graph(graph: MaybeJson, host: Json, layout: Json, now: f64, windows: Json, once: Option<&mut HostsCleanOnce>, clean: Function<FnArgs<(String, Json)>, Json>, activity: Function<FnArgs<(Json, f64, Json)>, Json>) -> Result<Json> {
+pub fn hosts_qualify_graph(
+    graph: MaybeJson,
+    host: Json,
+    layout: Json,
+    now: f64,
+    windows: Json,
+    once: Option<&mut HostsCleanOnce>,
+    clean: Function<FnArgs<(String, Json)>, Json>,
+    activity: Function<FnArgs<(Json, f64, Json)>, Json>,
+) -> Result<Json> {
     let g = graph.0.unwrap_or(Value::Null);
     let mut cleaner = match once {
         Some(o) => merge::Cleaner::Once(&mut o.inner),
@@ -642,7 +688,8 @@ pub fn hosts_same_repo(nodes: Json, cap: Option<f64>) -> Json {
 
 #[napi(js_name = "hostsMergeIdentities")]
 pub fn hosts_merge_identities(local: Json, remotes: Json, names: MaybeJson, hidden: MaybeJson) -> Json {
-    let remotes: Vec<(String, Vec<Value>)> = arr(Some(remotes.0)).into_iter().map(|r| (r.get("host").map(xenonet_base::text::js_string).unwrap_or_default(), arr(r.get("identities").cloned()))).collect();
+    let remotes: Vec<(String, Vec<Value>)> =
+        arr(Some(remotes.0)).into_iter().map(|r| (r.get("host").map(xenonet_base::text::js_string).unwrap_or_default(), arr(r.get("identities").cloned()))).collect();
     Json(Value::Array(merge::merge_identities(&arr(Some(local.0)), &remotes, &names.0.unwrap_or_else(|| json!({})), &hidden.0.unwrap_or_else(|| json!({})))))
 }
 
@@ -671,7 +718,14 @@ fn aliases_of(v: &Value) -> HashMap<String, String> {
 /// mergeGraph; `hosts` is [{ info, snapshot }], `memos` each host's
 /// cleanOnce in the same order (or null), and `opts` the rest.
 #[napi(js_name = "hostsMergeGraph")]
-pub fn hosts_merge_graph(local: Json, hosts: Json, mut memos: Vec<Option<&mut HostsCleanOnce>>, opts: Json, clean: Function<FnArgs<(String, Json)>, Json>, activity: Function<FnArgs<(Json, f64, Json)>, Json>) -> Result<Json> {
+pub fn hosts_merge_graph(
+    local: Json,
+    hosts: Json,
+    mut memos: Vec<Option<&mut HostsCleanOnce>>,
+    opts: Json,
+    clean: Function<FnArgs<(String, Json)>, Json>,
+    activity: Function<FnArgs<(Json, f64, Json)>, Json>,
+) -> Result<Json> {
     let o = opts.0;
     let get = |k: &str| o.get(k).cloned().unwrap_or_else(|| json!({}));
     let mut ins: Vec<merge::HostIn> = Vec::new();
@@ -681,7 +735,18 @@ pub fn hosts_merge_graph(local: Json, hosts: Json, mut memos: Vec<Option<&mut Ho
     }
     let aliases = aliases_of(&o.get("aliases").cloned().unwrap_or(Value::Null));
     let windows = o.get("windows").cloned().unwrap_or_else(|| json!({ "activeWindowMs": 600000, "recentWindowMs": 86400000, "projectActiveMs": 3600000 }));
-    with_schemas!(clean, activity, |sc| Json(merge::merge_graph(&local.0, &mut ins, &get("layout"), o.get("now").and_then(Value::as_f64).unwrap_or(0.0), &windows, &o.get("self").cloned().unwrap_or(Value::Null), &get("names"), &get("hidden"), &aliases, &mut sc)))
+    with_schemas!(clean, activity, |sc| Json(merge::merge_graph(
+        &local.0,
+        &mut ins,
+        &get("layout"),
+        o.get("now").and_then(Value::as_f64).unwrap_or(0.0),
+        &windows,
+        &o.get("self").cloned().unwrap_or(Value::Null),
+        &get("names"),
+        &get("hidden"),
+        &aliases,
+        &mut sc
+    )))
 }
 
 /// mergeLimits: { limits, replaced }, the apps another machine's reading
@@ -716,12 +781,20 @@ pub fn hosts_qualify_live(live: MaybeJson, host: Json, clean: Function<FnArgs<(S
     let l = live.0.unwrap_or(Value::Null);
     with_schemas!(clean, activity, |sc| {
         let q = merge::qualify_live(&l, &host.0, &mut sc);
-        Json(json!({ "sessions": q.sessions, "collisions": q.collisions, "collab": q.collab, "series": q.series, "at": q.at, "tpm": q.tpm, "today": q.today, "total24h": q.total24h, "readings": q.readings }))
+        Json(
+            json!({ "sessions": q.sessions, "collisions": q.collisions, "collab": q.collab, "series": q.series, "at": q.at, "tpm": q.tpm, "today": q.today, "total24h": q.total24h, "readings": q.readings }),
+        )
     })
 }
 
 #[napi(js_name = "hostsQualifyEvent")]
-pub fn hosts_qualify_event(name: String, data: MaybeJson, host: Json, clean: Function<FnArgs<(String, Json)>, Json>, activity: Function<FnArgs<(Json, f64, Json)>, Json>) -> Result<Json> {
+pub fn hosts_qualify_event(
+    name: String,
+    data: MaybeJson,
+    host: Json,
+    clean: Function<FnArgs<(String, Json)>, Json>,
+    activity: Function<FnArgs<(Json, f64, Json)>, Json>,
+) -> Result<Json> {
     let d = data.0.unwrap_or(Value::Null);
     with_schemas!(clean, activity, |sc| Json(merge::qualify_event(&name, &d, &host.0, &mut sc).unwrap_or(Value::Null)))
 }
@@ -783,7 +856,9 @@ pub fn hosts_probe_snapshot(graph: Json, live: MaybeJson) -> Json {
 
 #[napi(js_name = "hostsRelayConstants")]
 pub fn hosts_relay_constants() -> Json {
-    Json(json!({ "pingMs": relay::PING_MS, "defaultSinceMs": relay::DEFAULT_SINCE_MS, "getTimeoutMs": relay::GET_TIMEOUT_MS, "maxGets": relay::MAX_GETS, "exit": { "done": relay::EXIT_DONE, "failed": relay::EXIT_FAILED, "noXenoNet": relay::EXIT_NO_XENONET, "xenonetGone": relay::EXIT_XENONET_GONE, "oldXenoNet": relay::EXIT_OLD_XENONET } }))
+    Json(
+        json!({ "pingMs": relay::PING_MS, "defaultSinceMs": relay::DEFAULT_SINCE_MS, "getTimeoutMs": relay::GET_TIMEOUT_MS, "maxGets": relay::MAX_GETS, "exit": { "done": relay::EXIT_DONE, "failed": relay::EXIT_FAILED, "noXenoNet": relay::EXIT_NO_XENONET, "xenonetGone": relay::EXIT_XENONET_GONE, "oldXenoNet": relay::EXIT_OLD_XENONET } }),
+    )
 }
 
 #[napi(js_name = "hostsParseSince")]
@@ -857,7 +932,15 @@ fn copier<'a>(scrub: Option<&'a HostsScrubber>, copy: Option<&'a Function<'a, Js
 /// shapeGraph: { graph, dropped }.
 #[napi(js_name = "hostsShapeGraph")]
 #[allow(clippy::too_many_arguments)]
-pub fn hosts_shape_graph(input: Json, since_ms: Option<f64>, now: f64, aliases: MaybeJson, detail: bool, scrub: Option<&HostsScrubber>, copy: Option<Function<Json, Json>>) -> Result<Json> {
+pub fn hosts_shape_graph(
+    input: Json,
+    since_ms: Option<f64>,
+    now: f64,
+    aliases: MaybeJson,
+    detail: bool,
+    scrub: Option<&HostsScrubber>,
+    copy: Option<Function<Json, Json>>,
+) -> Result<Json> {
     let mut failed = None;
     let (g, dropped) = {
         let mut c = copier(scrub, copy.as_ref(), &mut failed);

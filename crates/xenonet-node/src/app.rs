@@ -326,7 +326,9 @@ fn log_line(l: &decide::LogLine) -> Jv {
 
 #[napi(js_name = "appDecideConstants")]
 pub fn app_decide_constants() -> Json {
-    Json(json!({ "url": decide::DECISIONS_URL, "model": decide::DEFAULT_MODEL, "keyTarget": decide::KEY_TARGET, "key": decide::KEY, "keyComment": decide::KEY_COMMENT, "timeoutMs": decide::TIMEOUT_MS }))
+    Json(
+        json!({ "url": decide::DECISIONS_URL, "model": decide::DEFAULT_MODEL, "keyTarget": decide::KEY_TARGET, "key": decide::KEY, "keyComment": decide::KEY_COMMENT, "timeoutMs": decide::TIMEOUT_MS }),
+    )
 }
 
 #[napi(js_name = "appDecideSettings")]
@@ -613,7 +615,9 @@ fn ask_jv(job: spotify::Job, ask: spotify::Ask) -> Jv {
         spotify::Ask::SecretGet(t) => Jv::Obj(vec![("secret", Jv::Obj(vec![("op", s("get")), ("target", s(t))]))]),
         spotify::Ask::SecretHas(t) => Jv::Obj(vec![("secret", Jv::Obj(vec![("op", s("has")), ("target", s(t))]))]),
         spotify::Ask::SecretRemove(t) => Jv::Obj(vec![("secret", Jv::Obj(vec![("op", s("remove")), ("target", s(t))]))]),
-        spotify::Ask::SecretSet { target, value, comment } => Jv::Obj(vec![("secret", Jv::Obj(vec![("op", s("set")), ("target", s(target)), ("value", s(value)), ("comment", s(comment))]))]),
+        spotify::Ask::SecretSet { target, value, comment } => {
+            Jv::Obj(vec![("secret", Jv::Obj(vec![("op", s("set")), ("target", s(target)), ("value", s(value)), ("comment", s(comment))]))])
+        }
         spotify::Ask::Fetch { url, method, headers, body, timeout_ms, fallback, skip } => {
             let mut f = vec![("url", s(url)), ("method", s(method)), ("headers", Jv::Obj(headers.into_iter().map(|(k, v)| (k, s(v))).collect()))];
             if let Some(b) = body {
@@ -821,7 +825,19 @@ pub fn app_lock_holder(dir: String) -> AppTask {
 
 #[napi(js_name = "appControlCheck")]
 pub fn app_control_check(id: String) -> Option<String> {
-    let o = control::Opts { port: None, user_data: Some(""), log_dir: Some(""), settle_ms: 0.0, term_ms: 0.0, root: "", tmpdir: "", platform: "", appdata: None, xdg_config_home: None, home: "" };
+    let o = control::Opts {
+        port: None,
+        user_data: Some(""),
+        log_dir: Some(""),
+        settle_ms: 0.0,
+        term_ms: 0.0,
+        root: "",
+        tmpdir: "",
+        platform: "",
+        appdata: None,
+        xdg_config_home: None,
+        home: "",
+    };
     control::Instance::new(&id, &o).err()
 }
 
@@ -837,7 +853,16 @@ impl AppControl {
     pub fn new(id: String, opts: Json) -> Result<Self> {
         let o = opts.0;
         let text = |k: &str| o.get(k).and_then(Value::as_str).map(String::from);
-        let (user_data, log_dir, root, tmpdir, platform, appdata, xdg, home) = (text("userData"), text("logDir"), text("root").unwrap_or_default(), text("tmpdir").unwrap_or_default(), text("platform").unwrap_or_default(), text("appdata"), text("xdgConfigHome"), text("home").unwrap_or_default());
+        let (user_data, log_dir, root, tmpdir, platform, appdata, xdg, home) = (
+            text("userData"),
+            text("logDir"),
+            text("root").unwrap_or_default(),
+            text("tmpdir").unwrap_or_default(),
+            text("platform").unwrap_or_default(),
+            text("appdata"),
+            text("xdgConfigHome"),
+            text("home").unwrap_or_default(),
+        );
         let num = |k: &str, d: f64| o.get(k).and_then(Value::as_f64).unwrap_or(d);
         let opts = control::Opts {
             port: o.get("port").cloned(),
@@ -903,7 +928,9 @@ use xenonet_app::system_stats as stats;
 
 #[napi(js_name = "appSystemConstants")]
 pub fn app_system_constants() -> Json {
-    Json(json!({ "history": stats::HISTORY, "freshMs": stats::FRESH_MS, "idleMs": stats::IDLE_MS, "staleMs": stats::STALE_MS, "nvidiaQuery": stats::NVIDIA_QUERY, "nvidiaArgs": stats::nvidia_args() }))
+    Json(
+        json!({ "history": stats::HISTORY, "freshMs": stats::FRESH_MS, "idleMs": stats::IDLE_MS, "staleMs": stats::STALE_MS, "nvidiaQuery": stats::NVIDIA_QUERY, "nvidiaArgs": stats::nvidia_args() }),
+    )
 }
 
 #[napi(js_name = "appCpuModel")]
@@ -932,7 +959,9 @@ fn adapters_of(v: &Value) -> Vec<(String, f64)> {
 #[napi(js_name = "appParseWindowsGpu")]
 pub fn app_parse_windows_gpu(line: String, adapters: Json) -> Json {
     Json(match stats::parse_windows_gpu(&line, &adapters_of(&adapters.0)) {
-        stats::WindowsLine::Adapters(a) => json!({ "adapters": a.into_iter().map(|(name, mem)| json!({ "name": name, "mem": xenonet_base::json::number(mem) })).collect::<Vec<_>>() }),
+        stats::WindowsLine::Adapters(a) => {
+            json!({ "adapters": a.into_iter().map(|(name, mem)| json!({ "name": name, "mem": xenonet_base::json::number(mem) })).collect::<Vec<_>>() })
+        }
         stats::WindowsLine::Latest(l) => json!({ "latest": l }),
         stats::WindowsLine::Nothing => json!({}),
     })
@@ -949,7 +978,14 @@ pub fn app_windows_gpu_command(system_root: Option<String>, parent: f64) -> Json
 }
 
 #[napi(js_name = "appFindNvidiaSmi")]
-pub fn app_find_nvidia_smi(platform: String, path_var: String, pathext: Option<String>, system_root: Option<String>, program_files: Option<String>, exists: Function<String, bool>) -> Option<String> {
+pub fn app_find_nvidia_smi(
+    platform: String,
+    path_var: String,
+    pathext: Option<String>,
+    system_root: Option<String>,
+    program_files: Option<String>,
+    exists: Function<String, bool>,
+) -> Option<String> {
     stats::find_nvidia_smi(&platform, &path_var, pathext.as_deref(), system_root.as_deref(), program_files.as_deref(), &mut |f| exists.call(f.to_string()).unwrap_or(false))
 }
 

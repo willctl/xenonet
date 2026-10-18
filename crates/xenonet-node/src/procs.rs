@@ -233,7 +233,8 @@ impl ProcsCore {
         let p = p.0.unwrap_or(Value::Null);
         run(&self.inner, move |procs, io| {
             let agent = p.get("agent").and_then(Value::as_str);
-            let product = p.get("product").filter(|v| v.is_object()).map(|v| (v.get("product").and_then(Value::as_str).unwrap_or(""), v.get("role").and_then(Value::as_str).unwrap_or("")));
+            let product =
+                p.get("product").filter(|v| v.is_object()).map(|v| (v.get("product").and_then(Value::as_str).unwrap_or(""), v.get("role").and_then(Value::as_str).unwrap_or("")));
             Ok(Jv::Bool(procs.signed(io, p.get("pid"), p.get("start"), p.get("program"), agent, product)))
         })
     }

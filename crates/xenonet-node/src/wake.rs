@@ -57,7 +57,9 @@ fn done<T>(env: &Env, r: wake::Result<T>) -> Result<T> {
 fn outcome(r: wake::Result<Arg>) -> std::result::Result<Arg, Thrown> {
     match r {
         Ok(v) => Ok(Arg::Obj(vec![("done".into(), v)])),
-        Err(Fail::Wake { status, code, message }) => Ok(Arg::Obj(vec![("refused".into(), Arg::Obj(vec![("status".into(), Arg::num(status)), ("code".into(), Arg::text(code)), ("message".into(), Arg::text(message))]))])),
+        Err(Fail::Wake { status, code, message }) => {
+            Ok(Arg::Obj(vec![("refused".into(), Arg::Obj(vec![("status".into(), Arg::num(status)), ("code".into(), Arg::text(code)), ("message".into(), Arg::text(message))]))]))
+        }
         Err(Fail::Thrown(t)) => Err(t),
     }
 }
@@ -171,4 +173,3 @@ impl WakesCore {
         start(move |asker| outcome(w.forget(&mut AskCalls(asker), &slug.0).map(|()| Arg::Undef)))
     }
 }
-

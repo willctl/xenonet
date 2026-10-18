@@ -99,7 +99,9 @@ pub struct IntgRecords {
 impl IntgRecords {
     #[napi(factory)]
     pub fn of(dir: Option<String>, limit: f64) -> napi::Result<Self> {
-        common::Records::new(dir, if limit.is_finite() { limit.max(0.0) as usize } else { usize::MAX }).map(|inner| IntgRecords { inner }).map_err(|f| napi::Error::from_reason(f.message))
+        common::Records::new(dir, if limit.is_finite() { limit.max(0.0) as usize } else { usize::MAX })
+            .map(|inner| IntgRecords { inner })
+            .map_err(|f| napi::Error::from_reason(f.message))
     }
 
     #[napi]

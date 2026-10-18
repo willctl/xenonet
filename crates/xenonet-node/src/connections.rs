@@ -19,7 +19,9 @@ use xenonet_actors::connections::{self as conn, Connections, Fail};
 fn throw(env: &Env, f: Fail) -> Error {
     let (message, fields): (String, Vec<(&std::ffi::CStr, Value)>) = match f {
         Fail::Thrown(t) => return rethrow(env, t),
-        Fail::Connection { status, code, message, extra } => (message, vec![(c"xenonetConnection", json!(true)), (c"status", xenonet_base::json::number(status)), (c"code", json!(code)), (c"extra", extra)]),
+        Fail::Connection { status, code, message, extra } => {
+            (message, vec![(c"xenonetConnection", json!(true)), (c"status", xenonet_base::json::number(status)), (c"code", json!(code)), (c"extra", extra)])
+        }
         Fail::Link { code, message } => (message, vec![(c"xenonetLink", json!(true)), (c"code", json!(code))]),
     };
     settle(env);
@@ -168,4 +170,3 @@ impl ConnectionsCore {
         done(&env, self.inner.any_active(&mut SyncCalls::new(&env, &deps)))
     }
 }
-
