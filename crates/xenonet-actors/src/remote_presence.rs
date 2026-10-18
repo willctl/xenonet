@@ -63,6 +63,7 @@ impl RemotePresence {
     /// `targets` (node ids on the map, or none), having read `reach` (the
     /// places it covered, for the map's light only). "actors" is the
     /// registry, and "onRead" (when `on_read`) hears of the read.
+    #[expect(clippy::too_many_arguments, reason = "the JS's read and what it was told, which xenonet-node passes one by one")]
     pub fn read(&mut self, c: &mut dyn Calls, actor_id: &Arg, connection_id: &Arg, targets: &[Arg], reach: &[Arg], at: f64, on_read: bool) -> Result<()> {
         if !c.call("actors", "has", vec![actor_id.clone()])?.truthy() {
             return Ok(());
@@ -72,7 +73,8 @@ impl RemotePresence {
             self.shown.insert(actor.clone(), at);
             let mut reach = unique(reach);
             reach.truncate(REACH_MAX);
-            let read = Arg::Obj(vec![("actor".into(), actor_id.clone()), ("connection".into(), connection_id.clone()), ("reach".into(), Arg::List(reach)), ("at".into(), Arg::num(at))]);
+            let read =
+                Arg::Obj(vec![("actor".into(), actor_id.clone()), ("connection".into(), connection_id.clone()), ("reach".into(), Arg::List(reach)), ("at".into(), Arg::num(at))]);
             let _ = c.call("", "onRead", vec![read]);
         }
         let key = format!("{actor}|{}", js_text(connection_id));

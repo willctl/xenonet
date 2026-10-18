@@ -48,6 +48,7 @@ impl Arg {
         n.map_or(Arg::Null, Arg::Num)
     }
     /// A field of an object, Undef when it isn't there.
+    #[must_use]
     pub fn field(&self, k: &str) -> Arg {
         match self {
             Arg::Obj(fields) => fields.iter().rev().find(|(n, _)| n == k).map_or(Arg::Undef, |(_, v)| v.clone()),
@@ -82,6 +83,7 @@ impl Arg {
         }
     }
     /// What `value ?? fallback` takes.
+    #[must_use]
     pub fn or(self, fallback: Arg) -> Arg {
         if self.is_nullish() {
             fallback
@@ -253,7 +255,7 @@ impl From<rusqlite::Error> for SqlError {
 
 pub type Result<T> = std::result::Result<T, SqlError>;
 
-fn bind_one(stmt: &mut Statement, index: usize, v: &Arg) -> Result<()> {
+fn bind_one(stmt: &mut Statement<'_>, index: usize, v: &Arg) -> Result<()> {
     let value = match v {
         Arg::Null => SqlValue::Null,
         Arg::Num(n) => SqlValue::Real(*n),
@@ -269,7 +271,7 @@ fn bind_one(stmt: &mut Statement, index: usize, v: &Arg) -> Result<()> {
 }
 
 /// Binds a call's arguments as node:sqlite does.
-pub fn bind(stmt: &mut Statement, args: &[Arg]) -> Result<()> {
+pub fn bind(stmt: &mut Statement<'_>, args: &[Arg]) -> Result<()> {
     for i in 1..=stmt.parameter_count() {
         stmt.raw_bind_parameter(i, SqlValue::Null)?;
     }
@@ -304,7 +306,7 @@ pub fn bind(stmt: &mut Statement, args: &[Arg]) -> Result<()> {
 
 const MAX_SAFE: i64 = 9_007_199_254_740_991;
 
-fn read_rows(stmt: &mut Statement, first: bool) -> Result<Vec<Row>> {
+fn read_rows(stmt: &mut Statement<'_>, first: bool) -> Result<Vec<Row>> {
     let names: Vec<String> = stmt.column_names().into_iter().map(str::to_string).collect();
     let mut rows = stmt.raw_query();
     let mut out = Vec::new();
@@ -381,7 +383,7 @@ pub fn transaction<T>(db: &Connection, f: impl FnOnce() -> Result<T>) -> Result<
         return f();
     }
     exec(db, "BEGIN")?;
-    match f().and_then(|out| exec(db, "COMMIT").map(|_| out)) {
+    match f().and_then(|out| exec(db, "COMMIT").map(|()| out)) {
         Ok(out) => Ok(out),
         Err(e) => {
             let _ = exec(db, "ROLLBACK");

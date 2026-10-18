@@ -132,11 +132,10 @@ impl Swap {
     fn replace(&self, s: &str) -> String {
         let mut out = String::with_capacity(s.len());
         let mut i = 0;
-        while i < s.len() {
+        while let Some(c) = s[i..].chars().next() {
             if let Some((end, to)) = self.at(s, i) {
                 out.push_str(&to);
                 if end == i {
-                    let c = s[i..].chars().next().unwrap();
                     out.push(c);
                     i += c.len_utf8();
                 } else {
@@ -144,7 +143,6 @@ impl Swap {
                 }
                 continue;
             }
-            let c = s[i..].chars().next().unwrap();
             out.push(c);
             i += c.len_utf8();
         }
@@ -433,7 +431,11 @@ pub fn metadata_engine(mut e: Value) -> Value {
     }
     if let Some(Value::Array(agents)) = e.get_mut("agents") {
         for a in agents.iter_mut() {
-            let claims: Vec<Value> = a.get("claims").and_then(Value::as_array).map(|cs| cs.iter().map(|c| spread_with(&spread_with(c, "pattern", json!("")), "note", Value::Null)).collect()).unwrap_or_default();
+            let claims: Vec<Value> = a
+                .get("claims")
+                .and_then(Value::as_array)
+                .map(|cs| cs.iter().map(|c| spread_with(&spread_with(c, "pattern", json!("")), "note", Value::Null)).collect())
+                .unwrap_or_default();
             if let Some(m) = obj_mut(a) {
                 m.insert("claims".into(), Value::Array(claims));
             }
@@ -468,7 +470,14 @@ fn id_of(v: Option<&Value>) -> String {
 /// titles, states and counts only unless `detail`; and which sessions it
 /// left out. What's kept is copied once, by `copy` (the relay's
 /// scrubber, which writes the home folder as ~ as it copies).
-pub fn shape_graph(input: &Value, since_ms: Option<f64>, now: f64, aliases: &HashMap<String, String>, detail: bool, copy: &mut dyn FnMut(&Value) -> Value) -> (Value, HashSet<String>) {
+pub fn shape_graph(
+    input: &Value,
+    since_ms: Option<f64>,
+    now: f64,
+    aliases: &HashMap<String, String>,
+    detail: bool,
+    copy: &mut dyn FnMut(&Value) -> Value,
+) -> (Value, HashSet<String>) {
     let nodes = list(input.get("nodes"));
     let cutoff = since_ms.map_or(f64::NEG_INFINITY, |s| now - s);
     let mut dropped = HashSet::new();
@@ -668,14 +677,19 @@ fn chars_ok(v: &str, extra: &[u8], min: usize, max: usize) -> bool {
     (min..=max).contains(&v.len()) && v.bytes().all(|c| c.is_ascii_alphanumeric() || extra.contains(&c))
 }
 
+// Whether a query parameter (key, value) may come with a route.
+type QueryOk = fn(&str, &str) -> bool;
+
 // The route a path is, and whether a query parameter may come with it.
-fn route_of(path: &str) -> Option<(Shape, fn(&str, &str) -> bool)> {
+fn route_of(path: &str) -> Option<(Shape, QueryOk)> {
     let session_route = |p: &str, end: &str| p.strip_prefix("/api/session/").and_then(|r| r.strip_suffix(end)).is_some_and(session_ok);
     if path == "/api/mcp" {
         return Some((Shape::None, |k, v| k == "server" && chars_ok(v, b"._:-", 1, 160)));
     }
     if session_route(path, "/transcript") {
-        return Some((Shape::None, |k, v| (k == "cursor" && chars_ok(v, b"._:-", 1, 200)) || (k == "limit" && (1..=4).contains(&v.len()) && v.bytes().all(|c| c.is_ascii_digit()))));
+        return Some((Shape::None, |k, v| {
+            (k == "cursor" && chars_ok(v, b"._:-", 1, 200)) || (k == "limit" && (1..=4).contains(&v.len()) && v.bytes().all(|c| c.is_ascii_digit()))
+        }));
     }
     if session_route(path, "/stats") {
         return Some((Shape::None, |_, _| false));
@@ -702,7 +716,7 @@ pub fn allowed(raw: Option<&Value>) -> Result<(Shape, String), String> {
         return Err(plain.into());
     }
     let (pathname, search) = raw.split_once('?').unwrap_or((raw, ""));
-    let base = url::Url::parse("http://relay.invalid").unwrap();
+    let base = url::Url::parse("http://relay.invalid").expect("a fixed URL");
     let Ok(u) = base.join(raw) else { return Err("not a path".into()) };
     if u.origin().ascii_serialization() != "http://relay.invalid" || u.path() != pathname {
         return Err(plain.into());

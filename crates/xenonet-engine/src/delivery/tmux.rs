@@ -80,7 +80,7 @@ impl Tmux {
 
     /// A process's terminal and whether it's in the terminal's foreground
     /// process group (a + in its state).
-    fn proc(&self, c: &mut dyn Calls, pid: f64) -> Result<Option<(String, bool)>> {
+    fn proc(c: &mut dyn Calls, pid: f64) -> Result<Option<(String, bool)>> {
         let (ok, out) = exec(c, "ps", &["-o", "tty=,stat=", "-p", &js_text(&Arg::num(pid))])?;
         let out = xenonet_base::text::js_trim(&out).to_string();
         if !ok || out.is_empty() {
@@ -102,7 +102,7 @@ impl Tmux {
         if self.off || pid.fract() != 0.0 || !pid.is_finite() || pid <= 1.0 {
             return Ok(None);
         }
-        let Some((tty, foreground)) = self.proc(c, pid)? else { return Ok(None) };
+        let Some((tty, foreground)) = Self::proc(c, pid)? else { return Ok(None) };
         if !foreground {
             return Ok(None);
         }

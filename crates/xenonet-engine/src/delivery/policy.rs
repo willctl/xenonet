@@ -23,6 +23,7 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use xenonet_base::json::stringify;
+use xenonet_base::sync::Locked;
 
 pub const YOU: &str = xenonet_base::ids::YOU;
 
@@ -45,7 +46,7 @@ pub fn limits() -> Value {
 /// You write as actor:you from XenoNet's window and command, or as "you":
 /// never an actor here, so never scoped.
 pub fn is_you(id: &Arg) -> bool {
-    matches!(id.as_str(), Some("you") | Some(YOU))
+    matches!(id.as_str(), Some("you" | YOU))
 }
 
 fn is_actor(id: &Arg) -> bool {
@@ -75,7 +76,7 @@ fn secrets() -> [&'static regex::Regex; 10] {
 /// any character, line terminators and all.
 fn private_key() -> &'static regex::Regex {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    RE.get_or_init(|| regex::Regex::new(r"-----BEGIN [A-Z ]*PRIVATE KEY-----(?s:.)*?(-----END [A-Z ]*PRIVATE KEY-----|$)").unwrap())
+    RE.get_or_init(|| regex::Regex::new(r"-----BEGIN [A-Z ]*PRIVATE KEY-----(?s:.)*?(-----END [A-Z ]*PRIVATE KEY-----|$)").expect("a fixed pattern"))
 }
 
 /// The text with what looks like a secret in it redacted, and how many.
@@ -84,7 +85,7 @@ pub fn redact_secrets(text: &str) -> (String, usize) {
     let mut n = 0;
     for re in secrets() {
         out = re
-            .replace_all(&out, |c: &regex::Captures| {
+            .replace_all(&out, |c: &regex::Captures<'_>| {
                 n += 1;
                 // The JS's replacer: its second argument is the first group
                 // when the pattern has one, else the offset, a number.
@@ -123,7 +124,13 @@ pub fn sanitize(text: &str, one_line: bool, max: f64) -> String {
     if len as f64 > max {
         // slice(0, max - 1), a negative end counting from the end.
         let end = (max - 1.0).trunc();
-        let keep = if end.is_nan() { 0 } else if end < 0.0 { (len as f64 + end).max(0.0) as usize } else { end.min(len as f64) as usize };
+        let keep = if end.is_nan() {
+            0
+        } else if end < 0.0 {
+            (len as f64 + end).max(0.0) as usize
+        } else {
+            end.min(len as f64) as usize
+        };
         return format!("{}…", slice16(&s, keep));
     }
     s
@@ -133,8 +140,8 @@ fn regex_replace(pattern: &'static str, text: &str, with: &str) -> String {
     static CACHE: std::sync::OnceLock<std::sync::Mutex<HashMap<&'static str, regex::Regex>>> = std::sync::OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
     let re = {
-        let mut c = cache.lock().unwrap();
-        c.entry(pattern).or_insert_with(|| regex::Regex::new(pattern).unwrap()).clone()
+        let mut c = cache.locked();
+        c.entry(pattern).or_insert_with(|| regex::Regex::new(pattern).expect("a fixed pattern")).clone()
     };
     re.replace_all(text, with).into_owned()
 }
@@ -162,7 +169,7 @@ pub fn framed(id: &Arg, from: &Arg, verified: &Arg, text: &Arg, user: bool) -> S
 }
 
 pub fn hash_text(text: &str) -> String {
-    Sha256::digest(text.as_bytes()).iter().take(8).map(|x| format!("{x:02x}")).collect()
+    xenonet_base::jsstr::hex(&Sha256::digest(text.as_bytes())[..8])
 }
 
 /// How a policy call went wrong: a refusal the sender can read (with its
@@ -274,7 +281,7 @@ impl Policy {
         Ok(p)
     }
 
-    fn now(&self, c: &mut dyn Calls) -> Result<f64> {
+    fn now(c: &mut dyn Calls) -> Result<f64> {
         let t = c.call("policy", "now", vec![])?;
         Ok(match t {
             Arg::Num(n) => n,
@@ -282,7 +289,7 @@ impl Policy {
         })
     }
 
-    fn limit(&self, c: &mut dyn Calls, k: &str) -> Result<f64> {
+    fn limit(c: &mut dyn Calls, k: &str) -> Result<f64> {
         Ok(match c.get(&format!("policy.limits.{k}"))? {
             Arg::Num(n) => n,
             Arg::Undef => f64::NAN,
@@ -299,7 +306,7 @@ impl Policy {
         c.call("fs", "mkdirSync", vec![Arg::text(dirname(&file)), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])])?;
         let tmp = format!("{file}.tmp");
         let text = stringify(&Value::Object(self.data.clone()), 1);
-        c.call("fs", "writeFileSync", vec![Arg::text(tmp.clone()), Arg::text(text), Arg::Obj(vec![("mode".into(), Arg::num(0o600 as f64))])])?;
+        c.call("fs", "writeFileSync", vec![Arg::text(tmp.clone()), Arg::text(text), Arg::Obj(vec![("mode".into(), Arg::num(f64::from(0o600)))])])?;
         c.call("fs", "renameSync", vec![Arg::text(tmp), Arg::text(file)])?;
         Ok(())
     }
@@ -343,15 +350,24 @@ impl Policy {
                 Arg::Num(n) => *n,
                 other => num(Some(&other.to_json())),
             },
-            None => self.limit(c, "grantMs")?,
+            None => Self::limit(c, "grantMs")?,
         };
-        let at = self.now(c)?;
+        let at = Self::now(c)?;
         let ttl = if ttl.is_nan() { f64::NAN } else { ttl.max(60e3) };
-        let expires_at = self.now(c)? + ttl;
+        let expires_at = Self::now(c)? + ttl;
         let g = json!({ "selector": format_selector(Some(&sel)), "at": xenonet_base::json::number(at), "expiresAt": xenonet_base::json::number(expires_at) });
         self.table("grants")?.insert(js_text(actor), g.clone());
         self.save(c)?;
-        self.audit(c, Arg::Obj(vec![("kind".into(), Arg::text("grant")), ("actor".into(), actor.clone()), ("selector".into(), value_arg(&g["selector"])), ("expiresAt".into(), Arg::num(expires_at)), ("by".into(), by.clone())]))?;
+        self.audit(
+            c,
+            Arg::Obj(vec![
+                ("kind".into(), Arg::text("grant")),
+                ("actor".into(), actor.clone()),
+                ("selector".into(), value_arg(&g["selector"])),
+                ("expiresAt".into(), Arg::num(expires_at)),
+                ("by".into(), by.clone()),
+            ]),
+        )?;
         Ok(value_arg(&g))
     }
 
@@ -367,7 +383,7 @@ impl Policy {
     }
 
     pub fn grants(&self, c: &mut dyn Calls) -> Result<Arg> {
-        let t = self.now(c)?;
+        let t = Self::now(c)?;
         let mut out = Vec::new();
         for (actor, g) in spread(self.data.get("grants").unwrap_or(&Value::Null)) {
             // { actor, ...g, expired }: a key g has too keeps its place.
@@ -389,7 +405,7 @@ impl Policy {
             return Ok(Scope::Free);
         }
         let g = self.data.get("grants").and_then(|g| g.get(js_text(id)));
-        if !truthy(g) || num(g.and_then(|g| g.get("expiresAt"))) <= self.now(c)? {
+        if !truthy(g) || num(g.and_then(|g| g.get("expiresAt"))) <= Self::now(c)? {
             return Ok(Scope::Deny);
         }
         // A grant whose selector doesn't parse limits nothing, as the JS
@@ -426,7 +442,7 @@ impl Policy {
     // ---------- rate, fan-out, loops ----------
 
     fn take(&mut self, c: &mut dyn Calls, key: &str, max: f64, window_ms: f64) -> Result<bool> {
-        let t = self.now(c)?;
+        let t = Self::now(c)?;
         let mut list: Vec<f64> = self.hits.get(key).cloned().unwrap_or_default().into_iter().filter(|x| t - x < window_ms).collect();
         if list.len() as f64 >= max {
             self.hits.insert(key.to_string(), list);
@@ -441,23 +457,42 @@ impl Policy {
     /// sender can read when it may not go. `depth`: how many replies deep.
     pub fn check_send(&mut self, c: &mut dyn Calls, sender: &Arg, recipients: &[Arg], text: &Arg, depth: f64) -> Result<()> {
         let refuse = |p: &mut Policy, c: &mut dyn Calls, why: String, code: &'static str| -> Result<()> {
-            p.audit(c, Arg::Obj(vec![("kind".into(), Arg::text("refused")), ("sender".into(), sender.clone()), ("to".into(), Arg::num(recipients.len() as f64)), ("why".into(), Arg::text(code))]))?;
+            p.audit(
+                c,
+                Arg::Obj(vec![
+                    ("kind".into(), Arg::text("refused")),
+                    ("sender".into(), sender.clone()),
+                    ("to".into(), Arg::num(recipients.len() as f64)),
+                    ("why".into(), Arg::text(code)),
+                ]),
+            )?;
             Err(Fail::Refused { why, code })
         };
         if self.paused() && !is_you(sender) {
             return refuse(self, c, "XenoNet's messages are paused by your user; nothing is sent until they resume them".into(), "paused");
         }
-        let fan_out = self.limit(c, "fanOut")?;
+        let fan_out = Self::limit(c, "fanOut")?;
         if recipients.len() as f64 > fan_out {
             return refuse(self, c, format!("a message reaches at most {} sessions; narrow it with a scope such as project:… or app:…", js_text(&Arg::num(fan_out))), "fan-out");
         }
-        let max_hops = self.limit(c, "maxHops")?;
+        let max_hops = Self::limit(c, "maxHops")?;
         if depth >= max_hops {
-            return refuse(self, c, format!("this thread is {} replies deep; XenoNet stops agent-to-agent threads at {} so two agents can't loop. Ask your user before going on.", js_text(&Arg::num(depth)), js_text(&Arg::num(max_hops))), "hops");
+            return refuse(
+                self,
+                c,
+                format!(
+                    "this thread is {} replies deep; XenoNet stops agent-to-agent threads at {} so two agents can't loop. Ask your user before going on.",
+                    js_text(&Arg::num(depth)),
+                    js_text(&Arg::num(max_hops))
+                ),
+                "hops",
+            );
         }
-        let t = self.now(c)?;
-        let dedupe = self.limit(c, "dedupeMs")?;
-        self.recent.retain(|(_, at)| !(t - at > dedupe));
+        let t = Self::now(c)?;
+        let dedupe = Self::limit(c, "dedupeMs")?;
+        // As the JS, which deletes what's older than that (a NaN stays).
+        let expired = |at: f64| t - at > dedupe;
+        self.recent.retain(|(_, at)| !expired(*at));
         let id_of = |r: &Arg| match r.field("id") {
             Arg::Undef | Arg::Null => r.clone(),
             id => id,
@@ -465,25 +500,33 @@ impl Policy {
         let mut ids: Vec<String> = recipients.iter().map(|r| js_text(&id_of(r))).collect();
         ids.sort_by(|a, b| crate::js::utf16_cmp(a, b));
         let s = js_text;
-        let hash: String = Sha256::digest(format!("{}|{}|{}", s(sender), ids.join(","), s(text)).as_bytes()).iter().map(|x| format!("{x:02x}")).collect();
+        let hash = xenonet_base::jsstr::hex(&Sha256::digest(format!("{}|{}|{}", s(sender), ids.join(","), s(text)).as_bytes()));
         if self.recent.iter().any(|(k, _)| *k == hash) {
             return refuse(self, c, "you sent the same message to the same sessions under a minute ago".into(), "duplicate");
         }
-        let per_sender = self.limit(c, "perSenderPerMinute")?;
+        let per_sender = Self::limit(c, "perSenderPerMinute")?;
         if !self.take(c, &format!("s:{}", s(sender)), per_sender, 60e3)? {
             return refuse(self, c, format!("at most {} messages a minute from one sender", js_text(&Arg::num(per_sender))), "sender-rate");
         }
         for r in recipients {
             let id = js_text(&id_of(r));
-            let per_target = self.limit(c, "perTargetPerMinute")?;
+            let per_target = Self::limit(c, "perTargetPerMinute")?;
             if !self.take(c, &format!("t:{id}"), per_target, 60e3)? {
                 return refuse(self, c, format!("{id} is getting too many messages; try again in a minute"), "target-rate");
             }
             let mut pair = [s(sender), id.clone()];
             pair.sort_by(|a, b| crate::js::utf16_cmp(a, b));
-            let per_pair = self.limit(c, "pairPerTenMinutes")?;
+            let per_pair = Self::limit(c, "pairPerTenMinutes")?;
             if !self.take(c, &format!("p:{}", pair.join("|")), per_pair, 600e3)? {
-                return refuse(self, c, format!("you and {id} have exchanged {} messages in ten minutes, which looks like a loop; XenoNet holds the rest. Ask your user before going on.", js_text(&Arg::num(per_pair))), "storm");
+                return refuse(
+                    self,
+                    c,
+                    format!(
+                        "you and {id} have exchanged {} messages in ten minutes, which looks like a loop; XenoNet holds the rest. Ask your user before going on.",
+                        js_text(&Arg::num(per_pair))
+                    ),
+                    "storm",
+                );
             }
         }
         self.recent.retain(|(k, _)| *k != hash);
@@ -499,14 +542,23 @@ impl Policy {
                 Arg::Num(n) => *n,
                 other => num(Some(&other.to_json())),
             },
-            None => self.limit(c, "consentMs")?,
+            None => Self::limit(c, "consentMs")?,
         };
-        let until = self.now(c)? + ttl;
-        let at = self.now(c)?;
+        let until = Self::now(c)? + ttl;
+        let at = Self::now(c)?;
         let consent = json!({ "until": xenonet_base::json::number(until), "remote": remote, "at": xenonet_base::json::number(at) });
         self.table("consent")?.insert(js_text(session), consent.clone());
         self.save(c)?;
-        self.audit(c, Arg::Obj(vec![("kind".into(), Arg::text("consent")), ("session".into(), session.clone()), ("until".into(), Arg::num(until)), ("remote".into(), Arg::Bool(remote)), ("by".into(), by.clone())]))?;
+        self.audit(
+            c,
+            Arg::Obj(vec![
+                ("kind".into(), Arg::text("consent")),
+                ("session".into(), session.clone()),
+                ("until".into(), Arg::num(until)),
+                ("remote".into(), Arg::Bool(remote)),
+                ("by".into(), by.clone()),
+            ]),
+        )?;
         Ok(value_arg(&consent))
     }
 
@@ -522,11 +574,11 @@ impl Policy {
     /// `!!c && c.until > now() && (!remote || c.remote)`.
     pub fn consented(&self, c: &mut dyn Calls, session: &Arg, remote: bool) -> Result<Arg> {
         let kept = self.data.get("consent").and_then(|m| m.get(js_text(session))).cloned();
-        if !truthy(kept.as_ref()) {
+        let Some(kept) = kept.filter(|k| truthy(Some(k))) else {
             return Ok(Arg::Bool(false));
-        }
-        let kept = kept.unwrap();
-        if !(num(kept.get("until")) > self.now(c)?) {
+        };
+        let live = num(kept.get("until")) > Self::now(c)?;
+        if !live {
             return Ok(Arg::Bool(false));
         }
         if !remote {
@@ -549,7 +601,7 @@ impl Policy {
         let mut within = |key: String| -> Result<usize> {
             let mut n = 0;
             for x in self.hits.get(&key).cloned().unwrap_or_default() {
-                if self.now(c)? - x < 3600e3 {
+                if Self::now(c)? - x < 3600e3 {
                     n += 1;
                 }
             }
@@ -557,10 +609,10 @@ impl Policy {
         };
         let s = within(format!("w:{}", js_text(sender)))?;
         let t = within(format!("wt:{}", js_text(target)))?;
-        if s as f64 >= self.limit(c, "wakesPerSenderPerHour")? {
+        if s as f64 >= Self::limit(c, "wakesPerSenderPerHour")? {
             return Ok(no("sender-wake-budget"));
         }
-        if t as f64 >= self.limit(c, "wakesPerTargetPerHour")? {
+        if t as f64 >= Self::limit(c, "wakesPerTargetPerHour")? {
             return Ok(no("target-wake-budget"));
         }
         Ok(Arg::Obj(vec![("ok".into(), Arg::Bool(true))]))
@@ -576,7 +628,7 @@ impl Policy {
 
     /// Append-only, one JSON line each; message text never, only its hash.
     pub fn audit(&mut self, c: &mut dyn Calls, entry: Arg) -> Result<Arg> {
-        let at = self.now(c)?;
+        let at = Self::now(c)?;
         let mut fields = vec![("at".to_string(), Arg::num(at))];
         if let Arg::Obj(f) = entry {
             for (k, v) in f {
@@ -591,7 +643,9 @@ impl Policy {
         if file.truthy() {
             let file = js_text(&file);
             let text = format!("{}\n", stringify(&json_of(&line).unwrap_or(Value::Null), 0));
-            let _ = c.call("fs", "mkdirSync", vec![Arg::text(dirname(&file)), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])]).and_then(|_| c.call("fs", "appendFileSync", vec![Arg::text(file), Arg::text(text), Arg::Obj(vec![("mode".into(), Arg::num(0o600 as f64))])]));
+            let _ = c
+                .call("fs", "mkdirSync", vec![Arg::text(dirname(&file)), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])])
+                .and_then(|_| c.call("fs", "appendFileSync", vec![Arg::text(file), Arg::text(text), Arg::Obj(vec![("mode".into(), Arg::num(f64::from(0o600)))])]));
         } else {
             self.memory_audit.push(line.clone());
         }

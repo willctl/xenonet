@@ -71,7 +71,7 @@ fn key(v: Option<&Value>) -> String {
     v.map_or_else(|| "undefined".into(), |v| xenonet_base::json::stringify(v, 0))
 }
 
-fn truthy_or<'a>(a: Option<&'a Value>, b: String) -> Value {
+fn truthy_or(a: Option<&Value>, b: String) -> Value {
     match a.filter(|v| xenonet_app::jsv::truthy(Some(v))) {
         Some(v) => v.clone(),
         None => json!(b),
@@ -132,10 +132,9 @@ pub fn session_metadata(content: &str, file: &str) -> Result<Value, Fail> {
         if matches!(t, Some("compaction" | "branch_summary")) {
             checkpoints += 1.0;
         }
-        let m = entry.get("message").filter(|m| !m.is_null());
-        let role = m.and_then(|m| m.get("role")).and_then(Value::as_str);
+        let Some(m) = entry.get("message").filter(|m| !m.is_null()) else { continue };
+        let role = m.get("role").and_then(Value::as_str);
         if role == Some("assistant") {
-            let m = m.unwrap();
             model = clean(Some(&truthy_or(m.get("model"), model.clone())), 160);
             provider = clean(Some(&truthy_or(m.get("provider"), provider.clone())), 160);
             tokens += number(m.get("usage").and_then(|u| u.get("totalTokens")));
@@ -151,7 +150,6 @@ pub fn session_metadata(content: &str, file: &str) -> Result<Value, Fail> {
             }
         }
         if role == Some("toolResult") {
-            let m = m.unwrap();
             let k = key(m.get("toolCallId"));
             pending.retain(|p| *p != k);
             if m.get("isError") == Some(&json!(true)) {
@@ -195,6 +193,7 @@ pub fn scan(root: &str, max_files: usize, max_bytes: u64) -> Value {
             }
         }
         // false once a limit stops the walk here.
+        #[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the JS reads .jsonl files in lower case only")]
         fn walk(&mut self, dir: &str, depth: u32) {
             let Ok(rd) = std::fs::read_dir(dir) else {
                 if depth == 0 {
@@ -202,7 +201,8 @@ pub fn scan(root: &str, max_files: usize, max_bytes: u64) -> Value {
                 }
                 return;
             };
-            let mut entries: Vec<(String, std::fs::FileType)> = rd.filter_map(|e| e.ok()).filter_map(|e| Some((e.file_name().to_string_lossy().into_owned(), e.file_type().ok()?))).collect();
+            let mut entries: Vec<(String, std::fs::FileType)> =
+                rd.filter_map(Result::ok).filter_map(|e| Some((e.file_name().to_string_lossy().into_owned(), e.file_type().ok()?))).collect();
             entries.sort_by(|a, b| xenonet_app::jstext::locale_compare(&a.0, &b.0));
             for (name, kind) in entries {
                 self.visited += 1;

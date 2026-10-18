@@ -37,6 +37,7 @@ pub async fn serve() {
 /// for the desktop app, the end-to-end tests and the scripts, and its
 /// development instances run the checkout's Electron, so Node is there
 /// whenever they are.
+#[expect(clippy::unused_async, reason = "the command serves it as it does the other servers, by awaiting it")]
 pub async fn serve_console() -> Result<(), String> {
     Err("the console operator isn't in the Rust xenonet yet: run node mcp/console.js (or node cli/xenonet.js mcp console) from XenoNet's checkout".into())
 }

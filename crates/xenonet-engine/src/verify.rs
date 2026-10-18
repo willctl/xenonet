@@ -33,6 +33,7 @@ use crate::sql::Arg;
 use crate::store::{js_text, Shared};
 use std::collections::HashMap;
 use std::sync::Mutex;
+use xenonet_base::sync::Locked;
 
 /// The apps whose sessions XenoNet checks, by their id in a session's name.
 fn app_name(app: &str) -> Option<&'static str> {
@@ -139,7 +140,7 @@ pub fn actor_refusal(chain: &[Arg], product: &Arg, pid: &Arg, registering: bool)
             format!("an actor's token doesn't work from under a session, and this came from under {a} process")
         });
     }
-    let own = chain.first().map(product_of).unwrap_or(Arg::Undef);
+    let own = chain.first().map_or(Arg::Undef, product_of);
     if own.field("role").as_str() == Some("app") {
         let what = if registering { "register an actor" } else { "use an actor's token" };
         return Some(format!("{}'s own processes can't {what}: they could be relaying for its cloud", product_word(&own.field("product"))));
@@ -152,7 +153,11 @@ pub fn actor_refusal(chain: &[Arg], product: &Arg, pid: &Arg, registering: bool)
         }
     } else if let Some(inside) = chain.iter().find(|p| product_of(p).truthy()) {
         let name = product_word(&product_of(inside).field("product"));
-        return Some(if registering { format!("a program under {name} can't register an actor of its own") } else { format!("an actor of your own can't use its token from under {name}") });
+        return Some(if registering {
+            format!("a program under {name} can't register an actor of its own")
+        } else {
+            format!("an actor of your own can't use its token from under {name}")
+        });
     }
     if !pid.is_nullish() && !own_of(chain).iter().any(|p| same(&p.field("pid"), pid)) {
         return Some(if chain.iter().any(|p| same(&p.field("pid"), pid)) {
@@ -227,10 +232,10 @@ impl Verifier {
     }
 
     pub fn counts(&self) -> Counts {
-        self.inner.lock().unwrap().counts.clone()
+        self.inner.locked().counts.clone()
     }
 
-    fn now(&self, c: &mut dyn Calls) -> Result<f64> {
+    fn now(c: &mut dyn Calls) -> Result<f64> {
         let t = c.call("", "now", vec![])?;
         Ok(match t {
             Arg::Num(n) => n,
@@ -241,26 +246,26 @@ impl Verifier {
         })
     }
 
-    fn supported(&self, c: &mut dyn Calls) -> Result<bool> {
+    fn supported(c: &mut dyn Calls) -> Result<bool> {
         Ok(c.get("procs.supported")?.truthy())
     }
 
     fn pass(&self) -> Arg {
-        self.inner.lock().unwrap().counts.unchecked += 1.0;
+        self.inner.locked().counts.unchecked += 1.0;
         obj(vec![("ok", Arg::Bool(true)), ("checked", Arg::Bool(false))])
     }
 
     fn refuse(&self, c: &mut dyn Calls, agent: Arg, reason: &str) -> Result<Arg> {
-        self.inner.lock().unwrap().counts.refused += 1.0;
-        let at = self.now(c)?;
-        self.inner.lock().unwrap().counts.last_refusal = Some(obj(vec![("agent", agent), ("reason", Arg::text(reason)), ("at", Arg::num(at))]));
+        self.inner.locked().counts.refused += 1.0;
+        let at = Self::now(c)?;
+        self.inner.locked().counts.last_refusal = Some(obj(vec![("agent", agent), ("reason", Arg::text(reason)), ("at", Arg::num(at))]));
         Ok(obj(vec![("ok", Arg::Bool(false)), ("checked", Arg::Bool(true)), ("reason", Arg::text(reason))]))
     }
 
     /// A request whose process XenoNet couldn't see, where it can look:
     /// never kept as a verdict.
     fn unseen(&self, c: &mut dyn Calls, agent: Arg, reason: &str) -> Result<Arg> {
-        self.inner.lock().unwrap().counts.unseen += 1.0;
+        self.inner.locked().counts.unseen += 1.0;
         let mut v = self.refuse(c, agent, reason)?;
         if let Arg::Obj(f) = &mut v {
             f.push(("unseen".into(), Arg::Bool(true)));
@@ -269,29 +274,29 @@ impl Verifier {
     }
 
     fn checked(&self) {
-        self.inner.lock().unwrap().counts.checked += 1.0;
+        self.inner.locked().counts.checked += 1.0;
     }
 
     fn home(&self) -> Arg {
-        self.inner.lock().unwrap().home.clone()
+        self.inner.locked().home.clone()
     }
 
     /// The process on the other end of this request's socket, or null.
-    fn peer_pid(&self, c: &mut dyn Calls) -> Arg {
+    fn peer_pid(c: &mut dyn Calls) -> Arg {
         c.call("", "peerOf", vec![]).unwrap_or(Arg::Null)
     }
 
-    fn chain(&self, c: &mut dyn Calls, pid: &Arg, opts: Arg) -> Vec<Arg> {
+    fn chain(c: &mut dyn Calls, pid: &Arg, opts: Arg) -> Vec<Arg> {
         list(c.call("procs", "chain", vec![pid.clone(), opts]).unwrap_or(Arg::List(vec![])))
     }
 
     /// The process on the other end of the socket and the ones above it.
-    fn see(&self, c: &mut dyn Calls, exe: bool) -> (Arg, Vec<Arg>) {
-        let pid = self.peer_pid(c);
+    fn see(c: &mut dyn Calls, exe: bool) -> (Arg, Vec<Arg>) {
+        let pid = Self::peer_pid(c);
         if !pid.truthy() {
             return (Arg::Null, Vec::new());
         }
-        let chain = self.chain(c, &pid, obj(vec![("exe", Arg::Bool(exe))]));
+        let chain = Self::chain(c, &pid, obj(vec![("exe", Arg::Bool(exe))]));
         (pid, chain)
     }
 
@@ -300,10 +305,10 @@ impl Verifier {
     pub fn check(&self, c: &mut dyn Calls, agent: &Arg, hook: bool) -> Result<Arg> {
         let name = js_text(agent);
         let app = name.split(':').next().unwrap_or("").to_string();
-        if app_lookup(&app).is_none() || !self.supported(c)? {
+        if app_lookup(&app).is_none() || !Self::supported(c)? {
             return Ok(self.pass());
         }
-        let (pid, chain) = self.see(c, false);
+        let (pid, chain) = Self::see(c, false);
         if !pid.truthy() {
             return Ok(self.pass());
         }
@@ -340,14 +345,14 @@ impl Verifier {
         // Claude Code itself, in one of its HTTP hooks: this process holds
         // the session.
         if hook && app == "claude" && same(&chain[0].field("pid"), &holder.field("pid")) && c.call("procs", "signed", vec![holder.clone()])?.truthy() {
-            let t = self.now(c)?;
+            let t = Self::now(c)?;
             self.store.with(|s| s.pin(agent.clone(), &root, Arg::Bool(true), Arg::num(t)))?;
             self.store.with(|s| s.drop_guesses(agent.clone()))?;
             return Ok(ok(&root, true));
         }
         if let Some(h) = held.iter().find(|p| is_root(p)) {
             let sure = h.field("sure");
-            let t = self.now(c)?;
+            let t = Self::now(c)?;
             self.store.with(|s| s.pin(agent.clone(), &root, sure, Arg::num(t)))?;
             return Ok(ok(&root, false));
         }
@@ -355,7 +360,7 @@ impl Verifier {
             let word = app_lookup(&app).unwrap_or_else(|| "undefined".into());
             return self.refuse(c, agent.clone(), &format!("{name} belongs to another {word} process"));
         }
-        let t = self.now(c)?;
+        let t = Self::now(c)?;
         self.store.with(|s| s.pin(agent.clone(), &root, Arg::Bool(false), Arg::num(t)))?;
         Ok(ok(&root, false))
     }
@@ -364,10 +369,10 @@ impl Verifier {
     /// product's processes. The nearer of one of those and XenoNet's own
     /// app decides.
     pub fn person(&self, c: &mut dyn Calls) -> Result<Arg> {
-        if !self.supported(c)? {
+        if !Self::supported(c)? {
             return Ok(self.pass());
         }
-        let (_, chain) = self.see(c, false);
+        let (_, chain) = Self::see(c, false);
         if chain.is_empty() {
             return self.unseen(c, Arg::Null, "this is yours to do, and XenoNet couldn't see which program asked; run it in your own terminal or in XenoNet");
         }
@@ -376,10 +381,18 @@ impl Verifier {
         let near = chain.iter().find(|p| p.field("agent").truthy() || product_of(p).truthy() || same(&p.field("pid"), &home));
         if let Some(near) = near {
             if near.field("agent").truthy() {
-                return self.refuse(c, Arg::Null, &format!("this is yours to do, and it came from under {} process; run it in your own terminal or in XenoNet", a_app(&js_text(&near.field("agent")))));
+                return self.refuse(
+                    c,
+                    Arg::Null,
+                    &format!("this is yours to do, and it came from under {} process; run it in your own terminal or in XenoNet", a_app(&js_text(&near.field("agent")))),
+                );
             }
             if product_of(near).truthy() {
-                return self.refuse(c, Arg::Null, &format!("this is yours to do, and it came from under {}; run it in your own terminal or in XenoNet", product_word(&product_of(near).field("product"))));
+                return self.refuse(
+                    c,
+                    Arg::Null,
+                    &format!("this is yours to do, and it came from under {}; run it in your own terminal or in XenoNet", product_word(&product_of(near).field("product"))),
+                );
             }
         }
         Ok(obj(vec![("ok", Arg::Bool(true)), ("checked", Arg::Bool(true))]))
@@ -387,47 +400,45 @@ impl Verifier {
 
     /// Why a call under a product whose maker signs its app isn't that
     /// app's, or None.
-    fn unsigned(&self, c: &mut dyn Calls, chain: &[Arg], product: &Arg, registering: bool) -> Result<Option<String>> {
+    fn unsigned(c: &mut dyn Calls, chain: &[Arg], product: &Arg, registering: bool) -> Option<String> {
         let key = if product.is_nullish() { String::new() } else { js_text(product) };
-        let Some(maker) = signed_by(&key) else {
-            return Ok(None);
-        };
+        let maker = signed_by(&key)?;
         let app = chain.iter().find(|p| {
             let pr = product_of(p);
             same(&pr.field("product"), product) && pr.field("role").as_str() == Some("app")
         });
         if let Some(app) = app {
             if c.call("procs", "signed", vec![app.clone()]).unwrap_or(Arg::Bool(false)).truthy() {
-                return Ok(None);
+                return None;
             }
         }
         let name = product_name(&key).unwrap_or("undefined");
         let verb = if registering { "registers" } else { "works" };
-        Ok(Some(format!("{name}'s actor {verb} only from under {name}'s app as {maker} signed it, and the app this came from isn't signed by {maker}")))
+        Some(format!("{name}'s actor {verb} only from under {name}'s app as {maker} signed it, and the app this came from isn't signed by {maker}"))
     }
 
     /// A request with an actor's token (`who`: its slug and product id),
     /// naming `pid` as its process or not.
     pub fn actor(&self, c: &mut dyn Calls, who: &Arg, pid: &Arg) -> Result<Arg> {
-        if !self.supported(c)? {
+        if !Self::supported(c)? {
             return Ok(self.pass());
         }
         let slug = who.field("slug");
         let id = if slug.truthy() { Arg::text(format!("actor:{}", js_text(&slug))) } else { Arg::Null };
         let blind = "XenoNet couldn't see which program sent this, so it doesn't take the token from it";
-        let peer = self.peer_pid(c);
+        let peer = Self::peer_pid(c);
         if !peer.truthy() {
             return self.unseen(c, id, blind);
         }
         let part = |a: &Arg| if a.is_nullish() { String::new() } else { js_text(a) };
         let key = format!("{}|{}|{}|{}", part(&slug), part(&who.field("product")), js_text(&peer), part(pid));
-        let kept = self.inner.lock().unwrap().actor_verdicts.get(&key).cloned();
+        let kept = self.inner.locked().actor_verdicts.get(&key).cloned();
         if let Some((at, verdict)) = kept {
-            if self.now(c)? - at < ACTOR_VERDICT_MS {
+            if Self::now(c)? - at < ACTOR_VERDICT_MS {
                 return Ok(verdict);
             }
         }
-        let chain = self.chain(c, &peer, obj(vec![("exe", Arg::Bool(true))]));
+        let chain = Self::chain(c, &peer, obj(vec![("exe", Arg::Bool(true))]));
         if chain.is_empty() {
             return self.unseen(c, id, blind);
         }
@@ -435,14 +446,19 @@ impl Verifier {
         let product = who.field("product").or(Arg::Null);
         let why = match actor_refusal(&chain, &product, pid, false) {
             Some(w) => Some(w),
-            None => self.unsigned(c, &chain, &who.field("product"), false)?,
+            None => Self::unsigned(c, &chain, &who.field("product"), false),
         };
         let verdict = match why {
             Some(why) => self.refuse(c, id, &why)?,
-            None => obj(vec![("ok", Arg::Bool(true)), ("checked", Arg::Bool(true)), ("root", obj(vec![("pid", chain[0].field("pid")), ("start", chain[0].field("start"))])), ("chain", Arg::List(chain))]),
+            None => obj(vec![
+                ("ok", Arg::Bool(true)),
+                ("checked", Arg::Bool(true)),
+                ("root", obj(vec![("pid", chain[0].field("pid")), ("start", chain[0].field("start"))])),
+                ("chain", Arg::List(chain)),
+            ]),
         };
-        let at = self.now(c)?;
-        let mut inner = self.inner.lock().unwrap();
+        let at = Self::now(c)?;
+        let mut inner = self.inner.locked();
         if inner.actor_verdicts.len() > 256 {
             inner.actor_verdicts.clear();
         }
@@ -450,7 +466,7 @@ impl Verifier {
         Ok(verdict)
     }
 
-    fn cwd(&self, c: &mut dyn Calls, peer: &Arg) -> Result<Arg> {
+    fn cwd(c: &mut dyn Calls, peer: &Arg) -> Result<Arg> {
         if c.kind("procs.cwd")? != "function" {
             return Ok(Arg::Null);
         }
@@ -460,22 +476,22 @@ impl Verifier {
     /// A request to register an actor, asking to be `product` (or an actor
     /// of your own), naming `pid` or not.
     pub fn register(&self, c: &mut dyn Calls, product: &Arg, pid: &Arg) -> Result<Arg> {
-        if !self.supported(c)? {
+        if !Self::supported(c)? {
             return Ok(self.pass());
         }
-        let (peer, chain) = self.see(c, true);
+        let (peer, chain) = Self::see(c, true);
         if chain.is_empty() {
             return self.unseen(c, Arg::Null, "XenoNet couldn't see which program asked to register, so it can't show you who asked");
         }
         self.checked();
         let why = match actor_refusal(&chain, product, pid, true) {
             Some(w) => Some(w),
-            None => self.unsigned(c, &chain, product, true)?,
+            None => Self::unsigned(c, &chain, product, true),
         };
         if let Some(why) = why {
             return self.refuse(c, Arg::Null, &why);
         }
-        let cwd = self.cwd(c, &peer)?;
+        let cwd = Self::cwd(c, &peer)?;
         Ok(obj(vec![("ok", Arg::Bool(true)), ("checked", Arg::Bool(true)), ("chain", Arg::List(chain)), ("cwd", cwd)]))
     }
 
@@ -483,10 +499,10 @@ impl Verifier {
     /// session or your own terminal, but never from under an actor
     /// product's processes.
     pub fn asker(&self, c: &mut dyn Calls) -> Result<Arg> {
-        if !self.supported(c)? {
+        if !Self::supported(c)? {
             return Ok(self.pass());
         }
-        let (peer, chain) = self.see(c, true);
+        let (peer, chain) = Self::see(c, true);
         if chain.is_empty() {
             return self.unseen(c, Arg::Null, "XenoNet couldn't see which program asked, so it can't show you who asked");
         }
@@ -494,49 +510,53 @@ impl Verifier {
         let home = self.home();
         let near = chain.iter().find(|p| product_of(p).truthy() || same(&p.field("pid"), &home));
         if let Some(near) = near.filter(|n| product_of(n).truthy()) {
-            return self.refuse(c, Arg::Null, &format!("a program under {} can't ask for a gateway token: it could be relaying for its cloud", product_word(&product_of(near).field("product"))));
+            return self.refuse(
+                c,
+                Arg::Null,
+                &format!("a program under {} can't ask for a gateway token: it could be relaying for its cloud", product_word(&product_of(near).field("product"))),
+            );
         }
-        let cwd = self.cwd(c, &peer)?;
+        let cwd = Self::cwd(c, &peer)?;
         Ok(obj(vec![("ok", Arg::Bool(true)), ("checked", Arg::Bool(true)), ("chain", Arg::List(chain)), ("cwd", cwd)]))
     }
 
     /// The process on the other end of a socket, or null where XenoNet
     /// can't look.
     pub fn peer(&self, c: &mut dyn Calls) -> Result<Arg> {
-        if !self.supported(c)? {
+        if !Self::supported(c)? {
             return Ok(Arg::Null);
         }
-        Ok(self.peer_pid(c))
+        Ok(Self::peer_pid(c))
     }
 
     /// A running process and the ones above it, nearest first, as pids;
     /// null where XenoNet can't look, and [] for a process that's gone.
     pub fn lineage(&self, c: &mut dyn Calls, pid: &Arg) -> Result<Arg> {
-        if !self.supported(c)? {
+        if !Self::supported(c)? {
             return Ok(Arg::Null);
         }
-        Ok(Arg::List(self.chain(c, pid, obj(vec![("again", Arg::Bool(false))])).iter().map(|p| p.field("pid")).collect()))
+        Ok(Arg::List(Self::chain(c, pid, obj(vec![("again", Arg::Bool(false))])).iter().map(|p| p.field("pid")).collect()))
     }
 
     /// Requests only XenoNet's own window makes: from a process of
     /// XenoNet's app, with no agent nearer.
     pub fn window(&self, c: &mut dyn Calls) -> Result<Arg> {
-        if !self.supported(c)? {
+        if !Self::supported(c)? {
             return Ok(self.pass());
         }
         let blind = "this is for XenoNet's own window, and XenoNet couldn't see which program asked";
-        let pid = self.peer_pid(c);
+        let pid = Self::peer_pid(c);
         if !pid.truthy() {
             return self.unseen(c, Arg::Null, blind);
         }
         let key = key_of(&pid);
-        let kept = self.inner.lock().unwrap().verdicts.get(&key).cloned();
+        let kept = self.inner.locked().verdicts.get(&key).cloned();
         if let Some((at, verdict)) = kept {
-            if self.now(c)? - at < WINDOW_VERDICT_MS {
+            if Self::now(c)? - at < WINDOW_VERDICT_MS {
                 return Ok(verdict);
             }
         }
-        let chain = self.chain(c, &pid, obj(vec![("exe", Arg::Bool(true))]));
+        let chain = Self::chain(c, &pid, obj(vec![("exe", Arg::Bool(true))]));
         if chain.is_empty() {
             return self.unseen(c, Arg::Null, blind);
         }
@@ -544,7 +564,9 @@ impl Verifier {
         let home = self.home();
         let near = chain.iter().position(|p| p.field("agent").truthy() || (!home.is_nullish() && same(&p.field("pid"), &home)));
         let verdict = match near {
-            Some(i) if chain[i].field("agent").truthy() => self.refuse(c, Arg::Null, &format!("this is for XenoNet's own window, and it came from under {} process", a_app(&js_text(&chain[i].field("agent")))))?,
+            Some(i) if chain[i].field("agent").truthy() => {
+                self.refuse(c, Arg::Null, &format!("this is for XenoNet's own window, and it came from under {} process", a_app(&js_text(&chain[i].field("agent")))))?
+            }
             None => self.refuse(c, Arg::Null, "this is for XenoNet's own window, and it came from outside XenoNet")?,
             Some(i) => {
                 // Every process from the caller up to XenoNet's app is the
@@ -562,8 +584,8 @@ impl Verifier {
                 }
             }
         };
-        let at = self.now(c)?;
-        let mut inner = self.inner.lock().unwrap();
+        let at = Self::now(c)?;
+        let mut inner = self.inner.locked();
         if inner.verdicts.len() > 256 {
             inner.verdicts.clear();
         }
@@ -577,7 +599,7 @@ impl Verifier {
     /// agent or an actor product's. `connected` false: the Desktop went.
     pub fn desktop(&self, c: &mut dyn Calls, connected: bool) -> Result<Arg> {
         let mine = {
-            let mut i = self.inner.lock().unwrap();
+            let mut i = self.inner.locked();
             i.desktops += 1;
             i.home = Arg::Null;
             i.verdicts.clear();
@@ -586,10 +608,10 @@ impl Verifier {
         if !connected {
             return Ok(obj(vec![("ok", Arg::Bool(true)), ("checked", Arg::Bool(false))]));
         }
-        if !self.supported(c)? {
+        if !Self::supported(c)? {
             return Ok(self.pass());
         }
-        let (pid, chain) = self.see(c, true);
+        let (pid, chain) = Self::see(c, true);
         if !pid.truthy() || chain.is_empty() {
             return self.unseen(c, Arg::Null, "XenoNet couldn't see which program connected as its Desktop");
         }
@@ -607,7 +629,7 @@ impl Verifier {
             obj(vec![("ok", Arg::Bool(true)), ("checked", Arg::Bool(true))])
         };
         if verdict.field("ok").truthy() {
-            let mut i = self.inner.lock().unwrap();
+            let mut i = self.inner.locked();
             if i.desktops == mine {
                 i.home = p.field("pid");
             }

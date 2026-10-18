@@ -26,7 +26,9 @@ pub fn source_of(g: Option<&Value>, l: Option<&Value>, t: f64) -> Value {
     let Some(g) = g.filter(|g| truthy(Some(g))) else { return json!({ "state": "unavailable", "observedAt": null, "coverage": "unknown", "reason": "not_started" }) };
     let state = g.get("state").and_then(Value::as_str);
     let last_ok = g.get("lastOk").filter(|v| !v.is_null());
-    let Some(last_ok) = last_ok.filter(|_| state != Some("idle")) else { return json!({ "state": "unavailable", "observedAt": null, "coverage": "unknown", "reason": "not_started" }) };
+    let Some(last_ok) = last_ok.filter(|_| state != Some("idle")) else {
+        return json!({ "state": "unavailable", "observedAt": null, "coverage": "unknown", "reason": "not_started" });
+    };
     if matches!(state, Some("failed" | "stopped")) {
         return json!({ "state": "unavailable", "observedAt": last_ok, "coverage": "unknown", "reason": if state == Some("stopped") { "stopped" } else { "read_failed" } });
     }
@@ -54,7 +56,9 @@ pub trait Around {
 }
 
 fn targets(a: &Value) -> Value {
-    Value::Array(a.get("targets").filter(|t| !t.is_null()).and_then(Value::as_array).into_iter().flatten().map(|x| json!({ "id": x.get("id"), "relation": x.get("relation") })).collect())
+    Value::Array(
+        a.get("targets").filter(|t| !t.is_null()).and_then(Value::as_array).into_iter().flatten().map(|x| json!({ "id": x.get("id"), "relation": x.get("relation") })).collect(),
+    )
 }
 
 fn via(a: &Value) -> Value {
@@ -64,6 +68,7 @@ fn via(a: &Value) -> Value {
 /// A view at `t`, from the map's nodes (state.index's values), the live
 /// state (state.liveSnapshot()), the registry's actors and the two apps'
 /// sources.
+#[expect(clippy::too_many_arguments, reason = "the JS's view and its inputs, which xenonet-node passes one by one")]
 pub fn view(t: f64, nodes: &[Value], live: &Value, actors: &[Value], has_actors: bool, claude: Value, codex: Value, around: &mut dyn Around) -> Value {
     let mut live_by_id: Map<String, Value> = Map::new();
     for s in live.get("sessions").and_then(Value::as_array).into_iter().flatten() {

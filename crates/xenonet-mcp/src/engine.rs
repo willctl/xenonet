@@ -5,6 +5,7 @@
 //! still waiting when the client goes is dropped with the process, not
 //! waited for. HTTP/1.1 to 127.0.0.1, with the API's version header.
 
+use std::fmt::Write as _;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
@@ -28,10 +29,10 @@ async fn send(port: u16, method: &str, path: &str, headers: &[(String, String)],
     s.set_nodelay(true)?;
     let mut head = format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n");
     for (k, v) in headers {
-        head.push_str(&format!("{k}: {v}\r\n"));
+        let _ = write!(head, "{k}: {v}\r\n");
     }
     if let Some(b) = body {
-        head.push_str(&format!("Content-Length: {}\r\n", b.len()));
+        let _ = write!(head, "Content-Length: {}\r\n", b.len());
     }
     head.push_str("Connection: close\r\n\r\n");
     let mut r = BufReader::new(s);
@@ -117,7 +118,7 @@ pub async fn request(port: f64, name: &str, method: &str, route: &str, body: Opt
     let Some(p) = real_port(port) else { return Err(stopped()) };
     let answer = send(p, method, route, &all, text.as_deref().map(str::as_bytes)).await.map_err(|_| stopped())?;
     let ok = (200..300).contains(&answer.status);
-    let data = answer.body.as_ref().ok().and_then(|b| json_of(b)).unwrap_or_else(|| Value::Object(Default::default()));
+    let data = answer.body.as_ref().ok().and_then(|b| json_of(b)).unwrap_or_else(|| Value::Object(serde_json::Map::default()));
     if ok {
         return Ok(data);
     }

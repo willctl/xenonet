@@ -45,6 +45,7 @@ pub fn access(a: &Value, now: f64) -> Value {
 }
 
 /// How many records recent() asks for: 1 to 1000.
+#[expect(clippy::manual_clamp, reason = "clamp keeps a NaN limit NaN; this has always made it 1")]
 pub fn limit_of(limit: f64) -> f64 {
     limit.max(1.0).min(1000.0)
 }

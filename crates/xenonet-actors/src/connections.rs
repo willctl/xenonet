@@ -36,8 +36,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use xenonet_base::ids::YOU;
 use xenonet_base::json::stringify;
-use xenonet_engine::re;
+use xenonet_base::sync::Locked;
 use xenonet_engine::peer::{list, Calls, Thrown};
+use xenonet_engine::re;
 use xenonet_engine::sql::{Arg, Cell, Row, SqlError};
 use xenonet_engine::store::{js_text, Shared};
 
@@ -96,7 +97,7 @@ fn fail<T>(status: f64, code: &'static str, message: impl Into<String>) -> Resul
 fn random_hex(n: usize) -> std::result::Result<String, Thrown> {
     let mut b = vec![0u8; n];
     getrandom::fill(&mut b).map_err(|e| Thrown::new(format!("no random bytes: {e}")))?;
-    Ok(b.iter().map(|x| format!("{x:02x}")).collect())
+    Ok(crate::tokens::hex(&b))
 }
 
 fn new_id(prefix: &str) -> std::result::Result<String, Thrown> {
@@ -109,7 +110,7 @@ fn uuid_id(prefix: &str) -> std::result::Result<String, Thrown> {
     getrandom::fill(&mut b).map_err(|e| Thrown::new(format!("no random bytes: {e}")))?;
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
-    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    let h = crate::tokens::hex(&b);
     Ok(format!("{prefix}_{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32]))
 }
 
@@ -226,7 +227,7 @@ pub fn fingerprint_of(host: &Arg, user: &Arg, state_dir: &Arg) -> String {
     use sha2::{Digest, Sha256};
     let part = |a: &Arg| if a.is_nullish() { String::new() } else { js_text(a) };
     let joined = [part(host), part(user), part(state_dir)].join("\0");
-    Sha256::digest(joined.as_bytes()).iter().map(|x| format!("{x:02x}")).collect()
+    crate::tokens::hex(&Sha256::digest(joined.as_bytes()))
 }
 
 /// What the tunnel client runs for a grant: the adapter, holding no secret.
@@ -317,7 +318,13 @@ impl Standing {
     pub fn to_arg(&self) -> Arg {
         match self {
             Standing::No { code, reason } => obj(vec![("ok", Arg::Bool(false)), ("code", Arg::text(*code)), ("reason", reason.clone())]),
-            Standing::Ok { grant, connection, actor_id, revision } => obj(vec![("ok", Arg::Bool(true)), ("grant", row_arg(grant)), ("connection", row_arg(connection)), ("actorId", Arg::text(actor_id.clone())), ("revision", val(revision))]),
+            Standing::Ok { grant, connection, actor_id, revision } => obj(vec![
+                ("ok", Arg::Bool(true)),
+                ("grant", row_arg(grant)),
+                ("connection", row_arg(connection)),
+                ("actorId", Arg::text(actor_id.clone())),
+                ("revision", val(revision)),
+            ]),
         }
     }
 }
@@ -344,15 +351,15 @@ impl Connections {
     pub fn start(&self, c: &mut dyn Calls) -> Result<()> {
         self.device(c)?;
         self.apply_tombstones(c)?;
-        let t = self.now(c)?;
+        let t = Self::now(c)?;
         self.sync(c, t)
     }
 
-    fn now(&self, c: &mut dyn Calls) -> Result<f64> {
+    fn now(c: &mut dyn Calls) -> Result<f64> {
         Ok(to_number(&c.call("", "now", vec![])?))
     }
 
-    fn emit(&self, c: &mut dyn Calls, name: &str, what: Arg) -> Result<()> {
+    fn emit(c: &mut dyn Calls, name: &str, what: Arg) -> Result<()> {
         c.call("", "emit", vec![Arg::text(name), what])?;
         Ok(())
     }
@@ -364,22 +371,22 @@ impl Connections {
 
     fn bridged(&self, connection: &Cell) -> bool {
         let id = js_text(&val(connection));
-        self.bridges.lock().unwrap().iter().any(|(k, n)| *k == id && *n > 0.0)
+        self.bridges.locked().iter().any(|(k, n)| *k == id && *n > 0.0)
     }
 
     // ---------- this device ----------
 
     pub fn device(&self, c: &mut dyn Calls) -> Result<Value> {
-        if let Some(id) = self.device_id.lock().unwrap().clone().filter(|id| value_arg(id).truthy()) {
+        if let Some(id) = self.device_id.locked().clone().filter(|id| value_arg(id).truthy()) {
             return Ok(id);
         }
         let had = self.store.with(|s| s.meta(Arg::text("device_id")))?;
         let had_some = value_arg(&had).truthy();
         if had_some && value_arg(&self.store.with(|s| s.meta(Arg::text("device_fingerprint")))?) == self.fingerprint {
-            *self.device_id.lock().unwrap() = Some(had.clone());
+            *self.device_id.locked() = Some(had.clone());
             return Ok(had);
         }
-        let t = self.now(c)?;
+        let t = Self::now(c)?;
         let id = uuid_id("dev")?;
         let key = random_hex(32)?;
         self.store.transaction(|| -> Result<()> {
@@ -393,7 +400,7 @@ impl Connections {
             })?;
             Ok(())
         })?;
-        *self.device_id.lock().unwrap() = Some(Value::String(id.clone()));
+        *self.device_id.locked() = Some(Value::String(id.clone()));
         // Moved or copied: every grant made for the old one stops.
         if had_some {
             for g in self.store.with(|s| s.grants())? {
@@ -435,7 +442,9 @@ impl Connections {
     /// panel (actors.setRemote).
     pub fn sync(&self, c: &mut dyn Calls, t: f64) -> Result<()> {
         let grants = self.store.with(|s| s.grants())?;
-        let mut by_slug: Vec<(String, Vec<(Row, Option<Row>)>)> = Vec::new();
+        // By actor slug: each connection, with its grant if it has one.
+        type Entries = Vec<(Row, Option<Row>)>;
+        let mut by_slug: Vec<(String, Entries)> = Vec::new();
         for conn in self.store.with(|s| s.connections())? {
             let g = grants.iter().find(|x| same_cell(x.get("connection_id"), conn.get("connection_id"))).cloned();
             let slug = js_text(&val(conn.get("actor_slug")));
@@ -446,18 +455,19 @@ impl Connections {
         }
         for id in list(c.call("actors", "ids", vec![])?) {
             let id_text = js_text(&id);
-            let slug: String = id_text.encode_utf16().skip("actor:".len()).collect::<Vec<u16>>().iter().map(|u| char::from_u32(*u as u32).unwrap_or('\u{fffd}')).collect();
+            let slug: String = id_text.encode_utf16().skip("actor:".len()).collect::<Vec<u16>>().iter().map(|u| char::from_u32(u32::from(*u)).unwrap_or('\u{fffd}')).collect();
             let Some((_, entries)) = by_slug.iter().find(|(s, _)| *s == slug) else {
                 if c.call("actors", "remoteOf", vec![id.clone()])?.truthy() {
                     c.call("actors", "setRemote", vec![id.clone(), Arg::Null])?;
                 }
                 continue;
             };
-            let mut active: Vec<&(Row, Option<Row>)> = Vec::new();
-            for e in entries {
-                if let Some(g) = &e.1 {
+            // Each active connection, with its grant.
+            let mut active: Vec<(&Row, &Row)> = Vec::new();
+            for (conn, g) in entries {
+                if let Some(g) = g {
                     if self.state_of(c, g, t)? == "active" {
-                        active.push(e);
+                        active.push((conn, g));
                     }
                 }
             }
@@ -465,7 +475,7 @@ impl Connections {
             let (link, _) = account_links::link_state(&self.store, &Arg::text(slug.clone()), t)?;
             let mut permissions: Vec<Value> = Vec::new();
             for (_, g) in &active {
-                let parsed = parse(g.as_ref().unwrap().get("permissions"), json!([]));
+                let parsed = parse(g.get("permissions"), json!([]));
                 let each = match parsed {
                     Value::Array(a) => a,
                     other => vec![other],
@@ -525,14 +535,14 @@ impl Connections {
             Ok(r)
         })?;
         self.note_revision(c, &grant)?;
-        self.emit(c, "revoked", obj(vec![("grant", grant), ("connection", connection), ("reason", reason.clone())]))?;
+        Self::emit(c, "revoked", obj(vec![("grant", grant), ("connection", connection), ("reason", reason.clone())]))?;
         Ok(changed)
     }
 
     /// A grant revoked while the service was stopped, or one a restored
     /// database has as active: the tombstone wins.
     fn apply_tombstones(&self, c: &mut dyn Calls) -> Result<()> {
-        let t = self.now(c)?;
+        let t = Self::now(c)?;
         for id in list(self.disk(c, "markedRevoked", vec![])?) {
             if let Some(g) = self.store.with(|s| s.grant(id.clone()))? {
                 if g.get("revoked_at").is_null() {
@@ -545,7 +555,7 @@ impl Connections {
 
     // ---------- pairing ----------
 
-    fn remote_actors(&self, c: &mut dyn Calls) -> Result<usize> {
+    fn remote_actors(c: &mut dyn Calls) -> Result<usize> {
         let mut n = 0;
         for id in list(c.call("actors", "ids", vec![])?) {
             if c.call("actors", "isRemote", vec![id.clone()])?.truthy() && c.call("actors", "remoteOf", vec![id.clone()])?.field("active").truthy() {
@@ -565,14 +575,14 @@ impl Connections {
         Ok(n)
     }
 
-    fn is_taken(&self, c: &mut dyn Calls, slug: &str) -> std::result::Result<bool, Thrown> {
+    fn is_taken(c: &mut dyn Calls, slug: &str) -> std::result::Result<bool, Thrown> {
         Ok(c.call("actors", "has", vec![Arg::text(format!("actor:{slug}"))])?.truthy() || c.call("", "taken", vec![Arg::text(slug)])?.truthy())
     }
 
     /// The actor a pairing is for, without changing anything yet: one
     /// already here, as you picked it, or a new one. A name a caller sends
     /// never picks one.
-    fn plan_actor(&self, c: &mut dyn Calls, ask: &Arg, adapter: &Adapter) -> Result<Plan> {
+    fn plan_actor(c: &mut dyn Calls, ask: &Arg, adapter: &Adapter) -> Result<Plan> {
         let given = ask.field("actor");
         if !given.is_nullish() {
             let id = js_text(&given);
@@ -593,7 +603,7 @@ impl Connections {
             }
             return Ok(Plan { id, create: None });
         }
-        if self.remote_actors(c)? >= REMOTE_ACTORS_MAX {
+        if Self::remote_actors(c)? >= REMOTE_ACTORS_MAX {
             return fail(409.0, "full", format!("{REMOTE_ACTORS_MAX} remote actors are paired already; revoke or remove one first"));
         }
         let made = product(&adapter.product);
@@ -601,7 +611,7 @@ impl Connections {
             let slug = if p.id == "dots" {
                 let mut slug = "dots".to_string();
                 let mut i = 0;
-                while self.is_taken(c, &slug)? {
+                while Self::is_taken(c, &slug)? {
                     if i > 50 {
                         return fail(409.0, "taken", "XenoNet couldn't find a free slug for another dot");
                     }
@@ -610,7 +620,7 @@ impl Connections {
                 }
                 slug
             } else {
-                if self.is_taken(c, p.slug)? {
+                if Self::is_taken(c, p.slug)? {
                     return fail(409.0, "taken", format!("{} is beside the map already, as actor:{}: pair that actor instead", p.name, p.slug));
                 }
                 p.slug.to_string()
@@ -633,8 +643,8 @@ impl Connections {
                 return fail(400.0, "bad-request", why);
             }
             let slug = js_text(&slug);
-            if self.is_taken(c, &slug)? {
-                let suggest = suggest_slug(&slug, None, &mut |s| self.is_taken(c, s))?;
+            if Self::is_taken(c, &slug)? {
+                let suggest = suggest_slug(&slug, None, &mut |s| Self::is_taken(c, s))?;
                 return Err(Fail::Connection { status: 409.0, code: "taken", message: format!("actor:{slug} is taken"), extra: json!({ "suggest": suggest }) });
             }
             (slug, name)
@@ -643,7 +653,7 @@ impl Connections {
         Ok(Plan { id: format!("actor:{slug}"), create: Some(obj(vec![("kind", Arg::text("agent")), ("name", Arg::text(name)), ("product", product)])) })
     }
 
-    fn adapter_for(&self, c: &mut dyn Calls, product: Arg) -> Result<Option<Adapter>> {
+    fn adapter_for(c: &mut dyn Calls, product: Arg) -> Result<Option<Adapter>> {
         let a = c.call("", "adapterFor", vec![product])?;
         if !a.truthy() {
             return Ok(None);
@@ -656,13 +666,13 @@ impl Connections {
     /// XenoNet knows, for a link that's your word. Your view of it, with
     /// its launch command; the credential is only ever on disk.
     pub fn pair(&self, c: &mut dyn Calls, ask: &Arg) -> Result<Arg> {
-        let t = self.now(c)?;
-        let Some(adapter) = self.adapter_for(c, ask.field("product").or(Arg::Null))? else {
+        let t = Self::now(c)?;
+        let Some(adapter) = Self::adapter_for(c, ask.field("product").or(Arg::Null))? else {
             return fail(400.0, "bad-request", "that product can't be paired as a remote actor");
         };
         let transport = ask.field("transport");
         let known = TRANSPORTS.iter().any(|x| transport.as_str() == Some(x.id));
-        if !known || !adapter.transports.iter().any(|x| *x == transport) {
+        if !known || !adapter.transports.contains(&transport) {
             let who = if adapter.product.truthy() { product(&adapter.product).map_or("undefined", |p| p.name) } else { "An actor of your own" };
             let names: Vec<&str> = adapter.transports.iter().map(|x| TRANSPORTS.iter().find(|t| x.as_str() == Some(t.id)).map_or("undefined", |t| t.name)).collect();
             return fail(400.0, "bad-request", format!("{who} reaches XenoNet through {}", names.join(" or ")));
@@ -719,7 +729,7 @@ impl Connections {
         if self.active_grants(c, t)? >= CONNECTIONS_MAX {
             return fail(409.0, "full", format!("{CONNECTIONS_MAX} connections are active already; revoke one first"));
         }
-        let plan = self.plan_actor(c, ask, &adapter)?;
+        let plan = Self::plan_actor(c, ask, &adapter)?;
 
         let dev = value_arg(&self.device(c)?);
         let connection_id = new_id("cn")?;
@@ -808,7 +818,7 @@ impl Connections {
         let grant = Arg::text(grant_id.clone());
         self.note_revision(c, &grant)?;
         self.sync(c, t)?;
-        self.emit(c, "changed", obj(vec![("grant", grant.clone())]))?;
+        Self::emit(c, "changed", obj(vec![("grant", grant.clone())]))?;
         let g = self.store.with(|s| s.grant(grant))?;
         self.view_of(c, g.as_ref(), t)
     }
@@ -831,7 +841,7 @@ impl Connections {
     /// its revision moves on. Taking projects away needs nothing more;
     /// adding them is a new approval, which is why this is the window's.
     pub fn update(&self, c: &mut dyn Calls, grant_id: &Arg, change_to: &Arg) -> Result<Arg> {
-        let t = self.now(c)?;
+        let t = Self::now(c)?;
         let g = self.active(c, grant_id, t)?;
         let mut change: Vec<(String, Arg)> = Vec::new();
         let projects = change_to.field("projects");
@@ -896,7 +906,7 @@ impl Connections {
             Ok(())
         })?;
         self.note_revision(c, grant_id)?;
-        self.emit(c, "changed", obj(vec![("grant", grant_id.clone())]))?;
+        Self::emit(c, "changed", obj(vec![("grant", grant_id.clone())]))?;
         let g = self.store.with(|s| s.grant(grant_id.clone()))?;
         self.view_of(c, g.as_ref(), t)
     }
@@ -904,7 +914,7 @@ impl Connections {
     /// A new credential: the old one stops at once, and adapters holding
     /// it are let go.
     pub fn rotate(&self, c: &mut dyn Calls, grant_id: &Arg) -> Result<Arg> {
-        let t = self.now(c)?;
+        let t = Self::now(c)?;
         let g = self.active(c, grant_id, t)?;
         let made = c.call("disk", "newToken", vec![])?;
         let credential = obj(vec![("grant", grant_id.clone()), ("token", made.field("token")), ("device", val(g.get("device_id"))), ("expiresAt", val(g.get("expires_at")))]);
@@ -925,7 +935,7 @@ impl Connections {
             Ok(())
         })?;
         self.note_revision(c, grant_id)?;
-        self.emit(c, "rotated", obj(vec![("grant", grant_id.clone()), ("connection", val(g.get("connection_id")))]))?;
+        Self::emit(c, "rotated", obj(vec![("grant", grant_id.clone()), ("connection", val(g.get("connection_id")))]))?;
         let g = self.store.with(|s| s.grant(grant_id.clone()))?;
         self.view_of(c, g.as_ref(), t)
     }
@@ -935,7 +945,7 @@ impl Connections {
         let Some(g) = g else {
             return fail(404.0, "not-found", "XenoNet has no such connection");
         };
-        let t = self.now(c)?;
+        let t = Self::now(c)?;
         let changed = if g.get("revoked_at").is_null() { self.revoke_row(c, &g, reason, t, "owner")? } else { false };
         self.sync(c, t)?;
         Ok(obj(vec![("revoked", grant_id.clone()), ("already", Arg::Bool(!changed))]))
@@ -944,20 +954,20 @@ impl Connections {
     /// Every connection off, until you turn them on again; adapters are
     /// let go at once.
     pub fn disable(&self, c: &mut dyn Calls) -> Result<Arg> {
-        let t = self.now(c)?;
+        let t = Self::now(c)?;
         self.disk(c, "markDisabled", vec![Arg::num(t)])?;
         self.store.with(|s| s.add_audit(&obj(vec![("at", Arg::num(t)), ("kind", Arg::text("owner")), ("operation", Arg::text("disable")), ("result", Arg::text("ok"))])))?;
         self.sync(c, t)?;
-        self.emit(c, "disabled", Arg::Obj(vec![]))?;
+        Self::emit(c, "disabled", Arg::Obj(vec![]))?;
         Ok(obj(vec![("disabled", Arg::Bool(true))]))
     }
 
     pub fn enable(&self, c: &mut dyn Calls) -> Result<Arg> {
-        let t = self.now(c)?;
+        let t = Self::now(c)?;
         self.disk(c, "clearDisabled", vec![])?;
         self.store.with(|s| s.add_audit(&obj(vec![("at", Arg::num(t)), ("kind", Arg::text("owner")), ("operation", Arg::text("enable")), ("result", Arg::text("ok"))])))?;
         self.sync(c, t)?;
-        self.emit(c, "enabled", Arg::Obj(vec![]))?;
+        Self::emit(c, "enabled", Arg::Obj(vec![]))?;
         Ok(obj(vec![("disabled", Arg::Bool(false))]))
     }
 
@@ -968,7 +978,7 @@ impl Connections {
     pub fn standing(&self, c: &mut dyn Calls, g: Option<&Row>, t: Option<f64>) -> Result<Standing> {
         let t = match t {
             Some(t) => t,
-            None => self.now(c)?,
+            None => Self::now(c)?,
         };
         let Some(g) = g else {
             return Ok(Standing::no("NOT_AUTHORIZED", "unknown-grant"));
@@ -1087,7 +1097,7 @@ impl Connections {
     pub fn used(&self, grant_id: &Arg, t: f64) -> Result<()> {
         let key = js_text(grant_id);
         {
-            let mut touched = self.touched.lock().unwrap();
+            let mut touched = self.touched.locked();
             if t - touched.get(&key).copied().unwrap_or(f64::NEG_INFINITY) < TOUCH_MS {
                 return Ok(());
             }
@@ -1101,7 +1111,7 @@ impl Connections {
     pub fn bridge(&self, c: &mut dyn Calls, connection_id: &Arg, delta: f64) -> Result<()> {
         let key = js_text(connection_id);
         {
-            let mut bridges = self.bridges.lock().unwrap();
+            let mut bridges = self.bridges.locked();
             let had = bridges.iter().find(|(k, _)| *k == key).map_or(0.0, |(_, n)| *n);
             let n = (had + delta).max(0.0);
             let n = if (had + delta).is_nan() { f64::NAN } else { n };
@@ -1114,7 +1124,7 @@ impl Connections {
                 bridges.retain(|(k, _)| *k != key);
             }
         }
-        let t = self.now(c)?;
+        let t = Self::now(c)?;
         self.sync(c, t)
     }
 
@@ -1149,7 +1159,14 @@ impl Connections {
             ("adapter_id", val(conn.get("adapter_id"))),
             ("provider", val(conn.get("provider"))),
             ("transport_kind", val(conn.get("transport_kind"))),
-            ("audience", obj(vec![("description", val(conn.get("audience_description"))), ("verification", val(conn.get("audience_verification"))), ("scope", val(conn.get("audience_scope")))])),
+            (
+                "audience",
+                obj(vec![
+                    ("description", val(conn.get("audience_description"))),
+                    ("verification", val(conn.get("audience_verification"))),
+                    ("scope", val(conn.get("audience_scope"))),
+                ]),
+            ),
             ("account_link", obj(vec![("state", Arg::text(link)), ("identity", value_arg(&identity))])),
             ("device", obj(vec![("id", val(g.get("device_id"))), ("alias", opt("device_alias"))])),
             ("permissions", value_arg(&parse(g.get("permissions"), json!([])))),
@@ -1163,10 +1180,13 @@ impl Connections {
             ("created_at", iso(g.get("created_at"))),
             ("expires_at", iso(g.get("expires_at"))),
             ("revoked_at", iso(g.get("revoked_at"))),
-            ("revoked_reason", match g.get("revoked_reason") {
-                Cell::Null => Arg::Null,
-                r => val(r),
-            }),
+            (
+                "revoked_reason",
+                match g.get("revoked_reason") {
+                    Cell::Null => Arg::Null,
+                    r => val(r),
+                },
+            ),
             ("last_used_at", iso(g.get("last_used_at"))),
             ("launch", launch_for(&val(g.get("grant_id")), &self.port)),
         ]))
@@ -1176,7 +1196,7 @@ impl Connections {
     pub fn view(&self, c: &mut dyn Calls, grant_id: &Arg) -> Result<Arg> {
         match self.store.with(|s| s.grant(grant_id.clone()))? {
             Some(g) => {
-                let t = self.now(c)?;
+                let t = Self::now(c)?;
                 self.view_of(c, Some(&g), t)
             }
             None => Ok(Arg::Null),
@@ -1184,7 +1204,7 @@ impl Connections {
     }
 
     pub fn list(&self, c: &mut dyn Calls) -> Result<Arg> {
-        let t = self.now(c)?;
+        let t = Self::now(c)?;
         let disabled = self.disabled(c)?;
         let device = self.device(c)?;
         let mut views = Vec::new();
@@ -1199,11 +1219,11 @@ impl Connections {
     pub fn tick(&self, c: &mut dyn Calls, t: f64) -> Result<()> {
         for g in self.store.with(|s| s.grants())? {
             let id = js_text(&val(g.get("grant_id")));
-            if !g.get("revoked_at").is_null() || num(g.get("expires_at")) > t || self.expired.lock().unwrap().contains(&id) {
+            if !g.get("revoked_at").is_null() || num(g.get("expires_at")) > t || self.expired.locked().contains(&id) {
                 continue;
             }
-            self.expired.lock().unwrap().insert(id);
-            self.emit(c, "expired", obj(vec![("grant", val(g.get("grant_id"))), ("connection", val(g.get("connection_id")))]))?;
+            self.expired.locked().insert(id);
+            Self::emit(c, "expired", obj(vec![("grant", val(g.get("grant_id"))), ("connection", val(g.get("connection_id")))]))?;
         }
         self.sync(c, t)
     }
@@ -1211,7 +1231,7 @@ impl Connections {
     /// Removing an actor (yours) revokes its connections first, while its
     /// grants can still be named; the rows then go with the actor's.
     pub fn before_remove(&self, c: &mut dyn Calls, slug: &Arg) -> Result<()> {
-        let t = self.now(c)?;
+        let t = Self::now(c)?;
         for conn in self.store.with(|s| s.connections_of(slug.clone()))? {
             let g = self.store.with(|s| s.grants())?.into_iter().find(|x| same_cell(x.get("connection_id"), conn.get("connection_id")));
             if let Some(g) = g {
@@ -1229,7 +1249,7 @@ impl Connections {
             return Ok(false);
         }
         for g in self.store.with(|s| s.grants())? {
-            let t = self.now(c)?;
+            let t = Self::now(c)?;
             if self.state_of(c, &g, t)? == "active" {
                 return Ok(true);
             }
@@ -1254,7 +1274,7 @@ mod tests {
         assert_eq!(words(&Arg::text("  My\n dot "), "a name", 64).unwrap(), Some("My dot".into()));
         assert_eq!(words(&Arg::text(""), "a name", 64).unwrap(), None);
         assert!(words(&Arg::num(1.0), "a name", 64).is_err());
-        assert!(words(&Arg::text(&"x".repeat(65)), "a name", 64).is_err());
+        assert!(words(&Arg::text("x".repeat(65)), "a name", 64).is_err());
     }
 
     #[test]

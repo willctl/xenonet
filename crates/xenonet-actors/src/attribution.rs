@@ -20,6 +20,7 @@
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use xenonet_base::paths::path_key;
+use xenonet_base::sync::Locked;
 use xenonet_engine::js::truthy;
 use xenonet_engine::peer::{list, Calls, Result};
 use xenonet_engine::sql::Arg;
@@ -236,15 +237,19 @@ impl Spawns {
     /// Which of these agent processes the actor started are new: each is
     /// taken once. Their folders, where not given, are read in one call.
     pub fn fresh(&self, list: &[Candidate]) -> Vec<Candidate> {
-        list.iter().filter(|p| { let k = key(p.pid, p.start); !self.pending.iter().any(|(x, _)| *x == k) && !self.done.has(&k) }).cloned().collect()
+        list.iter()
+            .filter(|p| {
+                let k = key(p.pid, p.start);
+                !self.pending.iter().any(|(x, _)| *x == k) && !self.done.has(&k)
+            })
+            .cloned()
+            .collect()
     }
 
     /// The new ones taken, with the folders read for those that needed one
     /// (`cwds`: [pid, folder] pairs).
     pub fn take(&mut self, actor: &str, fresh: Vec<Candidate>, cwds: &[Arg], at: f64) {
-        let cwd_of = |pid: f64| {
-            cwds.iter().rev().find(|p| p.as_list_item(0).as_f64() == Some(pid)).map(|p| p.as_list_item(1).to_json()).filter(|v| !v.is_null())
-        };
+        let cwd_of = |pid: f64| cwds.iter().rev().find(|p| p.as_list_item(0).as_f64() == Some(pid)).map(|p| p.as_list_item(1).to_json()).filter(|v| !v.is_null());
         for p in fresh {
             let k = key(p.pid, p.start);
             let cwd = p.cwd.clone().unwrap_or_else(|| cwd_of(p.pid).unwrap_or(Value::Null));
@@ -255,8 +260,6 @@ impl Spawns {
             }
         }
     }
-
-
 }
 
 /// The state of a Spawns, shared by the calls on it; never held across a
@@ -268,12 +271,14 @@ pub type SpawnsState = std::sync::Mutex<Spawns>;
 /// the process was seen gone, and that no other process is pinned to (a
 /// session of yours, say, begun nearby while the actor's process ran).
 pub fn session_of(state: &SpawnsState, calls: &mut dyn Calls, paths: &Paths, s: &Pending) -> Result<Option<String>> {
-    let claimed = |id: &str| state.lock().unwrap().claimed.has(id);
+    let claimed = |id: &str| state.locked().claimed.has(id);
     let mut pins: Vec<Arg> = list(calls.call(&paths.store, "pinnedTo", vec![Arg::Num(s.pid)])?)
         .into_iter()
         .filter(|pin| {
             let agent = pin.field("agent");
-            (pin.field("start").as_f64().unwrap_or(f64::NAN) - s.start).abs() <= SLACK_MS && agent.as_str().is_some_and(|a| a.starts_with(&format!("{}:", s.agent))) && !claimed(agent.as_str().unwrap_or(""))
+            (pin.field("start").as_f64().unwrap_or(f64::NAN) - s.start).abs() <= SLACK_MS
+                && agent.as_str().is_some_and(|a| a.starts_with(&format!("{}:", s.agent)))
+                && !claimed(agent.as_str().unwrap_or(""))
         })
         .collect();
     if !pins.is_empty() {
@@ -301,7 +306,13 @@ pub fn session_of(state: &SpawnsState, calls: &mut dyn Calls, paths: &Paths, s: 
         let Some(at) = created.as_f64().filter(|_| !created.is_nullish()) else { continue };
         let key_of = |f: &str| x.field(f).as_str().and_then(path_key);
         let id = x.field("id");
-        if x.field("app").as_str() == Some(s.agent.as_str()) && at >= s.start - SLACK_MS && at <= until && (key_of("cwd") == k || key_of("worktree") == k) && !claimed(id.as_str().unwrap_or("")) && !held_elsewhere(calls, paths, &id, s)? {
+        if x.field("app").as_str() == Some(s.agent.as_str())
+            && at >= s.start - SLACK_MS
+            && at <= until
+            && (key_of("cwd") == k || key_of("worktree") == k)
+            && !claimed(id.as_str().unwrap_or(""))
+            && !held_elsewhere(calls, paths, &id, s)?
+        {
             found.push(id);
         }
     }
@@ -310,7 +321,9 @@ pub fn session_of(state: &SpawnsState, calls: &mut dyn Calls, paths: &Paths, s: 
 
 // Whether a session is pinned to a process other than this one.
 fn held_elsewhere(calls: &mut dyn Calls, paths: &Paths, session: &Arg, s: &Pending) -> Result<bool> {
-    Ok(list(calls.call(&paths.store, "pins", vec![session.clone()])?).iter().any(|pin| pin.field("pid").as_f64() != Some(s.pid) || (pin.field("start").as_f64().unwrap_or(f64::NAN) - s.start).abs() > SLACK_MS))
+    Ok(list(calls.call(&paths.store, "pins", vec![session.clone()])?)
+        .iter()
+        .any(|pin| pin.field("pid").as_f64() != Some(s.pid) || (pin.field("start").as_f64().unwrap_or(f64::NAN) - s.start).abs() > SLACK_MS))
 }
 
 /// Whether a process still runs, as settle asks it (None: every one is
@@ -320,16 +333,16 @@ pub type Alive<'a> = Option<&'a mut dyn FnMut(&mut dyn Calls, &Pending) -> Resul
 /// The processes settled now: those whose session is known, and those that
 /// waited two minutes without, which count only if they ran long enough to
 /// hold one.
-pub fn settle(state: &SpawnsState, calls: &mut dyn Calls, paths: &Paths, at: f64, mut alive: Alive) -> Result<Vec<Settled>> {
+pub fn settle(state: &SpawnsState, calls: &mut dyn Calls, paths: &Paths, at: f64, mut alive: Alive<'_>) -> Result<Vec<Settled>> {
     let mut out = Vec::new();
-    let keys: Vec<String> = state.lock().unwrap().pending.iter().map(|(k, _)| k.clone()).collect();
+    let keys: Vec<String> = state.locked().pending.iter().map(|(k, _)| k.clone()).collect();
     for k in keys {
-        let Some(mut s) = state.lock().unwrap().pending.iter().find(|(x, _)| *x == k).map(|(_, p)| p.clone()) else { continue };
+        let Some(mut s) = state.locked().pending.iter().find(|(x, _)| *x == k).map(|(_, p)| p.clone()) else { continue };
         if s.gone_at.is_none() {
             if let Some(f) = alive.as_mut() {
                 if !f(calls, &s)? {
                     s.gone_at = Some(at);
-                    if let Some(slot) = state.lock().unwrap().pending.iter_mut().find(|(x, _)| *x == k) {
+                    if let Some(slot) = state.locked().pending.iter_mut().find(|(x, _)| *x == k) {
                         slot.1.gone_at = Some(at);
                     }
                 }
@@ -340,7 +353,7 @@ pub fn settle(state: &SpawnsState, calls: &mut dyn Calls, paths: &Paths, at: f64
             continue;
         }
         {
-            let mut st = state.lock().unwrap();
+            let mut st = state.locked();
             st.pending.retain(|(x, _)| *x != k);
             st.done.add(k);
             if let Some(id) = &session {
@@ -352,7 +365,7 @@ pub fn settle(state: &SpawnsState, calls: &mut dyn Calls, paths: &Paths, at: f64
         }
         out.push(Settled { actor: s.actor, agent: s.agent, cwd: s.cwd, start: s.start, session });
     }
-    let mut st = state.lock().unwrap();
+    let mut st = state.locked();
     st.done.trim();
     st.claimed.trim();
     Ok(out)
@@ -361,13 +374,13 @@ pub fn settle(state: &SpawnsState, calls: &mut dyn Calls, paths: &Paths, at: f64
 /// The agent processes the actor started, as startedUnder finds them: each
 /// taken once, with the folder it works in.
 pub fn saw(state: &SpawnsState, calls: &mut dyn Calls, paths: &Paths, actor: &str, list: &[Candidate], at: f64) -> Result<()> {
-    let fresh = state.lock().unwrap().fresh(list);
+    let fresh = state.locked().fresh(list);
     if fresh.is_empty() {
         return Ok(());
     }
     let unknown: Vec<Arg> = fresh.iter().filter(|p| p.cwd.is_none()).map(|p| Arg::Num(p.pid)).collect();
     let cwds = if unknown.is_empty() { Vec::new() } else { list_of(calls.call(&paths.procs, "cwds", vec![Arg::List(unknown)])?) };
-    state.lock().unwrap().take(actor, fresh, &cwds, at);
+    state.locked().take(actor, fresh, &cwds, at);
     Ok(())
 }
 
@@ -458,7 +471,7 @@ fn waits(a: Arg) -> Vec<Wait> {
 pub fn reported_look(state: &std::sync::Mutex<Spawns>, calls: &mut dyn Calls, paths: &Paths, at: f64) -> Result<()> {
     let waiting = waits(calls.call("actors", "expireWaiting", vec![Arg::Num(at)])?);
     if waiting.is_empty() {
-        state.lock().unwrap().pending.clear();
+        state.locked().pending.clear();
         return Ok(());
     }
     let census = Census::of(&calls.call("", "census", vec![])?);
@@ -491,13 +504,20 @@ pub fn reported_look(state: &std::sync::Mutex<Spawns>, calls: &mut dyn Calls, pa
     for s in settled {
         let Some(session) = s.session.clone() else { continue };
         // A session it named itself already isn't the one it didn't.
-        let named = list(calls.call("actors", "targetsOf", vec![Arg::text(&s.actor)])?).iter().any(|t| t.field("id").as_str() == Some(session.as_str()) && t.field("relation").as_str() == Some("spawned"));
+        let named = list(calls.call("actors", "targetsOf", vec![Arg::text(&s.actor)])?)
+            .iter()
+            .any(|t| t.field("id").as_str() == Some(session.as_str()) && t.field("relation").as_str() == Some("spawned"));
         if named {
             continue;
         }
         let place = if truthy(Some(&s.cwd)) { calls.call("actors", "placeOf", vec![xenonet_actors_value(&s.cwd)])?.to_json() } else { Value::Null };
         let live = waits(calls.get("actors.waiting")?);
-        let found = live.iter().find(|w| w.actor == s.actor && (!truthy(Some(&w.app)) || w.app.as_str() == Some(s.agent.as_str())) && (w.place.is_null() || w.place == place) && (s.start - w.at).abs() <= SPAWN_WAIT_MS);
+        let found = live.iter().find(|w| {
+            w.actor == s.actor
+                && (!truthy(Some(&w.app)) || w.app.as_str() == Some(s.agent.as_str()))
+                && (w.place.is_null() || w.place == place)
+                && (s.start - w.at).abs() <= SPAWN_WAIT_MS
+        });
         let Some(w) = found else { continue };
         calls.call("actors", "dropWaitingAt", vec![Arg::Num(w.index as f64)])?;
         let r = format!("spawned:{session}");
@@ -520,4 +540,3 @@ pub fn reported_look(state: &std::sync::Mutex<Spawns>, calls: &mut dyn Calls, pa
 fn xenonet_actors_value(v: &Value) -> Arg {
     crate::registry::value_arg(v)
 }
-

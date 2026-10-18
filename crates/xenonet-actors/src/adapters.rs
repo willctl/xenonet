@@ -41,10 +41,46 @@ pub struct Adapter {
 pub const ADAPTERS: [Adapter; 4] = [
     // The tunnel forwards an MCP call to the local adapter; it passes no
     // assertion of the ChatGPT user or the dot that XenoNet could validate.
-    Adapter { key: "dots", id: "openai-dots", product: Some("dots"), provider: "openai", transports: &["openai-secure-mcp-tunnel", "local-stdio"], support: "experimental", unavailable: "transport-has-no-assertion", capabilities: &["read"] },
-    Adapter { key: "grok-bot", id: "grok-bot", product: Some("grok-bot"), provider: "spacexai", transports: &["local-stdio"], support: "fixture", unavailable: "no-supported-route", capabilities: &["read"] },
-    Adapter { key: "hermes-agent", id: "hermes-agent", product: Some("hermes-agent"), provider: "nous", transports: &["local-stdio"], support: "fixture", unavailable: "no-supported-route", capabilities: &["read"] },
-    Adapter { key: "custom", id: "custom", product: None, provider: "local", transports: &["openai-secure-mcp-tunnel", "local-stdio"], support: "experimental", unavailable: "no-provider", capabilities: &["read"] },
+    Adapter {
+        key: "dots",
+        id: "openai-dots",
+        product: Some("dots"),
+        provider: "openai",
+        transports: &["openai-secure-mcp-tunnel", "local-stdio"],
+        support: "experimental",
+        unavailable: "transport-has-no-assertion",
+        capabilities: &["read"],
+    },
+    Adapter {
+        key: "grok-bot",
+        id: "grok-bot",
+        product: Some("grok-bot"),
+        provider: "spacexai",
+        transports: &["local-stdio"],
+        support: "fixture",
+        unavailable: "no-supported-route",
+        capabilities: &["read"],
+    },
+    Adapter {
+        key: "hermes-agent",
+        id: "hermes-agent",
+        product: Some("hermes-agent"),
+        provider: "nous",
+        transports: &["local-stdio"],
+        support: "fixture",
+        unavailable: "no-supported-route",
+        capabilities: &["read"],
+    },
+    Adapter {
+        key: "custom",
+        id: "custom",
+        product: None,
+        provider: "local",
+        transports: &["openai-secure-mcp-tunnel", "local-stdio"],
+        support: "experimental",
+        unavailable: "no-provider",
+        capabilities: &["read"],
+    },
 ];
 
 /// The adapter for a product (by its id), or for a program of your own

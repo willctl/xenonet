@@ -35,6 +35,7 @@ use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData as McpError, ServerHandler, ServiceExt};
 use serde_json::{json, Map, Value};
 use std::collections::VecDeque;
+use std::future::Future;
 use std::sync::{Arc, Mutex};
 use xenonet_base::json as js;
 
@@ -118,7 +119,7 @@ fn uuid() -> String {
     let _ = getrandom::fill(&mut b);
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
-    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    let h = xenonet_base::jsstr::hex(&b);
     format!("{}-{}-{}-{}-{}", &h[..8], &h[8..12], &h[12..16], &h[16..20], &h[20..])
 }
 
@@ -355,12 +356,12 @@ impl ServerHandler for Assistant {
 
     // The 2026-07-28 probe, answered as the JS server answers it: that
     // revision alone.
-    async fn discover(&self, _context: RequestContext<RoleServer>) -> Result<DiscoverResult, McpError> {
-        Ok(DiscoverResult::from_server_info(vec![ProtocolVersion::V_2026_07_28], self.get_info()))
+    fn discover(&self, _context: RequestContext<RoleServer>) -> impl Future<Output = Result<DiscoverResult, McpError>> + Send + '_ {
+        std::future::ready(Ok(DiscoverResult::from_server_info(vec![ProtocolVersion::V_2026_07_28], self.get_info())))
     }
 
-    async fn list_tools(&self, _request: Option<PaginatedRequestParams>, context: RequestContext<RoleServer>) -> Result<ListToolsResult, McpError> {
-        Ok(tools::list(&self.defs, &context, "xenonet-assistant"))
+    fn list_tools(&self, _request: Option<PaginatedRequestParams>, context: RequestContext<RoleServer>) -> impl Future<Output = Result<ListToolsResult, McpError>> + Send + '_ {
+        std::future::ready(Ok(tools::list(&self.defs, &context, "xenonet-assistant")))
     }
 
     async fn call_tool(&self, request: CallToolRequestParams, context: RequestContext<RoleServer>) -> Result<CallToolResponse, McpError> {

@@ -28,6 +28,7 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use xenonet_base::log::js_slice;
 use xenonet_base::paths::path_key;
+use xenonet_base::sync::Locked;
 use xenonet_engine::peer::{list, Calls, Result};
 use xenonet_engine::procs::{agent_of, wants_args};
 use xenonet_engine::sql::Arg;
@@ -90,7 +91,7 @@ struct State {
     tracked: Vec<(f64, Entry)>,
     busy_at: Option<f64>,
     was_installed: bool,
-    table_state: Option<String>,
+    table_status: Option<String>,
     looked_at: Option<f64>,
 }
 
@@ -160,7 +161,7 @@ impl GrokBot {
     }
 
     fn s(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner())
+        self.state.locked()
     }
 
     // The new commands' places (one lsof for them all), each counted as ran
@@ -171,7 +172,13 @@ impl GrokBot {
         if !commands.is_empty() {
             let cwds = list(c.call("procs", "cwds", vec![Arg::List(commands.iter().map(|p| Arg::Num(*p)).collect())])?);
             for pid in commands {
-                let cwd = cwds.iter().rev().find(|p| list((*p).clone()).first().and_then(Arg::as_f64) == Some(pid)).and_then(|p| list(p.clone()).get(1).cloned()).filter(|v| !v.is_nullish()).map_or(Value::Null, |v| v.to_json());
+                let cwd = cwds
+                    .iter()
+                    .rev()
+                    .find(|p| list((*p).clone()).first().and_then(Arg::as_f64) == Some(pid))
+                    .and_then(|p| list(p.clone()).get(1).cloned())
+                    .filter(|v| !v.is_nullish())
+                    .map_or(Value::Null, |v| v.to_json());
                 let place = if xenonet_engine::js::truthy(Some(&cwd)) { c.call("actors", "placeOf", vec![crate::registry::value_arg(&cwd)])?.to_json() } else { Value::Null };
                 let started_at = {
                     let mut s = self.s();
@@ -182,7 +189,14 @@ impl GrokBot {
                     e.started_at
                 };
                 if c.call("actors", "has", vec![Arg::text(ID)])?.truthy() {
-                    c.call("", "gather", vec![Arg::text(ID), Arg::Obj(vec![("kind".into(), Arg::text("ran")), ("target".into(), crate::registry::value_arg(&place)), ("at".into(), Arg::Num(started_at))])])?;
+                    c.call(
+                        "",
+                        "gather",
+                        vec![
+                            Arg::text(ID),
+                            Arg::Obj(vec![("kind".into(), Arg::text("ran")), ("target".into(), crate::registry::value_arg(&place)), ("at".into(), Arg::Num(started_at))]),
+                        ],
+                    )?;
                 }
             }
         }
@@ -201,7 +215,8 @@ impl GrokBot {
                 }
             }
         }
-        let list: Vec<Candidate> = sessions.iter().map(|(pid, e)| Candidate { pid: *pid, start: e.start, agent: e.agent.name().unwrap().into(), cwd: e.cwd.clone() }).collect();
+        let list: Vec<Candidate> =
+            sessions.iter().filter_map(|(pid, e)| Some(Candidate { pid: *pid, start: e.start, agent: e.agent.name()?.into(), cwd: e.cwd.clone() })).collect();
         attribution::saw(&self.spawns, c, &paths(), ID, &list, at)
     }
 
@@ -220,9 +235,10 @@ impl GrokBot {
         }
         let mut table_state = None;
         let census = census(c, &mut table_state);
-        self.s().table_state = table_state;
+        self.s().table_status = table_state;
         let census: Census = census?;
-        let is_app = |i: usize| census.products[i].get("product").and_then(Value::as_str) == Some("grok-bot") && census.products[i].get("role").and_then(Value::as_str) == Some("app");
+        let is_app =
+            |i: usize| census.products[i].get("product").and_then(Value::as_str) == Some("grok-bot") && census.products[i].get("role").and_then(Value::as_str) == Some("app");
         let apps: Vec<usize> = (0..census.table.len()).filter(|&i| is_app(i)).collect();
         let installed = !apps.is_empty() || c.call("app", "installed", vec![])?.truthy();
         self.s().was_installed = installed;
@@ -274,12 +290,13 @@ impl GrokBot {
                     }
                     // One the poll saw first may be a Node or Bun process it
                     // couldn't tell: the census has read its arguments.
-                    let e = s.entry(child.pid).unwrap();
-                    if e.agent == Agent::Unknown {
-                        e.agent = agent;
-                    }
-                    if e.agent.name().is_some() && !e.handed {
-                        candidates.push(child.pid);
+                    if let Some(e) = s.entry(child.pid) {
+                        if e.agent == Agent::Unknown {
+                            e.agent = agent;
+                        }
+                        if e.agent.name().is_some() && !e.handed {
+                            candidates.push(child.pid);
+                        }
                     }
                 }
                 i += 1;
@@ -396,7 +413,10 @@ impl GrokBot {
         if children.is_empty() {
             return Ok(());
         }
-        let described: Vec<Value> = list(c.call("procs", "describe", vec![Arg::List(children.iter().map(|p| Arg::Num(*p)).collect())])?).iter().map(|pair| list(pair.clone()).get(1).cloned().unwrap_or(Arg::Undef).to_json()).collect();
+        let described: Vec<Value> = list(c.call("procs", "describe", vec![Arg::List(children.iter().map(|p| Arg::Num(*p)).collect())])?)
+            .iter()
+            .map(|pair| list(pair.clone()).get(1).cloned().unwrap_or(Arg::Undef).to_json())
+            .collect();
         let mut rows: Vec<Value> = described;
         let n = |v: &Value, k: &str| v.get(k).and_then(Value::as_f64).unwrap_or(f64::NAN);
         // Parents before children, so a command's own children know it.
@@ -446,7 +466,7 @@ impl GrokBot {
     pub fn status(&self, c: &mut dyn Calls, home: &str) -> Result<Value> {
         let (was, table) = {
             let s = self.s();
-            (s.was_installed, s.table_state.clone().unwrap_or_else(|| "ok".into()))
+            (s.was_installed, s.table_status.clone().unwrap_or_else(|| "ok".into()))
         };
         let installed = c.call("app", "installed", vec![])?.truthy() || was;
         let mut sources = vec![json!({ "name": "processes", "file": null, "state": table })];

@@ -43,11 +43,11 @@ fn re(i: usize) -> &'static Regex {
     let r = R.get_or_init(|| {
         let s = r"[\t\n\x0B\x0C\r \x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}]";
         [
-            Regex::new(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$").unwrap(),
-            Regex::new(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$").unwrap(),
-            Regex::new(r"^(?:xenonet|/[A-Za-z0-9._+/-]{1,1023})$").unwrap(),
-            Regex::new(r"^[0-9]{1,4}[mhd]$").unwrap(),
-            Regex::new(&format!("^(?:([^@{}]+)@)?([^@{}]+)$", &s[1..s.len() - 1], &s[1..s.len() - 1])).unwrap(),
+            Regex::new(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$").expect("a fixed pattern"),
+            Regex::new(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$").expect("a fixed pattern"),
+            Regex::new(r"^(?:xenonet|/[A-Za-z0-9._+/-]{1,1023})$").expect("a fixed pattern"),
+            Regex::new(r"^[0-9]{1,4}[mhd]$").expect("a fixed pattern"),
+            Regex::new(&format!("^(?:([^@{}]+)@)?([^@{}]+)$", &s[1..s.len() - 1], &s[1..s.len() - 1])).expect("a fixed pattern"),
         ]
     });
     &r[i]
@@ -130,7 +130,9 @@ pub fn host_entry(input: &Value, now: f64, check: &mut dyn FnMut(&Value) -> Resu
     };
     let transport = get(input, "transport").cloned().unwrap_or_else(|| json!(if truthy(input.get("local")) { "local" } else { "ssh" }));
     let transport_s = transport.as_str().filter(|t| *t == "ssh" || *t == "local");
-    let Some(transport_s) = transport_s else { return Err(fail(format!("a host is reached over ssh, or locally (another XenoNet on this machine), not {}", say(Some(&transport))))) };
+    let Some(transport_s) = transport_s else {
+        return Err(fail(format!("a host is reached over ssh, or locally (another XenoNet on this machine), not {}", say(Some(&transport)))));
+    };
     let port = if blank(input.get("port")) { DEFAULT_PORT } else { js_number(input.get("port")) };
     if port.fract() != 0.0 || !(1.0..=65535.0).contains(&port) {
         return Err(fail(format!("the port of the XenoNet to read there is a number from 1 to 65535, not {}", say(input.get("port")))));
@@ -158,7 +160,7 @@ pub fn host_entry(input: &Value, now: f64, check: &mut dyn FnMut(&Value) -> Resu
             }
         }
         let alias = get(given, "hostKeyAlias").or_else(|| get(input, "hostKeyAlias"));
-        if !blank(alias) && !ssh_hostname_ok(&js_string(alias.unwrap())) {
+        if alias.filter(|a| !blank(Some(a))).is_some_and(|a| !ssh_hostname_ok(&js_string(a))) {
             return Err(fail(format!("{} isn't a name ssh can keep a host key under", say(alias))));
         }
         let identity = ssh_file(get(given, "identity").or_else(|| input.get("identity")), "the key file")?;
@@ -169,7 +171,7 @@ pub fn host_entry(input: &Value, now: f64, check: &mut dyn FnMut(&Value) -> Resu
             "port": ssh_port_n.map(xenonet_base::json::number),
             "identity": identity,
             "knownHosts": known,
-            "hostKeyAlias": if truthy(alias) { alias.cloned().unwrap() } else { Value::Null },
+            "hostKeyAlias": alias.filter(|a| truthy(Some(a))).cloned().unwrap_or(Value::Null),
         });
         let c = get(input, "command").map_or_else(|| "xenonet".to_string(), js_string);
         if !command_ok(&c) {
@@ -200,7 +202,9 @@ pub fn host_entry(input: &Value, now: f64, check: &mut dyn FnMut(&Value) -> Resu
 // Nothing of an ssh block may hold a line break, whatever passed before.
 fn one_line(h: &Value) -> bool {
     let ssh = &h["ssh"];
-    [&h["id"], &ssh["hostname"], &ssh["user"], &ssh["port"], &ssh["identity"], &ssh["knownHosts"], &ssh["hostKeyAlias"]].iter().all(|v| !js_string(v).contains(['\n', '\r', '\u{2028}', '\u{2029}', '\0']))
+    [&h["id"], &ssh["hostname"], &ssh["user"], &ssh["port"], &ssh["identity"], &ssh["knownHosts"], &ssh["hostKeyAlias"]]
+        .iter()
+        .all(|v| !js_string(v).contains(['\n', '\r', '\u{2028}', '\u{2029}', '\0']))
 }
 
 /// XenoNet's own ssh config, a Host block per ssh host, named by its id.
@@ -267,9 +271,9 @@ pub fn prepare(doc: &Value, now: f64, check: &mut dyn FnMut(&Value) -> bool) -> 
     if let Some(Value::Array(hosts)) = doc.get("hosts") {
         for h in hosts {
             let id = h.get("id").and_then(Value::as_str);
-            let ok = check(h) && id.is_some_and(|i| !seen.iter().any(|s| s == i));
-            if ok {
-                seen.push(id.unwrap().to_string());
+            let ok = if check(h) { id.filter(|i| !seen.iter().any(|s| s == i)) } else { None };
+            if let Some(id) = ok {
+                seen.push(id.to_string());
                 kept.push(h.clone());
             } else {
                 dropped.push(id.filter(|i| is_host_id(i)).map_or_else(|| "(no id)".to_string(), String::from));
@@ -336,6 +340,7 @@ pub fn learn(entry: &Value, key: Option<&Value>, name: Option<&Value>) -> Value 
 mod tests {
     use super::*;
 
+    #[expect(clippy::unnecessary_wraps, reason = "host_entry's check, which may refuse")]
     fn ok(_: &Value) -> Result<(), String> {
         Ok(())
     }

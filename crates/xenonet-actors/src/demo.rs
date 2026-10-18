@@ -158,7 +158,7 @@ impl Demo {
 
     fn play<H: Host + Resolve>(&mut self, actors: &mut Actors, id: &str, when: f64, host: &mut H) -> Result<Value> {
         let script = self.scripts[id].as_array().cloned().unwrap_or_default();
-        let slot = self.at.iter_mut().find(|(k, _)| k == id).unwrap();
+        let slot = self.at.iter_mut().find(|(k, _)| k == id).expect("each turn's actor has a script");
         let step = script[slot.1 % script.len()].clone();
         slot.1 += 1;
         if !Self::playing(actors, id) {
@@ -223,7 +223,7 @@ impl Demo {
         let defs = demo_actors(host);
         let store = actors.store.clone();
         store.transaction(|| -> Result<()> {
-            for d in defs.as_array().unwrap() {
+            for d in defs.as_array().into_iter().flatten() {
                 actors.upsert(&with_at(d, now - history), host)?;
             }
             let longest = demo.scripts.as_object().map_or(0, |o| o.values().map(|s| s.as_array().map_or(0, Vec::len)).max().unwrap_or(0));

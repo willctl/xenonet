@@ -21,13 +21,14 @@
 //! already running (`Call::share`) waits for that one's answer, as JS's
 //! shared promises do.
 
+use crate::js::{is_integer, template, truthy};
 use crate::re;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 use xenonet_base::json::number_string;
 use xenonet_base::paths::normalize_posix;
-use crate::js::{is_integer, template, truthy};
+use xenonet_base::sync::Locked;
 use xenonet_base::text::{js_number, js_string, js_trim};
 
 const TABLE_MS: f64 = 1500.0;
@@ -67,7 +68,7 @@ pub struct Call {
 
 impl Call {
     pub fn new(file: &str, args: &[&str]) -> Self {
-        Call { file: file.into(), args: args.iter().map(|s| s.to_string()).collect(), share: None }
+        Call { file: file.into(), args: args.iter().map(ToString::to_string).collect(), share: None }
     }
     fn shared(mut self, key: String) -> Self {
         self.share = Some(key);
@@ -483,6 +484,13 @@ fn listed(pids: &[Value], min: f64) -> Vec<f64> {
     out
 }
 
+// A bundle id's read: under way while plutil runs, then what it read
+// (None when it couldn't).
+enum BundleRead {
+    Asked,
+    Settled(Option<String>),
+}
+
 #[derive(Default)]
 struct State {
     table: Option<Arc<Table>>,
@@ -496,8 +504,8 @@ struct State {
     // Each process's executable, by pid, start time and program.
     executables: HashMap<String, String>,
     // The bundle id of each Hermes.app, Grok Bot.app and Muse.app, by its
-    // folder: asked (None while plutil runs), and settled.
-    bundle_reads: HashMap<String, Option<Option<String>>>,
+    // folder: asked, and settled.
+    bundle_reads: HashMap<String, BundleRead>,
     bundle_ids: HashMap<String, Option<String>>,
 }
 
@@ -515,7 +523,7 @@ impl Procs {
     }
 
     fn s(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner())
+        self.state.locked()
     }
 
     /// The process table, shared for TABLE_MS.
@@ -657,7 +665,7 @@ impl Procs {
             s.bundle_reads.clear();
             s.bundle_ids.clear();
         }
-        s.bundle_reads.insert(bundle.to_string(), None);
+        s.bundle_reads.insert(bundle.to_string(), BundleRead::Asked);
         Some(Self::plutil(bundle))
     }
 
@@ -670,7 +678,7 @@ impl Procs {
         let id = answer.ok().map(|out| js_trim(&out).to_string()).filter(|s| !s.is_empty());
         let mut s = self.s();
         if let Some(slot) = s.bundle_reads.get_mut(bundle) {
-            *slot = Some(id.clone());
+            *slot = BundleRead::Settled(id.clone());
         }
         s.bundle_ids.insert(bundle.to_string(), id.clone());
         id
@@ -682,8 +690,8 @@ impl Procs {
         let call = {
             let mut s = self.s();
             match s.bundle_reads.get(bundle) {
-                Some(Some(id)) => return id.clone(),
-                Some(None) => Self::plutil(bundle),
+                Some(BundleRead::Settled(id)) => return id.clone(),
+                Some(BundleRead::Asked) => Self::plutil(bundle),
                 None => Self::begin_bundle(&mut s, bundle).expect("not read yet"),
             }
         };
@@ -782,7 +790,7 @@ impl Procs {
         // And those under way elsewhere, once they're done.
         let waiting: Vec<(String, Call)> = {
             let s = self.s();
-            bundles.iter().filter(|b| matches!(s.bundle_reads.get(*b), Some(None))).map(|b| (b.clone(), Self::plutil(b))).collect()
+            bundles.iter().filter(|b| matches!(s.bundle_reads.get(*b), Some(BundleRead::Asked))).map(|b| (b.clone(), Self::plutil(b))).collect()
         };
         self.settle_all(io, waiting);
         let fresh: Vec<Row> = {
@@ -943,7 +951,8 @@ mod tests {
         assert_eq!(t.len(), 1);
         assert_eq!(t.get(510.0).unwrap().start, 1_791_045_269_000.0);
         assert_eq!(parse_ps("  702     1 Sun Foo  1 07:30:00 2026 /bin/sh\n").get(702.0).unwrap().start, 0.0);
-        let row = "tcp4       0      0  127.0.0.1.51000        127.0.0.1.47842        ESTABLISHED    111   2970  406912  146988 node:4242            00102 00000104 0000000003bca9cb";
+        let row =
+            "tcp4       0      0  127.0.0.1.51000        127.0.0.1.47842        ESTABLISHED    111   2970  406912  146988 node:4242            00102 00000104 0000000003bca9cb";
         assert_eq!(parse_netstat(row, "47842", "51000"), Some(4242.0));
         assert_eq!(parse_netstat(row, "47842", "52000"), None);
     }

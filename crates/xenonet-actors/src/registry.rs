@@ -114,12 +114,7 @@ pub fn node_kind(id: &str) -> Option<&'static str> {
     if app_of_session(id).is_some() {
         return Some("session");
     }
-    for k in ["project", "zone", "native"] {
-        if id.strip_prefix(k).is_some_and(|r| r.starts_with(':')) {
-            return Some(k);
-        }
-    }
-    None
+    ["project", "zone", "native"].into_iter().find(|k| id.strip_prefix(k).is_some_and(|r| r.starts_with(':')))
 }
 
 fn node_kind_of(v: &Value) -> Option<&'static str> {
@@ -270,10 +265,14 @@ pub struct Waiting {
     pub until: f64,
 }
 
+/// Who started which sessions: each listed actor's name by its id, and
+/// the starts.
+pub type Started = (Vec<(String, Value)>, Vec<Value>);
+
 pub struct Actors {
     pub store: Shared,
     pub demo: bool,
-    actors: Vec<Actor>,
+    all: Vec<Actor>,
     pub waiting: Vec<Waiting>,
     last_list: Option<String>,
     changed: bool,
@@ -284,7 +283,7 @@ pub struct Actors {
 impl Actors {
     /// The actors kept in `store`, and you, if only as a placeholder.
     pub fn new(store: Shared, demo: bool, host: &mut dyn Host) -> Result<Self> {
-        let mut a = Actors { store, demo, actors: Vec::new(), waiting: Vec::new(), last_list: None, changed: false, emits: Vec::new(), you: You::default() };
+        let mut a = Actors { store, demo, all: Vec::new(), waiting: Vec::new(), last_list: None, changed: false, emits: Vec::new(), you: You::default() };
         a.load()?;
         let via: Vec<Arg> = if demo { vec!["demo".into(), "observed".into()] } else { vec!["observed".into()] };
         a.upsert(
@@ -315,11 +314,11 @@ impl Actors {
     }
 
     fn get(&self, id: &str) -> Option<&Actor> {
-        self.actors.iter().find(|a| a.id == id)
+        self.all.iter().find(|a| a.id == id)
     }
 
     fn get_mut(&mut self, id: &str) -> Option<&mut Actor> {
-        self.actors.iter_mut().find(|a| a.id == id)
+        self.all.iter_mut().find(|a| a.id == id)
     }
 
     fn need(&self, id: &str) -> Result<&Actor> {
@@ -327,7 +326,7 @@ impl Actors {
     }
 
     fn need_index(&self, id: &str) -> Result<usize> {
-        self.actors.iter().position(|a| a.id == id).ok_or_else(|| Fail::Error(format!("no actor {id}")))
+        self.all.iter().position(|a| a.id == id).ok_or_else(|| Fail::Error(format!("no actor {id}")))
     }
 
     // ---------- what the API asks of an actor ----------
@@ -336,7 +335,7 @@ impl Actors {
         self.get(id).is_some()
     }
     pub fn ids(&self) -> Vec<String> {
-        self.actors.iter().map(|a| a.id.clone()).collect()
+        self.all.iter().map(|a| a.id.clone()).collect()
     }
     pub fn presence(&self, id: &str) -> Option<String> {
         self.get(id).map(|a| a.presence.clone())
@@ -396,11 +395,11 @@ impl Actors {
         })
     }
     pub fn registered_count(&self) -> usize {
-        self.actors.iter().filter(|a| a.allowed_at.is_some() && a.has_via("registered") && !a.has_via("demo")).count()
+        self.all.iter().filter(|a| a.allowed_at.is_some() && a.has_via("registered") && !a.has_via("demo")).count()
     }
     /// The actors of a product (by its id; None for undefined).
     pub fn of_product(&self, product: Option<&Value>) -> Vec<String> {
-        self.actors.iter().filter(|a| a.product.get("id") == product).map(|a| a.id.clone()).collect()
+        self.all.iter().filter(|a| a.product.get("id") == product).map(|a| a.id.clone()).collect()
     }
     pub fn is_remote(&self, id: &str) -> bool {
         self.get(id).is_some_and(|a| a.has_via("remote"))
@@ -416,11 +415,16 @@ impl Actors {
     /// by name), for the tests that look in.
     pub fn records(&self) -> Value {
         Value::Array(
-            self.actors
+            self.all
                 .iter()
                 .map(|a| {
-                    let instances: Vec<Value> = a.instances.iter().map(|(n, i)| json!([n, { "presence": i.presence, "at": number(i.at), "heartbeatMs": opt(i.heartbeat_ms), "pid": opt(i.pid) }])).collect();
-                    let targets: Vec<Value> = a.targets.iter().map(|(k, t)| json!([k, { "id": t.id, "relation": t.relation, "since": number(t.since), "lastAt": number(t.last_at) }])).collect();
+                    let instances: Vec<Value> = a
+                        .instances
+                        .iter()
+                        .map(|(n, i)| json!([n, { "presence": i.presence, "at": number(i.at), "heartbeatMs": opt(i.heartbeat_ms), "pid": opt(i.pid) }]))
+                        .collect();
+                    let targets: Vec<Value> =
+                        a.targets.iter().map(|(k, t)| json!([k, { "id": t.id, "relation": t.relation, "since": number(t.since), "lastAt": number(t.last_at) }])).collect();
                     json!({ "id": a.id, "slug": a.slug, "presence": a.presence, "status": a.status, "pid": opt(a.pid), "cwd": a.cwd, "instances": instances, "targets": targets })
                 })
                 .collect(),
@@ -493,9 +497,9 @@ impl Actors {
                 let name = if id == YOU { "window" } else { "main" };
                 a.instances.push((name.into(), Instance { presence: a.presence.clone(), at: last, heartbeat_ms: a.heartbeat_ms, pid: None, restored: true, lease_ms: lease }));
             }
-            match self.actors.iter_mut().find(|x| x.id == id) {
+            match self.all.iter_mut().find(|x| x.id == id) {
                 Some(slot) => *slot = a,
-                None => self.actors.push(a),
+                None => self.all.push(a),
             }
         }
         Ok(())
@@ -526,15 +530,15 @@ impl Actors {
     }
 
     fn save(&mut self, i: usize) -> Result<()> {
-        let row = Self::row(&self.actors[i]);
+        let row = Self::row(&self.all[i]);
         self.store.with(|s| s.save_actor(&row))?;
-        self.actors[i].dirty = false;
+        self.all[i].dirty = false;
         Ok(())
     }
 
     // Rows that only heard a heartbeat are written on the clock.
     fn flush(&mut self) -> Result<()> {
-        let dirty: Vec<usize> = (0..self.actors.len()).filter(|&i| self.actors[i].dirty).collect();
+        let dirty: Vec<usize> = (0..self.all.len()).filter(|&i| self.all[i].dirty).collect();
         if dirty.is_empty() {
             return Ok(());
         }
@@ -554,12 +558,10 @@ impl Actors {
     /// enabled, at). Only you are human.
     pub fn upsert(&mut self, def: &Arg, host: &mut dyn Host) -> Result<()> {
         let id_arg = def.field("id");
-        let id = id_arg.as_str().map(str::to_string);
-        let parsed = id.as_deref().and_then(parse_actor_id).map(|(h, s)| (h.is_some(), s.to_string()));
-        let Some((elsewhere, slug)) = parsed else {
+        let parsed = id_arg.as_str().and_then(|id| parse_actor_id(id).map(|(h, s)| (id.to_string(), h.is_some(), s.to_string())));
+        let Some((id, elsewhere, slug)) = parsed else {
             return err(format!("not an actor id of this machine: {}", xenonet_engine::store::js_text(&id_arg)));
         };
-        let id = id.unwrap();
         if elsewhere {
             return err(format!("not an actor id of this machine: {id}"));
         }
@@ -575,7 +577,7 @@ impl Actors {
             a => a.as_f64().unwrap_or(f64::NAN),
         };
         if self.get(&id).is_none() {
-            self.actors.push(Actor {
+            self.all.push(Actor {
                 id: id.clone(),
                 slug: slug.clone(),
                 kind: kind.clone(),
@@ -610,7 +612,7 @@ impl Actors {
             });
         }
         let i = self.need_index(&id)?;
-        let a = &mut self.actors[i];
+        let a = &mut self.all[i];
         a.kind = kind;
         a.name = def.field("name").to_json();
         a.product = match def.field("product") {
@@ -647,10 +649,10 @@ impl Actors {
     /// it changed.
     pub fn add_via(&mut self, id: &str, v: &str) -> Result<()> {
         let i = self.need_index(id)?;
-        if self.actors[i].has_via(v) {
+        if self.all[i].has_via(v) {
             return Ok(());
         }
-        self.actors[i].via.push(v.into());
+        self.all[i].via.push(v.into());
         self.save(i)?;
         self.mark_changed();
         Ok(())
@@ -658,10 +660,10 @@ impl Actors {
 
     pub fn drop_via(&mut self, id: &str, v: &str) -> Result<()> {
         let i = self.need_index(id)?;
-        if !self.actors[i].has_via(v) {
+        if !self.all[i].has_via(v) {
             return Ok(());
         }
-        self.actors[i].via.retain(|x| x != v);
+        self.all[i].via.retain(|x| x != v);
         self.save(i)?;
         self.mark_changed();
         Ok(())
@@ -675,7 +677,8 @@ impl Actors {
             return Ok(());
         }
         let next = if truthy(Some(remote)) {
-            let mut transports: Vec<String> = remote.get("transports").and_then(Value::as_array).map(|t| t.iter().map(|x| xenonet_engine::js::template(Some(x))).collect()).unwrap_or_default();
+            let mut transports: Vec<String> =
+                remote.get("transports").and_then(Value::as_array).map(|t| t.iter().map(|x| xenonet_engine::js::template(Some(x))).collect()).unwrap_or_default();
             transports.sort_by(|x, y| xenonet_engine::js::utf16_cmp(x, y));
             transports.dedup();
             Some(json!({
@@ -709,7 +712,7 @@ impl Actors {
     pub fn remove(&mut self, id: &str) -> Result<()> {
         let slug = self.need(id)?.slug.clone();
         self.store.with(|s| s.remove_actor(Arg::text(slug)))?;
-        self.actors.retain(|a| a.id != id);
+        self.all.retain(|a| a.id != id);
         self.waiting.retain(|w| w.actor != id);
         self.mark_changed();
         Ok(())
@@ -718,11 +721,11 @@ impl Actors {
     /// Your record deleted at once, when you turn off "Show me on the map".
     pub fn forget_you(&mut self) -> Result<()> {
         let i = self.need_index(YOU)?;
-        let slug = self.actors[i].slug.clone();
+        let slug = self.all[i].slug.clone();
         let store = self.store.clone();
         store.transaction(|| -> Result<()> {
             self.store.with(|s| s.forget_actor(Arg::text(&slug)))?;
-            let a = &mut self.actors[i];
+            let a = &mut self.all[i];
             a.instances.clear();
             a.targets.clear();
             a.presence = "unknown".into();
@@ -753,14 +756,14 @@ impl Actors {
     pub fn unregister(&mut self, id: &str, revoked: bool) -> Result<bool> {
         let i = self.need_index(id)?;
         if revoked {
-            self.actors[i].via.retain(|v| v != "remote");
+            self.all[i].via.retain(|v| v != "remote");
         }
-        let a = &self.actors[i];
+        let a = &self.all[i];
         let observed = !a.has_via("demo") && a.via.iter().any(|v| v == "observed" || v == "attributed");
         if !observed && !a.has_via("remote") {
             return Ok(true);
         }
-        let a = &mut self.actors[i];
+        let a = &mut self.all[i];
         a.via.retain(|v| v != "registered");
         a.allowed_at = None;
         a.pid = None;
@@ -773,10 +776,10 @@ impl Actors {
     /// A new token for an actor, given from the window now.
     pub fn allow(&mut self, id: &str, at: f64) -> Result<()> {
         let i = self.need_index(id)?;
-        if self.actors[i].allowed_at == Some(at) {
+        if self.all[i].allowed_at == Some(at) {
             return Ok(());
         }
-        self.actors[i].allowed_at = Some(at);
+        self.all[i].allowed_at = Some(at);
         self.save(i)?;
         self.mark_changed();
         Ok(())
@@ -784,7 +787,7 @@ impl Actors {
 
     pub fn set_enabled(&mut self, id: &str, on: bool) -> Result<()> {
         let i = self.need_index(id)?;
-        self.actors[i].enabled = on;
+        self.all[i].enabled = on;
         self.save(i)?;
         self.mark_changed();
         Ok(())
@@ -792,10 +795,10 @@ impl Actors {
 
     pub fn set_installed(&mut self, id: &str, installed: bool) -> Result<()> {
         let i = self.need_index(id)?;
-        if self.actors[i].installed == Some(installed) {
+        if self.all[i].installed == Some(installed) {
             return Ok(());
         }
-        self.actors[i].installed = Some(installed);
+        self.all[i].installed = Some(installed);
         self.mark_changed();
         Ok(())
     }
@@ -828,7 +831,7 @@ impl Actors {
         while i > 0 {
             i -= 1;
             let w = &self.waiting[i];
-            if at >= w.until || !self.actors.iter().any(|a| a.id == w.actor) {
+            if at >= w.until || !self.all.iter().any(|a| a.id == w.actor) {
                 self.waiting.remove(i);
             }
         }
@@ -845,7 +848,7 @@ impl Actors {
     /// The process a registered actor said it runs as when it registered.
     pub fn watch_pid(&mut self, id: &str, pid: &Arg) -> Result<()> {
         let i = self.need_index(id)?;
-        self.actors[i].pid = pid.as_f64().filter(|p| p.is_finite() && p.trunc() == *p && *p > 1.0);
+        self.all[i].pid = pid.as_f64().filter(|p| p.is_finite() && p.trunc() == *p && *p > 1.0);
         Ok(())
     }
 
@@ -864,7 +867,7 @@ impl Actors {
             Arg::Undef => host.now(),
             v => v.as_f64().unwrap_or(f64::NAN),
         };
-        let a = &mut self.actors[i];
+        let a = &mut self.all[i];
         // A presence kept across a restart gives way to the first source
         // that speaks: the same instance carries on from it, and any other
         // replaces it.
@@ -900,7 +903,7 @@ impl Actors {
                 }
             }
         }
-        let inst = &mut a.instances.iter_mut().find(|(n, _)| *n == instance).unwrap().1;
+        let inst = &mut a.instances.iter_mut().find(|(n, _)| *n == instance).expect("added above when it wasn't there").1;
         if presence != Arg::Undef {
             inst.presence = xenonet_engine::store::js_text(&presence);
         }
@@ -984,7 +987,7 @@ impl Actors {
 
     // A change of presence is an event, and its time is presenceSince.
     fn settle(&mut self, i: usize, at: f64, via: &Arg, _host: &mut dyn Host) -> Result<()> {
-        let a = &mut self.actors[i];
+        let a = &mut self.all[i];
         let t = js_max(at, a.settled_at.unwrap_or(f64::NEG_INFINITY));
         a.settled_at = Some(t);
         let p = Self::presence_of(a, t);
@@ -1002,11 +1005,11 @@ impl Actors {
     // looks like it holds a key never gets in.
     fn set_status_line(&mut self, i: usize, text: &Arg, via: &Arg, at: f64, target: &Value) -> Result<()> {
         let Ok(line) = status_line(Some(&text.to_json_keep_undef())) else { return Ok(()) };
-        if line == self.actors[i].status {
+        if line == self.all[i].status {
             return Ok(());
         }
-        let a = &mut self.actors[i];
-        a.status = line.clone();
+        let a = &mut self.all[i];
+        a.status.clone_from(&line);
         a.status_at = Some(at);
         // A status cleared isn't news.
         if let Some(l) = line {
@@ -1048,8 +1051,8 @@ impl Actors {
             let event = if kind == "status" {
                 let line = status_line(Some(&status.to_json_keep_undef())).ok().flatten().filter(|l| !l.is_empty());
                 let Some(line) = line else { return err("a status event needs a line of its own") };
-                self.actors[i].status = Some(line.clone());
-                self.actors[i].status_at = Some(at);
+                self.all[i].status = Some(line.clone());
+                self.all[i].status_at = Some(at);
                 self.event(i, &kind, &target, Some(line), &via, at, Some(&facts), r.clone())?
             } else {
                 let at_where = self.where_of(&target, host);
@@ -1070,7 +1073,7 @@ impl Actors {
             // while after it; an observed one is whatever its observer sees.
             if ACTIONS.contains(&kind.as_str()) && event.get("via").and_then(Value::as_str) == Some("registered") {
                 let now = host.now();
-                let a = &mut self.actors[i];
+                let a = &mut self.all[i];
                 a.acted_at = Some(js_max(a.acted_at.unwrap_or(0.0), js_min(at, now)));
             }
             self.settle(i, at, &via, host)?;
@@ -1080,9 +1083,9 @@ impl Actors {
         Ok(event)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "the JS's event and what it records, one argument each")]
     fn event(&mut self, i: usize, kind: &str, target: &Value, detail: Option<String>, via: &Arg, at: f64, facts: Option<&Value>, r: Arg) -> Result<Value> {
-        let a = &mut self.actors[i];
+        let a = &mut self.all[i];
         a.seq += 1.0;
         let via = if via.is_nullish() { a.via.iter().find(|v| *v != "demo").cloned().unwrap_or_else(|| "observed".into()) } else { xenonet_engine::store::js_text(via) };
         let detail = detail.map(|d| clip(&d, 200));
@@ -1112,7 +1115,7 @@ impl Actors {
         ]);
         self.store.with(|s| s.add_actor_event(&row))?;
         self.save(i)?;
-        let a = &mut self.actors[i];
+        let a = &mut self.all[i];
         // Newest last, whatever order they came in.
         let mut k = a.recent.len();
         while k > 0 && a.recent[k - 1].get("at").and_then(Value::as_f64).is_some_and(|t| t > at) {
@@ -1123,7 +1126,7 @@ impl Actors {
             let extra = a.recent.len() - RECENT as usize;
             a.recent.drain(0..extra);
         }
-        if self.is_public(&self.actors[i].id) {
+        if self.is_public(&self.all[i].id) {
             self.emits.push(("event", event.clone()));
         }
         Ok(event)
@@ -1141,11 +1144,11 @@ impl Actors {
             return json!({ "kind": k });
         }
         if d.get("kind").and_then(Value::as_str) == Some("session") {
-            let place = d.get("place").filter(|p| !p.is_null()).map(|p| Value::String(place_name(&xenonet_engine::js::template(Some(p)), Some("project")))).unwrap_or(Value::Null);
+            let place = d.get("place").filter(|p| !p.is_null()).map_or(Value::Null, |p| Value::String(place_name(&xenonet_engine::js::template(Some(p)), Some("project"))));
             return json!({ "kind": "session", "app": d.get("app").cloned().filter(|a| !a.is_null()).unwrap_or(Value::Null), "place": place });
         }
         let kind = d.get("kind").cloned().unwrap_or(Value::Null);
-        let name = d.get("name").filter(|p| !p.is_null()).map(|n| Value::String(place_name(&xenonet_engine::js::template(Some(n)), kind.as_str()))).unwrap_or(Value::Null);
+        let name = d.get("name").filter(|p| !p.is_null()).map_or(Value::Null, |n| Value::String(place_name(&xenonet_engine::js::template(Some(n)), kind.as_str())));
         json!({ "kind": kind, "name": name, "place": name })
     }
 
@@ -1164,7 +1167,7 @@ impl Actors {
 
     pub fn untarget(&mut self, id: &str, node: &str, relation: &str) -> Result<()> {
         let i = self.need_index(id)?;
-        if self.actors[i].drop_target(&format!("{relation}|{node}")).is_some() {
+        if self.all[i].drop_target(&format!("{relation}|{node}")).is_some() {
             self.store.with(|s| s.drop_actor_target(Arg::text(id), Arg::text(node), Arg::text(relation)))?;
         }
         self.mark_changed();
@@ -1173,7 +1176,7 @@ impl Actors {
 
     fn touch(&mut self, i: usize, node: &str, relation: &str, at: f64) -> Result<()> {
         let key = format!("{relation}|{node}");
-        let a = &mut self.actors[i];
+        let a = &mut self.all[i];
         let t = match a.target_mut(&key) {
             Some(t) => {
                 t.since = js_min(t.since, at);
@@ -1187,9 +1190,15 @@ impl Actors {
             }
         };
         let actor = a.id.clone();
-        let row = Arg::Obj(vec![("actor".into(), Arg::text(&actor)), ("target".into(), Arg::text(node)), ("relation".into(), Arg::text(relation)), ("since".into(), Arg::Num(t.since)), ("last_at".into(), Arg::Num(t.last_at))]);
+        let row = Arg::Obj(vec![
+            ("actor".into(), Arg::text(&actor)),
+            ("target".into(), Arg::text(node)),
+            ("relation".into(), Arg::text(relation)),
+            ("since".into(), Arg::Num(t.since)),
+            ("last_at".into(), Arg::Num(t.last_at)),
+        ]);
         self.store.with(|s| s.save_actor_target(&row))?;
-        let a = &mut self.actors[i];
+        let a = &mut self.all[i];
         if a.targets.len() > TARGETS_KEPT {
             let mut order: Vec<(usize, f64)> = a.targets.iter().enumerate().map(|(j, (_, t))| (j, t.last_at)).collect();
             order.sort_by(|x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -1260,7 +1269,7 @@ impl Actors {
                 &own
             }
         };
-        let a = self.get(id).unwrap().clone();
+        let Some(a) = self.get(id).cloned() else { return Ok(Value::Null) };
         let mut targets: Vec<&Target> = Vec::new();
         for (_, t) in &a.targets {
             if now - t.last_at < DAY_MS && Self::known(t, now, host) {
@@ -1268,7 +1277,8 @@ impl Actors {
             }
         }
         targets.sort_by(|x, y| y.last_at.partial_cmp(&x.last_at).unwrap_or(std::cmp::Ordering::Equal));
-        let targets: Vec<Value> = targets.into_iter().take(TARGETS_SHOWN).map(|t| json!({ "id": t.id, "relation": t.relation, "since": number(t.since), "lastAt": number(t.last_at) })).collect();
+        let targets: Vec<Value> =
+            targets.into_iter().take(TARGETS_SHOWN).map(|t| json!({ "id": t.id, "relation": t.relation, "since": number(t.since), "lastAt": number(t.last_at) })).collect();
         let mut o = Map::new();
         o.insert("schema".into(), json!("actor/snapshot/v1"));
         o.insert("id".into(), json!(a.id));
@@ -1315,8 +1325,8 @@ impl Actors {
 
     /// Who started which sessions, for what each actor's work costs:
     /// `names` (each listed actor's name by its id) and `starts`.
-    pub fn sessions_started(&self, now: f64) -> Result<(Vec<(String, Value)>, Vec<Value>)> {
-        let names: Vec<(String, Value)> = self.actors.iter().filter(|a| self.is_public(&a.id) && Self::listed(a, now)).map(|a| (a.id.clone(), a.name.clone())).collect();
+    pub fn sessions_started(&self, now: f64) -> Result<Started> {
+        let names: Vec<(String, Value)> = self.all.iter().filter(|a| self.is_public(&a.id) && Self::listed(a, now)).map(|a| (a.id.clone(), a.name.clone())).collect();
         let has = |id: &str| names.iter().any(|(n, _)| n == id);
         let mut starts = Vec::new();
         for r in self.store.with(|s| s.actor_spawns(Arg::Num(now - WEEK_MS)))? {
@@ -1326,7 +1336,7 @@ impl Actors {
             }
         }
         for (id, _) in &names {
-            let a = self.get(id).unwrap();
+            let Some(a) = self.get(id) else { continue };
             let via = if a.has_via("registered") { "registered".to_string() } else { Self::source(a) };
             for (_, t) in &a.targets {
                 if t.relation == "spawned" && node_kind(&t.id) == Some("session") {
@@ -1410,9 +1420,9 @@ impl Actors {
         let via = if *via == Arg::Undef { Arg::text("registered") } else { via.clone() };
         let store = self.store.clone();
         store.transaction(|| self.set_status_line(i, &text, &via, at, &Value::Null))?;
-        self.actors[i].dirty = true;
+        self.all[i].dirty = true;
         self.mark_changed();
-        Ok(Ok(self.actors[i].status.clone().map_or(Value::Null, Value::String)))
+        Ok(Ok(self.all[i].status.clone().map_or(Value::Null, Value::String)))
     }
 
     /// A message an actor sent through the engine: a said event in
@@ -1432,7 +1442,13 @@ impl Actors {
         };
         let store = self.store.clone();
         let event = store.transaction(|| -> Result<Value> {
-            let o = Arg::Obj(vec![("kind".into(), Arg::text("said")), ("target".into(), value_arg(&target)), ("count".into(), Arg::Num(to.len() as f64)), ("via".into(), Arg::text("registered")), ("at".into(), Arg::Num(at))]);
+            let o = Arg::Obj(vec![
+                ("kind".into(), Arg::text("said")),
+                ("target".into(), value_arg(&target)),
+                ("count".into(), Arg::Num(to.len() as f64)),
+                ("via".into(), Arg::text("registered")),
+                ("at".into(), Arg::Num(at)),
+            ]);
             let event = self.record(from, &o, host)?;
             let i = self.need_index(from)?;
             for s in &sessions {
@@ -1445,7 +1461,7 @@ impl Actors {
 
     /// The actors the engine counts among the agents at work.
     pub fn engine_ids(&self, since: f64, now: f64) -> Vec<String> {
-        self.actors
+        self.all
             .iter()
             .filter(|a| a.id != YOU && a.last_seen.is_some_and(|l| l >= since) && ["working", "idle", "away"].contains(&a.presence.as_str()) && Self::listed(a, now))
             .map(|a| a.id.clone())
@@ -1456,7 +1472,7 @@ impl Actors {
     pub fn tokens(&self, now: f64) -> Result<Vec<Value>> {
         let rows = self.store.with(|s| s.actor_token_times())?;
         let row = |slug: &str| rows.iter().rev().find(|r| r.get("slug").and_then(Value::as_str) == Some(slug));
-        let mut list: Vec<&Actor> = self.actors.iter().filter(|a| a.id != YOU && self.is_registered(&a.id)).collect();
+        let mut list: Vec<&Actor> = self.all.iter().filter(|a| a.id != YOU && self.is_registered(&a.id)).collect();
         list.sort_by(|x, y| x.created_at.partial_cmp(&y.created_at).unwrap_or(std::cmp::Ordering::Equal));
         Ok(list
             .into_iter()
@@ -1464,19 +1480,30 @@ impl Actors {
                 let r = row(&a.slug);
                 let has_token = r.is_some_and(|r| truthy(r.get("hasToken")));
                 let r_at = r.and_then(|r| r.get("at")).and_then(Value::as_f64);
-                let works = has_token && !token_expired(r_at, now);
-                let used = has_token && r_at.is_some() && a.allowed_at.is_some() && r_at.unwrap() > a.allowed_at.unwrap();
+                // When the token was used, if it still works, and if it was
+                // used since it was allowed.
+                let works_at = r_at.filter(|_| has_token && !token_expired(r_at, now));
+                let works = works_at.is_some();
+                let used_at = r_at.filter(|at| has_token && a.allowed_at.is_some_and(|allowed| *at > allowed));
                 let has_gateway = r.is_some_and(|r| truthy(r.get("hasGateway")));
-                let state = if works { "works" } else if a.allowed_at.is_some() && !has_gateway { "expired" } else { "none" };
+                let state = if works {
+                    "works"
+                } else if a.allowed_at.is_some() && !has_gateway {
+                    "expired"
+                } else {
+                    "none"
+                };
                 let gateway_at = r.and_then(|r| r.get("gatewayAt")).and_then(Value::as_f64);
                 let mut o = Map::new();
                 o.insert("actor".into(), json!(a.id));
                 o.insert("state".into(), json!(state));
-                o.insert("expiresAt".into(), if works { number(r_at.unwrap() + TOKEN_UNUSED_MS) } else { Value::Null });
-                o.insert("usedAt".into(), if used { number(r_at.unwrap()) } else { Value::Null });
-                if has_gateway && !token_expired(gateway_at, now) {
-                    let g = gateway_at.unwrap();
-                    o.insert("gateway".into(), json!({ "state": "works", "expiresAt": number(g + TOKEN_UNUSED_MS), "usedAt": if g > a.allowed_at.unwrap_or(0.0) { number(g) } else { Value::Null } }));
+                o.insert("expiresAt".into(), works_at.map_or(Value::Null, |at| number(at + TOKEN_UNUSED_MS)));
+                o.insert("usedAt".into(), used_at.map_or(Value::Null, number));
+                if let Some(g) = gateway_at.filter(|_| has_gateway && !token_expired(gateway_at, now)) {
+                    o.insert(
+                        "gateway".into(),
+                        json!({ "state": "works", "expiresAt": number(g + TOKEN_UNUSED_MS), "usedAt": if g > a.allowed_at.unwrap_or(0.0) { number(g) } else { Value::Null } }),
+                    );
                 }
                 Value::Object(o)
             })
@@ -1488,11 +1515,12 @@ impl Actors {
     pub fn list(&mut self, view: &str, now: Option<f64>, host: &mut dyn Host) -> Result<Value> {
         let now = now.unwrap_or_else(|| host.now());
         let counts = self.counts(now)?;
-        let mut shown: Vec<(String, bool, f64, f64)> = self.actors.iter().filter(|a| Self::listed(a, now)).map(|a| (a.id.clone(), a.id == YOU, a.last_seen.unwrap_or(0.0), a.created_at)).collect();
+        let mut shown: Vec<(String, bool, f64, f64)> =
+            self.all.iter().filter(|a| Self::listed(a, now)).map(|a| (a.id.clone(), a.id == YOU, a.last_seen.unwrap_or(0.0), a.created_at)).collect();
         if shown.len() > LIST_MAX {
             let mut by_seen = shown.clone();
             by_seen.sort_by(|x, y| {
-                let you = (y.1 as i32) - (x.1 as i32);
+                let you = i32::from(y.1) - i32::from(x.1);
                 if you != 0 {
                     return you.cmp(&0);
                 }
@@ -1509,7 +1537,7 @@ impl Actors {
             shown.retain(|s| keep.contains(&s.0));
         }
         shown.sort_by(|x, y| {
-            let you = (y.1 as i32) - (x.1 as i32);
+            let you = i32::from(y.1) - i32::from(x.1);
             if you != 0 {
                 return you.cmp(&0);
             }
@@ -1560,7 +1588,8 @@ impl Actors {
             return Ok(json!({ "schema": "actor/events/v1", "at": number(now), "events": [] }));
         }
         let except = if only.truthy() || view == "window" || self.demo { Arg::Null } else { Arg::text(YOU) };
-        let rows = self.store.with(|s| s.actor_events_since(Arg::Num(from), &Arg::Obj(vec![("limit".into(), Arg::Num(n)), ("only".into(), only.clone()), ("except".into(), except)])))?;
+        let rows =
+            self.store.with(|s| s.actor_events_since(Arg::Num(from), &Arg::Obj(vec![("limit".into(), Arg::Num(n)), ("only".into(), only.clone()), ("except".into(), except)])))?;
         Ok(json!({ "schema": "actor/events/v1", "at": number(now), "events": rows.iter().map(event_of).collect::<Vec<_>>() }))
     }
 
@@ -1571,19 +1600,20 @@ impl Actors {
     pub fn tick(&mut self, now: f64, host: &mut dyn Host) -> Result<()> {
         let store = self.store.clone();
         store.transaction(|| -> Result<()> {
-            for i in 0..self.actors.len() {
+            for i in 0..self.all.len() {
                 self.ended(i, now, host);
                 self.settle(i, now, &Arg::Undef, host)?;
                 if !Self::map_ready(host) {
                     continue;
                 }
-                let gone: Vec<(String, Target)> = self.actors[i].targets.iter().filter(|(_, t)| node_kind(&t.id) == Some("session") && now - t.since >= SESSION_WAIT_MS).cloned().collect();
+                let gone: Vec<(String, Target)> =
+                    self.all[i].targets.iter().filter(|(_, t)| node_kind(&t.id) == Some("session") && now - t.since >= SESSION_WAIT_MS).cloned().collect();
                 for (key, t) in gone {
                     if host.has(&t.id) == Some(true) {
                         continue;
                     }
-                    self.actors[i].drop_target(&key);
-                    let actor = self.actors[i].id.clone();
+                    self.all[i].drop_target(&key);
+                    let actor = self.all[i].id.clone();
                     self.store.with(|s| s.drop_actor_target(Arg::text(actor), Arg::text(&t.id), Arg::text(&t.relation)))?;
                 }
             }
@@ -1595,19 +1625,19 @@ impl Actors {
 
     // The processes an actor named, watched.
     fn ended(&mut self, i: usize, now: f64, host: &mut dyn Host) {
-        let pids: Vec<(usize, f64)> = self.actors[i].instances.iter().enumerate().filter_map(|(j, (_, inst))| inst.pid.filter(|p| *p != 0.0 && !p.is_nan()).map(|p| (j, p))).collect();
+        let pids: Vec<(usize, f64)> = self.all[i].instances.iter().enumerate().filter_map(|(j, (_, inst))| inst.pid.filter(|p| *p != 0.0 && !p.is_nan()).map(|p| (j, p))).collect();
         for (j, pid) in pids {
             if !host.alive(pid) {
-                let inst = &mut self.actors[i].instances[j].1;
+                let inst = &mut self.all[i].instances[j].1;
                 inst.presence = "offline".into();
                 inst.pid = None;
             }
         }
-        let Some(pid) = self.actors[i].pid else { return };
+        let Some(pid) = self.all[i].pid else { return };
         if host.alive(pid) {
             return;
         }
-        let a = &mut self.actors[i];
+        let a = &mut self.all[i];
         a.pid = None;
         if a.instances.is_empty() {
             a.instances.push(("main".into(), Instance { presence: "offline".into(), at: now, heartbeat_ms: a.heartbeat_ms, pid: None, restored: false, lease_ms: None }));
@@ -1621,11 +1651,16 @@ impl Actors {
     pub fn prune(&mut self, now: f64) -> Result<()> {
         self.flush()?;
         self.store.with(|s| s.prune(now))?;
-        let targets: Vec<String> = self.store.with(|s| s.actor_targets())?.iter().map(|t| format!("{}|{}|{}", t.text("actor").unwrap_or(""), t.text("relation").unwrap_or(""), t.text("target").unwrap_or(""))).collect();
-        for i in 0..self.actors.len() {
-            let id = self.actors[i].id.clone();
+        let targets: Vec<String> = self
+            .store
+            .with(|s| s.actor_targets())?
+            .iter()
+            .map(|t| format!("{}|{}|{}", t.text("actor").unwrap_or(""), t.text("relation").unwrap_or(""), t.text("target").unwrap_or("")))
+            .collect();
+        for i in 0..self.all.len() {
+            let id = self.all[i].id.clone();
             let recent: Vec<Value> = self.store.with(|s| s.last_actor_events(Arg::text(&id), Arg::Num(RECENT)))?.iter().map(event_of).collect();
-            let a = &mut self.actors[i];
+            let a = &mut self.all[i];
             a.recent = recent;
             a.targets.retain(|(key, _)| targets.contains(&format!("{id}|{key}")));
             if id == YOU && a.status_at.is_some_and(|t| now - t >= DAY_MS) {
@@ -1651,26 +1686,34 @@ impl Actors {
             if !self.demo {
                 return Ok(Value::Null);
             }
-            let held: Vec<String> = self.actors.iter().filter(|x| x.simulated_offline).map(|x| x.id.clone()).collect();
+            let held: Vec<String> = self.all.iter().filter(|x| x.simulated_offline).map(|x| x.id.clone()).collect();
             for id in held {
-                self.get_mut(&id).unwrap().simulated_offline = false;
+                if let Some(x) = self.get_mut(&id) {
+                    x.simulated_offline = false;
+                }
                 self.report(&id, &Arg::Obj(vec![("instance".into(), Arg::text("main")), ("presence".into(), Arg::text("working"))]), host)?;
             }
-            for i in 0..self.actors.len() {
-                if self.actors[i].needs_you.is_some() {
-                    self.actors[i].needs_you = None;
-                    self.actors[i].dirty = true;
+            for i in 0..self.all.len() {
+                if self.all[i].needs_you.is_some() {
+                    self.all[i].needs_you = None;
+                    self.all[i].dirty = true;
                     self.mark_changed();
                 }
             }
-            let tunnels: Vec<String> = self.actors.iter().filter(|x| x.simulated_remote).map(|x| x.id.clone()).collect();
+            let tunnels: Vec<String> = self.all.iter().filter(|x| x.simulated_remote).map(|x| x.id.clone()).collect();
             for id in tunnels {
-                self.get_mut(&id).unwrap().simulated_remote = false;
+                if let Some(x) = self.get_mut(&id) {
+                    x.simulated_remote = false;
+                }
                 self.set_remote(&id, &Value::Null)?;
             }
             return Ok(json!({ "ok": true, "kind": kind }));
         }
-        let a = if a.is_null() { self.actors.iter().find(|x| x.kind == "agent").map(|x| x.id.clone()).or_else(|| self.demo.then(|| YOU.to_string())) } else { Some(xenonet_engine::js::template(Some(&a))) };
+        let a = if a.is_null() {
+            self.all.iter().find(|x| x.kind == "agent").map(|x| x.id.clone()).or_else(|| self.demo.then(|| YOU.to_string()))
+        } else {
+            Some(xenonet_engine::js::template(Some(&a)))
+        };
         let Some(a) = a else { return Ok(Value::Null) };
         if !self.has(&a) || !self.is_public(&a) {
             return Ok(Value::Null);
@@ -1692,7 +1735,11 @@ impl Actors {
                 let mut b = b;
                 if b.is_null() {
                     let d = if truthy(Some(&session)) { host.describe(&xenonet_engine::js::template(Some(&session))) } else { Value::Null };
-                    b = if d.get("kind").and_then(Value::as_str) == Some("session") { d.get("placeId").filter(|p| !p.is_null()).cloned().unwrap_or(session.clone()) } else { session.clone() };
+                    b = if d.get("kind").and_then(Value::as_str) == Some("session") {
+                        d.get("placeId").filter(|p| !p.is_null()).cloned().unwrap_or(session.clone())
+                    } else {
+                        session.clone()
+                    };
                 }
                 self.record(&a, &rec("edited", &b, true), host)?;
                 Ok(json!({ "ok": true, "kind": kind, "a": a, "b": b }))
@@ -1702,14 +1749,16 @@ impl Actors {
                 Ok(json!({ "ok": true, "kind": kind, "a": a, "b": session }))
             }
             "actor-online" => {
-                self.get_mut(&a).unwrap().simulated_offline = false;
+                if let Some(x) = self.get_mut(&a) {
+                    x.simulated_offline = false;
+                }
                 self.report(&a, &Arg::Obj(vec![("instance".into(), Arg::text("main")), ("presence".into(), Arg::text("working"))]), host)?;
                 Ok(json!({ "ok": true, "kind": kind, "a": a }))
             }
             "actor-offline" => {
                 let demo = self.demo;
                 let now = host.now();
-                let x = self.get_mut(&a).unwrap();
+                let Some(x) = self.get_mut(&a) else { return Ok(Value::Null) };
                 if demo {
                     x.simulated_offline = true;
                 }
@@ -1724,20 +1773,22 @@ impl Actors {
                 Ok(json!({ "ok": true, "kind": kind, "a": a }))
             }
             "actor-tunnel" | "actor-tunnel-down" => {
-                if !self.demo || self.get(&a).unwrap().kind != "agent" {
+                if !self.demo || self.get(&a).is_none_or(|x| x.kind != "agent") {
                     return Ok(Value::Null);
                 }
-                self.get_mut(&a).unwrap().simulated_remote = true;
+                if let Some(x) = self.get_mut(&a) {
+                    x.simulated_remote = true;
+                }
                 let bridge = if kind == "actor-tunnel" { "connected" } else { "not_connected" };
                 self.set_remote(&a, &json!({ "simulated": true, "active": true, "connections": 1, "bridge": bridge, "accountLink": "unverified", "permissions": ["read"], "transports": ["openai-secure-mcp-tunnel"] }))?;
                 Ok(json!({ "ok": true, "kind": kind, "a": a }))
             }
             "actor-needs-you" => {
-                if !self.demo || self.get(&a).unwrap().kind != "agent" {
+                if !self.demo || self.get(&a).is_none_or(|x| x.kind != "agent") {
                     return Ok(Value::Null);
                 }
                 let now = host.now();
-                let x = self.get_mut(&a).unwrap();
+                let Some(x) = self.get_mut(&a) else { return Ok(Value::Null) };
                 x.needs_you = Some(json!({ "kind": "question", "text": "Should the refunds fix go out tonight, or wait for the review?", "since": number(now) }));
                 x.dirty = true;
                 self.mark_changed();
@@ -1763,7 +1814,7 @@ impl Actors {
         Ok(())
     }
 
-    fn you_place_of(&mut self, session: &Value, host: &mut dyn Host) -> Value {
+    fn you_place_of(session: &Value, host: &mut dyn Host) -> Value {
         let d = host.describe(&xenonet_engine::js::template(Some(session)));
         d.get("placeId").filter(|p| !p.is_null()).cloned().unwrap_or(Value::Null)
     }
@@ -1789,13 +1840,20 @@ impl Actors {
         let at_where = self.where_of(&node, host);
         let kind = at_where.get("kind").and_then(Value::as_str).map(str::to_string);
         if at_where.is_null() || !kind.as_deref().is_some_and(|k| crate::you::on(&what, k)) {
-            let k = at_where.get("kind").filter(|k| !k.is_null()).map(|k| xenonet_engine::js::template(Some(k))).unwrap_or_else(|| "node like that".into());
+            let k = at_where.get("kind").filter(|k| !k.is_null()).map_or_else(|| "node like that".into(), |k| xenonet_engine::js::template(Some(k)));
             return Ok(Some(format!("you can't do that to a {k}")));
         }
         let apps = |v: &Arg| matches!(v.as_str(), Some("claude" | "codex"));
         if what == "started" {
             let app = if apps(&d.field("app")) { d.field("app") } else { Arg::text("claude") };
-            let o = Arg::Obj(vec![("kind".into(), Arg::text("spawned")), ("target".into(), value_arg(&node)), ("relation".into(), Arg::text("works-on")), ("app".into(), app), ("via".into(), Arg::text("observed")), ("at".into(), Arg::Num(at))]);
+            let o = Arg::Obj(vec![
+                ("kind".into(), Arg::text("spawned")),
+                ("target".into(), value_arg(&node)),
+                ("relation".into(), Arg::text("works-on")),
+                ("app".into(), app),
+                ("via".into(), Arg::text("observed")),
+                ("at".into(), Arg::Num(at)),
+            ]);
             self.record(YOU, &o, host)?;
             return Ok(None);
         }
@@ -1803,7 +1861,7 @@ impl Actors {
             if !apps(&d.field("to")) {
                 return Ok(Some("a handoff says which app it went to".into()));
             }
-            let place = self.you_place_of(&node, host);
+            let place = Self::you_place_of(&node, host);
             if !truthy(Some(&place)) {
                 return Ok(Some("XenoNet doesn't know where that session lives".into()));
             }
@@ -1820,7 +1878,7 @@ impl Actors {
             self.record(YOU, &o, host)?;
             return Ok(None);
         }
-        let target = if what == "terminal" && kind.as_deref() == Some("session") { self.you_place_of(&node, host) } else { node };
+        let target = if what == "terminal" && kind.as_deref() == Some("session") { Self::you_place_of(&node, host) } else { node };
         let line = crate::detail::console_status(Some(&what), Some(&at_where));
         let (true, Some(line)) = (truthy(Some(&target)), line) else {
             return Ok(Some("XenoNet can't say what that is".into()));
