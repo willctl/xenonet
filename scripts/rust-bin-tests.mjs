@@ -41,16 +41,26 @@ if (!args.includes("--no-build")) cargo(["build", "-p", "xenonet-cli"], { stdio:
 // node --test's TAP summary: # tests, # pass, # fail, # skipped.
 const count = (out, key) => Number(new RegExp(`^# ${key} (\\d+)$`, "m").exec(out)?.[1] ?? 0);
 
+// A test the binary leaves waiting fails after this, as one that times out,
+// unless it sets its own; a file still running after FILE_LIMIT (a hook
+// that never returns) is stopped, so a hang can't hold up the rest.
+const TEST_LIMIT = 180000;
+const FILE_LIMIT = 15 * 60000;
+
 function run(file) {
   return new Promise((resolve) => {
     const env = { ...process.env, XENONET_CLI_BIN: bin, XENONET_SERVICE_BIN: bin };
-    const child = spawn(process.execPath, ["--test", "--test-reporter=tap", file], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, ["--test", "--test-reporter=tap", `--test-timeout=${TEST_LIMIT}`, file], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
+    let stopped = false;
+    const limit = setTimeout(() => ((stopped = true), child.kill("SIGKILL")), FILE_LIMIT);
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (out += d));
     child.on("close", (code) => {
+      clearTimeout(limit);
       const failed = [...out.matchAll(/^\s*not ok \d+ - (.+)$/gm)].map((m) => m[1]);
-      resolve({ file, code, tests: count(out, "tests"), pass: count(out, "pass"), fail: count(out, "fail"), skipped: count(out, "skipped"), failed });
+      if (stopped) failed.push(`(stopped after ${FILE_LIMIT / 60000} minutes)`);
+      resolve({ file, code, tests: count(out, "tests"), pass: count(out, "pass"), fail: count(out, "fail") + (stopped ? 1 : 0), skipped: count(out, "skipped"), failed });
     });
   });
 }
