@@ -176,7 +176,7 @@ mod tests {
         let missing = format!("{d}/nope");
         let e = call("readFileSync", &[Arg::text(&missing), Arg::text("utf8")]).unwrap_err();
         assert_eq!(e.message, format!("ENOENT: no such file or directory, open '{missing}'"));
-        assert_eq!(e.code, Some(serde_json::json!("ENOENT")));
+        assert_eq!(e.code.as_deref(), Some(&serde_json::json!("ENOENT")));
         call("renameSync", &[Arg::text(&f), Arg::text(format!("{d}/y.json"))]).unwrap();
         assert_eq!(dirs(&d).unwrap(), Arg::List(vec![Arg::text("a")]));
         std::fs::remove_dir_all(&d).unwrap();

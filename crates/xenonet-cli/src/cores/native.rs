@@ -251,7 +251,7 @@ mod tests {
         assert_eq!(fs_call("readFileSync", &[Arg::text(f.clone()), Arg::text("utf8")]).unwrap(), Arg::text("{}"));
         assert_eq!(fs_call("existsSync", &[Arg::text(f.clone())]).unwrap(), Arg::Bool(true));
         let gone = fs_call("readFileSync", &[Arg::text(format!("{d}/none")), Arg::text("utf8")]).unwrap_err();
-        assert_eq!(gone.code, Some(Value::String("ENOENT".into())));
+        assert_eq!(gone.code.as_deref(), Some(&Value::String("ENOENT".into())));
         assert!(gone.message.starts_with("ENOENT: no such file or directory, open"));
         let _ = std::fs::remove_dir_all(&dir);
     }
