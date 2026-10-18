@@ -131,6 +131,8 @@ fn serve(args: &[String]) -> i32 {
             xenonet_wire_map::wire(&mut cores, config, env);
             xenonet_wire_engine::wire(&mut cores, config, env);
             xenonet_wire_app::wire(&mut cores, config, env);
+            // The terminal drawer's shells live in the service.
+            cores.terminals = std::sync::Arc::new(xenonet_service::terminals::Shells::new());
             cores
         }),
     )
