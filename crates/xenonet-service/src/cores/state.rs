@@ -205,6 +205,12 @@ pub trait State: Send + Sync {
         pending(M)
     }
     fn stop(&self) {}
+    /// `state.live.sessionCosts(now)`: each session's spend today, as
+    /// `{ id, app, cost, tokens, unpriced }`, for what each actor's work
+    /// cost (core/actors/spend.js).
+    fn session_costs(&self, _now: f64) -> R<Vec<Value>> {
+        pending(M)
+    }
 }
 
 impl State for Pending {}
