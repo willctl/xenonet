@@ -4,6 +4,8 @@
 // already serves left alone, a child tunnel's address learned from its
 // output and started again when it exits.
 
+#![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
+
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -83,7 +85,7 @@ impl TunnelHost for Fake {
         self.ran.lock().unwrap().push(std::iter::once(file.to_string()).chain(args.iter().cloned()).collect());
         let ok = |stdout: String| RunOut { ok: true, stdout, stderr: String::new(), timed_out: false };
         match args.first().map(String::as_str) {
-            Some("version") | Some("--version") => ok(format!("{}\n  tailscale commit: abc\n", self.tools.get(file).cloned().unwrap_or_default())),
+            Some("version" | "--version") => ok(format!("{}\n  tailscale commit: abc\n", self.tools.get(file).cloned().unwrap_or_default())),
             Some("status") => ok(self.status.clone()),
             Some("funnel") if args.get(1).map(String::as_str) == Some("status") => ok(self.conf.lock().unwrap().clone()),
             Some("funnel") => {
@@ -145,7 +147,7 @@ fn each_tool_is_found_on_path_and_where_its_usually_installed() {
     let files = ["/opt/homebrew/bin/ngrok".to_string(), "/usr/local/bin/ngrok".to_string(), onpath.clone()];
     let exists = |f: &str| files.iter().any(|x| x == f);
     assert_eq!(find_tools("ngrok", &format!("/home/me/bin{sep}/usr/bin"), None, "darwin", &exists), vec![onpath, "/opt/homebrew/bin/ngrok".into(), "/usr/local/bin/ngrok".into()]);
-    assert!(find_tools("ngrok", "", None, "darwin", &|_| false).is_empty());
+    assert_eq!(find_tools("ngrok", "", None, "darwin", &|_| false), Vec::<String>::new());
     assert_eq!(kind_ids(), vec!["tailscale", "cloudflare", "cloudflare-quick", "ngrok", "own"]);
 }
 

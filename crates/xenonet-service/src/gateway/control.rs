@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use xenonet_base::json;
+use xenonet_base::sync::Locked;
 
 const KEY: &str = "gateway";
 const SEEN: &str = "gateway.seen";
@@ -124,7 +125,7 @@ impl GatewayControl {
             }),
             on_refused: Arc::new(move |actor, code, reason, at| {
                 if let (Some(c), Some(actor)) = (w2.upgrade(), actor) {
-                    c.refused.lock().unwrap().insert(actor.to_string(), json!({ "code": code, "reason": reason, "at": json::number(at) }));
+                    c.refused.locked().insert(actor.to_string(), json!({ "code": code, "reason": reason, "at": json::number(at) }));
                 }
             }),
             on_run: parts.on_run.clone(),
@@ -180,8 +181,8 @@ impl GatewayControl {
     }
 
     fn called(&self, slug: &str, id: &str, host: Option<&str>, at: f64) {
-        self.refused.lock().unwrap().remove(id);
-        let mut seen = self.seen.lock().unwrap();
+        self.refused.locked().remove(id);
+        let mut seen = self.seen.locked();
         let had = seen.get(slug).cloned();
         let host = host.map(|h| json!(h)).or_else(|| had.as_ref().map(|h| h["host"].clone())).unwrap_or(Value::Null);
         let saved_at = had.as_ref().and_then(|h| h["savedAt"].as_f64()).unwrap_or(0.0);
@@ -216,25 +217,25 @@ impl GatewayControl {
         } else {
             let _wait = self.checking.lock().await;
         }
-        self.reach.lock().unwrap().clone()
+        self.reach.locked().clone()
     }
 
     async fn check_now(&self) {
         let s = self.saved();
         if !s.on || !self.gateway().listening() {
-            let mut r = self.reach.lock().unwrap();
+            let mut r = self.reach.locked();
             r["state"] = json!("off");
             r["stage"] = Value::Null;
             r["why"] = Value::Null;
             return;
         }
-        let before = self.reach.lock().unwrap()["state"].clone();
-        self.reach.lock().unwrap()["state"] = json!("checking");
+        let before = self.reach.locked()["state"].clone();
+        self.reach.locked()["state"] = json!("checking");
         let g = self.gateway().clone();
         let got = check_reach(s.host.as_deref(), &random_hex(16), |w| g.expect_probe(w), self.probe_local.then_some(self.port), self.network.as_ref()).await;
         let t = (self.now)();
         let ok = got["ok"] == json!(true);
-        let mut r = self.reach.lock().unwrap();
+        let mut r = self.reach.locked();
         let ok_at = if ok { json::number(t) } else { r["okAt"].clone() };
         *r = json!({ "state": if ok { "ok" } else { "failing" }, "stage": got["stage"], "why": got["why"], "at": json::number(t), "okAt": ok_at, "local": self.probe_local });
         if before != r["state"] {
@@ -249,7 +250,7 @@ impl GatewayControl {
             tokio::time::sleep(Duration::from_millis(ms)).await;
             me.check().await;
         });
-        if let Some(old) = self.soon.lock().unwrap().replace(task) {
+        if let Some(old) = self.soon.locked().replace(task) {
             old.abort();
         }
     }
@@ -259,7 +260,7 @@ impl GatewayControl {
     async fn tick(self: &Arc<Self>) {
         let t = (self.now)();
         let woke = {
-            let mut last = self.last_tick.lock().unwrap();
+            let mut last = self.last_tick.locked();
             let woke = t - *last > 3.0 * TICK.as_millis() as f64;
             *last = t;
             woke
@@ -269,16 +270,16 @@ impl GatewayControl {
             return;
         }
         let (at, state) = {
-            let r = self.reach.lock().unwrap();
+            let r = self.reach.locked();
             (r["at"].as_f64(), r["state"].clone())
         };
-        let due = woke || at.is_none() || t - at.unwrap() >= if state == "ok" { OK_EVERY_MS } else { FAILING_EVERY_MS };
+        let due = woke || at.is_none_or(|at| t - at >= if state == "ok" { OK_EVERY_MS } else { FAILING_EVERY_MS });
         if !due {
             return;
         }
         // Its port was taken: try it again, and the tunnel with it.
         if !self.gateway().listening() {
-            self.reach.lock().unwrap()["at"] = json::number(t);
+            self.reach.locked()["at"] = json::number(t);
             return self.apply(&s, false).await;
         }
         if s.tunnel.is_none() {
@@ -290,11 +291,11 @@ impl GatewayControl {
 
     async fn apply(self: &Arc<Self>, s: &Saved, take_over: bool) {
         self.gateway().set_host(s.host.as_deref());
-        let had = self.problem.lock().unwrap().take();
+        let had = self.problem.locked().take();
         let result = if s.on {
             self.gateway().start().await.map(|_| ())
         } else {
-            self.gateway().stop().await;
+            self.gateway().stop();
             Ok(())
         };
         if let Err(e) = result {
@@ -302,18 +303,18 @@ impl GatewayControl {
             if had.as_deref() != Some(p.as_str()) {
                 (self.log)("gateway.error", &p);
             }
-            *self.problem.lock().unwrap() = Some(p.clone());
+            *self.problem.locked() = Some(p.clone());
             // Its port taken: a tunnel XenoNet runs stops, but Funnel's
             // setting, which may be that one's, stays.
             self.tunnel().stop();
-            let mut r = self.reach.lock().unwrap();
+            let mut r = self.reach.locked();
             for (k, v) in [("state", json!("failing")), ("stage", json!("port")), ("why", json!(p)), ("at", json::number((self.now)()))] {
                 r[k] = v;
             }
             return;
         }
         {
-            let mut r = self.reach.lock().unwrap();
+            let mut r = self.reach.locked();
             if r["stage"] == "port" {
                 r["state"] = json!("unknown");
                 r["stage"] = Value::Null;
@@ -322,7 +323,7 @@ impl GatewayControl {
         }
         let Some((k, name, host)) = s.tunnel.clone().filter(|_| s.on) else {
             self.tunnel().down().await;
-            let mut r = self.reach.lock().unwrap();
+            let mut r = self.reach.locked();
             r["state"] = json!(if s.on { "failing" } else { "off" });
             r["stage"] = if s.on { json!("address") } else { Value::Null };
             r["why"] = Value::Null;
@@ -340,8 +341,8 @@ impl GatewayControl {
         let t = (self.now)();
         let mut out = Vec::new();
         let mut ids = Vec::new();
-        let seen = self.seen.lock().unwrap().clone();
-        let refused = self.refused.lock().unwrap().clone();
+        let seen = self.seen.locked().clone();
+        let refused = self.refused.locked().clone();
         let row = |id: &str, extra: Value| {
             let info = self.actors.info(id);
             let slug = id.strip_prefix("actor:").unwrap_or(id);
@@ -351,13 +352,15 @@ impl GatewayControl {
                 "id": id,
                 "name": info.as_ref().and_then(|i| i.get("name").cloned()).unwrap_or(json!(slug)),
                 "product": info.as_ref().and_then(|i| i["product"].get("id").cloned()).unwrap_or(Value::Null),
-                "lastAt": sn.map(|s| s["at"].clone()).unwrap_or(Value::Null),
+                "lastAt": sn.map_or(Value::Null, |s| s["at"].clone()),
                 "lastHost": last_host,
                 "oldAddress": host.is_some() && last_host.is_some() && last_host != host,
                 "refused": refused.get(id).cloned().unwrap_or(Value::Null),
             });
-            for (k, v) in extra.as_object().unwrap() {
-                r[k] = v.clone();
+            if let Value::Object(extra) = extra {
+                for (k, v) in extra {
+                    r[k] = v;
+                }
             }
             r
         };
@@ -390,18 +393,18 @@ impl GatewayControl {
                 me.tick().await;
             }
         });
-        *self.ticker.lock().unwrap() = Some(task);
+        *self.ticker.locked() = Some(task);
     }
 
-    pub async fn stop(&self) {
-        if let Some(t) = self.ticker.lock().unwrap().take() {
+    pub fn stop(&self) {
+        if let Some(t) = self.ticker.locked().take() {
             t.abort();
         }
-        if let Some(t) = self.soon.lock().unwrap().take() {
+        if let Some(t) = self.soon.locked().take() {
             t.abort();
         }
         self.tunnel().stop();
-        self.gateway().stop().await;
+        self.gateway().stop();
     }
 
     /// `set({ on, tunnel, check, repair })`: `tunnel` None leaves it,
@@ -468,11 +471,10 @@ impl GatewayControl {
         let s = self.saved();
         let g = self.gateway().status();
         let tv = self.tunnel().view();
-        let reach = self.reach.lock().unwrap().clone();
+        let reach = self.reach.locked().clone();
         let why = self
             .problem
-            .lock()
-            .unwrap()
+            .locked()
             .clone()
             .map(Value::String)
             .or_else(|| (s.on && s.tunnel.is_none()).then(|| json!("pick how the gateway reaches the internet")))
@@ -482,7 +484,7 @@ impl GatewayControl {
         let mut tunnel = tv.clone();
         match &s.tunnel {
             Some((k, name, given)) => {
-                let kd = kind(k).unwrap();
+                let kd = kind(k).expect("saved() keeps only a tunnel kind that exists");
                 for (key, v) in
                     [("kind", json!(k)), ("label", json!(kd.label)), ("through", json!(kd.through)), ("name", json!(name)), ("given", json!(given)), ("stable", json!(kd.stable))]
                 {
@@ -496,8 +498,10 @@ impl GatewayControl {
             }
         }
         let mut out = json!({ "on": s.on });
-        for (k, v) in g.as_object().unwrap() {
-            out[k] = v.clone();
+        if let Value::Object(g) = g {
+            for (k, v) in g {
+                out[k] = v;
+            }
         }
         out["tunnel"] = tunnel;
         out["reach"] = reach;

@@ -41,3 +41,6 @@ regex.workspace = true
 # calls on macOS (and /proc on Linux, read as files).
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
+
+[lints]
+workspace = true

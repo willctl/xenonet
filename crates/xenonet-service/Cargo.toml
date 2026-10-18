@@ -29,7 +29,6 @@ portable-pty = "0.9"
 reqwest.workspace = true
 rustls.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
 tokio.workspace = true
 xenonet-actors.workspace = true
 xenonet-base.workspace = true
@@ -38,3 +37,6 @@ xenonet-schema.workspace = true
 [dev-dependencies]
 # Paused time, for the tunnel's waits between restarts.
 tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

@@ -17,10 +17,10 @@ pub fn environments() -> Value {
 /// `environmentOf(id).id`: the one named, or the first.
 pub fn environment_of(id: &Value) -> String {
     let all = environments();
-    let list = all.as_array().unwrap();
+    let list = all.as_array().expect("environments() is an array literal");
     list.iter().find(|e| &e["id"] == id).unwrap_or(&list[0])["id"].as_str().unwrap_or(DEFAULT_ENVIRONMENT).to_string()
 }
 
 pub fn is_environment(id: &Value) -> bool {
-    environments().as_array().unwrap().iter().any(|e| &e["id"] == id)
+    environments().as_array().is_some_and(|l| l.iter().any(|e| &e["id"] == id))
 }

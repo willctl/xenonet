@@ -1,5 +1,5 @@
-//! Themes by id (server/routes/themes.js): GET /api/themes/<id> returns one
-//! whole, as the console draws it; POST /api/themes/reveal {id} shows a
+//! Themes by id (server/routes/themes.js): `GET /api/themes/<id>` returns one
+//! whole, as the console draws it; `POST /api/themes/reveal {id}` shows a
 //! theme of yours in the file manager (not in the demo). The list, the one
 //! in use, switching and copying are server/index.js's (routes/mod.rs).
 
@@ -9,7 +9,7 @@ use crate::http::{Reply, Req};
 use serde_json::{json, Value};
 use std::path::Path;
 
-/// ^[a-z0-9][a-z0-9-]{0,40}$
+/// `^[a-z0-9][a-z0-9-]{0,40}$`
 pub fn theme_id(id: &str) -> bool {
     let b = id.as_bytes();
     (1..=41).contains(&b.len()) && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit()) && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')

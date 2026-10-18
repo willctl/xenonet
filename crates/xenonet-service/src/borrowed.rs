@@ -63,7 +63,7 @@ pub fn random_uuid() -> String {
     getrandom::fill(&mut b).expect("the system's random numbers");
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
-    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    let h = xenonet_base::jsstr::hex(&b);
     format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32])
 }
 
@@ -104,7 +104,7 @@ pub struct Sender<'a> {
 
 /// attest (core/engine/attest.js): the envelope for a message from
 /// `sender`, authenticated by `method`, with the route's verdict.
-pub fn attest(sender: Sender, method: &str, verdict: &Value, home: &str, now: f64, platform: &str) -> Value {
+pub fn attest(sender: Sender<'_>, method: &str, verdict: &Value, home: &str, now: f64, platform: &str) -> Value {
     let proc = process_of(verdict, method);
     let exe = verdict.get("chain").and_then(|c| c.get(0)).and_then(|p| p.get("exe")).and_then(Value::as_str);
     let mut env = json!({

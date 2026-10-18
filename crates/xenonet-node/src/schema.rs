@@ -17,7 +17,7 @@ pub struct JsSpec {
 }
 
 /// A major of a vendor source's schema as JS sees it: { id, major, range, spec }.
-pub fn major_jv(env: &Env, m: lenient::Major) -> Result<Jv> {
+pub fn major_jv(env: Env, m: lenient::Major) -> Result<Jv> {
     let at = SpecRef::Node(m.schema.root);
     Ok(Jv::Obj(vec![("id", Jv::Json(Value::String(m.id))), ("major", Jv::Num(f64::from(m.major))), ("range", Jv::Json(m.range)), ("spec", spec_raw(env, &m.schema, at)?)]))
 }
@@ -46,27 +46,28 @@ fn keys_of(v: &Value) -> Vec<Key> {
         .unwrap_or_default()
 }
 
-fn spec_raw(env: &Env, schema: &Arc<Schema>, at: SpecRef) -> Result<Jv> {
-    let instance = JsSpec { schema: schema.clone(), at }.into_instance(env)?;
+fn spec_raw(env: Env, schema: &Arc<Schema>, at: SpecRef) -> Result<Jv> {
+    let instance = JsSpec { schema: schema.clone(), at }.into_instance(&env)?;
+    // SAFETY: env is the call's, and the instance was made in it just above.
     Ok(Jv::Raw(unsafe { ToNapiValue::to_napi_value(env.raw(), instance)? }))
 }
 
-fn opt_str(s: &Option<String>) -> Jv {
-    Jv::Json(s.clone().map_or(Value::Null, Value::String))
+fn opt_str(s: Option<&str>) -> Jv {
+    Jv::Json(s.map_or(Value::Null, |s| Value::String(s.to_string())))
 }
 
-fn variant(v: &Option<Vec<Value>>) -> Jv {
-    Jv::Json(v.clone().map_or(Value::Null, Value::Array))
+fn variant(v: Option<&[Value]>) -> Jv {
+    Jv::Json(v.map_or(Value::Null, |v| Value::Array(v.to_vec())))
 }
 
-fn finding(env: &Env, schema: &Arc<Schema>, f: &Finding) -> Result<Jv> {
+fn finding(env: Env, schema: &Arc<Schema>, f: &Finding) -> Result<Jv> {
     let kind = |k: &str| ("kind", Jv::Json(Value::String(k.into())));
     Ok(Jv::Obj(match f {
-        Finding::MissingField { path, variant: v } => vec![kind("missing-field"), ("path", opt_str(path)), ("variant", variant(v))],
+        Finding::MissingField { path, variant: v } => vec![kind("missing-field"), ("path", opt_str(path.as_deref())), ("variant", variant(v.as_deref()))],
         Finding::TypeChange { path, variant: v, value, data, keys, segments, spec } => vec![
             kind("type-change"),
-            ("path", opt_str(path)),
-            ("variant", variant(v)),
+            ("path", opt_str(path.as_deref())),
+            ("variant", variant(v.as_deref())),
             ("value", Jv::Json(value.clone())),
             ("data", Jv::Bool(*data)),
             ("keys", Jv::Json(keys_json(keys))),
@@ -74,9 +75,11 @@ fn finding(env: &Env, schema: &Arc<Schema>, f: &Finding) -> Result<Jv> {
             ("spec", spec_raw(env, schema, spec.clone())?),
         ],
         Finding::NewField { path, variant: v, value, data } => {
-            vec![kind("new-field"), ("path", opt_str(path)), ("variant", variant(v)), ("value", Jv::Json(value.clone())), ("data", Jv::Bool(*data))]
+            vec![kind("new-field"), ("path", opt_str(path.as_deref())), ("variant", variant(v.as_deref())), ("value", Jv::Json(value.clone())), ("data", Jv::Bool(*data))]
         }
-        Finding::NewVariant { path, variant: v, value } => vec![kind("new-variant"), ("path", opt_str(path)), ("variant", variant(v)), ("value", Jv::Json(value.clone()))],
+        Finding::NewVariant { path, variant: v, value } => {
+            vec![kind("new-variant"), ("path", opt_str(path.as_deref())), ("variant", variant(v.as_deref())), ("value", Jv::Json(value.clone()))]
+        }
     }))
 }
 
@@ -90,7 +93,7 @@ impl JsSpec {
 
     /// { findings, strip, drop }, as lenient.js's inspect() gives them.
     #[napi]
-    pub fn inspect(&self, env: &Env, value: Json) -> Result<Jv> {
+    pub fn inspect(&self, env: Env, value: Json) -> Result<Jv> {
         let r = self.schema.inspect_at(&self.at, &value.0);
         let findings = r.findings.iter().map(|f| finding(env, &self.schema, f)).collect::<Result<Vec<_>>>()?;
         Ok(Jv::Obj(vec![("findings", Jv::Arr(findings)), ("strip", Jv::Json(Value::Array(r.strip.iter().map(|k| keys_json(k)).collect()))), ("drop", Jv::Bool(r.drop))]))
@@ -106,7 +109,7 @@ pub fn compile_schema(root: Json) -> JsSpec {
 
 /// The majors of a vendor source's schema, newest first: [{ id, major, range, spec }].
 #[napi(js_name = "loadVendor")]
-pub fn load_vendor(env: &Env, source: String, dir: String) -> Result<Jv> {
+pub fn load_vendor(env: Env, source: String, dir: String) -> Result<Jv> {
     let majors = lenient::load_vendor(&source, Path::new(&dir));
     let out = majors.into_iter().map(|m| major_jv(env, m)).collect::<Result<Vec<_>>>()?;
     Ok(Jv::Arr(out))

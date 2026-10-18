@@ -44,3 +44,6 @@ xenonet-wire-map.workspace = true
 # terminal's width (TIOCGWINSZ), as Node's process.stdout.columns reads it.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[lints]
+workspace = true

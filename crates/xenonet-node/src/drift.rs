@@ -271,7 +271,7 @@ impl JsVendorReader {
     #[napi]
     pub fn majors(&mut self, env: Env) -> Result<Jv> {
         let majors = self.ready().majors().to_vec();
-        let out = majors.into_iter().map(|m| crate::schema::major_jv(&env, m)).collect::<Result<Vec<_>>>()?;
+        let out = majors.into_iter().map(|m| crate::schema::major_jv(env, m)).collect::<Result<Vec<_>>>()?;
         Ok(Jv::Arr(out))
     }
 

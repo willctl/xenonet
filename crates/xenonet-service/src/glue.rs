@@ -7,6 +7,7 @@ use crate::ctx::Ctx;
 use crate::events::Local;
 use serde_json::{json, Value};
 use std::sync::Arc;
+use xenonet_base::sync::Locked;
 
 /// The events the cores send, by where they come from.
 pub enum From {
@@ -167,7 +168,7 @@ fn refusal(ctx: &Arc<Ctx>, ev: Value) {
     ctx.log("info", "refusals.seen", &format!("{} {}{category} in {session}", js(&rec["provider"]), js(&rec["kind"])), None, None);
     ctx.broadcast("refusal", &json!({ "id": rec["id"], "at": rec["at"], "provider": rec["provider"], "kind": rec["kind"], "category": rec["signal"]["category"], "session": ev["sessionId"], "context": xenonet_base::text::truthy(rec.get("context")) }));
     let t = ctx.now();
-    let mut notes = ctx.refusal_notes.lock().unwrap();
+    let mut notes = ctx.refusal_notes.locked();
     notes.at.retain(|x| t - x < 3600e3);
     let last = notes.by_session.get(&session).copied().unwrap_or(0.0);
     if ctx.config.demo || rec["kind"] != "refusal" || notes.at.len() >= 6 || t - last < 10.0 * 60e3 {
@@ -177,7 +178,7 @@ fn refusal(ctx: &Arc<Ctx>, ev: Value) {
     notes.by_session.insert(session.clone(), t);
     drop(notes);
     let node = ctx.cores.state.node(&session).ok().flatten();
-    let title = node.as_ref().and_then(|n| n.get("title")).and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| session.clone());
+    let title = node.as_ref().and_then(|n| n.get("title")).and_then(Value::as_str).map_or_else(|| session.clone(), str::to_string);
     let provider = if rec["provider"] == "openai" { "OpenAI" } else { "Anthropic" };
     let body = rec["signal"]["explanation"].as_str().or_else(|| rec["signal"]["category"].as_str()).unwrap_or("XenoNet kept a record of it.");
     ctx.notify_desktop(json!({ "type": "notify", "key": format!("refusal:{session}"), "id": session, "title": format!("{provider} refused a turn"), "subtitle": cut(&title, 80), "body": cut(body, 160) }));

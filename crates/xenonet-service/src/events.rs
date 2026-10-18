@@ -10,6 +10,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use xenonet_base::json;
+use xenonet_base::sync::Locked;
 
 pub const PING: Duration = Duration::from_secs(25);
 
@@ -57,25 +58,25 @@ impl Events {
                 }
             }
         });
-        self.clients.lock().unwrap().push(Client { tx, own_only });
+        self.clients.locked().push(Client { tx, own_only });
         rx
     }
 
     /// How many pages are reading (Spotify looks more often while one is).
     pub fn count(&self) -> usize {
-        let mut clients = self.clients.lock().unwrap();
+        let mut clients = self.clients.locked();
         clients.retain(|c| !c.tx.is_closed());
         clients.len()
     }
 
-    pub fn broadcast(&self, event: &str, data: &Value, local: Local) {
+    pub fn broadcast(&self, event: &str, data: &Value, local: Local<'_>) {
         let msg = frame(event, data);
         let own = match local {
             Local::Same => Some(msg.clone()),
             Local::None => None,
             Local::Own(v) => Some(frame(event, v)),
         };
-        let mut clients = self.clients.lock().unwrap();
+        let mut clients = self.clients.locked();
         clients.retain(|c| {
             let m = if c.own_only { own.clone() } else { Some(msg.clone()) };
             match m {

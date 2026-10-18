@@ -91,6 +91,7 @@ impl CoreError {
         CoreError { kind, status: Some(status), code: Some(code.to_string()), message: message.into(), extra: Value::Null }
     }
 
+    #[must_use]
     pub fn with_extra(mut self, extra: Value) -> Self {
         self.extra = extra;
         self

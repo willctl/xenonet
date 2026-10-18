@@ -18,6 +18,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use xenonet_actors::tokens::token_in_url;
 use xenonet_base::ids::{parse_actor_id, YOU};
+use xenonet_base::sync::Locked;
 
 const CONSOLE_BODY: usize = 8 << 10;
 const REGISTER_BODY: usize = 4 << 10;
@@ -135,7 +136,7 @@ impl ActorRoutes<'_> {
     }
 
     async fn you(&self, req: &mut Req) -> Result<Reply, CoreError> {
-        let actors = self.ctx.cores.actors.as_ref().unwrap();
+        let actors = self.actors();
         // Without a key it's any program asking about you, which gets what
         // the list says.
         if req.method == "GET" && req.header("x-xenonet-window").is_none() {
@@ -162,7 +163,7 @@ impl ActorRoutes<'_> {
                 },
             ));
         }
-        let wait = self.ctx.you_reports.lock().unwrap().take(1.0, self.ctx.now());
+        let wait = self.ctx.you_reports.locked().take(1.0, self.ctx.now());
         if wait != 0.0 {
             return Ok(fail(429, "too-many", "the window is reporting faster than XenoNet takes reports", &[retry_after(wait)], &none()));
         }
@@ -196,11 +197,11 @@ impl ActorRoutes<'_> {
     }
 
     fn registration(&self) -> &Arc<dyn crate::cores::Registration> {
-        self.ctx.cores.registration.as_ref().unwrap()
+        self.ctx.cores.registration.as_ref().expect("actors are on, and their registration comes with them")
     }
 
     fn actors(&self) -> &Arc<dyn crate::cores::Actors> {
-        self.ctx.cores.actors.as_ref().unwrap()
+        self.ctx.cores.actors.as_ref().expect("route() answers 503 while actors are off")
     }
 
     async fn actor_of(&self, req: &Req, waiting: bool) -> Result<Value, Reply> {
@@ -598,7 +599,7 @@ impl ActorRoutes<'_> {
                             }
                         }
                     }
-                    _ = tx.closed() => return,
+                    () = tx.closed() => return,
                 }
             }
         });

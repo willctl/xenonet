@@ -8,7 +8,7 @@
 //! against the process it comes from, and connecting agents only goes
 //! through when no agent is asking.
 //!
-//! Registered actors call the same operations as actor:<slug>, with their
+//! Registered actors call the same operations as `actor:<slug>`, with their
 //! token, checked as their own routes are, and held to what you allowed
 //! them: sending needs message-agents (60 messages an hour, 6 of them to a
 //! repo or to all), claiming needs edit-repos. An actor's focus is its
@@ -160,7 +160,7 @@ impl EngineRoutes<'_> {
         }
         let extra = (name == "send").then(|| {
             let info = self.actors.as_ref().and_then(|a| a.info(&id));
-            let name = info.as_ref().and_then(|i| i.get("name")).and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| slug.clone());
+            let name = info.as_ref().and_then(|i| i.get("name")).and_then(Value::as_str).map_or_else(|| slug.clone(), str::to_string);
             let product = info.as_ref().and_then(|i| i.get("product")).and_then(|p| p.get("id")).and_then(Value::as_str).map(str::to_string);
             json!({ "envelope": attest(Sender { id: &id, kind: "actor", name: Some(name), product }, "token", &verdict, self.home, self.now, platform()) })
         });
@@ -241,11 +241,9 @@ impl EngineRoutes<'_> {
         if req.header("authorization").is_some() {
             return Ok(if name == "channel" { Reply::error(404, "not found") } else { self.as_actor(req, &name).await });
         }
-        let me = req.header("x-xenonet-agent").map(str::to_string);
-        if !is_agent_id(me.as_deref()) {
+        let Some(me) = req.header("x-xenonet-agent").filter(|m| is_agent_id(Some(m))).map(str::to_string) else {
             return Ok(Reply::error(400, "say which session is calling, in x-xenonet-agent (claude:<session id> or codex:<thread id>)"));
-        }
-        let me = me.unwrap();
+        };
         let verdict = self.verify.check(req.peer, &me, false).await;
         if !ok(&verdict) {
             return Ok(Reply::send(403, &json!({ "error": verdict.get("reason").cloned().unwrap_or(Value::Null) }), &[]));

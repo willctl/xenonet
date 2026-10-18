@@ -3,6 +3,8 @@
 // credential and nothing else, then assistant.read and nothing else; its
 // descriptor written while it listens, and gone when it stops.
 
+#![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
+
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
@@ -74,7 +76,7 @@ async fn an_adapter_says_which_grant_and_then_may_only_read() {
     let e = Endpoint::new(grants.clone(), Arc::new(Reads), Some(grants.clone()), file.clone(), Arc::new(|_: &str| {}));
     e.sync().await;
     let d: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
-    assert_eq!((d["state"].clone(), d["api"].clone(), d["pid"].as_u64()), (json!("/state"), json!({ "min": 1, "max": 1 }), Some(std::process::id() as u64)));
+    assert_eq!((d["state"].clone(), d["api"].clone(), d["pid"].as_u64()), (json!("/state"), json!({ "min": 1, "max": 1 }), Some(u64::from(std::process::id()))));
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

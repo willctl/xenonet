@@ -5,7 +5,7 @@
 //! the same engine and rules as an actor on this machine, and nothing else.
 //!
 //! It listens on 127.0.0.1 alone, on a port of its own, and a tunnel of the
-//! owner's choosing puts it on the internet, forwarding https://<host>/mcp
+//! owner's choosing puts it on the internet, forwarding `https://<host>/mcp`
 //! to it. So: only POST, GET and DELETE on /mcp, for the host the owner
 //! named or this machine on its own port; no browser (an Origin is
 //! refused); each request carries an actor's gateway token, and past 20
@@ -38,6 +38,7 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use xenonet_actors::tokens::{bearer_of, token_in_url};
 use xenonet_base::json;
+use xenonet_base::sync::Locked;
 
 pub const MCP_PATH: &str = "/mcp";
 pub const PROBE_HEADER: &str = "x-xenonet-probe";
@@ -195,7 +196,7 @@ impl ActorGateway {
     /// within half a minute.
     pub fn expect_probe(&self, word: &str) {
         let t = (self.inner.now)();
-        let mut probes = self.inner.probes.lock().unwrap();
+        let mut probes = self.inner.probes.locked();
         probes.retain(|_, until| *until > t);
         probes.insert(word.to_string(), t + PROBE_MS);
     }
@@ -203,12 +204,12 @@ impl ActorGateway {
     /// The public host the owner named, without a scheme or path, or None.
     pub fn set_host(&self, name: Option<&str>) -> Option<String> {
         let h = normal_host(name);
-        *self.inner.host.lock().unwrap() = h.clone();
+        self.inner.host.locked().clone_from(&h);
         h
     }
 
     pub fn listening(&self) -> bool {
-        self.inner.server.lock().unwrap().is_some()
+        self.inner.server.locked().is_some()
     }
 
     pub async fn start(&self) -> std::io::Result<Value> {
@@ -233,20 +234,20 @@ impl ActorGateway {
                 });
             }
         });
-        *self.inner.server.lock().unwrap() = Some(task);
+        *self.inner.server.locked() = Some(task);
         Ok(self.status())
     }
 
-    pub async fn stop(&self) -> Value {
-        if let Some(t) = self.inner.server.lock().unwrap().take() {
+    pub fn stop(&self) -> Value {
+        if let Some(t) = self.inner.server.locked().take() {
             t.abort();
         }
         self.status()
     }
 
     pub fn status(&self) -> Value {
-        let s = self.inner.stats.lock().unwrap().clone();
-        let host = self.inner.host.lock().unwrap().clone();
+        let s = self.inner.stats.locked().clone();
+        let host = self.inner.host.locked().clone();
         let port = self.inner.port;
         json!({
             "listening": self.listening(),
@@ -297,7 +298,7 @@ impl ActorGateway {
         let (path, query) = parse_target(&req.target);
         let host = header("host").unwrap_or("").to_lowercase();
         let port = self.inner.port;
-        let public = self.inner.host.lock().unwrap().clone();
+        let public = self.inner.host.locked().clone();
         if public.as_deref() != Some(host.as_str()) && host != format!("127.0.0.1:{port}") && host != format!("localhost:{port}") {
             return Self::reply(421, json!({ "error": "this gateway doesn't answer for that host" }), &[]);
         }
@@ -311,7 +312,7 @@ impl ActorGateway {
             return Self::reply(405, json!({ "error": "the gateway takes POST, GET and DELETE" }), &[("allow", "POST, GET, DELETE")]);
         }
         if let Some(word) = header(PROBE_HEADER) {
-            let mut probes = self.inner.probes.lock().unwrap();
+            let mut probes = self.inner.probes.locked();
             if probes.get(word).copied().unwrap_or(0.0) > t {
                 probes.remove(word);
                 return Reply {
@@ -324,7 +325,7 @@ impl ActorGateway {
         if token_in_url(query.iter().map(|(k, v)| (k.as_str(), v.as_str())), &path) {
             return Self::reply(400, json!({ "error": "a token goes in the Authorization header, never in the URL" }), &[]);
         }
-        let blocked = *self.inner.blocked_until.lock().unwrap();
+        let blocked = *self.inner.blocked_until.locked();
         if blocked > t {
             let (k, v) = retry_after(blocked - t);
             return Self::reply(429, json!({ "error": "too many tokens XenoNet doesn't know; wait a minute" }), &[(&k, &v)]);
@@ -335,11 +336,11 @@ impl ActorGateway {
             None => json!({ "ok": false, "status": 401, "code": "no-token", "error": "the gateway takes a gateway token, as Authorization: Bearer <token>" }),
         };
         if auth["ok"] != json!(true) {
-            self.inner.stats.lock().unwrap().refused += 1;
+            self.inner.stats.locked().refused += 1;
             let code = auth["code"].as_str().unwrap_or("bad-token").to_string();
             (self.inner.hooks.on_refused)(auth["actor"].as_str(), &code, auth["reason"].as_str(), t);
-            if code != "no-token" && self.inner.buckets.lock().unwrap().take("bad-tokens", BAD_TOKENS, 1.0, t) != 0.0 {
-                *self.inner.blocked_until.lock().unwrap() = t + BLOCK_MS;
+            if code != "no-token" && self.inner.buckets.locked().take("bad-tokens", BAD_TOKENS, 1.0, t) != 0.0 {
+                *self.inner.blocked_until.locked() = t + BLOCK_MS;
             }
             let realm = if code == "no-token" { "Bearer realm=\"xenonet-gateway\"".to_string() } else { "Bearer realm=\"xenonet-gateway\", error=\"invalid_token\"".to_string() };
             let status = auth["status"].as_u64().unwrap_or(401) as u16;
@@ -349,7 +350,7 @@ impl ActorGateway {
             return Self::reply(413, json!({ "error": "that body is over 64 KiB" }), &[]);
         }
         {
-            let mut s = self.inner.stats.lock().unwrap();
+            let mut s = self.inner.stats.locked();
             s.calls += 1;
             s.last_at = Some(t);
             s.last_actor = auth["id"].as_str().map(str::to_string);
@@ -412,7 +413,7 @@ impl ActorGateway {
             if !m.is_object() || m.get("jsonrpc") != Some(&json!("2.0")) || !(is_request || is_response) {
                 return Self::transport_error(400, -32600, "Bad Request: the request body is not a valid JSON-RPC message", None, id);
             }
-            if let Some(refusal) = self.envelope(m, &version, header) {
+            if let Some(refusal) = Self::envelope(m, version.as_deref(), header) {
                 return refusal;
             }
             let this_modern = version.as_deref() == Some(MODERN);
@@ -440,11 +441,11 @@ impl ActorGateway {
     /// The 2026-07-28 revision's checks of a message against its headers:
     /// the per-request envelope in `_meta`, and the headers that say what
     /// the body does. A refusal, or None.
-    fn envelope<'a>(&self, m: &Value, version: &Option<String>, header: impl Fn(&str) -> Option<&'a str>) -> Option<Reply> {
+    fn envelope<'a>(m: &Value, version: Option<&str>, header: impl Fn(&str) -> Option<&'a str>) -> Option<Reply> {
         let params = m.get("params");
         let meta = params.and_then(|p| p.get("_meta"));
         let body_version = meta.and_then(|x| x.get(format!("{ENVELOPE}protocolVersion"))).and_then(Value::as_str);
-        let modern_header = version.as_deref() == Some(MODERN);
+        let modern_header = version == Some(MODERN);
         let has_envelope = meta.is_some_and(|x| x.get(format!("{ENVELOPE}protocolVersion")).is_some());
         if !modern_header && !has_envelope {
             return None;
@@ -461,17 +462,15 @@ impl ActorGateway {
             ));
         }
         let meta = meta?;
-        for key in ["clientCapabilities"] {
-            if meta.get(format!("{ENVELOPE}{key}")).is_none() {
-                let k = format!("{ENVELOPE}{key}");
-                return Some(Self::transport_error(
-                    400,
-                    -32602,
-                    &format!("Invalid _meta envelope for protocol revision 2026-07-28: {k}: missing"),
-                    Some(json!({ "envelope": { "key": k, "problem": "missing" } })),
-                    id,
-                ));
-            }
+        let k = format!("{ENVELOPE}clientCapabilities");
+        if meta.get(&k).is_none() {
+            return Some(Self::transport_error(
+                400,
+                -32602,
+                &format!("Invalid _meta envelope for protocol revision 2026-07-28: {k}: missing"),
+                Some(json!({ "envelope": { "key": k, "problem": "missing" } })),
+                id,
+            ));
         }
         let mismatch = |h: &str, said: String| {
             Some(Self::transport_error(
@@ -483,7 +482,7 @@ impl ActorGateway {
             ))
         };
         let bv = body_version.unwrap_or("");
-        match version.as_deref() {
+        match version {
             None => return mismatch("(missing)", format!("the body envelope names protocol version {bv} but the required MCP-Protocol-Version header is absent")),
             Some(v) if v != bv => return mismatch(v, format!("the body envelope names protocol version {bv} but the MCP-Protocol-Version header names {v}")),
             _ => {}
@@ -572,7 +571,7 @@ impl ActorGateway {
                 if !issues.is_empty() {
                     return Self::error(200, &id, -32602, &format!("Invalid tools/call request: {}", json::stringify(&Value::Array(issues), 2)));
                 }
-                let tool = params["name"].as_str().unwrap().to_string();
+                let tool = params["name"].as_str().expect("the name was checked to be a string above").to_string();
                 let Some(def) = self.tools().into_iter().find(|t| t["name"] == json!(tool)) else {
                     return Self::error(200, &id, -32602, &format!("Tool {tool} not found"));
                 };
@@ -619,9 +618,9 @@ impl ActorGateway {
                 }
                 let to = a.get("to").and_then(Value::as_str);
                 let wide = matches!(to, Some("repo" | "project" | "all"));
-                let mut wait = if wide { self.inner.buckets.lock().unwrap().take(&format!("{slug}|wide"), WIDE, 1.0, t) } else { 0.0 };
+                let mut wait = if wide { self.inner.buckets.locked().take(&format!("{slug}|wide"), WIDE, 1.0, t) } else { 0.0 };
                 if wait == 0.0 {
-                    wait = self.inner.buckets.lock().unwrap().take(&format!("{slug}|messages"), MESSAGES, 1.0, t);
+                    wait = self.inner.buckets.locked().take(&format!("{slug}|messages"), MESSAGES, 1.0, t);
                 }
                 if wait != 0.0 {
                     let why = if wide { "an actor sends at most 6 messages an hour to a repo or to all" } else { "an actor sends at most 60 messages an hour" };
@@ -651,7 +650,7 @@ impl ActorGateway {
             }
             "report_run" => {
                 let Some(runs) = &c.runs else { return Err("Tool report_run not found".into()) };
-                if self.inner.buckets.lock().unwrap().take(&format!("{slug}|run"), RUN_REPORTS, 1.0, t) != 0.0 {
+                if self.inner.buckets.locked().take(&format!("{slug}|run"), RUN_REPORTS, 1.0, t) != 0.0 {
                     return Err("too many run reports: one a second is the most the gateway takes".into());
                 }
                 let mut run = json!({ "run": a["run"], "app": a["app"], "presence": a.get("presence").cloned().unwrap_or(json!("working")) });
@@ -667,7 +666,7 @@ impl ActorGateway {
                 Ok(json!({ "session": session, "actor": id }))
             }
             "heartbeat" => {
-                if self.inner.buckets.lock().unwrap().take(&format!("{slug}|beat"), BEATS, 1.0, t) != 0.0 {
+                if self.inner.buckets.locked().take(&format!("{slug}|beat"), BEATS, 1.0, t) != 0.0 {
                     return Err("one heartbeat a second is the most the gateway takes".into());
                 }
                 let mut beat = json!({ "schema": "actor/report/v1" });

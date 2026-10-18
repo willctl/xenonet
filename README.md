@@ -40,7 +40,9 @@ npm install
 npm run app
 ```
 
-For the browser console, run `npm run dev` and open http://127.0.0.1:47842.
+`npm run app` builds the `xenonet` binary first, which takes
+[Rust](https://rustup.rs); the checkout pins its version. For the browser
+console, run `npm run dev` and open http://127.0.0.1:47842.
 An installed service serves the console at http://127.0.0.1:47840, so a
 browser can stand in for Desktop. See [components](docs/guide/components.md#the-console-in-a-browser).
 
@@ -377,9 +379,10 @@ records, and a run in a SPACE sandbox, as sessions, both experimental. See
 ## Development
 
 ```bash
-npm run dev       # server and hot-reloading UI at http://127.0.0.1:47842
-npm run demo      # the same, with made-up data, at http://127.0.0.1:47841
 npm run app       # the desktop app (Electron) from source, as XenoNet Dev
+npm run dev       # the service alone, with the UI at http://127.0.0.1:47842
+npm run demo      # the same, with made-up data, at http://127.0.0.1:47841
+npm run rust:bin  # the xenonet binary: the service, the command and the MCP servers
 npm run dev:install  # macOS: XenoNet Dev.app in ~/Applications, running this checkout
 npm test          # unit tests
 npm run test:e2e  # end-to-end tests, on a hidden XenoNet Dev with made-up data

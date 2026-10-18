@@ -10,6 +10,7 @@ use crate::cores::{ok, reason, CoreError, HostsConfig, Hub, Verify};
 use crate::ctx::pending_reply;
 use crate::http::{decode_uri_component, Reply, Req};
 use serde_json::{json, Value};
+use std::fmt::Write as _;
 use std::sync::Arc;
 use xenonet_base::ids::{is_host_id, parse_qualified};
 
@@ -62,7 +63,9 @@ fn search(pairs: &[(&str, &str)]) -> String {
             match b {
                 b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'*' | b'-' | b'.' | b'_' => out.push(b as char),
                 b' ' => out.push('+'),
-                _ => out.push_str(&format!("%{b:02X}")),
+                _ => {
+                    let _ = write!(out, "%{b:02X}");
+                }
             }
         }
         out
