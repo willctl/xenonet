@@ -176,20 +176,14 @@ fn follow_events(port: u16, route: &str, to: mpsc::UnboundedSender<Event>) -> Re
     Ok(())
 }
 
-/// Starts a XenoNet here for as long as the relay runs: the checkout's
-/// JS service with the Node on PATH, as the JS relay starts its own, or
-/// else this binary's.
+/// Starts a XenoNet here for as long as the relay runs: this binary's
+/// service.
 fn start_xenonet(port: u16, demo: bool) -> Option<std::process::Child> {
-    let root = sys::xenonet_root();
-    let entry = xenonet_base::paths::join_all(&[&root, "server", "index.js"]);
-    let (file, mut args) = match super::native::on_path("node").filter(|_| std::path::Path::new(&entry).is_file()) {
-        Some(node) => (node, vec![entry]),
-        None => (std::env::current_exe().ok()?.to_string_lossy().into_owned(), vec!["serve".to_string()]),
-    };
+    let mut args = vec!["serve".to_string()];
     if demo {
         args.push("--demo".into());
     }
-    std::process::Command::new(file)
+    std::process::Command::new(std::env::current_exe().ok()?)
         .args(args)
         .env("XENONET_PORT", port.to_string())
         .stdin(std::process::Stdio::null())

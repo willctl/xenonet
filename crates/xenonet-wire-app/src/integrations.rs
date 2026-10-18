@@ -95,7 +95,6 @@ pub struct Integrated {
     pi_on: Mutex<bool>,
     tickets: Mutex<Tickets>,
     routing_busy: Mutex<bool>,
-    collect: OnceCell<String>,
     seeded: OnceCell<()>,
 }
 
@@ -115,7 +114,6 @@ impl Integrated {
             pi_on: Mutex::new(pi_on),
             tickets: Mutex::new(Tickets::default()),
             routing_busy: Mutex::new(false),
-            collect: OnceCell::new(),
             seeded: OnceCell::new(),
         }))
     }
@@ -129,24 +127,10 @@ impl Integrated {
     }
 
     // COLLECT_TEXT: the program that collects text inside a sandbox, which
-    // runs on the sandbox's Node, made from reviews.js's own functions, as
-    // the JS made it.
-    async fn collect_text(&self) -> String {
-        self.collect
-            .get_or_init(|| async {
-                let file = Path::new(&self.parts.root).join("core").join("integrations").join("reviews.js");
-                let url = format!("file://{}", file.to_string_lossy().replace('\\', "/"));
-                let script = format!("import {{ COLLECT_TEXT }} from {}; process.stdout.write(COLLECT_TEXT);", xenonet_base::json::stringify(&json!(url), 0));
-                let node = fx::on_path("node").unwrap_or_else(|| "node".into());
-                let r = fx::exec_file(&node, &["--input-type=module".into(), "-e".into(), script], 15000, RunOptions::default()).await;
-                if r.ok() {
-                    r.stdout
-                } else {
-                    String::new()
-                }
-            })
-            .await
-            .clone()
+    // runs on the sandbox's Node, as reviews.js makes it from its own
+    // functions; the binary carries it.
+    fn collect_text() -> String {
+        xenonet_integrations::reviews::COLLECT_TEXT.to_string()
     }
 
     fn shared(&self, collect: String) -> impl FnOnce() -> (openshell::Shared, reviews::Shared) + Send + 'static {
@@ -168,7 +152,7 @@ impl Integrated {
                     r.add(&made["decision"], now_ms()).map_err(fail)?;
                     r.add(&made["export"], now_ms()).map_err(fail)?;
                 }
-                let collect = me.collect_text().await;
+                let collect = Self::collect_text();
                 for pair in made["sandboxes"].as_array().cloned().unwrap_or_default() {
                     let (name, options) = (xenonet_base::text::js_string(&pair[0]), pair[1].clone());
                     let shared = me.shared(collect.clone());
@@ -280,7 +264,7 @@ impl Integrated {
     }
 
     async fn shell(self: &Arc<Self>, method: &str, arg: Value, arg2: Value) -> R<Value> {
-        let collect = self.collect_text().await;
+        let collect = Self::collect_text();
         let shared = self.shared(collect.clone());
         let perform = self.perform(collect);
         let method = method.to_string();
