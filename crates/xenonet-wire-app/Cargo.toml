@@ -29,6 +29,10 @@ xenonet-sources.workspace = true
 # state.json and the drift log against XenoNet's schemas.
 xenonet-engine.workspace = true
 xenonet-schema.workspace = true
+# hosts.json, read as a versioned store; graph.js's activityOf and the SSH
+# aliases' reading, for a hub's merged map.
+xenonet-blocks.workspace = true
+xenonet-state.workspace = true
 
 # os.cpus(), os.totalmem() and os.freemem(), as Node reads them: the mach
 # calls on macOS (and /proc on Linux, read as files).

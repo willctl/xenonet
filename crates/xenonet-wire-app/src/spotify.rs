@@ -80,7 +80,6 @@ impl SpotifyRemote {
     }
 }
 
-#[expect(clippy::result_large_err, reason = "a core's error, as the routes take it")]
 fn settle<T>(r: Result<T, Failed>) -> R<T> {
     r.map_err(|f| match f {
         Failed::Spotify(e) => spotify_error(e),

@@ -8,9 +8,15 @@
 //! server/index.js makes them: the demo's are made up or kept in memory,
 //! and never reach your machine's own credential store or apps.
 
+// A core's error carries what the JS errors do (a status, a code, extra
+// fields), as the routes answer it, and is rare: boxing it would only make
+// each driver wordier, as in the service itself.
+#![expect(clippy::result_large_err, reason = "a core's error is the routes' own, and rare")]
+
 pub mod decide;
 pub mod doctor;
 pub mod fx;
+pub mod hosts;
 pub mod mcp;
 pub mod open;
 pub mod paths;
@@ -63,6 +69,35 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
     };
     cores.system = if demo { Arc::new(system::DemoSystem) } else { Arc::new(system::SystemPanel(system::System::new())) };
     cores.mcp_info = Arc::new(mcp::Catalog::new(&js, &env.version));
+
+    // Hosts: this XenoNet as one, which needs no flag, and with
+    // XENONET_HOSTS=1 the hub, whose hosts' file is one of the map's
+    // building blocks.
+    let schemas = Arc::new(hosts::schemas::HostSchemas::new());
+    let host_store = Arc::new(hosts::config::HostsStore::new(&state_dir, schemas.clone()));
+    cores.hosts = Arc::new(hosts::config::Hosts(host_store.clone()));
+    if cores.hub.is_some() {
+        let windows = serde_json::json!({ "activeWindowMs": js["activeWindowMs"], "recentWindowMs": js["recentWindowMs"], "projectActiveMs": js["projectActiveMs"] });
+        let exec = fx::env_set("XENONET_EXEC");
+        let parts = hosts::hub::HubParts {
+            hosts: host_store.clone(),
+            schemas,
+            state: cores.state.clone(),
+            store: cores.store.clone(),
+            cache_dir: config.cache_dir.clone(),
+            root: config.root.to_string_lossy().into_owned(),
+            home: config.home.clone(),
+            demo,
+            windows,
+            emitter: env.emitter.clone(),
+            run_as_node: exec.is_some(),
+            exec: exec.or_else(|| fx::on_path("node")).unwrap_or_else(|| "node".into()),
+            ssh_bin: vec!["ssh".into()],
+        };
+        cores.hub = Some(Arc::new(hosts::hub::HubCore(hosts::hub::HostHub::new(parts))));
+        let block = host_store.clone();
+        let _ = cores.state.add_block(Arc::new(move || block.health()), None);
+    }
 
     // The doctor last: its context is the other cores (the hub's hosts
     // among them), as server/index.js's doctorContext reads them.

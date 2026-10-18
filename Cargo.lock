@@ -2460,6 +2460,7 @@ dependencies = [
  "xenonet-app",
  "xenonet-assistant",
  "xenonet-base",
+ "xenonet-blocks",
  "xenonet-components",
  "xenonet-doctor",
  "xenonet-engine",
@@ -2468,6 +2469,7 @@ dependencies = [
  "xenonet-schema",
  "xenonet-service",
  "xenonet-sources",
+ "xenonet-state",
 ]
 
 [[package]]
