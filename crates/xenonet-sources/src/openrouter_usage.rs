@@ -61,8 +61,8 @@ pub fn reading(has_key: bool, answer: Option<(&Value, bool)>, body: Option<&Valu
     let mut out = Map::new();
     out.insert("key".into(), Value::String("stored".into()));
     out.insert("at".into(), number(at));
-    for (k, v) in usage_of(body).as_object().unwrap() {
-        out.insert(k.clone(), v.clone());
+    if let Value::Object(usage) = usage_of(body) {
+        out.extend(usage);
     }
     Value::Object(out)
 }

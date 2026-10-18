@@ -45,9 +45,9 @@ fn window(w: Option<&Value>) -> (Value, Value) {
         return (Value::Null, Value::Null);
     }
     let resets = opt_prop(w, "resets_at");
-    let at = if truthy(resets) {
+    let at = if let Some(resets) = resets.filter(|r| truthy(Some(r))) {
         // Date.parse(String(resets_at)).
-        parse_iso(&js_string(resets.unwrap())).unwrap_or(f64::NAN)
+        parse_iso(&js_string(resets)).unwrap_or(f64::NAN)
     } else {
         f64::NAN
     };

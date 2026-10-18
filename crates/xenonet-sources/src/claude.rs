@@ -239,8 +239,8 @@ fn block_text(content: Js<'_>) -> Result<String, TypeError> {
 fn message_entries(m: &Value, out: &mut Vec<Obj>) -> Result<(), TypeError> {
     let m = Some(m);
     let stamp = prop(m, "timestamp")?;
-    let ts = if truthy(stamp) {
-        match time::parse_iso(&js_string(stamp.unwrap())) {
+    let ts = if let Some(stamp) = stamp.filter(|s| truthy(Some(s))) {
+        match time::parse_iso(&js_string(stamp)) {
             Some(t) => F::V(json::number(t)),
             None => F::Num(f64::NAN),
         }

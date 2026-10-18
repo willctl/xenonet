@@ -220,6 +220,7 @@ impl CopilotCli {
     }
 
     // The logs changed in the last day, newest first.
+    #[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the JS's endsWith is case-sensitive, and so is this")]
     fn found(&mut self, root: Option<&str>, now: f64, files: &mut dyn Files) -> Vec<Found> {
         let Some(root) = root else {
             self.root_state = "unreadable";
@@ -255,7 +256,7 @@ impl CopilotCli {
 
     /// Reads what changed. `check` is the vendor reader's, given the
     /// version session.start says.
-    pub fn read(&mut self, root: Option<&str>, now: f64, files: &mut dyn Files, check: &mut Check) {
+    pub fn read(&mut self, root: Option<&str>, now: f64, files: &mut dyn Files, check: &mut Check<'_>) {
         let found = self.found(root, now, files);
         let mut runs = OrderedMap::new();
         let mut seen = HashSet::new();
@@ -373,7 +374,7 @@ mod tests {
     use crate::native::no_check;
 
     fn lines(rs: &[Value]) -> String {
-        rs.iter().map(|r| r.to_string()).collect::<Vec<_>>().join("\n") + "\n"
+        rs.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n") + "\n"
     }
 
     #[test]
@@ -381,8 +382,8 @@ mod tests {
         let j = |s: &str| serde_json::from_str::<Value>(s).unwrap();
         assert_eq!(edited_by(Some(&j("\"create\"")), Some(&j(r#"{"path":"/a"}"#))), ["/a"]);
         assert_eq!(edited_by(Some(&j("\"apply_patch\"")), Some(&j("\"*** Begin Patch\\n*** Update File: b.ts\\n*** End Patch\""))), ["b.ts"]);
-        assert!(edited_by(Some(&j("\"view\"")), Some(&j(r#"{"path":"/a"}"#))).is_empty());
-        assert!(edited_by(Some(&j("\"str_replace_editor\"")), Some(&j(r#"{"command":"view","path":"/a"}"#))).is_empty());
+        assert_eq!(edited_by(Some(&j("\"view\"")), Some(&j(r#"{"path":"/a"}"#))), Vec::<String>::new());
+        assert_eq!(edited_by(Some(&j("\"str_replace_editor\"")), Some(&j(r#"{"command":"view","path":"/a"}"#))), Vec::<String>::new());
         assert_eq!(edited_by(Some(&j("\"apply_patch\"")), Some(&j(r#"{"b":"*** Add File: x","1":"*** Add File: y","path":"/p"}"#))), ["/p", "y", "x"]);
     }
 

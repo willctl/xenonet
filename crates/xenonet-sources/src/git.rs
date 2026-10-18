@@ -209,7 +209,7 @@ pub fn after_drivers(code: Option<f64>, err: bool, stdout: &str, scoped: bool) -
     }
     match filter_overrides(if err { "" } else { stdout }, scoped) {
         None => AfterDrivers::Nothing,
-        Some(filters) => AfterDrivers::Status(GUARDS.iter().map(|s| s.to_string()).chain(filters).chain(STATUS_ARGS.iter().map(|s| s.to_string())).collect()),
+        Some(filters) => AfterDrivers::Status(GUARDS.iter().map(ToString::to_string).chain(filters).chain(STATUS_ARGS.iter().map(ToString::to_string)).collect()),
     }
 }
 
