@@ -415,6 +415,9 @@ impl Store for StoreCore {
     fn load_report(&self) -> R<Value> {
         Ok(self.0.load_report())
     }
+    fn identities(&self) -> R<Value> {
+        Ok(self.0.identities())
+    }
 }
 
 #[cfg(test)]
