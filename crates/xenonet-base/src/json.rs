@@ -19,6 +19,7 @@
 
 pub use serde_json::Value;
 use serde_json::{Map, Number};
+use std::fmt::Write as _;
 
 const MAX_DEPTH: usize = 512;
 
@@ -172,9 +173,14 @@ impl Parser<'_> {
     }
 
     fn hex4(&mut self) -> Result<u32, SyntaxError> {
-        let h = self.s.get(self.i..self.i + 4).filter(|h| h.iter().all(u8::is_ascii_hexdigit)).ok_or_else(|| self.err("Bad Unicode escape"))?;
+        let n = self
+            .s
+            .get(self.i..self.i + 4)
+            .filter(|h| h.iter().all(u8::is_ascii_hexdigit))
+            .and_then(|h| u32::from_str_radix(std::str::from_utf8(h).ok()?, 16).ok())
+            .ok_or_else(|| self.err("Bad Unicode escape"))?;
         self.i += 4;
-        Ok(u32::from_str_radix(std::str::from_utf8(h).unwrap(), 16).unwrap())
+        Ok(n)
     }
 
     fn string(&mut self) -> Result<String, SyntaxError> {
@@ -296,25 +302,25 @@ impl Parser<'_> {
 /// to the double: ECMA-262 (Number::toString) takes the even one, and Rust
 /// the larger (1000000000000000.25 is …0.2 in JS, …0.3 in Rust).
 pub fn shortest(x: f64) -> (String, i32) {
-    let e = format!("{:e}", x);
-    let (mantissa, exp) = e.split_once('e').unwrap();
-    let exp: i32 = exp.parse().unwrap();
+    let e = format!("{x:e}");
+    let (mantissa, exp) = e.split_once('e').expect("{:e} writes an exponent");
+    let exp: i32 = exp.parse().expect("{:e} writes the exponent as an integer");
     let mut digits: String = mantissa.chars().filter(|c| *c != '.').collect();
     // Two digit strings of one length both read back as the double only
     // when the double's spacing is wider than theirs, at 16 digits or more;
     // and a tie needs the double to be exactly their midpoint.
     let last = digits.as_bytes()[digits.len() - 1];
     if digits.len() >= 15 && (last - b'0') % 2 == 1 {
-        let exact = format!("{:.800e}", x);
-        let (exact, exact_exp) = exact.split_once('e').unwrap();
+        let exact = format!("{x:.800e}");
+        let (exact, exact_exp) = exact.split_once('e').expect("{:e} writes an exponent");
         let exact: String = exact.chars().filter(|c| *c != '.').collect();
         for other in [last - 1, last + 1] {
             if other > b'9' || exact_exp.parse::<i32>() != Ok(exp) {
                 continue;
             }
-            let mut n = digits.clone().into_bytes();
-            *n.last_mut().unwrap() = other;
-            let n = String::from_utf8(n).unwrap();
+            let mut n = digits.clone();
+            n.pop();
+            n.push(char::from(other));
             let low = if other < last { &n } else { &digits };
             let at_midpoint = exact.starts_with(low.as_str()) && exact.as_bytes()[low.len()] == b'5' && exact[low.len() + 1..].bytes().all(|b| b == b'0');
             let reads_back = format!("{}.{}e{exp}", &n[..1], &n[1..]).parse::<f64>() == Ok(x);
@@ -373,7 +379,9 @@ fn write_string(out: &mut String, s: &str) {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c if (c as u32) < 0x20 => {
+                let _ = write!(out, "\\u{:04x}", c as u32);
+            }
             c => out.push(c),
         }
     }
@@ -461,7 +469,7 @@ mod tests {
     // other to the double, the even one. The literals are exact doubles,
     // longer than either.
     #[test]
-    #[allow(clippy::excessive_precision)]
+    #[expect(clippy::excessive_precision, reason = "the literals are the exact doubles, longer than either shortest form")]
     fn ties_go_to_even() {
         for (x, js) in [
             (1000000000000000.25, "1000000000000000.2"),

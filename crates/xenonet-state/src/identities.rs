@@ -196,7 +196,7 @@ pub fn chatgpt_account(auth: Js<'_>, claims: Js<'_>) -> Value {
 /// names are never read, so a token stored in the file stays where it is.
 pub fn parse_gh_hosts(text: &str) -> Vec<Value> {
     struct Host {
-        host: String,
+        name: String,
         users: Vec<String>,
         active: Option<String>,
     }
@@ -213,7 +213,7 @@ pub fn parse_gh_hosts(text: &str) -> Vec<Value> {
         let key = m.get(1).map_or("", |x| x.as_str());
         let value = m.get(2).map_or("", |x| x.as_str());
         if indent == 0 {
-            hosts.push(Host { host: unquote(key).to_lowercase(), users: Vec::new(), active: None });
+            hosts.push(Host { name: unquote(key).to_lowercase(), users: Vec::new(), active: None });
             users_at = -1;
             user_at = -1;
             continue;
@@ -243,7 +243,7 @@ pub fn parse_gh_hosts(text: &str) -> Vec<Value> {
             }
         }
     }
-    hosts.into_iter().filter(|h| !h.users.is_empty()).map(|h| json!({ "host": h.host, "users": h.users, "active": h.active })).collect()
+    hosts.into_iter().filter(|h| !h.users.is_empty()).map(|h| json!({ "host": h.name, "users": h.users, "active": h.active })).collect()
 }
 
 /// hosts.yml as JSON, keys only, for its schema: a key with a value has ""
@@ -298,7 +298,7 @@ pub fn gh_hosts_shape(text: &str) -> Value {
             continue;
         }
         let indent = indent_of(raw) as i64;
-        while stack.len() > 1 && indent <= stack.last().unwrap().indent {
+        while stack.len() > 1 && stack.last().is_some_and(|f| indent <= f.indent) {
             stack.pop();
         }
         let top = stack.len() - 1;
@@ -318,16 +318,19 @@ pub fn gh_hosts_shape(text: &str) -> Value {
         if matches!(stack[top].obj.map(|i| &nodes[i]), Some(Node::Arr)) {
             continue;
         }
-        if stack[top].obj.is_none() {
-            nodes.push(Node::Obj(Vec::new()));
-            let i = nodes.len() - 1;
-            if let Some(p) = stack[top].parent {
-                let key = stack[top].key.clone();
-                put(&mut nodes, p, &key, Slot::Node(i));
+        let obj = match stack[top].obj {
+            Some(i) => i,
+            None => {
+                nodes.push(Node::Obj(Vec::new()));
+                let i = nodes.len() - 1;
+                if let Some(p) = stack[top].parent {
+                    let key = stack[top].key.clone();
+                    put(&mut nodes, p, &key, Slot::Node(i));
+                }
+                stack[top].obj = Some(i);
+                i
             }
-            stack[top].obj = Some(i);
-        }
-        let obj = stack[top].obj.unwrap();
+        };
         let key = unquote(m.get(1).map_or("", |x| x.as_str()));
         let has_value = m.get(2).is_some_and(|x| !x.as_str().is_empty());
         put(&mut nodes, obj, &key, Slot::Leaf(if has_value { Value::String(String::new()) } else { Value::Null }));
@@ -485,7 +488,7 @@ pub fn push_account(url: Js<'_>, cfg: Js<'_>, aliases: &[(String, String)]) -> R
     let mut named = None;
     for u in usernames {
         let scope = prop(Some(u), "scope")?;
-        if truthy(scope) && covers(&js_string(scope.unwrap()), &r) {
+        if scope.filter(|s| truthy(Some(s))).is_some_and(|s| covers(&js_string(s), &r)) {
             named = Some(u);
         }
     }
@@ -502,10 +505,10 @@ pub fn push_account(url: Js<'_>, cfg: Js<'_>, aliases: &[(String, String)]) -> R
     let mut helpers: Vec<String> = Vec::new();
     for h in items(prop(cfg, "helpers")?, "cfg.helpers")? {
         let scope = prop(Some(h), "scope")?;
-        if !truthy(scope) || covers(&js_string(scope.unwrap()), &r) {
+        if scope.filter(|s| truthy(Some(s))).is_none_or(|s| covers(&js_string(s), &r)) {
             let value = prop(Some(h), "value")?;
-            if truthy(value) {
-                helpers.push(js_string(value.unwrap()));
+            if let Some(value) = value.filter(|v| truthy(Some(v))) {
+                helpers.push(js_string(value));
             } else {
                 helpers.clear();
             }
@@ -805,11 +808,11 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
         Some(_) => return Err(TypeError("gh is not iterable".into())),
     };
     let file_of = |k: &str, dflt: &str| nn(acc(k)).map_or_else(|| dflt.to_string(), js_string);
-    if truthy(acc("claude")) {
-        recs.record(acc("claude").unwrap(), Some(&source(file_of("claudeFile", "~/.claude.json"))), &[("signedIn", Value::Bool(true))]);
+    if let Some(claude) = acc("claude").filter(|v| truthy(Some(v))) {
+        recs.record(claude, Some(&source(file_of("claudeFile", "~/.claude.json"))), &[("signedIn", Value::Bool(true))]);
     }
-    if truthy(acc("chatgpt")) {
-        recs.record(acc("chatgpt").unwrap(), Some(&source(file_of("chatgptFile", "~/.codex/auth.json"))), &[("signedIn", Value::Bool(true))]);
+    if let Some(chatgpt) = acc("chatgpt").filter(|v| truthy(Some(v))) {
+        recs.record(chatgpt, Some(&source(file_of("chatgptFile", "~/.codex/auth.json"))), &[("signedIn", Value::Bool(true))]);
     }
     let lower = |v: Js<'_>, what: &str| -> Result<String, TypeError> {
         match v {
@@ -856,7 +859,7 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
         if !truthy(a) {
             continue;
         }
-        let spans = signins.get_mut(app).unwrap();
+        let spans = signins.get_mut(app).expect("both apps' timelines are read above");
         let op = note_signin(spans, a.and_then(|x| x.get("id")).unwrap_or(&Value::Null), now, opt_prop(a, "since"));
         if op != Signin::Same {
             out.dirty = true;
@@ -1021,7 +1024,7 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
     for &pi in &group_nodes {
         groups.push((pi, if group_nodes.len() > 1 { key_len(pi)? } else { 0 }));
     }
-    groups.sort_by(|a, b| b.1.cmp(&a.1));
+    groups.sort_by_key(|g| std::cmp::Reverse(g.1));
     let parent_of = |i: usize| parent.get(&key_of(nodes[i].get("id")));
     for (g, _) in groups {
         let gid = nodes[g].get("id");
@@ -1035,8 +1038,11 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
                 }
             }
         }
-        if owners_in.len() == 1 && owner_of(&ids_of[&g]).filter(|o| truthy(Some(o))).is_none() {
-            ids_of.get_mut(&g).unwrap().push(json!({ "id": owners_in[0], "role": "owner", "confidence": "likely", "via": "the projects in it" }));
+        if owners_in.len() == 1 && owner_of(&ids_of[&g]).as_ref().is_none_or(|o| !truthy(Some(o))) {
+            ids_of
+                .get_mut(&g)
+                .expect("every project and group has its list")
+                .push(json!({ "id": owners_in[0], "role": "owner", "confidence": "likely", "via": "the projects in it" }));
         }
     }
     // A satellite takes its project's. Two passes, for a satellite of a
@@ -1056,7 +1062,10 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
                     if inh.get("confidence").and_then(Value::as_str) == Some("exact") { Value::from("likely") } else { inh.get("confidence").cloned().unwrap_or(Value::Null) };
                 let name = tpl(nodes[up].get("name"));
                 let via = if truthy(nodes[up].get("group")) { format!("its group, {name}") } else { format!("the project it's grouped with, {name}") };
-                ids_of.get_mut(&p).unwrap().push(json!({ "id": inh.get("id").cloned().unwrap_or(Value::Null), "role": "owner", "confidence": confidence, "via": via }));
+                ids_of
+                    .get_mut(&p)
+                    .expect("every project and group has its list")
+                    .push(json!({ "id": inh.get("id").cloned().unwrap_or(Value::Null), "role": "owner", "confidence": confidence, "via": via }));
             }
         }
     }
@@ -1073,7 +1082,7 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
     // keeps its email, and every identity keeps when XenoNet first saw it.
     let mut known: Map<String, Value> = known_saved.as_object().cloned().unwrap_or_default();
     for key in recs.order.clone() {
-        let rec = recs.recs.get_mut(&key).unwrap();
+        let rec = recs.recs.get_mut(&key).expect("order lists the records' keys");
         let id = tpl(rec.get("id"));
         let k = known.get(&id).cloned();
         let k = k.filter(|k| truthy(Some(k)));
@@ -1100,8 +1109,8 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
                 if changed || now - last >= SIGNIN_STEP_MS {
                     let v = json!({ "handle": nn(rec.get("handle")).or(k.get("handle")).cloned(), "detail": merged(k.get("detail"), rec.get("detail")), "lastSeen": js_json::number(now) });
                     if let Some(Value::Object(km)) = known.get_mut(&id) {
-                        for (f, x) in v.as_object().unwrap() {
-                            km.insert(f.clone(), x.clone());
+                        if let Value::Object(fields) = &v {
+                            km.extend(fields.iter().map(|(f, x)| (f.clone(), x.clone())));
                         }
                     }
                     out.known.push((id.clone(), false, v));
@@ -1123,10 +1132,10 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
         for pin in pins.values() {
             let identity = prop(Some(pin), "identity")?;
             let k = known.get(&tpl(identity)).filter(|k| truthy(Some(k)));
-            if recs.has(identity) || k.is_none() {
+            let Some(k) = k else { continue };
+            if recs.has(identity) {
                 continue;
             }
-            let k = k.unwrap();
             let mut r = Map::new();
             r.insert("id".into(), identity.cloned().unwrap_or(Value::Null));
             if let Value::Object(km) = k {

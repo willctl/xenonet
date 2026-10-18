@@ -289,9 +289,10 @@ impl Refusals {
     }
 
     fn load_keys(&mut self) -> &mut HashSet<String> {
-        if self.keys.is_none() {
+        let index = self.index_file();
+        self.keys.get_or_insert_with(|| {
             let mut keys = HashSet::new();
-            if let Ok(b) = fs::read(self.index_file()) {
+            if let Ok(b) = fs::read(index) {
                 for line in String::from_utf8_lossy(&b).split('\n') {
                     if let Ok(v) = parse(line) {
                         // JSON.parse(line).key, as a Set keeps it: undefined
@@ -300,9 +301,8 @@ impl Refusals {
                     }
                 }
             }
-            self.keys = Some(keys);
-        }
-        self.keys.as_mut().unwrap()
+            keys
+        })
     }
 
     /// A record's folder: its id with anything but letters, digits and "-"
@@ -338,7 +338,7 @@ impl Refusals {
         }
         let folder = self.folder_of(rec.get("id").and_then(Value::as_str).unwrap_or(""));
         let mut gz = GzEncoder::new(Vec::new(), Compression::default());
-        gz.write_all(format!("{text}\n").as_bytes()).and_then(|_| gz.flush()).map_err(|e| StoreError { message: e.to_string(), code: None })?;
+        gz.write_all(format!("{text}\n").as_bytes()).and_then(|()| gz.flush()).map_err(|e| StoreError { message: e.to_string(), code: None })?;
         let packed = gz.finish().map_err(|e| StoreError { message: e.to_string(), code: None })?;
         let ctx_file = folder.join("context.jsonl.gz");
         write_private(&ctx_file, &packed, false).map_err(|e| StoreError::io(e, "open", &ctx_file))?;
@@ -416,7 +416,7 @@ impl Refusals {
             "session": rec["session"]["id"],
             "context": truthy(rec.get("context")),
         });
-        let mut line = line.as_object().cloned().unwrap();
+        let mut line = line.as_object().cloned().expect("an object literal");
         // JSON.stringify leaves out a category that's undefined.
         if get(sig, "category").is_none() {
             line.remove("category");

@@ -69,7 +69,11 @@ pub fn current_runtime(xenonet_exec: Option<&str>, exec_path: &str, electron: bo
 pub fn command_script(runtime: &str, entry: &str, run_as_node: bool, platform: &str) -> Result<String, String> {
     if platform == "win32" {
         let electron = if run_as_node { "set \"ELECTRON_RUN_AS_NODE=1\"\n" } else { "" };
-        return Ok(format!("@echo off\n:: {MARKER}: the xenonet command. xenonet uninstall takes it out.\nsetlocal DisableDelayedExpansion\n{electron}{} {} %*\n", batch_quote(runtime)?, batch_quote(entry)?));
+        return Ok(format!(
+            "@echo off\n:: {MARKER}: the xenonet command. xenonet uninstall takes it out.\nsetlocal DisableDelayedExpansion\n{electron}{} {} %*\n",
+            batch_quote(runtime)?,
+            batch_quote(entry)?
+        ));
     }
     let electron = if run_as_node { "ELECTRON_RUN_AS_NODE=1 " } else { "" };
     Ok(format!("#!/bin/sh\n# {MARKER}: the xenonet command. xenonet uninstall takes it out.\n{electron}exec {} {} \"$@\"\n", quote(runtime), quote(entry)))
@@ -87,12 +91,12 @@ pub struct State {
 
 fn batch_runs() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r#"(?mR)^"([^"]+)" "([^"]+)" %\*$"#).unwrap())
+    R.get_or_init(|| Regex::new(r#"(?mR)^"([^"]+)" "([^"]+)" %\*$"#).expect("a fixed pattern"))
 }
 
 fn sh_runs() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"exec '((?:[^']|'\\'')+)' '((?:[^']|'\\'')+)'").unwrap())
+    R.get_or_init(|| Regex::new(r"exec '((?:[^']|'\\'')+)' '((?:[^']|'\\'')+)'").expect("a fixed pattern"))
 }
 
 /// What's there now: whether there's a xenonet, whether it's XenoNet's,
@@ -143,12 +147,12 @@ pub fn reg_query(key: &str) -> Vec<String> {
 
 fn reg_line() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"(?imR)^\s+Path\s+REG_(?:EXPAND_)?SZ\s+([^\r\n\u2028\u2029]*?)\s*$").unwrap())
+    R.get_or_init(|| Regex::new(r"(?imR)^\s+Path\s+REG_(?:EXPAND_)?SZ\s+([^\r\n\u2028\u2029]*?)\s*$").expect("a fixed pattern"))
 }
 
 fn var_ref() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"%([^%]+)%").unwrap())
+    R.get_or_init(|| Regex::new(r"%([^%]+)%").expect("a fixed pattern"))
 }
 
 /// reg query's line for Path, split into folders with %VARS% filled in.
@@ -157,7 +161,7 @@ pub fn reg_path(stdout: &str, env: &Map<String, Value>) -> Vec<String> {
     value
         .split(';')
         .map(|d| {
-            let filled = var_ref().replace_all(d, |c: &regex::Captures| env_value(env, &c[1]).unwrap_or_else(|| c[0].to_string()));
+            let filled = var_ref().replace_all(d, |c: &regex::Captures<'_>| env_value(env, &c[1]).unwrap_or_else(|| c[0].to_string()));
             xenonet_base::text::js_trim(&filled).to_string()
         })
         .filter(|d| !d.is_empty())
@@ -217,7 +221,10 @@ mod tests {
     #[test]
     fn scripts_quote_what_they_run() {
         let sh = command_script("/opt/node's/bin/node", "/src/x.js", true, "linux").unwrap();
-        assert_eq!(sh, "#!/bin/sh\n# Added by XenoNet: the xenonet command. xenonet uninstall takes it out.\nELECTRON_RUN_AS_NODE=1 exec '/opt/node'\\''s/bin/node' '/src/x.js' \"$@\"\n");
+        assert_eq!(
+            sh,
+            "#!/bin/sh\n# Added by XenoNet: the xenonet command. xenonet uninstall takes it out.\nELECTRON_RUN_AS_NODE=1 exec '/opt/node'\\''s/bin/node' '/src/x.js' \"$@\"\n"
+        );
         assert!(command_script("C:\\a\"b", "e", false, "win32").is_err());
         assert!(command_script("C:\\100%\\node.exe", "e", false, "win32").unwrap().contains("\"C:\\100%%\\node.exe\" \"e\" %*\n"));
     }
@@ -240,7 +247,10 @@ mod tests {
     #[test]
     fn windows_paths_from_the_registry() {
         let env: Map<String, Value> = json!({ "USERPROFILE": "C:\\Users\\ada", "systemroot": "C:\\Windows" }).as_object().unwrap().clone();
-        assert_eq!(reg_path("\r\nHKEY_CURRENT_USER\\Environment\r\n    Path    REG_EXPAND_SZ    %UserProfile%\\.local\\bin;;%NOT_SET%\\x\r\n\r\n", &env), ["C:\\Users\\ada\\.local\\bin", "%NOT_SET%\\x"]);
+        assert_eq!(
+            reg_path("\r\nHKEY_CURRENT_USER\\Environment\r\n    Path    REG_EXPAND_SZ    %UserProfile%\\.local\\bin;;%NOT_SET%\\x\r\n\r\n", &env),
+            ["C:\\Users\\ada\\.local\\bin", "%NOT_SET%\\x"]
+        );
         assert_eq!(reg_path("    Path    REG_SZ    C:\\a;;C:\\b\r\n", &Map::new()), ["C:\\a", "C:\\b"]);
         assert_eq!(reg_exe(&env), "C:\\Windows\\System32\\reg.exe");
         assert!(same_place("C:\\Users\\Ada\\XenoNet\\bin\\", "c:\\users\\ada\\xenonet\\bin", "win32"));

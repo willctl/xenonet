@@ -109,7 +109,7 @@ fn run_sync(file: &str, args: &[String], cwd: &str, timeout: Duration) -> (Optio
         .stderr(std::process::Stdio::null())
         .spawn();
     let Ok(mut child) = child else { return (None, String::new()) };
-    let mut out = child.stdout.take().unwrap();
+    let mut out = child.stdout.take().expect("stdout is piped above");
     let reader = std::thread::spawn(move || {
         let mut s = Vec::new();
         let _ = out.read_to_end(&mut s);
@@ -137,7 +137,7 @@ fn run_sync(file: &str, args: &[String], cwd: &str, timeout: Duration) -> (Optio
 pub fn check_runtime(staged: &Value, platform: &str) -> Result<(), Failure> {
     let root = js_string(staged.get("root").unwrap_or(&Value::Null));
     let runtime = NATIVE.join(&[&root, node_name(platform)]);
-    let t = Duration::from_millis(15000);
+    let t = Duration::from_secs(15);
     let probe = "await import('node:sqlite'); await import('@lydell/node-pty'); await import('@modelcontextprotocol/server'); await import('tar'); process.stdout.write('ok')";
     let (status, out) = run_sync(&runtime, &["--input-type=module".into(), "-e".into(), probe.into()], &root, t);
     if status != Some(0) || out != "ok" {
@@ -288,11 +288,10 @@ async fn recover(io: &Io, env: &Env, ctx: &Ctx, life: &Life) -> Result<Value, Fa
     let record = xenonet_base::json::parse(&text).map_err(|e| Failure::msg(e.to_string()))?;
     let valid = |v: Option<&Value>| truthy(v) && crate::packages::is_semver(v.and_then(|v| v.get("version"))) && crate::packages::is_sha(v.and_then(|v| v.get("sha256")));
     let previous = record.get("previous");
-    let next = record.get("next");
-    if !valid(next) || (previous != Some(&Value::Null) && !valid(previous)) {
-        return Err(Failure::msg("Invalid service update recovery record."));
-    }
-    let next = next.unwrap();
+    let next = match record.get("next") {
+        Some(next) if valid(Some(next)) && (previous == Some(&Value::Null) || valid(previous)) => next,
+        _ => return Err(Failure::msg("Invalid service update recovery record.")),
+    };
     let previous = previous.filter(|p| !p.is_null());
     let state = running(io, env).await?;
     if truthy(Some(&state)) && state.get("version") == next.get("version") {
@@ -390,7 +389,9 @@ async fn activate_locked(io: &Io, file: &str, item: &Value, env: &Env, ctx: &Ctx
     if component == "tools" {
         select_component("tools", &staged, env, m)?;
         install_launcher(env, ctx)?;
-        return Ok(json!({ "component": "tools", "version": staged["version"], "status": "updated", "detail": "New commands use this version. Connected MCP processes keep running." }));
+        return Ok(
+            json!({ "component": "tools", "version": staged["version"], "status": "updated", "detail": "New commands use this version. Connected MCP processes keep running." }),
+        );
     }
     let state = running(io, env).await?;
     if truthy(Some(&state)) && open_terminals(&state)? {
@@ -435,7 +436,7 @@ async fn activate_locked(io: &Io, file: &str, item: &Value, env: &Env, ctx: &Ctx
 fn message(io: &Io, f: &Failure) -> String {
     match f {
         Failure::Rethrow => io.last_message(),
-        other => other.message().to_string(),
+        other @ Failure::Error { .. } => other.message().to_string(),
     }
 }
 

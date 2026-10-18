@@ -109,16 +109,16 @@ pub fn config(argv: &[String], env: &Env, home: &str, platform: &str, finds: &mu
         let n = if n == 0.0 || n.is_nan() { fallback } else { n };
         n.max(1.0)
     };
-    let codex_home = world_str(world, "codexHome")
-        .unwrap_or_else(|| Value::String(path.resolve(&[&var(env, "CODEX_HOME").map_or_else(|| path.join(&[home, ".codex"]), String::from)])));
+    let codex_home =
+        world_str(world, "codexHome").unwrap_or_else(|| Value::String(path.resolve(&[&var(env, "CODEX_HOME").map_or_else(|| path.join(&[home, ".codex"]), String::from)])));
     let claude_desktop_dir = match world {
         Some(w) => w.get("claudeDesktopDir").cloned().unwrap_or(Value::Null),
         None => finds.claude_desktop_dir().map_or(Value::Null, Value::String),
     };
     let poll_ms = var(env, "XENONET_POLL_MS").map_or(8000.0, number);
     let claude_config_dir = var(env, "CLAUDE_CONFIG_DIR");
-    let claude_projects_dir = world_str(world, "claudeRoot")
-        .unwrap_or_else(|| Value::String(path.join(&[&claude_config_dir.map_or_else(|| path.join(&[home, ".claude"]), String::from), "projects"])));
+    let claude_projects_dir =
+        world_str(world, "claudeRoot").unwrap_or_else(|| Value::String(path.join(&[&claude_config_dir.map_or_else(|| path.join(&[home, ".claude"]), String::from), "projects"])));
     let numbat_file = match set(env, "XENONET_NUMBAT_FILE") {
         Some(f) if !demo => Value::String(path.resolve(&[f])),
         _ => Value::Null,
@@ -234,7 +234,13 @@ mod tests {
     #[test]
     fn plain_settings_come_from_the_environment() {
         let mut f = Fake { asked: vec![] };
-        let c = config(&["node".into(), "server/index.js".into()], &env(&[("XENONET_PROJECTS_DEPTH", "0"), ("XENONET_POLL_MS", "x"), ("XENONET_READERS", " opencode, ,cursor"), ("XDG_STATE_HOME", "/xdg")]), "/home/me", "linux", &mut f);
+        let c = config(
+            &["node".into(), "server/index.js".into()],
+            &env(&[("XENONET_PROJECTS_DEPTH", "0"), ("XENONET_POLL_MS", "x"), ("XENONET_READERS", " opencode, ,cursor"), ("XDG_STATE_HOME", "/xdg")]),
+            "/home/me",
+            "linux",
+            &mut f,
+        );
         assert_eq!(f.asked, ["context", "desktop", "server"]);
         assert_eq!(num_of(&c, "port"), 47840.0);
         assert!(num_of(&c, "pollMs").is_nan());

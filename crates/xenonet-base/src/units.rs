@@ -99,7 +99,7 @@ pub fn locale(x: f64, min_frac: usize, max_frac: usize) -> String {
     let sign = if x.is_sign_negative() { "-" } else { "" };
     // The shortest digits, written out in full: 1.005, 1e21 → 1000…0.
     let (digits, exp) = shortest(x.abs());
-    let point = exp as i64 + 1;
+    let point = i64::from(exp) + 1;
     let (int, frac) = if point <= 0 {
         ("0".to_string(), format!("{}{digits}", "0".repeat((-point) as usize)))
     } else if (point as usize) >= digits.len() {

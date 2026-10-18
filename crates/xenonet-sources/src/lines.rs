@@ -98,6 +98,7 @@ pub struct ClaudeLine {
 }
 
 impl ClaudeLine {
+    #[expect(clippy::unnecessary_wraps, reason = "the readers' helpers take a Js, an Option, so this hands them the line as one")]
     fn r(&self) -> Js<'_> {
         Some(&self.raw)
     }
@@ -233,6 +234,7 @@ pub struct CodexLine {
 }
 
 impl CodexLine {
+    #[expect(clippy::unnecessary_wraps, reason = "the readers' helpers take a Js, an Option, so this hands them the line as one")]
     fn r(&self) -> Js<'_> {
         Some(&self.raw)
     }

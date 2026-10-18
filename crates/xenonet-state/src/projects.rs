@@ -315,7 +315,7 @@ fn outline(f: &Facts, out: &mut Map<String, Value>) {
             None => kinds.push((ext, 1)),
         }
     }
-    kinds.sort_by(|a, b| b.1.cmp(&a.1));
+    kinds.sort_by_key(|k| std::cmp::Reverse(k.1));
     let mut markers: Vec<String> = f.names.iter().filter(|n| known_file(n) || is_readme(n, true)).cloned().collect();
     markers.sort_by(|a, b| jsstr::cmp_units(a, b));
     out.insert("markers".into(), json!(markers));
@@ -608,12 +608,10 @@ impl Scan {
                     None => cache.get(&d, now),
                 };
                 // Inside a repo or workspace only another repo counts.
-                let counts = facts.as_ref().is_some_and(|f| f.vcs.is_some() || (inside.is_none() && f.workspace.is_some()));
-                if !counts {
+                let Some(facts) = facts.filter(|f| f.vcs.is_some() || (inside.is_none() && f.workspace.is_some())) else {
                     (d, k) = next(&d, &k);
                     continue;
-                }
-                let facts = facts.unwrap();
+                };
                 let git = if facts.vcs == Some(".git") { git_info(&d) } else { None };
                 if let Some(of) = git.as_ref().and_then(|g| g.worktree_of.as_deref()) {
                     if paths::path_key(of).is_some_and(|wk| paths::is_under(&k, &wk)) {
@@ -675,7 +673,7 @@ impl Scan {
 
         let mut projects: Vec<(String, Value)> = Vec::new();
         for key in kept_order.iter().filter(|k| kept.contains(*k)) {
-            let f = self.get(key).unwrap().clone();
+            let f = self.get(key).expect("kept holds keys of folders this has").clone();
             let group = groups.contains(key);
             let git = if f.facts.vcs == Some(".git") { git_info(&f.path).map(|g| g.to_json()) } else { None };
             let (stack, description) = describe(&f.path, &f.facts);
@@ -816,7 +814,7 @@ pub type KeyPairs = Vec<(String, String)>;
 /// a remote.
 pub fn relations(projects: &[Value]) -> Result<(KeyPairs, KeyPairs), TypeError> {
     let real: Vec<&Value> = projects.iter().filter(|p| p.get("role").and_then(Value::as_str) != Some("group")).collect();
-    let key_of = |p: &Value| -> String { p.get("key").map(text::js_string).unwrap_or_else(|| "undefined".into()) };
+    let key_of = |p: &Value| -> String { p.get("key").map_or_else(|| "undefined".into(), text::js_string) };
     let parent_of = |p: &Value| -> String {
         match p.get("parent") {
             None | Some(Value::Null) => String::new(),

@@ -237,19 +237,32 @@ fn line_break(c: char) -> bool {
 /// means something only on its own machine, or that has no path.
 pub fn remote_parts(url: &str) -> Option<(String, String)> {
     let s = crate::text::js_trim(url);
-    let (host, rest) = url_form(s).or_else(|| scp_form(s))??;
+    let (host, rest) = match url_form(s) {
+        UrlForm::Remote(host, rest) => (host, rest),
+        UrlForm::File => return None,
+        UrlForm::No => scp_form(s)?,
+    };
     let repo = rest.trim_start_matches('/').trim_end_matches('/');
     let repo = if repo.len() >= 4 && repo[repo.len() - 4..].eq_ignore_ascii_case(".git") { &repo[..repo.len() - 4] } else { repo };
     (!repo.is_empty()).then(|| (host.to_lowercase(), repo.to_string()))
 }
 
+// What url_form makes of a remote: no URL, a file:// URL, which is no
+// remote, or a URL's host and path.
+enum UrlForm<'a> {
+    No,
+    File,
+    Remote(&'a str, &'a str),
+}
+
 // /^([a-z][a-z0-9+.-]*):\/\/(?:[^@/]*@)?(\[[^\]/]+\]|[^/:]+)(?::\d*)?(\/.*)?$/i
-// Some(None) for a file:// URL, which is no remote.
-fn url_form(s: &str) -> Option<Option<(&str, &str)>> {
-    let (scheme, after) = s.split_once("://")?;
+fn url_form(s: &str) -> UrlForm<'_> {
+    let Some((scheme, after)) = s.split_once("://") else {
+        return UrlForm::No;
+    };
     let b = scheme.as_bytes();
     if b.is_empty() || !b[0].is_ascii_alphabetic() || !b.iter().all(|c| c.is_ascii_alphanumeric() || b"+.-".contains(c)) {
-        return None;
+        return UrlForm::No;
     }
     // The user part, when there's an @ before the first /; else none.
     let tries: Vec<&str> = match after.find(['@', '/']) {
@@ -269,15 +282,15 @@ fn url_form(s: &str) -> Option<Option<(&str, &str)>> {
             continue;
         }
         if scheme.eq_ignore_ascii_case("file") {
-            return Some(None);
+            return UrlForm::File;
         }
-        return Some(Some((host, rest)));
+        return UrlForm::Remote(host, rest);
     }
-    None
+    UrlForm::No
 }
 
 // /^(?:[^@/]+@)?([^:/\\]{2,}):(?!\/\/)(.+)$/
-fn scp_form(s: &str) -> Option<Option<(&str, &str)>> {
+fn scp_form(s: &str) -> Option<(&str, &str)> {
     let mut tries = Vec::new();
     if let Some(i) = s.find(['@', '/']).filter(|&i| i > 0 && s.as_bytes()[i] == b'@') {
         tries.push(&s[i + 1..]);
@@ -292,7 +305,7 @@ fn scp_form(s: &str) -> Option<Option<(&str, &str)>> {
         if rest.starts_with("//") || rest.is_empty() || rest.contains(line_break) {
             continue;
         }
-        return Some(Some((&t[..end], rest)));
+        return Some((&t[..end], rest));
     }
     None
 }

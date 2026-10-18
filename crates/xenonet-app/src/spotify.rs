@@ -39,12 +39,12 @@ pub const REDIRECT_SHOWN: &str = "http://127.0.0.1/api/spotify/callback";
 
 fn client_id_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(CLIENT_ID).unwrap())
+    R.get_or_init(|| Regex::new(CLIENT_ID).expect("a fixed pattern"))
 }
 
 fn spotify_link() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"^https://open\.spotify\.com/").unwrap())
+    R.get_or_init(|| Regex::new(r"^https://open\.spotify\.com/").expect("a fixed pattern"))
 }
 
 /// base64url without padding.
@@ -177,7 +177,11 @@ fn read_settings(file: &str) -> Settings {
         Ok(s @ Value::Object(_)) => {
             let s = Some(&s);
             let id = get(s, "clientId").map_or_else(String::new, js_string);
-            Settings { client_id: client_id_re().is_match(&id).then(|| raw(s, "clientId").map(js_string).unwrap_or_default()), device: raw(s, "device").and_then(Value::as_str).map(String::from), duck: raw(s, "duck") == Some(&Value::Bool(true)) }
+            Settings {
+                client_id: client_id_re().is_match(&id).then(|| raw(s, "clientId").map(js_string).unwrap_or_default()),
+                device: raw(s, "device").and_then(Value::as_str).map(String::from),
+                duck: raw(s, "duck") == Some(&Value::Bool(true)),
+            }
         }
         Ok(Value::Null) | Err(_) => none,
         Ok(_) => Settings { client_id: None, device: None, duck: false },
@@ -211,13 +215,29 @@ pub struct Spotify {
 pub enum Ask {
     SecretGet(&'static str),
     SecretHas(&'static str),
-    SecretSet { target: &'static str, value: String, comment: &'static str },
+    SecretSet {
+        target: &'static str,
+        value: String,
+        comment: &'static str,
+    },
     SecretRemove(&'static str),
     /// A request; its answer's body is read as JSON (or `fallback` when it
     /// isn't), except for a status in `skip`.
-    Fetch { url: String, method: &'static str, headers: Vec<(&'static str, String)>, body: Option<String>, timeout_ms: f64, fallback: Value, skip: Vec<u16> },
+    Fetch {
+        url: String,
+        method: &'static str,
+        headers: Vec<(&'static str, String)>,
+        body: Option<String>,
+        timeout_ms: f64,
+        fallback: Value,
+        skip: Vec<u16>,
+    },
     /// A line for XenoNet's log, then on.
-    Log { level: &'static str, code: &'static str, message: &'static str },
+    Log {
+        level: &'static str,
+        code: &'static str,
+        message: &'static str,
+    },
     Done(Value),
     Fail(SpotifyError),
     /// Throws what the last thing asked threw.
@@ -296,7 +316,15 @@ impl Spotify {
         let challenge = challenge_of(&verifier);
         let redirect = self.redirect();
         let scope = SCOPES.join(" ");
-        let q = search_params(&[("client_id", &client_id), ("response_type", "code"), ("redirect_uri", &redirect), ("code_challenge_method", "S256"), ("code_challenge", &challenge), ("state", &state), ("scope", &scope)]);
+        let q = search_params(&[
+            ("client_id", &client_id),
+            ("response_type", "code"),
+            ("redirect_uri", &redirect),
+            ("code_challenge_method", "S256"),
+            ("code_challenge", &challenge),
+            ("state", &state),
+            ("scope", &scope),
+        ]);
         self.pending = Some(Pending { state, verifier, at: now });
         Ok(json!({ "url": format!("{ACCOUNTS}/authorize?{q}") }))
     }
@@ -374,19 +402,24 @@ impl Spotify {
                 };
                 job.insert("stage".into(), json!("exchanged"));
                 let redirect = self.redirect();
-                let client = self.settings.client_id.clone().map_or_else(|| "null".into(), |c| c);
-                (Value::Object(job), Self::token_fetch(&[("grant_type", "authorization_code"), ("code", &code), ("redirect_uri", &redirect), ("client_id", &client), ("code_verifier", &p.verifier)]))
+                let client = self.settings.client_id.clone().unwrap_or_else(|| "null".into());
+                (
+                    Value::Object(job),
+                    Self::token_fetch(&[
+                        ("grant_type", "authorization_code"),
+                        ("code", &code),
+                        ("redirect_uri", &redirect),
+                        ("client_id", &client),
+                        ("code_verifier", &p.verifier),
+                    ]),
+                )
             }
             "disconnect" => {
                 job.insert("stage".into(), json!("removed"));
                 (Value::Object(job), Ask::SecretRemove(REFRESH_TARGET))
             }
             "player" | "command" => {
-                let route = if kind == "player" {
-                    Ok(("GET", "/me/player".to_string()))
-                } else {
-                    self.command_route(raw(Some(args), "op"), raw(Some(args), "value"))
-                };
+                let route = if kind == "player" { Ok(("GET", "/me/player".to_string())) } else { self.command_route(raw(Some(args), "op"), raw(Some(args), "value")) };
                 match route {
                     Err(e) => (Value::Object(job), Ask::Fail(e)),
                     Ok((method, route)) => {
@@ -421,7 +454,7 @@ impl Spotify {
             Some("previous") => Ok(("POST", format!("/me/player/previous{device}"))),
             Some("volume") => {
                 let v = js_round(js_number(Some(value.unwrap_or(&Value::Null))));
-                if !(v >= 0.0 && v <= 100.0) {
+                if !(0.0..=100.0).contains(&v) {
                     return Err(err(400, "bad-request", "volume is 0 to 100"));
                 }
                 let and = if device.is_empty() { String::new() } else { format!("&{}", &device[1..]) };
@@ -441,7 +474,7 @@ impl Spotify {
         if let Some(a) = &self.access {
             if now < a.until - EARLY_MS {
                 let token = a.token.clone();
-                return self.api_fetch(job, &token);
+                return Self::api_fetch(job, &token);
             }
         }
         if self.settings.client_id.is_none() {
@@ -451,7 +484,7 @@ impl Spotify {
         (Value::Object(job), Ask::SecretGet(REFRESH_TARGET))
     }
 
-    fn api_fetch(&mut self, mut job: Map<String, Value>, token: &Value) -> (Job, Ask) {
+    fn api_fetch(mut job: Map<String, Value>, token: &Value) -> (Job, Ask) {
         let retry = job.get("retry") == Some(&json!(true));
         let method = match job.get("method").and_then(Value::as_str) {
             Some("PUT") => "PUT",
@@ -464,7 +497,18 @@ impl Spotify {
         if retry {
             skip.push(401);
         }
-        (Value::Object(job), Ask::Fetch { url: format!("{API}{route}"), method, headers: vec![("authorization", format!("Bearer {}", js_string(token)))], body: None, timeout_ms: 10000.0, fallback: Value::Null, skip })
+        (
+            Value::Object(job),
+            Ask::Fetch {
+                url: format!("{API}{route}"),
+                method,
+                headers: vec![("authorization", format!("Bearer {}", js_string(token)))],
+                body: None,
+                timeout_ms: 10000.0,
+                fallback: Value::Null,
+                skip,
+            },
+        )
     }
 
     /// Takes what was asked for and says what's next.
@@ -538,7 +582,7 @@ impl Spotify {
                     }
                     None => {
                         let token = self.access.as_ref().map_or(Value::Null, |a| a.token.clone());
-                        self.api_fetch(job, &token)
+                        Self::api_fetch(job, &token)
                     }
                 },
             },
@@ -546,7 +590,7 @@ impl Spotify {
                 Got::Threw(_) => (Value::Object(job), Ask::Rethrow),
                 _ => {
                     let token = self.access.as_ref().map_or(Value::Null, |a| a.token.clone());
-                    self.api_fetch(job, &token)
+                    Self::api_fetch(job, &token)
                 }
             },
             "api" => {

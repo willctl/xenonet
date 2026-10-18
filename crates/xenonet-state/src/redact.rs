@@ -9,6 +9,7 @@ use std::path::Path;
 use std::sync::Mutex;
 use xenonet_base::json::number;
 use xenonet_base::jsstr;
+use xenonet_base::sync::Locked;
 use xenonet_base::text::{js_string, truthy};
 
 const ONSETS: [&str; 20] = ["b", "d", "f", "g", "h", "k", "l", "m", "n", "p", "r", "s", "t", "v", "z", "th", "sh", "kr", "dr", "vr"];
@@ -72,7 +73,7 @@ pub fn star_names(ids: &[Value], salt: &str, day: &str) -> Vec<(Value, String)> 
         }
     }
     let mut hashed: Vec<(&Value, [u8; 32])> = unique.into_iter().map(|id| (id, digest(salt, day, &js_string(id)))).collect();
-    hashed.sort_by(|a, b| a.1.cmp(&b.1));
+    hashed.sort_by_key(|a| a.1);
     let mut taken = std::collections::HashSet::new();
     let mut names = Vec::new();
     for (id, bytes) in hashed {
@@ -107,7 +108,7 @@ fn new_salt() -> String {
 /// this run alone.
 pub fn poster_salt(dir: Option<&str>) -> std::io::Result<String> {
     let Some(dir) = dir.filter(|d| !d.is_empty()) else {
-        return Ok(RUN_SALT.lock().unwrap().get_or_insert_with(new_salt).clone());
+        return Ok(RUN_SALT.locked().get_or_insert_with(new_salt).clone());
     };
     let file = Path::new(dir).join("poster-salt");
     if let Ok(b) = std::fs::read(&file) {
@@ -215,7 +216,7 @@ pub fn constellation_of(day: Option<&Value>, salt: &str, now: f64, names: bool, 
         "totals": { "sessions": total("sessions"), "turns": total("turns"), "toolCalls": total("toolCalls"), "files": total("files") },
         "tokens": or0(field("tokens")),
         "stars": stars,
-        "apps": Value::Object(xenonet_base::jsstr::js_key_order(apps)),
+        "apps": Value::Object(jsstr::js_key_order(apps)),
     })
 }
 
@@ -228,7 +229,7 @@ pub fn labels_of(nodes: &[Value], day: Option<&Value>, salt: &str, now: f64) -> 
         let key = n.get("id").map_or_else(|| "undefined".into(), js_string);
         labels.insert(key, lookup(&stars, n.get("id")).map_or(Value::Null, |s| Value::String(s.into())));
     }
-    Value::Object(xenonet_base::jsstr::js_key_order(labels))
+    Value::Object(jsstr::js_key_order(labels))
 }
 
 #[cfg(test)]
@@ -239,8 +240,7 @@ mod tests {
     fn hmac_is_rfc_4231s() {
         // RFC 4231, test case 2.
         let mac = hmac_sha256(b"Jefe", b"what do ya want for nothing?");
-        let hex: String = mac.iter().map(|b| format!("{b:02x}")).collect();
-        assert_eq!(hex, "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
+        assert_eq!(jsstr::hex(&mac), "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
     }
 
     #[test]

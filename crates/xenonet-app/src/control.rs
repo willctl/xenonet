@@ -123,7 +123,7 @@ pub struct Opts<'a> {
 }
 
 impl Instance {
-    pub fn new(id: &str, o: &Opts) -> Result<Instance, String> {
+    pub fn new(id: &str, o: &Opts<'_>) -> Result<Instance, String> {
         let Some(i) = instance(id) else {
             let ids: Vec<&str> = INSTANCES.iter().map(|i| i.id).collect();
             return Err(format!("no instance \"{id}\"; there's {}", ids.join(", ")));
@@ -253,7 +253,11 @@ impl Instance {
                 return Ok(last);
             }
             if !last.is_null() && raw(Some(&last), "controlled") == Some(&json!(false)) {
-                return Err(Failure::msg(format!("port {} has a XenoNet server with no window to control ({})", self.port_text(), raw(Some(&last), "error").map_or_else(|| "undefined".into(), js_string))));
+                return Err(Failure::msg(format!(
+                    "port {} has a XenoNet server with no window to control ({})",
+                    self.port_text(),
+                    raw(Some(&last), "error").map_or_else(|| "undefined".into(), js_string)
+                )));
             }
             io.sleep(500.0).await;
         }
@@ -386,9 +390,16 @@ impl Instance {
                     return Err(Failure::msg(self.held(&holder)));
                 }
                 if state == "up" {
-                    return Err(Failure::msg(format!("port {} has a XenoNet server with no window (npm run dev or npm run demo?); stop it, or use another instance", self.port_text())));
+                    return Err(Failure::msg(format!(
+                        "port {} has a XenoNet server with no window (npm run dev or npm run demo?); stop it, or use another instance",
+                        self.port_text()
+                    )));
                 }
-                return Err(Failure::msg(format!("something on port {} doesn't answer (a server still on its way out, or another program); stop it, or run {} on another port", self.port_text(), self.name)));
+                return Err(Failure::msg(format!(
+                    "something on port {} doesn't answer (a server still on its way out, or another program); stop it, or run {} on another port",
+                    self.port_text(),
+                    self.name
+                )));
             }
             io.sleep(300.0).await;
         }
@@ -440,7 +451,12 @@ impl Instance {
                 if self.gone(io, pid, 5000.0).await? {
                     return Ok(json!({ "quit": true, "killed": xenonet_base::json::number(pid) }));
                 }
-                return Err(Failure::msg(format!("{} didn't quit in {}s, and process {} is still there after kill -9", self.name, number_string(timeout / 1000.0), number_string(pid))));
+                return Err(Failure::msg(format!(
+                    "{} didn't quit in {}s, and process {} is still there after kill -9",
+                    self.name,
+                    number_string(timeout / 1000.0),
+                    number_string(pid)
+                )));
             }
             io.sleep(300.0).await;
         }
@@ -528,7 +544,19 @@ mod tests {
     }
 
     fn opts() -> Opts<'static> {
-        Opts { port: Some(json!(5999)), user_data: Some("/nowhere"), log_dir: Some("/nowhere/logs"), settle_ms: 300.0, term_ms: 300.0, root: "/src", tmpdir: "/tmp", platform: "linux", appdata: None, xdg_config_home: None, home: "/home/nova" }
+        Opts {
+            port: Some(json!(5999)),
+            user_data: Some("/nowhere"),
+            log_dir: Some("/nowhere/logs"),
+            settle_ms: 300.0,
+            term_ms: 300.0,
+            root: "/src",
+            tmpdir: "/tmp",
+            platform: "linux",
+            appdata: None,
+            xdg_config_home: None,
+            home: "/home/nova",
+        }
     }
 
     #[test]

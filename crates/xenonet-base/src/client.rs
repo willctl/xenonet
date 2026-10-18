@@ -155,7 +155,7 @@ pub fn request(port: f64, name: &str, method: &str, route: &str, body: Option<&V
     let text = body.map(|b| json::stringify(b, 0));
     let stopped = || Refused { message: format!("{name} stopped answering on 127.0.0.1:{} (restarting, or quit); try again in a moment", number_string(port)), status: None };
     let answer = real_port(port).ok_or_else(stopped).and_then(|p| http::request(p, method, route, &all, text.as_deref().map(str::as_bytes), None).map_err(|_| stopped()))?;
-    let data = answer.body.as_ref().ok().and_then(|b| json_of(b)).unwrap_or_else(|| Value::Object(Default::default()));
+    let data = answer.body.as_ref().ok().and_then(|b| json_of(b)).unwrap_or_else(|| Value::Object(serde_json::Map::default()));
     if answer.ok() {
         return Ok(data);
     }

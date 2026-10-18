@@ -22,8 +22,8 @@ pub const DEFAULT_SIZE: &str = "portrait";
 /// id that isn't one.
 pub fn poster_size(id: Option<&str>) -> usize {
     let sizes = poster_sizes();
-    let at = |want: &str| sizes.as_array().unwrap().iter().position(|s| s["id"] == want);
-    id.and_then(at).or_else(|| at(DEFAULT_SIZE)).unwrap()
+    let at = |want: &str| sizes.as_array().and_then(|a| a.iter().position(|s| s["id"] == want));
+    id.and_then(at).or_else(|| at(DEFAULT_SIZE)).expect("DEFAULT_SIZE is one of the poster sizes")
 }
 
 /// A film's frames: a story, the page's, and a wide one for --size.

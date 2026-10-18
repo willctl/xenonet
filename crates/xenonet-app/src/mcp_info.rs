@@ -48,12 +48,12 @@ fn public_uri(value: Option<&Value>) -> Value {
 
 fn template() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"\{[^}]*\?[^}]*\}").unwrap())
+    R.get_or_init(|| Regex::new(r"\{[^}]*\?[^}]*\}").expect("a fixed pattern"))
 }
 
 fn credential() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"(?i)key|token|secret|auth|password").unwrap())
+    R.get_or_init(|| Regex::new(r"(?i)key|token|secret|auth|password").expect("a fixed pattern"))
 }
 
 /// An http(s) URL with no user, password, query or fragment, or only its
@@ -194,7 +194,7 @@ pub fn display_catalog(raw_v: Option<&Value>) -> Value {
 
 /// The package or plugin manifest beside a local entry point, if there's
 /// one: looking doesn't run the command or install a package.
-fn package_info(spec: &Value, read: &mut Read) -> Map<String, Value> {
+fn package_info(spec: &Value, read: &mut Read<'_>) -> Map<String, Value> {
     let spec_r = Some(spec);
     let args = std::iter::once(raw(spec_r, "command").cloned()).chain(list(raw(spec_r, "args")).into_iter().map(Some));
     for arg in args.flatten() {
@@ -244,10 +244,12 @@ impl Collect {
     }
 
     pub fn from_value(v: Value) -> Self {
-        Collect { state: match v {
-            Value::Object(m) => m,
-            _ => Map::new(),
-        } }
+        Collect {
+            state: match v {
+                Value::Object(m) => m,
+                _ => Map::new(),
+            },
+        }
     }
 
     fn server(&self) -> String {
@@ -295,18 +297,25 @@ impl Collect {
     }
 
     fn codex_used(&self) -> bool {
-        self.using().iter().any(|s| raw(Some(s), "app").and_then(Value::as_str) == Some("codex") || raw(Some(s), "id").and_then(Value::as_str).is_some_and(|id| id.starts_with("codex:")))
+        self.using()
+            .iter()
+            .any(|s| raw(Some(s), "app").and_then(Value::as_str) == Some("codex") || raw(Some(s), "id").and_then(Value::as_str).is_some_and(|id| id.starts_with("codex:")))
     }
 
     fn status_request(&self) -> Next {
-        Next::Request { method: "mcpServerStatus/list", params: json!({ "serverName": self.server(), "detail": "full", "limit": 100, "cursor": self.state.get("cursor").cloned().unwrap_or(Value::Null) }) }
+        Next::Request {
+            method: "mcpServerStatus/list",
+            params: json!({ "serverName": self.server(), "detail": "full", "limit": 100, "cursor": self.state.get("cursor").cloned().unwrap_or(Value::Null) }),
+        }
     }
 
     // After Codex has been asked (or couldn't be): discover the server
     // ourselves unless Codex had its catalog.
-    fn discover_or_finish(&mut self, settings: &Settings, read: &mut Read) -> Next {
+    fn discover_or_finish(&mut self, settings: &Settings, read: &mut Read<'_>) -> Next {
         let specs = self.specs();
-        let usable = |s: &Value| raw(Some(s), "enabled") != Some(&Value::Bool(false)) && (truthy(raw(Some(s), "command")) || truthy(raw(Some(s), "url")) || truthy(raw(Some(s), "serverUrl")));
+        let usable = |s: &Value| {
+            raw(Some(s), "enabled") != Some(&Value::Bool(false)) && (truthy(raw(Some(s), "command")) || truthy(raw(Some(s), "url")) || truthy(raw(Some(s), "serverUrl")))
+        };
         let selected = specs.iter().find(|s| usable(s)).cloned();
         if selected.is_none() && !specs.is_empty() && specs.iter().all(|s| raw(Some(s), "enabled") == Some(&Value::Bool(false))) {
             self.result().insert("status".into(), json!("disabled"));
@@ -321,7 +330,7 @@ impl Collect {
         self.finish(read)
     }
 
-    fn finish(&mut self, read: &mut Read) -> Next {
+    fn finish(&mut self, read: &mut Read<'_>) -> Next {
         let server = self.server();
         let specs = self.specs();
         let using = self.using();
@@ -389,7 +398,7 @@ fn plugin_name(server: &str) -> Option<&str> {
 
 /// Starts collecting a server's catalog: what the settings and the files
 /// beside them say, then the first question for Codex.
-pub fn begin(server: &str, sessions: &[Value], settings: &Settings, now: f64, read: &mut Read) -> (Collect, Next) {
+pub fn begin(server: &str, sessions: &[Value], settings: &Settings, now: f64, read: &mut Read<'_>) -> (Collect, Next) {
     let st = Some(settings);
     let using: Vec<Value> = sessions.iter().filter(|s| list(raw(Some(s), "mcp")).iter().any(|m| raw(Some(m), "server").and_then(Value::as_str) == Some(server))).cloned().collect();
     let result = json!({ "server": server, "title": server, "author": null, "status": "unknown", "auth": "unknown", "tools": [], "resources": [], "templates": [], "capabilities": [], "connections": [], "checkedAt": now, "catalog": false });
@@ -475,7 +484,7 @@ pub enum Answer {
 }
 
 /// Takes the answer to what was asked last and says what's next.
-pub fn step(mut c: Collect, answer: Answer, settings: &Settings, read: &mut Read) -> (Collect, Next) {
+pub fn step(mut c: Collect, answer: Answer, settings: &Settings, read: &mut Read<'_>) -> (Collect, Next) {
     let stage = c.state.get("stage").and_then(Value::as_str).unwrap_or("").to_string();
     let next = match stage.as_str() {
         "config" => {
@@ -603,7 +612,14 @@ mod tests {
         let Next::Discover(sel) = next else { panic!("{next:?}") };
         assert_eq!(sel["env"]["API_TOKEN"], "private-value");
         assert_eq!(sel["cwd"], "/workspace");
-        let (_, next) = step(c, Answer::Ok(json!({ "serverInfo": { "name": "library", "version": "2" }, "runtimeStatus": "connected", "authStatus": "unsupported", "tools": [], "resources": [], "resourceTemplates": [] })), &settings, &mut read);
+        let (_, next) = step(
+            c,
+            Answer::Ok(
+                json!({ "serverInfo": { "name": "library", "version": "2" }, "runtimeStatus": "connected", "authStatus": "unsupported", "tools": [], "resources": [], "resourceTemplates": [] }),
+            ),
+            &settings,
+            &mut read,
+        );
         let Next::Done(info) = next else { panic!() };
         assert_eq!(info["author"], "Library authors");
         assert_eq!(info["lastCall"], 30);

@@ -41,7 +41,7 @@ pub fn migrate_sqlite(db: &Connection, steps: &[Step]) -> rusqlite::Result<Versi
     }
     for v in from..last {
         db.execute_batch("BEGIN")?;
-        let step = steps[v as usize](db).and_then(|_| db.execute_batch(&format!("PRAGMA user_version = {}", v + 1)));
+        let step = steps[v as usize](db).and_then(|()| db.execute_batch(&format!("PRAGMA user_version = {}", v + 1)));
         match step {
             Ok(()) => db.execute_batch("COMMIT")?,
             Err(e) => {
@@ -80,8 +80,10 @@ impl SqliteStore {
 
     /// Opens the database and brings it up to date.
     pub fn open(&mut self, now: f64) -> Result<&Connection, String> {
-        if self.db.is_some() {
-            return Ok(self.db.as_ref().unwrap());
+        // Taken and put back: a borrow of it, returned from here, would
+        // outlast the rest of the function, which changes self.
+        if let Some(db) = self.db.take() {
+            return Ok(self.db.insert(db));
         }
         let opened = (|| -> Result<(Connection, Version), String> {
             if let Some(dir) = Path::new(&self.file).parent() {
@@ -114,8 +116,7 @@ impl SqliteStore {
                     self.life.ok(now);
                 }
                 self.version = Some(v);
-                self.db = Some(db);
-                Ok(self.db.as_ref().unwrap())
+                Ok(self.db.insert(db))
             }
         }
     }

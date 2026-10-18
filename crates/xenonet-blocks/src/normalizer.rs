@@ -113,14 +113,14 @@ mod tests {
         fn parse(&mut self, text: &str) -> Result<String, String> {
             text.strip_prefix('{').map(str::to_string).ok_or_else(|| "not a record".to_string())
         }
-        fn inspect(&mut self, raw: String, _: &()) -> Result<Option<String>, String> {
+        fn inspect(&mut self, raw: String, (): &()) -> Result<Option<String>, String> {
             match raw.as_str() {
                 "drop" => Ok(None),
                 "bad" => Err("can't check it".into()),
                 _ => Ok(Some(raw)),
             }
         }
-        fn normalize(&mut self, raw: String, _: &()) -> Result<String, String> {
+        fn normalize(&mut self, raw: String, (): &()) -> Result<String, String> {
             Ok(raw.to_uppercase())
         }
     }

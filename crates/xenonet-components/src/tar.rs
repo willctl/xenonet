@@ -332,7 +332,9 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             assert!(std::fs::metadata(dir.join("node")).unwrap().permissions().mode() & 0o100 != 0);
         }
-        for bad in [archive(&[("../escape", b'0', b"x", 0o644)]), archive(&[("link", b'1', b"", 0o644)]), archive(&[("/abs", b'0', b"x", 0o644)]), archive(&[("a\\b", b'0', b"x", 0o644)])] {
+        for bad in
+            [archive(&[("../escape", b'0', b"x", 0o644)]), archive(&[("link", b'1', b"", 0o644)]), archive(&[("/abs", b'0', b"x", 0o644)]), archive(&[("a\\b", b'0', b"x", 0o644)])]
+        {
             assert_eq!(unpack(&bad, &dir), Err(Unpack::Refused));
         }
         assert!(!dir.parent().unwrap().join("escape").exists());
@@ -347,7 +349,12 @@ mod tests {
         let long = "a/".repeat(60) + "file.txt";
         let record = format!(" path={long}\n");
         let rec = format!("{}{record}", record.len() + (record.len() + 3).to_string().len());
-        let t = archive(&[("PaxHeader", b'x', rec.as_bytes(), 0o644), ("short", b'0', b"pax", 0o644), ("././@LongLink", b'L', format!("{long}2\0").as_bytes(), 0o644), ("short2", b'0', b"gnu", 0o644)]);
+        let t = archive(&[
+            ("PaxHeader", b'x', rec.as_bytes(), 0o644),
+            ("short", b'0', b"pax", 0o644),
+            ("././@LongLink", b'L', format!("{long}2\0").as_bytes(), 0o644),
+            ("short2", b'0', b"gnu", 0o644),
+        ]);
         let es = entries(&t).unwrap();
         assert_eq!(es.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(), [long.as_str(), &format!("{long}2")]);
     }

@@ -93,7 +93,7 @@ impl Cursor {
     /// Reads the file when it changed (by size and mtime), else drops what
     /// went stale. Threw when the vendor check did: the runs stay as they
     /// were, and the stamp is taken.
-    pub fn read(&mut self, file: Option<&str>, now: f64, files: &mut dyn Files, check: &mut Check) -> Result<(), Threw> {
+    pub fn read(&mut self, file: Option<&str>, now: f64, files: &mut dyn Files, check: &mut Check<'_>) -> Result<(), Threw> {
         let got = match file {
             Some(f) => tail(f, files),
             None => Err(FsError { code: Some("ERR_INVALID_ARG_TYPE".into()), message: "no file".into() }),
@@ -117,7 +117,7 @@ impl Cursor {
         Ok(())
     }
 
-    fn parse(&mut self, lines: &[String], now: f64, check: &mut Check) -> Result<(), Threw> {
+    fn parse(&mut self, lines: &[String], now: f64, check: &mut Check<'_>) -> Result<(), Threw> {
         let mut runs: OrderedMap<Run> = OrderedMap::new();
         let mut checked = 0;
         for line in lines {

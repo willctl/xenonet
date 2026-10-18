@@ -87,7 +87,7 @@ pub fn chosen(dir: Option<&str>, default: &str) -> Option<String> {
 /// A folder as someone typed it: ~ and ~/… are the home folder; anything
 /// else has to be a full path. None when it isn't one.
 pub fn resolve_folder(input: Option<&Value>, home: &str) -> Option<String> {
-    let s = input.and_then(Value::as_str).map(js_trim).unwrap_or("");
+    let s = input.and_then(Value::as_str).map_or("", js_trim);
     if s == "~" {
         return Some(paths::resolve(home));
     }
@@ -163,7 +163,7 @@ pub fn check_start(input: Option<&Value>, home: &str, projects_dir: &str, platfo
     if !ok {
         return json!({ "done": { "ok": false, "path": v["path"], "link": null, "error": v["error"], "current": current, "warnings": [], "scan": null } });
     }
-    let path = path.unwrap();
+    let path = path.expect("validate gives a path with ok");
     let shown = tilde(&path, home);
     let mut warnings = Vec::new();
     if let Some(l) = v["link"].as_str() {

@@ -19,6 +19,7 @@ pub struct State {
 
 // The .json files under `dir`, as paths inside it with forward slashes; a
 // folder that can't be read has none.
+#[expect(clippy::case_sensitive_file_extension_comparisons, reason = "files.js's endsWith(\".json\") is case-sensitive, and so is this")]
 fn list_json(dir: &str, at: &str, out: &mut Vec<String>) {
     let Ok(ents) = paths::read_dir_sorted(Path::new(&paths::join(dir, at))) else { return };
     for e in ents {

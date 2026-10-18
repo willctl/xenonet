@@ -161,12 +161,9 @@ impl Numbat {
     // The new whole lines since the last read. Err when the read failed
     // (what it changed before then stays changed).
     fn lines(&mut self, file: Option<&str>, files: &mut dyn Files) -> Result<Vec<String>, FsError> {
-        let st = match file.map(|f| files.stat(f)) {
-            Some(Ok(st)) => st,
-            _ => {
-                self.file_state = "missing";
-                return Ok(Vec::new());
-            }
+        let Some(Ok(st)) = file.map(|f| files.stat(f)) else {
+            self.file_state = "missing";
+            return Ok(Vec::new());
         };
         let file = file.unwrap_or_default();
         let mut skip_first = false;

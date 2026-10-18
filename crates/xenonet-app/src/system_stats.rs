@@ -56,12 +56,12 @@ pub fn cpu_model(model: &str) -> Option<String> {
     static R: OnceLock<[Regex; 6]> = OnceLock::new();
     let r = R.get_or_init(|| {
         [
-            Regex::new(r"(?i)\((?:R|TM|C)\)").unwrap(),
-            Regex::new(r"(?-u:\b)CPU(?-u:\b)").unwrap(),
-            Regex::new(&format!(r"(?i)@{SPACE}*[0-9.]+{SPACE}*GHz")).unwrap(),
-            Regex::new(r"(?i)(?-u:\b)[0-9]+-Core Processor(?-u:\b)").unwrap(),
-            Regex::new(r"(?i)(?-u:\b)Processor(?-u:\b)").unwrap(),
-            Regex::new(&format!("{SPACE}+")).unwrap(),
+            Regex::new(r"(?i)\((?:R|TM|C)\)").expect("a fixed pattern"),
+            Regex::new(r"(?-u:\b)CPU(?-u:\b)").expect("a fixed pattern"),
+            Regex::new(&format!(r"(?i)@{SPACE}*[0-9.]+{SPACE}*GHz")).expect("a fixed pattern"),
+            Regex::new(r"(?i)(?-u:\b)[0-9]+-Core Processor(?-u:\b)").expect("a fixed pattern"),
+            Regex::new(r"(?i)(?-u:\b)Processor(?-u:\b)").expect("a fixed pattern"),
+            Regex::new(&format!("{SPACE}+")).expect("a fixed pattern"),
         ]
     });
     let s = r[0].replace_all(model, "");
@@ -113,7 +113,13 @@ pub fn parse_ioreg(text: &str, total_mem: Option<f64>) -> Option<Value> {
     let vram_used = stat("vramUsedBytes");
     let vram_total = stat("VRAM,totalMB");
     static NAME: OnceLock<[Regex; 3]> = OnceLock::new();
-    let r = NAME.get_or_init(|| [Regex::new(r#""model" = "([^"]+)""#).unwrap(), Regex::new(r#""model" = <"([^"]+)">"#).unwrap(), Regex::new(r#""gpu-core-count" = ([0-9]+)"#).unwrap()]);
+    let r = NAME.get_or_init(|| {
+        [
+            Regex::new(r#""model" = "([^"]+)""#).expect("a fixed pattern"),
+            Regex::new(r#""model" = <"([^"]+)">"#).expect("a fixed pattern"),
+            Regex::new(r#""gpu-core-count" = ([0-9]+)"#).expect("a fixed pattern"),
+        ]
+    });
     let name = r[0].captures(text).or_else(|| r[1].captures(text)).map(|c| c[1].to_string());
     let cores = r[2].captures(text).map(|c| c[1].to_string());
     if let Some(total) = vram_total.filter(|t| *t != 0.0) {
@@ -175,12 +181,22 @@ pub fn parse_windows_gpu(line: &str, adapters: &[(String, f64)]) -> WindowsLine 
                 Value::Array(a) => a.into_iter().filter(|v| v.is_object() || v.is_array()).collect(),
                 _ => Vec::new(),
             };
-            let Some(top) = luids.iter().max_by(|a, b| n_or0(raw(Some(a), "m")).partial_cmp(&n_or0(raw(Some(b), "m"))).unwrap_or(std::cmp::Ordering::Equal).then(std::cmp::Ordering::Greater)) else {
+            let Some(top) =
+                luids.iter().max_by(|a, b| n_or0(raw(Some(a), "m")).partial_cmp(&n_or0(raw(Some(b), "m"))).unwrap_or(std::cmp::Ordering::Equal).then(std::cmp::Ordering::Greater))
+            else {
                 return WindowsLine::Nothing;
             };
             let card = adapters.first();
             let mem_total = card.map(|c| c.1).filter(|m| *m != 0.0);
-            WindowsLine::Latest(gpu(0.0, card.map_or("GPU", |c| c.0.as_str()), Some((n_or0(raw(Some(top), "u")) / 100.0).min(1.0)), Some(n_or0(raw(Some(top), "m"))), mem_total, None, false))
+            WindowsLine::Latest(gpu(
+                0.0,
+                card.map_or("GPU", |c| c.0.as_str()),
+                Some((n_or0(raw(Some(top), "u")) / 100.0).min(1.0)),
+                Some(n_or0(raw(Some(top), "m"))),
+                mem_total,
+                None,
+                false,
+            ))
         }
         _ => WindowsLine::Nothing,
     }
@@ -211,7 +227,14 @@ pub fn windows_gpu_script(parent: f64) -> String {
 
 /// Where nvidia-smi is: on PATH, or where NVIDIA's driver puts it on
 /// Windows. `exists` says whether a file is there.
-pub fn find_nvidia_smi(platform: &str, path_var: &str, pathext: Option<&str>, system_root: Option<&str>, program_files: Option<&str>, exists: &mut dyn FnMut(&str) -> bool) -> Option<String> {
+pub fn find_nvidia_smi(
+    platform: &str,
+    path_var: &str,
+    pathext: Option<&str>,
+    system_root: Option<&str>,
+    program_files: Option<&str>,
+    exists: &mut dyn FnMut(&str) -> bool,
+) -> Option<String> {
     if let Some(f) = xenonet_base::paths::on_path("nvidia-smi", path_var, pathext, platform == "win32", exists) {
         return Some(f);
     }
@@ -220,7 +243,9 @@ pub fn find_nvidia_smi(platform: &str, path_var: &str, pathext: Option<&str>, sy
     }
     let w = crate::nodepath::Style::Win32;
     let root = system_root.unwrap_or("C:\\Windows");
-    [w.join(&[root, "System32", "nvidia-smi.exe"]), w.join(&[program_files.unwrap_or("C:\\Program Files"), "NVIDIA Corporation", "NVSMI", "nvidia-smi.exe"])].into_iter().find(|f| exists(f))
+    [w.join(&[root, "System32", "nvidia-smi.exe"]), w.join(&[program_files.unwrap_or("C:\\Program Files"), "NVIDIA Corporation", "NVSMI", "nvidia-smi.exe"])]
+        .into_iter()
+        .find(|f| exists(f))
 }
 
 /// What nvidia-smi is run with: its own loop, a line a GPU every 2 s.
@@ -422,10 +447,13 @@ struct Load {
 }
 
 fn loads(times: &[Times]) -> Vec<Load> {
-    times.iter().map(|t| {
-        let busy = t.user + t.nice + t.sys + t.irq;
-        Load { busy, total: busy + t.idle }
-    }).collect()
+    times
+        .iter()
+        .map(|t| {
+            let busy = t.user + t.nice + t.sys + t.irq;
+            Load { busy, total: busy + t.idle }
+        })
+        .collect()
 }
 
 /// The CPU and memory side of the system panel: the cores' times at the
@@ -458,7 +486,11 @@ impl Stats {
     pub fn cpu(&mut self, model: Option<&str>, speed: Option<f64>, threads: usize, times: &[Times]) -> Value {
         let now = loads(times);
         let prev = self.prev.clone().unwrap_or_default();
-        let cores: Vec<Value> = if now.len() == prev.len() { now.iter().zip(&prev).map(|(t, p)| num_v(frac(t.busy - p.busy, t.total - p.total))).collect() } else { now.iter().map(|_| json!(0)).collect() };
+        let cores: Vec<Value> = if now.len() == prev.len() {
+            now.iter().zip(&prev).map(|(t, p)| num_v(frac(t.busy - p.busy, t.total - p.total))).collect()
+        } else {
+            now.iter().map(|_| json!(0)).collect()
+        };
         let busy: f64 = now.iter().enumerate().fold(0.0, |s, (i, t)| s + t.busy - prev.get(i).map_or(t.busy, |p| p.busy));
         let total: f64 = now.iter().enumerate().fold(0.0, |s, (i, t)| s + t.total - prev.get(i).map_or(t.total, |p| p.total));
         self.prev = Some(now);
@@ -469,8 +501,19 @@ impl Stats {
     /// The reading: the CPU, memory, the GPUs (None when the reader had
     /// nothing), which reader that was (None when there's none), and the
     /// history, which gains a sample at most every 1.5 s.
-    #[allow(clippy::too_many_arguments)]
-    pub fn reading(&mut self, at: f64, platform: &str, arch: Option<&str>, uptime: f64, cpu: Value, total: f64, free: f64, gpus: Option<Vec<Value>>, reader: Option<&str>) -> Value {
+    #[expect(clippy::too_many_arguments, reason = "what the machine read this time, as the addon hands it over; xenonet-node calls it this way")]
+    pub fn reading(
+        &mut self,
+        at: f64,
+        platform: &str,
+        arch: Option<&str>,
+        uptime: f64,
+        cpu: Value,
+        total: f64,
+        free: f64,
+        gpus: Option<Vec<Value>>,
+        reader: Option<&str>,
+    ) -> Value {
         let used = (total - free).max(0.0);
         let first = gpus.as_ref().and_then(|g| g.first()).cloned();
         let last_sample = self.history.last().and_then(|h| h["at"].as_f64());
@@ -550,7 +593,9 @@ mod tests {
 
     #[test]
     fn windows_counters() {
-        let WindowsLine::Adapters(a) = parse_windows_gpu(r#"A [{"name":"Intel(R) UHD Graphics 770","mem":134217728},{"name":"NVIDIA RTX A4500","mem":21474836480}]"#, &[]) else { panic!() };
+        let WindowsLine::Adapters(a) = parse_windows_gpu(r#"A [{"name":"Intel(R) UHD Graphics 770","mem":134217728},{"name":"NVIDIA RTX A4500","mem":21474836480}]"#, &[]) else {
+            panic!()
+        };
         assert_eq!(a[0].0, "NVIDIA RTX A4500");
         let WindowsLine::Latest(l) = parse_windows_gpu(r#"S {"0x00000000_0x00001a2b":{"u":2.5,"m":0},"0x00000000_0x00003c4d":{"u":64.3,"m":2147483648}}"#, &a) else { panic!() };
         assert_eq!(l["usage"], 0.643);

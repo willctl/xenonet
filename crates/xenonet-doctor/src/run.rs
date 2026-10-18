@@ -47,16 +47,30 @@ pub fn host_check(h: &Value, now: f64) -> Value {
         Some("offline") => {
             let heard = last.map_or(String::new(), |t| format!(", last heard {} ago", span(now - t)));
             let cached = if truthy(h.get("cached")) { "; the map shows its last snapshot" } else { "" };
-            return verdict("warn", format!("offline{heard}: {}{cached}", message.unwrap_or_else(|| "the connection ended".into())), Some(fix.unwrap_or_else(|| "XenoNet tries again by itself.".into())));
+            return verdict(
+                "warn",
+                format!("offline{heard}: {}{cached}", message.unwrap_or_else(|| "the connection ended".into())),
+                Some(fix.unwrap_or_else(|| "XenoNet tries again by itself.".into())),
+            );
         }
-        Some("stale") => return verdict("warn", format!("no word from it for {}", span(now - h.get("lastHeard").and_then(Value::as_f64).unwrap_or(now))), Some("XenoNet waits a little longer, then connects again.".into())),
+        Some("stale") => {
+            return verdict(
+                "warn",
+                format!("no word from it for {}", span(now - h.get("lastHeard").and_then(Value::as_f64).unwrap_or(now))),
+                Some("XenoNet waits a little longer, then connects again.".into()),
+            )
+        }
         Some("connecting") => return verdict("info", format!("connecting to {}", s(h.get("target")).unwrap_or_else(|| id.clone())), None),
         _ => {}
     }
     let skew = h.get("offsetMs").and_then(Value::as_f64).filter(|x| x.is_finite());
     let off = skew.filter(|x| x.abs() >= 2000.0).map(|x| format!("its clock {} {} this one's", span(x), if x > 0.0 { "ahead of" } else { "behind" }));
     if skew.is_some_and(|x| x.abs() > SKEW_MS) {
-        return verdict("warn", format!("live, but {}", off.unwrap_or_default()), Some(format!("Have {id} set its clock by itself: on Linux, timedatectl set-ntp true; on a Mac, System Settings › General › Date & Time.")));
+        return verdict(
+            "warn",
+            format!("live, but {}", off.unwrap_or_default()),
+            Some(format!("Have {id} set its clock by itself: on Linux, timedatectl set-ntp true; on a Mac, System Settings › General › Date & Time.")),
+        );
     }
     let version = s(h.get("version")).unwrap_or_else(|| "of an unknown version".into());
     let platform = s(h.get("platform")).unwrap_or_else(|| "an unknown system".into());
@@ -85,7 +99,13 @@ fn rank(s: Option<&str>) -> Option<u8> {
 
 /// The problems in `next` that weren't in `prev`: what's worth telling you.
 pub fn new_problems(prev: &Value, next: &Value) -> Vec<Value> {
-    let before: Vec<(Value, Value)> = prev.get("results").and_then(Value::as_array).into_iter().flatten().map(|r| (r.get("id").cloned().unwrap_or(Value::Null), r.get("status").cloned().unwrap_or(Value::Null))).collect();
+    let before: Vec<(Value, Value)> = prev
+        .get("results")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|r| (r.get("id").cloned().unwrap_or(Value::Null), r.get("status").cloned().unwrap_or(Value::Null)))
+        .collect();
     let was = |id: Option<&Value>| before.iter().rev().find(|(k, _)| xenonet_app::jsv::strict_eq(Some(k), id)).and_then(|(_, s)| rank(s.as_str())).unwrap_or(0);
     next.get("results")
         .and_then(Value::as_array)
@@ -111,7 +131,9 @@ pub fn write_run(file: Option<&str>, result: &Value) {
         m.insert(k.clone(), v.clone());
     }
     let tmp = format!("{file}.tmp");
-    let _ = fsx::mkdir_p(&xenonet_app::nodepath::NATIVE.dirname(file), None).and_then(|()| fsx::write_file(&tmp, xenonet_base::json::stringify(&Value::Object(m), 0).as_bytes(), None)).and_then(|()| fsx::rename(&tmp, file));
+    let _ = fsx::mkdir_p(&xenonet_app::nodepath::NATIVE.dirname(file), None)
+        .and_then(|()| fsx::write_file(&tmp, xenonet_base::json::stringify(&Value::Object(m), 0).as_bytes(), None))
+        .and_then(|()| fsx::rename(&tmp, file));
 }
 
 #[cfg(test)]

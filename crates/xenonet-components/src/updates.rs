@@ -20,12 +20,12 @@ const DOWNLOADS: &str = "https://github.com/willctl/xenonet/releases/latest/down
 
 fn file_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"^XenoNet-(service|tools)-[A-Za-z0-9_.-]+\.tar\.gz$").unwrap())
+    R.get_or_init(|| Regex::new(r"^XenoNet-(service|tools)-[A-Za-z0-9_.-]+\.tar\.gz$").expect("a fixed pattern"))
 }
 
 fn url_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"^https://github\.com/willctl/xenonet/releases/latest/download/XenoNet-[A-Za-z0-9_.-]+\.tar\.gz$").unwrap())
+    R.get_or_init(|| Regex::new(r"^https://github\.com/willctl/xenonet/releases/latest/download/XenoNet-[A-Za-z0-9_.-]+\.tar\.gz$").expect("a fixed pattern"))
 }
 
 fn size_ok(v: Option<&Value>) -> bool {
@@ -49,7 +49,8 @@ pub async fn component_updates(io: &Io, env: &Env, m: &Machine) -> Result<Value,
         _ => return Err(Failure::msg("Invalid component update manifest.")),
     };
     let mut out = Vec::new();
-    for item in packages.iter().filter(|i| i.get("platform").and_then(Value::as_str) == Some(m.platform.as_str()) && i.get("arch").and_then(Value::as_str) == Some(m.arch.as_str())) {
+    for item in packages.iter().filter(|i| i.get("platform").and_then(Value::as_str) == Some(m.platform.as_str()) && i.get("arch").and_then(Value::as_str) == Some(m.arch.as_str()))
+    {
         package_info(Some(item), &m.platform, &m.arch).map_err(Failure::msg)?;
         let file = item.get("file").map_or_else(|| "undefined".into(), js_string);
         if !file_re().is_match(&file) || !size_ok(item.get("size")) || !is_sha(item.get("sha256")) {
@@ -118,7 +119,7 @@ impl Download {
     pub fn new(file: &str, size: f64, sha256: &str) -> Result<Self, FsError> {
         let mut b = [0u8; 16];
         getrandom::fill(&mut b).expect("the system's random numbers");
-        let tmp = format!("{file}.{}.tmp", b.iter().map(|x| format!("{x:02x}")).collect::<String>());
+        let tmp = format!("{file}.{}.tmp", xenonet_base::jsstr::hex(&b));
         let mut o = std::fs::OpenOptions::new();
         o.write(true).create_new(true);
         #[cfg(unix)]

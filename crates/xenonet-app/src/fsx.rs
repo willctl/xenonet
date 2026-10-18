@@ -42,6 +42,7 @@ pub fn mkdir_p(p: &str, mode: Option<u32>) -> Result<(), FsError> {
 
 /// fs.mkdirSync(p, { mode }): one folder, which mustn't be there yet.
 pub fn mkdir(p: &str, mode: Option<u32>) -> Result<(), FsError> {
+    #[cfg_attr(not(unix), expect(unused_mut, reason = "only unix gives the folder a mode"))]
     let mut b = std::fs::DirBuilder::new();
     #[cfg(unix)]
     if let Some(m) = mode {
@@ -100,14 +101,16 @@ pub fn realpath(p: &str) -> Result<String, FsError> {
 
 /// fs.readdirSync(p): names in Node's order.
 pub fn read_dir_names(p: &str) -> Result<Vec<String>, FsError> {
-    xenonet_base::paths::read_dir_sorted(Path::new(p)).map(|ents| ents.into_iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).map_err(|e| FsError::of(e, "scandir", p))
+    xenonet_base::paths::read_dir_sorted(Path::new(p))
+        .map(|ents| ents.into_iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+        .map_err(|e| FsError::of(e, "scandir", p))
 }
 
 /// n random bytes from the system, as hex (crypto.randomBytes(n).toString("hex")).
 pub fn random_hex(n: usize) -> String {
     let mut b = vec![0u8; n];
     getrandom::fill(&mut b).expect("the system's random numbers");
-    b.iter().map(|x| format!("{x:02x}")).collect()
+    xenonet_base::jsstr::hex(&b)
 }
 
 /// fs.mkdtempSync(prefix): the prefix and six random letters and digits.
