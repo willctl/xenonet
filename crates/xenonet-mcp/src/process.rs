@@ -106,7 +106,7 @@ mod windows {
     // The few kernel32 calls this needs, declared here rather than through
     // a crate of bindings.
     #[repr(C)]
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case, reason = "the fields keep the names PROCESSENTRY32W has in Windows's headers")]
     struct ProcessEntry32W {
         dwSize: u32,
         cntUsage: u32,
