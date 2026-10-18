@@ -3,31 +3,36 @@
 ## Commands
 
 ```bash
-npm run dev       # XenoNet Dev's server and hot-reloading UI at http://127.0.0.1:47842
-npm run demo      # the same, with made-up data, at http://127.0.0.1:47841
 npm run app       # the desktop app (Electron) from source, as XenoNet Dev
+npm run dev       # XenoNet Dev's service alone, with the UI at http://127.0.0.1:47842
+npm run demo      # the same, with made-up data, at http://127.0.0.1:47841
+npm run rust:bin  # the xenonet binary: the service, the command and the MCP servers
 npm run dev:install  # macOS: XenoNet Dev.app in ~/Applications, running this checkout
 npm test          # unit tests
 npm run test:e2e  # end-to-end tests, on a hidden XenoNet Dev with made-up data
 node cli/xenonet.js console launch shot:overview  # drive XenoNet Dev from a terminal (see below)
 npm run lab -- status  # macOS: the VM lab, Linux VMs to try other machines in (see below)
 npm run dist      # the installers for this OS, in release/ (dist:win, dist:mac)
-npm run rust:build  # the Rust core's Node addon, for the port to Rust (see crates/ below)
-npm run test:rust   # the unit tests that pass with the Rust core in place of the JS
+npm run test:bin  # the tests that start the service, the command or an MCP server, against the binary
+npm run rust:build  # the Rust core's Node addon, which the JS tests load in place of core/ (test:rust)
+npm run test:rust   # the unit tests, with the Rust core in place of the JS
+npm run lint:rust   # formatting, clippy, docs and the dependency checks
 cargo test        # the Rust core's own tests
 ```
 
 ## XenoNet Dev
 
-The desktop app run from source is XenoNet Dev. It has its own settings, port, layout and search index, so it runs beside an installed XenoNet without writing over its files. Its port is 47842. The first run copies the installed XenoNet's layout. `npm run dev`, the server alone, uses XenoNet Dev's port and folders too.
+The desktop app run from source is XenoNet Dev. It has its own settings, port, layout and search index, so it runs beside an installed XenoNet without writing over its files. Its port is 47842. The first run copies the installed XenoNet's layout. `npm run dev`, the service alone, uses XenoNet Dev's port and folders too.
+
+XenoNet's service is the `xenonet` binary, built from `crates/` with the Rust that `rust-toolchain.toml` pins (rustup installs it on the first build). XenoNet Dev runs the checkout's newer build of `target/debug/xenonet` and `target/release/xenonet`. `npm run app`, `npm run dev` and `npm run test:e2e` build it first; started any other way, XenoNet Dev says to run `npm run rust:bin` when there's none. The service runs on its own, as an installed one does, and keeps running when XenoNet Dev quits.
 
 Connecting Claude Code and Codex from XenoNet Dev adds its own entries beside the installed XenoNet's, with its MCP server named `xenonet-dev`, and leaves the installed XenoNet's entries alone. Disconnecting takes away only its own. Whichever XenoNet connects next clears entries that point at a checkout that's gone. Terminals XenoNet opens don't pass on its own `XENONET_*` settings, so `npm run app` started in one runs as XenoNet Dev, not on the installed XenoNet's port.
 
 XenoNet Dev picks up edits as you save them:
 
-- The UI hot-reloads.
-- A change under `core/` or `server/` restarts the server.
-- A change under `electron/` relaunches XenoNet Dev.app. If you started XenoNet Dev with `npm run app`, it prints a reminder to restart instead.
+- The UI hot-reloads. `npm run dev` rebuilds it into `dist/` instead: reload the page to see a change.
+- A change under `crates/` takes a build: `npm run rust:bin`. XenoNet Dev sees the binary change, stops its service and relaunches onto the new one.
+- A change under `electron/`, or to the `core/` and `server/` modules Desktop runs itself, relaunches XenoNet Dev.app. If you started XenoNet Dev with `npm run app`, it prints a reminder to restart instead.
 
 Vite keeps its prebundled dependencies in each checkout's `.xenonet/vite`, which git ignores. So worktrees that link `node_modules` don't share them.
 
@@ -63,7 +68,7 @@ Claude Code and Codex can run on one computer while you develop XenoNet on anoth
 ssh -N -R 127.0.0.1:47840:127.0.0.1:47840 -L 127.0.0.1:47842:127.0.0.1:47842 you@devbox
 ```
 
-- **The page against real sessions.** On the other computer, `XENONET_UPSTREAM=http://127.0.0.1:47840 npm run dev` serves the page from the checkout and passes its reads to the installed XenoNet (`server/upstream.js`). Only reads go through: anything that would change something there is refused, so a page in development can look but never act. Add `--demo` to keep the dev server's own service on made-up data. `XENONET_UPSTREAM` takes only an address on that computer, a forwarded port, and the installed service ignores it.
+- **The page against real sessions.** On the other computer, `XENONET_UPSTREAM=http://127.0.0.1:47840 npm run dev` serves the page from the checkout and passes its reads to the installed XenoNet (`crates/xenonet-service/src/upstream.rs`). Only reads go through: anything that would change something there is refused, so a page in development can look but never act. Add `--demo` to keep the dev server's own service on made-up data. `XENONET_UPSTREAM` takes only an address on that computer, a forwarded port, and the installed service ignores it.
 - **Sessions talking to XenoNet Dev.** On the sessions' computer, `xenonet connect --here --port 47842` adds XenoNet Dev's MCP server and hooks to Claude Code's and Codex's settings beside the installed XenoNet's, through that computer's own launcher. Asking XenoNet Dev itself would write the other computer's settings. While the forward is down, its hooks do nothing. `xenonet disconnect --port 47842` takes them out again.
 
 What acts on the sessions' computer (opening a session in its app, handoffs, terminals in its folders, its credential store) stays with the installed XenoNet there.

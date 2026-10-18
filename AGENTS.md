@@ -28,9 +28,11 @@ and `docs/guide/development.md` has the layout and how to drive XenoNet Dev.
   under an agent; `simulate` with `host-add` stands in for one.
 - After a change to the UI, check `logs` for page errors, and run
   `npm run test:e2e` before you finish.
-- XenoNet Dev reloads as you save: `src/` reloads the page, `core/` and
-  `server/` restart the server and `electron/` relaunches the app. The tools
-  wait for it.
+- XenoNet Dev reloads as you save: `src/` reloads the page and
+  `electron/` relaunches the app. The service is the `xenonet` binary:
+  after a change under `crates/`, `npm run rust:bin` rebuilds it, and
+  XenoNet Dev restarts its service on the new build. The tools wait for
+  it.
 - When you add something to the UI that a test or an agent should be able
   to reach, add it to the driver (`src/driver.js`), and a new kind of action
   to the console's MCP tools (`mcp/console.js`) and the end-to-end

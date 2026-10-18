@@ -509,9 +509,9 @@ port. The service stays the only writer of `state.json` and
 4. **The binary.** `xenonet hook` and `xenonet mcp` first, since they
    gain the most from starting natively. Then the other commands. Then
    `xenonet serve`, with the route tests run against it.
-5. **The switch.** Desktop starts the binary as the standalone service.
-   The JS core and the addon go, and the remaining tests move to
-   `cargo test`.
+5. **The switch.** Desktop starts the binary as the standalone service,
+   and only the binary: there's no JS service to fall back to. Then the
+   JS core and the addon go, and the remaining tests move to `cargo test`.
 
 Each step leaves `npm test` passing on JS, and adds to `parity.json`.
 
@@ -654,13 +654,17 @@ since each record crosses between JS and Rust several times while the
 vendor checks are still JS. The readers gain from Rust once they're Rust
 from the file to the answer.
 
-The readers and the schemas (step 2) are ported: every module of `core/` that reads a source, the map and its state, and `core/schema/`. Through the twins they're slower than the JS (a map of 3,000 sessions takes about 26 ms against 5 ms, a session's stats about 6 times as long), since every value crosses between JS and Rust; they gain once they're Rust from the file to the answer. Not ported yet: the engine and what follows it, in the order above.
+The readers and the schemas (step 2) are ported: every module of `core/` that reads a source, the map and its state, and `core/schema/`. Through the twins they're slower than the JS (a map of 3,000 sessions takes about 26 ms against 5 ms, a session's stats about 6 times as long), since every value crosses between JS and Rust; they gain once they're Rust from the file to the answer. The engine, delivery, the actors, the assistant, hosts and the binary followed (steps 3 and 4).
 
 `npm run test:bin` builds the binary and runs every JS test that starts
 the service, the command or an MCP server against it
 (`XENONET_SERVICE_BIN`, `XENONET_CLI_BIN`, through
 `test/harness/xenonet-bin.js`), and `crates/xenonet-cli/bin-tests.json`
-keeps the counts. Desktop starts `xenonet serve` with
-`XENONET_SERVICE_RUNTIME=rust`; Node stays the default until every core
-the service calls is in Rust. The Service and Tools packages carry the
-binary as `bin/xenonet`.
+keeps the counts. Desktop runs `xenonet serve` and nothing else
+(`electron/service-runtime.js`): the installed Service's `bin/xenonet`,
+or in XenoNet Dev the checkout's newer build of `target/debug` and
+`target/release`. With no binary it stops and says how to get one. The
+Service and Tools packages carry the binary as `bin/xenonet`. XenoNet
+Dev's page still hot-reloads, through Vite in Desktop's own frontend
+server (`electron/desktop-server.js`), and it restarts its service when
+the binary is rebuilt.
