@@ -77,7 +77,7 @@ fn thrown_of(e: Arg) -> Thrown {
     };
     let handle = e.field("handle").as_f64().map(|h| h as u64);
     let stdout = e.field("stdout").as_str().map(str::to_string);
-    Thrown { message, code, handle, stdout }
+    Thrown { message, code: code.map(Box::new), handle, stdout }
 }
 
 fn answer_arg(v: Arg) -> std::result::Result<Arg, Thrown> {
@@ -127,7 +127,7 @@ impl Asker {
 fn thrown_json(t: &Thrown) -> Value {
     let mut o = json!({ "message": t.message });
     if let Some(c) = &t.code {
-        o["code"] = c.clone();
+        o["code"] = (**c).clone();
     }
     if let Some(s) = &t.stdout {
         o["stdout"] = Value::String(s.clone());
@@ -215,7 +215,7 @@ impl Machine {
                 self.over = true;
                 let mut o = vec![("error", Jv::Json(Value::String(t.message)))];
                 if let Some(c) = t.code {
-                    o.push(("code", Jv::Json(c)));
+                    o.push(("code", Jv::Json(*c)));
                 }
                 if let Some(h) = t.handle {
                     o.push(("handle", Jv::Num(h as f64)));

@@ -64,7 +64,7 @@ impl SyncCalls {
             *n.borrow()
         });
         THROWN.with(|t| t.borrow_mut().push((h, r)));
-        Thrown { message, code, handle: Some(h), stdout: None }
+        Thrown { message, code: code.map(Box::new), handle: Some(h), stdout: None }
     }
 }
 

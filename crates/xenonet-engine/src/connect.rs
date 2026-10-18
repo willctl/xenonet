@@ -477,7 +477,7 @@ impl Connect {
         let text = match c.call("fs", "readFileSync", vec![Arg::text(file), Arg::text("utf8")]) {
             Ok(t) => js_text(&t),
             Err(e) => {
-                let code = e.code.as_ref().filter(|v| !v.is_null());
+                let code = e.code.as_deref().filter(|v| !v.is_null());
                 if code.and_then(Value::as_str) == Some("ENOENT") {
                     return Ok(json!({}));
                 }

@@ -8,11 +8,13 @@ use crate::sql::Arg;
 use serde_json::Value;
 
 /// What a call threw: its message and code, and a handle the twin keeps
-/// the thrown value under, so that what's thrown on is the same value.
+/// the thrown value under, so that what's thrown on is the same value. The
+/// code is boxed, as it's rare, to keep every Result that carries a Thrown
+/// small.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Thrown {
     pub message: String,
-    pub code: Option<Value>,
+    pub code: Option<Box<Value>>,
     pub handle: Option<u64>,
     /// What a failed command wrote anyway.
     pub stdout: Option<String>,
@@ -23,13 +25,13 @@ impl Thrown {
         Thrown { message: message.into(), code: None, handle: None, stdout: None }
     }
     pub fn coded(message: impl Into<String>, code: &str) -> Self {
-        Thrown { message: message.into(), code: Some(Value::String(code.into())), handle: None, stdout: None }
+        Thrown { message: message.into(), code: Some(Box::new(Value::String(code.into()))), handle: None, stdout: None }
     }
 }
 
 impl From<crate::sql::SqlError> for Thrown {
     fn from(e: crate::sql::SqlError) -> Self {
-        Thrown { message: e.message().to_string(), code: e.code().map(|c| Value::String(c.into())), handle: None, stdout: None }
+        Thrown { message: e.message().to_string(), code: e.code().map(|c| Box::new(Value::String(c.into()))), handle: None, stdout: None }
     }
 }
 

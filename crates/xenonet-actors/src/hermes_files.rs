@@ -42,7 +42,7 @@ fn source(k: &str) -> &'static str {
 pub const EDIT_TOOLS: [&str; 2] = ["write_file", "patch"];
 
 fn code_of(t: &Thrown) -> Option<&str> {
-    t.code.as_ref().and_then(Value::as_str)
+    t.code.as_deref().and_then(Value::as_str)
 }
 
 // What a failed read says, by the error's code.
@@ -92,7 +92,7 @@ enum Read {
 fn read_text(c: &mut dyn Calls, file: &str) -> Result<Read> {
     Ok(match c.call("files", "readFileSync", vec![Arg::text(file), Arg::text("utf8")]) {
         Ok(v) => Read::Ok(xenonet_engine::store::js_text(&v)),
-        Err(t) => Read::Failed(state_of(&t), t.code.clone().unwrap_or(Value::Null)),
+        Err(t) => Read::Failed(state_of(&t), t.code.as_deref().cloned().unwrap_or(Value::Null)),
     })
 }
 
@@ -386,7 +386,7 @@ pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: 
     }
     if let Err(t) = c.call("db", "open", vec![Arg::text(file)]) {
         let denied = js(r"permission|EACCES|EPERM|authoriz", true).is_match(&t.message);
-        return Ok(with_state(if denied { "denied" } else { "unreadable" }, Some(t.code.clone().unwrap_or(Value::Null)), empty(after_id)));
+        return Ok(with_state(if denied { "denied" } else { "unreadable" }, Some(t.code.as_deref().cloned().unwrap_or(Value::Null)), empty(after_id)));
     }
     let out = (|| -> Result<Value> {
         let src = source("stateDb");
@@ -491,7 +491,7 @@ pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: 
         Ok(v) => Ok(v),
         Err(t) => {
             let busy = js(r"SQLITE_BUSY|locked", true).is_match(&t.message);
-            Ok(with_state(if busy { "busy" } else { "unreadable" }, Some(t.code.clone().unwrap_or(Value::Null)), empty(after_id)))
+            Ok(with_state(if busy { "busy" } else { "unreadable" }, Some(t.code.as_deref().cloned().unwrap_or(Value::Null)), empty(after_id)))
         }
     }
 }
