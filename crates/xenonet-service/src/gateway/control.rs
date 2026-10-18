@@ -294,7 +294,7 @@ impl GatewayControl {
         let result = if s.on {
             self.gateway().start().await.map(|_| ())
         } else {
-            self.gateway().stop().await;
+            self.gateway().stop();
             Ok(())
         };
         if let Err(e) = result {
@@ -393,7 +393,7 @@ impl GatewayControl {
         *self.ticker.lock().unwrap() = Some(task);
     }
 
-    pub async fn stop(&self) {
+    pub fn stop(&self) {
         if let Some(t) = self.ticker.lock().unwrap().take() {
             t.abort();
         }
@@ -401,7 +401,7 @@ impl GatewayControl {
             t.abort();
         }
         self.tunnel().stop();
-        self.gateway().stop().await;
+        self.gateway().stop();
     }
 
     /// `set({ on, tunnel, check, repair })`: `tunnel` None leaves it,

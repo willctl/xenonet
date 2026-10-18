@@ -694,7 +694,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     if ctx.config.dev && m == "POST" && route == "/api/dev/simulate" {
         let body = req.json_body().await?;
         let kind = body.get("kind").cloned().unwrap_or(Value::Null);
-        let done = simulate(ctx, &kind, &body).await?;
+        let done = simulate(ctx, &kind, &body)?;
         if let Some(e) = done.as_ref().and_then(|d| d.get("error")).filter(|e| truthy(Some(e))) {
             return Ok(Reply::send(400, &json!({ "error": e }), &[]));
         }
@@ -1013,7 +1013,7 @@ async fn spotify(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreErr
 /// Dev only: puts sessions into states that are otherwise rare, so the
 /// visuals can be checked (server/index.js's simulate). What it did, or
 /// None for an unknown simulation or session.
-async fn simulate(ctx: &Arc<Ctx>, kind: &Value, body: &Value) -> Result<Option<Value>, CoreError> {
+fn simulate(ctx: &Arc<Ctx>, kind: &Value, body: &Value) -> Result<Option<Value>, CoreError> {
     let cores = &ctx.cores;
     let kind_s = match kind {
         Value::String(s) => s.clone(),

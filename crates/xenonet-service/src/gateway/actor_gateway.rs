@@ -237,7 +237,7 @@ impl ActorGateway {
         Ok(self.status())
     }
 
-    pub async fn stop(&self) -> Value {
+    pub fn stop(&self) -> Value {
         if let Some(t) = self.inner.server.lock().unwrap().take() {
             t.abort();
         }

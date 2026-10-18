@@ -116,5 +116,5 @@ async fn on_with_a_tunnel_of_your_own_checked_here_kept_and_off() {
 
     let off = c.set(Some(false), None, false, false).await.unwrap();
     assert_eq!((off["on"].clone(), off["listening"].clone(), off["reach"]["state"].clone()), (json!(false), json!(false), json!("off")));
-    c.stop().await;
+    c.stop();
 }

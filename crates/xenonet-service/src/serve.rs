@@ -501,8 +501,7 @@ fn shutdown(ctx: &Arc<Ctx>) {
     }
     if let Some(g) = ctx.gateway.get() {
         g.tunnel().stop();
-        let gw = g.gateway().clone();
-        drop(tokio::spawn(async move { gw.stop().await }));
+        g.gateway().stop();
     }
     if let Some(comp) = ctx.components.lock().unwrap().take() {
         comp.close();

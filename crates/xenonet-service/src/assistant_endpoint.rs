@@ -138,7 +138,7 @@ impl Endpoint {
         self.inner.service.forget(grant);
     }
 
-    async fn hello(&self, client: &Rpc, params: &Value) -> Result<(Value, Arc<Session>), String> {
+    fn hello(&self, client: &Rpc, params: &Value) -> Result<(Value, Arc<Session>), String> {
         if now_ms() < *self.inner.quiet_until.lock().unwrap() {
             return Err("RATE_LIMITED".into());
         }
@@ -202,7 +202,7 @@ impl Endpoint {
                     return Err("XenoNet refused this connection.".into());
                 }
                 let Some(client) = c.lock().unwrap().clone() else { return Err("XenoNet refused this connection.".into()) };
-                let (answer, session) = me.hello(&client, &params).await?;
+                let (answer, session) = me.hello(&client, &params)?;
                 *s.lock().unwrap() = Some(session);
                 Ok(answer)
             })
