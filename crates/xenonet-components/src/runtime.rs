@@ -40,6 +40,36 @@ pub fn runtime_dir(env: &Env, m: &Machine) -> String {
 }
 
 /// The port the service is for: XENONET_PORT, or 47840.
+/// The xenonet binary's file name on `platform`.
+pub fn bin_name(platform: &str) -> &'static str {
+    if platform == "win32" {
+        "xenonet.exe"
+    } else {
+        "xenonet"
+    }
+}
+
+/// The launcher's own copy of the binary, which never moves
+/// (docs/design/contracts.md, section 12): `<runtime>/launcher/xenonet`.
+pub fn launcher_bin(env: &Env, m: &Machine) -> String {
+    NATIVE.join(&[&runtime_dir(env, m), "launcher", bin_name(&m.platform)])
+}
+
+/// The binary that what XenoNet writes into other programs runs: hooks,
+/// MCP servers, the command on PATH, a local host's relay, a tunnel's
+/// adapter (runtime.js's xenonetBin). XENONET_BIN when it's set; installed
+/// XenoNet's launcher (XENONET_LAUNCHER_BIN, or the binary beside the
+/// launcher in XENONET_LAUNCHER_ROOT); else `this`, the running binary.
+pub fn xenonet_bin(env: &Env, m: &Machine, this: &str) -> String {
+    if let Some(b) = set(env, "XENONET_BIN").or_else(|| set(env, "XENONET_LAUNCHER_BIN")) {
+        return b.into();
+    }
+    if let Some(root) = set(env, "XENONET_LAUNCHER_ROOT") {
+        return xenonet_app::nodepath::Style::of(&m.platform).join(&[root, bin_name(&m.platform)]);
+    }
+    this.into()
+}
+
 pub fn port_of(env: &Env) -> String {
     set(env, "XENONET_PORT").unwrap_or("47840").to_string()
 }
@@ -105,4 +135,22 @@ pub async fn ensure_service(io: &Io, root: &str, exec: &str, env: &Env, timeout:
         io.sleep(200.0).await;
     }
     Err(Failure::msg("XenoNet Service did not start. See its service log."))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_binary_entries_run() {
+        let m = Machine { platform: "darwin".into(), arch: "arm64".into(), home: "/h".into() };
+        let env = |pairs: &[(&str, &str)]| -> Env { pairs.iter().map(|(k, v)| ((*k).to_string(), json!(v))).collect() };
+        assert_eq!(xenonet_bin(&env(&[]), &m, "/c/target/debug/xenonet"), "/c/target/debug/xenonet");
+        assert_eq!(xenonet_bin(&env(&[("XENONET_LAUNCHER_ROOT", "/r/launcher")]), &m, "/x"), "/r/launcher/xenonet");
+        assert_eq!(xenonet_bin(&env(&[("XENONET_LAUNCHER_BIN", "/l/xenonet"), ("XENONET_LAUNCHER_ROOT", "/r/launcher")]), &m, "/x"), "/l/xenonet");
+        assert_eq!(xenonet_bin(&env(&[("XENONET_BIN", "/b"), ("XENONET_LAUNCHER_BIN", "/l/xenonet")]), &m, "/x"), "/b");
+        let win = Machine { platform: "win32".into(), ..m };
+        assert_eq!(xenonet_bin(&env(&[("XENONET_LAUNCHER_ROOT", r"C:\r\launcher")]), &win, "/x"), r"C:\r\launcher\xenonet.exe");
+        assert_eq!(launcher_bin(&env(&[("XENONET_RUNTIME_DIR", "/r")]), &Machine { platform: "darwin".into(), arch: "arm64".into(), home: "/h".into() }), "/r/launcher/xenonet");
+    }
 }
