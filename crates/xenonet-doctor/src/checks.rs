@@ -191,8 +191,8 @@ fn s(v: Option<&Value>) -> String {
     v.map_or_else(|| "undefined".into(), js_string)
 }
 
-fn version_in(text: &str, re: &'static OnceLock<Regex>, pattern: &str) -> Option<String> {
-    re.get_or_init(|| Regex::new(pattern).unwrap()).find(text).map(|m| m.as_str().to_string())
+fn version_in(text: &str, re: &'static OnceLock<Regex>, pattern: &'static str) -> Option<String> {
+    re.get_or_init(|| Regex::new(pattern).expect("a fixed pattern")).find(text).map(|m| m.as_str().to_string())
 }
 
 /// One check's verdict.
@@ -370,16 +370,14 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
                     break;
                 }
             }
-            let bin = bin.or_else(|| bins.first().cloned());
-            let missing = match &bin {
-                None => true,
-                Some(b) if NATIVE.is_absolute(b) => !c.exists(b).await?,
-                Some(b) => c.which(b).await?.is_none(),
+            let bin = match bin.or_else(|| bins.first().cloned()) {
+                Some(b) if NATIVE.is_absolute(&b) => c.exists(&b).await?.then_some(b),
+                Some(b) => c.which(&b).await?.is_some().then_some(b),
+                None => None,
             };
-            if missing {
+            let Some(bin) = bin else {
                 return Ok(warn("no Codex: neither the ChatGPT app's codex nor a codex command", Some("Install the ChatGPT desktop app or the Codex CLI.")));
-            }
-            let bin = bin.unwrap();
+            };
             let v = c.run(&bin, &["--version"], 4000.0).await?;
             static R: OnceLock<Regex> = OnceLock::new();
             let version = version_in(&s(v.get("stdout")), &R, r"\d+\.\d+\.\d+[A-Za-z0-9_.-]*");
