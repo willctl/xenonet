@@ -53,6 +53,33 @@ fn compile(pattern: &str) -> Regex {
     Regex::new(&pattern.replace(r"\d", "[0-9]")).expect("a pattern of the schemas")
 }
 
+// zod's last pass over what it wrote (compactTypeUnion): an anyOf whose
+// every branch is a type and nothing else, as a nullable string's is,
+// becomes one type list, after the keys already there.
+fn compact(m: &mut Map<String, Value>) {
+    let Some(Value::Array(options)) = m.get("anyOf") else { return };
+    if options.is_empty() || m.contains_key("type") {
+        return;
+    }
+    let mut types: Vec<Value> = vec![];
+    for o in options {
+        let Some(o) = o.as_object().filter(|o| o.len() == 1) else { return };
+        let members = match o.get("type") {
+            Some(Value::String(t)) => vec![Value::String(t.clone())],
+            Some(Value::Array(ts)) if ts.iter().all(Value::is_string) => ts.clone(),
+            _ => return,
+        };
+        for t in members {
+            if !types.contains(&t) {
+                types.push(t);
+            }
+        }
+    }
+    m.shift_remove("anyOf");
+    let t = if types.len() == 1 { types.remove(0) } else { Value::Array(types) };
+    m.insert("type".into(), t);
+}
+
 fn of(kind: Kind) -> Z {
     Z { kind, description: None }
 }
@@ -237,6 +264,7 @@ impl Z {
         if let Some(d) = &self.description {
             m.insert("description".into(), json!(d));
         }
+        compact(&mut m);
         m
     }
 
@@ -506,6 +534,13 @@ mod tests {
         assert_eq!(
             Value::Object(object(vec![("p", array(string()).min(1.0)), ("r", int().optional())]).input_schema()).to_string(),
             r#"{"type":"object","$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"p":{"minItems":1,"type":"array","items":{"type":"string"}},"r":{"type":"integer","minimum":-9007199254740991,"maximum":9007199254740991}},"required":["p"]}"#
+        );
+        // A nullable or a union whose branches are bare types is one type
+        // list, after the keys before it, as mcp/console.js's nullable ids
+        // are listed; "a" and "d" above, with constraints, stay an anyOf.
+        assert_eq!(
+            Value::Object(object(vec![("s", string().nullable().optional().describe("S")), ("t", union(vec![string(), boolean(), string()]))]).json()).to_string(),
+            r#"{"type":"object","properties":{"s":{"description":"S","type":["string","null"]},"t":{"type":["string","boolean"]}},"required":["t"]}"#
         );
     }
 }
