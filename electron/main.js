@@ -139,8 +139,10 @@ let updates = null;
 let windowKey = null;
 // What quitting stops: Desktop's hold on the terminal's shells (the
 // service keeps them), and its connection to the service, which hears
-// first that the window closed (you went offline). The service keeps
-// running.
+// first that the window closed (you went offline). An installed XenoNet's
+// service keeps running; a service XenoNet Dev started goes with it, as the
+// server it used to run in-process did, so each start of a dev, demo or
+// test instance gets a fresh one.
 function stop() {
   quitting = true;
   updates?.dispose();
@@ -148,6 +150,7 @@ function stop() {
   tellWindow("closed");
   serviceClient?.close();
   frontendServer?.close();
+  if (ownService) try { process.kill(ownService); } catch {}
 }
 
 // Whether the window shows, for the server's word on you and the page's
@@ -240,9 +243,11 @@ async function openTarget(target) {
   throw new Error("XenoNet opens only apps' links, folders and pages.");
 }
 
-// The service this Desktop runs, and the environment it runs it in.
+// The service this Desktop runs, the environment it runs it in, and its
+// pid when it's XenoNet Dev's own to stop (see stop()).
 let serviceBin = null;
 let serviceEnv = null;
+let ownService = null;
 
 // Starts the service, or finds it running, and connects to it. The service
 // is the xenonet binary (service-runtime.js): the installed Service's in a
@@ -279,6 +284,7 @@ async function startServer() {
     return control.handle(body);
   } });
   windowKey = serviceClient.info.windowKey;
+  if (fromSource && how === "started") ownService = serviceClient.info.pid;
   serviceClient.on("notification", notify);
   serviceClient.on("connected", (info) => { windowKey = info.windowKey; if (win && !win.isDestroyed()) win.webContents.reload(); });
   serviceClient.on("disconnect", () => { windowKey = null; control?.log("service", "warning", "XenoNet Service disconnected."); });
