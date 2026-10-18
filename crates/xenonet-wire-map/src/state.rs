@@ -107,6 +107,9 @@ pub struct MapState {
     live_queued: AtomicBool,
     new_files: AtomicU64,
     tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    /// The events it sent, for the tests to read.
+    #[cfg(test)]
+    pub sent: Mutex<Vec<(String, Value)>>,
 }
 
 fn err(m: impl Into<String>) -> CoreError {
@@ -192,6 +195,8 @@ impl MapState {
             live_queued: AtomicBool::new(false),
             new_files: AtomicU64::new(0),
             tasks: Mutex::new(Vec::new()),
+            #[cfg(test)]
+            sent: Mutex::new(Vec::new()),
             cfg,
         });
         // The building blocks it's made of, for /api/health and the doctor.
@@ -225,6 +230,8 @@ impl MapState {
     }
 
     fn emit(&self, name: &str, data: Value) {
+        #[cfg(test)]
+        lock(&self.sent).push((name.to_string(), data.clone()));
         self.emitter.emit(From::State, name, data);
     }
 
@@ -1398,3 +1405,7 @@ impl Runs for RunsCore {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "state_tests.rs"]
+mod tests;
