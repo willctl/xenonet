@@ -38,3 +38,6 @@ xenonet-schema.workspace = true
 [dev-dependencies]
 # Paused time, for the tunnel's waits between restarts.
 tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true
