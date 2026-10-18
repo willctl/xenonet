@@ -26,6 +26,9 @@ const placed = { fx: null, fy: null, fz: null, pinned: false, actions: [] };
 const rolled = { sessionCount: 1, activeCount: 1, lastActivity: null, lastSessionAt: null };
 const S = "claude:0190d3e0-0000-7000-8000-000000000001";
 
+// The xenonet binary a local link runs.
+const BIN = "/x/launcher/xenonet";
+
 function setup({ clock = fakeClock(), stateDir = tmp(), cacheDir = tmp(), key = null } = {}) {
   const machine = fakeProcesses({ clock });
   const hosts = new HostsConfig({ stateDir, clock });
@@ -44,8 +47,8 @@ function setup({ clock = fakeClock(), stateDir = tmp(), cacheDir = tmp(), key = 
   });
   const liveOf = () => ({ at: clock.now(), sessions: [], series: { claude: [0], codex: [0] }, tpm: 0, total24h: 0, today: 0, limits: { claude: null, codex: null }, limitForecast: {}, collab: [], collisions: [], resources: [], status: {} });
   let relay = null;
-  // ssh, and the runtime that runs another XenoNet's relay here, both play
-  // the same made-up relay.
+  // ssh, and the xenonet binary that runs another XenoNet's relay here,
+  // both play the same made-up relay.
   const script = (io) => {
     relay = io;
     io.json({ t: "hello", schema: "host/hello/v1", protocol: 1, version: "0.4.0", host: { id: "lab", key: KEY }, platform: "linux", demo: false, now: clock.now(), sinceMs: 604800000, detail: false });
@@ -56,8 +59,8 @@ function setup({ clock = fakeClock(), stateDir = tmp(), cacheDir = tmp(), key = 
     });
   };
   machine.program("ssh", script);
-  machine.program(process.execPath, script);
-  const hub = createHub({ hosts, cacheDir, root: "/src/xenonet", home: "/Users/nova", local: { graph: () => mine, live: liveOf, layout: () => ({}), identities: () => ({}), aliases: () => new Map(), forgetLayout: () => 0 }, clock, linkOptions: { spawn: machine.spawn, random: () => 0.5 } });
+  machine.program(BIN, script);
+  const hub = createHub({ hosts, cacheDir, root: "/src/xenonet", home: "/Users/nova", local: { graph: () => mine, live: liveOf, layout: () => ({}), identities: () => ({}), aliases: () => new Map(), forgetLayout: () => 0 }, clock, linkOptions: { spawn: machine.spawn, random: () => 0.5, bin: BIN } });
   const out = { graph: [], live: [], hosts: [], activity: [] };
   for (const name of Object.keys(out)) hub.on(name, (d) => out[name].push(d));
   return { clock, machine, hosts, hub, out, mine, theirs, relay: () => relay, stateDir, cacheDir, settle: () => clock.flush(40) };
@@ -213,8 +216,9 @@ test("XenoNet Dev's simulations: another XenoNet here as a host, offline and bac
   // What core/control.js sends: { a, b }.
   assert.deepEqual(w.hub.simulate("host-add", { a: "demo-b", b: "47999" }), { ok: true, kind: "host-add", id: "demo-b" });
   await w.settle();
-  const local = w.machine.spawned.find((x) => x.file === process.execPath);
-  assert.deepEqual(local.args, ["/src/xenonet/cli/xenonet.js", "relay", "--port", "47999", "--since", "7d"]);
+  // The xenonet binary runs the relay, with no Node or entry script.
+  const local = w.machine.spawned.find((x) => x.file === BIN);
+  assert.deepEqual(local.args, ["relay", "--port", "47999", "--since", "7d"]);
   assert.equal(w.hosts.get("demo-b"), null, "in memory only, never in hosts.json");
   const state = (id) => w.hub.list().find((h) => h.id === id);
   assert.deepEqual([state("demo-b").state, state("demo-b").simulated], ["live", true]);
