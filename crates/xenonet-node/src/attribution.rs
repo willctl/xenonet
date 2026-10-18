@@ -141,11 +141,16 @@ impl SpawnsCore {
     #[napi]
     pub fn settle(&self, env: Env, deps: Object<'_>, at: f64, alive: Option<Function<'_, JsArg, JsArg>>) -> Result<Json> {
         let mut calls = SyncCalls::new(&env, &deps);
-        let mut check = |_: &mut dyn Calls, p: &Pending| -> xenonet_engine::peer::Result<bool> {
-            let f = alive.as_ref().unwrap();
-            f.call(JsArg(crate::args::value_to_arg(&p.json()))).map(|v| v.0.truthy()).map_err(|e| Thrown::new(e.reason.clone()))
+        let mut check = alive.as_ref().map(|f| {
+            move |_: &mut dyn Calls, p: &Pending| -> xenonet_engine::peer::Result<bool> {
+                f.call(JsArg(crate::args::value_to_arg(&p.json()))).map(|v| v.0.truthy()).map_err(|e| Thrown::new(e.reason.clone()))
+            }
+        });
+        let alive: attribution::Alive<'_> = match &mut check {
+            Some(c) => Some(c),
+            None => None,
         };
-        let out = attribution::settle(&self.state, &mut calls, &Paths::default(), at, if alive.is_some() { Some(&mut check) } else { None });
+        let out = attribution::settle(&self.state, &mut calls, &Paths::default(), at, alive);
         let out = out.map(|v| Json(Value::Array(v.iter().map(attribution::Settled::json).collect()))).map_err(|t| rethrow(&env, t));
         settled(&env);
         out

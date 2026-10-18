@@ -25,6 +25,13 @@ fn check(status: sys::napi_status, what: &str) -> peer::Result<()> {
     }
 }
 
+// napi takes a property's name NUL-terminated. The paths and methods are
+// the crates' own names, so one holding a NUL is a mistake to report, not
+// a property to look up.
+fn key_of(name: &str) -> peer::Result<std::ffi::CString> {
+    std::ffi::CString::new(name).map_err(|_| Thrown::new(format!("couldn't read {name:?}: it holds a NUL")))
+}
+
 /// The deps object of a call into Rust.
 pub struct SyncCalls {
     env: sys::napi_env,
@@ -44,7 +51,7 @@ impl SyncCalls {
             if t != sys::ValueType::napi_object && t != sys::ValueType::napi_function {
                 return Err(Thrown::coded(format!("Cannot read properties of {} (reading '{k}')", if t == sys::ValueType::napi_null { "null" } else { "undefined" }), "TypeError"));
             }
-            let key = std::ffi::CString::new(k).unwrap();
+            let key = key_of(k)?;
             let mut next = ptr::null_mut();
             check(unsafe { sys::napi_get_named_property(self.env, v, key.as_ptr(), &raw mut next) }, "read a property")?;
             v = next;
@@ -98,7 +105,7 @@ impl peer::Calls for SyncCalls {
     fn call(&mut self, path: &str, method: &str, args: Vec<Arg>) -> peer::Result<Arg> {
         unsafe {
             let target = self.at(path)?;
-            let key = std::ffi::CString::new(method).unwrap();
+            let key = key_of(method)?;
             let mut t = 0;
             check(sys::napi_typeof(self.env, target, &raw mut t), "tell a value's type")?;
             if t != sys::ValueType::napi_object && t != sys::ValueType::napi_function {

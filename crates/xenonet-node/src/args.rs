@@ -252,11 +252,10 @@ impl ToNapiValue for Out {
             }
             Out::Changes(c) => {
                 check(unsafe { sys::napi_create_object(env, &raw mut out) }, "make an object")?;
-                for (k, v) in [("lastInsertRowid", c.last_insert_rowid as f64), ("changes", c.changes as f64)] {
+                for (k, v) in [(c"lastInsertRowid", c.last_insert_rowid as f64), (c"changes", c.changes as f64)] {
                     let mut value = ptr::null_mut();
                     check(unsafe { sys::napi_create_double(env, v, &raw mut value) }, "make a number")?;
-                    let key = std::ffi::CString::new(k).unwrap();
-                    check(unsafe { sys::napi_set_named_property(env, out, key.as_ptr(), value) }, "fill an object")?;
+                    check(unsafe { sys::napi_set_named_property(env, out, k.as_ptr(), value) }, "fill an object")?;
                 }
             }
         }
