@@ -25,6 +25,10 @@ xenonet-hosts.workspace = true
 xenonet-integrations.workspace = true
 # Refusals, OpenRouter's spend and Xenolith's folder are the sources'.
 xenonet-sources.workspace = true
+# The doctor's process self-test (core/procs.js), and its checks of
+# state.json and the drift log against XenoNet's schemas.
+xenonet-engine.workspace = true
+xenonet-schema.workspace = true
 
 # os.cpus(), os.totalmem() and os.freemem(), as Node reads them: the mach
 # calls on macOS (and /proc on Linux, read as files).

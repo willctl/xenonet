@@ -2454,8 +2454,10 @@ dependencies = [
  "xenonet-base",
  "xenonet-components",
  "xenonet-doctor",
+ "xenonet-engine",
  "xenonet-hosts",
  "xenonet-integrations",
+ "xenonet-schema",
  "xenonet-service",
  "xenonet-sources",
 ]

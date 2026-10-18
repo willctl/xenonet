@@ -9,6 +9,7 @@
 //! and never reach your machine's own credential store or apps.
 
 pub mod decide;
+pub mod doctor;
 pub mod fx;
 pub mod mcp;
 pub mod open;
@@ -62,4 +63,12 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
     };
     cores.system = if demo { Arc::new(system::DemoSystem) } else { Arc::new(system::SystemPanel(system::System::new())) };
     cores.mcp_info = Arc::new(mcp::Catalog::new(&js, &env.version));
+
+    // The doctor last: its context is the other cores (the hub's hosts
+    // among them), as server/index.js's doctorContext reads them.
+    let parts =
+        Arc::new(doctor::Parts { cores: cores.clone(), config: config.clone(), paths: js, version: env.version.clone(), drift: env.drift.clone(), emitter: env.emitter.clone() });
+    let service = doctor::DoctorService::new(parts.clone());
+    cores.doctor = Arc::new(doctor::DoctorCore(service.clone()));
+    cores.diagnostics = Arc::new(doctor::Diagnose { parts, doctor: service });
 }
