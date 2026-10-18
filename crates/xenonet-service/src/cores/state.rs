@@ -218,6 +218,13 @@ pub trait State: Send + Sync {
     fn add_block(&self, _health: std::sync::Arc<dyn Fn() -> Value + Send + Sync>, _source: Option<String>) -> R<()> {
         pending(M)
     }
+    /// `codexClient.request(method, params)`: a request of the Codex
+    /// app-server the map's Codex reader runs (core/codex.js), shared as the
+    /// JS shared it: the MCP catalog asks it `config/read` and
+    /// `mcpServerStatus/list`.
+    async fn codex_request(&self, _method: &str, _params: Value) -> R<Value> {
+        pending(M)
+    }
 }
 
 impl State for Pending {}
