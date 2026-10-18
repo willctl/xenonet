@@ -220,6 +220,8 @@ impl CodexClient {
         let mut g = lock(&self.inner);
         g.version = version;
         g.ready = true;
+        // Connected is started, as the JS's block counts it.
+        g.life.started = true;
         g.life.ok(now_ms());
         Ok(())
     }
@@ -463,6 +465,51 @@ mod tests {
         assert_eq!((page["entries"][0]["text"].as_str(), page["cursor"].as_str()), (Some("two"), Some("rollout:1")));
         let older = c.rollout_page(&f, Some("rollout:1"), 1.0).expect("a page");
         assert_eq!(older["entries"][0]["text"], "one");
+        std::fs::remove_dir_all(&dir).expect("cleaned up");
+    }
+}
+
+#[cfg(all(test, unix))]
+mod app_server {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use xenonet_schema::drift::DriftLog;
+
+    // A stand-in for `codex app-server`: it answers initialize, a listing,
+    // a thread's items and a rename, by the request's id.
+    const FAKE: &str = r#"#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*) printf '{"id":%s,"result":{"userAgent":"codex_cli_rs/0.150.0 (Mac OS 15.0)"}}\n' "$id" ;;
+    *'"method":"thread/list"'*'"archived":false'*) printf '{"id":%s,"result":{"data":[{"id":"0190d3e0-0000-7000-8000-00000000cccc","preview":"Fix the build\\nand more","createdAt":1790000000,"updatedAt":1790000100,"cwd":"/w/p","status":"idle","source":"cli"}],"nextCursor":null}}\n' "$id" ;;
+    *'"method":"thread/list"'*) printf '{"id":%s,"result":{"data":[],"nextCursor":null}}\n' "$id" ;;
+    *'"method":"thread/items/list"'*) printf '{"id":%s,"result":{"data":[{"item":{"id":"i1","type":"agentMessage","text":"Hello"}}],"nextCursor":null}}\n' "$id" ;;
+    *'"method":"thread/name/set"'*) printf '{"id":%s,"result":{}}\n' "$id" ;;
+  esac
+done
+"#;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn threads_items_and_a_rename_through_the_app_server() {
+        let dir = std::env::temp_dir().join(format!("xenonet-wire-app-server-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a folder");
+        let bin = dir.join("codex");
+        std::fs::write(&bin, FAKE).expect("the stand-in");
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("runnable");
+        let vendor = Vendor::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas"), Arc::new(Mutex::new(DriftLog::default())));
+        let c = CodexClient::new(bin.to_string_lossy().into_owned(), "0.3.0".into(), vendor);
+        let threads = c.threads().await.expect("the threads");
+        assert_eq!(threads.len(), 1);
+        assert_eq!((threads[0]["id"].as_str(), threads[0]["title"].as_str()), (Some("codex:0190d3e0-0000-7000-8000-00000000cccc"), Some("Fix the build")));
+        assert_eq!(lock(&c.inner).version.as_deref(), Some("0.150.0"), "Codex's version, from its user agent");
+        let page = c.read_thread("0190d3e0-0000-7000-8000-00000000cccc", None, 120.0, None).await.expect("a page");
+        assert_eq!(page["entries"][0]["text"], "Hello");
+        c.rename("0190d3e0-0000-7000-8000-00000000cccc", "Build fix").await.expect("renamed");
+        let h = c.health();
+        assert_eq!((h["state"].as_str(), h["counters"]["starts"].as_f64()), (Some("running"), Some(1.0)));
+        c.stop();
+        assert_eq!(c.health()["state"], "stopped");
         std::fs::remove_dir_all(&dir).expect("cleaned up");
     }
 }
