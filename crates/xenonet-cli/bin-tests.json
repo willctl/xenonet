@@ -13,12 +13,9 @@
       "failed": []
     },
     "test/control.test.js": {
-      "pass": 4,
+      "pass": 6,
       "tests": 6,
-      "failed": [
-        "mcp: answers a 2025-era client's handshake and lists the tools",
-        "mcp: answers a 2026-07-28 client, which sends no handshake"
-      ]
+      "failed": []
     },
     "test/cli.test.js": {
       "pass": 13,
