@@ -3,6 +3,14 @@
 //! the lifecycle API (`lifecycle_api!`), so the twin of Block can stand on
 //! any of them.
 
+// On the module, not the items: napi-derive copies an item's attributes
+// onto the two-argument wrapper it generates for the export, and an
+// expectation there goes unfulfilled.
+#![expect(
+    clippy::too_many_arguments,
+    reason = "readVersioned and the normalizer's and scanner's methods take the twin's arguments and hooks one by one, as their JS functions did"
+)]
+
 use crate::js::Json;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -236,16 +244,18 @@ impl JsRegistry {
 
 // ----- the normalizer -----
 
+/// A twin's hook: a JS function taking `Args` and answering any value.
+type Hook<'a, Args> = Function<'a, Args, Unknown<'a>>;
+
 /// The hooks a twin passes: JS functions wrapped so they don't throw. A
 /// wrapper that caught an error returns `failed`, and `failure()` says what
 /// it was. Without `parse`, lines are parsed here, as JSON.parse would.
-#[allow(clippy::type_complexity)]
 struct JsHooks<'a> {
     env: &'a Env,
-    parse: Option<Function<'a, String, Unknown<'a>>>,
-    inspect: Option<Function<'a, FnArgs<(Unknown<'a>, Unknown<'a>)>, Unknown<'a>>>,
-    unparsable: Option<Function<'a, FnArgs<(String, Unknown<'a>, String)>, Unknown<'a>>>,
-    normalize: Function<'a, FnArgs<(Unknown<'a>, Unknown<'a>)>, Unknown<'a>>,
+    parse: Option<Hook<'a, String>>,
+    inspect: Option<Hook<'a, FnArgs<(Unknown<'a>, Unknown<'a>)>>>,
+    unparsable: Option<Hook<'a, FnArgs<(String, Unknown<'a>, String)>>>,
+    normalize: Hook<'a, FnArgs<(Unknown<'a>, Unknown<'a>)>>,
     failed: Unknown<'a>,
     failure: Function<'a, (), String>,
 }
@@ -317,6 +327,10 @@ impl HasLife for JsNormalizer {
 lifecycle_api!(JsNormalizer);
 
 #[napi]
+// On the impl, not the methods: napi-derive copies a method's attributes
+// onto the two-argument wrapper it generates for it, and an expectation
+// there goes unfulfilled.
+#[expect(clippy::type_complexity, reason = "line's hooks are spelled out as napi Functions of the arguments the twin calls them with")]
 impl JsNormalizer {
     #[napi(constructor)]
     pub fn new(name: String, source: Option<String>, now: f64) -> Self {
@@ -329,7 +343,6 @@ impl JsNormalizer {
     }
 
     /// A line of text through the hooks; null when it isn't a record.
-    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
     #[napi]
     pub fn line(
         &mut self,
@@ -349,7 +362,6 @@ impl JsNormalizer {
     }
 
     /// A record already parsed, through the hooks.
-    #[allow(clippy::too_many_arguments)]
     #[napi]
     pub fn record(
         &mut self,
@@ -531,7 +543,6 @@ impl JsScanner {
 
     /// A depth-first walk, with the twin's root, limits and rules. Without
     /// `stat` and `readdir`, it reads the disk itself.
-    #[allow(clippy::too_many_arguments)]
     #[napi]
     pub fn scan(
         &mut self,
@@ -846,7 +857,6 @@ fn report_jv(r: Report) -> Jv {
 }
 
 /// Reads a versioned JSON file through a twin's hooks: { doc, report }.
-#[allow(clippy::too_many_arguments)]
 #[napi(js_name = "readVersioned")]
 pub fn read_versioned(
     env: &Env,
@@ -902,7 +912,6 @@ lifecycle_api!(JsGatherer);
 #[napi]
 impl JsGatherer {
     /// `backoff`: [baseMs, factor or null, maxMs or null], or null.
-    #[allow(clippy::too_many_arguments)]
     #[napi(constructor)]
     pub fn new(name: String, every_ms: Option<f64>, next_in: bool, backoff: Option<Vec<Option<f64>>>, stamped: bool, keep: bool, now: f64) -> Self {
         let backoff = backoff.map(|b| Backoff::of(b.first().copied().flatten().unwrap_or(f64::NAN), b.get(1).copied().flatten(), b.get(2).copied().flatten()));

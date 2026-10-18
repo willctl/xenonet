@@ -6,6 +6,14 @@
 //! throw into Rust: a check that threw returns `failed`, and `files` and a
 //! handle answer [value] or { code, message }.
 
+// On the module, not the items: napi-derive copies an item's attributes
+// onto the two-argument wrapper it generates for the export, and an
+// expectation there goes unfulfilled.
+#![expect(
+    clippy::too_many_arguments,
+    reason = "opencodeReadDb and OpenCodeCore.read take readDb's arguments and callbacks from the twin one by one, as the JS did, and read_db passes them on"
+)]
+
 use crate::js::{from_js, to_js, Json, Jv, MaybeJson};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -155,7 +163,6 @@ pub struct JsCopilotCli {
 #[napi]
 impl JsCopilotCli {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsCopilotCli { c: copilot_cli::CopilotCli::new() }
     }
@@ -216,7 +223,6 @@ pub struct JsGeminiCli {
 #[napi]
 impl JsGeminiCli {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsGeminiCli { g: gemini_cli::GeminiCli::new() }
     }
@@ -267,7 +273,6 @@ pub struct JsCursor {
 #[napi]
 impl JsCursor {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsCursor { c: cursor::Cursor::new() }
     }
@@ -390,7 +395,6 @@ impl Vendor for JsVendor<'_> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn read_db(
     env: &Env,
     exists: bool,
@@ -418,7 +422,6 @@ fn read_db(
 }
 
 /// readDb's answer, or true when getting the vendor reader threw.
-#[allow(clippy::too_many_arguments)]
 #[napi(js_name = "opencodeReadDb")]
 pub fn opencode_read_db(
     env: &Env,
@@ -446,13 +449,11 @@ pub struct JsOpenCode {
 #[napi]
 impl JsOpenCode {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsOpenCode { o: OpenCode::new() }
     }
     /// undefined, true when getting the vendor reader threw, or a
     /// TypeError's message.
-    #[allow(clippy::too_many_arguments)]
     #[napi]
     pub fn read(
         &mut self,
@@ -531,7 +532,6 @@ pub struct JsNumbat {
 #[napi]
 impl JsNumbat {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsNumbat { n: numbat::Numbat::new() }
     }
@@ -605,7 +605,6 @@ pub struct JsReportedRuns {
 #[napi]
 impl JsReportedRuns {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsReportedRuns { r: reported_runs::ReportedRuns::new() }
     }

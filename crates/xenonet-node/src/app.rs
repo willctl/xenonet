@@ -1,6 +1,11 @@
 //! xenonet-app for the twins of core/config.js, instances.js, version.js,
 //! environments.js, demo-root.js and the other small modules of core/.
 
+// On the module, not the items: napi-derive copies an item's attributes
+// onto the two-argument wrapper it generates for the export, and an
+// expectation there goes unfulfilled.
+#![expect(clippy::too_many_arguments, reason = "appConfig, reading and createWorld take the twin's arguments one by one, as their JS functions did")]
+
 use crate::js::{Json, Jv, MaybeJson};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -133,7 +138,6 @@ impl config::Finds for JsFinds<'_> {
 /// The settings, with readers and hiddenResources as arrays for the twin
 /// to make Sets of.
 #[napi(js_name = "appConfig")]
-#[allow(clippy::too_many_arguments)]
 pub fn app_config(
     argv: Vec<String>,
     env: Json,
@@ -1138,7 +1142,6 @@ impl AppSystemStats {
     }
 
     #[napi]
-    #[allow(clippy::too_many_arguments)]
     pub fn reading(&mut self, at: f64, platform: String, arch: Option<String>, uptime: f64, cpu: Json, total: f64, free: f64, gpus: MaybeJson, reader: Option<String>) -> Json {
         let gpus = match gpus.0 {
             Some(Value::Array(a)) => Some(a),
@@ -1319,7 +1322,6 @@ impl AppDemo {
     }
 
     #[napi(js_name = "createWorld")]
-    #[allow(clippy::too_many_arguments)]
     pub fn create_world(
         &mut self,
         now: f64,

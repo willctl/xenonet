@@ -442,6 +442,10 @@ pub struct JsLog {
 }
 
 #[napi]
+// On the impl, not the methods: napi-derive copies a method's attributes
+// onto the two-argument wrapper it generates for it, and an expectation
+// there goes unfulfilled.
+#[expect(clippy::too_many_arguments, reason = "write takes the twin's arguments one by one, as LogCore's JS method did")]
 impl JsLog {
     #[napi(constructor)]
     pub fn new(dir: Option<String>, component: String, instance: Option<String>, version: Option<String>, home: String, max_bytes: f64) -> Self {
@@ -451,7 +455,6 @@ impl JsLog {
     }
 
     /// The entry written, or null when the same came too soon.
-    #[allow(clippy::too_many_arguments)]
     #[napi]
     pub fn write(&mut self, level: String, code: String, message: Option<String>, err: Option<LogErr>, fix: Option<String>, ctx: Option<Json>, now: f64) -> Option<Json> {
         let err = err.map(|e| ErrInfo { message: e.message, stack: e.stack, code: e.code });

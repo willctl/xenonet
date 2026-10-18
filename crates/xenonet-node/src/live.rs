@@ -144,6 +144,10 @@ pub struct JsLiveCore {
 }
 
 #[napi]
+// On the impl, not the methods: napi-derive copies a method's attributes
+// onto the two-argument wrapper it generates for it, and an expectation
+// there goes unfulfilled.
+#[expect(clippy::too_many_arguments, reason = "line and apply take the twin's arguments one by one, as LiveCore's JS methods did")]
 impl JsLiveCore {
     /// `roots`: [{ dir, app }], the folders it reads, as real paths.
     #[napi(constructor)]
@@ -172,7 +176,6 @@ impl JsLiveCore {
 
     /// A line the tailer read (`raw`, as its normalizer gave it): its
     /// refusal, and what it says.
-    #[allow(clippy::too_many_arguments)]
     #[napi]
     pub fn line(&mut self, env: &Env, codex: bool, session_id: String, agent_id: MaybeJson, file: MaybeJson, raw: MaybeJson, live: bool, now: f64) -> Result<Jv> {
         let f = Where { session_id, agent_id: or_null(agent_id), file: or_null(file) };
@@ -182,7 +185,6 @@ impl JsLiveCore {
     }
 
     /// A line given straight to applyClaude or applyCodex.
-    #[allow(clippy::too_many_arguments)]
     #[napi]
     pub fn apply(&mut self, env: &Env, codex: bool, session_id: String, agent_id: MaybeJson, raw: MaybeJson, live: bool, now: f64) -> Result<Jv> {
         let f = Where { session_id, agent_id: or_null(agent_id), file: Value::Null };

@@ -1,5 +1,10 @@
 //! xenonet-hosts for the twins of core/hosts/.
 
+// On the module, not the items: napi-derive copies an item's attributes
+// onto the two-argument wrapper it generates for the export, and an
+// expectation there goes unfulfilled.
+#![expect(clippy::too_many_arguments, reason = "qualifyGraph takes the twin's arguments one by one, as the JS function did")]
+
 use crate::app::{answer, fs_error, s};
 use crate::js::{Json, Jv, MaybeJson};
 use napi::bindgen_prelude::*;
@@ -677,7 +682,6 @@ fn part_jv(p: merge::Part) -> Json {
 
 /// qualifyGraph; `once` is the host's cleanOnce memo, or null.
 #[napi(js_name = "hostsQualifyGraph")]
-#[allow(clippy::too_many_arguments)]
 pub fn hosts_qualify_graph(
     graph: MaybeJson,
     host: Json,
@@ -951,7 +955,6 @@ fn copier<'a>(scrub: Option<&'a HostsScrubber>, copy: Option<&'a Function<'a, Js
 
 /// shapeGraph: { graph, dropped }.
 #[napi(js_name = "hostsShapeGraph")]
-#[allow(clippy::too_many_arguments)]
 pub fn hosts_shape_graph(
     input: Json,
     since_ms: Option<f64>,

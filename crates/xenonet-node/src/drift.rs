@@ -209,7 +209,6 @@ pub struct JsSampling {
 #[napi]
 impl JsSampling {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsSampling { s: Sampling::default() }
     }

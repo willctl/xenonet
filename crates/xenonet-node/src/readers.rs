@@ -228,7 +228,6 @@ pub struct JsRolloutEntries {
 #[napi]
 impl JsRolloutEntries {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsRolloutEntries { e: codex::RolloutEntries::default() }
     }
@@ -258,7 +257,6 @@ pub struct JsCodexStdout {
 #[napi]
 impl JsCodexStdout {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsCodexStdout { io: codex::Stdout::default() }
     }
@@ -293,7 +291,6 @@ pub struct JsCodexStderr {
 #[napi]
 impl JsCodexStderr {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsCodexStderr { io: codex::Stderr::default() }
     }

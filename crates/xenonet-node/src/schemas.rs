@@ -228,7 +228,6 @@ pub struct JsRegistry {
 #[napi]
 impl JsRegistry {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsRegistry { inner: Registry::new() }
     }
