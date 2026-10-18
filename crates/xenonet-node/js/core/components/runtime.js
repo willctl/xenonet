@@ -9,11 +9,22 @@ import { native } from "../../index.js";
 import { settle } from "../../settle.js";
 import { drive } from "../../task.js";
 import { envOf, machine } from "../../machine.js";
+import { pathStyle } from "../paths.js";
 import { rpc } from "./rpc.js";
 import { SERVICE_API, negotiate } from "./protocol.js";
 
 export const runtimeDir = (env = process.env) => native.compRuntimeDir(envOf(env), machine());
 export const descriptorFile = (env = process.env) => native.compDescriptorFile(envOf(env), machine());
+
+export const binName = (platform = process.platform) => native.compBinName(String(platform));
+export const launcherBin = (env = process.env, platform = process.platform) => native.compLauncherBin(envOf(env), { ...machine(), platform: String(platform) });
+
+// Which binary XenoNet's entries run is Rust's; the checkout's build, its
+// last word, is looked for here.
+export function xenonetBin({ env = process.env, root, platform = process.platform, exists = fs.existsSync } = {}) {
+  const built = ["release", "debug"].map((profile) => pathStyle(root).join(root, "target", profile, binName(platform)));
+  return native.compXenonetBin(envOf(env), { ...machine(), platform: String(platform) }, built.find((f) => exists(f)) ?? built[1]);
+}
 
 export async function connectService({ env = process.env, role = "tools", handle } = {}) {
   const descriptor = settle(native.compReadDescriptor(envOf(env), machine()));

@@ -59,36 +59,30 @@ impl Calls for ConnectCalls {
     }
 }
 
-/// The runtime the hooks and servers run the xenonet command on: the
-/// launcher's, or the app's own, else the Node on PATH.
-fn runtime(config: &Config) -> (String, bool) {
-    if let Some(e) = &config.launcher_exec {
-        return (e.clone(), false);
-    }
-    if let Some(e) = &config.exec {
-        return (e.clone(), true);
-    }
-    let path = std::env::var("PATH").unwrap_or_default();
-    let node = xenonet_base::paths::on_path("node", &path, std::env::var("PATHEXT").ok().as_deref(), cfg!(windows), &mut |f: &str| xenonet_base::paths::can_run(f));
-    (node.unwrap_or_else(|| "node".into()), false)
+/// The xenonet binary the hooks and servers run (runtime.js's xenonetBin):
+/// XENONET_BIN, installed XenoNet's launcher, which never moves, else this
+/// one.
+fn bin(config: &Config) -> String {
+    let env: xenonet_components::runtime::Env = std::env::vars().map(|(k, v)| (k, Value::String(v))).collect();
+    let m = xenonet_components::runtime::Machine { platform: crate::js::platform().into(), arch: std::env::consts::ARCH.into(), home: config.home.clone() };
+    let this = std::env::current_exe().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+    xenonet_components::runtime::xenonet_bin(&env, &m, &this)
 }
 
 pub struct ConnectDriver(std::sync::Arc<Core>);
 
 impl ConnectDriver {
     pub fn new(config: &Config) -> ConnectDriver {
-        let (exec, run_as_node) = runtime(config);
         let env = |k: &str| std::env::var(k).ok();
         let options = Options {
             port: Arg::Num(f64::from(config.port)),
-            root: config.launcher_root.clone().unwrap_or_else(|| config.root.to_string_lossy().into_owned()),
             demo: Arg::Bool(config.demo),
-            exec,
-            run_as_node,
+            bin: bin(config),
             home: config.home.clone(),
             claude_config_dir: env("CLAUDE_CONFIG_DIR"),
             codex_home: env("CODEX_HOME"),
-            console_mcp: config.launcher_exec.is_some(),
+            // Installed XenoNet's console operator, which Desktop registers.
+            console_mcp: env("XENONET_LAUNCHER_BIN").is_some_and(|b| !b.is_empty()) || config.launcher_exec.is_some(),
             platform: crate::js::platform().into(),
             instances: INSTANCES.iter().map(|(id, name, port)| Instance { id: (*id).into(), name: (*name).into(), port: Arg::Num(*port) }).collect(),
         };

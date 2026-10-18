@@ -9,6 +9,11 @@
 //!   Codex        the xenonet MCP server (through `codex mcp`), and command
 //!                hooks in ~/.codex/hooks.json
 //!
+//! Both run the xenonet binary (`xenonet mcp`, `xenonet hook <app>`): the
+//! launcher's for installed XenoNet, which never moves. Entries an earlier
+//! XenoNet wrote run Node and cli/xenonet.js instead; they're still its own,
+//! so connecting again replaces them and disconnecting takes them out.
+//!
 //! XenoNet's hooks are told apart from yours by their URL or command, and a
 //! copy of each settings file is kept the first time XenoNet changes it
 //! (`<file>.before-xenonet`). Each XenoNet on this machine is told apart by
@@ -20,7 +25,7 @@
 //! through `Calls`: "fs" (node:fs), "run" (a CLI, its output) and "cli" (a
 //! CLI on PATH, or null).
 
-use crate::js::{base64, base64_bytes, from_utf16le, join_style, utf16le};
+use crate::js::{base64, base64_bytes, from_utf16le, utf16le};
 use crate::peer::{Calls, Thrown};
 use crate::sql::Arg;
 use crate::store::js_text;
@@ -268,10 +273,9 @@ pub fn merge_hooks(c: &mut dyn Calls, settings: &Value, ours: &mut dyn FnMut(&mu
 /// was given.
 pub struct Options {
     pub port: Arg,
-    pub root: String,
     pub demo: Arg,
-    pub exec: String,
-    pub run_as_node: bool,
+    /// The xenonet binary the entries run.
+    pub bin: String,
     pub home: String,
     pub claude_config_dir: Option<String>,
     pub codex_home: Option<String>,
@@ -282,7 +286,6 @@ pub struct Options {
 
 pub struct Connect {
     o: Options,
-    entry: String,
     server_env: Vec<(String, String)>,
     mcp: Value,
     hook_url: String,
@@ -302,13 +305,9 @@ enum Kind {
 
 impl Connect {
     pub fn new(o: Options) -> Self {
-        let entry = join_style(&o.root, &["cli", "xenonet.js"]);
-        let mut server_env = vec![("XENONET_PORT".to_string(), js_text(&o.port))];
-        if o.run_as_node {
-            server_env.push(("ELECTRON_RUN_AS_NODE".into(), "1".into()));
-        }
+        let server_env = vec![("XENONET_PORT".to_string(), js_text(&o.port))];
         let env_obj: Map<String, Value> = server_env.iter().map(|(k, v)| (k.clone(), Value::String(v.clone()))).collect();
-        let mcp = json!({ "type": "stdio", "command": o.exec, "args": [entry, "mcp"], "env": Value::Object(env_obj) });
+        let mcp = json!({ "type": "stdio", "command": o.bin, "args": ["mcp"], "env": Value::Object(env_obj) });
         let hook_url = format!("http://127.0.0.1:{}/api/hook/claude", js_text(&o.port));
         let claude_dir = o.claude_config_dir.clone().unwrap_or_else(|| join(&o.home, ".claude"));
         let claude_settings = join(&claude_dir, "settings.json");
@@ -320,7 +319,7 @@ impl Connect {
         };
         let codex_hooks = join(&o.codex_home.clone().unwrap_or_else(|| join(&o.home, ".codex")), "hooks.json");
         let names = server_names(&o.port, &o.instances);
-        let mut c = Connect { o, entry, server_env, mcp, hook_url, claude_settings, claude_state, codex_hooks, names, claude_hooks: Value::Null, codex_hook_set: Value::Null };
+        let mut c = Connect { o, server_env, mcp, hook_url, claude_settings, claude_state, codex_hooks, names, claude_hooks: Value::Null, codex_hook_set: Value::Null };
         let win = c.o.platform == "win32";
         // Claude Code takes HTTP hooks, which cost nothing to run, except at
         // SessionStart, which takes only commands.
@@ -363,12 +362,12 @@ impl Connect {
 
     fn hook_command(&self, app: &str) -> String {
         let env: Vec<String> = self.server_env.iter().map(|(k, v)| format!("{k}={v}")).collect();
-        format!("{} {} {} hook {app}", env.join(" "), quote(&self.o.exec), quote(&self.entry))
+        format!("{} {} hook {app}", env.join(" "), quote(&self.o.bin))
     }
 
     fn windows_hook(&self, app: &str) -> String {
         let env: Vec<String> = self.server_env.iter().map(|(k, v)| format!("$env:{k}={}", ps_quote(v))).collect();
-        let script = format!("# XenoNet hook {app}\n{}; & {} {} hook {}; exit $LASTEXITCODE", env.join("; "), ps_quote(&self.o.exec), ps_quote(&self.entry), ps_quote(app));
+        let script = format!("# XenoNet hook {app}\n{}; & {} hook {}; exit $LASTEXITCODE", env.join("; "), ps_quote(&self.o.bin), ps_quote(app));
         format!("powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand {}", base64(&utf16le(&script)))
     }
 
@@ -386,15 +385,16 @@ impl Connect {
     }
 
     /// Any XenoNet's command entries, whichever XenoNet or checkout added
-    /// them, in this form or the hook.js of earlier versions.
+    /// them: the binary's, cli/xenonet.js's with Node, or the hook.js of
+    /// earlier versions.
     fn xenonet_command(kind: Kind, h: &Value) -> bool {
         if h.get("type").and_then(Value::as_str) != Some("command") {
             return false;
         }
         let command = text_of(h.get("command"));
         let (form, app) = match kind {
-            Kind::Claude => (crate::re!(r#"(cli[\\/]xenonet\.js['"]? hook|(cli|server[\\/]engine)[\\/]hook\.js['"]?) claude$"#), "claude"),
-            Kind::Codex => (crate::re!(r#"(cli[\\/]xenonet\.js['"]? hook|(cli|server[\\/]engine)[\\/]hook\.js['"]?) codex$"#), "codex"),
+            Kind::Claude => (crate::re!(r#"(cli[\\/]xenonet\.js['"]? hook|(cli|server[\\/]engine)[\\/]hook\.js['"]?|[\\/]xenonet(\.exe)?['"]? hook) claude$"#), "claude"),
+            Kind::Codex => (crate::re!(r#"(cli[\\/]xenonet\.js['"]? hook|(cli|server[\\/]engine)[\\/]hook\.js['"]?|[\\/]xenonet(\.exe)?['"]? hook) codex$"#), "codex"),
         };
         if form.is_match(&command) {
             return true;
@@ -464,6 +464,26 @@ impl Connect {
             }
         }
         Ok(false)
+    }
+
+    /// Whether this XenoNet has hooks here, in place or not: its port's,
+    /// or an early form's that named none.
+    fn has_own(&self, hooks: Option<&Value>, kind: Kind) -> bool {
+        flat(values(hooks)).iter().flat_map(hooks_of).any(|h| Self::xenonet_hook(kind, &h) && Self::port_of(&h).is_none_or(|p| matches!(self.o.port, Arg::Num(q) if q == p)))
+    }
+
+    /// Whether this XenoNet's entries here are an earlier XenoNet's, which
+    /// run Node and cli/xenonet.js (or hook.js) rather than the binary: a
+    /// hook of its own, or its MCP server.
+    fn earlier(&self, hooks: Option<&Value>, kind: Kind, server: Option<&Value>) -> bool {
+        let node = |t: &str| t.contains("xenonet.js") || t.contains("hook.js");
+        let own = flat(values(hooks)).iter().flat_map(hooks_of).any(|h| {
+            h.get("type").and_then(Value::as_str) == Some("command")
+                && Self::xenonet_hook(kind, &h)
+                && Self::port_of(&h).is_none_or(|p| matches!(self.o.port, Arg::Num(q) if q == p))
+                && node(&Self::hook_text(&h))
+        });
+        own || server.and_then(|s| s.get("args")).and_then(Value::as_array).is_some_and(|a| a.iter().any(|x| crate::re!(r"\.m?js$").is_match(&text_of(Some(x)))))
     }
 
     /// Other XenoNets connected here too, by port, for the preview.
@@ -685,7 +705,7 @@ impl Connect {
         };
         let port = js_text(&self.o.port);
         let home = &self.o.home;
-        let command = format!("{} {}", tilde(&self.o.exec, home), tilde(&self.entry, home));
+        let command = tilde(&self.o.bin, home);
         let mut console_args = self.mcp["args"].as_array().cloned().unwrap_or_default();
         console_args.push(json!("console"));
         let console_args = Value::Array(console_args);
@@ -703,13 +723,17 @@ impl Connect {
         claude_changes.push(json!({ "id": "mcp", "what": format!("The {xenonet} MCP server, for every project"), "where": "Claude Code's user settings, through claude mcp add-json --scope user", "state": self.server_state(claude_entry.as_ref(), None), "detail": format!("{command} mcp (XENONET_PORT={port})") }));
         let settings = self.read_json(c, &self.claude_settings)?;
         let in_place = self.hooks_in_place(c, &settings, Kind::Claude, &self.claude_hooks)?;
-        claude_changes.push(json!({ "id": "hooks", "what": format!("Hooks: {}", events(&CLAUDE_EVENTS)), "where": tilde(&self.claude_settings, home), "state": if in_place { "present" } else { "missing" }, "detail": format!("posting to {}; SessionStart runs {command} hook claude", self.hook_url) }));
+        let state = hooks_state(in_place, self.has_own(settings.get("hooks"), Kind::Claude));
+        claude_changes.push(json!({ "id": "hooks", "what": format!("Hooks: {}", events(&CLAUDE_EVENTS)), "where": tilde(&self.claude_settings, home), "state": state, "detail": format!("posting to {}; SessionStart runs {command} hook claude", self.hook_url) }));
         let mut claude_notes: Vec<Value> = if claude.truthy() {
             Vec::new()
         } else {
             vec![json!("XenoNet can't find the claude command, so it can add the hooks but not the MCP server. Install Claude Code's CLI, or add the server by hand.")]
         };
         let settings = self.read_json(c, &self.claude_settings)?;
+        if self.earlier(settings.get("hooks"), Kind::Claude, claude_entry.as_ref()) {
+            claude_notes.push(json!(EARLIER));
+        }
         let others = self.others(c, settings.get("hooks"), Kind::Claude)?;
         claude_notes.extend(self.besides(&others));
         let settings = self.read_json(c, &self.claude_settings)?;
@@ -719,11 +743,15 @@ impl Connect {
         codex_changes.push(json!({ "id": "mcp", "what": format!("The {xenonet} MCP server, for every project"), "where": "Codex's config, through codex mcp add", "state": self.server_state(codex_server.as_ref(), None), "detail": format!("{command} mcp (XENONET_PORT={port})") }));
         let hooks_file = self.read_json(c, &self.codex_hooks)?;
         let in_place = self.hooks_in_place(c, &hooks_file, Kind::Codex, &self.codex_hook_set)?;
-        codex_changes.push(json!({ "id": "hooks", "what": format!("Hooks: {}", events(&CODEX_EVENTS)), "where": tilde(&self.codex_hooks, home), "state": if in_place { "present" } else { "missing" }, "detail": format!("running {command} hook codex") }));
+        let state = hooks_state(in_place, self.has_own(hooks_file.get("hooks"), Kind::Codex));
+        codex_changes.push(json!({ "id": "hooks", "what": format!("Hooks: {}", events(&CODEX_EVENTS)), "where": tilde(&self.codex_hooks, home), "state": state, "detail": format!("running {command} hook codex") }));
         let mut codex_notes: Vec<Value> =
             if codex.truthy() { Vec::new() } else { vec![json!("XenoNet can't find the codex command, so it can add the hooks but not the MCP server.")] };
         codex_notes.push(json!("Codex runs new hooks only once you trust them: run /hooks in Codex and trust XenoNet's."));
         let hooks_file = self.read_json(c, &self.codex_hooks)?;
+        if self.earlier(hooks_file.get("hooks"), Kind::Codex, codex_server.as_ref()) {
+            codex_notes.push(json!(EARLIER));
+        }
         let others = self.others(c, hooks_file.get("hooks"), Kind::Codex)?;
         codex_notes.extend(self.besides(&others));
         let hooks_file = self.read_json(c, &self.codex_hooks)?;
@@ -772,7 +800,7 @@ impl Connect {
             if bin.truthy() {
                 let env: Vec<String> = self.server_env.iter().flat_map(|(k, v)| ["--env".to_string(), format!("{k}={v}")]).collect();
                 let tail = |extra: Option<&str>| {
-                    let mut t = vec!["--".to_string(), self.o.exec.clone()];
+                    let mut t = vec!["--".to_string(), self.o.bin.clone()];
                     t.extend(list_strings(&self.mcp["args"]));
                     if let Some(e) = extra {
                         t.push(e.into());
@@ -823,6 +851,21 @@ impl Connect {
             }
         }
         self.preview(c)
+    }
+}
+
+/// What the preview says of entries an earlier XenoNet wrote.
+const EARLIER: &str = "XenoNet's entries here run cli/xenonet.js with Node, as an earlier XenoNet wrote them. Connecting again has them run the xenonet binary.";
+
+/// A hooks change's state: as XenoNet would add them, or there but not
+/// so (an earlier XenoNet's, say), or not there.
+fn hooks_state(in_place: bool, own: bool) -> &'static str {
+    if in_place {
+        "present"
+    } else if own {
+        "different"
+    } else {
+        "missing"
     }
 }
 
@@ -881,10 +924,8 @@ mod tests {
     fn hooks_say_which_xenonet_theyre_for() {
         let c = Connect::new(Options {
             port: Arg::num(47842.0),
-            root: "/app".into(),
             demo: Arg::Bool(false),
-            exec: "/x/node".into(),
-            run_as_node: true,
+            bin: "/x/xenonet".into(),
             home: "/h".into(),
             claude_config_dir: None,
             codex_home: None,
@@ -897,9 +938,22 @@ mod tests {
         });
         assert_eq!(c.names(), &("xenonet-dev".to_string(), "xenonet-dev-console".to_string()));
         let start = &c.claude_hooks["SessionStart"]["hooks"][0];
-        assert_eq!(start["command"], json!("XENONET_PORT=47842 ELECTRON_RUN_AS_NODE=1 '/x/node' '/app/cli/xenonet.js' hook claude"));
+        assert_eq!(start["command"], json!("XENONET_PORT=47842 '/x/xenonet' hook claude"));
         assert!(Connect::xenonet_hook(Kind::Claude, start));
         assert_eq!(Connect::port_of(start), Some(47842.0));
+        assert_eq!(c.mcp, json!({ "type": "stdio", "command": "/x/xenonet", "args": ["mcp"], "env": { "XENONET_PORT": "47842" } }));
+        // An earlier XenoNet's hook, which ran Node and cli/xenonet.js, is
+        // still a XenoNet's, and says so.
+        let node = json!({ "type": "command", "command": "XENONET_PORT=47842 ELECTRON_RUN_AS_NODE=1 '/x/node' '/app/cli/xenonet.js' hook claude" });
+        assert!(Connect::xenonet_hook(Kind::Claude, &node));
+        let hooks = json!({ "SessionStart": [{ "hooks": [node] }] });
+        assert!(c.has_own(Some(&hooks), Kind::Claude) && c.earlier(Some(&hooks), Kind::Claude, None));
+        assert!(!c.earlier(Some(&c.claude_hooks), Kind::Claude, Some(&c.mcp)));
+        assert!(c.earlier(None, Kind::Codex, Some(&json!({ "command": "/x/node", "args": ["/app/cli/xenonet.js", "mcp"] }))));
+        // Another XenoNet's binary, and a Windows one's, are XenoNet's too.
+        assert!(Connect::xenonet_hook(Kind::Codex, &json!({ "type": "command", "command": "XENONET_PORT=47840 '/r/launcher/xenonet' hook codex" })));
+        assert!(Connect::xenonet_hook(Kind::Codex, &json!({ "type": "command", "command": r"XENONET_PORT=47840 'C:\r\launcher\xenonet.exe' hook codex" })));
+        assert!(!Connect::xenonet_hook(Kind::Codex, &json!({ "type": "command", "command": "my-xenonet-thing hook codex" })));
         let win = c.windows_hook("codex");
         let h = json!({ "type": "command", "command": "x", "commandWindows": win });
         assert!(Connect::hook_text(&h).starts_with("# XenoNet hook codex\n$env:XENONET_PORT='47842'"));

@@ -46,21 +46,19 @@ impl Calls for Machine {
     }
 }
 
-/// createConnect({ port, root, exec }) as the command makes it, for this
+/// createConnect({ port, bin }) as the command makes it, for this
 /// computer's own settings: its home folder, CLAUDE_CONFIG_DIR, CODEX_HOME
 /// and the instances XenoNet Dev runs as.
 fn core(opts: &Value) -> Connect {
     let t = |k: &str| opts.get(k).map(xenonet_base::text::js_string).unwrap_or_default();
     Connect::new(Options {
         port: opts.get("port").map_or(Arg::Undef, super::native::arg_of),
-        root: t("root"),
         demo: Arg::Bool(false),
-        exec: t("exec"),
-        run_as_node: false,
+        bin: t("bin"),
         home: sys::home(),
         claude_config_dir: std::env::var("CLAUDE_CONFIG_DIR").ok(),
         codex_home: std::env::var("CODEX_HOME").ok(),
-        console_mcp: sys::var("XENONET_LAUNCHER_EXEC").is_some(),
+        console_mcp: sys::var("XENONET_LAUNCHER_BIN").or_else(|| sys::var("XENONET_LAUNCHER_EXEC")).is_some(),
         platform: sys::platform().into(),
         instances: xenonet_app::instances::INSTANCES.iter().map(|i| Instance { id: i.id.into(), name: i.name.into(), port: Arg::Num(f64::from(i.port)) }).collect(),
     })

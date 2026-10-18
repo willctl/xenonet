@@ -2496,6 +2496,7 @@ dependencies = [
  "xenonet-app",
  "xenonet-base",
  "xenonet-blocks",
+ "xenonet-components",
  "xenonet-engine",
  "xenonet-schema",
  "xenonet-service",

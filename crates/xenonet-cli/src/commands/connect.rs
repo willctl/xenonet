@@ -10,7 +10,6 @@ use crate::js::{list, str, t};
 use crate::out::{c, json, print, Done, Fail};
 use crate::prompt::confirm;
 use crate::reach::{candidates, need};
-use crate::sys;
 use serde_json::{json, Value};
 use xenonet_base::client::name_of;
 
@@ -72,45 +71,11 @@ fn left(after: &Value, apps: &[&str]) -> Vec<String> {
 }
 
 /// What createConnect is given for this computer's own settings: the
-/// port, and what XenoNet's hooks and MCP servers run, a node and the
-/// cli/xenonet.js in its root: the launcher's (XENONET_LAUNCHER_ROOT and
-/// XENONET_LAUNCHER_EXEC), else the checkout this binary is in with the
-/// Node on PATH, as node cli/xenonet.js gives its own. Without either,
-/// this binary and its folder, which the preview shows and connecting
-/// refuses (`runnable`).
+/// port, and the xenonet binary XenoNet's hooks and MCP servers run:
+/// installed XenoNet's launcher, which never moves, else this binary
+/// (cores::xenonet_bin).
 pub fn local_options(port: f64) -> Value {
-    let exe = std::env::current_exe().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
-    let checkout = Some(sys::xenonet_root()).filter(|r| std::path::Path::new(&sys::join(&sys::join(r, "cli"), "xenonet.js")).is_file());
-    let root = sys::var("XENONET_LAUNCHER_ROOT").or_else(|| checkout.clone()).unwrap_or_else(|| sys::dir_name(&exe));
-    // As process.execPath names it: its links followed.
-    let node = checkout
-        .and_then(|_| {
-            xenonet_base::paths::on_path(
-                "node",
-                &std::env::var("PATH").unwrap_or_default(),
-                std::env::var("PATHEXT").ok().as_deref(),
-                cfg!(windows),
-                &mut xenonet_base::paths::can_run,
-            )
-        })
-        .map(|n| std::fs::canonicalize(&n).map_or(n, |p| p.to_string_lossy().into_owned()));
-    let exec = sys::var("XENONET_LAUNCHER_EXEC").or(node).unwrap_or(exe);
-    json!({ "port": xenonet_base::json::number(port), "root": root, "exec": exec })
-}
-
-/// Why these options can't be written into the apps' settings: the
-/// entries would run a cli/xenonet.js that isn't there. The settings
-/// XenoNet writes still name a node and its entry script (core/engine/
-/// connect.js), not this binary alone.
-fn runnable(opts: &Value) -> Result<(), Fail> {
-    let root = t(opts, "root");
-    if std::path::Path::new(&sys::join(&sys::join(&root, "cli"), "xenonet.js")).is_file() {
-        return Ok(());
-    }
-    Err(Fail::new(
-        "this xenonet can't connect the apps by itself yet: their hooks and MCP servers run XenoNet's cli/xenonet.js with Node, and there's none beside it. Run node cli/xenonet.js connect --here from XenoNet's checkout, or set XENONET_LAUNCHER_ROOT and XENONET_LAUNCHER_EXEC to XenoNet's launcher.",
-        1,
-    ))
+    json!({ "port": xenonet_base::json::number(port), "bin": cores::xenonet_bin() })
 }
 
 // The XenoNet on that port runs elsewhere, so it can't write this
@@ -135,7 +100,6 @@ fn here(apps: &[&str], flags: &Flags) -> Done {
         print(c::green(format!("Already connected to {who}.")));
         return Ok(0);
     }
-    runnable(&opts)?;
     if !confirm(&format!("Connect {} here to {who}?", names(&todo)), flags)? {
         print(c::dim("Nothing changed."));
         return Ok(0);

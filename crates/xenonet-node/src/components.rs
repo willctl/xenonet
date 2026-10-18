@@ -92,6 +92,21 @@ pub fn comp_runtime_dir(env: Json, machine: Json) -> String {
     runtime::runtime_dir(&env_of(env), &machine_of(&machine))
 }
 
+#[napi(js_name = "compBinName")]
+pub fn comp_bin_name(platform: String) -> String {
+    runtime::bin_name(&platform).into()
+}
+
+#[napi(js_name = "compLauncherBin")]
+pub fn comp_launcher_bin(env: Json, machine: Json) -> String {
+    runtime::launcher_bin(&env_of(env), &machine_of(&machine))
+}
+
+#[napi(js_name = "compXenonetBin")]
+pub fn comp_xenonet_bin(env: Json, machine: Json, this: String) -> String {
+    runtime::xenonet_bin(&env_of(env), &machine_of(&machine), &this)
+}
+
 #[napi(js_name = "compDescriptorFile")]
 pub fn comp_descriptor_file(env: Json, machine: Json) -> String {
     runtime::descriptor_file(&env_of(env), &machine_of(&machine))

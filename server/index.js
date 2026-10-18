@@ -124,7 +124,7 @@ actors?.drive(CLOCK_MS, () => registration.tick());
 // made up and whose machine isn't read. Loaded only where they run.
 const observers = actors && !config.demo ? (await import("../core/actors/observers.js")).createObservers({ actors, registration, procs, home: config.homeDir }) : null;
 for (const o of observers?.list ?? []) state.blocks.add(o);
-const connect = createConnect({ port: config.port, root: process.env.XENONET_LAUNCHER_ROOT || root, demo: config.demo, exec: process.env.XENONET_LAUNCHER_EXEC || process.env.XENONET_EXEC || process.execPath, runAsNode: !process.env.XENONET_LAUNCHER_EXEC && !!process.env.XENONET_EXEC });
+const connect = createConnect({ port: config.port, root, demo: config.demo });
 
 const ALLOWED_HOSTS = new Set([`127.0.0.1:${config.port}`, `localhost:${config.port}`]);
 const ALLOWED_ORIGINS = new Set([...ALLOWED_HOSTS].map((h) => `http://${h}`));

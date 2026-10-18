@@ -62,7 +62,7 @@ export async function confirm(question, flags) {
 async function here(apps, flags) {
   if (!flags.port) throw new Fail("--here needs --port: the port the other XenoNet answers on here", 2);
   const port = candidates(flags)[0];
-  const local = createConnect({ port, root: process.env.XENONET_LAUNCHER_ROOT || ROOT, exec: process.env.XENONET_LAUNCHER_EXEC || process.execPath });
+  const local = createConnect({ port, root: ROOT });
   const preview = await local.preview();
   if (flags.json) return json(preview);
   const todo = preview.apps.filter((a) => apps.includes(a.app) && (a.changes.some((ch) => ch.state !== "present") || a.broken?.length));

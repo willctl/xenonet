@@ -82,6 +82,14 @@ pub(crate) fn env_map() -> serde_json::Map<String, Value> {
     std::env::vars().map(|(k, v)| (k, Value::String(v))).collect()
 }
 
+/// The xenonet binary XenoNet's entries in other programs run
+/// (runtime.js's xenonetBin): XENONET_BIN, installed XenoNet's launcher, or
+/// this binary.
+pub fn xenonet_bin() -> String {
+    let this = std::env::current_exe().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+    xenonet_components::runtime::xenonet_bin(&env_map(), &components::machine(), &this)
+}
+
 // ---------- the demo ----------
 
 /// createWorld(): the demo's made-up world, in a temporary folder.

@@ -25,6 +25,7 @@ rusqlite.workspace = true
 xenonet-schema.workspace = true
 # The demo's sessions by title, for its made-up actors' scripts.
 xenonet-app.workspace = true
+xenonet-components.workspace = true
 # A webhook wake follows no redirect; the service's fetch does.
 reqwest.workspace = true
 # WHATWG URL parsing, for a webhook's URL, as the twin's new URL() read it.

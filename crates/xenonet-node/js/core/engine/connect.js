@@ -9,6 +9,7 @@ import os from "node:os";
 import { native } from "../../index.js";
 import { drive, calls } from "../../drive.js";
 import { onPath } from "../paths.js";
+import { xenonetBin } from "../components/runtime.js";
 import { INSTANCES } from "../../../../../core/instances.js";
 
 const instances = () => Object.entries(INSTANCES).map(([id, v]) => ({ id, name: v.name, port: v.port }));
@@ -17,17 +18,15 @@ export const serverNames = (port) => native.connectServerNames(port, instances()
 
 export const mergeHooks = (settings, ours, add = null) => native.connectMerge({ ours: (h) => !!ours(h) }, settings, add);
 
-export function createConnect({ port, root, demo = false, exec = process.execPath, runAsNode = false, home = os.homedir(), env = process.env, platform = process.platform, run = runFile }) {
+export function createConnect({ port, root, demo = false, home = os.homedir(), env = process.env, platform = process.platform, bin = xenonetBin({ env, root, platform }), run = runFile }) {
   const core = new native.ConnectCore({
     port,
-    root: String(root),
     demo,
-    exec: String(exec),
-    runAsNode: !!runAsNode,
+    bin: String(bin),
     home: String(home),
     claudeConfigDir: env.CLAUDE_CONFIG_DIR ?? null,
     codexHome: env.CODEX_HOME ?? null,
-    consoleMcp: !!env.XENONET_LAUNCHER_EXEC,
+    consoleMcp: !!(env.XENONET_LAUNCHER_BIN || env.XENONET_LAUNCHER_EXEC),
     platform: String(platform),
     instances: instances(),
   });

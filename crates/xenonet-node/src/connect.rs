@@ -52,10 +52,8 @@ impl ConnectCore {
         let o = o.0;
         let options = Options {
             port: o.field("port"),
-            root: js_text(&o.field("root")),
             demo: o.field("demo"),
-            exec: js_text(&o.field("exec")),
-            run_as_node: o.field("runAsNode").truthy(),
+            bin: js_text(&o.field("bin")),
             home: js_text(&o.field("home")),
             claude_config_dir: text(o.field("claudeConfigDir")),
             codex_home: text(o.field("codexHome")),
