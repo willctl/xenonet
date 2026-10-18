@@ -26,11 +26,14 @@ pub struct Local {
 }
 
 #[cfg(unix)]
+#[expect(unsafe_code, reason = "localtime_r(3), which std doesn't wrap")]
 fn breakdown(secs: i64) -> Option<Local> {
     let t = secs as libc::time_t;
+    // SAFETY: tm is a plain C struct, for which all zeros is a valid value.
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    // SAFETY: localtime_r reads the time given and fills the tm given.
-    let got = unsafe { libc::localtime_r(&t, &mut tm) };
+    // SAFETY: localtime_r only reads `t` and fills `tm`, both alive for the
+    // call.
+    let got = unsafe { libc::localtime_r(&raw const t, &raw mut tm) };
     (!got.is_null()).then(|| Local {
         year: i64::from(tm.tm_year) + 1900,
         month: (tm.tm_mon + 1) as u32,

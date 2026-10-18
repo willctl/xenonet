@@ -60,11 +60,6 @@ pub fn base_name(p: &str) -> String {
     cut.to_string()
 }
 
-/// The folder of a path, as path.dirname has it.
-pub fn dir_name(p: &str) -> String {
-    std::path::Path::new(p).parent().map_or_else(|| ".".into(), |d| d.to_string_lossy().into_owned())
-}
-
 /// path.join(a, b).
 pub fn join(a: &str, b: &str) -> String {
     paths::join(a, b)

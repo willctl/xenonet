@@ -25,7 +25,7 @@ pub fn gather(flags: &Flags) -> Result<(String, Value), Fail> {
     let doctor = checkup(flags, None).ok();
     let connect = s.as_ref().and_then(|s| s.get("/api/engine/connect").ok());
     let launcher = cores::machine_launcher().ok();
-    let health = s.as_ref().map(|s| s.health.clone()).unwrap_or(Value::Null);
+    let health = s.as_ref().map_or(Value::Null, |s| s.health.clone());
     let instance = crate::js::have(&health, "instance").cloned().unwrap_or_else(|| if flags.on("dev") { json!("dev") } else { Value::Null });
     let xenonet = json!({
         "version": crate::js::have(&health, "version").cloned().unwrap_or_else(|| json!(VERSION)),
@@ -38,6 +38,7 @@ pub fn gather(flags: &Flags) -> Result<(String, Value), Fail> {
     Ok((state_dir, bundle))
 }
 
+#[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the name is lowercased first")]
 pub fn run(_args: &[String], flags: &Flags) -> Done {
     let (state_dir, bundle) = gather(flags)?;
     if !flags.on("ask") {

@@ -108,6 +108,7 @@ pub async fn connect_service(env: &Env, role: &str) -> Result<Client, Value> {
 // ---------- processes ----------
 
 /// process.kill(pid, 0): Ok when it's there, ESRCH (or EPERM) when not.
+#[cfg_attr(unix, expect(unsafe_code, reason = "kill(2) with signal 0, which std doesn't wrap"))]
 fn alive(pid: f64) -> Reply {
     #[cfg(unix)]
     {

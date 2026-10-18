@@ -3,6 +3,8 @@
 // no XenoNet there, or one that doesn't answer, it prints nothing and
 // exits 0. The same cases as test/launcher.test.js's, against the binary.
 
+#![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::process::{Command, Stdio};

@@ -103,6 +103,7 @@ fn show(data: &Value, s: &Server) {
     print(table(&rows, Layout::default()));
 }
 
+#[expect(clippy::unnecessary_wraps, reason = "it ends a command, whose answer is a Done like every other command's")]
 fn out(data: &Value, words: &str, flags: &Flags) -> Done {
     if flags.on("json") {
         json(data);

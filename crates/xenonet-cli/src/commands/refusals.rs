@@ -39,6 +39,7 @@ fn may_hold(text: &str) -> bool {
 
 // A transcript's session: its app and the uuid its file is named by
 // (/([0-9a-f-]{36})\.jsonl$/i), or else the file's name.
+#[expect(clippy::case_sensitive_file_extension_comparisons, reason = "as the JS's pattern, which reads .jsonl")]
 fn session_of(app: &str, file: &str) -> String {
     let stem = file.strip_suffix(".jsonl").unwrap_or(file);
     let tail: Vec<char> = stem.chars().rev().take(36).collect();
@@ -47,6 +48,7 @@ fn session_of(app: &str, file: &str) -> String {
     format!("{app}:{}", id.unwrap_or_else(|| name.strip_suffix(".jsonl").unwrap_or(&name).to_string()))
 }
 
+#[expect(clippy::case_sensitive_file_extension_comparisons, reason = "as the JS's endsWith, which reads .jsonl")]
 fn scan(dir: &str, flags: &Flags) -> Done {
     let from = if flags.on("since") { since_of(flags.get("since"), now())? } else { now() - 90.0 * 86400e3 };
     let roots = [("claude", config::claude_projects_dir()), ("codex", sys::join(&config::codex_home(), "sessions"))];

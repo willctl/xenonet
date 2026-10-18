@@ -24,6 +24,7 @@ fn actor_id(a: &str) -> String {
 }
 
 // The answer, as JSON with --json, or as it is.
+#[expect(clippy::unnecessary_wraps, reason = "it ends a command, whose answer is a Done like every other command's")]
 fn say(out: &Value, flags: &Flags) -> Done {
     if flags.on("json") {
         json(out);

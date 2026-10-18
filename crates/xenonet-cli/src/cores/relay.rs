@@ -338,7 +338,7 @@ impl Relay {
             Look::Same => {}
             Look::None => self.alias_map.clear(),
             Look::Read(file) => {
-                self.alias_map = std::fs::read(file).map(|b| xenonet_state::identities::parse_ssh_aliases(&String::from_utf8_lossy(&b)).into_iter().collect()).unwrap_or_default()
+                self.alias_map = std::fs::read(file).map(|b| xenonet_state::identities::parse_ssh_aliases(&String::from_utf8_lossy(&b)).into_iter().collect()).unwrap_or_default();
             }
         }
         &self.alias_map
@@ -535,6 +535,7 @@ async fn run(r: &mut Relay, read: &mut mpsc::UnboundedReceiver<Read>, start: boo
     code
 }
 
+#[cfg_attr(unix, expect(unsafe_code, reason = "kill(2) with SIGTERM, which std's Child::kill (SIGKILL) isn't"))]
 fn terminate(c: &mut std::process::Child) {
     #[cfg(unix)]
     {
@@ -624,13 +625,13 @@ async fn serve(r: &mut Relay, read: &mut mpsc::UnboundedReceiver<Read>, up: Opti
                 }
                 None => {}
             },
-            _ = drained.notified() => r.drain(),
+            () = drained.notified() => r.drain(),
             _ = pinger.tick() => {
                 if r.out.ping_due(now()) {
                     r.send(&json!({ "t": "ping", "now": xenonet_base::json::number(now()) }), None);
                 }
             }
-            _ = &mut signals => r.stop(EXIT_DONE, None),
+            () = &mut signals => r.stop(EXIT_DONE, None),
         }
     }
     r.code
@@ -638,7 +639,7 @@ async fn serve(r: &mut Relay, read: &mut mpsc::UnboundedReceiver<Read>, up: Opti
 
 /// runRelay({ port, sinceMs, detail, start, demo }): the exit code, once
 /// whatever was on its way to the console has gone.
-pub fn run_relay(opts: &serde_json::Value) -> Result<i32, Fail> {
+pub fn run_relay(opts: &Value) -> Result<i32, Fail> {
     let port = opts.get("port").and_then(Value::as_f64).unwrap_or(0.0) as u16;
     let since = opts.get("sinceMs").and_then(Value::as_f64).unwrap_or(core::DEFAULT_SINCE_MS);
     let on = |k: &str| opts.get(k) == Some(&Value::Bool(true));

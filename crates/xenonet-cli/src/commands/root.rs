@@ -54,7 +54,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
     };
 
     if flags.on("check") {
-        let r = s.post("/api/workspace/check", &json!({ "path": folder(dir.unwrap()) }), &[])?;
+        let r = s.post("/api/workspace/check", &json!({ "path": dir.map(|d| folder(d)) }), &[])?;
         if flags.on("json") {
             json(&r);
         } else if !on(&r, "ok") {
@@ -69,11 +69,11 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
                 print(c::yellow(format!("! {}", crate::js::text(Some(w)))));
             }
         }
-        return Ok(if on(&r, "ok") { 0 } else { 1 });
+        return Ok(i32::from(!on(&r, "ok")));
     }
 
     if dir.is_some() || flags.on("reset") {
-        let r = if flags.on("reset") { s.del("/api/workspace/root")? } else { s.post("/api/workspace/root", &json!({ "path": folder(dir.unwrap()) }), &[])? };
+        let r = if flags.on("reset") { s.del("/api/workspace/root")? } else { s.post("/api/workspace/root", &json!({ "path": dir.map(|d| folder(d)) }), &[])? };
         if flags.on("json") {
             json(&r);
             return Ok(0);

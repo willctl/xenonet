@@ -27,7 +27,7 @@ fn swatch(colors: &[Value]) -> String {
     if !color() {
         return String::new();
     }
-    colors.iter().map(|hex| crate::js::text(Some(hex))).map(|hex| format!("\x1b[48;2;{}m  \x1b[0m", [1, 3, 5].map(|i| channel(&hex, i)).join(";"))).collect()
+    colors.iter().map(|hex| crate::js::text(Some(hex))).map(|hex| format!("\x1b[48;2;{}m  \x1b[0m", [1, 3, 5].map(|i| channel(&hex, i)).join(";"))).collect::<Vec<_>>().concat()
 }
 
 fn only(v: &Value, keys: &[&str]) -> Value {

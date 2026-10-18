@@ -75,7 +75,7 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
         }));
     }
     // New as of the report, before it was marked seen.
-    Ok(if flags.on("exitCode") && fresh { 1 } else { 0 })
+    Ok(i32::from(flags.on("exitCode") && fresh))
 }
 
 /// The report from drift.json itself, which is then marked seen there

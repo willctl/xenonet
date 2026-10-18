@@ -61,7 +61,7 @@ fn pad(out: &mut impl Write, n: usize) -> io::Result<()> {
     out.write_all(&vec![0u8; rest])
 }
 
-/// A pax record: "<length> path=<name>\n", its length counting itself.
+/// A pax record: `"<length> path=<name>\n"`, its length counting itself.
 fn pax_path(name: &str) -> Vec<u8> {
     let body = format!(" path={name}\n");
     let mut n = body.len() + 1;

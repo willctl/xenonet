@@ -60,7 +60,7 @@ fn names(apps: &[&Value]) -> String {
     apps.iter().map(|a| t(a, "name")).collect::<Vec<_>>().join(" and ")
 }
 
-/// What's left undone after connecting: "<app>: <what>" for each change
+/// What's left undone after connecting: `"<app>: <what>"` for each change
 /// that isn't in place.
 fn left(after: &Value, apps: &[&str]) -> Vec<String> {
     list(after, "apps")

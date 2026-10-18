@@ -3,6 +3,7 @@
 //! or not, as a number, or as a list (none when it isn't one).
 
 use serde_json::Value;
+use std::fmt::Write as _;
 use xenonet_base::text::{js_number, js_string, truthy};
 
 /// `${v}`, for a value that may not be there.
@@ -30,23 +31,23 @@ pub fn num(a: &Value, k: &str) -> f64 {
     js_number(a.get(k))
 }
 
-/// a[k] when it's a string.
+/// `a[k]` when it's a string.
 pub fn str<'a>(a: &'a Value, k: &str) -> Option<&'a str> {
     a.get(k).and_then(Value::as_str)
 }
 
-/// a[k] as a number, None when it's null or not there: what money() and
+/// `a[k]` as a number, None when it's null or not there: what money() and
 /// tokens() take.
 pub fn amount(a: &Value, k: &str) -> Option<f64> {
     have(a, k).map(|v| js_number(Some(v)))
 }
 
-/// a[k] as a list; empty when it's anything else.
+/// `a[k]` as a list; empty when it's anything else.
 pub fn list<'a>(a: &'a Value, k: &str) -> &'a [Value] {
     a.get(k).and_then(Value::as_array).map_or(&[], Vec::as_slice)
 }
 
-/// a[k] when it's truthy (`a[k] && …`).
+/// `a[k]` when it's truthy (`a[k] && …`).
 pub fn some<'a>(a: &'a Value, k: &str) -> Option<&'a Value> {
     a.get(k).filter(|v| truthy(Some(v)))
 }
@@ -82,7 +83,7 @@ pub fn encode(s: &str) -> String {
         if b.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&b) {
             out.push(b as char);
         } else {
-            out.push_str(&format!("%{b:02X}"));
+            let _ = write!(out, "%{b:02X}");
         }
     }
     out

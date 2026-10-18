@@ -1,6 +1,6 @@
 //! The xenonet command's commands (cli/lib/commands.js), for its help and
-//! its shell completion, and each one's code: commands/<name>.rs ports
-//! cli/commands/<name>.js. Each has its help, and `run(args, flags)`.
+//! its shell completion, and each one's code: `commands/<name>.rs` ports
+//! `cli/commands/<name>.js`. Each has its help, and `run(args, flags)`.
 
 use crate::args::Flags;
 use crate::out::Done;

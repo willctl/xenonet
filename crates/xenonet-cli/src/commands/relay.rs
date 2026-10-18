@@ -1,6 +1,6 @@
 //! xenonet relay (cli/commands/relay.js): this XenoNet's map, streamed to
 //! a console on another machine over the SSH connection the console opened
-//! (core/hosts/relay.js). Consoles run it, as ssh <host> xenonet relay;
+//! (core/hosts/relay.js). Consoles run it, as `ssh <host> xenonet relay`;
 //! nothing listens anywhere.
 
 use crate::args::Flags;

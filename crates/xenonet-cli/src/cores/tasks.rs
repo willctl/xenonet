@@ -158,6 +158,7 @@ mod tests {
 
     struct Twice;
     impl Perform for Twice {
+        #[expect(clippy::unused_async_trait_impl, reason = "the trait's ask is async, and this one answers at once")]
         async fn ask(&mut self, q: &Value) -> Reply {
             match q["n"].as_i64() {
                 Some(n) if n < 100 => Ok(json!(n * 2)),

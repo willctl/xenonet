@@ -130,14 +130,17 @@ pub mod c {
 
 /// The terminal's columns, as process.stdout.columns has them: only when
 /// stdout is a terminal.
+#[cfg_attr(unix, expect(unsafe_code, reason = "ioctl(2) TIOCGWINSZ, which std doesn't wrap"))]
 fn columns() -> Option<usize> {
     if !std::io::stdout().is_terminal() {
         return None;
     }
     #[cfg(unix)]
     {
+        // SAFETY: winsize is a plain C struct of numbers, for which all zeros
+        // is a valid value.
         let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
-        // SAFETY: TIOCGWINSZ fills the winsize given, on the terminal stdout is.
+        // SAFETY: TIOCGWINSZ only fills `ws`, which is alive for the call.
         let ok = unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut ws) } == 0;
         (ok && ws.ws_col > 0).then_some(usize::from(ws.ws_col))
     }
@@ -365,7 +368,7 @@ mod tests {
     use super::*;
 
     fn rows(r: &[&[&str]]) -> Vec<Vec<String>> {
-        r.iter().map(|row| row.iter().map(|s| s.to_string()).collect()).collect()
+        r.iter().map(|row| row.iter().map(ToString::to_string).collect()).collect()
     }
 
     // The same cases as test/cli.test.js's.

@@ -43,7 +43,7 @@ impl Around for Here {
         let _ = getrandom::fill(&mut b);
         b[6] = (b[6] & 0x0f) | 0x40;
         b[8] = (b[8] & 0x3f) | 0x80;
-        let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
+        let h = b.iter().map(|x| format!("{x:02x}")).collect::<Vec<_>>().concat();
         format!("{}-{}-{}-{}-{}", &h[..8], &h[8..12], &h[12..16], &h[16..20], &h[20..])
     }
     fn now(&mut self) -> f64 {

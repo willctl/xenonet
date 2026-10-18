@@ -134,6 +134,7 @@ fn show_kinds(st: &Value) {
     }
 }
 
+#[expect(clippy::unnecessary_wraps, reason = "it ends a command, whose answer is a Done like every other command's")]
 fn out(st: &Value, s: &Server, flags: &Flags) -> Done {
     if flags.on("json") {
         json(st);

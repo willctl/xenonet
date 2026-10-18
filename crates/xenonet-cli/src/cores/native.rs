@@ -144,7 +144,6 @@ fn thrown(e: FsError) -> Thrown {
 }
 
 /// A node:fs call a core makes, synchronously: `fs.<method>(...args)`.
-#[expect(clippy::result_large_err, reason = "what a core's Calls answer, which throws a Thrown")]
 pub fn fs_call(method: &str, args: &[Arg]) -> Result<Arg, Thrown> {
     let p = |i: usize| args.get(i).map(text).unwrap_or_default();
     let of = |e: std::io::Error, syscall: &str, path: &str| thrown(FsError::of(e, syscall, path));

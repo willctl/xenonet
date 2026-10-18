@@ -1,4 +1,4 @@
-//! xenonet hook <app> (cli/commands/hook.js): what Claude Code's and
+//! `xenonet hook <app>` (cli/commands/hook.js): what Claude Code's and
 //! Codex's hooks run (XenoNet adds them when you connect your agents). It
 //! passes the event on to the running XenoNet and prints what XenoNet
 //! wants the agent to hear, in the hook output format both read. If XenoNet isn't running, or doesn't
@@ -25,6 +25,7 @@ pub fn port(flag: Option<&str>, env: Option<&str>) -> Option<u16> {
     (n.fract() == 0.0 && (1.0..=65535.0).contains(&n)).then_some(n as u16)
 }
 
+#[expect(clippy::unnecessary_wraps, reason = "every command's run has the dispatcher's signature, and a hook never fails")]
 pub fn run(args: &[String], flags: &Flags) -> Done {
     // --port as JS's Number() reads the flag: on its own, it's 1.
     let port_flag = flags.get("port").map(|v| if *v == Value::Bool(true) { "1".to_string() } else { xenonet_base::text::js_string(v) });

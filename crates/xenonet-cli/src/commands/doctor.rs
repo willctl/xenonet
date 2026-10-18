@@ -120,7 +120,7 @@ fn live(flags: &Flags) -> Done {
     print(format!("  {}", t(&r, "opencodeAlias")));
     print("");
     print(c::dim("OpenCode sessions and tmux panes take messages only once you allow it, per session: xenonet live allow <session>. So does a Claude Code or Codex session that has ended, which XenoNet then resumes for a turn to take a message (claude -p --resume, codex exec resume). xenonet live pause stops everything."));
-    Ok(if channels { 0 } else { 1 })
+    Ok(i32::from(!channels))
 }
 
 pub fn run(_args: &[String], flags: &Flags) -> Done {
@@ -134,7 +134,7 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
     let fails = count("fail");
     if flags.on("json") {
         json(&result);
-        return Ok(if fails > 0 { 1 } else { 0 });
+        return Ok(i32::from(fails > 0));
     }
 
     // One width for every group's titles, so the details line up.
@@ -175,5 +175,5 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
     };
     let by = if on(&result, "by") { format!(", run by {}", t(&result, "by")) } else { String::new() };
     print(format!("{verdict} {}", c::dim(format!("· {} in {} s{by}", plural(results.len() as f64, "check"), to_fixed(num(&result, "ms") / 1000.0, 1)))));
-    Ok(if fails > 0 { 1 } else { 0 })
+    Ok(i32::from(fails > 0))
 }

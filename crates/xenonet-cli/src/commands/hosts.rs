@@ -283,7 +283,7 @@ fn test(s: &Server, rest: &[String], flags: &Flags) -> Done {
     let tried = s.post(&format!("/api/hosts/{}/test", encode(id)), &json!({}), &[])?;
     if flags.on("json") {
         json(&tried);
-        return Ok(if on(&tried, "ok") { 0 } else { 1 });
+        return Ok(i32::from(!on(&tried, "ok")));
     }
     let error = tried.get("error").filter(|e| !e.is_null());
     if !on(&tried, "ok") {

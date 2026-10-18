@@ -1,4 +1,4 @@
-//! xenonet who <path> (cli/commands/who.js): which agents have a hand in a
+//! `xenonet who <path>` (cli/commands/who.js): which agents have a hand in a
 //! file or folder, as the engine sees it (the who_has tool, for people).
 
 use crate::args::Flags;

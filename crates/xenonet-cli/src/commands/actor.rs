@@ -18,6 +18,7 @@ use crate::prompt::confirm;
 use crate::reach::{bearer, need};
 use crate::sys;
 use serde_json::{json, Map, Value};
+use std::fmt::Write as _;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
@@ -74,6 +75,10 @@ fn program_of(pid: u32) -> Option<String> {
     Some(xenonet_base::text::js_trim(&out).to_string()).filter(|p| !p.is_empty())
 }
 
+// None where there's no parent to ask for (Windows), which is why it's
+// an Option on unix too.
+#[cfg_attr(unix, expect(unsafe_code, reason = "getppid(2), which std doesn't wrap"))]
+#[cfg_attr(unix, expect(clippy::unnecessary_wraps, reason = "None on Windows, where it has no getppid"))]
 fn parent_pid() -> Option<u32> {
     #[cfg(unix)]
     {
@@ -447,7 +452,7 @@ fn event(args: &[String], flags: &Flags) -> Done {
     Ok(0)
 }
 
-/// --add and --remove take "<id or path>=<relation>": a node id
+/// --add and --remove take `"<id or path>=<relation>"`: a node id
 /// (project:…, a session's id) or a folder, which XenoNet maps to its
 /// project.
 pub fn target_of(spec: &str, fallback: Option<&str>) -> Value {
@@ -667,7 +672,7 @@ fn open_stream(port: u16, route: &str, headers: &[(String, String)]) -> std::io:
     s.set_nodelay(true)?;
     let mut head = format!("GET {route} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n");
     for (k, v) in headers {
-        head.push_str(&format!("{k}: {v}\r\n"));
+        let _ = write!(head, "{k}: {v}\r\n");
     }
     head.push_str("Connection: close\r\n\r\n");
     (&s).write_all(head.as_bytes())?;

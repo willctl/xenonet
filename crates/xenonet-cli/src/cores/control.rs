@@ -81,6 +81,7 @@ fn signal_of(name: &str) -> libc::c_int {
 
 /// process.kill(pid, 0): whether the process is there (or there and not
 /// ours to signal).
+#[cfg_attr(unix, expect(unsafe_code, reason = "kill(2) with signal 0, which std doesn't wrap"))]
 fn alive(pid: f64) -> bool {
     #[cfg(unix)]
     {
@@ -99,6 +100,7 @@ fn alive(pid: f64) -> bool {
 }
 
 /// process.kill(pid, signal), quietly.
+#[cfg_attr(unix, expect(unsafe_code, reason = "kill(2), which std doesn't wrap for a pid alone"))]
 fn kill(pid: f64, signal: &str) {
     #[cfg(unix)]
     {
@@ -198,7 +200,7 @@ impl Perform for Dev {
                 Ok(Value::Null)
             }
             Some("exited") => Ok(match self.child.as_mut().map(std::process::Child::try_wait) {
-                Some(Ok(Some(st))) => st.code().map_or_else(|| exit_signal(&st), Value::from),
+                Some(Ok(Some(st))) => st.code().map_or_else(|| exit_signal(st), Value::from),
                 _ => Value::Null,
             }),
             other => Err(error(format!("control asked for {}", other.unwrap_or("undefined")))),
@@ -207,7 +209,7 @@ impl Perform for Dev {
 }
 
 #[cfg(unix)]
-fn exit_signal(st: &std::process::ExitStatus) -> Value {
+fn exit_signal(st: std::process::ExitStatus) -> Value {
     use std::os::unix::process::ExitStatusExt;
     st.signal().map_or(Value::Null, |s| {
         json!(if s == libc::SIGTERM {
@@ -221,7 +223,7 @@ fn exit_signal(st: &std::process::ExitStatus) -> Value {
 }
 
 #[cfg(not(unix))]
-fn exit_signal(_: &std::process::ExitStatus) -> Value {
+fn exit_signal(_: std::process::ExitStatus) -> Value {
     Value::Null
 }
 

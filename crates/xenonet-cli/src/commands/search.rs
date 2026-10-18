@@ -1,4 +1,4 @@
-//! xenonet search <words> (cli/commands/search.js): every Claude Code and
+//! `xenonet search <words>` (cli/commands/search.js): every Claude Code and
 //! Codex transcript, through the running XenoNet's index (core/search.js).
 
 use crate::args::Flags;

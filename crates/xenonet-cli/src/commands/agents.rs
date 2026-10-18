@@ -86,13 +86,17 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
 
     // A line for each agent, and a second for what it has in hand.
     let room = width() - 2;
-    sessions.iter().for_each(|a| show(a, room));
+    for a in &sessions {
+        show(a, room);
+    }
     if !actors.is_empty() {
         if !sessions.is_empty() {
             print("");
         }
         print(c::bold("Actors"));
-        actors.iter().for_each(|a| show(a, room));
+        for a in &actors {
+            show(a, room);
+        }
     }
     // Only sessions connect to XenoNet; an actor reaches it with its token.
     let connected = sessions.iter().filter(|a| on(a, "reachable")).count();

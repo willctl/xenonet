@@ -27,6 +27,10 @@
 //! command
 //! run_script, control_*    core/script.js, core/control.js            console, script, film
 //! ```
+#![expect(
+    clippy::unnecessary_wraps,
+    reason = "each core function answers as a Result, as its JS throws, so a command calls them all alike, whether or not this port of one can fail"
+)]
 
 mod command;
 mod components;
@@ -167,6 +171,7 @@ pub fn live_setup(port: &Value, listen_file: Option<&str>) -> Res<Value> {
 // ---------- diagnostics ----------
 
 /// os.release(): the kernel's release.
+#[cfg_attr(unix, expect(unsafe_code, reason = "uname(3), which std doesn't wrap"))]
 fn release() -> String {
     #[cfg(unix)]
     {
@@ -174,7 +179,7 @@ fn release() -> String {
         // which all zeros is a valid value.
         let mut u: libc::utsname = unsafe { std::mem::zeroed() };
         // SAFETY: `u` is a struct uname(3) may write, alive for the call.
-        if unsafe { libc::uname(&mut u) } == 0 {
+        if unsafe { libc::uname(&raw mut u) } == 0 {
             // SAFETY: uname filled `release` with a NUL-terminated string,
             // and `u` outlives the borrow.
             let c = unsafe { std::ffi::CStr::from_ptr(u.release.as_ptr()) };
