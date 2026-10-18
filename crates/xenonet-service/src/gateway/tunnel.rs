@@ -25,6 +25,7 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use xenonet_base::json;
 use xenonet_base::paths::tilde;
+use xenonet_base::sync::Locked;
 
 pub struct Kind {
     pub id: &'static str,
@@ -520,7 +521,7 @@ impl Tunnel {
 
     fn set_state(&self, s: &str, why: Option<String>) {
         let changed = {
-            let mut i = self.inner.lock().unwrap();
+            let mut i = self.inner.locked();
             if i.state.0 == s && i.state.1 == why {
                 false
             } else {
@@ -536,7 +537,7 @@ impl Tunnel {
     // The copies of a tool here, each with its version, for a minute.
     async fn tool(&self, name: &str) -> Vec<Tool> {
         let t = self.host.now();
-        if let Some((at, found)) = self.inner.lock().unwrap().tools.get(name) {
+        if let Some((at, found)) = self.inner.locked().tools.get(name) {
             if t - at < TOOL_MS {
                 return found.clone();
             }
@@ -549,7 +550,7 @@ impl Tunnel {
             let words = if out.stdout.is_empty() { out.stderr } else { out.stdout };
             found.push(Tool { path: file, version: version_in(&words) });
         }
-        self.inner.lock().unwrap().tools.insert(name.to_string(), (self.host.now(), found.clone()));
+        self.inner.locked().tools.insert(name.to_string(), (self.host.now(), found.clone()));
         found
     }
 
@@ -575,7 +576,7 @@ impl Tunnel {
         let Some(me) = me else { return (None, None, Some("Tailscale didn't answer: is it running?".into())) };
         let version = me["version"].as_str();
         let bin = found.iter().find(|t| t.version.is_some() && t.version.as_deref() == version).cloned().unwrap_or_else(|| found[0].clone());
-        self.inner.lock().unwrap().tailscale_bin = Some((self.host.now(), bin.clone()));
+        self.inner.locked().tailscale_bin = Some((self.host.now(), bin.clone()));
         if me["up"] != json!(true) {
             let why = xenonet_base::text::js_string(&me["why"]);
             return (Some(bin), Some(me), Some(why));
@@ -593,7 +594,7 @@ impl Tunnel {
     }
 
     async fn tailscale_up(&self, take_over: bool) {
-        if self.inner.lock().unwrap().state.0 != "up" {
+        if self.inner.locked().state.0 != "up" {
             self.set_state("starting", Some("setting up Tailscale Funnel".into()));
         }
         let (bin, me, why) = self.tailscale().await;
@@ -688,7 +689,7 @@ impl Tunnel {
             }
             self.reap(tool).await;
             {
-                let mut i = self.inner.lock().unwrap();
+                let mut i = self.inner.locked();
                 if i.want.as_ref().map(|x| x.id) != Some(w.id) {
                     return;
                 }
@@ -702,7 +703,7 @@ impl Tunnel {
                 Err(e) => return self.exited(None, format!("it couldn't start: {e}")),
             };
             let gen = {
-                let mut i = self.inner.lock().unwrap();
+                let mut i = self.inner.locked();
                 i.next += 1;
                 let gen = i.next;
                 i.child = Some(ChildHandle { gen, pid: spawned.pid, kill: spawned.kill });
@@ -719,7 +720,7 @@ impl Tunnel {
             let mut lines = spawned.lines;
             let exit = spawned.exit;
             tokio::spawn(async move {
-                let mine = |me: &Tunnel| me.inner.lock().unwrap().child.as_ref().map(|c| c.gen) == Some(gen);
+                let mine = |me: &Tunnel| me.inner.locked().child.as_ref().map(|c| c.gen) == Some(gen);
                 let mut exit = exit;
                 loop {
                     tokio::select! {
@@ -728,7 +729,7 @@ impl Tunnel {
                             Some(raw) => {
                                 let Some(got) = read_line(&kind_id, &raw) else { continue };
                                 {
-                                    let mut i = me.inner.lock().unwrap();
+                                    let mut i = me.inner.locked();
                                     let msg = xenonet_base::log::js_slice(&tilde(&got.msg, &me.home), 300).to_string();
                                     i.lines.push(json!({ "at": json::number(me.host.now()), "error": got.error, "msg": msg }));
                                     let n = i.lines.len();
@@ -754,7 +755,7 @@ impl Tunnel {
                             // What it wrote before it went, then why.
                             while let Ok(raw) = lines.try_recv() {
                                 if let Some(got) = read_line(&kind_id, &raw) {
-                                    let mut i = me.inner.lock().unwrap();
+                                    let mut i = me.inner.locked();
                                     i.lines.push(json!({ "at": json::number(me.host.now()), "error": got.error, "msg": xenonet_base::log::js_slice(&tilde(&got.msg, &me.home), 300) }));
                                 }
                             }
@@ -769,7 +770,7 @@ impl Tunnel {
 
     fn exited(&self, gen: Option<u64>, why: String) {
         let w = {
-            let mut i = self.inner.lock().unwrap();
+            let mut i = self.inner.locked();
             if gen.is_some() && i.child.as_ref().map(|c| c.gen) != gen {
                 return;
             }
@@ -785,7 +786,7 @@ impl Tunnel {
         };
         let t = self.host.now();
         let (count, said) = {
-            let mut i = self.inner.lock().unwrap();
+            let mut i = self.inner.locked();
             i.exits.retain(|at| t - at < WINDOW_MS);
             i.exits.push(t);
             let last = i.lines.iter().rev().find(|l| l["error"] == json!(true)).and_then(|l| l["msg"].as_str()).map(str::to_string);
@@ -793,7 +794,7 @@ impl Tunnel {
         };
         (self.hooks.log)("gateway.tunnel", &said);
         if count > BACKOFF_MS.len() {
-            self.inner.lock().unwrap().failed_at = t;
+            self.inner.locked().failed_at = t;
             return self.set_state("failed", Some(said));
         }
         let wait = BACKOFF_MS[count - 1];
@@ -802,7 +803,7 @@ impl Tunnel {
         let handle = tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(wait as u64)).await;
             let again = {
-                let mut i = me.inner.lock().unwrap();
+                let mut i = me.inner.locked();
                 i.timer = None;
                 i.want.as_ref().map(|x| x.id) == Some(w.id) && i.child.is_none()
             };
@@ -810,11 +811,11 @@ impl Tunnel {
                 me.child_up(w).await;
             }
         });
-        self.inner.lock().unwrap().timer = Some(handle);
+        self.inner.locked().timer = Some(handle);
     }
 
     fn child_down(&self) {
-        let mut i = self.inner.lock().unwrap();
+        let mut i = self.inner.locked();
         i.stopping = true;
         if let Some(t) = i.timer.take() {
             t.abort();
@@ -831,7 +832,7 @@ impl Tunnel {
     }
 
     pub async fn down(&self) {
-        let was = self.inner.lock().unwrap().want.take();
+        let was = self.inner.locked().want.take();
         self.child_down();
         if was.is_some_and(|w| w.kind == "tailscale") {
             self.tailscale_down().await;
@@ -846,7 +847,7 @@ impl Tunnel {
             return Err(format!("no such tunnel: {kind_id}"));
         }
         let (same, had) = {
-            let i = self.inner.lock().unwrap();
+            let i = self.inner.locked();
             let same = i.want.as_ref().is_some_and(|w| w.kind == kind_id && w.name.as_deref() == name && w.host.as_deref() == host);
             (same, i.want.is_some())
         };
@@ -854,14 +855,14 @@ impl Tunnel {
             self.down().await;
         }
         {
-            let i = self.inner.lock().unwrap();
+            let i = self.inner.locked();
             if same && (i.child.is_some() || i.state.0 == "up") && !take_over {
                 drop(i);
                 return Ok(self.view());
             }
         }
         let w = {
-            let mut i = self.inner.lock().unwrap();
+            let mut i = self.inner.locked();
             let w = if same {
                 i.want.clone().unwrap()
             } else {
@@ -876,7 +877,7 @@ impl Tunnel {
             self.set_state("yours", None);
         } else if kind_id == "tailscale" {
             self.tailscale_up(take_over).await;
-        } else if self.inner.lock().unwrap().child.is_none() {
+        } else if self.inner.locked().child.is_none() {
             self.child_up(w).await;
         }
         Ok(self.view())
@@ -886,7 +887,7 @@ impl Tunnel {
     /// went, and a child that gave up started again after ten minutes.
     pub async fn ensure(&self) {
         let (w, idle, failed_at) = {
-            let i = self.inner.lock().unwrap();
+            let i = self.inner.locked();
             (i.want.clone(), i.child.is_none() && i.timer.is_none(), i.failed_at)
         };
         let Some(w) = w else { return };
@@ -894,7 +895,7 @@ impl Tunnel {
             return self.tailscale_up(false).await;
         }
         if w.kind != "own" && idle && self.host.now() - failed_at >= WINDOW_MS {
-            self.inner.lock().unwrap().exits.clear();
+            self.inner.locked().exits.clear();
             self.child_up(w).await;
         }
     }
@@ -902,13 +903,13 @@ impl Tunnel {
     /// On XenoNet's way out: its child stops; Funnel stays set up, so the
     /// gateway is back as soon as XenoNet is.
     pub fn stop(&self) {
-        self.inner.lock().unwrap().want = None;
+        self.inner.locked().want = None;
         self.child_down();
         self.set_state("off", None);
     }
 
     pub fn view(&self) -> Value {
-        let i = self.inner.lock().unwrap();
+        let i = self.inner.locked();
         let k = i.want.as_ref().and_then(|w| kind(&w.kind));
         let log: Vec<Value> = i.lines.iter().rev().take(6).rev().cloned().collect();
         json!({
@@ -932,11 +933,11 @@ impl Tunnel {
                 None => Vec::new(),
             };
             // Tailscale's: the command that matches the Tailscale running.
-            let fresh = self.inner.lock().unwrap().tailscale_bin.as_ref().is_some_and(|(at, _)| self.host.now() - at < TOOL_MS);
+            let fresh = self.inner.locked().tailscale_bin.as_ref().is_some_and(|(at, _)| self.host.now() - at < TOOL_MS);
             if k.id == "tailscale" && found.len() > 1 && !fresh {
                 self.tailscale().await;
             }
-            let bin = self.inner.lock().unwrap().tailscale_bin.as_ref().map(|(_, b)| b.path.clone());
+            let bin = self.inner.locked().tailscale_bin.as_ref().map(|(_, b)| b.path.clone());
             let used = (if k.id == "tailscale" { bin.and_then(|b| found.iter().find(|t| t.path == b).cloned()) } else { None }).or_else(|| found.first().cloned());
             let asks = {
                 let mut a = serde_json::Map::new();

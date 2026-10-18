@@ -28,6 +28,7 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use xenonet_base::log::{log_dir, ErrInfo, Log, MAX_BYTES};
+use xenonet_base::sync::Locked;
 use xenonet_schema::drift::{DriftLog, DRIFT_FILE};
 
 pub use crate::glue::notify_doctor;
@@ -131,7 +132,7 @@ fn shorten(path: &str) -> String {
 
 /// Pokes Spotify's poll to look again after `ms`.
 pub fn poll_spotify_soon(ctx: &Ctx, ms: u64) {
-    if let Some(tx) = &ctx.music.lock().unwrap().again {
+    if let Some(tx) = &ctx.music.locked().again {
         let _ = tx.send(ms);
     }
 }
@@ -158,7 +159,7 @@ async fn poll_spotify(ctx: Arc<Ctx>, mut again: mpsc::UnboundedReceiver<u64>) {
                 let now = s.player().await?;
                 let text = xenonet_base::json::stringify(&now, 0);
                 let changed = {
-                    let mut m = ctx.music.lock().unwrap();
+                    let mut m = ctx.music.locked();
                     let changed = m.last != text;
                     m.last = text;
                     changed
@@ -168,9 +169,9 @@ async fn poll_spotify(ctx: Arc<Ctx>, mut again: mpsc::UnboundedReceiver<u64>) {
                 }
                 if xenonet_base::text::truthy(st.get("duck")) {
                     let waiting = ctx.cores.state.someone_waits(now_ms()).unwrap_or(false);
-                    let held = ctx.music.lock().unwrap().held.clone();
+                    let held = ctx.music.locked().held.clone();
                     let plan = s.duck_plan(waiting, &now, st.get("device").unwrap_or(&Value::Null), &held)?;
-                    ctx.music.lock().unwrap().held = plan.get("held").cloned().unwrap_or(Value::Null);
+                    ctx.music.locked().held = plan.get("held").cloned().unwrap_or(Value::Null);
                     if plan["op"] == "volume" {
                         s.command("volume", &plan["volume"]).await?;
                     }
@@ -187,10 +188,10 @@ async fn poll_spotify(ctx: Arc<Ctx>, mut again: mpsc::UnboundedReceiver<u64>) {
                 // Spotify's asked XenoNet to wait, needs Premium, or isn't
                 // reachable: say so once in a while, and look again later.
                 let t = now_ms();
-                let quiet = ctx.music.lock().unwrap().quiet_until;
+                let quiet = ctx.music.locked().quiet_until;
                 if t > quiet {
                     ctx.log("warn", &format!("spotify.{}", e.code.as_deref().unwrap_or("error")), &e.message, None, None);
-                    ctx.music.lock().unwrap().quiet_until = t + 10.0 * 60e3;
+                    ctx.music.locked().quiet_until = t + 10.0 * 60e3;
                 }
                 wait = 60000;
             }
@@ -274,7 +275,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
     // were given, opened there unless one of them did.
     let drift = env.drift.clone();
     {
-        let mut d = drift.lock().unwrap();
+        let mut d = drift.locked();
         if d.view().0.is_none() {
             d.open(&Path::new(&config.cache_dir).join(DRIFT_FILE).to_string_lossy());
         }
@@ -380,7 +381,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
             terminals: ctx.cores.terminals.clone(),
         };
         match component::start(config.descriptor_file(), hooks).await {
-            Ok(c) => *ctx.components.lock().unwrap() = Some(c),
+            Ok(c) => *ctx.components.locked() = Some(c),
             Err(e) => {
                 eprintln!("[xenonet] {e}");
                 return 1;
@@ -403,7 +404,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
     // used, and the connections' clock.
     if let (Some(connections), Some(service)) = (ctx.cores.connections.clone(), ctx.cores.assistant.clone()) {
         let e = crate::assistant_endpoint::Endpoint::new(connections.clone(), service, ctx.cores.audit.clone(), config.endpoint_file(), Arc::new(say));
-        *ctx.endpoint.lock().unwrap() = Some(Arc::new(e.clone()));
+        *ctx.endpoint.locked() = Some(Arc::new(e.clone()));
         tokio::spawn(async move { e.sync().await });
         tokio::spawn(async move {
             let mut every = tokio::time::interval(Duration::from_secs(60));
@@ -504,7 +505,7 @@ fn shutdown(ctx: &Arc<Ctx>) {
         g.tunnel().stop();
         g.gateway().stop();
     }
-    if let Some(comp) = ctx.components.lock().unwrap().take() {
+    if let Some(comp) = ctx.components.locked().take() {
         comp.close();
     }
     if let Some(h) = &c.hub {
@@ -515,6 +516,6 @@ fn shutdown(ctx: &Arc<Ctx>) {
     }
     c.state.stop();
     c.doctor.stop();
-    ctx.drift.lock().unwrap().flush();
+    ctx.drift.locked().flush();
     let _ = json!(null);
 }

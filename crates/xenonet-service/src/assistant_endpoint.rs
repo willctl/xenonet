@@ -23,6 +23,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::TcpListener;
+use xenonet_base::sync::Locked;
 
 const HELLO: Duration = Duration::from_secs(5);
 const SWEEP: Duration = Duration::from_secs(2);
@@ -128,7 +129,7 @@ impl Endpoint {
     }
 
     fn drop_where(&self, matches: impl Fn(&Session) -> bool) {
-        for s in self.inner.sessions.lock().unwrap().iter().filter(|s| matches(s)) {
+        for s in self.inner.sessions.locked().iter().filter(|s| matches(s)) {
             s.client.close();
         }
     }
@@ -139,15 +140,15 @@ impl Endpoint {
     }
 
     fn hello(&self, client: &Rpc, params: &Value) -> Result<(Value, Arc<Session>), String> {
-        if now_ms() < *self.inner.quiet_until.lock().unwrap() {
+        if now_ms() < *self.inner.quiet_until.locked() {
             return Err("RATE_LIMITED".into());
         }
         let refused = |code: &str, reason: &str| -> String {
             if let Some(a) = &self.inner.audit {
                 a.access(json!({ "grant": if grant_id(&params["grant_id"]) { params["grant_id"].clone() } else { Value::Null }, "operation": "hello", "result": reason }));
             }
-            if self.inner.refusals.lock().unwrap().take(1.0, now_ms()) != 0.0 {
-                *self.inner.quiet_until.lock().unwrap() = now_ms() + 60e3;
+            if self.inner.refusals.locked().take(1.0, now_ms()) != 0.0 {
+                *self.inner.quiet_until.locked() = now_ms() + 60e3;
             }
             code.to_string()
         };
@@ -170,7 +171,7 @@ impl Endpoint {
         let grant = s["grant"]["grant_id"].as_str().unwrap_or("").to_string();
         let connection = s["connection"]["connection_id"].as_str().unwrap_or("").to_string();
         let session = Arc::new(Session { client: client.clone(), grant: grant.clone(), actor: s["actorId"].clone(), connection: connection.clone() });
-        self.inner.sessions.lock().unwrap().push(session.clone());
+        self.inner.sessions.locked().push(session.clone());
         self.inner.connections.bridge(&connection, 1);
         if let Some(a) = &self.inner.audit {
             a.access(json!({ "grant": grant, "revision": s["revision"], "actor": s["actorId"], "connection": connection, "operation": "hello", "result": "ok" }));
@@ -190,7 +191,7 @@ impl Endpoint {
         let handler: Handler = Arc::new(move |method, params| {
             let (me, s, c) = (me.clone(), s.clone(), c.clone());
             Box::pin(async move {
-                let current = s.lock().unwrap().clone();
+                let current = s.locked().clone();
                 if let Some(session) = current {
                     if method != "assistant.read" {
                         return Err("Unsupported request.".into());
@@ -201,28 +202,28 @@ impl Endpoint {
                 if method != "hello" {
                     return Err("XenoNet refused this connection.".into());
                 }
-                let Some(client) = c.lock().unwrap().clone() else { return Err("XenoNet refused this connection.".into()) };
+                let Some(client) = c.locked().clone() else { return Err("XenoNet refused this connection.".into()) };
                 let (answer, session) = me.hello(&client, &params)?;
-                *s.lock().unwrap() = Some(session);
+                *s.locked() = Some(session);
                 Ok(answer)
             })
         });
         let (rpc, _) = Rpc::new(socket, handler, &[], MAX_LINE);
-        *client.lock().unwrap() = Some(rpc.clone());
+        *client.locked() = Some(rpc.clone());
         let me = self.clone();
         tokio::spawn(async move {
             tokio::select! {
                 () = tokio::time::sleep(HELLO) => {
-                    if session.lock().unwrap().is_none() {
+                    if session.locked().is_none() {
                         rpc.close();
                     }
                 }
                 () = rpc.closed() => {}
             }
             rpc.closed().await;
-            let gone = session.lock().unwrap().take();
+            let gone = session.locked().take();
             if let Some(gone) = gone {
-                let mut all = me.inner.sessions.lock().unwrap();
+                let mut all = me.inner.sessions.locked();
                 let before = all.len();
                 all.retain(|x| !Arc::ptr_eq(x, &gone));
                 if all.len() < before {
@@ -268,7 +269,7 @@ impl Endpoint {
     }
 
     async fn start(&self) -> std::io::Result<()> {
-        if self.inner.server.lock().unwrap().is_some() {
+        if self.inner.server.locked().is_some() {
             return Ok(());
         }
         let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
@@ -282,14 +283,14 @@ impl Endpoint {
                 }
             }
         });
-        *self.inner.server.lock().unwrap() = Some((port, task));
+        *self.inner.server.locked() = Some((port, task));
         (self.inner.log)(&format!("remote actors' endpoint on 127.0.0.1:{port}"));
         Ok(())
     }
 
     fn stop_listening(&self) {
         self.drop_where(|_| true);
-        if let Some((_, task)) = self.inner.server.lock().unwrap().take() {
+        if let Some((_, task)) = self.inner.server.locked().take() {
             task.abort();
             self.remove_descriptor();
         }
@@ -309,7 +310,7 @@ impl Endpoint {
     // Sessions whose grant no longer stands, let go; the tombstones written
     // without the service count.
     async fn sweep(&self) {
-        let stale: Vec<Arc<Session>> = self.inner.sessions.lock().unwrap().iter().filter(|s| self.inner.connections.recheck(&s.grant)["ok"] != json!(true)).cloned().collect();
+        let stale: Vec<Arc<Session>> = self.inner.sessions.locked().iter().filter(|s| self.inner.connections.recheck(&s.grant)["ok"] != json!(true)).cloned().collect();
         for s in stale {
             s.client.close();
         }
@@ -322,7 +323,7 @@ impl Endpoint {
 
     /// How many adapters are connected, and where it listens.
     pub fn info(&self) -> Value {
-        let server = self.inner.server.lock().unwrap();
-        json!({ "listening": server.is_some(), "port": server.as_ref().map(|(p, _)| *p), "sessions": self.inner.sessions.lock().unwrap().len() })
+        let server = self.inner.server.locked();
+        json!({ "listening": server.is_some(), "port": server.as_ref().map(|(p, _)| *p), "sessions": self.inner.sessions.locked().len() })
     }
 }

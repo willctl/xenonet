@@ -15,6 +15,7 @@ use crate::window_key::WindowKey;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use xenonet_base::log::{ErrInfo, Log};
+use xenonet_base::sync::Locked;
 use xenonet_schema::drift::DriftLog;
 
 pub struct Ctx {
@@ -120,7 +121,7 @@ impl Ctx {
 
     /// A notification from the desktop app (through the component service).
     pub fn notify_desktop(&self, note: Value) {
-        if let Some(c) = self.components.lock().unwrap().clone() {
+        if let Some(c) = self.components.locked().clone() {
             c.notify(note);
         }
     }
@@ -128,7 +129,7 @@ impl Ctx {
     /// An app's link, a folder or a page, opened by the connected Desktop
     /// when there is one, else by the service itself.
     pub async fn open(&self, target: &str) -> Result<(), CoreError> {
-        let components = self.components.lock().unwrap().clone();
+        let components = self.components.locked().clone();
         if let Some(c) = components {
             if c.open(target).await {
                 return Ok(());

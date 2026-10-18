@@ -24,6 +24,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::TcpListener;
+use xenonet_base::sync::Locked;
 
 const HELLO: Duration = Duration::from_secs(5);
 // Desktop's answers to the service's requests: rpc.js's default.
@@ -61,7 +62,7 @@ impl Components {
             "api": api_range(SERVICE_API),
             "consoleApi": api_range(CONSOLE_API),
             "capabilities": CAPABILITIES,
-            "desktop": self.desktop.lock().unwrap().is_some(),
+            "desktop": self.desktop.locked().is_some(),
         })
     }
 
@@ -71,7 +72,7 @@ impl Components {
 
     /// A notification for the connected Desktop, if there is one.
     pub fn notify(&self, note: Value) {
-        if let Some(d) = self.desktop.lock().unwrap().clone() {
+        if let Some(d) = self.desktop.locked().clone() {
             let _ = d.notify("notification", note);
         }
     }
@@ -79,20 +80,20 @@ impl Components {
     /// Has the connected Desktop open an app's link, a folder or a page;
     /// false when there's none, or it's too old to (the service opens it then).
     pub async fn open(&self, target: &str) -> bool {
-        let Some(d) = self.desktop.lock().unwrap().clone() else { return false };
+        let Some(d) = self.desktop.locked().clone() else { return false };
         d.request("open", json!({ "target": target }), ASK).await.is_ok()
     }
 
     /// XenoNet Dev's control channel: the request, for the Desktop's window.
     pub async fn console(&self, body: Value) -> Result<Value, String> {
-        let Some(d) = self.desktop.lock().unwrap().clone() else {
+        let Some(d) = self.desktop.locked().clone() else {
             return Err("XenoNet Desktop is closed or restarting. The service is still running.".into());
         };
         d.request("console", body, ASK).await
     }
 
     pub fn close(&self) {
-        for c in self.clients.lock().unwrap().drain(..) {
+        for c in self.clients.locked().drain(..) {
             c.close();
         }
         self.hooks.terminals.kill_all();
@@ -104,7 +105,7 @@ impl Components {
     }
 
     async fn handle(self: &Arc<Self>, conn: &Arc<Conn>, method: String, params: Value) -> Result<Value, String> {
-        let role = conn.role.lock().unwrap().clone();
+        let role = conn.role.locked().clone();
         let Some(role) = role else {
             let token = params.get("token").and_then(Value::as_str);
             if method != "hello" || !token.is_some_and(|t| same(t.as_bytes(), self.token.as_bytes())) {
@@ -115,16 +116,16 @@ impl Components {
             if role != "desktop" && role != "tools" {
                 return Err("Unknown XenoNet component.".into());
             }
-            if role == "desktop" && self.desktop.lock().unwrap().is_some() {
+            if role == "desktop" && self.desktop.locked().is_some() {
                 return Err("XenoNet already has a connected Desktop.".into());
             }
-            *conn.role.lock().unwrap() = Some(role.to_string());
-            let _ = conn.hello.lock().unwrap().take().map(|t| t.send(()));
+            *conn.role.locked() = Some(role.to_string());
+            let _ = conn.hello.locked().take().map(|t| t.send(()));
             if role != "desktop" {
                 return Ok(self.info());
             }
-            let rpc = conn.rpc.lock().unwrap().clone();
-            *self.desktop.lock().unwrap() = rpc;
+            let rpc = conn.rpc.locked().clone();
+            *self.desktop.locked() = rpc;
             // The window key goes only to a Desktop the service can tell is
             // an app's own process, which the page's requests then come from.
             let seen = (self.hooks.on_desktop)(Some(conn.peer)).await;
@@ -236,8 +237,8 @@ pub async fn start(file: PathBuf, hooks: Hooks) -> std::io::Result<Arc<Component
                 Box::pin(async move { s.handle(&c, method, params).await })
             });
             let (rpc, _) = Rpc::new(socket, handler, &[], MAX_LINE);
-            *conn.rpc.lock().unwrap() = Some(rpc.clone());
-            svc.clients.lock().unwrap().push(rpc.clone());
+            *conn.rpc.locked() = Some(rpc.clone());
+            svc.clients.locked().push(rpc.clone());
             let s = svc.clone();
             tokio::spawn(async move {
                 // Five seconds to say hello.
@@ -246,10 +247,10 @@ pub async fn start(file: PathBuf, hooks: Hooks) -> std::io::Result<Arc<Component
                     () = tokio::time::sleep(HELLO) => rpc.close(),
                 }
                 rpc.closed().await;
-                s.clients.lock().unwrap().retain(|c| !c.is_closed());
+                s.clients.locked().retain(|c| !c.is_closed());
                 let was_desktop = {
-                    let mut d = s.desktop.lock().unwrap();
-                    if d.as_ref().is_some_and(Rpc::is_closed) && conn.role.lock().unwrap().as_deref() == Some("desktop") {
+                    let mut d = s.desktop.locked();
+                    if d.as_ref().is_some_and(Rpc::is_closed) && conn.role.locked().as_deref() == Some("desktop") {
                         *d = None;
                         true
                     } else {

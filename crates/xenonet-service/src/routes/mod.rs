@@ -28,6 +28,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use xenonet_base::ids::YOU;
 use xenonet_base::log::{log_dir, read_logs, summarize, LEVELS};
+use xenonet_base::sync::Locked;
 use xenonet_base::text::{js_number, js_string, truthy};
 
 pub const SERVICE_API: (u32, u32) = (1, 1);
@@ -113,7 +114,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
 
     if m == "GET" && route == "/api/health" {
         // What it has: a source not read yet (its core not in Rust) is none.
-        let components = ctx.components.lock().unwrap().is_some();
+        let components = ctx.components.locked().is_some();
         return Ok(Reply::json(
             200,
             json!({
@@ -708,7 +709,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     // the component service's socket. JSON only, which a cross-site form
     // can't send.
     if m == "POST" && route == "/api/dev/control" {
-        let components = ctx.components.lock().unwrap().clone();
+        let components = ctx.components.locked().clone();
         let Some(components) = components.filter(|_| ctx.config.control) else {
             return Ok(Reply::error(503, "this server has no window to control: it isn't running inside XenoNet Dev (npm run app, or npm run drive -- launch)"));
         };
@@ -994,7 +995,7 @@ async fn spotify(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreErr
                 "/api/spotify/player" => {
                     let op = body.get("op").filter(|o| !o.is_null()).map(js_string).unwrap_or_default();
                     s.command(&op, body.get("value").unwrap_or(&Value::Null)).await?;
-                    ctx.music.lock().unwrap().last.clear();
+                    ctx.music.locked().last.clear();
                     crate::serve::poll_spotify_soon(ctx, 400);
                     return Ok(Some(Reply::json(200, json!({ "ok": true }))));
                 }

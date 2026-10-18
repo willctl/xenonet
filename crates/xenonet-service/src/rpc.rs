@@ -16,6 +16,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot, watch};
 use xenonet_base::json;
+use xenonet_base::sync::Locked;
 
 pub const MAX_LINE: usize = 16 << 20;
 const BUSY: usize = 16 << 20;
@@ -125,7 +126,7 @@ impl Rpc {
     fn take(&self, message: Value, handle: &Handler, incoming: &[&str], events: &mpsc::UnboundedSender<(String, Value)>) {
         if xenonet_base::text::truthy(message.get("reply")) {
             let id = message["reply"].as_i64().unwrap_or(-1);
-            if let Some(p) = self.shared.pending.lock().unwrap().remove(&id) {
+            if let Some(p) = self.shared.pending.locked().remove(&id) {
                 let _ = p.send(if xenonet_base::text::truthy(message.get("error")) {
                     Err(xenonet_base::text::js_string(&message["error"]))
                 } else {
@@ -171,16 +172,16 @@ impl Rpc {
     pub async fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
         let id = self.shared.sequence.fetch_add(1, Ordering::SeqCst) + 1;
         let (tx, rx) = oneshot::channel();
-        self.shared.pending.lock().unwrap().insert(id, tx);
+        self.shared.pending.locked().insert(id, tx);
         if let Err(e) = self.send(&json!({ "id": id, "method": method, "params": params })) {
-            self.shared.pending.lock().unwrap().remove(&id);
+            self.shared.pending.locked().remove(&id);
             return Err(e);
         }
         match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(answer)) => answer,
             Ok(Err(_)) => Err(DISCONNECTED.into()),
             Err(_) => {
-                self.shared.pending.lock().unwrap().remove(&id);
+                self.shared.pending.locked().remove(&id);
                 Err(format!("{method} did not answer; the action was not retried."))
             }
         }
@@ -202,7 +203,7 @@ impl Rpc {
         if self.shared.closed.swap(true, Ordering::SeqCst) {
             return;
         }
-        for (_, p) in self.shared.pending.lock().unwrap().drain() {
+        for (_, p) in self.shared.pending.locked().drain() {
             let _ = p.send(Err(DISCONNECTED.into()));
         }
         let _ = self.shared.gone.send(true);

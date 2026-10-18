@@ -18,6 +18,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use xenonet_actors::tokens::token_in_url;
 use xenonet_base::ids::{parse_actor_id, YOU};
+use xenonet_base::sync::Locked;
 
 const CONSOLE_BODY: usize = 8 << 10;
 const REGISTER_BODY: usize = 4 << 10;
@@ -162,7 +163,7 @@ impl ActorRoutes<'_> {
                 },
             ));
         }
-        let wait = self.ctx.you_reports.lock().unwrap().take(1.0, self.ctx.now());
+        let wait = self.ctx.you_reports.locked().take(1.0, self.ctx.now());
         if wait != 0.0 {
             return Ok(fail(429, "too-many", "the window is reporting faster than XenoNet takes reports", &[retry_after(wait)], &none()));
         }

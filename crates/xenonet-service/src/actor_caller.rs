@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use xenonet_actors::tokens::bearer_of;
+use xenonet_base::sync::Locked;
 
 /// Rates, per the interface's table of limits (server/routes/actors.js).
 pub mod rates {
@@ -74,15 +75,15 @@ impl ActorCaller {
     async fn bad_token(&self, req: &Req) -> Option<Refusal> {
         let peer = self.verify.peer(req.peer).await;
         let t = (self.now)();
-        let until = self.blocked.lock().unwrap().get(&peer).copied().unwrap_or(0.0);
+        let until = self.blocked.locked().get(&peer).copied().unwrap_or(0.0);
         let words = "too many tokens XenoNet doesn't know came from this process; wait a minute";
         if until > t {
             let mut r = no(429, "too-many", words);
             r.headers.push(retry_after(until - t));
             return Some(r);
         }
-        if self.bad.lock().unwrap().take(&format!("bad|{peer}"), rates::BAD_TOKENS, 1.0, t) != 0.0 {
-            let mut blocked = self.blocked.lock().unwrap();
+        if self.bad.locked().take(&format!("bad|{peer}"), rates::BAD_TOKENS, 1.0, t) != 0.0 {
+            let mut blocked = self.blocked.locked();
             if blocked.len() > 256 {
                 blocked.clear();
             }
@@ -138,11 +139,11 @@ impl ActorCaller {
 
     /// A rate for `key`: 0, or the milliseconds until it allows n.
     pub fn take(&self, key: &str, rate: Rate, n: f64) -> f64 {
-        self.buckets.lock().unwrap().take(key, rate, n, (self.now)())
+        self.buckets.locked().take(key, rate, n, (self.now)())
     }
 
     pub fn forget(&self, slug: &str) {
-        self.buckets.lock().unwrap().forget(&format!("a:{slug}|"));
+        self.buckets.locked().forget(&format!("a:{slug}|"));
     }
 }
 

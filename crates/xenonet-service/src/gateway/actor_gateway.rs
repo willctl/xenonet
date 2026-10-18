@@ -38,6 +38,7 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use xenonet_actors::tokens::{bearer_of, token_in_url};
 use xenonet_base::json;
+use xenonet_base::sync::Locked;
 
 pub const MCP_PATH: &str = "/mcp";
 pub const PROBE_HEADER: &str = "x-xenonet-probe";
@@ -195,7 +196,7 @@ impl ActorGateway {
     /// within half a minute.
     pub fn expect_probe(&self, word: &str) {
         let t = (self.inner.now)();
-        let mut probes = self.inner.probes.lock().unwrap();
+        let mut probes = self.inner.probes.locked();
         probes.retain(|_, until| *until > t);
         probes.insert(word.to_string(), t + PROBE_MS);
     }
@@ -203,12 +204,12 @@ impl ActorGateway {
     /// The public host the owner named, without a scheme or path, or None.
     pub fn set_host(&self, name: Option<&str>) -> Option<String> {
         let h = normal_host(name);
-        *self.inner.host.lock().unwrap() = h.clone();
+        self.inner.host.locked().clone_from(&h);
         h
     }
 
     pub fn listening(&self) -> bool {
-        self.inner.server.lock().unwrap().is_some()
+        self.inner.server.locked().is_some()
     }
 
     pub async fn start(&self) -> std::io::Result<Value> {
@@ -233,20 +234,20 @@ impl ActorGateway {
                 });
             }
         });
-        *self.inner.server.lock().unwrap() = Some(task);
+        *self.inner.server.locked() = Some(task);
         Ok(self.status())
     }
 
     pub fn stop(&self) -> Value {
-        if let Some(t) = self.inner.server.lock().unwrap().take() {
+        if let Some(t) = self.inner.server.locked().take() {
             t.abort();
         }
         self.status()
     }
 
     pub fn status(&self) -> Value {
-        let s = self.inner.stats.lock().unwrap().clone();
-        let host = self.inner.host.lock().unwrap().clone();
+        let s = self.inner.stats.locked().clone();
+        let host = self.inner.host.locked().clone();
         let port = self.inner.port;
         json!({
             "listening": self.listening(),
@@ -297,7 +298,7 @@ impl ActorGateway {
         let (path, query) = parse_target(&req.target);
         let host = header("host").unwrap_or("").to_lowercase();
         let port = self.inner.port;
-        let public = self.inner.host.lock().unwrap().clone();
+        let public = self.inner.host.locked().clone();
         if public.as_deref() != Some(host.as_str()) && host != format!("127.0.0.1:{port}") && host != format!("localhost:{port}") {
             return Self::reply(421, json!({ "error": "this gateway doesn't answer for that host" }), &[]);
         }
@@ -311,7 +312,7 @@ impl ActorGateway {
             return Self::reply(405, json!({ "error": "the gateway takes POST, GET and DELETE" }), &[("allow", "POST, GET, DELETE")]);
         }
         if let Some(word) = header(PROBE_HEADER) {
-            let mut probes = self.inner.probes.lock().unwrap();
+            let mut probes = self.inner.probes.locked();
             if probes.get(word).copied().unwrap_or(0.0) > t {
                 probes.remove(word);
                 return Reply {
@@ -324,7 +325,7 @@ impl ActorGateway {
         if token_in_url(query.iter().map(|(k, v)| (k.as_str(), v.as_str())), &path) {
             return Self::reply(400, json!({ "error": "a token goes in the Authorization header, never in the URL" }), &[]);
         }
-        let blocked = *self.inner.blocked_until.lock().unwrap();
+        let blocked = *self.inner.blocked_until.locked();
         if blocked > t {
             let (k, v) = retry_after(blocked - t);
             return Self::reply(429, json!({ "error": "too many tokens XenoNet doesn't know; wait a minute" }), &[(&k, &v)]);
@@ -335,11 +336,11 @@ impl ActorGateway {
             None => json!({ "ok": false, "status": 401, "code": "no-token", "error": "the gateway takes a gateway token, as Authorization: Bearer <token>" }),
         };
         if auth["ok"] != json!(true) {
-            self.inner.stats.lock().unwrap().refused += 1;
+            self.inner.stats.locked().refused += 1;
             let code = auth["code"].as_str().unwrap_or("bad-token").to_string();
             (self.inner.hooks.on_refused)(auth["actor"].as_str(), &code, auth["reason"].as_str(), t);
-            if code != "no-token" && self.inner.buckets.lock().unwrap().take("bad-tokens", BAD_TOKENS, 1.0, t) != 0.0 {
-                *self.inner.blocked_until.lock().unwrap() = t + BLOCK_MS;
+            if code != "no-token" && self.inner.buckets.locked().take("bad-tokens", BAD_TOKENS, 1.0, t) != 0.0 {
+                *self.inner.blocked_until.locked() = t + BLOCK_MS;
             }
             let realm = if code == "no-token" { "Bearer realm=\"xenonet-gateway\"".to_string() } else { "Bearer realm=\"xenonet-gateway\", error=\"invalid_token\"".to_string() };
             let status = auth["status"].as_u64().unwrap_or(401) as u16;
@@ -349,7 +350,7 @@ impl ActorGateway {
             return Self::reply(413, json!({ "error": "that body is over 64 KiB" }), &[]);
         }
         {
-            let mut s = self.inner.stats.lock().unwrap();
+            let mut s = self.inner.stats.locked();
             s.calls += 1;
             s.last_at = Some(t);
             s.last_actor = auth["id"].as_str().map(str::to_string);
@@ -617,9 +618,9 @@ impl ActorGateway {
                 }
                 let to = a.get("to").and_then(Value::as_str);
                 let wide = matches!(to, Some("repo" | "project" | "all"));
-                let mut wait = if wide { self.inner.buckets.lock().unwrap().take(&format!("{slug}|wide"), WIDE, 1.0, t) } else { 0.0 };
+                let mut wait = if wide { self.inner.buckets.locked().take(&format!("{slug}|wide"), WIDE, 1.0, t) } else { 0.0 };
                 if wait == 0.0 {
-                    wait = self.inner.buckets.lock().unwrap().take(&format!("{slug}|messages"), MESSAGES, 1.0, t);
+                    wait = self.inner.buckets.locked().take(&format!("{slug}|messages"), MESSAGES, 1.0, t);
                 }
                 if wait != 0.0 {
                     let why = if wide { "an actor sends at most 6 messages an hour to a repo or to all" } else { "an actor sends at most 60 messages an hour" };
@@ -649,7 +650,7 @@ impl ActorGateway {
             }
             "report_run" => {
                 let Some(runs) = &c.runs else { return Err("Tool report_run not found".into()) };
-                if self.inner.buckets.lock().unwrap().take(&format!("{slug}|run"), RUN_REPORTS, 1.0, t) != 0.0 {
+                if self.inner.buckets.locked().take(&format!("{slug}|run"), RUN_REPORTS, 1.0, t) != 0.0 {
                     return Err("too many run reports: one a second is the most the gateway takes".into());
                 }
                 let mut run = json!({ "run": a["run"], "app": a["app"], "presence": a.get("presence").cloned().unwrap_or(json!("working")) });
@@ -665,7 +666,7 @@ impl ActorGateway {
                 Ok(json!({ "session": session, "actor": id }))
             }
             "heartbeat" => {
-                if self.inner.buckets.lock().unwrap().take(&format!("{slug}|beat"), BEATS, 1.0, t) != 0.0 {
+                if self.inner.buckets.locked().take(&format!("{slug}|beat"), BEATS, 1.0, t) != 0.0 {
                     return Err("one heartbeat a second is the most the gateway takes".into());
                 }
                 let mut beat = json!({ "schema": "actor/report/v1" });

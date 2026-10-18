@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use xenonet_base::sync::Locked;
 
 const KEEP: usize = 1 << 20;
 const MAX: usize = 64;
@@ -223,7 +224,7 @@ struct Term {
 impl Term {
     // Whether it's gone, and how it ended.
     fn refresh(&mut self) {
-        let mut exited = self.exited.lock().unwrap();
+        let mut exited = self.exited.locked();
         if exited.is_none() {
             if let Ok(Some(status)) = self.child.try_wait() {
                 *exited = Some(status.exit_code());
@@ -232,7 +233,7 @@ impl Term {
     }
 
     fn info(&self) -> Value {
-        json!({ "id": self.id, "pid": self.pid, "cwd": self.cwd, "profile": self.profile.id, "label": self.profile.label, "exited": self.exited.lock().unwrap().is_some(), "cols": self.cols, "rows": self.rows })
+        json!({ "id": self.id, "pid": self.pid, "cwd": self.cwd, "profile": self.profile.id, "label": self.profile.label, "exited": self.exited.locked().is_some(), "cols": self.cols, "rows": self.rows })
     }
 }
 
@@ -279,7 +280,7 @@ impl Terminals for Shells {
     }
 
     fn list(&self) -> Value {
-        let mut terms = self.terms.lock().unwrap();
+        let mut terms = self.terms.locked();
         Value::Array(
             terms
                 .values_mut()
@@ -292,7 +293,7 @@ impl Terminals for Shells {
     }
 
     fn create(&self, params: &Value) -> R<Value> {
-        if self.terms.lock().unwrap().len() >= MAX {
+        if self.terms.locked().len() >= MAX {
             return Err(CoreError::new("Close a terminal before opening another (64 maximum)."));
         }
         let wanted = params.get("profile").and_then(Value::as_str);
@@ -318,7 +319,7 @@ impl Terminals for Shells {
         let out = Arc::new(Mutex::new(Output::default()));
         let exited: Arc<Mutex<Option<u32>>> = Arc::new(Mutex::new(None));
         let id = {
-            let mut n = self.next.lock().unwrap();
+            let mut n = self.next.locked();
             let id = *n;
             *n += 1;
             id
@@ -341,7 +342,7 @@ impl Terminals for Shells {
                         let text = String::from_utf8_lossy(&pending[..good]).into_owned();
                         pending.drain(..good);
                         if !text.is_empty() {
-                            o.lock().unwrap().push(&text);
+                            o.locked().push(&text);
                         }
                     }
                 }
@@ -349,23 +350,23 @@ impl Terminals for Shells {
         });
         let term = Term { id, pid, cwd, profile, cols, rows, out, exited, master: pair.master, writer, child };
         let info = term.info();
-        self.terms.lock().unwrap().insert(id, term);
+        self.terms.locked().insert(id, term);
         Ok(info)
     }
 
     fn read(&self, params: &Value) -> R<Value> {
         let id = int(params.get("id"), -1.0) as u64;
-        let mut terms = self.terms.lock().unwrap();
+        let mut terms = self.terms.locked();
         let t = terms.get_mut(&id).ok_or_else(gone)?;
         t.refresh();
         let cursor = int(params.get("cursor"), 0.0).max(0.0) as usize;
-        let out = t.out.lock().unwrap();
+        let out = t.out.locked();
         let start = out.end - out.units;
         let mut info = t.info();
         info["data"] = json!(out.after(cursor));
         info["cursor"] = json!(out.end);
         info["truncated"] = json!(cursor < start);
-        info["exitCode"] = t.exited.lock().unwrap().map_or(Value::Null, |c| json!(c));
+        info["exitCode"] = t.exited.locked().map_or(Value::Null, |c| json!(c));
         Ok(info)
     }
 
@@ -374,7 +375,7 @@ impl Terminals for Shells {
             return Err(CoreError::new("Invalid terminal input."));
         };
         let id = int(params.get("id"), -1.0) as u64;
-        let mut terms = self.terms.lock().unwrap();
+        let mut terms = self.terms.locked();
         let t = terms.get_mut(&id).ok_or_else(gone)?;
         t.writer.write_all(data.as_bytes()).map_err(|e| CoreError::new(e.to_string()))?;
         let _ = t.writer.flush();
@@ -383,11 +384,11 @@ impl Terminals for Shells {
 
     fn resize(&self, params: &Value) -> R<()> {
         let id = int(params.get("id"), -1.0) as u64;
-        let mut terms = self.terms.lock().unwrap();
+        let mut terms = self.terms.locked();
         let t = terms.get_mut(&id).ok_or_else(gone)?;
         t.cols = int(params.get("cols"), 0.0).clamp(2.0, 1000.0) as u16;
         t.rows = int(params.get("rows"), 0.0).clamp(2.0, 1000.0) as u16;
-        if t.exited.lock().unwrap().is_none() {
+        if t.exited.locked().is_none() {
             let _ = t.master.resize(PtySize { rows: t.rows, cols: t.cols, pixel_width: 0, pixel_height: 0 });
         }
         Ok(())
@@ -395,14 +396,14 @@ impl Terminals for Shells {
 
     fn kill(&self, id: &Value) -> R<()> {
         let id = int(Some(id), -1.0) as u64;
-        if let Some(mut t) = self.terms.lock().unwrap().remove(&id) {
+        if let Some(mut t) = self.terms.locked().remove(&id) {
             let _ = t.child.kill();
         }
         Ok(())
     }
 
     fn kill_all(&self) {
-        for (_, mut t) in std::mem::take(&mut *self.terms.lock().unwrap()) {
+        for (_, mut t) in std::mem::take(&mut *self.terms.locked()) {
             let _ = t.child.kill();
         }
     }
