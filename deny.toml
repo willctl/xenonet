@@ -28,6 +28,9 @@ allow = [
   "ISC",
   "Unicode-3.0",
   "Zlib",
+  # subtle, which rustls (the service's HTTPS client) uses for its
+  # constant-time comparisons.
+  "BSD-3-Clause",
 ]
 
 [licenses.private]
