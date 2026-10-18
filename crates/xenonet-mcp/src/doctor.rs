@@ -115,10 +115,11 @@ fn git_available() -> bool {
     let mut ok = git.is_some();
     if xenonet_sources::git::needs_dev_tools(platform(), git.as_deref()) {
         let r = run_program("/usr/bin/xcode-select", &["-p".into()], 3000.0, &[], &[]);
+        // Without them, git is a stub that only asks to install them. The
+        // doctor's own check says so; JS's console.log of it would land on
+        // an MCP server's protocol.
         if r["code"] != json!(0) {
             ok = false;
-            // Not on standard output, which is an MCP server's protocol.
-            eprintln!("{}", xenonet_sources::git::NO_DEV_TOOLS);
         }
     }
     ok
@@ -467,7 +468,8 @@ fn runtime_check() -> Value {
 /// keeps), each in 8 seconds at most, and their summary.
 pub fn run_doctor(paths: &Paths, only: Option<&[String]>, launcher_source: &str) -> Value {
     let started = now();
-    let home = home();
+    // The home folder config.js has: the demo world's, for the demo.
+    let home = paths.get("homeDir").and_then(Value::as_str).map_or_else(home, String::from);
     let facts = json!({
         "self": null, "base": null, "baseName": null, "health": null, "live": null, "connect": null,
         "paths": paths, "home": home, "platform": platform(), "electron": null, "node": null,
