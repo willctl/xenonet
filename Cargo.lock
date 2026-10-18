@@ -2354,7 +2354,14 @@ dependencies = [
  "serde_json",
  "tokio",
  "xenonet-actors",
+ "xenonet-app",
  "xenonet-base",
+ "xenonet-components",
+ "xenonet-doctor",
+ "xenonet-engine",
+ "xenonet-schema",
+ "xenonet-sources",
+ "xenonet-state",
 ]
 
 [[package]]

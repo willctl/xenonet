@@ -227,7 +227,12 @@ impl Context {
     // XenoNet, which knows its own sources and connections).
     async fn doctor(&self) -> Result<String, String> {
         let Some(s) = engine::find(&[self.port], Duration::from_millis(NAMED_HEALTH_MS)).await else {
-            return crate::pending::local_doctor(self.port).map(|r| doctor_text(&r));
+            // None answers: the checks run here, on the folders of the
+            // XenoNet asked about (XenoNet Dev's for its port).
+            let name = (self.port == f64::from(xenonet_base::client::DEV_PORT)).then_some("XenoNet Dev");
+            let paths = crate::doctor::paths_for(name);
+            let r = tokio::task::spawn_blocking(move || crate::doctor::checkup_here(&paths, None, &crate::doctor::launcher_source())).await.map_err(|e| e.to_string())?;
+            return Ok(doctor_text(&r));
         };
         let name = s.health.get("name").filter(|n| !n.is_null()).map_or_else(|| "XenoNet".to_string(), |n| n.as_str().map_or_else(|| js_string(n), str::to_string));
         let mut r = engine::request(f64::from(s.port), &name, "POST", "/api/doctor", Some(&json!({})), &[]).await.map_err(|e| e.message)?;

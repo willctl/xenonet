@@ -27,6 +27,16 @@ serde_json.workspace = true
 tokio.workspace = true
 xenonet-actors.workspace = true
 xenonet-base.workspace = true
+# The doctor's checks, run here when no XenoNet answers, and what they read
+# of this machine: the xenonet command, the launcher, state.json against its
+# schema, drift.json, git and the process lookups' self-test.
+xenonet-app.workspace = true
+xenonet-components.workspace = true
+xenonet-doctor.workspace = true
+xenonet-engine.workspace = true
+xenonet-schema.workspace = true
+xenonet-sources.workspace = true
+xenonet-state.workspace = true
 
 # Whether a pid still runs (kill with signal 0), as process.kill(pid, 0).
 [target.'cfg(unix)'.dependencies]

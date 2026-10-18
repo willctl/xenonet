@@ -13,10 +13,12 @@
 //!   JS for now: it drives XenoNet Desktop through core/control.js, which
 //!   the desktop app, the end-to-end tests and the scripts use too.
 //!
-//! What they need of other slices of core/ that aren't in Rust yet is in
-//! `pending`.
+//! With no XenoNet answering, the doctor tool runs the doctor's checks
+//! here (`doctor`), which `xenonet doctor` does too. What they need of
+//! other slices of core/ that aren't in Rust yet is in `pending`.
 
 mod assistant;
+pub mod doctor;
 mod engine;
 mod pending;
 mod process;
