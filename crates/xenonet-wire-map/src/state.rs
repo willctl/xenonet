@@ -46,6 +46,10 @@ const REPO_POLL_MS: u64 = 20_000;
 const HEARTBEAT_MS: u64 = 2000;
 const NEW_FILE_MS: u64 = 1200;
 const DEMO_STEP_MS: u64 = 2200;
+// The wiki's folder, looked at this often for a change (the JS watches it),
+// and the map made again this long after one.
+const WIKI_LOOK_MS: u64 = 1000;
+const WIKI_SETTLE_MS: u64 = 800;
 
 /// What the map is read from: the demo's made-up world, or this machine's
 /// apps.
@@ -725,6 +729,25 @@ impl MapState {
                 m.refresh_repos().await;
             }
         }));
+        // A change in the wiki's folder makes the map again, once its
+        // writes settle.
+        if let Some(dir) = self.cfg.wiki_dir.clone() {
+            let m = me.clone();
+            tasks.push(tokio::spawn(async move {
+                let look = |d: String| crate::util::blocking(move || wiki_stamp(&d));
+                let mut last = look(dir.clone()).await;
+                let mut every = tokio::time::interval(Duration::from_millis(WIKI_LOOK_MS));
+                every.tick().await;
+                loop {
+                    every.tick().await;
+                    if look(dir.clone()).await != last {
+                        tokio::time::sleep(Duration::from_millis(WIKI_SETTLE_MS)).await;
+                        last = look(dir.clone()).await;
+                        let _ = m.refresh_map().await;
+                    }
+                }
+            }));
+        }
         // Build the search index in the background, then keep it current.
         let search = self.search.clone();
         tasks.push(tokio::spawn(async move {
@@ -942,6 +965,20 @@ impl MapState {
         }
         Some(out)
     }
+}
+
+// What the wiki's folder holds now, as one stamp: each file's path, size
+// and mtime, three folders down.
+fn wiki_stamp(dir: &str) -> String {
+    let mut pick = |_: &str| true;
+    xenonet_base::paths::list_files(dir, &mut pick, 3)
+        .into_iter()
+        .map(|f| match std::fs::metadata(&f) {
+            Ok(m) => format!("{f}:{}:{}", m.len(), xenonet_base::fs::mtime_ms_of(&m).map_or(0.0, |t| t)),
+            Err(_) => f,
+        })
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 // What the assistant says of a reader's source (core/assistant/source.js's

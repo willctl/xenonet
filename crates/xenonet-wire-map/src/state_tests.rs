@@ -273,3 +273,16 @@ async fn runs_actors_report_are_sessions_on_the_map() {
     assert!(s.observed_live(&id).expect("observed"));
     assert_eq!(s.live_info(&id, now_ms()).expect("its info").map(|i| i["status"].clone()), Some(json!("working")));
 }
+
+#[test]
+fn a_page_written_in_the_wiki_changes_its_stamp() {
+    let dir = std::env::temp_dir().join(format!("xenonet-wire-wiki-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("pages")).expect("a folder");
+    let d = dir.to_string_lossy().into_owned();
+    let before = wiki_stamp(&d);
+    std::fs::write(dir.join("pages").join("atlas.md"), "# Atlas\n").expect("a page");
+    let after = wiki_stamp(&d);
+    assert_ne!(before, after);
+    assert_eq!(after, wiki_stamp(&d), "the same until it changes");
+    std::fs::remove_dir_all(&dir).expect("cleaned up");
+}
