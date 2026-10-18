@@ -19,6 +19,7 @@ use crate::sql::{self, Arg, Cell, Changes, Result, Row, SqlError};
 use rusqlite::Connection;
 use serde_json::{json, Value};
 use xenonet_base::ids::YOU;
+use xenonet_base::sync::Locked;
 use xenonet_blocks::sqlite::{SqliteStore, Step, Version};
 
 const DAY_MS: f64 = 24.0 * 3600e3;
@@ -33,7 +34,7 @@ fn you_slug() -> &'static str {
     &YOU["actor:".len()..]
 }
 
-const STEP_ONE: &str = r#"
+const STEP_ONE: &str = r"
       CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY, sender TEXT NOT NULL, target TEXT NOT NULL,
         body TEXT NOT NULL, reply_to INTEGER, created_at INTEGER NOT NULL);
@@ -51,8 +52,8 @@ const STEP_ONE: &str = r#"
       CREATE TABLE IF NOT EXISTS pins (
         agent TEXT NOT NULL, pid INTEGER NOT NULL, start INTEGER NOT NULL,
         sure INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (agent, pid, start));
-    "#;
-const STEP_FOUR: &str = r#"
+    ";
+const STEP_FOUR: &str = r"
       CREATE TABLE IF NOT EXISTS actors (
         slug TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
         product TEXT, via TEXT NOT NULL, capabilities TEXT NOT NULL,
@@ -82,8 +83,8 @@ const STEP_FOUR: &str = r#"
       CREATE TABLE IF NOT EXISTS actor_revoked (
         token_hash TEXT PRIMARY KEY, actor TEXT NOT NULL, reason TEXT NOT NULL,
         at INTEGER NOT NULL);
-    "#;
-const STEP_FIVE: &str = r#"
+    ";
+const STEP_FIVE: &str = r"
       CREATE TABLE IF NOT EXISTS actor_connections (
         connection_id TEXT PRIMARY KEY,
         actor_slug TEXT NOT NULL REFERENCES actors (slug) ON DELETE CASCADE,
@@ -127,7 +128,7 @@ const STEP_FIVE: &str = r#"
         connection_id TEXT, operation TEXT NOT NULL, result TEXT NOT NULL,
         latency_ms INTEGER, bytes INTEGER, projects INTEGER);
       CREATE INDEX IF NOT EXISTS assistant_audit_by_time ON assistant_audit (at);
-    "#;
+    ";
 
 /// The steps the database's shape takes; PRAGMA user_version counts those
 /// taken.
@@ -515,9 +516,9 @@ impl EngineStore {
     pub fn remove_actor(&self, slug: Arg) -> Result<()> {
         let id = Arg::Text(format!("actor:{}", js_text(&slug)));
         self.transaction(|| {
-            self.run("DELETE FROM actors WHERE slug = ?", &[slug.clone()])?;
-            self.run("DELETE FROM actor_events WHERE actor = ?", &[id.clone()])?;
-            self.run("DELETE FROM actor_targets WHERE actor = ?", &[id.clone()])?;
+            self.run("DELETE FROM actors WHERE slug = ?", std::slice::from_ref(&slug))?;
+            self.run("DELETE FROM actor_events WHERE actor = ?", std::slice::from_ref(&id))?;
+            self.run("DELETE FROM actor_targets WHERE actor = ?", std::slice::from_ref(&id))?;
             Ok(())
         })
     }
@@ -525,8 +526,8 @@ impl EngineStore {
     pub fn forget_actor(&self, slug: Arg) -> Result<()> {
         let id = Arg::Text(format!("actor:{}", js_text(&slug)));
         self.transaction(|| {
-            self.run("DELETE FROM actor_events WHERE actor = ?", &[id.clone()])?;
-            self.run("DELETE FROM actor_targets WHERE actor = ?", &[id.clone()])?;
+            self.run("DELETE FROM actor_events WHERE actor = ?", std::slice::from_ref(&id))?;
+            self.run("DELETE FROM actor_targets WHERE actor = ?", std::slice::from_ref(&id))?;
             Ok(())
         })
     }
@@ -718,7 +719,7 @@ impl EngineStore {
     /// A place's own id for remote readers (prj_<uuid>), made the first
     /// time it's asked for; `make` makes one.
     pub fn project_id_of<E: From<SqlError>>(&self, place: Arg, make: &mut dyn FnMut() -> std::result::Result<Arg, E>, now: Arg) -> std::result::Result<Value, E> {
-        if let Some(had) = self.get("SELECT project_id FROM assistant_places WHERE place = ?", &[place.clone()])? {
+        if let Some(had) = self.get("SELECT project_id FROM assistant_places WHERE place = ?", std::slice::from_ref(&place))? {
             return Ok(had.get("project_id").to_json());
         }
         let id = make()?;
@@ -912,7 +913,7 @@ impl Shared {
     }
 
     pub fn with<T>(&self, f: impl FnOnce(&mut EngineStore) -> T) -> T {
-        f(&mut self.0.lock().unwrap_or_else(|e| e.into_inner()))
+        f(&mut self.0.locked())
     }
 
     /// `f` in a transaction of its own, unless one is under way already,

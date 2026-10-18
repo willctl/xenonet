@@ -4,6 +4,7 @@
 //! not only `\n`. Rust's own classes are Unicode's, which would match more.
 
 use regex::Regex;
+use std::fmt::Write as _;
 
 const SPACE: &str = r"\t\n\x0B\x0C\r \x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}";
 
@@ -24,17 +25,21 @@ pub fn translate(js: &str) -> String {
                     ('D', false) => out.push_str("[^0-9]"),
                     ('w', false) => out.push_str("[0-9A-Za-z_]"),
                     ('W', false) => out.push_str("[^0-9A-Za-z_]"),
-                    ('s', false) => out.push_str(&format!("[{SPACE}]")),
-                    ('S', false) => out.push_str(&format!("[^{SPACE}]")),
+                    ('s', false) => {
+                        let _ = write!(out, "[{SPACE}]");
+                    }
+                    ('S', false) => {
+                        let _ = write!(out, "[^{SPACE}]");
+                    }
                     ('d', true) => out.push_str("0-9"),
                     ('w', true) => out.push_str("0-9A-Za-z_"),
                     ('s', true) => out.push_str(SPACE),
                     ('b', false) => out.push_str(r"(?-u:\b)"),
                     ('B', false) => out.push_str(r"(?-u:\B)"),
                     ('/', _) => out.push('/'),
-                    ('u', _) if chars.peek().is_some_and(|c| c.is_ascii_hexdigit()) => {
+                    ('u', _) if chars.peek().is_some_and(char::is_ascii_hexdigit) => {
                         let hex: String = (0..4).filter_map(|_| chars.next()).collect();
-                        out.push_str(&format!(r"\x{{{hex}}}"));
+                        let _ = write!(out, r"\x{{{hex}}}");
                     }
                     (e, _) => {
                         out.push('\\');
@@ -46,8 +51,8 @@ pub fn translate(js: &str) -> String {
                 class = true;
                 out.push('[');
                 // A class that starts with ] or ^] keeps it as a character.
-                if chars.peek() == Some(&'^') {
-                    out.push(chars.next().unwrap());
+                if let Some(c) = chars.next_if_eq(&'^') {
+                    out.push(c);
                 }
                 if chars.peek() == Some(&']') {
                     chars.next();
@@ -74,7 +79,7 @@ pub fn translate(js: &str) -> String {
 /// A JS pattern compiled, with the `i` flag when `ignore_case`.
 pub fn js(pattern: &str, ignore_case: bool) -> Regex {
     let p = translate(pattern);
-    Regex::new(&if ignore_case { format!("(?i){p}") } else { p }).unwrap_or_else(|e| panic!("pattern {pattern}: {e}"))
+    Regex::new(&if ignore_case { format!("(?i){p}") } else { p }).expect("a fixed pattern: callers pass them from the source")
 }
 
 /// A pattern compiled once, the first time it's used.

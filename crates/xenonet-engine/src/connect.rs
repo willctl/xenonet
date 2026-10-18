@@ -205,7 +205,7 @@ fn dirname(p: &str) -> String {
 /// and xenonet-console, another's with its instance (xenonet-dev).
 pub fn server_names(port: &Arg, instances: &[Instance]) -> (String, String) {
     let id = instances.iter().find(|i| same_arg(&i.port, port)).map_or_else(|| js_text(port), |i| i.id.clone());
-    let installed = instances.iter().find(|i| i.id == "installed").map(|i| i.port.clone()).unwrap_or(Arg::Undef);
+    let installed = instances.iter().find(|i| i.id == "installed").map_or(Arg::Undef, |i| i.port.clone());
     let base = if same_arg(port, &installed) { "xenonet".to_string() } else { format!("xenonet-{id}") };
     let console = format!("{base}-console");
     (base, console)
@@ -425,7 +425,7 @@ impl Connect {
     }
 
     /// Only the paths among a command's quoted words.
-    fn hook_files(&self, hooks: Option<&Value>, ours: &mut dyn FnMut(&Value) -> bool) -> Vec<String> {
+    fn hook_files(hooks: Option<&Value>, ours: &mut dyn FnMut(&Value) -> bool) -> Vec<String> {
         let mut out = Vec::new();
         for g in flat(values(hooks)) {
             for h in hooks_of(&g) {
@@ -454,11 +454,11 @@ impl Connect {
             return Ok(false);
         }
         let port = Self::port_of(h);
-        if port.is_some_and(|p| matches!(self.o.port, Arg::Num(q) if q == p)) || port.is_none() {
+        if port.is_none_or(|p| matches!(self.o.port, Arg::Num(q) if q == p)) {
             return Ok(true);
         }
         let one = json!({ "x": [{ "hooks": [h] }] });
-        for f in self.hook_files(Some(&one), &mut |h| Self::xenonet_hook(kind, h)) {
+        for f in Self::hook_files(Some(&one), &mut |h| Self::xenonet_hook(kind, h)) {
             if !Self::exists(c, &f)? {
                 return Ok(true);
             }
@@ -515,7 +515,7 @@ impl Connect {
         }
     }
 
-    fn write_json(&self, c: &mut dyn Calls, file: &str, data: &Value) -> Result<()> {
+    fn write_json(c: &mut dyn Calls, file: &str, data: &Value) -> Result<()> {
         c.call("fs", "mkdirSync", vec![Arg::text(dirname(file)), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])])?;
         let before = format!("{file}.before-xenonet");
         if Self::exists(c, file)? && !Self::exists(c, &before)? {
@@ -527,11 +527,11 @@ impl Connect {
         Ok(())
     }
 
-    fn cli(&self, c: &mut dyn Calls, name: &str) -> Result<Arg> {
+    fn cli(c: &mut dyn Calls, name: &str) -> Result<Arg> {
         c.call("", "cli", vec![Arg::text(name)])
     }
 
-    fn run(&self, c: &mut dyn Calls, bin: &Arg, args: Vec<String>) -> Result<Arg> {
+    fn run(c: &mut dyn Calls, bin: &Arg, args: Vec<String>) -> Result<Arg> {
         c.call("", "run", vec![bin.clone(), Arg::List(args.into_iter().map(Arg::text).collect())])
     }
 
@@ -554,21 +554,21 @@ impl Connect {
         }
     }
 
-    fn codex_entry(&self, c: &mut dyn Calls, bin: &Arg, name: &str) -> Result<Option<Value>> {
+    fn codex_entry(c: &mut dyn Calls, bin: &Arg, name: &str) -> Option<Value> {
         if !bin.truthy() {
-            return Ok(None);
+            return None;
         }
-        let r = self.run(c, bin, vec!["mcp".into(), "get".into(), name.into(), "--json".into()]).unwrap_or(Arg::Null);
+        let r = Self::run(c, bin, vec!["mcp".into(), "get".into(), name.into(), "--json".into()]).unwrap_or(Arg::Null);
         if !r.truthy() {
-            return Ok(None);
+            return None;
         }
-        Ok(Some(match xenonet_base::json::parse(&js_text(&r)) {
+        Some(match xenonet_base::json::parse(&js_text(&r)) {
             Ok(Value::Null) | Err(_) => json!({ "command": null }),
             Ok(s) => match s.get("transport").filter(|t| !t.is_null()) {
                 Some(t) => t.clone(),
                 None => s,
             },
-        }))
+        })
     }
 
     /// `x.mcpServers?.[name]`.
@@ -611,7 +611,7 @@ impl Connect {
     }
 
     /// Files a connected entry runs that no longer exist.
-    fn gone(&self, c: &mut dyn Calls, entry: &Value) -> Result<Vec<String>> {
+    fn gone(c: &mut dyn Calls, entry: &Value) -> Result<Vec<String>> {
         let mut files = vec![entry.get("command").cloned().unwrap_or(Value::Null)];
         if let Some(Value::Array(args)) = entry.get("args") {
             files.extend(args.iter().filter(|a| crate::re!(r"\.m?js$").is_match(&text_of(Some(a)))).cloned());
@@ -631,7 +631,7 @@ impl Connect {
 
     fn broken(&self, c: &mut dyn Calls, entry: Option<&Value>, hooks: Option<&Value>, kind: Kind) -> Result<Vec<Value>> {
         let mut files = match entry.filter(|e| crate::js::truthy(Some(e))) {
-            Some(e) => self.gone(c, e)?,
+            Some(e) => Self::gone(c, e)?,
             None => Vec::new(),
         };
         // hookFiles with this XenoNet's own entries, which may look at files.
@@ -644,7 +644,7 @@ impl Connect {
             }
         }
         let wrapped = json!({ "x": [{ "hooks": mine_list }] });
-        for f in self.hook_files(Some(&wrapped), &mut |_| true) {
+        for f in Self::hook_files(Some(&wrapped), &mut |_| true) {
             if !Self::exists(c, &f)? {
                 files.push(f);
             }
@@ -671,14 +671,14 @@ impl Connect {
     }
 
     pub fn preview(&self, c: &mut dyn Calls) -> Result<Value> {
-        let claude = self.cli(c, "claude")?;
-        let codex = self.cli(c, "codex")?;
+        let claude = Self::cli(c, "claude")?;
+        let codex = Self::cli(c, "codex")?;
         let (xenonet, console) = self.names.clone();
         let claude_entry = Self::server_in(&self.read_json(c, &self.claude_state)?, &xenonet);
-        let codex_server = self.codex_entry(c, &codex, &xenonet)?;
+        let codex_server = Self::codex_entry(c, &codex, &xenonet);
         let (console_claude, console_codex) = if self.o.console_mcp {
             let a = Self::server_in(&self.read_json(c, &self.claude_state)?, &console);
-            let b = self.codex_entry(c, &codex, &console)?;
+            let b = Self::codex_entry(c, &codex, &console);
             (a, b)
         } else {
             (None, None)
@@ -753,22 +753,22 @@ impl Connect {
         if has("claude") {
             let settings = self.read_json(c, &self.claude_settings)?;
             let merged = merge_hooks(c, &settings, &mut |c, h| self.mine(c, Kind::Claude, h), Some(&self.claude_hooks))?;
-            self.write_json(c, &self.claude_settings, &merged)?;
-            let bin = self.cli(c, "claude")?;
+            Self::write_json(c, &self.claude_settings, &merged)?;
+            let bin = Self::cli(c, "claude")?;
             if bin.truthy() {
-                let _ = self.run(c, &bin, vec!["mcp".into(), "remove".into(), xenonet.clone(), "--scope".into(), "user".into()]);
-                self.run(c, &bin, vec!["mcp".into(), "add-json".into(), xenonet.clone(), json_text(&self.mcp), "--scope".into(), "user".into()])?;
+                let _ = Self::run(c, &bin, vec!["mcp".into(), "remove".into(), xenonet.clone(), "--scope".into(), "user".into()]);
+                Self::run(c, &bin, vec!["mcp".into(), "add-json".into(), xenonet.clone(), json_text(&self.mcp), "--scope".into(), "user".into()])?;
                 if self.o.console_mcp {
-                    let _ = self.run(c, &bin, vec!["mcp".into(), "remove".into(), console.clone(), "--scope".into(), "user".into()]);
-                    self.run(c, &bin, vec!["mcp".into(), "add-json".into(), console.clone(), json_text(&console_mcp), "--scope".into(), "user".into()])?;
+                    let _ = Self::run(c, &bin, vec!["mcp".into(), "remove".into(), console.clone(), "--scope".into(), "user".into()]);
+                    Self::run(c, &bin, vec!["mcp".into(), "add-json".into(), console.clone(), json_text(&console_mcp), "--scope".into(), "user".into()])?;
                 }
             }
         }
         if has("codex") {
             let hooks = self.read_json(c, &self.codex_hooks)?;
             let merged = merge_hooks(c, &hooks, &mut |c, h| self.mine(c, Kind::Codex, h), Some(&self.codex_hook_set))?;
-            self.write_json(c, &self.codex_hooks, &merged)?;
-            let bin = self.cli(c, "codex")?;
+            Self::write_json(c, &self.codex_hooks, &merged)?;
+            let bin = Self::cli(c, "codex")?;
             if bin.truthy() {
                 let env: Vec<String> = self.server_env.iter().flat_map(|(k, v)| ["--env".to_string(), format!("{k}={v}")]).collect();
                 let tail = |extra: Option<&str>| {
@@ -779,17 +779,17 @@ impl Connect {
                     }
                     t
                 };
-                let _ = self.run(c, &bin, vec!["mcp".into(), "remove".into(), xenonet.clone()]);
+                let _ = Self::run(c, &bin, vec!["mcp".into(), "remove".into(), xenonet.clone()]);
                 let mut args = vec!["mcp".to_string(), "add".into(), xenonet.clone()];
                 args.extend(env.clone());
                 args.extend(tail(None));
-                self.run(c, &bin, args)?;
+                Self::run(c, &bin, args)?;
                 if self.o.console_mcp {
-                    let _ = self.run(c, &bin, vec!["mcp".into(), "remove".into(), console.clone()]);
+                    let _ = Self::run(c, &bin, vec!["mcp".into(), "remove".into(), console.clone()]);
                     let mut args = vec!["mcp".to_string(), "add".into(), console.clone()];
                     args.extend(env);
                     args.extend(tail(Some("console")));
-                    self.run(c, &bin, args)?;
+                    Self::run(c, &bin, args)?;
                 }
             }
         }
@@ -799,27 +799,27 @@ impl Connect {
     pub fn remove(&self, c: &mut dyn Calls) -> Result<Value> {
         let settings = self.read_json(c, &self.claude_settings)?;
         let merged = merge_hooks(c, &settings, &mut |c, h| self.mine(c, Kind::Claude, h), None)?;
-        self.write_json(c, &self.claude_settings, &merged)?;
+        Self::write_json(c, &self.claude_settings, &merged)?;
         if Self::exists(c, &self.codex_hooks)? {
             let hooks = self.read_json(c, &self.codex_hooks)?;
             let merged = merge_hooks(c, &hooks, &mut |c, h| self.mine(c, Kind::Codex, h), None)?;
-            self.write_json(c, &self.codex_hooks, &merged)?;
+            Self::write_json(c, &self.codex_hooks, &merged)?;
         }
-        let claude = self.cli(c, "claude")?;
-        let codex = self.cli(c, "codex")?;
+        let claude = Self::cli(c, "claude")?;
+        let codex = Self::cli(c, "codex")?;
         let (xenonet, console) = self.names.clone();
         if claude.truthy() {
-            let _ = self.run(c, &claude, vec!["mcp".into(), "remove".into(), xenonet.clone(), "--scope".into(), "user".into()]);
+            let _ = Self::run(c, &claude, vec!["mcp".into(), "remove".into(), xenonet.clone(), "--scope".into(), "user".into()]);
         }
         if codex.truthy() {
-            let _ = self.run(c, &codex, vec!["mcp".into(), "remove".into(), xenonet.clone()]);
+            let _ = Self::run(c, &codex, vec!["mcp".into(), "remove".into(), xenonet.clone()]);
         }
         if self.o.console_mcp {
             if claude.truthy() {
-                let _ = self.run(c, &claude, vec!["mcp".into(), "remove".into(), console.clone(), "--scope".into(), "user".into()]);
+                let _ = Self::run(c, &claude, vec!["mcp".into(), "remove".into(), console.clone(), "--scope".into(), "user".into()]);
             }
             if codex.truthy() {
-                let _ = self.run(c, &codex, vec!["mcp".into(), "remove".into(), console.clone()]);
+                let _ = Self::run(c, &codex, vec!["mcp".into(), "remove".into(), console.clone()]);
             }
         }
         self.preview(c)

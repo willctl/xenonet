@@ -13,7 +13,9 @@
 use crate::peer::{list, Calls, Result, Thrown};
 use crate::sql::Arg;
 use crate::store::js_text;
+use std::fmt::Write as _;
 use std::sync::Mutex;
+use xenonet_base::sync::Locked;
 
 /// XenoNet's ids take OpenCode's ses_… with "-" for "_".
 pub fn open_code_id(id: &Arg) -> String {
@@ -112,11 +114,11 @@ fn number(s: &str) -> f64 {
 fn parse_hex(s: &str) -> f64 {
     let t = xenonet_base::text::js_trim(s);
     let t = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")).unwrap_or(t);
-    let digits: String = t.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+    let digits: String = t.chars().take_while(char::is_ascii_hexdigit).collect();
     if digits.is_empty() {
         return f64::NAN;
     }
-    digits.chars().fold(0.0, |n, d| n * 16.0 + d.to_digit(16).unwrap() as f64)
+    digits.chars().fold(0.0, |n, d| n * 16.0 + f64::from(d.to_digit(16).expect("a hex digit, as taken above")))
 }
 
 /// The TCP ports a process listens on, on loopback or any address.
@@ -167,7 +169,7 @@ pub fn listening_ports(c: &mut dyn Calls, pid: f64, platform: &str) -> Result<Ve
 /// /^n.*:(\d+)$/gm, with \r a line's end as JS's m flag has it.
 fn regex_lsof() -> &'static regex::Regex {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    RE.get_or_init(|| regex::Regex::new(r"(?mR)^n[^\n\r\x{2028}\x{2029}]*:([0-9]+)$").unwrap())
+    RE.get_or_init(|| regex::Regex::new(r"(?mR)^n[^\n\r\x{2028}\x{2029}]*:([0-9]+)$").expect("a fixed pattern"))
 }
 
 /// One folder, as OpenCode spells it in two places: the same once a
@@ -194,7 +196,7 @@ pub fn encode_uri_component(s: &str) -> String {
         } else {
             let mut buf = [0u8; 4];
             for b in ch.encode_utf8(&mut buf).bytes() {
-                out.push_str(&format!("%{b:02X}"));
+                let _ = write!(out, "%{b:02X}");
             }
         }
     }
@@ -234,7 +236,7 @@ impl OpenCode {
         OpenCode { cache_ms, inner: Mutex::new(Inner { cache_at: f64::NEG_INFINITY, ..Inner::default() }) }
     }
 
-    fn now(&self, c: &mut dyn Calls) -> Result<f64> {
+    fn now(c: &mut dyn Calls) -> Result<f64> {
         let t = c.call("", "now", vec![])?;
         Ok(match t {
             Arg::Num(n) => n,
@@ -244,7 +246,7 @@ impl OpenCode {
 
     /// A GET's JSON, or what it threw (an answer that isn't ok: route and
     /// status).
-    fn get(&self, c: &mut dyn Calls, base: &str, route: &str, ms: f64) -> Result<Arg> {
+    fn get(c: &mut dyn Calls, base: &str, route: &str, ms: f64) -> Result<Arg> {
         let r = c.call("", "get", vec![Arg::text(format!("{base}{route}")), Arg::num(ms)])?;
         if !r.field("ok").truthy() {
             return Err(Thrown { message: format!("{route}: {}", js_text(&r.field("status"))), code: None, handle: None, stdout: None });
@@ -254,9 +256,9 @@ impl OpenCode {
 
     /// The OpenCode servers running now.
     pub fn servers(&self, c: &mut dyn Calls) -> Result<Vec<Server>> {
-        let t = self.now(c)?;
+        let t = Self::now(c)?;
         {
-            let i = self.inner.lock().unwrap();
+            let i = self.inner.locked();
             if t - i.cache_at < self.cache_ms {
                 return Ok(i.servers.clone());
             }
@@ -273,21 +275,21 @@ impl OpenCode {
                 if found.iter().any(|f| f.base == base) {
                     continue;
                 }
-                let Ok(h) = self.get(c, &base, "/global/health", 800.0) else { continue };
+                let Ok(h) = Self::get(c, &base, "/global/health", 800.0) else { continue };
                 if !h.field("healthy").truthy() {
                     continue;
                 }
-                let dir = match self.get(c, &base, "/path", 800.0) {
+                let dir = match Self::get(c, &base, "/path", 800.0) {
                     Ok(x) => x.field("directory").or(Arg::Null),
                     Err(_) => Arg::Null,
                 };
                 found.push(Server { pid: p.field("pid"), base, dir });
             }
         }
-        let at = self.now(c)?;
-        let mut i = self.inner.lock().unwrap();
+        let at = Self::now(c)?;
+        let mut i = self.inner.locked();
         i.cache_at = at;
-        i.servers = found.clone();
+        i.servers.clone_from(&found);
         Ok(found)
     }
 
@@ -298,7 +300,7 @@ impl OpenCode {
         let ses = open_code_id(id);
         let (mut here, mut known) = (None, None);
         for s in self.servers(c)? {
-            let Ok(status) = self.get(c, &s.base, "/session/status", 1500.0) else { continue };
+            let Ok(status) = Self::get(c, &s.base, "/session/status", 1500.0) else { continue };
             let has = match &status {
                 Arg::Obj(f) => f.iter().any(|(k, _)| *k == ses),
                 Arg::List(l) => ses.parse::<usize>().is_ok_and(|i| i < l.len() && i.to_string() == ses),
@@ -308,7 +310,7 @@ impl OpenCode {
                 return Ok(Some(s));
             }
             if here.is_none() {
-                let Ok(info) = self.get(c, &s.base, &format!("/session/{}", encode_uri_component(&ses)), 1500.0) else { continue };
+                let Ok(info) = Self::get(c, &s.base, &format!("/session/{}", encode_uri_component(&ses)), 1500.0) else { continue };
                 if known.is_none() {
                     known = Some(s.clone());
                 }
@@ -326,9 +328,9 @@ impl OpenCode {
     /// OpenCode knows it. Each answer is kept for the cache's while.
     pub fn info(&self, c: &mut dyn Calls, id: &Arg, windows: bool) -> Result<Arg> {
         let ses = open_code_id(id);
-        let hit = self.inner.lock().unwrap().infos.iter().find(|(k, _, _)| *k == ses).map(|(_, at, v)| (*at, v.clone()));
+        let hit = self.inner.locked().infos.iter().find(|(k, _, _)| *k == ses).map(|(_, at, v)| (*at, v.clone()));
         if let Some((at, v)) = hit {
-            if self.now(c)? - at < self.cache_ms {
+            if Self::now(c)? - at < self.cache_ms {
                 return Ok(v);
             }
         }
@@ -368,8 +370,8 @@ impl OpenCode {
                 ]);
             }
         }
-        let at = self.now(c)?;
-        let mut i = self.inner.lock().unwrap();
+        let at = Self::now(c)?;
+        let mut i = self.inner.locked();
         i.infos.retain(|(k, _, _)| *k != ses);
         i.infos.push((ses, at, value.clone()));
         if i.infos.len() > 256 {
@@ -379,7 +381,7 @@ impl OpenCode {
     }
 
     pub fn forget(&self) {
-        let mut i = self.inner.lock().unwrap();
+        let mut i = self.inner.locked();
         i.cache_at = f64::NEG_INFINITY;
         i.servers.clear();
         i.infos.clear();

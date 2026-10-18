@@ -35,6 +35,7 @@ use crate::store::js_text;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use xenonet_base::ids::{is_session_id, parse_actor_id, YOU};
+use xenonet_base::sync::Locked;
 
 pub const ACTIVE_MS: f64 = 2.0 * 3600e3;
 const EDIT_HOLD_MS: f64 = 30.0 * 60e3;
@@ -275,7 +276,9 @@ pub fn edit_paths(tool_name: &Arg, input: &Arg, cwd: &Arg) -> Vec<String> {
 /// line) and its dot.
 fn patch_files() -> &'static regex::Regex {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    RE.get_or_init(|| regex::Regex::new(r"(?mR)^\*\*\* (?:Add|Update|Delete) File: ([^\n\r\x{2028}\x{2029}]+)$|^\*\*\* Move to: ([^\n\r\x{2028}\x{2029}]+)$").unwrap())
+    RE.get_or_init(|| {
+        regex::Regex::new(r"(?mR)^\*\*\* (?:Add|Update|Delete) File: ([^\n\r\x{2028}\x{2029}]+)$|^\*\*\* Move to: ([^\n\r\x{2028}\x{2029}]+)$").expect("a fixed pattern")
+    })
 }
 
 /// What git printed for `rev-parse`, as a repo, or None when it didn't print
@@ -448,13 +451,13 @@ pub struct Engine {
 }
 
 impl Engine {
-    fn now(&self, c: &mut dyn Calls) -> Result<f64> {
+    fn now(c: &mut dyn Calls) -> Result<f64> {
         Ok(num(&c.call("engine", "now", vec![])?))
     }
 
     /// A turn of the event loop where the JS awaited one of the engine's
     /// own async functions, so that what runs between steps runs as it did.
-    fn hop(&self, c: &mut dyn Calls) -> Result<()> {
+    fn hop(c: &mut dyn Calls) -> Result<()> {
         c.call("", "tick", vec![])?;
         Ok(())
     }
@@ -463,7 +466,7 @@ impl Engine {
 
     /// Everyone who worked in the last `within_ms`.
     pub fn agents(&self, c: &mut dyn Calls, within_ms: f64) -> Result<Vec<Arg>> {
-        let since = self.now(c)? - within_ms;
+        let since = Self::now(c)? - within_ms;
         let mut ids: Vec<Arg> = Vec::new();
         let add = |ids: &mut Vec<Arg>, id: Arg| {
             if !ids.iter().any(|x| same(x, &id)) {
@@ -497,12 +500,13 @@ impl Engine {
             add(&mut ids, id);
         }
         let wanted: Vec<Arg> = ids.into_iter().filter(|id| is_agent_id(id) || is_actor_agent(id)).collect();
-        let views = self.views(c, &wanted)?;
+        let views = Self::views(c, &wanted)?;
         // Working agents first, then the most recent; sessions that ended
         // drop out, unless you allowed XenoNet to resume one for a message.
         let mut kept = Vec::new();
         for v in views {
-            if !(num(&v.field("lastActive")) >= since) {
+            let recent = num(&v.field("lastActive")) >= since;
+            if !recent {
                 continue;
             }
             if v.field("ended").truthy() && !opt_call(c, "engine.delivery", "resumable", vec![v.clone()])?.truthy() {
@@ -516,14 +520,14 @@ impl Engine {
             let d = if d != 0.0 { d } else { num(&b.field("lastActive")) - num(&a.field("lastActive")) };
             d.partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal)
         });
-        self.hop(c)?;
-        self.hop(c)?;
+        Self::hop(c)?;
+        Self::hop(c)?;
         Ok(kept)
     }
 
     /// Several views at once, as Promise.all of view(): what each reads at
     /// once, then the sessions' own apps asked together, then their repos.
-    fn views(&self, c: &mut dyn Calls, ids: &[Arg]) -> Result<Vec<Arg>> {
+    fn views(c: &mut dyn Calls, ids: &[Arg]) -> Result<Vec<Arg>> {
         enum Stage {
             Done(Arg),
             Actor { id: Arg, a: Arg, claims: Arg, cwd: Arg },
@@ -532,20 +536,20 @@ impl Engine {
         let mut stages = Vec::new();
         for id in ids {
             stages.push(if is_actor_agent(id) {
-                let now = self.now(c)?;
+                let now = Self::now(c)?;
                 let a = if kind_nullish(c, "engine.actors")? { Arg::Undef } else { c.call("engine.actors", "engineView", vec![id.clone(), obj(vec![("now", Arg::num(now))])])? };
-                let claims = self.claims_of(c, id, now)?;
+                let claims = Self::claims_of(c, id, now)?;
                 if !a.truthy() {
-                    Stage::Done(self.gone_actor(id, claims))
+                    Stage::Done(Self::gone_actor(id, claims))
                 } else {
                     let cwd = a.field("cwd").or(a.field("place").field("path")).or(Arg::Null);
                     Stage::Actor { id: id.clone(), a, claims, cwd }
                 }
             } else if id.as_str() == Some(YOU) {
-                let now = self.now(c)?;
-                Stage::Done(self.you_view(now))
+                let now = Self::now(c)?;
+                Stage::Done(Self::you_view(now))
             } else {
-                Stage::Session(self.view_start(c, id)?)
+                Stage::Session(Self::view_start(c, id)?)
             });
         }
         // The sessions XenoNet has no record of, asked of their own app.
@@ -588,23 +592,23 @@ impl Engine {
         for (i, s) in stages.into_iter().enumerate() {
             out.push(match s {
                 Stage::Done(v) => v,
-                Stage::Actor { id, a, claims, cwd } => self.actor_view_end(c, &id, &a, claims, cwd, repos.remove(&i).unwrap_or(Arg::Null))?,
+                Stage::Actor { id, a, claims, cwd } => Self::actor_view_end(c, &id, &a, claims, cwd, repos.remove(&i).unwrap_or(Arg::Null))?,
                 Stage::Session(p) => {
                     let t = told.remove(&i).unwrap_or(Arg::Null);
                     let cwd = cwds[i].clone().unwrap_or(Arg::Null);
-                    self.view_end(c, p, t, cwd, gone[&i], repos.remove(&i).unwrap_or(Arg::Null))?
+                    Self::view_end(c, p, t, cwd, gone[&i], repos.remove(&i).unwrap_or(Arg::Null))?
                 }
             });
         }
-        self.hop(c)?;
+        Self::hop(c)?;
         Ok(out)
     }
 
     pub fn view(&self, c: &mut dyn Calls, id: &Arg) -> Result<Arg> {
-        Ok(self.views(c, std::slice::from_ref(id))?.remove(0))
+        Ok(Self::views(c, std::slice::from_ref(id))?.remove(0))
     }
 
-    fn you_view(&self, now: f64) -> Arg {
+    fn you_view(now: f64) -> Arg {
         obj(vec![
             ("id", Arg::text(YOU)),
             ("app", Arg::text("you")),
@@ -617,7 +621,7 @@ impl Engine {
         ])
     }
 
-    fn claims_of(&self, c: &mut dyn Calls, id: &Arg, now: f64) -> Result<Arg> {
+    fn claims_of(c: &mut dyn Calls, id: &Arg, now: f64) -> Result<Arg> {
         let all = list(c.call("engine.store", "claims", vec![Arg::num(now)])?);
         Ok(Arg::List(
             all.into_iter()
@@ -627,7 +631,7 @@ impl Engine {
         ))
     }
 
-    fn gone_actor(&self, id: &Arg, claims: Arg) -> Arg {
+    fn gone_actor(id: &Arg, claims: Arg) -> Arg {
         let slug: String = js_text(id).chars().skip("actor:".len()).collect();
         obj(vec![
             ("id", id.clone()),
@@ -655,7 +659,7 @@ impl Engine {
     /// folder, else its latest works-on target; it's working or idle from
     /// its presence, and ended once it's offline; it's reachable while it
     /// isn't offline and reports itself.
-    fn actor_view_end(&self, c: &mut dyn Calls, id: &Arg, a: &Arg, claims: Arg, cwd: Arg, repo: Arg) -> Result<Arg> {
+    fn actor_view_end(c: &mut dyn Calls, id: &Arg, a: &Arg, claims: Arg, cwd: Arg, repo: Arg) -> Result<Arg> {
         let ended = a.field("presence").as_str() == Some("offline");
         let place = a.field("place");
         let status = if ended {
@@ -665,7 +669,7 @@ impl Engine {
         } else {
             "idle"
         };
-        let reachable = !ended && self.reads(c, id)?;
+        let reachable = !ended && Self::reads(c, id)?;
         Ok(obj(vec![
             ("id", id.clone()),
             ("app", Arg::text("actor")),
@@ -688,8 +692,8 @@ impl Engine {
         ]))
     }
 
-    fn view_start(&self, c: &mut dyn Calls, id: &Arg) -> Result<Pending> {
-        let now = self.now(c)?;
+    fn view_start(c: &mut dyn Calls, id: &Arg) -> Result<Pending> {
+        let now = Self::now(c)?;
         let node = c.call("", "node", vec![id.clone()])?;
         let live = c.call("", "live", vec![id.clone(), Arg::num(now)])?;
         let contact = c.call("engine.store", "contact", vec![id.clone()])?;
@@ -697,11 +701,11 @@ impl Engine {
         Ok(Pending { id: id.clone(), now, node, live, contact, describe })
     }
 
-    fn view_end(&self, c: &mut dyn Calls, p: Pending, told: Arg, cwd: Arg, gone: bool, repo: Arg) -> Result<Arg> {
+    fn view_end(c: &mut dyn Calls, p: Pending, told: Arg, cwd: Arg, gone: bool, repo: Arg) -> Result<Arg> {
         let Pending { id, now, node, live, contact, .. } = p;
         let observed = live.field("observed").truthy();
         let app = js_text(&id).split(':').next().unwrap_or("").to_string();
-        let place = self.place_of(c, &id, &cwd)?;
+        let place = Self::place_of(c, &id, &cwd)?;
         let mut edits: Vec<Arg> = list(live.field("edits")).into_iter().filter(|e| now - num(&e.field("ts")) < EDIT_HOLD_MS).collect();
         edits.sort_by(|a, b| (num(&b.field("ts")) - num(&a.field("ts"))).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
         let base = if cwd.is_nullish() { None } else { Some(js_text(&cwd)) };
@@ -742,7 +746,7 @@ impl Engine {
             }
         };
         let focus = c.call("engine.store", "focus", vec![id.clone()])?.field("text").or(Arg::Null);
-        let claims = self.claims_of(c, &id, now)?;
+        let claims = Self::claims_of(c, &id, now)?;
         let reachable =
             (contact.truthy() && !ended_at.truthy() && now - num(&contact.field("at")) < REACHABLE_MS) || opt_call(c, "engine.delivery", "reaches", vec![id.clone()])?.truthy();
         let mut v = obj(vec![
@@ -782,7 +786,7 @@ impl Engine {
     }
 
     /// Whether messages can reach an agent.
-    fn reads(&self, c: &mut dyn Calls, id: &Arg) -> Result<bool> {
+    fn reads(c: &mut dyn Calls, id: &Arg) -> Result<bool> {
         if opt_call(c, "engine.delivery", "reaches", vec![id.clone()])?.truthy() {
             return Ok(true);
         }
@@ -793,13 +797,13 @@ impl Engine {
     }
 
     /// Why an actor XenoNet only observes isn't sent messages.
-    fn deaf(&self, a: &Arg) -> Fail {
+    fn deaf(a: &Arg) -> Fail {
         let how = if a.field("reader").truthy() { "XenoNet reads its records but has no way to message it" } else { "XenoNet only observes it" };
         Fail::Error(format!("{} (\"{}\") can't read messages: {how}, so nothing would reach it", js_text(&a.field("id")), js_text(&a.field("title"))))
     }
 
     /// What kind of agent another is, as agents read it.
-    fn kind_of(&self, c: &mut dyn Calls, a: &Arg) -> Result<String> {
+    fn kind_of(c: &mut dyn Calls, a: &Arg) -> Result<String> {
         if a.field("app").as_str() != Some("actor") {
             return Ok(js_text(&a.field("app")));
         }
@@ -813,7 +817,7 @@ impl Engine {
 
     /// The project (or folder) a session lives in, from the map, or for one
     /// the map hasn't seen yet, the project whose folder holds `cwd`.
-    fn place_of(&self, c: &mut dyn Calls, id: &Arg, cwd: &Arg) -> Result<Arg> {
+    fn place_of(c: &mut dyn Calls, id: &Arg, cwd: &Arg) -> Result<Arg> {
         let home = c.call("", "homeOf", vec![id.clone()])?;
         if home.truthy() {
             let node = c.call("", "node", vec![home])?;
@@ -879,7 +883,7 @@ impl Engine {
             push(&mut a, "overlap", Arg::List(overlap));
             out.push(a);
         }
-        self.hop(c)?;
+        Self::hop(c)?;
         Ok(out)
     }
 
@@ -929,14 +933,14 @@ impl Engine {
                 }
             }
         }
-        self.hop(c)?;
+        Self::hop(c)?;
         Ok(out)
     }
 
     /// For an agent, next to its own working tree; for a person, next to
     /// the repo the file is in.
     pub fn who_has(&self, c: &mut dyn Calls, me: &Arg, file: &Arg) -> Result<Vec<Arg>> {
-        let me_view = if me.truthy() { self.view(c, me)? } else { self.place_at(c, file)? };
+        let me_view = if me.truthy() { self.view(c, me)? } else { Self::place_at(c, file)? };
         Ok(self
             .conflicts_of(c, &me_view, std::slice::from_ref(file))?
             .into_iter()
@@ -950,10 +954,10 @@ impl Engine {
             .collect())
     }
 
-    fn place_at(&self, c: &mut dyn Calls, file: &Arg) -> Result<Arg> {
+    fn place_at(c: &mut dyn Calls, file: &Arg) -> Result<Arg> {
         let dir = dirname_style(&js_text(file));
         let repo = c.call("engine.repos", "of", vec![Arg::text(dir.clone())])?;
-        self.hop(c)?;
+        Self::hop(c)?;
         Ok(obj(vec![
             ("id", Arg::Null),
             ("cwd", Arg::text(dir)),
@@ -990,7 +994,7 @@ impl Engine {
         let me_view = self.view(c, me)?;
         let mut active = Vec::new();
         for a in self.agents(c, ACTIVE_MS)? {
-            if !same(&a.field("id"), me) && self.reads(c, &a.field("id"))? && self.visible_to(c, me, &a)? {
+            if !same(&a.field("id"), me) && Self::reads(c, &a.field("id"))? && self.visible_to(c, me, &a)? {
                 active.push(a);
             }
         }
@@ -1014,7 +1018,7 @@ impl Engine {
             (active.clone(), "all".into())
         } else {
             let one = self.resolve(c, me, &to)?;
-            self.hop(c)?;
+            Self::hop(c)?;
             let id = js_text(&one.field("id"));
             (vec![one], id)
         };
@@ -1059,7 +1063,7 @@ impl Engine {
                 c.call("engine.policy", "audit", vec![obj(vec![("kind", Arg::text("redacted")), ("sender", me.clone()), ("count", redacted)])])?;
             }
         }
-        let now = self.now(c)?;
+        let now = Self::now(c)?;
         let ids: Vec<Arg> = recipients.iter().map(|r| r.field("id")).collect();
         let stored = obj(vec![
             ("sender", me.clone()),
@@ -1108,16 +1112,16 @@ impl Engine {
     fn catch_up(&self, c: &mut dyn Calls, me: &Arg) -> Result<()> {
         let key = repo_key(&self.view(c, me)?);
         if !key.truthy() {
-            self.hop(c)?;
+            Self::hop(c)?;
             return Ok(());
         }
-        let since = self.now(c)? - RECENT_MS;
+        let since = Self::now(c)? - RECENT_MS;
         for m in list(c.call("engine.store", "scoped", vec![key, Arg::num(since)])?) {
             if !same(&m.field("sender"), me) {
                 c.call("engine.store", "deliver", vec![m.field("id"), me.clone()])?;
             }
         }
-        self.hop(c)?;
+        Self::hop(c)?;
         Ok(())
     }
 
@@ -1131,8 +1135,8 @@ impl Engine {
             if !self.visible_to(c, me, &one)? {
                 return err(format!("no session or actor you can reach is {to_text}"));
             }
-            if !self.reads(c, to)? {
-                return Err(self.deaf(&one));
+            if !Self::reads(c, to)? {
+                return Err(Self::deaf(&one));
             }
             return Ok(one);
         }
@@ -1165,15 +1169,15 @@ impl Engine {
         };
         let (mut reading, mut deaf) = (Vec::new(), Vec::new());
         for a in all {
-            if self.reads(c, &a.field("id"))? {
+            if Self::reads(c, &a.field("id"))? {
                 reading.push(a);
             } else {
                 deaf.push(a);
             }
         }
-        let found = pick(reading);
+        let mut found = pick(reading);
         if found.len() == 1 {
-            return Ok(found.into_iter().next().unwrap());
+            return Ok(found.remove(0));
         }
         if !found.is_empty() {
             let names: Vec<String> = found.iter().take(6).map(|a| format!("{} (\"{}\")", js_text(&a.field("id")), js_text(&a.field("title")))).collect();
@@ -1183,7 +1187,7 @@ impl Engine {
         // sent to.
         let deaf = pick(deaf);
         if let Some(a) = deaf.first() {
-            return Err(self.deaf(a));
+            return Err(Self::deaf(a));
         }
         err(format!("no session or actor matches \"{to_text}\"; peers lists them"))
     }
@@ -1216,8 +1220,8 @@ impl Engine {
         let key = js_text(me);
         loop {
             let aborted = !kind_nullish(c, "signal")? && c.get("signal.aborted")?.truthy();
-            let since = self.inner.lock().unwrap().stop_mail.get(&key).copied().unwrap_or(f64::NEG_INFINITY);
-            if aborted || self.now(c)? - since < 5000.0 {
+            let since = self.inner.locked().stop_mail.get(&key).copied().unwrap_or(f64::NEG_INFINITY);
+            if aborted || Self::now(c)? - since < 5000.0 {
                 return Ok(Arg::Null);
             }
             self.catch_up(c, me)?;
@@ -1229,7 +1233,7 @@ impl Engine {
                     return Ok(Arg::Null);
                 }
                 let taken = self.take(c, me)?;
-                let text = self.mail(c, &taken)?;
+                let text = Self::mail(c, &taken)?;
                 if !text.is_empty() {
                     return Ok(obj(vec![("decision", Arg::text("block")), ("reason", Arg::text(text)), ("ids", Arg::List(taken.iter().map(|m| m.field("id")).collect()))]));
                 }
@@ -1248,7 +1252,7 @@ impl Engine {
         self.catch_up(c, me)?;
         let list_ = list(c.call("engine.store", "unseen", vec![me.clone()])?);
         let ids: Vec<Arg> = list_.iter().map(|m| m.field("id")).collect();
-        let now = self.now(c)?;
+        let now = Self::now(c)?;
         c.call("engine.store", "markSeen", vec![me.clone(), Arg::List(ids.clone()), Arg::num(now)])?;
         if !list_.is_empty() {
             c.call("", "emit", vec![Arg::text("seen"), obj(vec![("agent", me.clone()), ("ids", Arg::List(ids))])])?;
@@ -1267,7 +1271,7 @@ impl Engine {
                 ("envelope", envelope_of(m)),
             ]));
         }
-        self.hop(c)?;
+        Self::hop(c)?;
         Ok(out)
     }
 
@@ -1298,7 +1302,7 @@ impl Engine {
                 }
             }
         };
-        let until = self.now(c)? + minutes.max(1.0).min(8.0 * 60.0) * 60e3;
+        let until = Self::now(c)? + minutes.clamp(1.0, 8.0 * 60.0) * 60e3;
         let note = ask.field("note").or(Arg::Null);
         let note = if matches!(ask.field("note"), Arg::Undef) { Arg::Null } else { note };
         // Relative to your working tree; a folder keeps its trailing slash.
@@ -1322,10 +1326,10 @@ impl Engine {
             })
             .collect();
         if is_actor_agent(me) {
-            self.actor_claims(c, me, &abs)?;
+            Self::actor_claims(c, me, &abs)?;
         }
         for p in &abs {
-            let t = self.now(c)?;
+            let t = Self::now(c)?;
             c.call("engine.store", "claim", vec![me.clone(), Arg::text(p.clone()), note.clone(), Arg::num(until), Arg::num(t)])?;
         }
         // Claiming what someone else holds is allowed; say so.
@@ -1341,7 +1345,7 @@ impl Engine {
     /// An actor's claims stay inside the projects and folders XenoNet knows,
     /// never a whole folder that isn't a project, and it holds at most 50 at
     /// once.
-    fn actor_claims(&self, c: &mut dyn Calls, me: &Arg, abs: &[String]) -> Result<()> {
+    fn actor_claims(c: &mut dyn Calls, me: &Arg, abs: &[String]) -> Result<()> {
         for p in abs {
             let head = p.split('*').next().unwrap_or("");
             let dir = head.trim_end_matches(['\\', '/']);
@@ -1359,7 +1363,7 @@ impl Engine {
                 )));
             }
         }
-        let now = self.now(c)?;
+        let now = Self::now(c)?;
         let mut held: Vec<String> =
             list(c.call("engine.store", "claims", vec![Arg::num(now)])?).into_iter().filter(|cl| same(&cl.field("agent"), me)).map(|cl| js_text(&cl.field("pattern"))).collect();
         for p in abs {
@@ -1388,7 +1392,7 @@ impl Engine {
             }
             return Ok(obj(vec![("focus", r.field("status"))]));
         }
-        let now = self.now(c)?;
+        let now = Self::now(c)?;
         c.call("engine.store", "setFocus", vec![me.clone(), clip(&Arg::text(t), 200), Arg::num(now)])?;
         Ok(obj(vec![("focus", c.call("engine.store", "focus", vec![me.clone()])?.field("text").or(Arg::Null))]))
     }
@@ -1401,7 +1405,7 @@ impl Engine {
             Arg::Num(n) if n.fract() == 0.0 && n.is_finite() && n > 1.0 => Arg::Num(n),
             _ => Arg::Null,
         };
-        let now = self.now(c)?;
+        let now = Self::now(c)?;
         let via = ask.field("via");
         c.call("engine.store", "touch", vec![me.clone(), obj(vec![("app", ask.field("app")), ("cwd", ask.field("cwd")), ("via", via.clone()), ("pid", pid)]), Arg::num(now)])?;
         c.call("", "emit", vec![Arg::text("contact"), obj(vec![("agent", me.clone()), ("via", via)])])?;
@@ -1495,7 +1499,7 @@ impl Engine {
         }
         let ev = event.as_str().unwrap_or("");
         if ev == "SessionEnd" {
-            let now = self.now(c)?;
+            let now = Self::now(c)?;
             c.call("engine.store", "ended", vec![me.clone(), Arg::num(now)])?;
             return Ok(Arg::Null);
         }
@@ -1522,7 +1526,7 @@ impl Engine {
             }
             let files: Vec<Arg> = files.into_iter().map(Arg::text).collect();
             let text = self.warn(c, &me, &files, sub.as_deref())?;
-            self.hop(c)?;
+            Self::hop(c)?;
             return Ok(say(text));
         }
         if sub.is_some() {
@@ -1531,24 +1535,24 @@ impl Engine {
         match ev {
             "SessionStart" => {
                 let brief = self.briefing(c, &me)?;
-                self.hop(c)?;
+                Self::hop(c)?;
                 let taken = self.take(c, &me)?;
-                let mail = self.mail(c, &taken)?;
+                let mail = Self::mail(c, &taken)?;
                 Ok(say([brief, mail].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n\n")))
             }
             "UserPromptSubmit" | "PostToolUse" => {
                 let taken = self.take(c, &me)?;
-                Ok(say(self.mail(c, &taken)?))
+                Ok(say(Self::mail(c, &taken)?))
             }
             "Stop" => {
                 if input.field("stop_hook_active").truthy() {
                     return Ok(Arg::Null);
                 }
                 let taken = self.take(c, &me)?;
-                let text = self.mail(c, &taken)?;
+                let text = Self::mail(c, &taken)?;
                 if !text.is_empty() {
-                    let now = self.now(c)?;
-                    self.inner.lock().unwrap().stop_mail.insert(js_text(&me), now);
+                    let now = Self::now(c)?;
+                    self.inner.locked().stop_mail.insert(js_text(&me), now);
                     return Ok(obj(vec![("decision", Arg::text("block")), ("reason", Arg::text(text))]));
                 }
                 Ok(Arg::Null)
@@ -1563,7 +1567,7 @@ impl Engine {
         let all = self.peers(c, me, &Arg::text("repo"), ACTIVE_MS)?;
         let mut others = Vec::new();
         for a in &all {
-            if a.field("status").as_str() == Some("working") || self.now(c)? - num(&a.field("lastActive")) < RECENT_MS {
+            if a.field("status").as_str() == Some("working") || Self::now(c)? - num(&a.field("lastActive")) < RECENT_MS {
                 others.push(a.clone());
             }
         }
@@ -1572,8 +1576,8 @@ impl Engine {
         }
         let mut lines = Vec::new();
         for a in others.iter().take(6) {
-            let kind = self.kind_of(c, a)?;
-            let reads = self.reads(c, &a.field("id"))?;
+            let kind = Self::kind_of(c, a)?;
+            let reads = Self::reads(c, &a.field("id"))?;
             lines.push(format!("- {}", line(a, &me_view, &kind, reads)));
         }
         let rest = all.len() as i64 - others.len().min(6) as i64;
@@ -1594,7 +1598,7 @@ impl Engine {
     /// Each thread hears a warning once: a subagent can't see what the main
     /// thread was told, nor the other way round.
     fn warn(&self, c: &mut dyn Calls, me: &Arg, files: &[Arg], sub: Option<&str>) -> Result<String> {
-        let now = self.now(c)?;
+        let now = Self::now(c)?;
         let mut fresh = Vec::new();
         for x in self.conflicts(c, me, files)? {
             let key = format!(
@@ -1605,7 +1609,7 @@ impl Engine {
                 js_text(&x.field("agent").field("id")),
                 js_text(&x.field("how"))
             );
-            let mut i = self.inner.lock().unwrap();
+            let mut i = self.inner.locked();
             if now - i.noticed.get(&key).copied().unwrap_or(0.0) < NOTICE_EVERY_MS {
                 continue;
             }
@@ -1619,7 +1623,7 @@ impl Engine {
         let mut lines = Vec::new();
         for x in &fresh {
             let agent = x.field("agent");
-            let kind = self.kind_of(c, &agent)?;
+            let kind = Self::kind_of(c, &agent)?;
             let who = format!(
                 "\"{}\" ({kind}, {}, {})",
                 js_text(&agent.field("title")),
@@ -1662,7 +1666,7 @@ impl Engine {
         // Actors XenoNet only observes aren't ones to tell.
         let mut deaf = true;
         for x in &fresh {
-            if self.reads(c, &x.field("agent").field("id"))? {
+            if Self::reads(c, &x.field("agent").field("id"))? {
                 deaf = false;
                 break;
             }
@@ -1699,11 +1703,11 @@ impl Engine {
 
     /// Messages as an agent reads them, framed as other agents' (and
     /// actors'), never your user's.
-    fn mail(&self, c: &mut dyn Calls, messages: &[Arg]) -> Result<String> {
+    fn mail(c: &mut dyn Calls, messages: &[Arg]) -> Result<String> {
         if messages.is_empty() {
             return Ok(String::new());
         }
-        let now = self.now(c)?;
+        let now = Self::now(c)?;
         let who = if messages.iter().any(|m| m.field("from").field("app").as_str() == Some("actor")) { "sessions and actors" } else { "sessions" };
         let mut parts = Vec::new();
         for m in messages {
@@ -1715,7 +1719,7 @@ impl Engine {
                     format!(
                         "[#{}] from {}, {}{}.",
                         js_text(&m.field("id")),
-                        self.sender(c, &m.field("from"))?,
+                        Self::sender(c, &m.field("from"))?,
                         ago(now - num(&m.field("at"))),
                         if to.as_str() == Some("you") { String::new() } else { format!(", to {}", js_text(&to)) }
                     ),
@@ -1737,7 +1741,7 @@ impl Engine {
     }
 
     /// Who a message is from, with how XenoNet knows it.
-    fn sender(&self, c: &mut dyn Calls, from: &Arg) -> Result<String> {
+    fn sender(c: &mut dyn Calls, from: &Arg) -> Result<String> {
         if from.field("id").as_str() == Some(YOU) {
             return Ok("your user, at XenoNet's own window".into());
         }
@@ -1760,7 +1764,7 @@ impl Engine {
     // ---------- for the console ----------
 
     pub fn snapshot(&self, c: &mut dyn Calls) -> Result<Arg> {
-        let now = self.now(c)?;
+        let now = Self::now(c)?;
         let agents: Vec<Arg> = self
             .agents(c, ACTIVE_MS)?
             .iter()

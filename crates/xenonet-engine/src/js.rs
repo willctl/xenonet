@@ -67,22 +67,6 @@ pub fn locale_compare(a: &str, b: &str) -> std::cmp::Ordering {
     primary.then_with(|| ka.iter().map(|k| k.1).cmp(kb.iter().map(|k| k.1)))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::cmp::Ordering::*;
-
-    #[test]
-    fn orders() {
-        assert_eq!(locale_compare("a", "B"), Less);
-        assert_eq!(locale_compare("a", "A"), Less);
-        assert_eq!(locale_compare("Wren", "hermes"), Greater);
-        assert_eq!(locale_compare("a-b", "ab"), Less);
-        assert_eq!(locale_compare("x", "x"), Equal);
-        assert_eq!(utf16_cmp("\u{ffff}", "\u{10000}"), Greater);
-    }
-}
-
 /// `pathStyle(base).join(base, ...parts)`: joined in the syntax `base` keeps
 /// (core/paths.js), and normalized as Node's path module normalizes.
 pub fn join_style(base: &str, parts: &[&str]) -> String {
@@ -219,7 +203,7 @@ pub fn base64_bytes(s: &str) -> Vec<u8> {
             b'=' => break,
             _ => continue,
         };
-        bits = bits << 6 | v as u32;
+        bits = bits << 6 | u32::from(v);
         n += 6;
         if n >= 8 {
             n -= 8;
@@ -235,7 +219,7 @@ pub fn base64(bytes: &[u8]) -> String {
     let mut out = String::new();
     for chunk in bytes.chunks(3) {
         let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
-        let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
+        let n = u32::from(b[0]) << 16 | u32::from(b[1]) << 8 | u32::from(b[2]);
         for i in 0..4 {
             if i <= chunk.len() {
                 out.push(A[(n >> (18 - 6 * i) & 63) as usize] as char);
@@ -300,7 +284,7 @@ pub fn dirname_of(p: &str, win32: bool) -> String {
         }
     }
     match end {
-        None if root => p[..start + 1].to_string(),
+        None if root => p[..=start].to_string(),
         None if start > 0 => p[..start].to_string(),
         None => ".".into(),
         Some(1) if root && start == 0 && !win32 => p[..2].to_string(),
@@ -324,7 +308,7 @@ fn posix_resolve(base: &str, p: &str) -> String {
     } else if base.starts_with('/') {
         format!("{base}/{p}")
     } else {
-        let cwd = std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_else(|_| "/".into());
+        let cwd = std::env::current_dir().map_or_else(|_| "/".into(), |d| d.to_string_lossy().into_owned());
         format!("{cwd}/{base}/{p}")
     };
     let n = xenonet_base::paths::normalize_posix(&full);
@@ -341,9 +325,8 @@ fn win32_resolve(base: &str, p: &str) -> String {
         (b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':').then(|| s[..2].to_string())
     };
     let rooted = |s: &str| s.starts_with('\\') || s.starts_with('/');
-    let full = if drive(p).is_some() && p.len() > 2 && rooted(&p[2..]) {
-        p.to_string()
-    } else if p.starts_with("\\\\") || p.starts_with("//") {
+    // Absolute already: from a drive's root, or a UNC path.
+    let full = if (drive(p).is_some() && p.len() > 2 && rooted(&p[2..])) || p.starts_with("\\\\") || p.starts_with("//") {
         p.to_string()
     } else if rooted(p) {
         format!("{}{p}", drive(base).unwrap_or_default())
@@ -394,4 +377,20 @@ pub fn relative_host(from: &str, to: &str) -> String {
     let mut out: Vec<&str> = vec![".."; a.len() - common];
     out.extend(&b[common..]);
     out.join("/")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cmp::Ordering::*;
+
+    #[test]
+    fn orders() {
+        assert_eq!(locale_compare("a", "B"), Less);
+        assert_eq!(locale_compare("a", "A"), Less);
+        assert_eq!(locale_compare("Wren", "hermes"), Greater);
+        assert_eq!(locale_compare("a-b", "ab"), Less);
+        assert_eq!(locale_compare("x", "x"), Equal);
+        assert_eq!(utf16_cmp("\u{ffff}", "\u{10000}"), Greater);
+    }
 }
