@@ -19,10 +19,12 @@
 //! and a SERVED_FROM_CACHE warning. A revoked, expired or turned-off grant,
 //! or a new revision, empties it; so does a restart.
 //!
-//! With --fixture it serves made-up data through the same checks; that
-//! needs the assistant's service, which isn't in Rust yet (`pending`).
+//! With --fixture it needs no XenoNet, no grant and nothing of this
+//! computer's: it serves made-up data through the same checks (`fixture`),
+//! for trying a client or a tunnel first.
 
 mod client;
+mod fixture;
 mod schema;
 
 use crate::tools::{self, Def};
@@ -285,9 +287,16 @@ fn say(line: &str) {
     eprintln!("[xenonet assistant] {line}");
 }
 
+/// Where reads go: the service, through a grant's client, or the made-up
+/// data of --fixture.
+enum Backend {
+    Client(Arc<Client>),
+    Fixture(Arc<fixture::Fixture>),
+}
+
 struct Assistant {
     defs: Vec<Def>,
-    client: Arc<Client>,
+    backend: Backend,
     cache: Arc<Mutex<Cache>>,
 }
 
@@ -298,7 +307,13 @@ impl Assistant {
             return refusal(&error_envelope(&request_id, "INVALID_ARGUMENT", None));
         }
         let operation = schema::OPERATIONS.iter().find(|(t, _)| *t == tool).map_or("", |(_, op)| *op);
-        let r = self.client.read(operation, &given, &request_id).await;
+        let r = match &self.backend {
+            Backend::Client(c) => c.read(operation, &given, &request_id).await,
+            Backend::Fixture(f) => {
+                let a = f.read(operation, &given, &request_id);
+                client::Read { ok: a.ok, envelope: a.envelope, detail: None }
+            }
+        };
         if r.ok {
             self.cache.lock().expect("the cache").put(tool, &given, &r.envelope, now());
             // The SDK checks a result against the tool's outputSchema
@@ -318,17 +333,21 @@ impl Assistant {
             // Only for a grant that, as far as this computer's files say,
             // still stands: revoked, expired or turned off, nothing is
             // served again.
-            let revision = match self.client.standing() {
-                Standing::Not(c) if c != "SERVICE_UNAVAILABLE" => {
-                    self.cache.lock().expect("the cache").clear();
-                    return refusal(&error_envelope(&request_id, c, None));
-                }
-                Standing::Not(_) => json!(-1),
-                // A real grant's revision, read from the files, must be the
-                // one the answer was read under.
-                Standing::Stands(r) => r.map_or(json!(-1), js::number),
+            let revision = match &self.backend {
+                // Fixtures have no grant to change.
+                Backend::Fixture(_) => None,
+                Backend::Client(c) => Some(match c.standing() {
+                    Standing::Not(c) if c != "SERVICE_UNAVAILABLE" => {
+                        self.cache.lock().expect("the cache").clear();
+                        return refusal(&error_envelope(&request_id, c, None));
+                    }
+                    Standing::Not(_) => json!(-1),
+                    // A real grant's revision, read from the files, must be
+                    // the one the answer was read under.
+                    Standing::Stands(r) => r.map_or(json!(-1), js::number),
+                }),
             };
-            let hit = self.cache.lock().expect("the cache").get(tool, &given, Some(&revision), now());
+            let hit = self.cache.lock().expect("the cache").get(tool, &given, revision.as_ref(), now());
             if let Some(hit) = hit {
                 return result(stale(&hit, tool, &request_id, now()));
             }
@@ -374,14 +393,16 @@ impl ServerHandler for Assistant {
 
 /// Serves the assistant's server on stdio until the client goes.
 pub async fn serve(grant: Option<String>, fixture: bool, port: Option<u16>) -> Result<(), String> {
-    if fixture {
-        crate::pending::fixture_service()?;
-    }
-    let Some(grant) = grant else {
-        return Err("xenonet mcp assistant needs --grant <grant>, as XenoNet's window shows it, or --fixture for made-up data".into());
+    let backend = if fixture {
+        say("serving made-up data (--fixture): nothing of this computer's");
+        Backend::Fixture(Arc::new(fixture::Fixture::new(tools::VERSION)))
+    } else {
+        let Some(grant) = grant else {
+            return Err("xenonet mcp assistant needs --grant <grant>, as XenoNet's window shows it, or --fixture for made-up data".into());
+        };
+        Backend::Client(Arc::new(Client::new(&grant, port.map(|p| p.to_string()))?))
     };
-    let client = Client::new(&grant, port.map(|p| p.to_string()))?;
-    let server = Assistant { defs: defs(), client: Arc::new(client), cache: Arc::new(Mutex::new(Cache::new(CACHE_MS, CACHE_BYTES))) };
+    let server = Assistant { defs: defs(), backend, cache: Arc::new(Mutex::new(Cache::new(CACHE_MS, CACHE_BYTES))) };
     match server.serve(rmcp::transport::stdio()).await {
         Ok(running) => {
             let _ = running.waiting().await;

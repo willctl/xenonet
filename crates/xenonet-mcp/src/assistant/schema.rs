@@ -29,7 +29,7 @@ pub const TOOLS: [&str; 6] = ["xenonet_status", "xenonet_projects", "xenonet_ses
 const STATUSES: [&str; 6] = ["working", "waiting", "idle", "completed", "stuck", "unknown"];
 const STATUS_BASES: [&str; 8] =
     ["observed_turn_active", "observed_wait", "observed_turn_end", "observed_idle", "observed_interrupt", "observed_inactive", "inferred_stall", "source_unavailable"];
-const ATTENTION_KINDS: [&str; 4] = ["waiting", "stalled", "collision", "turn_completed"];
+pub const ATTENTION_KINDS: [&str; 4] = ["waiting", "stalled", "collision", "turn_completed"];
 const REASON_CODES: [&str; 7] = ["input_requested", "approval_requested", "repeated_failure", "inactive_mid_turn", "recent_overlap", "turn_ended", "unknown"];
 pub const ERROR_CODES: [&str; 13] = [
     "NOT_AUTHORIZED",

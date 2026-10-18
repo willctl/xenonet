@@ -2355,6 +2355,7 @@ dependencies = [
  "tokio",
  "xenonet-actors",
  "xenonet-app",
+ "xenonet-assistant",
  "xenonet-base",
  "xenonet-components",
  "xenonet-doctor",

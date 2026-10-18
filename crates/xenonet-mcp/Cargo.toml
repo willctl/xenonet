@@ -37,6 +37,8 @@ xenonet-engine.workspace = true
 xenonet-schema.workspace = true
 xenonet-sources.workspace = true
 xenonet-state.workspace = true
+# The assistant's service, over made-up data for --fixture.
+xenonet-assistant.workspace = true
 
 # Whether a pid still runs (kill with signal 0), as process.kill(pid, 0).
 [target.'cfg(unix)'.dependencies]
