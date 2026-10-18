@@ -6,12 +6,11 @@
 use crate::args::JsArg;
 use crate::js::Json;
 use crate::machine::{start, AskCalls, Machine};
-use crate::peer::{rethrow, settle, SyncCalls};
+use crate::peer::{rethrow, settle, throw_with, SyncCalls};
 use crate::store::EngineStoreCore;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde_json::json;
-use std::ptr;
 use std::sync::Arc;
 use xenonet_actors::wake::{self, Fail, Wakes};
 use xenonet_engine::peer::Thrown;
@@ -19,25 +18,12 @@ use xenonet_engine::sql::Arg;
 
 /// A WakeError thrown for the twin: an Error marked xenonetWake, with its
 /// status and code.
-fn throw(env: &Env, f: Fail) -> Error {
+fn throw(env: Env, f: Fail) -> Error {
     match f {
-        Fail::Thrown(t) => rethrow(env, t),
+        Fail::Thrown(t) => rethrow(&env, t),
         Fail::Wake { status, code, message } => {
-            settle(env);
-            let raw = env.raw();
-            unsafe {
-                let mut msg = ptr::null_mut();
-                sys::napi_create_string_utf8(raw, message.as_ptr().cast(), message.len() as isize, &raw mut msg);
-                let mut err = ptr::null_mut();
-                sys::napi_create_error(raw, ptr::null_mut(), msg, &raw mut err);
-                for (k, v) in [(c"xenonetWake", json!(true)), (c"status", xenonet_base::json::number(status)), (c"code", json!(code))] {
-                    if let Ok(js) = crate::js::to_js(raw, &v, 0) {
-                        sys::napi_set_named_property(raw, err, k.as_ptr(), js);
-                    }
-                }
-                sys::napi_throw(raw, err);
-            }
-            Error::new(Status::PendingException, message)
+            settle(&env);
+            throw_with(&env, &message, &[(c"xenonetWake", json!(true)), (c"status", xenonet_base::json::number(status)), (c"code", json!(code))])
         }
     }
 }
@@ -48,7 +34,7 @@ fn done<T>(env: Env, r: wake::Result<T>) -> Result<T> {
             settle(&env);
             Ok(v)
         }
-        Err(f) => Err(throw(&env, f)),
+        Err(f) => Err(throw(env, f)),
     }
 }
 

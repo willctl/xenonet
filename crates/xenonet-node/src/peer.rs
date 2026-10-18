@@ -183,20 +183,33 @@ pub fn rethrow(env: &Env, t: Thrown) -> Error {
         unsafe { sys::napi_delete_reference(env.raw(), r) };
     }
     out.unwrap_or_else(|| {
-        unsafe {
-            let mut msg = ptr::null_mut();
-            sys::napi_create_string_utf8(env.raw(), t.message.as_ptr().cast(), t.message.len() as isize, &raw mut msg);
-            let mut err = ptr::null_mut();
-            sys::napi_create_error(env.raw(), ptr::null_mut(), msg, &raw mut err);
-            if let Some(c) = &t.code {
-                if let Ok(code) = crate::js::to_js(env.raw(), c, 0) {
-                    sys::napi_set_named_property(env.raw(), err, c"code".as_ptr(), code);
-                }
-            }
-            sys::napi_throw(env.raw(), err);
-        }
-        Error::new(Status::PendingException, t.message)
+        let code: Vec<_> = t.code.iter().map(|c| (c"code", (**c).clone())).collect();
+        throw_with(env, &t.message, &code)
     })
+}
+
+/// Throws `new Error(message)` with `fields` set on it, as the JS modules
+/// throw their own errors (a LinkError, an ActorError, …), and says so to
+/// napi-rs. A field JSON can't make is left off.
+pub fn throw_with(env: &Env, message: &str, fields: &[(&std::ffi::CStr, serde_json::Value)]) -> Error {
+    let raw = env.raw();
+    // SAFETY: raw is the env of the export under way, as every Env here
+    // is. msg, err and each js are handles made in it just above their
+    // use, message's pointer and length are its UTF-8 bytes, and each key
+    // is a NUL-terminated C string.
+    unsafe {
+        let mut msg = ptr::null_mut();
+        sys::napi_create_string_utf8(raw, message.as_ptr().cast(), message.len() as isize, &raw mut msg);
+        let mut err = ptr::null_mut();
+        sys::napi_create_error(raw, ptr::null_mut(), msg, &raw mut err);
+        for (k, v) in fields {
+            if let Ok(js) = crate::js::to_js(raw, v, 0) {
+                sys::napi_set_named_property(raw, err, k.as_ptr(), js);
+            }
+        }
+        sys::napi_throw(raw, err);
+    }
+    Error::new(Status::PendingException, message.to_string())
 }
 
 /// The values kept for the call under way let go, once it's done.

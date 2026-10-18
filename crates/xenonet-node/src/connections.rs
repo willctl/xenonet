@@ -5,40 +5,26 @@
 
 use crate::args::JsArg;
 use crate::js::Json;
-use crate::peer::{rethrow, settle, SyncCalls};
+use crate::peer::{rethrow, settle, throw_with, SyncCalls};
 use crate::store::EngineStoreCore;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde_json::{json, Value};
-use std::ptr;
 use std::sync::Arc;
 use xenonet_actors::connections::{self as conn, Connections, Fail};
 
 /// A refusal thrown for the twin: an Error marked as a ConnectionError or
 /// a LinkError, with its status, code and extra fields.
-fn throw(env: &Env, f: Fail) -> Error {
+fn throw(env: Env, f: Fail) -> Error {
     let (message, fields): (String, Vec<(&std::ffi::CStr, Value)>) = match f {
-        Fail::Thrown(t) => return rethrow(env, t),
+        Fail::Thrown(t) => return rethrow(&env, t),
         Fail::Connection { status, code, message, extra } => {
             (message, vec![(c"xenonetConnection", json!(true)), (c"status", xenonet_base::json::number(status)), (c"code", json!(code)), (c"extra", extra)])
         }
         Fail::Link { code, message } => (message, vec![(c"xenonetLink", json!(true)), (c"code", json!(code))]),
     };
-    settle(env);
-    let raw = env.raw();
-    unsafe {
-        let mut msg = ptr::null_mut();
-        sys::napi_create_string_utf8(raw, message.as_ptr().cast(), message.len() as isize, &raw mut msg);
-        let mut err = ptr::null_mut();
-        sys::napi_create_error(raw, ptr::null_mut(), msg, &raw mut err);
-        for (k, v) in fields {
-            if let Ok(js) = crate::js::to_js(raw, &v, 0) {
-                sys::napi_set_named_property(raw, err, k.as_ptr(), js);
-            }
-        }
-        sys::napi_throw(raw, err);
-    }
-    Error::new(Status::PendingException, message)
+    settle(&env);
+    throw_with(&env, &message, &fields)
 }
 
 fn done<T>(env: Env, r: conn::Result<T>) -> Result<T> {
@@ -47,7 +33,7 @@ fn done<T>(env: Env, r: conn::Result<T>) -> Result<T> {
             settle(&env);
             Ok(v)
         }
-        Err(f) => Err(throw(&env, f)),
+        Err(f) => Err(throw(env, f)),
     }
 }
 

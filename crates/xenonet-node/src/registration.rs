@@ -5,13 +5,11 @@
 
 use crate::args::JsArg;
 use crate::js::Json;
-use crate::peer::{rethrow, settle, SyncCalls};
+use crate::peer::{rethrow, settle, throw_with, SyncCalls};
 use napi::bindgen_prelude::*;
-use napi::sys;
 use napi_derive::napi;
 use serde_json::{json, Value};
 use std::cell::RefCell;
-use std::ptr;
 use xenonet_actors::registration::{self, ActorError, Fail, Registration};
 
 #[napi(js_name = "registrationConstants")]
@@ -34,32 +32,16 @@ pub fn token_expired(at: Option<f64>, t: f64) -> bool {
 
 /// An ActorError thrown for the twin: an Error marked xenonetActor, with
 /// its status, code and extra fields.
-pub fn throw_actor(env: &Env, e: &ActorError) -> Error {
-    let env_raw = env.raw();
-    unsafe {
-        let mut msg = ptr::null_mut();
-        sys::napi_create_string_utf8(env_raw, e.message.as_ptr().cast(), e.message.len() as isize, &raw mut msg);
-        let mut err = ptr::null_mut();
-        sys::napi_create_error(env_raw, ptr::null_mut(), msg, &raw mut err);
-        let set = |k: &std::ffi::CStr, v: &Value| {
-            if let Ok(js) = crate::js::to_js(env_raw, v, 0) {
-                sys::napi_set_named_property(env_raw, err, k.as_ptr(), js);
-            }
-        };
-        set(c"xenonetActor", &json!(true));
-        set(c"status", &xenonet_base::json::number(e.status));
-        set(c"code", &json!(e.code));
-        set(c"extra", &e.extra);
-        sys::napi_throw(env_raw, err);
-    }
-    Error::new(Status::PendingException, e.message.clone())
+pub fn throw_actor(env: Env, e: &ActorError) -> Error {
+    let fields = [(c"xenonetActor", json!(true)), (c"status", xenonet_base::json::number(e.status)), (c"code", json!(e.code)), (c"extra", e.extra.clone())];
+    throw_with(&env, &e.message, &fields)
 }
 
 pub fn fail(env: Env, f: Fail) -> Error {
     match f {
         Fail::Actor(e) => {
             settle(&env);
-            throw_actor(&env, &e)
+            throw_actor(env, &e)
         }
         Fail::Thrown(t) => rethrow(&env, t),
     }

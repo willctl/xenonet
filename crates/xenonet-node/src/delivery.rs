@@ -3,11 +3,10 @@
 //! policy's clock, limits and files are called through the twin.
 
 use crate::args::JsArg;
-use crate::peer::{rethrow, settle, SyncCalls};
+use crate::peer::{rethrow, settle, throw_with, SyncCalls};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use std::cell::RefCell;
-use std::ptr;
 use xenonet_engine::delivery::policy::{self, Fail, Policy};
 use xenonet_engine::delivery::selector::{self, Selector};
 use xenonet_engine::delivery::usage;
@@ -90,26 +89,13 @@ pub fn policy_text_for(text: JsArg, sender: JsArg, sender_facts: JsArg, recipien
 
 /// A refusal thrown as the JS threw it: an Error with its code and status
 /// 429; an Error with its sentence; or what a collaborator threw.
-fn throw(env: &Env, f: Fail) -> Error {
+fn throw(env: Env, f: Fail) -> Error {
     match f {
-        Fail::Thrown(t) => rethrow(env, t),
-        Fail::Error(message) => rethrow(env, Thrown::new(message)),
+        Fail::Thrown(t) => rethrow(&env, t),
+        Fail::Error(message) => rethrow(&env, Thrown::new(message)),
         Fail::Refused { why, code } => {
-            settle(env);
-            let raw = env.raw();
-            unsafe {
-                let mut msg = ptr::null_mut();
-                sys::napi_create_string_utf8(raw, why.as_ptr().cast(), why.len() as isize, &raw mut msg);
-                let mut err = ptr::null_mut();
-                sys::napi_create_error(raw, ptr::null_mut(), msg, &raw mut err);
-                for (k, v) in [(c"code", serde_json::json!(code)), (c"status", serde_json::json!(429))] {
-                    if let Ok(js) = crate::js::to_js(raw, &v, 0) {
-                        sys::napi_set_named_property(raw, err, k.as_ptr(), js);
-                    }
-                }
-                sys::napi_throw(raw, err);
-            }
-            Error::new(Status::PendingException, why)
+            settle(&env);
+            throw_with(&env, &why, &[(c"code", serde_json::json!(code)), (c"status", serde_json::json!(429))])
         }
     }
 }
@@ -136,7 +122,7 @@ impl PolicyCore {
                 settle(&env);
                 Ok(v)
             }
-            Err(e) => Err(throw(&env, e)),
+            Err(e) => Err(throw(env, e)),
         }
     }
 }
