@@ -277,7 +277,10 @@ async function startServer() {
   serviceBin = rustBinary({ root: fromSource ? root : null, serviceRoot });
   if (!serviceBin) throw new Error(missingBinary({ fromSource }));
   serviceEnv = env;
-  const how = await ensureService({ root: serviceRoot, exec: serviceBin, args: ["serve"], env });
+  // From a checkout, the service has the dev instances' routes
+  // (/api/dev/simulate and capture) unless --prod is passed, as the JS
+  // server it replaces had.
+  const how = await ensureService({ root: serviceRoot, exec: serviceBin, args: ["serve", ...(dev ? ["--dev"] : [])], env });
   serviceClient = await desktopClient({ env, handle: (method, body) => {
     if (method === "open") return openTarget(body?.target);
     if (method !== "console") throw new Error("Unsupported Desktop request.");
