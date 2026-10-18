@@ -179,6 +179,51 @@ fn identities_read_again_without_waiting_on_themselves() {
     assert_eq!(rx.recv_timeout(Duration::from_secs(60)), Ok(true), "the repos' passes never ended, or found no identity");
 }
 
+// The repos' pass while the blocks' health, the identities and the map are
+// asked for from other threads, as /api/health, the doctor and a refresh
+// ask for them: one lock order everywhere, or this never ends.
+#[test]
+fn identities_read_while_their_health_and_the_map_are_asked_for() {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build().expect("a runtime");
+        rt.block_on(async {
+            let w = world();
+            let s = w.state.clone();
+            s.refresh_map().await.expect("a map");
+            let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let mut askers = Vec::new();
+            for _ in 0..3 {
+                let (s, stop) = (s.clone(), stop.clone());
+                askers.push(tokio::task::spawn_blocking(move || {
+                    while !stop.load(Ordering::SeqCst) {
+                        let _ = s.blocks();
+                        let _ = s.identity_detection();
+                    }
+                }));
+            }
+            let mapper = {
+                let s = s.clone();
+                tokio::spawn(async move {
+                    for _ in 0..5 {
+                        let _ = s.refresh_map().await;
+                    }
+                })
+            };
+            for _ in 0..20 {
+                s.refresh_repos().await;
+            }
+            let _ = mapper.await;
+            stop.store(true, Ordering::SeqCst);
+            for a in askers {
+                let _ = a.await;
+            }
+            let _ = tx.send(true);
+        });
+    });
+    assert_eq!(rx.recv_timeout(Duration::from_secs(90)), Ok(true), "the passes and the asks never ended");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn identities_named_hidden_pinned_and_found_again() {
     let w = world();
