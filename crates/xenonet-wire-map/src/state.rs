@@ -99,6 +99,8 @@ pub struct MapState {
     codex_threads: Arc<Gather>,
     codex_projects: Arc<Gather>,
     pub runs: Mutex<ReportedRuns>,
+    /// The native readers and numbat's, when they're on.
+    observed: Vec<Arc<crate::observed::Observed>>,
     inner: Mutex<Inner>,
     refreshing: Mutex<Option<watch::Receiver<Done>>>,
     repo_pass: tokio::sync::Mutex<()>,
@@ -187,6 +189,7 @@ impl MapState {
             codex_threads,
             codex_projects,
             runs: Mutex::new(ReportedRuns::new()),
+            observed: crate::observed::Observed::all(&cfg, &vendor),
             inner: Mutex::new(Inner { map: Map_ { sources: json!([]), ..Default::default() }, memory: Memory::new(), projects_dir, demo_titles: Vec::new(), repo_pass_for: None }),
             refreshing: Mutex::new(None),
             repo_pass: tokio::sync::Mutex::new(()),
@@ -219,6 +222,9 @@ impl MapState {
         }
         if let Some(i) = state.identities.clone() {
             let _ = b.add(i, Some("identities"));
+        }
+        for o in &state.observed {
+            let _ = b.add(o.clone(), Some(o.source));
         }
         let _ = b.add(state.repos.clone(), None);
         let _ = b.add(state.projects_scan.clone(), Some("projects"));
@@ -367,6 +373,9 @@ impl MapState {
         // Keep the previous sessions for a source that failed this round, so
         // a transient error doesn't make half the graph vanish.
         let prev: Vec<Value> = self.all_nodes().into_iter().filter(|n| s(n, "kind") == Some("session")).collect();
+        // Observed runs, unless XenoNet reads the same run itself.
+        let readers = self.observed.clone();
+        crate::util::blocking(move || readers.iter().for_each(|o| o.read())).await;
         let observed = self.observed_sessions();
         let titles: HashMap<String, Value> = lock(&self.inner).demo_titles.iter().cloned().collect();
         let ok = |st: &Value| st.get("ok") == Some(&Value::Bool(true));
@@ -482,6 +491,7 @@ impl MapState {
         let live = lock(&self.live.status).clone();
         let search = self.search.status_json();
         let mut sources = vec![projects_st, codex_st, native_st, claude_st];
+        sources.extend(self.observed.iter().map(|o| o.status()));
         sources.push(json!({ "name": "live", "ok": live.watching, "count": live.files }));
         let mut wiki_st = json!({ "name": "wiki", "ok": wiki.is_some(), "count": wiki.as_ref().map_or(0, |w| items(w.get("pages")).len()) });
         if wiki.is_none() {
@@ -523,7 +533,12 @@ impl MapState {
     /// actors report (the native readers and numbat are the JS service's
     /// for now).
     fn observed_sessions(&self) -> Vec<Value> {
-        lock(&self.runs).sessions(now_ms()).iter().filter_map(crate::util::native_out).collect()
+        let mut all: Vec<Value> = self.observed.iter().flat_map(|o| o.sessions()).collect();
+        all.extend(lock(&self.runs).sessions(now_ms()).iter().filter_map(crate::util::native_out));
+        // One session per id: the first source to list it wins.
+        let ids: Vec<Option<Value>> = all.iter().map(|x| x.get("id").cloned()).collect();
+        let first = xenonet_sources::reported_runs::firsts(&ids);
+        all.into_iter().zip(first).filter(|(_, f)| *f).map(|(x, _)| x).collect()
     }
 
     // A sign-in that changed since the last refresh goes to the activity
@@ -1373,6 +1388,9 @@ impl MapState {
     // A run an actor reported, or another observed one, as the engine reads
     // a live session.
     fn observed(&self, id: &str, now: f64) -> Option<Value> {
+        if let Some(l) = self.observed.iter().find_map(|o| o.live(id)) {
+            return Some(l);
+        }
         let runs = lock(&self.runs);
         let r = runs.runs.get(id)?;
         let st = runs.status_of(id, r.serial, (r.ended_at, r.updated_at), now);

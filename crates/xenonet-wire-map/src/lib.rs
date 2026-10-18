@@ -16,6 +16,7 @@ pub mod git;
 pub mod identities;
 pub mod live;
 pub mod narrate;
+pub mod observed;
 pub mod projects;
 pub mod schemas;
 pub mod sdk;
