@@ -4,6 +4,8 @@
 // already serves left alone, a child tunnel's address learned from its
 // output and started again when it exits.
 
+#![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
+
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;

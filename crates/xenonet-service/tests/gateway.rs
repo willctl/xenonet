@@ -3,6 +3,8 @@
 // to the Rust gateway with the same stand-ins for its cores, and the answer
 // compared byte for byte (status, the headers that matter, the body).
 
+#![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
+
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;

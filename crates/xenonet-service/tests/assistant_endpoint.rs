@@ -3,6 +3,8 @@
 // credential and nothing else, then assistant.read and nothing else; its
 // descriptor written while it listens, and gone when it stops.
 
+#![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
+
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};

@@ -3,6 +3,8 @@
 // address checked on this computer alone (as XENONET_GATEWAY_PROBE=local
 // checks it), the settings kept, a tunnel it doesn't know refused, and off.
 
+#![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
+
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
