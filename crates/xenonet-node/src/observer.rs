@@ -24,9 +24,9 @@ pub struct ObserverCore {
     inner: Arc<Observer>,
 }
 
-fn done<T>(env: &Env, r: xenonet_engine::peer::Result<T>) -> Result<T> {
-    let out = r.map_err(|t| rethrow(env, t));
-    settle(env);
+fn done<T>(env: Env, r: xenonet_engine::peer::Result<T>) -> Result<T> {
+    let out = r.map_err(|t| rethrow(&env, t));
+    settle(&env);
     out
 }
 
@@ -35,6 +35,10 @@ fn s(a: &Arg) -> String {
 }
 
 #[napi]
+// On the impl, not the methods: napi-derive copies a method's attributes
+// onto the two-argument wrapper it generates for it, and an expectation
+// there goes unfulfilled.
+#[expect(clippy::unused_self, reason = "mayLook is a method of the JS class, as it was in the JS, though it asks only `me`")]
 impl ObserverCore {
     #[napi(constructor)]
     pub fn new() -> Self {
@@ -42,32 +46,32 @@ impl ObserverCore {
     }
 
     #[napi]
-    pub fn keep(&self, env: Env, me: Object, id: JsArg, o: JsArg) -> Result<()> {
-        done(&env, self.inner.keep(&mut SyncCalls::new(&env, &me), &s(&id.0), &o.0))
+    pub fn keep(&self, env: Env, me: Object<'_>, id: JsArg, o: JsArg) -> Result<()> {
+        done(env, self.inner.keep(&mut SyncCalls::new(&env, &me), &s(&id.0), &o.0))
     }
     #[napi]
-    pub fn say(&self, env: Env, me: Object, id: JsArg, o: JsArg) -> Result<bool> {
-        done(&env, self.inner.say(&mut SyncCalls::new(&env, &me), &s(&id.0), &o.0))
+    pub fn say(&self, env: Env, me: Object<'_>, id: JsArg, o: JsArg) -> Result<bool> {
+        done(env, self.inner.say(&mut SyncCalls::new(&env, &me), &s(&id.0), &o.0))
     }
     #[napi]
-    pub fn happened(&self, env: Env, me: Object, id: JsArg, o: JsArg) -> Result<JsArg> {
-        done(&env, self.inner.happened(&mut SyncCalls::new(&env, &me), &s(&id.0), &o.0)).map(JsArg)
+    pub fn happened(&self, env: Env, me: Object<'_>, id: JsArg, o: JsArg) -> Result<JsArg> {
+        done(env, self.inner.happened(&mut SyncCalls::new(&env, &me), &s(&id.0), &o.0)).map(JsArg)
     }
     #[napi]
     pub fn gather(&self, id: JsArg, o: JsArg) {
         self.inner.gather(&s(&id.0), &o.0);
     }
     #[napi]
-    pub fn flush(&self, env: Env, me: Object, now: JsArg) -> Result<()> {
-        done(&env, self.inner.flush(&mut SyncCalls::new(&env, &me), &now.0))
+    pub fn flush(&self, env: Env, me: Object<'_>, now: JsArg) -> Result<()> {
+        done(env, self.inner.flush(&mut SyncCalls::new(&env, &me), &now.0))
     }
     #[napi]
-    pub fn touch(&self, env: Env, me: Object, id: JsArg, node: JsArg, relation: JsArg, at: JsArg) -> Result<()> {
-        done(&env, self.inner.touch(&mut SyncCalls::new(&env, &me), &s(&id.0), &node.0, &relation.0, &at.0))
+    pub fn touch(&self, env: Env, me: Object<'_>, id: JsArg, node: JsArg, relation: JsArg, at: JsArg) -> Result<()> {
+        done(env, self.inner.touch(&mut SyncCalls::new(&env, &me), &s(&id.0), &node.0, &relation.0, &at.0))
     }
     #[napi(js_name = "mayLook")]
-    pub fn may_look(&self, env: Env, me: Object) -> Result<bool> {
-        done(&env, Observer::may_look(&mut SyncCalls::new(&env, &me)))
+    pub fn may_look(&self, env: Env, me: Object<'_>) -> Result<bool> {
+        done(env, Observer::may_look(&mut SyncCalls::new(&env, &me)))
     }
     /// One look, as a machine: the observer's look(at), then flush, ok or
     /// problem, through the observer.

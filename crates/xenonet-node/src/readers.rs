@@ -130,7 +130,7 @@ impl JsProjectScan {
 
     /// { projects, folders, groups, count }.
     #[napi]
-    pub fn finish(&mut self, env: &Env, sessions: Json, max_submodules: MaybeJson, now: f64) -> Result<Jv> {
+    pub fn finish(&mut self, env: Env, sessions: Json, max_submodules: MaybeJson, now: f64) -> Result<Jv> {
         let sessions = match sessions.0 {
             Value::Array(a) => a,
             _ => Vec::new(),
@@ -150,7 +150,7 @@ impl JsProjectScan {
 
 /// { parentOf: [[key, parent]…], sameRemote: [[a, b]…] }.
 #[napi(js_name = "projectRelations")]
-pub fn project_relations(env: &Env, projects: Json) -> Result<Jv> {
+pub fn project_relations(env: Env, projects: Json) -> Result<Jv> {
     let Value::Array(ps) = projects.0 else {
         return thrown(env, xenonet_sources::lines::TypeError("projects.filter is not a function".into()));
     };
@@ -196,7 +196,7 @@ pub fn codex_request_timeout_ms() -> f64 {
 
 /// { parent, nickname, kind }
 #[napi(js_name = "codexSubAgentOf")]
-pub fn codex_sub_agent_of(env: &Env, t: MaybeJson) -> Result<Jv> {
+pub fn codex_sub_agent_of(env: Env, t: MaybeJson) -> Result<Jv> {
     match codex::sub_agent_of(t.0.as_ref()) {
         Ok((parent, nickname, kind)) => Ok(Jv::Obj(vec![("parent", Jv::Json(parent)), ("nickname", Jv::Json(nickname)), ("kind", Jv::Json(kind))])),
         Err(e) => thrown(env, e),
@@ -204,13 +204,13 @@ pub fn codex_sub_agent_of(env: &Env, t: MaybeJson) -> Result<Jv> {
 }
 
 #[napi(js_name = "codexThreadToSession")]
-pub fn codex_thread_to_session(env: &Env, t: MaybeJson, archived: bool) -> Result<Jv> {
+pub fn codex_thread_to_session(env: Env, t: MaybeJson, archived: bool) -> Result<Jv> {
     codex::thread_to_session(t.0.as_ref(), archived).map(obj).or_else(|e| thrown(env, e))
 }
 
 /// A page of the app-server's items, oldest first.
 #[napi(js_name = "codexNormalizeItems")]
-pub fn codex_normalize_items(env: &Env, data: MaybeJson) -> Result<Jv> {
+pub fn codex_normalize_items(env: Env, data: MaybeJson) -> Result<Jv> {
     codex::normalize_items(data.0.as_ref()).map(objs).or_else(|e| thrown(env, e))
 }
 
@@ -228,14 +228,13 @@ pub struct JsRolloutEntries {
 #[napi]
 impl JsRolloutEntries {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsRolloutEntries { e: codex::RolloutEntries::default() }
     }
 
     /// A line's record, as lines.js read it.
     #[napi]
-    pub fn add(&mut self, env: &Env, raw: MaybeJson) -> Result<()> {
+    pub fn add(&mut self, env: Env, raw: MaybeJson) -> Result<()> {
         self.e.add(raw.0.unwrap_or(Value::Null)).or_else(|e| thrown(env, e))
     }
 
@@ -258,7 +257,6 @@ pub struct JsCodexStdout {
 #[napi]
 impl JsCodexStdout {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsCodexStdout { io: codex::Stdout::default() }
     }
@@ -293,7 +291,6 @@ pub struct JsCodexStderr {
 #[napi]
 impl JsCodexStderr {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsCodexStderr { io: codex::Stderr::default() }
     }
@@ -339,7 +336,7 @@ pub fn codex_read_state_db(file: String) -> Jv {
 }
 
 #[napi(js_name = "codexNativeProjects")]
-pub fn codex_native_projects(env: &Env, rows: MaybeJson) -> Result<Jv> {
+pub fn codex_native_projects(env: Env, rows: MaybeJson) -> Result<Jv> {
     codex::native_projects(rows.0.as_ref()).map(objs).or_else(|e| thrown(env, e))
 }
 
@@ -379,7 +376,7 @@ pub fn claude_desktop_index(records: Json) -> Jv {
 }
 
 #[napi(js_name = "claudeSessions")]
-pub fn claude_sessions(env: &Env, listed: Json, desktop: Json) -> Result<Jv> {
+pub fn claude_sessions(env: Env, listed: Json, desktop: Json) -> Result<Jv> {
     let listed = match listed.0 {
         Value::Array(a) => a,
         _ => Vec::new(),
@@ -399,7 +396,7 @@ pub fn claude_page(len: f64, cursor: MaybeJson, limit: f64) -> Jv {
 }
 
 #[napi(js_name = "claudeEntries")]
-pub fn claude_entries(env: &Env, messages: Json) -> Result<Jv> {
+pub fn claude_entries(env: Env, messages: Json) -> Result<Jv> {
     let ms = match messages.0 {
         Value::Array(a) => a,
         _ => Vec::new(),
@@ -489,7 +486,7 @@ pub fn id_parse_git_config(out: String) -> Json {
 }
 
 #[napi(js_name = "idPushAccount")]
-pub fn id_push_account(env: &Env, url: MaybeJson, cfg: MaybeJson, aliases: Json) -> Result<Json> {
+pub fn id_push_account(env: Env, url: MaybeJson, cfg: MaybeJson, aliases: Json) -> Result<Json> {
     identities::push_account(url.0.as_ref(), cfg.0.as_ref(), &pairs(&aliases.0)).map(Json).or_else(|e| thrown(env, e))
 }
 
@@ -547,7 +544,7 @@ pub fn id_claude_id(account: String, org: String) -> String {
 /// From { nodes, links, accounts, ssh, repos, owners, saved, home, now }:
 /// { ranAs, links, identities, signins, known, dirty }.
 #[napi(js_name = "idLinkIdentities")]
-pub fn id_link_identities(env: &Env, input: Json) -> Result<Jv> {
+pub fn id_link_identities(env: Env, input: Json) -> Result<Jv> {
     let mut m = match input.0 {
         Value::Object(m) => m,
         _ => serde_json::Map::new(),

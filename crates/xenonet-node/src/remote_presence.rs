@@ -20,6 +20,10 @@ pub struct RemotePresenceCore {
 }
 
 #[napi]
+// On the impl, not the methods: napi-derive copies a method's attributes
+// onto the two-argument wrapper it generates for it, and an expectation
+// there goes unfulfilled.
+#[expect(clippy::too_many_arguments, reason = "read takes the twin's arguments one by one, as the JS method did")]
 impl RemotePresenceCore {
     #[napi(constructor)]
     pub fn new() -> Self {
@@ -28,8 +32,7 @@ impl RemotePresenceCore {
 
     /// A read went out: `deps` has the actors and onRead.
     #[napi]
-    #[allow(clippy::too_many_arguments)]
-    pub fn read(&self, env: Env, deps: Object, actor_id: JsArg, connection_id: JsArg, targets: JsArg, reach: JsArg, at: f64, on_read: bool) -> Result<()> {
+    pub fn read(&self, env: Env, deps: Object<'_>, actor_id: JsArg, connection_id: JsArg, targets: JsArg, reach: JsArg, at: f64, on_read: bool) -> Result<()> {
         let mut p = self.inner.try_borrow_mut().map_err(|_| Error::new(Status::GenericFailure, "the remote presence was asked again while it was busy".to_string()))?;
         let out = p.read(&mut SyncCalls::new(&env, &deps), &actor_id.0, &connection_id.0, &list(targets.0), &list(reach.0), at, on_read);
         let out = out.map_err(|t| rethrow(&env, t));

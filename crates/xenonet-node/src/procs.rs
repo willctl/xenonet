@@ -128,7 +128,7 @@ pub fn parse_netstat(text: String, local_port: MaybeJson, remote_port: MaybeJson
 
 #[napi(js_name = "procsSelfTest")]
 pub fn self_test(me: f64, peer: Option<f64>, first: MaybeJson) -> Json {
-    let first = first.0.filter(|v| v.is_object());
+    let first = first.0.filter(Value::is_object);
     let at = first.as_ref().map(|f| (f.get("pid").and_then(Value::as_f64).unwrap_or(f64::NAN), f.get("exe")));
     let (peer, chain, exe) = procs::self_test(me, peer, at);
     Json(json!({ "supported": true, "peer": peer, "chain": chain, "exe": exe }))
@@ -142,7 +142,7 @@ pub struct ProcsCore {
 
 fn run<F>(p: &Arc<Procs>, f: F) -> Machine
 where
-    F: FnOnce(&Procs, &mut Bridged) -> Result<Jv, String> + Send + 'static,
+    F: FnOnce(&Procs, &mut Bridged<'_>) -> Result<Jv, String> + Send + 'static,
 {
     let p = p.clone();
     start(move |asker| f(&p, &mut Bridged(asker)).map_err(Into::into))
@@ -233,7 +233,8 @@ impl ProcsCore {
         let p = p.0.unwrap_or(Value::Null);
         run(&self.inner, move |procs, io| {
             let agent = p.get("agent").and_then(Value::as_str);
-            let product = p.get("product").filter(|v| v.is_object()).map(|v| (v.get("product").and_then(Value::as_str).unwrap_or(""), v.get("role").and_then(Value::as_str).unwrap_or("")));
+            let product =
+                p.get("product").filter(|v| v.is_object()).map(|v| (v.get("product").and_then(Value::as_str).unwrap_or(""), v.get("role").and_then(Value::as_str).unwrap_or("")));
             Ok(Jv::Bool(procs.signed(io, p.get("pid"), p.get("start"), p.get("program"), agent, product)))
         })
     }

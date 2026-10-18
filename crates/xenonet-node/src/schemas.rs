@@ -31,30 +31,39 @@ pub struct CheckData(Data);
 // This realm's Object.prototype, which a plain object has for its own.
 unsafe fn object_prototype(env: sys::napi_env) -> Result<sys::napi_value> {
     let mut global = ptr::null_mut();
-    ok(unsafe { sys::napi_get_global(env, &mut global) }, "find the globals")?;
+    // SAFETY: env is the call's; napi writes to the local `global`.
+    ok(unsafe { sys::napi_get_global(env, &raw mut global) }, "find the globals")?;
+    // SAFETY: env and `global` are the call's, the name is NUL-terminated.
     let object = unsafe { named(env, global, c"Object")? };
+    // SAFETY: env and `object` are the call's, the name is NUL-terminated.
     unsafe { named(env, object, c"prototype") }
 }
 
 unsafe fn named(env: sys::napi_env, v: sys::napi_value, name: &std::ffi::CStr) -> Result<sys::napi_value> {
     let mut out = ptr::null_mut();
-    ok(unsafe { sys::napi_get_named_property(env, v, name.as_ptr(), &mut out) }, "read a property")?;
+    // SAFETY: env and `v` are the call's, the name is NUL-terminated; napi
+    // writes to the local `out`.
+    ok(unsafe { sys::napi_get_named_property(env, v, name.as_ptr(), &raw mut out) }, "read a property")?;
     Ok(out)
 }
 
 unsafe fn truthy(env: sys::napi_env, v: sys::napi_value) -> Result<bool> {
     let mut b = ptr::null_mut();
-    ok(unsafe { sys::napi_coerce_to_bool(env, v, &mut b) }, "tell truthiness")?;
+    // SAFETY: env and `v` are the call's; napi writes to the local `b`.
+    ok(unsafe { sys::napi_coerce_to_bool(env, v, &raw mut b) }, "tell truthiness")?;
+    // SAFETY: env and `b` are the call's.
     unsafe { bool::from_napi_value(env, b) }
 }
 
 // An object to zod's isObject: typeof "object", not null, not an array.
 unsafe fn is_object(env: sys::napi_env, v: sys::napi_value) -> Result<bool> {
+    // SAFETY: env and `v` are the call's.
     if unsafe { type_of(env, v)? } != sys::ValueType::napi_object {
         return Ok(false);
     }
     let mut is = false;
-    ok(unsafe { sys::napi_is_array(env, v, &mut is) }, "tell an array")?;
+    // SAFETY: env and `v` are the call's; napi writes to the local `is`.
+    ok(unsafe { sys::napi_is_array(env, v, &raw mut is) }, "tell an array")?;
     Ok(!is)
 }
 
@@ -64,27 +73,40 @@ unsafe fn is_object(env: sys::napi_env, v: sys::napi_value) -> Result<bool> {
 // isPrototypeOf, as Object's has).
 unsafe fn class_of(env: sys::napi_env, v: sys::napi_value) -> Result<(Option<String>, bool)> {
     let mut has = false;
-    ok(unsafe { sys::napi_has_named_property(env, v, c"constructor".as_ptr(), &mut has) }, "look for a constructor")?;
+    // SAFETY: env and `v` are the call's, the name is NUL-terminated; napi
+    // writes to the local `has`.
+    ok(unsafe { sys::napi_has_named_property(env, v, c"constructor".as_ptr(), &raw mut has) }, "look for a constructor")?;
+    // SAFETY: env and `v` are the call's, the name is NUL-terminated.
     let ctor = unsafe { named(env, v, c"constructor")? };
     let mut class = None;
+    // SAFETY: env and `ctor` are the call's.
     if has && unsafe { truthy(env, ctor)? } {
+        // SAFETY: env and `ctor` are the call's, the name is NUL-terminated.
         let name = unsafe { named(env, ctor, c"name")? };
         let mut text = name;
+        // SAFETY: env and `name` are the call's.
         if unsafe { type_of(env, name)? } != sys::ValueType::napi_string {
-            ok(unsafe { sys::napi_coerce_to_string(env, name, &mut text) }, "name a constructor")?;
+            // SAFETY: env and `name` are the call's; napi writes to the local `text`.
+            ok(unsafe { sys::napi_coerce_to_string(env, name, &raw mut text) }, "name a constructor")?;
         }
+        // SAFETY: env and `text` are the call's.
         class = Some(unsafe { String::from_napi_value(env, text)? });
     }
+    // SAFETY: env and `ctor` are the call's.
     let plain = if unsafe { type_of(env, ctor)? } != sys::ValueType::napi_function {
         true
     } else {
+        // SAFETY: env and `ctor` are the call's, the name is NUL-terminated.
         let proto = unsafe { named(env, ctor, c"prototype")? };
+        // SAFETY: env and `proto` are the call's.
         if !unsafe { is_object(env, proto)? } {
             false
         } else {
+            // SAFETY: env is the call's.
             let key = unsafe { String::to_napi_value(env, "isPrototypeOf".to_string())? };
             let mut own = false;
-            ok(unsafe { sys::napi_has_own_property(env, proto, key, &mut own) }, "look at a prototype")?;
+            // SAFETY: env, `proto` and `key` are the call's; napi writes to the local `own`.
+            ok(unsafe { sys::napi_has_own_property(env, proto, key, &raw mut own) }, "look at a prototype")?;
             own
         }
     };
@@ -99,32 +121,40 @@ struct Reader {
 }
 
 unsafe fn read(env: sys::napi_env, v: sys::napi_value, r: &mut Reader) -> Result<Data> {
-    use sys::ValueType::*;
+    use sys::ValueType::{napi_boolean, napi_function, napi_null, napi_number, napi_object, napi_string, napi_symbol, napi_undefined};
     if r.inside.len() > MAX_DEPTH {
         return Err(Error::new(Status::InvalidArg, "a value nested too deeply".to_string()));
     }
+    // SAFETY: env and `v` are the call's.
     let t = unsafe { type_of(env, v)? };
     Ok(match t {
         _ if t == napi_undefined => Data::Undefined,
         _ if t == napi_null => Data::Null,
+        // SAFETY: env and `v` are the call's.
         _ if t == napi_boolean => Data::Bool(unsafe { bool::from_napi_value(env, v)? }),
+        // SAFETY: env and `v` are the call's.
         _ if t == napi_number => Data::Num(unsafe { f64::from_napi_value(env, v)? }),
+        // SAFETY: env and `v` are the call's.
         _ if t == napi_string => Data::Str(unsafe { String::from_napi_value(env, v)? }),
         _ if t == napi_symbol => Data::Other("symbol"),
+        // SAFETY: env and `v` are the call's, and so is the length read from it.
         _ if t == napi_function => Data::Fn(unsafe { f64::from_napi_value(env, named(env, v, c"length")?)? }),
         // napi_bigint
         9 => Data::Other("bigint"),
         _ if t == napi_object => {
             let mut is = false;
-            ok(unsafe { sys::napi_is_array(env, v, &mut is) }, "tell an array")?;
+            // SAFETY: env and `v` are the call's; napi writes to the local `is`.
+            ok(unsafe { sys::napi_is_array(env, v, &raw mut is) }, "tell an array")?;
             let mut again = false;
             for outer in &r.inside {
-                ok(unsafe { sys::napi_strict_equals(env, *outer, v, &mut again) }, "compare objects")?;
+                // SAFETY: env, `outer` and `v` are the call's; napi writes to the local `again`.
+                ok(unsafe { sys::napi_strict_equals(env, *outer, v, &raw mut again) }, "compare objects")?;
                 if again {
                     break;
                 }
             }
             r.inside.push(v);
+            // SAFETY: env and `v` are the call's.
             let read = if is { unsafe { read_array(env, v, r, again)? } } else { unsafe { read_object(env, v, r, again)? } };
             r.inside.pop();
             read
@@ -139,11 +169,14 @@ unsafe fn read_array(env: sys::napi_env, v: sys::napi_value, r: &mut Reader, aga
         return Ok(Data::Arr(Vec::new()));
     }
     let mut n = 0u32;
-    ok(unsafe { sys::napi_get_array_length(env, v, &mut n) }, "read an array's length")?;
+    // SAFETY: env and `v` are the call's; napi writes to the local `n`.
+    ok(unsafe { sys::napi_get_array_length(env, v, &raw mut n) }, "read an array's length")?;
     let mut a = Vec::with_capacity(n as usize);
     for i in 0..n {
         let mut item = ptr::null_mut();
-        ok(unsafe { sys::napi_get_element(env, v, i, &mut item) }, "read an array")?;
+        // SAFETY: env and `v` are the call's; napi writes to the local `item`.
+        ok(unsafe { sys::napi_get_element(env, v, i, &raw mut item) }, "read an array")?;
+        // SAFETY: env and `item` are the call's.
         a.push(unsafe { read(env, item, r)? });
     }
     Ok(Data::Arr(a))
@@ -155,10 +188,13 @@ unsafe fn read_array(env: sys::napi_env, v: sys::napi_value, r: &mut Reader, aga
 unsafe fn read_object(env: sys::napi_env, v: sys::napi_value, r: &mut Reader, again: bool) -> Result<Data> {
     let mut o = Object::new();
     let mut proto = ptr::null_mut();
-    ok(unsafe { sys::napi_get_prototype(env, v, &mut proto) }, "find a prototype")?;
+    // SAFETY: env and `v` are the call's; napi writes to the local `proto`.
+    ok(unsafe { sys::napi_get_prototype(env, v, &raw mut proto) }, "find a prototype")?;
     let mut same = false;
-    ok(unsafe { sys::napi_strict_equals(env, proto, r.object_proto, &mut same) }, "compare prototypes")?;
+    // SAFETY: env, `proto` and `r.object_proto` are the call's; napi writes to the local `same`.
+    ok(unsafe { sys::napi_strict_equals(env, proto, r.object_proto, &raw mut same) }, "compare prototypes")?;
     if !same {
+        // SAFETY: env and `v` are the call's.
         (o.class, o.plain) = unsafe { class_of(env, v)? };
     }
     if again {
@@ -166,6 +202,7 @@ unsafe fn read_object(env: sys::napi_env, v: sys::napi_value, r: &mut Reader, ag
     }
     let mut keys = ptr::null_mut();
     ok(
+        // SAFETY: env and `v` are the call's; napi writes to the local `keys`.
         unsafe {
             sys::napi_get_all_property_names(
                 env,
@@ -173,18 +210,22 @@ unsafe fn read_object(env: sys::napi_env, v: sys::napi_value, r: &mut Reader, ag
                 sys::KeyCollectionMode::own_only,
                 sys::KeyFilter::enumerable | sys::KeyFilter::skip_symbols,
                 sys::KeyConversion::numbers_to_strings,
-                &mut keys,
+                &raw mut keys,
             )
         },
         "list an object's keys",
     )?;
     let mut n = 0u32;
-    ok(unsafe { sys::napi_get_array_length(env, keys, &mut n) }, "count an object's keys")?;
+    // SAFETY: env and `keys` are the call's; napi writes to the local `n`.
+    ok(unsafe { sys::napi_get_array_length(env, keys, &raw mut n) }, "count an object's keys")?;
     for i in 0..n {
         let mut key = ptr::null_mut();
-        ok(unsafe { sys::napi_get_element(env, keys, i, &mut key) }, "read a key")?;
+        // SAFETY: env and `keys` are the call's; napi writes to the local `key`.
+        ok(unsafe { sys::napi_get_element(env, keys, i, &raw mut key) }, "read a key")?;
         let mut item = ptr::null_mut();
-        ok(unsafe { sys::napi_get_property(env, v, key, &mut item) }, "read a property")?;
+        // SAFETY: env, `v` and `key` are the call's; napi writes to the local `item`.
+        ok(unsafe { sys::napi_get_property(env, v, key, &raw mut item) }, "read a property")?;
+        // SAFETY: env, `key` and `item` are the call's.
         o.insert(unsafe { String::from_napi_value(env, key)? }, unsafe { read(env, item, r)? });
     }
     Ok(Data::Obj(o))
@@ -192,7 +233,9 @@ unsafe fn read_object(env: sys::napi_env, v: sys::napi_value, r: &mut Reader, ag
 
 impl FromNapiValue for CheckData {
     unsafe fn from_napi_value(env: sys::napi_env, v: sys::napi_value) -> Result<Self> {
+        // SAFETY: env is the call's.
         let proto = unsafe { object_prototype(env)? };
+        // SAFETY: env and `v` are the call's.
         Ok(CheckData(unsafe { read(env, v, &mut Reader { object_proto: proto, inside: Vec::new() })? }))
     }
 }
@@ -201,8 +244,8 @@ impl TypeName for CheckData {
     fn type_name() -> &'static str {
         "unknown"
     }
-    fn value_type() -> napi::ValueType {
-        napi::ValueType::Unknown
+    fn value_type() -> ValueType {
+        ValueType::Unknown
     }
 }
 
@@ -228,7 +271,6 @@ pub struct JsRegistry {
 #[napi]
 impl JsRegistry {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsRegistry { inner: Registry::new() }
     }

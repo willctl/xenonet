@@ -21,14 +21,14 @@ fn thrown(f: Fail) -> Thrown {
 
 /// A heartbeat taken: the registry told, or an ActorError for the twin.
 #[napi(js_name = "reportsHeartbeat")]
-pub fn heartbeat(env: Env, deps: Object, id: JsArg, body: JsArg, now: JsArg) -> Result<()> {
+pub fn heartbeat(env: Env, deps: Object<'_>, id: JsArg, body: JsArg, now: JsArg) -> Result<()> {
     let out = reports::take_heartbeat(&mut SyncCalls::new(&env, &deps), &id.0, &body.0, &now.0);
     match out {
         Ok(()) => {
             settle(&env);
             Ok(())
         }
-        Err(f) => Err(fail(&env, f)),
+        Err(f) => Err(fail(env, f)),
     }
 }
 

@@ -6,12 +6,11 @@
 use crate::args::JsArg;
 use crate::js::Json;
 use crate::machine::{start, AskCalls, Machine};
-use crate::peer::{rethrow, settle, SyncCalls};
+use crate::peer::{rethrow, settle, throw_with, SyncCalls};
 use crate::store::EngineStoreCore;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde_json::json;
-use std::ptr;
 use std::sync::Arc;
 use xenonet_actors::wake::{self, Fail, Wakes};
 use xenonet_engine::peer::Thrown;
@@ -19,33 +18,20 @@ use xenonet_engine::sql::Arg;
 
 /// A WakeError thrown for the twin: an Error marked xenonetWake, with its
 /// status and code.
-fn throw(env: &Env, f: Fail) -> Error {
+fn throw(env: Env, f: Fail) -> Error {
     match f {
-        Fail::Thrown(t) => rethrow(env, t),
+        Fail::Thrown(t) => rethrow(&env, t),
         Fail::Wake { status, code, message } => {
-            settle(env);
-            let raw = env.raw();
-            unsafe {
-                let mut msg = ptr::null_mut();
-                sys::napi_create_string_utf8(raw, message.as_ptr().cast(), message.len() as isize, &mut msg);
-                let mut err = ptr::null_mut();
-                sys::napi_create_error(raw, ptr::null_mut(), msg, &mut err);
-                for (k, v) in [(c"xenonetWake", json!(true)), (c"status", xenonet_base::json::number(status)), (c"code", json!(code))] {
-                    if let Ok(js) = crate::js::to_js(raw, &v, 0) {
-                        sys::napi_set_named_property(raw, err, k.as_ptr(), js);
-                    }
-                }
-                sys::napi_throw(raw, err);
-            }
-            Error::new(Status::PendingException, message)
+            settle(&env);
+            throw_with(&env, &message, &[(c"xenonetWake", json!(true)), (c"status", xenonet_base::json::number(status)), (c"code", json!(code))])
         }
     }
 }
 
-fn done<T>(env: &Env, r: wake::Result<T>) -> Result<T> {
+fn done<T>(env: Env, r: wake::Result<T>) -> Result<T> {
     match r {
         Ok(v) => {
-            settle(env);
+            settle(&env);
             Ok(v)
         }
         Err(f) => Err(throw(env, f)),
@@ -57,7 +43,9 @@ fn done<T>(env: &Env, r: wake::Result<T>) -> Result<T> {
 fn outcome(r: wake::Result<Arg>) -> std::result::Result<Arg, Thrown> {
     match r {
         Ok(v) => Ok(Arg::Obj(vec![("done".into(), v)])),
-        Err(Fail::Wake { status, code, message }) => Ok(Arg::Obj(vec![("refused".into(), Arg::Obj(vec![("status".into(), Arg::num(status)), ("code".into(), Arg::text(code)), ("message".into(), Arg::text(message))]))])),
+        Err(Fail::Wake { status, code, message }) => {
+            Ok(Arg::Obj(vec![("refused".into(), Arg::Obj(vec![("status".into(), Arg::num(status)), ("code".into(), Arg::text(code)), ("message".into(), Arg::text(message))]))]))
+        }
         Err(Fail::Thrown(t)) => Err(t),
     }
 }
@@ -89,9 +77,9 @@ pub fn link_local(ip: JsArg) -> bool {
 }
 
 #[napi(js_name = "wakeCheckUrl")]
-pub fn check_url(env: Env, deps: Object, raw: JsArg) -> Result<Json> {
+pub fn check_url(env: Env, deps: Object<'_>, raw: JsArg) -> Result<Json> {
     let out = wake::check_wake_url(&mut SyncCalls::new(&env, &deps), &raw.0);
-    done(&env, out).map(|(url, host)| Json(json!({ "url": url, "host": host })))
+    done(env, out).map(|(url, host)| Json(json!({ "url": url, "host": host })))
 }
 
 #[napi(js_name = "wakeSignature")]
@@ -117,37 +105,37 @@ impl WakesCore {
     }
 
     #[napi]
-    pub fn arrived(&self, env: Env, deps: Object, id: JsArg) -> Result<()> {
-        done(&env, self.inner.arrived(&mut SyncCalls::new(&env, &deps), &id.0))
+    pub fn arrived(&self, env: Env, deps: Object<'_>, id: JsArg) -> Result<()> {
+        done(env, self.inner.arrived(&mut SyncCalls::new(&env, &deps), &id.0))
     }
     #[napi]
     pub fn view(&self, env: Env, id: JsArg) -> Result<JsArg> {
-        done(&env, self.inner.view(&id.0)).map(JsArg)
+        done(env, self.inner.view(&id.0)).map(JsArg)
     }
     #[napi]
-    pub fn list(&self, env: Env, deps: Object) -> Result<JsArg> {
-        done(&env, self.inner.list(&mut SyncCalls::new(&env, &deps))).map(JsArg)
+    pub fn list(&self, env: Env, deps: Object<'_>) -> Result<JsArg> {
+        done(env, self.inner.list(&mut SyncCalls::new(&env, &deps))).map(JsArg)
     }
     /// The set the sink joined.
     #[napi]
-    pub fn subscribe(&self, env: Env, deps: Object, id: JsArg, sink: u32) -> Result<u32> {
-        done(&env, self.inner.subscribe(&mut SyncCalls::new(&env, &deps), &id.0, u64::from(sink))).map(|n| n as u32)
+    pub fn subscribe(&self, env: Env, deps: Object<'_>, id: JsArg, sink: u32) -> Result<u32> {
+        done(env, self.inner.subscribe(&mut SyncCalls::new(&env, &deps), &id.0, u64::from(sink))).map(|n| n as u32)
     }
     #[napi]
     pub fn unsubscribe(&self, id: JsArg, set: u32, sink: u32) {
         self.inner.unsubscribe(&id.0, u64::from(set), u64::from(sink));
     }
     #[napi]
-    pub fn stop(&self, env: Env, deps: Object) -> Result<()> {
-        done(&env, self.inner.stop(&mut SyncCalls::new(&env, &deps)))
+    pub fn stop(&self, env: Env, deps: Object<'_>) -> Result<()> {
+        done(env, self.inner.stop(&mut SyncCalls::new(&env, &deps)))
     }
     #[napi(js_name = "wakeDue")]
     pub fn wake_due(&self, id: JsArg) -> bool {
         self.inner.wake_due(&id.0)
     }
     #[napi(js_name = "notifyDue")]
-    pub fn notify_due(&self, env: Env, deps: Object, id: JsArg) -> Result<()> {
-        done(&env, self.inner.notify_due(&mut SyncCalls::new(&env, &deps), &id.0))
+    pub fn notify_due(&self, env: Env, deps: Object<'_>, id: JsArg) -> Result<()> {
+        done(env, self.inner.notify_due(&mut SyncCalls::new(&env, &deps), &id.0))
     }
 
     #[napi]
@@ -171,4 +159,3 @@ impl WakesCore {
         start(move |asker| outcome(w.forget(&mut AskCalls(asker), &slug.0).map(|()| Arg::Undef)))
     }
 }
-
