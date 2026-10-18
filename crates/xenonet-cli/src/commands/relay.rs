@@ -4,8 +4,8 @@
 //! nothing listens anywhere.
 
 use crate::args::Flags;
+use crate::cores;
 use crate::out::{Done, Fail};
-use crate::pending;
 use crate::reach::candidates;
 use serde_json::json;
 use xenonet_base::json::number;
@@ -51,7 +51,7 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
     if port.fract() != 0.0 || port.is_nan() || !(1.0..=65535.0).contains(&port) {
         return Err(Fail::new("--port is a number from 1 to 65535", 2));
     }
-    let code = pending::run_relay(
+    let code = cores::run_relay(
         &json!({ "port": number(port), "sinceMs": number(since), "detail": flags.is_true("detail"), "start": flags.is_true("start"), "demo": flags.is_true("demo") }),
     )?;
     Ok(code)

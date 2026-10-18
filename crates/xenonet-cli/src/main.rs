@@ -15,7 +15,6 @@ mod instances;
 mod js;
 mod needs_you;
 mod out;
-mod pending;
 mod products;
 mod prompt;
 mod reach;
