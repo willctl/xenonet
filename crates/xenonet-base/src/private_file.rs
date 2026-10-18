@@ -190,6 +190,7 @@ pub fn other_readers(file: &str, windows: bool, run: &mut Run<'_>) -> Result<Vec
 }
 
 /// chmod 600, as Node does it: on Windows only the read-only flag.
+#[cfg_attr(not(unix), expect(clippy::permissions_set_readonly_false, reason = "Windows has no world-writable bit: clearing read-only is all chmod 600 does there, as in Node"))]
 pub fn chmod_600(file: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
