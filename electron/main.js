@@ -140,9 +140,9 @@ let windowKey = null;
 // What quitting stops: Desktop's hold on the terminal's shells (the
 // service keeps them), and its connection to the service, which hears
 // first that the window closed (you went offline). An installed XenoNet's
-// service keeps running; a service XenoNet Dev started goes with it, as the
-// server it used to run in-process did, so each start of a dev, demo or
-// test instance gets a fresh one.
+// service keeps running, as does a --prod run's; one XenoNet Dev started
+// otherwise goes with it, as the server it used to run in-process did, so
+// each start of a dev, demo or test instance gets a fresh one.
 function stop() {
   quitting = true;
   updates?.dispose();
@@ -287,7 +287,8 @@ async function startServer() {
     return control.handle(body);
   } });
   windowKey = serviceClient.info.windowKey;
-  if (fromSource && how === "started") ownService = serviceClient.info.pid;
+  // A --prod run stands in for an installed XenoNet, whose service outlives it.
+  if (dev && how === "started") ownService = serviceClient.info.pid;
   serviceClient.on("notification", notify);
   serviceClient.on("connected", (info) => { windowKey = info.windowKey; if (win && !win.isDestroyed()) win.webContents.reload(); });
   serviceClient.on("disconnect", () => { windowKey = null; control?.log("service", "warning", "XenoNet Service disconnected."); });
@@ -878,7 +879,7 @@ if (iconsArg >= 0) {
     await loadShellEnv({ locale: app.getSystemLocale() });
     wireIpc();
     wireDownloads();
-    control = createControl({ root: fromSource ? root : runtimeDir(), production: !fromSource, instance: instance || { id: "installed", name: "XenoNet", demo: false }, port: PORT, getWindow: () => win, showWindow, hideWindow, reveal, recorder, filmFile, onDriven: (on) => ((driven = on), tellDrawing()) });
+    control = createControl({ root: fromSource ? root : runtimeDir(), production: !dev, instance: instance || { id: "installed", name: "XenoNet", demo: false }, port: PORT, getWindow: () => win, showWindow, hideWindow, reveal, recorder, filmFile, onDriven: (on) => ((driven = on), tellDrawing()) });
     // A locked screen or a computer going to sleep: nothing to draw for.
     for (const [event, key, on] of [["lock-screen", "locked", true], ["unlock-screen", "locked", false], ["suspend", "asleep", true], ["resume", "asleep", false]]) powerMonitor.on(event, () => ((held[key] = on), tellDrawing()));
     // The screen may be locked already, with no lock-screen event to come:
