@@ -220,10 +220,15 @@ impl ActorGateway {
         let listener = TcpListener::bind(("127.0.0.1", self.inner.port)).await?;
         let me = self.clone();
         let task = tokio::spawn(async move {
+            // Its connections are this task's, so stopping the gateway closes
+            // them too, as the JS's closeAllConnections does: a client's
+            // kept-alive connection doesn't outlive the gateway turned off.
+            let mut conns = tokio::task::JoinSet::new();
             loop {
                 let Ok((stream, _)) = listener.accept().await else { continue };
+                while conns.try_join_next().is_some() {}
                 let me = me.clone();
-                tokio::spawn(async move {
+                conns.spawn(async move {
                     let svc = service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
                         let me = me.clone();
                         async move { Ok::<_, Infallible>(me.serve_hyper(req).await) }

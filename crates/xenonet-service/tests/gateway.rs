@@ -139,3 +139,25 @@ async fn a_probe_xenonet_asked_for_is_answered_once_and_bad_tokens_are_held_off(
     assert_eq!(g.status()["refused"], json!(22), "the probe's, the 21 tokens; a call held off is refused before its token is read");
     assert_eq!(g.serve(bad(), true).await.status, 429);
 }
+
+#[tokio::test]
+async fn turning_the_gateway_off_closes_the_connections_it_kept_alive() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let g = gateway(port);
+    g.start().await.unwrap();
+    let mut c = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let ask = format!("GET /mcp HTTP/1.1\r\nhost: 127.0.0.1:{port}\r\n\r\n");
+    c.write_all(ask.as_bytes()).await.unwrap();
+    let mut buf = [0u8; 4096];
+    let n = c.read(&mut buf).await.unwrap();
+    assert!(buf[..n].starts_with(b"HTTP/1.1 "), "answered while on");
+    g.stop();
+    // Asked again on the connection a client kept alive, as fetch does:
+    // closed, and not answered.
+    let _ = c.write_all(ask.as_bytes()).await;
+    let mut after = Vec::new();
+    let read = tokio::time::timeout(Duration::from_secs(10), c.read_to_end(&mut after)).await;
+    assert!(read.is_ok(), "the connection is closed, not left open");
+    assert!(!String::from_utf8_lossy(&after).contains("HTTP/1.1 "), "not answered once off");
+}
