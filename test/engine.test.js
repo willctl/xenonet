@@ -301,10 +301,12 @@ test("connect: previews, adds and takes out only XenoNet's entries", async () =>
   const old = { hooks: [{ type: "command", command: "XENONET_PORT=47842 '/old/node' '/old/xenonet/cli/hook.js' claude", timeout: 10 }] };
   fs.writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({ model: "opus", hooks: { PreToolUse: [mine], SessionStart: [old] } }));
   const calls = [];
-  const connect = createConnect({ platform: "darwin", port: 47842, root: "/app", exec: "/Apps/XenoNet Dev.app/Contents/MacOS/Electron", runAsNode: true, home, env: { PATH: bin }, run: async (file, args) => (calls.push([path.basename(file), ...args]), args[1] === "get" ? Promise.reject(new Error("not found")) : "") });
+  const connect = createConnect({ platform: "darwin", port: 47842, bin: "/app/target/debug/xenonet", home, env: { PATH: bin }, run: async (file, args) => (calls.push([path.basename(file), ...args]), args[1] === "get" ? Promise.reject(new Error("not found")) : "") });
 
   const before = await connect.preview();
-  assert.deepEqual(before.apps.map((a) => a.changes.map((c) => c.state)), [["missing", "missing"], ["missing", "missing"]]);
+  // The earlier XenoNet's hook makes Claude Code's hooks there but not as
+  // this XenoNet adds them.
+  assert.deepEqual(before.apps.map((a) => a.changes.map((c) => c.state)), [["missing", "different"], ["missing", "missing"]]);
 
   await connect.apply();
   const settings = JSON.parse(fs.readFileSync(path.join(home, ".claude", "settings.json"), "utf8"));
@@ -313,12 +315,14 @@ test("connect: previews, adds and takes out only XenoNet's entries", async () =>
   assert.deepEqual(settings.hooks.PreToolUse[1], { matcher: "Edit|Write|MultiEdit|NotebookEdit", hooks: [{ type: "http", url: "http://127.0.0.1:47842/api/hook/claude", timeout: 5 }] });
   // SessionStart takes only commands in Claude Code.
   assert.equal(settings.hooks.SessionStart.length, 1);
-  assert.match(settings.hooks.SessionStart[0].hooks[0].command, /^XENONET_PORT=47842 ELECTRON_RUN_AS_NODE=1 '\/Apps\/XenoNet Dev\.app\/Contents\/MacOS\/Electron' '\/app\/cli\/xenonet\.js' hook claude$/);
+  assert.match(settings.hooks.SessionStart[0].hooks[0].command, /^XENONET_PORT=47842 '\/app\/target\/debug\/xenonet' hook claude$/);
   assert.ok(fs.existsSync(path.join(home, ".claude", "settings.json.before-xenonet")));
   const add = calls.find((c) => c[0] === "claude" && c[2] === "add-json");
-  assert.deepEqual(JSON.parse(add[4]), { type: "stdio", command: "/Apps/XenoNet Dev.app/Contents/MacOS/Electron", args: ["/app/cli/xenonet.js", "mcp"], env: { XENONET_PORT: "47842", ELECTRON_RUN_AS_NODE: "1" } });
+  assert.deepEqual(JSON.parse(add[4]), { type: "stdio", command: "/app/target/debug/xenonet", args: ["mcp"], env: { XENONET_PORT: "47842" } });
   assert.deepEqual(add.slice(-2), ["--scope", "user"]);
-  assert.ok(calls.some((c) => c[0] === "codex" && c[1] === "mcp" && c[2] === "add" && c.includes("ELECTRON_RUN_AS_NODE=1")));
+  const codexAdd = calls.find((c) => c[0] === "codex" && c[1] === "mcp" && c[2] === "add");
+  assert.deepEqual(codexAdd.slice(codexAdd.indexOf("--")), ["--", "/app/target/debug/xenonet", "mcp"]);
+  assert.ok(!codexAdd.some((a) => /ELECTRON_RUN_AS_NODE/.test(a)));
   const codexHooks = JSON.parse(fs.readFileSync(path.join(home, ".codex", "hooks.json"), "utf8"));
   assert.deepEqual(Object.keys(codexHooks.hooks).sort(), ["PostToolUse", "PreToolUse", "SessionEnd", "SessionStart", "Stop", "UserPromptSubmit"]);
   assert.equal(codexHooks.hooks.PreToolUse[0].matcher, "apply_patch|Edit|Write");
