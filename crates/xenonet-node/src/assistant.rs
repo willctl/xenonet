@@ -167,7 +167,7 @@ impl credentials::Private for JsPrivate<'_> {
 /// `c`: { grant, token, device, expiresAt }; protect(file) and
 /// readers(file) answer { ok } or { error: message }.
 #[napi(js_name = "asstWriteCredential")]
-pub fn asst_write_credential(dir: String, c: Json, protect: Function<String, Json>, readers: Function<String, Json>) -> Jv {
+pub fn asst_write_credential(dir: String, c: Json, protect: Function<'_, String, Json>, readers: Function<'_, String, Json>) -> Jv {
     let c = c.0;
     let mut p = JsPrivate { protect: &protect, readers: &readers };
     let expires = c.get("expiresAt").cloned().unwrap_or(Value::Null);
@@ -271,7 +271,7 @@ pub fn asst_stall_reason(reasons: MaybeJson) -> &'static str {
     projection::stall_reason(reasons.0.as_ref())
 }
 
-fn visible_jv(v: &projection::Visible) -> Value {
+fn visible_jv(v: &projection::Visible<'_>) -> Value {
     json!({ "s": v.s, "project": v.project, "updated": xenonet_base::json::number(v.updated), "source": v.source, "status": v.status, "basis": v.basis })
 }
 
@@ -317,7 +317,7 @@ pub fn asst_sources_data(view: Json) -> Json {
 }
 
 #[napi(js_name = "asstAttentionItems")]
-pub fn asst_attention_items(view: Json, policy: Json, now: f64, id_of: Function<String, String>) -> Result<Json> {
+pub fn asst_attention_items(view: Json, policy: Json, now: f64, id_of: Function<'_, String, String>) -> Result<Json> {
     let failed = std::cell::RefCell::new(None);
     let f = |parts: &str| match id_of.call(parts.to_string()) {
         Ok(id) => id,
@@ -386,7 +386,7 @@ impl source::Around for JsAround<'_> {
 
 /// `x`: { t, nodes, live, actors, hasActors, claude, codex }.
 #[napi(js_name = "asstView")]
-pub fn asst_view(x: Json, home_of: Function<Json, Json>, product_of: Function<Json, Json>, registered: Function<Json, bool>) -> Result<Json> {
+pub fn asst_view(x: Json, home_of: Function<'_, Json, Json>, product_of: Function<'_, Json, Json>, registered: Function<'_, Json, bool>) -> Result<Json> {
     let x = x.0;
     let mut a = JsAround { home_of: &home_of, product_of: &product_of, registered: &registered, failed: None };
     let get = |k: &str| x.get(k).cloned().unwrap_or(Value::Null);
@@ -541,7 +541,7 @@ impl AsstAdapter {
 
     /// { ok: { port, pid } } or { error: { code, detail } }.
     #[napi]
-    pub fn endpoint(&mut self, text: Option<String>, alive: Function<f64, bool>) -> Jv {
+    pub fn endpoint(&mut self, text: Option<String>, alive: Function<'_, f64, bool>) -> Jv {
         let mut a = |pid: f64| alive.call(pid).unwrap_or(false);
         match self.inner.endpoint(text.as_deref(), &mut a) {
             Ok(e) => Jv::Obj(vec![("ok", Jv::Obj(vec![("port", Jv::Num(e.port)), ("pid", Jv::Num(e.pid))]))]),
@@ -614,7 +614,7 @@ pub fn asst_client_places(env: Json, platform: String, home: String) -> Vec<Stri
 
 /// exists(file): { ok: bool } or { error }.
 #[napi(js_name = "asstFindClient")]
-pub fn asst_find_client(env: Json, platform: String, home: String, exists: Function<String, Json>) -> Option<String> {
+pub fn asst_find_client(env: Json, platform: String, home: String, exists: Function<'_, String, Json>) -> Option<String> {
     let mut e = |f: &str| settled(exists.call(f.to_string())).map(|v| v == json!(true)).map_err(|_| ());
     tunnel_client::find_client(&obj(Some(env.0)), &platform, &home, &mut e)
 }
@@ -655,7 +655,7 @@ impl tunnel_client::Files for JsFiles<'_> {
 /// list(dir), read(file) and stat(file) (its mtimeMs) each answer { ok }
 /// or { error }.
 #[napi(js_name = "asstFindProfiles")]
-pub fn asst_find_profiles(dirs: Vec<String>, list: Function<String, Json>, read: Function<String, Json>, stat: Function<String, Json>) -> Json {
+pub fn asst_find_profiles(dirs: Vec<String>, list: Function<'_, String, Json>, read: Function<'_, String, Json>, stat: Function<'_, String, Json>) -> Json {
     let mut f = JsFiles { list: &list, read: &read, stat: &stat };
     Json(Value::Array(tunnel_client::find_profiles(&dirs, &mut f)))
 }
@@ -716,7 +716,7 @@ pub fn asst_key_target_for(tunnel_id: String) -> String {
 }
 
 #[napi(js_name = "asstBindingOf")]
-pub fn asst_binding_of(text: Option<String>, target_ok: Function<String, bool>) -> Json {
+pub fn asst_binding_of(text: Option<String>, target_ok: Function<'_, String, bool>) -> Json {
     let ok = |s: &str| target_ok.call(s.to_string()).unwrap_or(false);
     Json(binding_jv(&tunnels::binding_of(text.as_deref(), &ok)))
 }
@@ -728,7 +728,7 @@ pub fn asst_key_target_of(binding: Json) -> Option<String> {
 
 /// { ok: { binding, text } } or { error: { status, code, message } }.
 #[napi(js_name = "asstConfigure")]
-pub fn asst_configure(binding: Json, tunnel_id: MaybeJson, key_target: MaybeJson, autostart: MaybeJson, target_ok: Function<String, bool>) -> Jv {
+pub fn asst_configure(binding: Json, tunnel_id: MaybeJson, key_target: MaybeJson, autostart: MaybeJson, target_ok: Function<'_, String, bool>) -> Jv {
     let ok = |s: &str| target_ok.call(s.to_string()).unwrap_or(false);
     match tunnels::configure(&binding_from(&binding.0), tunnel_id.0.as_ref(), key_target.0.as_ref(), autostart.0.as_ref(), &ok) {
         Ok(b) => Jv::Obj(vec![("ok", Jv::Obj(vec![("binding", Jv::Json(binding_jv(&b))), ("text", s(b.text()))]))]),

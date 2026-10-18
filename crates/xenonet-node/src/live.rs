@@ -29,28 +29,28 @@ fn check(status: sys::napi_status, what: &str) -> Result<()> {
 
 unsafe fn js_string(env: sys::napi_env, s: &str) -> Result<sys::napi_value> {
     let mut out = ptr::null_mut();
-    check(unsafe { sys::napi_create_string_utf8(env, s.as_ptr().cast(), s.len() as isize, &mut out) }, "make a string")?;
+    check(unsafe { sys::napi_create_string_utf8(env, s.as_ptr().cast(), s.len() as isize, &raw mut out) }, "make a string")?;
     Ok(out)
 }
 
 /// An object with its fields in order, undefined where a field's value is.
 unsafe fn fields_js(env: sys::napi_env, f: &Fields) -> Result<sys::napi_value> {
     let mut out = ptr::null_mut();
-    check(unsafe { sys::napi_create_object(env, &mut out) }, "make an object")?;
+    check(unsafe { sys::napi_create_object(env, &raw mut out) }, "make an object")?;
     for (k, v) in f {
         let key = unsafe { js_string(env, k)? };
         let value = match v {
             Some(v) => unsafe { to_js(env, v, 0)? },
             None => {
                 let mut u = ptr::null_mut();
-                check(unsafe { sys::napi_get_undefined(env, &mut u) }, "make undefined")?;
+                check(unsafe { sys::napi_get_undefined(env, &raw mut u) }, "make undefined")?;
                 u
             }
         };
         if k == "__proto__" {
             let attributes = sys::PropertyAttributes::writable | sys::PropertyAttributes::enumerable | sys::PropertyAttributes::configurable;
             let d = sys::napi_property_descriptor { utf8name: ptr::null(), name: key, method: None, getter: None, setter: None, value, attributes, data: ptr::null_mut() };
-            check(unsafe { sys::napi_define_properties(env, out, 1, &d) }, "define a key")?;
+            check(unsafe { sys::napi_define_properties(env, out, 1, &raw const d) }, "define a key")?;
         } else {
             check(unsafe { sys::napi_set_property(env, out, key, value) }, "fill an object")?;
         }
@@ -62,7 +62,7 @@ unsafe fn fields_js(env: sys::napi_env, f: &Fields) -> Result<sys::napi_value> {
 /// leaves out) as None; None for null or undefined; no fields for another
 /// value.
 unsafe fn js_fields(env: sys::napi_env, v: sys::napi_value) -> Result<Option<Fields>> {
-    use sys::ValueType::*;
+    use sys::ValueType::{napi_function, napi_null, napi_object, napi_symbol, napi_undefined};
     let t = unsafe { type_of(env, v)? };
     if t == napi_null || t == napi_undefined {
         return Ok(None);
@@ -79,19 +79,19 @@ unsafe fn js_fields(env: sys::napi_env, v: sys::napi_value) -> Result<Option<Fie
                 sys::KeyCollectionMode::own_only,
                 sys::KeyFilter::enumerable | sys::KeyFilter::skip_symbols,
                 sys::KeyConversion::numbers_to_strings,
-                &mut keys,
+                &raw mut keys,
             )
         },
         "list an object's keys",
     )?;
     let mut n = 0u32;
-    check(unsafe { sys::napi_get_array_length(env, keys, &mut n) }, "count an object's keys")?;
+    check(unsafe { sys::napi_get_array_length(env, keys, &raw mut n) }, "count an object's keys")?;
     let mut out = Vec::with_capacity(n as usize);
     for i in 0..n {
         let mut key = ptr::null_mut();
-        check(unsafe { sys::napi_get_element(env, keys, i, &mut key) }, "read a key")?;
+        check(unsafe { sys::napi_get_element(env, keys, i, &raw mut key) }, "read a key")?;
         let mut item = ptr::null_mut();
-        check(unsafe { sys::napi_get_property(env, v, key, &mut item) }, "read a property")?;
+        check(unsafe { sys::napi_get_property(env, v, key, &raw mut item) }, "read a property")?;
         let it = unsafe { type_of(env, item)? };
         let value = if it == napi_undefined || it == napi_function || it == napi_symbol { None } else { Some(unsafe { from_js(env, item, 0)? }) };
         out.push((unsafe { String::from_napi_value(env, key)? }, value));
@@ -194,7 +194,7 @@ impl JsLiveCore {
 
     /// An event a caller made for a session (made when it's new).
     #[napi]
-    pub fn activity(&mut self, env: &Env, id: String, app: String, ev: Unknown, live: bool, now: f64) -> Result<Jv> {
+    pub fn activity(&mut self, env: &Env, id: String, app: String, ev: Unknown<'_>, live: bool, now: f64) -> Result<Jv> {
         let Some(fields) = (unsafe { js_fields(env.raw(), ev.raw())? }) else { return type_error(env, "Cannot read properties of undefined (reading 'ts')") };
         let i = self.t.session(&id, &app);
         let mut out = Vec::new();
@@ -212,7 +212,7 @@ impl JsLiveCore {
     /// A tool call, as noteTool takes it: { name, detail, full, files, ts,
     /// agentId, server, extra, ok }. Gives { emits, tool }.
     #[napi(js_name = "noteTool")]
-    pub fn note_tool(&mut self, env: &Env, id: String, call: Unknown, live: bool, now: f64) -> Result<Jv> {
+    pub fn note_tool(&mut self, env: &Env, id: String, call: Unknown<'_>, live: bool, now: f64) -> Result<Jv> {
         let fields = unsafe { js_fields(env.raw(), call.raw())? }.unwrap_or_default();
         let get = |k: &str| fields.iter().find(|(key, _)| key == k).map(|(_, v)| v.clone());
         let files = match get("files").flatten() {

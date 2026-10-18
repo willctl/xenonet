@@ -28,38 +28,38 @@ fn check(status: sys::napi_status, what: &str) -> Result<()> {
 
 unsafe fn string(env: sys::napi_env, s: &str) -> Result<sys::napi_value> {
     let mut out = ptr::null_mut();
-    check(unsafe { sys::napi_create_string_utf8(env, s.as_ptr().cast(), s.len() as isize, &mut out) }, "make a string")?;
+    check(unsafe { sys::napi_create_string_utf8(env, s.as_ptr().cast(), s.len() as isize, &raw mut out) }, "make a string")?;
     Ok(out)
 }
 
 unsafe fn build(env: sys::napi_env, v: &Out) -> Result<sys::napi_value> {
     let mut out = ptr::null_mut();
     match v {
-        Out::Undef => check(unsafe { sys::napi_get_undefined(env, &mut out) }, "make undefined")?,
-        Out::Null => check(unsafe { sys::napi_get_null(env, &mut out) }, "make null")?,
-        Out::Bool(b) => check(unsafe { sys::napi_get_boolean(env, *b, &mut out) }, "make a boolean")?,
-        Out::Num(n) => check(unsafe { sys::napi_create_double(env, *n, &mut out) }, "make a number")?,
+        Out::Undef => check(unsafe { sys::napi_get_undefined(env, &raw mut out) }, "make undefined")?,
+        Out::Null => check(unsafe { sys::napi_get_null(env, &raw mut out) }, "make null")?,
+        Out::Bool(b) => check(unsafe { sys::napi_get_boolean(env, *b, &raw mut out) }, "make a boolean")?,
+        Out::Num(n) => check(unsafe { sys::napi_create_double(env, *n, &raw mut out) }, "make a number")?,
         Out::Str(s) => out = unsafe { string(env, s)? },
         Out::Json(j) => out = unsafe { crate::js::to_js(env, j, 0)? },
         // A Uint8Array, as node:sqlite gives a BLOB.
         Out::Bytes(b) => {
             let mut data = ptr::null_mut();
             let mut buf = ptr::null_mut();
-            check(unsafe { sys::napi_create_arraybuffer(env, b.len(), &mut data, &mut buf) }, "make an array buffer")?;
+            check(unsafe { sys::napi_create_arraybuffer(env, b.len(), &raw mut data, &raw mut buf) }, "make an array buffer")?;
             if !b.is_empty() {
                 unsafe { ptr::copy_nonoverlapping(b.as_ptr(), data.cast::<u8>(), b.len()) };
             }
-            check(unsafe { sys::napi_create_typedarray(env, sys::TypedarrayType::uint8_array, b.len(), buf, 0, &mut out) }, "make a Uint8Array")?;
+            check(unsafe { sys::napi_create_typedarray(env, sys::TypedarrayType::uint8_array, b.len(), buf, 0, &raw mut out) }, "make a Uint8Array")?;
         }
         Out::Arr(items) => {
-            check(unsafe { sys::napi_create_array_with_length(env, items.len(), &mut out) }, "make an array")?;
+            check(unsafe { sys::napi_create_array_with_length(env, items.len(), &raw mut out) }, "make an array")?;
             for (i, x) in items.iter().enumerate() {
                 let item = unsafe { build(env, x)? };
                 check(unsafe { sys::napi_set_element(env, out, i as u32, item) }, "fill an array")?;
             }
         }
         Out::Obj(fields) => {
-            check(unsafe { sys::napi_create_object(env, &mut out) }, "make an object")?;
+            check(unsafe { sys::napi_create_object(env, &raw mut out) }, "make an object")?;
             for (k, x) in fields {
                 let key = unsafe { string(env, k)? };
                 let value = unsafe { build(env, x)? };
@@ -68,14 +68,14 @@ unsafe fn build(env: sys::napi_env, v: &Out) -> Result<sys::napi_value> {
                     // object's prototype.
                     let attributes = sys::PropertyAttributes::writable | sys::PropertyAttributes::enumerable | sys::PropertyAttributes::configurable;
                     let d = sys::napi_property_descriptor { utf8name: ptr::null(), name: key, method: None, getter: None, setter: None, value, attributes, data: ptr::null_mut() };
-                    check(unsafe { sys::napi_define_properties(env, out, 1, &d) }, "define a key")?;
+                    check(unsafe { sys::napi_define_properties(env, out, 1, &raw const d) }, "define a key")?;
                 } else {
                     check(unsafe { sys::napi_set_property(env, out, key, value) }, "fill an object")?;
                 }
             }
         }
         Out::Assigned(fields) => {
-            check(unsafe { sys::napi_create_object(env, &mut out) }, "make an object")?;
+            check(unsafe { sys::napi_create_object(env, &raw mut out) }, "make an object")?;
             for (k, x) in fields {
                 let key = unsafe { string(env, k)? };
                 let value = unsafe { build(env, x)? };
@@ -96,8 +96,8 @@ impl TypeName for OutJs {
     fn type_name() -> &'static str {
         "unknown"
     }
-    fn value_type() -> napi::ValueType {
-        napi::ValueType::Unknown
+    fn value_type() -> ValueType {
+        ValueType::Unknown
     }
 }
 

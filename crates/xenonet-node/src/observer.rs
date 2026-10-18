@@ -42,15 +42,15 @@ impl ObserverCore {
     }
 
     #[napi]
-    pub fn keep(&self, env: Env, me: Object, id: JsArg, o: JsArg) -> Result<()> {
+    pub fn keep(&self, env: Env, me: Object<'_>, id: JsArg, o: JsArg) -> Result<()> {
         done(&env, self.inner.keep(&mut SyncCalls::new(&env, &me), &s(&id.0), &o.0))
     }
     #[napi]
-    pub fn say(&self, env: Env, me: Object, id: JsArg, o: JsArg) -> Result<bool> {
+    pub fn say(&self, env: Env, me: Object<'_>, id: JsArg, o: JsArg) -> Result<bool> {
         done(&env, self.inner.say(&mut SyncCalls::new(&env, &me), &s(&id.0), &o.0))
     }
     #[napi]
-    pub fn happened(&self, env: Env, me: Object, id: JsArg, o: JsArg) -> Result<JsArg> {
+    pub fn happened(&self, env: Env, me: Object<'_>, id: JsArg, o: JsArg) -> Result<JsArg> {
         done(&env, self.inner.happened(&mut SyncCalls::new(&env, &me), &s(&id.0), &o.0)).map(JsArg)
     }
     #[napi]
@@ -58,15 +58,15 @@ impl ObserverCore {
         self.inner.gather(&s(&id.0), &o.0);
     }
     #[napi]
-    pub fn flush(&self, env: Env, me: Object, now: JsArg) -> Result<()> {
+    pub fn flush(&self, env: Env, me: Object<'_>, now: JsArg) -> Result<()> {
         done(&env, self.inner.flush(&mut SyncCalls::new(&env, &me), &now.0))
     }
     #[napi]
-    pub fn touch(&self, env: Env, me: Object, id: JsArg, node: JsArg, relation: JsArg, at: JsArg) -> Result<()> {
+    pub fn touch(&self, env: Env, me: Object<'_>, id: JsArg, node: JsArg, relation: JsArg, at: JsArg) -> Result<()> {
         done(&env, self.inner.touch(&mut SyncCalls::new(&env, &me), &s(&id.0), &node.0, &relation.0, &at.0))
     }
     #[napi(js_name = "mayLook")]
-    pub fn may_look(&self, env: Env, me: Object) -> Result<bool> {
+    pub fn may_look(&self, env: Env, me: Object<'_>) -> Result<bool> {
         done(&env, Observer::may_look(&mut SyncCalls::new(&env, &me)))
     }
     /// One look, as a machine: the observer's look(at), then flush, ok or

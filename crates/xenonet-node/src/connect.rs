@@ -31,7 +31,7 @@ pub fn server_names(port: JsArg, all: JsArg) -> Json {
 
 /// mergeHooks with the caller's own `ours(hook)`.
 #[napi(js_name = "connectMerge")]
-pub fn merge(env: Env, deps: Object, settings: JsArg, add: JsArg) -> Result<Json> {
+pub fn merge(env: Env, deps: Object<'_>, settings: JsArg, add: JsArg) -> Result<Json> {
     let mut c = SyncCalls::new(&env, &deps);
     let add = (!add.0.is_nullish()).then(|| add.0.to_json());
     let out = connect::merge_hooks(&mut c, &settings.0.to_json(), &mut |c, h| Ok(c.call("", "ours", vec![crate::args::value_to_arg(h)])?.truthy()), add.as_ref());

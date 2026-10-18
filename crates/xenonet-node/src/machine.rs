@@ -91,7 +91,7 @@ impl Asker {
     /// Asks the twin one thing, as JS values.
     pub fn ask_arg(&self, question: Arg) -> std::result::Result<Arg, Thrown> {
         self.out.send(Out::Ask(question)).map_err(|_| gone())?;
-        self.answers.recv().map(answer_arg).unwrap_or_else(|_| Err(gone()))
+        self.answers.recv().map_or_else(|_| Err(gone()), answer_arg)
     }
 
     /// Asks several things at once (the twin answers them together, as
@@ -185,7 +185,7 @@ where
             Ok(Err(t)) => Out::Fail(t),
             Err(p) => Out::Fail(Thrown::new(format!(
                 "XenoNet's Rust core failed: {}",
-                p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+                p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(ToString::to_string)).unwrap_or_default()
             ))),
         };
         let _ = asker.out.send(done);

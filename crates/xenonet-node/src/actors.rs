@@ -73,13 +73,13 @@ pub fn heavy_folders() -> Vec<&'static str> {
 }
 
 #[napi(js_name = "readTokenFile")]
-pub fn read_token_file(file: String, windows: bool, run: Function<Vec<String>, RunAnswer>) -> Jv {
+pub fn read_token_file(file: String, windows: bool, run: Function<'_, Vec<String>, RunAnswer>) -> Jv {
     outcome(token_file::read_token_file(&file, windows, &mut runner(&run)).map(text))
 }
 
 /// The twin hands over the two variables, each when it's set and not empty.
 #[napi(js_name = "tokenFromEnv")]
-pub fn token_from_env(token_file_var: Option<String>, token_var: Option<String>, windows: bool, run: Function<Vec<String>, RunAnswer>) -> Jv {
+pub fn token_from_env(token_file_var: Option<String>, token_var: Option<String>, windows: bool, run: Function<'_, Vec<String>, RunAnswer>) -> Jv {
     let env = |k: &str| match k {
         "XENONET_ACTOR_TOKEN_FILE" => token_file_var.clone(),
         "XENONET_ACTOR_TOKEN" => token_var.clone(),
@@ -100,6 +100,6 @@ pub fn token_file_refusal(file: String, force: bool, projects_dir: Option<String
 }
 
 #[napi(js_name = "writeTokenFile")]
-pub fn write_token_file(file: String, token: String, windows: bool, run: Function<Vec<String>, RunAnswer>, force: bool, projects_dir: Option<String>) -> Jv {
+pub fn write_token_file(file: String, token: String, windows: bool, run: Function<'_, Vec<String>, RunAnswer>, force: bool, projects_dir: Option<String>) -> Jv {
     outcome(token_file::write_token_file(&file, &token, windows, &mut runner(&run), force, projects_dir.as_deref()).map(text))
 }

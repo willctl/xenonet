@@ -139,10 +139,10 @@ pub fn app_config(
     env: Json,
     home: String,
     platform: String,
-    world: Function<(), Json>,
-    context_dir: Function<(), Option<String>>,
-    context_server: Function<Option<String>, Json>,
-    claude_desktop_dir: Function<(), Option<String>>,
+    world: Function<'_, (), Json>,
+    context_dir: Function<'_, (), Option<String>>,
+    context_server: Function<'_, Option<String>, Json>,
+    claude_desktop_dir: Function<'_, (), Option<String>>,
 ) -> Result<Jv> {
     let env = match env.0 {
         Value::Object(m) => m,
@@ -425,7 +425,7 @@ pub fn app_mcp_display_catalog(raw: MaybeJson) -> Json {
 }
 
 #[napi(js_name = "appMcpBegin")]
-pub fn app_mcp_begin(server: String, sessions: Json, settings: Json, now: f64, read: Option<Function<Option<String>, Json>>) -> Result<Jv> {
+pub fn app_mcp_begin(server: String, sessions: Json, settings: Json, now: f64, read: Option<Function<'_, Option<String>, Json>>) -> Result<Jv> {
     let sessions = match sessions.0 {
         Value::Array(a) => a,
         _ => Vec::new(),
@@ -439,7 +439,7 @@ pub fn app_mcp_begin(server: String, sessions: Json, settings: Json, now: f64, r
 }
 
 #[napi(js_name = "appMcpStep")]
-pub fn app_mcp_step(state: Json, answer: Json, settings: Json, read: Option<Function<Option<String>, Json>>) -> Result<Jv> {
+pub fn app_mcp_step(state: Json, answer: Json, settings: Json, read: Option<Function<'_, Option<String>, Json>>) -> Result<Jv> {
     let answer = match answer.0.get("error") {
         Some(e) => mcp_info::Answer::Failed { name: e.get("name").and_then(Value::as_str).map(String::from), code: e.get("code").filter(|c| !c.is_null()).cloned() },
         None => mcp_info::Answer::Ok(answer.0.get("ok").cloned().unwrap_or(Value::Null)),
@@ -984,7 +984,7 @@ pub fn app_find_nvidia_smi(
     pathext: Option<String>,
     system_root: Option<String>,
     program_files: Option<String>,
-    exists: Function<String, bool>,
+    exists: Function<'_, String, bool>,
 ) -> Option<String> {
     stats::find_nvidia_smi(&platform, &path_var, pathext.as_deref(), system_root.as_deref(), program_files.as_deref(), &mut |f| exists.call(f.to_string()).unwrap_or(false))
 }
@@ -1324,14 +1324,14 @@ impl AppDemo {
         &mut self,
         now: f64,
         platform: String,
-        git: Function<(), bool>,
-        local: Function<f64, Vec<f64>>,
-        claude: Function<FnArgs<(String, String)>, String>,
-        github: Function<FnArgs<(String, String)>, String>,
-        git_id: Function<String, String>,
-        random: Function<(), f64>,
-        uuid: Function<(), String>,
-        clock: Function<(), f64>,
+        git: Function<'_, (), bool>,
+        local: Function<'_, f64, Vec<f64>>,
+        claude: Function<'_, FnArgs<(String, String)>, String>,
+        github: Function<'_, FnArgs<(String, String)>, String>,
+        git_id: Function<'_, String, String>,
+        random: Function<'_, (), f64>,
+        uuid: Function<'_, (), String>,
+        clock: Function<'_, (), f64>,
     ) -> Result<Jv> {
         let mut around = JsAround { git: Some(git), local: Some(local), claude: Some(claude), github: Some(github), git_id: Some(git_id), random, uuid, now: clock, failed: None };
         let r = self.inner.create_world(now, &mut around, &platform);
@@ -1350,7 +1350,7 @@ impl AppDemo {
             self.inner
                 .client_repos
                 .iter()
-                .map(|r| json!({ "dir": r.dir, "steps": steps, "dirty": r.dirty.iter().map(|(rel, t)| json!([xenonet_app::nodepath::NATIVE.join(&[&r.dir, rel]), t])).collect::<Vec<_>>() }))
+                .map(|r| json!({ "dir": r.dir, "steps": steps, "dirty": r.dirty.iter().map(|(rel, t)| json!([nodepath::NATIVE.join(&[&r.dir, rel]), t])).collect::<Vec<_>>() }))
                 .collect(),
         ))
     }
@@ -1376,7 +1376,7 @@ impl AppDemo {
     }
 
     #[napi(js_name = "stepLive")]
-    pub fn step_live(&mut self, k: u32, now: f64, random: Function<(), f64>, uuid: Function<(), String>, clock: Function<(), f64>) -> Result<()> {
+    pub fn step_live(&mut self, k: u32, now: f64, random: Function<'_, (), f64>, uuid: Function<'_, (), String>, clock: Function<'_, (), f64>) -> Result<()> {
         let mut around = JsAround { git: None, local: None, claude: None, github: None, git_id: None, random, uuid, now: clock, failed: None };
         self.inner.step_live(k as usize, now, &mut around);
         around.failed.map_or(Ok(()), Err)

@@ -20,9 +20,9 @@ fn fail(env: &Env, f: LinkFail) -> Error {
             let raw = env.raw();
             unsafe {
                 let mut msg = ptr::null_mut();
-                sys::napi_create_string_utf8(raw, message.as_ptr().cast(), message.len() as isize, &mut msg);
+                sys::napi_create_string_utf8(raw, message.as_ptr().cast(), message.len() as isize, &raw mut msg);
                 let mut err = ptr::null_mut();
-                sys::napi_create_error(raw, ptr::null_mut(), msg, &mut err);
+                sys::napi_create_error(raw, ptr::null_mut(), msg, &raw mut err);
                 for (k, v) in [(c"xenonetLink", json!(true)), (c"code", json!(code))] {
                     if let Ok(js) = crate::js::to_js(raw, &v, 0) {
                         sys::napi_set_named_property(raw, err, k.as_ptr(), js);

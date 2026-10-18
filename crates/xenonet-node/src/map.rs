@@ -158,7 +158,7 @@ fn asker<'a>(f: &'a Function<'a, Json, MaybeJson>) -> impl FnMut(&Value) -> Resu
 }
 
 #[napi(js_name = "digestSummarize")]
-pub fn digest_summarize(events: Json, since: f64, until: f64, title_of: Function<Json, MaybeJson>, live: MaybeJson) -> Result<Json> {
+pub fn digest_summarize(events: Json, since: f64, until: f64, title_of: Function<'_, Json, MaybeJson>, live: MaybeJson) -> Result<Json> {
     let mut ask = asker(&title_of);
     digest::summarize(events.0.as_array().map_or(&[], Vec::as_slice), since, until, &mut ask, live.0.as_ref()).map(Json)
 }
@@ -167,9 +167,9 @@ pub fn digest_summarize(events: Json, since: f64, until: f64, title_of: Function
 pub fn digest_day_log(
     events: Json,
     now: f64,
-    title_of: Option<Function<Json, MaybeJson>>,
-    home_of: Function<Json, MaybeJson>,
-    name_of: Function<Json, MaybeJson>,
+    title_of: Option<Function<'_, Json, MaybeJson>>,
+    home_of: Function<'_, Json, MaybeJson>,
+    name_of: Function<'_, Json, MaybeJson>,
     live: MaybeJson,
     repos: Json,
 ) -> Result<Json> {
@@ -405,7 +405,7 @@ pub fn project_detection(root: String, scan: MaybeJson, rules: Json, codex: Mayb
 }
 
 #[napi(js_name = "homeOf")]
-pub fn home_of(id: String, kind_of: Function<String, Option<String>>, parent_of: Function<String, Option<String>>) -> Option<String> {
+pub fn home_of(id: String, kind_of: Function<'_, String, Option<String>>, parent_of: Function<'_, String, Option<String>>) -> Option<String> {
     state::home_of(&id, &mut |i| kind_of.call(i.to_string()).ok().flatten(), &mut |i| parent_of.call(i.to_string()).ok().flatten())
 }
 
@@ -425,7 +425,7 @@ pub fn known_identity(id: MaybeJson, identities: Json, known: Json) -> Option<St
 }
 
 #[napi(js_name = "identityDetection")]
-pub fn identity_detection(enabled: bool, at: MaybeJson, identities: MaybeJson, saved: Json, node: Function<String, MaybeJson>) -> Json {
+pub fn identity_detection(enabled: bool, at: MaybeJson, identities: MaybeJson, saved: Json, node: Function<'_, String, MaybeJson>) -> Json {
     Json(state::identity_detection(enabled, at.0.as_ref(), identities.0.as_ref(), &saved.0, &mut |id| node.call(id.to_string()).ok().and_then(|n| n.0).filter(|v| !v.is_null())))
 }
 
@@ -435,12 +435,12 @@ pub fn pin_problem(kind: Option<String>) -> Option<&'static str> {
 }
 
 #[napi(js_name = "liveSnapshotFor")]
-pub fn live_snapshot_for(snap: Json, hidden: Json, acks: Json, signed_in: MaybeJson, node: Function<String, MaybeJson>) -> Json {
+pub fn live_snapshot_for(snap: Json, hidden: Json, acks: Json, signed_in: MaybeJson, node: Function<'_, String, MaybeJson>) -> Json {
     Json(state::live_snapshot(snap.0, &js_set(&hidden.0), &acks.0, signed_in.0.as_ref(), &mut |id| node.call(id.to_string()).ok().and_then(|n| n.0).filter(|v| !v.is_null())))
 }
 
 #[napi(js_name = "trayStatus")]
-pub fn tray_status(snap: Json, title_of: Function<Json, MaybeJson>, url: String) -> Json {
+pub fn tray_status(snap: Json, title_of: Function<'_, Json, MaybeJson>, url: String) -> Json {
     Json(state::summary(&snap.0, &mut |id| title_of.call(Json(id.clone())).ok().and_then(|t| t.0).unwrap_or(Value::Null), &url))
 }
 
@@ -505,7 +505,7 @@ impl JsStateMemory {
     /// `home` is [id, name, repo] for the session's home, or null.
     #[napi(js_name = "shipIt")]
     pub fn ship_it(&mut self, ev: Json, home: MaybeJson, now: f64) -> Json {
-        let home = home.0.filter(|h| h.is_array());
+        let home = home.0.filter(Value::is_array);
         let h = home.as_ref().and_then(|h| Some((h.get(0)?.as_str()?, h.get(1)?, h.get(2)?)));
         Json(self.m.ship_it(&ev.0, h, now).unwrap_or(Value::Null))
     }

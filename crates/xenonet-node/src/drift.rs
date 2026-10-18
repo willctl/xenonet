@@ -30,8 +30,8 @@ pub fn drift_constants() -> DriftConstants {
     DriftConstants {
         max: drift::DRIFT_MAX as u32,
         file: drift::DRIFT_FILE.into(),
-        kinds: drift::KINDS.iter().map(|k| k.to_string()).collect(),
-        additions: drift::ADDITIONS.iter().map(|k| k.to_string()).collect(),
+        kinds: drift::KINDS.iter().map(ToString::to_string).collect(),
+        additions: drift::ADDITIONS.iter().map(ToString::to_string).collect(),
     }
 }
 

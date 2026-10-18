@@ -128,7 +128,7 @@ pub fn parse_netstat(text: String, local_port: MaybeJson, remote_port: MaybeJson
 
 #[napi(js_name = "procsSelfTest")]
 pub fn self_test(me: f64, peer: Option<f64>, first: MaybeJson) -> Json {
-    let first = first.0.filter(|v| v.is_object());
+    let first = first.0.filter(Value::is_object);
     let at = first.as_ref().map(|f| (f.get("pid").and_then(Value::as_f64).unwrap_or(f64::NAN), f.get("exe")));
     let (peer, chain, exe) = procs::self_test(me, peer, at);
     Json(json!({ "supported": true, "peer": peer, "chain": chain, "exe": exe }))
@@ -142,7 +142,7 @@ pub struct ProcsCore {
 
 fn run<F>(p: &Arc<Procs>, f: F) -> Machine
 where
-    F: FnOnce(&Procs, &mut Bridged) -> Result<Jv, String> + Send + 'static,
+    F: FnOnce(&Procs, &mut Bridged<'_>) -> Result<Jv, String> + Send + 'static,
 {
     let p = p.clone();
     start(move |asker| f(&p, &mut Bridged(asker)).map_err(Into::into))

@@ -32,7 +32,7 @@ fn thrown(e: Error) -> Thrown {
 /// the table's [pid, row] pairs, `of(row)` what the census says a row is,
 /// `is_root(row)` whether it's one of the product's.
 #[napi(js_name = "attrStartedUnder")]
-pub fn started_under(rows: JsArg, of: Function<JsArg, JsArg>, is_root: Function<JsArg, bool>) -> Result<Json> {
+pub fn started_under(rows: JsArg, of: Function<'_, JsArg, JsArg>, is_root: Function<'_, JsArg, bool>) -> Result<Json> {
     let table = pairs(rows.0);
     let row = |i: usize| JsArg(crate::args::value_to_arg(&table[i].row));
     let mut failed: Option<Error> = None;
@@ -128,7 +128,7 @@ impl SpawnsCore {
     }
 
     #[napi(js_name = "sessionOf")]
-    pub fn session_of(&self, env: Env, deps: Object, s: JsArg) -> Result<Option<String>> {
+    pub fn session_of(&self, env: Env, deps: Object<'_>, s: JsArg) -> Result<Option<String>> {
         let out = attribution::session_of(&self.state, &mut SyncCalls::new(&env, &deps), &Paths::default(), &pending_of(&s.0));
         let out = out.map_err(|t| rethrow(&env, t));
         settled(&env);
@@ -138,14 +138,14 @@ impl SpawnsCore {
     /// The processes settled now. `alive(record)`, when given, says
     /// whether one still runs.
     #[napi]
-    pub fn settle(&self, env: Env, deps: Object, at: f64, alive: Option<Function<JsArg, JsArg>>) -> Result<Json> {
+    pub fn settle(&self, env: Env, deps: Object<'_>, at: f64, alive: Option<Function<'_, JsArg, JsArg>>) -> Result<Json> {
         let mut calls = SyncCalls::new(&env, &deps);
         let mut check = |_: &mut dyn Calls, p: &Pending| -> xenonet_engine::peer::Result<bool> {
             let f = alive.as_ref().unwrap();
             f.call(JsArg(crate::args::value_to_arg(&p.json()))).map(|v| v.0.truthy()).map_err(|e| Thrown::new(e.reason.clone()))
         };
         let out = attribution::settle(&self.state, &mut calls, &Paths::default(), at, if alive.is_some() { Some(&mut check) } else { None });
-        let out = out.map(|v| Json(Value::Array(v.iter().map(|s| s.json()).collect()))).map_err(|t| rethrow(&env, t));
+        let out = out.map(|v| Json(Value::Array(v.iter().map(attribution::Settled::json).collect()))).map_err(|t| rethrow(&env, t));
         settled(&env);
         out
     }

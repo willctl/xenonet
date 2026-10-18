@@ -30,9 +30,9 @@ fn list(items: Vec<Out>) -> Jv {
     Jv::Arr(items.into_iter().map(jv).collect())
 }
 
-fn same(env: &Env, a: &Unknown, b: &Unknown) -> bool {
+fn same(env: &Env, a: &Unknown<'_>, b: &Unknown<'_>) -> bool {
     let mut is = false;
-    unsafe { sys::napi_strict_equals(env.raw(), a.raw(), b.raw(), &mut is) };
+    unsafe { sys::napi_strict_equals(env.raw(), a.raw(), b.raw(), &raw mut is) };
     is
 }
 
@@ -42,7 +42,7 @@ fn same(env: &Env, a: &Unknown, b: &Unknown) -> bool {
 /// gave back, or `failed` when it threw.
 type CheckFn<'a> = Function<'a, FnArgs<(Unknown<'a>, Option<String>)>, Unknown<'a>>;
 
-fn checked(env: &Env, check: &CheckFn, failed: &Unknown, record: &Value, version: Option<&str>) -> std::result::Result<Checked, Threw> {
+fn checked(env: &Env, check: &CheckFn<'_>, failed: &Unknown<'_>, record: &Value, version: Option<&str>) -> std::result::Result<Checked, Threw> {
     let raw = unsafe { to_js(env.raw(), record, 0) }.map_err(|_| Threw)?;
     let arg = unsafe { Unknown::from_raw_unchecked(env.raw(), raw) };
     let out = check.call(FnArgs::from((arg, version.map(str::to_string)))).map_err(|_| Threw)?;
@@ -134,7 +134,7 @@ pub fn copilot_edited_by(tool: MaybeJson, args: MaybeJson) -> Vec<String> {
 
 /// The log, null, or `failed` when the check threw.
 #[napi(js_name = "copilotReadEvents")]
-pub fn copilot_read_events(env: &Env, text: String, check: CheckFn, failed: Unknown) -> Jv {
+pub fn copilot_read_events(env: &Env, text: String, check: CheckFn<'_>, failed: Unknown<'_>) -> Jv {
     match copilot_cli::read_events(&text, &mut |r| checked(env, &check, &failed, r, None)) {
         Ok(Some(l)) => jv(copilot_cli::log_out(&l)),
         Ok(None) => Jv::Json(Value::Null),
@@ -160,7 +160,7 @@ impl JsCopilotCli {
         JsCopilotCli { c: copilot_cli::CopilotCli::new() }
     }
     #[napi]
-    pub fn read(&mut self, env: &Env, root: Option<String>, now: f64, check: CheckFn, failed: Unknown, io: Option<IoFn>) {
+    pub fn read(&mut self, env: &Env, root: Option<String>, now: f64, check: CheckFn<'_>, failed: Unknown<'_>, io: Option<IoFn<'_>>) {
         let mut files = files_of(&io);
         self.c.read(root.as_deref(), now, files.as_mut(), &mut |r, v| checked(env, &check, &failed, r, v));
     }
@@ -195,7 +195,7 @@ pub fn gemini_session_id_of(id: String) -> Option<String> {
 
 /// The chat, null, or `failed` when the check threw.
 #[napi(js_name = "geminiReadChat")]
-pub fn gemini_read_chat(env: &Env, text: String, check: CheckFn, failed: Unknown) -> Jv {
+pub fn gemini_read_chat(env: &Env, text: String, check: CheckFn<'_>, failed: Unknown<'_>) -> Jv {
     match gemini_cli::read_chat(&text, &mut |r| checked(env, &check, &failed, r, None)) {
         Ok(Some(c)) => jv(gemini_cli::chat_out(&c)),
         Ok(None) => Jv::Json(Value::Null),
@@ -221,7 +221,7 @@ impl JsGeminiCli {
         JsGeminiCli { g: gemini_cli::GeminiCli::new() }
     }
     #[napi]
-    pub fn read(&mut self, env: &Env, root: Option<String>, now: f64, check: CheckFn, failed: Unknown, io: Option<IoFn>) {
+    pub fn read(&mut self, env: &Env, root: Option<String>, now: f64, check: CheckFn<'_>, failed: Unknown<'_>, io: Option<IoFn<'_>>) {
         let mut files = files_of(&io);
         self.g.read(root.as_deref(), now, files.as_mut(), &mut |r, v| checked(env, &check, &failed, r, v));
     }
@@ -273,7 +273,7 @@ impl JsCursor {
     }
     /// True when the vendor check threw (the twin has what it threw).
     #[napi]
-    pub fn read(&mut self, env: &Env, file: Option<String>, now: f64, check: CheckFn, failed: Unknown, io: Option<IoFn>) -> bool {
+    pub fn read(&mut self, env: &Env, file: Option<String>, now: f64, check: CheckFn<'_>, failed: Unknown<'_>, io: Option<IoFn<'_>>) -> bool {
         let mut files = files_of(&io);
         self.c.read(file.as_deref(), now, files.as_mut(), &mut |r, v| checked(env, &check, &failed, r, v)).is_err()
     }
@@ -397,11 +397,11 @@ fn read_db(
     file: &str,
     since_ms: f64,
     edits_since_ms: f64,
-    query: &Option<QueryFn>,
-    ready: &Function<(), Unknown>,
-    missing: &Function<FnArgs<(String, Option<String>)>, Unknown>,
-    check: &CheckFn,
-    failed: &Unknown,
+    query: &Option<QueryFn<'_>>,
+    ready: &Function<'_, (), Unknown<'_>>,
+    missing: &Function<'_, FnArgs<(String, Option<String>)>, Unknown<'_>>,
+    check: &CheckFn<'_>,
+    failed: &Unknown<'_>,
 ) -> std::result::Result<opencode::Read, Threw> {
     let mut vendor = JsVendor { env, ready, missing, check, failed };
     let mut open = || -> std::result::Result<Box<dyn Db + '_>, String> {
@@ -426,11 +426,11 @@ pub fn opencode_read_db(
     file: String,
     since_ms: f64,
     edits_since_ms: f64,
-    query: Option<QueryFn>,
-    ready: Function<(), Unknown>,
-    missing: Function<FnArgs<(String, Option<String>)>, Unknown>,
-    check: CheckFn,
-    failed: Unknown,
+    query: Option<QueryFn<'_>>,
+    ready: Function<'_, (), Unknown<'_>>,
+    missing: Function<'_, FnArgs<(String, Option<String>)>, Unknown<'_>>,
+    check: CheckFn<'_>,
+    failed: Unknown<'_>,
 ) -> Jv {
     match read_db(env, exists, &file, since_ms, edits_since_ms, &query, &ready, &missing, &check, &failed) {
         Ok(r) => jv(r.out()),
@@ -460,11 +460,11 @@ impl JsOpenCode {
         now: f64,
         exists: bool,
         file: String,
-        query: Option<QueryFn>,
-        ready: Function<(), Unknown>,
-        missing: Function<FnArgs<(String, Option<String>)>, Unknown>,
-        check: CheckFn,
-        failed: Unknown,
+        query: Option<QueryFn<'_>>,
+        ready: Function<'_, (), Unknown<'_>>,
+        missing: Function<'_, FnArgs<(String, Option<String>)>, Unknown<'_>>,
+        check: CheckFn<'_>,
+        failed: Unknown<'_>,
     ) -> Jv {
         const DAY_MS: f64 = 24.0 * 3600e3;
         const EDIT_KEEP_MS: f64 = 30.0 * 60e3;
@@ -537,7 +537,7 @@ impl JsNumbat {
     }
     /// The message of a read that failed, or null.
     #[napi]
-    pub fn read(&mut self, file: Option<String>, now: f64, io: Option<IoFn>) -> Option<String> {
+    pub fn read(&mut self, file: Option<String>, now: f64, io: Option<IoFn<'_>>) -> Option<String> {
         let mut files = files_of(&io);
         self.n.read(file.as_deref(), now, files.as_mut()).err()
     }
@@ -612,7 +612,7 @@ impl JsReportedRuns {
     /// { ok, id } or { ok: false, error }. `now` is asked only for a
     /// report that's good, and what it throws goes on to the caller.
     #[napi]
-    pub fn report(&mut self, actor: String, run: Option<String>, app: String, title: Option<String>, presence: Option<String>, now: Function<(), f64>) -> Result<Jv> {
+    pub fn report(&mut self, actor: String, run: Option<String>, app: String, title: Option<String>, presence: Option<String>, now: Function<'_, (), f64>) -> Result<Jv> {
         let answer = |r: std::result::Result<String, String>| match r {
             Ok(id) => Jv::Obj(vec![("ok", Jv::Bool(true)), ("id", Jv::Json(Value::String(id)))]),
             Err(error) => Jv::Obj(vec![("ok", Jv::Bool(false)), ("error", Jv::Json(Value::String(error)))]),

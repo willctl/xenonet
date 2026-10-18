@@ -137,7 +137,7 @@ pub fn names_slug_refusal(slug: MaybeJson, product: MaybeJson) -> Option<String>
 }
 
 #[napi(js_name = "namesSuggestSlug")]
-pub fn names_suggest_slug(base: String, product: MaybeJson, taken: Function<String, bool>) -> Result<Option<String>> {
+pub fn names_suggest_slug(base: String, product: MaybeJson, taken: Function<'_, String, bool>) -> Result<Option<String>> {
     let product = product.0.as_ref().and_then(Value::as_str).map(str::to_string);
     names::suggest_slug(&base, product.as_deref(), &mut |s| taken.call(s.to_string()))
 }
@@ -229,7 +229,7 @@ impl Buckets {
 
     #[napi]
     pub fn forget(&self, prefix: String) {
-        self.inner.lock().unwrap().forget(&prefix)
+        self.inner.lock().unwrap().forget(&prefix);
     }
 
     #[napi(getter)]

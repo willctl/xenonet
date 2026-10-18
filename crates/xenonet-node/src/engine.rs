@@ -37,9 +37,9 @@ fn throw(env: &Env, f: Fail) -> Error {
             let raw = env.raw();
             unsafe {
                 let mut msg = ptr::null_mut();
-                sys::napi_create_string_utf8(raw, message.as_ptr().cast(), message.len() as isize, &mut msg);
+                sys::napi_create_string_utf8(raw, message.as_ptr().cast(), message.len() as isize, &raw mut msg);
                 let mut err = ptr::null_mut();
-                sys::napi_create_error(raw, ptr::null_mut(), msg, &mut err);
+                sys::napi_create_error(raw, ptr::null_mut(), msg, &raw mut err);
                 for (k, v) in [(c"status", serde_json::json!(400)), (c"code", serde_json::json!("bad-request"))] {
                     if let Ok(js) = crate::js::to_js(raw, &v, 0) {
                         sys::napi_set_named_property(raw, err, k.as_ptr(), js);
@@ -174,23 +174,23 @@ impl EngineCore {
     }
 
     #[napi]
-    pub fn release(&self, env: Env, deps: Object, me: JsArg, paths: JsArg) -> Result<JsArg> {
+    pub fn release(&self, env: Env, deps: Object<'_>, me: JsArg, paths: JsArg) -> Result<JsArg> {
         done(&env, self.inner.release(&mut SyncCalls::new(&env, &deps), &me.0, &paths.0)).map(JsArg)
     }
     #[napi(js_name = "setFocus")]
-    pub fn set_focus(&self, env: Env, deps: Object, me: JsArg, text: JsArg) -> Result<JsArg> {
+    pub fn set_focus(&self, env: Env, deps: Object<'_>, me: JsArg, text: JsArg) -> Result<JsArg> {
         done(&env, self.inner.set_focus(&mut SyncCalls::new(&env, &deps), &me.0, &text.0)).map(JsArg)
     }
     #[napi]
-    pub fn touch(&self, env: Env, deps: Object, me: JsArg, ask: JsArg) -> Result<()> {
+    pub fn touch(&self, env: Env, deps: Object<'_>, me: JsArg, ask: JsArg) -> Result<()> {
         done(&env, self.inner.touch(&mut SyncCalls::new(&env, &deps), &me.0, &ask.0))
     }
     #[napi]
-    pub fn facts(&self, env: Env, deps: Object, a: JsArg) -> Result<JsArg> {
+    pub fn facts(&self, env: Env, deps: Object<'_>, a: JsArg) -> Result<JsArg> {
         done(&env, self.inner.facts(&mut SyncCalls::new(&env, &deps), &a.0)).map(JsArg)
     }
     #[napi(js_name = "visibleTo")]
-    pub fn visible_to(&self, env: Env, deps: Object, me: JsArg, a: JsArg) -> Result<bool> {
+    pub fn visible_to(&self, env: Env, deps: Object<'_>, me: JsArg, a: JsArg) -> Result<bool> {
         done(&env, self.inner.visible_to(&mut SyncCalls::new(&env, &deps), &me.0, &a.0))
     }
 }

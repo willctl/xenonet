@@ -51,7 +51,7 @@ pub struct SecretStoreCore {
 impl SecretStoreCore {
     /// `on_path`: where secret-tool is, asked only where it's the store.
     #[napi(constructor)]
-    pub fn new(platform: String, on_path: Function<(), Option<String>>) -> Result<Self> {
+    pub fn new(platform: String, on_path: Function<'_, (), Option<String>>) -> Result<Self> {
         let tool = if platform == "darwin" || platform == "win32" { None } else { on_path.call(())? };
         Ok(SecretStoreCore { inner: Arc::new(SecretStore::new(&platform, tool)) })
     }
