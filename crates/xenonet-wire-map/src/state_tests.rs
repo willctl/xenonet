@@ -286,3 +286,59 @@ fn a_page_written_in_the_wiki_changes_its_stamp() {
     assert_eq!(after, wiki_stamp(&d), "the same until it changes");
     std::fs::remove_dir_all(&dir).expect("cleaned up");
 }
+
+// A made-up home folder, not the demo: a project with a repo, Claude
+// Code's transcript of a session in it, and its sign-in.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_home_folders_own_sessions_and_projects() {
+    let home = std::env::temp_dir().join(format!("xenonet-wire-real-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    let p = home.join("Projects").join("atlas");
+    std::fs::create_dir_all(p.join("src")).expect("a project");
+    std::fs::write(p.join("package.json"), "{}").expect("its package");
+    let home_s = std::fs::canonicalize(&home).expect("the home").to_string_lossy().into_owned();
+    let cwd = std::path::Path::new(&home_s).join("Projects").join("atlas").to_string_lossy().into_owned();
+    let id = "0190d3e0-0000-7000-8000-00000000aaaa";
+    let folder = home.join(".claude").join("projects").join(cwd.replace(|c: char| !c.is_ascii_alphanumeric(), "-"));
+    std::fs::create_dir_all(&folder).expect("Claude Code's folder");
+    let ts = |ago: f64| xenonet_base::time::iso(now_ms() - ago);
+    let lines = [
+        json!({ "type": "user", "uuid": "u1", "parentUuid": null, "sessionId": id, "cwd": cwd, "gitBranch": "main", "version": "2.0.1", "timestamp": ts(60e3), "message": { "role": "user", "content": "Add a health check route" } }),
+        json!({ "type": "assistant", "uuid": "a1", "parentUuid": "u1", "sessionId": id, "cwd": cwd, "version": "2.0.1", "timestamp": ts(50e3), "message": { "id": "m1", "role": "assistant", "model": "claude-sonnet-4-5", "stop_reason": "end_turn", "usage": { "input_tokens": 10, "output_tokens": 20 }, "content": [{ "type": "text", "text": "Added GET /health." }] } }),
+    ];
+    let text: String = lines.iter().map(|l| format!("{}\n", xenonet_base::json::stringify(l, 0))).collect();
+    std::fs::write(folder.join(format!("{id}.jsonl")), text).expect("a transcript");
+    let mut env = process_env();
+    env.insert("XENONET_CODEX_BIN".into(), json!("/nonexistent/codex"));
+    env.insert("XENONET_CLAUDE_USAGE".into(), json!("off"));
+    env.insert("XENONET_CLAUDE_DESKTOP_DIR".into(), json!(home.join("no-desktop").to_string_lossy()));
+    env.insert("XENONET_STATE_DIR".into(), json!(home.join(".state").to_string_lossy()));
+    env.insert("XENONET_CACHE_DIR".into(), json!(home.join(".cache").to_string_lossy()));
+    env.insert("XENONET_WIKI_DIR".into(), json!(home.join("no-wiki").to_string_lossy()));
+    env.insert("HOME".into(), json!(home_s));
+    for k in ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XENONET_PROJECTS_DIR", "XENONET_READERS", "XENONET_NUMBAT_FILE", "GH_CONFIG_DIR", "XDG_CONFIG_HOME"] {
+        env.shift_remove(k);
+    }
+    let cfg = MapConfig::new(false, false, env, &home_s, None);
+    assert!(!cfg.demo && cfg.claude_projects_dir.starts_with(&home_s), "nothing of yours is read");
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas");
+    let vendor = Vendor::new(dir, Arc::new(Mutex::new(xenonet_schema::drift::DriftLog::default())));
+    let store = StateStore::new(&cfg.state_dir, &cfg.projects_dir);
+    let live = Live::new(&cfg.claude_projects_dir, "", None, false, &cfg.home_dir, vendor.clone());
+    let codex = CodexClient::new(cfg.codex_binary(), "0.0.0".into(), vendor.clone());
+    let claude = crate::claude::Claude::new(&cfg.claude_projects_dir, None, vendor.clone());
+    let s = MapState::new(cfg, store, vendor, Emitter::new(), Readers::Real { claude }, live, codex, "0.0.0");
+    let g = s.refresh_map().await.expect("a map");
+    let session = items(g.get("nodes")).iter().find(|n| s_of(n, "id") == Some(&format!("claude:{id}"))).cloned().expect("the session, on the map");
+    assert_eq!((session["title"].as_str(), session["cwd"].as_str()), (Some("Add a health check route"), Some(cwd.as_str())));
+    assert!(s.home(&format!("claude:{id}")).is_some_and(|h| h.ends_with("/atlas")), "in its project");
+    let st = |name: &str| items(g.get("sources")).iter().find(|x| s_of(x, "name") == Some(name)).cloned().unwrap_or(Value::Null);
+    assert_eq!((st("claude")["ok"].as_bool(), st("claude")["count"].as_u64()), (Some(true), Some(1)));
+    assert_eq!(st("codex")["error"], "spawn /nonexistent/codex ENOENT", "no Codex here, said as Node says it");
+    let t = s.read_transcript(&session, None, 120.0).await.expect("its transcript");
+    assert_eq!(t["entries"][0]["text"], "Add a health check route");
+    let renamed = s.rename_session(json!(format!("claude:{id}")), json!("Health check")).await.expect("renamed");
+    assert_eq!((renamed["title"].as_str(), renamed["saved"].clone()), (Some("Health check"), json!(["Claude Code"])));
+    s.end();
+    std::fs::remove_dir_all(&home).expect("cleaned up");
+}
