@@ -81,7 +81,6 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
     cores.hosts = Arc::new(hosts::config::Hosts(host_store.clone()));
     if cores.hub.is_some() {
         let windows = serde_json::json!({ "activeWindowMs": js["activeWindowMs"], "recentWindowMs": js["recentWindowMs"], "projectActiveMs": js["projectActiveMs"] });
-        let exec = fx::env_set("XENONET_EXEC");
         let parts = hosts::hub::HubParts {
             hosts: host_store.clone(),
             schemas,
@@ -93,8 +92,7 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
             demo,
             windows,
             emitter: env.emitter.clone(),
-            run_as_node: exec.is_some(),
-            exec: exec.or_else(|| fx::on_path("node")).unwrap_or_else(|| "node".into()),
+            bin: fx::xenonet_bin(&config.home),
             ssh_bin: vec!["ssh".into()],
         };
         cores.hub = Some(Arc::new(hosts::hub::HubCore(hosts::hub::HostHub::new(parts))));
@@ -119,15 +117,9 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
                     cores.assistant_source = Some(Arc::new(assistant::reads::SourceCore(reads.clone())));
                     cores.assistant = Some(Arc::new(assistant::reads::ServiceCore(reads.clone())));
                     cores.audit = Some(Arc::new(assistant::reads::AuditCore(reads)));
-                    // tunnel-client runs XenoNet's launcher as the adapter, as
+                    // tunnel-client runs the xenonet binary as the adapter, as
                     // the hooks do.
-                    let (launcher, exec) = (fx::env_set("XENONET_LAUNCHER_EXEC"), fx::env_set("XENONET_EXEC"));
-                    let launch = assistant::tunnels::Launch {
-                        run_as_node: launcher.is_none() && exec.is_some(),
-                        exec: launcher.or(exec).or_else(|| fx::on_path("node")).unwrap_or_else(|| "node".into()),
-                        entry: config.cli_entry().to_string_lossy().into_owned(),
-                        port: config.port,
-                    };
+                    let launch = assistant::tunnels::Launch { bin: fx::xenonet_bin(&config.home), port: config.port };
                     let secrets = Arc::new(if demo { Secrets::memory() } else { Secrets::real() });
                     let runner = assistant::tunnels::Runner::new(remote, store, &dir, secrets, launch, &config.home, demo, env.emitter.clone());
                     cores.tunnels = Some(Arc::new(assistant::tunnels::TunnelsCore(runner)));

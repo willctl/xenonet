@@ -167,10 +167,10 @@ export function createTunnels({ connections, store, dir, secrets, launch, home =
     fs.mkdirSync(tdir, { recursive: true, mode: 0o700 });
     const profile = fileOf(grant, "yaml");
     const urlFile = fileOf(grant, "url");
-    const command = commandLine(adapterArgv({ exec: launch.exec, entry: launch.entry, grant, port: launch.port }));
+    const command = commandLine(adapterArgv({ bin: launch.bin, grant, port: launch.port }));
     fs.writeFileSync(profile, profileYaml({ tunnelId: b.tunnelId, command, label: v.label }), { mode: 0o600 });
     fs.rmSync(urlFile, { force: true });
-    const childEnv = native.asstChildEnv(envOf(env), key, launch.port, !!launch.runAsNode, true);
+    const childEnv = native.asstChildEnv(envOf(env), key, launch.port, true);
     if (core.launching(grant, now())) changed(grant, "starting");
     const h = handles(grant);
     let child;
@@ -256,9 +256,9 @@ export function createTunnels({ connections, store, dir, secrets, launch, home =
     if (!key) fail(409, "no-key", "XenoNet has no runtime key for this tunnel yet");
     fs.mkdirSync(tdir, { recursive: true, mode: 0o700 });
     const profile = fileOf(grant, "check.yaml");
-    const command = commandLine(adapterArgv({ exec: launch.exec, entry: launch.entry, grant, port: launch.port }));
+    const command = commandLine(adapterArgv({ bin: launch.bin, grant, port: launch.port }));
     fs.writeFileSync(profile, profileYaml({ tunnelId: b.tunnelId, command, label: v.label }), { mode: 0o600 });
-    const childEnv = native.asstChildEnv(envOf(env), key, launch.port, !!launch.runAsNode, false);
+    const childEnv = native.asstChildEnv(envOf(env), key, launch.port, false);
     const out = await new Promise((resolve) => {
       execFile(c.path, ["doctor", "--profile-file", profile, "--explain"], { env: childEnv, timeout: 60000, windowsHide: true, maxBuffer: 1 << 20 }, (err, stdout, stderr) => resolve({ ok: !err, text: `${stdout ?? ""}\n${stderr ?? ""}` }));
     });

@@ -670,7 +670,7 @@ pub fn asst_adapter_argv(a: Json) -> Jv {
     let a = a.0;
     let get = |k: &str| a.get(k).cloned().unwrap_or(Value::Null);
     let port = a.get("port").cloned().unwrap_or_else(|| json!(47840));
-    ok_or(tunnel_client::adapter_argv(&get("exec"), &get("entry"), &get("grant"), &port).map(Value::Array))
+    ok_or(tunnel_client::adapter_argv(&get("bin"), &get("grant"), &port).map(Value::Array))
 }
 
 #[napi(js_name = "asstProfileYaml")]
@@ -745,8 +745,8 @@ pub fn asst_runtime_key(binding: Json, key: MaybeJson) -> Jv {
 }
 
 #[napi(js_name = "asstChildEnv")]
-pub fn asst_child_env(env: Json, key: String, port: MaybeJson, run_as_node: bool, run: bool) -> Json {
-    Json(Value::Object(tunnels::child_env(&obj(Some(env.0)), &key, &port.0.unwrap_or(Value::String("undefined".into())), run_as_node, run)))
+pub fn asst_child_env(env: Json, key: String, port: MaybeJson, run: bool) -> Json {
+    Json(Value::Object(tunnels::child_env(&obj(Some(env.0)), &key, &port.0.unwrap_or(Value::String("undefined".into())), run)))
 }
 
 #[napi(js_name = "asstReadyzOf")]

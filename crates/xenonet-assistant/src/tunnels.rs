@@ -111,16 +111,13 @@ pub fn runtime_key(b: &Binding, key: Option<&Value>) -> Result<String, Refused> 
     Ok(k)
 }
 
-/// tunnel-client's own environment: XenoNet's, with the key, the port and
-/// how to run the adapter; a run's never has OPENAI_API_KEY (`run`), and
-/// its doctor's keeps what XenoNet's had, as the JS did.
-pub fn child_env(env: &Map<String, Value>, key: &str, port: &Value, run_as_node: bool, run: bool) -> Map<String, Value> {
+/// tunnel-client's own environment: XenoNet's, with the key and the port;
+/// a run's never has OPENAI_API_KEY (`run`), and its doctor's keeps what
+/// XenoNet's had, as the JS did.
+pub fn child_env(env: &Map<String, Value>, key: &str, port: &Value, run: bool) -> Map<String, Value> {
     let mut e = env.clone();
     e.insert("CONTROL_PLANE_API_KEY".into(), json!(key));
     e.insert("XENONET_PORT".into(), json!(js_string(port)));
-    if run_as_node {
-        e.insert("ELECTRON_RUN_AS_NODE".into(), json!("1"));
-    }
     if run {
         e.shift_remove("OPENAI_API_KEY");
     }
@@ -372,7 +369,7 @@ mod tests {
         let mut env = Map::new();
         env.insert("OPENAI_API_KEY".into(), json!("sk-mine"));
         env.insert("PATH".into(), json!("/bin"));
-        let e = child_env(&env, "sk-runtime", &json!(47841), false, true);
+        let e = child_env(&env, "sk-runtime", &json!(47841), true);
         assert_eq!(e.get("CONTROL_PLANE_API_KEY"), Some(&json!("sk-runtime")));
         assert!(!e.contains_key("OPENAI_API_KEY"));
         assert_eq!(check_lines("ok sk-abcdefghijk\n\n  \nbye\r\n", ""), vec!["ok sk-…", "bye"]);

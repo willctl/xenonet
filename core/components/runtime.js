@@ -19,11 +19,13 @@ export const launcherBin = (env = process.env, platform = process.platform) => p
 // servers, the command on PATH, a local host's relay, a tunnel's adapter.
 // XENONET_BIN when it's set; installed XenoNet's launcher
 // (XENONET_LAUNCHER_BIN, or the binary beside the launcher in
-// XENONET_LAUNCHER_ROOT); else this checkout's build.
+// XENONET_LAUNCHER_ROOT); else this checkout's build, or with no checkout
+// the xenonet on PATH.
 export function xenonetBin({ env = process.env, root, platform = process.platform, exists = fs.existsSync } = {}) {
   if (env.XENONET_BIN) return env.XENONET_BIN;
   if (env.XENONET_LAUNCHER_BIN) return env.XENONET_LAUNCHER_BIN;
   if (env.XENONET_LAUNCHER_ROOT) return pathStyle(env.XENONET_LAUNCHER_ROOT).join(env.XENONET_LAUNCHER_ROOT, binName(platform));
+  if (!root) return binName(platform);
   const built = ["release", "debug"].map((profile) => pathStyle(root).join(root, "target", profile, binName(platform)));
   return built.find((f) => exists(f)) ?? built[1];
 }

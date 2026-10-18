@@ -124,11 +124,11 @@ export function commandLine(argv) {
     .join(" ");
 }
 
-// What tunnel-client runs for a grant: XenoNet's launcher (its node and
-// cli/xenonet.js, which stay put across updates) with mcp assistant.
-export function adapterArgv({ exec, entry, grant, port = 47840 }) {
+// What tunnel-client runs for a grant: the xenonet binary (installed
+// XenoNet's launcher, which stays put across updates) with mcp assistant.
+export function adapterArgv({ bin, grant, port = 47840 }) {
   if (!GRANT_ID.test(String(grant))) throw new Error("not a grant id");
-  return [exec, entry, "mcp", "assistant", "--grant", grant, ...(port !== 47840 ? ["--port", String(port)] : [])];
+  return [bin, "mcp", "assistant", "--grant", grant, ...(port !== 47840 ? ["--port", String(port)] : [])];
 }
 
 // The profile XenoNet writes for a grant: no secret in it, its health on a

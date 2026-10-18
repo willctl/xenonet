@@ -27,7 +27,6 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use xenonet_app::jstext::{slice16, utf16_len};
 use xenonet_app::jsv::truthy;
-use xenonet_app::nodepath::Style;
 use xenonet_base::ids::is_host_id;
 use xenonet_base::text::js_string;
 
@@ -67,9 +66,8 @@ pub struct Options {
     pub ssh_config: Option<String>,
     /// ssh, or ssh and words before its own (a stand-in for tests).
     pub ssh_bin: Vec<String>,
-    pub exec: String,
-    pub run_as_node: bool,
-    pub root: String,
+    /// The xenonet binary a local link runs `relay` with.
+    pub bin: String,
     pub env: Map<String, Value>,
 }
 
@@ -98,18 +96,8 @@ pub fn transport(entry: &Value, o: &Options) -> Result<Command, String> {
     }
     match entry.get("transport").and_then(Value::as_str) {
         Some("local") => {
-            let mut env: Map<String, Value> = o.env.iter().filter(|(k, _)| !k.starts_with("XENONET_")).map(|(k, v)| (k.clone(), v.clone())).collect();
-            if o.run_as_node {
-                env.insert("ELECTRON_RUN_AS_NODE".into(), json!("1"));
-            }
-            let style = match xenonet_base::paths::path_style(&o.root) {
-                xenonet_base::paths::PathStyle::Windows => Style::Win32,
-                xenonet_base::paths::PathStyle::Posix => Style::Posix,
-                xenonet_base::paths::PathStyle::Native => xenonet_app::nodepath::NATIVE,
-            };
-            let mut args = vec![style.join(&[&o.root, "cli", "xenonet.js"])];
-            args.extend(relay);
-            Ok((o.exec.clone(), args, env))
+            let env: Map<String, Value> = o.env.iter().filter(|(k, _)| !k.starts_with("XENONET_")).map(|(k, v)| (k.clone(), v.clone())).collect();
+            Ok((o.bin.clone(), relay, env))
         }
         Some("ssh") => {
             let command = entry.get("command").map_or_else(|| "undefined".into(), js_string);
@@ -930,7 +918,7 @@ mod tests {
     use super::*;
 
     fn opts() -> Options {
-        Options { ssh_config: Some("/x/ssh_config".into()), ssh_bin: vec!["ssh".into()], exec: "/node".into(), run_as_node: false, root: "/src".into(), env: Map::new() }
+        Options { ssh_config: Some("/x/ssh_config".into()), ssh_bin: vec!["ssh".into()], bin: "/x/xenonet".into(), env: Map::new() }
     }
 
     #[test]

@@ -46,7 +46,7 @@ export const findProfiles = (dirs, { read = (f) => fs.readFileSync(f, "utf8"), l
 
 export const commandLine = (argv) => native.asstCommandLine(argv.map(String));
 
-export const adapterArgv = ({ exec, entry, grant, port = 47840 }) => settle(native.asstAdapterArgv({ exec, entry, grant, port }));
+export const adapterArgv = ({ bin, grant, port = 47840 }) => settle(native.asstAdapterArgv({ bin, grant, port }));
 
 export const profileYaml = ({ tunnelId, command, label = null }) => settle(native.asstProfileYaml({ tunnelId, command, label }));
 

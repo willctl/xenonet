@@ -290,6 +290,15 @@ pub fn env_map() -> Map<String, Value> {
 }
 
 /// A variable that's set and not empty.
+/// The xenonet binary XenoNet's entries in other programs run (runtime.js's
+/// xenonetBin): XENONET_BIN, installed XenoNet's launcher, or this one.
+pub fn xenonet_bin(home: &str) -> String {
+    let env: xenonet_components::runtime::Env = std::env::vars().map(|(k, v)| (k, Value::String(v))).collect();
+    let m = xenonet_components::runtime::Machine { platform: platform().into(), arch: std::env::consts::ARCH.into(), home: home.into() };
+    let this = std::env::current_exe().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+    xenonet_components::runtime::xenonet_bin(&env, &m, &this)
+}
+
 pub fn env_set(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.is_empty())
 }

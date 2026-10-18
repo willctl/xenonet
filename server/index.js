@@ -5,6 +5,7 @@ import { integrationRoutes } from "./routes/integrations.js";
 import { createIntegrations } from "../core/integrations/index.js";
 import { demoRefusals } from "../core/refusals/demo.js";
 import { SERVICE_API, CONSOLE_API, CAPABILITIES } from "../core/components/protocol.js";
+import { xenonetBin } from "../core/components/runtime.js";
 let components = null;
 import fs from "node:fs";
 import path from "node:path";
@@ -389,7 +390,7 @@ const tunnels = connections
       secrets: config.demo ? createMemorySecrets() : createSecretStore(),
       ...(config.demo ? { find: () => process.env.XENONET_TUNNEL_CLIENT || null, profiles: () => [] } : {}),
       home: config.homeDir,
-      launch: { exec: process.env.XENONET_LAUNCHER_EXEC || process.env.XENONET_EXEC || process.execPath, entry: path.join(process.env.XENONET_LAUNCHER_ROOT || root, "cli", "xenonet.js"), runAsNode: !process.env.XENONET_LAUNCHER_EXEC && !!process.env.XENONET_EXEC, port: config.port },
+      launch: { bin: xenonetBin({ env: process.env, root }), port: config.port },
       log: (line) => console.log(`[xenonet] ${line}`),
     })
   : null;
@@ -442,7 +443,6 @@ const hub =
             return gone.length;
           },
         },
-        linkOptions: { exec: process.env.XENONET_EXEC || process.execPath, runAsNode: !!process.env.XENONET_EXEC },
       })
     : null;
 if (hub) state.blocks.add(hostsConfig.store);

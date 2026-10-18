@@ -39,11 +39,10 @@ fn target_ok(s: &str) -> bool {
     xenonet_actors::secret_store::is_target(s)
 }
 
-/// How a tunnel-client runs the adapter: XenoNet's launcher.
+/// How a tunnel-client runs the adapter: the xenonet binary (installed
+/// XenoNet's launcher), on this XenoNet's port.
 pub struct Launch {
-    pub exec: String,
-    pub entry: String,
-    pub run_as_node: bool,
+    pub bin: String,
     pub port: u16,
 }
 
@@ -294,7 +293,7 @@ impl Runner {
     }
 
     fn profile_text(&self, grant: &str, tunnel_id: &str, label: &Value) -> R<String> {
-        let argv = client::adapter_argv(&json!(self.launch.exec), &json!(self.launch.entry), &json!(grant), &json!(self.launch.port)).map_err(CoreError::new)?;
+        let argv = client::adapter_argv(&json!(self.launch.bin), &json!(grant), &json!(self.launch.port)).map_err(CoreError::new)?;
         let command = client::command_line(&argv);
         client::profile_yaml(&json!(tunnel_id), &json!(command), Some(label)).map_err(CoreError::new)
     }
@@ -309,7 +308,7 @@ impl Runner {
         let url_file = self.file_of(grant, "url");
         Self::write_private(&profile, &self.profile_text(grant, tunnel_id, &v["label"])?)?;
         let _ = std::fs::remove_file(&url_file);
-        let env = core::child_env(&fx::env_map(), key, &json!(self.launch.port), self.launch.run_as_node, true);
+        let env = core::child_env(&fx::env_map(), key, &json!(self.launch.port), true);
         if self.core.locked().launching(grant, now_ms()) {
             self.changed();
         }
@@ -541,7 +540,7 @@ impl Tunnels for TunnelsCore {
         xenonet_app::fsx::mkdir_p(&t.tdir, Some(0o700)).map_err(|e| CoreError::new(e.message))?;
         let profile = t.file_of(grant, "check.yaml");
         Runner::write_private(&profile, &t.profile_text(grant, &tunnel_id, &v["label"])?)?;
-        let env = core::child_env(&fx::env_map(), &key, &json!(t.launch.port), t.launch.run_as_node, false);
+        let env = core::child_env(&fx::env_map(), &key, &json!(t.launch.port), false);
         let r = fx::exec_file(
             &file,
             &["doctor".into(), "--profile-file".into(), profile.clone(), "--explain".into()],

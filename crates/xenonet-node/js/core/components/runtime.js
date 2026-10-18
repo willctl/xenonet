@@ -22,7 +22,7 @@ export const launcherBin = (env = process.env, platform = process.platform) => n
 // Which binary XenoNet's entries run is Rust's; the checkout's build, its
 // last word, is looked for here.
 export function xenonetBin({ env = process.env, root, platform = process.platform, exists = fs.existsSync } = {}) {
-  const built = ["release", "debug"].map((profile) => pathStyle(root).join(root, "target", profile, binName(platform)));
+  const built = root ? ["release", "debug"].map((profile) => pathStyle(root).join(root, "target", profile, binName(platform))) : [binName(platform), binName(platform)];
   return native.compXenonetBin(envOf(env), { ...machine(), platform: String(platform) }, built.find((f) => exists(f)) ?? built[1]);
 }
 

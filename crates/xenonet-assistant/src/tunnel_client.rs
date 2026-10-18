@@ -200,13 +200,13 @@ pub fn command_line(argv: &[Value]) -> String {
         .join(" ")
 }
 
-/// What tunnel-client runs for a grant: XenoNet's launcher with mcp
-/// assistant.
-pub fn adapter_argv(exec: &Value, entry: &Value, grant: &Value, port: &Value) -> Result<Vec<Value>, String> {
+/// What tunnel-client runs for a grant: the xenonet binary (installed
+/// XenoNet's launcher) with mcp assistant.
+pub fn adapter_argv(bin: &Value, grant: &Value, port: &Value) -> Result<Vec<Value>, String> {
     if !crate::credentials::is_grant(&js_string(grant)) {
         return Err("not a grant id".into());
     }
-    let mut argv = vec![exec.clone(), entry.clone(), json!("mcp"), json!("assistant"), json!("--grant"), grant.clone()];
+    let mut argv = vec![bin.clone(), json!("mcp"), json!("assistant"), json!("--grant"), grant.clone()];
     if !xenonet_app::jsv::strict_eq(Some(port), Some(&json!(47840))) {
         argv.push(json!("--port"));
         argv.push(json!(js_string(port)));

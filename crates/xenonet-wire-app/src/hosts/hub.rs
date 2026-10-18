@@ -42,10 +42,8 @@ pub struct HubParts {
     pub demo: bool,
     pub windows: Value,
     pub emitter: Emitter,
-    /// The program a local link runs cli/xenonet.js with, and whether it's
-    /// Electron run as Node.
-    pub exec: String,
-    pub run_as_node: bool,
+    /// The xenonet binary a local link runs `relay` with.
+    pub bin: String,
     pub ssh_bin: Vec<String>,
 }
 
@@ -194,14 +192,7 @@ impl HostHub {
     }
 
     fn options(&self) -> link::Options {
-        link::Options {
-            ssh_config: Some(self.parts.hosts.ssh_config_file()),
-            ssh_bin: self.parts.ssh_bin.clone(),
-            exec: self.parts.exec.clone(),
-            run_as_node: self.parts.run_as_node,
-            root: self.parts.root.clone(),
-            env: env_map(),
-        }
+        link::Options { ssh_config: Some(self.parts.hosts.ssh_config_file()), ssh_bin: self.parts.ssh_bin.clone(), bin: self.parts.bin.clone(), env: env_map() }
     }
 
     fn new_link(&self, entry: Value, once: bool) -> LinkRt {
@@ -1021,8 +1012,7 @@ mod tests {
             demo: true,
             windows: json!({ "activeWindowMs": 600000, "recentWindowMs": 86400000, "projectActiveMs": 3600000 }),
             emitter: Emitter::new(),
-            exec: "/no/such/node".into(),
-            run_as_node: false,
+            bin: "/no/such/xenonet".into(),
             ssh_bin: vec!["ssh".into()],
         };
         (HostHub::new(parts), dir)

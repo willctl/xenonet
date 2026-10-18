@@ -11,6 +11,7 @@ import { spawn as childSpawn } from "node:child_process";
 import { native } from "../../index.js";
 import { peer } from "../../peer.js";
 import { settle } from "../../settle.js";
+import { xenonetBin } from "../components/runtime.js";
 import { MAX_FRAME, lineSplitter } from "./frames.js";
 
 const { systemClock } = await import(peer("blocks/clock.js"));
@@ -24,7 +25,7 @@ export const STALE_MS = C.staleMs;
 export const BACKOFF = { min: C.backoff.min, max: C.backoff.max };
 export const SSH_OPTIONS = C.sshOptions;
 
-const optionsOf = ({ sshBin = "ssh", sshConfig = null, exec = process.execPath, runAsNode = false, root, env = process.env } = {}) => ({ sshBin: [].concat(sshBin).map(String), sshConfig: sshConfig == null ? null : String(sshConfig), exec: String(exec), runAsNode: Boolean(runAsNode), root: root == null ? "" : String(root), env: { ...env } });
+const optionsOf = ({ sshBin = "ssh", sshConfig = null, root, env = process.env, bin = null } = {}) => ({ sshBin: [].concat(sshBin).map(String), sshConfig: sshConfig == null ? null : String(sshConfig), bin: String(bin ?? xenonetBin({ env, root })), env: { ...env } });
 
 export const transport = (entry, options = {}) => settle(native.hostsTransport(entry, optionsOf(options)));
 
@@ -56,9 +57,9 @@ export class HostLink extends EventEmitter {
   #gets = new Map();
   #unstarted = new Set();
 
-  constructor({ entry, sshConfig = null, sshBin = "ssh", exec = process.execPath, runAsNode = false, root, env = process.env, spawn = childSpawn, clock = systemClock, random = Math.random, helloMs = HELLO_MS, staleMs = STALE_MS, backoff = BACKOFF, getMs = C.getMs, demoOnly = false, once = false, tilde = (p) => p }) {
+  constructor({ entry, sshConfig = null, sshBin = "ssh", root, env = process.env, bin = null, spawn = childSpawn, clock = systemClock, random = Math.random, helloMs = HELLO_MS, staleMs = STALE_MS, backoff = BACKOFF, getMs = C.getMs, demoOnly = false, once = false, tilde = (p) => p }) {
     super();
-    this.options = { sshConfig, sshBin, exec, runAsNode, root, env };
+    this.options = { sshConfig, sshBin, root, env, bin };
     Object.assign(this, { spawn, clock, random, tilde });
     this.#core = new native.HostsLink({ ...entry }, optionsOf(this.options), { helloMs, staleMs, backoff: { min: backoff?.min, max: backoff?.max }, getMs, demoOnly: Boolean(demoOnly), once: Boolean(once) }, clock.now());
   }
