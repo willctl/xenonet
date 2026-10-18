@@ -92,10 +92,10 @@ export function mergeHooks(settings, ours, add = null) {
 const hooksInPlace = (settings, ours, add) => Object.entries(add).every(([event, group]) => (settings.hooks?.[event] ?? []).some((g) => (g.matcher ?? null) === (group.matcher ?? null) && g.hooks?.some((h) => ours(h) && JSON.stringify(h) === JSON.stringify(group.hooks[0]))));
 
 // `bin`: the xenonet binary the entries run, xenonetBin's by default.
-export function createConnect({ port, root, demo = false, home = os.homedir(), env = process.env, platform = process.platform, bin = xenonetBin({ env, root, platform }), run = runFile }) {
+// `consoleMcp`: whether the console operator's entry is XenoNet's too, as
+// for the installed XenoNet, which Desktop registers it for.
+export function createConnect({ port, root, demo = false, home = os.homedir(), env = process.env, platform = process.platform, bin = xenonetBin({ env, root, platform }), run = runFile, consoleMcp = !!(env.XENONET_LAUNCHER_BIN || env.XENONET_LAUNCHER_EXEC) }) {
   const serverEnv = { XENONET_PORT: String(port) };
-  // Installed XenoNet's console operator, which Desktop registers.
-  const consoleMcp = !!(env.XENONET_LAUNCHER_BIN || env.XENONET_LAUNCHER_EXEC);
   const mcp = { type: "stdio", command: bin, args: ["mcp"], env: serverEnv };
   const hookUrl = `http://127.0.0.1:${port}/api/hook/claude`;
   const claudeSettings = path.join(env.CLAUDE_CONFIG_DIR ?? path.join(home, ".claude"), "settings.json");

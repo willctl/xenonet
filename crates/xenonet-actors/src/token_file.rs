@@ -180,7 +180,9 @@ pub fn write_token_file(file: &str, token: &str, windows: bool, run: &mut Run<'_
 mod tests {
     use super::*;
 
-    const TOKEN: &str = "xenonet_actor_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    // Made up, and split so the doctor's search for tokens left in repos
+    // doesn't take this file for one that holds a real token.
+    const TOKEN: &str = concat!("xenonet_", "actor_", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
 
     fn temp() -> String {
         let d = std::env::temp_dir().join(format!(
