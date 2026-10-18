@@ -223,7 +223,9 @@ pub async fn status(io: Io, s: Shared, profile: Value) -> Result<Value, Failure>
     };
     Ok(match (version, listed) {
         (Ok(v), true) => json!({ "ready": true, "version": clean(v.get("stdout"), 160), "backend": backend, "experimental": experimental }),
-        _ => json!({ "ready": false, "backend": backend, "experimental": experimental, "reason": "OpenShell or its active gateway is unavailable. Configure the gateway in this execution environment, then check again." }),
+        _ => {
+            json!({ "ready": false, "backend": backend, "experimental": experimental, "reason": "OpenShell or its active gateway is unavailable. Configure the gateway in this execution environment, then check again." })
+        }
     })
 }
 
@@ -241,7 +243,8 @@ pub async fn preview(io: Io, s: Shared, body: Value) -> Result<Value, Failure> {
         command(&profile, &[], &o.platform, o.system_root.as_deref()).map_err(failure)?;
     }
     let f = |m: &str| failure(Fail { status: 400, code: "bad-request".into(), message: m.into() });
-    let agent = body.get("agent").and_then(Value::as_str).filter(|a| ["pi", "codex", "claude"].contains(a)).map(String::from).ok_or_else(|| f("Choose Pi, Codex or Claude Code."))?;
+    let agent =
+        body.get("agent").and_then(Value::as_str).filter(|a| ["pi", "codex", "claude"].contains(a)).map(String::from).ok_or_else(|| f("Choose Pi, Codex or Claude Code."))?;
     let request = text(body.get("request"), "Task", 2000).map_err(failure)?;
     if has_credential(&request) {
         return Err(f("Attach credentials through an OpenShell provider, not the task."));
@@ -288,7 +291,11 @@ pub async fn preview(io: Io, s: Shared, body: Value) -> Result<Value, Failure> {
         // the agent waits for the separate upload, and the task stays argv.
         let ready = format!("/tmp/{name}.ready");
         let workdir = if baseline.is_some() { "/workspace/project".to_string() } else { format!("/workspace/project/{}", NATIVE.basename(source, None)) };
-        let cmd = if baseline.is_some() { r#"while [ ! -e "$1" ]; do sleep 1; done; shift; cd "$1" || exit 1; shift; "$@" < /dev/null; while :; do sleep 60; done"# } else { r#"while [ ! -e "$1" ]; do sleep 1; done; shift; cd "$1" || exit 1; shift; exec "$@" < /dev/null"# };
+        let cmd = if baseline.is_some() {
+            r#"while [ ! -e "$1" ]; do sleep 1; done; shift; cd "$1" || exit 1; shift; "$@" < /dev/null; while :; do sleep 60; done"#
+        } else {
+            r#"while [ ! -e "$1" ]; do sleep 1; done; shift; cd "$1" || exit 1; shift; exec "$@" < /dev/null"#
+        };
         args.extend(strs(&["--", "/bin/sh", "-c", cmd, "xenonet-upload", &ready, &workdir]));
         args.extend(agent_args.iter().cloned());
         rest.push(strs(&["sandbox", "exec", &name, "--no-login-shell", "--", "/bin/sh", "-c", "test ! -e /workspace/project"]));
@@ -335,7 +342,11 @@ pub async fn preview(io: Io, s: Shared, body: Value) -> Result<Value, Failure> {
             return Err(failure(e));
         }
     };
-    let review_note = if baseline.is_some() { "Text review uploads only the frozen manifest below. The image needs /usr/local/bin/node. Its sandbox stays running after the agent exits until you delete it. A local baseline and retrieved changes stay on this computer until you forget the local review. " } else { "" };
+    let review_note = if baseline.is_some() {
+        "Text review uploads only the frozen manifest below. The image needs /usr/local/bin/node. Its sandbox stays running after the agent exits until you delete it. A local baseline and retrieved changes stay on this computer until you forget the local review. "
+    } else {
+        ""
+    };
     let mut out: Map<String, Value> = issued.as_object().cloned().unwrap_or_default();
     out.insert("command".into(), commands[0].clone());
     out.insert("commands".into(), Value::Array(commands));
@@ -406,7 +417,11 @@ pub async fn launch(io: Io, s: Shared, ticket: Value) -> Result<Value, Failure> 
             // A lost CLI connection can leave a sandbox running. Never retry
             // or delete it implicitly; its unique name lets inspection
             // reconcile it.
-            let (kind, reason) = if denied { ("execution-policy-denial", "OpenShell reported policy_denied. Inspect its effective policy.") } else { ("runtime-unavailable", "Creation did not complete locally. Inspect the gateway before retrying; the sandbox may exist.") };
+            let (kind, reason) = if denied {
+                ("execution-policy-denial", "OpenShell reported policy_denied. Inspect its effective policy.")
+            } else {
+                ("runtime-unavailable", "Creation did not complete locally. Inspect the gateway before retrying; the sandbox may exist.")
+            };
             update(&io, &record["id"], json!({ "status": "creation-unknown", "eventKind": kind, "reason": reason })).await
         }
     }
@@ -430,9 +445,16 @@ pub async fn inspect(io: Io, s: Shared, id: Value) -> Result<Value, Failure> {
     let status = if value.get("status").and_then(Value::as_str) == Some("deletion-requested") { value["status"].clone() } else { json!("observed") };
     let t = now(&io).await?;
     update(&io, &id, json!({ "status": status, "checkedAt": xenonet_base::json::number(t) })).await?;
-    let phase = [sandbox.get("phase"), sandbox.get("sandbox").and_then(|x| x.get("phase")), sandbox.get("status").and_then(|x| x.get("phase"))].into_iter().flatten().find(|v| !v.is_null()).cloned().unwrap_or_else(|| json!("unknown"));
+    let phase = [sandbox.get("phase"), sandbox.get("sandbox").and_then(|x| x.get("phase")), sandbox.get("status").and_then(|x| x.get("phase"))]
+        .into_iter()
+        .flatten()
+        .find(|v| !v.is_null())
+        .cloned()
+        .unwrap_or_else(|| json!("unknown"));
     // Logs are shown on request and never copied to the record store.
-    Ok(json!({ "id": id, "sandbox": { "name": value["name"], "phase": clean(Some(&phase), 160) }, "policy": clean(policy.get("stdout"), 64000), "logs": clean(logs.get("stdout"), 64000), "audit": "A bounded snapshot of best-effort gateway logs; absence of an event does not establish that an operation was allowed." }))
+    Ok(
+        json!({ "id": id, "sandbox": { "name": value["name"], "phase": clean(Some(&phase), 160) }, "policy": clean(policy.get("stdout"), 64000), "logs": clean(logs.get("stdout"), 64000), "audit": "A bounded snapshot of best-effort gateway logs; absence of an event does not establish that an operation was allowed." }),
+    )
 }
 
 /// review(id): the job's local review, if it has one.
@@ -466,7 +488,14 @@ pub async fn retrieve(io: Io, s: Shared, id: Value) -> Result<Value, Failure> {
     let collect = s.borrow().collect_text.clone();
     let name = js_string(&value["name"]);
     let got = async {
-        let out = call(&io, &s, &value["profile"], &strs(&["sandbox", "exec", &name, "--no-login-shell", "--timeout", "30", "--", "/usr/local/bin/node", "-e", &collect]), json!({ "timeout": 45000, "maxBuffer": 8 * 1024 * 1024 })).await?;
+        let out = call(
+            &io,
+            &s,
+            &value["profile"],
+            &strs(&["sandbox", "exec", &name, "--no-login-shell", "--timeout", "30", "--", "/usr/local/bin/node", "-e", &collect]),
+            json!({ "timeout": 45000, "maxBuffer": 8 * 1024 * 1024 }),
+        )
+        .await?;
         let got = parsed(&js_string(&out["stdout"]))?;
         let result = asked(&io, json!({ "op": "reviews.accept", "id": value["reviewId"], "value": got })).await?;
         let t = asked(&io, json!({ "op": "now" })).await?;
@@ -489,7 +518,13 @@ pub async fn retrieve(io: Io, s: Shared, id: Value) -> Result<Value, Failure> {
             if ["retrieval-invalid", "review-too-large", "review-capacity"].contains(&err.code().as_str()) {
                 return Err(err.thrown());
             }
-            Err(failure(Fail { status: 502, code: "retrieval-unavailable".into(), message: "Changes could not be retrieved. The sandbox may be stopped, unavailable, changing, or outside the text limits. An earlier local review, if any, is retained.".into() }))
+            Err(failure(Fail {
+                status: 502,
+                code: "retrieval-unavailable".into(),
+                message:
+                    "Changes could not be retrieved. The sandbox may be stopped, unavailable, changing, or outside the text limits. An earlier local review, if any, is retained."
+                        .into(),
+            }))
         }
     }
 }
@@ -525,6 +560,10 @@ pub async fn remove(io: Io, s: Shared, id: Value) -> Result<Value, Failure> {
     let name = js_string(&value["name"]);
     let _ = call(&io, &s, &value["profile"], &strs(&["sandbox", "delete", &name]), json!({ "timeout": 60000 })).await;
     let listed = call(&io, &s, &value["profile"], &strs(&["sandbox", "list", "--selector", &format!("xenonet-job={name}"), "-o", "json"]), Value::Null).await;
-    let gone = listed.ok().and_then(|l| xenonet_base::json::parse(&js_string(&l["stdout"])).ok()).is_some_and(|l| l.get("sandboxes").and_then(Value::as_array).is_some_and(Vec::is_empty) && !truthy(l.get("next_page_token")));
-    update(&io, &id, json!({ "status": if gone { "deleted" } else { "deletion-requested" }, "eventKind": if gone { "sandbox-deleted" } else { "sandbox-deletion-requested" } })).await
+    let gone = listed
+        .ok()
+        .and_then(|l| xenonet_base::json::parse(&js_string(&l["stdout"])).ok())
+        .is_some_and(|l| l.get("sandboxes").and_then(Value::as_array).is_some_and(Vec::is_empty) && !truthy(l.get("next_page_token")));
+    update(&io, &id, json!({ "status": if gone { "deleted" } else { "deletion-requested" }, "eventKind": if gone { "sandbox-deleted" } else { "sandbox-deletion-requested" } }))
+        .await
 }

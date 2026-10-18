@@ -26,7 +26,9 @@ pub fn source_of(g: Option<&Value>, l: Option<&Value>, t: f64) -> Value {
     let Some(g) = g.filter(|g| truthy(Some(g))) else { return json!({ "state": "unavailable", "observedAt": null, "coverage": "unknown", "reason": "not_started" }) };
     let state = g.get("state").and_then(Value::as_str);
     let last_ok = g.get("lastOk").filter(|v| !v.is_null());
-    let Some(last_ok) = last_ok.filter(|_| state != Some("idle")) else { return json!({ "state": "unavailable", "observedAt": null, "coverage": "unknown", "reason": "not_started" }) };
+    let Some(last_ok) = last_ok.filter(|_| state != Some("idle")) else {
+        return json!({ "state": "unavailable", "observedAt": null, "coverage": "unknown", "reason": "not_started" });
+    };
     if matches!(state, Some("failed" | "stopped")) {
         return json!({ "state": "unavailable", "observedAt": last_ok, "coverage": "unknown", "reason": if state == Some("stopped") { "stopped" } else { "read_failed" } });
     }
@@ -54,7 +56,9 @@ pub trait Around {
 }
 
 fn targets(a: &Value) -> Value {
-    Value::Array(a.get("targets").filter(|t| !t.is_null()).and_then(Value::as_array).into_iter().flatten().map(|x| json!({ "id": x.get("id"), "relation": x.get("relation") })).collect())
+    Value::Array(
+        a.get("targets").filter(|t| !t.is_null()).and_then(Value::as_array).into_iter().flatten().map(|x| json!({ "id": x.get("id"), "relation": x.get("relation") })).collect(),
+    )
 }
 
 fn via(a: &Value) -> Value {

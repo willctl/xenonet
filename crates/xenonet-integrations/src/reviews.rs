@@ -88,7 +88,8 @@ pub fn review_path(name: &Value) -> bool {
                 return false;
             }
             let stem = p.split('.').next().unwrap_or("").to_ascii_lowercase();
-            let device = matches!(stem.as_str(), "con" | "prn" | "aux" | "nul") || (stem.len() == 4 && (stem.starts_with("com") || stem.starts_with("lpt")) && matches!(stem.as_bytes()[3], b'1'..=b'9'));
+            let device = matches!(stem.as_str(), "con" | "prn" | "aux" | "nul")
+                || (stem.len() == 4 && (stem.starts_with("com") || stem.starts_with("lpt")) && matches!(stem.as_bytes()[3], b'1'..=b'9'));
             !device
         })
 }
@@ -325,7 +326,9 @@ pub fn validate_result(value: &Value) -> Result<Value, Fail> {
     for f in files {
         let path = f.get("path").and_then(Value::as_str).unwrap_or("");
         let content = f.get("content").and_then(Value::as_str);
-        let Some(content) = content.filter(|c| review_path(&json!(path)) && !excluded_path(path) && c.len() <= FILE_BYTES.div_ceil(3) * 4) else { return invalid("The gateway returned an unsupported file.") };
+        let Some(content) = content.filter(|c| review_path(&json!(path)) && !excluded_path(path) && c.len() <= FILE_BYTES.div_ceil(3) * 4) else {
+            return invalid("The gateway returned an unsupported file.");
+        };
         let key = path.to_lowercase();
         if seen.contains(&key) {
             return invalid("The gateway returned colliding file paths.");
@@ -351,7 +354,9 @@ pub fn validate_result(value: &Value) -> Result<Value, Fail> {
         }
     }
     for entry in problems.iter().chain(omissions) {
-        let ok = truthy(Some(entry)) && entry.get("path").and_then(Value::as_str).is_some_and(|p| xenonet_app::jstext::utf16_len(p) <= 240) && entry.get("reason").and_then(Value::as_str).is_some_and(|r| xenonet_app::jstext::utf16_len(r) <= 160);
+        let ok = truthy(Some(entry))
+            && entry.get("path").and_then(Value::as_str).is_some_and(|p| xenonet_app::jstext::utf16_len(p) <= 240)
+            && entry.get("reason").and_then(Value::as_str).is_some_and(|r| xenonet_app::jstext::utf16_len(r) <= 160);
         if !ok {
             return invalid("The gateway returned invalid retrieval diagnostics.");
         }
@@ -455,7 +460,8 @@ pub fn text_patch(before: &[Value], after: &[Value]) -> Value {
 
 // ---------- local reviews ----------
 
-const SCOPE_NOTE: &str = "New files use frozen repository .gitignore rules. Existing omitted paths stay excluded. Global and local-only ignore rules are not applied to newly created paths.";
+const SCOPE_NOTE: &str =
+    "New files use frozen repository .gitignore rules. Existing omitted paths stay excluded. Global and local-only ignore rules are not applied to newly created paths.";
 
 /// The local reviews: a folder of one per job, readable by you alone,
 /// and the last few read kept in memory.
@@ -570,7 +576,13 @@ impl Reviews {
     }
 
     pub fn describe(v: &Value) -> Value {
-        let files: Vec<Value> = v.get("files").and_then(Value::as_array).into_iter().flatten().map(|f| json!({ "path": f.get("path"), "bytes": b64::byte_length(&f.get("content").map(js_string).unwrap_or_default()) })).collect();
+        let files: Vec<Value> = v
+            .get("files")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .map(|f| json!({ "path": f.get("path"), "bytes": b64::byte_length(&f.get("content").map(js_string).unwrap_or_default()) }))
+            .collect();
         json!({ "id": v.get("id"), "digest": v.get("digest"), "at": v.get("at"), "bytes": v.get("bytes"), "files": files, "excluded": v.get("excluded"), "omittedPaths": v.get("omittedPaths").filter(|x| !x.is_null()).cloned().unwrap_or_else(|| json!([])), "scopeNote": SCOPE_NOTE, "limits": limits() })
     }
 
@@ -592,7 +604,8 @@ impl Reviews {
         if !st.is_file() || st.file_type().is_symlink() || st.len() != 0 {
             return failed("The isolated Git configuration changed.", "storage-invalid", 409);
         }
-        let mut a: Vec<String> = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=", "-c", &format!("core.excludesFile={empty}"), "-C", folder].iter().map(|s| s.to_string()).collect();
+        let mut a: Vec<String> =
+            ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=", "-c", &format!("core.excludesFile={empty}"), "-C", folder].iter().map(|s| s.to_string()).collect();
         a.extend(args.iter().map(|s| s.to_string()));
         let mut e = git_env(env);
         e.insert("GIT_CONFIG_NOSYSTEM".into(), json!("1"));
@@ -605,7 +618,9 @@ impl Reviews {
         if !self.demo {
             return fail("Synthetic reviews belong to the demo instance.");
         }
-        let encode = |v: Option<&Value>| -> Vec<Value> { v.and_then(Value::as_object).into_iter().flatten().map(|(p, t)| json!({ "path": p, "content": b64::encode(js_string(t).as_bytes()) })).collect() };
+        let encode = |v: Option<&Value>| -> Vec<Value> {
+            v.and_then(Value::as_object).into_iter().flatten().map(|(p, t)| json!({ "path": p, "content": b64::encode(js_string(t).as_bytes()) })).collect()
+        };
         let files = encode(options.get("before"));
         let comparison = text_patch(&files, &encode(options.get("after")));
         let problems = options.get("problems").filter(|v| !v.is_null()).cloned().unwrap_or_else(|| json!([]));
@@ -647,7 +662,9 @@ impl Reviews {
     pub fn export(&mut self, id: &Value, revision: &Value) -> R<Value> {
         let v = self.load(id)?;
         let r = v.get("result").filter(|r| truthy(Some(r)));
-        let Some(r) = r.filter(|r| xenonet_app::jsv::strict_eq(r.get("revision"), Some(revision))) else { return failed("The reviewed result changed. Open it again before exporting.", "changed", 409) };
+        let Some(r) = r.filter(|r| xenonet_app::jsv::strict_eq(r.get("revision"), Some(revision))) else {
+            return failed("The reviewed result changed. Open it again before exporting.", "changed", 409);
+        };
         if !truthy(r.get("complete")) {
             return failed("Retrieval is incomplete. Resolve the reported files before exporting.", "incomplete", 409);
         }
@@ -777,7 +794,9 @@ pub async fn launch(io: Io, r: Shared, id: Value) -> Result<Value, Failure> {
         parts.extend(p.split('/'));
         let file = NATIVE.join(&parts);
         let st = std::fs::symlink_metadata(&file).map_err(|e| fs_fail(fsx::FsError::of(e, "lstat", &file)))?;
-        let same = st.is_file() && !st.file_type().is_symlink() && b64::encode(&std::fs::read(&file).map_err(|e| fs_fail(fsx::FsError::of(e, "open", &file)))?) == js_string(&f["content"]);
+        let same = st.is_file()
+            && !st.file_type().is_symlink()
+            && b64::encode(&std::fs::read(&file).map_err(|e| fs_fail(fsx::FsError::of(e, "open", &file)))?) == js_string(&f["content"]);
         if !same {
             return Err(changed("The frozen upload changed. Preview again."));
         }
@@ -834,7 +853,8 @@ async fn filter_scope(io: &Io, r: &Shared, v: &Value, value: &Value, env: &Map<S
     let omitted_paths: Vec<String> = v.get("omittedPaths").and_then(Value::as_array).into_iter().flatten().map(js_string).collect();
     let omitted = |name: &str| {
         let n = name.to_lowercase();
-        omitted_paths.iter().any(|p| if p.ends_with('/') { n.starts_with(&p.to_lowercase()) } else { n == p.to_lowercase() }) || excluded.iter().any(|p| n == *p || n.starts_with(&format!("{p}/")))
+        omitted_paths.iter().any(|p| if p.ends_with('/') { n.starts_with(&p.to_lowercase()) } else { n == p.to_lowercase() })
+            || excluded.iter().any(|p| n == *p || n.starts_with(&format!("{p}/")))
     };
     let mut ignored: Vec<String> = Vec::new();
     if !r.borrow().demo {
@@ -899,7 +919,9 @@ mod tests {
     fn scope_and_portable_paths() {
         assert!(excluded_path("a/.ENV.local") && excluded_path("keys/server.PEM") && excluded_path("node_modules/x") && excluded_path("secret"));
         assert!(!excluded_path("src/environment.ts") && !excluded_path("secretary.txt"));
-        assert!(review_path(&json!("src/main.rs")) && !review_path(&json!("CON.txt")) && !review_path(&json!("a/../b")) && !review_path(&json!("x.")) && review_path(&json!("com0")));
+        assert!(
+            review_path(&json!("src/main.rs")) && !review_path(&json!("CON.txt")) && !review_path(&json!("a/../b")) && !review_path(&json!("x.")) && review_path(&json!("com0"))
+        );
         assert!(!portable_set(&["A.txt".into(), "a.txt".into()]) && !portable_set(&["a".into(), "a/b".into()]));
     }
 

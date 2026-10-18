@@ -36,8 +36,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use xenonet_base::ids::YOU;
 use xenonet_base::json::stringify;
-use xenonet_engine::re;
 use xenonet_engine::peer::{list, Calls, Thrown};
+use xenonet_engine::re;
 use xenonet_engine::sql::{Arg, Cell, Row, SqlError};
 use xenonet_engine::store::{js_text, Shared};
 
@@ -317,7 +317,13 @@ impl Standing {
     pub fn to_arg(&self) -> Arg {
         match self {
             Standing::No { code, reason } => obj(vec![("ok", Arg::Bool(false)), ("code", Arg::text(*code)), ("reason", reason.clone())]),
-            Standing::Ok { grant, connection, actor_id, revision } => obj(vec![("ok", Arg::Bool(true)), ("grant", row_arg(grant)), ("connection", row_arg(connection)), ("actorId", Arg::text(actor_id.clone())), ("revision", val(revision))]),
+            Standing::Ok { grant, connection, actor_id, revision } => obj(vec![
+                ("ok", Arg::Bool(true)),
+                ("grant", row_arg(grant)),
+                ("connection", row_arg(connection)),
+                ("actorId", Arg::text(actor_id.clone())),
+                ("revision", val(revision)),
+            ]),
         }
     }
 }
@@ -1149,7 +1155,14 @@ impl Connections {
             ("adapter_id", val(conn.get("adapter_id"))),
             ("provider", val(conn.get("provider"))),
             ("transport_kind", val(conn.get("transport_kind"))),
-            ("audience", obj(vec![("description", val(conn.get("audience_description"))), ("verification", val(conn.get("audience_verification"))), ("scope", val(conn.get("audience_scope")))])),
+            (
+                "audience",
+                obj(vec![
+                    ("description", val(conn.get("audience_description"))),
+                    ("verification", val(conn.get("audience_verification"))),
+                    ("scope", val(conn.get("audience_scope"))),
+                ]),
+            ),
             ("account_link", obj(vec![("state", Arg::text(link)), ("identity", value_arg(&identity))])),
             ("device", obj(vec![("id", val(g.get("device_id"))), ("alias", opt("device_alias"))])),
             ("permissions", value_arg(&parse(g.get("permissions"), json!([])))),
@@ -1163,10 +1176,13 @@ impl Connections {
             ("created_at", iso(g.get("created_at"))),
             ("expires_at", iso(g.get("expires_at"))),
             ("revoked_at", iso(g.get("revoked_at"))),
-            ("revoked_reason", match g.get("revoked_reason") {
-                Cell::Null => Arg::Null,
-                r => val(r),
-            }),
+            (
+                "revoked_reason",
+                match g.get("revoked_reason") {
+                    Cell::Null => Arg::Null,
+                    r => val(r),
+                },
+            ),
             ("last_used_at", iso(g.get("last_used_at"))),
             ("launch", launch_for(&val(g.get("grant_id")), &self.port)),
         ]))

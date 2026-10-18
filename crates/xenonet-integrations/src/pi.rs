@@ -202,7 +202,8 @@ pub fn scan(root: &str, max_files: usize, max_bytes: u64) -> Value {
                 }
                 return;
             };
-            let mut entries: Vec<(String, std::fs::FileType)> = rd.filter_map(|e| e.ok()).filter_map(|e| Some((e.file_name().to_string_lossy().into_owned(), e.file_type().ok()?))).collect();
+            let mut entries: Vec<(String, std::fs::FileType)> =
+                rd.filter_map(|e| e.ok()).filter_map(|e| Some((e.file_name().to_string_lossy().into_owned(), e.file_type().ok()?))).collect();
             entries.sort_by(|a, b| xenonet_app::jstext::locale_compare(&a.0, &b.0));
             for (name, kind) in entries {
                 self.visited += 1;

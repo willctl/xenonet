@@ -72,7 +72,8 @@ impl RemotePresence {
             self.shown.insert(actor.clone(), at);
             let mut reach = unique(reach);
             reach.truncate(REACH_MAX);
-            let read = Arg::Obj(vec![("actor".into(), actor_id.clone()), ("connection".into(), connection_id.clone()), ("reach".into(), Arg::List(reach)), ("at".into(), Arg::num(at))]);
+            let read =
+                Arg::Obj(vec![("actor".into(), actor_id.clone()), ("connection".into(), connection_id.clone()), ("reach".into(), Arg::List(reach)), ("at".into(), Arg::num(at))]);
             let _ = c.call("", "onRead", vec![read]);
         }
         let key = format!("{actor}|{}", js_text(connection_id));

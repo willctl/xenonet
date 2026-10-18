@@ -141,16 +141,34 @@ pub fn engine_step<E>(i: usize, has_column: &mut dyn FnMut(&str, &str) -> std::r
         // 1: the tables as they first were.
         0 => vec![STEP_ONE],
         // 2: a message's repo (its scope), for messages to everyone working there.
-        1 => if has_column("messages", "scope")? { vec![] } else { vec!["ALTER TABLE messages ADD COLUMN scope TEXT"] },
+        1 => {
+            if has_column("messages", "scope")? {
+                vec![]
+            } else {
+                vec!["ALTER TABLE messages ADD COLUMN scope TEXT"]
+            }
+        }
         // 3: an agent's process, to tell when it's gone.
-        2 => if has_column("contacts", "pid")? { vec![] } else { vec!["ALTER TABLE contacts ADD COLUMN pid INTEGER"] },
+        2 => {
+            if has_column("contacts", "pid")? {
+                vec![]
+            } else {
+                vec!["ALTER TABLE contacts ADD COLUMN pid INTEGER"]
+            }
+        }
         // 4: actors, their registrations, events, targets and revoked tokens.
         3 => vec![STEP_FOUR],
         // 5: remote actors' connections, grants, account links and refs,
         // and the log of what was read.
         4 => vec![STEP_FIVE],
         // 6: how XenoNet knows who sent a message (attest): what it checked.
-        5 => if has_column("messages", "envelope")? { vec![] } else { vec!["ALTER TABLE messages ADD COLUMN envelope TEXT"] },
+        5 => {
+            if has_column("messages", "envelope")? {
+                vec![]
+            } else {
+                vec!["ALTER TABLE messages ADD COLUMN envelope TEXT"]
+            }
+        }
         // 7: an actor's gateway token, apart from its own.
         6 => {
             let mut out = Vec::new();
@@ -176,9 +194,8 @@ pub fn engine_steps() -> Vec<Step> {
     (0..ENGINE_VERSION)
         .map(|i| -> Step {
             Box::new(move |db: &Connection| {
-                let stmts = engine_step(i, &mut |t, c| {
-                    db.query_row(&format!("SELECT count(*) FROM pragma_table_info('{t}') WHERE name = ?"), [c], |r| r.get::<_, i64>(0)).map(|n| n > 0)
-                })?;
+                let stmts =
+                    engine_step(i, &mut |t, c| db.query_row(&format!("SELECT count(*) FROM pragma_table_info('{t}') WHERE name = ?"), [c], |r| r.get::<_, i64>(0)).map(|n| n > 0))?;
                 for s in stmts {
                     db.execute_batch(s)?;
                 }
@@ -309,8 +326,13 @@ impl EngineStore {
             self.run("DELETE FROM actor_events WHERE at < ? OR (actor = ? AND at < ?)", &[n(now - WEEK_MS), Arg::text(YOU), n(now - DAY_MS)])?;
             for r in self.all("SELECT actor FROM actor_events GROUP BY actor HAVING count(*) > ?", &[n(ACTOR_EVENTS_KEPT)])? {
                 let actor = r.get("actor").arg();
-                if let Some(last) = self.get("SELECT at, rowid FROM actor_events WHERE actor = ? ORDER BY at DESC, rowid DESC LIMIT 1 OFFSET ?", &[actor.clone(), n(ACTOR_EVENTS_KEPT - 1.0)])? {
-                    self.run("DELETE FROM actor_events WHERE actor = ? AND (at < ? OR (at = ? AND rowid < ?))", &[actor, num(last.get("at")), num(last.get("at")), num(last.get("rowid"))])?;
+                if let Some(last) =
+                    self.get("SELECT at, rowid FROM actor_events WHERE actor = ? ORDER BY at DESC, rowid DESC LIMIT 1 OFFSET ?", &[actor.clone(), n(ACTOR_EVENTS_KEPT - 1.0)])?
+                {
+                    self.run(
+                        "DELETE FROM actor_events WHERE actor = ? AND (at < ? OR (at = ? AND rowid < ?))",
+                        &[actor, num(last.get("at")), num(last.get("at")), num(last.get("rowid"))],
+                    )?;
                 }
             }
             self.run("DELETE FROM actor_targets WHERE last_at < ? OR (actor = ? AND last_at < ?)", &[n(now - WEEK_MS), Arg::text(YOU), n(now - DAY_MS)])?;
@@ -511,7 +533,17 @@ impl EngineStore {
     pub fn add_actor_event(&self, e: &Arg) -> Result<()> {
         self.run(
             "INSERT INTO actor_events (id, actor, at, kind, target, detail, via, facts, ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            &[e.field("id"), e.field("actor"), e.field("at"), e.field("kind"), def(e.field("target"), Arg::Null), def(e.field("detail"), Arg::Null), e.field("via"), def(e.field("facts"), Arg::Null), def(e.field("ref"), Arg::Null)],
+            &[
+                e.field("id"),
+                e.field("actor"),
+                e.field("at"),
+                e.field("kind"),
+                def(e.field("target"), Arg::Null),
+                def(e.field("detail"), Arg::Null),
+                e.field("via"),
+                def(e.field("facts"), Arg::Null),
+                def(e.field("ref"), Arg::Null),
+            ],
         )?;
         Ok(())
     }
@@ -562,7 +594,10 @@ impl EngineStore {
     /// What an actor's events of one kind said as facts since `since`,
     /// newest first, with the source that said it.
     pub fn actor_facts_since(&self, actor: Arg, kind: Arg, since: Arg) -> Result<Vec<Row>> {
-        self.all("SELECT at, facts, via FROM actor_events WHERE actor = ? AND kind = ? AND at >= ? AND facts IS NOT NULL ORDER BY at DESC, rowid DESC LIMIT 200", &[actor, kind, since])
+        self.all(
+            "SELECT at, facts, via FROM actor_events WHERE actor = ? AND kind = ? AND at >= ? AND facts IS NOT NULL ORDER BY at DESC, rowid DESC LIMIT 200",
+            &[actor, kind, since],
+        )
     }
 
     // ---------- actors' tokens, registrations, revoked tokens ----------
@@ -658,7 +693,10 @@ impl EngineStore {
     }
     /// A token that stopped working, and why. The first reason stands.
     pub fn revoke_actor_token(&self, r: &Arg) -> Result<()> {
-        self.run("INSERT OR IGNORE INTO actor_revoked (token_hash, actor, reason, at) VALUES (?, ?, ?, ?)", &[r.field("token_hash"), r.field("actor"), r.field("reason"), r.field("at")])?;
+        self.run(
+            "INSERT OR IGNORE INTO actor_revoked (token_hash, actor, reason, at) VALUES (?, ?, ?, ?)",
+            &[r.field("token_hash"), r.field("actor"), r.field("reason"), r.field("at")],
+        )?;
         Ok(())
     }
     pub fn revoked_actor_token(&self, hash: Arg) -> Result<Option<Row>> {
@@ -737,7 +775,8 @@ impl EngineStore {
     /// A grant's scope changed: its revision moves on. Whether it was
     /// changed (it isn't once revoked).
     pub fn change_grant(&self, id: Arg, c: &Arg) -> Result<bool> {
-        let sets: Vec<(&str, Arg)> = ["project_allowlist", "field_policy", "data_mode", "token_hash", "expires_at"].into_iter().map(|k| (k, c.field(k))).filter(|(_, v)| *v != Arg::Undef).collect();
+        let sets: Vec<(&str, Arg)> =
+            ["project_allowlist", "field_policy", "data_mode", "token_hash", "expires_at"].into_iter().map(|k| (k, c.field(k))).filter(|(_, v)| *v != Arg::Undef).collect();
         let mut parts: Vec<String> = sets.iter().map(|(k, _)| format!("{k} = ?")).collect();
         parts.push("revision = revision + 1".into());
         let q = format!("UPDATE actor_grants SET {} WHERE grant_id = ? AND revoked_at IS NULL", parts.join(", "));
@@ -747,7 +786,8 @@ impl EngineStore {
     }
     /// Revoked, for good: the first reason stands, and the revision moves on.
     pub fn revoke_grant(&self, id: Arg, reason: Arg, at: Arg) -> Result<bool> {
-        Ok(self.run("UPDATE actor_grants SET revoked_at = ?, revoked_reason = ?, revision = revision + 1 WHERE grant_id = ? AND revoked_at IS NULL", &[at, reason, id])?.changes > 0)
+        Ok(self.run("UPDATE actor_grants SET revoked_at = ?, revoked_reason = ?, revision = revision + 1 WHERE grant_id = ? AND revoked_at IS NULL", &[at, reason, id])?.changes
+            > 0)
     }
     pub fn touch_grant(&self, id: Arg, at: Arg) -> Result<()> {
         self.run("UPDATE actor_grants SET last_used_at = ? WHERE grant_id = ?", &[at.clone(), id.clone()])?;
@@ -847,7 +887,9 @@ mod tests {
     fn a_new_store_takes_every_step_and_keeps_messages() {
         let s = EngineStore::open(":memory:", 1000.0).unwrap();
         assert_eq!(s.version().unwrap(), Version { from: 0, version: 7, newer: false });
-        let id = s.send(&obj(&[("sender", "claude:a".into()), ("target", "codex:b".into()), ("body", "hi".into()), ("recipients", Arg::List(vec!["codex:b".into()]))]), n(1000.0)).unwrap();
+        let id = s
+            .send(&obj(&[("sender", "claude:a".into()), ("target", "codex:b".into()), ("body", "hi".into()), ("recipients", Arg::List(vec!["codex:b".into()]))]), n(1000.0))
+            .unwrap();
         assert_eq!(id, 1.0);
         let unseen = s.unseen("codex:b".into()).unwrap();
         assert_eq!(unseen.len(), 1);

@@ -37,8 +37,8 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use xenonet_base::json::stringify;
-use xenonet_engine::peer::{list, Calls, Thrown};
 use xenonet_engine::js::{base64, base64_bytes};
+use xenonet_engine::peer::{list, Calls, Thrown};
 use xenonet_engine::re;
 use xenonet_engine::sql::{Arg, Cell, SqlError};
 use xenonet_engine::store::{js_text, Shared};
@@ -346,7 +346,22 @@ impl Wakes {
             return Ok(());
         }
         let t = self.now(c)?;
-        let s = State { timer: false, notify_timer: false, in_flight: false, again: false, testing: false, last_at: None, last: None, failures: 0.0, not_before: 0.0, notified_at: 0.0, tested_at: 0.0, woke: None, tokens: PER_ACTOR_BURST, tokens_at: t };
+        let s = State {
+            timer: false,
+            notify_timer: false,
+            in_flight: false,
+            again: false,
+            testing: false,
+            last_at: None,
+            last: None,
+            failures: 0.0,
+            not_before: 0.0,
+            notified_at: 0.0,
+            tested_at: 0.0,
+            woke: None,
+            tokens: PER_ACTOR_BURST,
+            tokens_at: t,
+        };
         let mut inner = self.inner.lock().unwrap();
         if !inner.state.iter().any(|(k, _)| k == id) {
             inner.state.push((id.to_string(), s));
@@ -562,7 +577,12 @@ impl Wakes {
         let host = set_host(self)?;
         let host = if host.is_nullish() { "its webhook".to_string() } else { js_text(&host) };
         if !url.truthy() || !key.truthy() {
-            return Ok(out(false, None, Some("its webhook isn't in your credential store any more; set its wake again".into()), Some("its webhook is missing from the credential store".into())));
+            return Ok(out(
+                false,
+                None,
+                Some("its webhook isn't in your credential store any more; set its wake again".into()),
+                Some("its webhook is missing from the credential store".into()),
+            ));
         }
         let checked = match check_wake_url(c, &url) {
             Ok(v) => Some(v),
@@ -573,7 +593,12 @@ impl Wakes {
         let key_text = js_text(&key);
         let same_host = checked.as_ref().is_some_and(|(_, h)| wanted.as_str() == Some(h.as_str()));
         if !same_host || !secret_ok(&key_text) {
-            return Ok(out(false, None, Some("the webhook in your credential store isn't the one set in XenoNet's window; set its wake again".into()), Some("its webhook changed outside XenoNet".into())));
+            return Ok(out(
+                false,
+                None,
+                Some("the webhook in your credential store isn't the one set in XenoNet's window; set its wake again".into()),
+                Some("its webhook changed outside XenoNet".into()),
+            ));
         }
         let (checked_url, _) = checked.unwrap();
         let bare = match parse_url(c, &checked_url)? {
@@ -604,7 +629,14 @@ impl Wakes {
     /// wake back nor counts as a failure to wait out.
     fn record(&self, c: &mut dyn Calls, id: &str, t: f64, out: Arg, test: bool) -> Result<Arg> {
         let or_null = |k: &str| out.field(k).or(Arg::Null);
-        let last = Arg::Obj(vec![("ok".into(), out.field("ok")), ("at".into(), Arg::num(t)), ("status".into(), or_null("status")), ("why".into(), or_null("why")), ("reason".into(), or_null("reason")), ("test".into(), Arg::Bool(test))]);
+        let last = Arg::Obj(vec![
+            ("ok".into(), out.field("ok")),
+            ("at".into(), Arg::num(t)),
+            ("status".into(), or_null("status")),
+            ("why".into(), or_null("why")),
+            ("reason".into(), or_null("reason")),
+            ("test".into(), Arg::Bool(test)),
+        ]);
         self.with(id, |s| s.last = Some(last));
         if test {
             return Ok(out);
@@ -804,8 +836,16 @@ impl Wakes {
                 let store = if store.is_nullish() { "a credential store".to_string() } else { js_text(&store) };
                 return fail(501.0, "no-store", format!("XenoNet can't reach {store} on this computer, so it can't keep a webhook's key"));
             }
-            c.call("secrets", "set", vec![Arg::text(wake_target(&slug, "url")), Arg::text(url), Arg::Obj(vec![("comment".into(), Arg::text("The webhook XenoNet calls to wake an actor"))])])?;
-            c.call("secrets", "set", vec![Arg::text(wake_target(&slug, "key")), Arg::text(key.clone()), Arg::Obj(vec![("comment".into(), Arg::text("The key XenoNet sends with an actor's wake"))])])?;
+            c.call(
+                "secrets",
+                "set",
+                vec![Arg::text(wake_target(&slug, "url")), Arg::text(url), Arg::Obj(vec![("comment".into(), Arg::text("The webhook XenoNet calls to wake an actor"))])],
+            )?;
+            c.call(
+                "secrets",
+                "set",
+                vec![Arg::text(wake_target(&slug, "key")), Arg::text(key.clone()), Arg::Obj(vec![("comment".into(), Arg::text("The key XenoNet sends with an actor's wake"))])],
+            )?;
             let t = self.now(c)?;
             json!({ "kind": kind, "host": host, "signed": key.starts_with("whsec_"), "at": xenonet_base::json::number(t) })
         } else {
@@ -956,7 +996,10 @@ mod tests {
 
     #[test]
     fn signatures_match_standard_webhooks_own_vector() {
-        assert_eq!(wake_signature("whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw", "msg_p5jXN8AQM9LWM0D4loKWxJek", "1614265330", "{\"test\": 2432232314}"), "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE=");
+        assert_eq!(
+            wake_signature("whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw", "msg_p5jXN8AQM9LWM0D4loKWxJek", "1614265330", "{\"test\": 2432232314}"),
+            "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+        );
     }
 
     #[test]

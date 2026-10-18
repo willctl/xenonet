@@ -106,7 +106,13 @@ fn version_arg(v: &Option<String>) -> Arg {
 
 // A JSON file read against its source's schema: Ok(value) or Err((state,
 // code)).
-fn read_json(c: &mut dyn Calls, file: &str, src: &str, version: Option<String>, version_of: Option<&dyn Fn(&Value) -> Option<String>>) -> Result<std::result::Result<Value, (&'static str, Value)>> {
+fn read_json(
+    c: &mut dyn Calls,
+    file: &str,
+    src: &str,
+    version: Option<String>,
+    version_of: Option<&dyn Fn(&Value) -> Option<String>>,
+) -> Result<std::result::Result<Value, (&'static str, Value)>> {
     let text = match read_text(c, file)? {
         Read::Ok(t) => t,
         Read::Failed(state, code) => return Ok(Err((state, code))),
@@ -186,7 +192,9 @@ pub fn installed(c: &mut dyn Calls, root: &str) -> Result<bool> {
 /// The build stamp: the release this build is of (baseVersion).
 pub fn read_stamp(c: &mut dyn Calls, root: &str) -> Result<Value> {
     let file = join(&join(root, "hermes-agent"), "install-stamp.json");
-    let of = |v: &Value| v.get("schemaVersion").filter(|s| s.as_f64().is_some_and(f64::is_finite)).and_then(|s| clean_version(&xenonet_engine::js::template(Some(s))).map(str::to_string));
+    let of = |v: &Value| {
+        v.get("schemaVersion").filter(|s| s.as_f64().is_some_and(f64::is_finite)).and_then(|s| clean_version(&xenonet_engine::js::template(Some(s))).map(str::to_string))
+    };
     Ok(match read_json(c, &file, source("stamp"), None, Some(&of))? {
         Ok(v) => json!({ "state": "ok", "version": v.get("baseVersion").and_then(Value::as_str).filter(|s| !s.is_empty()).and_then(clean_version) }),
         Err((state, _)) => json!({ "state": state, "version": null }),
@@ -273,7 +281,9 @@ pub fn read_ticker(c: &mut dyn Calls, home: &str, version: Option<String>) -> Re
     let checked = vendor(c, "check", vec![Arg::text(source("ticker")), value_arg(&record), version_arg(&version)])?.to_json();
     let checked = if checked.is_null() { json!({}) } else { checked };
     let hb = checked.get("heartbeat");
-    Ok(json!({ "state": "ok", "ticker": { "at": ms(c, hb.and_then(|h| h.get("at"))), "pid": num(hb.and_then(|h| h.get("pid"))), "lastSuccess": ms(c, checked.get("last_success").and_then(|l| l.get("at"))) } }))
+    Ok(
+        json!({ "state": "ok", "ticker": { "at": ms(c, hb.and_then(|h| h.get("at"))), "pid": num(hb.and_then(|h| h.get("pid"))), "lastSuccess": ms(c, checked.get("last_success").and_then(|l| l.get("at"))) } }),
+    )
 }
 
 /// The background processes Hermes's terminal tool runs. Never their
@@ -316,11 +326,13 @@ pub fn read_jobs(c: &mut dyn Calls, home: &str, version: Option<String>) -> Resu
 
 // ---------- a profile's state.db ----------
 
-const SESSION_COLUMNS: [&str; 12] = ["id", "source", "parent_session_id", "started_at", "ended_at", "end_reason", "cwd", "git_repo_root", "last_activity_at", "last_activity_description", "archived", "hidden"];
+const SESSION_COLUMNS: [&str; 12] =
+    ["id", "source", "parent_session_id", "started_at", "ended_at", "end_reason", "cwd", "git_repo_root", "last_activity_at", "last_activity_description", "archived", "hidden"];
 const MESSAGE_COLUMNS: [&str; 6] = ["id", "session_id", "role", "tool_name", "timestamp", "active"];
 const HEARTBEAT_COLUMNS: [&str; 4] = ["pid", "started_at", "last_heartbeat", "profile"];
 // The columns XenoNet can't do without: one that's gone is drift.
-const NEEDED: [(&str, &[&str]); 2] = [("sessions", &["id", "source", "started_at", "ended_at", "cwd"]), ("messages", &["id", "session_id", "role", "tool_name", "timestamp", "tool_calls"])];
+const NEEDED: [(&str, &[&str]); 2] =
+    [("sessions", &["id", "source", "started_at", "ended_at", "cwd"]), ("messages", &["id", "session_id", "role", "tool_name", "timestamp", "tool_calls"])];
 // New messages read at once at most; the rest wait for the next look.
 const MESSAGES_MAX: usize = 5000;
 // On a first read, how far back to start, at most.
@@ -454,7 +466,12 @@ pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: 
         // The sessions those belong to, the ones open and active since
         // then, and the ones that ended since then.
         let mut ids: Vec<Value> = Vec::new();
-        for id in session_ids.iter().cloned().chain(messages.iter().map(|m| m.get("session_id").cloned().unwrap_or(Value::Null))).chain(tool_paths.iter().map(|t| t.get("session_id").cloned().unwrap_or(Value::Null))) {
+        for id in session_ids
+            .iter()
+            .cloned()
+            .chain(messages.iter().map(|m| m.get("session_id").cloned().unwrap_or(Value::Null)))
+            .chain(tool_paths.iter().map(|t| t.get("session_id").cloned().unwrap_or(Value::Null)))
+        {
             if id.is_string() && !ids.contains(&id) {
                 ids.push(id);
             }
@@ -472,8 +489,13 @@ pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: 
         if ended {
             args.push(Arg::Num(since));
         }
-        let sessions = rows(c, &format!("SELECT {} FROM sessions WHERE {} ORDER BY started_at DESC LIMIT 500", pick(&SESSION_COLUMNS, "sessions").join(", "), wheres.join(" OR ")), args)?;
-        let heartbeats = if has_col("gateway_heartbeats", "pid") { rows(c, &format!("SELECT {} FROM gateway_heartbeats", pick(&HEARTBEAT_COLUMNS, "gateway_heartbeats").join(", ")), vec![])? } else { Vec::new() };
+        let sessions =
+            rows(c, &format!("SELECT {} FROM sessions WHERE {} ORDER BY started_at DESC LIMIT 500", pick(&SESSION_COLUMNS, "sessions").join(", "), wheres.join(" OR ")), args)?;
+        let heartbeats = if has_col("gateway_heartbeats", "pid") {
+            rows(c, &format!("SELECT {} FROM gateway_heartbeats", pick(&HEARTBEAT_COLUMNS, "gateway_heartbeats").join(", ")), vec![])?
+        } else {
+            Vec::new()
+        };
         let schema_version = match &version {
             Some(v) => json!([{ "version": xenonet_base::text::js_number(Some(&Value::String(v.clone()))) }]),
             None => json!([]),
@@ -484,7 +506,9 @@ pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: 
         let arr = |k: &str| checked.get(k).filter(|v| !v.is_null()).cloned().unwrap_or(json!([]));
         // Archived compaction generations are history, not new work.
         let messages: Vec<Value> = arr("messages").as_array().cloned().unwrap_or_default().into_iter().filter(|m| m.get("active").and_then(Value::as_f64) != Some(0.0)).collect();
-        Ok(json!({ "state": "ok", "version": version, "sessions": arr("sessions"), "messages": messages, "toolPaths": arr("tool_paths"), "heartbeats": arr("gateway_heartbeats"), "lastId": last_id }))
+        Ok(
+            json!({ "state": "ok", "version": version, "sessions": arr("sessions"), "messages": messages, "toolPaths": arr("tool_paths"), "heartbeats": arr("gateway_heartbeats"), "lastId": last_id }),
+        )
     })();
     let _ = c.call("db", "close", vec![]);
     match out {

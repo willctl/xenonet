@@ -38,14 +38,21 @@ pub fn read_cache(dir: Option<&str>, key: &str) -> Option<Value> {
 
 /// Keeps a host's snapshot; whether it could.
 pub fn write_cache(dir: Option<&str>, key: &str, id: &Value, saved_at: &Value, hello: &Value, graph: Option<&Value>, live: Option<&Value>, engine: &Value) -> bool {
-    let (Some(dir), Some(graph), Some(live)) = (dir.filter(|d| !d.is_empty()), graph.filter(|g| xenonet_app::jsv::truthy(Some(g))), live.filter(|l| xenonet_app::jsv::truthy(Some(l)))) else { return false };
+    let (Some(dir), Some(graph), Some(live)) =
+        (dir.filter(|d| !d.is_empty()), graph.filter(|g| xenonet_app::jsv::truthy(Some(g))), live.filter(|l| xenonet_app::jsv::truthy(Some(l))))
+    else {
+        return false;
+    };
     if !host_key().is_match(key) {
         return false;
     }
     let file = file_of(dir, key);
     let tmp = format!("{file}.tmp");
     let doc = json!({ "key": key, "id": id, "savedAt": saved_at, "hello": hello, "graph": graph, "live": live, "engine": engine });
-    fsx::mkdir_p(&NATIVE.dirname(&file), Some(0o700)).and_then(|()| fsx::write_file(&tmp, xenonet_base::json::stringify(&doc, 0).as_bytes(), Some(0o600))).and_then(|()| fsx::rename(&tmp, &file)).is_ok()
+    fsx::mkdir_p(&NATIVE.dirname(&file), Some(0o700))
+        .and_then(|()| fsx::write_file(&tmp, xenonet_base::json::stringify(&doc, 0).as_bytes(), Some(0o600)))
+        .and_then(|()| fsx::rename(&tmp, &file))
+        .is_ok()
 }
 
 pub fn remove_cache(dir: Option<&str>, key: &str) -> Result<(), fsx::FsError> {

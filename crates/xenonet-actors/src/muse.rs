@@ -83,7 +83,9 @@ impl Muse {
         let census = census?;
         let open = census.table.iter().enumerate().any(|(i, p)| {
             let pr = &census.products[i];
-            pr.get("product").and_then(Value::as_str) == Some("muse") && pr.get("role").and_then(Value::as_str) == Some("app") && xenonet_engine::js::template(p.row.get("program").filter(|v| !v.is_null()).or(Some(&json!("")))).ends_with(MAIN)
+            pr.get("product").and_then(Value::as_str) == Some("muse")
+                && pr.get("role").and_then(Value::as_str) == Some("app")
+                && xenonet_engine::js::template(p.row.get("program").filter(|v| !v.is_null()).or(Some(&json!("")))).ends_with(MAIN)
         });
         let installed = open || c.call("app", "installed", vec![])?.truthy();
         self.state.lock().unwrap().was_installed = installed;
@@ -105,7 +107,8 @@ impl Muse {
         if !c.call("actors", "enabled", vec![Arg::text(ID)])?.truthy() {
             return Ok(());
         }
-        let (presence, status) = if open { ("idle", "Its app is open on this Mac; it works in Meta's cloud") } else { ("unknown", "Its app on this Mac is closed; it may still work in Meta's cloud") };
+        let (presence, status) =
+            if open { ("idle", "Its app is open on this Mac; it works in Meta's cloud") } else { ("unknown", "Its app on this Mac is closed; it may still work in Meta's cloud") };
         c.call("", "say", vec![Arg::text(ID), Arg::Obj(vec![("presence".into(), Arg::text(presence)), ("status".into(), Arg::text(status)), ("at".into(), Arg::Num(at))])])?;
         Ok(())
     }

@@ -167,7 +167,14 @@ impl Observer {
         }
         let registered = c.call("actors", "isRegistered", vec![Arg::text(id)])?.truthy();
         let f = |k: &str| info.field(k);
-        let was = Arg::Obj(vec![("name".into(), f("name")), ("product".into(), f("product")), ("via".into(), f("via")), ("heartbeatMs".into(), f("heartbeatMs")), ("capabilities".into(), f("capabilities")), ("identity".into(), f("identity"))]);
+        let was = Arg::Obj(vec![
+            ("name".into(), f("name")),
+            ("product".into(), f("product")),
+            ("via".into(), f("via")),
+            ("heartbeatMs".into(), f("heartbeatMs")),
+            ("capabilities".into(), f("capabilities")),
+            ("identity".into(), f("identity")),
+        ]);
         // A version XenoNet can't read just now (an update under way) isn't
         // a version gone.
         let version = if version.is_nullish() { f("product").field("version").or(Arg::Null) } else { version };
@@ -303,7 +310,10 @@ impl Observer {
         let i = match s.buckets.iter().position(|(k, _)| *k == key) {
             Some(i) => i,
             None => {
-                s.buckets.push((key, Bucket { id: id.into(), kind: o.field("kind"), target, platform: o.field("platform"), subject: o.field("subject"), minute, count: 0.0, paths: vec![], at }));
+                s.buckets.push((
+                    key,
+                    Bucket { id: id.into(), kind: o.field("kind"), target, platform: o.field("platform"), subject: o.field("subject"), minute, count: 0.0, paths: vec![], at },
+                ));
                 s.buckets.len() - 1
             }
         };
@@ -332,7 +342,13 @@ impl Observer {
             };
             let opt = |a: &Arg| if a.is_nullish() { String::new() } else { text(a) };
             let r = format!("o:{}:{}:{}", text(&b.kind), xenonet_base::json::number_string(b.minute), tag(&format!("{}|{}", opt(&b.target), opt(&b.platform))));
-            let mut o = vec![("ref".to_string(), Arg::text(r)), ("kind".to_string(), b.kind), ("target".to_string(), b.target), ("at".to_string(), Arg::Num(b.at)), ("count".to_string(), Arg::Num(b.count))];
+            let mut o = vec![
+                ("ref".to_string(), Arg::text(r)),
+                ("kind".to_string(), b.kind),
+                ("target".to_string(), b.target),
+                ("at".to_string(), Arg::Num(b.at)),
+                ("count".to_string(), Arg::Num(b.count)),
+            ];
             if !b.paths.is_empty() {
                 o.push(("paths".into(), Arg::List(b.paths)));
             }

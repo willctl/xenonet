@@ -50,7 +50,8 @@ pub fn request_of(body: Option<&Value>) -> Result<String, Fail> {
     Ok(request)
 }
 
-pub const NOTE: &str = "Only this task and the listed candidate descriptions go to OpenRouter. The saved record contains a task hash, scores and outcome, never task text. No agent starts.";
+pub const NOTE: &str =
+    "Only this task and the listed candidate descriptions go to OpenRouter. The saved record contains a task hash, scores and outcome, never task text. No agent starts.";
 
 /// The preview's outgoing request, as shown before anything goes.
 pub fn outgoing(model: &Value, request: &str, candidates: &[Value]) -> Value {
@@ -107,7 +108,14 @@ pub fn decision_record(result: &Value, request: &str, metrics: &Value) -> Value 
         .flatten()
         .map(|c| {
             let r = c.get("router");
-            fields(&[("id", c.get("id").cloned()), ("name", c.get("name").cloned()), ("probability", c.get("jev_probability").cloned()), ("filtered", r.and_then(|r| r.get("filtered")).cloned()), ("reason", Some(json!(clean(r.and_then(|r| r.get("filter_reason")), 160)))), ("confirmation", r.and_then(|r| r.get("requires_confirmation")).cloned())])
+            fields(&[
+                ("id", c.get("id").cloned()),
+                ("name", c.get("name").cloned()),
+                ("probability", c.get("jev_probability").cloned()),
+                ("filtered", r.and_then(|r| r.get("filtered")).cloned()),
+                ("reason", Some(json!(clean(r.and_then(|r| r.get("filter_reason")), 160)))),
+                ("confirmation", r.and_then(|r| r.get("requires_confirmation")).cloned()),
+            ])
         })
         .collect();
     fields(&[

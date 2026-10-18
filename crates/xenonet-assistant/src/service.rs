@@ -382,7 +382,9 @@ fn sessions(c: &Ctx) -> Result<Out, Failure> {
     };
     let mut list: Vec<Visible> = p::visible_sessions(c.view, policy, c.t)
         .into_iter()
-        .filter(|v| (!truthy(Some(&project)) || strict_eq(Some(&v.project), Some(&project))) && statuses.as_ref().is_none_or(|s| s.iter().any(|x| x == v.status)) && v.updated >= since)
+        .filter(|v| {
+            (!truthy(Some(&project)) || strict_eq(Some(&v.project), Some(&project))) && statuses.as_ref().is_none_or(|s| s.iter().any(|x| x == v.status)) && v.updated >= since
+        })
         .collect();
     list.sort_by(|a, b| {
         let d = upd(b) - upd(a);
@@ -392,10 +394,13 @@ fn sessions(c: &Ctx) -> Result<Out, Failure> {
         let (ia, ib) = (a.s.get("id").map(js_string).unwrap_or_default(), b.s.get("id").map(js_string).unwrap_or_default());
         ia.encode_utf16().cmp(ib.encode_utf16())
     });
-    let keyed: Vec<(Visible, Vec<Value>)> = list.into_iter().map(|v| {
-        let k = vec![xenonet_base::json::number(-upd(&v)), v.s.get("id").cloned().unwrap_or(Value::Null)];
-        (v, k)
-    }).collect();
+    let keyed: Vec<(Visible, Vec<Value>)> = list
+        .into_iter()
+        .map(|v| {
+            let k = vec![xenonet_base::json::number(-upd(&v)), v.s.get("id").cloned().unwrap_or(Value::Null)];
+            (v, k)
+        })
+        .collect();
     let (shown, next) = page(keyed, after.as_ref(), c.limit);
     let f = p::freshness_of(c.view, c.t, &p::all_sources());
     Ok(Out {
@@ -427,7 +432,10 @@ fn attention(c: &Ctx, id_key: &[u8]) -> Result<Out, Failure> {
     let index = |k: &str| c.cfg.attention_kinds.iter().position(|x| x == k).map_or(-1.0, |i| i as f64);
     let mut items: Vec<(Value, Vec<Value>)> = p::attention_items(c.view, c.policy, c.t, &id_of)
         .into_iter()
-        .filter(|i| (!truthy(Some(&project)) || strict_eq(i.get("project_id"), Some(&project))) && kinds.as_ref().is_none_or(|k| k.iter().any(|x| Some(x.as_str()) == i.get("kind").and_then(Value::as_str))))
+        .filter(|i| {
+            (!truthy(Some(&project)) || strict_eq(i.get("project_id"), Some(&project)))
+                && kinds.as_ref().is_none_or(|k| k.iter().any(|x| Some(x.as_str()) == i.get("kind").and_then(Value::as_str)))
+        })
         .map(|i| {
             let k = vec![json!(index(i.get("kind").and_then(Value::as_str).unwrap_or(""))), i.get("attention_id").cloned().unwrap_or(Value::Null)];
             (i, k)

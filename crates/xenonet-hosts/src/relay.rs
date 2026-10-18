@@ -433,7 +433,11 @@ pub fn metadata_engine(mut e: Value) -> Value {
     }
     if let Some(Value::Array(agents)) = e.get_mut("agents") {
         for a in agents.iter_mut() {
-            let claims: Vec<Value> = a.get("claims").and_then(Value::as_array).map(|cs| cs.iter().map(|c| spread_with(&spread_with(c, "pattern", json!("")), "note", Value::Null)).collect()).unwrap_or_default();
+            let claims: Vec<Value> = a
+                .get("claims")
+                .and_then(Value::as_array)
+                .map(|cs| cs.iter().map(|c| spread_with(&spread_with(c, "pattern", json!("")), "note", Value::Null)).collect())
+                .unwrap_or_default();
             if let Some(m) = obj_mut(a) {
                 m.insert("claims".into(), Value::Array(claims));
             }
@@ -468,7 +472,14 @@ fn id_of(v: Option<&Value>) -> String {
 /// titles, states and counts only unless `detail`; and which sessions it
 /// left out. What's kept is copied once, by `copy` (the relay's
 /// scrubber, which writes the home folder as ~ as it copies).
-pub fn shape_graph(input: &Value, since_ms: Option<f64>, now: f64, aliases: &HashMap<String, String>, detail: bool, copy: &mut dyn FnMut(&Value) -> Value) -> (Value, HashSet<String>) {
+pub fn shape_graph(
+    input: &Value,
+    since_ms: Option<f64>,
+    now: f64,
+    aliases: &HashMap<String, String>,
+    detail: bool,
+    copy: &mut dyn FnMut(&Value) -> Value,
+) -> (Value, HashSet<String>) {
     let nodes = list(input.get("nodes"));
     let cutoff = since_ms.map_or(f64::NEG_INFINITY, |s| now - s);
     let mut dropped = HashSet::new();
@@ -675,7 +686,9 @@ fn route_of(path: &str) -> Option<(Shape, fn(&str, &str) -> bool)> {
         return Some((Shape::None, |k, v| k == "server" && chars_ok(v, b"._:-", 1, 160)));
     }
     if session_route(path, "/transcript") {
-        return Some((Shape::None, |k, v| (k == "cursor" && chars_ok(v, b"._:-", 1, 200)) || (k == "limit" && (1..=4).contains(&v.len()) && v.bytes().all(|c| c.is_ascii_digit()))));
+        return Some((Shape::None, |k, v| {
+            (k == "cursor" && chars_ok(v, b"._:-", 1, 200)) || (k == "limit" && (1..=4).contains(&v.len()) && v.bytes().all(|c| c.is_ascii_digit()))
+        }));
     }
     if session_route(path, "/stats") {
         return Some((Shape::None, |_, _| false));

@@ -152,7 +152,11 @@ pub fn actor_refusal(chain: &[Arg], product: &Arg, pid: &Arg, registering: bool)
         }
     } else if let Some(inside) = chain.iter().find(|p| product_of(p).truthy()) {
         let name = product_word(&product_of(inside).field("product"));
-        return Some(if registering { format!("a program under {name} can't register an actor of its own") } else { format!("an actor of your own can't use its token from under {name}") });
+        return Some(if registering {
+            format!("a program under {name} can't register an actor of its own")
+        } else {
+            format!("an actor of your own can't use its token from under {name}")
+        });
     }
     if !pid.is_nullish() && !own_of(chain).iter().any(|p| same(&p.field("pid"), pid)) {
         return Some(if chain.iter().any(|p| same(&p.field("pid"), pid)) {
@@ -376,10 +380,18 @@ impl Verifier {
         let near = chain.iter().find(|p| p.field("agent").truthy() || product_of(p).truthy() || same(&p.field("pid"), &home));
         if let Some(near) = near {
             if near.field("agent").truthy() {
-                return self.refuse(c, Arg::Null, &format!("this is yours to do, and it came from under {} process; run it in your own terminal or in XenoNet", a_app(&js_text(&near.field("agent")))));
+                return self.refuse(
+                    c,
+                    Arg::Null,
+                    &format!("this is yours to do, and it came from under {} process; run it in your own terminal or in XenoNet", a_app(&js_text(&near.field("agent")))),
+                );
             }
             if product_of(near).truthy() {
-                return self.refuse(c, Arg::Null, &format!("this is yours to do, and it came from under {}; run it in your own terminal or in XenoNet", product_word(&product_of(near).field("product"))));
+                return self.refuse(
+                    c,
+                    Arg::Null,
+                    &format!("this is yours to do, and it came from under {}; run it in your own terminal or in XenoNet", product_word(&product_of(near).field("product"))),
+                );
             }
         }
         Ok(obj(vec![("ok", Arg::Bool(true)), ("checked", Arg::Bool(true))]))
@@ -439,7 +451,12 @@ impl Verifier {
         };
         let verdict = match why {
             Some(why) => self.refuse(c, id, &why)?,
-            None => obj(vec![("ok", Arg::Bool(true)), ("checked", Arg::Bool(true)), ("root", obj(vec![("pid", chain[0].field("pid")), ("start", chain[0].field("start"))])), ("chain", Arg::List(chain))]),
+            None => obj(vec![
+                ("ok", Arg::Bool(true)),
+                ("checked", Arg::Bool(true)),
+                ("root", obj(vec![("pid", chain[0].field("pid")), ("start", chain[0].field("start"))])),
+                ("chain", Arg::List(chain)),
+            ]),
         };
         let at = self.now(c)?;
         let mut inner = self.inner.lock().unwrap();
@@ -494,7 +511,11 @@ impl Verifier {
         let home = self.home();
         let near = chain.iter().find(|p| product_of(p).truthy() || same(&p.field("pid"), &home));
         if let Some(near) = near.filter(|n| product_of(n).truthy()) {
-            return self.refuse(c, Arg::Null, &format!("a program under {} can't ask for a gateway token: it could be relaying for its cloud", product_word(&product_of(near).field("product"))));
+            return self.refuse(
+                c,
+                Arg::Null,
+                &format!("a program under {} can't ask for a gateway token: it could be relaying for its cloud", product_word(&product_of(near).field("product"))),
+            );
         }
         let cwd = self.cwd(c, &peer)?;
         Ok(obj(vec![("ok", Arg::Bool(true)), ("checked", Arg::Bool(true)), ("chain", Arg::List(chain)), ("cwd", cwd)]))
@@ -544,7 +565,9 @@ impl Verifier {
         let home = self.home();
         let near = chain.iter().position(|p| p.field("agent").truthy() || (!home.is_nullish() && same(&p.field("pid"), &home)));
         let verdict = match near {
-            Some(i) if chain[i].field("agent").truthy() => self.refuse(c, Arg::Null, &format!("this is for XenoNet's own window, and it came from under {} process", a_app(&js_text(&chain[i].field("agent")))))?,
+            Some(i) if chain[i].field("agent").truthy() => {
+                self.refuse(c, Arg::Null, &format!("this is for XenoNet's own window, and it came from under {} process", a_app(&js_text(&chain[i].field("agent")))))?
+            }
             None => self.refuse(c, Arg::Null, "this is for XenoNet's own window, and it came from outside XenoNet")?,
             Some(i) => {
                 // Every process from the caller up to XenoNet's app is the

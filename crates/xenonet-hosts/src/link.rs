@@ -42,7 +42,24 @@ pub const TIME_EVERY_MS: f64 = 5.0 * 60e3;
 /// a prompt, a host key that's known and unchanged even if your own config
 /// would take a new one, none of your forwards, compression, and a
 /// connection that gives up on a silent host in about 45 seconds.
-pub const SSH_OPTIONS: [&str; 16] = ["-T", "-a", "-x", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ClearAllForwardings=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-C"];
+pub const SSH_OPTIONS: [&str; 16] = [
+    "-T",
+    "-a",
+    "-x",
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "StrictHostKeyChecking=yes",
+    "-o",
+    "ClearAllForwardings=yes",
+    "-o",
+    "ConnectTimeout=10",
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=3",
+    "-C",
+];
 
 /// How a link reaches a host, and this machine's part in it.
 #[derive(Clone, Debug)]
@@ -63,7 +80,8 @@ pub struct Options {
 /// only XenoNet's own relay, with none of this XenoNet's XENONET_ settings.
 pub fn transport(entry: &Value, o: &Options) -> Result<(String, Vec<String>, Map<String, Value>), String> {
     let id = entry.get("id").and_then(Value::as_str).filter(|i| is_host_id(i)).ok_or_else(|| format!("not a host id: {}", show(entry.get("id"))))?;
-    let port = entry.get("port").and_then(Value::as_f64).filter(|p| p.fract() == 0.0 && (1.0..=65535.0).contains(p)).ok_or_else(|| format!("not a port: {}", show(entry.get("port"))))?;
+    let port =
+        entry.get("port").and_then(Value::as_f64).filter(|p| p.fract() == 0.0 && (1.0..=65535.0).contains(p)).ok_or_else(|| format!("not a port: {}", show(entry.get("port"))))?;
     let since = entry.get("since").map_or_else(|| "undefined".into(), js_string);
     if !crate::config::since_ok(&since) {
         return Err(format!("not a time: {}", show(entry.get("since"))));
@@ -198,11 +216,23 @@ pub fn why_ended(entry: &Value, e: &Ended, ssh_config: Option<&str>, tilde: &dyn
     let try_it = trust_command(&id, ssh_config, tilde);
     if let Some(err) = e.spawn_error {
         let what = if ssh { "ssh" } else { "the runtime" };
-        return why("error", "no-ssh", format!("{what} couldn't start here ({err})"), Some(if ssh { "Install OpenSSH's client, or put ssh on XenoNet's PATH." } else { "Restart XenoNet." }.into()));
+        return why(
+            "error",
+            "no-ssh",
+            format!("{what} couldn't start here ({err})"),
+            Some(if ssh { "Install OpenSSH's client, or put ssh on XenoNet's PATH." } else { "Restart XenoNet." }.into()),
+        );
     }
     let bye_code = e.bye.and_then(|b| b.get("code")).map(js_string).filter(|c| !c.is_empty());
     match bye_code.as_deref() {
-        Some("no-xenonet") => return why("offline", "no-xenonet", format!("no XenoNet is running on {id}"), Some(format!("Start XenoNet on {id}, or add it again with the port its XenoNet uses (xenonet hosts add {id} … --port)."))),
+        Some("no-xenonet") => {
+            return why(
+                "offline",
+                "no-xenonet",
+                format!("no XenoNet is running on {id}"),
+                Some(format!("Start XenoNet on {id}, or add it again with the port its XenoNet uses (xenonet hosts add {id} … --port).")),
+            )
+        }
         Some("xenonet-gone") => return why("offline", "xenonet-gone", format!("the XenoNet on {id} stopped"), None),
         Some("old-xenonet") => return why("error", "old-xenonet", format!("the XenoNet on {id} is too old to be a host"), Some(format!("Update XenoNet on {id}."))),
         Some(code) => {
@@ -222,7 +252,12 @@ pub fn why_ended(entry: &Value, e: &Ended, ssh_config: Option<&str>, tilde: &dyn
         return why("offline", "unreachable", format!("ssh couldn't reach {id}{at}"), Some(format!("Check that {id} is on and reachable: {try_it}")));
     }
     if e.exit_code == Some(127.0) || res()[2].is_match(e.stderr) {
-        return why("error", "no-relay", format!("{id} has no xenonet command"), Some(format!("Install XenoNet on {id} and its command (xenonet install), or add it again with the command's full path (--command).")));
+        return why(
+            "error",
+            "no-relay",
+            format!("{id} has no xenonet command"),
+            Some(format!("Install XenoNet on {id} and its command (xenonet install), or add it again with the command's full path (--command).")),
+        );
     }
     let how = match (&e.exit_code, &e.signal) {
         (Some(c), _) => format!(" (exit {})", xenonet_base::json::number_string(*c)),
@@ -236,19 +271,49 @@ pub fn why_ended(entry: &Value, e: &Ended, ssh_config: Option<&str>, tilde: &dyn
 /// What the twin is to do.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Effect {
-    Spawn { run: u64, file: String, args: Vec<String>, env: Map<String, Value> },
-    Write { run: u64, text: String },
+    Spawn {
+        run: u64,
+        file: String,
+        args: Vec<String>,
+        env: Map<String, Value>,
+    },
+    Write {
+        run: u64,
+        text: String,
+    },
     /// End the run's program (SIGTERM) if it's still there, or else tell
     /// the link it ended (`end`).
-    Fail { run: u64 },
+    Fail {
+        run: u64,
+    },
     /// End the run's program if it's still there.
-    Kill { run: u64 },
-    Emit { name: &'static str, data: Value },
-    Timer { name: String, ms: f64 },
-    Interval { name: String, ms: f64 },
-    Clear { name: String },
-    Resolve { id: u64, value: Value },
-    Reject { id: u64, message: String, status: u16 },
+    Kill {
+        run: u64,
+    },
+    Emit {
+        name: &'static str,
+        data: Value,
+    },
+    Timer {
+        name: String,
+        ms: f64,
+    },
+    Interval {
+        name: String,
+        ms: f64,
+    },
+    Clear {
+        name: String,
+    },
+    Resolve {
+        id: u64,
+        value: Value,
+    },
+    Reject {
+        id: u64,
+        message: String,
+        status: u16,
+    },
 }
 
 /// What a link asks of the JS around it: a random number for the jitter,
@@ -467,7 +532,8 @@ impl Link {
             Ok(c) => c,
             Err(err) => {
                 let id = self.id();
-                let w = why("error", "bad-entry", format!("XenoNet can't reach {id} as it's kept: {err}"), Some(format!("Remove it and add it again (xenonet hosts remove {id}).")));
+                let w =
+                    why("error", "bad-entry", format!("XenoNet can't reach {id} as it's kept: {err}"), Some(format!("Remove it and add it again (xenonet hosts remove {id}).")));
                 return self.ended(w, now, a);
             }
         };
@@ -592,16 +658,49 @@ impl Link {
         let id = self.id();
         if let Some(problem) = a.check_hello(f) {
             let first = slice16(problem.split('\n').next().unwrap_or(""), 160);
-            return self.fail(run, why("error", "bad-hello", format!("{id} answered with something that isn't a relay's hello ({first})"), Some(format!("Update XenoNet on {id} and here to the same version."))), now, a);
+            return self.fail(
+                run,
+                why(
+                    "error",
+                    "bad-hello",
+                    format!("{id} answered with something that isn't a relay's hello ({first})"),
+                    Some(format!("Update XenoNet on {id} and here to the same version.")),
+                ),
+                now,
+                a,
+            );
         }
         let protocol = f.get("protocol").and_then(Value::as_f64);
         if protocol != Some(PROTOCOL as f64) {
             let p = f.get("protocol").map_or_else(|| "undefined".into(), js_string);
-            return self.fail(run, why("error", "protocol", format!("{id} runs XenoNet {}, whose relay speaks protocol {p}; this XenoNet speaks {PROTOCOL}", f.get("version").map_or_else(|| "undefined".into(), js_string)), Some("Update the older of the two.".into())), now, a);
+            return self.fail(
+                run,
+                why(
+                    "error",
+                    "protocol",
+                    format!(
+                        "{id} runs XenoNet {}, whose relay speaks protocol {p}; this XenoNet speaks {PROTOCOL}",
+                        f.get("version").map_or_else(|| "undefined".into(), js_string)
+                    ),
+                    Some("Update the older of the two.".into()),
+                ),
+                now,
+                a,
+            );
         }
         let demo = truthy(f.get("demo"));
         if self.demo_only && !demo {
-            return self.fail(run, why("error", "not-demo", format!("{id} shows real sessions, and this XenoNet shows made-up data only"), Some("Watch it from a XenoNet that shows your own sessions, or run a demo XenoNet there.".into())), now, a);
+            return self.fail(
+                run,
+                why(
+                    "error",
+                    "not-demo",
+                    format!("{id} shows real sessions, and this XenoNet shows made-up data only"),
+                    Some("Watch it from a XenoNet that shows your own sessions, or run a demo XenoNet there.".into()),
+                ),
+                now,
+                a,
+            );
         }
         let key = f.get("host").and_then(|h| h.get("key")).cloned().unwrap_or(Value::Null);
         let known = self.entry.get("key").filter(|k| truthy(Some(k))).cloned();
@@ -609,7 +708,17 @@ impl Link {
         // data is made up, so its new key is taken.
         if let Some(k) = &known {
             if *k != key && !demo {
-                return self.fail(run, why("error", "key-changed", format!("another XenoNet answered as {id}: its key isn't the one {id} had"), Some(format!("If {id} was set up again, or its alias now points elsewhere on purpose, add it again (xenonet hosts add {id} … ) to accept the new one."))), now, a);
+                return self.fail(
+                    run,
+                    why(
+                        "error",
+                        "key-changed",
+                        format!("another XenoNet answered as {id}: its key isn't the one {id} had"),
+                        Some(format!("If {id} was set up again, or its alias now points elsewhere on purpose, add it again (xenonet hosts add {id} … ) to accept the new one.")),
+                    ),
+                    now,
+                    a,
+                );
             }
         }
         if let Some(r) = self.run.as_mut() {
@@ -653,7 +762,10 @@ impl Link {
         self.error = Value::Null;
         self.set("live", now);
         let at = f.get("at").and_then(Value::as_f64).map_or(Value::Null, xenonet_base::json::number);
-        self.emit("snapshot", json!({ "graph": f["graph"], "live": f["live"], "engine": f.get("engine").filter(|e| !e.is_null()).cloned().unwrap_or(Value::Null), "at": at, "first": first }));
+        self.emit(
+            "snapshot",
+            json!({ "graph": f["graph"], "live": f["live"], "engine": f.get("engine").filter(|e| !e.is_null()).cloned().unwrap_or(Value::Null), "at": at, "first": first }),
+        );
     }
 
     /// The time interval of `run`: ask the host its time again.
@@ -833,7 +945,12 @@ mod tests {
         let t = |p: &str| p.to_string();
         let w = why_ended(&e, &Ended { exit_code: Some(255.0), signal: None, stderr: "Host key verification failed.\n", bye: None, spawn_error: None }, Some("/x/c"), &t);
         assert_eq!((w.state, w.code), ("error", "host-key"));
-        let w = why_ended(&e, &Ended { exit_code: Some(255.0), signal: None, stderr: "ssh: connect to host nova-mac.local port 22: Connection refused\n", bye: None, spawn_error: None }, None, &t);
+        let w = why_ended(
+            &e,
+            &Ended { exit_code: Some(255.0), signal: None, stderr: "ssh: connect to host nova-mac.local port 22: Connection refused\n", bye: None, spawn_error: None },
+            None,
+            &t,
+        );
         assert_eq!(w.message, "ssh couldn't reach vm1: connect to host vm1 port 22: Connection refused");
         assert_eq!(shell_path("~/Library/Application Support/x"), "~/'Library/Application Support/x'");
     }

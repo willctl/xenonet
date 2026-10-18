@@ -48,10 +48,13 @@ impl Proc {
         Arg::Obj(vec![("pid".into(), Arg::num(self.pid)), ("args".into(), Arg::text(self.args.clone()))])
     }
     pub fn of(a: &Arg) -> Proc {
-        Proc { pid: match a.field("pid") {
-            Arg::Num(n) => n,
-            _ => f64::NAN,
-        }, args: js_text(&a.field("args")) }
+        Proc {
+            pid: match a.field("pid") {
+                Arg::Num(n) => n,
+                _ => f64::NAN,
+            },
+            args: js_text(&a.field("args")),
+        }
     }
 }
 
@@ -66,11 +69,25 @@ pub fn parse_ps(out: &str) -> Vec<Proc> {
 /// it in its arguments.
 pub fn open_code_processes(c: &mut dyn Calls, windows: bool) -> Result<Vec<Proc>> {
     if windows {
-        let out = c.call("", "ps", vec![Arg::text("powershell.exe"), Arg::List(vec![Arg::text("-NoProfile"), Arg::text("-Command"), Arg::text("Get-CimInstance Win32_Process -Filter \"Name like 'opencode%'\" | ForEach-Object { \"$($_.ProcessId) $($_.CommandLine)\" }")])])?;
+        let out = c.call(
+            "",
+            "ps",
+            vec![
+                Arg::text("powershell.exe"),
+                Arg::List(vec![
+                    Arg::text("-NoProfile"),
+                    Arg::text("-Command"),
+                    Arg::text("Get-CimInstance Win32_Process -Filter \"Name like 'opencode%'\" | ForEach-Object { \"$($_.ProcessId) $($_.CommandLine)\" }"),
+                ]),
+            ],
+        )?;
         return Ok(parse_ps(&js_text(&out)));
     }
     let out = c.call("", "ps", vec![Arg::text("ps"), Arg::List(vec![Arg::text("-axo"), Arg::text("pid=,args=")])])?;
-    Ok(parse_ps(&js_text(&out)).into_iter().filter(|p| crate::re!(r"^(\S*[/\\])?opencode(\.exe)?(\s|$)").is_match(&p.args) || crate::re!(r"^\S*node\S*\s+\S*opencode-ai").is_match(&p.args)).collect())
+    Ok(parse_ps(&js_text(&out))
+        .into_iter()
+        .filter(|p| crate::re!(r"^(\S*[/\\])?opencode(\.exe)?(\s|$)").is_match(&p.args) || crate::re!(r"^\S*node\S*\s+\S*opencode-ai").is_match(&p.args))
+        .collect())
 }
 
 fn unique(v: Vec<f64>) -> Vec<f64> {
@@ -141,7 +158,8 @@ pub fn listening_ports(c: &mut dyn Calls, pid: f64, platform: &str) -> Result<Ve
             }
         }
     }
-    let out = js_text(&c.call("", "exec", vec![Arg::text("lsof"), Arg::List(["-nP", "-a", "-p", &pid_text, "-iTCP", "-sTCP:LISTEN", "-Fn"].iter().map(|a| Arg::text(*a)).collect())])?);
+    let out =
+        js_text(&c.call("", "exec", vec![Arg::text("lsof"), Arg::List(["-nP", "-a", "-p", &pid_text, "-iTCP", "-sTCP:LISTEN", "-Fn"].iter().map(|a| Arg::text(*a)).collect())])?);
     let ports = regex_lsof().captures_iter(&out).map(|m| number(&m[1])).collect();
     Ok(unique(ports))
 }
@@ -317,7 +335,10 @@ impl OpenCode {
         let mut value = Arg::Null;
         if let Ok(Some(s)) = self.server_for(c, id, windows) {
             let path = format!("/session/{}", encode_uri_component(&ses));
-            let both = c.call_all(vec![("", "get", vec![Arg::text(format!("{}{path}", s.base)), Arg::num(1500.0)]), ("", "get", vec![Arg::text(format!("{}/session/status", s.base)), Arg::num(1500.0)])]);
+            let both = c.call_all(vec![
+                ("", "get", vec![Arg::text(format!("{}{path}", s.base)), Arg::num(1500.0)]),
+                ("", "get", vec![Arg::text(format!("{}/session/status", s.base)), Arg::num(1500.0)]),
+            ]);
             let mut got = Vec::new();
             for (r, route) in both.into_iter().zip([path.as_str(), "/session/status"]) {
                 match r {

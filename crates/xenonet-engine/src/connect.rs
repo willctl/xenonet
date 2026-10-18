@@ -28,8 +28,17 @@ use serde_json::{json, Map, Value};
 use xenonet_base::json::stringify;
 use xenonet_base::paths::tilde;
 
-const CLAUDE_EVENTS: [(&str, Option<&str>); 7] = [("SessionStart", None), ("UserPromptSubmit", None), ("PreToolUse", Some("Edit|Write|MultiEdit|NotebookEdit")), ("PostToolUse", None), ("Stop", None), ("SessionEnd", None), ("Notification", None)];
-const CODEX_EVENTS: [(&str, Option<&str>); 6] = [("SessionStart", None), ("UserPromptSubmit", None), ("PreToolUse", Some("apply_patch|Edit|Write")), ("PostToolUse", None), ("Stop", None), ("SessionEnd", None)];
+const CLAUDE_EVENTS: [(&str, Option<&str>); 7] = [
+    ("SessionStart", None),
+    ("UserPromptSubmit", None),
+    ("PreToolUse", Some("Edit|Write|MultiEdit|NotebookEdit")),
+    ("PostToolUse", None),
+    ("Stop", None),
+    ("SessionEnd", None),
+    ("Notification", None),
+];
+const CODEX_EVENTS: [(&str, Option<&str>); 6] =
+    [("SessionStart", None), ("UserPromptSubmit", None), ("PreToolUse", Some("apply_patch|Edit|Write")), ("PostToolUse", None), ("Stop", None), ("SessionEnd", None)];
 
 pub type Result<T> = std::result::Result<T, Thrown>;
 
@@ -180,7 +189,13 @@ fn dirname(p: &str) -> String {
         }
     }
     match end {
-        None => if root { p[..1].to_string() } else { ".".into() },
+        None => {
+            if root {
+                p[..1].to_string()
+            } else {
+                ".".into()
+            }
+        }
         Some(1) if root => p[..2].to_string(),
         Some(e) => p[..e].to_string(),
     }
@@ -390,7 +405,10 @@ impl Connect {
 
     fn xenonet_hook(kind: Kind, h: &Value) -> bool {
         match kind {
-            Kind::Claude => (h.get("type").and_then(Value::as_str) == Some("http") && crate::re!(r"^http://(127\.0\.0\.1|localhost):[0-9]+/api/hook/claude$").is_match(&text_of(h.get("url")))) || Self::xenonet_command(Kind::Claude, h),
+            Kind::Claude => {
+                (h.get("type").and_then(Value::as_str) == Some("http") && crate::re!(r"^http://(127\.0\.0\.1|localhost):[0-9]+/api/hook/claude$").is_match(&text_of(h.get("url"))))
+                    || Self::xenonet_command(Kind::Claude, h)
+            }
             Kind::Codex => Self::xenonet_command(Kind::Codex, h),
         }
     }
@@ -675,7 +693,9 @@ impl Connect {
             if !self.o.console_mcp {
                 return Vec::new();
             }
-            vec![json!({ "id": "console", "what": format!("The {console} MCP server, to operate Desktop"), "where": format!("{app} user settings"), "state": self.server_state(s, Some(&console_args)), "detail": format!("{command} mcp console (XENONET_PORT={port})") })]
+            vec![
+                json!({ "id": "console", "what": format!("The {console} MCP server, to operate Desktop"), "where": format!("{app} user settings"), "state": self.server_state(s, Some(&console_args)), "detail": format!("{command} mcp console (XENONET_PORT={port})") }),
+            ]
         };
         let events = |list: &[(&str, Option<&str>)]| list.iter().map(|(e, m)| if m.is_some() { format!("{e} (edits)") } else { e.to_string() }).collect::<Vec<_>>().join(", ");
 
@@ -684,7 +704,11 @@ impl Connect {
         let settings = self.read_json(c, &self.claude_settings)?;
         let in_place = self.hooks_in_place(c, &settings, Kind::Claude, &self.claude_hooks)?;
         claude_changes.push(json!({ "id": "hooks", "what": format!("Hooks: {}", events(&CLAUDE_EVENTS)), "where": tilde(&self.claude_settings, home), "state": if in_place { "present" } else { "missing" }, "detail": format!("posting to {}; SessionStart runs {command} hook claude", self.hook_url) }));
-        let mut claude_notes: Vec<Value> = if claude.truthy() { Vec::new() } else { vec![json!("XenoNet can't find the claude command, so it can add the hooks but not the MCP server. Install Claude Code's CLI, or add the server by hand.")] };
+        let mut claude_notes: Vec<Value> = if claude.truthy() {
+            Vec::new()
+        } else {
+            vec![json!("XenoNet can't find the claude command, so it can add the hooks but not the MCP server. Install Claude Code's CLI, or add the server by hand.")]
+        };
         let settings = self.read_json(c, &self.claude_settings)?;
         let others = self.others(c, settings.get("hooks"), Kind::Claude)?;
         claude_notes.extend(self.besides(&others));
@@ -696,7 +720,8 @@ impl Connect {
         let hooks_file = self.read_json(c, &self.codex_hooks)?;
         let in_place = self.hooks_in_place(c, &hooks_file, Kind::Codex, &self.codex_hook_set)?;
         codex_changes.push(json!({ "id": "hooks", "what": format!("Hooks: {}", events(&CODEX_EVENTS)), "where": tilde(&self.codex_hooks, home), "state": if in_place { "present" } else { "missing" }, "detail": format!("running {command} hook codex") }));
-        let mut codex_notes: Vec<Value> = if codex.truthy() { Vec::new() } else { vec![json!("XenoNet can't find the codex command, so it can add the hooks but not the MCP server.")] };
+        let mut codex_notes: Vec<Value> =
+            if codex.truthy() { Vec::new() } else { vec![json!("XenoNet can't find the codex command, so it can add the hooks but not the MCP server.")] };
         codex_notes.push(json!("Codex runs new hooks only once you trust them: run /hooks in Codex and trust XenoNet's."));
         let hooks_file = self.read_json(c, &self.codex_hooks)?;
         let others = self.others(c, hooks_file.get("hooks"), Kind::Codex)?;
@@ -841,14 +866,35 @@ mod tests {
     #[test]
     fn merging_takes_ours_out_and_puts_new_ones_in() {
         let settings = json!({ "model": "x", "hooks": { "Stop": [{ "hooks": [{ "type": "http", "url": "http://127.0.0.1:47840/api/hook/claude" }, { "type": "command", "command": "mine" }] }], "Other": [{ "hooks": [{ "type": "http", "url": "http://127.0.0.1:1/api/hook/claude" }] }] } });
-        let out = merge_hooks(&mut NoCalls, &settings, &mut |_, h| Ok(h.get("type").and_then(Value::as_str) == Some("http")), Some(&json!({ "Stop": { "hooks": [{ "type": "http" }] } }))).unwrap();
+        let out = merge_hooks(
+            &mut NoCalls,
+            &settings,
+            &mut |_, h| Ok(h.get("type").and_then(Value::as_str) == Some("http")),
+            Some(&json!({ "Stop": { "hooks": [{ "type": "http" }] } })),
+        )
+        .unwrap();
         assert_eq!(json_text(&out), r#"{"model":"x","hooks":{"Stop":[{"hooks":[{"type":"command","command":"mine"}]},{"hooks":[{"type":"http"}]}]}}"#);
         assert_eq!(merge_hooks(&mut NoCalls, &json!({ "hooks": {} }), &mut |_, _| Ok(true), None).unwrap(), json!({}));
     }
 
     #[test]
     fn hooks_say_which_xenonet_theyre_for() {
-        let c = Connect::new(Options { port: Arg::num(47842.0), root: "/app".into(), demo: Arg::Bool(false), exec: "/x/node".into(), run_as_node: true, home: "/h".into(), claude_config_dir: None, codex_home: None, console_mcp: false, platform: "darwin".into(), instances: vec![Instance { id: "installed".into(), name: "XenoNet".into(), port: Arg::num(47840.0) }, Instance { id: "dev".into(), name: "XenoNet Dev".into(), port: Arg::num(47842.0) }] });
+        let c = Connect::new(Options {
+            port: Arg::num(47842.0),
+            root: "/app".into(),
+            demo: Arg::Bool(false),
+            exec: "/x/node".into(),
+            run_as_node: true,
+            home: "/h".into(),
+            claude_config_dir: None,
+            codex_home: None,
+            console_mcp: false,
+            platform: "darwin".into(),
+            instances: vec![
+                Instance { id: "installed".into(), name: "XenoNet".into(), port: Arg::num(47840.0) },
+                Instance { id: "dev".into(), name: "XenoNet Dev".into(), port: Arg::num(47842.0) },
+            ],
+        });
         assert_eq!(c.names(), &("xenonet-dev".to_string(), "xenonet-dev-console".to_string()));
         let start = &c.claude_hooks["SessionStart"]["hooks"][0];
         assert_eq!(start["command"], json!("XENONET_PORT=47842 ELECTRON_RUN_AS_NODE=1 '/x/node' '/app/cli/xenonet.js' hook claude"));

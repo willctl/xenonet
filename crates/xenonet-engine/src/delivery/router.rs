@@ -327,7 +327,18 @@ impl Router {
             }
             let t = me.now(c)?;
             c.call("router.engine.store", "markSeen", vec![agent.clone(), Arg::List(vec![m.field("id")]), Arg::num(t)])?;
-            c.call("router.policy", "audit", vec![obj(vec![("kind", Arg::text("delivered")), ("message", m.field("id")), ("from", from.clone()), ("to", agent.clone()), ("how", Arg::text(how)), ("text", hash.clone())])])?;
+            c.call(
+                "router.policy",
+                "audit",
+                vec![obj(vec![
+                    ("kind", Arg::text("delivered")),
+                    ("message", m.field("id")),
+                    ("from", from.clone()),
+                    ("to", agent.clone()),
+                    ("how", Arg::text(how)),
+                    ("text", hash.clone()),
+                ])],
+            )?;
             me.emit(c, key)?;
             Ok(true)
         };
@@ -377,7 +388,20 @@ impl Router {
                     tried.push("tmux: no process known".into());
                 } else {
                     let r = caught(c.call("router.tmux", "deliver", vec![obj(vec![("pid", pid), ("text", text.clone())])]));
-                    c.call("router.policy", "audit", vec![obj(vec![("kind", Arg::text("typed")), ("message", m.field("id")), ("from", from.clone()), ("to", agent.clone()), ("pane", r.field("where").or(Arg::Null)), ("ok", r.field("ok")), ("why", r.field("why").or(Arg::Null)), ("text", hash.clone())])])?;
+                    c.call(
+                        "router.policy",
+                        "audit",
+                        vec![obj(vec![
+                            ("kind", Arg::text("typed")),
+                            ("message", m.field("id")),
+                            ("from", from.clone()),
+                            ("to", agent.clone()),
+                            ("pane", r.field("where").or(Arg::Null)),
+                            ("ok", r.field("ok")),
+                            ("why", r.field("why").or(Arg::Null)),
+                            ("text", hash.clone()),
+                        ])],
+                    )?;
                     if r.field("ok").truthy() {
                         return success(self, c, "tmux", vec![("where", r.field("where"))]);
                     }
@@ -391,7 +415,19 @@ impl Router {
                     tried.push("resume: no consent".into());
                 } else {
                     let r = caught(c.call("router.resume", "deliver", vec![obj(vec![("agent", agent.clone()), ("cwd", view.field("cwd")), ("text", text.clone())])]));
-                    c.call("router.policy", "audit", vec![obj(vec![("kind", Arg::text("resumed")), ("message", m.field("id")), ("from", from.clone()), ("to", agent.clone()), ("ok", r.field("ok")), ("why", r.field("why").or(Arg::Null)), ("text", hash.clone())])])?;
+                    c.call(
+                        "router.policy",
+                        "audit",
+                        vec![obj(vec![
+                            ("kind", Arg::text("resumed")),
+                            ("message", m.field("id")),
+                            ("from", from.clone()),
+                            ("to", agent.clone()),
+                            ("ok", r.field("ok")),
+                            ("why", r.field("why").or(Arg::Null)),
+                            ("text", hash.clone()),
+                        ])],
+                    )?;
                     if r.field("ok").truthy() {
                         return success(self, c, "resume", vec![("where", r.field("where"))]);
                     }
@@ -426,7 +462,9 @@ impl Router {
     }
 
     fn expire_inner(&self, c: &mut dyn Calls, key: &str) -> Result<()> {
-        let Some((acked, how, agent, message, from, from_name)) = self.with(key, |r| (r.get("ackedAt").truthy(), r.get("how"), r.get("agent"), r.message.clone(), r.from.clone(), r.get("fromName"))) else {
+        let Some((acked, how, agent, message, from, from_name)) =
+            self.with(key, |r| (r.get("ackedAt").truthy(), r.get("how"), r.get("agent"), r.message.clone(), r.from.clone(), r.get("fromName")))
+        else {
             return Ok(());
         };
         if acked {
@@ -474,7 +512,9 @@ impl Router {
     pub fn contact(&self, c: &mut dyn Calls, agent: &Arg) -> Result<()> {
         let keys: Vec<String> = self.inner.lock().unwrap().order.clone();
         for key in keys {
-            let due = self.with(&key, |r| r.get("agent") == *agent && r.get("state").as_str() == Some("live") && r.get("how").as_str() != Some("listen") && !r.get("ackedAt").truthy()).unwrap_or(false);
+            let due = self
+                .with(&key, |r| r.get("agent") == *agent && r.get("state").as_str() == Some("live") && r.get("how").as_str() != Some("listen") && !r.get("ackedAt").truthy())
+                .unwrap_or(false);
             if due {
                 self.ack(c, &key)?;
             }

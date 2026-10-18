@@ -29,7 +29,6 @@ pub fn is_integer(v: Option<&Value>) -> Option<f64> {
     v.and_then(Value::as_f64).filter(|f| f.is_finite() && f.trunc() == *f)
 }
 
-
 /// Two texts in JS's order (`a < b`): by UTF-16 code units, which differs
 /// from Rust's (by code points) only above U+FFFF.
 pub fn utf16_cmp(a: &str, b: &str) -> std::cmp::Ordering {
@@ -190,7 +189,16 @@ pub fn proto_member(name: &str) -> Option<String> {
     match name {
         "constructor" => Some("function Object() { [native code] }".into()),
         "__proto__" => Some("[object Object]".into()),
-        "__defineGetter__" | "__defineSetter__" | "hasOwnProperty" | "__lookupGetter__" | "__lookupSetter__" | "isPrototypeOf" | "propertyIsEnumerable" | "toString" | "valueOf" | "toLocaleString" => Some(format!("function {name}() {{ [native code] }}")),
+        "__defineGetter__"
+        | "__defineSetter__"
+        | "hasOwnProperty"
+        | "__lookupGetter__"
+        | "__lookupSetter__"
+        | "isPrototypeOf"
+        | "propertyIsEnumerable"
+        | "toString"
+        | "valueOf"
+        | "toLocaleString" => Some(format!("function {name}() {{ [native code] }}")),
         _ => None,
     }
 }
@@ -343,7 +351,13 @@ fn win32_resolve(base: &str, p: &str) -> String {
         format!("{base}\\{p}")
     };
     let n = normalize_win32(&full);
-    let root = if n.starts_with("\\\\") { n.match_indices('\\').nth(3).map_or(n.len(), |(i, _)| i + 1) } else if n.as_bytes().get(1) == Some(&b':') { 3 } else { 1 };
+    let root = if n.starts_with("\\\\") {
+        n.match_indices('\\').nth(3).map_or(n.len(), |(i, _)| i + 1)
+    } else if n.as_bytes().get(1) == Some(&b':') {
+        3
+    } else {
+        1
+    };
     if n.len() > root {
         n.trim_end_matches('\\').to_string()
     } else {

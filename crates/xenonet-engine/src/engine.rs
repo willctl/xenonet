@@ -386,7 +386,8 @@ fn line(a: &Arg, me: &Arg, kind: &str, reads: bool) -> String {
     if !editing.is_empty() {
         let shown = &editing[..editing.len().min(4)];
         let all = shown.iter().all(|e| e.field("observed").truthy());
-        let names: Vec<String> = shown.iter().map(|e| format!("{}{}", basename_host(&js_text(&e.field("path"))), if e.field("observed").truthy() && !all { " (observed)" } else { "" })).collect();
+        let names: Vec<String> =
+            shown.iter().map(|e| format!("{}{}", basename_host(&js_text(&e.field("path"))), if e.field("observed").truthy() && !all { " (observed)" } else { "" })).collect();
         parts.push(format!("editing {}{}{}", names.join(", "), if editing.len() > 4 { "…" } else { "" }, if all { " (observed by XenoNet)" } else { "" }));
     }
     let claims = list(a.field("claims"));
@@ -548,10 +549,14 @@ impl Engine {
             });
         }
         // The sessions XenoNet has no record of, asked of their own app.
-        let asks: Vec<(usize, Arg)> = stages.iter().enumerate().filter_map(|(i, s)| match s {
-            Stage::Session(p) if p.describe => Some((i, p.id.clone())),
-            _ => None,
-        }).collect();
+        let asks: Vec<(usize, Arg)> = stages
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| match s {
+                Stage::Session(p) if p.describe => Some((i, p.id.clone())),
+                _ => None,
+            })
+            .collect();
         let told_list = c.call_all(asks.iter().map(|(_, id)| ("engine.delivery", "describe", vec![id.clone()])).collect());
         let mut told: HashMap<usize, Arg> = HashMap::new();
         for ((i, _), r) in asks.iter().zip(told_list) {
@@ -600,12 +605,26 @@ impl Engine {
     }
 
     fn you_view(&self, now: f64) -> Arg {
-        obj(vec![("id", Arg::text(YOU)), ("app", Arg::text("you")), ("title", Arg::text("you")), ("project", Arg::Null), ("top", Arg::Null), ("status", Arg::text("working")), ("lastActive", Arg::num(now)), ("ended", Arg::Bool(false))])
+        obj(vec![
+            ("id", Arg::text(YOU)),
+            ("app", Arg::text("you")),
+            ("title", Arg::text("you")),
+            ("project", Arg::Null),
+            ("top", Arg::Null),
+            ("status", Arg::text("working")),
+            ("lastActive", Arg::num(now)),
+            ("ended", Arg::Bool(false)),
+        ])
     }
 
     fn claims_of(&self, c: &mut dyn Calls, id: &Arg, now: f64) -> Result<Arg> {
         let all = list(c.call("engine.store", "claims", vec![Arg::num(now)])?);
-        Ok(Arg::List(all.into_iter().filter(|cl| same(&cl.field("agent"), id)).map(|cl| obj(vec![("pattern", cl.field("pattern")), ("note", cl.field("note")), ("until", cl.field("expires_at"))])).collect()))
+        Ok(Arg::List(
+            all.into_iter()
+                .filter(|cl| same(&cl.field("agent"), id))
+                .map(|cl| obj(vec![("pattern", cl.field("pattern")), ("note", cl.field("note")), ("until", cl.field("expires_at"))]))
+                .collect(),
+        ))
     }
 
     fn gone_actor(&self, id: &Arg, claims: Arg) -> Arg {
@@ -639,7 +658,13 @@ impl Engine {
     fn actor_view_end(&self, c: &mut dyn Calls, id: &Arg, a: &Arg, claims: Arg, cwd: Arg, repo: Arg) -> Result<Arg> {
         let ended = a.field("presence").as_str() == Some("offline");
         let place = a.field("place");
-        let status = if ended { "ended" } else if a.field("presence").as_str() == Some("working") { "working" } else { "idle" };
+        let status = if ended {
+            "ended"
+        } else if a.field("presence").as_str() == Some("working") {
+            "working"
+        } else {
+            "idle"
+        };
         let reachable = !ended && self.reads(c, id)?;
         Ok(obj(vec![
             ("id", id.clone()),
@@ -700,7 +725,9 @@ impl Engine {
         // Ended: its SessionEnd hook said so (unless it has been at work
         // since), or the process its tools ran under is gone.
         let ended_at = contact.field("ended_at");
-        let ended = gone || (ended_at.truthy() && num0(&live.field("lastEventAt")) < num(&ended_at) + 5000.0) || (!live.field("endedAt").is_nullish() && num(&live.field("lastEventAt")) <= num(&live.field("endedAt")));
+        let ended = gone
+            || (ended_at.truthy() && num0(&live.field("lastEventAt")) < num(&ended_at) + 5000.0)
+            || (!live.field("endedAt").is_nullish() && num(&live.field("lastEventAt")) <= num(&live.field("endedAt")));
         let need = live.field("needsYou");
         let title = {
             let t = node.field("title");
@@ -716,7 +743,8 @@ impl Engine {
         };
         let focus = c.call("engine.store", "focus", vec![id.clone()])?.field("text").or(Arg::Null);
         let claims = self.claims_of(c, &id, now)?;
-        let reachable = (contact.truthy() && !ended_at.truthy() && now - num(&contact.field("at")) < REACHABLE_MS) || opt_call(c, "engine.delivery", "reaches", vec![id.clone()])?.truthy();
+        let reachable =
+            (contact.truthy() && !ended_at.truthy() && now - num(&contact.field("at")) < REACHABLE_MS) || opt_call(c, "engine.delivery", "reaches", vec![id.clone()])?.truthy();
         let mut v = obj(vec![
             ("id", id.clone()),
             ("app", Arg::text(app)),
@@ -729,7 +757,16 @@ impl Engine {
             ("top", repo.field("top").or(Arg::Null)),
             ("repo", repo.field("common").or(Arg::Null)),
             ("branch", node.field("branch").or(repo.field("branch")).or(Arg::Null)),
-            ("status", Arg::text(if ended { "ended" } else if working { "working" } else { "idle" })),
+            (
+                "status",
+                Arg::text(if ended {
+                    "ended"
+                } else if working {
+                    "working"
+                } else {
+                    "idle"
+                }),
+            ),
             ("ended", Arg::Bool(ended)),
             ("needsYou", if need.truthy() && need.as_str() != Some("review") { need } else { Arg::Null }),
             ("lastActive", Arg::num(last_active)),
@@ -881,7 +918,13 @@ impl Engine {
                 for cl in list(other.field("claims")) {
                     let pattern = cl.field("pattern");
                     if matches(&pattern, file) || (with && other.field("top").truthy() && matches(&Arg::text(rel(&other, &pattern)), &Arg::text(r.clone()))) {
-                        out.push(obj(vec![("agent", other.clone()), ("file", file.clone()), ("how", Arg::text("claimed")), ("note", cl.field("note")), ("until", cl.field("until"))]));
+                        out.push(obj(vec![
+                            ("agent", other.clone()),
+                            ("file", file.clone()),
+                            ("how", Arg::text("claimed")),
+                            ("note", cl.field("note")),
+                            ("until", cl.field("until")),
+                        ]));
                     }
                 }
             }
@@ -911,7 +954,14 @@ impl Engine {
         let dir = dirname_style(&js_text(file));
         let repo = c.call("engine.repos", "of", vec![Arg::text(dir.clone())])?;
         self.hop(c)?;
-        Ok(obj(vec![("id", Arg::Null), ("cwd", Arg::text(dir)), ("top", repo.field("top").or(Arg::Null)), ("repo", repo.field("common").or(Arg::Null)), ("projectKind", Arg::Null), ("projectId", Arg::Null)]))
+        Ok(obj(vec![
+            ("id", Arg::Null),
+            ("cwd", Arg::text(dir)),
+            ("top", repo.field("top").or(Arg::Null)),
+            ("repo", repo.field("common").or(Arg::Null)),
+            ("projectKind", Arg::Null),
+            ("projectId", Arg::Null),
+        ]))
     }
 
     // ---------- messages ----------
@@ -985,13 +1035,21 @@ impl Engine {
                 let next = r.field("reply_to");
                 r = if next.truthy() { c.call("engine.store", "message", vec![next])? } else { Arg::Null };
             }
-            c.call("engine.policy", "checkSend", vec![obj(vec![("sender", me.clone()), ("recipients", Arg::List(recipients.clone())), ("text", Arg::text(text.clone())), ("depth", Arg::num(depth))])])?;
+            c.call(
+                "engine.policy",
+                "checkSend",
+                vec![obj(vec![("sender", me.clone()), ("recipients", Arg::List(recipients.clone())), ("text", Arg::text(text.clone())), ("depth", Arg::num(depth))])],
+            )?;
             // Secrets don't cross identities, or go to or from an actor.
             let mine = self.facts(c, &me_view)?;
             let mut redacted = Arg::num(0.0);
             for r in &recipients {
                 let f = self.facts(c, r)?;
-                let out = c.call("engine.policy", "textFor", vec![obj(vec![("text", Arg::text(text.clone())), ("sender", me.clone()), ("senderFacts", mine.clone()), ("recipientFacts", f)])])?;
+                let out = c.call(
+                    "engine.policy",
+                    "textFor",
+                    vec![obj(vec![("text", Arg::text(text.clone())), ("sender", me.clone()), ("senderFacts", mine.clone()), ("recipientFacts", f)])],
+                )?;
                 if out.field("redacted").truthy() {
                     text = js_text(&out.field("text"));
                     redacted = out.field("redacted");
@@ -1022,7 +1080,8 @@ impl Engine {
             let w = opt_call(c, "engine.delivery", "way", vec![me.clone(), r.clone()])?;
             ways.push(if w.is_nullish() { Arg::text(delivery_of(r)) } else { w });
         }
-        let mut event = obj(vec![("id", id.clone()), ("from", me.clone()), ("to", Arg::List(ids)), ("target", Arg::text(target.clone())), ("text", Arg::text(text)), ("ts", Arg::num(now))]);
+        let mut event =
+            obj(vec![("id", id.clone()), ("from", me.clone()), ("to", Arg::List(ids)), ("target", Arg::text(target.clone())), ("text", Arg::text(text)), ("ts", Arg::num(now))]);
         if envelope.truthy() {
             push(&mut event, "verified", envelope.field("line"));
             push(&mut event, "strength", envelope.field("auth").field("strength"));
@@ -1294,11 +1353,15 @@ impl Engine {
             let node = c.call("", "node", vec![place])?;
             let path = node.field("path");
             if node.field("kind").as_str() != Some("project") && path.truthy() && key_arg(&path).trim_end_matches('/') == key_of(dir) {
-                return Err(Fail::Bad(format!("an actor can claim files and folders inside {}, but not all of a folder that isn't a project", js_text(&node.field("name").or(Arg::text("a folder"))))));
+                return Err(Fail::Bad(format!(
+                    "an actor can claim files and folders inside {}, but not all of a folder that isn't a project",
+                    js_text(&node.field("name").or(Arg::text("a folder")))
+                )));
             }
         }
         let now = self.now(c)?;
-        let mut held: Vec<String> = list(c.call("engine.store", "claims", vec![Arg::num(now)])?).into_iter().filter(|cl| same(&cl.field("agent"), me)).map(|cl| js_text(&cl.field("pattern"))).collect();
+        let mut held: Vec<String> =
+            list(c.call("engine.store", "claims", vec![Arg::num(now)])?).into_iter().filter(|cl| same(&cl.field("agent"), me)).map(|cl| js_text(&cl.field("pattern"))).collect();
         for p in abs {
             if !held.contains(p) {
                 held.push(p.clone());
@@ -1445,7 +1508,13 @@ impl Engine {
         };
         let cwd = if sub.is_some() { Arg::Null } else { input.field("cwd").or(Arg::Null) };
         self.touch(c, &me, &obj(vec![("app", app.clone()), ("cwd", cwd), ("via", Arg::text("hook"))]))?;
-        let say = |text: String| if text.is_empty() { Arg::Null } else { obj(vec![("hookSpecificOutput", obj(vec![("hookEventName", event.clone()), ("additionalContext", Arg::text(text))]))]) };
+        let say = |text: String| {
+            if text.is_empty() {
+                Arg::Null
+            } else {
+                obj(vec![("hookSpecificOutput", obj(vec![("hookEventName", event.clone()), ("additionalContext", Arg::text(text))]))])
+            }
+        };
         if ev == "PreToolUse" {
             let files = edit_paths(&input.field("tool_name"), &input.field("tool_input"), &input.field("cwd"));
             if files.is_empty() {
@@ -1528,7 +1597,14 @@ impl Engine {
         let now = self.now(c)?;
         let mut fresh = Vec::new();
         for x in self.conflicts(c, me, files)? {
-            let key = format!("{}{}|{}|{}|{}", js_text(me), sub.map_or(String::new(), |s| format!("/{s}")), key_arg(&x.field("file")), js_text(&x.field("agent").field("id")), js_text(&x.field("how")));
+            let key = format!(
+                "{}{}|{}|{}|{}",
+                js_text(me),
+                sub.map_or(String::new(), |s| format!("/{s}")),
+                key_arg(&x.field("file")),
+                js_text(&x.field("agent").field("id")),
+                js_text(&x.field("how"))
+            );
             let mut i = self.inner.lock().unwrap();
             if now - i.noticed.get(&key).copied().unwrap_or(0.0) < NOTICE_EVERY_MS {
                 continue;
@@ -1544,21 +1620,37 @@ impl Engine {
         for x in &fresh {
             let agent = x.field("agent");
             let kind = self.kind_of(c, &agent)?;
-            let who = format!("\"{}\" ({kind}, {}, {})", js_text(&agent.field("title")), if agent.field("status").as_str() == Some("idle") { "idle" } else { "working now" }, js_text(&agent.field("id")));
+            let who = format!(
+                "\"{}\" ({kind}, {}, {})",
+                js_text(&agent.field("title")),
+                if agent.field("status").as_str() == Some("idle") { "idle" } else { "working now" },
+                js_text(&agent.field("id"))
+            );
             let seen = if !x.field("observed").truthy() {
                 None
             } else if is_actor_agent(&agent.field("id")) {
                 Some("observed: XenoNet inferred it, the actor didn't report it".to_string())
             } else {
-                Some(format!("observed{}: XenoNet inferred it from records, not a transcript", if agent.field("observed").as_str() == Some("numbat") { " through numbat" } else { "" }))
+                Some(format!(
+                    "observed{}: XenoNet inferred it from records, not a transcript",
+                    if agent.field("observed").as_str() == Some("numbat") { " through numbat" } else { "" }
+                ))
             };
             let file = js_text(&x.field("file"));
             lines.push(match x.field("how").as_str() {
-                Some("editing") => format!("- {who} edited {} {}, in this same working tree{}.", basename_host(&file), ago(now - num(&x.field("at"))), seen.map_or(String::new(), |s| format!(" ({s})"))),
+                Some("editing") => format!(
+                    "- {who} edited {} {}, in this same working tree{}.",
+                    basename_host(&file),
+                    ago(now - num(&x.field("at"))),
+                    seen.map_or(String::new(), |s| format!(" ({s})"))
+                ),
                 Some("worktree") => {
                     let branch = agent.field("branch");
                     let notes: Vec<String> = [branch.truthy().then(|| format!("branch {}", js_text(&branch))), seen].into_iter().flatten().collect();
-                    format!("- {who} is changing the same file in another worktree{}: expect a merge conflict.", if notes.is_empty() { String::new() } else { format!(" ({})", notes.join("; ")) })
+                    format!(
+                        "- {who} is changing the same file in another worktree{}: expect a merge conflict.",
+                        if notes.is_empty() { String::new() } else { format!(" ({})", notes.join("; ")) }
+                    )
                 }
                 _ => {
                     let note = x.field("note");
@@ -1584,7 +1676,11 @@ impl Engine {
         }
         let one = who.len() == 1;
         let advice = if deaf {
-            format!("{} can't read messages (XenoNet only observes {}), so if it could clash, keep to other files.", if one { "It" } else { "They" }, if one { "it" } else { "them" })
+            format!(
+                "{} can't read messages (XenoNet only observes {}), so if it could clash, keep to other files.",
+                if one { "It" } else { "They" },
+                if one { "it" } else { "them" }
+            )
         } else {
             "If it could clash, tell them with the xenonet send tool, or keep to other files.".to_string()
         };
@@ -1616,7 +1712,13 @@ impl Engine {
             let text = m.field("text");
             parts.push(
                 [
-                    format!("[#{}] from {}, {}{}.", js_text(&m.field("id")), self.sender(c, &m.field("from"))?, ago(now - num(&m.field("at"))), if to.as_str() == Some("you") { String::new() } else { format!(", to {}", js_text(&to)) }),
+                    format!(
+                        "[#{}] from {}, {}{}.",
+                        js_text(&m.field("id")),
+                        self.sender(c, &m.field("from"))?,
+                        ago(now - num(&m.field("at"))),
+                        if to.as_str() == Some("you") { String::new() } else { format!(", to {}", js_text(&to)) }
+                    ),
                     if line.is_nullish() { "verified: nothing more than its sender's id (sent before XenoNet kept how it knew).".into() } else { js_text(&line) },
                     "It says:".into(),
                     quoted(&if text.is_nullish() { String::new() } else { js_text(&text) }),
@@ -1675,8 +1777,19 @@ impl Engine {
             .collect();
         let mut messages = Vec::new();
         for m in list(c.call("engine.store", "recent", vec![Arg::num(now - 24.0 * 3600e3)])?) {
-            let to: Vec<Arg> = list(c.call("engine.store", "deliveries", vec![m.field("id")])?).iter().map(|d| obj(vec![("id", d.field("agent")), ("seen", Arg::Bool(d.field("seen_at").truthy()))])).collect();
-            messages.push(obj(vec![("id", m.field("id")), ("from", m.field("sender")), ("target", m.field("target")), ("text", m.field("body")), ("at", m.field("created_at")), ("how", envelope_method(&m.field("envelope"))), ("to", Arg::List(to))]));
+            let to: Vec<Arg> = list(c.call("engine.store", "deliveries", vec![m.field("id")])?)
+                .iter()
+                .map(|d| obj(vec![("id", d.field("agent")), ("seen", Arg::Bool(d.field("seen_at").truthy()))]))
+                .collect();
+            messages.push(obj(vec![
+                ("id", m.field("id")),
+                ("from", m.field("sender")),
+                ("target", m.field("target")),
+                ("text", m.field("body")),
+                ("at", m.field("created_at")),
+                ("how", envelope_method(&m.field("envelope"))),
+                ("to", Arg::List(to)),
+            ]));
         }
         Ok(obj(vec![("agents", Arg::List(agents)), ("messages", Arg::List(messages))]))
     }

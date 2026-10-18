@@ -40,13 +40,17 @@ pub const SPACE: &str = r"\t\n\x0B\x0C\r \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}
 
 fn secrets() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(&format!(r"(?i-u:sk-)[A-Za-z0-9_-]{{16,}}|(?i-u:bearer)[{SPACE}]+[^{SPACE}]+|(?i-u:password|api[_-]?key|token|secret)[{SPACE}]*[=:][{SPACE}]*[^{SPACE},;]+")).unwrap())
+    R.get_or_init(|| {
+        Regex::new(&format!(r"(?i-u:sk-)[A-Za-z0-9_-]{{16,}}|(?i-u:bearer)[{SPACE}]+[^{SPACE}]+|(?i-u:password|api[_-]?key|token|secret)[{SPACE}]*[=:][{SPACE}]*[^{SPACE},;]+"))
+            .unwrap()
+    })
 }
 
 /// Whether a task carries something that reads as a credential.
 pub fn has_credential(text: &str) -> bool {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(&format!(r"(?i-u:sk-)[A-Za-z0-9_-]{{16,}}|(?i-u:bearer)[{SPACE}]+[^{SPACE}]+|(?i-u:password|api[_-]?key|token|secret)[{SPACE}]*[=:]")).unwrap()).is_match(text)
+    R.get_or_init(|| Regex::new(&format!(r"(?i-u:sk-)[A-Za-z0-9_-]{{16,}}|(?i-u:bearer)[{SPACE}]+[^{SPACE}]+|(?i-u:password|api[_-]?key|token|secret)[{SPACE}]*[=:]")).unwrap())
+        .is_match(text)
 }
 
 /// clean(value, max): a value as text, credentials as [redacted], control
@@ -61,7 +65,9 @@ pub fn clean(value: Option<&Value>, max: usize) -> String {
 /// text(value, name, max): text, trimmed, of at most `max` units, or why not.
 pub fn text(value: Option<&Value>, name: &str, max: usize) -> Result<String, Fail> {
     match value {
-        Some(Value::String(s)) if !xenonet_base::text::js_trim(s).is_empty() && xenonet_app::jstext::utf16_len(s) <= max && !s.contains('\0') => Ok(xenonet_base::text::js_trim(s).to_string()),
+        Some(Value::String(s)) if !xenonet_base::text::js_trim(s).is_empty() && xenonet_app::jstext::utf16_len(s) <= max && !s.contains('\0') => {
+            Ok(xenonet_base::text::js_trim(s).to_string())
+        }
         _ => fail(format!("{name} must be text, at most {max} characters.")),
     }
 }
@@ -189,7 +195,8 @@ impl Records {
         let record = self.save(Value::Object(m))?;
         // A saved live job is the owner's way to inspect or delete its
         // remote sandbox: retention never orphans it.
-        let completed: Vec<Value> = self.list()?.into_iter().filter(|r| !truthy(r.get("reviewId")) && (r.get("kind").and_then(Value::as_str) != Some("sandbox") || sandbox_gone(r))).collect();
+        let completed: Vec<Value> =
+            self.list()?.into_iter().filter(|r| !truthy(r.get("reviewId")) && (r.get("kind").and_then(Value::as_str) != Some("sandbox") || sandbox_gone(r))).collect();
         for old in completed.iter().skip(self.limit) {
             let id = js_string(&old["id"]);
             match &self.dir {
@@ -230,7 +237,15 @@ pub fn write_new(p: &str, data: &[u8], mode: u32) -> Result<(), fsx::FsError> {
 
 /// queryRecords: a page of fifty, by words, kind and status.
 pub fn query(records: &[Value], q: &Value) -> Value {
-    let words: Vec<String> = q.get("q").filter(|v| !v.is_null()).map_or_else(String::new, js_string).to_lowercase().split(xenonet_base::text::is_js_space).filter(|w| !w.is_empty()).map(String::from).collect();
+    let words: Vec<String> = q
+        .get("q")
+        .filter(|v| !v.is_null())
+        .map_or_else(String::new, js_string)
+        .to_lowercase()
+        .split(xenonet_base::text::is_js_space)
+        .filter(|w| !w.is_empty())
+        .map(String::from)
+        .collect();
     let kind = q.get("kind").filter(|v| truthy(Some(v)));
     let status = q.get("status").filter(|v| truthy(Some(v)));
     let kept: Vec<&Value> = records.iter().filter(|r| kind.is_none_or(|k| xenonet_app::jsv::strict_eq(r.get("kind"), Some(k)))).collect();

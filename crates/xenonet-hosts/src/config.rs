@@ -130,7 +130,9 @@ pub fn host_entry(input: &Value, now: f64, check: &mut dyn FnMut(&Value) -> Resu
     };
     let transport = get(input, "transport").cloned().unwrap_or_else(|| json!(if truthy(input.get("local")) { "local" } else { "ssh" }));
     let transport_s = transport.as_str().filter(|t| *t == "ssh" || *t == "local");
-    let Some(transport_s) = transport_s else { return Err(fail(format!("a host is reached over ssh, or locally (another XenoNet on this machine), not {}", say(Some(&transport))))) };
+    let Some(transport_s) = transport_s else {
+        return Err(fail(format!("a host is reached over ssh, or locally (another XenoNet on this machine), not {}", say(Some(&transport)))));
+    };
     let port = if blank(input.get("port")) { DEFAULT_PORT } else { js_number(input.get("port")) };
     if port.fract() != 0.0 || !(1.0..=65535.0).contains(&port) {
         return Err(fail(format!("the port of the XenoNet to read there is a number from 1 to 65535, not {}", say(input.get("port")))));
@@ -200,7 +202,9 @@ pub fn host_entry(input: &Value, now: f64, check: &mut dyn FnMut(&Value) -> Resu
 // Nothing of an ssh block may hold a line break, whatever passed before.
 fn one_line(h: &Value) -> bool {
     let ssh = &h["ssh"];
-    [&h["id"], &ssh["hostname"], &ssh["user"], &ssh["port"], &ssh["identity"], &ssh["knownHosts"], &ssh["hostKeyAlias"]].iter().all(|v| !js_string(v).contains(['\n', '\r', '\u{2028}', '\u{2029}', '\0']))
+    [&h["id"], &ssh["hostname"], &ssh["user"], &ssh["port"], &ssh["identity"], &ssh["knownHosts"], &ssh["hostKeyAlias"]]
+        .iter()
+        .all(|v| !js_string(v).contains(['\n', '\r', '\u{2028}', '\u{2029}', '\0']))
 }
 
 /// XenoNet's own ssh config, a Host block per ssh host, named by its id.

@@ -171,7 +171,13 @@ impl GrokBot {
         if !commands.is_empty() {
             let cwds = list(c.call("procs", "cwds", vec![Arg::List(commands.iter().map(|p| Arg::Num(*p)).collect())])?);
             for pid in commands {
-                let cwd = cwds.iter().rev().find(|p| list((*p).clone()).first().and_then(Arg::as_f64) == Some(pid)).and_then(|p| list(p.clone()).get(1).cloned()).filter(|v| !v.is_nullish()).map_or(Value::Null, |v| v.to_json());
+                let cwd = cwds
+                    .iter()
+                    .rev()
+                    .find(|p| list((*p).clone()).first().and_then(Arg::as_f64) == Some(pid))
+                    .and_then(|p| list(p.clone()).get(1).cloned())
+                    .filter(|v| !v.is_nullish())
+                    .map_or(Value::Null, |v| v.to_json());
                 let place = if xenonet_engine::js::truthy(Some(&cwd)) { c.call("actors", "placeOf", vec![crate::registry::value_arg(&cwd)])?.to_json() } else { Value::Null };
                 let started_at = {
                     let mut s = self.s();
@@ -182,7 +188,14 @@ impl GrokBot {
                     e.started_at
                 };
                 if c.call("actors", "has", vec![Arg::text(ID)])?.truthy() {
-                    c.call("", "gather", vec![Arg::text(ID), Arg::Obj(vec![("kind".into(), Arg::text("ran")), ("target".into(), crate::registry::value_arg(&place)), ("at".into(), Arg::Num(started_at))])])?;
+                    c.call(
+                        "",
+                        "gather",
+                        vec![
+                            Arg::text(ID),
+                            Arg::Obj(vec![("kind".into(), Arg::text("ran")), ("target".into(), crate::registry::value_arg(&place)), ("at".into(), Arg::Num(started_at))]),
+                        ],
+                    )?;
                 }
             }
         }
@@ -222,7 +235,8 @@ impl GrokBot {
         let census = census(c, &mut table_state);
         self.s().table_state = table_state;
         let census: Census = census?;
-        let is_app = |i: usize| census.products[i].get("product").and_then(Value::as_str) == Some("grok-bot") && census.products[i].get("role").and_then(Value::as_str) == Some("app");
+        let is_app =
+            |i: usize| census.products[i].get("product").and_then(Value::as_str) == Some("grok-bot") && census.products[i].get("role").and_then(Value::as_str) == Some("app");
         let apps: Vec<usize> = (0..census.table.len()).filter(|&i| is_app(i)).collect();
         let installed = !apps.is_empty() || c.call("app", "installed", vec![])?.truthy();
         self.s().was_installed = installed;
@@ -396,7 +410,10 @@ impl GrokBot {
         if children.is_empty() {
             return Ok(());
         }
-        let described: Vec<Value> = list(c.call("procs", "describe", vec![Arg::List(children.iter().map(|p| Arg::Num(*p)).collect())])?).iter().map(|pair| list(pair.clone()).get(1).cloned().unwrap_or(Arg::Undef).to_json()).collect();
+        let described: Vec<Value> = list(c.call("procs", "describe", vec![Arg::List(children.iter().map(|p| Arg::Num(*p)).collect())])?)
+            .iter()
+            .map(|pair| list(pair.clone()).get(1).cloned().unwrap_or(Arg::Undef).to_json())
+            .collect();
         let mut rows: Vec<Value> = described;
         let n = |v: &Value, k: &str| v.get(k).and_then(Value::as_f64).unwrap_or(f64::NAN);
         // Parents before children, so a command's own children know it.

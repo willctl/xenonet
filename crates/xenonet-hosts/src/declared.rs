@@ -20,7 +20,10 @@ pub enum Shape {
     /// pipe (its input) and lazy (what its getter gives).
     Same(usize),
     Array(usize),
-    Tuple { items: Vec<usize>, rest: Option<usize> },
+    Tuple {
+        items: Vec<usize>,
+        rest: Option<usize>,
+    },
     /// A record keeps its keys, which its schema declares as a kind of key.
     Record(usize),
     Union(Vec<usize>),
@@ -48,7 +51,9 @@ pub fn shape_of(v: &Value) -> Shape {
         Some("tuple") => Shape::Tuple { items: list(at(1)), rest: at(2).and_then(Value::as_u64).map(|n| n as usize) },
         Some("record") => Shape::Record(idx(at(1))),
         Some("union") => Shape::Union(list(at(1))),
-        Some("object") => Shape::Object(at(1).and_then(Value::as_array).map(|fs| fs.iter().filter_map(|f| Some((f.get(0)?.as_str()?.to_string(), f.get(1)?.as_u64()? as usize))).collect()).unwrap_or_default()),
+        Some("object") => Shape::Object(
+            at(1).and_then(Value::as_array).map(|fs| fs.iter().filter_map(|f| Some((f.get(0)?.as_str()?.to_string(), f.get(1)?.as_u64()? as usize))).collect()).unwrap_or_default(),
+        ),
         Some("any") => Shape::Any,
         _ => Shape::Leaf,
     }

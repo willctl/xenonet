@@ -61,7 +61,10 @@ fn res() -> &'static Res {
     R.get_or_init(|| Res {
         // \b and /i as JS has them without /u: ASCII words, ASCII case.
         bearer: Regex::new(&format!(r"(?-u:\b)((?i-u:bearer|token|password|passwd|secret|api[_-]?key))(?-u:\b)[{SPACE}]*[:=][{SPACE}]*[^{SPACE}]+")).unwrap(),
-        key: Regex::new(r"(?:sk-|sk_|pk_|rk_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[abprs]-|AKIA|ASIA|AIza|npm_|pypi-|hf_|xenonet_actor_|xenonet_assistant_)[A-Za-z0-9_-]*").unwrap(),
+        key: Regex::new(
+            r"(?:sk-|sk_|pk_|rk_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[abprs]-|AKIA|ASIA|AIza|npm_|pypi-|hf_|xenonet_actor_|xenonet_assistant_)[A-Za-z0-9_-]*",
+        )
+        .unwrap(),
         email: Regex::new(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}").unwrap(),
         // Followed by a separator or the end, checked after (a lookahead).
         user_folder: Regex::new(r#"(?:[A-Za-z]:)?[\\/](?i-u:Users|home)[\\/][^\\/"'`]+"#).unwrap(),
@@ -380,7 +383,14 @@ pub fn attention_items(view: &Value, policy: &Value, now: f64, id_of: &dyn Fn(&s
             items.push(Item { kind: "waiting", sessions: vec![id], project: v.project.clone(), first: or_null(need.and_then(|n| n.get("since"))), reason, files: None });
         } else if truthy(live.get("stuck")) {
             let first = or_null(live.get("turnStartedAt").filter(|x| !x.is_null()).or_else(|| live.get("lastEventAt")));
-            items.push(Item { kind: "stalled", sessions: vec![id], project: v.project.clone(), first, reason: stall_reason(live.get("stuck").and_then(|s| s.get("reasons"))), files: None });
+            items.push(Item {
+                kind: "stalled",
+                sessions: vec![id],
+                project: v.project.clone(),
+                first,
+                reason: stall_reason(live.get("stuck").and_then(|s| s.get("reasons"))),
+                files: None,
+            });
         } else if kind == Some("review") {
             let first = or_null(live.get("lastTurnEndAt").filter(|x| !x.is_null()).or_else(|| need.and_then(|n| n.get("since"))));
             items.push(Item { kind: "turn_completed", sessions: vec![id], project: v.project.clone(), first, reason: "turn_ended", files: None });
@@ -393,7 +403,14 @@ pub fn attention_items(view: &Value, policy: &Value, now: f64, id_of: &dyn Fn(&s
         }
         let mut sessions = vec![c.get("a").cloned().unwrap_or(Value::Null), c.get("b").cloned().unwrap_or(Value::Null)];
         sessions.sort_by(|x, y| js_string(x).encode_utf16().cmp(js_string(y).encode_utf16()));
-        items.push(Item { kind: "collision", sessions, project: a.project.clone(), first: or_null(c.get("ts")), reason: "recent_overlap", files: Some(c.get("files").cloned().unwrap_or(Value::Null)) });
+        items.push(Item {
+            kind: "collision",
+            sessions,
+            project: a.project.clone(),
+            first: or_null(c.get("ts")),
+            reason: "recent_overlap",
+            files: Some(c.get("files").cloned().unwrap_or(Value::Null)),
+        });
     }
     items
         .into_iter()

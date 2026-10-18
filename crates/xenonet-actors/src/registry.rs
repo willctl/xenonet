@@ -419,8 +419,13 @@ impl Actors {
             self.actors
                 .iter()
                 .map(|a| {
-                    let instances: Vec<Value> = a.instances.iter().map(|(n, i)| json!([n, { "presence": i.presence, "at": number(i.at), "heartbeatMs": opt(i.heartbeat_ms), "pid": opt(i.pid) }])).collect();
-                    let targets: Vec<Value> = a.targets.iter().map(|(k, t)| json!([k, { "id": t.id, "relation": t.relation, "since": number(t.since), "lastAt": number(t.last_at) }])).collect();
+                    let instances: Vec<Value> = a
+                        .instances
+                        .iter()
+                        .map(|(n, i)| json!([n, { "presence": i.presence, "at": number(i.at), "heartbeatMs": opt(i.heartbeat_ms), "pid": opt(i.pid) }]))
+                        .collect();
+                    let targets: Vec<Value> =
+                        a.targets.iter().map(|(k, t)| json!([k, { "id": t.id, "relation": t.relation, "since": number(t.since), "lastAt": number(t.last_at) }])).collect();
                     json!({ "id": a.id, "slug": a.slug, "presence": a.presence, "status": a.status, "pid": opt(a.pid), "cwd": a.cwd, "instances": instances, "targets": targets })
                 })
                 .collect(),
@@ -675,7 +680,8 @@ impl Actors {
             return Ok(());
         }
         let next = if truthy(Some(remote)) {
-            let mut transports: Vec<String> = remote.get("transports").and_then(Value::as_array).map(|t| t.iter().map(|x| xenonet_engine::js::template(Some(x))).collect()).unwrap_or_default();
+            let mut transports: Vec<String> =
+                remote.get("transports").and_then(Value::as_array).map(|t| t.iter().map(|x| xenonet_engine::js::template(Some(x))).collect()).unwrap_or_default();
             transports.sort_by(|x, y| xenonet_engine::js::utf16_cmp(x, y));
             transports.dedup();
             Some(json!({
@@ -1187,7 +1193,13 @@ impl Actors {
             }
         };
         let actor = a.id.clone();
-        let row = Arg::Obj(vec![("actor".into(), Arg::text(&actor)), ("target".into(), Arg::text(node)), ("relation".into(), Arg::text(relation)), ("since".into(), Arg::Num(t.since)), ("last_at".into(), Arg::Num(t.last_at))]);
+        let row = Arg::Obj(vec![
+            ("actor".into(), Arg::text(&actor)),
+            ("target".into(), Arg::text(node)),
+            ("relation".into(), Arg::text(relation)),
+            ("since".into(), Arg::Num(t.since)),
+            ("last_at".into(), Arg::Num(t.last_at)),
+        ]);
         self.store.with(|s| s.save_actor_target(&row))?;
         let a = &mut self.actors[i];
         if a.targets.len() > TARGETS_KEPT {
@@ -1268,7 +1280,8 @@ impl Actors {
             }
         }
         targets.sort_by(|x, y| y.last_at.partial_cmp(&x.last_at).unwrap_or(std::cmp::Ordering::Equal));
-        let targets: Vec<Value> = targets.into_iter().take(TARGETS_SHOWN).map(|t| json!({ "id": t.id, "relation": t.relation, "since": number(t.since), "lastAt": number(t.last_at) })).collect();
+        let targets: Vec<Value> =
+            targets.into_iter().take(TARGETS_SHOWN).map(|t| json!({ "id": t.id, "relation": t.relation, "since": number(t.since), "lastAt": number(t.last_at) })).collect();
         let mut o = Map::new();
         o.insert("schema".into(), json!("actor/snapshot/v1"));
         o.insert("id".into(), json!(a.id));
@@ -1432,7 +1445,13 @@ impl Actors {
         };
         let store = self.store.clone();
         let event = store.transaction(|| -> Result<Value> {
-            let o = Arg::Obj(vec![("kind".into(), Arg::text("said")), ("target".into(), value_arg(&target)), ("count".into(), Arg::Num(to.len() as f64)), ("via".into(), Arg::text("registered")), ("at".into(), Arg::Num(at))]);
+            let o = Arg::Obj(vec![
+                ("kind".into(), Arg::text("said")),
+                ("target".into(), value_arg(&target)),
+                ("count".into(), Arg::Num(to.len() as f64)),
+                ("via".into(), Arg::text("registered")),
+                ("at".into(), Arg::Num(at)),
+            ]);
             let event = self.record(from, &o, host)?;
             let i = self.need_index(from)?;
             for s in &sessions {
@@ -1467,7 +1486,13 @@ impl Actors {
                 let works = has_token && !token_expired(r_at, now);
                 let used = has_token && r_at.is_some() && a.allowed_at.is_some() && r_at.unwrap() > a.allowed_at.unwrap();
                 let has_gateway = r.is_some_and(|r| truthy(r.get("hasGateway")));
-                let state = if works { "works" } else if a.allowed_at.is_some() && !has_gateway { "expired" } else { "none" };
+                let state = if works {
+                    "works"
+                } else if a.allowed_at.is_some() && !has_gateway {
+                    "expired"
+                } else {
+                    "none"
+                };
                 let gateway_at = r.and_then(|r| r.get("gatewayAt")).and_then(Value::as_f64);
                 let mut o = Map::new();
                 o.insert("actor".into(), json!(a.id));
@@ -1476,7 +1501,10 @@ impl Actors {
                 o.insert("usedAt".into(), if used { number(r_at.unwrap()) } else { Value::Null });
                 if has_gateway && !token_expired(gateway_at, now) {
                     let g = gateway_at.unwrap();
-                    o.insert("gateway".into(), json!({ "state": "works", "expiresAt": number(g + TOKEN_UNUSED_MS), "usedAt": if g > a.allowed_at.unwrap_or(0.0) { number(g) } else { Value::Null } }));
+                    o.insert(
+                        "gateway".into(),
+                        json!({ "state": "works", "expiresAt": number(g + TOKEN_UNUSED_MS), "usedAt": if g > a.allowed_at.unwrap_or(0.0) { number(g) } else { Value::Null } }),
+                    );
                 }
                 Value::Object(o)
             })
@@ -1488,7 +1516,8 @@ impl Actors {
     pub fn list(&mut self, view: &str, now: Option<f64>, host: &mut dyn Host) -> Result<Value> {
         let now = now.unwrap_or_else(|| host.now());
         let counts = self.counts(now)?;
-        let mut shown: Vec<(String, bool, f64, f64)> = self.actors.iter().filter(|a| Self::listed(a, now)).map(|a| (a.id.clone(), a.id == YOU, a.last_seen.unwrap_or(0.0), a.created_at)).collect();
+        let mut shown: Vec<(String, bool, f64, f64)> =
+            self.actors.iter().filter(|a| Self::listed(a, now)).map(|a| (a.id.clone(), a.id == YOU, a.last_seen.unwrap_or(0.0), a.created_at)).collect();
         if shown.len() > LIST_MAX {
             let mut by_seen = shown.clone();
             by_seen.sort_by(|x, y| {
@@ -1560,7 +1589,8 @@ impl Actors {
             return Ok(json!({ "schema": "actor/events/v1", "at": number(now), "events": [] }));
         }
         let except = if only.truthy() || view == "window" || self.demo { Arg::Null } else { Arg::text(YOU) };
-        let rows = self.store.with(|s| s.actor_events_since(Arg::Num(from), &Arg::Obj(vec![("limit".into(), Arg::Num(n)), ("only".into(), only.clone()), ("except".into(), except)])))?;
+        let rows =
+            self.store.with(|s| s.actor_events_since(Arg::Num(from), &Arg::Obj(vec![("limit".into(), Arg::Num(n)), ("only".into(), only.clone()), ("except".into(), except)])))?;
         Ok(json!({ "schema": "actor/events/v1", "at": number(now), "events": rows.iter().map(event_of).collect::<Vec<_>>() }))
     }
 
@@ -1577,7 +1607,8 @@ impl Actors {
                 if !Self::map_ready(host) {
                     continue;
                 }
-                let gone: Vec<(String, Target)> = self.actors[i].targets.iter().filter(|(_, t)| node_kind(&t.id) == Some("session") && now - t.since >= SESSION_WAIT_MS).cloned().collect();
+                let gone: Vec<(String, Target)> =
+                    self.actors[i].targets.iter().filter(|(_, t)| node_kind(&t.id) == Some("session") && now - t.since >= SESSION_WAIT_MS).cloned().collect();
                 for (key, t) in gone {
                     if host.has(&t.id) == Some(true) {
                         continue;
@@ -1595,7 +1626,8 @@ impl Actors {
 
     // The processes an actor named, watched.
     fn ended(&mut self, i: usize, now: f64, host: &mut dyn Host) {
-        let pids: Vec<(usize, f64)> = self.actors[i].instances.iter().enumerate().filter_map(|(j, (_, inst))| inst.pid.filter(|p| *p != 0.0 && !p.is_nan()).map(|p| (j, p))).collect();
+        let pids: Vec<(usize, f64)> =
+            self.actors[i].instances.iter().enumerate().filter_map(|(j, (_, inst))| inst.pid.filter(|p| *p != 0.0 && !p.is_nan()).map(|p| (j, p))).collect();
         for (j, pid) in pids {
             if !host.alive(pid) {
                 let inst = &mut self.actors[i].instances[j].1;
@@ -1621,7 +1653,12 @@ impl Actors {
     pub fn prune(&mut self, now: f64) -> Result<()> {
         self.flush()?;
         self.store.with(|s| s.prune(now))?;
-        let targets: Vec<String> = self.store.with(|s| s.actor_targets())?.iter().map(|t| format!("{}|{}|{}", t.text("actor").unwrap_or(""), t.text("relation").unwrap_or(""), t.text("target").unwrap_or(""))).collect();
+        let targets: Vec<String> = self
+            .store
+            .with(|s| s.actor_targets())?
+            .iter()
+            .map(|t| format!("{}|{}|{}", t.text("actor").unwrap_or(""), t.text("relation").unwrap_or(""), t.text("target").unwrap_or("")))
+            .collect();
         for i in 0..self.actors.len() {
             let id = self.actors[i].id.clone();
             let recent: Vec<Value> = self.store.with(|s| s.last_actor_events(Arg::text(&id), Arg::Num(RECENT)))?.iter().map(event_of).collect();
@@ -1670,7 +1707,11 @@ impl Actors {
             }
             return Ok(json!({ "ok": true, "kind": kind }));
         }
-        let a = if a.is_null() { self.actors.iter().find(|x| x.kind == "agent").map(|x| x.id.clone()).or_else(|| self.demo.then(|| YOU.to_string())) } else { Some(xenonet_engine::js::template(Some(&a))) };
+        let a = if a.is_null() {
+            self.actors.iter().find(|x| x.kind == "agent").map(|x| x.id.clone()).or_else(|| self.demo.then(|| YOU.to_string()))
+        } else {
+            Some(xenonet_engine::js::template(Some(&a)))
+        };
         let Some(a) = a else { return Ok(Value::Null) };
         if !self.has(&a) || !self.is_public(&a) {
             return Ok(Value::Null);
@@ -1692,7 +1733,11 @@ impl Actors {
                 let mut b = b;
                 if b.is_null() {
                     let d = if truthy(Some(&session)) { host.describe(&xenonet_engine::js::template(Some(&session))) } else { Value::Null };
-                    b = if d.get("kind").and_then(Value::as_str) == Some("session") { d.get("placeId").filter(|p| !p.is_null()).cloned().unwrap_or(session.clone()) } else { session.clone() };
+                    b = if d.get("kind").and_then(Value::as_str) == Some("session") {
+                        d.get("placeId").filter(|p| !p.is_null()).cloned().unwrap_or(session.clone())
+                    } else {
+                        session.clone()
+                    };
                 }
                 self.record(&a, &rec("edited", &b, true), host)?;
                 Ok(json!({ "ok": true, "kind": kind, "a": a, "b": b }))
@@ -1795,7 +1840,14 @@ impl Actors {
         let apps = |v: &Arg| matches!(v.as_str(), Some("claude" | "codex"));
         if what == "started" {
             let app = if apps(&d.field("app")) { d.field("app") } else { Arg::text("claude") };
-            let o = Arg::Obj(vec![("kind".into(), Arg::text("spawned")), ("target".into(), value_arg(&node)), ("relation".into(), Arg::text("works-on")), ("app".into(), app), ("via".into(), Arg::text("observed")), ("at".into(), Arg::Num(at))]);
+            let o = Arg::Obj(vec![
+                ("kind".into(), Arg::text("spawned")),
+                ("target".into(), value_arg(&node)),
+                ("relation".into(), Arg::text("works-on")),
+                ("app".into(), app),
+                ("via".into(), Arg::text("observed")),
+                ("at".into(), Arg::Num(at)),
+            ]);
             self.record(YOU, &o, host)?;
             return Ok(None);
         }

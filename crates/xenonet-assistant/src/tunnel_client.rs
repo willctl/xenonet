@@ -130,7 +130,10 @@ fn value_of(text: &str, key: &str) -> Option<String> {
 pub fn read_profile(text: &str) -> Value {
     static GRANT: OnceLock<Regex> = OnceLock::new();
     let command = value_of(text, "command");
-    let grant = GRANT.get_or_init(|| Regex::new(r"(?-u:\b)mcp\s+assistant(?-u:\b).*--grant[ =](gr_[0-9a-f]{24})(?-u:\b)").unwrap()).captures(command.as_deref().unwrap_or("")).map(|c| c[1].to_string());
+    let grant = GRANT
+        .get_or_init(|| Regex::new(r"(?-u:\b)mcp\s+assistant(?-u:\b).*--grant[ =](gr_[0-9a-f]{24})(?-u:\b)").unwrap())
+        .captures(command.as_deref().unwrap_or(""))
+        .map(|c| c[1].to_string());
     let tunnel = value_of(text, "tunnel_id");
     json!({ "tunnelId": tunnel.filter(|t| is_tunnel_id(t)), "health": value_of(text, "listen_addr"), "grant": grant, "xenonet": grant.is_some() })
 }
@@ -280,7 +283,11 @@ pub fn health_of(h: Option<&Value>) -> Value {
     if let Some(cp) = cp {
         if cp.get("status").and_then(Value::as_str) != Some("ok") {
             let said = cp.get("state").filter(|v| !v.is_null()).or_else(|| cp.get("status")).map_or_else(|| "undefined".into(), js_string);
-            let fails = cp.get("details").and_then(|d| d.get("consecutive_failures")).filter(|v| truthy(Some(v))).map_or(String::new(), |n| format!(", {} failures in a row", js_string(n)));
+            let fails = cp
+                .get("details")
+                .and_then(|d| d.get("consecutive_failures"))
+                .filter(|v| truthy(Some(v)))
+                .map_or(String::new(), |n| format!(", {} failures in a row", js_string(n)));
             return json!({ "state": "degraded", "why": format!("OpenAI's control plane: {said}{fails}") });
         }
     }

@@ -21,13 +21,13 @@
 //! already running (`Call::share`) waits for that one's answer, as JS's
 //! shared promises do.
 
+use crate::js::{is_integer, template, truthy};
 use crate::re;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 use xenonet_base::json::number_string;
 use xenonet_base::paths::normalize_posix;
-use crate::js::{is_integer, template, truthy};
 use xenonet_base::text::{js_number, js_string, js_trim};
 
 const TABLE_MS: f64 = 1500.0;
@@ -943,7 +943,8 @@ mod tests {
         assert_eq!(t.len(), 1);
         assert_eq!(t.get(510.0).unwrap().start, 1_791_045_269_000.0);
         assert_eq!(parse_ps("  702     1 Sun Foo  1 07:30:00 2026 /bin/sh\n").get(702.0).unwrap().start, 0.0);
-        let row = "tcp4       0      0  127.0.0.1.51000        127.0.0.1.47842        ESTABLISHED    111   2970  406912  146988 node:4242            00102 00000104 0000000003bca9cb";
+        let row =
+            "tcp4       0      0  127.0.0.1.51000        127.0.0.1.47842        ESTABLISHED    111   2970  406912  146988 node:4242            00102 00000104 0000000003bca9cb";
         assert_eq!(parse_netstat(row, "47842", "51000"), Some(4242.0));
         assert_eq!(parse_netstat(row, "47842", "52000"), None);
     }

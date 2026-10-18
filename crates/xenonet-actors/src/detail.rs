@@ -6,11 +6,11 @@
 //! name projects, never session titles, which come from conversations, so
 //! a session is only ever "a Claude Code session in atlas-api".
 
-use xenonet_engine::js::{template, truthy};
 use serde_json::Value;
 use std::sync::OnceLock;
 use xenonet_base::log::js_slice;
 use xenonet_base::text::js_trim;
+use xenonet_engine::js::{template, truthy};
 
 /// The agent apps by their id.
 pub fn app_name(app: &str) -> Option<&'static str> {
@@ -189,11 +189,8 @@ pub fn write_detail(kind: &str, facts: Option<&Value>, at_where: Option<&Value>)
 /// the window reported (section 6): looking at a place or a session,
 /// reading or opening a session, or a terminal opened in a folder.
 pub fn console_status(what: Option<&str>, at_where: Option<&Value>) -> Option<String> {
-    let it = if str_of(at_where, "kind") == Some("session") {
-        Some(Value::String(session_words(get(at_where, "app"), get(at_where, "place"))))
-    } else {
-        get(at_where, "name").cloned()
-    };
+    let it =
+        if str_of(at_where, "kind") == Some("session") { Some(Value::String(session_words(get(at_where, "app"), get(at_where, "place")))) } else { get(at_where, "name").cloned() };
     if !truthy(it.as_ref()) {
         return None;
     }
@@ -255,7 +252,12 @@ pub fn one_line(s: &str) -> String {
 
 fn key_prefix() -> &'static regex::Regex {
     static R: OnceLock<regex::Regex> = OnceLock::new();
-    R.get_or_init(|| regex::Regex::new(r"(?:^|[^A-Za-z0-9])(?:sk-|sk_|pk_|rk_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[abprs]-|AKIA|ASIA|AIza|npm_|pypi-|hf_|xenonet_actor_|xenonet_assistant_)").unwrap())
+    R.get_or_init(|| {
+        regex::Regex::new(
+            r"(?:^|[^A-Za-z0-9])(?:sk-|sk_|pk_|rk_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[abprs]-|AKIA|ASIA|AIza|npm_|pypi-|hf_|xenonet_actor_|xenonet_assistant_)",
+        )
+        .unwrap()
+    })
 }
 
 /// Words that start the way keys and tokens do, and a run of 32 or more

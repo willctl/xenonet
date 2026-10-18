@@ -105,7 +105,8 @@ pub fn attribute(sessions: &[Value], starts: &[Value], known: Option<&HashSet<St
                 break;
             }
             let s = by_id.get(&id_key(&c));
-            cur = s.filter(|s| matches!(s.get("parentKind").and_then(Value::as_str), Some("subagent" | "spawn"))).and_then(|s| s.get("parentId")).filter(|p| p.is_string()).cloned();
+            cur =
+                s.filter(|s| matches!(s.get("parentKind").and_then(Value::as_str), Some("subagent" | "spawn"))).and_then(|s| s.get("parentId")).filter(|p| p.is_string()).cloned();
             up += 1;
         }
     }
@@ -238,7 +239,8 @@ mod tests {
     #[test]
     fn sessions_go_to_their_actor_or_parent() {
         let sessions = vec![json!({ "id": "a" }), json!({ "id": "b", "parentId": "a", "parentKind": "subagent" }), json!({ "id": "c", "parentId": "a", "parentKind": "fork" })];
-        let starts = vec![json!({ "actor": "actor:wren", "session": "a", "at": 1, "via": "registered" }), json!({ "actor": "actor:hermes", "session": "a", "at": 5, "via": "observed" })];
+        let starts =
+            vec![json!({ "actor": "actor:wren", "session": "a", "at": 1, "via": "registered" }), json!({ "actor": "actor:hermes", "session": "a", "at": 5, "via": "observed" })];
         let w = attribute(&sessions, &starts, None, None);
         assert_eq!(w.len(), 2);
         assert_eq!(w[0].1, Who { actor: "actor:hermes".into(), how: "started" });

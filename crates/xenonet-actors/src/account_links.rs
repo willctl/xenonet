@@ -204,7 +204,10 @@ mod tests {
 
     fn store() -> Shared {
         let s = Shared::new(EngineStore::open(":memory:", 1000.0).unwrap());
-        s.with(|s| xenonet_engine::sql::exec(s.db().unwrap(), "INSERT INTO actors (slug, kind, name, via, capabilities, created_at) VALUES ('dots', 'agent', 'Dots', '[]', '[]', 0)")).unwrap();
+        s.with(|s| {
+            xenonet_engine::sql::exec(s.db().unwrap(), "INSERT INTO actors (slug, kind, name, via, capabilities, created_at) VALUES ('dots', 'agent', 'Dots', '[]', '[]', 0)")
+        })
+        .unwrap();
         s
     }
 
@@ -217,7 +220,13 @@ mod tests {
         assert!(matches!(assert_link(&s, &slug, &Arg::text("other"), &Arg::text("openai"), Some(&known), &Arg::num(1.0)), Err(LinkFail::Link { code: "unknown-identity", .. })));
         assert_link(&s, &slug, &Arg::text("chatgpt:w"), &Arg::text("openai"), Some(&known), &Arg::num(1.0)).unwrap();
         assert_eq!(link_state(&s, &slug, 2.0).unwrap(), ("owner_asserted", Value::String("chatgpt:w".into())));
-        let facts = Arg::Obj(vec![("state".into(), Arg::text("verified")), ("issuer".into(), Arg::text("i")), ("provider".into(), Arg::text("openai")), ("workspace".into(), Arg::text("w")), ("subject".into(), Arg::text("u"))]);
+        let facts = Arg::Obj(vec![
+            ("state".into(), Arg::text("verified")),
+            ("issuer".into(), Arg::text("i")),
+            ("provider".into(), Arg::text("openai")),
+            ("workspace".into(), Arg::text("w")),
+            ("subject".into(), Arg::text("u")),
+        ]);
         assert_eq!(record_verified(&s, &slug, &facts, &known, 3.0).unwrap(), (Some("chatgpt:w".into()), false));
         assert_eq!(link_state(&s, &slug, 4.0).unwrap().0, "verified");
     }

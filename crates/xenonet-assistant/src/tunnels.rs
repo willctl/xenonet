@@ -234,7 +234,10 @@ impl Tunnels {
     pub fn launching(&mut self, grant: &str, now: f64) -> bool {
         if !self.runs.contains_key(grant) {
             self.order.push(grant.into());
-            self.runs.insert(grant.into(), Run { state: "off".into(), why: None, since: now, version: Value::Null, polled_at: Value::Null, exits: vec![], lines: vec![], stopping: false });
+            self.runs.insert(
+                grant.into(),
+                Run { state: "off".into(), why: None, since: now, version: Value::Null, polled_at: Value::Null, exits: vec![], lines: vec![], stopping: false },
+            );
         }
         let r = self.runs.get_mut(grant).unwrap();
         r.stopping = false;

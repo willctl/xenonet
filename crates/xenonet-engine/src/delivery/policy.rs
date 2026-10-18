@@ -123,7 +123,13 @@ pub fn sanitize(text: &str, one_line: bool, max: f64) -> String {
     if len as f64 > max {
         // slice(0, max - 1), a negative end counting from the end.
         let end = (max - 1.0).trunc();
-        let keep = if end.is_nan() { 0 } else if end < 0.0 { (len as f64 + end).max(0.0) as usize } else { end.min(len as f64) as usize };
+        let keep = if end.is_nan() {
+            0
+        } else if end < 0.0 {
+            (len as f64 + end).max(0.0) as usize
+        } else {
+            end.min(len as f64) as usize
+        };
         return format!("{}…", slice16(&s, keep));
     }
     s
@@ -351,7 +357,16 @@ impl Policy {
         let g = json!({ "selector": format_selector(Some(&sel)), "at": xenonet_base::json::number(at), "expiresAt": xenonet_base::json::number(expires_at) });
         self.table("grants")?.insert(js_text(actor), g.clone());
         self.save(c)?;
-        self.audit(c, Arg::Obj(vec![("kind".into(), Arg::text("grant")), ("actor".into(), actor.clone()), ("selector".into(), value_arg(&g["selector"])), ("expiresAt".into(), Arg::num(expires_at)), ("by".into(), by.clone())]))?;
+        self.audit(
+            c,
+            Arg::Obj(vec![
+                ("kind".into(), Arg::text("grant")),
+                ("actor".into(), actor.clone()),
+                ("selector".into(), value_arg(&g["selector"])),
+                ("expiresAt".into(), Arg::num(expires_at)),
+                ("by".into(), by.clone()),
+            ]),
+        )?;
         Ok(value_arg(&g))
     }
 
@@ -441,7 +456,15 @@ impl Policy {
     /// sender can read when it may not go. `depth`: how many replies deep.
     pub fn check_send(&mut self, c: &mut dyn Calls, sender: &Arg, recipients: &[Arg], text: &Arg, depth: f64) -> Result<()> {
         let refuse = |p: &mut Policy, c: &mut dyn Calls, why: String, code: &'static str| -> Result<()> {
-            p.audit(c, Arg::Obj(vec![("kind".into(), Arg::text("refused")), ("sender".into(), sender.clone()), ("to".into(), Arg::num(recipients.len() as f64)), ("why".into(), Arg::text(code))]))?;
+            p.audit(
+                c,
+                Arg::Obj(vec![
+                    ("kind".into(), Arg::text("refused")),
+                    ("sender".into(), sender.clone()),
+                    ("to".into(), Arg::num(recipients.len() as f64)),
+                    ("why".into(), Arg::text(code)),
+                ]),
+            )?;
             Err(Fail::Refused { why, code })
         };
         if self.paused() && !is_you(sender) {
@@ -453,7 +476,16 @@ impl Policy {
         }
         let max_hops = self.limit(c, "maxHops")?;
         if depth >= max_hops {
-            return refuse(self, c, format!("this thread is {} replies deep; XenoNet stops agent-to-agent threads at {} so two agents can't loop. Ask your user before going on.", js_text(&Arg::num(depth)), js_text(&Arg::num(max_hops))), "hops");
+            return refuse(
+                self,
+                c,
+                format!(
+                    "this thread is {} replies deep; XenoNet stops agent-to-agent threads at {} so two agents can't loop. Ask your user before going on.",
+                    js_text(&Arg::num(depth)),
+                    js_text(&Arg::num(max_hops))
+                ),
+                "hops",
+            );
         }
         let t = self.now(c)?;
         let dedupe = self.limit(c, "dedupeMs")?;
@@ -483,7 +515,15 @@ impl Policy {
             pair.sort_by(|a, b| crate::js::utf16_cmp(a, b));
             let per_pair = self.limit(c, "pairPerTenMinutes")?;
             if !self.take(c, &format!("p:{}", pair.join("|")), per_pair, 600e3)? {
-                return refuse(self, c, format!("you and {id} have exchanged {} messages in ten minutes, which looks like a loop; XenoNet holds the rest. Ask your user before going on.", js_text(&Arg::num(per_pair))), "storm");
+                return refuse(
+                    self,
+                    c,
+                    format!(
+                        "you and {id} have exchanged {} messages in ten minutes, which looks like a loop; XenoNet holds the rest. Ask your user before going on.",
+                        js_text(&Arg::num(per_pair))
+                    ),
+                    "storm",
+                );
             }
         }
         self.recent.retain(|(k, _)| *k != hash);
@@ -506,7 +546,16 @@ impl Policy {
         let consent = json!({ "until": xenonet_base::json::number(until), "remote": remote, "at": xenonet_base::json::number(at) });
         self.table("consent")?.insert(js_text(session), consent.clone());
         self.save(c)?;
-        self.audit(c, Arg::Obj(vec![("kind".into(), Arg::text("consent")), ("session".into(), session.clone()), ("until".into(), Arg::num(until)), ("remote".into(), Arg::Bool(remote)), ("by".into(), by.clone())]))?;
+        self.audit(
+            c,
+            Arg::Obj(vec![
+                ("kind".into(), Arg::text("consent")),
+                ("session".into(), session.clone()),
+                ("until".into(), Arg::num(until)),
+                ("remote".into(), Arg::Bool(remote)),
+                ("by".into(), by.clone()),
+            ]),
+        )?;
         Ok(value_arg(&consent))
     }
 
@@ -591,7 +640,9 @@ impl Policy {
         if file.truthy() {
             let file = js_text(&file);
             let text = format!("{}\n", stringify(&json_of(&line).unwrap_or(Value::Null), 0));
-            let _ = c.call("fs", "mkdirSync", vec![Arg::text(dirname(&file)), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])]).and_then(|_| c.call("fs", "appendFileSync", vec![Arg::text(file), Arg::text(text), Arg::Obj(vec![("mode".into(), Arg::num(0o600 as f64))])]));
+            let _ = c
+                .call("fs", "mkdirSync", vec![Arg::text(dirname(&file)), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])])
+                .and_then(|_| c.call("fs", "appendFileSync", vec![Arg::text(file), Arg::text(text), Arg::Obj(vec![("mode".into(), Arg::num(0o600 as f64))])]));
         } else {
             self.memory_audit.push(line.clone());
         }

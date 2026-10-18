@@ -406,7 +406,8 @@ impl Hermes {
         let home = p.home.clone();
         let v = version.clone();
         let gateway = self.stamped(c, &format!("{}:gateway", p.name), &[f(&["gateway_state.json"])], &mut |c| hf::read_gateway(c, &home, v.clone()))?;
-        let ticker = self.stamped(c, &format!("{}:ticker", p.name), &[f(&["cron", "ticker_heartbeat"]), f(&["cron", "ticker_last_success"])], &mut |c| hf::read_ticker(c, &home, v.clone()))?;
+        let ticker = self
+            .stamped(c, &format!("{}:ticker", p.name), &[f(&["cron", "ticker_heartbeat"]), f(&["cron", "ticker_last_success"])], &mut |c| hf::read_ticker(c, &home, v.clone()))?;
         let processes = self.stamped(c, &format!("{}:processes", p.name), &[f(&["processes.json"])], &mut |c| hf::read_processes(c, &home, v.clone()))?;
         let jobs = self.stamped(c, &format!("{}:jobs", p.name), &[f(&["cron", "jobs.json"])], &mut |c| hf::read_jobs(c, &home, v.clone()))?;
         let label = if p.name == "default" { String::new() } else { format!(" ({})", p.name) };
@@ -466,7 +467,14 @@ impl Hermes {
         }
         let mut table_state = None;
         let census = census(c, &mut table_state)?;
-        let role = |i: usize| census.products[i].get("product").and_then(Value::as_str).filter(|p| *p == "hermes-agent").and_then(|_| census.products[i].get("role").and_then(Value::as_str)).map(str::to_string);
+        let role = |i: usize| {
+            census.products[i]
+                .get("product")
+                .and_then(Value::as_str)
+                .filter(|p| *p == "hermes-agent")
+                .and_then(|_| census.products[i].get("role").and_then(Value::as_str))
+                .map(str::to_string)
+        };
         let (mut hosts, mut tuis, mut apps) = (Vec::new(), Vec::new(), Vec::new());
         for i in 0..census.table.len() {
             match role(i).as_deref() {
@@ -553,7 +561,11 @@ impl Hermes {
         }
         let main_apps: Vec<usize> = apps.iter().copied().filter(|&a| !apps.iter().any(|&b| census.table[b].pid == census.table[a].ppid)).collect();
         for a in main_apps {
-            let profile = live.iter().find(|e| e["purpose"].as_str() == Some("serve") && n(e.get("spawnerPid")) == Some(census.table[a].pid)).and_then(|e| e.get("profile").filter(|p| truthy(Some(p)))).map_or_else(|| "default".to_string(), |p| template(Some(p)));
+            let profile = live
+                .iter()
+                .find(|e| e["purpose"].as_str() == Some("serve") && n(e.get("spawnerPid")) == Some(census.table[a].pid))
+                .and_then(|e| e.get("profile").filter(|p| truthy(Some(p))))
+                .map_or_else(|| "default".to_string(), |p| template(Some(p)));
             add(&mut apps_of, profile, a);
         }
         for p in profiles.iter_mut() {
@@ -613,7 +625,8 @@ impl Hermes {
         // The sessions at work: open, not hidden, active in the last two
         // minutes.
         let latest = |s: &Session| s.activity_at.unwrap_or(0.0).max(s.last_message_at.unwrap_or(0.0));
-        let mut active: Vec<Session> = p.sessions.iter().map(|(_, s)| s.clone()).filter(|s| s.ended_at.is_none() && !s.archived && !s.hidden && latest(s) >= at - ACTIVE_MS).collect();
+        let mut active: Vec<Session> =
+            p.sessions.iter().map(|(_, s)| s.clone()).filter(|s| s.ended_at.is_none() && !s.archived && !s.hidden && latest(s) >= at - ACTIVE_MS).collect();
         active.sort_by(|a, b| latest(b).partial_cmp(&latest(a)).unwrap_or(std::cmp::Ordering::Equal));
         // A gateway whose heartbeat is stale while its process runs has gone
         // quiet: only its sessions' own activity says what it's doing.
@@ -749,12 +762,20 @@ impl Hermes {
                 if record {
                     if let Some(kind) = tool_kind(&tool) {
                         let target = Self::place_of_session(c, s.as_ref())?;
-                        c.call("", "gather", vec![Arg::text(&p.id), Arg::Obj(vec![("kind".into(), Arg::text(kind)), ("target".into(), value_arg(&target)), ("at".into(), Arg::Num(when))])])?;
+                        c.call(
+                            "",
+                            "gather",
+                            vec![Arg::text(&p.id), Arg::Obj(vec![("kind".into(), Arg::text(kind)), ("target".into(), value_arg(&target)), ("at".into(), Arg::Num(when))])],
+                        )?;
                     }
                 }
             } else if record && m["role"].as_str() == Some("assistant") && !truthy(m.get("calls")) {
                 if let Some(pl) = s.as_ref().and_then(|s| s.source.as_str()).and_then(platform) {
-                    c.call("", "gather", vec![Arg::text(&p.id), Arg::Obj(vec![("kind".into(), Arg::text("messaged")), ("platform".into(), Arg::text(pl)), ("at".into(), Arg::Num(when))])])?;
+                    c.call(
+                        "",
+                        "gather",
+                        vec![Arg::text(&p.id), Arg::Obj(vec![("kind".into(), Arg::text("messaged")), ("platform".into(), Arg::text(pl)), ("at".into(), Arg::Num(when))])],
+                    )?;
                 }
             }
         }
@@ -774,7 +795,14 @@ impl Hermes {
             };
             let target = if truthy(Some(&place)) { place.clone() } else { Self::place_of_session(c, s.as_ref())? };
             let paths = if truthy(Some(&place)) { Arg::List(vec![Arg::text(file.unwrap())]) } else { Arg::List(vec![]) };
-            c.call("", "gather", vec![Arg::text(&p.id), Arg::Obj(vec![("kind".into(), Arg::text("edited")), ("target".into(), value_arg(&target)), ("at".into(), Arg::Num(when)), ("paths".into(), paths)])])?;
+            c.call(
+                "",
+                "gather",
+                vec![
+                    Arg::text(&p.id),
+                    Arg::Obj(vec![("kind".into(), Arg::text("edited")), ("target".into(), value_arg(&target)), ("at".into(), Arg::Num(when)), ("paths".into(), paths)]),
+                ],
+            )?;
         }
         // Sessions that ended (not a subagent's, nor one that went on in
         // another), once each.
@@ -892,6 +920,8 @@ impl Hermes {
     pub fn status(&self, c: &mut dyn Calls) -> Result<Value> {
         let installed = hf::installed(c, &self.root)?;
         let s = self.s();
-        Ok(json!({ "product": "hermes-agent", "name": "Hermes Agent", "installed": installed, "sources": s.source_states.iter().map(|(_, v)| v.clone()).collect::<Vec<_>>(), "recognized": s.recognized }))
+        Ok(
+            json!({ "product": "hermes-agent", "name": "Hermes Agent", "installed": installed, "sources": s.source_states.iter().map(|(_, v)| v.clone()).collect::<Vec<_>>(), "recognized": s.recognized }),
+        )
     }
 }

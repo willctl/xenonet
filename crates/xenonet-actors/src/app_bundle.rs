@@ -10,11 +10,11 @@
 //! "id" (the ids that are the product's, a pattern to test), "files" and
 //! "binary" (a key read from a binary Info.plist).
 
-use xenonet_engine::jsre::js;
 use serde_json::{json, Value};
 use std::sync::Mutex;
 use xenonet_base::paths::tilde;
 use xenonet_engine::js::join_style;
+use xenonet_engine::jsre::js;
 use xenonet_engine::peer::{list, Calls, Result, Thrown};
 use xenonet_engine::sql::Arg;
 
@@ -174,7 +174,13 @@ impl AppBundle {
         };
         let plist = self.plist();
         let other = plist.as_ref().is_some_and(|p| p.id.is_some()) && !self.ours(c)?;
-        let state = if app.is_none() { "missing" } else if other { "other" } else { "ok" };
+        let state = if app.is_none() {
+            "missing"
+        } else if other {
+            "other"
+        } else {
+            "ok"
+        };
         let version_file = plist.as_ref().and_then(|p| p.file.clone()).unwrap_or_else(|| join_style(&at, &["Contents", "Info.plist"]));
         Ok(json!([
             { "name": "app", "file": tilde(&at, home), "state": state },
