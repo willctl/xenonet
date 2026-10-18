@@ -8,7 +8,7 @@
 use crate::runtime::{runtime_dir, Env, Machine};
 use crate::tar::{unpack, Unpack};
 use regex::Regex;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::sync::OnceLock;
 use xenonet_app::fsx::{self, FsError};
@@ -22,12 +22,12 @@ pub const MAX_PACKAGE: usize = 512 << 20;
 
 fn semver() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"^[0-9]+\.[0-9]+\.[0-9]+$").unwrap())
+    R.get_or_init(|| Regex::new(r"^[0-9]+\.[0-9]+\.[0-9]+$").expect("a fixed pattern"))
 }
 
 pub fn sha_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new("^[a-f0-9]{64}$").unwrap())
+    R.get_or_init(|| Regex::new("^[a-f0-9]{64}$").expect("a fixed pattern"))
 }
 
 // RegExp.test reads its argument as a string.
@@ -45,15 +45,15 @@ pub fn is_sha(v: Option<&Value>) -> bool {
 
 /// The SHA-256 of bytes, in hex.
 pub fn digest(data: &[u8]) -> String {
-    Sha256::digest(data).iter().map(|b| format!("{b:02x}")).collect()
+    xenonet_base::jsstr::hex(&Sha256::digest(data))
 }
 
 /// Whether version a is newer than b.
 pub fn newer(a: Option<&Value>, b: Option<&Value>) -> Result<bool, String> {
-    if !is_semver(a) || !is_semver(b) {
+    let (Some(a), Some(b)) = (a.filter(|v| is_semver(Some(v))), b.filter(|v| is_semver(Some(v)))) else {
         return Err("Invalid component version.".into());
-    }
-    let parts = |v: Option<&Value>| -> Vec<f64> { js_string(v.unwrap()).split('.').map(|p| p.parse::<f64>().unwrap_or(f64::NAN)).collect() };
+    };
+    let parts = |v: &Value| -> Vec<f64> { js_string(v).split('.').map(|p| p.parse::<f64>().unwrap_or(f64::NAN)).collect() };
     let (x, y) = (parts(a), parts(b));
     for i in 0..3 {
         if x[i] != y[i] {
@@ -108,7 +108,7 @@ pub fn current_component(component: &str, env: &Env, m: &Machine) -> Result<Opti
     let sha = js_string(&current["sha256"]);
     let mut out = match current {
         Value::Object(m) => m,
-        _ => Default::default(),
+        _ => Map::new(),
     };
     out.insert("root".into(), json!(NATIVE.join(&[&dir, &format!("{version}-{}", &sha[..16])])));
     Ok(Some(Value::Object(out)))
@@ -119,7 +119,7 @@ fn random_uuid() -> String {
     getrandom::fill(&mut b).expect("the system's random numbers");
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
-    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    let h = xenonet_base::jsstr::hex(&b);
     format!("{}-{}-{}-{}-{}", &h[..8], &h[8..12], &h[12..16], &h[16..20], &h[20..])
 }
 
@@ -130,7 +130,7 @@ pub fn select_component(component: &str, value: &Value, env: &Env, m: &Machine) 
     fsx::mkdir_p(&dir, None)?;
     let file = NATIVE.join(&[&dir, "current.json"]);
     let tmp = format!("{file}.{}.tmp", random_uuid());
-    let mut pointer = serde_json::Map::new();
+    let mut pointer = Map::new();
     for k in ["version", "sha256"] {
         if let Some(v) = value.get(k) {
             pointer.insert(k.into(), v.clone());
@@ -143,7 +143,7 @@ pub fn select_component(component: &str, value: &Value, env: &Env, m: &Machine) 
 fn with_root(manifest: Value, root: &str, sha256: &Value) -> Value {
     let mut m = match manifest {
         Value::Object(m) => m,
-        _ => Default::default(),
+        _ => Map::new(),
     };
     m.insert("root".into(), json!(root));
     m.insert("sha256".into(), sha256.clone());

@@ -20,12 +20,12 @@ const DOWNLOADS: &str = "https://github.com/willctl/xenonet/releases/latest/down
 
 fn file_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"^XenoNet-(service|tools)-[A-Za-z0-9_.-]+\.tar\.gz$").unwrap())
+    R.get_or_init(|| Regex::new(r"^XenoNet-(service|tools)-[A-Za-z0-9_.-]+\.tar\.gz$").expect("a fixed pattern"))
 }
 
 fn url_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"^https://github\.com/willctl/xenonet/releases/latest/download/XenoNet-[A-Za-z0-9_.-]+\.tar\.gz$").unwrap())
+    R.get_or_init(|| Regex::new(r"^https://github\.com/willctl/xenonet/releases/latest/download/XenoNet-[A-Za-z0-9_.-]+\.tar\.gz$").expect("a fixed pattern"))
 }
 
 fn size_ok(v: Option<&Value>) -> bool {
@@ -119,7 +119,7 @@ impl Download {
     pub fn new(file: &str, size: f64, sha256: &str) -> Result<Self, FsError> {
         let mut b = [0u8; 16];
         getrandom::fill(&mut b).expect("the system's random numbers");
-        let tmp = format!("{file}.{}.tmp", b.iter().map(|x| format!("{x:02x}")).collect::<String>());
+        let tmp = format!("{file}.{}.tmp", xenonet_base::jsstr::hex(&b));
         let mut o = std::fs::OpenOptions::new();
         o.write(true).create_new(true);
         #[cfg(unix)]

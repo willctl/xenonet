@@ -50,7 +50,7 @@ pub fn descriptor_file(env: &Env, m: &Machine) -> String {
 
 fn token_re() -> &'static regex::Regex {
     static R: OnceLock<regex::Regex> = OnceLock::new();
-    R.get_or_init(|| regex::Regex::new("^[a-f0-9]{64}$").unwrap())
+    R.get_or_init(|| regex::Regex::new("^[a-f0-9]{64}$").expect("a fixed pattern"))
 }
 
 /// The service's descriptor: its port and the token its hello wants.
