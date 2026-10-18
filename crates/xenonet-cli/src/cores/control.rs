@@ -390,6 +390,16 @@ pub fn control_quit(instance: &str) -> Result<(), Fail> {
     sync(instance, "quit", json!({})).map(|_| ())
 }
 
+/// The console operator's way in (xenonet mcp console): any of the
+/// client's methods, `kind`, with its arguments as `method` takes them.
+pub struct ConsoleControl;
+
+impl xenonet_mcp::Control for ConsoleControl {
+    fn method(&self, instance: &str, kind: &str, args: Value) -> Result<Value, String> {
+        sync(instance, kind, args).map_err(|f| f.message)
+    }
+}
+
 // ---------- scripts ----------
 
 /// An argument a step calls with, as JSON: what's undefined left out.

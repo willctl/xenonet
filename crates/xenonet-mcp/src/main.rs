@@ -9,6 +9,17 @@ fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
     args.iter().enumerate().find_map(|(i, a)| if *a == long { args.get(i + 1).map(String::as_str) } else { a.strip_prefix(&eq) })
 }
 
+// This binary is for the crate's tests, which check what the console
+// operator lists and how it refuses arguments; driving XenoNet is the
+// command's (xenonet mcp console).
+struct NoControl;
+
+impl xenonet_mcp::Control for NoControl {
+    fn method(&self, _instance: &str, _kind: &str, _args: serde_json::Value) -> Result<serde_json::Value, String> {
+        Err("this test binary drives no XenoNet: xenonet mcp console does".into())
+    }
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
@@ -20,7 +31,7 @@ async fn main() {
             xenonet_mcp::serve().await;
             Ok(())
         }
-        Some("console") => xenonet_mcp::serve_console().await,
+        Some("console") => xenonet_mcp::serve_console(std::sync::Arc::new(NoControl), false).await,
         Some("assistant") => {
             let port = flag(&args, "port")
                 .and_then(|p| p.parse().ok())

@@ -301,3 +301,45 @@ fn the_assistant() {
     same("the assistant, against the JS --fixture", &listing, fixture, rust);
     let _ = std::fs::remove_dir_all(&runtime);
 }
+
+#[test]
+fn the_console_operator() {
+    if !js_runs() {
+        return;
+    }
+    let mut messages = opening();
+    // Calls that don't fit a tool, and calls each tool refuses before it
+    // reaches an instance: neither drives a XenoNet.
+    messages.extend(
+        [
+            ("select", json!({ "instance": "nope" })),
+            ("navigate", json!({})),
+            ("find", json!({ "limit": 0 })),
+            ("find", json!({ "kind": "planet" })),
+            ("rename", json!({ "title": "" })),
+            ("input", json!({ "move": { "x": 1 } })),
+            ("input", json!({ "keys": 5 })),
+            ("terminal", json!({ "lines": 1001 })),
+            ("feed", json!({ "limit": 1.5 })),
+            ("root", json!({ "path": 5 })),
+            ("logs", json!({ "since": "x" })),
+            ("simulate", json!({ "kind": "nope" })),
+            ("nope", json!({})),
+            ("stats", json!({})),
+            ("rename", json!({ "title": "x" })),
+            ("theme", json!({ "action": "set" })),
+            ("mcp_info", json!({})),
+            ("environment", json!({ "action": "preview" })),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, (name, args))| call(10 + i as u64, name, args)),
+    );
+    compare("the console operator", ("mcp/console.js", &[]), &["console"], &[], &messages);
+    let m26 = |id: u64, method: &str, mut params: Value| {
+        params["_meta"] = meta26();
+        request(id, method, params)
+    };
+    let era = vec![m26(1, "server/discover", json!({})), m26(2, "tools/list", json!({})), m26(3, "tools/call", json!({ "name": "theme", "arguments": { "action": "focus" } }))];
+    compare("the console operator, 2026-07-28", ("mcp/console.js", &[]), &["console"], &[], &era);
+}

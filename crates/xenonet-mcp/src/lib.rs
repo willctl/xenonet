@@ -9,14 +9,15 @@
 //! - `serve_assistant`: the read-only server for a remote actor paired in
 //!   XenoNet's window (mcp/assistant.js), `xenonet mcp assistant`, in
 //!   `assistant`.
-//! - `serve_console`: the console operator (mcp/console.js), which stays
-//!   JS for now: it drives XenoNet Desktop through core/control.js, which
-//!   the desktop app, the end-to-end tests and the scripts use too.
+//! - `serve_console`: the console operator (mcp/console.js), `xenonet mcp
+//!   console`, in `console`, its tools answered through the `Control` the
+//!   command gives it (core/control.js's client, natively).
 //!
 //! With no XenoNet answering, the doctor tool runs the doctor's checks
 //! here (`doctor`), which `xenonet doctor` does too.
 
 mod assistant;
+mod console;
 pub mod doctor;
 mod engine;
 mod process;
@@ -24,6 +25,7 @@ mod tools;
 mod xenonet;
 mod zod;
 
+pub use console::Control;
 pub use xenonet::{channel_enabled, server_name};
 
 /// Serves the sessions' server on stdio until the client goes; `xenonet
@@ -32,14 +34,11 @@ pub async fn serve() {
     xenonet::serve().await;
 }
 
-/// Serves the console operator (mcp/console.js) on stdio. It isn't in Rust:
-/// its tools drive XenoNet Desktop through core/control.js, which stays JS
-/// for the desktop app, the end-to-end tests and the scripts, and its
-/// development instances run the checkout's Electron, so Node is there
-/// whenever they are.
-#[expect(clippy::unused_async, reason = "the command serves it as it does the other servers, by awaiting it")]
-pub async fn serve_console() -> Result<(), String> {
-    Err("the console operator isn't in the Rust xenonet yet: run node mcp/console.js (or node cli/xenonet.js mcp console) from XenoNet's checkout".into())
+/// Serves the console operator (mcp/console.js) on stdio until the client
+/// goes, each tool answered through `control`; `installed` for installed
+/// Tools', which operate installed XenoNet only, with no eval or simulate.
+pub async fn serve_console(control: std::sync::Arc<dyn Control>, installed: bool) -> Result<(), String> {
+    console::serve(control, installed).await
 }
 
 /// Serves the assistant's read-only server (mcp/assistant.js) on stdio,
