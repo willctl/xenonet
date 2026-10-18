@@ -633,6 +633,15 @@ impl Actors for ActorsDriver {
         .await
         .map_err(|e| CoreError::new(e.to_string()))?
     }
+    fn registry(&self, method: &str, args: Vec<Value>) -> R<Value> {
+        let args: Vec<Arg> = args.iter().map(arg).collect();
+        self.call(method, &args)
+    }
+    fn before_remove(&self, hook: Arc<dyn Fn(&str) + Send + Sync>) {
+        if let Ok(a) = self.side() {
+            a.before_remove.locked().push(hook);
+        }
+    }
     fn start(&self) {
         if let Some(a) = &self.0.actors {
             a.start(&self.0);

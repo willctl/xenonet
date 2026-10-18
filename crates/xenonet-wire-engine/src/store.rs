@@ -287,6 +287,9 @@ impl Trait for Store {
     fn waiting_actor_requests(&self, now: f64) -> R<Vec<Value>> {
         self.0.with(|s| s.waiting_actor_requests(Arg::Num(now))).map(|r| r.iter().map(|r| crate::js::json(&crate::js::row(r))).collect()).map_err(core_error)
     }
+    fn native(&self) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>> {
+        Some(std::sync::Arc::new(self.0.clone()))
+    }
     fn connection(&self, id: &str) -> R<Option<Value>> {
         self.0.with(|s| s.connection(Arg::text(id))).map(|r| r.map(|r| crate::js::json(&crate::js::row(&r)))).map_err(core_error)
     }
