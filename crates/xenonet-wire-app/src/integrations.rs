@@ -10,8 +10,8 @@
 //! JS's objects were, so it lives on the tasks' own thread (fx.rs), one per
 //! integrations, and each request reaches it there.
 //!
-//! JevRouter, which routes a task in the JS, is an npm library with no Rust
-//! of its own yet: a route answers that it isn't here.
+//! A route goes through JevRouter's rules as jev.rs has them, where the JS
+//! had the npm library.
 
 use crate::decide::Decisions;
 use crate::fx::{self, now_ms, Locked, Perform, RunOptions};
@@ -306,6 +306,33 @@ impl Integrated {
         .map_err(thrown)
     }
 
+    // A route: the preview's task to the decider, its answer checked and
+    // made a decision by JevRouter's rules (jev.rs), and the record kept.
+    async fn route(&self, ticket: &Value) -> R<Value> {
+        let held = self.tickets.locked().take(&xenonet_base::text::js_string(ticket), now_ms()).map_err(fail)?;
+        if xenonet_base::json::stringify(&held["candidates"], 0) != xenonet_base::json::stringify(&self.inventory(), 0) {
+            return Err(CoreError::of(Kind::Integration, 409, "changed", "The available agents changed. Preview again."));
+        }
+        let request = xenonet_base::text::js_string(&held["request"]);
+        let candidates = held["candidates"].as_array().cloned().unwrap_or_default();
+        let mut metrics = json!({ "model": self.model(), "cost": 0, "ms": 0 });
+        let payload = routing::payload(&request, &candidates);
+        let decided = if self.parts.demo { Ok(index::demo_decision()) } else { self.parts.decider.decide("routing", &payload["state"], &payload["questions"]).await };
+        let raw = match decided {
+            Ok(response) => {
+                metrics = response.clone();
+                if routing::answer_ok(&response["answers"], &candidates) {
+                    Ok(json!({ "answers": response["answers"], "model": response["model"] }))
+                } else {
+                    Err(crate::jev::JevError::http("The provider returned an invalid probability distribution."))
+                }
+            }
+            Err(e) => Err(crate::jev::JevError::http(e.message)),
+        };
+        let result = crate::jev::route(&candidates, &["suggest".to_string()], raw);
+        self.records.locked().add(&routing::decision_record(&result, &request, &metrics), now_ms()).map_err(fail)
+    }
+
     fn inventory(&self) -> Value {
         routing::inventory(&self.parts.state.nodes().unwrap_or_default())
     }
@@ -416,14 +443,16 @@ impl Integrations for IntegrationsCore {
                 Ok(out)
             }
             "routing.route" => {
-                if *me.routing_busy.locked() {
-                    return Err(CoreError::of(Kind::Integration, 409, "busy", "A routing decision is already running."));
+                {
+                    let mut busy = me.routing_busy.locked();
+                    if *busy {
+                        return Err(CoreError::of(Kind::Integration, 409, "busy", "A routing decision is already running."));
+                    }
+                    *busy = true;
                 }
-                let held = me.tickets.locked().take(&xenonet_base::text::js_string(&arg(0)), now_ms()).map_err(fail)?;
-                if xenonet_base::json::stringify(&held["candidates"], 0) != xenonet_base::json::stringify(&me.inventory(), 0) {
-                    return Err(CoreError::of(Kind::Integration, 409, "changed", "The available agents changed. Preview again."));
-                }
-                Err(CoreError::of(Kind::Integration, 501, "unavailable", "Routing a task isn't in this XenoNet's Rust service yet; its preview is."))
+                let out = me.route(&arg(0)).await;
+                *me.routing_busy.locked() = false;
+                out
             }
             "routing.outcome" => {
                 routing::outcome_ok(&arg(1)).map_err(fail)?;
@@ -465,8 +494,10 @@ mod tests {
         assert!(i.call("routing.preview", vec![json!({})]).await.is_err(), "a route needs a task");
         let p = i.call("routing.preview", vec![json!({ "request": "Fix the flaky test in atlas-api" })]).await.unwrap();
         assert!(p["ticket"].is_string() && p["candidates"].is_array());
-        let routed = i.call("routing.route", vec![p["ticket"].clone()]).await.unwrap_err();
-        assert!(routed.is(Kind::Integration));
+        let routed = i.call("routing.route", vec![p["ticket"].clone()]).await.unwrap();
+        assert_eq!(routed["kind"], "decision");
+        assert!(routed["candidates"].as_array().is_some_and(|c| !c.is_empty()));
+        assert!(i.call("routing.route", vec![p["ticket"].clone()]).await.unwrap_err().is(Kind::Integration), "a ticket works once");
         assert_eq!(i.call("routing.outcome", vec![json!("nope"), json!("accepted")]).await.unwrap_err().status, Some(404));
     }
 

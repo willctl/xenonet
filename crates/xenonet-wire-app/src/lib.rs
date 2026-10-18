@@ -19,6 +19,7 @@ pub mod doctor;
 pub mod fx;
 pub mod hosts;
 pub mod integrations;
+pub mod jev;
 pub mod mcp;
 pub mod open;
 pub mod paths;
