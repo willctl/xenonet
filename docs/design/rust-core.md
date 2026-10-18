@@ -505,9 +505,6 @@ Each step leaves `npm test` passing on JS, and adds to `parity.json`.
 
 ## Not decided yet
 
-- The DNS resolver and TLS the actor gateway's check of a public address
-  needs (`hickory-resolver` and `rustls`, say). The check on this computer
-  alone is in Rust.
 - Signing on Windows.
 - Whether a release ships Rust subsystems inside the JS service (twins in
   place) before the binary replaces the service.
