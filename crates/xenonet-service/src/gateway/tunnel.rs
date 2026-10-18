@@ -863,11 +863,14 @@ impl Tunnel {
         }
         let w = {
             let mut i = self.inner.locked();
-            let w = if same {
-                i.want.clone().unwrap()
-            } else {
-                i.next += 1;
-                Want { kind: kind_id.to_string(), name: name.map(str::to_string), host: host.map(str::to_string), id: i.next }
+            // The lock was let go since `same` was read, so a down() in
+            // between may have taken the want: then it's picked anew.
+            let w = match i.want.clone() {
+                Some(w) if same => w,
+                _ => {
+                    i.next += 1;
+                    Want { kind: kind_id.to_string(), name: name.map(str::to_string), host: host.map(str::to_string), id: i.next }
+                }
             };
             i.want = Some(w.clone());
             i.exits.clear();
