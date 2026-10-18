@@ -118,7 +118,7 @@ pub fn kind_ids() -> Vec<&'static str> {
     KINDS.iter().map(|k| k.id).collect()
 }
 
-/// A Cloudflare tunnel's name or id: ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$
+/// A Cloudflare tunnel's name or id: `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`
 pub fn tunnel_name(s: &str) -> bool {
     let b = s.as_bytes();
     (1..=64).contains(&b.len()) && b[0].is_ascii_alphanumeric() && b.iter().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))

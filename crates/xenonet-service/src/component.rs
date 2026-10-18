@@ -1,6 +1,6 @@
 //! The component service (server/component-service.js): a socket on
 //! 127.0.0.1 that XenoNet Desktop and the Tools connect to, found through
-//! runtime/service-<port>.json, which holds its port and a token new at each
+//! `runtime/service-<port>.json`, which holds its port and a token new at each
 //! start. JSON lines (rpc.rs): a hello carrying the token, then status,
 //! console (relayed to the Desktop), stop, and the Desktop's own requests
 //! (where its window is, the terminals). The service sends the Desktop

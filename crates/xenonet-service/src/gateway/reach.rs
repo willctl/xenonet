@@ -1,7 +1,7 @@
 //! Whether the actor gateway's address reaches it from the internet
 //! (server/gateway-reach.js), as a cloud agent would call it: the name
 //! looked up in the internet's DNS (public resolvers, not this computer's
-//! own), then a request to https://<name>/mcp at the address it gave,
+//! own), then a request to `https://<name>/mcp` at the address it gave,
 //! carrying a one-time word the gateway answers only while XenoNet waits
 //! for it. So a yes means this XenoNet's gateway answered, through whatever
 //! tunnel is in between, and a no says where it stopped.

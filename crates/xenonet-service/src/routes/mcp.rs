@@ -1,6 +1,6 @@
-//! What an MCP server on the map is (server/routes/mcp.js): GET
-//! /api/mcp?server=<name>, from this machine's sessions, or with ?host= from
-//! another host's catalog. The demo's are made up.
+//! What an MCP server on the map is (server/routes/mcp.js):
+//! `GET /api/mcp?server=<name>`, from this machine's sessions, or with
+//! `?host=` from another host's catalog. The demo's are made up.
 
 use crate::cores::CoreError;
 use crate::ctx::{pending_reply, Ctx};

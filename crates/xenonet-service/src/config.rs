@@ -66,7 +66,7 @@ fn resolve(p: &str) -> String {
 
 /// Where XenoNet's own files are: XENONET_ROOT, the launcher's, or the
 /// folder above the binary's that holds package.json (bin/xenonet in a
-/// package, target/<profile>/xenonet in a checkout), or else here.
+/// package, `target/<profile>/xenonet` in a checkout), or else here.
 pub fn find_root(env: &dyn Fn(&str) -> Option<String>) -> PathBuf {
     if let Some(r) = env("XENONET_ROOT").or_else(|| env("XENONET_LAUNCHER_ROOT")).filter(|r| !r.is_empty()) {
         return PathBuf::from(r);

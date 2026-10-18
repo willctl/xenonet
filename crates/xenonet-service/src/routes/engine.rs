@@ -8,7 +8,7 @@
 //! against the process it comes from, and connecting agents only goes
 //! through when no agent is asking.
 //!
-//! Registered actors call the same operations as actor:<slug>, with their
+//! Registered actors call the same operations as `actor:<slug>`, with their
 //! token, checked as their own routes are, and held to what you allowed
 //! them: sending needs message-agents (60 messages an hour, 6 of them to a
 //! repo or to all), claiming needs edit-repos. An actor's focus is its

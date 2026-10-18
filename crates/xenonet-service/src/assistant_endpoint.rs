@@ -13,7 +13,7 @@
 //! revoked, expired, given a new credential or turned off lets go of its
 //! adapters at once; the tombstones written without the service are looked
 //! at every two seconds too. It listens only while a grant could be used,
-//! and says where in runtime/assistant-<port>.json, which holds no secret.
+//! and says where in `runtime/assistant-<port>.json`, which holds no secret.
 
 use crate::buckets::{now_ms, Bucket, Rate};
 use crate::cores::{AssistantService, Audit, Connections};

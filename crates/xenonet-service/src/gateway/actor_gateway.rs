@@ -5,7 +5,7 @@
 //! the same engine and rules as an actor on this machine, and nothing else.
 //!
 //! It listens on 127.0.0.1 alone, on a port of its own, and a tunnel of the
-//! owner's choosing puts it on the internet, forwarding https://<host>/mcp
+//! owner's choosing puts it on the internet, forwarding `https://<host>/mcp`
 //! to it. So: only POST, GET and DELETE on /mcp, for the host the owner
 //! named or this machine on its own port; no browser (an Origin is
 //! refused); each request carries an actor's gateway token, and past 20
