@@ -29,12 +29,16 @@
 //! ```
 
 mod command;
+mod components;
 mod connect;
 mod demo;
 mod native;
 mod secrets;
 mod setup;
+mod tar;
+mod tasks;
 
+pub use components::{activate_package, component_updates, ensure_service, install_launcher, installed_runtime, recover_service_update, service_request, update_component};
 
 use crate::out::Fail;
 use crate::sys;
@@ -329,6 +333,23 @@ pub fn mark_revoked(dir: &str, grant: &str) -> Res<()> {
 /// deleteCredential(dir, grant)
 pub fn delete_credential(dir: &str, grant: &str) -> Res<()> {
     xenonet_assistant::credentials::delete_credential(dir, &json!(grant)).map_err(fs_fail)
+}
+
+// ---------- components ----------
+
+/// runtimeDir()
+pub fn runtime_dir() -> Res<String> {
+    Ok(xenonet_components::runtime::runtime_dir(&env_map(), &components::machine()))
+}
+
+/// tar.c({ file, cwd, portable: true, gzip: true }, entries)
+pub fn tar_create(file: &str, cwd: &str, entries: &[String]) -> Res<()> {
+    tar::create(file, cwd, entries).map_err(|e| Fail::error(e.to_string()))
+}
+
+/// digest(bytes): its SHA-256, in hex.
+pub fn digest(bytes: &[u8]) -> Res<String> {
+    Ok(xenonet_components::packages::digest(bytes))
 }
 
 // ---------- the command on your PATH ----------

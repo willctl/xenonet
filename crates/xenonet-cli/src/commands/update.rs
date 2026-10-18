@@ -2,9 +2,9 @@
 //! checked or installed (core/components/updates.js).
 
 use crate::args::Flags;
+use crate::cores;
 use crate::js::str;
 use crate::out::{print, Done, Fail};
-use crate::pending;
 use xenonet_base::json::stringify;
 
 pub const HELP: &str = include_str!("help/update.txt");
@@ -14,9 +14,9 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
     if !["service", "tools", "all"].contains(&component) {
         return Err(Fail::error(HELP));
     }
-    let updates = pending::component_updates()?;
+    let updates = cores::component_updates()?;
     for item in updates.iter().filter(|i| component == "all" || str(i, "component") == Some(component)) {
-        let out = if flags.on("check") { item.clone() } else { pending::update_component(item)? };
+        let out = if flags.on("check") { item.clone() } else { cores::update_component(item)? };
         print(stringify(&out, 0));
     }
     Ok(0)

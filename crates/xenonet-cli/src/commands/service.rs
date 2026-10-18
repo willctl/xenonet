@@ -3,8 +3,8 @@
 //! socket (core/components/runtime.js, install.js).
 
 use crate::args::Flags;
+use crate::cores;
 use crate::out::{print, Done, Fail};
-use crate::pending;
 use serde_json::{json, Map, Value};
 use xenonet_base::json::stringify;
 
@@ -19,15 +19,15 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
     }
     let env = Value::Object(env);
     if action == "start" {
-        pending::recover_service_update(&env)?;
-        let status = pending::ensure_service(&pending::installed_runtime(&env)?)?;
+        cores::recover_service_update(&env)?;
+        let status = cores::ensure_service(&cores::installed_runtime(&env)?)?;
         print(stringify(&json!({ "status": status }), 0));
         return Ok(0);
     }
     if action != "status" && action != "stop" {
         return Err(Fail::error(HELP));
     }
-    let answer = pending::service_request(&env, action, &json!({ "force": flags.on("force") }))?;
+    let answer = cores::service_request(&env, action, &json!({ "force": flags.on("force") }))?;
     print(stringify(&answer, 0));
     Ok(0)
 }
