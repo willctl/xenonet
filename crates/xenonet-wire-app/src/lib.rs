@@ -17,6 +17,7 @@ pub mod decide;
 pub mod doctor;
 pub mod fx;
 pub mod hosts;
+pub mod integrations;
 pub mod mcp;
 pub mod open;
 pub mod paths;
@@ -97,6 +98,20 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
         cores.hub = Some(Arc::new(hosts::hub::HubCore(hosts::hub::HostHub::new(parts))));
         let block = host_store.clone();
         let _ = cores.state.add_block(Arc::new(move || block.health()), None);
+    }
+
+    // Integrations: their records in the state folder, the demo's in memory.
+    let parts = integrations::Parts {
+        dir: (!demo).then(|| Path::new(&state_dir).join("integrations").to_string_lossy().into_owned()),
+        home: config.home.clone(),
+        demo,
+        decider: decisions.clone(),
+        state: cores.state.clone(),
+        root: config.root.to_string_lossy().into_owned(),
+    };
+    match integrations::Integrated::new(parts) {
+        Ok(i) => cores.integrations = Arc::new(integrations::IntegrationsCore(i)),
+        Err(e) => env.emitter.log("error", "integrations.start", &format!("the integrations' records can't be kept: {}", e.message)),
     }
 
     // The doctor last: its context is the other cores (the hub's hosts
