@@ -18,7 +18,7 @@ export const serverNames = (port) => native.connectServerNames(port, instances()
 
 export const mergeHooks = (settings, ours, add = null) => native.connectMerge({ ours: (h) => !!ours(h) }, settings, add);
 
-export function createConnect({ port, root, demo = false, home = os.homedir(), env = process.env, platform = process.platform, bin = xenonetBin({ env, root, platform }), run = runFile }) {
+export function createConnect({ port, root, demo = false, home = os.homedir(), env = process.env, platform = process.platform, bin = xenonetBin({ env, root, platform }), run = runFile, consoleMcp = !!(env.XENONET_LAUNCHER_BIN || env.XENONET_LAUNCHER_EXEC) }) {
   const core = new native.ConnectCore({
     port,
     demo,
@@ -26,7 +26,7 @@ export function createConnect({ port, root, demo = false, home = os.homedir(), e
     home: String(home),
     claudeConfigDir: env.CLAUDE_CONFIG_DIR ?? null,
     codexHome: env.CODEX_HOME ?? null,
-    consoleMcp: !!(env.XENONET_LAUNCHER_BIN || env.XENONET_LAUNCHER_EXEC),
+    consoleMcp,
     platform: String(platform),
     instances: instances(),
   });
