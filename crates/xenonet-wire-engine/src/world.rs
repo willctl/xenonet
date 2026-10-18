@@ -29,6 +29,8 @@ pub struct Setup {
     pub state_dir: String,
     pub projects_dir: String,
     pub version: String,
+    /// Where XenoNet's files are: schemas/ among them.
+    pub root: std::path::PathBuf,
 }
 
 pub struct World {

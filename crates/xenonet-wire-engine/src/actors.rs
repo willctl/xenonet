@@ -290,6 +290,15 @@ impl ActorSide {
                 let (app, place, at) = (json(&o.field("app")), json(&o.field("place")), now_or(o.field("at")));
                 Arg::Bool(self.reg.locked().await_session(&s(0), app, place, own, at, now_ms()))
             }
+            "expireWaiting" => {
+                let at = now_or(x(0));
+                let list = self.reg.locked().expire_waiting(at);
+                waiting_arg(&list)
+            }
+            "dropWaitingAt" => {
+                self.reg.locked().drop_waiting_at(crate::js::num(&x(0)).max(0.0) as usize);
+                Arg::Undef
+            }
             "watchPid" => {
                 let pid = x(1);
                 self.reg.locked().watch_pid(&s(0), &pid).map_err(thrown)?;
@@ -448,6 +457,25 @@ impl ActorSide {
     }
 }
 
+/// The spawned reports waiting for their session, as `actors.waiting`
+/// gives them.
+fn waiting_arg(list: &[registry::Waiting]) -> Arg {
+    Arg::List(
+        list.iter()
+            .map(|w| {
+                obj(vec![
+                    ("actor", Arg::text(&w.actor)),
+                    ("app", arg(&w.app)),
+                    ("place", arg(&w.place)),
+                    ("own", Arg::List(w.own.iter().map(|p| Arg::Num(*p)).collect())),
+                    ("at", Arg::Num(w.at)),
+                    ("until", Arg::Num(w.until)),
+                ])
+            })
+            .collect(),
+    )
+}
+
 /// What `actors.<method>` is.
 pub fn kind(method: &str) -> &'static str {
     match method {
@@ -457,7 +485,9 @@ pub fn kind(method: &str) -> &'static str {
         "has" | "ids" | "presence" | "presenceSince" | "isPublic" | "can" | "enabled" | "installed" | "isRegistered" | "onlyObserved" | "targetsOf" | "pidsOf" | "info"
         | "registeredCount" | "ofProduct" | "isRemote" | "remoteOf" | "simulationHeld" | "upsert" | "addVia" | "dropVia" | "setRemote" | "remove" | "forgetYou" | "unregister"
         | "allow" | "setEnabled" | "setInstalled" | "awaitSession" | "watchPid" | "report" | "record" | "where" | "target" | "untarget" | "snapshot" | "sessionsStarted"
-        | "placeOf" | "engineView" | "setStatus" | "said" | "engineIds" | "tokens" | "list" | "events" | "tick" | "prune" | "refresh" | "now" => "function",
+        | "placeOf" | "engineView" | "setStatus" | "said" | "engineIds" | "tokens" | "list" | "events" | "tick" | "prune" | "refresh" | "now" | "expireWaiting"
+        | "dropWaitingAt" => "function",
+        "waiting" => "object",
         _ => "undefined",
     }
 }
@@ -478,6 +508,7 @@ pub fn collab_get(w: &World, path: &str) -> Arg {
     match (&w.actors, path) {
         (None, _) => Arg::Undef,
         (Some(a), "actors.demo") => Arg::Bool(a.is_demo),
+        (Some(a), "actors.waiting") => waiting_arg(&a.reg.locked().waiting),
         _ => Arg::Undef,
     }
 }

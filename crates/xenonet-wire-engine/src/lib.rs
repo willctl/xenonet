@@ -66,6 +66,31 @@ fn demo_folders(cores: &Cores, config: &mut Config) {
 /// delivery, and with actors on, the actors, their registration, wakes,
 /// reports and observers (never in the demo).
 pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
+    let Some(w) = world(cores, config, env) else { return };
+    cores.engine_store = Arc::new(store::Store(w.store.clone()));
+    cores.verify = w.checks.clone();
+    cores.engine = Arc::new(engine::EngineDriver(w.clone()));
+    cores.connect = Arc::new(connect::ConnectDriver::new(config));
+    cores.channels = Arc::new(delivery::ChannelsDriver(w.clone()));
+    cores.policy = Arc::new(delivery::PolicyDriver(w.clone()));
+    cores.router = Arc::new(delivery::RouterDriver(w.clone()));
+    cores.reports = Arc::new(reports::ReportsDriver(w.clone()));
+    cores.spend = Arc::new(spend::SpendDriver(w.clone()));
+    if w.actors.is_some() {
+        cores.actors = Some(Arc::new(actors::ActorsDriver(w.clone())));
+        cores.registration = Some(Arc::new(registration::RegistrationDriver(w.clone())));
+        cores.wakes = Some(Arc::new(wakes::WakesDriver(w.clone())));
+    } else {
+        cores.actors = None;
+        cores.registration = None;
+        cores.wakes = None;
+    }
+}
+
+/// The area's parts, made as server/index.js's top level makes them, on
+/// the map the cores already have; None when engine.sqlite can't be
+/// opened, and the engine's routes stay pending.
+pub fn world(cores: &Cores, config: &mut Config, env: &WireEnv) -> Option<Arc<World>> {
     demo_folders(cores, config);
     let file = Path::new(&config.state_dir).join("engine.sqlite");
     if let Err(e) = std::fs::create_dir_all(&config.state_dir) {
@@ -75,9 +100,13 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
         Ok(s) => Shared::new(s),
         Err(e) => {
             log_later(env, "error", "engine.store", format!("engine.sqlite can't be opened: {e}"));
-            return;
+            return None;
         }
     };
+    // The engine's store, listed with the map's blocks in /api/health and
+    // the doctor.
+    let held = store.clone();
+    let _ = cores.state.add_block(Arc::new(move || held.with(|s| store::block_health("engine", "store", &s.block.life))), None);
     let setup = Setup {
         demo: config.demo,
         port: config.port,
@@ -85,6 +114,7 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
         state_dir: config.state_dir.clone(),
         projects_dir: config.projects_dir.clone(),
         version: env.version.clone(),
+        root: config.root.clone(),
     };
     let map = map::Map::new(cores.state.clone());
     let sys = procs::System::new();
@@ -138,26 +168,5 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
     if w.actors.is_some() && !config.demo {
         observers::make(&w);
     }
-    // The engine's store, listed with the map's blocks in /api/health and
-    // the doctor.
-    let held = store.clone();
-    let _ = cores.state.add_block(Arc::new(move || held.with(|s| store::block_health("engine", "store", &s.block.life))), None);
-    cores.engine_store = Arc::new(store::Store(store));
-    cores.verify = checks;
-    cores.engine = Arc::new(engine::EngineDriver(w.clone()));
-    cores.connect = Arc::new(connect::ConnectDriver::new(config));
-    cores.channels = Arc::new(delivery::ChannelsDriver(w.clone()));
-    cores.policy = Arc::new(delivery::PolicyDriver(w.clone()));
-    cores.router = Arc::new(delivery::RouterDriver(w.clone()));
-    cores.reports = Arc::new(reports::ReportsDriver(w.clone()));
-    cores.spend = Arc::new(spend::SpendDriver(w.clone()));
-    if w.actors.is_some() {
-        cores.actors = Some(Arc::new(actors::ActorsDriver(w.clone())));
-        cores.registration = Some(Arc::new(registration::RegistrationDriver(w.clone())));
-        cores.wakes = Some(Arc::new(wakes::WakesDriver(w.clone())));
-    } else {
-        cores.actors = None;
-        cores.registration = None;
-        cores.wakes = None;
-    }
+    Some(w)
 }
