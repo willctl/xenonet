@@ -195,6 +195,11 @@ export async function uninstall({ ask = true, purge = false, win = null, stop = 
     if (response !== 0) return false;
     purge = checkboxChecked;
   }
+  // What a purge runs lives in the bundle that's about to go to the Trash,
+  // so it's loaded now. Loaded after the move, the imports failed and the
+  // uninstall stopped halfway, with the hooks, the service and the data
+  // still in place.
+  const purging = purge ? await Promise.all([import("../core/engine/connect.js"), import("../core/components/runtime.js")]).catch((err) => (console.error(`[xenonet] couldn't load what a purge needs: ${err.message ?? err}`), null)) : null;
   // The login item goes first, while the bundle it points at is still there.
   const atLogin = opensAtLogin();
   if (atLogin) app.setLoginItemSettings({ openAtLogin: false });
@@ -208,17 +213,22 @@ export async function uninstall({ ask = true, purge = false, win = null, stop = 
     return false;
   }
   if (purge) {
-    // XenoNet's hooks and MCP servers in Claude Code and Codex run files about
-    // to be deleted: take them out first.
+    // A step that fails is said, and the rest still run: the data goes, and
+    // XenoNet quits.
+    const [connect, runtime] = purging ?? [];
+    // XenoNet's hooks and MCP servers in Claude Code and Codex, the console's
+    // too, run files about to be deleted: take them out first.
     try {
-      const { createConnect } = await import("../core/engine/connect.js");
-      await createConnect({ port: 47840, root: app.getAppPath(), exec: process.execPath }).remove();
+      await connect.createConnect({ port: 47840, root: app.getAppPath(), exec: process.execPath, consoleMcp: true }).remove();
     } catch (err) {
       console.error(`[xenonet] couldn't take XenoNet out of Claude Code and Codex: ${err.message ?? err}`);
     }
-    const { connectService } = await import("../core/components/runtime.js");
-    const client = await connectService().catch(() => null);
-    if (client) { try { await client.request("stop", { force: true }); } finally { client.close(); } }
+    try {
+      const client = await runtime.connectService().catch(() => null);
+      if (client) { try { await client.request("stop", { force: true }); } finally { client.close(); } }
+    } catch (err) {
+      console.error(`[xenonet] couldn't stop the service: ${err.message ?? err}`);
+    }
     removeAfterExit(dataDirs());
   }
   stop();

@@ -45,6 +45,22 @@ test("installed connections register both MCP interfaces through the stable laun
   for (const app of ["claude", "codex"]) assert.ok(calls.some((call) => call.app === app && call.args[1] === "remove" && call.args[2] === "xenonet-console"));
 });
 
+test("an uninstall from Desktop, whose environment names no launcher, still takes out the console's server when asked", async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-connect-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const bin = path.join(home, "bin");
+  fs.mkdirSync(bin);
+  for (const name of ["claude", "codex"]) fs.writeFileSync(path.join(bin, name), "");
+  const calls = [];
+  const run = async (file, args) => (calls.push([path.basename(file), ...args]), "");
+  const removed = () => calls.filter((c) => c[2] === "remove").map((c) => `${c[0]} ${c[3]}`).sort();
+  await createConnect({ platform: "darwin", port: 47840, root: "/Applications/XenoNet.app/Contents/Resources/app", home, env: { PATH: bin }, run }).remove();
+  assert.deepEqual(removed(), ["claude xenonet", "codex xenonet"], "without it, as before");
+  calls.length = 0;
+  await createConnect({ platform: "darwin", port: 47840, root: "/Applications/XenoNet.app/Contents/Resources/app", home, env: { PATH: bin }, run, consoleMcp: true }).remove();
+  assert.deepEqual(removed(), ["claude xenonet", "claude xenonet-console", "codex xenonet", "codex xenonet-console"]);
+});
+
 test("installed XenoNet and XenoNet Dev connect side by side: each changes its own entries and leaves the other's, and a gone checkout's are anyone's to clear", async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-connect-"));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
