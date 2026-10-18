@@ -13,7 +13,6 @@ use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::ptr;
 use xenonet_actors::registration::{self, ActorError, Fail, Registration};
-use xenonet_engine::sql::Arg;
 
 #[napi(js_name = "registrationConstants")]
 pub fn registration_constants() -> Json {
@@ -190,6 +189,3 @@ impl RegistrationCore {
         self.with(&env, &deps, |r, c| r.simulate(c, &kind.0, &a.0)).map(Json)
     }
 }
-
-#[allow(dead_code)]
-fn unused(_: Arg) {}
