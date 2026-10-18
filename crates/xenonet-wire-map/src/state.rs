@@ -1154,7 +1154,11 @@ impl State for MapState {
         let picks = if self.cfg.demo {
             xenonet_app::demo::demo_picks(&Value::Array(outline.clone()))
         } else if decider {
-            return Err(CoreError::pending("core/decide.js"));
+            match self.decider_picks(&outline).await {
+                Ok(p) => p,
+                Err(e) if e.is_pending() => return Err(e),
+                Err(e) => return Err(status(if e.status == Some(409) { 409 } else { 502 }, format!("The decision model couldn't sort the folders: {}", e.message))),
+            }
         } else {
             match crate::narrate::ask_codex(&self.cfg.codex_binary(), &classify::picks_prompt(&outline), Some(classify::picks_schema()))
                 .await
@@ -1164,13 +1168,17 @@ impl State for MapState {
                 Err(e) => return Err(status(502, format!("Codex couldn't sort the folders: {e}"))),
             }
         };
+        // Who sorted them: Codex, or the decision model by its name.
+        let by = match (decider, self.emitter.ctx()) {
+            (true, Some(ctx)) => ctx.cores.decider.status().await.ok().and_then(|s| s.get("model").cloned()).unwrap_or(Value::Null),
+            (true, None) => Value::Null,
+            (false, _) => json!("codex"),
+        };
         let at = now_ms();
         self.store
             .set_codex_picks(
                 path_key(&root).as_deref(),
-                Some(
-                    json!({ "ranAt": num(at), "ms": num(at - started), "fingerprint": fp, "sent": outline.len(), "picks": picks, "by": if decider { "decider" } else { "codex" } }),
-                ),
+                Some(json!({ "ranAt": num(at), "ms": num(at - started), "fingerprint": fp, "sent": outline.len(), "picks": picks, "by": by })),
             )
             .map_err(err)?;
         self.after_change().await?;
@@ -1416,6 +1424,22 @@ impl State for MapState {
 }
 
 impl MapState {
+    // The decision model's picks (classify.js's askDeciderForPicks): the
+    // outline as one choice a folder, a batch at a time.
+    async fn decider_picks(&self, outline: &[Value]) -> R<Value> {
+        let Some(ctx) = self.emitter.ctx() else { return Err(CoreError::pending("core/decide.js")) };
+        let state = json!({ "about": classify::DECIDER_ABOUT, "folders": outline });
+        let mut picks = Vec::new();
+        let mut offset = 0.0;
+        for batch in classify::jev_questions(outline) {
+            let r = ctx.cores.decider.decide(json!({ "kind": "projects", "state": state, "questions": batch.get("questions").cloned().unwrap_or(Value::Null) })).await?;
+            let folders = items(batch.get("folders")).to_vec();
+            picks.extend(classify::picks_from_answers(r.get("answers").unwrap_or(&Value::Null), &folders, offset));
+            offset += folders.len() as f64;
+        }
+        Ok(Value::Array(picks))
+    }
+
     fn known(&self, id: &Value) -> R<String> {
         let ids = lock(&self.inner).map.graph.as_ref().map(|g| items(g.get("identities")).to_vec()).unwrap_or_default();
         let known = self.store.identities().get("known").cloned().unwrap_or_else(|| json!({}));
