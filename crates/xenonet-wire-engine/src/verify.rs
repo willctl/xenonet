@@ -160,4 +160,63 @@ mod tests {
         // An app XenoNet doesn't check passes.
         assert_eq!(c.check(peer, "nobody:x", false).await["ok"], true);
     }
+
+    // A made-up Mac, answering the commands procs asks for: the Claude app
+    // with two Claude Code sessions (200 and 300, both signed), a shell
+    // under the first, and a plain terminal; each connection's process by
+    // its remote port, as netstat names it.
+    fn machine() -> Arc<System> {
+        let rows = [
+            (1, 0, "/sbin/launchd"),
+            (100, 1, "/Applications/Claude.app/Contents/MacOS/Claude"),
+            (200, 100, "/Users/me/.local/share/claude/versions/2.1.288"),
+            (220, 200, "/bin/zsh"),
+            (300, 100, "/Users/me/.local/share/claude/versions/2.1.288"),
+            (400, 1, "/bin/zsh"),
+        ];
+        let ps: String = rows.iter().map(|(pid, ppid, p)| format!("{pid:>5} {ppid:>5} Fri Oct  3 16:34:29 2026 {p}\n")).collect();
+        let by_port = [(51000, 220), (51001, 400), (51002, 300), (51003, 200)];
+        let netstat: String = by_port.iter().map(|(port, pid)| format!("tcp4       0      0  127.0.0.1.{port}        127.0.0.1.47842        ESTABLISHED    111   2970  406912  146988 proc:{pid}            00102 00000104 0000000003bca9cb\n")).collect();
+        System::with(
+            "darwin",
+            Box::new(move |c| match c.file.as_str() {
+                "ps" if c.args.first().map(String::as_str) == Some("-axo") => Ok(ps.clone()),
+                "netstat" => Ok(netstat.clone()),
+                // Only the sessions' own processes are signed.
+                "codesign" if c.args.last().is_some_and(|p| p == "200" || p == "300") => Ok(String::new()),
+                _ => Err(xenonet_engine::procs::Failure { message: format!("Command failed: {}", c.file), stdout: None }),
+            }),
+        )
+    }
+
+    fn from(port: u16) -> Peer {
+        Peer { remote: format!("127.0.0.1:{port}").parse().unwrap(), local: "127.0.0.1:47842".parse().unwrap() }
+    }
+
+    #[tokio::test]
+    async fn a_request_in_a_sessions_name_is_held_to_the_process_it_comes_from() {
+        let c = Checks::new(Shared::new(xenonet_engine::store::EngineStore::open(":memory:", 0.0).unwrap()), machine());
+        let s = "claude:0190d3e0-0000-7000-8000-00000000000a";
+        // From the shell under Claude Code: it's that session's, now pinned
+        // to its process.
+        let ok = c.check(from(51000), s, false).await;
+        assert_eq!((ok["ok"].clone(), ok["root"]["pid"].clone()), (json!(true), json!(200)), "{ok}");
+        // From a plain terminal: no Claude Code above it.
+        let no = c.check(from(51001), s, false).await;
+        assert_eq!(no["ok"], false);
+        assert!(no["reason"].as_str().unwrap().contains("have to come from a Claude Code process"), "{no}");
+        // From the other session's process, while the first still runs.
+        let other = c.check(from(51002), s, false).await;
+        assert!(other["reason"].as_str().unwrap().contains("belongs to another Claude Code process"), "{other}");
+        // Claude Code's own hook, from its signed process, is sure of it.
+        let hook = c.check(from(51003), s, true).await;
+        assert_eq!((hook["ok"].clone(), hook["sure"].clone()), (json!(true), json!(true)), "{hook}");
+        // What's yours: refused from under an agent, and the process seen.
+        let you = c.person(from(51000)).await;
+        assert!(you["reason"].as_str().unwrap().starts_with("this is yours to do, and it came from under a Claude Code process"), "{you}");
+        assert_eq!(c.person(from(51001)).await["ok"], true);
+        assert_eq!(c.peer(from(51001)).await, "400");
+        assert_eq!(c.state()["refused"], json!(3));
+        assert_eq!(c.lineage(&Arg::Num(220.0)), Arg::List(vec![Arg::Num(220.0), Arg::Num(200.0), Arg::Num(100.0)]));
+    }
 }

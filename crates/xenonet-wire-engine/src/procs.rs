@@ -14,7 +14,7 @@ use xenonet_engine::peer::{Result, Thrown};
 use xenonet_engine::procs::{Call, Failure, Io, Link, PidMap, Procs, Product, Row};
 use xenonet_engine::sql::Arg;
 
-type Answer = std::result::Result<String, Failure>;
+pub type Answer = std::result::Result<String, Failure>;
 
 /// A run under way, which others asking for the same command wait on.
 #[derive(Default)]
@@ -28,7 +28,12 @@ struct Slot {
 pub struct System {
     pub procs: Procs,
     running: Mutex<HashMap<String, Arc<Slot>>>,
+    /// What runs a command: the system, or a test's made-up machine.
+    runner: Runner,
 }
+
+/// A command's answer, from the machine or a test's stand-in for it.
+pub type Runner = Box<dyn Fn(&Call) -> Answer + Send + Sync>;
 
 fn spec_of(c: &Call) -> Spec {
     let mut s = Spec::new(&c.file, &c.args, 5000);
@@ -42,11 +47,16 @@ fn answer(r: std::result::Result<String, exec::Failed>) -> Answer {
 
 impl System {
     pub fn new() -> Arc<System> {
-        Arc::new(System { procs: Procs::new(crate::js::platform()), running: Mutex::new(HashMap::new()) })
+        System::with(crate::js::platform(), Box::new(|c| answer(exec::run(&spec_of(c)))))
+    }
+
+    /// The lookups with commands run by `runner`, as if on `platform`.
+    pub fn with(platform: &str, runner: Runner) -> Arc<System> {
+        Arc::new(System { procs: Procs::new(platform), running: Mutex::new(HashMap::new()), runner })
     }
 
     fn run(&self, c: &Call) -> Answer {
-        let Some(key) = c.share.clone() else { return answer(exec::run(&spec_of(c))) };
+        let Some(key) = c.share.clone() else { return (self.runner)(c) };
         let (slot, mine) = {
             let mut r = self.running.locked();
             match r.get(&key) {
@@ -67,7 +77,7 @@ impl System {
                 done = slot.ready.wait(done).unwrap_or_else(std::sync::PoisonError::into_inner);
             }
         }
-        let out = answer(exec::run(&spec_of(c)));
+        let out = (self.runner)(c);
         *slot.done.locked() = Some(out.clone());
         slot.ready.notify_all();
         self.running.locked().remove(&key);
