@@ -151,7 +151,7 @@ const LINES: usize = 20;
 pub fn find_tools(tool: &str, path_var: &str, pathext: Option<&str>, platform: &str, exists: &dyn Fn(&str) -> bool) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let on = xenonet_base::paths::on_path(tool, path_var, pathext, platform == "win32", &mut |f| exists(f));
-    for f in on.into_iter().chain(places(tool, platform).iter().map(|s| s.to_string())) {
+    for f in on.into_iter().chain(places(tool, platform).iter().map(ToString::to_string)) {
         if exists(&f) && !out.contains(&f) {
             out.push(f);
         }
@@ -249,7 +249,7 @@ pub fn read_line(kind: &str, raw: &str) -> Option<Line> {
     if kind == "ngrok" {
         let Ok(o) = json::parse(line) else { return Some(Line { msg: line.into(), ..Default::default() }) };
         let err = o.get("err").filter(|e| xenonet_base::text::truthy(Some(e)) && *e != "<nil>").map(xenonet_base::text::js_string);
-        let msg = || o.get("msg").filter(|m| !m.is_null()).map(xenonet_base::text::js_string).unwrap_or_else(|| line.to_string());
+        let msg = || o.get("msg").filter(|m| !m.is_null()).map_or_else(|| line.to_string(), xenonet_base::text::js_string);
         if o["msg"] == "started tunnel" && xenonet_base::text::truthy(o.get("url")) {
             let url = xenonet_base::text::js_string(&o["url"]);
             return Some(Line { msg: format!("started {url}"), host: super::actor_gateway::normal_host(Some(&url)), ready: true, error: false });
@@ -283,7 +283,7 @@ pub fn read_line(kind: &str, raw: &str) -> Option<Line> {
 /// The command line XenoNet runs for a kind it keeps as its child.
 pub fn child_args(kind: &str, port: u16, name: Option<&str>, host: Option<&str>) -> Option<Vec<String>> {
     let origin = format!("http://127.0.0.1:{port}");
-    let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    let s = |v: &[&str]| v.iter().map(ToString::to_string).collect::<Vec<_>>();
     match kind {
         "cloudflare" => Some(s(&["tunnel", "--no-autoupdate", "run", "--url", &origin, name.unwrap_or("")])),
         "cloudflare-quick" => Some(s(&["tunnel", "--no-autoupdate", "--url", &origin])),
@@ -926,7 +926,7 @@ impl Tunnel {
     /// Each kind, and whether its tool is on this computer.
     pub async fn kinds(&self) -> Value {
         let mut out = Vec::new();
-        for k in KINDS.iter() {
+        for k in &KINDS {
             let found = match k.tool {
                 Some(t) => self.tool(t).await,
                 None => Vec::new(),

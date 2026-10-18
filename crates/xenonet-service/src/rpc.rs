@@ -225,7 +225,7 @@ pub fn negotiate(local: (u32, u32), remote: &Value) -> Result<u32, String> {
     let (Some(rmin), Some(rmax)) = (remote.get("min").and_then(int), remote.get("max").and_then(int)) else {
         return Err("XenoNet did not report a supported interface version. Update the service first.".into());
     };
-    let (lmin, lmax) = (local.0 as f64, local.1 as f64);
+    let (lmin, lmax) = (f64::from(local.0), f64::from(local.1));
     let version = lmax.min(rmax);
     if lmin > lmax || rmin > rmax || version < lmin.max(rmin) {
         return Err("These XenoNet components use incompatible interfaces. Open Updates or run xenonet update.".into());

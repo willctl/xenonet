@@ -14,6 +14,7 @@
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
+use std::fmt::Write as _;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
@@ -129,7 +130,7 @@ fn https_code(e: &reqwest::Error) -> String {
     let mut words = e.to_string();
     let mut src = std::error::Error::source(e);
     while let Some(s) = src {
-        words.push_str(&format!(": {s}"));
+        let _ = write!(words, ": {s}");
         src = s.source();
     }
     let lower = words.to_lowercase();
@@ -143,9 +144,8 @@ fn https_code(e: &reqwest::Error) -> String {
         }
     } else if lower.contains("refused") {
         "ECONNREFUSED".into()
-    } else if lower.contains("reset") {
-        "ECONNRESET".into()
     } else {
+        // A reset, or anything else the connection did.
         "ECONNRESET".into()
     }
 }
@@ -301,9 +301,8 @@ mod tests {
 mod online {
     use super::*;
 
-    // Asks the internet: run with --ignored on a computer that's online.
     #[tokio::test]
-    #[ignore]
+    #[ignore = "it asks the internet: run with --ignored on a computer that's online"]
     async fn a_public_name_through_public_dns_and_https() {
         let (addr, family) = SystemNetwork.lookup("example.com").await.unwrap();
         assert!(addr.parse::<std::net::IpAddr>().is_ok() && (family == 4 || family == 6));

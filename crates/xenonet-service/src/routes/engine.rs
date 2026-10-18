@@ -160,7 +160,7 @@ impl EngineRoutes<'_> {
         }
         let extra = (name == "send").then(|| {
             let info = self.actors.as_ref().and_then(|a| a.info(&id));
-            let name = info.as_ref().and_then(|i| i.get("name")).and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| slug.clone());
+            let name = info.as_ref().and_then(|i| i.get("name")).and_then(Value::as_str).map_or_else(|| slug.clone(), str::to_string);
             let product = info.as_ref().and_then(|i| i.get("product")).and_then(|p| p.get("id")).and_then(Value::as_str).map(str::to_string);
             json!({ "envelope": attest(Sender { id: &id, kind: "actor", name: Some(name), product }, "token", &verdict, self.home, self.now, platform()) })
         });

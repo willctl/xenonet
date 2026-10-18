@@ -142,7 +142,7 @@ async fn poll_spotify(ctx: Arc<Ctx>, mut again: mpsc::UnboundedReceiver<u64>) {
     let mut wait = 0u64;
     loop {
         tokio::select! {
-            _ = tokio::time::sleep(Duration::from_millis(wait)) => {}
+            () = tokio::time::sleep(Duration::from_millis(wait)) => {}
             got = again.recv() => match got {
                 Some(ms) => {
                     tokio::time::sleep(Duration::from_millis(ms)).await;
@@ -340,7 +340,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
             return 1;
         }
     };
-    let port = listener.local_addr().map(|a| a.port()).unwrap_or(config.port);
+    let port = listener.local_addr().map_or(config.port, |a| a.port());
     let (stop_tx, mut stop_rx) = mpsc::unbounded_channel::<()>();
 
     if config.standalone {
@@ -466,9 +466,9 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
     };
 
     tokio::select! {
-        _ = serving => {}
+        () = serving => {}
         _ = stop_rx.recv() => {}
-        _ = signal() => {}
+        () = signal() => {}
     }
     shutdown(&ctx);
     0

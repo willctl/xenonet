@@ -68,7 +68,7 @@ impl Events {
         clients.len()
     }
 
-    pub fn broadcast(&self, event: &str, data: &Value, local: Local) {
+    pub fn broadcast(&self, event: &str, data: &Value, local: Local<'_>) {
         let msg = frame(event, data);
         let own = match local {
             Local::Same => Some(msg.clone()),

@@ -97,7 +97,7 @@ impl Components {
         }
         self.hooks.terminals.kill_all();
         // Its descriptor, if it's still this process's.
-        let mine = std::fs::read_to_string(&self.file).ok().and_then(|t| xenonet_base::json::parse(&t).ok()).and_then(|v| v["pid"].as_u64()) == Some(std::process::id() as u64);
+        let mine = std::fs::read_to_string(&self.file).ok().and_then(|t| xenonet_base::json::parse(&t).ok()).and_then(|v| v["pid"].as_u64()) == Some(u64::from(std::process::id()));
         if mine {
             let _ = std::fs::remove_file(&self.file);
         }
@@ -160,7 +160,7 @@ impl Components {
         }
         let t = &self.hooks.terminals;
         let e = |r: crate::cores::R<Value>| r.map_err(|e| e.message);
-        let unit = |r: crate::cores::R<()>| r.map(|_| Value::Null).map_err(|e| e.message);
+        let unit = |r: crate::cores::R<()>| r.map(|()| Value::Null).map_err(|e| e.message);
         match method.as_str() {
             "window" => {
                 (self.hooks.window_state)(&params);
@@ -243,13 +243,13 @@ pub async fn start(file: PathBuf, hooks: Hooks) -> std::io::Result<Arc<Component
                 // Five seconds to say hello.
                 tokio::select! {
                     _ = hello_rx => {}
-                    _ = tokio::time::sleep(HELLO) => rpc.close(),
+                    () = tokio::time::sleep(HELLO) => rpc.close(),
                 }
                 rpc.closed().await;
                 s.clients.lock().unwrap().retain(|c| !c.is_closed());
                 let was_desktop = {
                     let mut d = s.desktop.lock().unwrap();
-                    if d.as_ref().is_some_and(|d| d.is_closed()) && conn.role.lock().unwrap().as_deref() == Some("desktop") {
+                    if d.as_ref().is_some_and(Rpc::is_closed) && conn.role.lock().unwrap().as_deref() == Some("desktop") {
                         *d = None;
                         true
                     } else {

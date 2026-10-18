@@ -153,7 +153,7 @@ impl Endpoint {
         };
         let keys: Option<Vec<&str>> = params.as_object().map(|o| {
             let mut k: Vec<&str> = o.keys().map(String::as_str).collect();
-            k.sort();
+            k.sort_unstable();
             k
         });
         if keys.as_deref() != Some(&HELLO_KEYS[..]) || params["role"] != "assistant" {
@@ -212,12 +212,12 @@ impl Endpoint {
         let me = self.clone();
         tokio::spawn(async move {
             tokio::select! {
-                _ = tokio::time::sleep(HELLO) => {
+                () = tokio::time::sleep(HELLO) => {
                     if session.lock().unwrap().is_none() {
                         rpc.close();
                     }
                 }
-                _ = rpc.closed() => {}
+                () = rpc.closed() => {}
             }
             rpc.closed().await;
             let gone = session.lock().unwrap().take();
@@ -261,7 +261,7 @@ impl Endpoint {
 
     fn remove_descriptor(&self) {
         let mine =
-            std::fs::read_to_string(&self.inner.file).ok().and_then(|t| xenonet_base::json::parse(&t).ok()).and_then(|v| v["pid"].as_u64()) == Some(std::process::id() as u64);
+            std::fs::read_to_string(&self.inner.file).ok().and_then(|t| xenonet_base::json::parse(&t).ok()).and_then(|v| v["pid"].as_u64()) == Some(u64::from(std::process::id()));
         if mine {
             let _ = std::fs::remove_file(&self.inner.file);
         }

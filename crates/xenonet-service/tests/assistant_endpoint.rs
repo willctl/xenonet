@@ -74,7 +74,7 @@ async fn an_adapter_says_which_grant_and_then_may_only_read() {
     let e = Endpoint::new(grants.clone(), Arc::new(Reads), Some(grants.clone()), file.clone(), Arc::new(|_: &str| {}));
     e.sync().await;
     let d: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
-    assert_eq!((d["state"].clone(), d["api"].clone(), d["pid"].as_u64()), (json!("/state"), json!({ "min": 1, "max": 1 }), Some(std::process::id() as u64)));
+    assert_eq!((d["state"].clone(), d["api"].clone(), d["pid"].as_u64()), (json!("/state"), json!({ "min": 1, "max": 1 }), Some(u64::from(std::process::id()))));
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

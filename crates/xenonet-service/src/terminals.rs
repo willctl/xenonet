@@ -27,7 +27,7 @@ pub struct Profile {
 }
 
 fn posix_shell(name: &str) -> (String, Vec<String>, Vec<(String, String)>) {
-    let l = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let l = |a: &[&str]| a.iter().map(ToString::to_string).collect::<Vec<_>>();
     match name {
         "zsh" => ("zsh".into(), l(&["-l"]), vec![]),
         "bash" => ("bash".into(), l(&["-l"]), vec![("BASH_SILENCE_DEPRECATION_WARNING".into(), "1".into())]),
@@ -213,7 +213,8 @@ struct Term {
     cols: u16,
     rows: u16,
     out: Arc<Mutex<Output>>,
-    exited: Arc<Mutex<Option<Option<u32>>>>,
+    // None while it runs, then its exit code.
+    exited: Arc<Mutex<Option<u32>>>,
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn Child + Send + Sync>,
@@ -225,7 +226,7 @@ impl Term {
         let mut exited = self.exited.lock().unwrap();
         if exited.is_none() {
             if let Ok(Some(status)) = self.child.try_wait() {
-                *exited = Some(Some(status.exit_code()));
+                *exited = Some(status.exit_code());
             }
         }
     }
@@ -298,8 +299,8 @@ impl Terminals for Shells {
         let profile =
             self.profiles.iter().find(|p| Some(p.id.as_str()) == wanted).or(self.profiles.first()).cloned().ok_or_else(|| CoreError::new("XenoNet found no shell to open."))?;
         let cwd = safe_cwd(params.get("cwd").and_then(Value::as_str));
-        let cols = int(params.get("cols"), 120.0).max(2.0).min(u16::MAX as f64) as u16;
-        let rows = int(params.get("rows"), 30.0).max(2.0).min(u16::MAX as f64) as u16;
+        let cols = int(params.get("cols"), 120.0).max(2.0).min(f64::from(u16::MAX)) as u16;
+        let rows = int(params.get("rows"), 30.0).max(2.0).min(f64::from(u16::MAX)) as u16;
         let pair = native_pty_system().openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).map_err(|e| CoreError::new(e.to_string()))?;
         let mut cmd = CommandBuilder::new(&profile.file);
         cmd.args(&profile.args);
@@ -315,7 +316,7 @@ impl Terminals for Shells {
         let mut reader = pair.master.try_clone_reader().map_err(|e| CoreError::new(e.to_string()))?;
         let writer = pair.master.take_writer().map_err(|e| CoreError::new(e.to_string()))?;
         let out = Arc::new(Mutex::new(Output::default()));
-        let exited: Arc<Mutex<Option<Option<u32>>>> = Arc::new(Mutex::new(None));
+        let exited: Arc<Mutex<Option<u32>>> = Arc::new(Mutex::new(None));
         let id = {
             let mut n = self.next.lock().unwrap();
             let id = *n;
@@ -364,7 +365,7 @@ impl Terminals for Shells {
         info["data"] = json!(out.after(cursor));
         info["cursor"] = json!(out.end);
         info["truncated"] = json!(cursor < start);
-        info["exitCode"] = t.exited.lock().unwrap().flatten().map_or(Value::Null, |c| json!(c));
+        info["exitCode"] = t.exited.lock().unwrap().map_or(Value::Null, |c| json!(c));
         Ok(info)
     }
 

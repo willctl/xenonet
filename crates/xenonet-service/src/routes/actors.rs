@@ -598,7 +598,7 @@ impl ActorRoutes<'_> {
                             }
                         }
                     }
-                    _ = tx.closed() => return,
+                    () = tx.closed() => return,
                 }
             }
         });

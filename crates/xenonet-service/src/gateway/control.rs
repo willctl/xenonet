@@ -351,7 +351,7 @@ impl GatewayControl {
                 "id": id,
                 "name": info.as_ref().and_then(|i| i.get("name").cloned()).unwrap_or(json!(slug)),
                 "product": info.as_ref().and_then(|i| i["product"].get("id").cloned()).unwrap_or(Value::Null),
-                "lastAt": sn.map(|s| s["at"].clone()).unwrap_or(Value::Null),
+                "lastAt": sn.map_or(Value::Null, |s| s["at"].clone()),
                 "lastHost": last_host,
                 "oldAddress": host.is_some() && last_host.is_some() && last_host != host,
                 "refused": refused.get(id).cloned().unwrap_or(Value::Null),

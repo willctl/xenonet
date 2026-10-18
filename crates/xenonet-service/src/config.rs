@@ -60,7 +60,7 @@ fn resolve(p: &str) -> String {
     if path.is_absolute() {
         p.to_string()
     } else {
-        std::env::current_dir().map(|d| d.join(path).to_string_lossy().into_owned()).unwrap_or_else(|_| p.to_string())
+        std::env::current_dir().map_or_else(|_| p.to_string(), |d| d.join(path).to_string_lossy().into_owned())
     }
 }
 
@@ -133,8 +133,7 @@ impl Config {
         let gateway_port = set("XENONET_GATEWAY_PORT")
             .map(|p| js_number(Some(&Value::String(p))))
             .filter(|n| *n != 0.0 && n.fract() == 0.0 && (1.0..=65535.0).contains(n))
-            .map(|n| n as u16)
-            .unwrap_or(port.wrapping_add(10));
+            .map_or(port.wrapping_add(10), |n| n as u16);
         Config {
             demo,
             dev,
@@ -224,7 +223,7 @@ mod tests {
 
     fn config(args: &[&str], vars: &[(&str, &str)]) -> Config {
         let map: HashMap<String, String> = vars.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
-        let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+        let args: Vec<String> = args.iter().map(ToString::to_string).collect();
         Config::from(&args, &|k: &str| map.get(k).cloned())
     }
 

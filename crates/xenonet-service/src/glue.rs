@@ -177,7 +177,7 @@ fn refusal(ctx: &Arc<Ctx>, ev: Value) {
     notes.by_session.insert(session.clone(), t);
     drop(notes);
     let node = ctx.cores.state.node(&session).ok().flatten();
-    let title = node.as_ref().and_then(|n| n.get("title")).and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| session.clone());
+    let title = node.as_ref().and_then(|n| n.get("title")).and_then(Value::as_str).map_or_else(|| session.clone(), str::to_string);
     let provider = if rec["provider"] == "openai" { "OpenAI" } else { "Anthropic" };
     let body = rec["signal"]["explanation"].as_str().or_else(|| rec["signal"]["category"].as_str()).unwrap_or("XenoNet kept a record of it.");
     ctx.notify_desktop(json!({ "type": "notify", "key": format!("refusal:{session}"), "id": session, "title": format!("{provider} refused a turn"), "subtitle": cut(&title, 80), "body": cut(body, 160) }));

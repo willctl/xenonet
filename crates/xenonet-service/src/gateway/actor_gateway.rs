@@ -412,7 +412,7 @@ impl ActorGateway {
             if !m.is_object() || m.get("jsonrpc") != Some(&json!("2.0")) || !(is_request || is_response) {
                 return Self::transport_error(400, -32600, "Bad Request: the request body is not a valid JSON-RPC message", None, id);
             }
-            if let Some(refusal) = self.envelope(m, &version, header) {
+            if let Some(refusal) = Self::envelope(m, version.as_deref(), header) {
                 return refusal;
             }
             let this_modern = version.as_deref() == Some(MODERN);
@@ -440,11 +440,11 @@ impl ActorGateway {
     /// The 2026-07-28 revision's checks of a message against its headers:
     /// the per-request envelope in `_meta`, and the headers that say what
     /// the body does. A refusal, or None.
-    fn envelope<'a>(&self, m: &Value, version: &Option<String>, header: impl Fn(&str) -> Option<&'a str>) -> Option<Reply> {
+    fn envelope<'a>(m: &Value, version: Option<&str>, header: impl Fn(&str) -> Option<&'a str>) -> Option<Reply> {
         let params = m.get("params");
         let meta = params.and_then(|p| p.get("_meta"));
         let body_version = meta.and_then(|x| x.get(format!("{ENVELOPE}protocolVersion"))).and_then(Value::as_str);
-        let modern_header = version.as_deref() == Some(MODERN);
+        let modern_header = version == Some(MODERN);
         let has_envelope = meta.is_some_and(|x| x.get(format!("{ENVELOPE}protocolVersion")).is_some());
         if !modern_header && !has_envelope {
             return None;
@@ -461,17 +461,15 @@ impl ActorGateway {
             ));
         }
         let meta = meta?;
-        for key in ["clientCapabilities"] {
-            if meta.get(format!("{ENVELOPE}{key}")).is_none() {
-                let k = format!("{ENVELOPE}{key}");
-                return Some(Self::transport_error(
-                    400,
-                    -32602,
-                    &format!("Invalid _meta envelope for protocol revision 2026-07-28: {k}: missing"),
-                    Some(json!({ "envelope": { "key": k, "problem": "missing" } })),
-                    id,
-                ));
-            }
+        let k = format!("{ENVELOPE}clientCapabilities");
+        if meta.get(&k).is_none() {
+            return Some(Self::transport_error(
+                400,
+                -32602,
+                &format!("Invalid _meta envelope for protocol revision 2026-07-28: {k}: missing"),
+                Some(json!({ "envelope": { "key": k, "problem": "missing" } })),
+                id,
+            ));
         }
         let mismatch = |h: &str, said: String| {
             Some(Self::transport_error(
@@ -483,7 +481,7 @@ impl ActorGateway {
             ))
         };
         let bv = body_version.unwrap_or("");
-        match version.as_deref() {
+        match version {
             None => return mismatch("(missing)", format!("the body envelope names protocol version {bv} but the required MCP-Protocol-Version header is absent")),
             Some(v) if v != bv => return mismatch(v, format!("the body envelope names protocol version {bv} but the MCP-Protocol-Version header names {v}")),
             _ => {}

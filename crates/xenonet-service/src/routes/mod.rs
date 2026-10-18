@@ -768,14 +768,14 @@ fn model_ok(s: &str) -> bool {
 
 fn base64_decode(s: &str) -> Vec<u8> {
     let val = |c: u8| -> Option<u32> {
-        Some(match c {
+        Some(u32::from(match c {
             b'A'..=b'Z' => c - b'A',
             b'a'..=b'z' => c - b'a' + 26,
             b'0'..=b'9' => c - b'0' + 52,
             b'+' | b'-' => 62,
             b'/' | b'_' => 63,
             _ => return None,
-        } as u32)
+        }))
     };
     let mut out = Vec::with_capacity(s.len() * 3 / 4);
     let (mut acc, mut bits) = (0u32, 0);
