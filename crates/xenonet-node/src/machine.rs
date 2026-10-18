@@ -49,7 +49,10 @@ impl From<Arg> for Done {
     }
 }
 
-// Jv holds raw napi values only when built on JS's thread, which these never are.
+// SAFETY: an Out goes from the function's thread to JS's. All that isn't
+// Send in it is a Jv::Raw, a napi value, and the function's thread can't
+// make one: it has no env, and start() takes only a Send closure, which
+// can't carry one in.
 unsafe impl Send for Out {}
 
 /// What the twin answered: the value, or what it threw.
@@ -208,6 +211,8 @@ impl Machine {
         }
         self.started = true;
         let out = self.from.recv().map_err(|_| Error::new(Status::GenericFailure, "the Rust side went away".to_string()))?;
+        // SAFETY: env is what napi-rs passed into this export, and the
+        // value is handed back to JS in it.
         let raw = |a: &Arg| -> Result<Jv> { Ok(Jv::Raw(unsafe { arg_to_js(env.raw(), a)? })) };
         Ok(match out {
             Out::Ask(q) => Jv::Obj(vec![("ask", raw(&q)?)]),

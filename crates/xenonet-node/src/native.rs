@@ -40,6 +40,8 @@ fn list(items: Vec<Out>) -> Jv {
 
 fn same(env: &Env, a: &Unknown<'_>, b: &Unknown<'_>) -> bool {
     let mut is = false;
+    // SAFETY: env, `a` and `b` are the export's, as every Env and Unknown
+    // here are; napi writes to the local `is`.
     unsafe { sys::napi_strict_equals(env.raw(), a.raw(), b.raw(), &raw mut is) };
     is
 }
@@ -51,7 +53,9 @@ fn same(env: &Env, a: &Unknown<'_>, b: &Unknown<'_>) -> bool {
 type CheckFn<'a> = Function<'a, FnArgs<(Unknown<'a>, Option<String>)>, Unknown<'a>>;
 
 fn checked(env: &Env, check: &CheckFn<'_>, failed: &Unknown<'_>, record: &Value, version: Option<&str>) -> std::result::Result<Checked, Threw> {
+    // SAFETY: env is the export's, as every Env here is.
     let raw = unsafe { to_js(env.raw(), record, 0) }.map_err(|_| Threw)?;
+    // SAFETY: `raw` is a value napi made in that env just above.
     let arg = unsafe { Unknown::from_raw_unchecked(env.raw(), raw) };
     let out = check.call(FnArgs::from((arg, version.map(str::to_string)))).map_err(|_| Threw)?;
     if same(env, &out, failed) {
@@ -63,6 +67,7 @@ fn checked(env: &Env, check: &CheckFn<'_>, failed: &Unknown<'_>, record: &Value,
     if matches!(out.get_type(), Ok(ValueType::Null | ValueType::Undefined)) {
         return Ok(Checked::Null);
     }
+    // SAFETY: env is the export's, and `out` is what check answered in it.
     Ok(Checked::Other(unsafe { from_js(env.raw(), out.raw(), 0) }.map_err(|_| Threw)?))
 }
 

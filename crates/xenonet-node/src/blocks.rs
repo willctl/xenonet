@@ -264,6 +264,9 @@ impl<'a> JsHooks<'a> {
     fn checked(&self, r: Result<Unknown<'a>>) -> std::result::Result<Unknown<'a>, String> {
         let v = r.map_err(|e| e.reason.clone())?;
         let mut same = false;
+        // SAFETY: self.env, `v` and self.failed are values of the export
+        // under way, which JsHooks borrows them from for 'a; napi writes to
+        // the local `same`.
         unsafe { sys::napi_strict_equals(self.env.raw(), v.raw(), self.failed.raw(), &raw mut same) };
         if same {
             Err(self.failure.call(()).unwrap_or_default())
@@ -283,7 +286,9 @@ impl<'a> Hooks<Unknown<'a>, Unknown<'a>, Unknown<'a>> for JsHooks<'a> {
             Some(f) => self.checked(f.call(text.to_string())),
             None => {
                 let v = js_json::parse(text).map_err(|e| e.to_string())?;
+                // SAFETY: self.env is the export's, borrowed for 'a.
                 let raw = unsafe { <Json as ToNapiValue>::to_napi_value(self.env.raw(), Json(v)) }.map_err(|e| e.reason.clone())?;
+                // SAFETY: `raw` is a value napi made in that env just above.
                 Ok(unsafe { Unknown::from_raw_unchecked(self.env.raw(), raw) })
             }
         }
@@ -802,6 +807,9 @@ struct JsDocHooks<'a> {
 impl<'a> JsDocHooks<'a> {
     fn is_failed(&self, v: &Unknown<'a>) -> bool {
         let mut same = false;
+        // SAFETY: self.env, `v` and self.failed are values of the export
+        // under way, which JsDocHooks borrows them from for 'a; napi writes
+        // to the local `same`.
         unsafe { sys::napi_strict_equals(self.env.raw(), v.raw(), self.failed.raw(), &raw mut same) };
         same
     }
@@ -812,12 +820,15 @@ impl<'a> DocHooks<Unknown<'a>> for JsDocHooks<'a> {
         self.fresh.call(()).map_err(|_| Halt)
     }
     fn parsed(&mut self, v: Value) -> std::result::Result<Unknown<'a>, Halt> {
+        // SAFETY: self.env is the export's, borrowed for 'a.
         let raw = unsafe { crate::js::to_js(self.env.raw(), &v, 0) }.map_err(|_| Halt)?;
+        // SAFETY: `raw` is a value napi made in that env just above.
         Ok(unsafe { Unknown::from_raw_unchecked(self.env.raw(), raw) })
     }
     fn version_of(&mut self, doc: &Unknown<'a>) -> std::result::Result<Option<f64>, Halt> {
         let v = self.version_of.call(*doc).map_err(|_| Halt)?;
         Ok(match v.get_type() {
+            // SAFETY: `v` is a number, as get_type just said.
             Ok(ValueType::Number) => Some(unsafe { v.cast::<f64>() }.map_err(|_| Halt)?),
             _ => None,
         })
@@ -831,6 +842,8 @@ impl<'a> DocHooks<Unknown<'a>> for JsDocHooks<'a> {
         if self.is_failed(&v) {
             return Ok(Err(()));
         }
+        // SAFETY: self.env is the export's, borrowed for 'a, and `v` is
+        // what prepare answered in it.
         let list = unsafe { crate::js::from_js(self.env.raw(), v.raw(), 0) }.map_err(|_| Halt)?;
         Ok(Ok(list.as_array().map(|a| a.iter().map(xenonet_base::text::js_string).collect()).unwrap_or_default()))
     }

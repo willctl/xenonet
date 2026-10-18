@@ -29,50 +29,72 @@ fn check(status: sys::napi_status, what: &str) -> Result<()> {
 unsafe fn build(env: sys::napi_env, v: &Out) -> Result<sys::napi_value> {
     let mut out = ptr::null_mut();
     match v {
+        // SAFETY: env is the call's; napi writes to the local `out`.
         Out::Undef => check(unsafe { sys::napi_get_undefined(env, &raw mut out) }, "make undefined")?,
+        // SAFETY: env is the call's; napi writes to the local `out`.
         Out::Null => check(unsafe { sys::napi_get_null(env, &raw mut out) }, "make null")?,
+        // SAFETY: env is the call's; napi writes to the local `out`.
         Out::Bool(b) => check(unsafe { sys::napi_get_boolean(env, *b, &raw mut out) }, "make a boolean")?,
+        // SAFETY: env is the call's; napi writes to the local `out`.
         Out::Num(n) => check(unsafe { sys::napi_create_double(env, *n, &raw mut out) }, "make a number")?,
+        // SAFETY: env is the call's.
         Out::Str(s) => out = unsafe { string(env, s)? },
+        // SAFETY: env is the call's.
         Out::Json(j) => out = unsafe { crate::js::to_js(env, j, 0)? },
         // A Uint8Array, as node:sqlite gives a BLOB.
         Out::Bytes(b) => {
             let mut data = ptr::null_mut();
             let mut buf = ptr::null_mut();
+            // SAFETY: env is the call's; napi writes to the locals `data` and `buf`.
             check(unsafe { sys::napi_create_arraybuffer(env, b.len(), &raw mut data, &raw mut buf) }, "make an array buffer")?;
             if !b.is_empty() {
+                // SAFETY: napi made `data` an ArrayBuffer of b.len() bytes
+                // just above, and a new buffer can't overlap `b`.
                 unsafe { ptr::copy_nonoverlapping(b.as_ptr(), data.cast::<u8>(), b.len()) };
             }
+            // SAFETY: env and `buf` are the call's; napi writes to the local `out`.
             check(unsafe { sys::napi_create_typedarray(env, sys::TypedarrayType::uint8_array, b.len(), buf, 0, &raw mut out) }, "make a Uint8Array")?;
         }
         Out::Arr(items) => {
+            // SAFETY: env is the call's; napi writes to the local `out`.
             check(unsafe { sys::napi_create_array_with_length(env, items.len(), &raw mut out) }, "make an array")?;
             for (i, x) in items.iter().enumerate() {
+                // SAFETY: env is the call's.
                 let item = unsafe { build(env, x)? };
+                // SAFETY: env, `out` and `item` are the call's.
                 check(unsafe { sys::napi_set_element(env, out, i as u32, item) }, "fill an array")?;
             }
         }
         Out::Obj(fields) => {
+            // SAFETY: env is the call's; napi writes to the local `out`.
             check(unsafe { sys::napi_create_object(env, &raw mut out) }, "make an object")?;
             for (k, x) in fields {
+                // SAFETY: env is the call's.
                 let key = unsafe { string(env, k)? };
+                // SAFETY: env is the call's.
                 let value = unsafe { build(env, x)? };
                 if k == "__proto__" {
                     // Defined, not set: setting __proto__ would change the
                     // object's prototype.
                     let attributes = sys::PropertyAttributes::writable | sys::PropertyAttributes::enumerable | sys::PropertyAttributes::configurable;
                     let d = sys::napi_property_descriptor { utf8name: ptr::null(), name: key, method: None, getter: None, setter: None, value, attributes, data: ptr::null_mut() };
+                    // SAFETY: env and `out` are the call's, `d` is a local napi reads.
                     check(unsafe { sys::napi_define_properties(env, out, 1, &raw const d) }, "define a key")?;
                 } else {
+                    // SAFETY: env, `out`, `key` and `value` are the call's.
                     check(unsafe { sys::napi_set_property(env, out, key, value) }, "fill an object")?;
                 }
             }
         }
         Out::Assigned(fields) => {
+            // SAFETY: env is the call's; napi writes to the local `out`.
             check(unsafe { sys::napi_create_object(env, &raw mut out) }, "make an object")?;
             for (k, x) in fields {
+                // SAFETY: env is the call's.
                 let key = unsafe { string(env, k)? };
+                // SAFETY: env is the call's.
                 let value = unsafe { build(env, x)? };
+                // SAFETY: env, `out`, `key` and `value` are the call's.
                 check(unsafe { sys::napi_set_property(env, out, key, value) }, "set a key")?;
             }
         }
@@ -82,6 +104,7 @@ unsafe fn build(env: sys::napi_env, v: &Out) -> Result<sys::napi_value> {
 
 impl ToNapiValue for OutJs {
     unsafe fn to_napi_value(env: sys::napi_env, val: Self) -> Result<sys::napi_value> {
+        // SAFETY: env is the call's.
         unsafe { build(env, &val.0) }
     }
 }

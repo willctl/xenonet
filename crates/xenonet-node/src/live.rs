@@ -30,13 +30,17 @@ fn check(status: sys::napi_status, what: &str) -> Result<()> {
 /// An object with its fields in order, undefined where a field's value is.
 unsafe fn fields_js(env: sys::napi_env, f: &Fields) -> Result<sys::napi_value> {
     let mut out = ptr::null_mut();
+    // SAFETY: env is the call's; napi writes to the local `out`.
     check(unsafe { sys::napi_create_object(env, &raw mut out) }, "make an object")?;
     for (k, v) in f {
+        // SAFETY: env is the call's.
         let key = unsafe { string(env, k)? };
         let value = match v {
+            // SAFETY: env is the call's.
             Some(v) => unsafe { to_js(env, v, 0)? },
             None => {
                 let mut u = ptr::null_mut();
+                // SAFETY: env is the call's; napi writes to the local `u`.
                 check(unsafe { sys::napi_get_undefined(env, &raw mut u) }, "make undefined")?;
                 u
             }
@@ -44,8 +48,10 @@ unsafe fn fields_js(env: sys::napi_env, f: &Fields) -> Result<sys::napi_value> {
         if k == "__proto__" {
             let attributes = sys::PropertyAttributes::writable | sys::PropertyAttributes::enumerable | sys::PropertyAttributes::configurable;
             let d = sys::napi_property_descriptor { utf8name: ptr::null(), name: key, method: None, getter: None, setter: None, value, attributes, data: ptr::null_mut() };
+            // SAFETY: env and `out` are the call's, `d` is a local napi reads.
             check(unsafe { sys::napi_define_properties(env, out, 1, &raw const d) }, "define a key")?;
         } else {
+            // SAFETY: env, `out`, `key` and `value` are the call's.
             check(unsafe { sys::napi_set_property(env, out, key, value) }, "fill an object")?;
         }
     }
@@ -57,6 +63,7 @@ unsafe fn fields_js(env: sys::napi_env, f: &Fields) -> Result<sys::napi_value> {
 /// value.
 unsafe fn js_fields(env: sys::napi_env, v: sys::napi_value) -> Result<Option<Fields>> {
     use sys::ValueType::{napi_function, napi_null, napi_object, napi_symbol, napi_undefined};
+    // SAFETY: env and `v` are the call's.
     let t = unsafe { type_of(env, v)? };
     if t == napi_null || t == napi_undefined {
         return Ok(None);
@@ -66,6 +73,7 @@ unsafe fn js_fields(env: sys::napi_env, v: sys::napi_value) -> Result<Option<Fie
     }
     let mut keys = ptr::null_mut();
     check(
+        // SAFETY: env and `v` are the call's; napi writes to the local `keys`.
         unsafe {
             sys::napi_get_all_property_names(
                 env,
@@ -79,15 +87,21 @@ unsafe fn js_fields(env: sys::napi_env, v: sys::napi_value) -> Result<Option<Fie
         "list an object's keys",
     )?;
     let mut n = 0u32;
+    // SAFETY: env and `keys` are the call's; napi writes to the local `n`.
     check(unsafe { sys::napi_get_array_length(env, keys, &raw mut n) }, "count an object's keys")?;
     let mut out = Vec::with_capacity(n as usize);
     for i in 0..n {
         let mut key = ptr::null_mut();
+        // SAFETY: env and `keys` are the call's; napi writes to the local `key`.
         check(unsafe { sys::napi_get_element(env, keys, i, &raw mut key) }, "read a key")?;
         let mut item = ptr::null_mut();
+        // SAFETY: env, `v` and `key` are the call's; napi writes to the local `item`.
         check(unsafe { sys::napi_get_property(env, v, key, &raw mut item) }, "read a property")?;
+        // SAFETY: env and `item` are the call's.
         let it = unsafe { type_of(env, item)? };
+        // SAFETY: env and `item` are the call's.
         let value = if it == napi_undefined || it == napi_function || it == napi_symbol { None } else { Some(unsafe { from_js(env, item, 0)? }) };
+        // SAFETY: env and `key` are the call's.
         out.push((unsafe { String::from_napi_value(env, key)? }, value));
     }
     Ok(Some(out))
@@ -97,6 +111,8 @@ fn emits(env: &Env, out: Vec<Emit>, error: Option<TypeError>) -> Result<Jv> {
     let mut items = Vec::with_capacity(out.len());
     for e in &out {
         let (name, payload) = match e {
+            // SAFETY: env is the Env of the export under way, as every Env
+            // here is, and the object is handed back to JS in that call.
             Emit::Activity(f) => ("activity", Jv::Raw(unsafe { fields_js(env.raw(), f)? })),
             Emit::Tokens(v) => ("tokens", Jv::Json(v.clone())),
             Emit::Refusal(v) => ("refusal", Jv::Json(v.clone())),
@@ -109,6 +125,8 @@ fn emits(env: &Env, out: Vec<Emit>, error: Option<TypeError>) -> Result<Jv> {
 fn events(env: &Env, list: &[xenonet_sources::live::telemetry::Event]) -> Result<Jv> {
     let mut items = Vec::with_capacity(list.len());
     for e in list {
+        // SAFETY: env is the Env of the export under way, as every Env here
+        // is, and the object is handed back to JS in that call.
         items.push(Jv::Raw(unsafe { fields_js(env.raw(), &e.fields)? }));
     }
     Ok(Jv::Arr(items))
@@ -192,6 +210,7 @@ impl JsLiveCore {
     /// An event a caller made for a session (made when it's new).
     #[napi]
     pub fn activity(&mut self, env: &Env, id: String, app: String, ev: Unknown<'_>, live: bool, now: f64) -> Result<Jv> {
+        // SAFETY: env and `ev` are what napi-rs passed into this export.
         let Some(fields) = (unsafe { js_fields(env.raw(), ev.raw())? }) else { return type_error(*env, "Cannot read properties of undefined (reading 'ts')") };
         let i = self.t.session(&id, &app);
         let mut out = Vec::new();
@@ -210,6 +229,7 @@ impl JsLiveCore {
     /// agentId, server, extra, ok }. Gives { emits, tool }.
     #[napi(js_name = "noteTool")]
     pub fn note_tool(&mut self, env: &Env, id: String, call: Unknown<'_>, live: bool, now: f64) -> Result<Jv> {
+        // SAFETY: env and `call` are what napi-rs passed into this export.
         let fields = unsafe { js_fields(env.raw(), call.raw())? }.unwrap_or_default();
         let get = |k: &str| fields.iter().find(|(key, _)| key == k).map(|(_, v)| v.clone());
         let files = match get("files").flatten() {

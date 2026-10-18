@@ -167,6 +167,7 @@ pub struct MaybeJsonText(pub String);
 
 impl FromNapiValue for MaybeJsonText {
     unsafe fn from_napi_value(env: sys::napi_env, v: sys::napi_value) -> Result<Self> {
+        // SAFETY: env and `v` are the call's.
         let a = unsafe { crate::args::arg_of(env, v, 0)? };
         Ok(MaybeJsonText(match a {
             Arg::Undef | Arg::Null => String::new(),

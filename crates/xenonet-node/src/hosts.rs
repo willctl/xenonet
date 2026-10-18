@@ -86,6 +86,7 @@ pub fn hosts_shallow(value: Unknown<'_>, max: f64) -> Result<bool> {
         if v.get_type()? != ValueType::Object {
             continue;
         }
+        // SAFETY: `v` is an object, as get_type just said.
         let o: Object<'_> = unsafe { v.cast()? };
         let children: Vec<Unknown<'_>> = if o.is_array()? {
             (0..o.get_array_length()?).map(|i| o.get_element::<Unknown<'_>>(i)).collect::<Result<_>>()?
