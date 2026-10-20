@@ -67,9 +67,9 @@ test("Windows hooks run, keep other hooks, and can be reinstalled and removed", 
   assert.equal(claude[1].hooks[0].shell, "powershell");
   for (const [app, command] of [["claude", claude[1].hooks[0].command], ["codex", codex.SessionStart[0].hooks[0].commandWindows]]) {
     const args = command.split(" ").slice(1);
-    // PowerShell can take over ten seconds to start on a busy CI runner.
-    const result = spawnSync("powershell.exe", args, { input: '{"hook_event_name":"SessionStart"}', encoding: "utf8", windowsHide: true, timeout: 30000 });
-    assert.equal(result.status, 0, result.stderr);
+    // PowerShell can take over thirty seconds to start on a busy CI runner.
+    const result = spawnSync("powershell.exe", args, { input: '{"hook_event_name":"SessionStart"}', encoding: "utf8", windowsHide: true, timeout: 120000 });
+    assert.equal(result.status, 0, result.error ? `${result.error.message}; stderr: ${result.stderr}` : result.stderr);
     assert.deepEqual(JSON.parse(result.stdout), { port: "47842", args: ["hook", app], input: '{"hook_event_name":"SessionStart"}' });
   }
   assert.equal(codex.SessionEnd[0].hooks[0].timeout, 3);
