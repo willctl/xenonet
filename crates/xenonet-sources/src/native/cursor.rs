@@ -261,6 +261,6 @@ mod tests {
         c.read(Some(&format!("{file}.none")), now, &mut StdFiles, &mut no_check).unwrap();
         assert_eq!(c.file_state, "missing");
         std::fs::remove_dir_all(&dir).unwrap();
-        assert_eq!(cursor_events_file(None, "/s"), "/s/cursor-hooks.ndjson");
+        assert_eq!(cursor_events_file(None, "/s"), xenonet_base::paths::join("/s", "cursor-hooks.ndjson"));
     }
 }

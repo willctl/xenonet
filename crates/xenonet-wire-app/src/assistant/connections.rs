@@ -463,6 +463,6 @@ mod tests {
         assert_eq!(c.recheck(&grant)["ok"], false);
         assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|(name, _)| name == "revoked"));
         assert!(c.pair(&json!({ "label": "" }), &places, &[]).unwrap_err().is(xenonet_service::cores::Kind::Connection));
-        std::fs::remove_dir_all(&dir).unwrap();
+        let _ = std::fs::remove_dir_all(&dir); // Windows keeps a folder whose files are still open.
     }
 }

@@ -182,7 +182,9 @@ mod tests {
     #[test]
     fn a_fetch_to_nothing_is_refused_as_fetch_says_it() {
         let port = std::net::TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map(|a| a.port()).expect("a port");
-        let r = block_on(fetch_asked(&json!({ "url": format!("http://127.0.0.1:{port}/api/health"), "timeoutMs": 2000 }))).expect("a runtime");
+        // Windows retries a refused connection for about two seconds before
+        // it says so, so the timeout leaves it time; elsewhere it's at once.
+        let r = block_on(fetch_asked(&json!({ "url": format!("http://127.0.0.1:{port}/api/health"), "timeoutMs": 10000 }))).expect("a runtime");
         let e = r.expect_err("nothing listens");
         assert_eq!((e["message"].clone(), e["causeCode"].clone()), (json!("fetch failed"), json!("ECONNREFUSED")));
     }

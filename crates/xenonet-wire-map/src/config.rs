@@ -207,7 +207,11 @@ impl MapConfig {
     }
 }
 
+// Spelled as on a unix host, where Node's path module is posix; on Windows
+// the JS tests run against the Rust (test:rust) check the same. (Two
+// attributes: clippy takes only a plain cfg(test) for test code.)
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
 

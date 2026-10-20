@@ -96,7 +96,7 @@ impl Ctx {
 
     /// A service for tests: the demo's settings, these cores, nothing written.
     pub fn for_tests(cores: Cores) -> Arc<Ctx> {
-        let mut config = Config::from(&["--demo".to_string()], &|k: &str| (k == "HOME").then(|| "/home/nova".to_string()));
+        let mut config = Config::from(&["--demo".to_string()], &|k: &str| (k == "HOME" || k == "USERPROFILE").then(|| "/home/nova".to_string()));
         let tmp = std::env::temp_dir().join(format!("xenonet-service-test-{}", std::process::id()));
         config.state_dir = tmp.join("state").to_string_lossy().into_owned();
         config.cache_dir = tmp.join("cache").to_string_lossy().into_owned();

@@ -598,7 +598,7 @@ mod tests {
     fn the_checks_run_here_on_the_folders_given() {
         let state = tmp("state");
         let chosen = tmp("code");
-        std::fs::write(format!("{state}/state.json"), format!("{{\"version\":2,\"workspace\":{{\"root\":\"{chosen}\"}}}}")).unwrap();
+        std::fs::write(format!("{state}/state.json"), json!({ "version": 2, "workspace": { "root": chosen } }).to_string()).unwrap();
         let paths = json!({ "stateDir": state, "cacheDir": tmp("cache"), "projectsDir": chosen, "claudeProjectsDir": "/nowhere/claude", "codexHome": "/nowhere/codex", "homeDir": "/nowhere" });
         let r = checkup_here(&paths, Some(&["system.runtime".into(), "xenonet.server".into(), "system.projects".into(), "xenonet.state".into()]), "/nowhere/launcher.cjs");
         let got: Vec<(String, String)> = r["results"].as_array().unwrap().iter().map(|x| (text(x.get("id")), text(x.get("status")))).collect();

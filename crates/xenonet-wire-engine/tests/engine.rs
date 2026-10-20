@@ -148,7 +148,7 @@ async fn messages_to_one_agent_to_the_repo_replies_and_an_inbox_that_waits() {
     e.send(A, json!({ "to": C, "text": "twice" }), None).await.unwrap();
     let again = e.send(A, json!({ "to": C, "text": "twice" }), None).await.unwrap_err();
     assert_eq!((again.status, again.code.as_deref()), (Some(429), Some("duplicate")), "{}", again.message);
-    std::fs::remove_dir_all(dir).unwrap();
+    let _ = std::fs::remove_dir_all(dir); // Windows keeps a folder whose files are still open.
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -184,7 +184,7 @@ async fn a_listening_stop_hook_hands_mail_over_and_stops_when_the_hook_goes() {
     // A hook that went before the answer leaves the message unread.
     e.mark_unseen(C, &out["ids"]).unwrap();
     assert_eq!(e.inbox(C, Duration::ZERO).await.unwrap().as_array().unwrap().len(), 1);
-    std::fs::remove_dir_all(dir).unwrap();
+    let _ = std::fs::remove_dir_all(dir); // Windows keeps a folder whose files are still open.
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -223,7 +223,7 @@ async fn delivery_records_a_message_handed_to_a_listening_hook_and_the_pause_swi
     let held = e.send(A, json!({ "to": C, "text": "while paused" }), None).await.unwrap_err();
     assert_eq!((held.status, held.code.as_deref()), (Some(429), Some("paused")));
     assert_eq!(policy.read_audit(10.0).unwrap().as_array().unwrap().last().unwrap()["kind"], "refused");
-    std::fs::remove_dir_all(dir).unwrap();
+    let _ = std::fs::remove_dir_all(dir); // Windows keeps a folder whose files are still open.
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -259,7 +259,7 @@ async fn hooks_brief_a_starting_session_and_warn_before_an_edit() {
     assert_eq!(e.release(C, Value::Null).await.unwrap(), json!({ "released": 1 }));
     // SessionEnd: the session's contact ends.
     assert_eq!(e.hook("claude", Some("SessionEnd"), &json!({ "session_id": "aaaaaaaa-0001" })).await.unwrap(), None);
-    std::fs::remove_dir_all(dir).unwrap();
+    let _ = std::fs::remove_dir_all(dir); // Windows keeps a folder whose files are still open.
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -282,5 +282,5 @@ async fn a_channel_poll_waits_for_its_session_and_ends_empty_at_its_time() {
     let started = Instant::now();
     assert_eq!(channels.poll(A, Duration::from_millis(200)).await.unwrap(), json!([]));
     assert!(started.elapsed() >= Duration::from_millis(150));
-    std::fs::remove_dir_all(dir).unwrap();
+    let _ = std::fs::remove_dir_all(dir); // Windows keeps a folder whose files are still open.
 }

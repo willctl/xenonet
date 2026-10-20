@@ -223,7 +223,7 @@ mod tests {
         let mut newer = SqliteStore::new("notes", &file, steps(2), vec![], false, 0.0);
         newer.open(0.0).unwrap();
         assert_eq!((newer.version.map(|v| v.newer), newer.life.state.as_str()), (Some(true), "degraded"));
-        std::fs::remove_dir_all(&d).unwrap();
+        let _ = std::fs::remove_dir_all(&d); // Windows keeps a folder whose files are still open.
     }
 
     #[test]
@@ -241,7 +241,7 @@ mod tests {
         let v: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
         let tables: Vec<String> = c.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
         assert_eq!((v, tables), (1, vec!["a".to_string()]));
-        std::fs::remove_dir_all(&d).unwrap();
+        let _ = std::fs::remove_dir_all(&d); // Windows keeps a folder whose files are still open.
     }
 
     #[test]

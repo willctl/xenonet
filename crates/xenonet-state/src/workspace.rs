@@ -228,7 +228,11 @@ pub fn stands_for(asked: &[Value], dev_port: &Value, dev_name: &str) -> Option<S
     (asked.len() == 1 && &asked[0] == dev_port).then(|| dev_name.to_string())
 }
 
+// Spelled as on a unix host, where Node's path module is posix; on Windows
+// the JS tests run against the Rust (test:rust) check the same. (Two
+// attributes: clippy takes only a plain cfg(test) for test code.)
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
 

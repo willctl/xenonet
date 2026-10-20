@@ -96,7 +96,7 @@ async fn the_demos_actors_their_simulations_and_its_made_up_request() {
     assert_eq!(actors.observers_status(), json!([]));
     let names: Vec<Value> = empty.blocks.lock().unwrap().iter().map(|h| h()["name"].clone()).collect();
     assert_eq!(names, vec![json!("engine")]);
-    std::fs::remove_dir_all(dir).unwrap();
+    let _ = std::fs::remove_dir_all(dir); // Windows keeps a folder whose files are still open.
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -146,5 +146,5 @@ async fn registering_an_actor_allowing_it_and_taking_what_it_reports() {
     assert_eq!(products, vec![(json!("hermes-agent"), json!(true)), (json!("grok-bot"), json!(true)), (json!("muse"), json!(true))]);
     let names: Vec<Value> = empty.blocks.lock().unwrap().iter().map(|h| h()["name"].clone()).collect();
     assert_eq!(names, vec![json!("engine"), json!("hermes-observer"), json!("grok-bot-observer"), json!("muse-observer")]);
-    std::fs::remove_dir_all(dir).unwrap();
+    let _ = std::fs::remove_dir_all(dir); // Windows keeps a folder whose files are still open.
 }
