@@ -447,10 +447,19 @@ test("Claude Code's hooks honor the sender's process identity", async () => {
 });
 
 test("XenoNet Dev's simulations, its control channel and captures", async () => {
+  const shows = {
+    "needs-you": (s) => s.needsYou?.text?.startsWith("Should I run the migration"),
+    stuck: (s) => s.stuck?.reasons.includes("4 failed tool calls in a row"),
+  };
   for (const kind of ["needs-you", "collision", "stuck", "turn-end", "wiki-write"]) {
-    assert.equal((await post("/api/dev/simulate", { kind })).data.kind, kind, kind);
-    if (kind === "needs-you") assert.ok((await get("/api/live")).data.sessions.some((s) => s.needsYou?.text?.startsWith("Should I run the migration")));
-    if (kind === "stuck") assert.ok((await get("/api/live")).data.sessions.some((s) => s.stuck?.reasons.includes("4 failed tool calls in a row")));
+    // The demo's sessions are still reading their history, so an event can
+    // land between the simulation and the read and undo it: simulate again
+    // until the map shows it.
+    for (const until = Date.now() + 10000; ; await new Promise((r) => setTimeout(r, 200))) {
+      assert.equal((await post("/api/dev/simulate", { kind })).data.kind, kind, kind);
+      if (!shows[kind] || (await get("/api/live")).data.sessions.some(shows[kind])) break;
+      assert.ok(Date.now() < until, `the map shows ${kind}`);
+    }
   }
   assert.equal((await post("/api/dev/simulate", { kind: "doctor" })).data.kind, "doctor");
   assert.ok((await get("/api/doctor")).data.results.some((r) => r.id === "codex.auth" && r.status === "fail"));
