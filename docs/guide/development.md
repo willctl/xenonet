@@ -259,6 +259,7 @@ The console page imports only the core modules that have no Node in them, `theme
 - `schemas.mjs`, for the schema files in `schemas/`
 - `bench.mjs`, the benchmark
 - `gpu-bench.mjs` (`npm run bench:gpu`), what the console costs the machine on a Mac: GPU time, CPU and memory with the window at rest, turning, busy, behind another app, covered, minimized and hidden
+- `bench-history.mjs`, a made-up history of Claude Code and Codex sessions in a folder of its own, from a few hundred sessions to a few thousand, with long ones, subagents and files that keep growing, for measuring the service at scale
 - `hook-snippet.mjs`
 - `dev-install.mjs`
 - `dist.mjs`
