@@ -1277,6 +1277,7 @@
     "test/actor-wake.test.js",
     "test/actors-layer.test.js",
     "test/actors.test.js",
+    "test/app-capabilities.test.js",
     "test/apps.test.js",
     "test/assistant-connections.test.js",
     "test/assistant-endpoint.test.js",
