@@ -1,9 +1,10 @@
 // The app registry (core/apps.js): each entry fits app/v1, it is what the
-// session ids and the Rust's copy say, and its values are the ones the code
-// it feeds reads.
+// session ids and the Rust's copy say, its products are the provider drift
+// check's, and its values are the ones the code it feeds reads.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { APPS, APP, TAILED, appsWith, tailedApp } from "../core/apps.js";
@@ -11,9 +12,11 @@ import { SESSION_APPS, appOfSession } from "../core/schema/ids.js";
 import { check, explain } from "../core/schema/index.js";
 import { CAPABILITIES } from "../core/schema/app.js";
 import { LEFT_OUT, readRecord } from "../core/numbat.js";
+import { PROVIDERS } from "../scripts/provider-drift/registry.mjs";
 import { event } from "./fixtures/numbat.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const read = (rel) => fs.readFileSync(path.join(root, rel), "utf8");
 
 test("every entry fits app/v1, strictly", () => {
   for (const app of APPS) {
@@ -34,6 +37,24 @@ test("the registry is what session ids say, in their order", () => {
 
 test("the Rust's copy of the registry is current: node scripts/apps.mjs writes it", () => {
   execFileSync(process.execPath, ["scripts/apps.mjs", "--check"], { cwd: root, stdio: "pipe" });
+});
+
+test("every product an entry names is the provider drift check's, and every source the drift log names belongs to one", () => {
+  const providers = new Set(PROVIDERS.map((p) => p.id));
+  for (const a of APPS) for (const p of a.products ?? []) assert.ok(providers.has(p), `${a.id}'s ${p} is in scripts/provider-drift/registry.mjs`);
+  const owners = (source) => PROVIDERS.filter((p) => p.sources.includes(source)).map((p) => p.id);
+  const js = read("core/drift.js");
+  const jsSources = [...js.slice(js.indexOf("const SOURCES = {"), js.indexOf("};", js.indexOf("const SOURCES = {"))).matchAll(/^\s+"([^"]+)": /gm)].map((m) => m[1]);
+  const rs = read("crates/xenonet-schema/src/drift.rs");
+  const rsSources = [...rs.slice(rs.indexOf("pub const SOURCES"), rs.indexOf("];", rs.indexOf("pub const SOURCES"))).matchAll(/^\s+\("([^"]+)", /gm)].map((m) => m[1]);
+  assert.ok(jsSources.length > 20 && rsSources.length > 20, "the tables were found");
+  assert.deepEqual(rsSources, jsSources, "drift.rs names the sources drift.js does");
+  for (const s of jsSources) assert.deepEqual(owners(s).length, 1, `${s} belongs to one provider (${owners(s)})`);
+  // A tailed or natively read app's sources are its own products'.
+  for (const a of APPS.filter((a) => a.has?.includes("lines") || a.has?.includes("native"))) {
+    const sources = PROVIDERS.filter((p) => a.products.includes(p.id)).flatMap((p) => p.sources);
+    assert.ok(sources.length, `${a.id}'s products have sources`);
+  }
 });
 
 test("numbat leaves out the apps XenoNet tails, and reads every other app under its own id", () => {
