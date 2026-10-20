@@ -56,6 +56,8 @@ jobs:
       - run: cargo test --workspace --locked
       - run: npm run rust:build -- --debug
       - run: npm run test:rust
+      # The service serves the built page, which one route test asks for.
+      - run: npm run build
       - run: npm run test:bin
   # What doesn't depend on the platform, once: formatting, docs, advisories,
   # licenses, bans, sources and unused dependencies (npm run lint:rust).
