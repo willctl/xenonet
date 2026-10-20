@@ -16,7 +16,7 @@
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use xenonet_base::text::{js_trim, truthy};
 
 /// The Agent SDK release whose readings these are, as the lenient
@@ -40,8 +40,28 @@ fn sorted_names(dir: &Path) -> Vec<std::fs::DirEntry> {
 struct HeadTail {
     mtime: f64,
     size: u64,
+    stamp: Stamp,
     head: String,
     tail: String,
+}
+
+/// A file as it stood: its size, when it was last written and which file
+/// it is. A transcript that still has the same one hasn't changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Stamp {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    ino: u64,
+}
+
+impl Stamp {
+    fn of(meta: &std::fs::Metadata) -> Stamp {
+        #[cfg(unix)]
+        let ino = std::os::unix::fs::MetadataExt::ino(meta);
+        #[cfg(not(unix))]
+        let ino = 0;
+        Stamp { len: meta.len(), modified: meta.modified().ok(), ino }
+    }
 }
 
 fn open_plain(file: &Path) -> std::io::Result<std::fs::File> {
@@ -74,7 +94,7 @@ fn head_tail(file: &Path) -> Option<HeadTail> {
     let mtime = xenonet_base::fs::mtime_ms_of(&meta).map_or(0.0, f64::floor);
     let head_text = String::from_utf8_lossy(&head).into_owned();
     let tail = if size > CHUNK { String::from_utf8_lossy(&read_at(&mut f, size - CHUNK, CHUNK).ok()?).into_owned() } else { head_text.clone() };
-    Some(HeadTail { mtime, size, head: head_text, tail })
+    Some(HeadTail { mtime, size, stamp: Stamp::of(&meta), head: head_text, tail })
 }
 
 // ---------- finding values in the text ----------
@@ -104,19 +124,39 @@ fn starts(text: &str, pat: &str) -> Vec<usize> {
     text.match_indices(pat).map(|(i, _)| i + pat.len()).collect()
 }
 
-/// The last `"key":"…"` (or `"key": "…"`) in the text that closes.
+// How much of the text, back from the end, last_value looks at first.
+const STRETCH: usize = 8192;
+
+/// The last `"key":"…"` (or `"key": "…"`) in the text that closes. It's
+/// looked for a stretch of whole lines at a time from the end, where it
+/// usually is: a key never spans a line break, so the matches in a
+/// stretch that starts a line are those a search of the whole text finds
+/// there.
 fn last_value(text: &str, key: &str) -> Option<String> {
-    let mut at: Vec<usize> = starts(text, &format!("\"{key}\":\"")).into_iter().chain(starts(text, &format!("\"{key}\": \""))).collect();
-    at.sort_unstable();
-    at.into_iter().rev().find_map(|i| value_at(text, i))
+    last_value_by(text, key, STRETCH)
+}
+
+fn last_value_by(text: &str, key: &str, stretch: usize) -> Option<String> {
+    let (tight, spaced) = (format!("\"{key}\":\""), format!("\"{key}\": \""));
+    let mut end = text.len();
+    while end > 0 {
+        let from = text.as_bytes()[..end.saturating_sub(stretch)].iter().rposition(|&b| b == b'\n').map_or(0, |n| n + 1);
+        let part = &text[from..end];
+        let mut at: Vec<usize> = starts(part, &tight).into_iter().chain(starts(part, &spaced)).map(|i| from + i).collect();
+        at.sort_unstable();
+        if let Some(v) = at.into_iter().rev().find_map(|i| value_at(text, i)) {
+            return Some(v);
+        }
+        end = from;
+    }
+    None
 }
 
 /// The first `"key":"…"`, or, only when there's none of those, the first
 /// `"key": "…"`.
 fn first_value(text: &str, key: &str) -> Option<String> {
-    let tight = starts(text, &format!("\"{key}\":\""));
-    let list = if tight.is_empty() { starts(text, &format!("\"{key}\": \"")) } else { tight };
-    list.into_iter().next().and_then(|i| value_at(text, i))
+    let first = |pat: String| text.find(&pat).map(|i| i + pat.len());
+    first(format!("\"{key}\":\"")).or_else(|| first(format!("\"{key}\": \""))).and_then(|i| value_at(text, i))
 }
 
 fn nonempty(s: Option<String>) -> Option<String> {
@@ -353,29 +393,67 @@ fn sidecar_title(file: &Path, id: &str) -> Option<String> {
 
 // ---------- listSessions ----------
 
-fn listing(id: &str, file: &Path, t: &HeadTail) -> Option<Value> {
-    let first_line = t.head.split('\n').next().unwrap_or("");
-    if first_line.contains("\"isSidechain\":true") || first_line.contains("\"isSidechain\": true") {
+/// What a listing takes from a transcript's head and tail: all of it but
+/// the sidecar's name and whether a session it continued in has begun,
+/// which are other files. Kept from one listing to the next while the
+/// transcript stays as it was, so an unchanged one isn't read again.
+#[derive(Clone, Debug)]
+struct Seen {
+    stamp: Stamp,
+    mtime: f64,
+    size: u64,
+    /// The session this one continued in, by its tail.
+    continued: Option<String>,
+    /// A subagent's transcript, which isn't a session of its own.
+    sidechain: bool,
+    /// The name in the tail, even an empty one: only when there's none at
+    /// all is the sidecar's looked at.
+    tail_title: Option<String>,
+    /// The name when neither the tail nor the sidecar has one.
+    later_title: Option<String>,
+    first: Option<String>,
+    created: Option<f64>,
+    /// What it's called without a name.
+    later_summary: Option<String>,
+    branch: Option<String>,
+    cwd: Option<String>,
+    tag: Option<String>,
+}
+
+impl Seen {
+    fn of(t: &HeadTail) -> Seen {
+        let first_line = t.head.split('\n').next().unwrap_or("");
+        let sidechain = first_line.contains("\"isSidechain\":true") || first_line.contains("\"isSidechain\": true");
+        let first = nonempty(Some(first_prompt(&t.head)));
+        Seen {
+            stamp: t.stamp,
+            mtime: t.mtime,
+            size: t.size,
+            continued: continued_in(&t.tail),
+            sidechain,
+            tail_title: last_value(&t.tail, "customTitle"),
+            later_title: nonempty(last_value(&t.head, "customTitle")).or_else(|| nonempty(last_value(&t.tail, "aiTitle"))).or_else(|| nonempty(last_value(&t.head, "aiTitle"))),
+            created: first_value(&t.head, "timestamp").and_then(|s| xenonet_base::time::parse_iso(&s)),
+            later_summary: nonempty(last_value(&t.tail, "lastPrompt"))
+                .or_else(|| nonempty(last_value(&t.tail, "summary")))
+                .or_else(|| first.clone())
+                .or_else(|| nonempty(Some(attached(&t.head)))),
+            first,
+            branch: nonempty(last_value(&t.tail, "gitBranch")).or_else(|| nonempty(first_value(&t.head, "gitBranch"))),
+            cwd: nonempty(relocated(&t.tail)).or_else(|| nonempty(first_value(&t.head, "cwd"))),
+            tag: t.tail.split('\n').rfind(|l| l.contains("\"type\":\"tag\"") && l.contains("\"tag\":\"")).and_then(|l| nonempty(last_value(l, "tag"))),
+        }
+    }
+}
+
+fn listing(id: &str, file: &Path, t: &Seen) -> Option<Value> {
+    if t.sidechain {
         return None;
     }
-    let tail_title = last_value(&t.tail, "customTitle");
-    let sidecar = if tail_title.is_none() { sidecar_title(file, id) } else { None };
-    let custom = nonempty(tail_title)
-        .or(sidecar)
-        .or_else(|| nonempty(last_value(&t.head, "customTitle")))
-        .or_else(|| nonempty(last_value(&t.tail, "aiTitle")))
-        .or_else(|| nonempty(last_value(&t.head, "aiTitle")));
-    let first = nonempty(Some(first_prompt(&t.head)));
-    let created = first_value(&t.head, "timestamp").and_then(|s| xenonet_base::time::parse_iso(&s));
-    let summary = custom
-        .clone()
-        .or_else(|| nonempty(last_value(&t.tail, "lastPrompt")))
-        .or_else(|| nonempty(last_value(&t.tail, "summary")))
-        .or_else(|| first.clone())
-        .or_else(|| nonempty(Some(attached(&t.head))))?;
-    let branch = nonempty(last_value(&t.tail, "gitBranch")).or_else(|| nonempty(first_value(&t.head, "gitBranch")));
-    let cwd = nonempty(relocated(&t.tail)).or_else(|| nonempty(first_value(&t.head, "cwd")));
-    let tag = t.tail.split('\n').rfind(|l| l.contains("\"type\":\"tag\"") && l.contains("\"tag\":\"")).and_then(|l| nonempty(last_value(l, "tag")));
+    let sidecar = if t.tail_title.is_none() { sidecar_title(file, id) } else { None };
+    let custom = nonempty(t.tail_title.clone()).or(sidecar).or_else(|| t.later_title.clone());
+    let summary = custom.clone().or_else(|| t.later_summary.clone())?;
+    let (first, created, branch, cwd, tag) = (t.first.clone(), t.created, t.branch.clone(), t.cwd.clone(), t.tag.clone());
     let mut m = Map::new();
     m.insert("sessionId".into(), json!(id));
     m.insert("summary".into(), json!(summary));
@@ -395,9 +473,43 @@ fn listing(id: &str, file: &Path, t: &HeadTail) -> Option<Value> {
     Some(Value::Object(m))
 }
 
+/// What listings read of each transcript, by its path, kept from one
+/// listing to the next.
+#[derive(Default)]
+pub struct Listings {
+    seen: HashMap<PathBuf, Seen>,
+}
+
+// How many transcripts are read at once when many are new or changed, as
+// they all are at the start; fewer than READ_TOGETHER are read in turn.
+const READERS: usize = 4;
+const READ_TOGETHER: usize = 64;
+
+fn read_one(file: &Path) -> Option<(PathBuf, Seen)> {
+    head_tail(file).map(|t| (file.to_path_buf(), Seen::of(&t)))
+}
+
+fn read_all(files: &[PathBuf]) -> Vec<(PathBuf, Seen)> {
+    let readers = std::thread::available_parallelism().map_or(1, std::num::NonZero::get).min(READERS);
+    if files.len() < READ_TOGETHER || readers < 2 {
+        return files.iter().filter_map(|f| read_one(f)).collect();
+    }
+    std::thread::scope(|s| {
+        let parts: Vec<_> = files.chunks(files.len().div_ceil(readers)).map(|part| s.spawn(move || part.iter().filter_map(|f| read_one(f)).collect::<Vec<_>>())).collect();
+        parts.into_iter().flat_map(|p| p.join().unwrap_or_default()).collect()
+    })
+}
+
 /// listSessions(): every session's listing, newest first.
 pub fn list_sessions(projects_dir: &str) -> Vec<Value> {
-    let mut found: Vec<(String, f64, Value)> = Vec::new();
+    list_sessions_with(projects_dir, &mut Listings::default())
+}
+
+/// listSessions(), with what earlier listings read: a transcript that
+/// hasn't changed since isn't read again. Only its sidecar's name, and
+/// whether a session it continued in has begun, are looked at each time.
+pub fn list_sessions_with(projects_dir: &str, listings: &mut Listings) -> Vec<Value> {
+    let mut files: Vec<(String, PathBuf)> = Vec::new();
     for folder in sorted_names(Path::new(projects_dir)) {
         if !folder.file_type().is_ok_and(|t| t.is_dir()) {
             continue;
@@ -405,28 +517,51 @@ pub fn list_sessions(projects_dir: &str) -> Vec<Value> {
         for f in sorted_names(&folder.path()) {
             let name = f.file_name().to_string_lossy().into_owned();
             let Some(id) = name.strip_suffix(".jsonl").filter(|s| is_uuid(s)) else { continue };
-            let file = f.path();
-            let Some(t) = head_tail(&file) else { continue };
-            if let Some(other) = continued_in(&t.tail) {
-                if continued_elsewhere(&file, &other) {
-                    continue;
+            files.push((id.to_string(), f.path()));
+        }
+    }
+    let mut seen: HashMap<PathBuf, Seen> = HashMap::with_capacity(files.len());
+    let mut stale = Vec::new();
+    for (_, file) in &files {
+        let now = std::fs::symlink_metadata(file).ok().filter(|m| m.file_type().is_file()).map(|m| Stamp::of(&m));
+        match listings.seen.remove(file) {
+            Some(s) if Some(s.stamp) == now => {
+                seen.insert(file.clone(), s);
+            }
+            _ => stale.push(file.clone()),
+        }
+    }
+    seen.extend(read_all(&stale));
+    let mut found: Vec<(String, f64, Value)> = Vec::new();
+    let mut at: HashMap<String, usize> = HashMap::new();
+    for (id, file) in &files {
+        let Some(t) = seen.get(file) else { continue };
+        if let Some(other) = &t.continued {
+            if continued_elsewhere(file, other) {
+                continue;
+            }
+        }
+        let Some(l) = listing(id, file, t) else { continue };
+        match at.get(id) {
+            Some(&k) => {
+                if t.mtime > found[k].1 {
+                    found[k] = (id.clone(), t.mtime, l);
                 }
             }
-            let Some(l) = listing(id, &file, &t) else { continue };
-            match found.iter_mut().find(|(i, _, _)| i == id) {
-                Some(slot) if t.mtime > slot.1 => *slot = (id.to_string(), t.mtime, l),
-                Some(_) => {}
-                None => found.push((id.to_string(), t.mtime, l)),
+            None => {
+                at.insert(id.clone(), found.len());
+                found.push((id.clone(), t.mtime, l));
             }
         }
     }
+    listings.seen = seen;
     found.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| b.0.cmp(&a.0)));
     found.into_iter().map(|(_, _, l)| l).collect()
 }
 
 // ---------- getSessionMessages ----------
 
-fn find_file(projects_dir: &str, id: &str) -> Option<std::path::PathBuf> {
+fn find_file(projects_dir: &str, id: &str) -> Option<PathBuf> {
     sorted_names(Path::new(projects_dir)).into_iter().map(|d| d.path().join(format!("{id}.jsonl"))).find(|f| std::fs::metadata(f).is_ok_and(|m| m.len() > 0))
 }
 
@@ -855,5 +990,75 @@ mod tests {
         assert!(is_markup("<system-reminder>hi"));
         assert!(!is_markup("Fix <b> tags"));
         assert_eq!(unwrap_pastes("see\n<pasted_content id=\"a1b2\">\nbody\n</pasted_content id=\"a1b2\">\nend"), "seebodyend");
+    }
+
+    // A fixed run of numbers, for the texts and transcripts the tests below
+    // make up.
+    struct Dice(u64);
+
+    impl Dice {
+        fn roll(&mut self, n: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % n as u64) as usize
+        }
+    }
+
+    // The searches as they were, over the whole text.
+    fn last_value_whole(text: &str, key: &str) -> Option<String> {
+        let mut at: Vec<usize> = starts(text, &format!("\"{key}\":\"")).into_iter().chain(starts(text, &format!("\"{key}\": \""))).collect();
+        at.sort_unstable();
+        at.into_iter().rev().find_map(|i| value_at(text, i))
+    }
+
+    fn first_value_whole(text: &str, key: &str) -> Option<String> {
+        let tight = starts(text, &format!("\"{key}\":\""));
+        let list = if tight.is_empty() { starts(text, &format!("\"{key}\": \"")) } else { tight };
+        list.into_iter().next().and_then(|i| value_at(text, i))
+    }
+
+    #[test]
+    fn values_found_from_the_end_are_those_the_whole_text_has() {
+        let bits = ["\"k\":\"", "\"k\": \"", "\n", "x", "\\\"", "\"", "\\\\", "k", ":", " ", "é"];
+        let mut d = Dice(0x9e37_79b9_7f4a_7c15);
+        for _ in 0..5000 {
+            let n = d.roll(48);
+            let text: String = (0..n).map(|_| bits[d.roll(bits.len())]).collect();
+            for stretch in [1, 2, 5, 16, STRETCH] {
+                assert_eq!(last_value_by(&text, "k", stretch), last_value_whole(&text, "k"), "{text:?}, {stretch} at a time");
+            }
+            assert_eq!(first_value(&text, "k"), first_value_whole(&text, "k"), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn a_listing_reads_again_only_what_changed() {
+        let root = std::env::temp_dir().join(format!("xenonet-wire-sdk-listings-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let p = root.join("-Users-nova-Projects-atlas");
+        let dir = root.to_string_lossy().into_owned();
+        let prompt = |id: &str, text: &str| json!({ "type": "user", "uuid": "u1", "sessionId": id, "cwd": "/Users/nova/Projects/atlas", "timestamp": "2026-10-17T10:00:00.000Z", "message": { "role": "user", "content": text } });
+        write(&p, A, &[prompt(A, "Add partial refunds")]);
+        write(&p, B, &[prompt(B, "Review the refunds change")]);
+        let mut l = Listings::default();
+        assert_eq!(list_sessions_with(&dir, &mut l), list_sessions(&dir));
+        assert_eq!(l.seen.len(), 2);
+        // A name in the sidecar shows though the transcript is as it was.
+        std::fs::create_dir_all(p.join(A)).expect("a folder");
+        std::fs::write(p.join(A).join("custom-title.json"), r#"{"customTitle":"Refunds"}"#).expect("a sidecar");
+        let list = list_sessions_with(&dir, &mut l);
+        assert_eq!(list, list_sessions(&dir));
+        assert!(list.iter().any(|s| s["customTitle"] == "Refunds"));
+        // A transcript written to is read again.
+        rename_session(&dir, B, "Review").expect("renamed");
+        let list = list_sessions_with(&dir, &mut l);
+        assert_eq!(list, list_sessions(&dir));
+        assert!(list.iter().any(|s| s["customTitle"] == "Review"));
+        // One that's gone is forgotten.
+        std::fs::remove_file(p.join(format!("{A}.jsonl"))).expect("removed");
+        assert_eq!(list_sessions_with(&dir, &mut l).len(), 1);
+        assert_eq!(l.seen.len(), 1);
+        std::fs::remove_dir_all(&root).expect("cleaned up");
     }
 }
