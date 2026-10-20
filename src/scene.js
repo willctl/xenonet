@@ -276,7 +276,12 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
   controls.autoRotate = true;
   controls.autoRotateSpeed = 0.28;
   controls.enableDamping = true;
-  controls.dampingFactor = 0.06;
+  // Damping eases a turn out by this share each frame at 60 a second. The
+  // controls ease out per frame, so each frame takes its share for the time
+  // it covers (see drawFrame): drawn in software, at a frame a second, a
+  // turn would otherwise take a minute and a half to come to rest.
+  const DAMPING = 0.06;
+  controls.dampingFactor = DAMPING;
   let idleTimer = null;
   controls.addEventListener("start", () => {
     controls.autoRotate = false;
@@ -1179,6 +1184,10 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
   addEventListener("keydown", onInput, { passive: true });
   const pacer = createPacer();
   let forced = true, rafId = null, waitTimer = null, lastFrameAt = -Infinity, frames = 0, forcedFrames = 0;
+  // How far apart frames have come lately (ms), so that a pause stands out
+  // from a map that's slow to draw: drawn in software, with no GPU, frames
+  // can be a second apart.
+  let frameGap = 1000 / 60;
   const drawnHooks = [];
   // The frame rate now (0: none, Infinity: every frame).
   function rate() {
@@ -1224,8 +1233,9 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
   function drawFrame(at) {
     timer.update();
     // Long enough for the slowest pace, and short enough that the map
-    // doesn't leap after a pause.
-    const dt = Math.min(timer.getDelta(), 0.2);
+    // doesn't leap after a pause. Frames that only ever come slowly (drawn
+    // in software) get their whole gap, so the map keeps time.
+    const dt = Math.min(timer.getDelta(), Math.max(0.2, (1.5 * frameGap) / 1000));
     // Ambient animation runs on its own clock, at the theme's pace, and
     // stops while still.
     ambientClock += dt * THEME.motion.pace;
@@ -1320,10 +1330,21 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
     }
     // The layout stops on its own clock (cooldownTime). After a pause
     // (nobody could see the window) it gets that time afresh, so a layout
-    // that started meanwhile finishes rather than stopping half done.
+    // that started meanwhile finishes rather than stopping half done. A
+    // pause is a gap of a second or more, and well beyond the usual one:
+    // frames that only ever come slowly would otherwise restart the clock
+    // every time, and the layout would never stop.
     const t0 = performance.now();
-    if (engineRunning && t0 - lastFrameAt > 1000) forceGraph?.resetCountdown();
+    const since = t0 - lastFrameAt;
+    if (engineRunning && since > Math.max(1000, 3 * frameGap)) forceGraph?.resetCountdown();
+    if (Number.isFinite(since)) frameGap += (Math.min(since, 3000) - frameGap) * 0.2;
     lastFrameAt = t0;
+    controls.dampingFactor = 1 - (1 - DAMPING) ** (dt * 60);
+    // The layout takes a step each frame (the graph's own, below) until its
+    // clock runs out: a frame that comes slowly takes the steps of the
+    // frames it stands for first, so the layout settles as far as it would
+    // at 60 a second.
+    if (engineRunning && forceGraph) for (let i = Math.min(60, Math.round(dt * 60)); i > 1; i--) forceGraph.tickFrame();
     if (ownFrames) {
       graph._animationCycle();
       graph.pauseAnimation();
