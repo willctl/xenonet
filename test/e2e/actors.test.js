@@ -176,29 +176,36 @@ test("selecting an actor frames it with what it acts on, and the inspector shows
   assert.equal((await s.driver("state")).selection, null);
 }));
 
-test("a click on an actor selects it, over whatever glows behind it", { timeout: 60000 }, shoot("actors-click", async () => {
+test("a click on an actor selects it, over whatever glows behind it", { timeout: 120000 }, shoot("actors-click", async () => {
   await s.driver("still", true);
   try {
-    const at = await s.driver("screenPos", "actor:wren");
-    assert.ok(at?.onScreen, "Wren is on screen");
     // As a person would, the pointer looks around Wren's middle for where
     // hovering shows it (a node's body may be drawn in front of it), and
-    // clicks there.
+    // clicks there. Wren's script moves it now and then, so a click that
+    // finds it gone looks again; drawn in software, looking and clicking
+    // take seconds, long enough for a move.
     const tipAt = async (p) => (await s.input({ move: p }), s.eval(`return document.querySelector("#tooltip").hidden ? "" : document.querySelector("#tooltip").textContent`));
-    let spot = null;
-    for (const [dx, dy] of [[0, 0], [0, -8], [8, 0], [-8, 0], [0, 8], [6, -6], [-6, -6], [6, 6], [-6, 6], [0, -14], [14, 0], [-14, 0], [0, 14]]) {
-      const p = { x: at.x + dx, y: at.y + dy };
-      if (/Wren/.test(await tipAt(p))) {
-        spot = p;
-        break;
+    let found = false, st = null;
+    for (let tries = 0; tries < 3 && st?.selection?.id !== "actor:wren"; tries++) {
+      if (st?.selection) await s.driver("select", null);
+      const at = await s.driver("screenPos", "actor:wren");
+      assert.ok(at?.onScreen, "Wren is on screen");
+      let spot = null;
+      for (const [dx, dy] of [[0, 0], [0, -8], [8, 0], [-8, 0], [0, 8], [6, -6], [-6, -6], [6, 6], [-6, 6], [0, -14], [14, 0], [-14, 0], [0, 14]]) {
+        const p = { x: at.x + dx, y: at.y + dy };
+        if (/Wren/.test(await tipAt(p))) {
+          spot = p;
+          break;
+        }
       }
+      if (!spot) continue;
+      found = true;
+      await s.input({ click: spot });
+      const end = Date.now() + 5000;
+      while (Date.now() < end && (st = await s.driver("state")).selection?.id !== "actor:wren") await sleep(150);
     }
-    assert.ok(spot, "hovering shows it");
-    await s.input({ click: spot });
-    const end = Date.now() + 5000;
-    let st;
-    while (Date.now() < end && (st = await s.driver("state")).selection?.id !== "actor:wren") await sleep(150);
-    assert.equal(st.selection?.id, "actor:wren");
+    assert.ok(found, "hovering shows it");
+    assert.equal(st?.selection?.id, "actor:wren");
   } finally {
     await s.driver("still", false);
     await s.driver("select", null);
