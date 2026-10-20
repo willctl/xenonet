@@ -147,6 +147,18 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
     if (hovered && hovered !== selected) unhighlight(hovered);
     hovered = node;
     if (node) highlight(node);
+    // The actor under the pointer was weighed against the node hovered when
+    // the pointer moved, but the graph finds the node as it draws, which can
+    // be a frame later: weighed again against this one, what's hovered stays
+    // what a click takes.
+    if (lastPointer && !dragging) {
+      const hit = actorAt(lastPointer);
+      const rec = actorInFront(hit, node) ? hit.rec : null;
+      if (rec !== hoveredActor) {
+        hoveredActor = rec;
+        actors.hover(rec?.id ?? null);
+      }
+    }
     el.style.cursor = node || hoveredActor ? "pointer" : "grab";
     onHover?.(hoveredActor ?? node);
   }
@@ -1134,7 +1146,7 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
   // The pointer's last move, looked at once a frame.
   let pointerMove = null;
   el.addEventListener("pointermove", (e) => (pointerMove = e.buttons ? null : e), { passive: true });
-  el.addEventListener("pointerleave", () => ((pointerMove = null), hoverActor(null)));
+  el.addEventListener("pointerleave", () => ((pointerMove = null), (lastPointer = null), hoverActor(null)));
 
   // ---------- frame loop ----------
   //
