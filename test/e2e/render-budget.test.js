@@ -162,7 +162,7 @@ test("a window nobody can see draws nothing, and draws again once it can", { tim
   await s.driver("settled", { timeout: 30000 });
 }));
 
-test("a frame draws each glow once, adds the bloom in the lens and keeps to one target", { timeout: 60000 }, shoot("budget-frame", async () => {
+test("a frame draws each glow once, adds the bloom in the lens and keeps to one target", { timeout: limit(60000) }, shoot("budget-frame", async () => {
   await s.driver("settled", { timeout: 30000 });
   const r = await s.eval(`return (() => {
     const scene = window.__xenonet.scene, renderer = scene.graph.renderer(), composer = scene.graph.postProcessingComposer();
