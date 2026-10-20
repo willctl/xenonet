@@ -141,7 +141,10 @@ fn unwrap_pastes(text: &str) -> String {
     let mut from = 0;
     while let Some(i) = out[from..].find(open).map(|i| i + from) {
         let id = &out[i + open.len()..];
-        let ok = id.len() >= 6 && id[..4].bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)) && &id[4..6] == "\">";
+        // Compared as bytes: what follows the tag is anyone's text, and a
+        // character there can straddle the four hex digits' end.
+        let b = id.as_bytes();
+        let ok = b.len() >= 6 && b[..4].iter().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(c)) && &b[4..6] == b"\">";
         if !ok {
             from = i + 1;
             continue;
@@ -855,5 +858,9 @@ mod tests {
         assert!(is_markup("<system-reminder>hi"));
         assert!(!is_markup("Fix <b> tags"));
         assert_eq!(unwrap_pastes("see\n<pasted_content id=\"a1b2\">\nbody\n</pasted_content id=\"a1b2\">\nend"), "seebodyend");
+        // A character across the id's end is no id: the text stays as it is.
+        for odd in ["<pasted_content id=\"€€\">", "<pasted_content id=\"abcdé", "<pasted_content id=\"abc€\">"] {
+            assert_eq!(unwrap_pastes(odd), odd);
+        }
     }
 }
