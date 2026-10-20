@@ -11,6 +11,7 @@ import { createConnect, mergeHooks, FORMATS } from "../core/engine/connect.js";
 import { PROCESSES, agentApps, agentOf } from "../core/processes.js";
 import { createVerifier } from "../core/engine/verify.js";
 import { EngineStore } from "../core/engine/store.js";
+import { CALLERS, callingApps, callingSession } from "../mcp/xenonet.js";
 
 // A made-up app, Wren, whose config format keeps command hooks in
 // ~/.wren/hooks.json and its MCP server through `wren mcp`, built from what
@@ -138,4 +139,27 @@ test("processes: verify checks a session's app by its processes, and passes an a
   assert.deepEqual(await verifier("codex").check(socket, "claude:x"), { ok: false, checked: true, reason: "requests in claude:x's name have to come from a Claude Code process, and this one doesn't" });
   assert.deepEqual(await verifier("claude").check(socket, "claude:x", { hook: true }), { ok: true, checked: true, root: { pid: 50, start: 1 }, sure: true }, "Claude Code's own hook pins its session");
   assert.deepEqual(await verifier("codex").check(socket, "codex:x", { hook: true }), { ok: true, checked: true, root: { pid: 50, start: 1 } }, "Codex's hooks don't");
+});
+
+// crates/xenonet-mcp/src/xenonet.rs has the same cases.
+test("caller: the calling session is the first app's that says one is, Claude Code's then Codex's", () => {
+  assert.deepEqual(callingApps().map(([app]) => app), ["claude", "codex"]);
+  const ask = (env, meta = {}) => callingSession({ env, meta })?.id ?? null;
+  assert.equal(ask({}), null);
+  assert.equal(ask({ CLAUDE_CODE_SESSION_ID: "abc", CODEX_THREAD_ID: "t" }, { threadId: "u" }), "claude:abc");
+  assert.equal(ask({ CLAUDE_CODE_SESSION_ID: "" }, { threadId: "u" }), "codex:u", "an empty session id is none");
+  assert.equal(ask({ CODEX_THREAD_ID: "w" }, { "x-codex-turn-metadata": { thread_id: "v" } }), "codex:v");
+  assert.equal(ask({}, { threadId: null, "x-codex-turn-metadata": { thread_id: "v" } }), "codex:v");
+  assert.equal(ask({ CODEX_THREAD_ID: "w" }), "codex:w");
+  assert.equal(ask({ CODEX_THREAD_ID: "w" }, { threadId: "" }), null, "an empty thread id is none, and the variable isn't asked");
+  assert.equal(ask({}, { threadId: 7 }), "codex:7");
+  assert.deepEqual(callingSession({ env: { CLAUDE_CODE_SESSION_ID: "abc" } }), { id: "claude:abc", app: "claude" });
+  assert.equal(CALLERS.claude.started({ CLAUDE_CODE_SESSION_ID: "abc" }), true);
+  assert.equal(CALLERS.codex.started, undefined, "Codex's thread doesn't keep an actor from this server");
+  // A made-up app's own way, in a registry of its own.
+  const registry = [{ id: "wren", name: "Wren", numbat: ["wren"], has: ["caller"] }, { id: "codex", name: "Codex", numbat: ["codex"], has: ["caller"] }, { id: "lark", name: "Lark", numbat: ["lark"] }];
+  const apps = callingApps(registry, { ...CALLERS, wren: { session: (env) => env.WREN_SESSION }, lark: { session: () => "never" } });
+  assert.deepEqual(apps.map(([app]) => app), ["wren", "codex"]);
+  assert.deepEqual(callingSession({ env: { WREN_SESSION: "s1" }, meta: { threadId: "u" }, apps }), { id: "wren:s1", app: "wren" });
+  assert.deepEqual(callingSession({ env: {}, meta: { threadId: "u" }, apps }), { id: "codex:u", app: "codex" });
 });
