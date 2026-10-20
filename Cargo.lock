@@ -2484,7 +2484,6 @@ name = "xenonet-wire-engine"
 version = "0.2.0"
 dependencies = [
  "async-trait",
- "libc",
  "regex",
  "reqwest",
  "rusqlite",

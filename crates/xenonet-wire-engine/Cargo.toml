@@ -33,9 +33,6 @@ url.workspace = true
 # The token look's names, shown without the token.
 regex.workspace = true
 
-# Whether a process still runs (kill with signal 0), without a command.
-[target.'cfg(unix)'.dependencies]
-libc.workspace = true
 
 [lints]
 workspace = true
