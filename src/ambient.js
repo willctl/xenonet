@@ -133,7 +133,9 @@ export function createAmbient() {
   // Where a sound of `kind` made at the first of `ids` that's on the map
   // is heard, as the mode places it, or null to let it go: a busy moment
   // keeps its loudest. Noted for the driver either way, sound or none.
-  function spot(kind, ids, { pan = 0, boost = 1, floor } = {}) {
+  // `held`: a sound let go before it was placed (see cue), noted unplayed
+  // and taking no place among the moment's.
+  function spot(kind, ids, { pan = 0, boost = 1, floor, held = false } = {}) {
     const id = (Array.isArray(ids) ? ids : [ids]).find((x) => x && where(x));
     const at = id ? where(id) : null;
     const e = mode === "flat" || !at ? null : ear();
@@ -141,8 +143,8 @@ export function createAmbient() {
     const place = placement(mode, heard, { pan });
     const now = performance.now();
     while (placed.length && now - placed[0].t > PLACED_MS) placed.shift();
-    let kept = true;
-    if (placed.length >= PLACED_MAX) {
+    let kept = !held;
+    if (kept && placed.length >= PLACED_MAX) {
       const quietest = placed.reduce((q, p) => (p.gain < q.gain ? p : q));
       if (quietest.gain >= place.gain) kept = false;
       else placed.splice(placed.indexOf(quietest), 1);
@@ -603,8 +605,13 @@ export function createAmbient() {
     cue(kind, { id = null, to = [] } = {}) {
       const gap = { message: 0.15, actor: 0.2, read: 0.3 }[kind];
       if (gap == null) return;
-      const now = ctx?.currentTime ?? performance.now() / 1000;
-      if (now - (cueAt.get(kind) ?? -10) < gap) return;
+      // Apart on the page's clock, not the audio's: the audio clock stands
+      // still until sound starts and can fall behind on a busy machine, and
+      // then held back every cue after the first. One held back is still
+      // noted, unplayed: acts that come together (a slow frame's events
+      // arrive at once) are each heard of, if not each heard.
+      const now = performance.now() / 1000;
+      if (now - (cueAt.get(kind) ?? -10) < gap) return void spot(kind, id, { floor: 0.12, held: true });
       cueAt.set(kind, now);
       const from = spot(kind, id, { floor: 0.12 });
       if (!from || !ready()) return;
