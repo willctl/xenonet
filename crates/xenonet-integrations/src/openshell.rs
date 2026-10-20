@@ -571,3 +571,56 @@ pub async fn remove(io: Io, s: Shared, id: Value) -> Result<Value, Failure> {
     update(&io, &id, json!({ "status": if gone { "deleted" } else { "deletion-requested" }, "eventKind": if gone { "sandbox-deleted" } else { "sandbox-deletion-requested" } }))
         .await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn why<T: std::fmt::Debug>(r: Result<T, Fail>) -> String {
+        r.map_or_else(|f| f.message, |v| format!("taken: {v:?}"))
+    }
+
+    #[test]
+    fn a_command_is_argv_for_native_or_a_named_wsl_distribution() {
+        let args = [json!("sandbox"), json!("create"), json!("--from"), json!("; rm -rf ~")];
+        assert_eq!(command(&json!({ "backend": "native" }), &args, "darwin", None).unwrap(), json!({ "file": "openshell", "args": args }));
+        assert_eq!(command(&json!({}), &args, "linux", None).unwrap()["file"], json!("openshell"));
+        let wsl = command(&json!({ "backend": "wsl", "distro": "Ubuntu-24.04" }), &args, "win32", Some("D:\\Windows")).unwrap();
+        assert_eq!(wsl["args"].as_array().unwrap()[..4], [json!("--distribution"), json!("Ubuntu-24.04"), json!("--exec"), json!("openshell")]);
+        assert_eq!(wsl["file"], json!(NATIVE.join(&["D:\\Windows", "System32", "wsl.exe"])));
+        assert_eq!(wsl["args"][7], json!("; rm -rf ~"), "the input stays one literal argument");
+        assert_eq!(why(command(&json!({ "backend": "docker" }), &args, "linux", None)), "Choose native or WSL execution.");
+        assert_eq!(why(command(&json!({ "backend": "wsl", "distro": "Ubuntu" }), &args, "linux", None)), "WSL profiles are available on Windows only.");
+        for distro in [json!("Ubuntu; calc"), json!("Ubuntu 24.04"), json!("Ub\u{fc}ntu"), json!("a&b")] {
+            assert_eq!(why(command(&json!({ "backend": "wsl", "distro": distro }), &args, "win32", None)), "Use the installed WSL distribution name.", "{distro}");
+        }
+        assert_eq!(why(command(&json!({ "backend": "wsl", "distro": "x".repeat(81) }), &args, "win32", None)), "WSL distribution must be text, at most 80 characters.");
+        let f = command(&json!({ "backend": "native" }), &args, "win32", None).unwrap_err();
+        assert_eq!((f.status, f.code.as_str()), (409, "unavailable"));
+        // What wsl --list prints, in UTF-16 with its NULs, names only.
+        assert_eq!(wsl_profiles("U\0b\0u\0n\0t\0u\0\r\n\0docker-desktop\r\nbad name\r\n"), json!([{ "backend": "wsl", "distro": "Ubuntu" }]));
+    }
+
+    #[test]
+    fn a_project_is_a_folder_and_a_policy_a_small_file() {
+        let dir = std::env::temp_dir().join(format!("xenonet-openshell-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("project")).unwrap();
+        let at = |p: &str| json!(dir.join(p).to_string_lossy());
+        assert_eq!(source_dir(Some(&at("project"))).unwrap(), fsx::realpath(&dir.join("project").to_string_lossy()).unwrap());
+        let root = if cfg!(windows) { "C:\\" } else { "/" };
+        assert_eq!(why(source_dir(Some(&json!(root)))), "Choose a project directory, not a filesystem root.");
+        std::fs::write(dir.join("policy.yaml"), "version: 1\n").unwrap();
+        assert_eq!(why(source_dir(Some(&at("policy.yaml")))), "Choose a project directory, not a filesystem root.");
+        assert!(why(source_dir(Some(&at("missing")))).starts_with("ENOENT"));
+        assert_eq!(why(source_dir(Some(&json!("  ")))), "Project folder must be text, at most 1024 characters.");
+        assert_eq!(why(source_dir(None)), "Project folder must be text, at most 1024 characters.");
+        assert_eq!(policy_file(Some(&json!(""))), Ok(Value::Null));
+        assert_eq!(policy_file(Some(&at("policy.yaml"))).unwrap()["hash"], json!(b64::sha256_hex(b"version: 1\n")));
+        std::fs::write(dir.join("big.yaml"), vec![b'#'; 256 * 1024 + 1]).unwrap();
+        for p in ["big.yaml", "project"] {
+            assert_eq!(why(policy_file(Some(&at(p)))), "Choose a policy file under 256 KiB.", "{p}");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
