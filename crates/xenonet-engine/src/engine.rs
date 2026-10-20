@@ -514,7 +514,7 @@ impl Engine {
             }
             kept.push(v);
         }
-        kept.sort_by(|a, b| {
+        xenonet_base::sort::sort_by(&mut kept, |a, b| {
             let w = |x: &Arg| f64::from(u8::from(x.field("status").as_str() == Some("working")));
             let d = w(b) - w(a);
             let d = if d != 0.0 { d } else { num(&b.field("lastActive")) - num(&a.field("lastActive")) };
@@ -707,7 +707,7 @@ impl Engine {
         let app = js_text(&id).split(':').next().unwrap_or("").to_string();
         let place = Self::place_of(c, &id, &cwd)?;
         let mut edits: Vec<Arg> = list(live.field("edits")).into_iter().filter(|e| now - num(&e.field("ts")) < EDIT_HOLD_MS).collect();
-        edits.sort_by(|a, b| (num(&b.field("ts")) - num(&a.field("ts"))).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
+        xenonet_base::sort::sort_by(&mut edits, |a, b| (num(&b.field("ts")) - num(&a.field("ts"))).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
         let base = if cwd.is_nullish() { None } else { Some(js_text(&cwd)) };
         let editing: Vec<Arg> = edits
             .iter()

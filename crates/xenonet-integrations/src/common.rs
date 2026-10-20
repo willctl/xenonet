@@ -153,7 +153,7 @@ impl Records {
     pub fn list(&self) -> Result<Vec<Value>, Fail> {
         let Some(dir) = &self.dir else {
             let mut all = self.memory.clone();
-            all.sort_by(newest_first);
+            xenonet_base::sort::sort_by(&mut all, newest_first);
             return Ok(all);
         };
         let mut out = Vec::new();
@@ -170,7 +170,7 @@ impl Records {
             }
             out.push(r);
         }
-        out.sort_by(newest_first);
+        xenonet_base::sort::sort_by(&mut out, newest_first);
         Ok(out)
     }
 
@@ -262,7 +262,7 @@ pub fn query(records: &[Value], q: &Value) -> Value {
         .map(|r| (*r).clone())
         .collect();
     if q.get("sort").and_then(Value::as_str) == Some("oldest") {
-        found.sort_by(|a, b| {
+        xenonet_base::sort::sort_by(&mut found, |a, b| {
             let at = |r: &Value| r.get("at").and_then(Value::as_f64).unwrap_or(f64::NAN);
             let d = at(a) - at(b);
             if let Some(o) = d.partial_cmp(&0.0).filter(|o| o.is_ne()) {
@@ -271,7 +271,7 @@ pub fn query(records: &[Value], q: &Value) -> Value {
             xenonet_app::jstext::locale_compare(&js_string(&a["id"]), &js_string(&b["id"]))
         });
     } else {
-        found.sort_by(newest_first);
+        xenonet_base::sort::sort_by(&mut found, newest_first);
     }
     let pages = (found.len() as f64 / 50.0).ceil();
     let given = q.get("page").map_or(1.0, |p| xenonet_base::text::js_number(Some(p)));

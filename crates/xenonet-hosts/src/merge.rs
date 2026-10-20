@@ -251,7 +251,7 @@ pub fn qualify_graph(graph: &Value, host: &Value, layout: &Value, now: f64, wind
         truncated = true;
         let (mut sessions, places): (Vec<Value>, Vec<Value>) = candidates.into_iter().partition(|x| x.get("kind") == Some(&json!("session")));
         let at = |x: &Value| x.get("updatedAt").filter(|v| !v.is_null()).map_or(0.0, |v| js_number(Some(v)));
-        sessions.sort_by(|a, b| (at(b) - at(a)).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
+        xenonet_base::sort::sort_by(&mut sessions, |a, b| (at(b) - at(a)).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
         candidates = places.into_iter().chain(sessions).take(MAX_NODES - 1).collect();
     }
 
@@ -612,7 +612,7 @@ pub fn merge_identities(local: &[Value], remotes: &[(String, Vec<Value>)], names
         }
     }
     let mut out: Vec<Value> = by_id.into_iter().map(|(_, v)| v).collect();
-    out.sort_by(|a, b| {
+    xenonet_base::sort::sort_by(&mut out, |a, b| {
         let d = js_number(b.get("sessions")) - js_number(a.get("sessions"));
         let d = if d == 0.0 || d.is_nan() { js_number(b.get("projects")) - js_number(a.get("projects")) } else { d };
         if d == 0.0 || d.is_nan() {

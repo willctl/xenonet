@@ -1,0 +1,1 @@
+{"type":"assistant","uuid":"u-5","message":{"content":[{"type":"thinking","thinking":"…","signature":"s"},{"type":"text","text":"Done","citations":null},{"type":"tool_use","id":"tu_1","name":"Bash","input":{},"caller":{"type":"direct"}},{"type":"tool_result","tool_use_id":"tu_1","content":"ok","cache_control":{"type":"ephemeral"}}]}}

@@ -386,7 +386,7 @@ fn sessions(c: &Ctx<'_>) -> Result<Out, Failure> {
             (!truthy(Some(&project)) || strict_eq(Some(&v.project), Some(&project))) && statuses.as_ref().is_none_or(|s| s.iter().any(|x| x == v.status)) && v.updated >= since
         })
         .collect();
-    list.sort_by(|a, b| {
+    xenonet_base::sort::sort_by(&mut list, |a, b| {
         let d = upd(b) - upd(a);
         if let Some(o) = d.partial_cmp(&0.0).filter(|o| o.is_ne()) {
             return o;
@@ -441,7 +441,7 @@ fn attention(c: &Ctx<'_>, id_key: &[u8]) -> Result<Out, Failure> {
             (i, k)
         })
         .collect();
-    items.sort_by(|x, y| {
+    xenonet_base::sort::sort_by(&mut items, |x, y| {
         let d = x.1[0].as_f64().unwrap_or(0.0) - y.1[0].as_f64().unwrap_or(0.0);
         if let Some(o) = d.partial_cmp(&0.0).filter(|o| o.is_ne()) {
             return o;
@@ -465,7 +465,7 @@ fn actors(c: &Ctx<'_>) -> Result<Out, Failure> {
             (a, k)
         })
         .collect();
-    list.sort_by(|x, y| {
+    xenonet_base::sort::sort_by(&mut list, |x, y| {
         let d = x.1[0].as_f64().unwrap_or(0.0) - y.1[0].as_f64().unwrap_or(0.0);
         if let Some(o) = d.partial_cmp(&0.0).filter(|o| o.is_ne()) {
             return o;

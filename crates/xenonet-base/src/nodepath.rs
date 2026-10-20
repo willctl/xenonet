@@ -380,6 +380,7 @@ fn basename_from(style: Style, p: &str, suffix: Option<&str>, from: usize) -> St
 
 // A byte range of a path, which JS's slice would cut at the same places.
 fn slice(p: &str, start: usize, end: usize) -> String {
+    let end = end.min(p.len());
     String::from_utf8_lossy(&p.as_bytes()[start.min(end)..end]).into_owned()
 }
 
@@ -802,6 +803,13 @@ fn win32_relative(from: &str, to: &str, cwd: &str) -> String {
     if from == to {
         return String::new();
     }
+    // Lowercasing can change a path's length (İ is two characters
+    // lowercased), and then the offsets below, found in the lowercased
+    // paths, don't fit the originals: Node reads the paths part by part
+    // instead.
+    if from.len() != from_orig.len() || to.len() != to_orig.len() {
+        return win32_relative_parts(&from_orig, &to_orig);
+    }
     let (f, t) = (from.as_bytes(), to.as_bytes());
     let mut from_start = 0;
     while from_start < f.len() && f[from_start] == b'\\' {
@@ -875,6 +883,35 @@ fn win32_relative(from: &str, to: &str, cwd: &str) -> String {
     slice(&to_orig, to_start, to_end)
 }
 
+// Node's win32.relative for paths whose length lowercasing changes: the
+// parts in common, compared lowercased, then a ".." for each part of
+// `from` left and the rest of `to`.
+fn win32_relative_parts(from_orig: &str, to_orig: &str) -> String {
+    let mut from: Vec<&str> = from_orig.split('\\').collect();
+    let mut to: Vec<&str> = to_orig.split('\\').collect();
+    if from.last() == Some(&"") {
+        from.pop();
+    }
+    if to.last() == Some(&"") {
+        to.pop();
+    }
+    let length = from.len().min(to.len());
+    let i = (0..length).find(|&i| from[i].to_lowercase() != to[i].to_lowercase()).unwrap_or(length);
+    if i == 0 {
+        return to_orig.to_string();
+    }
+    if i == length {
+        if to.len() > length {
+            return to[i..].join("\\");
+        }
+        if from.len() > length {
+            return format!("{}..", "..\\".repeat(from.len() - 1 - i));
+        }
+        return String::new();
+    }
+    format!("{}{}", "..\\".repeat(from.len() - i), to[i..].join("\\"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::Style::*;
@@ -936,5 +973,11 @@ mod tests {
         assert_eq!(Win32.relative("C:\\a\\b", "C:\\a\\c\\d"), "..\\c\\d");
         assert_eq!(Win32.relative("C:\\A", "c:\\a\\x"), "x");
         assert_eq!(Win32.relative("C:\\a", "D:\\b"), "D:\\b");
+        // Lowercased, İ is two characters, so these are read part by part,
+        // as Node 22 reads them.
+        assert_eq!(Win32.relative("C:\\a", "C:\\İİ"), "..\\İİ");
+        assert_eq!(Win32.relative("C:\\İİ\\x", "C:\\İİ\\y"), "..\\y");
+        assert_eq!(Win32.relative("C:\\a", "C:\\a\\İ"), "İ");
+        assert_eq!(Win32.relative("C:\\İ\\a\\b", "C:\\i̇"), "..\\..");
     }
 }

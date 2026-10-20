@@ -290,7 +290,7 @@ pub fn read_logs(dir: &Path, since: f64, level: &str, component: Option<&str>, c
         }
     }
     let at = |e: &Value| e.get("at").and_then(Value::as_f64).unwrap_or(f64::NAN);
-    out.sort_by(|a, b| at(b).partial_cmp(&at(a)).unwrap_or(std::cmp::Ordering::Equal));
+    crate::sort::sort_by(&mut out, |a, b| at(b).partial_cmp(&at(a)).unwrap_or(std::cmp::Ordering::Equal));
     out.truncate(limit);
     out
 }
@@ -363,5 +363,48 @@ mod tests {
         assert_eq!(unsafe_text("{\"x\":\"/home/nova/x\"}", "/home/nova"), Some("the home folder"));
         assert_eq!(unsafe_text("{\"x\":\"~\\\\x\"}", HOME), None);
         assert_eq!(js_slice("a😀b", 2), "a", "half a pair is left out");
+    }
+    #[test]
+    fn entries_without_a_time_are_read_in_any_order() {
+        // An entry without "at" sorts as NaN, which the newest-first
+        // comparator calls equal to every other: these 21, in this order,
+        // made the standard sort panic.
+        let times = [
+            Some(9),
+            Some(1),
+            None,
+            Some(9),
+            Some(1),
+            Some(1),
+            Some(7),
+            None,
+            Some(1),
+            Some(3),
+            None,
+            Some(6),
+            Some(3),
+            None,
+            None,
+            Some(9),
+            None,
+            None,
+            Some(3),
+            Some(5),
+            Some(3),
+        ];
+        let dir = std::env::temp_dir().join(format!("xenonet-log-nan-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let lines: Vec<String> = times
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                let at = t.map_or(String::new(), |t| format!(",\"at\":{t}"));
+                format!("{{\"schema\":\"log/entry/v1\",\"level\":\"error\",\"code\":\"c{i}\"{at}}}")
+            })
+            .collect();
+        std::fs::write(dir.join("service.ndjson"), lines.join("\n")).unwrap();
+        let read = read_logs(&dir, f64::NEG_INFINITY, "info", None, None, 100);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(read.len(), times.len());
     }
 }

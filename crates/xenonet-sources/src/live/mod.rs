@@ -325,7 +325,7 @@ pub fn codex_edits(changes: Option<&Value>) -> Vec<Value> {
 /// 0 for none.
 pub fn median(xs: &[f64]) -> f64 {
     let mut s = xs.to_vec();
-    s.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    xenonet_base::sort::sort_by(&mut s, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     if s.is_empty() {
         0.0
     } else {

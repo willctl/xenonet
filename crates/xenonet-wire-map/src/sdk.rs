@@ -181,7 +181,10 @@ fn unwrap_pastes(text: &str) -> String {
     let mut from = 0;
     while let Some(i) = out[from..].find(open).map(|i| i + from) {
         let id = &out[i + open.len()..];
-        let ok = id.len() >= 6 && id[..4].bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)) && &id[4..6] == "\">";
+        // Compared as bytes: what follows the tag is anyone's text, and a
+        // character there can straddle the four hex digits' end.
+        let b = id.as_bytes();
+        let ok = b.len() >= 6 && b[..4].iter().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(c)) && &b[4..6] == b"\">";
         if !ok {
             from = i + 1;
             continue;
@@ -961,9 +964,11 @@ impl Messages {
         self.list.is_empty()
     }
 
-    /// The messages from `start` to `end`, whole.
+    /// The messages from `start` to `end`, whole, as `slice` takes them: a
+    /// range past the end is cut to it.
     pub fn page(&self, start: usize, end: usize) -> Vec<Value> {
-        self.list[start..end]
+        let end = end.min(self.list.len());
+        self.list[start.min(end)..end]
             .iter()
             .map(|(m, line)| {
                 let mut m = m.clone();
@@ -1193,6 +1198,10 @@ mod tests {
         assert!(is_markup("<system-reminder>hi"));
         assert!(!is_markup("Fix <b> tags"));
         assert_eq!(unwrap_pastes("see\n<pasted_content id=\"a1b2\">\nbody\n</pasted_content id=\"a1b2\">\nend"), "seebodyend");
+        // A character across the id's end is no id: the text stays as it is.
+        for odd in ["<pasted_content id=\"€€\">", "<pasted_content id=\"abcdé", "<pasted_content id=\"abc€\">"] {
+            assert_eq!(unwrap_pastes(odd), odd);
+        }
     }
 
     // A fixed run of numbers, for the texts and transcripts the tests below
@@ -1566,6 +1575,10 @@ mod tests {
             let (a, b) = (d.roll(want.len() + 1), d.roll(want.len() + 1));
             let (a, b) = (a.min(b), a.max(b));
             assert_eq!(got.page(a, b), want[a..b], "round {round}, {a}..{b}");
+            // Past the end, as slice takes it: cut to what there is.
+            let n = want.len();
+            assert_eq!(got.page(a, n + 5), want[a..], "round {round}, {a}..past the end");
+            assert!(got.page(n + 1, n + 5).is_empty() && got.page(b, a.saturating_sub(1)).is_empty());
             shown += want.len();
         }
         assert!(shown > 500, "the transcripts have messages to show: {shown}");

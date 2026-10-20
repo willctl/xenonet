@@ -128,6 +128,34 @@ On 2026-10-19 the tests ran this share of each crate's lines:
 
 The JS tests reach most of the core through the twins, and the binary only through `test:bin`'s files, so the binary's own parts (`xenonet-cli`, `xenonet-mcp`, `xenonet-service` and the `xenonet-wire-*` crates) are the least covered.
 
+## Fuzzing
+
+XenoNet reads files, hook payloads, frames and requests that other programs write, so none of it can be trusted. `fuzz/` has fuzz targets for those readers, run with [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz). It's a workspace of its own, apart from `crates/`, because libFuzzer needs a nightly Rust. The pinned toolchain, `cargo deny` and `cargo shear` never see it.
+
+```bash
+rustup toolchain install nightly
+cargo install cargo-fuzz
+fuzz/run.sh lines 1800      # one target for 30 minutes
+```
+
+`cargo fuzz list --fuzz-dir fuzz` lists the targets. Each one's file in `fuzz/fuzz_targets/` says what it reads:
+
+| Target | What it reads |
+| --- | --- |
+| `json` | JSON as XenoNet parses and writes it |
+| `lines`, `telemetry` | Claude Code transcripts and Codex rollouts, line by line, into the live map |
+| `transcript_files` | Transcript files on disk: the session listing, the lenient normalizers, rollout pages, stats |
+| `schema`, `jsregex` | Records checked against the vendor schemas and XenoNet's own, and the schemas' patterns |
+| `native`, `sources`, `wiki` | The other apps' files (Gemini CLI, Copilot CLI, OpenCode, Cursor, numbat), Codex's app-server, git's output, plan usage, the shared context |
+| `base` | Strings, times, paths, git remotes and model names |
+| `http`, `hooks` | The service's routes, hook payloads and the actor gateway |
+| `state`, `hosts`, `misc` | `state.json`, frames from other machines, component packages, tokens and the remote actors' requests |
+| `tools` | What other tools print or keep: gh's and ssh's config, git's, ps, lsof, netstat, tmux, Codex's picks |
+
+`fuzz/run.sh` keeps what a target learns in `fuzz/corpus/<target>` and reads the seeds in `fuzz/seeds/<target>` too. A crash is saved in `fuzz/artifacts/<target>`. Run the target on that file alone to see the crash again, and `cargo fuzz tmin --fuzz-dir fuzz <target> <file>` makes it smaller. The corpora and crashes stay out of git.
+
+Fix a crash where it starts, and add a unit test with the smallest input that showed it, in the crate that had the bug. The fuzz crate needs nightly, so it holds no tests of its own. The seeds come from the test fixtures and the demo's made-up world, never from real sessions: `node fuzz/seed.mjs` writes them again, and stops if one would hold this machine's home folder.
+
 ## Driving XenoNet from agents, scripts and tests
 
 Installed XenoNet and XenoNet Dev both have a control channel, so an agent or a script can launch Desktop, act on it and see it the way you would. Development copies also offer simulation and evaluation for tests. Use the demo to check a change to XenoNet. Agents can operate the installed console for everyday work. [Components](components.md) explains the production MCP setup.

@@ -1,0 +1,9 @@
+POST /mcp
+host: mac.example.ts.net
+content-type: application/json
+accept: application/json, text/event-stream
+authorization: Bearer xenonet_gateway_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+mcp-protocol-version: 2026-07-28
+mcp-method: server/discover
+
+{"jsonrpc":"2.0","id":9,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{},"io.modelcontextprotocol/clientInfo":{"name":"c","version":"1"}}}}

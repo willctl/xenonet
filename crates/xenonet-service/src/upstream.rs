@@ -146,17 +146,29 @@ impl Upstream {
                     if r.read_line(&mut size).await.unwrap_or(0) == 0 {
                         return;
                     }
-                    let Ok(n) = usize::from_str_radix(size.trim().split(';').next().unwrap_or(""), 16) else { return };
+                    let Ok(n) = u64::from_str_radix(size.trim().split(';').next().unwrap_or(""), 16) else { return };
                     if n == 0 {
                         return;
                     }
-                    let mut chunk = vec![0u8; n + 2];
-                    if r.read_exact(&mut chunk).await.is_err() {
-                        return;
+                    // The chunk a piece at a time, as it comes: its size is
+                    // the other end's word, and only what arrives takes room.
+                    let mut left = n;
+                    while left > 0 {
+                        let want = buf.len().min(usize::try_from(left).unwrap_or(usize::MAX));
+                        match r.read(&mut buf[..want]).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(got) => {
+                                left -= got as u64;
+                                // The page going away ends the read there too.
+                                if tx.send(Bytes::copy_from_slice(&buf[..got])).is_err() {
+                                    return;
+                                }
+                            }
+                        }
                     }
-                    chunk.truncate(n);
-                    // The page going away ends the read there too.
-                    if tx.send(Bytes::from(chunk)).is_err() {
+                    // The CRLF after it.
+                    let mut crlf = [0u8; 2];
+                    if r.read_exact(&mut crlf).await.is_err() {
                         return;
                     }
                 }
@@ -263,6 +275,22 @@ mod passing {
         }
         let r = up.pass("GET", "/api/turned-away", &[]).await;
         assert_eq!((r.status, r.body_json()["code"].clone()), (502, json!("upstream-port")));
+    }
+
+    // A chunk size too big to hold, from the other end, ends the stream
+    // where the bytes do, rather than taking the service's memory.
+    #[tokio::test]
+    async fn a_chunk_too_big_to_hold_ends_the_stream() {
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut s, _) = l.accept().await.unwrap();
+            let mut buf = vec![0u8; 8192];
+            let _ = s.read(&mut buf).await.unwrap();
+            s.write_all(b"HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n5\r\nfirst\r\nffffffffffffffff\r\nsecond").await.unwrap();
+        });
+        let up = upstream_of(Some(&format!("http://127.0.0.1:{port}"))).unwrap().unwrap();
+        assert_eq!(body(up.pass("GET", "/api/events", &[]).await).await, "firstsecond");
     }
 
     #[tokio::test]

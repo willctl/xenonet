@@ -61,7 +61,7 @@ async fn send(port: u16, method: &str, path: &str, headers: &[(String, String)],
         if let Some((k, v)) = h.split_once(':') {
             let v = v.trim();
             if k.eq_ignore_ascii_case("content-length") {
-                length = v.parse::<usize>().ok();
+                length = v.parse::<u64>().ok();
             } else if k.eq_ignore_ascii_case("transfer-encoding") && v.to_ascii_lowercase().contains("chunked") {
                 chunked = true;
             }
@@ -73,18 +73,16 @@ async fn send(port: u16, method: &str, path: &str, headers: &[(String, String)],
             loop {
                 line.clear();
                 r.read_line(&mut line).await?;
-                let size =
-                    usize::from_str_radix(line.trim().split(';').next().unwrap_or(""), 16).map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "a bad chunk"))?;
+                let size = u64::from_str_radix(line.trim().split(';').next().unwrap_or(""), 16).map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "a bad chunk"))?;
                 if size == 0 {
                     break;
                 }
-                let mut chunk = vec![0; size + 2];
-                r.read_exact(&mut chunk).await?;
-                data.extend_from_slice(&chunk[..size]);
+                take(&mut r, size, &mut data).await?;
+                // The CRLF after the chunk.
+                take(&mut r, 2, &mut Vec::new()).await?;
             }
         } else if let Some(n) = length {
-            data.resize(n, 0);
-            r.read_exact(&mut data).await?;
+            take(&mut r, n, &mut data).await?;
         } else {
             r.read_to_end(&mut data).await?;
         }
@@ -92,6 +90,15 @@ async fn send(port: u16, method: &str, path: &str, headers: &[(String, String)],
     }
     .await;
     Ok(Answer { status, reason, body })
+}
+
+// `n` bytes onto `data`, or an early end. Whatever answers on the port
+// says how big its body is, so only the bytes that come take room.
+async fn take(r: &mut BufReader<TcpStream>, n: u64, data: &mut Vec<u8>) -> std::io::Result<()> {
+    if (&mut *r).take(n).read_to_end(data).await? as u64 != n {
+        return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "the answer ended early"));
+    }
+    Ok(())
 }
 
 // An answer's body as res.json() reads it.
@@ -205,5 +212,27 @@ mod tests {
         );
         let found = find(&[gone.into(), p], Duration::from_secs(2)).await.unwrap();
         assert_eq!((found.port, found.health["name"].as_str()), (port, Some("Stand-in")));
+    }
+
+    // Whatever listens on the port can say any size: one too big to hold is
+    // an answer that ended early, not an overflow or a huge allocation.
+    #[tokio::test(flavor = "current_thread")]
+    async fn sizes_too_big_to_hold_end_early() {
+        for raw in [
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nffffffffffffffff\r\n{}",
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\nfffffffffffffffe\r\n",
+            "HTTP/1.1 200 OK\r\nContent-Length: 18446744073709551615\r\n\r\n{}",
+        ] {
+            let l = TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = l.local_addr().unwrap().port();
+            std::thread::spawn(move || {
+                let (mut s, _) = l.accept().unwrap();
+                let mut buf = [0u8; 4096];
+                let _ = s.read(&mut buf);
+                s.write_all(raw.as_bytes()).unwrap();
+            });
+            let answer = send(port, "GET", "/api/x", &[], None).await.unwrap();
+            assert_eq!(answer.body.unwrap_err().kind(), std::io::ErrorKind::UnexpectedEof, "{raw}");
+        }
     }
 }

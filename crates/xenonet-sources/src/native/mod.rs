@@ -200,7 +200,7 @@ pub(crate) fn ms_of(v: Option<&Value>) -> Option<f64> {
 /// A JS sort by a number, ascending, stable, as `(a, b) => a.n - b.n`
 /// sorts (NaN as equal).
 pub(crate) fn by_num<T>(items: &mut [T], key: impl Fn(&T) -> f64) {
-    items.sort_by(|a, b| key(a).partial_cmp(&key(b)).unwrap_or(std::cmp::Ordering::Equal));
+    xenonet_base::sort::sort_by(items, |a, b| key(a).partial_cmp(&key(b)).unwrap_or(std::cmp::Ordering::Equal));
 }
 
 #[cfg(test)]

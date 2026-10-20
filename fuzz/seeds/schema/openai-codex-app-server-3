@@ -1,0 +1,1 @@
+&{"thread/items/list":{"data":[{"item":{"type":"fileChange","id":"i2","changes":[{"path":"b.py","kind":{"type":"update","move_path":"c.py"},"diff":"@@"},{"path":"d.py","kind":{"type":"add"},"diff":"+x"}],"status":"completed"}}],"nextCursor":null}}

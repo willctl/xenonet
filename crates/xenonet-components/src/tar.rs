@@ -222,13 +222,26 @@ impl Default for Filter {
     }
 }
 
+// The most a tar the filter lets through can hold: its entries' bytes, and
+// a header and padding for each, with room for pax and long-name headers.
+const MAX_TAR: u64 = MAX_BYTES as u64 + MAX_ENTRIES as u64 * 4096;
+
 fn gunzip(bytes: &[u8]) -> Result<Vec<u8>, Unpack> {
+    gunzip_at_most(bytes, MAX_TAR)
+}
+
+fn gunzip_at_most(bytes: &[u8], max: u64) -> Result<Vec<u8>, Unpack> {
     // A plain tar is unpacked as node-tar would, without gunzipping.
     if bytes.len() < 2 || bytes[0] != 0x1f || bytes[1] != 0x8b {
         return Ok(bytes.to_vec());
     }
+    // Unzipped only as far as the filter could allow: a few kilobytes of
+    // gzip can unzip to more than the machine holds.
     let mut out = Vec::new();
-    GzDecoder::new(bytes).read_to_end(&mut out).map_err(|e| Unpack::Bad(format!("zlib: {e}")))?;
+    GzDecoder::new(bytes).take(max + 1).read_to_end(&mut out).map_err(|e| Unpack::Bad(format!("zlib: {e}")))?;
+    if out.len() as u64 > max {
+        return Err(Unpack::Refused);
+    }
     Ok(out)
 }
 
@@ -368,6 +381,33 @@ pub(crate) mod tests {
         broken[10] ^= 1;
         assert!(matches!(unpack(&broken, &dir), Err(Unpack::Bad(_))));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_time_no_clock_holds_is_left_alone() {
+        // 1e19 seconds is a Duration, but past what SystemTime counts to.
+        let dir = std::env::temp_dir().join(format!("xenonet-tar-time-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (i, m) in ["inf", "1e30", "18446744073709551615", "1e19", "NaN", "-5"].iter().enumerate() {
+            let name = format!("f{i}");
+            let t = archive(&[("PaxHeader", b'x', pax_record("mtime", m).as_bytes(), 0o644), (&name, b'0', b"x", 0o644)]);
+            unpack(&t, &dir).unwrap();
+            assert_eq!(std::fs::read_to_string(dir.join(&name)).unwrap(), "x", "{m}");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn gzip_unzips_only_as_far_as_the_filter_allows() {
+        use flate2::{write::GzEncoder, Compression};
+        use std::io::Write;
+        // Zeros, which gzip packs a thousand to one.
+        let mut z = GzEncoder::new(Vec::new(), Compression::fast());
+        z.write_all(&vec![0u8; 4 << 20]).unwrap();
+        let packed = z.finish().unwrap();
+        assert!(packed.len() < 64 << 10);
+        assert_eq!(gunzip_at_most(&packed, 1 << 20), Err(Unpack::Refused));
+        assert_eq!(gunzip_at_most(&packed, 4 << 20).unwrap().len(), 4 << 20);
     }
 
     #[test]

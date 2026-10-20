@@ -1,0 +1,1 @@
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"event_msg","payload":{"type":"item_completed","thread_id":"t1","turn_id":"u1","started_at_ms":1791230000000,"completed_at_ms":1791230001000,"item":{"type":"CommandExecution","id":"i3","command":["/bin/zsh","-lc","make test"],"exit_code":1,"status":"failed","aggregated_output":"1 failed"}}}

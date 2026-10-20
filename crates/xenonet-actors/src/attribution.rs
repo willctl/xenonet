@@ -282,7 +282,7 @@ pub fn session_of(state: &SpawnsState, calls: &mut dyn Calls, paths: &Paths, s: 
         })
         .collect();
     if !pins.is_empty() {
-        pins.sort_by(|a, b| {
+        xenonet_base::sort::sort_by(&mut pins, |a, b| {
             let d = |k: &str| b.field(k).as_f64().unwrap_or(f64::NAN) - a.field(k).as_f64().unwrap_or(f64::NAN);
             let first = d("sure");
             let v = if first != 0.0 && !first.is_nan() { first } else { d("at") };

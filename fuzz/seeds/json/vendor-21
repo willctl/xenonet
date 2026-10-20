@@ -1,0 +1,1 @@
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"FileChange","changes":{"/Users/ada/ledger/b.py":{"type":"update","unified_diff":"@@","move_path":"/Users/ada/ledger/c.py"},"/Users/ada/ledger/d.py":{"type":"add","content":"x = 1\n"}}}}}

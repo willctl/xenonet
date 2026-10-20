@@ -1,0 +1,37 @@
+G{
+  "identities": {
+    "names": {
+      "github:github.com/atlas-co": "work",
+      "git:f28de9788483a200": "work",
+      "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002": "work",
+      "github:github.com/orbitworks": "orbit",
+      "git:8bed4c8b3ce0bd80": "orbit"
+    },
+    "known": {
+      "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002": {
+        "kind": "claude",
+        "handle": "nova@atlas.example",
+        "detail": {
+          "plan": "Team",
+          "org": "Atlas"
+        },
+        "firstSeen": 1788609600000,
+        "lastSeen": 1791172800000
+      }
+    },
+    "signins": {
+      "claude": [
+        {
+          "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
+          "from": 1788609600000,
+          "to": 1791172800000
+        },
+        {
+          "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
+          "from": 1791172800000,
+          "to": 1791198000000
+        }
+      ]
+    }
+  }
+}

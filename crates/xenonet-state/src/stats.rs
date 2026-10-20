@@ -545,7 +545,7 @@ pub fn claude_events(files: Vec<File>, ids: &mut EventIds) -> Result<Vec<Event>,
             }
         }
     }
-    events.sort_by(|a, b| order(a.t - b.t));
+    xenonet_base::sort::sort_by(&mut events, |a, b| order(a.t - b.t));
     Ok(events)
 }
 
@@ -926,7 +926,7 @@ pub fn summarize(events: &[Event], app: Js<'_>) -> Result<Out, TypeError> {
 
     let mut model_list: Vec<&ModelSum> = models.items.iter().collect();
     let cost_of = |m: &ModelSum| if m.priced { m.cost } else { -1.0 };
-    model_list.sort_by(|a, b| {
+    xenonet_base::sort::sort_by(&mut model_list, |a, b| {
         let by_cost = cost_of(b) - cost_of(a);
         order(if by_cost != 0.0 && !by_cost.is_nan() { by_cost } else { b.tokens.num() - a.tokens.num() })
     });
@@ -964,7 +964,7 @@ pub fn summarize(events: &[Event], app: Js<'_>) -> Result<Out, TypeError> {
         .collect();
 
     let mut tool_list: Vec<&ToolSum> = tools.items.iter().collect();
-    tool_list.sort_by(|a, b| order(b.calls - a.calls));
+    xenonet_base::sort::sort_by(&mut tool_list, |a, b| order(b.calls - a.calls));
     let tools_out = tool_list
         .into_iter()
         .map(|t| {
@@ -980,7 +980,7 @@ pub fn summarize(events: &[Event], app: Js<'_>) -> Result<Out, TypeError> {
         .collect();
 
     let mut subs: Vec<&SubSum> = subagents.items.iter().collect();
-    subs.sort_by(|a, b| order(a.from - b.from));
+    xenonet_base::sort::sort_by(&mut subs, |a, b| order(a.from - b.from));
     let subagents_out = name_subagents(&subs, &spawns, &labels)?;
 
     Ok(Out::obj(vec![

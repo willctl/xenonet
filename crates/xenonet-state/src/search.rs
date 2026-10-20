@@ -617,7 +617,7 @@ impl Search {
                 s.snippets.push(Out::obj(vec![("role", sql_out(&role)), ("ts", Out::Num(sql_number(&ts))), ("text", sql_out(&snip))]));
             }
         }
-        by.sort_by(|a, b| {
+        xenonet_base::sort::sort_by(&mut by, |a, b| {
             let d = a.score - b.score;
             let r = if d != 0.0 && !d.is_nan() { d } else { b.hits - a.hits };
             r.partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal)
