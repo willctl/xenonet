@@ -5,7 +5,9 @@
 
 use super::files::Files;
 use super::node_path;
-use super::{by_num, edits_out, fits_id, js_max, js_min, older, prune_edits, push_edit, str_of, titled, Check, Checked, Edits, Out, Threw, DAY_MS, SESSIONS_MAX};
+use super::{
+    by_num, edits_out, fits_id, js_max, js_min, older, prune_edits, push_edit, str_of, titled, Check, Checked, Edits, NativeReader, Out, Threw, Vendor, DAY_MS, SESSIONS_MAX,
+};
 use crate::session::{RunSession, Via};
 use serde_json::Value;
 use xenonet_base::fs::FsError;
@@ -189,8 +191,24 @@ impl Cursor {
             prune_edits(&mut r.edits, now);
         }
     }
+}
 
-    pub fn sessions(&self) -> Vec<Out> {
+impl NativeReader for Cursor {
+    /// Reads the hook's file at `at`. A vendor check that threw is
+    /// reported.
+    fn read(&mut self, at: &str, now: f64, files: &mut dyn Files, vendor: &mut dyn Vendor) -> Result<(), String> {
+        Cursor::read(self, Some(at), now, files, &mut |rec, version| vendor.check(rec, version)).map_err(|Threw| "the vendor check failed".to_string())
+    }
+
+    fn source_state(&self) -> &'static str {
+        self.file_state
+    }
+
+    fn ids(&self) -> Vec<String> {
+        self.runs.keys().map(str::to_string).collect()
+    }
+
+    fn sessions(&self) -> Vec<Out> {
         self.runs
             .iter()
             .map(|(_, r)| {
@@ -213,7 +231,7 @@ impl Cursor {
             .collect()
     }
 
-    pub fn runs_out(&self) -> Vec<Out> {
+    fn runs_out(&self) -> Vec<Out> {
         self.runs
             .iter()
             .map(|(_, r)| {

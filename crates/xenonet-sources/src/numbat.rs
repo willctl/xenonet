@@ -11,7 +11,7 @@
 
 use crate::native::files::Files;
 use crate::native::node_path;
-use crate::native::{by_num, edits_out, fits_id, js_max, js_min, older, prune_edits, push_edit, titled, Edits, Out, DAY_MS, SESSIONS_MAX};
+use crate::native::{by_num, edits_out, fits_id, js_max, js_min, older, prune_edits, push_edit, titled, Edits, NativeReader, Out, Vendor, DAY_MS, SESSIONS_MAX};
 use crate::session::{RunSession, Via};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -278,9 +278,28 @@ impl Numbat {
             }
         }
     }
+}
+
+/// numbat's runs keep the native readers' contract, observed: XenoNet
+/// inferred their edits.
+impl NativeReader for Numbat {
+    /// Reads what's new in the file at `at`. Its records aren't vendor data
+    /// (numbat's schema versions are checked as they're read), so `vendor`
+    /// isn't asked.
+    fn read(&mut self, at: &str, now: f64, files: &mut dyn Files, _: &mut dyn Vendor) -> Result<(), String> {
+        Numbat::read(self, Some(at), now, files)
+    }
+
+    fn source_state(&self) -> &'static str {
+        self.file_state
+    }
+
+    fn ids(&self) -> Vec<String> {
+        self.runs.keys().map(str::to_string).collect()
+    }
 
     /// The runs as session/v1, for the map.
-    pub fn sessions(&self) -> Vec<Out> {
+    fn sessions(&self) -> Vec<Out> {
         self.runs
             .iter()
             .map(|(_, r)| {
@@ -304,7 +323,7 @@ impl Numbat {
             .collect()
     }
 
-    pub fn runs_out(&self) -> Vec<Out> {
+    fn runs_out(&self) -> Vec<Out> {
         self.runs
             .iter()
             .map(|(_, r)| {

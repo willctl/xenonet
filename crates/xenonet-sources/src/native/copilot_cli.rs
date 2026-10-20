@@ -5,10 +5,13 @@
 
 use super::files::Files;
 use super::node_path;
-use super::{by_num, edit_file, edits_out, fits_id, js_max, js_min, ms_of, push_edit, str_of, titled, Check, Checked, Edits, Out, Threw, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX};
+use super::{
+    by_num, edit_file, edits_out, fits_id, js_max, js_min, ms_of, push_edit, str_of, titled, Check, Checked, Edits, FileCache, NativeReader, Out, Threw, Vendor, DAY_MS,
+    EDIT_KEEP_MS, SESSIONS_MAX,
+};
 use crate::session::{RunSession, Via};
 use serde_json::{Map, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use xenonet_base::json::{self, number_string};
 use xenonet_base::jsstr::is_array_index;
 use xenonet_base::ordered::OrderedMap;
@@ -191,12 +194,6 @@ pub struct Run {
     pub edits: Edits,
 }
 
-struct Cached {
-    mtime_ms: f64,
-    size: f64,
-    log: Option<Log>,
-}
-
 struct Found {
     file: String,
     mtime_ms: f64,
@@ -207,13 +204,13 @@ struct Found {
 /// (until they change), and whether it could read the folder.
 pub struct CopilotCli {
     pub runs: OrderedMap<Run>,
-    cache: HashMap<String, Cached>,
+    cache: FileCache<Option<Log>>,
     pub root_state: &'static str,
 }
 
 impl Default for CopilotCli {
     fn default() -> Self {
-        CopilotCli { runs: OrderedMap::new(), cache: HashMap::new(), root_state: "unread" }
+        CopilotCli { runs: OrderedMap::new(), cache: FileCache::default(), root_state: "unread" }
     }
 }
 
@@ -265,9 +262,8 @@ impl CopilotCli {
         let mut seen = HashSet::new();
         for f in found {
             seen.insert(f.file.clone());
-            let fresh = self.cache.get(&f.file).is_some_and(|h| h.mtime_ms == f.mtime_ms && h.size == f.size);
-            if !fresh {
-                let log = files.read_text(&f.file).ok().and_then(|text| {
+            let log = self.cache.get(&f.file, f.mtime_ms, f.size, || {
+                files.read_text(&f.file).ok().and_then(|text| {
                     let mut version: Option<String> = None;
                     let mut checking = |rec: &Value| {
                         if field(rec, "type").and_then(Value::as_str) == Some("session.start") {
@@ -278,10 +274,9 @@ impl CopilotCli {
                         check(rec, version.as_deref())
                     };
                     read_events(&text, &mut checking).ok().flatten()
-                });
-                self.cache.insert(f.file.clone(), Cached { mtime_ms: f.mtime_ms, size: f.size, log });
-            }
-            let Some(l) = self.cache.get(&f.file).and_then(|h| h.log.as_ref()) else { continue };
+                })
+            });
+            let Some(l) = log else { continue };
             let Some(id) = session_id_of(&l.id) else { continue };
             let mut run = Run {
                 id: id.clone(),
@@ -306,11 +301,28 @@ impl CopilotCli {
             }
             runs.insert(&id, run);
         }
-        self.cache.retain(|k, _| seen.contains(k));
+        self.cache.keep(&seen);
         self.runs = runs;
     }
+}
 
-    pub fn sessions(&self) -> Vec<Out> {
+impl NativeReader for CopilotCli {
+    /// Reads the event logs in the folder at `at`. A log whose vendor check
+    /// threw is passed over, and no failure is reported.
+    fn read(&mut self, at: &str, now: f64, files: &mut dyn Files, vendor: &mut dyn Vendor) -> Result<(), String> {
+        CopilotCli::read(self, Some(at), now, files, &mut |rec, version| vendor.check(rec, version));
+        Ok(())
+    }
+
+    fn source_state(&self) -> &'static str {
+        self.root_state
+    }
+
+    fn ids(&self) -> Vec<String> {
+        self.runs.keys().map(str::to_string).collect()
+    }
+
+    fn sessions(&self) -> Vec<Out> {
         self.runs
             .iter()
             .map(|(_, r)| {
@@ -333,8 +345,7 @@ impl CopilotCli {
             .collect()
     }
 
-    /// The runs as the block's `runs` Map holds them, edits as pairs.
-    pub fn runs_out(&self) -> Vec<Out> {
+    fn runs_out(&self) -> Vec<Out> {
         self.runs
             .iter()
             .map(|(_, r)| {

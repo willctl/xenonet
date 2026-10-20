@@ -20,8 +20,8 @@ use napi_derive::napi;
 use serde_json::Value;
 use xenonet_base::fs::FsError;
 use xenonet_sources::native::files::{Entry, Files, Stat, StdFiles};
-use xenonet_sources::native::opencode::{self, Db, OpenCode, Sqlite, Vendor};
-use xenonet_sources::native::{copilot_cli, cursor, gemini_cli, Checked, Out, Threw};
+use xenonet_sources::native::opencode::{self, Db, OpenCode, Sqlite};
+use xenonet_sources::native::{copilot_cli, cursor, gemini_cli, Checked, NativeReader, Out, Threw, Vendor, DAY_MS, EDIT_KEEP_MS};
 use xenonet_sources::{numbat, reported_runs};
 
 fn jv(o: Out) -> Jv {
@@ -472,8 +472,6 @@ impl JsOpenCode {
         check: CheckFn<'_>,
         failed: Unknown<'_>,
     ) -> Jv {
-        const DAY_MS: f64 = 24.0 * 3600e3;
-        const EDIT_KEEP_MS: f64 = 30.0 * 60e3;
         match read_db(env, exists, &file, now - DAY_MS, now - EDIT_KEEP_MS, query.as_ref(), &ready, &missing, &check, &failed) {
             Err(Threw) => Jv::Bool(true),
             Ok(got) => match self.o.take(&got, now) {
