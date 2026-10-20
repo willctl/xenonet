@@ -421,8 +421,10 @@ test("drift: the report xenonet drift shows, and marking it seen", async () => {
   assert.deepEqual((await post("/api/drift/seen", { at: report.at })).data, { lookedAt: report.at });
   assert.equal((await get("/api/drift")).data.since, report.at);
   // Never ahead of now, so drift that turns up later is new; and a time
-  // that isn't one is the client's mistake.
-  assert.ok((await post("/api/drift/seen", { at: Date.now() + 3600e3 })).data.lookedAt <= Date.now());
+  // that isn't one is the client's mistake. "Now" is the service's clock,
+  // which on Windows can run a few ms ahead of this process's Date.now(),
+  // so an hour ahead must come back as now, give or take a second.
+  assert.ok((await post("/api/drift/seen", { at: Date.now() + 3600e3 })).data.lookedAt <= Date.now() + 1000);
   assert.equal((await post("/api/drift/seen", { at: "soon" })).status, 400);
   assert.equal((await post("/api/drift/seen", "null")).status, 200, "no body is now");
   assert.equal((await get("/api/drift/nothing")).status, 404);
