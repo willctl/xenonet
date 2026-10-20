@@ -24,5 +24,7 @@ fi
 mkdir -p "fuzz/corpus/$target"
 seeds=
 [ -d "fuzz/seeds/$target" ] && seeds="fuzz/seeds/$target"
+# A long run holds its whole corpus and the address sanitizer's own
+# memory, which came near libFuzzer's 2 GB default within half an hour.
 exec cargo fuzz run --fuzz-dir fuzz "$target" "fuzz/corpus/$target" $seeds -- \
-  -max_total_time="$seconds" -timeout=10 -print_final_stats=1 -dict=fuzz/dict/json.dict "$@"
+  -max_total_time="$seconds" -timeout=10 -rss_limit_mb=4096 -print_final_stats=1 -dict=fuzz/dict/json.dict "$@"
