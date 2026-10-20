@@ -12,6 +12,7 @@ import { PROCESSES, agentApps, agentOf } from "../core/processes.js";
 import { createVerifier } from "../core/engine/verify.js";
 import { EngineStore } from "../core/engine/store.js";
 import { CALLERS, callingApps, callingSession } from "../mcp/xenonet.js";
+import { actionsFor, urlFor, handoffUrl } from "../core/open.js";
 
 // A made-up app, Wren, whose config format keeps command hooks in
 // ~/.wren/hooks.json and its MCP server through `wren mcp`, built from what
@@ -162,4 +163,29 @@ test("caller: the calling session is the first app's that says one is, Claude Co
   assert.deepEqual(apps.map(([app]) => app), ["wren", "codex"]);
   assert.deepEqual(callingSession({ env: { WREN_SESSION: "s1" }, meta: { threadId: "u" }, apps }), { id: "wren:s1", app: "wren" });
   assert.deepEqual(callingSession({ env: {}, meta: { threadId: "u" }, apps }), { id: "codex:u", app: "codex" });
+});
+
+test("open: each app opens its own sessions, starts its own in a project, and takes a handoff, as before", () => {
+  const uuid = "0190a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2b";
+  const session = (fields) => ({ kind: "session", cwd: "/p", ...fields });
+  const opens = (node) => actionsFor(node).filter((a) => a.id === "open-app").map((a) => a.label);
+  assert.deepEqual(opens(session({ app: "claude", desktopId: "local_abc", rawId: uuid })), ["Open in Claude desktop"]);
+  assert.deepEqual(opens(session({ app: "claude", rawId: uuid })), ["Import into Claude desktop"]);
+  assert.deepEqual(opens(session({ app: "claude", desktopId: "nope", rawId: uuid })), [], "a desktop id that isn't one offers nothing");
+  assert.deepEqual(opens(session({ app: "codex", rawId: uuid })), ["Open in ChatGPT · Codex"]);
+  assert.deepEqual(opens(session({ app: "codex", rawId: "x&calc.exe" })), []);
+  assert.deepEqual(opens(session({ app: "opencode", rawId: uuid })), [], "an app without open");
+  assert.equal(urlFor(session({ app: "claude", desktopId: "local_a b" }), "open-app"), null);
+  assert.equal(urlFor(session({ app: "claude", desktopId: "local_abc", rawId: uuid }), "open-app"), "claude://code/continue?session=local_abc");
+  assert.equal(urlFor(session({ app: "claude", desktopId: "nope", rawId: uuid }), "open-app"), `claude://resume?session=${uuid}`, "the URL still resumes it");
+  assert.equal(urlFor(session({ app: "codex", rawId: uuid }), "open-app"), `codex://threads/${uuid}`);
+  assert.equal(urlFor(session({ app: "opencode", rawId: uuid }), "open-app"), null);
+  const project = { kind: "project", path: "/Users/me/a b" };
+  assert.deepEqual(actionsFor(project).map((a) => a.id), ["open-folder", "open-vscode", "new-claude"]);
+  assert.equal(urlFor(project, "new-claude"), "claude://code/new?folder=%2FUsers%2Fme%2Fa%20b");
+  assert.equal(urlFor({ kind: "project" }, "new-claude"), null, "no folder");
+  assert.equal(urlFor(project, "new-codex"), null, "Codex starts none here");
+  assert.equal(handoffUrl("claude", "/p", "go"), "claude://code/new?folder=%2Fp&q=go");
+  assert.equal(handoffUrl("codex", "", "go"), "codex://threads/new?prompt=go");
+  assert.equal(handoffUrl("opencode", "/p", "go"), null);
 });
