@@ -355,7 +355,6 @@ impl TunnelHost for SystemHost {
         }
     }
     fn spawn(&self, file: &str, args: &[String]) -> Result<Spawned, String> {
-        use tokio::io::AsyncBufReadExt;
         let mut cmd = tokio::process::Command::new(file);
         cmd.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
         #[cfg(windows)]
@@ -372,8 +371,8 @@ impl TunnelHost for SystemHost {
         {
             let tx = tx.clone();
             tokio::spawn(async move {
-                let mut r = tokio::io::BufReader::new(out).lines();
-                while let Ok(Some(l)) = r.next_line().await {
+                let (mut r, mut buf) = (tokio::io::BufReader::new(out), Vec::new());
+                while let Some(l) = crate::lines::next_line(&mut r, &mut buf).await {
                     if tx.send(l).is_err() {
                         break;
                     }

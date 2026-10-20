@@ -24,6 +24,7 @@ pub mod events;
 pub mod gateway;
 pub mod glue;
 pub mod http;
+pub mod lines;
 pub mod net;
 pub mod routes;
 pub mod rpc;

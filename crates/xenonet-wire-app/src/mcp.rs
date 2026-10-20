@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncWriteExt, BufReader};
 use xenonet_app::{mcp_discovery as discovery, mcp_info as info};
 use xenonet_service::cores::{McpInfo, State, R};
 
@@ -116,7 +116,8 @@ trait Channel: Send {
 struct Stdio {
     child: tokio::process::Child,
     stdin: tokio::process::ChildStdin,
-    lines: tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+    out: BufReader<tokio::process::ChildStdout>,
+    buf: Vec<u8>,
     id: u64,
 }
 
@@ -129,7 +130,7 @@ impl Channel for Stdio {
         self.stdin.write_all(line.as_bytes()).await.map_err(|_| why("Error", None))?;
         let wait = async {
             loop {
-                let Ok(Some(l)) = self.lines.next_line().await else { return Err(why("Error", Some(json!("ECONNRESET")))) };
+                let Some(l) = xenonet_service::lines::next_line(&mut self.out, &mut self.buf).await else { return Err(why("Error", Some(json!("ECONNRESET")))) };
                 let Ok(msg) = xenonet_base::json::parse(&l) else { continue };
                 // The server asking something of its own (roots, sampling):
                 // this client offers nothing.
@@ -266,7 +267,7 @@ fn open(how: &Value) -> Result<Box<dyn Channel>, Why> {
             }
             let mut child = cmd.spawn().map_err(|e| why("Error", xenonet_base::fs::code_of(&e).map(|c| json!(c))))?;
             let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else { return Err(why("Error", None)) };
-            Ok(Box::new(Stdio { child, stdin, lines: BufReader::new(stdout).lines(), id: 0 }))
+            Ok(Box::new(Stdio { child, stdin, out: BufReader::new(stdout), buf: Vec::new(), id: 0 }))
         }
         Some("http") => {
             let headers = how["headers"].as_object().map(|h| h.iter().map(|(k, v)| (k.clone(), xenonet_base::text::js_string(v))).collect()).unwrap_or_default();
