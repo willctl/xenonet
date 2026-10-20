@@ -172,10 +172,14 @@ export function createDriver(app) {
       calm = m.settled ? calm + 1 : 0;
       if (calm >= 3) {
         scene.wake();
-        await frame();
-        return { waitedMs: Math.round(performance.now() - t0) };
+        await drawn();
+        // Still settled once drawn; something that moved meanwhile is
+        // waited out too.
+        if (motion(scene).settled) return { waitedMs: Math.round(performance.now() - t0) };
+        calm = 0;
       }
       if (performance.now() - t0 > timeout) {
+        const m = motion(scene);
         const what = [m.layout && "the layout", m.camera && "the camera", m.moves && `${m.moves} gathering nodes`, m.theme && "a change of theme", m.transitions && `${m.transitions} CSS transitions`].filter(Boolean).join(", ");
         throw new Error(`still moving after ${timeout} ms: ${what}`);
       }

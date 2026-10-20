@@ -1044,9 +1044,13 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
   // moves go through `fly`, which notes when they end, and the frame loop
   // notes when the camera last moved for any other reason (a drag easing out).
   // Auto-rotation and wallpaper mode's drift are ambient and don't count.
+  // A fly counts until two frames are drawn after it ends: its last step
+  // lands on the first and is drawn on the second, which drawn in software
+  // can be a second or two later.
 
   let cameraUntil = 0;
   let cameraMovedAt = 0;
+  let sinceFly = 2;
   const lastCamera = new THREE.Vector3(), lastTarget = new THREE.Vector3();
   function fly(pos, look, ms) {
     cameraUntil = Math.max(cameraUntil, performance.now() + ms);
@@ -1055,7 +1059,7 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
   function motion() {
     const now = performance.now();
     const drifting = !still && (controls.autoRotate || !!wallpaper);
-    const cameraMoving = now < cameraUntil || (!drifting && now - cameraMovedAt < 150);
+    const cameraMoving = now < cameraUntil || sinceFly < 2 || (!drifting && now - cameraMovedAt < 150);
     // A change of theme counts until its new lines are placed.
     return { layout: engineRunning, camera: cameraMoving, moves: moves.size, theme: !!relinking, settled: !engineRunning && !cameraMoving && !moves.size && !relinking };
   }
@@ -1242,6 +1246,7 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
     const t = still ? STILL_T : ambientClock;
     const adt = still ? 0 : dt;
     if (camera.position.distanceToSquared(lastCamera) > 1e-6 || controls.target.distanceToSquared(lastTarget) > 1e-6) cameraMovedAt = performance.now();
+    sinceFly = performance.now() > cameraUntil ? sinceFly + 1 : 0;
     lastCamera.copy(camera.position);
     lastTarget.copy(controls.target);
     sky.material.uniforms.time.value = t;
