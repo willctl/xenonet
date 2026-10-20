@@ -1337,9 +1337,12 @@ li.pulse .feed-time { color: var(--gold); }
   background: var(--bg);
   transition: opacity 0.9s ease, visibility 0.9s;
 }
+/* It fades for 0.9 s, and visibility turns hidden only at the end: until
+   then it would still take clicks meant for the page that shows through. */
 .boot.done {
   opacity: 0;
   visibility: hidden;
+  pointer-events: none;
 }
 .boot-ring {
   width: 64px;
