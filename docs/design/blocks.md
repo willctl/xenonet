@@ -366,7 +366,10 @@ to change what XenoNet produces, and say so in the commit.
 The live tailer (`live.js`), a session's stats (`stats.js`) and search
 (`search.js`) read the same lines through the same normalizers, and
 share what they read alike: the line types, times, flags, a Claude line's
-tool results, text and usage, a Codex line's envelope. Wave 1 wrote up
+tool results, text and usage, a Codex line's envelope. They read each line
+as one stream of events (`core/events.js`, `line_events.rs`), as the
+refusals do: the mapper makes what they agree on, and each keeps its own
+way, below, over the events. Wave 1 wrote up
 where they read a line differently, and the owner decided at merge point
 A how they should agree. In Wave 2 they do, each change with its golden
 files:
