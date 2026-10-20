@@ -2,7 +2,9 @@
 // them when you connect your agents; see core/engine/connect.js). It passes
 // the event on to the running XenoNet and prints what XenoNet wants the agent to
 // hear, in the hook output format both read. If XenoNet isn't running, it
-// prints nothing and the agent carries on. XENONET_PORT says which XenoNet.
+// prints nothing and the agent carries on. XENONET_PORT says which XenoNet,
+// and --via=plugin marks the event as the copy XenoNet's plugin for Claude
+// Code sends, which XenoNet ignores while connect's own hook is there.
 export const help = `Passes a Claude Code or Codex hook event (JSON on stdin) to XenoNet and
 prints XenoNet's answer for the session. Their settings run it, so you don't
 need to.`;
@@ -15,7 +17,7 @@ export async function run([app], flags) {
   for await (const chunk of process.stdin) input += chunk;
   let out = "";
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/hook/${app}`, {
+    const res = await fetch(`http://127.0.0.1:${port}/api/hook/${app}${flags.via === "plugin" ? "?via=plugin" : ""}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: input || "{}",

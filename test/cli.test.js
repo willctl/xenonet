@@ -279,6 +279,19 @@ test("xenonet connect: shows what will change, needs a yes, then asks XenoNet to
   }
 });
 
+test("xenonet hook --via=plugin marks the event as the copy XenoNet's plugin for Claude Code sends", async () => {
+  const s = await fakeXenoNet({ "POST /api/hook/claude": () => [200, { systemMessage: "from XenoNet" }] });
+  try {
+    const r = await xenonet(["hook", "claude", `--port=${s.port}`, "--via=plugin"], { input: '{"hook_event_name":"SessionStart"}' });
+    assert.deepEqual([r.code, JSON.parse(r.stdout)], [0, { systemMessage: "from XenoNet" }]);
+    assert.deepEqual(s.seen.map((x) => [x.path, x.query, x.body]), [["/api/hook/claude", { via: "plugin" }, { hook_event_name: "SessionStart" }]]);
+    await xenonet(["hook", "claude", `--port=${s.port}`], { input: "{}" });
+    assert.deepEqual(s.seen[1].query, {}, "connect's own carry no mark");
+  } finally {
+    s.close();
+  }
+});
+
 test("xenonet connect --here: a XenoNet answering through a forwarded port is connected in this computer's settings, never by asking it", async () => {
   const s = await fakeXenoNet({ "GET /api/health": () => [200, health], "GET /api/engine/connect": () => [200, { port: 1, apps: [] }] });
   try {
