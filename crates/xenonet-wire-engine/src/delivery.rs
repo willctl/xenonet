@@ -315,6 +315,15 @@ impl RouterSide {
 /// and the ways in.
 pub struct RouterCalls<'a> {
     pub w: &'a World,
+    /// Who was listening when the message was sent, for a route that runs
+    /// after it (route()); None asks the engine now.
+    pub listening: Option<&'a [String]>,
+}
+
+impl<'a> RouterCalls<'a> {
+    pub fn of(w: &'a World) -> Self {
+        RouterCalls { w, listening: None }
+    }
 }
 
 fn windows() -> bool {
@@ -520,7 +529,7 @@ impl Calls for TmuxCalls {
 
 /// The router's own methods, as the engine and the hooks call them.
 pub fn router_call(w: &World, method: &str, args: &[Arg]) -> Result<Arg> {
-    let c = &mut RouterCalls { w };
+    let c = &mut RouterCalls::of(w);
     let r = &w.router.core;
     let x = |i| at(args, i);
     match method {
@@ -547,9 +556,11 @@ pub fn router_kind(method: &str) -> &'static str {
 }
 
 /// A message routed: each of its sessions' way in tried. What failed goes
-/// out as the router's error event.
-pub fn route(w: &World, m: &Arg) {
-    let mut c = RouterCalls { w };
+/// out as the router's error event. `listening` is who was listening when it
+/// was sent: the JS router routed in the same turn as the send, and here a
+/// listening hook can take the message and go before the route runs.
+pub fn route(w: &World, m: &Arg, listening: &[String]) {
+    let mut c = RouterCalls { w, listening: Some(listening) };
     if let Err(t) = w.router.core.route(&mut c, m) {
         w.emit(From::Delivery, "error", serde_json::json!({ "message": t.message }));
     }
@@ -557,12 +568,12 @@ pub fn route(w: &World, m: &Arg) {
 
 /// Messages the engine says a session has seen.
 pub fn seen(w: &World, agent: &Arg, ids: &[Arg]) {
-    let _ = w.router.core.seen(&mut RouterCalls { w }, agent, ids);
+    let _ = w.router.core.seen(&mut RouterCalls::of(w), agent, ids);
 }
 
 /// A hook from the session.
 pub fn contact(w: &World, agent: &Arg) {
-    let _ = w.router.core.contact(&mut RouterCalls { w }, agent);
+    let _ = w.router.core.contact(&mut RouterCalls::of(w), agent);
 }
 
 impl Calls for RouterCalls<'_> {
@@ -578,7 +589,10 @@ impl Calls for RouterCalls<'_> {
             }
             ("router.policy", m) => w.policy.as_call(m, &args),
             ("router.engine", "view") => self.engine().view(&x(0)),
-            ("router.engine.listening", "has") => Ok(Arg::Bool(w.mail.listening_has(&text(&x(0))))),
+            ("router.engine.listening", "has") => {
+                let id = text(&x(0));
+                Ok(Arg::Bool(self.listening.map_or_else(|| w.mail.listening_has(&id), |l| l.contains(&id))))
+            }
             ("router.engine.store", m) => crate::store::call(&w.store, m, &args),
             ("router.channels", "live") => Ok(Arg::Bool(w.channels.live(&text(&x(0))))),
             ("router.channels", "push") => Ok(Arg::Bool(w.channels.push(&text(&x(0)), x(1)))),
@@ -631,7 +645,7 @@ impl Calls for RouterCalls<'_> {
                 let k = key.clone();
                 let t = w.after(crate::js::num(&x(1)), move |w| {
                     w.router.timers.locked().remove(&k);
-                    let _ = w.router.core.expire(&mut RouterCalls { w }, &k);
+                    let _ = w.router.core.expire(&mut RouterCalls::of(w), &k);
                 });
                 if let Some(old) = w.router.timers.locked().insert(key, t) {
                     old.abort();
@@ -694,7 +708,7 @@ pub struct RouterDriver(pub std::sync::Arc<World>);
 
 impl Router for RouterDriver {
     fn usage(&self, app: &str) -> R<Value> {
-        Ok(json(&RouterCalls { w: &self.0 }.usage(&Arg::text(app))))
+        Ok(json(&RouterCalls::of(&self.0).usage(&Arg::text(app))))
     }
     fn list(&self, n: usize) -> R<Value> {
         Ok(Value::Array(self.0.router.list(n).iter().map(json).collect()))

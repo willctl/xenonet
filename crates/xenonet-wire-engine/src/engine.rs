@@ -275,7 +275,9 @@ pub fn told(w: &World, name: &str, payload: &Arg) {
         "message" => {
             w.emit(From::Engine, "message", json(payload));
             let m = payload.clone();
-            w.spawn_blocking(move |w| delivery::route(w, &m));
+            // Who is listening now, before the route below runs.
+            let listening: Vec<String> = list(payload.field("to")).iter().map(text).filter(|id| w.mail.listening_has(id)).collect();
+            w.spawn_blocking(move |w| delivery::route(w, &m, &listening));
             if let Some(wakes) = &w.wakes {
                 for r in list(payload.field("to")) {
                     wakes.arrived(w, &r);
