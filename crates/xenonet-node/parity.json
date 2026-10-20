@@ -1362,6 +1362,7 @@
     "test/mcp-actor.test.js",
     "test/mcp-info.test.js",
     "test/muse-observer.test.js",
+    "test/native-readers.test.js",
     "test/needs-you.test.js",
     "test/numbat.test.js",
     "test/observer.test.js",
