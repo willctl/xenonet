@@ -143,7 +143,8 @@ fn tailscales_status_and_funnels_settings_as_the_gateway_needs_them() {
 #[test]
 fn each_tool_is_found_on_path_and_where_its_usually_installed() {
     let sep = if cfg!(windows) { ";" } else { ":" };
-    let onpath = format!("/home/me/bin{}ngrok", std::path::MAIN_SEPARATOR);
+    // As path.join writes it on this machine, for the test to run anywhere.
+    let onpath = xenonet_base::paths::join("/home/me/bin", "ngrok");
     let files = ["/opt/homebrew/bin/ngrok".to_string(), "/usr/local/bin/ngrok".to_string(), onpath.clone()];
     let exists = |f: &str| files.iter().any(|x| x == f);
     assert_eq!(find_tools("ngrok", &format!("/home/me/bin{sep}/usr/bin"), None, "darwin", &exists), vec![onpath, "/opt/homebrew/bin/ngrok".into(), "/usr/local/bin/ngrok".into()]);
