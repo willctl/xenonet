@@ -208,11 +208,14 @@ fn field<'a>(v: &'a Value, k: &str) -> Js<'a> {
 /// Code reads as Codex.
 pub fn docs_from_line(raw: Value, app: &str, user_events: bool) -> Result<Vec<Doc>, TypeError> {
     let file = LineFile { items: !user_events, ..LineFile::default() };
+    // A record that isn't an object fails where search read it first.
     if app == "claude" {
         let o = ClaudeLine { raw };
+        o.kind()?;
         return docs_of(&line_events::claude(&o, &file));
     }
     let o = CodexLine { raw };
+    o.payload()?;
     docs_of(&line_events::codex(&o, &file))
 }
 

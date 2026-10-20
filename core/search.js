@@ -53,6 +53,8 @@ function docsOf(events) {
         if (e.origin === "event_msg:agent_message") return doc("assistant", String(e.parts ?? ""), e.t);
         if (e.origin === "response_item:message") return doc("assistant", textOf(e.parts), e.t);
         if (e.origin !== "assistant") break;
+        // A reply's blocks, which search reads as a list.
+        if (!Array.isArray(e.parts)) throw new TypeError("o.blocks.filter is not a function");
         const t = e.parts.filter((b) => b.type === "text").map((b) => b.text).join("\n");
         return t.trim() ? doc(e.sidechain ? "subagent" : "assistant", t, e.t) : [];
       }
@@ -93,6 +95,8 @@ function reaches(e) {
 export function docsFromLine(line, app, { userEvents = false } = {}) {
   const mapper = mapperOf(app, "codex");
   const o = line instanceof mapper.Line ? line : new mapper.Line(line);
+  // A record that isn't an object fails where search read it first.
+  void (o instanceof CodexLine ? o.payload : o.type);
   return docsOf(mapper.events(o, mapper.file({ items: !userEvents })));
 }
 
