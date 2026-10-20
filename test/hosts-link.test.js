@@ -292,7 +292,7 @@ test("ssh's arguments are fixed words and checked values, and the local relay ru
   assert.deepEqual(local.env, { PATH: "/usr/bin", HOME: "/Users/nova" });
   // By default, the checkout's own build; with none built yet, the JS
   // service runs the checkout's own relay on this Node.
-  assert.match(transport(hostEntry({ id: "xenonet", local: true, port: 47840 }), { root: "/src/xenonet", env: {} }).file, /^\/src\/xenonet\/target\/(release|debug)\/xenonet$/);
+  assert.match(transport(hostEntry({ id: "xenonet", local: true, port: 47840 }), { root: "/src/xenonet", env: {} }).file, /^\/src\/xenonet\/target\/(release|debug)\/xenonet(\.exe)?$/, "xenonet.exe on Windows");
   const checkout = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-link-checkout-"));
   try {
     fs.mkdirSync(path.join(checkout, "cli"));

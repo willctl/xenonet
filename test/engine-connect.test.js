@@ -187,14 +187,14 @@ test("an earlier XenoNet's entries, which ran Node and cli/xenonet.js, show as d
   assert.ok(after.apps.every((app) => !app.notes.some((n) => /earlier XenoNet/.test(n))));
   for (const file of [".claude/settings.json", ".codex/hooks.json"]) {
     const commands = hooksOf(file).filter((h) => h.type === "command" && h.command !== "my-own-stop-hook").map((h) => h.command);
-    assert.ok(commands.length && commands.every((c) => c.startsWith(`XENONET_PORT=47840 '${old}/xenonet' hook `)), commands.join(" | "));
+    assert.ok(commands.length && commands.every((c) => c.startsWith(`XENONET_PORT=47840 '${path.join(old, "xenonet")}' hook `)), commands.join(" | "));
   }
   assert.ok(hooksOf(".claude/settings.json").some((h) => h.command === "my-own-stop-hook"), "your own hooks stay");
   for (const app of ["claude", "codex"]) assert.deepEqual([servers[app].xenonet.command, servers[app].xenonet.args], [path.join(old, "xenonet"), ["mcp"]]);
 
   // Disconnecting takes either form out: the old one, written again here,
   // goes as the binary's does.
-  fs.writeFileSync(path.join(home, ".codex", "hooks.json"), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: `${node} hook codex` }, { type: "command", command: `XENONET_PORT=47840 '${old}/xenonet' hook codex` }] }] } }));
+  fs.writeFileSync(path.join(home, ".codex", "hooks.json"), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: `${node} hook codex` }, { type: "command", command: `XENONET_PORT=47840 '${path.join(old, "xenonet")}' hook codex` }] }] } }));
   await connect.remove();
   assert.deepEqual(hooksOf(".codex/hooks.json"), []);
   assert.deepEqual(hooksOf(".claude/settings.json").map((h) => h.command), ["my-own-stop-hook"]);
