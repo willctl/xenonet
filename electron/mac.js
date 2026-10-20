@@ -173,10 +173,11 @@ function removeAfterExit(dirs) {
   spawn("/bin/sh", ["-c", script, "sh", String(process.pid), ...dirs], { detached: true, stdio: "ignore" }).unref();
 }
 
-// Uninstall: stop opening at login, move XenoNet.app to the Trash, optionally
+// Uninstall: stop opening at login, move XenoNet.app to the Trash, stop the
+// service starting at login (`serviceAtLogin`, background.js), optionally
 // remove its data, and quit. `ask: false` is the scripted form
 // (`XenoNet --uninstall [--purge]`).
-export async function uninstall({ ask = true, purge = false, win = null, stop = () => {} } = {}) {
+export async function uninstall({ ask = true, purge = false, win = null, stop = () => {}, serviceAtLogin = null } = {}) {
   const bundle = bundlePath();
   if (!app.isPackaged || !bundle.endsWith(".app")) {
     if (ask) dialog.showErrorBox("Nothing to uninstall", "This copy of XenoNet runs from source. Delete the folder to remove it.");
@@ -187,7 +188,7 @@ export async function uninstall({ ask = true, purge = false, win = null, stop = 
     const { response, checkboxChecked } = await dialog.showMessageBox(win, {
       type: "warning",
       message: "Uninstall XenoNet Desktop?",
-      detail: "Desktop moves to the Trash and stops opening at login. The service and tools remain installed. Removing XenoNet data also stops the service and its terminals. Your Claude Code and Codex sessions, posters and clips are left alone.",
+      detail: "Desktop moves to the Trash and stops opening at login. The service and tools remain installed, but the service no longer starts at login, and if it started that way, it stops now. Removing XenoNet data also stops the service and its terminals. Your Claude Code and Codex sessions, posters and clips are left alone.",
       checkboxLabel: "Also remove my XenoNet data (saved layout, dismissed alerts, search index and settings)",
       buttons: ["Uninstall", "Cancel"],
       defaultId: 1,
@@ -212,6 +213,14 @@ export async function uninstall({ ask = true, purge = false, win = null, stop = 
     if (ask) dialog.showErrorBox("XenoNet couldn't move itself to the Trash", why);
     else console.error(`[xenonet] couldn't move ${bundle} to the Trash: ${why}`);
     return false;
+  }
+  // The launch agent runs the launcher in XenoNet's state folder, not this
+  // bundle, so it would go on starting the service at login: it's taken out
+  // too, while the launcher is still there to do it.
+  try {
+    await serviceAtLogin?.remove();
+  } catch (err) {
+    console.error(`[xenonet] couldn't stop the service starting at login: ${err.message ?? err}`);
   }
   if (purge) {
     // A step that fails is said, and the rest still run: the data goes, and
