@@ -73,7 +73,19 @@ export function createRecorder(getWindow, { onChange = () => {} } = {}) {
       const due = Math.floor(((Date.now() - startedAt) * fps) / 1000);
       for (let k = 0; frames < due && k < 4 && proc.stdin.writable; k++, frames++) proc.stdin.write(jpeg);
     }, 1000 / fps / 2);
-    rec = { proc, timer, file, startedAt, win, frames: () => frames, err: () => err, size: () => size0, before: keep ? null : before };
+    // A recording stopped before Chromium painted anything (a slow renderer)
+    // waits a little for the first frame and keeps it: ffmpeg can't make a
+    // film of none, and says only "Invalid argument".
+    const first = async (ms) => {
+      for (const end = Date.now() + ms; !latest && Date.now() < end; ) await sleep(50);
+      if (!latest && !win.isDestroyed()) latest = await win.webContents.capturePage(undefined, { stayHidden: true }).catch(() => null);
+      if (!latest || latest.isEmpty() || frames || !proc.stdin.writable) return;
+      jpeg ??= latest.toJPEG(92);
+      size0 ??= latest.getSize();
+      proc.stdin.write(jpeg);
+      frames = 1;
+    };
+    rec = { proc, timer, file, startedAt, win, first, frames: () => frames, err: () => err, size: () => size0, before: keep ? null : before };
     // The page draws every frame while it records (src/render-budget.js).
     onChange(true);
     return { file, fps, width, startedAt };
@@ -83,6 +95,10 @@ export function createRecorder(getWindow, { onChange = () => {} } = {}) {
     if (!rec) throw new Error("nothing is being recorded");
     const r = rec;
     rec = null;
+    if (!r.frames() && !r.win.isDestroyed()) {
+      r.win.webContents.invalidate();
+      await r.first(10000);
+    }
     onChange(false);
     clearInterval(r.timer);
     if (!r.win.isDestroyed()) {
