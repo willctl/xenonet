@@ -82,7 +82,8 @@ fn main_of(argv: &[String]) -> Done {
     let name = words.next().filter(|n| !n.is_empty()).map(|n| alias(&n).to_string());
     let args: Vec<String> = words.collect();
     if flags.on("version") {
-        print(if flags.on("json") { xenonet_base::json::stringify(&json!({ "version": VERSION }), 0) } else { format!("xenonet {VERSION}") });
+        let version = sys::version(VERSION);
+        print(if flags.on("json") { xenonet_base::json::stringify(&json!({ "version": version }), 0) } else { format!("xenonet {version}") });
         return Ok(0);
     }
     // What this binary is as installed XenoNet's launcher, a copy of the

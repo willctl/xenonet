@@ -12,7 +12,7 @@
 //! staged component's startup check), "now", "pause", and "alive" for the
 //! install lock.
 
-use crate::packages::{current_component, lock, newer, node_name, select_component, stage_package, unlock};
+use crate::packages::{current_component, lock, newer, select_component, stage_package, unlock};
 use crate::runtime::{bin_name, launcher_bin, runtime_dir, Env, Machine};
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -22,15 +22,30 @@ use xenonet_app::nodepath::NATIVE;
 use xenonet_app::task::{Failure, Io};
 use xenonet_base::text::js_string;
 
-/// What installing needs to know of the machine besides an env: the
-/// launcher script this XenoNet ships, and where the xenonet command goes.
+/// What installing needs to know of the machine besides an env: where the
+/// xenonet command goes.
 #[derive(Clone, Debug)]
 pub struct Ctx {
     pub machine: Machine,
-    pub launcher_source: String,
     /// process.env's LOCALAPPDATA, which the command's folder follows on
     /// Windows.
     pub local_app_data: Option<String>,
+}
+
+/// The node launcher script this XenoNet ships
+/// (core/components/launcher.cjs), built in, so a package needs none of
+/// XenoNet's JS beside its binary. It runs the Tools' binary for entries an
+/// earlier XenoNet wrote (docs/design/contracts.md, section 12).
+pub const LAUNCHER_SCRIPT: &str = include_str!("../../../core/components/launcher.cjs");
+
+// The node an earlier XenoNet copied into the launcher's folder, which the
+// entries it wrote run.
+fn earlier_node(platform: &str) -> &'static str {
+    if platform == "win32" {
+        "node.exe"
+    } else {
+        "node"
+    }
 }
 
 /// The version a launcher script says it is: 1 for the one before it
@@ -109,9 +124,9 @@ pub fn write_launcher_bin(tools: &Value, to: &str, platform: &str) -> bool {
 
 /// The launcher, in the runtime folder, which never moves (hooks, MCP
 /// servers and the xenonet command run its path): the Tools' xenonet
-/// binary, copied; and, while the Tools carry a node, the node and the
-/// launcher script that entries an earlier XenoNet wrote run. None without
-/// Tools.
+/// binary, copied. A node launcher an earlier XenoNet put beside it, which
+/// the entries it wrote still run, gets this XenoNet's script, which runs
+/// the binary; XenoNet never puts a node there itself. None without Tools.
 pub fn install_launcher(env: &Env, ctx: &Ctx) -> Result<Option<Value>, Failure> {
     let m = &ctx.machine;
     let Some(tools) = current_component("tools", env, m)? else { return Ok(None) };
@@ -119,26 +134,12 @@ pub fn install_launcher(env: &Env, ctx: &Ctx) -> Result<Option<Value>, Failure> 
     let bin = launcher_bin(env, m);
     fsx::mkdir_p(&dir, None)?;
     write_launcher_bin(&tools, &bin, &m.platform);
-    let node = NATIVE.join(&[&js_string(&tools["root"]), node_name(&m.platform)]);
-    let (mut runtime, mut entry) = (Value::Null, Value::Null);
-    if fsx::exists(&node) {
-        let e = NATIVE.join(&[&dir, "cli", "xenonet.js"]);
-        let r = NATIVE.join(&[&dir, node_name(&m.platform)]);
-        fsx::mkdir_p(&NATIVE.dirname(&e), None)?;
-        if !fsx::exists(&r) {
-            std::fs::copy(&node, &r).map_err(|err| FsError::of(err, "copyfile", &node))?;
-        }
-        #[cfg(unix)]
-        if m.platform != "win32" {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&r, std::fs::Permissions::from_mode(0o755)).map_err(|err| FsError::of(err, "chmod", &r))?;
-        }
-        let source = fsx::read_text(&ctx.launcher_source)?;
-        write_launcher(&e, &source)?;
-        (runtime, entry) = (json!(r), json!(e));
+    let entry = NATIVE.join(&[&dir, "cli", "xenonet.js"]);
+    if fsx::exists(&NATIVE.join(&[&dir, earlier_node(&m.platform)])) && fsx::exists(&entry) {
+        write_launcher(&entry, LAUNCHER_SCRIPT)?;
     }
     let bin = if fsx::exists(&bin) { json!(bin) } else { Value::Null };
-    Ok(Some(json!({ "bin": bin, "runtime": runtime, "entry": entry, "root": dir, "runAsNode": false })))
+    Ok(Some(json!({ "bin": bin, "root": dir })))
 }
 
 // Runs a program as spawnSync did: its output, and its exit code (None if
@@ -176,28 +177,25 @@ fn run_sync(file: &str, args: &[String], cwd: &str, timeout: Duration) -> (Optio
     (status, reader.join().unwrap_or_default())
 }
 
-/// The startup check of a staged runtime: its node itself, run without
-/// ELECTRON_RUN_AS_NODE, loads XenoNet's native modules, and its command
-/// says the version it was promised.
+/// The startup check of a staged component: its xenonet binary runs,
+/// without ELECTRON_RUN_AS_NODE, and says the version it was promised.
 pub fn check_runtime(staged: &Value, platform: &str) -> Result<(), Failure> {
     let root = js_string(staged.get("root").unwrap_or(&Value::Null));
-    let runtime = NATIVE.join(&[&root, node_name(platform)]);
-    let t = Duration::from_secs(15);
-    let probe = "await import('node:sqlite'); await import('@lydell/node-pty'); await import('@modelcontextprotocol/server'); await import('tar'); process.stdout.write('ok')";
-    let (status, out) = run_sync(&runtime, &["--input-type=module".into(), "-e".into(), probe.into()], &root, t);
-    if status != Some(0) || out != "ok" {
+    let bin = NATIVE.join(&[&root, "bin", bin_name(platform)]);
+    let (status, out) = run_sync(&bin, &["--version".into(), "--json".into()], &root, Duration::from_secs(15));
+    let version = xenonet_base::json::parse(&out).ok().and_then(|v| v.get("version").cloned()).filter(|v| !v.is_null());
+    if status != Some(0) || version.is_none() {
         return Err(Failure::msg("The new component runtime did not pass its startup check."));
     }
-    let (status, out) = run_sync(&runtime, &[NATIVE.join(&[&root, "cli/xenonet.js"]), "--version".into(), "--json".into()], &root, t);
-    let version = xenonet_base::json::parse(&out).ok().and_then(|v| v.get("version").cloned());
-    if status != Some(0) || version.as_ref() != staged.get("version") || version.is_none() {
+    if version.as_ref() != staged.get("version") {
         return Err(Failure::msg("The new component command did not pass its startup check."));
     }
     Ok(())
 }
 
-/// How to start the selected service: its runtime, and the env it runs
-/// with (the runtime folder, and the launcher when there is one).
+/// How to start the selected service: its xenonet binary, with `serve`,
+/// and the env it runs with (the runtime folder, and the launcher's binary
+/// when there is one).
 pub fn installed_runtime(env: &Env, ctx: &Ctx) -> Result<Value, Failure> {
     let m = &ctx.machine;
     let Some(service) = current_component("service", env, m)? else { return Err(Failure::msg("XenoNet Service is not installed. Use the bundle installer.")) };
@@ -205,16 +203,10 @@ pub fn installed_runtime(env: &Env, ctx: &Ctx) -> Result<Value, Failure> {
     let root = js_string(&service["root"]);
     let mut run_env = env.clone();
     run_env.insert("XENONET_RUNTIME_DIR".into(), json!(runtime_dir(env, m)));
-    if let Some(l) = &launcher {
-        if !l["bin"].is_null() {
-            run_env.insert("XENONET_LAUNCHER_BIN".into(), l["bin"].clone());
-        }
-        if !l["runtime"].is_null() {
-            run_env.insert("XENONET_LAUNCHER_EXEC".into(), l["runtime"].clone());
-            run_env.insert("XENONET_LAUNCHER_ROOT".into(), l["root"].clone());
-        }
+    if let Some(bin) = launcher.as_ref().map(|l| &l["bin"]).filter(|b| !b.is_null()) {
+        run_env.insert("XENONET_LAUNCHER_BIN".into(), bin.clone());
     }
-    Ok(json!({ "root": root, "exec": NATIVE.join(&[&root, node_name(&m.platform)]), "env": run_env }))
+    Ok(json!({ "root": root, "exec": NATIVE.join(&[&root, "bin", bin_name(&m.platform)]), "args": ["serve"], "env": run_env }))
 }
 
 fn journal_file(env: &Env, m: &Machine) -> String {
@@ -499,5 +491,6 @@ mod tests {
         assert_eq!(launcher_version(Some("// xenonet-launcher 7\nrest")), 7.0);
         assert_eq!(launcher_version(Some("// an old one")), 1.0);
         assert_eq!(launcher_version(None), 0.0);
+        assert_eq!(launcher_version(Some(LAUNCHER_SCRIPT)), 3.0, "the script built in");
     }
 }

@@ -698,7 +698,11 @@ keeps the counts. Desktop runs `xenonet serve` and nothing else
 (`electron/service-runtime.js`): the installed Service's `bin/xenonet`,
 or in XenoNet Dev the checkout's newer build of `target/debug` and
 `target/release`. With no binary it stops and says how to get one. The
-Service and Tools packages carry the binary as `bin/xenonet`. XenoNet
+Service and Tools packages are the binary, as `bin/xenonet`, with no Node
+runtime or JS beside it (`scripts/component-build.mjs`); the binary has
+the node launcher script built in, for entries an earlier XenoNet wrote.
+A package's startup check runs `bin/xenonet --version --json`, which says
+the version in the package's `package.json`. XenoNet
 Dev's page still hot-reloads, through Vite in Desktop's own frontend
 server (`electron/desktop-server.js`), and it restarts its service when
 the binary is rebuilt.

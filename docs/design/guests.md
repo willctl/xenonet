@@ -86,8 +86,9 @@ release installs.
 
 - The provisioner downloads the Service and Tools archives for the guest's
   operating system and CPU from one release, checks them against
-  `SHA256SUMS.txt`, and runs `./node cli/xenonet.js setup` for each, as
-  `components.md` says. Each archive carries its own Node.
+  `SHA256SUMS.txt`, and runs `./bin/xenonet setup` for each, as
+  `components.md` says. Each archive is the `xenonet` binary for that
+  system, so the guest needs no Node.
 - The Service runs as a systemd user unit in the guest. Lingering keeps it
   running when nobody is signed in. Where there is no systemd, as in most
   containers, the backend's `up` starts it.

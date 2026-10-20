@@ -233,7 +233,7 @@ impl Context {
             // XenoNet asked about (XenoNet Dev's for its port).
             let name = (self.port == f64::from(xenonet_base::client::DEV_PORT)).then_some("XenoNet Dev");
             let paths = crate::doctor::paths_for(name);
-            let r = tokio::task::spawn_blocking(move || crate::doctor::checkup_here(&paths, None, &crate::doctor::launcher_source())).await.map_err(|e| e.to_string())?;
+            let r = tokio::task::spawn_blocking(move || crate::doctor::checkup_here(&paths, None)).await.map_err(|e| e.to_string())?;
             return Ok(doctor_text(&r));
         };
         let name = s.health.get("name").filter(|n| !n.is_null()).map_or_else(|| "XenoNet".to_string(), |n| n.as_str().map_or_else(|| js_string(n), str::to_string));

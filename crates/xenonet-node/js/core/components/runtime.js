@@ -40,9 +40,9 @@ export async function connectService({ env = process.env, role = "tools", handle
   }
 }
 
-export function ensureService({ root, exec, env = process.env, timeout = 60000 }) {
+export function ensureService({ root, exec, args = null, env = process.env, timeout = 60000 }) {
   let failure;
-  return drive(native.compEnsureService(String(root), String(exec), envOf(env), Number(timeout), machine()), async (q) => {
+  return drive(native.compEnsureService(String(root), String(exec), args, envOf(env), Number(timeout), machine()), async (q) => {
     if (q.op === "connect") {
       const c = await connectService({ env });
       c.close();

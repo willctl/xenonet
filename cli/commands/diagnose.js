@@ -45,7 +45,7 @@ export async function gather(flags = {}) {
   return {
     stateDir,
     bundle: makeBundle({
-      xenonet: { version: s?.health?.version ?? version, instance: s?.health?.instance ?? (flags.dev ? "dev" : null), packaged: !!process.env.XENONET_LAUNCHER_EXEC, running: !!s },
+      xenonet: { version: s?.health?.version ?? version, instance: s?.health?.instance ?? (flags.dev ? "dev" : null), packaged: !!(process.env.XENONET_LAUNCHER_BIN || process.env.XENONET_LAUNCHER_EXEC), running: !!s },
       doctor,
       errors: readLogs(logDir(stateDir), { since: Date.now() - 24 * 3600e3, level: "warn" }),
       connect,

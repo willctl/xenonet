@@ -71,18 +71,51 @@ pub fn tilde(p: &str) -> String {
 }
 
 /// XenoNet's own folder, beside the command: the first of the folders the
-/// binary is in, and those above it, with XenoNet's package.json (a
-/// checkout's, for target/debug/xenonet), else the binary's own folder. It
-/// stands for the JS's ROOT, the folder its code is in.
+/// binary is in, and those above it, with XenoNet's package.json and either
+/// cli/ (a checkout's, for target/debug/xenonet) or component.json (a
+/// Service or Tools package's, for bin/xenonet), else the binary's own
+/// folder. It stands for the JS's ROOT, the folder its code is in.
 pub fn xenonet_root() -> String {
     let exe = std::env::current_exe().unwrap_or_default();
     exe.ancestors()
         .skip(1)
         .take(5)
-        .find(|d| d.join("package.json").is_file() && d.join("cli").is_dir())
+        .find(|d| d.join("package.json").is_file() && (d.join("cli").is_dir() || d.join("component.json").is_file()))
         .or_else(|| exe.parent())
         .map(|d| d.to_string_lossy().into_owned())
         .unwrap_or_default()
+}
+
+/// Whether this is installed Tools' command, whose console operator drives
+/// installed XenoNet only: as it was built (package.json's
+/// xenonetComponent), the Tools package's binary (the package.json beside
+/// it says so), or the launcher's copy of that binary, which hooks and MCP
+/// entries run and which has a `.from` file beside it naming the Tools it
+/// was copied from (docs/design/contracts.md, section 12). One binary goes
+/// in a checkout, the Service and the Tools.
+pub fn installed_tools() -> bool {
+    if crate::commands::console::INSTALLED {
+        return true;
+    }
+    let exe = std::env::current_exe().unwrap_or_default();
+    if exe.file_name().is_some_and(|n| exe.with_file_name(format!("{}.from", n.to_string_lossy())).is_file()) {
+        return true;
+    }
+    std::fs::read_to_string(std::path::Path::new(&xenonet_root()).join("package.json"))
+        .ok()
+        .and_then(|t| xenonet_base::json::parse(&t).ok())
+        .is_some_and(|p| p.get("xenonetComponent").and_then(serde_json::Value::as_str) == Some("tools"))
+}
+
+/// XenoNet's version as the package.json in its own folder says, as the
+/// JS's was: in a Service or Tools package, that component's version, which
+/// a package's startup check asks for. Else the version it was built as.
+pub fn version(built: &str) -> String {
+    std::fs::read_to_string(std::path::Path::new(&xenonet_root()).join("package.json"))
+        .ok()
+        .and_then(|t| xenonet_base::json::parse(&t).ok())
+        .and_then(|p| p.get("version").and_then(serde_json::Value::as_str).map(str::to_string))
+        .unwrap_or_else(|| built.to_string())
 }
 
 #[cfg(test)]

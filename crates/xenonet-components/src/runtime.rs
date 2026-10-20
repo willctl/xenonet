@@ -101,13 +101,23 @@ pub fn hello(token: &str, role: &str) -> Value {
     json!({ "token": token, "role": role, "api": crate::protocol::api_value(crate::protocol::SERVICE_API) })
 }
 
+/// What the service's binary runs with: `args` when they're given, else
+/// `serve`.
+pub fn service_args(args: Option<&Value>) -> Vec<String> {
+    match args {
+        Some(Value::Array(a)) => a.iter().map(xenonet_base::text::js_string).collect(),
+        _ => vec!["serve".into()],
+    }
+}
+
 /// Starts the service unless one answers: "reused", or "started" once
 /// the one started answers. It runs detached, as a standalone service, its
-/// output in the runtime folder's service log.
+/// output in the runtime folder's service log: `exec` (the xenonet binary)
+/// with `args`, in `root`.
 ///
 /// Asks: { op: "connect" } (connect and close again), { op: "spawn", … }
 /// and { op: "failure" } (throws what the child's exit or error was).
-pub async fn ensure_service(io: &Io, root: &str, exec: &str, env: &Env, timeout: f64, m: &Machine) -> Result<Value, Failure> {
+pub async fn ensure_service(io: &Io, root: &str, exec: &str, args: &[String], env: &Env, timeout: f64, m: &Machine) -> Result<Value, Failure> {
     match io.ask(json!({ "op": "connect", "env": env })).await {
         Ok(_) => return Ok(json!("reused")),
         Err(e) => {
@@ -123,9 +133,7 @@ pub async fn ensure_service(io: &Io, root: &str, exec: &str, env: &Env, timeout:
     child_env.insert("XENONET_STANDALONE".into(), json!("1"));
     child_env.shift_remove("ELECTRON_RUN_AS_NODE");
     child_env.shift_remove("XENONET_EXEC");
-    io.ask(json!({ "op": "spawn", "command": exec, "args": [NATIVE.join(&[root, "server", "index.js"])], "cwd": root, "env": child_env, "log": log }))
-        .await
-        .map_err(|_| Failure::Rethrow)?;
+    io.ask(json!({ "op": "spawn", "command": exec, "args": args, "cwd": root, "env": child_env, "log": log })).await.map_err(|_| Failure::Rethrow)?;
     let until = now_ms() + timeout;
     while now_ms() < until {
         if io.ask(json!({ "op": "connect", "env": env })).await.is_ok() {

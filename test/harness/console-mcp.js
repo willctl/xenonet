@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
 import { command as xenonet } from "./xenonet-bin.js";
 
-// xenonet mcp console: through the given runtime and entry (an installed
-// launcher's), or as the tests run xenonet.
-export async function consoleMcp({ command, entry, env }) {
-  const [file, args] = command || entry ? [command ?? process.execPath, [entry ?? "cli/xenonet.js", "mcp", "console"]] : xenonet(["mcp", "console"]);
+// xenonet mcp console: through the given binary (an installed launcher's),
+// or as the tests run xenonet.
+export async function consoleMcp({ bin, env }) {
+  const [file, args] = bin ? [bin, ["mcp", "console"]] : xenonet(["mcp", "console"]);
   const proc = spawn(file, args, { env: { ...env, XENONET_INSTANCE: "installed" }, stdio: ["pipe", "pipe", "inherit"], windowsHide: true });
   const pending = new Map();
   let buffer = "", seq = 0;

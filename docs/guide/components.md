@@ -8,7 +8,7 @@ XenoNet has three installed parts:
 | Service | Tracks and coordinates sessions, stores state and runs terminal processes. |
 | Tools | Provides the `xenonet` command, the hooks sessions run and both MCP servers. |
 
-The bundle installer includes all three. Service and Tools also have separate downloads for Windows x64, macOS arm64 and x64, and Linux x64. Each includes its Node runtime. You do not need to install Node.
+The bundle installer includes all three. Service and Tools also have separate downloads for Windows x64, macOS arm64 and x64, and Linux x64. Each is the `xenonet` binary for that system, in `bin/`. You do not need to install Node.
 
 Closing or updating Desktop leaves the service, terminals and connected MCP processes running. Reopening Desktop restores terminal tabs and recent output. Terminal output stays in memory. A service restart ends its terminals. If terminals are running, XenoNet downloads the service update but leaves it uninstalled. Close the terminals and choose Update again to install it.
 
@@ -19,10 +19,10 @@ Download and extract the Service and Tools archives for your operating system an
 From each extracted folder, run:
 
 ```sh
-./node cli/xenonet.js setup
+./bin/xenonet setup
 ```
 
-On Windows, use `./node.exe cli/xenonet.js setup`. Either component can be installed first. Tools installs the `xenonet` command. Start the service with `xenonet service start`; `xenonet service status` reports its version and running terminals. `xenonet service stop` refuses while terminals are running. `--force` stops them too.
+On Windows, use `bin\xenonet.exe setup`. Either component can be installed first. Tools installs the `xenonet` command. Start the service with `xenonet service start`; `xenonet service status` reports its version and running terminals. `xenonet service stop` refuses while terminals are running. `--force` stops them too.
 
 The service runs as your account, independently of Desktop. It stays running until stopped or you sign out. Opening Desktop starts it when needed. On macOS and Linux, `xenonet service install` has it start at login instead, and start again if it stops unexpectedly, under launchd or systemd. `xenonet service uninstall` turns that off. See [Keeping the service running](always-on.md).
 

@@ -12,8 +12,9 @@ use serde_json::Value;
 
 pub const HELP: &str = include_str!("help/console.txt");
 
-/// Whether this is the Tools package's command, which drives installed
-/// XenoNet unless told otherwise (package.json's xenonetComponent).
+/// Whether this was built as the Tools package's command (package.json's
+/// xenonetComponent); sys::installed_tools also asks the package and the
+/// launcher.
 pub const INSTALLED: bool = matches!(env!("XENONET_COMPONENT").as_bytes(), b"tools");
 
 /// A step's word, as the command prints it: text as it is, anything else
@@ -26,7 +27,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
     if args.is_empty() {
         return Err(Fail::new("say what to do: xenonet console <steps…>; xenonet console --help lists the steps", 2));
     }
-    let instance = flags.text("instance").or_else(|| sys::var("XENONET_INSTANCE")).unwrap_or_else(|| (if INSTALLED { "installed" } else { "demo" }).into());
+    let instance = flags.text("instance").or_else(|| sys::var("XENONET_INSTANCE")).unwrap_or_else(|| (if sys::installed_tools() { "installed" } else { "demo" }).into());
     let steps: Vec<Value> = args.iter().map(|a| Value::String(a.clone())).collect();
     cores::run_script(&instance, &steps, &mut |v| print(said(v)))?;
     Ok(0)

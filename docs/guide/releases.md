@@ -19,7 +19,7 @@ The Release workflow runs unit tests on Windows, macOS and Linux and the updater
 
 Installer builds run alongside the hosted checks on Windows and macOS. Vite produces the production page; electron-builder bundles the runtime and production dependencies, with maximum archive compression and only the required terminal module for each CPU. Existing package checks reject the builder's home path in bundled text.
 
-Each Mac architecture has a bundle disk image and a Desktop-only ZIP. Windows has a bundle installer and a Desktop-only installer; `latest.yml` must point to the latter. Each component archive includes a pinned Node runtime whose download is checked against Node's official SHA-256 list. The component build uses fixed archive timestamps. Assembly checks the manifest's version, file size and SHA-512 hash before it combines the Mac manifests. It verifies every Service and Tools archive for all supported targets, writes `components.json`, then writes SHA-256 checksums. No build job publishes files directly.
+Each Mac architecture has a bundle disk image and a Desktop-only ZIP. Windows has a bundle installer and a Desktop-only installer; `latest.yml` must point to the latter. Each component archive holds the `xenonet` binary built for its platform and CPU, with no Node runtime or JS beside it: the Service adds the built page it serves, and both add the schemas the binary reads the apps' data against. The component build uses fixed archive timestamps. Assembly checks the manifest's version, file size and SHA-512 hash before it combines the Mac manifests. It verifies every Service and Tools archive for all supported targets, writes `components.json`, then writes SHA-256 checksums. No build job publishes files directly.
 
 ## Publish
 

@@ -856,7 +856,7 @@ async function api(req, res, url) {
   if (route === "/api/diagnose" || route === "/api/diagnose/ask") {
     const bundle = async () =>
       makeBundle({
-        xenonet: { version: VERSION, instance: INSTANCE, packaged: !!process.env.XENONET_LAUNCHER_EXEC, running: true },
+        xenonet: { version: VERSION, instance: INSTANCE, packaged: !!(process.env.XENONET_LAUNCHER_BIN || process.env.XENONET_LAUNCHER_EXEC), running: true },
         doctor: doctor.last,
         errors: config.demo ? [] : readLogs(logDir(config.stateDir), { since: Date.now() - 24 * 3600e3, level: "warn" }),
         connect: config.demo ? null : await connect.preview().catch(() => null),
