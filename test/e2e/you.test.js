@@ -14,6 +14,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { xenonet } from "../../core/control.js";
+import { limit } from "../harness/software.js";
 
 const port = await new Promise((resolve) => {
   const probe = net.createServer().listen(0, "127.0.0.1", () => {
@@ -62,7 +63,7 @@ before(async () => {
   // One test instance at a time (it has a single-instance lock).
   await xenonet("test").quit();
   await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
-}, { timeout: 180000 });
+}, { timeout: limit(180000) });
 
 after(async () => {
   if (process.env.XENONET_E2E_KEEP === "1") return;
@@ -70,7 +71,7 @@ after(async () => {
   fs.rmSync(path.join(fs.realpathSync.native(os.tmpdir()), `xenonet-demo-${port}`), { recursive: true, force: true, maxRetries: 10 });
 });
 
-test("a selection that holds becomes what you're doing, in XenoNet's words", { timeout: 60000 }, shoot("you-looked", async () => {
+test("a selection that holds becomes what you're doing, in XenoNet's words", { timeout: limit(60000) }, shoot("you-looked", async () => {
   await home();
   const atlas = await findOne("atlas-api", "project");
   const since = Date.now();
@@ -84,7 +85,7 @@ test("a selection that holds becomes what you're doing, in XenoNet's words", { t
   assert.equal((await s.driver("state")).errors, 0, JSON.stringify(await s.driver("errors")));
 }));
 
-test("reading a session's stats is reading the session, and its title never leaves it", { timeout: 60000 }, shoot("you-read", async () => {
+test("reading a session's stats is reading the session, and its title never leaves it", { timeout: limit(60000) }, shoot("you-read", async () => {
   await home();
   const session = await findOne("partial refunds", "session");
   const since = Date.now();
@@ -97,7 +98,7 @@ test("reading a session's stats is reading the session, and its title never leav
   await home();
 }));
 
-test("what you type into the palette never reaches XenoNet", { timeout: 60000 }, shoot("you-typed", async () => {
+test("what you type into the palette never reaches XenoNet", { timeout: limit(60000) }, shoot("you-typed", async () => {
   await home();
   const since = Date.now();
   await s.input({ keys: "Mod+K" });
@@ -111,7 +112,7 @@ test("what you type into the palette never reaches XenoNet", { timeout: 60000 },
   assert.doesNotMatch(JSON.stringify(events), /zebra|quartz|secret/);
 }));
 
-test("your reports take the window's key, which only the window has, and never in a URL", { timeout: 30000 }, shoot("you-key", async () => {
+test("your reports take the window's key, which only the window has, and never in a URL", { timeout: limit(30000) }, shoot("you-key", async () => {
   const outside = await fetch(`${s.base}/api/actors/you`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ presence: "working" }) });
   assert.equal(outside.status, 403, "a program without the key is refused");
   assert.equal((await outside.json()).code, "yours");

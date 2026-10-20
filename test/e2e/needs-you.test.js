@@ -17,6 +17,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { xenonet } from "../../core/control.js";
+import { limit } from "../harness/software.js";
 
 const port = await new Promise((resolve) => {
   const probe = net.createServer().listen(0, "127.0.0.1", () => {
@@ -69,7 +70,7 @@ before(async () => {
   await xenonet("test").quit();
   await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
   cursor = (await s.logs({ limit: 1 })).cursor ?? 0;
-}, { timeout: 180000 });
+}, { timeout: limit(180000) });
 
 after(async () => {
   if (process.env.XENONET_E2E_KEEP === "1") return;
@@ -81,7 +82,7 @@ after(async () => {
 let heron = null;
 let osprey = null;
 
-test("a question, an actor and programs asking to join wait in one queue, the longest wait first", { timeout: 60000 }, shoot("needs-you-queue", async () => {
+test("a question, an actor and programs asking to join wait in one queue, the longest wait first", { timeout: limit(60000) }, shoot("needs-you-queue", async () => {
   // The demo's own question, which waits from before XenoNet starts. A
   // simulated one can go again as the demo's session moves on.
   const standing = await until(async () => (await queue()).items.find((it) => it.kind === "question"));
@@ -139,7 +140,7 @@ test("a question, an actor and programs asking to join wait in one queue, the lo
   assert.equal(st.overlays.needsYou, true, "the palette's command opens it");
 }));
 
-test("Show selects an actor, ✓ dismisses a session's wait, and a demo session can't open in an app", { timeout: 60000 }, shoot("needs-you-answer", async () => {
+test("Show selects an actor, ✓ dismisses a session's wait, and a demo session can't open in an app", { timeout: limit(60000) }, shoot("needs-you-answer", async () => {
   const q = await queue();
   const question = q.items.find((it) => it.kind === "question" && it.actions.includes("dismiss"));
   assert.ok(question, "a question to dismiss");
@@ -158,7 +159,7 @@ test("Show selects an actor, ✓ dismisses a session's wait, and a demo session 
   await s.driver("select", null);
 }));
 
-test("a real click on Deny keeps one program out, and on Allow, once ready, lets another in", { timeout: 60000 }, shoot("needs-you-decide", async () => {
+test("a real click on Deny keeps one program out, and on Allow, once ready, lets another in", { timeout: limit(60000) }, shoot("needs-you-decide", async () => {
   await s.driver("needsYou", "open");
   await clickOn(`[data-ny-deny="request:${heron.request}"]`);
   assert.ok(await until(async () => !(await queue()).items.some((it) => it.key === `request:${heron.request}`)), "Heron no longer waits");
@@ -181,7 +182,7 @@ test("a real click on Deny keeps one program out, and on Allow, once ready, lets
   await s.eval(`return (async () => { const key = await window.xenonetDesktop.windowKey(); return (await fetch("/api/actors/${osprey.a.slice(6)}", { method: "DELETE", headers: { "x-xenonet-window": key } })).status; })()`);
 }));
 
-test("no page errors along the way", { timeout: 30000 }, async () => {
+test("no page errors along the way", { timeout: limit(30000) }, async () => {
   const { entries } = await s.logs({ since: cursor, level: "error", source: "page" });
   assert.deepEqual(entries.map((e) => e.text), []);
   assert.deepEqual(await s.driver("errors"), []);

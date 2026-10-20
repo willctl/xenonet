@@ -2,13 +2,14 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import net from "node:net";
 import { xenonet } from "../../core/control.js";
+import { limit } from "../harness/software.js";
 
 const port = await new Promise((resolve) => { const p = net.createServer().listen(0, "127.0.0.1", () => { const port = p.address().port; p.close(() => resolve(port)); }); });
 const s = xenonet("test", { port });
-before(async () => { await xenonet("test").quit(); await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" }); }, { timeout: 180000 });
+before(async () => { await xenonet("test").quit(); await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" }); }, { timeout: limit(180000) });
 after(async () => { await s.quit().catch(() => {}); });
 
-test("focusing an MCP system shows metadata; tools and context are accessible without execution", { timeout: 60000 }, async () => {
+test("focusing an MCP system shows metadata; tools and context are accessible without execution", { timeout: limit(60000) }, async () => {
   await s.driver("select", "resource:reference-library");
   const st = await s.driver("mcp", "resource:reference-library");
   assert.equal(st.mcp.info.author, "XenoNet demo");
@@ -27,7 +28,7 @@ test("focusing an MCP system shows metadata; tools and context are accessible wi
   await s.input({ keys: "Escape" });
 });
 
-test("all environments draw across themes, persist independently, and never reload the page", { timeout: 180000 }, async () => {
+test("all environments draw across themes, persist independently, and never reload the page", { timeout: limit(180000) }, async () => {
   const origin = await s.eval("return performance.timeOrigin");
   for (const theme of ["xenonet", "phosphor", "ochre"]) {
     await s.driver("theme", theme);
@@ -46,7 +47,7 @@ test("all environments draw across themes, persist independently, and never relo
   assert.deepEqual(entries, []);
 });
 
-test("the environment cards preview with keyboard, cancel with Escape, and keep with Enter", { timeout: 60000 }, async () => {
+test("the environment cards preview with keyboard, cancel with Escape, and keep with Enter", { timeout: limit(60000) }, async () => {
   await s.driver("environment", "nebula");
   await s.driver("environmentPicker");
   await s.input({ keys: "ArrowRight" });

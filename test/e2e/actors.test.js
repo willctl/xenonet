@@ -21,6 +21,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { xenonet } from "../../core/control.js";
+import { limit } from "../harness/software.js";
 
 const port = await new Promise((resolve) => {
   const probe = net.createServer().listen(0, "127.0.0.1", () => {
@@ -109,7 +110,7 @@ before(async () => {
   await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
   ({ current: first } = await s.driver("themes"));
   ({ cursor } = await s.logs({ limit: 1 }));
-}, { timeout: 180000 });
+}, { timeout: limit(180000) });
 
 after(async () => {
   if (process.env.XENONET_E2E_KEEP === "1") return;
@@ -117,7 +118,7 @@ after(async () => {
   fs.rmSync(path.join(fs.realpathSync.native(os.tmpdir()), `xenonet-demo-${port}`), { recursive: true, force: true, maxRetries: 10 });
 });
 
-test("the demo's actors are drawn on a layer of their own, with beams into what they act on", { timeout: 60000 }, shoot("actors-drawn", async () => {
+test("the demo's actors are drawn on a layer of their own, with beams into what they act on", { timeout: limit(60000) }, shoot("actors-drawn", async () => {
   const list = await untilActors((l) => l.count === 4 && l.beams.length >= 2);
   assert.deepEqual(list.actors.map((a) => a.id).sort(), ["actor:kestrel", "actor:moth", "actor:wren", "actor:you"]);
   assert.equal(byId(list, "actor:you").title, "You", "never a name for you");
@@ -140,7 +141,7 @@ test("the demo's actors are drawn on a layer of their own, with beams into what 
   assert.deepEqual(found.nodes.map((n) => n.id), ["actor:wren"]);
 }));
 
-test("selecting an actor frames it with what it acts on, and the inspector shows it", { timeout: 60000 }, shoot("actors-select", async () => {
+test("selecting an actor frames it with what it acts on, and the inspector shows it", { timeout: limit(60000) }, shoot("actors-select", async () => {
   let st = await s.driver("select", "actor:wren");
   assert.deepEqual([st.selection.id, st.selection.kind, st.selection.title], ["actor:wren", "actor", "Wren"]);
   assert.ok(st.motion.settled);
@@ -176,7 +177,7 @@ test("selecting an actor frames it with what it acts on, and the inspector shows
   assert.equal((await s.driver("state")).selection, null);
 }));
 
-test("a click on an actor selects it, over whatever glows behind it", { timeout: 120000 }, shoot("actors-click", async () => {
+test("a click on an actor selects it, over whatever glows behind it", { timeout: limit(120000) }, shoot("actors-click", async () => {
   await s.driver("still", true);
   try {
     // As a person would, the pointer looks around Wren's middle for where
@@ -212,7 +213,7 @@ test("a click on an actor selects it, over whatever glows behind it", { timeout:
   }
 }));
 
-test("the pointer takes whatever is drawn in front: Wren before a node's body, and the body before Wren", { timeout: 60000 }, shoot("actors-front", async () => {
+test("the pointer takes whatever is drawn in front: Wren before a node's body, and the body before Wren", { timeout: limit(60000) }, shoot("actors-front", async () => {
   await s.driver("still", true);
   try {
     const wren = byId(await untilActors((l) => byId(l, "actor:wren")?.beams.length > 0), "actor:wren");
@@ -263,7 +264,7 @@ test("the pointer takes whatever is drawn in front: Wren before a node's body, a
   }
 }));
 
-test("actors act: a spawn beams to the session at once, and an actor that goes offline takes its beams away", { timeout: 60000 }, shoot("actors-act", async () => {
+test("actors act: a spawn beams to the session at once, and an actor that goes offline takes its beams away", { timeout: limit(60000) }, shoot("actors-act", async () => {
   const { nodes } = await s.driver("find", { query: "refunds guide", kind: "session", limit: 1 });
   const session = nodes[0].id;
   // Wren, whose script never takes it offline, so nothing else takes the
@@ -280,7 +281,7 @@ test("actors act: a spawn beams to the session at once, and an actor that goes o
   assert.equal(byId(list, "actor:moth").presence, "working");
 }));
 
-test("what actors do is listed in the activity feed, each line its actor's, and a click on one selects the actor", { timeout: 60000 }, shoot("actors-feed", async () => {
+test("what actors do is listed in the activity feed, each line its actor's, and a click on one selects the actor", { timeout: limit(60000) }, shoot("actors-feed", async () => {
   const { nodes } = await s.driver("find", { query: "refunds guide", kind: "session", limit: 1 });
   const since = Date.now() - 1000;
   await s.simulate("actor-spawn", { a: "actor:wren", b: nodes[0].id });
@@ -307,7 +308,7 @@ test("what actors do is listed in the activity feed, each line its actor's, and 
   await s.driver("select", null);
 }));
 
-test("an actor's message to agents is drawn from the actor, light running down a beam to each session it reached", { timeout: 60000 }, shoot("actors-message", async () => {
+test("an actor's message to agents is drawn from the actor, light running down a beam to each session it reached", { timeout: limit(60000) }, shoot("actors-message", async () => {
   // An actor's real message needs its token, which the process check
   // refuses from under an agent, as these tests may run; so the layer is
   // handed the message as the page's agent-message listener hands it.
@@ -327,7 +328,7 @@ test("an actor's message to agents is drawn from the actor, light running down a
   assert.deepEqual(await s.driver("errors"), []);
 }));
 
-test("an actor waiting on you has its card in the strip, and clear takes it away", { timeout: 60000 }, shoot("actors-needs-you", async () => {
+test("an actor waiting on you has its card in the strip, and clear takes it away", { timeout: limit(60000) }, shoot("actors-needs-you", async () => {
   const done = await s.simulate("actor-needs-you", { a: "actor:wren" });
   assert.deepEqual([done.ok, done.a], [true, "actor:wren"]);
   const needOf = async () => (await s.driver("state")).alerts.find((a) => a.kind === "actor-need" && a.actor === "actor:wren");
@@ -360,7 +361,7 @@ test("an actor waiting on you has its card in the strip, and clear takes it away
   assert.equal((await until(async () => ((await needOf()) ? null : "gone"), 6000)) ?? "still there", "gone", "clear takes the card away");
 }));
 
-test("an actor that reaches XenoNet through a tunnel has a gate, open with an adapter connected and shut without; a read flares through it", { timeout: 60000 }, shoot("actors-tunnel", async () => {
+test("an actor that reaches XenoNet through a tunnel has a gate, open with an adapter connected and shut without; a read flares through it", { timeout: limit(60000) }, shoot("actors-tunnel", async () => {
   const gateOf = (l) => (l.tunnels ?? []).find((g) => g.actor === "actor:wren");
   assert.equal(gateOf(await s.driver("actors")), undefined, "no gate before it has a tunnel");
   assert.deepEqual((await s.simulate("actor-tunnel", { a: "actor:wren" })).a, "actor:wren");
@@ -389,7 +390,7 @@ test("an actor that reaches XenoNet through a tunnel has a gate, open with an ad
   assert.deepEqual(await s.driver("errors"), []);
 }));
 
-test("you write to an actor from its inspector: it reads it in its inbox as yours, from XenoNet's window", { timeout: 60000 }, shoot("actors-message-you", async () => {
+test("you write to an actor from its inspector: it reads it in its inbox as yours, from XenoNet's window", { timeout: limit(60000) }, shoot("actors-message-you", async () => {
   await s.driver("select", "actor:moth");
   const button = await until(() => s.eval(`return !!document.querySelector('#inspector [data-message-actor="actor:moth"]')`));
   assert.ok(button, "Message… in a registered actor's inspector");
@@ -407,7 +408,7 @@ test("you write to an actor from its inspector: it reads it in its inbox as your
   assert.deepEqual(await s.driver("errors"), []);
 }));
 
-test("in each of a few themes, every actor takes the theme's form, with no page errors", { timeout: 180000 }, shoot("actors-themes", async () => {
+test("in each of a few themes, every actor takes the theme's form, with no page errors", { timeout: limit(180000) }, shoot("actors-themes", async () => {
   for (const id of ["phosphor", "helios", "rime", "trench", "eclipse", "ochre", first]) {
     await s.driver("theme", id);
     const theme = await s.api(`/api/themes/${id}`);
@@ -425,7 +426,7 @@ test("in each of a few themes, every actor takes the theme's form, with no page 
   assert.deepEqual(await s.driver("errors"), []);
 }));
 
-test("the Actors panel lists every actor and how XenoNet knows it, and takes you and an observer off the map and back", { timeout: 60000 }, shoot("actors-panel", async () => {
+test("the Actors panel lists every actor and how XenoNet knows it, and takes you and an observer off the map and back", { timeout: limit(60000) }, shoot("actors-panel", async () => {
   const st = await s.driver("command", "actors");
   assert.ok(st.overlays.modal, "the panel is open");
   const rows = await until(async () => {
@@ -486,7 +487,7 @@ test("the Actors panel lists every actor and how XenoNet knows it, and takes you
   await s.driver("select", null);
 }));
 
-test("an actor added in the panel shows its token once; New token replaces it, and Remove takes it away", { timeout: 60000 }, shoot("actors-add", async () => {
+test("an actor added in the panel shows its token once; New token replaces it, and Remove takes it away", { timeout: limit(60000) }, shoot("actors-add", async () => {
   await s.driver("command", "actors");
   await clickOn("[data-ac-new]:not([disabled])");
   await until(() => centerOf("[data-ac-name]"));
@@ -553,7 +554,7 @@ test("an actor added in the panel shows its token once; New token replaces it, a
   await until(panelClosed);
 }));
 
-test("programs asking to be actors wait on cards; a real click on Allow lets one in, and Deny keeps the other out", { timeout: 60000 }, shoot("actors-request", async () => {
+test("programs asking to be actors wait on cards; a real click on Allow lets one in, and Deny keeps the other out", { timeout: limit(60000) }, shoot("actors-request", async () => {
   const heron = await s.simulate("actor-request", { a: "Heron" });
   const osprey = await s.simulate("actor-request", { a: "Osprey" });
   assert.deepEqual([heron.ok, osprey.ok], [true, true]);
@@ -617,7 +618,7 @@ test("programs asking to be actors wait on cards; a real click on Allow lets one
   await until(panelClosed);
 }));
 
-test("no page errors along the way", { timeout: 30000 }, async () => {
+test("no page errors along the way", { timeout: limit(30000) }, async () => {
   const { entries } = await s.logs({ since: cursor, level: "error", source: "page" });
   assert.deepEqual(entries.map((e) => e.text), []);
   assert.deepEqual(await s.driver("errors"), []);

@@ -15,6 +15,7 @@ import os from "node:os";
 import path from "node:path";
 import { xenonet } from "../../core/control.js";
 import { findFfmpeg } from "../../core/dirs.js";
+import { limit, software } from "../harness/software.js";
 
 const port = await new Promise((resolve) => {
   const probe = net.createServer().listen(0, "127.0.0.1", () => {
@@ -23,11 +24,9 @@ const port = await new Promise((resolve) => {
   });
 });
 const s = xenonet("test", { port });
-// Drawn in software (XENONET_SOFTWARE_RENDERING=1, as on a Linux runner
-// with no GPU), the map draws a frame or two a second. There these tests
-// check the pace each state asks for and that no more is drawn, but not
-// that the frame rate reaches it.
-const software = process.env.XENONET_SOFTWARE_RENDERING === "1";
+// Drawn in software (as on a Linux runner with no GPU), the map draws a
+// frame or two a second. There these tests check the pace each state asks
+// for and that no more is drawn, but not that the frame rate reaches it.
 const film = path.join(fs.realpathSync.native(os.tmpdir()), `xenonet-e2e-budget-${port}.mp4`);
 
 const shoot = (name, body) => async () => {
@@ -44,7 +43,7 @@ before(async () => {
   await xenonet("test").quit();
   await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
   await s.driver("settled", { timeout: 60000 });
-}, { timeout: 180000 });
+}, { timeout: limit(180000) });
 
 after(async () => {
   await s.record({ action: "stop" }).catch(() => {});
@@ -71,7 +70,7 @@ function within(r, rest, moving) {
   if (!software) assert.ok(r.perSecond >= least * 0.6, `about ${least} a second or more: ${JSON.stringify(r)}`);
 }
 
-test("at rest the map keeps to the rest pace, not the display's rate", { timeout: 60000 }, shoot("budget-rest", async () => {
+test("at rest the map keeps to the rest pace, not the display's rate", { timeout: limit(60000) }, shoot("budget-rest", async () => {
   const st = await s.driver("state");
   assert.equal(st.render.pace, "balanced");
   const r = await measure();
@@ -81,7 +80,7 @@ test("at rest the map keeps to the rest pace, not the display's rate", { timeout
   within(r, 30, 60);
 }));
 
-test("camera moves still run in the paced loop: selecting a project flies to its gathering", { timeout: 60000 }, shoot("budget-camera", async () => {
+test("camera moves still run in the paced loop: selecting a project flies to its gathering", { timeout: limit(60000) }, shoot("budget-camera", async () => {
   await s.driver("select", null);
   await s.driver("reset");
   const before = (await s.driver("state")).view;
@@ -95,7 +94,7 @@ test("camera moves still run in the paced loop: selecting a project flies to its
   await s.driver("select", null);
 }));
 
-test("a recording draws every frame the display offers, and the rest pace comes back after", { timeout: 90000, skip: !findFfmpeg() && "needs ffmpeg" }, shoot("budget-recording", async () => {
+test("a recording draws every frame the display offers, and the rest pace comes back after", { timeout: limit(90000), skip: !findFfmpeg() && "needs ffmpeg" }, shoot("budget-recording", async () => {
   await s.record({ action: "start", file: film, fps: 30 });
   let r;
   try {
@@ -111,7 +110,7 @@ test("a recording draws every frame the display offers, and the rest pace comes 
   within(after, 30, 60);
 }));
 
-test("a replay draws at the moving pace while it plays", { timeout: 60000 }, shoot("budget-replay", async () => {
+test("a replay draws at the moving pace while it plays", { timeout: limit(60000) }, shoot("budget-replay", async () => {
   await s.driver("command", "replay");
   try {
     const r = await s.driver("render", { ms: 1000 });
@@ -123,7 +122,7 @@ test("a replay draws at the moving pace while it plays", { timeout: 60000 }, sho
   assert.equal((await s.driver("state")).overlays.replay, false);
 }));
 
-test("the frame rate choice in the palette: lower GPU use, every frame, then balanced again", { timeout: 60000 }, shoot("budget-pace", async () => {
+test("the frame rate choice in the palette: lower GPU use, every frame, then balanced again", { timeout: limit(60000) }, shoot("budget-pace", async () => {
   const commands = (await s.driver("commands")).map((c) => c.id);
   for (const id of ["pace-balanced", "pace-low", "pace-smooth"]) assert.ok(commands.includes(id), id);
   try {
@@ -142,7 +141,7 @@ test("the frame rate choice in the palette: lower GPU use, every frame, then bal
   assert.equal((await s.driver("state")).render.pace, "balanced");
 }));
 
-test("a window nobody can see draws nothing, and draws again once it can", { timeout: 60000 }, shoot("budget-unseen", async () => {
+test("a window nobody can see draws nothing, and draws again once it can", { timeout: limit(60000) }, shoot("budget-unseen", async () => {
   // As the page would hear it from the desktop app (the window hidden, and
   // no script working it), counted in the page so no request to the window
   // lands in the middle; then put back as the desktop app says.

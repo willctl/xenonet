@@ -13,6 +13,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { xenonet } from "../../core/control.js";
+import { limit } from "../harness/software.js";
 
 const port = await new Promise((resolve) => {
   const probe = net.createServer().listen(0, "127.0.0.1", () => {
@@ -37,7 +38,7 @@ before(async () => {
   // One test instance at a time (it has a single-instance lock).
   await xenonet("test").quit();
   await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
-}, { timeout: 180000 });
+}, { timeout: limit(180000) });
 
 after(async () => {
   if (process.env.XENONET_E2E_KEEP === "1") return;
@@ -45,7 +46,7 @@ after(async () => {
   fs.rmSync(path.join(fs.realpathSync.native(os.tmpdir()), `xenonet-demo-${port}`), { recursive: true, force: true, maxRetries: 10 });
 });
 
-test("the test instance's actors are the demo's alone: no observer looks at this machine", { timeout: 60000 }, shoot("observers-off", async () => {
+test("the test instance's actors are the demo's alone: no observer looks at this machine", { timeout: limit(60000) }, shoot("observers-off", async () => {
   const health = await s.api("/api/health");
   assert.equal(health.demo, true);
   assert.deepEqual(health.blocks.filter((b) => b.kind === "observer"), [], "no observer among its parts");

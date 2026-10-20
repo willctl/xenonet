@@ -16,6 +16,7 @@ import path from "node:path";
 import { xenonet } from "../../core/control.js";
 import { POSTER_SIZES } from "../../core/frames.js";
 import { MARK_BAND, MARK_URL } from "../../src/mark.js";
+import { limit } from "../harness/software.js";
 
 const port = await new Promise((resolve) => {
   const probe = net.createServer().listen(0, "127.0.0.1", () => {
@@ -79,7 +80,7 @@ function assertRedacted(during, plain, what) {
 before(async () => {
   await xenonet("test").quit();
   await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
-}, { timeout: 180000 });
+}, { timeout: limit(180000) });
 
 after(async () => {
   if (process.env.XENONET_E2E_KEEP === "1") return;
@@ -87,7 +88,7 @@ after(async () => {
   fs.rmSync(path.join(fs.realpathSync.native(os.tmpdir()), `xenonet-demo-${port}`), { recursive: true, force: true, maxRetries: 10 });
 });
 
-test("the export panel opens from the palette with a preview, hiding names and times until told, and says exports stay here", { timeout: 60000 }, shoot("export-panel", async () => {
+test("the export panel opens from the palette with a preview, hiding names and times until told, and says exports stay here", { timeout: limit(60000) }, shoot("export-panel", async () => {
   const st = await s.driver("command", "poster");
   assert.ok(st.overlays.modal && st.overlays.export, "the panel is open");
   const picked = await until(() => s.driver("exportPanel"), (p) => p?.preview);
@@ -113,7 +114,7 @@ test("the export panel opens from the palette with a preview, hiding names and t
   assert.equal((await s.driver("exportPanel")), null);
 }));
 
-test("each size renders at its own pixels, with the mark, star names and no clock, and the projects' names only when revealed", { timeout: 120000 }, shoot("poster-sizes", async () => {
+test("each size renders at its own pixels, with the mark, star names and no clock, and the projects' names only when revealed", { timeout: limit(120000) }, shoot("poster-sizes", async () => {
   const day = await api("/api/daylog");
   const projects = day.topProjects.map((p) => p.name);
   assert.ok(projects.length >= 2 && day.busiestHour != null, "the demo has busy projects and a busiest hour");
@@ -153,7 +154,7 @@ test("each size renders at its own pixels, with the mark, star names and no cloc
   assert.equal((await s.driver("state")).errors, 0, JSON.stringify(await s.driver("errors")));
 }));
 
-test("a film plays in a story-shaped window with the mark, star names, running counts and no clock, and the map's own labels follow", { timeout: 90000 }, shoot("film", async () => {
+test("a film plays in a story-shaped window with the mark, star names, running counts and no clock, and the map's own labels follow", { timeout: limit(90000) }, shoot("film", async () => {
   const projects = (await api("/api/daylog")).topProjects.map((p) => p.name);
   const { labels: plain } = await s.driver("labels");
   // The frame the desktop app records a film in, at half size: narrow

@@ -16,6 +16,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { xenonet } from "../../core/control.js";
 import { command } from "../harness/xenonet-bin.js";
+import { limit } from "../harness/software.js";
 
 const port = await new Promise((resolve) => {
   const probe = net.createServer().listen(0, "127.0.0.1", () => {
@@ -74,7 +75,7 @@ function adapter(grant) {
 before(async () => {
   await xenonet("test").quit();
   await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
-}, { timeout: 180000 });
+}, { timeout: limit(180000) });
 
 after(async () => {
   if (process.env.XENONET_E2E_KEEP === "1") return;
@@ -82,7 +83,7 @@ after(async () => {
   fs.rmSync(path.join(fs.realpathSync.native(os.tmpdir()), `xenonet-demo-${port}`), { recursive: true, force: true, maxRetries: 10 });
 });
 
-test("a dot paired in the window reads the demo's sessions through xenonet mcp assistant, and nothing once revoked", { timeout: 120000 }, shoot("assistant", async () => {
+test("a dot paired in the window reads the demo's sessions through xenonet mcp assistant, and nothing once revoked", { timeout: limit(120000) }, shoot("assistant", async () => {
   const outside = await fetch(`${s.base}/api/assistant/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ product: "dots" }) });
   assert.equal(outside.status, 403, "only the window pairs");
 
@@ -128,7 +129,7 @@ test("a dot paired in the window reads the demo's sessions through xenonet mcp a
   assert.equal((await s.driver("state")).errors, 0, JSON.stringify(await s.driver("errors")));
 }));
 
-test("a tunnel for a dot is set up in the window: its tunnel, a key kept and never shown, and Start says what's missing", { timeout: 120000 }, shoot("assistant-tunnel", async () => {
+test("a tunnel for a dot is set up in the window: its tunnel, a key kept and never shown, and Start says what's missing", { timeout: limit(120000) }, shoot("assistant-tunnel", async () => {
   const places = await fromWindow(`return (await call("GET", "/api/assistant/places")).body.places;`);
   const paired = await fromWindow(`return await call("POST", "/api/assistant/pair", ${JSON.stringify({ product: "dots", label: "Tunnel dot", transport: "openai-secure-mcp-tunnel", audience: { description: "Only my account", verification: "unverified", scope: "owner_endpoint" }, projects: [places[0].place] })});`);
   assert.equal(paired.status, 201, JSON.stringify(paired.body));

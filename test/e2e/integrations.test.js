@@ -5,10 +5,11 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { xenonet } from "../../core/control.js";
+import { limit } from "../harness/software.js";
 
 const port = await new Promise((resolve) => { const probe = net.createServer().listen(0, "127.0.0.1", () => { const { port } = probe.address(); probe.close(() => resolve(port)); }); });
 const s = xenonet("test", { port });
-before(async () => { await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" }); }, { timeout: 180000 });
+before(async () => { await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" }); }, { timeout: limit(180000) });
 after(async () => { await s.quit().catch(() => {}); fs.rmSync(path.join(fs.realpathSync.native(os.tmpdir()), `xenonet-demo-${port}`), { recursive: true, force: true, maxRetries: 10 }); });
 async function click(selector) {
   const spot = await s.eval(`const el = document.querySelector(${JSON.stringify(selector)}); el.scrollIntoView({ block: "center" }); const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };`);
@@ -21,7 +22,7 @@ async function until(check) {
 }
 const view = async () => (await s.driver("integrations", "refresh")).integrations;
 
-test("routing command previews exact input, invalidates edits, records scores and outcomes, and filters history", { timeout: 60000 }, async () => {
+test("routing command previews exact input, invalidates edits, records scores and outcomes, and filters history", { timeout: limit(60000) }, async () => {
   const commands = await s.driver("commands");
   for (const id of ["route-task", "decisions", "sandbox", "sandbox-results", "pi-runs"]) assert.ok(commands.some((c) => c.id === id));
   await s.driver("command", "route-task");
@@ -47,7 +48,7 @@ test("routing command previews exact input, invalidates edits, records scores an
   assert.equal(st.matched, 2); await s.screenshot({ name: "e2e-integrations-routing", inline: false });
 });
 
-test("sandbox preview, detached launch, policy inspection and reviewed deletion work with the demo gateway", { timeout: 60000 }, async () => {
+test("sandbox preview, detached launch, policy inspection and reviewed deletion work with the demo gateway", { timeout: limit(60000) }, async () => {
   await s.driver("command", "sandbox");
   const initial = (await view()).total;
   await s.driver("integrations", "draft", { backend: process.platform === "win32" ? "wsl" : "native", distro: "Ubuntu", agent: "pi", image: "demo/pi:1", provider: "demo-provider", request: "Review a made-up workspace" });
@@ -68,7 +69,7 @@ test("sandbox preview, detached launch, policy inspection and reviewed deletion 
   await until(async () => (await view()).records.find((r) => r.id === record.id).status === "deleted");
 });
 
-test("cached text reviews show changes, source drift, incomplete and unavailable evidence through safe driver actions", { timeout: 60000 }, async () => {
+test("cached text reviews show changes, source drift, incomplete and unavailable evidence through safe driver actions", { timeout: limit(60000) }, async () => {
   await s.driver("command", "sandbox-results");
   const records = (await view()).records;
   const select = async (name) => { const row = records.find((r) => r.name === name); assert.ok(row); await s.driver("integrations", "select", row.id); return (await s.driver("integrations", "review")).integrations.review; };
@@ -94,7 +95,7 @@ test("cached text reviews show changes, source drift, incomplete and unavailable
   const logs = await s.logs({ level: "error" }); assert.deepEqual(logs.entries.filter((e) => e.source === "page"), []);
 });
 
-test("Pi command exposes metadata, opt-in controls and safe HTML, and console actions cannot execute", { timeout: 60000 }, async () => {
+test("Pi command exposes metadata, opt-in controls and safe HTML, and console actions cannot execute", { timeout: limit(60000) }, async () => {
   await s.driver("command", "pi-runs"); const st = await view();
   assert.equal(st.records[0].kind, "pi-export"); assert.equal(st.total, 1);
   await s.driver("integrations", "select", st.records[0].id);
