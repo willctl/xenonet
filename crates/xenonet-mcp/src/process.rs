@@ -148,13 +148,13 @@ mod windows {
             let mut entry: ProcessEntry32W = std::mem::zeroed();
             entry.dwSize = size_of::<ProcessEntry32W>() as u32;
             let mut found = None;
-            let mut more = Process32FirstW(snapshot, &mut entry) != 0;
+            let mut more = Process32FirstW(snapshot, &raw mut entry) != 0;
             while more {
                 if entry.th32ProcessID == pid {
                     found = Some(entry.th32ParentProcessID);
                     break;
                 }
-                more = Process32NextW(snapshot, &mut entry) != 0;
+                more = Process32NextW(snapshot, &raw mut entry) != 0;
             }
             CloseHandle(snapshot);
             found
@@ -170,7 +170,7 @@ mod windows {
                 return false;
             }
             let mut code = 0u32;
-            let ok = GetExitCodeProcess(h, &mut code) != 0 && code == STILL_ACTIVE;
+            let ok = GetExitCodeProcess(h, &raw mut code) != 0 && code == STILL_ACTIVE;
             CloseHandle(h);
             ok
         }

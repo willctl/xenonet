@@ -158,7 +158,7 @@ pub mod os {
     // the cores' count and nothing of their use.
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     pub fn cpus() -> Cpus {
-        let n = std::thread::available_parallelism().map_or(1, |n| n.get());
+        let n = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
         Cpus { model: None, speed: None, times: vec![Times { user: 0.0, nice: 0.0, sys: 0.0, idle: 0.0, irq: 0.0 }; n] }
     }
 

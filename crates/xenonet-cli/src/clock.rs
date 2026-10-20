@@ -58,7 +58,7 @@ fn breakdown(secs: i64) -> Option<Local> {
     // SAFETY: _localtime64_s reads the time given and fills the tm given;
     // both are locals that outlive the call, and Tm is laid out as the C
     // runtime's struct tm, nine ints.
-    let ok = unsafe { _localtime64_s(&mut tm, &secs) } == 0;
+    let ok = unsafe { _localtime64_s(&raw mut tm, &raw const secs) } == 0;
     let [sec, min, hour, mday, mon, year, ..] = tm.0;
     ok.then(|| Local { year: i64::from(year) + 1900, month: (mon + 1) as u32, day: mday as u32, hour: hour as u32, minute: min as u32, second: sec as u32 })
 }

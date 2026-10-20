@@ -176,7 +176,10 @@ pub fn write_token_file(file: &str, token: &str, windows: bool, run: &mut Run<'_
     Ok(full)
 }
 
+// Its one test is about unix file modes. (Two attributes, not
+// cfg(all(test, unix)): clippy takes only a plain cfg(test) for test code.)
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
 
@@ -194,7 +197,6 @@ mod tests {
         std::fs::canonicalize(d).unwrap().to_string_lossy().into_owned()
     }
 
-    #[cfg(unix)]
     #[test]
     fn written_yours_alone_and_read_back() {
         let dir = temp();
