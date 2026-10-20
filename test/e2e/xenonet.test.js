@@ -96,12 +96,31 @@ test("selecting a project gathers its sessions; arrows step through, Esc puts th
   assert.equal(st.gathered, null);
 }));
 
-test("a real click on a gathered session selects it", { timeout: 60000 }, shoot("click", async () => {
+test("a real click on a gathered session selects it", { timeout: 120000 }, shoot("click", async () => {
   await home();
   const project = await findOne("atlas-api", "project");
   const { gathered } = await s.driver("select", project.id);
-  const session = gathered.members.find((id) => /^(claude|codex):/.test(id));
-  const { did, state } = await s.input({ click: { node: session } });
+  // As a person would, where hovering shows one, its body or its label
+  // beside it: once the selection has held 3 s, you are drawn looking at
+  // the project (you.js), and can stand in front of a session's body, as
+  // on a machine that draws slowly.
+  let session = null, spot = null;
+  for (const id of gathered.members.filter((id) => /^(claude|codex):/.test(id))) {
+    const at = await s.driver("screenPos", id);
+    const { title } = (await s.driver("find", { query: id, limit: 1 })).nodes[0] ?? {};
+    if (!at?.onScreen || !title) continue;
+    for (const dx of [0, 30, 60]) {
+      const p = { x: at.x + dx, y: at.y };
+      await s.input({ move: p });
+      if ((await s.eval(`return document.querySelector("#tooltip").hidden ? "" : document.querySelector("#tooltip").textContent`)).includes(title)) {
+        [session, spot] = [id, p];
+        break;
+      }
+    }
+    if (session) break;
+  }
+  assert.ok(session, "hovering shows one of its sessions");
+  const { did, state } = await s.input({ click: spot });
   assert.ok(did.click, "clicked");
   assert.equal(state.selection?.id, session);
   // Still gathered: picking one of its sessions keeps the gathering.
