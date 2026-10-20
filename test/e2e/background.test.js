@@ -140,10 +140,11 @@ test("a production Desktop offers it once, and registers and unregisters it thro
     });
   };
   let service;
+  let offered = null;
   try {
     await d.ready({ timeout: 90000 });
     // The offer, during setup.
-    const offered = await settled("offer");
+    offered = await settled("offer");
     assert.equal(offered.shown, true);
     assert.deepEqual([offered.live, offered.supported, offered.registered], [true, true, false]);
     assert.ok(offered.at.accept, JSON.stringify(offered));
@@ -181,6 +182,12 @@ test("a production Desktop offers it once, and registers and unregisters it thro
     assert.equal((await service.request("status")).pid, pid, "the service Desktop started kept running");
     assert.deepEqual((await d.logs({ source: "page", level: "error" })).entries, []);
   } catch (err) {
+    // What the window showed, and what the page and Desktop said, before
+    // anything here opens the panel again.
+    console.error(`offered: ${JSON.stringify(offered)}`);
+    await d.screenshot({ name: "e2e-background-failed", inline: false, settle: false }).catch(() => {});
+    console.error(`overlays: ${JSON.stringify((await d.driver("state").catch((e) => ({ overlays: e.message }))).overlays)}`);
+    console.error((await d.logs({}).catch((e) => ({ entries: [{ text: e.message }] }))).entries.slice(-40).map((e) => `${e.ts ? new Date(e.ts).toISOString() : ""} ${e.source ?? ""} ${e.level ?? ""} ${e.text}`).join("\n"));
     console.error(JSON.stringify(await d.driver("background", "status").catch((e) => e.message)));
     console.error(fs.readFileSync(path.join(dir, "desktop.log"), "utf8").slice(-6000));
     console.error(supervisor.calls().join("\n"));
