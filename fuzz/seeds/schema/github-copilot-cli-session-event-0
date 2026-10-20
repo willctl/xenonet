@@ -1,0 +1,1 @@
+{"id":"e1","timestamp":"2026-10-16T12:00:00.000Z","parentId":null,"type":"session.start","data":{"sessionId":"0f3c2b1a-0000-4000-8000-000000000001","version":1,"producer":"copilot-agent","copilotVersion":"1.0.98","startTime":"2026-10-16T12:00:00.000Z","context":{"cwd":"/Users/ada/atlas","branch":"main"}}}

@@ -1,0 +1,1 @@
+ [{"session_id":"proc_1","command":"codex exec 'tidy the imports'","pid":5100,"pid_scope":"host","host_start_time":179123000000,"cwd":"/Users/ada/atlas","started_at":1791230000.2,"task_id":"t1","owner_task_id":"t1","session_key":"k1","parent_session_id":"20261005_120000_a1b2c3","watch_patterns":[]}]

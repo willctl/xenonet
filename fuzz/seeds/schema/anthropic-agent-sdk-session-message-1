@@ -1,0 +1,1 @@
+{"type":"assistant","uuid":"u-2","session_id":"0190d3e0-0000-7000-8000-000000000001","parent_tool_use_id":null,"parent_agent_id":null,"message":{"content":[{"type":"text","text":"Done"},{"type":"tool_use","name":"Bash","input":{}},{"type":"tool_result","is_error":true,"content":"1 failed"}]}}

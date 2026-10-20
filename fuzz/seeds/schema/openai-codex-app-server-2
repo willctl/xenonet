@@ -1,0 +1,1 @@
+&{"thread/items/list":{"data":[{"item":{"type":"agentMessage","id":"i1","text":"Done"},"startedAtMs":1,"completedAtMs":2},{"item":{"type":"fileChange","changes":[{"path":"a.py","kind":{"type":"update"}}],"status":"completed"}}],"nextCursor":"c"}}

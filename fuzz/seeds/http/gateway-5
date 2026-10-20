@@ -1,0 +1,7 @@
+POST /mcp
+host: mac.example.ts.net
+content-type: application/json
+accept: application/json, text/event-stream
+authorization: Bearer xenonet_gateway_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}

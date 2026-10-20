@@ -1,0 +1,33 @@
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"session_meta","payload":{"id":"t1","cwd":"/Users/ada/ledger","cli_version":"0.150.0","originator":"codex_cli_rs","model_provider":"openai"}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"turn_context","payload":{"model":"gpt-5-codex","effort":"high","cwd":"/Users/ada/ledger"}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"event_msg","payload":{"type":"task_started","model_context_window":258400}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":9000,"cached_input_tokens":8000,"output_tokens":300,"reasoning_output_tokens":100,"total_tokens":9300},"last_token_usage":{"total_tokens":3000},"model_context_window":258400},"rate_limits":{"limit_id":"x","primary":{"used_percent":12,"window_minutes":300,"resets_at":1791240000},"secondary":null}}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":null}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"i1","command":["/bin/zsh","-lc","make"],"exit_code":0,"status":"completed"}}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"event_msg","payload":{"type":"item_completed","thread_id":"t1","turn_id":"u1","started_at_ms":1791230000000,"completed_at_ms":1791230001000,"item":{"type":"CommandExecution","id":"i3","command":["/bin/zsh","-lc","make test"],"exit_code":1,"status":"failed","aggregated_output":"1 failed"}}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"Reasoning","id":"i4","summary_text":["Checking the tests"],"raw_content":[]}}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"ContextCompaction","id":"i5"}}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"i6","server":"wiki","tool":"read","arguments":{"page":"ledger"},"status":"completed","result":{"content":[{"type":"text","text":"…"}]}}}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"FileChange","changes":{"/Users/ada/ledger/a.py":{"type":"update","unified_diff":"@@"}},"status":"completed"}}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"FileChange","changes":{"/Users/ada/ledger/b.py":{"type":"update","unified_diff":"@@","move_path":"/Users/ada/ledger/c.py"},"/Users/ada/ledger/d.py":{"type":"add","content":"x = 1\n"}}}}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"WebSearch","id":"i7","query":"rounding","action":{"type":"search","query":"rounding","queries":["rounding","banker's rounding"]}}}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"SubAgentActivity","id":"i2","kind":"completed","agent_thread_id":"t2","agent_path":"explorer"}}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"event_msg","payload":{"type":"user_message","message":"Why is it slow?"}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"event_msg","payload":{"type":"thread_settings_applied","thread_id":"t1","thread_settings":{"model":"gpt-5.6-sol","model_provider_id":"openai","service_tier":"priority","cwd":"/Users/ada/ledger","reasoning_effort":"high"}}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"event_msg","payload":{"type":"thread_settings_applied","thread_id":"t1","thread_settings":{"model":"gpt-5.6-sol","model_provider_id":"openai","cwd":"/Users/ada/ledger"}}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"response_item","payload":{"type":"function_call","call_id":"c1","name":"shell","arguments":"{}"}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"response_item","payload":{"type":"function_call","id":"fc_1","call_id":"c2","name":"read","namespace":"files","arguments":"{}"}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"c3","name":"apply_patch","input":"*** Begin Patch"}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"c3","name":"apply_patch","output":"Done"}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"c2","output":{"content":"ok"}}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Why?"}]}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"response_item","payload":{"type":"reasoning","summary":[]}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"response_item","payload":{"type":"agent_message","id":"r1"}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"response_item","payload":{"type":"tool_search_call","id":"r1"}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"response_item","payload":{"type":"tool_search_output","id":"r1"}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"response_item","payload":{"type":"image_generation_call","id":"r1"}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"response_item","payload":{"type":"compaction","id":"r1"}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"response_item","payload":{"type":"configuration_update","id":"r1"}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"response_item","payload":{"type":"compaction_trigger","id":"r1"}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"response_item","payload":{"type":"context_compaction","id":"r1"}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"compacted","payload":{"message":"earlier turns"}}

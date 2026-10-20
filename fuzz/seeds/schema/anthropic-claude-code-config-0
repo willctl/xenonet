@@ -1,0 +1,1 @@
+{"numStartups":3,"oauthAccount":{"accountUuid":"4f1c0000-0000-4000-8000-000000000001","organizationUuid":"4f1c0000-0000-4000-8000-000000000002","emailAddress":"ada@example.com","organizationType":"claude_max","organizationName":null,"displayName":"Ada"},"mcpServers":{"xenonet":{"command":"/usr/local/bin/node","args":["mcp/xenonet.js"],"env":{"XENONET_PORT":"47840"}}}}

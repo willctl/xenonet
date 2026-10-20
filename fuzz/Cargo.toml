@@ -1,0 +1,143 @@
+# Fuzz targets for XenoNet's readers of untrusted input (see "Fuzzing" in
+# docs/guide/development.md). libFuzzer needs a nightly Rust, so this crate
+# is its own workspace: the checkout's pinned toolchain, cargo deny and
+# cargo shear never see it.
+[package]
+name = "xenonet-fuzz"
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+# libfuzzer-sys is the only crate the workspace doesn't have already;
+# async-trait and tokio are for the service's routes and its stand-in cores.
+[dependencies]
+async-trait = "0.1"
+libfuzzer-sys = "0.4"
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+xenonet-actors = { path = "../crates/xenonet-actors" }
+xenonet-app = { path = "../crates/xenonet-app" }
+xenonet-assistant = { path = "../crates/xenonet-assistant" }
+xenonet-base = { path = "../crates/xenonet-base" }
+xenonet-components = { path = "../crates/xenonet-components" }
+xenonet-engine = { path = "../crates/xenonet-engine" }
+xenonet-hosts = { path = "../crates/xenonet-hosts" }
+xenonet-integrations = { path = "../crates/xenonet-integrations" }
+xenonet-schema = { path = "../crates/xenonet-schema" }
+xenonet-service = { path = "../crates/xenonet-service" }
+xenonet-sources = { path = "../crates/xenonet-sources" }
+xenonet-state = { path = "../crates/xenonet-state" }
+xenonet-wire-app = { path = "../crates/xenonet-wire-app" }
+xenonet-wire-map = { path = "../crates/xenonet-wire-map" }
+
+[[bin]]
+name = "json"
+path = "fuzz_targets/json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lines"
+path = "fuzz_targets/lines.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "telemetry"
+path = "fuzz_targets/telemetry.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "transcript_files"
+path = "fuzz_targets/transcript_files.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "schema"
+path = "fuzz_targets/schema.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "base"
+path = "fuzz_targets/base.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sources"
+path = "fuzz_targets/sources.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "native"
+path = "fuzz_targets/native.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wiki"
+path = "fuzz_targets/wiki.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "http"
+path = "fuzz_targets/http.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "state"
+path = "fuzz_targets/state.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "hooks"
+path = "fuzz_targets/hooks.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "hosts"
+path = "fuzz_targets/hosts.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "misc"
+path = "fuzz_targets/misc.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "jsregex"
+path = "fuzz_targets/jsregex.rs"
+test = false
+doc = false
+bench = false

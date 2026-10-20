@@ -11,3 +11,8 @@ build/*
 /target/
 /crates/xenonet-node/*.node
 /crates/xenonet-mcp/target/
+# The fuzzers' build, what they learn and what they find (fuzz/seeds is kept).
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/coverage/
