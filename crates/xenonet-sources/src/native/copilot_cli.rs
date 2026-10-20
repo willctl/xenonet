@@ -6,6 +6,7 @@
 use super::files::Files;
 use super::node_path;
 use super::{by_num, edit_file, edits_out, fits_id, js_max, js_min, ms_of, push_edit, str_of, titled, Check, Checked, Edits, Out, Threw, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX};
+use crate::session::{RunSession, Via};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 use xenonet_base::json::{self, number_string};
@@ -310,22 +311,21 @@ impl CopilotCli {
         self.runs
             .iter()
             .map(|(_, r)| {
-                Out::Obj(vec![
-                    ("id", Out::str(&r.id)),
-                    ("app", Out::str("copilot")),
-                    ("rawId", Out::str(&r.raw_id)),
-                    ("title", Out::str(&r.title.clone().unwrap_or_else(|| titled("Copilot CLI", r.cwd.as_deref())))),
-                    ("preview", Out::null()),
-                    ("cwd", Out::opt_str(r.cwd.as_deref())),
-                    ("createdAt", Out::Num(r.created_at)),
-                    ("updatedAt", Out::Num(r.updated_at)),
-                    ("archived", Out::bool(false)),
-                    ("model", Out::null()),
-                    ("branch", Out::opt_str(r.branch.as_deref())),
-                    ("parentId", Out::null()),
-                    ("parentKind", Out::null()),
-                    ("reader", Out::str("experimental")),
-                ])
+                RunSession {
+                    id: &r.id,
+                    app: "copilot",
+                    raw_id: &r.raw_id,
+                    title: r.title.clone().unwrap_or_else(|| titled("Copilot CLI", r.cwd.as_deref())),
+                    cwd: r.cwd.as_deref(),
+                    created_at: Out::Num(r.created_at),
+                    updated_at: Out::Num(r.updated_at),
+                    archived: false,
+                    model: None,
+                    branch: r.branch.as_deref(),
+                    subagent_of: None,
+                    via: Via::Reader,
+                }
+                .record()
             })
             .collect()
     }

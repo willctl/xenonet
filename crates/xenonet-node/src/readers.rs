@@ -9,8 +9,9 @@ use napi_derive::napi;
 use serde_json::{json, Value};
 use std::sync::{LazyLock, Mutex};
 use xenonet_sources::claude;
-use xenonet_sources::codex::{self, Obj, F};
+use xenonet_sources::codex;
 use xenonet_sources::git;
+use xenonet_sources::record::{Obj, F};
 use xenonet_state::identities;
 use xenonet_state::projects::{self, FactsCache, Scan};
 

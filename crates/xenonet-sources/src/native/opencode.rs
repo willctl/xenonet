@@ -7,6 +7,7 @@
 
 use super::node_path;
 use super::{edit_file, edits_out, js_max, js_min, push_edit, str_of, titled, Checked, Edits, Out, Threw, EDIT_KEEP_MS, SESSIONS_MAX};
+use crate::session::{RunSession, Via};
 use serde_json::{json, Map, Value};
 use xenonet_base::json;
 use xenonet_base::ordered::OrderedMap;
@@ -402,22 +403,21 @@ impl OpenCode {
         self.runs
             .iter()
             .map(|(_, r)| {
-                Out::Obj(vec![
-                    ("id", Out::str(&r.id)),
-                    ("app", Out::str("opencode")),
-                    ("rawId", Out::str(&r.raw_id)),
-                    ("title", Out::str(&r.title.clone().unwrap_or_else(|| titled("OpenCode", r.cwd.as_deref())))),
-                    ("preview", Out::null()),
-                    ("cwd", Out::opt_str(r.cwd.as_deref())),
-                    ("createdAt", r.created_at.out()),
-                    ("updatedAt", r.updated_at.out()),
-                    ("archived", Out::bool(r.archived)),
-                    ("model", Out::null()),
-                    ("branch", Out::null()),
-                    ("parentId", Out::opt_str(r.parent_id.as_deref())),
-                    ("parentKind", if r.parent_id.is_some() { Out::str("subagent") } else { Out::null() }),
-                    ("reader", Out::str("experimental")),
-                ])
+                RunSession {
+                    id: &r.id,
+                    app: "opencode",
+                    raw_id: &r.raw_id,
+                    title: r.title.clone().unwrap_or_else(|| titled("OpenCode", r.cwd.as_deref())),
+                    cwd: r.cwd.as_deref(),
+                    created_at: r.created_at.out(),
+                    updated_at: r.updated_at.out(),
+                    archived: r.archived,
+                    model: None,
+                    branch: None,
+                    subagent_of: r.parent_id.as_deref(),
+                    via: Via::Reader,
+                }
+                .record()
             })
             .collect()
     }
