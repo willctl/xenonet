@@ -3,8 +3,9 @@
 // xenonet.test.js): at rest it keeps to the rest pace instead of the
 // display's rate, a recording gets every frame (films, the showcase and
 // the X cuts all record through the desktop app's recorder), a replay
-// draws at the moving pace, the palette's frame rate choice holds, and a
-// window nobody can see draws nothing.
+// draws at the moving pace, the palette's frame rate choice holds, a
+// window nobody can see draws nothing, and a frame does no more work than
+// it needs (fx.js, scene.js).
 //
 //   npm run test:e2e
 import { test, before, after } from "node:test";
@@ -155,4 +156,23 @@ test("a window nobody can see draws nothing, and draws again once it can", { tim
   assert.equal(r.unseen, 0, "no frames while unseen");
   assert.ok(r.seen >= 8, `frames again once seen: ${r.seen}`);
   await s.driver("settled", { timeout: 30000 });
+}));
+
+test("a frame draws each glow once, adds the bloom in the lens and keeps to one target", { timeout: 60000 }, shoot("budget-frame", async () => {
+  await s.driver("settled", { timeout: 30000 });
+  const r = await s.eval(`return (() => {
+    const scene = window.__xenonet.scene, renderer = scene.graph.renderer(), composer = scene.graph.postProcessingComposer();
+    // Added light on both faces, still drawn in two passes (fx.js).
+    const twice = new Set();
+    scene.graph.scene().traverse((o) => {
+      for (const m of [o.material].flat()) if (m?.transparent && m.side === 2 && m.blending === 2 && !m.depthWrite && !m.forceSinglePass) twice.add(m.type);
+    });
+    const [, bloom, lens] = composer.passes;
+    const allocated = (target) => !!renderer.properties.get(target).__webglFramebuffer;
+    return { twice: [...twice], passes: composer.passes.map((p) => p.constructor.name), bloomInLens: !!lens.uniforms.tBloom && lens.uniforms.tBloom.value === bloom.renderTargetsHorizontal[0].texture, first: allocated(composer.renderTarget1), second: allocated(composer.renderTarget2) };
+  })()`);
+  assert.deepEqual(r.twice, [], "every additive double-sided material draws in one pass");
+  assert.deepEqual(r.passes, ["RenderPass", "UnrealBloomPass", "OutputPass"]);
+  assert.equal(r.bloomInLens, true, "the lens adds the bloom");
+  assert.equal([r.first, r.second].filter(Boolean).length, 1, `one target is drawn into, the other never allocated: ${JSON.stringify(r)}`);
 }));
