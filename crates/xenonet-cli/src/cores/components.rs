@@ -177,7 +177,8 @@ fn spawn_detached(q: &Value) -> Result<std::process::Child, Value> {
 
 // ---------- the tasks' requests ----------
 
-/// ensureService's: connect (and close again), spawn, and the failure of
+/// ensureService's: connect (and close again), spawn (or the supervisor's
+/// start, for a service registered to start at login), and the failure of
 /// the child it started, if it failed.
 struct Ensure {
     child: Option<std::process::Child>,
@@ -192,6 +193,13 @@ impl Perform for Ensure {
                 Ok(Value::Null)
             }
             Some("spawn") => {
+                // A service registered to start at login is started by its
+                // supervisor, never beside the copy the supervisor keeps.
+                let port = q.get("env").and_then(|e| e.get("XENONET_PORT")).map(xenonet_base::text::js_string).filter(|p| !p.is_empty()).unwrap_or_else(|| "47840".into());
+                if let Some(place) = super::supervisor::registered_for(&port) {
+                    xenonet_components::supervisor::start(&place, &xenonet_components::supervisor::Disk, &mut xenonet_components::supervisor::System).map_err(error)?;
+                    return Ok(Value::Null);
+                }
                 self.child = Some(spawn_detached(q)?);
                 Ok(Value::Null)
             }

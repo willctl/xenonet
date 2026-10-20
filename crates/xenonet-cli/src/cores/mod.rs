@@ -23,6 +23,8 @@
 //! run_relay                core/hosts/relay.js runRelay               relay
 //! runtime_dir…update_      core/components/                           setup, service, update
 //! component
+//! supervisor::*            docs/design/always-on.md                   service install, uninstall,
+//!                                                                     status, start, run
 //! command_dir…uninstall_   core/command.js                            install, uninstall, setup
 //! command
 //! run_script, control_*    core/script.js, core/control.js            console, script, film
@@ -41,6 +43,7 @@ mod native;
 mod relay;
 mod secrets;
 mod setup;
+pub mod supervisor;
 mod tar;
 mod tasks;
 

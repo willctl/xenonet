@@ -55,7 +55,7 @@ const fn cmd(name: &'static str, about: &'static str, args: Option<&'static str>
 
 pub const COMMANDS: &[Command] = &[
     cmd("setup", "Install a downloaded Service or Tools package for your account", None),
-    cmd("service", "Manage the background service", Some("[start|status|stop]")),
+    cmd("service", "Manage the background service, and start it at login", Some("[start|status|stop|install|uninstall]")),
     cmd("update", "Check or install service and tools updates", Some("[service|tools|all]")),
     cmd("status", "Whether XenoNet is running, what it reads and what needs you", None),
     cmd("doctor", "Check sign-ins, folders and connections, with a fix for each problem", None),
