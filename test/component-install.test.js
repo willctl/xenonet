@@ -4,30 +4,27 @@
 // startup check is never selected, a Tools update leaves the service
 // alone, recovery stops only an unexpected service and never one with open
 // terminals, and a launcher that can't be replaced now is left for next
-// time. Packages are made up; their "node" is a shell script that answers
-// the startup check, so the bundle tests run where a script can stand in
-// for a program.
+// time. Packages are made up; their xenonet binary is a shell script that
+// answers the startup check, so the bundle tests run where a script can
+// stand in for a program.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as tar from "tar";
-import { activatePackage, checkRuntime, installBundle, installedRuntime, installLauncher, recoverServiceUpdate, writeLauncher } from "../core/components/install.js";
+import { activatePackage, checkRuntime, installBundle, installedRuntime, installLauncher, recoverServiceUpdate, writeLauncher, launcherVersion, LAUNCHER_SOURCE } from "../core/components/install.js";
 import { currentComponent, digest, selectComponent, stagePackage } from "../core/components/packages.js";
 
+const EXE = process.platform === "win32" ? "xenonet.exe" : "xenonet";
+const BIN = path.join("bin", EXE);
 const NODE = process.platform === "win32" ? "node.exe" : "node";
-const posixOnly = { skip: process.platform === "win32" ? "a shell script stands in for node" : false };
+const posixOnly = { skip: process.platform === "win32" ? "a shell script stands in for the binary" : false };
 
-// A "node" that passes the startup check as `version`, or fails it: `fail`
-// "runtime" exits 1 for the module check, "command" reports another
-// version.
-const fakeNode = (version, fail = null) => `#!/bin/sh
-if [ "$1" = "--input-type=module" ]; then
-  ${fail === "runtime" ? "echo 'node:sqlite missing' >&2; exit 1" : "printf ok"}
-else
-  printf '{"version":"${fail === "command" ? "0.0.1" : version}"}'
-fi
+// A xenonet binary that passes the startup check as `version`, or fails it:
+// `fail` "runtime" doesn't run, "command" reports another version.
+const fakeBin = (version, fail = null) => `#!/bin/sh
+${fail === "runtime" ? "echo 'dyld: Library not loaded' >&2; exit 1" : `printf '{"version":"${fail === "command" ? "0.0.1" : version}"}'`}
 `;
 
 function workspace(t) {
@@ -42,16 +39,10 @@ async function pack(out, component, version, { fail = null, platform = process.p
   const app = fs.mkdtempSync(path.join(out, `${component}-${version}-`));
   const meta = { format: 1, component, version, platform, arch, dataSchema: 1, api: { min: 1, max: 1 } };
   fs.writeFileSync(path.join(app, "component.json"), JSON.stringify(meta));
-  fs.writeFileSync(path.join(app, NODE), fakeNode(version, fail), { mode: 0o755 });
-  fs.mkdirSync(path.join(app, "server"));
-  fs.mkdirSync(path.join(app, "cli"));
-  fs.writeFileSync(path.join(app, "server", "index.js"), "// a made-up service");
-  fs.writeFileSync(path.join(app, "cli", "xenonet.js"), "// made-up tools");
-  // The xenonet binary, as made-up text.
-  if (bin != null) {
-    fs.mkdirSync(path.join(app, "bin"));
-    fs.writeFileSync(path.join(app, "bin", process.platform === "win32" ? "xenonet.exe" : "xenonet"), bin, { mode: 0o755 });
-  }
+  // The xenonet binary: one that answers the startup check, or `bin`, as
+  // made-up text.
+  fs.mkdirSync(path.join(app, "bin"));
+  fs.writeFileSync(path.join(app, BIN), bin ?? fakeBin(version, fail), { mode: 0o755 });
   const name = `XenoNet-${component}-${version}-${platform}-${arch}.tar.gz`;
   const file = path.join(out, name);
   await tar.c({ file, cwd: app, gzip: true }, fs.readdirSync(app));
@@ -83,12 +74,35 @@ test("a bundle installs the components that are missing, with the launcher, and 
   const service = currentComponent("service", env);
   assert.deepEqual([service.version, currentComponent("tools", env).version], ["1.0.0", "1.0.0"]);
   assert.equal(runtime.root, service.root);
-  assert.equal(runtime.exec, path.join(service.root, NODE));
+  assert.deepEqual([runtime.exec, runtime.args], [path.join(service.root, BIN), ["serve"]], "the service's own binary, serving");
   const launcher = path.join(env.XENONET_RUNTIME_DIR, "launcher");
-  assert.deepEqual([runtime.env.XENONET_RUNTIME_DIR, runtime.env.XENONET_LAUNCHER_ROOT, runtime.env.XENONET_LAUNCHER_EXEC], [env.XENONET_RUNTIME_DIR, launcher, path.join(launcher, NODE)]);
-  assert.equal(fs.readFileSync(path.join(launcher, NODE), "utf8"), fakeNode("1.0.0"), "the launcher's node is a copy of the Tools' own");
-  assert.match(fs.readFileSync(path.join(launcher, "cli", "xenonet.js"), "utf8"), /^\/\/ xenonet-launcher \d+/);
-  assert.ok(fs.statSync(path.join(launcher, NODE)).mode & 0o100, "and it can run");
+  assert.deepEqual([runtime.env.XENONET_RUNTIME_DIR, runtime.env.XENONET_LAUNCHER_BIN], [env.XENONET_RUNTIME_DIR, path.join(launcher, EXE)]);
+  assert.deepEqual([runtime.env.XENONET_LAUNCHER_ROOT, runtime.env.XENONET_LAUNCHER_EXEC], [undefined, undefined], "no node launcher to name");
+  assert.equal(fs.readFileSync(path.join(launcher, EXE), "utf8"), fakeBin("1.0.0"), "the launcher is a copy of the Tools' binary");
+  assert.ok(fs.statSync(path.join(launcher, EXE)).mode & 0o100, "and it can run");
+  assert.deepEqual(fs.readdirSync(launcher).sort(), [EXE, `${EXE}.from`], "and nothing else: no node, no launcher script");
+});
+
+test("an earlier XenoNet's node launcher gets this XenoNet's script, which runs the binary, and nothing gets a node", posixOnly, async (t) => {
+  const { dir, env } = workspace(t);
+  const launcher = path.join(env.XENONET_RUNTIME_DIR, "launcher");
+  const entry = path.join(launcher, "cli", "xenonet.js");
+  fs.mkdirSync(path.dirname(entry), { recursive: true });
+  fs.writeFileSync(path.join(launcher, NODE), "an earlier XenoNet's node", { mode: 0o755 });
+  fs.writeFileSync(entry, "// xenonet-launcher 2 (protocol 1)\nearlier();\n");
+  await installBundle(await bundle(dir, "bundle-1", [["service", "1.0.0"], ["tools", "1.0.0"]]), { env, command: false });
+  assert.equal(fs.readFileSync(entry, "utf8"), fs.readFileSync(LAUNCHER_SOURCE, "utf8"));
+  assert.ok(launcherVersion(fs.readFileSync(entry, "utf8")) >= 3, "one that runs the Tools' binary");
+  assert.equal(fs.readFileSync(path.join(launcher, NODE), "utf8"), "an earlier XenoNet's node", "its node left as it was");
+  assert.equal(installedRuntime(env).env.XENONET_LAUNCHER_EXEC, undefined, "and the service isn't told of it");
+
+  // Without a node there's no node launcher to keep current.
+  const other = { XENONET_RUNTIME_DIR: path.join(dir, "other") };
+  fs.mkdirSync(path.join(other.XENONET_RUNTIME_DIR, "launcher", "cli"), { recursive: true });
+  fs.writeFileSync(path.join(other.XENONET_RUNTIME_DIR, "launcher", "cli", "xenonet.js"), "// xenonet-launcher 2 (protocol 1)\n");
+  await installBundle(await bundle(dir, "bundle-2", [["service", "1.0.0"], ["tools", "1.0.0"]]), { env: other, command: false });
+  assert.equal(fs.readFileSync(path.join(other.XENONET_RUNTIME_DIR, "launcher", "cli", "xenonet.js"), "utf8"), "// xenonet-launcher 2 (protocol 1)\n");
+  assert.equal(fs.existsSync(path.join(other.XENONET_RUNTIME_DIR, "launcher", NODE)), false);
 });
 
 test("a bundle never upgrades or restarts a service or Tools already installed", posixOnly, async (t) => {
@@ -112,13 +126,13 @@ test("a component whose runtime fails its startup check is never selected", posi
   assert.equal(currentComponent("tools", env).version, "1.0.0");
 });
 
-test("the startup check runs the staged node itself, without ELECTRON_RUN_AS_NODE, and wants the version it was promised", posixOnly, async (t) => {
+test("the startup check runs the staged binary itself, without ELECTRON_RUN_AS_NODE, and wants the version it was promised", posixOnly, async (t) => {
   const { dir } = workspace(t);
   const root = path.join(dir, "staged");
-  fs.mkdirSync(root);
-  // A node that fails unless it's run without the variable Electron's
-  // runtime would pass on.
-  fs.writeFileSync(path.join(root, NODE), `#!/bin/sh\n[ -n "$ELECTRON_RUN_AS_NODE" ] && exit 3\n${fakeNode("1.4.2").split("\n").slice(1).join("\n")}`, { mode: 0o755 });
+  fs.mkdirSync(path.join(root, "bin"), { recursive: true });
+  // A binary that fails unless it's run without the variable Electron's
+  // runtime would pass on, and only as `--version --json`.
+  fs.writeFileSync(path.join(root, BIN), `#!/bin/sh\n[ -n "$ELECTRON_RUN_AS_NODE" ] && exit 3\n[ "$*" = "--version --json" ] || exit 4\n${fakeBin("1.4.2").split("\n").slice(1).join("\n")}`, { mode: 0o755 });
   const saved = process.env.ELECTRON_RUN_AS_NODE;
   process.env.ELECTRON_RUN_AS_NODE = "1";
   try {
@@ -128,8 +142,8 @@ test("the startup check runs the staged node itself, without ELECTRON_RUN_AS_NOD
     if (saved === undefined) delete process.env.ELECTRON_RUN_AS_NODE;
     else process.env.ELECTRON_RUN_AS_NODE = saved;
   }
-  fs.rmSync(path.join(root, NODE));
-  assert.throws(() => checkRuntime({ root, version: "1.4.2" }), /runtime did not pass its startup check/, "no node at all");
+  fs.rmSync(path.join(root, BIN));
+  assert.throws(() => checkRuntime({ root, version: "1.4.2" }), /runtime did not pass its startup check/, "no binary at all");
 });
 
 // A service that answers status and stop, for activatePackage and
@@ -176,7 +190,7 @@ test("a Tools update selects the new Tools and its launcher, and leaves the runn
   assert.match(r.detail, /Connected MCP processes keep running/);
   assert.equal(currentComponent("tools", env).version, "1.1.0");
   assert.deepEqual([currentComponent("service", env).version, running.state.version, running.stops, running.starts], ["1.0.0", "1.0.0", 0, []], "the service, and its open terminal, untouched");
-  assert.ok(fs.existsSync(path.join(env.XENONET_RUNTIME_DIR, "launcher", "cli", "xenonet.js")));
+  assert.equal(fs.readFileSync(path.join(env.XENONET_RUNTIME_DIR, "launcher", EXE), "utf8"), fakeBin("1.1.0"), "the launcher, the new Tools' binary");
 
   // The same version again, or an older one: nothing changes.
   for (const again of [next, old]) {
@@ -246,7 +260,7 @@ test("the launcher's xenonet is a copy of the Tools' binary, made again only whe
   selectComponent("service", await stagePackage(svc.file, svc.item, { env }), env);
   const first = await pack(dir, "tools", "1.0.0", { bin: "binary 1.0.0" });
   selectComponent("tools", await stagePackage(first.file, first.item, { env }), env);
-  const bin = path.join(env.XENONET_RUNTIME_DIR, "launcher", process.platform === "win32" ? "xenonet.exe" : "xenonet");
+  const bin = path.join(env.XENONET_RUNTIME_DIR, "launcher", EXE);
   assert.equal(installLauncher(env).bin, bin);
   assert.equal(fs.readFileSync(bin, "utf8"), "binary 1.0.0");
   if (process.platform !== "win32") assert.ok(fs.statSync(bin).mode & 0o100, "and it can run");

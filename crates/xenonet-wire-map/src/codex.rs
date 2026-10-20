@@ -12,7 +12,7 @@ use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, Command};
 use tokio::sync::oneshot;
 use xenonet_blocks::lifecycle::{Lifecycle, State};
@@ -127,9 +127,9 @@ impl CodexClient {
         // What it says: answers, and requests of its own, declined.
         let (p, w) = (pending.clone(), stdin.clone());
         tokio::spawn(async move {
-            let mut lines = BufReader::new(stdout).lines();
+            let (mut out, mut buf) = (BufReader::new(stdout), Vec::new());
             let mut io = Stdout::default();
-            while let Ok(Some(line)) = lines.next_line().await {
+            while let Some(line) = xenonet_service::lines::next_line(&mut out, &mut buf).await {
                 for m in io.take(&format!("{line}\n")) {
                     match m {
                         Message::Decline(text) => {
@@ -150,8 +150,8 @@ impl CodexClient {
         });
         let tail = err_tail.clone();
         tokio::spawn(async move {
-            let mut lines = BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
+            let (mut err, mut buf) = (BufReader::new(stderr), Vec::new());
+            while let Some(line) = xenonet_service::lines::next_line(&mut err, &mut buf).await {
                 lock(&tail).push(&format!("{line}\n"));
             }
         });
@@ -477,12 +477,13 @@ mod app_server {
     use xenonet_schema::drift::DriftLog;
 
     // A stand-in for `codex app-server`: it answers initialize, a listing,
-    // a thread's items and a rename, by the request's id.
+    // a thread's items and a rename, by the request's id. Before its first
+    // answer it writes a line that isn't UTF-8, which the client reads past.
     const FAKE: &str = r#"#!/bin/sh
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
   case "$line" in
-    *'"method":"initialize"'*) printf '{"id":%s,"result":{"userAgent":"codex_cli_rs/0.150.0 (Mac OS 15.0)"}}\n' "$id" ;;
+    *'"method":"initialize"'*) printf 'not UTF-8: \377\376\n{"id":%s,"result":{"userAgent":"codex_cli_rs/0.150.0 (Mac OS 15.0)"}}\n' "$id" ;;
     *'"method":"thread/list"'*'"archived":false'*) printf '{"id":%s,"result":{"data":[{"id":"0190d3e0-0000-7000-8000-00000000cccc","preview":"Fix the build\\nand more","createdAt":1790000000,"updatedAt":1790000100,"cwd":"/w/p","status":"idle","source":"cli"}],"nextCursor":null}}\n' "$id" ;;
     *'"method":"thread/list"'*) printf '{"id":%s,"result":{"data":[],"nextCursor":null}}\n' "$id" ;;
     *'"method":"thread/items/list"'*) printf '{"id":%s,"result":{"data":[{"item":{"id":"i1","type":"agentMessage","text":"Hello"}}],"nextCursor":null}}\n' "$id" ;;

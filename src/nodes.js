@@ -37,7 +37,7 @@ function torus(radius, tube, color, opacity) {
 function flatRing(inner, outer, color, opacity, start = 0, length = Math.PI * 2) {
   return new THREE.Mesh(
     new THREE.RingGeometry(inner, outer, 160, 1, start, length),
-    remember(new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, blending: Additive, side: THREE.DoubleSide })),
+    remember(new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, blending: Additive, side: THREE.DoubleSide, forceSinglePass: true })),
   );
 }
 

@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
-use tokio::io::AsyncBufReadExt;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use xenonet_assistant::tunnel_client as client;
@@ -346,8 +345,8 @@ impl Runner {
         {
             let (me, g) = (self.me.clone(), grant.to_string());
             tokio::spawn(async move {
-                let mut lines = tokio::io::BufReader::new(stream).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
+                let (mut r, mut buf) = (tokio::io::BufReader::new(stream), Vec::new());
+                while let Some(line) = xenonet_service::lines::next_line(&mut r, &mut buf).await {
                     let Some(t) = me.upgrade() else { return };
                     let said = t.core.locked().line(&g, &line, now_ms(), &t.home);
                     if let Some(s) = said {

@@ -283,6 +283,22 @@ files.
 
 To build installers yourself, see [Releasing XenoNet](docs/guide/releases.md).
 
+### Install as a Claude Code plugin
+
+Claude Code can get XenoNet's MCP server and hooks from a plugin instead of
+`Connect Claude Code and Codex to XenoNet`. Install XenoNet first, since the
+plugin runs the `xenonet` command from your PATH. Then, in Claude Code:
+
+```text
+/plugin marketplace add willctl/xenonet
+/plugin install xenonet@xenonet
+```
+
+If Claude Code is already connected, XenoNet keeps one copy of each hook,
+and `xenonet connect` offers to take out its own entries. Codex is connected
+as before. [Sessions working together](docs/guide/agents.md#as-a-claude-code-plugin)
+has the details.
+
 ## The xenonet command
 
 `xenonet` gives you coordination, console control and component management

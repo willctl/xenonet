@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import * as tar from "tar";
-import { runtimeDir } from "./runtime.js";
+import { runtimeDir, binName } from "./runtime.js";
 import { negotiate, SERVICE_API } from "./protocol.js";
 
 export const COMPONENTS = ["service", "tools"];
@@ -59,7 +59,9 @@ export async function stagePackage(file, expected, { env = process.env, platform
   if (invalid) throw new Error(invalid);
   const manifest = packageInfo(JSON.parse(fs.readFileSync(path.join(staging, "component.json"), "utf8")), { platform, arch });
   if (manifest.component !== expected.component || manifest.version !== expected.version) throw new Error("Component archive differs from its release manifest.");
-  for (const entry of [platform === "win32" ? "node.exe" : "node", manifest.component === "service" ? "server/index.js" : "cli/xenonet.js"]) if (!fs.statSync(path.join(staging, entry)).isFile()) throw new Error(`Component is missing ${entry}.`);
+  // Service and Tools are each the xenonet binary, in bin/.
+  const bin = `bin/${binName(platform)}`;
+  if (!fs.statSync(path.join(staging, bin), { throwIfNoEntry: false })?.isFile()) throw new Error(`Component is missing ${bin}.`);
   // Windows scanners may briefly hold newly extracted executables open.
   // Retry only the final directory rename; never re-extract or change files
   // that an existing process could be using.

@@ -115,4 +115,8 @@ impl Connect for ConnectDriver {
     async fn remove(&self) -> R<Value> {
         self.run(|c, k| c.remove(k)).await
     }
+    async fn hook_connected(&self, event: &str) -> R<bool> {
+        let event = event.to_string();
+        Ok(self.run(move |c, k| c.hook_connected(k, &event).map(Value::Bool)).await?.as_bool().unwrap_or(false))
+    }
 }

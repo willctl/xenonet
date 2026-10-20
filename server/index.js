@@ -856,7 +856,7 @@ async function api(req, res, url) {
   if (route === "/api/diagnose" || route === "/api/diagnose/ask") {
     const bundle = async () =>
       makeBundle({
-        xenonet: { version: VERSION, instance: INSTANCE, packaged: !!process.env.XENONET_LAUNCHER_EXEC, running: true },
+        xenonet: { version: VERSION, instance: INSTANCE, packaged: !!(process.env.XENONET_LAUNCHER_BIN || process.env.XENONET_LAUNCHER_EXEC), running: true },
         doctor: doctor.last,
         errors: config.demo ? [] : readLogs(logDir(config.stateDir), { since: Date.now() - 24 * 3600e3, level: "warn" }),
         connect: config.demo ? null : await connect.preview().catch(() => null),
@@ -1113,6 +1113,14 @@ async function api(req, res, url) {
   // permission prompts and notifications.
   if (req.method === "POST" && route === "/api/hook/claude") {
     const body = await readJson(req).catch(() => ({}));
+    // XenoNet's plugin for Claude Code posts the same events as connect's
+    // own hooks, marked via=plugin. While connect's hook for an event is in
+    // Claude Code's settings, that one counts and the plugin's stands by, so
+    // each event arrives once.
+    if (url.searchParams.get("via") === "plugin" && (await connect.hookConnected(String(body?.hook_event_name)).catch(() => false))) {
+      res.writeHead(204).end();
+      return;
+    }
     if (typeof body.session_id === "string" && /^[0-9a-f-]{36}$/i.test(body.session_id)) {
       const ok = await verify.check(req.socket, `claude:${body.session_id}`, { hook: true });
       if (!ok.ok) return send(res, 403, { error: ok.reason });

@@ -20,6 +20,20 @@ export function checkVersion(pkg, lock, tag) {
   if (lock.version !== pkg.version || lock.packages[""].version !== pkg.version) throw new Error("package-lock.json has a different version.");
 }
 
+// XenoNet's plugin for Claude Code carries the package's version, so an
+// update to it reaches Claude Code's plugin list with each release.
+export const PLUGIN_MANIFEST = "plugins/xenonet/.claude-plugin/plugin.json";
+
+export function checkPlugin(pkg, plugin) {
+  if (plugin.version !== pkg.version) throw new Error(`${PLUGIN_MANIFEST} has version ${plugin.version}; npm run version sets it to ${pkg.version}.`);
+}
+
+// The manifest with the package's version, the rest of it as it was.
+export function pluginWithVersion(text, version) {
+  if (!/"version":\s*"[^"]*"/.test(text)) throw new Error(`${PLUGIN_MANIFEST} has no version to set.`);
+  return text.replace(/("version":\s*")[^"]*(")/, `$1${version}$2`);
+}
+
 const digest = (file, algorithm, encoding) => createHash(algorithm).update(fs.readFileSync(file)).digest(encoding);
 
 export function verifyArtifacts(dir, version, { components = false } = {}) {
@@ -75,10 +89,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   if (process.argv[2] === "check") {
     const tag = process.env.GITHUB_REF_TYPE === "tag" ? process.env.GITHUB_REF_NAME : `v${pkg.version}`;
     checkVersion(pkg, JSON.parse(fs.readFileSync("package-lock.json", "utf8")), tag);
+    checkPlugin(pkg, JSON.parse(fs.readFileSync(PLUGIN_MANIFEST, "utf8")));
     const notes = fs.readFileSync(`docs/releases/${pkg.version}.md`, "utf8");
     if (!notes.trim() || /\b(TODO|TBD)\b/.test(notes)) throw new Error("Write release notes before tagging.");
     console.log(`Ready to build XenoNet ${pkg.version}.`);
+  } else if (process.argv[2] === "plugin") {
+    // npm version runs this once it has set the package's version.
+    fs.writeFileSync(PLUGIN_MANIFEST, pluginWithVersion(fs.readFileSync(PLUGIN_MANIFEST, "utf8"), pkg.version));
+    console.log(`${PLUGIN_MANIFEST}: ${pkg.version}`);
   } else if (process.argv[2] === "verify") {
     console.log(verifyArtifacts(process.argv[3] ?? "release", pkg.version, { components: true }).join("\n"));
-  } else throw new Error("Use check or verify.");
+  } else throw new Error("Use check, plugin or verify.");
 }

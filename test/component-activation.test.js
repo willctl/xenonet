@@ -12,9 +12,8 @@ async function fixture(t, { terminals = [], stopWorks = true, failNew = false, w
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const env = { XENONET_RUNTIME_DIR: path.join(dir, "runtime") };
   const app = path.join(dir, "app");
-  fs.mkdirSync(path.join(app, "server"), { recursive: true });
-  fs.writeFileSync(path.join(app, "server/index.js"), "// test service");
-  fs.writeFileSync(path.join(app, process.platform === "win32" ? "node.exe" : "node"), "test runtime");
+  fs.mkdirSync(path.join(app, "bin"), { recursive: true });
+  fs.writeFileSync(path.join(app, "bin", process.platform === "win32" ? "xenonet.exe" : "xenonet"), "test service");
   async function pack(version) {
     const meta = { format: 1, component: "service", version, platform: process.platform, arch: process.arch, dataSchema: 1, api: { min: 1, max: 1 } };
     fs.writeFileSync(path.join(app, "component.json"), JSON.stringify(meta));

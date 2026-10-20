@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "xenonet": {
+      "type": "stdio",
+      "command": "xenonet",
+      "args": ["mcp"],
+      "env": {
+        "XENONET_PORT": "47840"
+      }
+    }
+  }
+}

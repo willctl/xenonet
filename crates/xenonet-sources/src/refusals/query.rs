@@ -142,7 +142,7 @@ pub fn query_refusals(records: &[Value], q: &Value) -> Value {
         .collect();
     let sort = qv("sort").and_then(Value::as_str).filter(|s| REFUSAL_SORTS.contains(s)).unwrap_or("newest");
     let id = |r: &Value| r["id"].as_str().unwrap_or("").to_string();
-    found.sort_by(|a, b| {
+    xenonet_base::sort::sort_by(&mut found, |a, b| {
         let by_field = if sort == "newest" || sort == "oldest" {
             Ordering::Equal
         } else {

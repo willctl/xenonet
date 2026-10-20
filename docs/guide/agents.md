@@ -31,6 +31,31 @@ On Windows, command hooks run through PowerShell. Codex's hook definitions inclu
 
 `xenonet connect` and `xenonet disconnect` do the same as the panel. `xenonet agents`, `xenonet who <path>` and `xenonet messages` show what the engine sees. [The xenonet command](cli.md) lists them all.
 
+## As a Claude Code plugin
+
+Claude Code can get the same MCP server and hooks from XenoNet's plugin instead. Install XenoNet first. The plugin runs the `xenonet` command from your PATH and can't install it. Then, in Claude Code:
+
+```text
+/plugin marketplace add willctl/xenonet
+/plugin install xenonet@xenonet
+```
+
+The plugin adds:
+
+- The `xenonet` MCP server, which runs `xenonet mcp`. In a session, its tools are named `mcp__plugin_xenonet_xenonet__peers` and so on, rather than `mcp__xenonet__peers`.
+- The hooks that connecting adds, for the same events. `SessionStart` runs `xenonet hook claude`, and the others post to `http://127.0.0.1:47840/api/hook/claude`.
+- A skill, `xenonet:coordinate`, that tells the session how to use the tools alongside other sessions.
+
+The plugin reaches the installed XenoNet on port 47840. XenoNet Dev connects with entries of its own, as before. Codex has no plugin, so connect it from the palette or with `xenonet connect codex`. On Windows, where the `xenonet` command is a `.cmd` script, connect Claude Code from the palette or with `xenonet connect` instead.
+
+XenoNet keeps one copy of each hook, whichever way you connected first:
+
+- While the plugin is installed and turned on, connecting Claude Code adds nothing to its settings. If connect's own entries are there from before, it shows them as to take out, and takes them out when you confirm.
+- While connect's own hook for an event is in Claude Code's settings, XenoNet ignores the plugin's copy of it, so each event arrives once.
+- `xenonet doctor` warns when both are there. Until connect's entries come out, sessions see XenoNet's tools twice.
+
+`xenonet disconnect` takes out only connect's own entries. `/plugin uninstall xenonet@xenonet` in Claude Code removes the plugin. Uninstalling XenoNet doesn't remove it.
+
 ## Optional Claude Code hooks
 
 XenoNet already catches questions and plan approvals by reading transcripts. Claude Code's hooks also tell it about permission prompts and notifications, which transcripts don't record. [Connecting Claude Code and Codex](#connecting-claude-code-and-codex) adds these hooks, along with the engine's own.

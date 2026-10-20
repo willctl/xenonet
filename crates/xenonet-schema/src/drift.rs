@@ -361,6 +361,10 @@ fn num(v: &Value, k: &str) -> f64 {
     v.get(k).and_then(Value::as_f64).unwrap_or(0.0)
 }
 
+/// What `DriftLog::view` gives: the log's file, when its drift was last
+/// looked at, and its records.
+pub type DriftView = (Option<String>, Option<f64>, Vec<Value>);
+
 /// The drift XenoNet has seen, merged, at most `max` records (the ones seen
 /// least lately go first), and kept in a file once `open` names one.
 pub struct DriftLog {
@@ -564,7 +568,7 @@ impl DriftLog {
 
     /// The drift as the doctor and the report see it, with what other
     /// processes wrote since.
-    pub fn view(&mut self) -> (Option<String>, Option<f64>, Vec<Value>) {
+    pub fn view(&mut self) -> DriftView {
         self.sync(false);
         (self.file.clone(), self.looked_at, self.list())
     }

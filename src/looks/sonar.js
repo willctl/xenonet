@@ -12,7 +12,7 @@ import { Additive, fresnelMaterial } from "../fx.js";
 const floorRing = (color, floorY, width = 0.015) => {
   const ring = new THREE.Mesh(
     new THREE.RingGeometry(1 - width, 1, 192),
-    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false, blending: Additive }),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0, side: THREE.DoubleSide, forceSinglePass: true, depthWrite: false, blending: Additive }),
   );
   ring.rotation.x = -Math.PI / 2;
   ring.position.y = floorY + 1;
@@ -35,7 +35,7 @@ export const SONAR = {
       const shell = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 48), fresnelMaterial(color, 0.9, 1.7));
       const ring = new THREE.Mesh(
         new THREE.RingGeometry(0.985, 1, 192),
-        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false, blending: Additive }),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.6, side: THREE.DoubleSide, forceSinglePass: true, depthWrite: false, blending: Additive }),
       );
       ring.rotation.x = -Math.PI / 2;
       ring.position.y = floorY + 1;

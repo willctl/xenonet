@@ -1,4 +1,5 @@
 import { createUpdatesPanel } from "./updates.js";
+import { createBackground } from "./background.js";
 import "@fontsource/chakra-petch/400.css";
 import "@fontsource/chakra-petch/500.css";
 import "@fontsource/chakra-petch/600.css";
@@ -455,6 +456,10 @@ const needsYou = createNeedsYou({
 });
 
 const updatesPanel = createUpdatesPanel({ modals, desktop, toast: (message) => hud.toast(message) });
+// Whether the service starts at login, and Desktop's offer of it during
+// setup, once the page has settled.
+const backgroundPanel = createBackground({ modals, desktop, toast: (m, bad) => hud.toast(m, bad) });
+backgroundPanel.offerWhenIdle();
 
 // ---------- folders for "terminal here" ----------
 
@@ -580,6 +585,7 @@ const commandList = [
   // The desktop app notifies natively; a browser tab has to ask first.
   ...(desktop ? [] : [{ id: "notify", label: "Enable desktop notifications", keywords: "alerts", run: async () => hud.toast(`Desktop notifications: ${await alerts.enableNotifications()}`) }]),
   { id: "updates", label: "Check for XenoNet updates", keywords: "version release download install restart", run: () => updatesPanel.open() },
+  { id: "background", label: "Background service: start XenoNet's service at login", keywords: "settings login startup boot always on keep running daemon launchd systemd launch agent", run: () => backgroundPanel.open() },
   { id: "doctor", label: "Check XenoNet's setup", keywords: "doctor health sign in login auth permissions problems diagnose", run: () => doctorPanel.open() },
   { id: "connect-agents", label: "Connect Claude Code and Codex to XenoNet", keywords: "si super intelligence agents claude code codex mcp hooks engine coordinate messages work together", run: () => connectPanel.open() },
   // The kill switch for messages between sessions and actors, and every wake (core/delivery/policy.js).
@@ -1261,6 +1267,7 @@ if (import.meta.env.DEV || desktop) {
     identities,
     hosts: hostFilters,
     updates: updatesPanel,
+    background: backgroundPanel,
     root: rootPanel,
     themes: themesUi,
     environments: environmentsUi,

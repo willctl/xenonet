@@ -1,8 +1,9 @@
-// The only bridge between the page and the desktop: terminals, native
-// notifications, recording films, the folder picker, commands from the
-// tray and the macOS menu bar, the theme's colors for the window itself,
-// the window key for the page's reports of you and for allowing actors,
-// whether the window shows, and saving an actor's token to a file.
+// The only bridge between the page and the desktop: updates, whether the
+// service starts at login, terminals, native notifications, recording
+// films, the folder picker, commands from the tray and the macOS menu bar,
+// the theme's colors for the window itself, the window key for the page's
+// reports of you and for allowing actors, whether the window shows, and
+// saving an actor's token to a file.
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("xenonetDesktop", {
@@ -14,6 +15,11 @@ contextBridge.exposeInMainWorld("xenonetDesktop", {
       ipcRenderer.on("app:update-state", listener);
       return () => ipcRenderer.removeListener("app:update-state", listener);
     },
+  },
+  // Whether XenoNet's service starts at login (electron/background.js):
+  // "status", "set" with { on, force }, and "dismiss" for the setup offer.
+  background: {
+    act: (action, value) => ipcRenderer.invoke("app:background", action, value),
   },
   terminal: {
     profiles: () => ipcRenderer.invoke("term:profiles"),

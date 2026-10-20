@@ -1,0 +1,5 @@
+{"t":"get","id":1,"path":"/api/graph"}
+{"t":"get","id":2,"path":"/api/mcp?server=agent-wiki"}
+{"t":"time","id":3}
+{"t":"get","id":4,"path":"/api/../etc","target":"nova@devbox","id_":"vm1","port":47840,"since":"7d"}
+xenonet relay --since 7d

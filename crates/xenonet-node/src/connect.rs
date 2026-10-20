@@ -75,6 +75,12 @@ impl ConnectCore {
         let apps = list(apps.0);
         start(move |asker| c.apply(&mut AskCalls(asker), &apps).map(|v| crate::args::value_to_arg(&v)))
     }
+    #[napi(js_name = "hookConnected")]
+    pub fn hook_connected(&self, event: JsArg) -> Machine {
+        let c = self.inner.clone();
+        let event = js_text(&event.0);
+        start(move |asker| c.hook_connected(&mut AskCalls(asker), &event).map(Arg::Bool))
+    }
     #[napi]
     pub fn remove(&self) -> Machine {
         let c = self.inner.clone();

@@ -430,6 +430,35 @@ export function createDriver(app) {
       await app.updates.open();
       return action === "status" ? app.updates.state : app.updates.action(action, value);
     },
+    // Background service (src/background.js): "status" opens it and reads
+    // whether the service starts at login, "offer" shows the setup offer if
+    // it's due, and "dismiss" answers that Not now. Turning it on or off is
+    // yours, so the driver doesn't, as it doesn't press Allow.
+    async background(action = "status") {
+      const b = app.background;
+      // The panel opens with a transition: its controls are where they'll
+      // stay once it's done.
+      const still = async () => {
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const el = document.querySelector("#modal .m-panel");
+        await Promise.all((el?.getAnimations({ subtree: true }) ?? []).map((a) => a.finished.catch(() => {})));
+      };
+      if (action === "status") {
+        await b.open();
+        await still();
+        return b.state;
+      }
+      if (action === "offer") {
+        const shown = await b.offer();
+        if (shown) await still();
+        return { shown, ...b.state };
+      }
+      if (action === "dismiss") {
+        await b.dismiss();
+        return b.state;
+      }
+      throw new Error(`background takes status, offer or dismiss, not ${action}`);
+    },
     commands: () => app.commands.map(({ id, label, key }) => ({ id, label, ...(key ? { key } : {}) })),
     async refusals(action = "open", value, opts) {
       const st = await act(() => app.refusals.action(action, value), opts);

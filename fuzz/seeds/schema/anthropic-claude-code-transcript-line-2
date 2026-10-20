@@ -1,0 +1,1 @@
+{"type":"user","timestamp":"2026-10-05T12:00:00.000Z","version":"2.1.280","sessionId":"0190d3e0-0000-7000-8000-000000000001","uuid":"u-1","isSidechain":false,"cwd":"/Users/ada/atlas","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","content":"ok","is_error":false}]}}

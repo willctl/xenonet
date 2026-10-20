@@ -10,6 +10,7 @@ import { installedConsole } from "../../core/components/console.js";
 import { consoleMcp } from "../harness/console-mcp.js";
 import { installLauncher, installBundle, activatePackage } from "../../core/components/install.js";
 import { connectService } from "../../core/components/runtime.js";
+import { currentComponent } from "../../core/components/packages.js";
 import { nextComponent } from "../harness/component-fixture.js";
 import { limit } from "../harness/software.js";
 
@@ -44,7 +45,7 @@ test("production Desktop restarts without losing its service, console connection
     await s.ready({ timeout: 90000 });
     service = await connectService({ env });
     const launcher = installLauncher(env);
-    mcp = await consoleMcp({ command: launcher?.runtime, entry: launcher?.entry, env });
+    mcp = await consoleMcp({ bin: launcher?.bin, env });
     if (launcher) {
       const names = (await mcp.list()).result.tools.map((tool) => tool.name);
       assert.ok(names.includes("terminal"));
@@ -98,7 +99,8 @@ test("production Desktop restarts without losing its service, console connection
       assert.equal((await activatePackage(tools.file, tools.item, { env })).status, "updated");
       assert.equal(mcp.proc.exitCode, null);
       assert.equal((await mcp.call("terminal", { action: "list" })).result.isError, undefined);
-      const version = JSON.parse(execFileSync(launcher.runtime, [launcher.entry, "--version", "--json"], { env, encoding: "utf8", windowsHide: true }));
+      // The new Tools' binary, which the launcher is a copy of, says their version.
+      const version = JSON.parse(execFileSync(path.join(currentComponent("tools", env).root, "bin", path.basename(launcher.bin)), ["--version", "--json"], { env, encoding: "utf8", windowsHide: true }));
       assert.equal(version.version, tools.item.version);
       assert.ok(fs.existsSync(tools.previous.root));
       assert.equal((await activatePackage(serviceUpdate.file, serviceUpdate.item, { env })).status, "staged");

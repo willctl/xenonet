@@ -15,7 +15,11 @@ use xenonet_service::http::ReplyBody;
 
 const FIXTURE: &str = include_str!("fixtures/gateway.json");
 
-struct Stand;
+/// The gateway's cores; `message` is whether you let this actor message
+/// agents.
+struct Stand {
+    message: bool,
+}
 
 #[async_trait]
 impl cores::Engine for Stand {
@@ -55,8 +59,8 @@ impl cores::Actors for Stand {
     fn info(&self, _id: &str) -> Option<Value> {
         Some(json!({ "name": "Muse", "product": { "id": "muse" } }))
     }
-    fn can(&self, _id: &str, _capability: &str) -> bool {
-        true
+    fn can(&self, _id: &str, capability: &str) -> bool {
+        capability != "message-agents" || self.message
     }
 }
 
@@ -72,10 +76,78 @@ impl cores::Runs for Stand {
     }
 }
 
+fn cores(message: bool) -> GatewayCores {
+    let s = Arc::new(Stand { message });
+    GatewayCores { engine: s.clone(), registration: s.clone(), actors: s.clone(), reports: s.clone(), runs: Some(s) }
+}
+
 fn gateway(port: u16) -> ActorGateway {
-    let s = Arc::new(Stand);
-    let cores = GatewayCores { engine: s.clone(), registration: s.clone(), actors: s.clone(), reports: s.clone(), runs: Some(s) };
-    ActorGateway::new(cores, GatewayHooks::default(), port, Some("https://mac.example.ts.net/"), "test")
+    ActorGateway::new(cores(true), GatewayHooks::default(), port, Some("https://mac.example.ts.net/"), "test")
+}
+
+/// A tool called through the gateway with Muse's token: the text it
+/// answered, and whether that's an error.
+async fn tool(g: &ActorGateway, name: &str, arguments: Value) -> (bool, String) {
+    let body = json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": name, "arguments": arguments } });
+    let headers = [
+        ("host", "mac.example.ts.net".to_string()),
+        ("content-type", "application/json".into()),
+        ("accept", "application/json, text/event-stream".into()),
+        ("authorization", format!("Bearer xenonet_gateway_{}", "a".repeat(64))),
+    ];
+    let req = GatewayRequest {
+        method: "POST".into(),
+        target: "/mcp".into(),
+        headers: headers.iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
+        body: body.to_string().into_bytes(),
+    };
+    let r = g.serve(req, false).await;
+    // A tool's answer is JSON, never a stream.
+    let b = match &r.body {
+        ReplyBody::Full(b) => b.to_vec(),
+        ReplyBody::Stream(_) => Vec::new(),
+    };
+    let answer: Value = serde_json::from_slice(&b).unwrap();
+    let result = &answer["result"];
+    (result["isError"] == json!(true), result["content"][0]["text"].as_str().unwrap_or_default().to_string())
+}
+
+#[tokio::test]
+async fn an_actor_sends_only_with_your_say_so_and_within_its_limits() {
+    let at = Arc::new(std::sync::Mutex::new(1_000_000.0));
+    let clock = {
+        let at = at.clone();
+        Arc::new(move || *at.lock().unwrap())
+    };
+    let host = Some("https://mac.example.ts.net/");
+    // Without the capability you allow, nothing is sent.
+    let held = ActorGateway::with_clock(cores(false), GatewayHooks::default(), 47997, host, "test", clock.clone());
+    let refused = (true, "send needs the message-agents capability, which your user didn't allow this actor".to_string());
+    assert_eq!(tool(&held, "send", json!({ "to": "claude:x", "text": "hi" })).await, refused);
+    assert!(!tool(&held, "peers", json!({})).await.0, "reading isn't sending");
+    // Six an hour to a repo or to all, sixty in all.
+    let g = ActorGateway::with_clock(cores(true), GatewayHooks::default(), 47996, host, "test", clock.clone());
+    for to in ["repo", "all", "project", "repo", "all", "repo"] {
+        assert!(!tool(&g, "send", json!({ "to": to, "text": "hi" })).await.0, "{to}");
+    }
+    assert_eq!(tool(&g, "send", json!({ "to": "all", "text": "hi" })).await, (true, "an actor sends at most 6 messages an hour to a repo or to all; try again in 600 s".into()));
+    for i in 0..54 {
+        assert!(!tool(&g, "send", json!({ "to": "claude:x", "text": "hi" })).await.0, "{i}");
+    }
+    assert_eq!(tool(&g, "send", json!({ "to": "claude:x", "text": "hi" })).await, (true, "an actor sends at most 60 messages an hour; try again in 60 s".into()));
+    *at.lock().unwrap() += 60e3;
+    assert!(!tool(&g, "send", json!({ "to": "claude:x", "text": "hi" })).await.0, "a minute on, one more");
+    // Heartbeats and run reports, a second apart at most, after a burst.
+    for _ in 0..4 {
+        assert!(!tool(&g, "heartbeat", json!({ "presence": "working" })).await.0);
+    }
+    assert_eq!(tool(&g, "heartbeat", json!({})).await, (true, "one heartbeat a second is the most the gateway takes".into()));
+    for i in 0..32 {
+        assert!(!tool(&g, "report_run", json!({ "run": format!("r{i}"), "app": "claude" })).await.0, "{i}");
+    }
+    assert_eq!(tool(&g, "report_run", json!({ "run": "r32", "app": "claude" })).await, (true, "too many run reports: one a second is the most the gateway takes".into()));
+    *at.lock().unwrap() += 1000.0;
+    assert!(!tool(&g, "heartbeat", json!({})).await.0 && !tool(&g, "report_run", json!({ "run": "r33", "app": "claude" })).await.0);
 }
 
 #[tokio::test]

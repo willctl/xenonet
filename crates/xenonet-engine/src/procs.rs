@@ -956,4 +956,68 @@ mod tests {
         assert_eq!(parse_netstat(row, "47842", "51000"), Some(4242.0));
         assert_eq!(parse_netstat(row, "47842", "52000"), None);
     }
+
+    /// A made-up codesign: the pids whose running code it vouches for, and
+    /// what it was asked.
+    struct Codesign {
+        good: Vec<&'static str>,
+        asked: Vec<Vec<String>>,
+    }
+
+    impl Io for Codesign {
+        fn exec(&mut self, call: Call) -> Result<String, Failure> {
+            assert_eq!(call.file, "codesign");
+            self.asked.push(call.args.clone());
+            if self.good.contains(&call.args[2].as_str()) {
+                Ok(String::new())
+            } else {
+                Err(Failure { message: "code object is not signed at all".into(), stdout: None })
+            }
+        }
+        fn now(&mut self) -> f64 {
+            0.0
+        }
+    }
+
+    #[test]
+    fn signed_is_the_running_code_as_its_apps_maker_signed_it() {
+        let p = Procs::new("darwin");
+        let mut io = Codesign { good: vec!["10", "30"], asked: vec![] };
+        let n = |x: f64| Value::from(x);
+        let program = Value::String("/Users/me/.local/bin/claude".into());
+        let signed = |io: &mut Codesign, pid: f64, start: f64, agent: Option<&str>, product: Option<(&str, &str)>| {
+            p.signed(io, Some(&n(pid)), Some(&n(start)), Some(&program), agent, product)
+        };
+        // Each app by its maker's team: Anthropic, OpenAI, Cursor, Meta.
+        assert!(signed(&mut io, 10.0, 1.0, Some("claude"), None));
+        assert!(!signed(&mut io, 20.0, 1.0, Some("codex"), None), "codesign says it isn't");
+        assert!(signed(&mut io, 30.0, 1.0, None, Some(("grok-bot", "app"))));
+        assert!(!signed(&mut io, 40.0, 1.0, None, Some(("muse", "app"))));
+        let teams: Vec<&str> = io.asked.iter().map(|a| a[1].as_str()).collect();
+        assert_eq!(
+            teams,
+            [
+                "-R=anchor apple generic and certificate leaf[subject.OU] = \"Q6L2SF6YDW\"",
+                "-R=anchor apple generic and certificate leaf[subject.OU] = \"2DC432GLL2\"",
+                "-R=anchor apple generic and certificate leaf[subject.OU] = \"DCNK4UB866\"",
+                "-R=anchor apple generic and certificate leaf[subject.OU] = \"V9WTTPBFK9\"",
+            ]
+        );
+        // Nothing to ask about: a product's helper rather than its app, an
+        // ad hoc signed one, a program that's no agent's.
+        let before = io.asked.len();
+        assert!(!signed(&mut io, 30.0, 1.0, None, Some(("grok-bot", "host"))));
+        assert!(!signed(&mut io, 30.0, 1.0, None, Some(("hermes-agent", "host"))));
+        assert!(!signed(&mut io, 10.0, 1.0, Some("cursor"), None));
+        assert!(!signed(&mut io, 10.0, 1.0, None, None));
+        assert_eq!(io.asked.len(), before);
+        // A verdict is kept for the process it was about, not its pid alone.
+        assert!(signed(&mut io, 10.0, 1.0, Some("claude"), None));
+        assert_eq!(io.asked.len(), before, "asked once");
+        io.good.clear();
+        assert!(!signed(&mut io, 10.0, 2.0, Some("claude"), None), "the pid, reused by another process");
+        // And nothing at all where XenoNet can't look.
+        let elsewhere = Procs::new("linux");
+        assert!(!elsewhere.signed(&mut io, Some(&n(10.0)), Some(&n(1.0)), Some(&program), Some("claude"), None));
+    }
 }

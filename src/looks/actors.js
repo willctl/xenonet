@@ -217,7 +217,7 @@ function crystal({ color, size, params = {}, seed }) {
   const l = lights();
   const n = Math.max(3, Math.min(12, Math.round(params.facets ?? 4)));
   const shape = bipyramid(n, size * 0.9, size * 1.45);
-  const faces = new THREE.Mesh(shape, l.add(new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, depthWrite: false, blending: Additive, side: THREE.DoubleSide })));
+  const faces = new THREE.Mesh(shape, l.add(new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, depthWrite: false, blending: Additive, side: THREE.DoubleSide, forceSinglePass: true })));
   const edges = fatEdges(shape, { color: lighter(color, 0.3), width: 1.5, opacity: 0.95 });
   l.add(edges.material);
   const body = new THREE.Group();

@@ -153,7 +153,7 @@ pub fn needs_you_queue(input: &Value) -> Vec<Value> {
         m.insert("actions".into(), Value::Array(Vec::new()));
         out.push(Value::Object(m));
     }
-    out.sort_by(order);
+    xenonet_base::sort::sort_by(&mut out, order);
     out
 }
 

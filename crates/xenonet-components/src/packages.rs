@@ -5,7 +5,7 @@
 //! What's installed is a pointer to one version (current.json), switched
 //! with a rename.
 
-use crate::runtime::{runtime_dir, Env, Machine};
+use crate::runtime::{bin_name, runtime_dir, Env, Machine};
 use crate::tar::{unpack, Unpack};
 use regex::Regex;
 use serde_json::{json, Map, Value};
@@ -155,15 +155,6 @@ fn read_json(file: &str) -> Result<Value, Failure> {
     xenonet_base::json::parse(&text).map_err(|e| Failure::msg(e.to_string()))
 }
 
-/// The runtime a package has: node, or node.exe on Windows.
-pub fn node_name(platform: &str) -> &'static str {
-    if platform == "win32" {
-        "node.exe"
-    } else {
-        "node"
-    }
-}
-
 /// Checks and unpacks a downloaded package beside the other versions of
 /// its component, without selecting it. A version unpacked already is
 /// taken as it is. On Windows, where a scanner can hold a file it just saw
@@ -205,12 +196,9 @@ pub async fn stage_package(io: &Io, file: &str, expected: &Value, env: &Env, m: 
     if manifest.get("component").and_then(Value::as_str) != Some(component) || manifest.get("version").map(js_string).as_deref() != Some(version.as_str()) {
         return Err(Failure::msg("Component archive differs from its release manifest."));
     }
-    for entry in [node_name(&m.platform), if component == "service" { "server/index.js" } else { "cli/xenonet.js" }] {
-        let f = NATIVE.join(&[&staging, entry]);
-        let meta = std::fs::metadata(&f).map_err(|e| FsError::of(e, "stat", &f))?;
-        if !meta.is_file() {
-            return Err(Failure::msg(format!("Component is missing {entry}.")));
-        }
+    // Service and Tools are each the xenonet binary, in bin/.
+    if !std::fs::metadata(NATIVE.join(&[&staging, "bin", bin_name(&m.platform)])).is_ok_and(|meta| meta.is_file()) {
+        return Err(Failure::msg(format!("Component is missing bin/{}.", bin_name(&m.platform))));
     }
     let until = now_ms() + 30000.0;
     loop {
@@ -299,5 +287,183 @@ mod tests {
         newer_api["api"] = json!({ "min": 2, "max": 2 });
         assert!(package_info(Some(&newer_api), "darwin", "arm64").unwrap_err().contains("incompatible"));
         assert_eq!(digest(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    }
+
+    use crate::tar::tests::archive;
+    use std::path::PathBuf;
+    use xenonet_app::task::{run_with, Done, Task};
+
+    /// A runtime folder of a test's own, on a made-up linux-x64 machine.
+    struct Place {
+        dir: PathBuf,
+        env: Env,
+        m: Machine,
+    }
+
+    fn place(name: &str) -> Place {
+        let dir = std::env::temp_dir().join(format!("xenonet-packages-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut env = Env::new();
+        env.insert("XENONET_RUNTIME_DIR".into(), json!(dir.join("runtime").to_string_lossy()));
+        Place { m: Machine { platform: "linux".into(), arch: "x64".into(), home: dir.to_string_lossy().into_owned() }, env, dir }
+    }
+
+    fn component_json(component: &str, version: &str, platform: &str) -> Vec<u8> {
+        json!({ "format": 1, "component": component, "version": version, "platform": platform, "arch": "x64", "dataSchema": 1, "api": { "min": 1, "max": 1 } })
+            .to_string()
+            .into_bytes()
+    }
+
+    /// A Tools package: its component.json and bin/xenonet, less the ones
+    /// `leave` names, and `more` entries.
+    fn tools(version: &str, leave: &[&str], more: &[(&str, u8, &[u8], u32)]) -> Vec<u8> {
+        let manifest = component_json("tools", version, "linux");
+        let all: Vec<(&str, u8, &[u8], u32)> = [("component.json", b'0', &manifest[..], 0o644), ("bin/xenonet", b'0', &b"#!/bin/sh\n"[..], 0o755)]
+            .into_iter()
+            .filter(|(n, ..)| !leave.contains(n))
+            .chain(more.iter().copied())
+            .collect();
+        archive(&all)
+    }
+
+    /// The release's word on a package: what it is and its hash and size.
+    fn release(bytes: &[u8], version: &str) -> Value {
+        json!({ "component": "tools", "version": version, "sha256": digest(bytes), "size": bytes.len() })
+    }
+
+    fn stage(p: &Place, bytes: &[u8], expected: &Value) -> Done {
+        let file = p.dir.join(format!("{}.tar.gz", digest(bytes)));
+        std::fs::write(&file, bytes).unwrap();
+        let (file, expected, env, m) = (file.to_string_lossy().into_owned(), expected.clone(), p.env.clone(), p.m.clone());
+        run_with(Task::new(move |io| async move { stage_package(&io, &file, &expected, &env, &m).await }), |q| Err(json!({ "message": format!("nothing here answers {q}") })))
+    }
+
+    fn refusal(d: Done) -> String {
+        match d {
+            Err(f) => f.message().to_string(),
+            Ok(v) => panic!("staged: {v}"),
+        }
+    }
+
+    fn tools_dir(p: &Place) -> PathBuf {
+        p.dir.join("runtime").join("components").join("tools")
+    }
+
+    #[test]
+    fn a_package_is_checked_against_its_release_before_anything_is_unpacked() {
+        let p = place("checked");
+        let bytes = tools("1.2.3", &[], &[]);
+        let good = release(&bytes, "1.2.3");
+        for (k, v) in [
+            ("component", json!("updater")),
+            ("component", json!(null)),
+            ("version", json!("1.2")),
+            ("version", json!("1.2.3/../..")),
+            ("sha256", json!("ABC")),
+            ("sha256", json!(null)),
+        ] {
+            let mut bad = good.clone();
+            bad[k] = v;
+            assert_eq!(refusal(stage(&p, &bytes, &bad)), "Invalid component release manifest.", "{bad}");
+        }
+        for (k, v) in [("size", json!(bytes.len() + 1)), ("size", json!(null)), ("size", json!(bytes.len().to_string())), ("sha256", json!(digest(b"another package")))] {
+            let mut bad = good.clone();
+            bad[k] = v;
+            assert_eq!(refusal(stage(&p, &bytes, &bad)), "Component download failed its hash or size check.", "{bad}");
+        }
+        assert!(!p.dir.join("runtime").exists(), "nothing was unpacked or made");
+        std::fs::remove_dir_all(&p.dir).unwrap();
+    }
+
+    #[test]
+    fn an_unsafe_or_mismatched_archive_is_never_installed() {
+        let p = place("unsafe");
+        let refused = |bytes: Vec<u8>, version: &str| refusal(stage(&p, &bytes, &release(&bytes, version)));
+        assert_eq!(refused(tools("1.2.3", &[], &[("../escape", b'0', b"x", 0o644)]), "1.2.3"), "Unsafe or oversized component archive.");
+        assert_eq!(refused(tools("1.2.3", &[], &[("bin/link", b'2', b"", 0o777)]), "1.2.3"), "Unsafe or oversized component archive.");
+        assert!(!tools_dir(&p).join("escape").exists() && !p.dir.join("escape").exists());
+        assert_eq!(refused(tools("9.9.9", &[], &[]), "1.2.3"), "Component archive differs from its release manifest.");
+        let service = archive(&[("component.json", b'0', &component_json("service", "1.2.3", "linux"), 0o644)]);
+        assert_eq!(refused(service, "1.2.3"), "Component archive differs from its release manifest.");
+        let elsewhere = archive(&[("component.json", b'0', &component_json("tools", "1.2.3", "win32"), 0o644)]);
+        assert_eq!(refused(elsewhere, "1.2.3"), "This component package is not compatible with this XenoNet installation.");
+        assert_eq!(refused(tools("1.2.3", &["bin/xenonet"], &[]), "1.2.3"), "Component is missing bin/xenonet.");
+        assert_eq!(refused(tools("1.2.3", &["bin/xenonet"], &[("bin/xenonet/", b'5', b"", 0o755)]), "1.2.3"), "Component is missing bin/xenonet.");
+        // An earlier XenoNet's package, a node and its JS, has no binary.
+        let earlier = archive(&[
+            ("component.json", b'0', &component_json("tools", "1.2.3", "linux"), 0o644),
+            ("node", b'0', b"#!/bin/sh\n", 0o755),
+            ("cli/xenonet.js", b'0', b"// tools", 0o644),
+        ]);
+        assert_eq!(refused(earlier, "1.2.3"), "Component is missing bin/xenonet.");
+        assert!(refused(b"not a package at all".repeat(40), "1.2.3").starts_with("TAR_ENTRY_INVALID"));
+        // None of them went in beside the versions that are.
+        let left: Vec<String> = std::fs::read_dir(tools_dir(&p)).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert!(left.iter().all(|n| n.starts_with(".stage-")), "{left:?}");
+        std::fs::remove_dir_all(&p.dir).unwrap();
+    }
+
+    #[test]
+    fn a_published_version_is_never_replaced() {
+        let p = place("published");
+        let bytes = tools("1.2.3", &[], &[]);
+        let staged = stage(&p, &bytes, &release(&bytes, "1.2.3")).unwrap();
+        let root = staged["root"].as_str().unwrap().to_string();
+        assert!(root.ends_with(&format!("1.2.3-{}", &digest(&bytes)[..16])));
+        select_component("tools", &staged, &p.env, &p.m).unwrap();
+        let current = current_component("tools", &p.env, &p.m).unwrap().unwrap();
+        assert_eq!((current["version"].clone(), current["root"].clone()), (json!("1.2.3"), json!(root)));
+        // The same version again, from a package of other bytes.
+        let other = tools("1.2.3", &[], &[("extra.js", b'0', b"// more", 0o644)]);
+        assert_eq!(refusal(stage(&p, &other, &release(&other, "1.2.3"))), "A published component version cannot be replaced. Release a new version.");
+        // The same package again: the version unpacked already, as it is.
+        std::fs::write(PathBuf::from(&root).join("bin/xenonet"), "// as it was").unwrap();
+        assert_eq!(stage(&p, &bytes, &release(&bytes, "1.2.3")).unwrap()["root"], json!(root));
+        assert_eq!(std::fs::read_to_string(PathBuf::from(&root).join("bin/xenonet")).unwrap(), "// as it was");
+        std::fs::remove_dir_all(&p.dir).unwrap();
+    }
+
+    #[test]
+    fn the_installed_pointer_is_checked() {
+        let p = place("pointer");
+        assert_eq!(current_component("updater", &p.env, &p.m).unwrap_err().message, "Choose service or tools.");
+        assert_eq!(current_component("tools", &p.env, &p.m), Ok(None));
+        std::fs::create_dir_all(tools_dir(&p)).unwrap();
+        let pointer = tools_dir(&p).join("current.json");
+        for (text, want) in [
+            ("null", "Cannot read properties of null (reading 'sha256')"),
+            (r#"{"version":"1.2.3","sha256":"../../../elsewhere"}"#, "Invalid installed component pointer."),
+            (r#"{"version":"../1.2.3","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}"#, "Invalid installed component pointer."),
+            (r#"{"version":"1.2.3"}"#, "Invalid installed component pointer."),
+        ] {
+            std::fs::write(&pointer, text).unwrap();
+            assert_eq!(current_component("tools", &p.env, &p.m).unwrap_err().message, want, "{text}");
+        }
+        std::fs::write(&pointer, "{").unwrap();
+        assert!(current_component("tools", &p.env, &p.m).is_err());
+        std::fs::remove_dir_all(&p.dir).unwrap();
+    }
+
+    #[test]
+    fn one_updater_at_a_time() {
+        let p = place("lock");
+        let take = |answer: Result<Value, Value>| {
+            let (env, m) = (p.env.clone(), p.m.clone());
+            run_with(Task::new(move |io| async move { lock(&io, &env, &m).await.map(Value::String) }), move |_| answer.clone())
+        };
+        let file = take(Ok(json!(null))).unwrap();
+        let file = file.as_str().unwrap();
+        assert_eq!(std::fs::read_to_string(file).unwrap(), std::process::id().to_string());
+        // Held by a process that's there: refused; by one that's gone: taken.
+        assert_eq!(take(Ok(json!(null))).unwrap_err().message(), "Another XenoNet update is in progress.");
+        assert_eq!(take(Err(json!({ "code": "EPERM" }))), Err(Failure::Rethrow));
+        assert!(take(Err(json!({ "code": "ESRCH" }))).is_ok());
+        // A lock with no pid in it yet is one starting.
+        std::fs::write(file, "").unwrap();
+        assert_eq!(take(Ok(json!(null))).unwrap_err().message(), "Another XenoNet update is starting.");
+        unlock(file).unwrap();
+        assert!(take(Ok(json!(null))).is_ok());
+        std::fs::remove_dir_all(&p.dir).unwrap();
     }
 }

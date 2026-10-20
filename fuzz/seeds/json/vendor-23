@@ -1,0 +1,1 @@
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"SubAgentActivity","id":"i2","kind":"completed","agent_thread_id":"t2","agent_path":"explorer"}}}

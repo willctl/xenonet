@@ -24,9 +24,16 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
         Some(s) => s.get("/api/engine/connect")?,
         None => cores::connect_preview(&opts)?,
     };
-    let there: Vec<&Value> = list(&preview, "apps").iter().filter(|a| list(a, "changes").iter().any(|ch| str(ch, "state") != Some("missing"))).collect();
+    // What XenoNet's plugin for Claude Code carries is the plugin's, not
+    // connect's, so it stays.
+    let ours = |ch: &&Value| str(ch, "state") != Some("missing") && str(ch, "via") != Some("plugin");
+    let plugin = list(&preview, "apps").iter().any(|a| list(a, "changes").iter().any(|ch| str(ch, "via") == Some("plugin")));
+    let there: Vec<&Value> = list(&preview, "apps").iter().filter(|a| list(a, "changes").iter().any(|ch| ours(&ch))).collect();
     if there.is_empty() {
         print(c::dim("XenoNet isn't in Claude Code's or Codex's settings; nothing to take out."));
+        if plugin {
+            print(c::dim(PLUGIN_STAYS));
+        }
         return Ok(0);
     }
     let shown: Vec<Value> = there
@@ -37,7 +44,7 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
             a.insert("broken".into(), json!([]));
             let changes: Vec<Value> = list(&Value::Object(a.clone()), "changes")
                 .iter()
-                .filter(|ch| str(ch, "state") != Some("missing"))
+                .filter(|ch| ours(ch))
                 .map(|ch| {
                     let mut ch: Map<String, Value> = ch.as_object().cloned().unwrap_or_default();
                     ch.insert("state".into(), json!("remove"));
@@ -64,5 +71,10 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
     }
     let keeps = s.as_ref().map_or(String::new(), |s| format!(" ({} keeps running)", name_of(s)));
     print(format!("{} Took XenoNet out of {names}{keeps}. Sessions already open keep their tools until restarted.", c::green("✓")));
+    if plugin {
+        print(c::dim(PLUGIN_STAYS));
+    }
     Ok(0)
 }
+
+const PLUGIN_STAYS: &str = "XenoNet's plugin for Claude Code stays. /plugin in Claude Code uninstalls it.";

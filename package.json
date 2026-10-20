@@ -23,6 +23,7 @@
     "test:bin": "node scripts/rust-bin-tests.mjs",
     "cargo": "node scripts/cargo.mjs",
     "lint:rust": "node scripts/rust-lint.mjs",
+    "coverage:rust": "node scripts/rust-coverage.mjs",
     "rust:build": "node scripts/rust-build.mjs",
     "rust:bin": "node scripts/rust-bin.mjs",
     "drive": "node cli/xenonet.js console",
@@ -43,6 +44,7 @@
     "dist:dir": "node scripts/dist.mjs dir",
     "shortcut": "release\\win-unpacked\\XenoNet.exe --install-shortcut",
     "release:check": "node scripts/release.mjs check",
+    "version": "node scripts/release.mjs plugin",
     "release:build": "node scripts/release-build.mjs",
     "release:verify": "node scripts/release.mjs verify"
   },

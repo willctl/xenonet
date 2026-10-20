@@ -500,6 +500,11 @@ port. The service stays the only writer of `state.json` and
   under the home folder. Release builds remap them
   (`--remap-path-prefix`) and strip debug info, and the build's existing
   check for the home folder's path in packaged files covers the binaries.
+- **The dist profile.** Published binaries build with Cargo's `dist`
+  profile: whole-program LTO in one codegen unit, no debug info and no
+  symbol table. On an M-series Mac that took the service from 34.5 MB to
+  22.1 MB and made scanning and search 5-10% quicker than the `release`
+  profile, for a build about three times as long.
 - SQLite is compiled in, so no platform needs its own.
 - CI builds every target, runs `cargo test` and the parity tests on each,
   and attaches the binaries to the release with the rest of its files.
@@ -693,7 +698,11 @@ keeps the counts. Desktop runs `xenonet serve` and nothing else
 (`electron/service-runtime.js`): the installed Service's `bin/xenonet`,
 or in XenoNet Dev the checkout's newer build of `target/debug` and
 `target/release`. With no binary it stops and says how to get one. The
-Service and Tools packages carry the binary as `bin/xenonet`. XenoNet
+Service and Tools packages are the binary, as `bin/xenonet`, with no Node
+runtime or JS beside it (`scripts/component-build.mjs`); the binary has
+the node launcher script built in, for entries an earlier XenoNet wrote.
+A package's startup check runs `bin/xenonet --version --json`, which says
+the version in the package's `package.json`. XenoNet
 Dev's page still hot-reloads, through Vite in Desktop's own frontend
 server (`electron/desktop-server.js`), and it restarts its service when
 the binary is rebuilt.

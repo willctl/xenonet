@@ -217,7 +217,7 @@ pub fn spend_by_actor(spend: &[Value], sessions: &[Value], starts: &[Value], nam
         }
     }
     let mut actors: Vec<(String, Value, &Part)> = rows.iter().map(|(id, p)| (id.clone(), name_of(id), p)).collect();
-    actors.sort_by(|(ai, an, a), (bi, bn, b)| {
+    xenonet_base::sort::sort_by(&mut actors, |(ai, an, a), (bi, bn, b)| {
         let by = |x: f64, y: f64| y.partial_cmp(&x).unwrap_or(Ordering::Equal);
         by(a.cost, b.cost)
             .then_with(|| by(a.sessions, b.sessions))

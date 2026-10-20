@@ -629,7 +629,7 @@ impl Hermes {
         let latest = |s: &Session| s.activity_at.unwrap_or(0.0).max(s.last_message_at.unwrap_or(0.0));
         let mut active: Vec<Session> =
             p.sessions.iter().map(|(_, s)| s.clone()).filter(|s| s.ended_at.is_none() && !s.archived && !s.hidden && latest(s) >= at - ACTIVE_MS).collect();
-        active.sort_by(|a, b| latest(b).partial_cmp(&latest(a)).unwrap_or(std::cmp::Ordering::Equal));
+        xenonet_base::sort::sort_by(&mut active, |a, b| latest(b).partial_cmp(&latest(a)).unwrap_or(std::cmp::Ordering::Equal));
         // A gateway whose heartbeat is stale while its process runs has gone
         // quiet: only its sessions' own activity says what it's doing.
         let quiet = r.gateway_alive && n(r.gateway.get("updatedAt")).is_some_and(|u| at - u > STALE_MS);

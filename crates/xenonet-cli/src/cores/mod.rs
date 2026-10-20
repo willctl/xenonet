@@ -23,6 +23,8 @@
 //! run_relay                core/hosts/relay.js runRelay               relay
 //! runtime_dir…update_      core/components/                           setup, service, update
 //! component
+//! supervisor::*            docs/design/always-on.md                   service install, uninstall,
+//!                                                                     status, start, run
 //! command_dir…uninstall_   core/command.js                            install, uninstall, setup
 //! command
 //! run_script, control_*    core/script.js, core/control.js            console, script, film
@@ -41,6 +43,7 @@ mod native;
 mod relay;
 mod secrets;
 mod setup;
+pub mod supervisor;
 mod tar;
 mod tasks;
 
@@ -145,17 +148,12 @@ pub fn checkup_here(flags: &crate::args::Flags, only: Option<&[String]>) -> Res<
         "stateDir": state_dir,
         "cacheDir": cache_dir,
     });
-    Ok(xenonet_mcp::doctor::checkup_here(&paths, only, &launcher_source()))
-}
-
-/// The launcher script this XenoNet ships, core/components/launcher.cjs.
-fn launcher_source() -> String {
-    xenonet_base::paths::join_all(&[&sys::xenonet_root(), "core", "components", "launcher.cjs"])
+    Ok(xenonet_mcp::doctor::checkup_here(&paths, only))
 }
 
 /// machine().launcher()
 pub fn machine_launcher() -> Res<Value> {
-    xenonet_mcp::doctor::launcher(&launcher_source()).map(|l| l.unwrap_or(Value::Null)).map_err(Fail::error)
+    xenonet_mcp::doctor::launcher().map(|l| l.unwrap_or(Value::Null)).map_err(Fail::error)
 }
 
 /// writeListenSettings({ dir, port }): the file's path.

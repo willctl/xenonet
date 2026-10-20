@@ -1,4 +1,4 @@
-// A downloaded component can install itself using its bundled Node runtime.
+// A downloaded component installs itself, from its extracted folder.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,7 +9,7 @@ import { activatePackage, installLauncher } from "../../core/components/install.
 import { installCommand } from "../../core/command.js";
 import { runtimeDir } from "../../core/components/runtime.js";
 
-export const help = "Install this downloaded component for your account. From its extracted folder, run its bundled node (node.exe on Windows) with cli/xenonet.js setup. Service and Tools can be installed in either order.";
+export const help = "Install this downloaded component for your account. From its extracted folder, run bin/xenonet setup (bin\\xenonet.exe setup on Windows). Service and Tools can be installed in either order.";
 export async function run() {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
   const manifest = JSON.parse(fs.readFileSync(path.join(root, "component.json"), "utf8"));

@@ -358,7 +358,7 @@
     "core/components/install.js": {
       "rust": "crates/xenonet-components/src/install.rs",
       "differences": [
-        "The service's connection, starting a runtime, the startup check given in operations, and the clock are asked of the twin, with the operations given; the startup check XenoNet does itself runs the staged node from Rust, with a 15 s limit as spawnSync had."
+        "The service's connection, starting a runtime, the startup check given in operations, and the clock are asked of the twin, with the operations given; the startup check XenoNet does itself runs the staged binary from Rust, with a 15 s limit as spawnSync had. The node launcher script is built into the Rust rather than read beside it."
       ]
     },
     "core/components/packages.js": {

@@ -6,7 +6,7 @@
 // token are (docs/design/actors/interface.md, section 5): yours alone.
 import { escapeHtml as h } from "./format.js";
 
-const STATE = { present: ["✓", "added"], missing: ["+", "to add"], different: ["↻", "to update"] };
+const STATE = { present: ["✓", "added"], missing: ["+", "to add"], different: ["↻", "to update"], remove: ["−", "to take out"] };
 
 export function createConnectPanel({ modals, toast, sfx }) {
   let panel = null;
@@ -14,7 +14,8 @@ export function createConnectPanel({ modals, toast, sfx }) {
   function render(d) {
     const changes = d.apps.flatMap((a) => a.changes);
     const done = changes.every((c) => c.state === "present");
-    const any = changes.some((c) => c.state !== "missing");
+    // What XenoNet's plugin for Claude Code carries isn't connect's to take out.
+    const any = changes.some((c) => c.state !== "missing" && c.via !== "plugin");
     const app = (a) => `
       <div class="d-k">${h(a.name)}${a.cli ? "" : ` <span class="dim">· command not found</span>`}</div>
       <ol class="d-list cx-list">${a.changes

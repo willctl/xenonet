@@ -30,7 +30,7 @@ pub fn gather(flags: &Flags) -> Result<(String, Value), Fail> {
     let xenonet = json!({
         "version": crate::js::have(&health, "version").cloned().unwrap_or_else(|| json!(VERSION)),
         "instance": instance,
-        "packaged": sys::var("XENONET_LAUNCHER_EXEC").is_some(),
+        "packaged": sys::var("XENONET_LAUNCHER_BIN").or_else(|| sys::var("XENONET_LAUNCHER_EXEC")).is_some(),
         "running": s.is_some(),
     });
     let errors = read_logs(Path::new(&log_dir(&state_dir)), now() - 24.0 * 3600e3, "warn", None, None, 500);

@@ -16,7 +16,7 @@
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use xenonet_base::text::{js_trim, truthy};
 
 /// The Agent SDK release whose readings these are, as the lenient
@@ -40,8 +40,28 @@ fn sorted_names(dir: &Path) -> Vec<std::fs::DirEntry> {
 struct HeadTail {
     mtime: f64,
     size: u64,
+    stamp: Stamp,
     head: String,
     tail: String,
+}
+
+/// A file as it stood: its size, when it was last written and which file
+/// it is. A transcript that still has the same one hasn't changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Stamp {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    ino: u64,
+}
+
+impl Stamp {
+    fn of(meta: &std::fs::Metadata) -> Stamp {
+        #[cfg(unix)]
+        let ino = std::os::unix::fs::MetadataExt::ino(meta);
+        #[cfg(not(unix))]
+        let ino = 0;
+        Stamp { len: meta.len(), modified: meta.modified().ok(), ino }
+    }
 }
 
 fn open_plain(file: &Path) -> std::io::Result<std::fs::File> {
@@ -74,7 +94,7 @@ fn head_tail(file: &Path) -> Option<HeadTail> {
     let mtime = xenonet_base::fs::mtime_ms_of(&meta).map_or(0.0, f64::floor);
     let head_text = String::from_utf8_lossy(&head).into_owned();
     let tail = if size > CHUNK { String::from_utf8_lossy(&read_at(&mut f, size - CHUNK, CHUNK).ok()?).into_owned() } else { head_text.clone() };
-    Some(HeadTail { mtime, size, head: head_text, tail })
+    Some(HeadTail { mtime, size, stamp: Stamp::of(&meta), head: head_text, tail })
 }
 
 // ---------- finding values in the text ----------
@@ -104,19 +124,39 @@ fn starts(text: &str, pat: &str) -> Vec<usize> {
     text.match_indices(pat).map(|(i, _)| i + pat.len()).collect()
 }
 
-/// The last `"key":"…"` (or `"key": "…"`) in the text that closes.
+// How much of the text, back from the end, last_value looks at first.
+const STRETCH: usize = 8192;
+
+/// The last `"key":"…"` (or `"key": "…"`) in the text that closes. It's
+/// looked for a stretch of whole lines at a time from the end, where it
+/// usually is: a key never spans a line break, so the matches in a
+/// stretch that starts a line are those a search of the whole text finds
+/// there.
 fn last_value(text: &str, key: &str) -> Option<String> {
-    let mut at: Vec<usize> = starts(text, &format!("\"{key}\":\"")).into_iter().chain(starts(text, &format!("\"{key}\": \""))).collect();
-    at.sort_unstable();
-    at.into_iter().rev().find_map(|i| value_at(text, i))
+    last_value_by(text, key, STRETCH)
+}
+
+fn last_value_by(text: &str, key: &str, stretch: usize) -> Option<String> {
+    let (tight, spaced) = (format!("\"{key}\":\""), format!("\"{key}\": \""));
+    let mut end = text.len();
+    while end > 0 {
+        let from = text.as_bytes()[..end.saturating_sub(stretch)].iter().rposition(|&b| b == b'\n').map_or(0, |n| n + 1);
+        let part = &text[from..end];
+        let mut at: Vec<usize> = starts(part, &tight).into_iter().chain(starts(part, &spaced)).map(|i| from + i).collect();
+        at.sort_unstable();
+        if let Some(v) = at.into_iter().rev().find_map(|i| value_at(text, i)) {
+            return Some(v);
+        }
+        end = from;
+    }
+    None
 }
 
 /// The first `"key":"…"`, or, only when there's none of those, the first
 /// `"key": "…"`.
 fn first_value(text: &str, key: &str) -> Option<String> {
-    let tight = starts(text, &format!("\"{key}\":\""));
-    let list = if tight.is_empty() { starts(text, &format!("\"{key}\": \"")) } else { tight };
-    list.into_iter().next().and_then(|i| value_at(text, i))
+    let first = |pat: String| text.find(&pat).map(|i| i + pat.len());
+    first(format!("\"{key}\":\"")).or_else(|| first(format!("\"{key}\": \""))).and_then(|i| value_at(text, i))
 }
 
 fn nonempty(s: Option<String>) -> Option<String> {
@@ -141,7 +181,10 @@ fn unwrap_pastes(text: &str) -> String {
     let mut from = 0;
     while let Some(i) = out[from..].find(open).map(|i| i + from) {
         let id = &out[i + open.len()..];
-        let ok = id.len() >= 6 && id[..4].bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)) && &id[4..6] == "\">";
+        // Compared as bytes: what follows the tag is anyone's text, and a
+        // character there can straddle the four hex digits' end.
+        let b = id.as_bytes();
+        let ok = b.len() >= 6 && b[..4].iter().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(c)) && &b[4..6] == b"\">";
         if !ok {
             from = i + 1;
             continue;
@@ -353,29 +396,67 @@ fn sidecar_title(file: &Path, id: &str) -> Option<String> {
 
 // ---------- listSessions ----------
 
-fn listing(id: &str, file: &Path, t: &HeadTail) -> Option<Value> {
-    let first_line = t.head.split('\n').next().unwrap_or("");
-    if first_line.contains("\"isSidechain\":true") || first_line.contains("\"isSidechain\": true") {
+/// What a listing takes from a transcript's head and tail: all of it but
+/// the sidecar's name and whether a session it continued in has begun,
+/// which are other files. Kept from one listing to the next while the
+/// transcript stays as it was, so an unchanged one isn't read again.
+#[derive(Clone, Debug)]
+struct Seen {
+    stamp: Stamp,
+    mtime: f64,
+    size: u64,
+    /// The session this one continued in, by its tail.
+    continued: Option<String>,
+    /// A subagent's transcript, which isn't a session of its own.
+    sidechain: bool,
+    /// The name in the tail, even an empty one: only when there's none at
+    /// all is the sidecar's looked at.
+    tail_title: Option<String>,
+    /// The name when neither the tail nor the sidecar has one.
+    later_title: Option<String>,
+    first: Option<String>,
+    created: Option<f64>,
+    /// What it's called without a name.
+    later_summary: Option<String>,
+    branch: Option<String>,
+    cwd: Option<String>,
+    tag: Option<String>,
+}
+
+impl Seen {
+    fn of(t: &HeadTail) -> Seen {
+        let first_line = t.head.split('\n').next().unwrap_or("");
+        let sidechain = first_line.contains("\"isSidechain\":true") || first_line.contains("\"isSidechain\": true");
+        let first = nonempty(Some(first_prompt(&t.head)));
+        Seen {
+            stamp: t.stamp,
+            mtime: t.mtime,
+            size: t.size,
+            continued: continued_in(&t.tail),
+            sidechain,
+            tail_title: last_value(&t.tail, "customTitle"),
+            later_title: nonempty(last_value(&t.head, "customTitle")).or_else(|| nonempty(last_value(&t.tail, "aiTitle"))).or_else(|| nonempty(last_value(&t.head, "aiTitle"))),
+            created: first_value(&t.head, "timestamp").and_then(|s| xenonet_base::time::parse_iso(&s)),
+            later_summary: nonempty(last_value(&t.tail, "lastPrompt"))
+                .or_else(|| nonempty(last_value(&t.tail, "summary")))
+                .or_else(|| first.clone())
+                .or_else(|| nonempty(Some(attached(&t.head)))),
+            first,
+            branch: nonempty(last_value(&t.tail, "gitBranch")).or_else(|| nonempty(first_value(&t.head, "gitBranch"))),
+            cwd: nonempty(relocated(&t.tail)).or_else(|| nonempty(first_value(&t.head, "cwd"))),
+            tag: t.tail.split('\n').rfind(|l| l.contains("\"type\":\"tag\"") && l.contains("\"tag\":\"")).and_then(|l| nonempty(last_value(l, "tag"))),
+        }
+    }
+}
+
+fn listing(id: &str, file: &Path, t: &Seen) -> Option<Value> {
+    if t.sidechain {
         return None;
     }
-    let tail_title = last_value(&t.tail, "customTitle");
-    let sidecar = if tail_title.is_none() { sidecar_title(file, id) } else { None };
-    let custom = nonempty(tail_title)
-        .or(sidecar)
-        .or_else(|| nonempty(last_value(&t.head, "customTitle")))
-        .or_else(|| nonempty(last_value(&t.tail, "aiTitle")))
-        .or_else(|| nonempty(last_value(&t.head, "aiTitle")));
-    let first = nonempty(Some(first_prompt(&t.head)));
-    let created = first_value(&t.head, "timestamp").and_then(|s| xenonet_base::time::parse_iso(&s));
-    let summary = custom
-        .clone()
-        .or_else(|| nonempty(last_value(&t.tail, "lastPrompt")))
-        .or_else(|| nonempty(last_value(&t.tail, "summary")))
-        .or_else(|| first.clone())
-        .or_else(|| nonempty(Some(attached(&t.head))))?;
-    let branch = nonempty(last_value(&t.tail, "gitBranch")).or_else(|| nonempty(first_value(&t.head, "gitBranch")));
-    let cwd = nonempty(relocated(&t.tail)).or_else(|| nonempty(first_value(&t.head, "cwd")));
-    let tag = t.tail.split('\n').rfind(|l| l.contains("\"type\":\"tag\"") && l.contains("\"tag\":\"")).and_then(|l| nonempty(last_value(l, "tag")));
+    let sidecar = if t.tail_title.is_none() { sidecar_title(file, id) } else { None };
+    let custom = nonempty(t.tail_title.clone()).or(sidecar).or_else(|| t.later_title.clone());
+    let summary = custom.clone().or_else(|| t.later_summary.clone())?;
+    let (first, created, branch, cwd, tag) = (t.first.clone(), t.created, t.branch.clone(), t.cwd.clone(), t.tag.clone());
     let mut m = Map::new();
     m.insert("sessionId".into(), json!(id));
     m.insert("summary".into(), json!(summary));
@@ -395,9 +476,43 @@ fn listing(id: &str, file: &Path, t: &HeadTail) -> Option<Value> {
     Some(Value::Object(m))
 }
 
+/// What listings read of each transcript, by its path, kept from one
+/// listing to the next.
+#[derive(Default)]
+pub struct Listings {
+    seen: HashMap<PathBuf, Seen>,
+}
+
+// How many transcripts are read at once when many are new or changed, as
+// they all are at the start; fewer than READ_TOGETHER are read in turn.
+const READERS: usize = 4;
+const READ_TOGETHER: usize = 64;
+
+fn read_one(file: &Path) -> Option<(PathBuf, Seen)> {
+    head_tail(file).map(|t| (file.to_path_buf(), Seen::of(&t)))
+}
+
+fn read_all(files: &[PathBuf]) -> Vec<(PathBuf, Seen)> {
+    let readers = std::thread::available_parallelism().map_or(1, std::num::NonZero::get).min(READERS);
+    if files.len() < READ_TOGETHER || readers < 2 {
+        return files.iter().filter_map(|f| read_one(f)).collect();
+    }
+    std::thread::scope(|s| {
+        let parts: Vec<_> = files.chunks(files.len().div_ceil(readers)).map(|part| s.spawn(move || part.iter().filter_map(|f| read_one(f)).collect::<Vec<_>>())).collect();
+        parts.into_iter().flat_map(|p| p.join().unwrap_or_default()).collect()
+    })
+}
+
 /// listSessions(): every session's listing, newest first.
 pub fn list_sessions(projects_dir: &str) -> Vec<Value> {
-    let mut found: Vec<(String, f64, Value)> = Vec::new();
+    list_sessions_with(projects_dir, &mut Listings::default())
+}
+
+/// listSessions(), with what earlier listings read: a transcript that
+/// hasn't changed since isn't read again. Only its sidecar's name, and
+/// whether a session it continued in has begun, are looked at each time.
+pub fn list_sessions_with(projects_dir: &str, listings: &mut Listings) -> Vec<Value> {
+    let mut files: Vec<(String, PathBuf)> = Vec::new();
     for folder in sorted_names(Path::new(projects_dir)) {
         if !folder.file_type().is_ok_and(|t| t.is_dir()) {
             continue;
@@ -405,28 +520,51 @@ pub fn list_sessions(projects_dir: &str) -> Vec<Value> {
         for f in sorted_names(&folder.path()) {
             let name = f.file_name().to_string_lossy().into_owned();
             let Some(id) = name.strip_suffix(".jsonl").filter(|s| is_uuid(s)) else { continue };
-            let file = f.path();
-            let Some(t) = head_tail(&file) else { continue };
-            if let Some(other) = continued_in(&t.tail) {
-                if continued_elsewhere(&file, &other) {
-                    continue;
+            files.push((id.to_string(), f.path()));
+        }
+    }
+    let mut seen: HashMap<PathBuf, Seen> = HashMap::with_capacity(files.len());
+    let mut stale = Vec::new();
+    for (_, file) in &files {
+        let now = std::fs::symlink_metadata(file).ok().filter(|m| m.file_type().is_file()).map(|m| Stamp::of(&m));
+        match listings.seen.remove(file) {
+            Some(s) if Some(s.stamp) == now => {
+                seen.insert(file.clone(), s);
+            }
+            _ => stale.push(file.clone()),
+        }
+    }
+    seen.extend(read_all(&stale));
+    let mut found: Vec<(String, f64, Value)> = Vec::new();
+    let mut at: HashMap<String, usize> = HashMap::new();
+    for (id, file) in &files {
+        let Some(t) = seen.get(file) else { continue };
+        if let Some(other) = &t.continued {
+            if continued_elsewhere(file, other) {
+                continue;
+            }
+        }
+        let Some(l) = listing(id, file, t) else { continue };
+        match at.get(id) {
+            Some(&k) => {
+                if t.mtime > found[k].1 {
+                    found[k] = (id.clone(), t.mtime, l);
                 }
             }
-            let Some(l) = listing(id, &file, &t) else { continue };
-            match found.iter_mut().find(|(i, _, _)| i == id) {
-                Some(slot) if t.mtime > slot.1 => *slot = (id.to_string(), t.mtime, l),
-                Some(_) => {}
-                None => found.push((id.to_string(), t.mtime, l)),
+            None => {
+                at.insert(id.clone(), found.len());
+                found.push((id.clone(), t.mtime, l));
             }
         }
     }
+    listings.seen = seen;
     found.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| b.0.cmp(&a.0)));
     found.into_iter().map(|(_, _, l)| l).collect()
 }
 
 // ---------- getSessionMessages ----------
 
-fn find_file(projects_dir: &str, id: &str) -> Option<std::path::PathBuf> {
+fn find_file(projects_dir: &str, id: &str) -> Option<PathBuf> {
     sorted_names(Path::new(projects_dir)).into_iter().map(|d| d.path().join(format!("{id}.jsonl"))).find(|f| std::fs::metadata(f).is_ok_and(|m| m.len() > 0))
 }
 
@@ -575,52 +713,99 @@ fn chain(entries: &mut [Value]) -> Vec<usize> {
         cur = parent(&entries[i]).and_then(|p| by.get(p).copied());
     }
     out.reverse();
-    // What ran beside the chain: a reply's other parts, and the results of
-    // its tool calls, after the last of its parts.
+    beside(entries, out)
+}
+
+// What ran beside the chain: a reply's other parts, and the results of its
+// tool calls, after the last of its parts. Each reply's parts and results
+// are found once, by index, so a long transcript costs no more than a
+// short one does per line.
+fn beside(entries: &[Value], out: Vec<usize>) -> Vec<usize> {
     let in_chain: HashSet<usize> = out.iter().copied().collect();
-    let mut owner: HashMap<String, Option<String>> = HashMap::new();
-    for e in entries.iter() {
+    // Whose each tool call is: the reply that made it, unless more than one
+    // reply says it made it.
+    let mut owner: HashMap<String, Option<&str>> = HashMap::new();
+    // Each reply's parts, in the file's order, and the replies each uuid is
+    // a part of.
+    let mut parts: HashMap<&str, Vec<usize>> = HashMap::new();
+    let mut replies_of: HashMap<&str, Vec<&str>> = HashMap::new();
+    for (i, e) in entries.iter().enumerate() {
         if let Some(m) = msg_id(e) {
             for t in tool_uses(e) {
-                let slot = owner.entry(t).or_insert_with(|| Some(m.to_string()));
-                if slot.as_deref() != Some(m) {
+                let slot = owner.entry(t).or_insert(Some(m));
+                if *slot != Some(m) {
                     *slot = None;
+                }
+            }
+            parts.entry(m).or_default().push(i);
+            if let Some(u) = uuid(e) {
+                let of = replies_of.entry(u).or_default();
+                if !of.contains(&m) {
+                    of.push(m);
                 }
             }
         }
     }
-    let mut ids: Vec<String> = Vec::new();
-    for &i in &out {
+    // Each reply's tool results off the chain, in the file's order: those
+    // that follow one of its parts, or answer a call only it made.
+    let mut results: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (i, e) in entries.iter().enumerate() {
+        if in_chain.contains(&i) || !is_tool_result(e) {
+            continue;
+        }
+        let mut of: Vec<&str> = parent(e).and_then(|p| replies_of.get(p)).cloned().unwrap_or_default();
+        for t in tool_results(e) {
+            if let Some(Some(m)) = owner.get(&t) {
+                if !of.contains(m) {
+                    of.push(m);
+                }
+            }
+        }
+        for m in of {
+            results.entry(m).or_default().push(i);
+        }
+    }
+    // The replies on the chain, each once, in its order, and where each
+    // last appears on it.
+    let mut ids: Vec<&str> = Vec::new();
+    let mut last_at: HashMap<&str, usize> = HashMap::new();
+    for (at, &i) in out.iter().enumerate() {
         if let Some(m) = msg_id(&entries[i]) {
-            if !ids.iter().any(|x| x == m) {
-                ids.push(m.to_string());
+            if last_at.insert(m, at).is_none() {
+                ids.push(m);
             }
         }
     }
+    let ts = |i: &usize| entries[*i].get("timestamp").and_then(Value::as_str).unwrap_or("");
     let mut added: HashSet<usize> = HashSet::new();
+    // What goes after each place on the chain. What's put in is a reply's
+    // own parts and tool results, never another reply's part, so where a
+    // reply last appears is where it did on the chain.
+    let mut after: HashMap<usize, Vec<usize>> = HashMap::new();
     for m in ids {
-        let group: Vec<usize> = (0..entries.len()).filter(|&i| msg_id(&entries[i]) == Some(m.as_str())).collect();
-        let group_uuids: HashSet<&str> = group.iter().filter_map(|&i| uuid(&entries[i])).collect();
-        let mut missing: Vec<usize> = group.iter().copied().filter(|i| !in_chain.contains(i) && !added.contains(i)).collect();
-        let mut direct: Vec<usize> = (0..entries.len())
-            .filter(|&i| is_tool_result(&entries[i]) && !in_chain.contains(&i) && !added.contains(&i))
-            .filter(|&i| {
-                parent(&entries[i]).is_some_and(|p| group_uuids.contains(p))
-                    || tool_results(&entries[i]).iter().any(|t| owner.get(t).is_some_and(|o| o.as_deref() == Some(m.as_str())))
-            })
-            .collect();
-        let ts = |i: &usize| entries[*i].get("timestamp").and_then(Value::as_str).unwrap_or("").to_string();
-        missing.sort_by_key(ts);
-        direct.sort_by_key(ts);
+        let mut missing: Vec<usize> = parts.get(m).map_or(&[][..], Vec::as_slice).iter().copied().filter(|i| !in_chain.contains(i) && !added.contains(i)).collect();
+        let mut direct: Vec<usize> = results.get(m).map_or(&[][..], Vec::as_slice).iter().copied().filter(|i| !added.contains(i)).collect();
+        missing.sort_by(|a, b| ts(a).cmp(ts(b)));
+        direct.sort_by(|a, b| ts(a).cmp(ts(b)));
         if missing.is_empty() && direct.is_empty() {
             continue;
         }
-        let Some(last) = out.iter().rposition(|&i| msg_id(&entries[i]) == Some(m.as_str())) else { continue };
+        let Some(&last) = last_at.get(m) else { continue };
         let insert: Vec<usize> = missing.into_iter().chain(direct).collect();
         added.extend(insert.iter().copied());
-        out.splice((last + 1)..=last, insert);
+        after.insert(last, insert);
     }
-    out
+    if after.is_empty() {
+        return out;
+    }
+    let mut full = Vec::with_capacity(out.len() + added.len());
+    for (at, i) in out.into_iter().enumerate() {
+        full.push(i);
+        if let Some(insert) = after.remove(&at) {
+            full.extend(insert);
+        }
+    }
+    full
 }
 
 // A queued command: the prompt typed while a turn ran, as the message it
@@ -666,27 +851,181 @@ fn last_text(e: &Value) -> String {
     }
 }
 
+// A line's entry, if it's JSON.
+fn parse_line(l: &[u8]) -> Option<Value> {
+    let start = l.iter().position(|b| *b > 0x20)?;
+    xenonet_base::json::parse(&String::from_utf8_lossy(&l[start..])).ok()
+}
+
+// The fields of an entry that finding its session's messages reads, with
+// its message cut to what's read of that: its id, and of each block its
+// type, a call's id, the call a result answers and, in what you said, the
+// text. The rest (tool results, file contents, thinking) stays in the
+// line until the message is shown. A field read below that isn't kept
+// here reads as missing, so a field newly read is added here too.
+fn slim(e: Value) -> Value {
+    let Value::Object(mut all) = e else { return e };
+    let user = all.get("type").and_then(Value::as_str) == Some("user");
+    let mut m = Map::new();
+    for k in [
+        "type",
+        "uuid",
+        "parentUuid",
+        "isSidechain",
+        "teamName",
+        "subtype",
+        "compactMetadata",
+        "isMeta",
+        "promptSource",
+        "sessionId",
+        "timestamp",
+        "interruptedByShutdown",
+        "toolDenialUnanswered",
+        "isCompactSummary",
+        "isVisibleInTranscriptOnly",
+        "isQueuedCommand",
+        "isCompletedLocalCommand",
+        "origin",
+    ] {
+        if let Some(v) = all.shift_remove(k) {
+            m.insert(k.into(), v);
+        }
+    }
+    // A queued command's attachment becomes the message, so it's kept
+    // whole; of any other, only its type is read.
+    if let Some(a) = all.shift_remove("attachment") {
+        let queued = a.get("type").and_then(Value::as_str) == Some("queued_command");
+        let a = match a {
+            Value::Object(o) if !queued => Value::Object(o.into_iter().filter(|(k, _)| k == "type").collect()),
+            a => a,
+        };
+        m.insert("attachment".into(), a);
+    }
+    if let Some(message) = all.shift_remove("message") {
+        let message = match message {
+            Value::Object(mut msg) => {
+                let mut cut = Map::new();
+                if let Some(id) = msg.shift_remove("id") {
+                    cut.insert("id".into(), id);
+                }
+                if let Some(content) = msg.shift_remove("content") {
+                    let content = match content {
+                        Value::Array(blocks) => Value::Array(
+                            blocks
+                                .into_iter()
+                                .map(|b| match b {
+                                    Value::Object(mut b) => {
+                                        let text = user && b.get("type").and_then(Value::as_str) == Some("text");
+                                        let mut kept = Map::new();
+                                        for k in ["type", "id", "tool_use_id"] {
+                                            if let Some(v) = b.shift_remove(k) {
+                                                kept.insert(k.into(), v);
+                                            }
+                                        }
+                                        if let Some(t) = b.shift_remove("text").filter(|_| text) {
+                                            kept.insert("text".into(), t);
+                                        }
+                                        Value::Object(kept)
+                                    }
+                                    b => b,
+                                })
+                                .collect(),
+                        ),
+                        c => c,
+                    };
+                    cut.insert("content".into(), content);
+                }
+                Value::Object(cut)
+            }
+            message => message,
+        };
+        m.insert("message".into(), message);
+    }
+    Value::Object(m)
+}
+
+/// A session's messages, root first, as getSessionMessages gives them,
+/// each one's message left in its line in the transcript until it's
+/// taken: a long session's messages, all held at once, would take several
+/// times their size in the file.
+pub struct Messages {
+    data: Vec<u8>,
+    /// Each message, with where its line is, or none when it was made here
+    /// (a queued command), whole.
+    list: Vec<(Value, Line)>,
+}
+
+impl Messages {
+    pub fn len(&self) -> usize {
+        self.list.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.list.is_empty()
+    }
+
+    /// The messages from `start` to `end`, whole, as `slice` takes them: a
+    /// range past the end is cut to it.
+    pub fn page(&self, start: usize, end: usize) -> Vec<Value> {
+        let end = end.min(self.list.len());
+        self.list[start.min(end)..end]
+            .iter()
+            .map(|(m, line)| {
+                let mut m = m.clone();
+                if let Some(line) = line {
+                    m["message"] = parse_line(&self.data[line.clone()]).and_then(|mut e| e.get_mut("message").map(Value::take)).unwrap_or(Value::Null);
+                }
+                m
+            })
+            .collect()
+    }
+
+    pub fn all(&self) -> Vec<Value> {
+        self.page(0, self.len())
+    }
+}
+
 /// getSessionMessages(id): a session's messages, root first, as the SDK
 /// gives them; none for an id that isn't one or a session not found.
 pub fn session_messages(projects_dir: &str, id: &str) -> Vec<Value> {
+    messages(projects_dir, id).all()
+}
+
+/// The same, each message read whole only when it's taken.
+pub fn messages(projects_dir: &str, id: &str) -> Messages {
+    let none = || Messages { data: Vec::new(), list: Vec::new() };
     if !is_uuid(id) {
-        return Vec::new();
+        return none();
     }
-    let Some(file) = find_file(projects_dir, id) else { return Vec::new() };
-    let Ok(data) = std::fs::read(&file) else { return Vec::new() };
-    let mut entries: Vec<Value> = data
-        .split(|b| *b == b'\n')
-        .filter_map(|l| {
-            let start = l.iter().position(|b| *b > 0x20)?;
-            xenonet_base::json::parse(&String::from_utf8_lossy(&l[start..])).ok()
-        })
-        .filter(|e| matches!(kind(e), "user" | "assistant" | "progress" | "system" | "attachment") && uuid(e).is_some())
-        .collect();
+    let Some(file) = find_file(projects_dir, id) else { return none() };
+    let Ok(data) = std::fs::read(&file) else { return none() };
+    let mut entries: Vec<Value> = Vec::new();
+    let mut lines: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut at = 0;
+    for l in data.split(|b| *b == b'\n') {
+        let range = at..at + l.len();
+        at = range.end + 1;
+        let Some(e) = parse_line(l) else { continue };
+        if matches!(kind(&e), "user" | "assistant" | "progress" | "system" | "attachment") && uuid(&e).is_some() {
+            entries.push(slim(e));
+            lines.push(range);
+        }
+    }
     let order = chain(&mut entries);
-    let mut list: Vec<Value> = order.iter().map(|&i| entries[i].clone()).collect();
+    // The chain names each entry once, so each is moved out, not copied.
+    let list: Vec<(Value, Line)> = order.iter().map(|&i| (std::mem::take(&mut entries[i]), Some(lines[i].clone()))).collect();
+    drop(entries);
+    Messages { list: shown(list), data }
+}
+
+type Line = Option<std::ops::Range<usize>>;
+
+// What of the chain's entries getSessionMessages gives, and how; each
+// one's message is put in when it's taken, from its line.
+fn shown(mut list: Vec<(Value, Line)>) -> Vec<(Value, Line)> {
     // A local command's records, after its caveat, until the next reply.
     let mut marking = false;
-    for e in &mut list {
+    for (e, _) in &mut list {
         if kind(e) == "assistant" {
             marking = false;
             continue;
@@ -708,14 +1047,17 @@ pub fn session_messages(projects_dir: &str, id: &str) -> Vec<Value> {
     // Queued commands a reply took up become the messages they were.
     let n = list.len();
     for i in 0..n {
-        if kind(&list[i]) != "attachment" {
+        if kind(&list[i].0) != "attachment" {
             continue;
         }
-        let consumed =
-            list[i + 1..].iter().find(|x| is_message(x)).is_some_and(|x| kind(x) == "assistant" || is_tool_result(x) || last_text(x).starts_with("[Request interrupted by user"));
+        let consumed = list[i + 1..]
+            .iter()
+            .map(|(x, _)| x)
+            .find(|x| is_message(x))
+            .is_some_and(|x| kind(x) == "assistant" || is_tool_result(x) || last_text(x).starts_with("[Request interrupted by user"));
         if consumed || i + 1 == n {
-            if let Some(q) = queued_message(&list[i]) {
-                list[i] = q;
+            if let Some(q) = queued_message(&list[i].0) {
+                list[i] = (q, None);
             }
         }
     }
@@ -723,13 +1065,14 @@ pub fn session_messages(projects_dir: &str, id: &str) -> Vec<Value> {
         o.and_then(|o| o.get("kind")).and_then(Value::as_str).is_some_and(|k| matches!(k, "channel" | "observer" | "observer-activity" | "slack-ping" | "peer"))
     };
     list.into_iter()
-        .filter(|e| is_message(e) && (!truthy(e.get("isMeta")) || special(e.get("origin"))) && !truthy(e.get("isSidechain")) && !truthy(e.get("teamName")))
-        .map(|e| {
+        .filter(|(e, _)| is_message(e) && (!truthy(e.get("isMeta")) || special(e.get("origin"))) && !truthy(e.get("isSidechain")) && !truthy(e.get("teamName")))
+        .map(|(e, line)| {
             let mut m = Map::new();
             m.insert("type".into(), e.get("type").cloned().unwrap_or(Value::Null));
             m.insert("uuid".into(), e.get("uuid").cloned().unwrap_or(Value::Null));
             m.insert("session_id".into(), e.get("sessionId").cloned().unwrap_or(Value::Null));
-            m.insert("message".into(), e.get("message").cloned().unwrap_or(Value::Null));
+            // A line's message is read from it when it's taken.
+            m.insert("message".into(), if line.is_some() { Value::Null } else { e.get("message").cloned().unwrap_or(Value::Null) });
             m.insert("parent_tool_use_id".into(), Value::Null);
             m.insert("parent_agent_id".into(), Value::Null);
             let on = |k: &str| e.get(k) == Some(&Value::Bool(true));
@@ -762,7 +1105,7 @@ pub fn session_messages(projects_dir: &str, id: &str) -> Vec<Value> {
                 };
                 m.insert("origin".into(), o);
             }
-            Value::Object(m)
+            (Value::Object(m), line)
         })
         .collect()
 }
@@ -855,5 +1198,390 @@ mod tests {
         assert!(is_markup("<system-reminder>hi"));
         assert!(!is_markup("Fix <b> tags"));
         assert_eq!(unwrap_pastes("see\n<pasted_content id=\"a1b2\">\nbody\n</pasted_content id=\"a1b2\">\nend"), "seebodyend");
+        // A character across the id's end is no id: the text stays as it is.
+        for odd in ["<pasted_content id=\"€€\">", "<pasted_content id=\"abcdé", "<pasted_content id=\"abc€\">"] {
+            assert_eq!(unwrap_pastes(odd), odd);
+        }
+    }
+
+    // A fixed run of numbers, for the texts and transcripts the tests below
+    // make up.
+    struct Dice(u64);
+
+    impl Dice {
+        fn roll(&mut self, n: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % n as u64) as usize
+        }
+    }
+
+    // The searches as they were, over the whole text.
+    fn last_value_whole(text: &str, key: &str) -> Option<String> {
+        let mut at: Vec<usize> = starts(text, &format!("\"{key}\":\"")).into_iter().chain(starts(text, &format!("\"{key}\": \""))).collect();
+        at.sort_unstable();
+        at.into_iter().rev().find_map(|i| value_at(text, i))
+    }
+
+    fn first_value_whole(text: &str, key: &str) -> Option<String> {
+        let tight = starts(text, &format!("\"{key}\":\""));
+        let list = if tight.is_empty() { starts(text, &format!("\"{key}\": \"")) } else { tight };
+        list.into_iter().next().and_then(|i| value_at(text, i))
+    }
+
+    #[test]
+    fn values_found_from_the_end_are_those_the_whole_text_has() {
+        let bits = ["\"k\":\"", "\"k\": \"", "\n", "x", "\\\"", "\"", "\\\\", "k", ":", " ", "é"];
+        let mut d = Dice(0x9e37_79b9_7f4a_7c15);
+        for _ in 0..5000 {
+            let n = d.roll(48);
+            let text: String = (0..n).map(|_| bits[d.roll(bits.len())]).collect();
+            for stretch in [1, 2, 5, 16, STRETCH] {
+                assert_eq!(last_value_by(&text, "k", stretch), last_value_whole(&text, "k"), "{text:?}, {stretch} at a time");
+            }
+            assert_eq!(first_value(&text, "k"), first_value_whole(&text, "k"), "{text:?}");
+        }
+    }
+
+    // What ran beside the chain, found as it was: each reply's parts and
+    // results looked for through every entry.
+    fn beside_as_it_was(entries: &[Value], mut out: Vec<usize>) -> Vec<usize> {
+        let in_chain: HashSet<usize> = out.iter().copied().collect();
+        let mut owner: HashMap<String, Option<String>> = HashMap::new();
+        for e in entries {
+            if let Some(m) = msg_id(e) {
+                for t in tool_uses(e) {
+                    let slot = owner.entry(t).or_insert_with(|| Some(m.to_string()));
+                    if slot.as_deref() != Some(m) {
+                        *slot = None;
+                    }
+                }
+            }
+        }
+        let mut ids: Vec<String> = Vec::new();
+        for &i in &out {
+            if let Some(m) = msg_id(&entries[i]) {
+                if !ids.iter().any(|x| x == m) {
+                    ids.push(m.to_string());
+                }
+            }
+        }
+        let mut added: HashSet<usize> = HashSet::new();
+        for m in ids {
+            let group: Vec<usize> = (0..entries.len()).filter(|&i| msg_id(&entries[i]) == Some(m.as_str())).collect();
+            let group_uuids: HashSet<&str> = group.iter().filter_map(|&i| uuid(&entries[i])).collect();
+            let mut missing: Vec<usize> = group.iter().copied().filter(|i| !in_chain.contains(i) && !added.contains(i)).collect();
+            let mut direct: Vec<usize> = (0..entries.len())
+                .filter(|&i| is_tool_result(&entries[i]) && !in_chain.contains(&i) && !added.contains(&i))
+                .filter(|&i| {
+                    parent(&entries[i]).is_some_and(|p| group_uuids.contains(p))
+                        || tool_results(&entries[i]).iter().any(|t| owner.get(t).is_some_and(|o| o.as_deref() == Some(m.as_str())))
+                })
+                .collect();
+            let ts = |i: &usize| entries[*i].get("timestamp").and_then(Value::as_str).unwrap_or("").to_string();
+            missing.sort_by_key(ts);
+            direct.sort_by_key(ts);
+            if missing.is_empty() && direct.is_empty() {
+                continue;
+            }
+            let Some(last) = out.iter().rposition(|&i| msg_id(&entries[i]) == Some(m.as_str())) else { continue };
+            let insert: Vec<usize> = missing.into_iter().chain(direct).collect();
+            added.extend(insert.iter().copied());
+            out.splice((last + 1)..=last, insert);
+        }
+        out
+    }
+
+    #[test]
+    fn what_ran_beside_the_chain_is_found_as_it_was() {
+        let mut d = Dice(0x2545_f491_4f6c_dd1d);
+        let mut grew = 0;
+        for round in 0..400 {
+            let n = 1 + d.roll(48);
+            let mut entries = Vec::new();
+            for _ in 0..n {
+                let mut e = json!({ "uuid": format!("u{}", d.roll(n + 4)) });
+                if d.roll(6) > 0 {
+                    e["parentUuid"] = json!(format!("u{}", d.roll(n + 4)));
+                }
+                if d.roll(8) > 0 {
+                    e["timestamp"] = json!(format!("2026-10-17T10:00:{:02}.000Z", d.roll(12)));
+                }
+                let calls = |d: &mut Dice, kind: &str, key: &str| -> Vec<Value> { (0..d.roll(3)).map(|_| json!({ "type": kind, key: format!("t{}", d.roll(10)) })).collect() };
+                match d.roll(3) {
+                    0 => {
+                        e["type"] = json!("assistant");
+                        e["message"] = json!({ "id": format!("m{}", d.roll(8)), "content": calls(&mut d, "tool_use", "id") });
+                    }
+                    1 => {
+                        e["type"] = json!("user");
+                        e["message"] = json!({ "content": calls(&mut d, "tool_result", "tool_use_id") });
+                    }
+                    _ => {
+                        e["type"] = json!("user");
+                        e["message"] = json!({ "content": "a prompt" });
+                    }
+                }
+                entries.push(e);
+            }
+            // A chain: some of the entries, each once, in any order.
+            let mut out: Vec<usize> = (0..n).filter(|_| d.roll(3) > 0).collect();
+            for i in (1..out.len()).rev() {
+                out.swap(i, d.roll(i + 1));
+            }
+            let found = beside(&entries, out.clone());
+            grew += usize::from(found.len() > out.len());
+            assert_eq!(found, beside_as_it_was(&entries, out), "round {round}: {entries:?}");
+        }
+        assert!(grew > 100, "most rounds find something beside the chain: {grew}");
+    }
+
+    #[test]
+    fn a_listing_reads_again_only_what_changed() {
+        let root = std::env::temp_dir().join(format!("xenonet-wire-sdk-listings-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let p = root.join("-Users-nova-Projects-atlas");
+        let dir = root.to_string_lossy().into_owned();
+        let prompt = |id: &str, text: &str| json!({ "type": "user", "uuid": "u1", "sessionId": id, "cwd": "/Users/nova/Projects/atlas", "timestamp": "2026-10-17T10:00:00.000Z", "message": { "role": "user", "content": text } });
+        write(&p, A, &[prompt(A, "Add partial refunds")]);
+        write(&p, B, &[prompt(B, "Review the refunds change")]);
+        let mut l = Listings::default();
+        assert_eq!(list_sessions_with(&dir, &mut l), list_sessions(&dir));
+        assert_eq!(l.seen.len(), 2);
+        // A name in the sidecar shows though the transcript is as it was.
+        std::fs::create_dir_all(p.join(A)).expect("a folder");
+        std::fs::write(p.join(A).join("custom-title.json"), r#"{"customTitle":"Refunds"}"#).expect("a sidecar");
+        let list = list_sessions_with(&dir, &mut l);
+        assert_eq!(list, list_sessions(&dir));
+        assert!(list.iter().any(|s| s["customTitle"] == "Refunds"));
+        // A transcript written to is read again.
+        rename_session(&dir, B, "Review").expect("renamed");
+        let list = list_sessions_with(&dir, &mut l);
+        assert_eq!(list, list_sessions(&dir));
+        assert!(list.iter().any(|s| s["customTitle"] == "Review"));
+        // One that's gone is forgotten.
+        std::fs::remove_file(p.join(format!("{A}.jsonl"))).expect("removed");
+        assert_eq!(list_sessions_with(&dir, &mut l).len(), 1);
+        assert_eq!(l.seen.len(), 1);
+        std::fs::remove_dir_all(&root).expect("cleaned up");
+    }
+
+    // getSessionMessages as it was: every entry held whole throughout.
+    fn session_messages_as_it_was(projects_dir: &str, id: &str) -> Vec<Value> {
+        let Some(file) = find_file(projects_dir, id) else { return Vec::new() };
+        let data = std::fs::read(file).expect("a transcript");
+        let mut entries: Vec<Value> = data
+            .split(|b| *b == b'\n')
+            .filter_map(parse_line)
+            .filter(|e| matches!(kind(e), "user" | "assistant" | "progress" | "system" | "attachment") && uuid(e).is_some())
+            .collect();
+        let order = chain(&mut entries);
+        let mut list: Vec<Value> = order.iter().map(|&i| entries[i].clone()).collect();
+        let mut marking = false;
+        for e in &mut list {
+            if kind(e) == "assistant" {
+                marking = false;
+                continue;
+            }
+            if kind(e) != "user" {
+                continue;
+            }
+            if truthy(e.get("isMeta")) {
+                if last_text(e).starts_with("<local-command-caveat>") {
+                    marking = true;
+                }
+                continue;
+            }
+            let t = last_text(e);
+            if marking && e.get("promptSource").is_none() && (t.contains("<command-name>") || t.contains("<local-command-stdout>") || t.contains("<local-command-stderr>")) {
+                e["isCompletedLocalCommand"] = json!(true);
+            }
+        }
+        let n = list.len();
+        for i in 0..n {
+            if kind(&list[i]) != "attachment" {
+                continue;
+            }
+            let consumed = list[i + 1..]
+                .iter()
+                .find(|x| is_message(x))
+                .is_some_and(|x| kind(x) == "assistant" || is_tool_result(x) || last_text(x).starts_with("[Request interrupted by user"));
+            if consumed || i + 1 == n {
+                if let Some(q) = queued_message(&list[i]) {
+                    list[i] = q;
+                }
+            }
+        }
+        let special = |o: Option<&Value>| {
+            o.and_then(|o| o.get("kind")).and_then(Value::as_str).is_some_and(|k| matches!(k, "channel" | "observer" | "observer-activity" | "slack-ping" | "peer"))
+        };
+        list.into_iter()
+            .filter(|e| is_message(e) && (!truthy(e.get("isMeta")) || special(e.get("origin"))) && !truthy(e.get("isSidechain")) && !truthy(e.get("teamName")))
+            .map(|e| {
+                let mut m = Map::new();
+                m.insert("type".into(), e.get("type").cloned().unwrap_or(Value::Null));
+                m.insert("uuid".into(), e.get("uuid").cloned().unwrap_or(Value::Null));
+                m.insert("session_id".into(), e.get("sessionId").cloned().unwrap_or(Value::Null));
+                m.insert("message".into(), e.get("message").cloned().unwrap_or(Value::Null));
+                m.insert("parent_tool_use_id".into(), Value::Null);
+                m.insert("parent_agent_id".into(), Value::Null);
+                let on = |k: &str| e.get(k) == Some(&Value::Bool(true));
+                if on("interruptedByShutdown") {
+                    m.insert("interruptedByShutdown".into(), json!(true));
+                }
+                if e.get("toolDenialUnanswered").and_then(Value::as_str) == Some("stream-closed") {
+                    m.insert("toolDenialUnanswered".into(), json!("stream-closed"));
+                }
+                if on("isCompactSummary") {
+                    m.insert("isCompactSummary".into(), json!(true));
+                }
+                if on("isMeta") || on("isCompactSummary") || on("isVisibleInTranscriptOnly") {
+                    m.insert("is_meta".into(), json!(true));
+                }
+                if on("isQueuedCommand") {
+                    m.insert("isQueuedCommand".into(), json!(true));
+                }
+                if on("isCompletedLocalCommand") {
+                    m.insert("isCompletedLocalCommand".into(), json!(true));
+                }
+                if let Some(t) = e.get("timestamp").filter(|t| !t.is_null()) {
+                    m.insert("timestamp".into(), t.clone());
+                }
+                if let Some(o) = e.get("origin").filter(|o| truthy(Some(o))) {
+                    let o = if o.get("kind").and_then(Value::as_str) == Some("task-notification") {
+                        Value::Object(["kind", "subkind", "fireReason", "producer"].iter().filter_map(|k| o.get(*k).map(|v| (k.to_string(), v.clone()))).collect())
+                    } else {
+                        o.clone()
+                    };
+                    m.insert("origin".into(), o);
+                }
+                Value::Object(m)
+            })
+            .collect()
+    }
+
+    // A made-up transcript's entry, of every kind getSessionMessages reads.
+    fn entry(d: &mut Dice, n: usize, prev: &str) -> Value {
+        let pick = |d: &mut Dice, list: &[Value]| list[d.roll(list.len())].clone();
+        let mut e = json!({ "uuid": format!("u{}", d.roll(n + 4)), "sessionId": A });
+        e["parentUuid"] = match d.roll(8) {
+            0 => Value::Null,
+            1 => json!(format!("u{}", d.roll(n + 4))),
+            _ => json!(prev),
+        };
+        if d.roll(8) > 0 {
+            e["timestamp"] = json!(format!("2026-10-17T10:{:02}:00.000Z", d.roll(30)));
+        }
+        let texts = [
+            json!("Add partial refunds"),
+            json!("<local-command-caveat>Caveat</local-command-caveat>"),
+            json!("<command-name>/cost</command-name>"),
+            json!("<local-command-stdout>ok</local-command-stdout>"),
+            json!("[Request interrupted by user]"),
+        ];
+        let block = |d: &mut Dice| match d.roll(6) {
+            0 => json!({ "type": "text", "text": pick(d, &texts) }),
+            1 => json!({ "type": "tool_result", "tool_use_id": format!("t{}", d.roll(8)), "content": [{ "type": "text", "text": "x".repeat(300) }], "is_error": false }),
+            2 => json!({ "type": "image", "source": { "data": "aGk=".repeat(50) } }),
+            3 => json!({ "type": "tool_use", "id": format!("t{}", d.roll(8)), "name": "Bash", "input": { "command": "npm test" } }),
+            4 => json!({ "type": "thinking", "thinking": "Where are refunds?", "signature": "sig" }),
+            _ => json!("a bare string"),
+        };
+        match d.roll(7) {
+            0 | 1 => {
+                e["type"] = json!("user");
+                let content = if d.roll(2) == 0 { pick(d, &texts) } else { Value::Array((0..=d.roll(3)).map(|_| block(d)).collect()) };
+                e["message"] = json!({ "role": "user", "content": content });
+                e["toolUseResult"] = json!({ "stdout": "y".repeat(200) });
+            }
+            2 | 3 => {
+                e["type"] = json!("assistant");
+                e["message"] =
+                    json!({ "id": format!("m{}", d.roll(6)), "role": "assistant", "model": "claude-x", "content": (0..=d.roll(3)).map(|_| block(d)).collect::<Vec<_>>() });
+            }
+            4 => {
+                e["type"] = json!("attachment");
+                e["attachment"] = match d.roll(3) {
+                    0 => json!({ "type": "queued_command", "prompt": pick(d, &texts), "source_uuid": format!("q{}", d.roll(5)) }),
+                    1 => {
+                        json!({ "type": "queued_command", "prompt": [{ "type": "text", "text": "later" }], "isMeta": d.roll(2) == 0, "origin": pick(d, &[json!({ "kind": "peer" }), json!({ "kind": "x" })]), "commandMode": pick(d, &[json!("task-notification"), json!("prompt")]) })
+                    }
+                    _ => json!({ "type": pick(d, &[json!("file"), json!("fork_briefing")]), "content": "z".repeat(300) }),
+                };
+            }
+            5 => {
+                e["type"] = json!("system");
+                e["subtype"] = json!("compact_boundary");
+                let u: Vec<String> = (0..3).map(|_| format!("u{}", d.roll(n))).collect();
+                e["compactMetadata"] = if d.roll(2) == 0 {
+                    json!({ "preservedSegment": { "headUuid": u[0], "anchorUuid": u[1], "tailUuid": u[2] } })
+                } else {
+                    json!({ "preservedMessages": { "anchorUuid": u[0], "uuids": [u[1], u[2]] } })
+                };
+            }
+            _ => e["type"] = pick(d, &[json!("progress"), json!("summary")]),
+        }
+        for (k, v) in [
+            ("isMeta", json!(true)),
+            ("isSidechain", json!(true)),
+            ("teamName", json!("crew")),
+            ("promptSource", json!("typed")),
+            ("interruptedByShutdown", json!(true)),
+            ("toolDenialUnanswered", json!("stream-closed")),
+            ("isCompactSummary", json!(true)),
+            ("isVisibleInTranscriptOnly", json!(true)),
+            ("isQueuedCommand", json!(true)),
+            ("origin", json!({ "kind": "task-notification", "subkind": "done", "extra": 1 })),
+        ] {
+            if d.roll(12) == 0 {
+                e[k] = v;
+            }
+        }
+        if d.roll(30) == 0 {
+            e.as_object_mut().expect("an object").shift_remove("uuid");
+        }
+        e
+    }
+
+    #[test]
+    fn messages_read_whole_only_when_taken_are_those_held_whole() {
+        let root = std::env::temp_dir().join(format!("xenonet-wire-sdk-messages-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let p = root.join("-Users-nova-Projects-atlas");
+        std::fs::create_dir_all(&p).expect("a folder");
+        let dir = root.to_string_lossy().into_owned();
+        let mut d = Dice(0x1234_5678_9abc_def1);
+        let mut shown = 0;
+        for round in 0..300 {
+            let n = 1 + d.roll(60);
+            let mut text = String::new();
+            let mut prev = String::from("u0");
+            for _ in 0..n {
+                let e = entry(&mut d, n, &prev);
+                prev = e["uuid"].as_str().unwrap_or("u0").to_string();
+                match d.roll(20) {
+                    0 => text.push_str("not json\n"),
+                    1 => text.push_str("\n  "),
+                    _ => {}
+                }
+                text.push_str(&xenonet_base::json::stringify(&e, 0));
+                text.push('\n');
+            }
+            std::fs::write(p.join(format!("{A}.jsonl")), &text).expect("a transcript");
+            let want = session_messages_as_it_was(&dir, A);
+            let got = messages(&dir, A);
+            assert_eq!(got.all(), want, "round {round}: {text}");
+            let (a, b) = (d.roll(want.len() + 1), d.roll(want.len() + 1));
+            let (a, b) = (a.min(b), a.max(b));
+            assert_eq!(got.page(a, b), want[a..b], "round {round}, {a}..{b}");
+            // Past the end, as slice takes it: cut to what there is.
+            let n = want.len();
+            assert_eq!(got.page(a, n + 5), want[a..], "round {round}, {a}..past the end");
+            assert!(got.page(n + 1, n + 5).is_empty() && got.page(b, a.saturating_sub(1)).is_empty());
+            shown += want.len();
+        }
+        assert!(shown > 500, "the transcripts have messages to show: {shown}");
+        std::fs::remove_dir_all(&root).expect("cleaned up");
     }
 }

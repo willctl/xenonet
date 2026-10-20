@@ -897,7 +897,7 @@ impl Actors {
             // At most INSTANCES_MAX: the one silent longest goes.
             if a.instances.len() > INSTANCES_MAX {
                 let mut others: Vec<(usize, f64)> = a.instances.iter().enumerate().filter(|(_, (n, _))| *n != instance).map(|(j, (_, x))| (j, x.at)).collect();
-                others.sort_by(|x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal));
+                xenonet_base::sort::sort_by(&mut others, |x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal));
                 if let Some((j, _)) = others.first() {
                     a.instances.remove(*j);
                 }
@@ -1201,7 +1201,7 @@ impl Actors {
         let a = &mut self.all[i];
         if a.targets.len() > TARGETS_KEPT {
             let mut order: Vec<(usize, f64)> = a.targets.iter().enumerate().map(|(j, (_, t))| (j, t.last_at)).collect();
-            order.sort_by(|x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal));
+            xenonet_base::sort::sort_by(&mut order, |x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal));
             let gone = a.targets.remove(order[0].0).1;
             self.store.with(|s| s.drop_actor_target(Arg::text(&actor), Arg::text(&gone.id), Arg::text(&gone.relation)))?;
         }
@@ -1276,7 +1276,7 @@ impl Actors {
                 targets.push(t);
             }
         }
-        targets.sort_by(|x, y| y.last_at.partial_cmp(&x.last_at).unwrap_or(std::cmp::Ordering::Equal));
+        xenonet_base::sort::sort_by(&mut targets, |x, y| y.last_at.partial_cmp(&x.last_at).unwrap_or(std::cmp::Ordering::Equal));
         let targets: Vec<Value> =
             targets.into_iter().take(TARGETS_SHOWN).map(|t| json!({ "id": t.id, "relation": t.relation, "since": number(t.since), "lastAt": number(t.last_at) })).collect();
         let mut o = Map::new();
@@ -1473,7 +1473,7 @@ impl Actors {
         let rows = self.store.with(|s| s.actor_token_times())?;
         let row = |slug: &str| rows.iter().rev().find(|r| r.get("slug").and_then(Value::as_str) == Some(slug));
         let mut list: Vec<&Actor> = self.all.iter().filter(|a| a.id != YOU && self.is_registered(&a.id)).collect();
-        list.sort_by(|x, y| x.created_at.partial_cmp(&y.created_at).unwrap_or(std::cmp::Ordering::Equal));
+        xenonet_base::sort::sort_by(&mut list, |x, y| x.created_at.partial_cmp(&y.created_at).unwrap_or(std::cmp::Ordering::Equal));
         Ok(list
             .into_iter()
             .map(|a| {
@@ -1519,7 +1519,7 @@ impl Actors {
             self.all.iter().filter(|a| Self::listed(a, now)).map(|a| (a.id.clone(), a.id == YOU, a.last_seen.unwrap_or(0.0), a.created_at)).collect();
         if shown.len() > LIST_MAX {
             let mut by_seen = shown.clone();
-            by_seen.sort_by(|x, y| {
+            xenonet_base::sort::sort_by(&mut by_seen, |x, y| {
                 let you = i32::from(y.1) - i32::from(x.1);
                 if you != 0 {
                     return you.cmp(&0);
@@ -1536,7 +1536,7 @@ impl Actors {
             let keep: Vec<String> = by_seen.into_iter().take(LIST_MAX).map(|s| s.0).collect();
             shown.retain(|s| keep.contains(&s.0));
         }
-        shown.sort_by(|x, y| {
+        xenonet_base::sort::sort_by(&mut shown, |x, y| {
             let you = i32::from(y.1) - i32::from(x.1);
             if you != 0 {
                 return you.cmp(&0);

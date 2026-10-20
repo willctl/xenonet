@@ -509,6 +509,18 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
                     Some("Connect them from XenoNet's palette (Connect Claude Code and Codex to XenoNet), or run xenonet connect."),
                 ));
             }
+            // XenoNet's plugin for Claude Code carries what connect would
+            // add; connect's own entries beside it are to come out.
+            let removing = |x: &&Value| x.get("state").and_then(Value::as_str) == Some("remove");
+            if changes.iter().any(|x| removing(&x)) {
+                let tools = changes.iter().any(|x| removing(&x) && x.get("id").and_then(Value::as_str) == Some("mcp"));
+                let tools = if tools { ", but sessions get XenoNet's tools twice" } else { "" };
+                return Ok(warn(
+                    format!("connected twice, through XenoNet's plugin and through xenonet connect's own entries: each event still arrives once{tools}"),
+                    Some("Run xenonet connect claude, which takes connect's own entries out and keeps the plugin."),
+                ));
+            }
+            let plugin = changes.iter().any(|x| x.get("via").and_then(Value::as_str) == Some("plugin"));
             let stale: Vec<String> =
                 changes.iter().filter(|x| x.get("state").and_then(Value::as_str) != Some("present")).map(|x| format!("{} {}", s(x.get("id")), s(x.get("state")))).collect();
             if !stale.is_empty() {
@@ -516,9 +528,11 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
             }
             let broken = list(a.get("broken"));
             if !broken.is_empty() {
-                return Ok(fail(format!("connected, but {}", broken.iter().map(js_string).collect::<Vec<_>>().join("; ")), Some("Run xenonet connect again.")));
+                let fix = if plugin { "Install XenoNet, or put its xenonet command on your PATH." } else { "Run xenonet connect again." };
+                return Ok(fail(format!("connected, but {}", broken.iter().map(js_string).collect::<Vec<_>>().join("; ")), Some(fix)));
             }
-            Ok(ok(format!("connected to XenoNet on port {}", s(connect.and_then(|cn| cn.get("port"))))))
+            let through = if plugin { ", through its plugin for Claude Code" } else { "" };
+            Ok(ok(format!("connected to XenoNet on port {}{through}", s(connect.and_then(|cn| cn.get("port"))))))
         }
         "agents.checked" => {
             if f.platform() != "darwin" {

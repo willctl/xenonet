@@ -175,7 +175,7 @@ pub fn find_profiles(dirs: &[String], fs: &mut dyn Files) -> Vec<Value> {
             out.push((at, json!({ "name": yaml_name(n).unwrap_or(n), "file": file, "tunnelId": p["tunnelId"], "health": p["health"], "grant": p["grant"] })));
         }
     }
-    out.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    xenonet_base::sort::sort_by(&mut out, |a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     out.into_iter().map(|(_, p)| p).collect()
 }
 

@@ -13,11 +13,11 @@ import { envOf, machine } from "../../machine.js";
 import { lifecycleOps, stopTimeout } from "../../lifecycle.js";
 import { ensureService, connectService } from "./runtime.js";
 
-// The launcher script this XenoNet ships, beside core/components/install.js:
-// hooks, MCP servers and the xenonet command run its path.
+// The node launcher script this XenoNet ships, which entries an earlier
+// XenoNet wrote run; the Rust has it built in.
 export const LAUNCHER_SOURCE = new URL("../../../../../core/components/launcher.cjs", import.meta.url);
 
-const ctx = () => ({ ...machine(), launcherSource: fs.realpathSync(LAUNCHER_SOURCE), localAppData: process.env.LOCALAPPDATA ?? null, home: os.homedir() });
+const ctx = () => ({ ...machine(), localAppData: process.env.LOCALAPPDATA ?? null, home: os.homedir() });
 
 export const launcherVersion = (text) => native.compLauncherVersion(text == null ? null : String(text));
 

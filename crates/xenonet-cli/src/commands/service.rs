@@ -1,12 +1,17 @@
 //! xenonet service (cli/commands/service.js): the background service,
 //! started, asked how it is, or stopped, through the component service's
-//! socket (core/components/runtime.js, install.js).
+//! socket (core/components/runtime.js, install.js); and started at login
+//! under launchd or systemd (install, uninstall, run; cores/supervisor.rs,
+//! docs/design/always-on.md).
 
 use crate::args::Flags;
 use crate::cores;
-use crate::out::{print, Done, Fail};
+use crate::cores::supervisor as login;
+use crate::out::{c, json as print_json, print, Done, Fail};
+use crate::sys;
 use serde_json::{json, Map, Value};
 use xenonet_base::json::stringify;
+use xenonet_components::supervisor::{self, Disk, Files, System, UNSUPPORTED};
 
 pub const HELP: &str = include_str!("help/service.txt");
 
@@ -18,16 +23,147 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         env.insert("XENONET_PORT".into(), json!(xenonet_base::text::js_string(&flags.get("port").cloned().unwrap_or(Value::Null))));
     }
     let env = Value::Object(env);
-    if action == "start" {
-        cores::recover_service_update(&env)?;
-        let status = cores::ensure_service(&cores::installed_runtime(&env)?)?;
-        print(stringify(&json!({ "status": status }), 0));
+    match action {
+        "start" => start(&env),
+        "status" => Ok(status(&env)),
+        "stop" => {
+            let answer = cores::service_request(&env, action, &json!({ "force": flags.on("force") }))?;
+            print(stringify(&answer, 0));
+            Ok(0)
+        }
+        "install" => install(&env, flags),
+        "uninstall" => uninstall(&env, flags),
+        "run" => login::run(&env),
+        _ => Err(Fail::error(HELP)),
+    }
+}
+
+/// The port this command is about.
+fn port_of(env: &Value) -> String {
+    env.get("XENONET_PORT").and_then(Value::as_str).map(str::to_string).or_else(|| sys::var("XENONET_PORT")).unwrap_or_else(|| "47840".into())
+}
+
+/// Starts the service unless one answers. One registered to start at login
+/// is started by its supervisor, so there's never a second copy beside
+/// the one it keeps.
+fn start(env: &Value) -> Done {
+    cores::recover_service_update(env)?;
+    if login::running(env).is_some() {
+        print(stringify(&json!({ "status": "reused" }), 0));
         return Ok(0);
     }
-    if action != "status" && action != "stop" {
-        return Err(Fail::error(HELP));
+    if let Some(place) = login::registered_for(&port_of(env)) {
+        login::start(env, &place)?;
+        print(stringify(&json!({ "status": "started", "supervisor": place.kind.name() }), 0));
+        return Ok(0);
     }
-    let answer = cores::service_request(&env, action, &json!({ "force": flags.on("force") }))?;
-    print(stringify(&answer, 0));
+    let status = cores::ensure_service(&cores::installed_runtime(env)?)?;
+    print(stringify(&json!({ "status": status }), 0));
+    Ok(0)
+}
+
+/// The running service's own status, with `running`, and `login`: whether
+/// it starts at login, and how the supervisor has it. With no service
+/// running it says so, and exits 1.
+fn status(env: &Value) -> i32 {
+    let place = login::place();
+    let login = supervisor::status(place.as_ref(), &Disk, &mut System);
+    match cores::service_request(env, "status", &json!({})) {
+        Ok(mut s) => {
+            s["running"] = json!(true);
+            s["supervised"] = json!(login::supervised(&s, &login));
+            s["login"] = login;
+            print(stringify(&s, 0));
+            0
+        }
+        Err(e) => {
+            print(stringify(&json!({ "running": false, "error": e.message, "login": login }), 0));
+            1
+        }
+    }
+}
+
+fn install(env: &Value, flags: &Flags) -> Done {
+    let Some(place) = login::place() else { return Err(Fail::new(UNSUPPORTED, 1)) };
+    login::yours(env)?;
+    // The launcher the job runs, copied from the Tools when they're there.
+    let _ = cores::install_launcher();
+    let mut given = cores::env_map();
+    for (k, v) in env.as_object().into_iter().flatten() {
+        given.insert(k.clone(), v.clone());
+    }
+    let job = login::job(&given);
+    // Reloading a changed registration restarts the service the supervisor
+    // runs, and with it its terminals.
+    let changed = supervisor::contents(place.kind, &job).ok() != Disk.read(&place.file);
+    if changed && !flags.on("force") {
+        if let Some(s) = login::running(env) {
+            let seen = supervisor::status(Some(&place), &Disk, &mut System);
+            if login::supervised(&s, &seen) && login::has_terminals(&s) {
+                return Err(Fail::new("XenoNet has running terminals, and changing how it starts at login restarts it. Close them first, or use --force.", 1));
+            }
+        }
+    }
+    let mut out = supervisor::install(&place, &job, &mut Disk, &mut System).map_err(|e| Fail::new(e, 1))?;
+    let takeover = if out["status"] == json!("already") { None } else { login::hand_over(env, &place) };
+    out["takeover"] = json!(takeover);
+    let linger = supervisor::lingering(&place, &mut System);
+    out["linger"] = json!(linger);
+    if flags.on("json") {
+        print_json(&out);
+        return Ok(0);
+    }
+    let by = place.kind.name();
+    if out["status"] == json!("already") {
+        print(c::dim(format!("XenoNet's service already starts at login ({by}, {}).", sys::tilde(&place.file))));
+        return Ok(0);
+    }
+    print(format!("{} XenoNet's service starts at login now, and starts again if it stops unexpectedly.", c::green("✓")));
+    print(c::dim(format!("  {by} · {}", sys::tilde(&place.file))));
+    match takeover {
+        Some("now") => print(c::dim(format!("  The service that was running stopped, and the one {by} started took over."))),
+        Some("terminals") => print(format!("{} The service running now keeps running, since it has terminals open. The one {by} starts takes over when it stops.", c::yellow("!"))),
+        Some("later") => print(c::dim(format!("  The service running now keeps running. The one {by} starts takes over when it stops."))),
+        _ => {}
+    }
+    if linger == Some(false) {
+        print(c::dim(format!("  It starts when you log in. To start it at boot, before anyone logs in, run: loginctl enable-linger {}", place.user)));
+    }
+    Ok(0)
+}
+
+fn uninstall(env: &Value, flags: &Flags) -> Done {
+    let Some(place) = login::place() else {
+        if flags.on("json") {
+            print_json(&json!({ "status": "absent", "supervisor": null, "reason": UNSUPPORTED }));
+        } else {
+            print(c::dim("XenoNet's service doesn't start at login on this system."));
+        }
+        return Ok(0);
+    };
+    login::yours(env)?;
+    // Unregistering stops the copy the supervisor runs, terminals and all.
+    let mut stops = false;
+    if let Some(s) = login::running(env) {
+        let seen = supervisor::status(Some(&place), &Disk, &mut System);
+        stops = login::supervised(&s, &seen);
+        if stops && login::has_terminals(&s) && !flags.on("force") {
+            return Err(Fail::new("XenoNet has running terminals, and the service stops when it no longer starts at login. Close them first, or use --force.", 1));
+        }
+    }
+    let mut out = supervisor::uninstall(&place, &mut Disk, &mut System).map_err(|e| Fail::new(e, 1))?;
+    out["stopped"] = json!(stops);
+    if flags.on("json") {
+        print_json(&out);
+        return Ok(0);
+    }
+    if out["status"] == json!("absent") {
+        print(c::dim("XenoNet's service wasn't set to start at login."));
+        return Ok(0);
+    }
+    print(format!("{} XenoNet's service no longer starts at login.", c::green("✓")));
+    if stops {
+        print(c::dim("  It stopped. Opening Desktop, or xenonet service start, starts it until you log out."));
+    }
     Ok(0)
 }

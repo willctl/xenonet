@@ -32,13 +32,28 @@
 // demo's map (in the page only: the server keeps the demo's), a third of
 // them working, so the costs of a large map show.
 //
+// --seen counts the window as seen in the states where it's shown
+// (unfocused, rest, orbit, busy), whatever the desktop app says, for a run
+// while the screen is locked: the page draws nothing then, as it should,
+// and only its own pace decides with --seen. The window is still drawn and
+// composited; the device's utilization lacks the screen's own share.
+//
 // For each state: the share of one GPU the window's GPU process kept busy
 // (gpu %), the device's own utilization (every app, as ioreg reports it),
-// the CPU of XenoNet's main, renderer, GPU and server processes, their
-// resident memory, the page's JS heap, and the frames the page drew per
-// second. Apple's GPUs lower their clocks under light load, so a lighter
-// frame shows as less GPU time but not in proportion; frames drawn says
-// what the page asked for.
+// the CPU of XenoNet's main, renderer and GPU processes and of the service
+// (the xenonet binary on the instance's port), their resident memory, the
+// page's JS heap, the frames the page drew per second, and what a frame
+// cost: the composer's GPU time (a WebGL timer query), the GPU process's
+// GPU time per frame (compositing included) and the main thread's time for
+// the map's frame. Apple's GPUs lower their clocks under light load, so a
+// lighter frame shows as less GPU time but not in proportion; frames drawn
+// says what the page asked for. Through ANGLE's Metal backend a timer
+// query spans whole command buffers and reads high, so on a Mac the GPU
+// process's figure is the one to compare.
+//
+// Before it starts XenoNet, it samples the device's utilization for as
+// long as a state (--baseline seconds; 0 skips it), since that figure
+// counts every other app too.
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
@@ -84,10 +99,21 @@ function cpuAndMemory(pids) {
   return by;
 }
 
-// XenoNet's processes: the main one and its helpers, by kind.
-function processesOf(mainPid) {
+// The process listening on this port: the service, the xenonet binary,
+// which runs apart from Desktop.
+function listenerOn(port) {
+  try {
+    return execFileSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], { encoding: "utf8" }).trim().split("\n").map(Number).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+// XenoNet's processes: the main one and its helpers, by kind, and the
+// service on the instance's port.
+function processesOf(mainPid, port) {
   const out = execFileSync("ps", ["-A", "-o", "pid=,ppid=,command="], { encoding: "utf8", maxBuffer: 16 << 20 });
-  const kinds = { main: [mainPid], renderer: [], gpu: [], server: [] };
+  const kinds = { main: [mainPid], renderer: [], gpu: [], server: [], service: listenerOn(port).filter((p) => p !== mainPid) };
   for (const line of out.split("\n")) {
     const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
     if (!m || Number(m[2]) !== mainPid) continue;
@@ -101,19 +127,64 @@ function processesOf(mainPid) {
 
 // The page's own count: each frame it drew (a render of the composer), by
 // wall-clock time, so a window of time can be counted afterwards without a
-// request to the page in the middle of it.
+// request to the page in the middle of it. With each frame, what it cost:
+// the GPU time of the composer's render, from a WebGL timer query where the
+// GPU offers one, and the main thread's time for the whole frame, the map's
+// own frame loop (scene.js) timed as requestAnimationFrame runs it.
 const COUNTER = `return (() => {
   if (window.__benchFrames) return true;
-  const c = window.__xenonet.scene.graph.postProcessingComposer();
+  const scene = window.__xenonet.scene;
+  const c = scene.graph.postProcessingComposer();
+  const gl = scene.graph.renderer().getContext();
+  const timer = gl.getExtension("EXT_disjoint_timer_query_webgl2");
   const log = (window.__benchFrames = []);
+  const pending = [];
   const render = c.render;
-  // Each frame's time, and the frame rate the page kept for it (render-
-  // budget.js; absent before it).
+  // Each frame's time, the frame rate the page kept for it (render-
+  // budget.js; absent before it), whether it was driven, and later its
+  // costs in ms: [time, fps, driven, gpu, cpu].
   c.render = function (...a) {
-    log.push([performance.timeOrigin + performance.now(), window.__xenonet.scene.drawingState?.().fps ?? null]);
+    const st = scene.drawingState?.();
+    const row = [performance.timeOrigin + performance.now(), st?.fps ?? null, !!st?.driven, null, null];
+    log.push(row);
     if (log.length > 20000) log.splice(0, 10000);
-    return render.apply(this, a);
+    if (!timer || pending.length > 64) return render.apply(this, a);
+    const q = gl.createQuery();
+    gl.beginQuery(timer.TIME_ELAPSED_EXT, q);
+    try {
+      return render.apply(this, a);
+    } finally {
+      gl.endQuery(timer.TIME_ELAPSED_EXT);
+      pending.push([q, row]);
+    }
   };
+  // A query's answer comes a frame or more later; one the GPU spoiled (a
+  // disjoint, such as the clock changing) is dropped.
+  const collect = () => {
+    if (timer) {
+      const spoiled = gl.getParameter(timer.GPU_DISJOINT_EXT);
+      while (pending.length && gl.getQueryParameter(pending[0][0], gl.QUERY_RESULT_AVAILABLE)) {
+        const [q, row] = pending.shift();
+        if (!spoiled) row[3] = gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6;
+        gl.deleteQuery(q);
+      }
+    }
+    setTimeout(collect, 100);
+  };
+  collect();
+  // The frame loop is the callback named loop; a call that drew is the one
+  // whose frame the composer logged.
+  const raf = window.requestAnimationFrame;
+  window.requestAnimationFrame = (fn) =>
+    raf((now) => {
+      if (fn.name !== "loop") return fn(now);
+      const n = log.length, t0 = performance.now();
+      try {
+        return fn(now);
+      } finally {
+        if (log.length > n) log[log.length - 1][4] = performance.now() - t0;
+      }
+    });
   return true;
 })()`;
 const framesBetween = (t0, t1) => `return (() => {
@@ -123,34 +194,59 @@ const framesBetween = (t0, t1) => `return (() => {
   const rates = {};
   for (const [, r] of log) rates[r === Infinity ? "every" : r] = (rates[r === Infinity ? "every" : r] ?? 0) + 1 / Math.max(1, n);
   for (const k in rates) rates[k] = Math.round(rates[k] * 100) / 100;
-  return { frames: n, rates, heapMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e5) / 10 : null, render: window.__xenonet.driver.state().render ?? null };
+  // Mean, median and 95th percentile of each frame's cost, in ms.
+  const spread = (i) => {
+    const v = log.map((row) => row[i]).filter((x) => x != null).sort((a, b) => a - b);
+    if (!v.length) return null;
+    const r = (x) => Math.round(x * 100) / 100;
+    return { mean: r(v.reduce((a, b) => a + b, 0) / v.length), p50: r(v[Math.floor(v.length / 2)]), p95: r(v[Math.min(v.length - 1, Math.floor(v.length * 0.95))]), n: v.length };
+  };
+  return { frames: n, driven: log.filter((row) => row[2]).length, rates, gpuMs: spread(3), cpuMs: spread(4), heapMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e5) / 10 : null, render: window.__xenonet.driver.state().render ?? null };
 })()`;
 
-// A sample of `ms`: everything above, as rates over that time.
-async function sample(s, procs, ms) {
-  const pids = Object.values(procs).flat();
-  const g0 = gpuTimes(), c0 = cpuAndMemory(pids), t0 = Date.now(), h0 = process.hrtime.bigint();
+// The device's utilization once a second over `ms`: its mean, median and
+// 90th percentile. It counts every app on the machine, and moves in jumps.
+async function utilization(ms) {
   const util = [];
   for (const until = Date.now() + ms; Date.now() < until; ) {
     await sleep(1000);
     util.push(deviceUtilization());
   }
+  const v = util.filter(Number.isFinite).sort((a, b) => a - b);
+  const pct = (x) => Math.round(x * 10) / 10;
+  return { mean: pct(v.reduce((a, b) => a + b, 0) / Math.max(1, v.length)), p50: v[Math.floor(v.length / 2)] ?? null, p90: v[Math.min(v.length - 1, Math.floor(v.length * 0.9))] ?? null };
+}
+
+// A sample of `ms`: everything above, as rates over that time.
+async function sample(s, procs, ms) {
+  const pids = Object.values(procs).flat();
+  const g0 = gpuTimes(), c0 = cpuAndMemory(pids), t0 = Date.now(), h0 = process.hrtime.bigint();
+  const util = await utilization(ms);
   const g1 = gpuTimes(), c1 = cpuAndMemory(pids), t1 = Date.now(), wall = Number(process.hrtime.bigint() - h0);
   const page = await s.eval(framesBetween(t0, t1)).catch(() => ({ frames: null, heapMB: null }));
   const pct = (v) => Math.round(v * 10) / 10;
   const sum = (pidsOf, f) => pidsOf.reduce((a, p) => a + f(p), 0);
   const cpu = (kind) => pct((sum(procs[kind], (p) => (c1.get(p)?.cpu ?? 0) - (c0.get(p)?.cpu ?? 0)) / (wall / 1e9)) * 100);
   const mem = (kind) => Math.round(sum(procs[kind], (p) => c1.get(p)?.mb ?? 0));
+  const gpuNs = sum(procs.gpu, (p) => (g1.get(p) ?? 0) - (g0.get(p) ?? 0));
   return {
-    gpu: pct((sum(procs.gpu, (p) => (g1.get(p) ?? 0) - (g0.get(p) ?? 0)) / wall) * 100),
-    device: pct(util.reduce((a, b) => a + b, 0) / Math.max(1, util.length)),
+    gpu: pct((gpuNs / wall) * 100),
+    device: util.mean,
+    deviceSpread: util,
     fps: page.frames == null ? null : pct(page.frames / ((t1 - t0) / 1000)),
+    // What a frame cost: the GPU process's GPU time over the frames drawn
+    // (the window's compositing included), the composer's own GPU time and
+    // the main thread's time for the map's frame.
+    frame: page.frames ? { gpuProcessMs: Math.round((gpuNs / 1e6 / page.frames) * 100) / 100, gpuMs: page.gpuMs, cpuMs: page.cpuMs } : null,
+    // Frames drawn while a request to the window was in hand (someone else
+    // driving it spoils a sample).
+    drivenFrames: page.driven,
     // The page's own word (none before the frame budget): the rates it
     // kept over the sample, and whether it could be seen and was focused.
     rates: page.rates,
     page: page.render ? { seen: page.render.seen, focused: page.render.focused, pace: page.render.pace } : undefined,
-    cpu: { main: cpu("main"), renderer: cpu("renderer"), gpu: cpu("gpu"), server: cpu("server") },
-    memMB: { main: mem("main"), renderer: mem("renderer"), gpu: mem("gpu"), server: mem("server"), heap: page.heapMB },
+    cpu: { main: cpu("main"), renderer: cpu("renderer"), gpu: cpu("gpu"), server: cpu("server"), service: cpu("service") },
+    memMB: { main: mem("main"), renderer: mem("renderer"), gpu: mem("gpu"), server: mem("server"), service: mem("service"), heap: page.heapMB },
   };
 }
 
@@ -196,6 +292,26 @@ const BUSY_START = `return (() => {
   return ids.length;
 })()`;
 const BUSY_STOP = `return (clearInterval(window.__benchBusy), true)`;
+
+// --seen: the page's drawing state with seen held true, then handed back
+// to the page, which reads the window's real state again on a visibility
+// change (main.js).
+const SEEN_ON = `return (() => {
+  const scene = window.__xenonet.scene;
+  if (!scene.__benchSetDrawing) {
+    const set = (scene.__benchSetDrawing = scene.setDrawing);
+    scene.setDrawing = (patch) => set({ ...patch, seen: true });
+  }
+  scene.setDrawing({});
+  return scene.drawingState().seen;
+})()`;
+const SEEN_OFF = `return (() => {
+  const scene = window.__xenonet.scene;
+  if (scene.__benchSetDrawing) scene.setDrawing = scene.__benchSetDrawing;
+  delete scene.__benchSetDrawing;
+  document.dispatchEvent(new Event("visibilitychange"));
+  return scene.drawingState().seen;
+})()`;
 
 // --big: a made-up map of n sessions, drawn in place of the demo's (which
 // the server keeps sending; the page ignores it until the end).
@@ -266,7 +382,7 @@ async function cover(rect) {
 function compare(beforeFile, afterFile) {
   const before = JSON.parse(fs.readFileSync(beforeFile, "utf8"));
   const after = JSON.parse(fs.readFileSync(afterFile, "utf8"));
-  const row = (name, b, a) => `${name.padEnd(10)} gpu ${fmt(b?.gpu)} → ${fmt(a?.gpu)} %   fps ${fmt(b?.fps)} → ${fmt(a?.fps)}   renderer cpu ${fmt(b?.cpu.renderer)} → ${fmt(a?.cpu.renderer)} %   main cpu ${fmt(b?.cpu.main)} → ${fmt(a?.cpu.main)} %   gpu-process cpu ${fmt(b?.cpu.gpu)} → ${fmt(a?.cpu.gpu)} %`;
+  const row = (name, b, a) => `${name.padEnd(10)} gpu ${fmt(b?.gpu)} → ${fmt(a?.gpu)} %   fps ${fmt(b?.fps)} → ${fmt(a?.fps)}   frame gpu ${fmt(b?.frame?.gpuMs?.mean)} → ${fmt(a?.frame?.gpuMs?.mean)} ms   frame cpu ${fmt(b?.frame?.cpuMs?.mean)} → ${fmt(a?.frame?.cpuMs?.mean)} ms   renderer cpu ${fmt(b?.cpu.renderer)} → ${fmt(a?.cpu.renderer)} %   main cpu ${fmt(b?.cpu.main)} → ${fmt(a?.cpu.main)} %   gpu-process cpu ${fmt(b?.cpu.gpu)} → ${fmt(a?.cpu.gpu)} %`;
   const fmt = (v) => (v == null ? "  —" : String(v).padStart(5));
   for (const name of Object.keys(after.states)) console.log(row(name, before.states[name], after.states[name]));
 }
@@ -283,8 +399,10 @@ async function main() {
   const ms = Number(opt("seconds", 10)) * 1000;
   const big = Number(opt("big", 0));
   const outFile = opt("out", null);
+  const forceSeen = argv.includes("--seen");
+  const baseline = Number(opt("baseline", ms / 1000)) * 1000;
   const ALL = ["unfocused", "rest", "orbit", "busy", "covered", "minimized", "hidden"];
-  const flags = new Set(["--instance", "--seconds", "--big", "--out"]);
+  const flags = new Set(["--instance", "--seconds", "--big", "--out", "--baseline"]);
   const wanted = argv.filter((a, i) => !a.startsWith("--") && !flags.has(argv[i - 1]));
   for (const w of wanted) if (!ALL.includes(w)) throw new Error(`no state "${w}"; there's ${ALL.join(", ")}`);
   const states = wanted.length ? ALL.filter((x) => wanted.includes(x)) : ALL;
@@ -297,12 +415,19 @@ async function main() {
   const port = id === "test" ? await new Promise((resolve) => { const p = net.createServer().listen(0, "127.0.0.1", () => { const { port } = p.address(); p.close(() => resolve(port)); }); }) : INSTANCES[id].port;
   const s = xenonet(id, { port });
   const front = frontApp();
-  const result = { at: new Date().toISOString(), instance: id, seconds: ms / 1000, big, machine: `${os.cpus()[0]?.model ?? "?"}, ${Math.round(os.totalmem() / 2 ** 30)} GB`, states: {} };
+  const result = { at: new Date().toISOString(), instance: id, seconds: ms / 1000, big, seen: forceSeen, machine: `${os.cpus()[0]?.model ?? "?"}, ${Math.round(os.totalmem() / 2 ** 30)} GB`, states: {} };
   const log = (...a) => console.error("[bench:gpu]", ...a);
   try {
+    // The machine without XenoNet, for the device's utilization, which
+    // counts every app.
+    if (baseline) {
+      log("the machine without XenoNet…");
+      result.machine = await utilization(baseline);
+      log(`the machine without XenoNet: device ${result.machine.mean}% (median ${result.machine.p50}%, 90th percentile ${result.machine.p90}%)`);
+    }
     process.env.XENONET_MUTED = "1";
     const p = await s.launch({ show: "inactive", timeout: 180000 });
-    const procs = processesOf(p.pid);
+    const procs = processesOf(p.pid, port);
     const page = await s.eval("return { dpr: devicePixelRatio, width: innerWidth, height: innerHeight, x: screenX, y: screenY, outerWidth, outerHeight, nodes: window.__xenonet.scene.nodes().length }");
     Object.assign(result, { window: p.window, page, processes: procs });
     log(`${INSTANCES[id].name}: window ${p.window.width}x${p.window.height} at ${page.dpr}x, ${page.nodes} nodes; processes ${JSON.stringify(procs)}`);
@@ -317,14 +442,17 @@ async function main() {
     // drawing while it's driven), so each state starts a few seconds after
     // the last one.
     const quiet = () => sleep(5000);
+    const shown = new Set(["unfocused", "rest", "orbit", "busy"]);
     const run = async (name, setup, during = null, teardown = null) => {
       if (!states.includes(name)) return;
       await setup?.();
+      if (forceSeen && shown.has(name)) await s.eval(SEEN_ON);
       await quiet();
       log(`${name}…`);
       const [r] = await Promise.all([sample(s, procs, ms), during?.()]);
       result.states[name] = r;
-      log(`${name}: gpu ${r.gpu}% (device ${r.device}%), ${r.fps} fps ${JSON.stringify(r.rates)}, cpu main ${r.cpu.main}% renderer ${r.cpu.renderer}% gpu ${r.cpu.gpu}% server ${r.cpu.server}%, renderer ${r.memMB.renderer} MB, heap ${r.memMB.heap} MB`);
+      log(`${name}: gpu ${r.gpu}% (device ${r.device}%), ${r.fps} fps ${JSON.stringify(r.rates)}, frame gpu ${r.frame?.gpuMs?.mean ?? "—"} ms (gpu process ${r.frame?.gpuProcessMs ?? "—"} ms) cpu ${r.frame?.cpuMs?.mean ?? "—"} ms, cpu main ${r.cpu.main}% renderer ${r.cpu.renderer}% gpu ${r.cpu.gpu}% service ${r.cpu.service}%, renderer ${r.memMB.renderer} MB, heap ${r.memMB.heap} MB${r.drivenFrames ? `, ${r.drivenFrames} frames driven` : ""}`);
+      if (forceSeen && shown.has(name)) await s.eval(SEEN_OFF);
       await teardown?.();
     };
     await run("unfocused", null);

@@ -37,6 +37,7 @@ export function createConnect({ port, root, demo = false, home = os.homedir(), e
     preview: () => go(core.preview()),
     apply: (apps = ["claude", "codex"]) => go(core.apply(apps)),
     remove: () => go(core.remove()),
+    hookConnected: (event) => go(core.hookConnected(event)),
   };
 }
 

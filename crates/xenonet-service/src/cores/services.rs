@@ -6,7 +6,7 @@
 use super::{pending, Pending, R};
 use async_trait::async_trait;
 use serde_json::Value;
-use xenonet_schema::drift::DriftLog;
+use xenonet_schema::drift::DriftView;
 
 const DOCTOR: &str = "core/doctor/service.js";
 const DIAGNOSTICS: &str = "core/diagnostics.js";
@@ -62,9 +62,13 @@ pub trait Diagnostics: Send + Sync {
 }
 
 /// `driftReport({ log, all, home, now })`, which reads what the vendor
-/// readers have read; the log itself (core/drift.js) is in Rust.
+/// readers have read; the log itself (core/drift.js) is in Rust. It takes
+/// the log's view rather than the log: the readers hold their own lock
+/// while they record drift in the log, so a report that asked them what
+/// they've read with the log still locked could wait on a reader that
+/// waits on it.
 pub trait DriftReport: Send + Sync {
-    fn report(&self, _log: &mut DriftLog, _all: bool, _home: &str, _now: f64) -> R<Value> {
+    fn report(&self, _view: DriftView, _all: bool, _home: &str, _now: f64) -> R<Value> {
         pending(VENDOR)
     }
 }

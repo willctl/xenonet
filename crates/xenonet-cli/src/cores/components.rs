@@ -30,12 +30,9 @@ pub fn machine() -> Machine {
     Machine { platform: sys::platform().into(), arch: super::arch().into(), home: sys::home() }
 }
 
-/// install.js's ctx: the machine, the launcher script this XenoNet ships
-/// (its links followed) and process.env's LOCALAPPDATA.
+/// install.js's ctx: the machine and process.env's LOCALAPPDATA.
 fn ctx() -> Ctx {
-    let source = super::launcher_source();
-    let source = std::fs::canonicalize(&source).map_or(source, |p| p.to_string_lossy().into_owned());
-    Ctx { machine: machine(), launcher_source: source, local_app_data: std::env::var("LOCALAPPDATA").ok() }
+    Ctx { machine: machine(), local_app_data: std::env::var("LOCALAPPDATA").ok() }
 }
 
 /// process.env with what the command was given over it.
@@ -177,7 +174,8 @@ fn spawn_detached(q: &Value) -> Result<std::process::Child, Value> {
 
 // ---------- the tasks' requests ----------
 
-/// ensureService's: connect (and close again), spawn, and the failure of
+/// ensureService's: connect (and close again), spawn (or the supervisor's
+/// start, for a service registered to start at login), and the failure of
 /// the child it started, if it failed.
 struct Ensure {
     child: Option<std::process::Child>,
@@ -192,6 +190,13 @@ impl Perform for Ensure {
                 Ok(Value::Null)
             }
             Some("spawn") => {
+                // A service registered to start at login is started by its
+                // supervisor, never beside the copy the supervisor keeps.
+                let port = q.get("env").and_then(|e| e.get("XENONET_PORT")).map(xenonet_base::text::js_string).filter(|p| !p.is_empty()).unwrap_or_else(|| "47840".into());
+                if let Some(place) = super::supervisor::registered_for(&port) {
+                    xenonet_components::supervisor::start(&place, &xenonet_components::supervisor::Disk, &mut xenonet_components::supervisor::System).map_err(error)?;
+                    return Ok(Value::Null);
+                }
                 self.child = Some(spawn_detached(q)?);
                 Ok(Value::Null)
             }
@@ -209,9 +214,10 @@ impl Perform for Ensure {
 async fn ensure(runtime: &Value) -> Result<Value, Failed> {
     let root = runtime.get("root").map(xenonet_base::text::js_string).unwrap_or_default();
     let exec = runtime.get("exec").map(xenonet_base::text::js_string).unwrap_or_default();
+    let args = runtime::service_args(runtime.get("args"));
     let env: Env = runtime.get("env").and_then(Value::as_object).cloned().unwrap_or_default();
     let m = machine();
-    let task = Task::new(move |io| async move { runtime::ensure_service(&io, &root, &exec, &env, START_MS, &m).await });
+    let task = Task::new(move |io| async move { runtime::ensure_service(&io, &root, &exec, &args, &env, START_MS, &m).await });
     drive(task, &mut Ensure { child: None }).await
 }
 

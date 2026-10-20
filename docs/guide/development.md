@@ -18,6 +18,7 @@ npm run rust:build  # the Rust core's Node addon, which the JS tests load in pla
 npm run test:rust   # the unit tests, with the Rust core in place of the JS
 npm run lint:rust   # formatting, clippy, docs and the dependency checks
 cargo test        # the Rust core's own tests
+npm run coverage:rust  # how much of the Rust core the tests run, crate by crate (see Coverage)
 ```
 
 ## XenoNet Dev
@@ -84,6 +85,79 @@ What acts on the sessions' computer (opening a session in its app, handoffs, ter
 
 [Install](install.md) says how to install what you build.
 
+## Coverage
+
+`npm run coverage:rust` measures how much of the Rust core the tests run, with cargo-llvm-cov. It runs `cargo test` instrumented, then prints each crate's lines and the share of its lines, functions and regions the tests ran.
+
+- `-- --js` counts the JS tests too: the ones `npm run test:rust` runs on the twins, and the ones `npm run test:bin` runs against the binary. Run `npm run build` first, as for `test:bin`.
+- `-- --html` writes the report, line by line, to `target/llvm-cov/html/index.html`.
+- `-- --no-run` shows the last run's numbers again, and `-- --json` gives them as JSON.
+
+It needs cargo-llvm-cov and the pinned toolchain's llvm-tools:
+
+```sh
+cargo install --locked cargo-llvm-cov
+rustup component add llvm-tools --toolchain 1.99.1  # the channel rust-toolchain.toml pins
+```
+
+The instrumented builds go to `target/llvm-cov-target` and `target/llvm-cov-js`, apart from the usual ones, so `cargo test`, `npm run lint:rust` and the addon don't build again after a run. Once built, a run takes about a minute, and `--js` about four. While `--js` runs, the twins load an instrumented addon, and the one that was there is put back after. llvm-cov counts the `#[cfg(test)]` modules in a crate's own files among its lines.
+
+On 2026-10-19 the tests ran this share of each crate's lines:
+
+| Crate | `cargo test` | With the JS tests |
+| --- | --- | --- |
+| xenonet-actors | 40.7% | 93.0% |
+| xenonet-app | 69.0% | 90.2% |
+| xenonet-assistant | 58.8% | 94.7% |
+| xenonet-base | 81.5% | 91.2% |
+| xenonet-blocks | 85.8% | 97.2% |
+| xenonet-cli | 21.4% | 55.5% |
+| xenonet-components | 59.7% | 89.7% |
+| xenonet-doctor | 42.8% | 92.9% |
+| xenonet-engine | 68.1% | 91.1% |
+| xenonet-hosts | 33.6% | 95.2% |
+| xenonet-integrations | 53.9% | 93.9% |
+| xenonet-mcp | 56.6% | 56.9% |
+| xenonet-node | (not run) | 77.2% |
+| xenonet-schema | 72.3% | 84.9% |
+| xenonet-service | 60.0% | 70.0% |
+| xenonet-sources | 79.6% | 91.6% |
+| xenonet-state | 82.4% | 93.6% |
+| xenonet-wire-app | 54.0% | 66.2% |
+| xenonet-wire-engine | 55.3% | 60.7% |
+| xenonet-wire-map | 74.4% | 80.4% |
+| All | 59.9% | 81.3% |
+
+The JS tests reach most of the core through the twins, and the binary only through `test:bin`'s files, so the binary's own parts (`xenonet-cli`, `xenonet-mcp`, `xenonet-service` and the `xenonet-wire-*` crates) are the least covered.
+
+## Fuzzing
+
+XenoNet reads files, hook payloads, frames and requests that other programs write, so none of it can be trusted. `fuzz/` has fuzz targets for those readers, run with [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz). It's a workspace of its own, apart from `crates/`, because libFuzzer needs a nightly Rust. The pinned toolchain, `cargo deny` and `cargo shear` never see it.
+
+```bash
+rustup toolchain install nightly
+cargo install cargo-fuzz
+fuzz/run.sh lines 1800      # one target for 30 minutes
+```
+
+`cargo fuzz list --fuzz-dir fuzz` lists the targets. Each one's file in `fuzz/fuzz_targets/` says what it reads:
+
+| Target | What it reads |
+| --- | --- |
+| `json` | JSON as XenoNet parses and writes it |
+| `lines`, `telemetry` | Claude Code transcripts and Codex rollouts, line by line, into the live map |
+| `transcript_files` | Transcript files on disk: the session listing, the lenient normalizers, rollout pages, stats |
+| `schema`, `jsregex` | Records checked against the vendor schemas and XenoNet's own, and the schemas' patterns |
+| `native`, `sources`, `wiki` | The other apps' files (Gemini CLI, Copilot CLI, OpenCode, Cursor, numbat), Codex's app-server, git's output, plan usage, the shared context |
+| `base` | Strings, times, paths, git remotes and model names |
+| `http`, `hooks` | The service's routes, hook payloads and the actor gateway |
+| `state`, `hosts`, `misc` | `state.json`, frames from other machines, component packages, tokens and the remote actors' requests |
+| `tools` | What other tools print or keep: gh's and ssh's config, git's, ps, lsof, netstat, tmux, Codex's picks |
+
+`fuzz/run.sh` keeps what a target learns in `fuzz/corpus/<target>` and reads the seeds in `fuzz/seeds/<target>` too. A crash is saved in `fuzz/artifacts/<target>`. Run the target on that file alone to see the crash again, and `cargo fuzz tmin --fuzz-dir fuzz <target> <file>` makes it smaller. The corpora and crashes stay out of git.
+
+Fix a crash where it starts, and add a unit test with the smallest input that showed it, in the crate that had the bug. The fuzz crate needs nightly, so it holds no tests of its own. The seeds come from the test fixtures and the demo's made-up world, never from real sessions: `node fuzz/seed.mjs` writes them again, and stops if one would hold this machine's home folder.
+
 ## Driving XenoNet from agents, scripts and tests
 
 Installed XenoNet and XenoNet Dev both have a control channel, so an agent or a script can launch Desktop, act on it and see it the way you would. Development copies also offer simulation and evaluation for tests. Use the demo to check a change to XenoNet. Agents can operate the installed console for everyday work. [Components](components.md) explains the production MCP setup.
@@ -96,6 +170,7 @@ The control channel operates the console. The engine that connects sessions to e
 - XenoNet Dev keeps a log of what you do in it, as the same steps. Selecting a node, a palette command, a session's stats, a theme and a film all go in the log. `xenonet script record --instance dev > tour.json` saves it, and `xenonet script run tour.json` plays it back, in any instance, shown or hidden.
 - A script is a JSON list of steps, written as strings such as `"select:atlas-api"`, or as objects such as `{ "op": "select", "args": [...] }`. Any driver method is a step. For anything else, a script can be a JS module whose default export gets the instance and a `step` function.
 - `npm run test:e2e` drives a hidden XenoNet Dev with the demo's data through the same channel, in about five minutes. Run it before you send a change to the UI. A failing test saves a screenshot of what it saw to `.xenonet/`.
+- Starting the service at login is tested without the machine's own launchd or systemd. `XENONET_SUPERVISOR_BIN` names the `launchctl` or `systemctl` the `xenonet` command runs, and `XENONET_SUPERVISOR_DIR` the folder the launch agent or unit goes in. `test/e2e/background.test.js` points both at a made-up supervisor in a temporary folder.
 - `npm run test:real` checks, on a real Mac, that Grok Bot and Muse message each other through XenoNet Dev (the dev instance), through the actor gateway, or with `XENONET_REAL_ROUTE=local` from commands their apps run. It needs both apps signed in, you at XenoNet's window to set up the gateway and connect each, and someone to ask Grok Bot and Muse to do what it prints. It only reads XenoNet's state. `XENONET_REAL_PORT`, `XENONET_REAL_WORD` and `XENONET_REAL_MINUTES` change where it looks, the word the messages carry and how long it waits.
 - Scripts import `core/control.js`, which all of the above use.
 
@@ -215,6 +290,7 @@ The console page imports only the core modules that have no Node in them, `theme
 | `hud.js`, `telemetry.js`, `actor-spend-view.js`, `alerts.js`, `needs-you.js`, `modals.js`, `palette.js`, `replay.js`, `terminal.js`, `identities.js` | The panels around the map. `actor-spend-view.js` has Token use's rows of spend by actor. |
 | `export-panel.js`, `poster.js`, `poster-draw.js`, `mark.js` | The export panel, and posters of the day: the preview, the sizes, what an export reveals, and the mark |
 | `connect.js` | The panel for connecting Claude Code and Codex |
+| `background.js` | The Background service panel, and Desktop's offer of it during setup |
 | `doctor.js` | The panel for XenoNet's doctor |
 | `stats.js` | The panel for a session's stats |
 | `film.js`, `film-cards.js` | Films of the day, and their cards |
@@ -237,7 +313,8 @@ The console page imports only the core modules that have no Node in them, `theme
 | `pty.js` | Shells |
 | `tray.js`, `icons.js`, `preload.cjs` | The tray, the icons and the preload bridge |
 | `trust.js` | The only page the app answers |
-| `login.js` | Starting at login |
+| `login.js` | Opening Desktop at login |
+| `background.js` | Starting the service at login, through the `xenonet` command |
 | `shellenv.js` | The login shell's `PATH` |
 | `mac.js` | The macOS menu bar, the first run and the uninstaller |
 | `theme-menu.js` | The Theme menu in the tray and the menu bar |
@@ -260,7 +337,8 @@ The console page imports only the core modules that have no Node in them, `theme
 - `provider-drift.mjs` and `provider-drift/`, the daily check of new provider releases against the vendor schemas (see [Provider drift](provider-drift.md))
 - `schemas.mjs`, for the schema files in `schemas/`
 - `bench.mjs`, the benchmark
-- `gpu-bench.mjs` (`npm run bench:gpu`), what the console costs the machine on a Mac: GPU time, CPU and memory with the window at rest, turning, busy, behind another app, covered, minimized and hidden
+- `gpu-bench.mjs` (`npm run bench:gpu`), what the console costs the machine on a Mac: GPU time, frame time, and the CPU and memory of Desktop and the service, with the window at rest, turning, busy, behind another app, covered, minimized and hidden, beside the machine's GPU use without XenoNet
+- `bench-history.mjs`, a made-up history of Claude Code and Codex sessions in a folder of its own, from a few hundred sessions to a few thousand, with long ones, subagents and files that keep growing, for measuring the service at scale
 - `hook-snippet.mjs`
 - `dev-install.mjs`
 - `dist.mjs`

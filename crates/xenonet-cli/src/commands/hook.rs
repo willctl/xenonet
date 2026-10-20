@@ -3,7 +3,9 @@
 //! passes the event on to the running XenoNet and prints what XenoNet
 //! wants the agent to hear, in the hook output format both read. If XenoNet isn't running, or doesn't
 //! answer within 4 seconds, it prints nothing and the agent carries on: it
-//! always exits 0. XENONET_PORT (or --port) says which XenoNet.
+//! always exits 0. XENONET_PORT (or --port) says which XenoNet, and
+//! --via=plugin marks the event as the copy XenoNet's plugin for Claude
+//! Code sends, which XenoNet ignores while connect's own hook is there.
 
 use crate::args::Flags;
 use crate::out::Done;
@@ -29,10 +31,11 @@ pub fn port(flag: Option<&str>, env: Option<&str>) -> Option<u16> {
 pub fn run(args: &[String], flags: &Flags) -> Done {
     // --port as JS's Number() reads the flag: on its own, it's 1.
     let port_flag = flags.get("port").map(|v| if *v == Value::Bool(true) { "1".to_string() } else { xenonet_base::text::js_string(v) });
-    Ok(hook(args.first().map(String::as_str), port_flag.as_deref()))
+    let plugin = flags.get("via").and_then(Value::as_str) == Some("plugin");
+    Ok(hook(args.first().map(String::as_str), port_flag.as_deref(), plugin))
 }
 
-pub fn hook(app: Option<&str>, port_flag: Option<&str>) -> i32 {
+pub fn hook(app: Option<&str>, port_flag: Option<&str>, plugin: bool) -> i32 {
     let app = if app == Some("claude") { "claude" } else { "codex" };
     let mut input = Vec::new();
     let _ = std::io::stdin().read_to_end(&mut input);
@@ -41,7 +44,8 @@ pub fn hook(app: Option<&str>, port_flag: Option<&str>) -> i32 {
     let body = if text.is_empty() { "{}".to_string() } else { text };
     let env = std::env::var("XENONET_PORT").ok();
     if let Some(port) = port(port_flag, env.as_deref()) {
-        if let Ok(http::Answer { status: 200, body: Ok(body), .. }) = http::post_json(port, &format!("/api/hook/{app}"), body.as_bytes(), TIMEOUT) {
+        let path = format!("/api/hook/{app}{}", if plugin { "?via=plugin" } else { "" });
+        if let Ok(http::Answer { status: 200, body: Ok(body), .. }) = http::post_json(port, &path, body.as_bytes(), TIMEOUT) {
             let mut out = std::io::stdout().lock();
             let _ = out.write_all(&body);
             let _ = out.flush();

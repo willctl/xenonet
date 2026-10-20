@@ -137,7 +137,7 @@ pub fn summarize<E>(events: &[Value], since: f64, until: f64, title_of: &mut dyn
             (s.tool_calls + s.turns * 5.0, Value::Object(m))
         })
         .collect();
-    sessions.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    xenonet_base::sort::sort_by(&mut sessions, |a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     let mut t = [0.0f64; 6];
     for (_, s) in &sessions {
         t[0] += 1.0;
@@ -226,7 +226,7 @@ pub fn day_log<E>(events: &[Value], now: f64, hooks: DayHooks<'_, E>, live: Opti
     let busiest = hours.iter().position(|&h| h == max).unwrap_or(0);
     let today: Vec<&Value> = events.iter().filter(|e| js_number(get(e, "ts")) >= midnight).collect();
     let ts_of = |e: Option<&&Value>| e.and_then(|e| get(e, "ts")).filter(|v| !v.is_null()).cloned().unwrap_or(Value::Null);
-    projects.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    xenonet_base::sort::sort_by(&mut projects, |a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     let mut top = Vec::new();
     let mut name_of = hooks.name_of;
     for (id, n) in projects.into_iter().take(5) {

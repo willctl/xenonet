@@ -1,0 +1,4 @@
+tunnel: 1234-abcd
+credentials-file: /home/nova/.cloudflared/x.json
+ingress:
+  - service: http://127.0.0.1:47840

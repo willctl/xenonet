@@ -359,6 +359,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
         // No app started this service, so the Desktop that connects is the
         // one the window's requests come from (verify.desktop).
         let c = ctx.clone();
+        let person = ctx.clone();
         let you = ctx.clone();
         let stop = stop_tx.clone();
         let hooks = Hooks {
@@ -381,6 +382,10 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
                     }
                     seen
                 })
+            }),
+            on_person: Arc::new(move |peer| {
+                let c = person.clone();
+                Box::pin(async move { c.cores.verify.person(peer).await })
             }),
             terminals: ctx.cores.terminals.clone(),
         };
