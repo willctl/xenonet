@@ -352,15 +352,7 @@ pub fn list_files(dir: &str, pick: &mut dyn FnMut(&str) -> bool, depth: u32) -> 
 /// it there, which Node never shows and no other spelling of the path
 /// matches. `p` as it is when it can't be resolved.
 pub fn real_path(p: &Path) -> PathBuf {
-    let Ok(real) = fs::canonicalize(p) else { return p.to_path_buf() };
-    let s = real.to_string_lossy();
-    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
-        return PathBuf::from(format!(r"\\{rest}"));
-    }
-    if let Some(rest) = s.strip_prefix(r"\\?\") {
-        return PathBuf::from(rest);
-    }
-    real
+    crate::fs::realpath_native(&p.to_string_lossy()).map_or_else(|_| p.to_path_buf(), PathBuf::from)
 }
 
 #[cfg(test)]

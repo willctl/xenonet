@@ -99,6 +99,11 @@ pub fn realpath(p: &str) -> Result<String, FsError> {
     xenonet_base::fs::realpath(p).map_err(|e| FsError::of(e, "realpath", p))
 }
 
+/// fs.realpathSync.native.
+pub fn realpath_native(p: &str) -> Result<String, FsError> {
+    xenonet_base::fs::realpath_native(p).map_err(|e| FsError::of(e, "realpath", p))
+}
+
 /// fs.readdirSync(p): names in Node's order.
 pub fn read_dir_names(p: &str) -> Result<Vec<String>, FsError> {
     xenonet_base::paths::read_dir_sorted(Path::new(p))

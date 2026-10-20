@@ -204,6 +204,22 @@ pub fn realpath(p: &str) -> io::Result<String> {
     }
 }
 
+/// fs.realpathSync.native: `p` with its links followed and, on Windows, its
+/// short names spelled out, without the `\\?\` that canonicalize puts in
+/// front there, which Node never shows.
+pub fn realpath_native(p: &str) -> io::Result<String> {
+    std::fs::canonicalize(p).map(|r| plain(r.to_string_lossy().into_owned()))
+}
+
+// A path without the \\?\ (or \\?\UNC\) that marks a verbatim Windows
+// path, as libuv gives one back.
+fn plain(p: String) -> String {
+    if let Some(unc) = p.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{unc}");
+    }
+    p.strip_prefix(r"\\?\").map_or_else(|| p.clone(), str::to_string)
+}
+
 #[cfg(windows)]
 fn realpath_windows(p: &str) -> io::Result<String> {
     use crate::nodepath::Style::Win32;
@@ -226,12 +242,8 @@ fn realpath_windows(p: &str) -> io::Result<String> {
         let Some((at, end, next)) = link else { return Ok(p) };
         // Node stats the link first, so one that leads nowhere fails here.
         std::fs::metadata(&p[..end])?;
-        let target = std::fs::read_link(&p[..end])?.to_string_lossy().into_owned();
         // libuv undoes the \\?\ that Windows writes into an absolute link.
-        let target = match target.strip_prefix(r"\\?\UNC\") {
-            Some(rest) => format!(r"\\{rest}"),
-            None => target.strip_prefix(r"\\?\").map_or_else(|| target.clone(), str::to_string),
-        };
+        let target = plain(std::fs::read_link(&p[..end])?.to_string_lossy().into_owned());
         let resolved = Win32.resolve(&[&p[..at], &target]);
         p = Win32.resolve(&[&resolved, &p[next..]]);
     }
@@ -298,7 +310,7 @@ pub fn file_index(path: &str) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::realpath;
+    use super::{plain, realpath, realpath_native};
     use std::path::{Path, PathBuf};
 
     fn temp(name: &str) -> PathBuf {
@@ -318,6 +330,10 @@ mod tests {
         assert_eq!(realpath(&text(&dir.join("a").join("..").join("a"))).expect("a again"), a);
         assert!(a.ends_with('a') && !a.starts_with(r"\\?\"), "{a}");
         assert_eq!(realpath(&text(&dir.join("missing"))).map_err(|e| e.kind()), Err(std::io::ErrorKind::NotFound));
+        let native = realpath_native(&text(&dir.join("a").join("..").join("a"))).expect("a, natively");
+        assert!(native.ends_with('a') && !native.starts_with(r"\\?\"), "{native}");
+        assert_eq!(plain(r"\\?\UNC\host\share".into()), r"\\host\share");
+        assert_eq!(plain(r"\\?\C:\x".into()), r"C:\x");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

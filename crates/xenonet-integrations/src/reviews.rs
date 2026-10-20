@@ -165,6 +165,10 @@ fn realpath(p: &str) -> Result<String, Failure> {
     fsx::realpath(p).map_err(fs_fail)
 }
 
+fn realpath_native(p: &str) -> Result<String, Failure> {
+    fsx::realpath_native(p).map_err(fs_fail)
+}
+
 async fn git(io: &Io, args: Vec<String>, env: &Map<String, Value>, max_buffer: usize) -> Result<String, Failure> {
     let out = io.ask(json!({ "op": "git", "args": args, "options": { "env": env, "timeout": 10000, "maxBuffer": max_buffer } })).await.map_err(|_| Failure::Rethrow)?;
     Ok(out.get("stdout").map(js_string).unwrap_or_default())
@@ -185,12 +189,12 @@ fn open_nofollow(file: &str) -> std::io::Result<std::fs::File> {
 /// bytes, digest }. `env` is XenoNet's, without git's own settings.
 pub async fn source_snapshot(io: Io, source: String, env: Map<String, Value>) -> Result<Value, Failure> {
     // Windows can spell one directory with either short or long names.
-    let source = realpath(&source)?;
+    let source = realpath_native(&source)?;
     let env = git_env(&env);
     let base: Vec<String> = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=", "-C", &source].iter().map(ToString::to_string).collect();
     let with = |more: &[&str]| -> Vec<String> { base.iter().cloned().chain(more.iter().map(ToString::to_string)).collect() };
     let root = git(&io, with(&["rev-parse", "--show-toplevel"]), &env, 4096).await?;
-    if realpath(xenonet_base::text::js_trim(&root))? != source {
+    if realpath_native(xenonet_base::text::js_trim(&root))? != source {
         return Err(refused(Fail { status: 400, code: "bad-request".into(), message: "Change review needs the root of a Git working tree.".into() }));
     }
     let listed = git(&io, with(&["ls-files", "--cached", "--others", "--exclude-standard", "-z"]), &env, 1024 * 1024).await?;

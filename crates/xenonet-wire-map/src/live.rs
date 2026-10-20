@@ -121,7 +121,7 @@ impl Live {
         let roots: Vec<(String, String)> = [(claude_root, "claude"), (codex_root, "codex")]
             .into_iter()
             .filter(|(d, _)| !d.is_empty() && std::path::Path::new(d).exists())
-            .map(|(d, app)| (std::fs::canonicalize(d).map_or_else(|_| d.to_string(), |p| p.to_string_lossy().into_owned()), app.to_string()))
+            .map(|(d, app)| (xenonet_base::fs::realpath_native(d).unwrap_or_else(|_| d.to_string()), app.to_string()))
             .collect();
         let now = now_ms();
         let scanners = roots.iter().map(|(dir, _)| Scanner::new(&format!("transcripts:{dir}"), dir, Limits { depth: DEPTH, ..Limits::default() }, true, now)).collect();
