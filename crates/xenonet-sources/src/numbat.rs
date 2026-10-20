@@ -15,7 +15,7 @@ use crate::native::{by_num, edits_out, fits_id, js_max, js_min, older, prune_edi
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use xenonet_base::fs::FsError;
-use xenonet_base::ids::{is_session_app, SESSION_APPS};
+use xenonet_base::ids::{is_session_app, session_apps};
 use xenonet_base::json::{self, number_string};
 use xenonet_base::jsstr;
 use xenonet_base::ordered::OrderedMap;
@@ -283,7 +283,7 @@ impl Numbat {
         self.runs
             .iter()
             .map(|(_, r)| {
-                let name = SESSION_APPS.iter().find(|(a, _)| *a == r.app).map_or("", |(_, n)| *n);
+                let name = session_apps().iter().find(|(a, _)| *a == r.app).map_or("", |(_, n)| *n);
                 Out::Obj(vec![
                     ("id", Out::str(&r.id)),
                     ("app", Out::str(&r.app)),

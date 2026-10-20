@@ -1,12 +1,18 @@
 // The app registry (core/apps.js): each entry fits app/v1, it is what the
-// session ids say, and its values are the ones the code it feeds reads.
+// session ids and the Rust's copy say, and its values are the ones the code
+// it feeds reads.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { APPS, APP } from "../core/apps.js";
 import { SESSION_APPS, appOfSession } from "../core/schema/ids.js";
 import { check, explain } from "../core/schema/index.js";
 import { LEFT_OUT, readRecord } from "../core/numbat.js";
 import { event } from "./fixtures/numbat.js";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 test("every entry fits app/v1, strictly", () => {
   for (const app of APPS) {
@@ -23,6 +29,10 @@ test("the registry is what session ids say, in their order", () => {
   assert.equal(new Set(APPS.map((a) => a.id)).size, APPS.length, "each id once");
   for (const a of APPS) assert.equal(appOfSession(`${a.id}:0123456789`), a.id);
   assert.deepEqual(Object.keys(APP), APPS.map((a) => a.id));
+});
+
+test("the Rust's copy of the registry is current: node scripts/apps.mjs writes it", () => {
+  execFileSync(process.execPath, ["scripts/apps.mjs", "--check"], { cwd: root, stdio: "pipe" });
 });
 
 test("numbat leaves out the apps XenoNet tails, and reads every other app under its own id", () => {

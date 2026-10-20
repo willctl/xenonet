@@ -227,7 +227,7 @@ pub fn id_patterns() -> IdPatterns {
 
 #[napi(js_name = "sessionAppNames")]
 pub fn session_app_names() -> Vec<Vec<&'static str>> {
-    ids::SESSION_APPS.iter().map(|(a, n)| vec![*a, *n]).collect()
+    ids::session_apps().iter().map(|(a, n)| vec![*a, *n]).collect()
 }
 
 #[napi(js_name = "isSchemaPath")]

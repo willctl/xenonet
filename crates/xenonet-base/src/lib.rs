@@ -3,9 +3,10 @@
 //! compares and shows them (`paths`) and as Node's `path` builds them
 //! (`nodepath`), what a call to a model cost at API prices (`pricing`), the
 //! client that reaches a running XenoNet (`client`, over `http`), whether a
-//! process runs (`process`), sorting as JS sorts (`sort`), and locks that outlive
-//! a panic (`sync`).
+//! process runs (`process`), sorting as JS sorts (`sort`), locks that outlive
+//! a panic (`sync`), and the apps XenoNet knows (`apps`).
 
+pub mod apps;
 pub mod client;
 pub mod dirs;
 pub mod fs;
