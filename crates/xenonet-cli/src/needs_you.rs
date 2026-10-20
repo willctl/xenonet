@@ -113,7 +113,7 @@ pub fn queue(sessions: &[Value], actors: &[Value], waiting: &Value) -> Vec<Value
         let title = if n == 1.0 { "A program".to_string() } else { format!("{} programs", xenonet_base::json::number_string(n)) };
         items.push(json!({ "key": "requests", "kind": "requests", "id": null, "title": title, "count": waiting, "since": null, "actions": [] }));
     }
-    items.sort_by(order);
+    xenonet_base::sort::sort_by(&mut items, order);
     items
 }
 

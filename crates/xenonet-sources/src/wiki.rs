@@ -522,7 +522,7 @@ pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now:
             }
         }
     }
-    log.sort_by(|a, b| (a.ts - b.ts).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
+    xenonet_base::sort::sort_by(&mut log, |a, b| (a.ts - b.ts).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
     let pages = pages
         .into_iter()
         .map(|p| {

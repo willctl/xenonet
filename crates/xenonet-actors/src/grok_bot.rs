@@ -338,7 +338,7 @@ impl GrokBot {
             if !live.is_empty() {
                 s.busy_at = Some(s.busy_at.unwrap_or(0.0).max(at));
             }
-            live.sort_by(|a, b| b.started_at.partial_cmp(&a.started_at).unwrap_or(std::cmp::Ordering::Equal));
+            xenonet_base::sort::sort_by(&mut live, |a, b| b.started_at.partial_cmp(&a.started_at).unwrap_or(std::cmp::Ordering::Equal));
             (app_runs, live.into_iter().next(), s.busy_at)
         };
         let (presence, status) = if app_runs && busy_at.is_some_and(|b| at - b < LINGER_MS) {
@@ -420,7 +420,7 @@ impl GrokBot {
         let mut rows: Vec<Value> = described;
         let n = |v: &Value, k: &str| v.get(k).and_then(Value::as_f64).unwrap_or(f64::NAN);
         // Parents before children, so a command's own children know it.
-        rows.sort_by(|a, b| {
+        xenonet_base::sort::sort_by(&mut rows, |a, b| {
             let d = n(a, "start") - n(b, "start");
             let d = if d != 0.0 && !d.is_nan() { d } else { n(a, "pid") - n(b, "pid") };
             if d > 0.0 {

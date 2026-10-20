@@ -462,7 +462,7 @@ impl Refusals {
                     && kind.is_none_or(|k| is(r, "kind", k))
             })
             .collect();
-        out.sort_by(|a, b| {
+        xenonet_base::sort::sort_by(&mut out, |a, b| {
             let t = |r: &Value| get(r, "at").and_then(Value::as_f64).unwrap_or(f64::NAN);
             t(b).partial_cmp(&t(a)).unwrap_or(std::cmp::Ordering::Equal)
         });

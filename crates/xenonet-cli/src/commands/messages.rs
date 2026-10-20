@@ -41,7 +41,7 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
     }
     let titles: HashMap<String, Value> = agents.as_array().into_iter().flatten().map(|a| (t(a, "id"), a.get("title").cloned().unwrap_or(Value::Null))).collect();
     let name = |id: &str| titles.get(id).filter(|v| !v.is_null()).map_or_else(|| short_id(id), |v| crate::js::text(Some(v)));
-    messages.sort_by(|a, b| num(a, "at").partial_cmp(&num(b, "at")).unwrap_or(std::cmp::Ordering::Equal));
+    xenonet_base::sort::sort_by(&mut messages, |a, b| num(a, "at").partial_cmp(&num(b, "at")).unwrap_or(std::cmp::Ordering::Equal));
     let mut rows = Vec::new();
     for m in &messages {
         let target = t(m, "target");

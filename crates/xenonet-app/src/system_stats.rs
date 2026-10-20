@@ -172,7 +172,7 @@ pub fn parse_windows_gpu(line: &str, adapters: &[(String, f64)]) -> WindowsLine 
                 other => vec![other],
             };
             let mut out: Vec<(String, f64)> = list.iter().filter(|a| truthy(raw(Some(a), "name"))).map(|a| (js_string(&a["name"]), n_or0(raw(Some(a), "mem")))).collect();
-            out.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            xenonet_base::sort::sort_by(&mut out, |a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
             WindowsLine::Adapters(out)
         }
         "S " => {
@@ -368,7 +368,7 @@ impl NvidiaCards {
     /// The fresh readings, by index.
     pub fn read(&self, now: f64) -> Vec<Value> {
         let mut fresh: Vec<&(f64, Value, f64)> = self.cards.iter().filter(|c| now - c.2 < STALE_MS).collect();
-        fresh.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        xenonet_base::sort::sort_by(&mut fresh, |a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
         fresh.into_iter().map(|c| c.1.clone()).collect()
     }
 }

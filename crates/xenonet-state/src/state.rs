@@ -175,7 +175,7 @@ pub fn project_detection(root: &str, scan: Option<&Value>, rules: &Value, codex:
             Value::Object(m)
         })
         .collect();
-    list.sort_by(|a, b| js_number(get(b, "at")).partial_cmp(&js_number(get(a, "at"))).unwrap_or(std::cmp::Ordering::Equal));
+    xenonet_base::sort::sort_by(&mut list, |a, b| js_number(get(b, "at")).partial_cmp(&js_number(get(a, "at"))).unwrap_or(std::cmp::Ordering::Equal));
     let codex = nn(codex).filter(|c| truthy(Some(c))).map_or(Value::Null, |c| {
         let mut m = c.as_object().cloned().unwrap_or_default();
         m.insert("stale".into(), Value::Bool(current.unwrap_or(&Value::Null) != get(c, "fingerprint").unwrap_or(&Value::Null)));
@@ -239,7 +239,7 @@ pub fn identity_detection(enabled: bool, at: Option<&Value>, identities: Option<
             Value::Object(m)
         })
         .collect();
-    pins.sort_by(|a, b| js_number(get(b, "at")).partial_cmp(&js_number(get(a, "at"))).unwrap_or(std::cmp::Ordering::Equal));
+    xenonet_base::sort::sort_by(&mut pins, |a, b| js_number(get(b, "at")).partial_cmp(&js_number(get(a, "at"))).unwrap_or(std::cmp::Ordering::Equal));
     let signins: Map<String, Value> = get(saved, "signins")
         .and_then(Value::as_object)
         .into_iter()
