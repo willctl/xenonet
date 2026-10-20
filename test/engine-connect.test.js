@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createConnect } from "../core/engine/connect.js";
 
 test("installed connections register both MCP interfaces through the stable launcher", async (t) => {
@@ -198,4 +199,147 @@ test("an earlier XenoNet's entries, which ran Node and cli/xenonet.js, show as d
   await connect.remove();
   assert.deepEqual(hooksOf(".codex/hooks.json"), []);
   assert.deepEqual(hooksOf(".claude/settings.json").map((h) => h.command), ["my-own-stop-hook"]);
+});
+
+// A home with Claude Code and Codex on PATH, and XenoNet's plugin for Claude
+// Code installed and turned on as Claude Code records it (settings.json's
+// enabledPlugins, plugins/installed_plugins.json) when `plugin` is given.
+function pluginHome(t, { plugin = "xenonet@xenonet", enabled = true, installed = true, command = true } = {}) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-connect-plugin-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const bin = path.join(home, "bin");
+  fs.mkdirSync(bin);
+  for (const name of ["claude", "codex", ...(command ? ["xenonet"] : [])]) fs.writeFileSync(path.join(bin, name), "");
+  const launcher = path.join(home, "launcher", "xenonet");
+  fs.mkdirSync(path.dirname(launcher), { recursive: true });
+  fs.writeFileSync(launcher, "");
+  const claude = path.join(home, ".claude");
+  fs.mkdirSync(path.join(claude, "plugins"), { recursive: true });
+  const settings = { model: "x", hooks: { Stop: [{ hooks: [{ type: "command", command: "my-own-stop-hook" }] }] } };
+  if (plugin) settings.enabledPlugins = { "other@somewhere": true, [plugin]: enabled };
+  fs.writeFileSync(path.join(claude, "settings.json"), JSON.stringify(settings));
+  if (plugin && installed) fs.writeFileSync(path.join(claude, "plugins", "installed_plugins.json"), JSON.stringify({ version: 2, plugins: { [plugin]: [{ scope: "user", installPath: path.join(claude, "plugins", "cache", "xenonet", "xenonet", "0.3.0"), version: "0.3.0" }] } }));
+  const servers = { claude: {}, codex: {} }, calls = [];
+  const run = async (file, args) => {
+    const app = path.basename(file);
+    calls.push([app, ...args].join(" "));
+    const [, op, name] = args;
+    if (op === "get") {
+      if (!servers[app][name]) throw new Error("not found");
+      return JSON.stringify({ transport: servers[app][name] });
+    }
+    if (op === "remove") delete servers[app][name];
+    if (op === "add-json") servers[app][name] = JSON.parse(args[3]);
+    if (op === "add") servers[app][name] = { command: args[args.indexOf("--") + 1], args: args.slice(args.indexOf("--") + 2), env: { XENONET_PORT: "47840" } };
+    if (app === "claude") fs.writeFileSync(path.join(home, ".claude.json"), JSON.stringify({ mcpServers: servers.claude }));
+    return "";
+  };
+  const connect = (port = 47840) => createConnect({ platform: "darwin", port, bin: launcher, home, env: { PATH: bin }, run });
+  const settingsFile = path.join(claude, "settings.json");
+  const hooks = () => Object.values(JSON.parse(fs.readFileSync(settingsFile, "utf8")).hooks ?? {}).flat().flatMap((g) => g.hooks);
+  const enable = () => {
+    const s = JSON.parse(fs.readFileSync(settingsFile, "utf8"));
+    fs.writeFileSync(settingsFile, JSON.stringify({ ...s, enabledPlugins: { "xenonet@xenonet": true } }));
+    fs.writeFileSync(path.join(claude, "plugins", "installed_plugins.json"), JSON.stringify({ version: 2, plugins: { "xenonet@xenonet": [{ scope: "user", version: "0.3.0" }] } }));
+  };
+  return { home, launcher, servers, calls, connect, hooks, enable, settingsFile };
+}
+
+const claudeOf = (preview) => preview.apps.find((a) => a.app === "claude");
+
+test("with XenoNet's plugin installed and turned on, connecting leaves Claude Code to it and adds nothing of its own there", async (t) => {
+  const h = pluginHome(t);
+  const connect = h.connect();
+  const before = claudeOf(await connect.preview());
+  assert.deepEqual(before.changes.map((c) => [c.id, c.state, c.via]), [["mcp", "present", "plugin"], ["hooks", "present", "plugin"]]);
+  assert.ok(before.changes.every((c) => c.where === "XenoNet's plugin for Claude Code (xenonet@xenonet)"));
+  assert.ok(before.notes.some((n) => /Claude Code has XenoNet's plugin \(xenonet@xenonet\), which carries the xenonet MCP server and the hooks/.test(n)), before.notes.join(" | "));
+  assert.deepEqual(before.broken, []);
+
+  const after = await connect.apply();
+  assert.deepEqual(h.hooks().map((x) => x.command), ["my-own-stop-hook"], "no hook of connect's in Claude Code's settings");
+  assert.deepEqual(Object.keys(h.servers.claude), [], "and no server of its own");
+  assert.ok(!h.calls.some((c) => c.startsWith("claude mcp add-json")));
+  assert.ok(claudeOf(after).changes.every((c) => c.state === "present" && c.via === "plugin"));
+  // Codex has no plugin, so it's connected as before.
+  assert.ok(after.apps.find((a) => a.app === "codex").changes.every((c) => c.state === "present" && !c.via));
+  assert.equal(await connect.hookConnected("Stop"), false, "the plugin's hooks are the ones that count");
+});
+
+test("connect's own entries beside the plugin's show as to take out, the plugin's hooks stand by meanwhile, and connecting again keeps only the plugin's", async (t) => {
+  const h = pluginHome(t, { plugin: null });
+  const connect = h.connect();
+  await connect.apply();
+  assert.equal(await connect.hookConnected("Stop"), true);
+  assert.equal(await connect.hookConnected("SessionStart"), true);
+
+  // Then the plugin is installed: both are there.
+  h.enable();
+  const twice = claudeOf(await connect.preview());
+  assert.deepEqual(twice.changes.map((c) => [c.id, c.state]), [["mcp", "remove"], ["hooks", "remove"]]);
+  assert.ok(twice.notes.some((n) => /XenoNet ignores the plugin's copy of any hook connect added, so each event still arrives once/.test(n)), twice.notes.join(" | "));
+  for (const event of ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SessionEnd", "Notification"]) assert.equal(await connect.hookConnected(event), true, event);
+
+  const after = await connect.apply(["claude"]);
+  assert.deepEqual(h.hooks().map((x) => x.command), ["my-own-stop-hook"], "connect's own hooks out, yours kept");
+  assert.deepEqual(Object.keys(h.servers.claude), []);
+  assert.ok(h.calls.includes("claude mcp remove xenonet --scope user"));
+  assert.ok(claudeOf(after).changes.every((c) => c.state === "present" && c.via === "plugin"));
+  assert.equal(await connect.hookConnected("Stop"), false, "now the plugin's hooks count");
+});
+
+test("a turned-off or uninstalled plugin, or XenoNet Dev's own connect, isn't left to the plugin", async (t) => {
+  for (const [why, options, port] of [["turned off", { enabled: false }, 47840], ["not installed", { installed: false }, 47840], ["another marketplace's plugin of another name", { plugin: "xenonet-tools@xenonet" }, 47840], ["XenoNet Dev", {}, 47842]]) {
+    const h = pluginHome(t, options);
+    const preview = claudeOf(await h.connect(port).preview());
+    assert.deepEqual(preview.changes.map((c) => [c.id, c.state, c.via]), [["mcp", "missing", undefined], ["hooks", "missing", undefined]], why);
+    await h.connect(port).apply();
+    assert.ok(h.hooks().some((x) => x.type === "http" && x.url === `http://127.0.0.1:${port}/api/hook/claude`), why);
+  }
+});
+
+test("the plugin runs xenonet from PATH, so a missing command is something broken, and a missing claude command doesn't matter", async (t) => {
+  const h = pluginHome(t, { command: false });
+  assert.deepEqual(claudeOf(await h.connect().preview()).broken, ["XenoNet's plugin runs the xenonet command, which isn't on your PATH"]);
+  fs.rmSync(path.join(h.home, "bin", "claude"));
+  assert.ok(!claudeOf(await h.connect().preview()).notes.some((n) => /can't find the claude command/.test(n)));
+});
+
+test("whether connect's own hook for an event is there: only this XenoNet's, only one that can run, and none in settings that can't be read", async (t) => {
+  const h = pluginHome(t, { plugin: null });
+  const connect = h.connect();
+  assert.equal(await connect.hookConnected("Stop"), false, "nothing connected yet");
+  await connect.apply();
+  assert.equal(await connect.hookConnected("Stop"), true);
+  assert.equal(await connect.hookConnected("SubagentStop"), false, "an event connect adds no hook for");
+  assert.equal(await h.connect(47842).hookConnected("Stop"), false, "XenoNet Dev's own aren't there");
+  // SessionStart's command runs the launcher; once that's gone it can't run.
+  fs.rmSync(h.launcher);
+  assert.equal(await connect.hookConnected("SessionStart"), false);
+  assert.equal(await connect.hookConnected("Stop"), true, "an HTTP hook runs no file");
+  fs.writeFileSync(h.settingsFile, "{ not json");
+  assert.equal(await connect.hookConnected("Stop"), false);
+});
+
+test("XenoNet's plugin for Claude Code carries exactly connect's hooks and MCP server", async (t) => {
+  const h = pluginHome(t, { plugin: null });
+  await h.connect().apply(["claude"]);
+  const plugin = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "plugins", "xenonet");
+  const pluginHooks = JSON.parse(fs.readFileSync(path.join(plugin, "hooks", "hooks.json"), "utf8")).hooks;
+  const connected = JSON.parse(fs.readFileSync(h.settingsFile, "utf8")).hooks;
+  const ours = (groups) => groups.map((g) => ({ ...g, hooks: g.hooks.filter((x) => x.command !== "my-own-stop-hook") })).filter((g) => g.hooks.length);
+  assert.deepEqual(Object.keys(pluginHooks).sort(), Object.keys(connected).sort(), "the same events");
+  for (const [event, groups] of Object.entries(pluginHooks)) {
+    const theirs = ours(connected[event]);
+    assert.equal(groups.length, 1, event);
+    assert.equal(theirs.length, 1, event);
+    assert.equal(groups[0].matcher, theirs[0].matcher, event);
+    const [p] = groups[0].hooks, [c] = theirs[0].hooks;
+    assert.equal(p.type, c.type, event);
+    assert.equal(p.timeout, c.timeout, event);
+    if (c.type === "http") assert.equal(p.url, `${c.url}?via=plugin`, event);
+    else assert.equal(p.command, "xenonet hook claude --port=47840 --via=plugin", event);
+  }
+  const server = JSON.parse(fs.readFileSync(path.join(plugin, ".mcp.json"), "utf8")).mcpServers.xenonet;
+  assert.deepEqual(server, { ...h.servers.claude.xenonet, command: "xenonet" }, "connect's server, run from PATH");
 });

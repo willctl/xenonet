@@ -63,6 +63,6 @@ tree. If XenoNet is connected (the `xenonet` MCP tools are there), use them:
 
 ## Releases and public copy
 
-Follow `docs/guide/releases.md` for version tags, GitHub releases and desktop updates. Keep `package.json`, `package-lock.json` and the release notes in agreement. Never replace the files of a published release.
+Follow `docs/guide/releases.md` for version tags, GitHub releases and desktop updates. Keep `package.json`, `package-lock.json`, the plugin's manifest and the release notes in agreement. Never replace the files of a published release.
 
 Write public copy in XenoNet's plain, concrete voice. Review it with https://github.com/cursor/plugins/blob/main/pstack/skills/unslop/SKILL.md. Say what the app does and what the person should do next. Avoid hype, stock AI phrases, decorative emoji and unsupported claims.

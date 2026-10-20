@@ -25,11 +25,22 @@ export async function run(_args, flags) {
   // Nothing answers: this XenoNet's entries, by its port, taken out here.
   const local = s ? null : createConnect({ port: candidates(flags)[0], root: ROOT });
   const preview = s ? await get(s, "/api/engine/connect") : await local.preview();
-  const there = preview.apps.filter((a) => a.changes.some((ch) => ch.state !== "missing"));
-  if (!there.length) return print(c.dim("XenoNet isn't in Claude Code's or Codex's settings; nothing to take out."));
-  render({ ...preview, apps: there.map((a) => ({ ...a, notes: [], broken: [], changes: a.changes.filter((ch) => ch.state !== "missing").map((ch) => ({ ...ch, state: "remove" })) })) });
+  // What XenoNet's plugin for Claude Code carries is the plugin's, not
+  // connect's, so it stays.
+  const ours = (ch) => ch.state !== "missing" && ch.via !== "plugin";
+  const plugin = preview.apps.some((a) => a.changes.some((ch) => ch.via === "plugin"));
+  const there = preview.apps.filter((a) => a.changes.some(ours));
+  if (!there.length) {
+    print(c.dim("XenoNet isn't in Claude Code's or Codex's settings; nothing to take out."));
+    if (plugin) print(c.dim(PLUGIN_STAYS));
+    return;
+  }
+  render({ ...preview, apps: there.map((a) => ({ ...a, notes: [], broken: [], changes: a.changes.filter(ours).map((ch) => ({ ...ch, state: "remove" })) })) });
   if (!(await confirm(`Take XenoNet out of ${there.map((a) => a.name).join(" and ")}?`, flags))) return print(c.dim("Nothing changed."));
   if (s) await del(s, "/api/engine/connect");
   else await local.remove();
   print(`${c.green("✓")} Took XenoNet out of ${there.map((a) => a.name).join(" and ")}${s ? ` (${nameOf(s)} keeps running)` : ""}. Sessions already open keep their tools until restarted.`);
+  if (plugin) print(c.dim(PLUGIN_STAYS));
 }
+
+const PLUGIN_STAYS = "XenoNet's plugin for Claude Code stays. /plugin in Claude Code uninstalls it.";

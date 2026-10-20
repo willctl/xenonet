@@ -1,0 +1,41 @@
+{
+  "description": "The hooks xenonet connect adds to Claude Code, for the installed XenoNet on port 47840. They're marked via=plugin, so XenoNet ignores them while xenonet connect's own copies are in Claude Code's settings.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [{ "type": "command", "command": "xenonet hook claude --port=47840 --via=plugin", "timeout": 10 }]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [{ "type": "http", "url": "http://127.0.0.1:47840/api/hook/claude?via=plugin", "timeout": 5 }]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [{ "type": "http", "url": "http://127.0.0.1:47840/api/hook/claude?via=plugin", "timeout": 5 }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [{ "type": "http", "url": "http://127.0.0.1:47840/api/hook/claude?via=plugin", "timeout": 5 }]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [{ "type": "http", "url": "http://127.0.0.1:47840/api/hook/claude?via=plugin", "timeout": 5 }]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [{ "type": "http", "url": "http://127.0.0.1:47840/api/hook/claude?via=plugin", "timeout": 5 }]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [{ "type": "http", "url": "http://127.0.0.1:47840/api/hook/claude?via=plugin", "timeout": 5 }]
+      }
+    ]
+  }
+}

@@ -635,6 +635,16 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     // permission prompts and notifications.
     if m == "POST" && route == "/api/hook/claude" {
         let body = req.json_body().await.unwrap_or_else(|_| json!({}));
+        // XenoNet's plugin for Claude Code posts the same events as
+        // connect's own hooks, marked via=plugin. While connect's hook for
+        // an event is in Claude Code's settings, that one counts and the
+        // plugin's stands by, so each event arrives once.
+        if req.param("via") == Some("plugin") {
+            let event = body.get("hook_event_name").map(js_string).unwrap_or_default();
+            if cores.connect.hook_connected(&event).await.unwrap_or(false) {
+                return Ok(Reply::empty(204));
+            }
+        }
         if let Some(sid) = body.get("session_id").and_then(Value::as_str).filter(|s| is_uuid_like(s)) {
             let id = format!("claude:{sid}");
             let verdict = cores.verify.check(req.peer, &id, true).await;

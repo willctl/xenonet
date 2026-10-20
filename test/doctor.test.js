@@ -110,6 +110,19 @@ test("the runtime, XenoNet's own state and the agents' connection", async () => 
   assert.match(byId(await runDoctor(ctxWith({ ctx: apps(["present", "missing"]) })))["agents.codex"].detail, /partly connected \(hooks missing\)/);
   const gone = byId(await runDoctor(ctxWith({ ctx: apps(["present", "present"], ["~/old/xenonet/cli/xenonet.js is gone"]) })));
   assert.deepEqual([gone["agents.claude"].status, gone["agents.claude"].fix], ["fail", "Run xenonet connect again."]);
+  // XenoNet's plugin for Claude Code: what it carries counts as connected,
+  // connect's own entries beside it are a warning, and the command it runs
+  // missing from PATH is a failure of its own.
+  const plugin = (states, broken = []) => ({ connect: { port: 47840, apps: [{ app: "claude", changes: states.map((state, i) => ({ id: ["mcp", "hooks"][i], state, ...(state === "present" ? { via: "plugin" } : {}) })), broken }] } });
+  const carried = byId(await runDoctor(ctxWith({ ctx: plugin(["present", "present"]) })))["agents.claude"];
+  assert.deepEqual([carried.status, carried.detail], ["ok", "connected to XenoNet on port 47840, through its plugin for Claude Code"]);
+  const twice = byId(await runDoctor(ctxWith({ ctx: plugin(["remove", "remove"]) })))["agents.claude"];
+  assert.deepEqual([twice.status, twice.fix], ["warn", "Run xenonet connect claude, which takes connect's own entries out and keeps the plugin."]);
+  assert.equal(twice.detail, "connected twice, through XenoNet's plugin and through xenonet connect's own entries: each event still arrives once, but sessions get XenoNet's tools twice");
+  const hooksOnly = byId(await runDoctor(ctxWith({ ctx: plugin(["present", "remove"]) })))["agents.claude"];
+  assert.equal(hooksOnly.detail, "connected twice, through XenoNet's plugin and through xenonet connect's own entries: each event still arrives once", "the tools come from the plugin alone");
+  const noCommand = byId(await runDoctor(ctxWith({ ctx: plugin(["present", "present"], ["XenoNet's plugin runs the xenonet command, which isn't on your PATH"]) })))["agents.claude"];
+  assert.deepEqual([noCommand.status, noCommand.fix], ["fail", "Install XenoNet, or put its xenonet command on your PATH."]);
   // Without a running XenoNet, what only it knows is skipped.
   const alone = byId(await runDoctor(ctxWith({ ctx: { self: null, base: null, health: null, live: null, connect: null } })));
   assert.deepEqual(["xenonet.server", "xenonet.sources", "claude.usage", "agents.claude"].map((id) => alone[id].status), ["warn", "skip", "skip", "skip"]);
