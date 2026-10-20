@@ -241,6 +241,7 @@ The console page imports only the core modules that have no Node in them, such a
 | --- | --- |
 | `apps.js` | The app registry: the apps XenoNet knows sessions of, and what's fixed about each (its folder, hook events, signing team, edit tools and what XenoNet can do with it). The page uses it too, and `node scripts/apps.mjs` writes the Rust's copy, `crates/xenonet-base/src/apps.json` |
 | `claude.js`, `codex.js`, `git.js`, `wiki.js`, `demo.js` | The sources XenoNet reads |
+| `native/`, `numbat.js`, `reported-runs.js` | Runs of other apps: the experimental native readers, one for each app the registry gives `native` (the table in `native/index.js`, the contract each keeps in `native/reader.js`), numbat's records, and the runs actors report |
 | `lines.js` | Transcript lines, as all three of XenoNet's readers take them |
 | `vendor.js`, `drift.js`, `schema/` | The apps' data, read leniently against XenoNet's schemas, and the drift kept from it. The schemas themselves are in `schema/`. |
 | `projects.js` | How the projects folder is read |

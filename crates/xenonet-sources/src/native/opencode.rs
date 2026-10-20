@@ -398,7 +398,8 @@ impl OpenCode {
 impl NativeReader for OpenCode {
     /// Reads the database at `at` (on the disk, read only; `files` says
     /// whether it's there): its sessions of the last day and their edits of
-    /// the last half hour. A vendor check that threw is reported.
+    /// the last half hour. A vendor reader that couldn't be got is reported;
+    /// a check that threw leaves the database unreadable, as readDb has it.
     fn read(&mut self, at: &str, now: f64, files: &mut dyn Files, vendor: &mut dyn Vendor) -> Result<(), String> {
         let exists = files.exists(at);
         let mut open = || Sqlite::open(at).map(|db| Box::new(db) as Box<dyn Db>);
