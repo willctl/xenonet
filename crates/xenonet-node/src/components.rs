@@ -21,13 +21,9 @@ fn machine_of(m: &Json) -> runtime::Machine {
     runtime::Machine { platform: t("platform"), arch: t("arch"), home: t("home") }
 }
 
-/// The machine, the launcher's source and process.env's LOCALAPPDATA.
+/// The machine and process.env's LOCALAPPDATA.
 fn ctx_of(c: &Json) -> install::Ctx {
-    install::Ctx {
-        machine: machine_of(c),
-        launcher_source: c.0.get("launcherSource").map(xenonet_base::text::js_string).unwrap_or_default(),
-        local_app_data: c.0.get("localAppData").and_then(Value::as_str).map(String::from),
-    }
+    install::Ctx { machine: machine_of(c), local_app_data: c.0.get("localAppData").and_then(Value::as_str).map(String::from) }
 }
 
 #[napi(js_name = "compConstants")]
@@ -123,9 +119,9 @@ pub fn comp_hello(token: String, role: String) -> Json {
 }
 
 #[napi(js_name = "compEnsureService")]
-pub fn comp_ensure_service(root: String, exec: String, env: Json, timeout: f64, machine: Json) -> AppTask {
-    let (env, m) = (env_of(env), machine_of(&machine));
-    AppTask::of(Task::new(move |io| async move { runtime::ensure_service(&io, &root, &exec, &env, timeout, &m).await }))
+pub fn comp_ensure_service(root: String, exec: String, args: MaybeJson, env: Json, timeout: f64, machine: Json) -> AppTask {
+    let (args, env, m) = (runtime::service_args(args.0.as_ref()), env_of(env), machine_of(&machine));
+    AppTask::of(Task::new(move |io| async move { runtime::ensure_service(&io, &root, &exec, &args, &env, timeout, &m).await }))
 }
 
 #[napi(js_name = "compDigest")]

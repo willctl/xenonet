@@ -145,17 +145,12 @@ pub fn checkup_here(flags: &crate::args::Flags, only: Option<&[String]>) -> Res<
         "stateDir": state_dir,
         "cacheDir": cache_dir,
     });
-    Ok(xenonet_mcp::doctor::checkup_here(&paths, only, &launcher_source()))
-}
-
-/// The launcher script this XenoNet ships, core/components/launcher.cjs.
-fn launcher_source() -> String {
-    xenonet_base::paths::join_all(&[&sys::xenonet_root(), "core", "components", "launcher.cjs"])
+    Ok(xenonet_mcp::doctor::checkup_here(&paths, only))
 }
 
 /// machine().launcher()
 pub fn machine_launcher() -> Res<Value> {
-    xenonet_mcp::doctor::launcher(&launcher_source()).map(|l| l.unwrap_or(Value::Null)).map_err(Fail::error)
+    xenonet_mcp::doctor::launcher().map(|l| l.unwrap_or(Value::Null)).map_err(Fail::error)
 }
 
 /// writeListenSettings({ dir, port }): the file's path.

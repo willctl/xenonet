@@ -152,10 +152,10 @@ fn codex_bin() -> String {
 // ---------- the machine's other answers ----------
 
 /// The launcher hooks and MCP servers run, when there is one: its folder,
-/// what it says of itself (`node cli/xenonet.js --launcher`), its version
-/// and the version this XenoNet ships (machine().launcher()). `source` is
-/// the launcher script this XenoNet ships (core/components/launcher.cjs).
-pub fn launcher(source: &str) -> Result<Option<Value>, String> {
+/// what it says of itself (`xenonet --launcher`, or `node cli/xenonet.js
+/// --launcher` for an earlier XenoNet's), its version and the version this
+/// XenoNet ships, the launcher script built in (machine().launcher()).
+pub fn launcher() -> Result<Option<Value>, String> {
     let env: Map<String, Value> = std::env::vars().map(|(k, v)| (k, Value::String(v))).collect();
     let m = xenonet_components::runtime::Machine { platform: platform().into(), arch: String::new(), home: home() };
     let runtime = xenonet_components::runtime::runtime_dir(&env, &m);
@@ -166,8 +166,7 @@ pub fn launcher(source: &str) -> Result<Option<Value>, String> {
     if std::fs::metadata(&bin).is_ok() {
         let r = run_program(&bin, &["--launcher".into()], 8000.0, &[], &[]);
         let said = r["stdout"].as_str().and_then(|s| xenonet_base::json::parse(s).ok()).unwrap_or(Value::Null);
-        let read = |f: &str| std::fs::read(f).map(|b| String::from_utf8_lossy(&b).into_owned()).map_err(|e| xenonet_base::fs::FsError::of(e, "open", f).message);
-        let ships = xenonet_components::install::launcher_version(Some(&read(source)?));
+        let ships = xenonet_components::install::launcher_version(Some(xenonet_components::install::LAUNCHER_SCRIPT));
         let version = said.get("launcher").cloned().unwrap_or_else(|| xenonet_base::json::number(ships));
         return Ok(Some(json!({ "dir": dir, "said": said, "version": version, "ships": xenonet_base::json::number(ships) })));
     }
@@ -180,7 +179,7 @@ pub fn launcher(source: &str) -> Result<Option<Value>, String> {
     let said = r["stdout"].as_str().and_then(|s| xenonet_base::json::parse(s).ok()).unwrap_or(Value::Null);
     let read = |f: &str| std::fs::read(f).map(|b| String::from_utf8_lossy(&b).into_owned()).map_err(|e| xenonet_base::fs::FsError::of(e, "open", f).message);
     let version = xenonet_components::install::launcher_version(Some(&read(&entry)?));
-    let ships = xenonet_components::install::launcher_version(Some(&read(source)?));
+    let ships = xenonet_components::install::launcher_version(Some(xenonet_components::install::LAUNCHER_SCRIPT));
     Ok(Some(json!({ "dir": dir, "said": said, "version": xenonet_base::json::number(version), "ships": xenonet_base::json::number(ships) })))
 }
 
@@ -333,7 +332,6 @@ fn statfs(_: &str) -> Option<Value> {
 struct Machine {
     paths: Value,
     home: String,
-    launcher_source: String,
 }
 
 fn text(v: Option<&Value>) -> String {
@@ -409,7 +407,7 @@ impl Machine {
                 Some(dir) => Value::Array(xenonet_base::log::read_logs(std::path::Path::new(&xenonet_base::log::log_dir(&dir)), now() - DAY_MS, "error", None, None, 500)),
                 None => Value::Null,
             },
-            "launcher" => launcher(&self.launcher_source).map_err(|m| json!({ "message": m }))?.unwrap_or(Value::Null),
+            "launcher" => launcher().map_err(|m| json!({ "message": m }))?.unwrap_or(Value::Null),
             "stateFile" => inspect_state(&a(0)),
             "drift" => self.path("cacheDir").map_or(Value::Null, |d| drift(&d)),
             "gitAvailable" => json!(git_available()),
@@ -481,7 +479,7 @@ fn runtime_check() -> Value {
 
 /// runDoctor(machine({ paths }), { only }): every check (or those `only`
 /// keeps), each in 8 seconds at most, and their summary.
-pub fn run_doctor(paths: &Paths, only: Option<&[String]>, launcher_source: &str) -> Value {
+pub fn run_doctor(paths: &Paths, only: Option<&[String]>) -> Value {
     let started = now();
     // The home folder config.js has: the demo world's, for the demo.
     let home = paths.get("homeDir").and_then(Value::as_str).map_or_else(home, String::from);
@@ -495,7 +493,7 @@ pub fn run_doctor(paths: &Paths, only: Option<&[String]>, launcher_source: &str)
     let mut waiting = Vec::new();
     for (i, (id, ..)) in picked.iter().enumerate() {
         let (tx, rx) = mpsc::channel();
-        let (id, facts, m) = (id.to_string(), facts.clone(), Machine { paths: paths.clone(), home: home.clone(), launcher_source: launcher_source.to_string() });
+        let (id, facts, m) = (id.to_string(), facts.clone(), Machine { paths: paths.clone(), home: home.clone() });
         let t0 = now();
         std::thread::spawn(move || {
             let r = if id == "system.runtime" { runtime_check() } else { check(&id, facts, &m) };
@@ -521,27 +519,10 @@ pub fn run_doctor(paths: &Paths, only: Option<&[String]>, launcher_source: &str)
     json!({ "at": xenonet_base::json::number(started), "ms": xenonet_base::json::number(now() - started), "results": results, "summary": run::summarize(&results) })
 }
 
-/// The launcher script this XenoNet ships (core/components/launcher.cjs),
-/// in XenoNet's own folder: the first of the folders the binary is in, and
-/// those above it, with XenoNet's package.json and cli/ (a checkout's, for
-/// target/debug/xenonet), else the binary's own folder.
-pub fn launcher_source() -> String {
-    let exe = std::env::current_exe().unwrap_or_default();
-    let root = exe
-        .ancestors()
-        .skip(1)
-        .take(5)
-        .find(|d| d.join("package.json").is_file() && d.join("cli").is_dir())
-        .or_else(|| exe.parent())
-        .map(|d| d.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    xenonet_base::paths::join_all(&[&root, "core", "components", "launcher.cjs"])
-}
-
 /// checkup()'s fallback: the doctor run here on these folders, by no
 /// XenoNet.
-pub fn checkup_here(paths: &Paths, only: Option<&[String]>, launcher_source: &str) -> Value {
-    let mut r = run_doctor(paths, only, launcher_source);
+pub fn checkup_here(paths: &Paths, only: Option<&[String]>) -> Value {
+    let mut r = run_doctor(paths, only);
     r["by"] = Value::Null;
     r
 }
@@ -600,7 +581,7 @@ mod tests {
         let chosen = tmp("code");
         std::fs::write(format!("{state}/state.json"), json!({ "version": 2, "workspace": { "root": chosen } }).to_string()).unwrap();
         let paths = json!({ "stateDir": state, "cacheDir": tmp("cache"), "projectsDir": chosen, "claudeProjectsDir": "/nowhere/claude", "codexHome": "/nowhere/codex", "homeDir": "/nowhere" });
-        let r = checkup_here(&paths, Some(&["system.runtime".into(), "xenonet.server".into(), "system.projects".into(), "xenonet.state".into()]), "/nowhere/launcher.cjs");
+        let r = checkup_here(&paths, Some(&["system.runtime".into(), "xenonet.server".into(), "system.projects".into(), "xenonet.state".into()]));
         let got: Vec<(String, String)> = r["results"].as_array().unwrap().iter().map(|x| (text(x.get("id")), text(x.get("status")))).collect();
         assert_eq!(
             got,

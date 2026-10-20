@@ -42,8 +42,8 @@ export async function connectService({ env = process.env, role = "tools", handle
   } catch (err) { client.close(); throw err; }
 }
 
-// `args`: what `exec` runs, server/index.js under `root` unless they're
-// given (the Rust binary's ["serve"]).
+// `exec` is the xenonet binary, run in `root` with `args`, or `serve`
+// when they aren't given.
 export async function ensureService({ root, exec, args = null, env = process.env, timeout = 60000 }) {
   try { const c = await connectService({ env }); c.close(); return "reused"; } catch (err) {
     if (/incompatible/.test(err.message)) throw err;
@@ -54,7 +54,7 @@ export async function ensureService({ root, exec, args = null, env = process.env
   const childEnv = { ...env, XENONET_STANDALONE: "1" };
   delete childEnv.ELECTRON_RUN_AS_NODE;
   delete childEnv.XENONET_EXEC;
-  const child = spawn(exec, args ?? [path.join(root, "server", "index.js")], { cwd: root, env: childEnv, detached: true, windowsHide: true, stdio: ["ignore", out, out] });
+  const child = spawn(exec, args ?? ["serve"], { cwd: root, env: childEnv, detached: true, windowsHide: true, stdio: ["ignore", out, out] });
   fs.closeSync(out);
   child.unref();
   let failure;

@@ -30,12 +30,9 @@ pub fn machine() -> Machine {
     Machine { platform: sys::platform().into(), arch: super::arch().into(), home: sys::home() }
 }
 
-/// install.js's ctx: the machine, the launcher script this XenoNet ships
-/// (its links followed) and process.env's LOCALAPPDATA.
+/// install.js's ctx: the machine and process.env's LOCALAPPDATA.
 fn ctx() -> Ctx {
-    let source = super::launcher_source();
-    let source = std::fs::canonicalize(&source).map_or(source, |p| p.to_string_lossy().into_owned());
-    Ctx { machine: machine(), launcher_source: source, local_app_data: std::env::var("LOCALAPPDATA").ok() }
+    Ctx { machine: machine(), local_app_data: std::env::var("LOCALAPPDATA").ok() }
 }
 
 /// process.env with what the command was given over it.
@@ -209,9 +206,10 @@ impl Perform for Ensure {
 async fn ensure(runtime: &Value) -> Result<Value, Failed> {
     let root = runtime.get("root").map(xenonet_base::text::js_string).unwrap_or_default();
     let exec = runtime.get("exec").map(xenonet_base::text::js_string).unwrap_or_default();
+    let args = runtime::service_args(runtime.get("args"));
     let env: Env = runtime.get("env").and_then(Value::as_object).cloned().unwrap_or_default();
     let m = machine();
-    let task = Task::new(move |io| async move { runtime::ensure_service(&io, &root, &exec, &env, START_MS, &m).await });
+    let task = Task::new(move |io| async move { runtime::ensure_service(&io, &root, &exec, &args, &env, START_MS, &m).await });
     drive(task, &mut Ensure { child: None }).await
 }
 

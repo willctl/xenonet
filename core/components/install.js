@@ -5,14 +5,16 @@ import { currentComponent, stagePackage, selectComponent, newer, withInstallLock
 import { runtimeDir, ensureService, connectService, binName, launcherBin } from "./runtime.js";
 import { installCommand } from "../command.js";
 
-const nodeName = () => process.platform === "win32" ? "node.exe" : "node";
+// The node an earlier XenoNet copied into the launcher's folder, which the
+// entries it wrote run.
+const earlierNode = () => (process.platform === "win32" ? "node.exe" : "node");
 
 // The launcher never moves: hooks, MCP servers, the xenonet command and other
 // programs run its path. It's the Tools' xenonet binary, copied to
 // <runtime>/launcher/xenonet and copied again when the Tools change; a running
 // MCP process keeps the file it started from. Entries an earlier XenoNet wrote
 // run a node of the launcher's own and cli/xenonet.js (launcher.cjs says what
-// that does), which stay while the Tools carry a node.
+// that does), which XenoNet keeps current but never puts there itself.
 export const LAUNCHER_SOURCE = new URL("./launcher.cjs", import.meta.url);
 // The version a launcher script says it is: 1 for the one before it said.
 export const launcherVersion = (text) => Number(/^\/\/ xenonet-launcher (\d+)/.exec(String(text ?? ""))?.[1] ?? (text ? 1 : 0));
@@ -72,30 +74,21 @@ export function installLauncher(env = process.env) {
   const bin = launcherBin(env);
   fs.mkdirSync(dir, { recursive: true });
   writeLauncherBin(tools, bin);
-  let runtime = null;
-  let entry = null;
-  if (fs.existsSync(path.join(tools.root, nodeName()))) {
-    entry = path.join(dir, "cli", "xenonet.js");
-    runtime = path.join(dir, nodeName());
-    fs.mkdirSync(path.dirname(entry), { recursive: true });
-    if (!fs.existsSync(runtime)) fs.copyFileSync(path.join(tools.root, nodeName()), runtime);
-    if (process.platform !== "win32") fs.chmodSync(runtime, 0o755);
-    writeLauncher(entry);
-  }
-  return { bin: fs.existsSync(bin) ? bin : null, runtime, entry, root: dir, runAsNode: false };
+  const entry = path.join(dir, "cli", "xenonet.js");
+  if (fs.existsSync(path.join(dir, earlierNode())) && fs.existsSync(entry)) writeLauncher(entry);
+  return { bin: fs.existsSync(bin) ? bin : null, root: dir };
 }
 
+// The startup check of a staged component: its xenonet binary runs, without
+// ELECTRON_RUN_AS_NODE, and says the version it was promised.
 export function checkRuntime(staged) {
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
-  const options = { cwd: staged.root, windowsHide: true, encoding: "utf8", timeout: 15000, env };
-  const runtime = path.join(staged.root, nodeName());
-  const result = spawnSync(runtime, ["--input-type=module", "-e", "await import('node:sqlite'); await import('@lydell/node-pty'); await import('@modelcontextprotocol/server'); await import('tar'); process.stdout.write('ok')"], options);
-  if (result.status !== 0 || result.stdout !== "ok") throw new Error("The new component runtime did not pass its startup check.");
-  const cli = spawnSync(runtime, [path.join(staged.root, "cli/xenonet.js"), "--version", "--json"], options);
+  const result = spawnSync(path.join(staged.root, "bin", binName()), ["--version", "--json"], { cwd: staged.root, windowsHide: true, encoding: "utf8", timeout: 15000, env });
   let version;
-  try { version = JSON.parse(cli.stdout).version; } catch {}
-  if (cli.status !== 0 || version !== staged.version) throw new Error("The new component command did not pass its startup check.");
+  try { version = JSON.parse(result.stdout).version; } catch {}
+  if (result.status !== 0 || version == null) throw new Error("The new component runtime did not pass its startup check.");
+  if (version !== staged.version) throw new Error("The new component command did not pass its startup check.");
 }
 
 const lifecycle = (overrides) => ({ connect: connectService, start: ensureService, check: checkRuntime, now: Date.now, pause: (ms) => new Promise((resolve) => setTimeout(resolve, ms)), stopTimeout: 15000, ...overrides });
@@ -184,11 +177,14 @@ export async function installBundle(bundle, { env = process.env, command = true 
   });
 }
 
+// How to start the selected service: its xenonet binary, with `serve`, and
+// the env it runs with (the runtime folder, and the launcher's binary when
+// there is one).
 export function installedRuntime(env = process.env) {
   const service = currentComponent("service", env);
   if (!service) throw new Error("XenoNet Service is not installed. Use the bundle installer.");
   const launcher = installLauncher(env);
-  return { root: service.root, exec: path.join(service.root, nodeName()), env: { ...env, XENONET_RUNTIME_DIR: runtimeDir(env), ...(launcher?.bin ? { XENONET_LAUNCHER_BIN: launcher.bin } : {}), ...(launcher?.runtime ? { XENONET_LAUNCHER_EXEC: launcher.runtime, XENONET_LAUNCHER_ROOT: launcher.root } : {}) } };
+  return { root: service.root, exec: path.join(service.root, "bin", binName()), args: ["serve"], env: { ...env, XENONET_RUNTIME_DIR: runtimeDir(env), ...(launcher?.bin ? { XENONET_LAUNCHER_BIN: launcher.bin } : {}) } };
 }
 
 export async function activatePackage(file, item, { env = process.env, operations } = {}) {

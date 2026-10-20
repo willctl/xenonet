@@ -5,7 +5,7 @@
 //! What's installed is a pointer to one version (current.json), switched
 //! with a rename.
 
-use crate::runtime::{runtime_dir, Env, Machine};
+use crate::runtime::{bin_name, runtime_dir, Env, Machine};
 use crate::tar::{unpack, Unpack};
 use regex::Regex;
 use serde_json::{json, Map, Value};
@@ -155,15 +155,6 @@ fn read_json(file: &str) -> Result<Value, Failure> {
     xenonet_base::json::parse(&text).map_err(|e| Failure::msg(e.to_string()))
 }
 
-/// The runtime a package has: node, or node.exe on Windows.
-pub fn node_name(platform: &str) -> &'static str {
-    if platform == "win32" {
-        "node.exe"
-    } else {
-        "node"
-    }
-}
-
 /// Checks and unpacks a downloaded package beside the other versions of
 /// its component, without selecting it. A version unpacked already is
 /// taken as it is. On Windows, where a scanner can hold a file it just saw
@@ -205,12 +196,9 @@ pub async fn stage_package(io: &Io, file: &str, expected: &Value, env: &Env, m: 
     if manifest.get("component").and_then(Value::as_str) != Some(component) || manifest.get("version").map(js_string).as_deref() != Some(version.as_str()) {
         return Err(Failure::msg("Component archive differs from its release manifest."));
     }
-    for entry in [node_name(&m.platform), if component == "service" { "server/index.js" } else { "cli/xenonet.js" }] {
-        let f = NATIVE.join(&[&staging, entry]);
-        let meta = std::fs::metadata(&f).map_err(|e| FsError::of(e, "stat", &f))?;
-        if !meta.is_file() {
-            return Err(Failure::msg(format!("Component is missing {entry}.")));
-        }
+    // Service and Tools are each the xenonet binary, in bin/.
+    if !std::fs::metadata(NATIVE.join(&[&staging, "bin", bin_name(&m.platform)])).is_ok_and(|meta| meta.is_file()) {
+        return Err(Failure::msg(format!("Component is missing bin/{}.", bin_name(&m.platform))));
     }
     let until = now_ms() + 30000.0;
     loop {

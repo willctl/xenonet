@@ -279,10 +279,14 @@
         ReadEnvStr $R4 LOCALAPPDATA
         StrCpy $R4 "$R4\XenoNet\runtime\launcher"
       ${EndIf}
-      ${If} ${FileExists} "$R4\node.exe"
-        ; XenoNet's hooks and MCP servers in Claude Code and Codex run the
-        ; launcher about to be deleted: take them out first, so no agent's
-        ; hook is left pointing at nothing.
+      ; XenoNet's hooks and MCP servers in Claude Code and Codex run the
+      ; launcher about to be deleted: take them out first, so no agent's
+      ; hook is left pointing at nothing. The launcher is the xenonet binary;
+      ; an earlier XenoNet's was a node of its own and cli\xenonet.js.
+      ${If} ${FileExists} "$R4\xenonet.exe"
+        ExecWait '"$R4\xenonet.exe" disconnect --yes --port 47840' $R2
+        ExecWait '"$R4\xenonet.exe" service stop --force' $R2
+      ${ElseIf} ${FileExists} "$R4\node.exe"
         ExecWait '"$R4\node.exe" "$R4\cli\xenonet.js" disconnect --yes --port 47840' $R2
         ExecWait '"$R4\node.exe" "$R4\cli\xenonet.js" service stop --force' $R2
       ${EndIf}

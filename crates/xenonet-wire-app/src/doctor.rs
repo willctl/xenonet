@@ -53,11 +53,6 @@ impl Parts {
     fn home(&self) -> String {
         self.config.home.clone()
     }
-
-    /// The launcher script this XenoNet ships.
-    fn launcher_source(&self) -> String {
-        self.config.root.join("core").join("components").join("launcher.cjs").to_string_lossy().into_owned()
-    }
 }
 
 // ---------- the machine, as the checks ask it ----------
@@ -162,8 +157,8 @@ pub fn codex_bin(home: &str) -> String {
 
 /// machine().launcher(): the launcher hooks and MCP servers run, when
 /// there is one, what it says of itself, its version and the one this
-/// XenoNet ships.
-pub async fn launcher(source: &str) -> Result<Value, Value> {
+/// XenoNet ships, the launcher script built in.
+pub async fn launcher() -> Result<Value, Value> {
     let env = fx::env_map();
     let home = xenonet_service::config::home_dir(&|k| std::env::var(k).ok());
     let m = xenonet_components::runtime::Machine { platform: fx::platform().into(), arch: String::new(), home };
@@ -174,8 +169,7 @@ pub async fn launcher(source: &str) -> Result<Value, Value> {
     if std::fs::metadata(&bin).is_ok() {
         let r = run_program(&bin, &["--launcher".into()], 8000.0).await;
         let said = r["stdout"].as_str().and_then(|s| xenonet_base::json::parse(s).ok()).unwrap_or(Value::Null);
-        let read = |f: &str| std::fs::read(f).map(|b| String::from_utf8_lossy(&b).into_owned()).map_err(|e| fs_error(xenonet_base::fs::FsError::of(e, "open", f)));
-        let ships = xenonet_components::install::launcher_version(Some(&read(source)?));
+        let ships = xenonet_components::install::launcher_version(Some(xenonet_components::install::LAUNCHER_SCRIPT));
         let version = said.get("launcher").cloned().unwrap_or_else(|| xenonet_base::json::number(ships));
         return Ok(json!({ "dir": dir, "said": said, "version": version, "ships": xenonet_base::json::number(ships) }));
     }
@@ -188,7 +182,7 @@ pub async fn launcher(source: &str) -> Result<Value, Value> {
     let said = r["stdout"].as_str().and_then(|s| xenonet_base::json::parse(s).ok()).unwrap_or(Value::Null);
     let read = |f: &str| std::fs::read(f).map(|b| String::from_utf8_lossy(&b).into_owned()).map_err(|e| fs_error(xenonet_base::fs::FsError::of(e, "open", f)));
     let version = xenonet_components::install::launcher_version(Some(&read(&entry)?));
-    let ships = xenonet_components::install::launcher_version(Some(&read(source)?));
+    let ships = xenonet_components::install::launcher_version(Some(xenonet_components::install::LAUNCHER_SCRIPT));
     Ok(json!({ "dir": dir, "said": said, "version": xenonet_base::json::number(version), "ships": xenonet_base::json::number(ships) }))
 }
 
@@ -412,7 +406,7 @@ impl Machine {
                 Some(dir) => Value::Array(xenonet_base::log::read_logs(std::path::Path::new(&xenonet_base::log::log_dir(&dir)), now_ms() - DAY_MS, "error", None, None, 500)),
                 None => Value::Null,
             },
-            "launcher" => launcher(&self.parts.launcher_source()).await?,
+            "launcher" => launcher().await?,
             "stateFile" => inspect_state(&a(0)),
             "drift" => {
                 let (file, looked, records) = self.parts.drift.locked().view();
@@ -780,7 +774,10 @@ impl Diagnostics for Diagnose {
     async fn bundle(&self) -> R<Value> {
         let p = &self.parts;
         let c = &p.config;
-        let xenonet = json!({ "version": p.version, "instance": c.instance, "packaged": c.launcher_exec.is_some(), "running": true });
+        // Installed XenoNet's service is told of the launcher's binary, and,
+        // started by an earlier XenoNet, of its node.
+        let packaged = c.launcher_exec.is_some() || fx::env_set("XENONET_LAUNCHER_BIN").is_some();
+        let xenonet = json!({ "version": p.version, "instance": c.instance, "packaged": packaged, "running": true });
         let doctor = self.doctor.st.locked().last.clone();
         let errors = if c.demo {
             Vec::new()
@@ -788,7 +785,7 @@ impl Diagnostics for Diagnose {
             xenonet_base::log::read_logs(std::path::Path::new(&xenonet_base::log::log_dir(&c.state_dir)), now_ms() - DAY_MS, "warn", None, None, 500)
         };
         let connect = if c.demo { None } else { p.cores.connect.preview().await.ok() };
-        let launcher = launcher(&p.launcher_source()).await.ok().filter(|l| !l.is_null());
+        let launcher = launcher().await.ok().filter(|l| !l.is_null());
         let env = fx::env_map();
         let arch = crate::system::os::arch();
         let rel = release();
