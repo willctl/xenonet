@@ -13,6 +13,7 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde_json::{Map, Value};
 use std::ptr;
+use xenonet_base::usage::{Speed, TokenUsage};
 use xenonet_sources::claude_usage;
 use xenonet_sources::lines::TypeError;
 use xenonet_sources::live::telemetry::{Call, Emit, Fields, MapOp, Telemetry, ToolCall, Where};
@@ -387,15 +388,14 @@ impl JsLiveCore {
         let tok = |key: &str| k.get(key).filter(|v| !v.is_null()).map(|v| xenonet_base::text::js_number(Some(v)));
         let opt = |key: &str| xenonet_base::text::truthy(opts.0.as_ref().and_then(|o| o.get(key)));
         let call = Call {
-            tokens: xenonet_base::pricing::Tokens {
+            tokens: TokenUsage {
                 input: tok("input"),
                 cache_read: tok("cacheRead"),
-                cache_write5m: tok("cacheWrite5m"),
-                cache_write1h: tok("cacheWrite1h"),
+                cache_write_5m: tok("cacheWrite5m"),
+                cache_write_1h: tok("cacheWrite1h"),
                 output: tok("output"),
+                speed: Speed { fast: opt("fast"), priority: opt("priority") },
             },
-            fast: opt("fast"),
-            priority: opt("priority"),
         };
         self.t.at_mut(i).add_call(&model.0.unwrap_or(Value::Null), &call, ts);
     }

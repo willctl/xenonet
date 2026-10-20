@@ -9,6 +9,7 @@
 use libfuzzer_sys::fuzz_target;
 use serde_json::Value;
 use xenonet_base::nodepath::Style;
+use xenonet_base::usage::{Speed, TokenUsage};
 use xenonet_base::{ids, jsstr, log, patch, paths, pricing, text, time, units};
 
 fn num(s: &str) -> f64 {
@@ -79,9 +80,10 @@ fuzz_target!(|data: &[u8]| {
         }
         5 => {
             let at = Some(1_791_230_000_000.0);
-            let u = pricing::Tokens { input: Some(num(b)), output: Some(num(c)), cache_read: Some(1000.0), cache_write5m: None, cache_write1h: Some(5.0) };
+            let speed = Speed { fast: pick & 8 != 0, priority: pick & 16 != 0 };
+            let u = TokenUsage { input: Some(num(b)), output: Some(num(c)), cache_read: Some(1000.0), cache_write_5m: None, cache_write_1h: Some(5.0), speed };
             let _ = (pricing::plain_model(a), pricing::price_of(a, at), pricing::priority_tier(b));
-            let _ = (pricing::cost_parts(a, at, &u, pick & 8 != 0, pick & 16 != 0), pricing::cost_of(a, at, &u, false, false));
+            let _ = (pricing::cost_parts(a, at, &u), pricing::cost_of(a, at, &TokenUsage { speed: Speed::STANDARD, ..u }));
         }
         6 => {
             let _ = (log::scrub(a, b), log::unsafe_text(a, b), log::js_slice(a, small(b)));

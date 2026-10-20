@@ -5,6 +5,7 @@ use crate::js::Json;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde_json::{json, Map, Value};
+use xenonet_base::usage::{Speed, TokenUsage};
 use xenonet_base::{patch, paths, pricing, time, units};
 
 // ----- pricing -----
@@ -88,14 +89,15 @@ pub struct CostParts {
 
 #[napi(js_name = "costParts")]
 pub fn cost_parts(model: String, at: Option<f64>, u: Usage, fast: bool, priority: bool) -> Option<CostParts> {
-    let tokens = pricing::Tokens { input: u.input, cache_read: u.cache_read, cache_write5m: u.cache_write5m, cache_write1h: u.cache_write1h, output: u.output };
-    pricing::cost_parts(&model, at, &tokens, fast, priority).map(|c| CostParts {
-        input: c.input,
-        cache_read: c.cache_read,
-        cache_write: c.cache_write,
-        output: c.output,
-        total: c.total,
-    })
+    let tokens = TokenUsage {
+        input: u.input,
+        cache_read: u.cache_read,
+        cache_write_5m: u.cache_write5m,
+        cache_write_1h: u.cache_write1h,
+        output: u.output,
+        speed: Speed { fast, priority },
+    };
+    pricing::cost_parts(&model, at, &tokens).map(|c| CostParts { input: c.input, cache_read: c.cache_read, cache_write: c.cache_write, output: c.output, total: c.total })
 }
 
 // ----- patch -----
