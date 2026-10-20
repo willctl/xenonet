@@ -13,7 +13,8 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { DatabaseSync } from "node:sqlite";
 import { listFiles } from "./paths.js";
-import { ClaudeLine, CodexLine, linesOf } from "./lines.js";
+import { CodexLine } from "./lines.js";
+import { mapperOf, fail } from "./events.js";
 
 const UUID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(\.zst)?$/i;
 const MAX_TEXT = 6000;
@@ -31,40 +32,68 @@ const skippable = (t) => !t.trim() || t.startsWith("<") || t.startsWith("# AGENT
 // doesn't say when it was written (as stats leave such a line out).
 const doc = (role, text, ts) => (skippable(text) || !Number.isFinite(ts) ? [] : [{ role, text, ts }]);
 
-// One searchable record per human or agent message, from a line:
-// normalized (see lines.js), or as the transcript has it. `userEvents`: a
-// Codex rollout with no completed user messages at all, whose prompts are
-// its user_message events.
-export function docsFromLine(line, app, { userEvents = false } = {}) {
-  if (app === "claude") {
-    const o = line instanceof ClaudeLine ? line : new ClaudeLine(line);
-    const type = o.type;
-    if (type === "user" && !o.meta) {
-      // Tool results, a compacted summary and an interruption aren't
-      // anyone's message (see lines.js).
-      if (o.hasResults || o.compactSummary || o.interruption) return [];
-      return doc(o.sidechain ? "subagent" : "user", textOf(o.content), o.ts);
+// One searchable record per human or agent message, from a line's events
+// (events.js), each joined with newlines. Tool results, a compacted
+// summary and an interruption aren't anyone's message.
+function docsOf(events) {
+  for (const e of events) {
+    switch (e.kind) {
+      // A line with tool results is passed over whole.
+      case "result":
+        return [];
+      case "prompt":
+        // A Codex rollout's user_message events are its prompts while it
+        // has no completed user message (those are read as items, below).
+        if (e.origin === "event_msg:user_message") return doc("user", e.text, e.t);
+        // Claude Code's (which carry their slash command): not a meta line.
+        if (!("command" in e)) break;
+        if (e.meta || e.compactSummary || e.interruption) return [];
+        return doc(e.sidechain ? "subagent" : "user", textOf(e.parts), e.t);
+      case "said": {
+        if (e.origin === "event_msg:agent_message") return doc("assistant", String(e.parts ?? ""), e.t);
+        if (e.origin === "response_item:message") return doc("assistant", textOf(e.parts), e.t);
+        if (e.origin !== "assistant") break;
+        const t = e.parts.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+        return t.trim() ? doc(e.sidechain ? "subagent" : "assistant", t, e.t) : [];
+      }
+      // What you said in Codex is a rollout's completed user messages,
+      // whatever else may say it again.
+      case "item":
+        if (e.type === "UserMessage" || e.type === "AgentMessage") return doc(e.type === "UserMessage" ? "user" : "assistant", textOf(e.item.content), e.t);
+        break;
+      case "broken":
+        if (reaches(e)) fail(e);
+        break;
     }
-    if (type === "assistant") {
-      const t = o.blocks.filter((b) => b.type === "text").map((b) => b.text).join("\n");
-      return t.trim() ? doc(o.sidechain ? "subagent" : "assistant", t, o.ts) : [];
-    }
-    return [];
   }
-  const o = line instanceof CodexLine ? line : new CodexLine(line);
-  const p = o.payload;
-  const type = o.type;
-  // What you said is a rollout's completed user messages (see lines.js),
-  // not the user_message events and user response items that may say it
-  // again; in a rollout with none, it's its user_message events.
-  if (type === "event_msg" && p.type === "item_completed") {
-    const it = p.item ?? {};
-    if (it.type === "UserMessage" || it.type === "AgentMessage") return doc(it.type === "UserMessage" ? "user" : "assistant", textOf(it.content), o.ts);
-  }
-  if (userEvents && o.userEvent != null) return doc("user", o.userEvent, o.ts);
-  if (type === "event_msg" && p.type === "agent_message") return doc("assistant", String(p.message ?? ""), o.ts);
-  if (type === "response_item" && p.type === "message" && p.role === "assistant") return doc("assistant", textOf(p.content), o.ts);
   return [];
+}
+
+// Whether search reads the field a line broke at: a user line only as far
+// as its first tool result, and not a meta one; its text unless it's a
+// compacted summary; and neither the refusal, a usage nor the type stats
+// reads a Codex call by.
+function reaches(e) {
+  switch (e.at) {
+    case "content":
+      return !e.meta && !e.afterResult;
+    case "text":
+      return e.origin === "user" && !e.meta && !e.results && !e.compactSummary;
+    case "line":
+    case "blocks":
+      return true;
+    default:
+      return false;
+  }
+}
+
+// The documents of a line: normalized (see lines.js), or as the transcript
+// has it. `userEvents`: a Codex rollout with no completed user messages at
+// all, whose prompts are its user_message events.
+export function docsFromLine(line, app, { userEvents = false } = {}) {
+  const mapper = mapperOf(app, "codex");
+  const o = line instanceof mapper.Line ? line : new mapper.Line(line);
+  return docsOf(mapper.events(o, mapper.file({ items: !userEvents })));
 }
 
 // A transcript's text: a compressed archive's decompressed.
@@ -175,13 +204,14 @@ export class TranscriptSearch {
   indexText(file, app, sessionId, text, { userEvents = false } = {}) {
     let n = 0;
     const seen = new Set();
-    const lines = linesOf(app);
+    const mapper = mapperOf(app, "codex");
+    const state = mapper.file({ items: !userEvents });
     const where = { file };
     for (const line of text.split("\n")) {
       if (!line.trim()) continue;
-      const o = lines.line(line, where);
+      const o = mapper.lines.line(line, where);
       if (!o) continue;
-      for (const d of docsFromLine(o, app, { userEvents })) {
+      for (const d of docsOf(mapper.events(o, state))) {
         const body = d.text.slice(0, MAX_TEXT);
         const key = body.slice(0, 200);
         if (seen.has(key)) continue;
