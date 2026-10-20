@@ -53,8 +53,7 @@ impl Around for Here {
 
 /// os.tmpdir(), its links followed (fs.realpathSync.native).
 fn tmpdir() -> String {
-    let t = std::env::temp_dir();
-    std::fs::canonicalize(&t).unwrap_or(t).to_string_lossy().trim_end_matches(['/', '\\']).to_string()
+    xenonet_base::paths::real_path(&std::env::temp_dir()).to_string_lossy().trim_end_matches(['/', '\\']).to_string()
 }
 
 /// Builds the demo workspace from scratch, one per port, as config.js did

@@ -347,6 +347,22 @@ pub fn list_files(dir: &str, pick: &mut dyn FnMut(&str) -> bool, depth: u32) -> 
     out
 }
 
+/// fs.realpathSync.native: `p` with its links followed and, on Windows, its
+/// short names spelled out, without the `\\?\` prefix canonicalize puts on
+/// it there, which Node never shows and no other spelling of the path
+/// matches. `p` as it is when it can't be resolved.
+pub fn real_path(p: &Path) -> PathBuf {
+    let Ok(real) = fs::canonicalize(p) else { return p.to_path_buf() };
+    let s = real.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        return PathBuf::from(rest);
+    }
+    real
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

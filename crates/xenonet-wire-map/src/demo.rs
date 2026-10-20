@@ -64,8 +64,7 @@ impl DemoWorld {
     /// The demo for the instance on `port`: one world per port, so demo
     /// servers running side by side don't wipe each other's.
     pub fn new(port: u16) -> DemoWorld {
-        let tmp = std::env::temp_dir();
-        let tmp = std::fs::canonicalize(&tmp).unwrap_or(tmp);
+        let tmp = xenonet_base::paths::real_path(&std::env::temp_dir());
         DemoWorld { demo: Mutex::new(Demo::new(&tmp.to_string_lossy(), &port.to_string(), &local_day(now_ms()))), world: Mutex::new(None), clients: OnceCell::new() }
     }
 

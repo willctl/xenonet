@@ -180,8 +180,7 @@ impl Config {
     /// would be in, in the temp folder, so a demo never writes to your own
     /// state.
     pub fn demo_folders(&mut self) {
-        let tmp = std::env::temp_dir();
-        let tmp = std::fs::canonicalize(&tmp).unwrap_or(tmp);
+        let tmp = xenonet_base::paths::real_path(&std::env::temp_dir());
         let root = tmp.join(format!("xenonet-demo-{}", self.port));
         self.home = root.join("home").to_string_lossy().into_owned();
         self.projects_dir = root.join("home").join("Projects").to_string_lossy().into_owned();
