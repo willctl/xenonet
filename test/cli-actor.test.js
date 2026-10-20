@@ -411,6 +411,9 @@ test("xenonet actor listen hears of a message over the actor's stream and reads 
   const s = await streamingXenoNet();
   try {
     const out = await xenonetUntil(["actor", "listen", "--json", "--port", String(s.port)], (o) => o.includes("\n"), { env: { XENONET_ACTOR_TOKEN: TOKEN } });
+    // What it printed, and what it asked for, when it stops without a line:
+    // a CI run once got nothing on stdout and no other clue.
+    assert.ok(out.stdout.includes("\n"), `no line on stdout; stderr: ${out.stderr.slice(-500)}; asked: ${JSON.stringify(s.seen.map((r) => `${r.method} ${r.path}`))}`);
     assert.deepEqual(JSON.parse(out.stdout.split("\n")[0]), { id: 7, from: { id: "claude:abc", title: "Fix the build", app: "claude" }, to: "you", text: "the build is green", at: T, replyTo: null, envelope: null });
     const stream = s.seen.find((r) => r.path === "/api/actors/me/stream");
     assert.equal(stream.authorization, `Bearer ${TOKEN}`, "its token in the header, never the URL");
