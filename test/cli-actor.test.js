@@ -18,6 +18,7 @@ import { execFileSync } from "node:child_process";
 import { parse } from "../cli/lib/args.js";
 import { isShell, defaultPid } from "../cli/commands/actor.js";
 import { readTokenFile, tokenFromEnv, writeTokenFile, tokenFileRefusal, gitTreeOf } from "../core/actors/token-file.js";
+import { command } from "./harness/xenonet-bin.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const made = [];
@@ -74,7 +75,7 @@ async function fakeXenoNet(routes) {
 
 function xenonet(args, { env = {}, cwd = root } = {}) {
   return new Promise((resolve) => {
-    const proc = spawn(process.execPath, [path.join(root, "cli", "xenonet.js"), ...args], { cwd, env: { ...process.env, NO_COLOR: "1", XENONET_PORT: "", XENONET_ACTOR_TOKEN_FILE: "", XENONET_ACTOR_TOKEN: "", XENONET_ACTOR_WAIT_MS: "30", ...env }, stdio: ["pipe", "pipe", "pipe"] });
+    const proc = spawn(...command(args), { cwd, env: { ...process.env, NO_COLOR: "1", XENONET_PORT: "", XENONET_ACTOR_TOKEN_FILE: "", XENONET_ACTOR_TOKEN: "", XENONET_ACTOR_WAIT_MS: "30", ...env }, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "", stderr = "";
     proc.stdout.on("data", (d) => (stdout += d));
     proc.stderr.on("data", (d) => (stderr += d));
@@ -298,7 +299,7 @@ test("run from a shell, a heartbeat names no process; with --pid, the one it nam
   const viaShell = (args) =>
     new Promise((resolve) => {
       const quote = (a) => `'${String(a).replace(/'/g, "'\\''")}'`;
-      const line = [process.execPath, path.join(root, "cli", "xenonet.js"), ...args, "--port", s.port].map(quote).join(" ");
+      const line = command([...args, "--port", s.port]).flat().map(quote).join(" ");
       const proc = spawn("/bin/sh", ["-c", `${line}; exit $?`], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] });
       let stderr = "";
       proc.stderr.on("data", (d) => (stderr += d));
@@ -396,7 +397,7 @@ async function streamingXenoNet() {
 // Runs xenonet until `done(stdout)` says it has what it needs, then stops it.
 function xenonetUntil(args, done, { env = {} } = {}) {
   return new Promise((resolve) => {
-    const proc = spawn(process.execPath, [path.join(root, "cli", "xenonet.js"), ...args], { cwd: root, env: { ...process.env, NO_COLOR: "1", XENONET_PORT: "", XENONET_ACTOR_TOKEN_FILE: "", XENONET_ACTOR_TOKEN: "", ...env }, stdio: ["ignore", "pipe", "pipe"] });
+    const proc = spawn(...command(args), { cwd: root, env: { ...process.env, NO_COLOR: "1", XENONET_PORT: "", XENONET_ACTOR_TOKEN_FILE: "", XENONET_ACTOR_TOKEN: "", ...env }, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "";
     const check = () => done(stdout, stderr) && proc.kill();
     proc.stdout.on("data", (d) => ((stdout += d), check()));

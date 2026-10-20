@@ -29,15 +29,64 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
-  updates:
-    runs-on: windows-latest
-    timeout-minutes: 10
+  # The Rust core (docs/design/rust-core.md) on each platform: clippy, which
+  # sees each platform's own code only there, its own tests, the JS tests
+  # with each twin loaded, and the JS tests that start the service, the
+  # command and the MCP servers against the xenonet binary. Debug builds, so
+  # the addon and the binary reuse what cargo test compiled.
+  rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: npm
+      # The toolchain rust-toolchain.toml pins, with clippy and rustfmt.
+      - run: rustup toolchain install
+      - run: npm ci
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # Every crate's tests, so one run shows every failure.
+      - run: cargo test --workspace --locked --no-fail-fast
+      - run: npm run rust:build -- --debug
+      - run: npm run test:rust
+      # The service serves the built page, which one route test asks for.
+      - run: npm run build
+      - run: npm run test:bin
+  # What doesn't depend on the platform, once: formatting, docs, advisories,
+  # licenses, bans, sources and unused dependencies (npm run lint:rust).
+  rust-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - run: rustup toolchain install
+      - run: cargo install --locked cargo-deny@0.20.2 cargo-shear@1.14.0
+      - run: npm run lint:rust
+  updates:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+      # Desktop runs the xenonet binary, so it's built first.
+      - run: rustup toolchain install
       - run: npm ci
       - run: npm run build
+      - run: npm run rust:bin
       - run: node scripts/ci-desktop.mjs test/e2e/updates.test.js test/e2e/components.test.js

@@ -24,9 +24,19 @@ serde_json.workspace = true
 xenonet-actors.workspace = true
 xenonet-base.workspace = true
 xenonet-blocks.workspace = true
+xenonet-engine.workspace = true
 xenonet-schema.workspace = true
 xenonet-sources.workspace = true
 xenonet-state.workspace = true
+xenonet-app.workspace = true
+xenonet-components.workspace = true
+xenonet-hosts.workspace = true
+xenonet-assistant.workspace = true
+xenonet-integrations.workspace = true
+xenonet-doctor.workspace = true
 
 [build-dependencies]
 napi-build.workspace = true
+
+[lints]
+workspace = true

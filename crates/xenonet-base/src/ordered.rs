@@ -51,6 +51,19 @@ impl<V> OrderedMap<V> {
         }
     }
 
+    /// The value at `key`, added last with `make` when there's none, as
+    /// JS does with `if (!m.has(k)) m.set(k, make()); m.get(k)`.
+    pub fn get_or_insert_with(&mut self, key: &str, make: impl FnOnce() -> V) -> &mut V {
+        let (order, next) = (&mut self.order, &mut self.next);
+        let slot = self.by_key.entry(key.to_string()).or_insert_with(|| {
+            let at = *next;
+            *next += 1;
+            order.insert(at, key.to_string());
+            (at, make())
+        });
+        &mut slot.1
+    }
+
     pub fn remove(&mut self, key: &str) -> Option<V> {
         let (at, v) = self.by_key.remove(key)?;
         self.order.remove(&at);
@@ -135,5 +148,17 @@ mod tests {
             at = next;
         }
         assert_eq!(seen, ["b", "a", "d"]);
+    }
+
+    #[test]
+    fn adds_what_it_lacks_last() {
+        let mut m = OrderedMap::new();
+        m.insert("a", 1);
+        *m.get_or_insert_with("b", || 2) += 10;
+        *m.get_or_insert_with("a", || 3) += 10;
+        assert_eq!(m.iter().map(|(k, v)| (k.to_string(), *v)).collect::<Vec<_>>(), [("a".to_string(), 11), ("b".to_string(), 12)]);
+        m.remove("a");
+        m.get_or_insert_with("a", || 0);
+        assert_eq!(m.keys().collect::<Vec<_>>(), ["b", "a"]);
     }
 }

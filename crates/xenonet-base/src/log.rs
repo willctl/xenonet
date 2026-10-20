@@ -1,6 +1,6 @@
 //! XenoNet's error log (core/log.js): what went wrong in each part of
 //! XenoNet, kept where you can find it. Each part writes its own file of JSON
-//! lines, log/entry/v1, under <state>/logs (service.ndjson, desktop.ndjson,
+//! lines, log/entry/v1, under `<state>/logs` (service.ndjson, desktop.ndjson,
 //! cli.ndjson).
 //!
 //! An entry has a code that says what it is, XenoNet's words, the fix when
@@ -146,7 +146,7 @@ impl Log {
 
     /// Writes an entry at `now`, and gives it back; None when the same code
     /// with the same words came too soon after the last.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "an entry's fields as log.js's write takes them, and the clock; the crates that log call it so")]
     pub fn write(&mut self, level: &str, code: &str, message: Option<&str>, err: Option<&ErrInfo>, fix: Option<&str>, ctx: Option<&Value>, now: f64) -> Option<Value> {
         let raw = message.map(str::to_string).or_else(|| err.and_then(|e| e.message.clone())).unwrap_or_else(|| code.to_string());
         let text = js_slice(&scrub(&raw, &self.home), MESSAGE_MAX).to_string();
@@ -205,7 +205,7 @@ impl Log {
                 create_private_dir(&dir)?;
                 self.ready = true;
             }
-            let size = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
+            let size = std::fs::metadata(&file).map_or(0, |m| m.len());
             if size > self.max_bytes {
                 rotate(&file);
             }

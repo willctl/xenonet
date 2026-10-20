@@ -1,0 +1,7 @@
+Takes XenoNet's MCP server and hooks out of Claude Code's and Codex's
+settings, and leaves your own entries alone. It asks first. With no XenoNet
+running on that port, it takes them out itself.
+
+  --yes        don't ask
+  --port <n>   which XenoNet's entries (47840, the installed XenoNet's, unless
+               XENONET_PORT or --dev says otherwise)

@@ -589,6 +589,9 @@ test("the launcher check: what hooks and MCP servers run, current and finding Xe
   const dir = `${HOME}/state/runtime/launcher`;
   const good = await check({ dir, version: 2, ships: 2, said: { launcher: 2, protocol: 1, tools: "0.8.0", node: "v24.19.0" } });
   assert.deepEqual([good.status, good.detail], ["ok", "launcher 2, running Tools 0.8.0 on Node 24.19.0"]);
+  // The xenonet binary, launcher 3, has no node of its own to name.
+  const binary = await check({ dir, version: 3, ships: 3, said: { launcher: 3, protocol: 1, tools: "0.9.0", node: null } });
+  assert.deepEqual([binary.status, binary.detail], ["ok", "launcher 3, running Tools 0.9.0"]);
   assert.equal((await check({ dir, version: 1, ships: 2, said: { launcher: 1, protocol: 1, tools: "0.7.0", node: "v24.19.0" } })).status, "warn");
   const noTools = await check({ dir, version: 2, ships: 2, said: { launcher: 2, protocol: 1, tools: null, node: "v24.19.0" } });
   assert.equal(noTools.status, "fail");

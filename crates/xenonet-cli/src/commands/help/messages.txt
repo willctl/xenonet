@@ -1,0 +1,4 @@
+The messages sessions and actors sent each other in the last 24 hours,
+oldest first, with who has read each one.
+
+  --json   the messages as JSON

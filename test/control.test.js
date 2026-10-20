@@ -10,6 +10,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseKey, parseSize, modifierBits } from "../electron/keys.js";
 import { INSTANCES, instanceFrom } from "../core/instances.js";
+import { command, service } from "./harness/xenonet-bin.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -42,7 +43,7 @@ test("instances: each has its own port and name, picked from the environment", (
 
 // Starts a demo server on a spare port, outside the desktop app.
 async function demoServer(port) {
-  const proc = spawn(process.execPath, ["server/index.js", "--demo"], { cwd: root, env: { ...process.env, XENONET_PORT: String(port), XENONET_CONTROL: "1" }, stdio: ["ignore", "pipe", "pipe"] });
+  const proc = spawn(...service(["--demo"]), { cwd: root, env: { ...process.env, XENONET_PORT: String(port), XENONET_CONTROL: "1" }, stdio: ["ignore", "pipe", "pipe"] });
   let timer, stderr = "";
   proc.stderr.on("data", (chunk) => { stderr = (stderr + chunk).slice(-4000); });
   try {
@@ -82,18 +83,35 @@ test("server: the control route needs XenoNet Dev's window, JSON and the right h
 
 // Talks MCP over stdio to mcp/console.js, as a client of either era would.
 function mcpClient() {
-  const proc = spawn(process.execPath, ["mcp/console.js"], { cwd: root, stdio: ["pipe", "pipe", "inherit"] });
+  const proc = spawn(...command(["mcp", "console"]), { cwd: root, stdio: ["pipe", "pipe", "inherit"] });
   const waiting = new Map();
-  let buf = "", id = 0;
+  let buf = "", id = 0, gone = null;
+  // A server that exits, or never starts, fails the calls still waiting
+  // rather than leaving the test waiting for an answer that can't come.
+  const fail = (err) => {
+    gone ??= err;
+    for (const { reject } of waiting.values()) reject(gone);
+    waiting.clear();
+  };
+  proc.on("error", fail);
+  proc.on("close", (code, signal) => fail(new Error(`xenonet mcp console exited (${signal ?? code}) before it answered`)));
+  // Writing to a server that has exited fails with EPIPE; its exit says why.
+  proc.stdin.on("error", () => {});
   proc.stdout.on("data", (d) => {
     buf += d;
     for (let i; (i = buf.indexOf("\n")) >= 0; buf = buf.slice(i + 1)) {
       const msg = JSON.parse(buf.slice(0, i));
-      waiting.get(msg.id)?.(msg);
+      waiting.get(msg.id)?.resolve(msg);
+      waiting.delete(msg.id);
     }
   });
   return {
-    rpc: (method, params = {}) => new Promise((resolve) => (waiting.set(++id, resolve), proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n"))),
+    rpc: (method, params = {}) =>
+      new Promise((resolve, reject) => {
+        if (gone) return reject(gone);
+        waiting.set(++id, { resolve, reject });
+        proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+      }),
     notify: (method) => proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", method }) + "\n"),
     close: () => proc.kill(),
   };

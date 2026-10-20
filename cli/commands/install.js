@@ -1,13 +1,15 @@
-// xenonet install: puts the xenonet command on your PATH (core/command.js), run
-// by the Node that runs this.
+// xenonet install: puts the xenonet command on your PATH (core/command.js): a
+// script that runs the xenonet binary, installed XenoNet's launcher or this
+// checkout's build.
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { c, print, json, Fail } from "../lib/out.js";
-import { commandDir, currentRuntime, installCommand } from "../../core/command.js";
+import { commandDir, installCommand } from "../../core/command.js";
+import { xenonetBin } from "../../core/components/runtime.js";
 import { tilde } from "../../core/paths.js";
 
-export const help = `Installs a small script that runs this checkout's xenonet with this Node.
+export const help = `Installs a small script that runs the xenonet binary: installed XenoNet's, or this checkout's build.
 It goes in ~/.local/bin, or %LOCALAPPDATA%/XenoNet/bin on Windows.
 Add that folder to PATH if it isn't there yet.
 
@@ -16,11 +18,11 @@ Add that folder to PATH if it isn't there yet.
   --json          the result as JSON`;
 
 export async function run(_args, flags) {
-  const entry = fileURLToPath(new URL("../xenonet.js", import.meta.url));
+  const root = fileURLToPath(new URL("../..", import.meta.url));
   const dir = typeof flags.dir === "string" ? path.resolve(flags.dir) : commandDir();
   let st;
   try {
-    st = installCommand({ dir, entry, force: !!flags.force, ...currentRuntime({ env: { ...process.env, XENONET_EXEC: "" } }) });
+    st = installCommand({ dir, bin: xenonetBin({ env: process.env, root }), force: !!flags.force });
   } catch (err) {
     throw new Fail(`${err.message}${/isn't XenoNet's/.test(err.message) ? ". --force replaces it." : ""}`);
   }

@@ -3,6 +3,14 @@
 //! the lifecycle API (`lifecycle_api!`), so the twin of Block can stand on
 //! any of them.
 
+// On the module, not the items: napi-derive copies an item's attributes
+// onto the two-argument wrapper it generates for the export, and an
+// expectation there goes unfulfilled.
+#![expect(
+    clippy::too_many_arguments,
+    reason = "readVersioned and the normalizer's and scanner's methods take the twin's arguments and hooks one by one, as their JS functions did"
+)]
+
 use crate::js::Json;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -236,16 +244,18 @@ impl JsRegistry {
 
 // ----- the normalizer -----
 
+/// A twin's hook: a JS function taking `Args` and answering any value.
+type Hook<'a, Args> = Function<'a, Args, Unknown<'a>>;
+
 /// The hooks a twin passes: JS functions wrapped so they don't throw. A
 /// wrapper that caught an error returns `failed`, and `failure()` says what
 /// it was. Without `parse`, lines are parsed here, as JSON.parse would.
-#[allow(clippy::type_complexity)]
 struct JsHooks<'a> {
     env: &'a Env,
-    parse: Option<Function<'a, String, Unknown<'a>>>,
-    inspect: Option<Function<'a, FnArgs<(Unknown<'a>, Unknown<'a>)>, Unknown<'a>>>,
-    unparsable: Option<Function<'a, FnArgs<(String, Unknown<'a>, String)>, Unknown<'a>>>,
-    normalize: Function<'a, FnArgs<(Unknown<'a>, Unknown<'a>)>, Unknown<'a>>,
+    parse: Option<Hook<'a, String>>,
+    inspect: Option<Hook<'a, FnArgs<(Unknown<'a>, Unknown<'a>)>>>,
+    unparsable: Option<Hook<'a, FnArgs<(String, Unknown<'a>, String)>>>,
+    normalize: Hook<'a, FnArgs<(Unknown<'a>, Unknown<'a>)>>,
     failed: Unknown<'a>,
     failure: Function<'a, (), String>,
 }
@@ -254,7 +264,10 @@ impl<'a> JsHooks<'a> {
     fn checked(&self, r: Result<Unknown<'a>>) -> std::result::Result<Unknown<'a>, String> {
         let v = r.map_err(|e| e.reason.clone())?;
         let mut same = false;
-        unsafe { sys::napi_strict_equals(self.env.raw(), v.raw(), self.failed.raw(), &mut same) };
+        // SAFETY: self.env, `v` and self.failed are values of the export
+        // under way, which JsHooks borrows them from for 'a; napi writes to
+        // the local `same`.
+        unsafe { sys::napi_strict_equals(self.env.raw(), v.raw(), self.failed.raw(), &raw mut same) };
         if same {
             Err(self.failure.call(()).unwrap_or_default())
         } else {
@@ -262,7 +275,7 @@ impl<'a> JsHooks<'a> {
         }
     }
 
-    fn nullish(v: &Unknown) -> bool {
+    fn nullish(v: &Unknown<'_>) -> bool {
         matches!(v.get_type(), Ok(ValueType::Null | ValueType::Undefined))
     }
 }
@@ -273,7 +286,9 @@ impl<'a> Hooks<Unknown<'a>, Unknown<'a>, Unknown<'a>> for JsHooks<'a> {
             Some(f) => self.checked(f.call(text.to_string())),
             None => {
                 let v = js_json::parse(text).map_err(|e| e.to_string())?;
+                // SAFETY: self.env is the export's, borrowed for 'a.
                 let raw = unsafe { <Json as ToNapiValue>::to_napi_value(self.env.raw(), Json(v)) }.map_err(|e| e.reason.clone())?;
+                // SAFETY: `raw` is a value napi made in that env just above.
                 Ok(unsafe { Unknown::from_raw_unchecked(self.env.raw(), raw) })
             }
         }
@@ -317,6 +332,10 @@ impl HasLife for JsNormalizer {
 lifecycle_api!(JsNormalizer);
 
 #[napi]
+// On the impl, not the methods: napi-derive copies a method's attributes
+// onto the two-argument wrapper it generates for it, and an expectation
+// there goes unfulfilled.
+#[expect(clippy::type_complexity, reason = "line's hooks are spelled out as napi Functions of the arguments the twin calls them with")]
 impl JsNormalizer {
     #[napi(constructor)]
     pub fn new(name: String, source: Option<String>, now: f64) -> Self {
@@ -329,38 +348,36 @@ impl JsNormalizer {
     }
 
     /// A line of text through the hooks; null when it isn't a record.
-    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
     #[napi]
     pub fn line(
         &mut self,
         env: &Env,
         text: String,
-        where_: Unknown,
-        parse: Option<Function<String, Unknown>>,
-        inspect: Option<Function<FnArgs<(Unknown, Unknown)>, Unknown>>,
-        unparsable: Option<Function<FnArgs<(String, Unknown, String)>, Unknown>>,
-        normalize: Function<FnArgs<(Unknown, Unknown)>, Unknown>,
-        failed: Unknown,
-        failure: Function<(), String>,
-        clock: Function<(), f64>,
+        where_: Unknown<'_>,
+        parse: Option<Function<'_, String, Unknown<'_>>>,
+        inspect: Option<Function<'_, FnArgs<(Unknown<'_>, Unknown<'_>)>, Unknown<'_>>>,
+        unparsable: Option<Function<'_, FnArgs<(String, Unknown<'_>, String)>, Unknown<'_>>>,
+        normalize: Function<'_, FnArgs<(Unknown<'_>, Unknown<'_>)>, Unknown<'_>>,
+        failed: Unknown<'_>,
+        failure: Function<'_, (), String>,
+        clock: Function<'_, (), f64>,
     ) -> Option<Raw> {
         let mut hooks = JsHooks { env, parse, inspect, unparsable, normalize, failed, failure };
         self.n.line(&text, &where_, &mut hooks, || clock.call(()).unwrap_or(f64::NAN)).map(|v| Raw(v.raw()))
     }
 
     /// A record already parsed, through the hooks.
-    #[allow(clippy::too_many_arguments)]
     #[napi]
     pub fn record(
         &mut self,
         env: &Env,
-        raw: Unknown,
-        where_: Unknown,
-        inspect: Option<Function<FnArgs<(Unknown, Unknown)>, Unknown>>,
-        normalize: Function<FnArgs<(Unknown, Unknown)>, Unknown>,
-        failed: Unknown,
-        failure: Function<(), String>,
-        clock: Function<(), f64>,
+        raw: Unknown<'_>,
+        where_: Unknown<'_>,
+        inspect: Option<Function<'_, FnArgs<(Unknown<'_>, Unknown<'_>)>, Unknown<'_>>>,
+        normalize: Function<'_, FnArgs<(Unknown<'_>, Unknown<'_>)>, Unknown<'_>>,
+        failed: Unknown<'_>,
+        failure: Function<'_, (), String>,
+        clock: Function<'_, (), f64>,
     ) -> Option<Raw> {
         let mut hooks = JsHooks { env, parse: None, inspect, unparsable: None, normalize, failed, failure };
         self.n.record(raw, &where_, &mut hooks, || clock.call(()).unwrap_or(f64::NAN)).map(|v| Raw(v.raw()))
@@ -397,7 +414,7 @@ use crate::js::{Field, Fields};
 use xenonet_base::fs::{DirEntry, Fs, FsError, StdFs};
 use xenonet_blocks::scanner::{Breadth, Halt, Last, Limits, Read, Rules, Scanner};
 
-fn last_json(l: &Option<Last>) -> Value {
+fn last_json(l: Option<&Last>) -> Value {
     match l {
         None => Value::Null,
         Some(l) => json!({ "files": l.files, "read": l.read, "seen": l.seen, "truncated": l.truncated, "ms": js_json::number(l.ms) }),
@@ -520,18 +537,17 @@ impl JsScanner {
 
     #[napi(getter)]
     pub fn last(&self) -> Json {
-        Json(last_json(&self.s.last))
+        Json(last_json(self.s.last.as_ref()))
     }
 
     #[napi(getter)]
     pub fn budget(&self) -> Fields {
         let b = self.s.budget;
-        Fields(vec![("depth", Field::Num(b.depth)), ("folders", Field::Num(b.folders)), ("ms", Field::Num(b.ms)), ("last", Field::Json(last_json(&self.s.last)))])
+        Fields(vec![("depth", Field::Num(b.depth)), ("folders", Field::Num(b.folders)), ("ms", Field::Num(b.ms)), ("last", Field::Json(last_json(self.s.last.as_ref())))])
     }
 
     /// A depth-first walk, with the twin's root, limits and rules. Without
     /// `stat` and `readdir`, it reads the disk itself.
-    #[allow(clippy::too_many_arguments)]
     #[napi]
     pub fn scan(
         &mut self,
@@ -540,11 +556,11 @@ impl JsScanner {
         folders: f64,
         ms: f64,
         use_cache: bool,
-        pick: Function<FnArgs<(String, String)>, bool>,
-        enter: Function<FnArgs<(String, String, u32)>, bool>,
-        clock: Function<(), f64>,
-        stat: Option<Function<String, Option<f64>>>,
-        readdir: Option<Function<String, Json>>,
+        pick: Function<'_, FnArgs<(String, String)>, bool>,
+        enter: Function<'_, FnArgs<(String, String, u32)>, bool>,
+        clock: Function<'_, (), f64>,
+        stat: Option<Function<'_, String, Option<f64>>>,
+        readdir: Option<Function<'_, String, Json>>,
     ) -> Result<Vec<String>> {
         self.s.root = root;
         self.s.limits = Limits { depth, folders, ms };
@@ -559,7 +575,7 @@ impl JsScanner {
     }
 
     #[napi(js_name = "beginBreadth")]
-    pub fn begin_breadth(&mut self, root: String, depth: f64, folders: f64, ms: f64, use_cache: bool, clock: Function<(), f64>) -> JsBreadth {
+    pub fn begin_breadth(&mut self, root: String, depth: f64, folders: f64, ms: f64, use_cache: bool, clock: Function<'_, (), f64>) -> JsBreadth {
         self.s.use_cache = use_cache;
         let mut now = || clock.call(()).unwrap_or(f64::NAN);
         JsBreadth { w: Some(self.s.begin_breadth(&root, Limits { depth, folders, ms }, &mut now)) }
@@ -573,7 +589,7 @@ impl JsScanner {
     }
 
     #[napi(js_name = "beginRead")]
-    pub fn begin_read(&mut self, w: &mut JsBreadth, aborted: bool, clock: Function<(), f64>) -> Result<Option<f64>> {
+    pub fn begin_read(&mut self, w: &mut JsBreadth, aborted: bool, clock: Function<'_, (), f64>) -> Result<Option<f64>> {
         let mut now = || clock.call(()).unwrap_or(f64::NAN);
         Ok(self.s.begin_read(w.w()?, aborted, &mut now))
     }
@@ -603,8 +619,8 @@ impl JsScanner {
         read: Json,
         at: f64,
         entries: Json,
-        pick: Function<FnArgs<(String, String)>, bool>,
-        enter: Function<FnArgs<(String, String, u32)>, bool>,
+        pick: Function<'_, FnArgs<(String, String)>, bool>,
+        enter: Function<'_, FnArgs<(String, String, u32)>, bool>,
     ) -> Result<()> {
         let ents = entries_of(&entries.0).unwrap_or_default();
         let mut rules = JsRules { pick, enter };
@@ -618,7 +634,7 @@ impl JsScanner {
     }
 
     #[napi(js_name = "finishBreadth")]
-    pub fn finish_breadth(&mut self, w: &mut JsBreadth, clock: Function<(), f64>) -> Result<Vec<String>> {
+    pub fn finish_breadth(&mut self, w: &mut JsBreadth, clock: Function<'_, (), f64>) -> Result<Vec<String>> {
         let walk = w.w.take().ok_or_else(|| Error::new(Status::GenericFailure, "the walk is over".to_string()))?;
         let mut now = || clock.call(()).unwrap_or(f64::NAN);
         Ok(self.s.finish_breadth(walk, &mut now))
@@ -701,7 +717,7 @@ impl JsTailer {
     }
 
     #[napi]
-    pub fn discovered(&mut self, file: String, mtime_ms: Option<f64>, size: Option<f64>, clock: Function<(), f64>) -> &'static str {
+    pub fn discovered(&mut self, file: String, mtime_ms: Option<f64>, size: Option<f64>, clock: Function<'_, (), f64>) -> &'static str {
         listed(self.t.discovered(&file, stat_of(mtime_ms, size), || clock.call(()).unwrap_or(f64::NAN)))
     }
 
@@ -791,7 +807,10 @@ struct JsDocHooks<'a> {
 impl<'a> JsDocHooks<'a> {
     fn is_failed(&self, v: &Unknown<'a>) -> bool {
         let mut same = false;
-        unsafe { sys::napi_strict_equals(self.env.raw(), v.raw(), self.failed.raw(), &mut same) };
+        // SAFETY: self.env, `v` and self.failed are values of the export
+        // under way, which JsDocHooks borrows them from for 'a; napi writes
+        // to the local `same`.
+        unsafe { sys::napi_strict_equals(self.env.raw(), v.raw(), self.failed.raw(), &raw mut same) };
         same
     }
 }
@@ -801,12 +820,15 @@ impl<'a> DocHooks<Unknown<'a>> for JsDocHooks<'a> {
         self.fresh.call(()).map_err(|_| Halt)
     }
     fn parsed(&mut self, v: Value) -> std::result::Result<Unknown<'a>, Halt> {
+        // SAFETY: self.env is the export's, borrowed for 'a.
         let raw = unsafe { crate::js::to_js(self.env.raw(), &v, 0) }.map_err(|_| Halt)?;
+        // SAFETY: `raw` is a value napi made in that env just above.
         Ok(unsafe { Unknown::from_raw_unchecked(self.env.raw(), raw) })
     }
     fn version_of(&mut self, doc: &Unknown<'a>) -> std::result::Result<Option<f64>, Halt> {
         let v = self.version_of.call(*doc).map_err(|_| Halt)?;
         Ok(match v.get_type() {
+            // SAFETY: `v` is a number, as get_type just said.
             Ok(ValueType::Number) => Some(unsafe { v.cast::<f64>() }.map_err(|_| Halt)?),
             _ => None,
         })
@@ -820,6 +842,8 @@ impl<'a> DocHooks<Unknown<'a>> for JsDocHooks<'a> {
         if self.is_failed(&v) {
             return Ok(Err(()));
         }
+        // SAFETY: self.env is the export's, borrowed for 'a, and `v` is
+        // what prepare answered in it.
         let list = unsafe { crate::js::from_js(self.env.raw(), v.raw(), 0) }.map_err(|_| Halt)?;
         Ok(Ok(list.as_array().map(|a| a.iter().map(xenonet_base::text::js_string).collect()).unwrap_or_default()))
     }
@@ -846,20 +870,19 @@ fn report_jv(r: Report) -> Jv {
 }
 
 /// Reads a versioned JSON file through a twin's hooks: { doc, report }.
-#[allow(clippy::too_many_arguments)]
 #[napi(js_name = "readVersioned")]
 pub fn read_versioned(
     env: &Env,
     file: String,
     latest: f64,
     now: f64,
-    fresh: Function<(), Unknown>,
-    version_of: Function<Unknown, Unknown>,
-    migrate: Function<FnArgs<(Unknown, f64, f64)>, Unknown>,
-    prepare: Function<Unknown, Unknown>,
-    prepare_fresh: Function<Unknown, Unknown>,
-    failed: Unknown,
-    failure: Function<(), String>,
+    fresh: Function<'_, (), Unknown<'_>>,
+    version_of: Function<'_, Unknown<'_>, Unknown<'_>>,
+    migrate: Function<'_, FnArgs<(Unknown<'_>, f64, f64)>, Unknown<'_>>,
+    prepare: Function<'_, Unknown<'_>, Unknown<'_>>,
+    prepare_fresh: Function<'_, Unknown<'_>, Unknown<'_>>,
+    failed: Unknown<'_>,
+    failure: Function<'_, (), String>,
 ) -> Result<Jv> {
     let mut hooks = JsDocHooks { env, fresh, version_of, migrate, prepare, prepare_fresh, failed, failure };
     let (doc, report) = store::read_versioned(&file, latest, now, &mut hooks).map_err(|_| Error::new(Status::GenericFailure, "a hook threw".to_string()))?;
@@ -902,7 +925,6 @@ lifecycle_api!(JsGatherer);
 #[napi]
 impl JsGatherer {
     /// `backoff`: [baseMs, factor or null, maxMs or null], or null.
-    #[allow(clippy::too_many_arguments)]
     #[napi(constructor)]
     pub fn new(name: String, every_ms: Option<f64>, next_in: bool, backoff: Option<Vec<Option<f64>>>, stamped: bool, keep: bool, now: f64) -> Self {
         let backoff = backoff.map(|b| Backoff::of(b.first().copied().flatten().unwrap_or(f64::NAN), b.get(1).copied().flatten(), b.get(2).copied().flatten()));
@@ -910,8 +932,8 @@ impl JsGatherer {
     }
     /// The backoff as the gatherer uses it, or null.
     #[napi(getter)]
-    pub fn backoff(&self) -> Option<crate::js::Fields> {
-        self.g.backoff.map(|b| crate::js::Fields(vec![("baseMs", Field::Num(b.base_ms)), ("factor", Field::Num(b.factor)), ("maxMs", Field::Num(b.max_ms))]))
+    pub fn backoff(&self) -> Option<Fields> {
+        self.g.backoff.map(|b| Fields(vec![("baseMs", Field::Num(b.base_ms)), ("factor", Field::Num(b.factor)), ("maxMs", Field::Num(b.max_ms))]))
     }
     #[napi]
     pub fn due(&self, now: f64, same_stamp: bool) -> bool {

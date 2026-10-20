@@ -1,0 +1,3 @@
+Passes a Claude Code or Codex hook event (JSON on stdin) to XenoNet and
+prints XenoNet's answer for the session. Their settings run it, so you don't
+need to.

@@ -5,6 +5,7 @@ import { integrationRoutes } from "./routes/integrations.js";
 import { createIntegrations } from "../core/integrations/index.js";
 import { demoRefusals } from "../core/refusals/demo.js";
 import { SERVICE_API, CONSOLE_API, CAPABILITIES } from "../core/components/protocol.js";
+import { xenonetBin } from "../core/components/runtime.js";
 let components = null;
 import fs from "node:fs";
 import path from "node:path";
@@ -49,7 +50,7 @@ import { doctorContext } from "../core/doctor/context.js";
 import { createDoctorService } from "../core/doctor/service.js";
 import { summarize, machine } from "../core/doctor/index.js";
 import { createTokenScan } from "../core/actors/token-file.js";
-import { commandState, currentRuntime, installCommand } from "../core/command.js";
+import { commandState, installCommand } from "../core/command.js";
 import { readThemes, copyTheme } from "../core/themefiles.js";
 import { DEFAULT_THEME } from "../core/themes.js";
 import { drift, DRIFT_FILE } from "../core/drift.js";
@@ -124,7 +125,7 @@ actors?.drive(CLOCK_MS, () => registration.tick());
 // made up and whose machine isn't read. Loaded only where they run.
 const observers = actors && !config.demo ? (await import("../core/actors/observers.js")).createObservers({ actors, registration, procs, home: config.homeDir }) : null;
 for (const o of observers?.list ?? []) state.blocks.add(o);
-const connect = createConnect({ port: config.port, root: process.env.XENONET_LAUNCHER_ROOT || root, demo: config.demo, exec: process.env.XENONET_LAUNCHER_EXEC || process.env.XENONET_EXEC || process.execPath, runAsNode: !process.env.XENONET_LAUNCHER_EXEC && !!process.env.XENONET_EXEC });
+const connect = createConnect({ port: config.port, root, demo: config.demo });
 
 const ALLOWED_HOSTS = new Set([`127.0.0.1:${config.port}`, `localhost:${config.port}`]);
 const ALLOWED_ORIGINS = new Set([...ALLOWED_HOSTS].map((h) => `http://${h}`));
@@ -389,7 +390,7 @@ const tunnels = connections
       secrets: config.demo ? createMemorySecrets() : createSecretStore(),
       ...(config.demo ? { find: () => process.env.XENONET_TUNNEL_CLIENT || null, profiles: () => [] } : {}),
       home: config.homeDir,
-      launch: { exec: process.env.XENONET_LAUNCHER_EXEC || process.env.XENONET_EXEC || process.execPath, entry: path.join(process.env.XENONET_LAUNCHER_ROOT || root, "cli", "xenonet.js"), runAsNode: !process.env.XENONET_LAUNCHER_EXEC && !!process.env.XENONET_EXEC, port: config.port },
+      launch: { bin: xenonetBin({ env: process.env, root }), port: config.port },
       log: (line) => console.log(`[xenonet] ${line}`),
     })
   : null;
@@ -442,7 +443,6 @@ const hub =
             return gone.length;
           },
         },
-        linkOptions: { exec: process.env.XENONET_EXEC || process.execPath, runAsNode: !!process.env.XENONET_EXEC },
       })
     : null;
 if (hub) state.blocks.add(hostsConfig.store);
@@ -753,7 +753,7 @@ async function api(req, res, url) {
     if (req.method === "GET") return send(res, 200, commandState());
     if (req.method === "POST") {
       try {
-        return send(res, 200, installCommand({ entry: path.join(process.env.XENONET_LAUNCHER_ROOT || root, "cli", "xenonet.js"), ...(process.env.XENONET_LAUNCHER_EXEC ? { runtime: process.env.XENONET_LAUNCHER_EXEC } : currentRuntime()) }));
+        return send(res, 200, installCommand({ bin: xenonetBin({ env: process.env, root }) }));
       } catch (err) {
         return send(res, 409, { error: err.message });
       }

@@ -2,15 +2,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { currentComponent, stagePackage, selectComponent, newer, withInstallLock } from "./packages.js";
-import { runtimeDir, ensureService, connectService } from "./runtime.js";
+import { runtimeDir, ensureService, connectService, binName, launcherBin } from "./runtime.js";
 import { installCommand } from "../command.js";
 
 const nodeName = () => process.platform === "win32" ? "node.exe" : "node";
 
-// This small launcher never moves: hooks, MCP servers, the xenonet command
-// and other programs run its path (launcher.cjs says what it does). Each
-// invocation chooses a version and starts its runtime; long-lived MCP
-// processes keep that version's files.
+// The launcher never moves: hooks, MCP servers, the xenonet command and other
+// programs run its path. It's the Tools' xenonet binary, copied to
+// <runtime>/launcher/xenonet and copied again when the Tools change; a running
+// MCP process keeps the file it started from. Entries an earlier XenoNet wrote
+// run a node of the launcher's own and cli/xenonet.js (launcher.cjs says what
+// that does), which stay while the Tools carry a node.
 export const LAUNCHER_SOURCE = new URL("./launcher.cjs", import.meta.url);
 // The version a launcher script says it is: 1 for the one before it said.
 export const launcherVersion = (text) => Number(/^\/\/ xenonet-launcher (\d+)/.exec(String(text ?? ""))?.[1] ?? (text ? 1 : 0));
@@ -37,17 +39,50 @@ export function writeLauncher(entry, { source = fs.readFileSync(LAUNCHER_SOURCE,
   }
 }
 
+// Copies the Tools' binary to the launcher's, when it isn't the copy of these
+// Tools already (its .from file says which it is), through a temporary file
+// and a rename, so a hook starting meanwhile runs the old or the new. One in
+// use that can't be replaced now (on Windows) is replaced next time.
+export function writeLauncherBin(tools, to) {
+  const from = path.join(tools.root, "bin", binName());
+  if (!fs.existsSync(from)) return false;
+  const source = `${tools.version}-${tools.sha256}`;
+  let had = null;
+  try {
+    had = fs.readFileSync(`${to}.from`, "utf8");
+  } catch {}
+  if (had === source && fs.existsSync(to)) return false;
+  const tmp = `${to}.${process.pid}.tmp`;
+  try {
+    fs.copyFileSync(from, tmp);
+    if (process.platform !== "win32") fs.chmodSync(tmp, 0o755);
+    fs.renameSync(tmp, to);
+    fs.writeFileSync(`${to}.from`, source);
+    return true;
+  } catch {
+    fs.rmSync(tmp, { force: true });
+    return false;
+  }
+}
+
 export function installLauncher(env = process.env) {
   const tools = currentComponent("tools", env);
   if (!tools) return null;
   const dir = path.join(runtimeDir(env), "launcher");
-  const entry = path.join(dir, "cli", "xenonet.js");
-  const runtime = path.join(dir, nodeName());
-  fs.mkdirSync(path.dirname(entry), { recursive: true });
-  if (!fs.existsSync(runtime)) fs.copyFileSync(path.join(tools.root, nodeName()), runtime);
-  if (process.platform !== "win32") fs.chmodSync(runtime, 0o755);
-  writeLauncher(entry);
-  return { runtime, entry, root: dir, runAsNode: false };
+  const bin = launcherBin(env);
+  fs.mkdirSync(dir, { recursive: true });
+  writeLauncherBin(tools, bin);
+  let runtime = null;
+  let entry = null;
+  if (fs.existsSync(path.join(tools.root, nodeName()))) {
+    entry = path.join(dir, "cli", "xenonet.js");
+    runtime = path.join(dir, nodeName());
+    fs.mkdirSync(path.dirname(entry), { recursive: true });
+    if (!fs.existsSync(runtime)) fs.copyFileSync(path.join(tools.root, nodeName()), runtime);
+    if (process.platform !== "win32") fs.chmodSync(runtime, 0o755);
+    writeLauncher(entry);
+  }
+  return { bin: fs.existsSync(bin) ? bin : null, runtime, entry, root: dir, runAsNode: false };
 }
 
 export function checkRuntime(staged) {
@@ -144,7 +179,7 @@ export async function installBundle(bundle, { env = process.env, command = true 
       selectComponent(item.component, staged, env);
     }
     const launcher = installLauncher(env);
-    if (command && launcher) installCommand({ ...launcher, env });
+    if (command && launcher?.bin) installCommand({ bin: launcher.bin, env });
     return installedRuntime(env);
   });
 }
@@ -153,7 +188,7 @@ export function installedRuntime(env = process.env) {
   const service = currentComponent("service", env);
   if (!service) throw new Error("XenoNet Service is not installed. Use the bundle installer.");
   const launcher = installLauncher(env);
-  return { root: service.root, exec: path.join(service.root, nodeName()), env: { ...env, XENONET_RUNTIME_DIR: runtimeDir(env), ...(launcher ? { XENONET_LAUNCHER_EXEC: launcher.runtime, XENONET_LAUNCHER_ROOT: launcher.root } : {}) } };
+  return { root: service.root, exec: path.join(service.root, nodeName()), env: { ...env, XENONET_RUNTIME_DIR: runtimeDir(env), ...(launcher?.bin ? { XENONET_LAUNCHER_BIN: launcher.bin } : {}), ...(launcher?.runtime ? { XENONET_LAUNCHER_EXEC: launcher.runtime, XENONET_LAUNCHER_ROOT: launcher.root } : {}) } };
 }
 
 export async function activatePackage(file, item, { env = process.env, operations } = {}) {

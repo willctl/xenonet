@@ -12,6 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { vendorSources } from "../core/schema/lenient.js";
 import { createProcs } from "../core/procs.js";
+import { service, rustService } from "./harness/xenonet-bin.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const freePort = () =>
@@ -31,7 +32,7 @@ let server;
 let output = "";
 
 function start(args, p, extra = {}) {
-  const proc = spawn(process.execPath, ["server/index.js", ...args], { cwd: root, env: { ...env, XENONET_PORT: String(p), ...extra }, stdio: ["ignore", "pipe", "pipe"] });
+  const proc = spawn(...service(args), { cwd: root, env: { ...env, XENONET_PORT: String(p), ...extra }, stdio: ["ignore", "pipe", "pipe"] });
   proc.stdout.on("data", (d) => (output += d));
   proc.stderr.on("data", (d) => (output += d));
   return proc;
@@ -114,6 +115,9 @@ before(async () => {
     try {
       const { data } = await get("/api/graph");
       if (data.nodes?.some((n) => n.kind === "session")) return;
+      // The Rust service before the map's core is in Rust: up, and each
+      // test passes or fails on what it reaches.
+      if (rustService && data.code === "pending") return;
     } catch {}
   }
   throw new Error(`the demo server didn't start:\n${output}`);
@@ -161,7 +165,14 @@ test("the map, its live state, history, summary and digests", async () => {
   assert.ok(summary.needsYou.some((n) => n.kind === "question"));
   assert.ok(summary.needsYou.every((n) => Number.isFinite(n.since)), "each wait says since when, for the queue's order");
   assert.ok(Array.isArray(summary.actorsNeedYou) && Number.isInteger(summary.requests));
-  assert.ok((await get(`/api/digest?since=${Date.now() - 6 * 3600e3}`)).data.totals.sessions > 0);
+  // The demo's history is still being read for a moment after the map shows
+  // its first session, so the digest gets that moment to fill in.
+  let digest;
+  for (const until = Date.now() + 10000; Date.now() < until; await new Promise((r) => setTimeout(r, 100))) {
+    digest = (await get(`/api/digest?since=${Date.now() - 6 * 3600e3}`)).data;
+    if (digest.totals.sessions > 0) break;
+  }
+  assert.ok(digest.totals.sessions > 0);
   const log = (await get("/api/daylog")).data;
   assert.equal(log.hours.length, 24);
   // What a poster or film gets: star names, never the projects' own, and
@@ -170,8 +181,22 @@ test("the map, its live state, history, summary and digests", async () => {
   assert.ok(stars.stars.length > 0 && stars.stars.every((s) => /^[A-Z][a-z]+( \d+)?$/.test(s.name) && !("project" in s)));
   assert.ok(!log.topProjects.some((p) => stars.stars.some((s) => s.name === p.name)));
   assert.ok(!("hours" in stars) && !("busiestHour" in stars) && !("sessions" in stars));
-  assert.deepEqual((await get("/api/constellation?names=1")).data.stars.map((s) => s.project), log.topProjects.map((p) => p.name));
-  assert.deepEqual((await get("/api/constellation")).data.stars, stars.stars, "the same names again");
+  // The demo's history may still be loading, and its live sessions keep
+  // adding tool calls, either of which can change which projects are the
+  // day's top five between two reads. So each pair is read until it agrees,
+  // for 10 seconds at most, and compared as sets.
+  const sorted = (names) => [...names].sort();
+  const agreed = async (read) => {
+    for (const until = Date.now() + 10000; ; await new Promise((r) => setTimeout(r, 200))) {
+      const pair = (await read()).map(sorted);
+      if (JSON.stringify(pair[0]) === JSON.stringify(pair[1]) || Date.now() > until) return pair;
+    }
+  };
+  const names = async () => (await get("/api/constellation")).data.stars.map((s) => s.name);
+  const [named, top] = await agreed(async () => [(await get("/api/constellation?names=1")).data.stars.map((s) => s.project), (await get("/api/daylog")).data.topProjects.map((p) => p.name)]);
+  assert.deepEqual(named, top);
+  const [again, before] = await agreed(async () => [await names(), await names()]);
+  assert.deepEqual(again, before, "the same names again");
   assert.match((await post("/api/narrate", { kind: "day" })).data.text, /While you were away/);
   assert.match((await post("/api/narrate", {})).data.text, /While you were away/);
 });

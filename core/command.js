@@ -1,9 +1,9 @@
 // The xenonet command on your PATH: a small script, ~/.local/bin/xenonet, that
-// runs cli/xenonet.js. xenonet install writes it with the Node that ran it; the
-// app's palette (Install the xenonet command) with the app's own runtime
-// (Electron as Node), so it works without Node installed. XenoNet's script is
-// told apart from another program's by its marker line, and only XenoNet's is
-// replaced or taken out.
+// runs the xenonet binary (installed XenoNet's launcher, which never moves; see
+// components/runtime.js's xenonetBin). One an earlier XenoNet wrote ran a node
+// and cli/xenonet.js; it's read as XenoNet's too, and installing again
+// replaces it. XenoNet's script is told apart from another program's by its
+// marker line, and only XenoNet's is replaced or taken out.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -18,24 +18,10 @@ const batchQuote = (s) => {
 // Windows uses the app's standard local data folder; Unix uses ~/.local/bin.
 export const commandDir = ({ home = os.homedir(), platform = process.platform, env = process.env } = {}) => (platform === "win32" ? path.join(env.LOCALAPPDATA ?? path.join(home, "AppData", "Local"), "XenoNet", "bin") : path.join(home, ".local", "bin"));
 
-// What runs it: the desktop app's own runtime when the app installs it
-// (XENONET_EXEC, Electron as Node), else this Node, by the path on PATH when
-// that's the same file, since that path survives upgrades.
-export function currentRuntime({ env = process.env, execPath = process.execPath, electron = process.versions.electron } = {}) {
-  if (env.XENONET_EXEC) return { runtime: env.XENONET_EXEC, runAsNode: true };
-  if (electron) return { runtime: execPath, runAsNode: true };
-  for (const dir of (env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
-    try {
-      const file = path.join(dir, "node");
-      if (fs.realpathSync(file) === fs.realpathSync(execPath)) return { runtime: file, runAsNode: false };
-    } catch {}
-  }
-  return { runtime: execPath, runAsNode: false };
-}
-
-export function commandScript({ runtime, entry, runAsNode = false, platform = process.platform }) {
-  if (platform === "win32") return `@echo off\n:: ${MARKER}: the xenonet command. xenonet uninstall takes it out.\nsetlocal DisableDelayedExpansion\n${runAsNode ? 'set "ELECTRON_RUN_AS_NODE=1"\n' : ""}${batchQuote(runtime)} ${batchQuote(entry)} %*\n`;
-  return `#!/bin/sh\n# ${MARKER}: the xenonet command. xenonet uninstall takes it out.\n${runAsNode ? "ELECTRON_RUN_AS_NODE=1 " : ""}exec ${quote(runtime)} ${quote(entry)} "$@"\n`;
+// The script itself: it runs `bin`, the xenonet binary.
+export function commandScript({ bin, platform = process.platform }) {
+  if (platform === "win32") return `@echo off\n:: ${MARKER}: the xenonet command. xenonet uninstall takes it out.\nsetlocal DisableDelayedExpansion\n${batchQuote(bin)} %*\n`;
+  return `#!/bin/sh\n# ${MARKER}: the xenonet command. xenonet uninstall takes it out.\nexec ${quote(bin)} "$@"\n`;
 }
 
 // What's there now: whether there's a xenonet, whether it's XenoNet's, what it
@@ -48,7 +34,8 @@ export function commandState({ dir = commandDir(), env = process.env, platform =
   try {
     text = fs.readFileSync(file, "utf8");
   } catch {}
-  const runs = platform === "win32" ? text?.match(/^"([^"]+)" "([^"]+)" %\*$/m)?.slice(1).map((s) => s.replace(/%%/g, "%")) ?? null : text?.match(/exec '((?:[^']|'\\'')+)' '((?:[^']|'\\'')+)'/)?.slice(1).map((s) => s.replace(/'\\''/g, "'")) ?? null;
+  // The binary, or an earlier XenoNet's node and its entry.
+  const runs = platform === "win32" ? text?.match(/^"([^"]+)"(?: "([^"]+)")? %\*$/m)?.slice(1).filter((s) => s != null).map((s) => s.replace(/%%/g, "%")) ?? null : text?.match(/exec '((?:[^']|'\\'')+)'(?: '((?:[^']|'\\'')+)')? "\$@"/)?.slice(1).filter((s) => s != null).map((s) => s.replace(/'\\''/g, "'")) ?? null;
   const onPath = (env.PATH ?? "").split(path.delimiter).some((d) => d && samePlace(d, dir, platform));
   return { file, installed: text != null, ours: !!text?.includes(MARKER), runs, broken: !!runs && runs.some((f) => !fs.existsSync(f)), onPath };
 }
@@ -96,12 +83,12 @@ function envValue(env, name) {
   return key ? env[key] : null;
 }
 
-export function installCommand({ dir = commandDir(), runtime, entry, runAsNode = false, force = false, env = process.env, platform = process.platform }) {
+export function installCommand({ dir = commandDir(), bin, force = false, env = process.env, platform = process.platform }) {
   const before = commandState({ dir, env, platform });
   if (before.installed && !before.ours && !force) throw new Error(`${before.file} is already there, and it isn't XenoNet's`);
   fs.mkdirSync(dir, { recursive: true });
   const tmp = `${before.file}.tmp-xenonet`;
-  fs.writeFileSync(tmp, commandScript({ runtime, entry, runAsNode, platform }), { mode: 0o755 });
+  fs.writeFileSync(tmp, commandScript({ bin, platform }), { mode: 0o755 });
   fs.renameSync(tmp, before.file);
   return commandState({ dir, env, platform });
 }

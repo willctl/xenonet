@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { check, explain } from "../core/schema/index.js";
 import { HostLink } from "../core/hosts/link.js";
 import { HostsConfig } from "../core/hosts/config.js";
+import { service, rustService } from "./harness/xenonet-bin.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const freePort = () =>
@@ -36,7 +37,7 @@ const servers = {};
 let output = "";
 
 function start(name, port, extra = {}, args = ["--demo"]) {
-  const proc = spawn(process.execPath, ["server/index.js", ...args], { cwd: root, env: { ...env, XENONET_PORT: String(port), ...extra }, stdio: ["ignore", "pipe", "pipe"] });
+  const proc = spawn(...service(args), { cwd: root, env: { ...env, XENONET_PORT: String(port), ...extra }, stdio: ["ignore", "pipe", "pipe"] });
   proc.stdout.on("data", (d) => (output += `[${name}] ${d}`));
   proc.stderr.on("data", (d) => (output += `[${name}] ${d}`));
   servers[name] = proc;
@@ -75,7 +76,8 @@ async function until(what, fn, ms = 20000) {
   }
   throw new Error(`${what}: not in ${ms / 1000} s (last: ${JSON.stringify(last)?.slice(0, 300)})\n${output.slice(-3000)}`);
 }
-const ready = (port) => until(`the XenoNet on ${port}`, async () => (await get("/api/graph", port)).data.nodes?.some((n) => n.kind === "session"), 60000);
+// The Rust service before the map's core is in Rust is up when it says so.
+const ready = (port) => until(`the XenoNet on ${port}`, async () => ((d) => d.nodes?.some((n) => n.kind === "session") || (rustService && d.code === "pending"))((await get("/api/graph", port)).data), 60000);
 const hostState = async () => (await get("/api/hosts")).data.hosts?.find((h) => h.id === "demo-b");
 const valid = (id, data, what) => {
   const c = check(id, data, { strict: true });

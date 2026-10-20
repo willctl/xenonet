@@ -19,7 +19,9 @@
 import { EventEmitter } from "node:events";
 import { spawn as childSpawn } from "node:child_process";
 import path from "node:path";
+import fs from "node:fs";
 import { pathStyle } from "../paths.js";
+import { xenonetBin } from "../components/runtime.js";
 import { systemClock } from "../blocks/clock.js";
 import { check, explain } from "../schema/check.js";
 import { HostHello, XENONET_COMMAND, SINCE } from "../schema/host.js";
@@ -44,20 +46,27 @@ export const SSH_OPTIONS = ["-T", "-a", "-x", "-o", "BatchMode=yes", "-o", "Stri
 // XenoNet's own ssh config, and comes after --, so it can't be an option.
 // The local transport runs only XenoNet's own relay, with none of this
 // XenoNet's XENONET_ settings (a demo world's port, its state folder).
-export function transport(entry, { sshBin = "ssh", sshConfig = null, exec = process.execPath, runAsNode = false, root, env = process.env } = {}) {
+// `bin`: the xenonet binary a local link runs `relay` with, xenonetBin's by
+// default.
+export function transport(entry, { sshBin = "ssh", sshConfig = null, root, env = process.env, bin = null } = {}) {
   if (!isHostId(entry?.id)) throw new Error(`not a host id: ${JSON.stringify(entry?.id)}`);
   if (!Number.isInteger(entry.port) || entry.port < 1 || entry.port > 65535) throw new Error(`not a port: ${JSON.stringify(entry.port)}`);
   if (!SINCE.test(String(entry.since))) throw new Error(`not a time: ${JSON.stringify(entry.since)}`);
   const relay = ["relay", "--port", String(entry.port), "--since", entry.since, ...(entry.detail === true ? ["--detail"] : []), ...(entry.start === true ? ["--start"] : [])];
   if (entry.transport === "local") {
     const clean = Object.fromEntries(Object.entries(env).filter(([k]) => !k.startsWith("XENONET_")));
-    return { file: exec, args: [pathStyle(root).join(root, "cli", "xenonet.js"), ...relay], env: runAsNode ? { ...clean, ELECTRON_RUN_AS_NODE: "1" } : clean };
+    const file = bin ?? xenonetBin({ env, root });
+    // The JS service in a checkout with no binary built yet (npm test,
+    // before cargo build) runs the checkout's own relay on this Node.
+    const js = root ? pathStyle(root).join(root, "cli", "xenonet.js") : null;
+    if (bin == null && !fs.existsSync(file) && js && fs.existsSync(js)) return { file: process.execPath, args: [js, ...relay], env: clean };
+    return { file, args: relay, env: clean };
   }
   if (entry.transport !== "ssh") throw new Error(`not a transport: ${JSON.stringify(entry.transport)}`);
   if (!XENONET_COMMAND.test(String(entry.command))) throw new Error(`not a xenonet command: ${JSON.stringify(entry.command)}`);
   if (!sshConfig) throw new Error("ssh needs XenoNet's own ssh config");
-  const [bin, ...pre] = [].concat(sshBin);
-  return { file: bin, args: [...pre, "-F", sshConfig, ...SSH_OPTIONS, "--", entry.id, entry.command, ...relay], env };
+  const [ssh, ...pre] = [].concat(sshBin);
+  return { file: ssh, args: [...pre, "-F", sshConfig, ...SSH_OPTIONS, "--", entry.id, entry.command, ...relay], env };
 }
 
 // A path as a word a shell takes as it is, for a command a person pastes
@@ -104,10 +113,10 @@ export function whyEnded({ entry, exitCode = null, signal = null, stderr = "", b
 const isObject = (v) => v != null && typeof v === "object" && !Array.isArray(v);
 
 export class HostLink extends EventEmitter {
-  constructor({ entry, sshConfig = null, sshBin = "ssh", exec = process.execPath, runAsNode = false, root, env = process.env, spawn = childSpawn, clock = systemClock, random = Math.random, helloMs = HELLO_MS, staleMs = STALE_MS, backoff = BACKOFF, getMs = GET_MS, demoOnly = false, once = false, tilde = (p) => p }) {
+  constructor({ entry, sshConfig = null, sshBin = "ssh", root, env = process.env, bin = null, spawn = childSpawn, clock = systemClock, random = Math.random, helloMs = HELLO_MS, staleMs = STALE_MS, backoff = BACKOFF, getMs = GET_MS, demoOnly = false, once = false, tilde = (p) => p }) {
     super();
     this.entry = { ...entry };
-    this.options = { sshConfig, sshBin, exec, runAsNode, root, env };
+    this.options = { sshConfig, sshBin, root, env, bin };
     // `once`: a single try, for xenonet hosts test, never again after it ends.
     Object.assign(this, { spawn, clock, random, helloMs, staleMs, backoff, getMs, demoOnly, oneShot: once, tilde });
     this.state = "offline";

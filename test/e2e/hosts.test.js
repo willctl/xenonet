@@ -15,6 +15,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { xenonet, root } from "../../core/control.js";
+import { service } from "../harness/xenonet-bin.js";
 
 // The test instance takes this from the environment it starts in.
 process.env.XENONET_HOSTS = "1";
@@ -67,7 +68,7 @@ before(async () => {
   await xenonet("test").quit();
   // The other machine: a plain demo XenoNet without the flag, as any host
   // runs, with a home of its own.
-  other = spawn(process.execPath, ["server/index.js", "--demo"], {
+  other = spawn(...service(["--demo"]), {
     cwd: root,
     env: { ...process.env, HOME: home, USERPROFILE: home, XENONET_PORT: String(hostPort), XENONET_HOSTS: "", XENONET_INSTANCE: "", XENONET_CONTROL: "", XENONET_EXEC: "", XENONET_HOT: "0" },
     stdio: ["ignore", "pipe", "pipe"],

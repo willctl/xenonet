@@ -25,7 +25,7 @@ use crate::fields::is_field;
 use serde_json::{Map, Value};
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
-use std::rc::Rc;
+use std::sync::Arc;
 use xenonet_base::json;
 
 /// `typeof`, as JSON sees a value: null, array, object, boolean, number,
@@ -99,7 +99,7 @@ impl<'a> Compiler<'a> {
         if is_empty(node) {
             return ANY;
         }
-        if let Some(&i) = self.seen.get(&(node as *const Value)) {
+        if let Some(&i) = self.seen.get(&std::ptr::from_ref(node)) {
             return i;
         }
         if let Some(r) = node.get("$ref") {
@@ -111,7 +111,7 @@ impl<'a> Compiler<'a> {
         // A place for it first, so a schema that refers to itself finds it.
         let at = self.nodes.len();
         self.nodes.push(Node::Any);
-        self.seen.insert(node as *const Value, at);
+        self.seen.insert(std::ptr::from_ref(node), at);
         let compiled = self.node(node);
         self.nodes[at] = compiled;
         at
@@ -218,7 +218,7 @@ pub struct Major {
     pub id: String,
     pub major: u32,
     pub range: Value,
-    pub schema: Rc<Schema>,
+    pub schema: Arc<Schema>,
 }
 
 /// The majors of a vendor source's schema in `dir`, newest first; none
@@ -237,15 +237,15 @@ pub fn load_vendor(source: &str, dir: &Path) -> Vec<Major> {
             let text = std::fs::read_to_string(folder.join(&name)).ok()?;
             let file = json::parse(&text).ok()?;
             let range = file.get("x-xenonet").and_then(|x| x.get("vendorVersions")).filter(|v| !v.is_null()).cloned().unwrap_or_else(|| Value::String("*".into()));
-            Some(Major { id: format!("vendor/{source}/v{n}"), major: n.parse().ok()?, range, schema: Rc::new(compile(&file)) })
+            Some(Major { id: format!("vendor/{source}/v{n}"), major: n.parse().ok()?, range, schema: Arc::new(compile(&file)) })
         })
         .collect();
-    out.sort_by(|a, b| b.major.cmp(&a.major));
+    out.sort_by_key(|m| std::cmp::Reverse(m.major));
     out
 }
 
 /// Every vendor source with a schema file in `dir`, as
-/// <vendor>/<product>/<source>, sorted.
+/// `<vendor>/<product>/<source>`, sorted.
 pub fn vendor_sources(dir: &Path) -> Vec<String> {
     fn walk(base: &Path, rel: &mut Vec<String>, out: &mut BTreeSet<String>) {
         let Ok(ents) = xenonet_base::paths::read_dir_sorted(&rel.iter().fold(base.to_path_buf(), |p, s| p.join(s))) else { return };
@@ -289,9 +289,9 @@ fn is_ident(k: &str) -> bool {
     !b.is_empty() && (b[0].is_ascii_alphabetic() || b[0] == b'_' || b[0] == b'$') && b[1..].iter().all(|&c| c.is_ascii_alphanumeric() || c == b'_' || c == b'$' || c == b'-')
 }
 
-/// Where, as a drift record says it: message.content[].citations,
-/// changes.*.type, ["https://api.openai.com/auth"].chatgpt_plan_type. None
-/// for the record itself.
+/// Where, as a drift record says it: `message.content[].citations`,
+/// `changes.*.type`, `["https://api.openai.com/auth"].chatgpt_plan_type`.
+/// None for the record itself.
 pub fn path_of(steps: &[Step]) -> Option<String> {
     if steps.is_empty() {
         return None;
@@ -307,7 +307,11 @@ pub fn path_of(steps: &[Step]) -> Option<String> {
                 }
                 s.push_str(k);
             }
-            Step::Prop(k) => s.push_str(&format!("[{}]", json::stringify(&Value::String(k.clone()), 0))),
+            Step::Prop(k) => {
+                s.push('[');
+                s.push_str(&json::stringify(&Value::String(k.clone()), 0));
+                s.push(']');
+            }
         }
     }
     Some(s)
@@ -392,10 +396,10 @@ impl Schema {
         out
     }
 
-    fn changed(steps: &[Step], v: &Value, spec: SpecRef, variant: &Option<Vec<Value>>, out: &mut Inspection) {
+    fn changed(steps: &[Step], v: &Value, spec: SpecRef, variant: Option<&[Value]>, out: &mut Inspection) {
         out.findings.push(Finding::TypeChange {
             path: path_of(steps),
-            variant: variant.clone(),
+            variant: variant.map(<[Value]>::to_vec),
             value: v.clone(),
             data: in_data(steps),
             keys: keys_of(steps),
@@ -413,7 +417,7 @@ impl Schema {
         let i = match spec {
             SpecRef::Types(t) => {
                 if !fits(t, v) {
-                    Self::changed(steps, v, spec.clone(), &variant, out);
+                    Self::changed(steps, v, spec.clone(), variant.as_deref(), out);
                 }
                 return;
             }
@@ -423,11 +427,11 @@ impl Schema {
             Node::Any => {}
             Node::Types(t) => {
                 if !fits(t, v) {
-                    Self::changed(steps, v, spec.clone(), &variant, out);
+                    Self::changed(steps, v, spec.clone(), variant.as_deref(), out);
                 }
             }
             Node::Array { items } => {
-                let Value::Array(a) = v else { return Self::changed(steps, v, spec.clone(), &variant, out) };
+                let Value::Array(a) = v else { return Self::changed(steps, v, spec.clone(), variant.as_deref(), out) };
                 for j in sample_of(a.len()) {
                     steps.push(Step::Item(j));
                     self.walk(&SpecRef::Node(*items), &a[j], steps, variant.clone(), out);
@@ -435,7 +439,7 @@ impl Schema {
                 }
             }
             Node::Record { value } => {
-                let Value::Object(m) = v else { return Self::changed(steps, v, spec.clone(), &variant, out) };
+                let Value::Object(m) = v else { return Self::changed(steps, v, spec.clone(), variant.as_deref(), out) };
                 for (k, x) in m.iter().take(MAX_ENTRIES) {
                     steps.push(Step::Entry(k.clone()));
                     self.walk(&SpecRef::Node(*value), x, steps, variant.clone(), out);
@@ -443,7 +447,7 @@ impl Schema {
                 }
             }
             Node::Object { props, closed, known } => {
-                let Value::Object(m) = v else { return Self::changed(steps, v, spec.clone(), &variant, out) };
+                let Value::Object(m) = v else { return Self::changed(steps, v, spec.clone(), variant.as_deref(), out) };
                 for (k, p, required) in props {
                     steps.push(Step::Prop(k.clone()));
                     match m.get(k) {
@@ -470,7 +474,7 @@ impl Schema {
                 }
             }
             Node::Variants { key, by_value, value_types } => {
-                let Value::Object(m) = v else { return Self::changed(steps, v, spec.clone(), &variant, out) };
+                let Value::Object(m) = v else { return Self::changed(steps, v, spec.clone(), variant.as_deref(), out) };
                 steps.push(Step::Prop(key.clone()));
                 let Some(d) = m.get(key) else {
                     out.findings.push(Finding::MissingField { path: path_of(steps), variant });
@@ -489,13 +493,13 @@ impl Schema {
                 if value_types.contains(json_type(d)) {
                     out.findings.push(Finding::NewVariant { path: path_of(steps), variant, value: d.clone() });
                 } else {
-                    Self::changed(steps, d, SpecRef::Types(value_types.clone()), &variant, out);
+                    Self::changed(steps, d, SpecRef::Types(value_types.clone()), variant.as_deref(), out);
                 }
                 steps.pop();
             }
             Node::Union { options } => match options.iter().find(|o| self.accepts_node(**o, v)) {
                 Some(o) => self.walk(&SpecRef::Node(*o), v, steps, variant, out),
-                None => Self::changed(steps, v, spec.clone(), &variant, out),
+                None => Self::changed(steps, v, spec.clone(), variant.as_deref(), out),
             },
         }
     }
@@ -644,7 +648,7 @@ mod tests {
         assert_eq!((path.as_deref(), variant.clone()), (Some("message.content[].text"), Some(vec![json!("user")])));
         assert_eq!(segments, &["message", "content", "[]", "text"]);
         assert_eq!(
-            strip(&json!({ "type": "user", "message": { "content": [{ "type": "text", "text": 5 }] } }), &[keys.clone()]),
+            strip(&json!({ "type": "user", "message": { "content": [{ "type": "text", "text": 5 }] } }), std::slice::from_ref(keys)),
             json!({ "type": "user", "message": { "content": [{ "type": "text" }] } })
         );
         let r = s.inspect(&json!({ "type": "assistant", "n": 1.5, "extra": 1, "0190d3e0-aaaa": 2 }));

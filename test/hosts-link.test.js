@@ -5,6 +5,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { HostLink, transport, whyEnded, shellPath, trustCommand, SSH_OPTIONS } from "../core/hosts/link.js";
 import { hostEntry } from "../core/hosts/config.js";
 import { fakeProcesses } from "./harness/procs.js";
@@ -282,7 +285,21 @@ test("ssh's arguments are fixed words and checked values, and the local relay ru
   assert.throws(() => transport(entry, {}), /ssh config/);
   assert.deepEqual(transport(entry, { sshConfig: CONFIG, sshBin: ["/usr/bin/node", "fake-ssh.mjs"] }).args.slice(0, 3), ["fake-ssh.mjs", "-F", CONFIG]);
 
-  const local = transport(hostEntry({ id: "xenonet", local: true, port: 47840 }), { exec: "/Applications/XenoNet.app/Contents/MacOS/XenoNet", runAsNode: true, root: "/src/xenonet", env: { PATH: "/usr/bin", XENONET_DEMO: "1", XENONET_PORT: "47843", XENONET_STATE_DIR: "/x", HOME: "/Users/nova" } });
-  assert.deepEqual([local.file, local.args], ["/Applications/XenoNet.app/Contents/MacOS/XenoNet", ["/src/xenonet/cli/xenonet.js", "relay", "--port", "47840", "--since", "7d"]]);
-  assert.deepEqual(local.env, { PATH: "/usr/bin", HOME: "/Users/nova", ELECTRON_RUN_AS_NODE: "1" });
+  // The local transport runs the xenonet binary's relay, with no Node and
+  // none of this XenoNet's XENONET_ settings.
+  const local = transport(hostEntry({ id: "xenonet", local: true, port: 47840 }), { bin: "/x/launcher/xenonet", env: { PATH: "/usr/bin", XENONET_DEMO: "1", XENONET_PORT: "47843", XENONET_STATE_DIR: "/x", HOME: "/Users/nova" } });
+  assert.deepEqual([local.file, local.args], ["/x/launcher/xenonet", ["relay", "--port", "47840", "--since", "7d"]]);
+  assert.deepEqual(local.env, { PATH: "/usr/bin", HOME: "/Users/nova" });
+  // By default, the checkout's own build; with none built yet, the JS
+  // service runs the checkout's own relay on this Node.
+  assert.match(transport(hostEntry({ id: "xenonet", local: true, port: 47840 }), { root: "/src/xenonet", env: {} }).file, /^\/src\/xenonet\/target\/(release|debug)\/xenonet(\.exe)?$/, "xenonet.exe on Windows");
+  const checkout = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-link-checkout-"));
+  try {
+    fs.mkdirSync(path.join(checkout, "cli"));
+    fs.writeFileSync(path.join(checkout, "cli", "xenonet.js"), "");
+    const js = transport(hostEntry({ id: "xenonet", local: true, port: 47840 }), { root: checkout, env: {} });
+    assert.deepEqual([js.file, js.args], [process.execPath, [path.join(checkout, "cli", "xenonet.js"), "relay", "--port", "47840", "--since", "7d"]]);
+  } finally {
+    fs.rmSync(checkout, { recursive: true, force: true });
+  }
 });

@@ -23,7 +23,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 export async function run(_args, flags) {
   const s = await find(flags);
   // Nothing answers: this XenoNet's entries, by its port, taken out here.
-  const local = s ? null : createConnect({ port: candidates(flags)[0], root: process.env.XENONET_LAUNCHER_ROOT || ROOT, exec: process.env.XENONET_LAUNCHER_EXEC || process.execPath });
+  const local = s ? null : createConnect({ port: candidates(flags)[0], root: ROOT });
   const preview = s ? await get(s, "/api/engine/connect") : await local.preview();
   const there = preview.apps.filter((a) => a.changes.some((ch) => ch.state !== "missing"));
   if (!there.length) return print(c.dim("XenoNet isn't in Claude Code's or Codex's settings; nothing to take out."));

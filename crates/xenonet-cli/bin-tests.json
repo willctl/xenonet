@@ -1,0 +1,66 @@
+{
+  "binary": "target/debug/xenonet",
+  "at": "2026-10-18",
+  "files": {
+    "test/server.test.js": {
+      "pass": 21,
+      "tests": 21,
+      "failed": []
+    },
+    "test/hosts-server.test.js": {
+      "pass": 8,
+      "tests": 8,
+      "failed": []
+    },
+    "test/control.test.js": {
+      "pass": 6,
+      "tests": 6,
+      "failed": []
+    },
+    "test/cli.test.js": {
+      "pass": 13,
+      "tests": 13,
+      "failed": []
+    },
+    "test/cli-actor.test.js": {
+      "pass": 12,
+      "tests": 12,
+      "failed": []
+    },
+    "test/cli-gateway.test.js": {
+      "pass": 4,
+      "tests": 4,
+      "failed": []
+    },
+    "test/cli-status-agents.test.js": {
+      "pass": 2,
+      "tests": 2,
+      "failed": []
+    },
+    "test/hosts-cli.test.js": {
+      "pass": 3,
+      "tests": 3,
+      "failed": []
+    },
+    "test/launcher.test.js": {
+      "pass": 5,
+      "tests": 5,
+      "failed": []
+    },
+    "test/mcp-actor.test.js": {
+      "pass": 4,
+      "tests": 4,
+      "failed": []
+    },
+    "test/engine.test.js": {
+      "pass": 17,
+      "tests": 17,
+      "failed": []
+    },
+    "test/assistant-endpoint.test.js": {
+      "pass": 9,
+      "tests": 9,
+      "failed": []
+    }
+  }
+}

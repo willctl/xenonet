@@ -20,6 +20,6 @@ export async function run() {
   const bytes = fs.readFileSync(file);
   const result = await activatePackage(file, { ...manifest, size: bytes.length, sha256: digest(bytes) });
   const launcher = installLauncher();
-  if (launcher) installCommand(launcher);
+  if (launcher?.bin) installCommand({ bin: launcher.bin });
   print(JSON.stringify(result));
 }

@@ -24,6 +24,7 @@ import { descriptorFile } from "../core/components/runtime.js";
 import { rpc } from "../core/components/rpc.js";
 import { RESULTS } from "../core/schema/assistant.js";
 import { createCache, stale } from "../mcp/assistant.js";
+import { command } from "./harness/xenonet-bin.js";
 
 const runtime = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-assistant-runtime-"));
 after(() => fs.rmSync(runtime, { recursive: true, force: true, maxRetries: 5 }));
@@ -203,7 +204,7 @@ test("a line too long closes the connection; the client waits longer after each 
 
 // The adapter, as a tunnel client runs it.
 function adapter(args, env) {
-  const proc = spawn(process.execPath, ["cli/xenonet.js", "mcp", "assistant", ...args], { env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+  const proc = spawn(...command(["mcp", "assistant", ...args]), { env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
   let buf = "";
   let err = "";
   let seq = 0;

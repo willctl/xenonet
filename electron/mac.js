@@ -219,7 +219,7 @@ export async function uninstall({ ask = true, purge = false, win = null, stop = 
     // XenoNet's hooks and MCP servers in Claude Code and Codex, the console's
     // too, run files about to be deleted: take them out first.
     try {
-      await connect.createConnect({ port: 47840, root: app.getAppPath(), exec: process.execPath, consoleMcp: true }).remove();
+      await connect.createConnect({ port: 47840, root: app.getAppPath(), consoleMcp: true }).remove();
     } catch (err) {
       console.error(`[xenonet] couldn't take XenoNet out of Claude Code and Codex: ${err.message ?? err}`);
     }

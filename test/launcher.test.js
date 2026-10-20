@@ -112,3 +112,21 @@ test("XenoNet writes a newer launcher over an older one, never an older over a n
     r.done();
   }
 });
+
+test("with Tools that carry the xenonet binary, it runs the binary, and tells it where the launcher's own copy is", { skip: process.platform === "win32" ? "a shell script stands in for the binary" : false }, async () => {
+  const r = runtime();
+  try {
+    const sha = "a".repeat(64);
+    const tools = path.join(r.dir, "components", "tools", `1.2.3-${sha.slice(0, 16)}`);
+    fs.mkdirSync(path.join(tools, "bin"), { recursive: true });
+    fs.writeFileSync(path.join(r.dir, "components", "tools", "current.json"), JSON.stringify({ version: "1.2.3", sha256: sha }));
+    fs.writeFileSync(path.join(tools, "bin", "xenonet"), `#!/bin/sh\nprintf '%s|%s|%s' "$*" "$XENONET_LAUNCHER_BIN" "$ELECTRON_RUN_AS_NODE"\n`, { mode: 0o755 });
+    const own = path.join(r.dir, "launcher", "xenonet");
+    fs.writeFileSync(own, "", { mode: 0o755 });
+    const ran = await run(r.entry, ["agents", "--json"], { env: { ELECTRON_RUN_AS_NODE: "1" } });
+    assert.deepEqual([ran.code, ran.stdout], [0, `agents --json|${fs.realpathSync(own)}|`]);
+    assert.equal(JSON.parse((await run(r.entry, ["--launcher"])).stdout).tools, "1.2.3");
+  } finally {
+    r.done();
+  }
+});

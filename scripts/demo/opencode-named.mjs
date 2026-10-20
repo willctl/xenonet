@@ -35,8 +35,12 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { buildBinary } from "../rust-bin.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+// The xenonet binary, built once: the service and the command.
+let built = null;
+const bin = () => (built ??= process.env.XENONET_SERVICE_BIN || buildBinary({ stdio: "ignore" }));
 const TOOL = path.join(ROOT, "scripts/demo/opencode-tool.js");
 
 // The projects: a name, the session's title, and what its notes say, which
@@ -388,7 +392,7 @@ export async function main(argv = process.argv.slice(2)) {
       CODEX_HOME: path.join(home, ".codex"),
     });
     const log = fs.openSync(xn.log, "a");
-    server = spawn(process.execPath, [path.join(ROOT, "server/index.js")], { cwd: ROOT, env, stdio: ["ignore", log, log] });
+    server = spawn(bin(), ["serve"], { cwd: ROOT, env, stdio: ["ignore", log, log] });
     fs.closeSync(log);
     await until("the demo XenoNet to answer", async () => (await http(xbase, "/api/health", { ms: 1000 }))?.name, { ms: 60e3 });
   };
@@ -397,7 +401,7 @@ export async function main(argv = process.argv.slice(2)) {
     server.kill("SIGTERM");
     await Promise.race([new Promise((r) => server.once("exit", r)), sleep(5000)]);
   };
-  const xenonet = (...args) => spawnSync(process.execPath, [path.join(ROOT, "cli/xenonet.js"), ...args, "--port", String(port)], { env: cleanEnv({ NO_COLOR: "1" }), encoding: "utf8" });
+  const xenonet = (...args) => spawnSync(bin(), [...args, "--port", String(port)], { env: cleanEnv({ NO_COLOR: "1" }), encoding: "utf8" });
 
   try {
     say(`OpenCode ${ocVersion}, model ${o.model}, ${o.sessions} sessions, ${o.rounds} round${o.rounds > 1 ? "s" : ""}`);
@@ -496,7 +500,7 @@ export async function main(argv = process.argv.slice(2)) {
         await startXenoNet();
       } else {
         say("Consent is yours to give. In your own terminal, run:");
-        for (const [p] of refused) say(`  node ${path.join(ROOT, "cli/xenonet.js")} live allow ${p.id} --hours 1 --port ${port}`);
+        for (const [p] of refused) say(`  ${bin()} live allow ${p.id} --hours 1 --port ${port}`);
         say("Waiting up to 10 minutes for it.");
       }
       await until("your consent for each session", async () => {

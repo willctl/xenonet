@@ -1,0 +1,20 @@
+[package]
+name = "xenonet-hosts"
+description = "Other machines' XenoNets on this one's map: hosts.json and XenoNet's own ssh config, the relay a console reads over ssh, the console's link to each host, and the merge that qualifies everything a host sends."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+regex.workspace = true
+serde_json.workspace = true
+url.workspace = true
+xenonet-app.workspace = true
+xenonet-base.workspace = true
+
+[lints]
+workspace = true

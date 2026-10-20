@@ -3,10 +3,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
-# Xenolith's crates join once its own workspace folds into this one. The MCP
-# server needs Rust 1.88 or later (rmcp), so it builds on its own until the
-# workspace pins a toolchain.
-exclude = ["xenolith", "crates/xenonet-mcp"]
+# Xenolith's crates join once its own workspace folds into this one.
+exclude = ["xenolith"]
 
 [workspace.package]
 version = "0.2.0"
@@ -21,12 +19,19 @@ publish = false
 xenonet-actors = { path = "crates/xenonet-actors" }
 xenonet-base = { path = "crates/xenonet-base" }
 xenonet-blocks = { path = "crates/xenonet-blocks" }
+xenonet-engine = { path = "crates/xenonet-engine" }
 xenonet-schema = { path = "crates/xenonet-schema" }
 xenonet-sources = { path = "crates/xenonet-sources" }
 xenonet-state = { path = "crates/xenonet-state" }
+# The app, components, hosts, assistant, integrations and doctor slice.
+xenonet-app = { path = "crates/xenonet-app" }
+xenonet-components = { path = "crates/xenonet-components" }
+xenonet-hosts = { path = "crates/xenonet-hosts" }
+xenonet-assistant = { path = "crates/xenonet-assistant" }
+xenonet-integrations = { path = "crates/xenonet-integrations" }
+xenonet-doctor = { path = "crates/xenonet-doctor" }
 # JS keeps an object's keys in the order they were added, and so do the
 # files and answers XenoNet writes: preserve_order keeps that order here.
-serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 # Where the JS matches with a regular expression that has no lookaround
 # (the log's key patterns); lookarounds are written out by hand.
@@ -34,17 +39,117 @@ regex = "1"
 # engine.sqlite and search.sqlite. Bundled, so FTS5 and VACUUM INTO are
 # there whatever SQLite the system has.
 rusqlite = { version = "0.40", features = ["bundled"] }
+# Names are compared after NFKC and NFD (core/actors/names.js), which std
+# doesn't do.
+unicode-normalization = "0.1"
 # Tokens: a SHA-256 of each is all XenoNet keeps, and 32 random bytes from
 # the system make one.
 sha2 = "0.10"
 getrandom = "0.3"
+# The local time zone, as JS's dates read it, on unix; and O_NOFOLLOW as
+# each system defines it, for reading a review's files without following
+# a link.
+libc = "0.2"
+# Gzip: the refusals' context, kept as zlib.gzipSync wrote it, and the
+# component packages (.tar.gz), which the components crate reads itself so
+# every entry is checked before anything is written.
+flate2 = "1"
+# URLs as `new URL()` reads and writes them (the WHATWG URL Standard), for
+# what the JS checks, cleans or builds with Node's URL.
+url = "2"
+# String.prototype.normalize("NFC"), for the assistant's labels: already
+# in the lock through url's idna.
+icu_normalizer = "2.1"
 # The Node-API bindings that put the crates behind the JS modules during the
 # port. The last releases that build on Rust 1.85; the resolver keeps their
 # dependencies to versions that do too.
 napi = { version = "3.4", default-features = false, features = ["napi8", "serde-json"] }
 napi-derive = "3.3"
 napi-build = "2.2"
+xenonet-mcp = { path = "crates/xenonet-mcp" }
+xenonet-service = { path = "crates/xenonet-service" }
+# The binary's processes: the service's sockets, timers and children, its
+# HTTP API (hyper, with XenoNet's own router on top), and the MCP servers
+# (rmcp, which needs Rust 1.88: rust-toolchain.toml pins the checkout's).
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-std", "io-util", "time", "sync", "process", "signal", "fs"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+rmcp = { version = "3.5", default-features = false, features = ["server", "transport-io"] }
+# The service's cores are traits the routes call through, async where the
+# JS awaits (crates/xenonet-service/src/cores).
+async-trait = "0.1"
+# The binary's own drivers for the cores, which the twins' JS drives during
+# the port: the map and its readers; the engine, delivery and actors; the
+# app, hosts, assistant and doctor (each wires its cores into the service).
+xenonet-wire-map = { path = "crates/xenonet-wire-map" }
+xenonet-wire-engine = { path = "crates/xenonet-wire-engine" }
+xenonet-wire-app = { path = "crates/xenonet-wire-app" }
+# fetch(), in the binary: HTTPS to the APIs XenoNet calls (Spotify,
+# OpenRouter, Anthropic's usage, webhooks, updates), with rustls on ring
+# and the system's own certificates, and the system's proxy.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "system-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 [profile.release]
 lto = "thin"
 codegen-units = 4
+
+# What the compiler and clippy hold the Rust core to (docs/design/rust-core.md,
+# "Static analysis"). Each crate takes these with `[lints] workspace = true`,
+# and CI fails on any warning. Code that needs an exception says why where it
+# makes it, with #[expect(lint, reason = "...")].
+[workspace.lints.rust]
+# unsafe only where a crate or module says why: the Node-API addon, a libc
+# call.
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+# The default groups (correctness, suspicious, style, complexity, perf) and
+# pedantic, less the pedantic checks below that are taste rather than bugs.
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+doc_markdown = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+needless_pass_by_value = "allow"
+too_many_lines = "allow"
+similar_names = "allow"
+many_single_char_names = "allow"
+items_after_statements = "allow"
+struct_excessive_bools = "allow"
+fn_params_excessive_bools = "allow"
+unreadable_literal = "allow"
+single_match_else = "allow"
+if_not_else = "allow"
+match_same_arms = "allow"
+implicit_hasher = "allow"
+# The port computes as the JS does: numbers are f64, compared exactly and
+# cast where JS truncates, on purpose.
+float_cmp = "allow"
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+# The service runs for days, so nothing a person or a file can reach may
+# panic it. expect stays for a real invariant, with the reason as its
+# message. Tests may do all of these (clippy.toml).
+unwrap_used = "warn"
+panic = "warn"
+todo = "warn"
+unimplemented = "warn"
+dbg_macro = "warn"
+# stdout is the MCP servers' protocol and the command's output, so nothing
+# else prints there. stderr is the log.
+print_stdout = "warn"
+undocumented_unsafe_blocks = "warn"
+# #[expect] rather than #[allow], so an exception no longer needed shows,
+# and each one says why.
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"

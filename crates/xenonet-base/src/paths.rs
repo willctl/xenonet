@@ -5,6 +5,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::nodepath::Style;
+
 /// A path's key: compared case-insensitively with forward slashes, because
 /// the apps report the same Windows folder as `C:\x`, `c:/x` or `\\?\C:\x`.
 /// On macOS, /tmp, /var and /etc are links into /private, and tools report
@@ -190,8 +192,7 @@ pub fn join_all(parts: &[&str]) -> String {
         return ".".into();
     }
     if cfg!(windows) {
-        let p: PathBuf = parts.iter().collect();
-        return p.to_string_lossy().into_owned();
+        return Style::Win32.join(&parts);
     }
     normalize_posix(&parts.join("/"))
 }
@@ -199,8 +200,7 @@ pub fn join_all(parts: &[&str]) -> String {
 /// Joins and normalizes as Node's path.join does for this platform.
 pub fn join(dir: &str, name: &str) -> String {
     if cfg!(windows) {
-        let p: PathBuf = [dir, name].iter().collect();
-        return p.to_string_lossy().into_owned();
+        return Style::Win32.join(&[dir, name]);
     }
     normalize_posix(&format!("{dir}/{name}"))
 }
@@ -287,16 +287,20 @@ pub fn can_run(file: &str) -> bool {
     {
         use std::os::unix::ffi::OsStrExt;
         let Ok(c) = std::ffi::CString::new(Path::new(file).as_os_str().as_bytes()) else { return false };
-        extern "C" {
-            fn access(path: *const std::os::raw::c_char, mode: std::os::raw::c_int) -> std::os::raw::c_int;
-        }
-        // X_OK is 1 on every unix.
-        unsafe { access(c.as_ptr(), 1) == 0 }
+        may_run(&c)
     }
     #[cfg(not(unix))]
     {
         Path::new(file).exists()
     }
+}
+
+#[cfg(unix)]
+#[expect(unsafe_code, reason = "access(2), which std doesn't wrap")]
+fn may_run(path: &std::ffi::CStr) -> bool {
+    // SAFETY: `path` is a NUL-terminated string that outlives the call, and
+    // access only reads it.
+    unsafe { libc::access(path.as_ptr(), libc::X_OK) == 0 }
 }
 
 /// A folder's entries as Node's readdir lists them: by name, byte for byte,
@@ -341,6 +345,14 @@ pub fn list_files(dir: &str, pick: &mut dyn FnMut(&str) -> bool, depth: u32) -> 
     let mut out = Vec::new();
     walk(dir, 0, depth, pick, &mut out);
     out
+}
+
+/// fs.realpathSync.native: `p` with its links followed and, on Windows, its
+/// short names spelled out, without the `\\?\` prefix canonicalize puts on
+/// it there, which Node never shows and no other spelling of the path
+/// matches. `p` as it is when it can't be resolved.
+pub fn real_path(p: &Path) -> PathBuf {
+    crate::fs::realpath_native(&p.to_string_lossy()).map_or_else(|_| p.to_path_buf(), PathBuf::from)
 }
 
 #[cfg(test)]

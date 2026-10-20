@@ -2,15 +2,14 @@
 // process (or reuses one already listening), shows the UI in a frameless
 // window, hosts real shells for the terminal drawer, and lives in the tray
 // (the menu bar on macOS).
-import { app, BrowserWindow, ipcMain, Notification, powerMonitor, screen, session, shell, utilityProcess, nativeImage } from "electron";
+import { app, BrowserWindow, ipcMain, Notification, powerMonitor, screen, session, shell, nativeImage } from "electron";
 import { execFile } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { registerPty } from "./pty.js";
 import { registerServicePty } from "./service-pty.js";
-import { ensureService, runtimeDir } from "../core/components/runtime.js";
+import { connectService, ensureService, runtimeDir } from "../core/components/runtime.js";
 import { currentComponent } from "../core/components/packages.js";
 import { installBundle, installedRuntime, recoverServiceUpdate } from "../core/components/install.js";
 import { componentUpdates, updateComponent } from "../core/components/updates.js";
@@ -22,6 +21,7 @@ import { createTray } from "./tray.js";
 import { launchedAtLogin } from "./login.js";
 import { loadShellEnv } from "./shellenv.js";
 import { prefs } from "./prefs.js";
+import { rustBinary, missingBinary } from "./service-runtime.js";
 import { installMenu, offerMove, askAboutLogin, uninstall } from "./mac.js";
 import { themeMenuOf } from "./theme-menu.js";
 import { instanceFrom } from "../core/instances.js";
@@ -61,12 +61,14 @@ const devBundle = fromSource && path.resolve(app.getAppPath()) !== root;
 // Demo mode (XENONET_DEMO=1) gets its own port so it never reuses a real server.
 const PORT = fromSource ? instance.port : Number(process.env.XENONET_PORT ?? (process.env.XENONET_DEMO === "1" ? 47841 : 47840));
 const SERVICE_BASE = `http://127.0.0.1:${PORT}`;
-const independent = app.isPackaged || process.env.XENONET_STANDALONE === "1";
+// The service is the Rust binary, run standalone as an installed one is
+// (service-runtime.js), from a checkout as well.
 let BASE = SERVICE_BASE;
 let serviceClient = null;
 let frontendServer = null;
-// Unpackaged runs use the Vite dev server (hot reload) unless --prod is passed.
-const dev = !independent && !process.argv.includes("--prod") && (process.argv.includes("--dev") || !app.isPackaged);
+// Unpackaged runs serve the page through Vite (hot reload) unless --prod is
+// passed.
+const dev = fromSource && !process.argv.includes("--prod");
 // How the window first appears (XENONET_SHOW): "front", as usual; "inactive",
 // shown without taking focus from the app you're in, which is how scripts and
 // agents start XenoNet Dev; or "hidden", never shown, for tests. A hidden window
@@ -125,29 +127,30 @@ let win = null;
 // anything thrown here that nothing caught. The demo instances keep none.
 const desktopLog = createLog({ dir: instance?.demo ? null : logDir(fromSource ? appDir("state", { name: instance.name }) : appDir("state")), component: "desktop", instance: instance?.id ?? "installed", version: app.getVersion() });
 process.on("uncaughtExceptionMonitor", (err) => desktopLog.error("desktop.uncaught", err?.message ?? String(err), { err }));
-let server = null;
 let pty = null;
 let quitting = false;
 // How long a loaded page has to start before it's loaded again.
 const BOOT_MS = 30e3;
 let updates = null;
-// The window key (core/actors/key.js), from the server this app started,
-// for the routes only XenoNet's own window may use. Held here while that
-// server runs, and given only to XenoNet's own page (app:window-key); never
+// The window key (core/actors/key.js), from the service this app connects
+// to, for the routes only XenoNet's own window may use. Held here while
+// connected, and given only to XenoNet's own page (app:window-key); never
 // written down.
 let windowKey = null;
-let windowKeyFrom = null;
-// What quitting stops: the shells in the terminal and the server, which
-// hears first that the window closed (you went offline).
+// What quitting stops: Desktop's hold on the terminal's shells (the
+// service keeps them), and its connection to the service, which hears
+// first that the window closed (you went offline). An installed XenoNet's
+// service keeps running, as does a --prod run's; one XenoNet Dev started
+// otherwise goes with it, as the server it used to run in-process did, so
+// each start of a dev, demo or test instance gets a fresh one.
 function stop() {
   quitting = true;
   updates?.dispose();
-  if (independent) pty?.dispose();
-  else pty?.killAll();
+  pty?.dispose();
   tellWindow("closed");
-  server?.kill();
   serviceClient?.close();
   frontendServer?.close();
+  if (ownService) try { process.kill(ownService); } catch {}
 }
 
 // Whether the window shows, for the server's word on you and the page's
@@ -163,11 +166,7 @@ function tellWindow(state = windowState()) {
   // The page hears it too (src/you.js, and src/render-budget.js, which
   // draws nothing while it's hidden). It goes with a window that closes.
   if (state !== "closed") win?.webContents.send("app:window-state", state);
-  if (serviceClient) { serviceClient.request("window", state).catch(() => {}); return; }
-  if (!server) return;
-  try {
-    server.postMessage({ type: "you", window: state });
-  } catch {}
+  serviceClient?.request("window", state).catch(() => {});
 }
 // XenoNet Dev's control channel, for scripts, tests and agents (control.js).
 let control = null;
@@ -201,16 +200,7 @@ function tellDrawing() {
 let themeMenu = null;
 let appMenu = null;
 
-async function healthy() {
-  try {
-    const r = await fetch(`${BASE}/api/health`, { signal: AbortSignal.timeout(1500) });
-    return r.ok;
-  } catch {
-    return false;
-  }
-}
-
-// XenoNet Dev's server keeps its layout and search index apart from the
+// XenoNet Dev's service keeps its layout and search index apart from the
 // installed XenoNet's, starting from a copy of its layout. It also relays the
 // control channel (XENONET_CONTROL). The demo instances keep everything in
 // their made-up world.
@@ -253,127 +243,87 @@ async function openTarget(target) {
   throw new Error("XenoNet opens only apps' links, folders and pages.");
 }
 
+// The service this Desktop runs, the environment it runs it in, and its
+// pid when it's XenoNet Dev's own to stop (see stop()).
+let serviceBin = null;
+let serviceEnv = null;
+let ownService = null;
+
+// Starts the service, or finds it running, and connects to it. The service
+// is the xenonet binary (service-runtime.js): the installed Service's in a
+// packaged XenoNet, the checkout's own build in XenoNet Dev.
 async function startServer() {
-  if (independent) {
-    const env = serverEnv();
-    env.XENONET_RUNTIME_DIR = process.env.XENONET_RUNTIME_DIR || runtimeDir();
-    let exec = process.env.XENONET_RUNTIME_EXEC;
-    let serviceRoot = process.env.XENONET_SERVICE_ROOT || root;
-    if (app.isPackaged) {
-      const bundle = path.join(process.resourcesPath, "components");
-      if (fs.existsSync(path.join(bundle, "components.json"))) await installBundle(bundle, { env, command: !packagedTest });
-      if (!currentComponent("service", env) || !currentComponent("tools", env)) {
-        if (packagedTest) throw new Error("The test bundle is missing its components.");
-        const available = await componentUpdates({ env });
-        for (const component of ["tools", "service"]) {
-          if (currentComponent(component, env)) continue;
-          const item = available.find((p) => p.component === component);
-          if (!item) throw new Error("Install the XenoNet bundle to add its background service and tools.");
-          await updateComponent(item, { env });
-        }
+  const env = serverEnv();
+  env.XENONET_RUNTIME_DIR = process.env.XENONET_RUNTIME_DIR || runtimeDir();
+  let serviceRoot = process.env.XENONET_SERVICE_ROOT || root;
+  if (app.isPackaged) {
+    const bundle = path.join(process.resourcesPath, "components");
+    if (fs.existsSync(path.join(bundle, "components.json"))) await installBundle(bundle, { env, command: !packagedTest });
+    if (!currentComponent("service", env) || !currentComponent("tools", env)) {
+      if (packagedTest) throw new Error("The test bundle is missing its components.");
+      const available = await componentUpdates({ env });
+      for (const component of ["tools", "service"]) {
+        if (currentComponent(component, env)) continue;
+        const item = available.find((p) => p.component === component);
+        if (!item) throw new Error("Install the XenoNet bundle to add its background service and tools.");
+        await updateComponent(item, { env });
       }
-      await recoverServiceUpdate({ env });
-      const installed = installedRuntime(env);
-      exec = installed.exec; serviceRoot = installed.root;
-      Object.assign(env, installed.env);
     }
-    if (!exec) throw new Error("XenoNet Service's runtime is missing. Reinstall XenoNet with the bundle installer.");
-    const how = await ensureService({ root: serviceRoot, exec, env });
-    serviceClient = await desktopClient({ env, handle: (method, body) => {
-      if (method === "open") return openTarget(body?.target);
-      if (method !== "console") throw new Error("Unsupported Desktop request.");
-      return control.handle(body);
-    } });
-    windowKey = serviceClient.info.windowKey;
-    serviceClient.on("notification", notify);
-    serviceClient.on("connected", (info) => { windowKey = info.windowKey; if (win && !win.isDestroyed()) win.webContents.reload(); });
-    serviceClient.on("disconnect", () => { windowKey = null; control?.log("service", "warning", "XenoNet Service disconnected."); });
-    // Only the window's own API requests carry this through Desktop, which
-    // the service takes for the window's (electron/desktop-server.js).
-    const secret = crypto.randomBytes(32).toString("hex");
-    frontendServer = await desktopServer({ root, port: Number(process.env.XENONET_DESKTOP_PORT || PORT + 1000), service: SERVICE_BASE, secret });
-    BASE = frontendServer.base;
-    pageHeaders(session.defaultSession, { base: BASE, secret });
-    const dir = runtimeDir(env);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, "desktop.json"), JSON.stringify({ command: process.execPath, args: fromSource ? [root, "--prod"] : [], cwd: root }));
-    return how;
+    await recoverServiceUpdate({ env });
+    const installed = installedRuntime(env);
+    serviceRoot = installed.root;
+    Object.assign(env, installed.env);
   }
-  if (await healthy()) return "reused";
-  server = utilityProcess.fork(path.join(root, "server", "index.js"), dev ? ["--dev"] : [], {
-    serviceName: "XenoNet server",
-    stdio: "pipe",
-    env: serverEnv(),
-  });
-  server.stdout?.on("data", (d) => {
-    process.stdout.write(`[server] ${d}`);
-    control?.log("server", "info", d);
-  });
-  server.stderr?.on("data", (d) => {
-    process.stderr.write(`[server] ${d}`);
-    control?.log("server", "error", d);
-  });
-  // Control requests the server relays from POST /api/dev/control.
-  const proc = server;
-  proc.on("message", (m) => {
-    // The window key, made at each start of the server.
-    if (m?.type === "window-key") return void ([windowKey, windowKeyFrom] = typeof m.key === "string" ? [m.key, proc] : [null, null]);
-    // The server's own news, such as the doctor finding a problem.
-    if (m?.type === "notify") return notify(m);
-    // Something to open from here (see openTarget).
-    if (m?.type === "open") return void openTarget(m.target).catch((err) => control?.log("server", "warning", `Couldn't open it: ${err.message}`));
-    if (m?.type !== "control" || !control) return;
-    control.handle(m.body).then(
-      (result) => proc.postMessage({ type: "control-result", id: m.id, result }),
-      (err) => proc.postMessage({ type: "control-result", id: m.id, error: String(err?.message ?? err) }),
-    );
-  });
-  // Its key goes with it.
-  proc.on("exit", () => windowKeyFrom === proc && ([windowKey, windowKeyFrom] = [null, null]));
-  await new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error("server did not start in 60s")), 60000);
-    server.on("message", (m) => {
-      if (m?.type === "ready") {
-        clearTimeout(t);
-        resolve();
-      } else if (m?.type === "error") {
-        clearTimeout(t);
-        reject(new Error(m.message));
-      }
-    });
-    server.on("exit", (code) => !quitting && reject(new Error(`server exited (${code})`)));
-  });
-  // A server started again (XenoNet Dev restarts it on an edit) hears where
-  // the window is.
-  tellWindow();
-  return "started";
+  serviceBin = rustBinary({ root: fromSource ? root : null, serviceRoot });
+  if (!serviceBin) throw new Error(missingBinary({ fromSource }));
+  serviceEnv = env;
+  // From a checkout, the service has the dev instances' routes
+  // (/api/dev/simulate and capture) unless --prod is passed, as the JS
+  // server it replaces had.
+  const how = await ensureService({ root: serviceRoot, exec: serviceBin, args: ["serve", ...(dev ? ["--dev"] : [])], env });
+  serviceClient = await desktopClient({ env, handle: (method, body) => {
+    if (method === "open") return openTarget(body?.target);
+    if (method !== "console") throw new Error("Unsupported Desktop request.");
+    return control.handle(body);
+  } });
+  windowKey = serviceClient.info.windowKey;
+  // A --prod run stands in for an installed XenoNet, whose service outlives it.
+  if (dev && how === "started") ownService = serviceClient.info.pid;
+  serviceClient.on("notification", notify);
+  serviceClient.on("connected", (info) => { windowKey = info.windowKey; if (win && !win.isDestroyed()) win.webContents.reload(); });
+  serviceClient.on("disconnect", () => { windowKey = null; control?.log("service", "warning", "XenoNet Service disconnected."); });
+  // Only the window's own API requests carry this through Desktop, which
+  // the service takes for the window's (electron/desktop-server.js).
+  const secret = crypto.randomBytes(32).toString("hex");
+  // The page's port, beside the service's, or any free one when that would
+  // be past the last port (a test instance on a high port).
+  const pagePort = Number(process.env.XENONET_DESKTOP_PORT || (PORT + 1000 <= 65535 ? PORT + 1000 : 0));
+  frontendServer = await desktopServer({ root, port: pagePort, service: SERVICE_BASE, secret, dev: dev ? { hot: !instance?.frozen } : null });
+  BASE = frontendServer.base;
+  pageHeaders(session.defaultSession, { base: BASE, secret });
+  const dir = runtimeDir(env);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "desktop.json"), JSON.stringify({ command: process.execPath, args: fromSource ? [root, "--prod"] : [], cwd: root }));
+  return how;
 }
 
 // XenoNet Dev picks up edits as they're saved. The page hot-reloads through
-// Vite. A change under server/ restarts the server, and Vite reloads the
-// page once it's back. A change to the preload reloads the page. A change
-// to the rest of electron/ relaunches XenoNet Dev.app; a terminal run says to
-// restart instead, since a relaunch would leave the terminal behind.
+// Vite (desktop-server.js), and a change to the preload reloads it. A change
+// to the rest of electron/, or to the core/ and server/ modules Desktop runs
+// itself, relaunches XenoNet Dev.app; a terminal run says to restart
+// instead, since a relaunch would leave the terminal behind. The service is
+// the checkout's xenonet binary: when a build replaces it (npm run
+// rust:bin), XenoNet Dev stops the old service and relaunches onto the new
+// one.
 function watchSource() {
   const changed = new Set();
   let timer = null;
-  const apply = async () => {
+  const apply = () => {
     const files = [...changed];
     changed.clear();
-    const shell = files.filter((f) => f.startsWith("electron") && !f.endsWith("preload.cjs"));
-    if (shell.length && devBundle) {
-      console.log(`[xenonet] ${shell.join(", ")} changed, relaunching`);
-      // It comes back without taking focus from your editor. It exits rather
-      // than quits: a quit waits for the page to agree to close, which a
-      // busy page can put off for good, leaving the old copy running.
-      process.env.XENONET_SHOW ||= "inactive";
-      app.relaunch();
-      stop();
-      return app.exit(0);
-    }
-    if (shell.length) console.log(`[xenonet] ${shell.join(", ")} changed; restart npm run app to load it`);
-    if (files.some((f) => f.startsWith("server") || f.startsWith("core"))) await restartServer();
-    else if (files.some((f) => f.endsWith("preload.cjs"))) win?.webContents.reloadIgnoringCache();
+    const shell = files.filter((f) => !f.endsWith("preload.cjs"));
+    if (shell.length) return relaunch(`${shell.join(", ")} changed`);
+    if (files.length) win?.webContents.reloadIgnoringCache();
   };
   for (const dir of ["core", "server", "electron"]) {
     fs.watch(path.join(root, dir), { recursive: true }, (_event, file) => {
@@ -383,20 +333,39 @@ function watchSource() {
       timer = setTimeout(apply, 200);
     });
   }
+  // A build writes the binary over a while, so it's taken once it has held
+  // still for a moment.
+  let rebuilt = null;
+  if (serviceBin) fs.watchFile(serviceBin, { interval: 1000 }, (now, before) => {
+    if (!now.size || now.mtimeMs === before.mtimeMs) return;
+    clearTimeout(rebuilt);
+    rebuilt = setTimeout(() => restartService().catch((err) => console.error(`[xenonet] the service didn't restart: ${err.message}`)), 1500);
+  });
 }
 
-async function restartServer() {
-  if (!server) return console.log("[xenonet] server/ changed, but XenoNet Dev is using a server it didn't start; restart that one to load it");
-  const old = server;
-  server = null;
-  // A server that crashed on a bad edit has already exited.
-  if (old.pid) await new Promise((resolve) => (old.once("exit", resolve), old.kill()));
+function relaunch(why) {
+  if (!devBundle) return console.log(`[xenonet] ${why}; restart npm run app to load it`);
+  console.log(`[xenonet] ${why}, relaunching`);
+  // It comes back without taking focus from your editor. It exits rather
+  // than quits: a quit waits for the page to agree to close, which a busy
+  // page can put off for good, leaving the old copy running.
+  process.env.XENONET_SHOW ||= "inactive";
+  app.relaunch();
+  stop();
+  app.exit(0);
+}
+
+// Stops the service XenoNet Dev runs, once its binary is rebuilt, so the
+// next start runs the new one rather than finding the old one running.
+async function restartService() {
   try {
-    await startServer();
-    console.log("[xenonet] server restarted");
-  } catch (err) {
-    console.error(`[xenonet] server didn't restart: ${err.message}`);
+    const c = await connectService({ env: serviceEnv });
+    try { await c.request("stop"); } finally { c.close(); }
+  } catch {}
+  for (const until = Date.now() + 15000; Date.now() < until; await new Promise((r) => setTimeout(r, 200))) {
+    try { (await connectService({ env: serviceEnv })).close(); } catch { return relaunch("the xenonet binary changed"); }
   }
+  throw new Error("the old service is still running");
 }
 
 // macOS: the Dock icon comes and goes with the window, as the taskbar button
@@ -629,7 +598,7 @@ function wireIpc() {
   // ⌘W with no terminal tab focused (macOS).
   ipcMain.on("app:hide", (e) => ownPage(e) && win?.close());
   // The window key, for the page's reports of you (src/you.js): only to
-  // XenoNet's own page, and null when this app didn't start the server.
+  // XenoNet's own page, and null while it isn't connected to the service.
   ipcMain.handle("app:window-key", (e) => (ownPage(e) ? windowKey : null));
   // Whether the window shows, for the same reports: "shown" or "hidden",
   // asked when the page starts and then told (tellWindow).
@@ -913,7 +882,7 @@ if (iconsArg >= 0) {
     await loadShellEnv({ locale: app.getSystemLocale() });
     wireIpc();
     wireDownloads();
-    control = createControl({ root: independent ? runtimeDir() : root, production: independent, instance: instance || { id: "installed", name: "XenoNet", demo: false }, port: PORT, getWindow: () => win, showWindow, hideWindow, reveal, recorder, filmFile, onDriven: (on) => ((driven = on), tellDrawing()) });
+    control = createControl({ root: fromSource ? root : runtimeDir(), production: !dev, instance: instance || { id: "installed", name: "XenoNet", demo: false }, port: PORT, getWindow: () => win, showWindow, hideWindow, reveal, recorder, filmFile, onDriven: (on) => ((driven = on), tellDrawing()) });
     // A locked screen or a computer going to sleep: nothing to draw for.
     for (const [event, key, on] of [["lock-screen", "locked", true], ["unlock-screen", "locked", false], ["suspend", "asleep", true], ["resume", "asleep", false]]) powerMonitor.on(event, () => ((held[key] = on), tellDrawing()));
     // The screen may be locked already, with no lock-screen event to come:
@@ -927,15 +896,15 @@ if (iconsArg >= 0) {
     try {
       const how = await startServer();
       console.log(`[xenonet] server ${how} at ${BASE}`);
-      // The control channel comes through a server this app started.
-      if (control && how === "reused") console.log(`[xenonet] the server at ${BASE} was already running, so scripts and agents can't control this window; stop that server and restart ${app.name}`);
     } catch (err) {
-      const { dialog } = await import("electron");
-      dialog.showErrorBox("XenoNet couldn't start its server", String(err.message ?? err));
+      // A window that's never shown (a test's) has no one to read a dialog,
+      // which would hold it open for good: it says why on stderr instead.
+      if (offscreen) console.error(`[xenonet] couldn't start its server: ${err.message ?? err}`);
+      else (await import("electron")).dialog.showErrorBox("XenoNet couldn't start its server", String(err.message ?? err));
       app.exit(1);
       return;
     }
-    pty = independent ? registerServicePty({ allowed: ownPage, client: serviceClient, getWindow: () => win }) : registerPty({ allowed: ownPage });
+    pty = registerServicePty({ allowed: ownPage, client: serviceClient, getWindow: () => win });
     await createWindow();
     updates.start();
     // A frozen instance (test, film) runs the code as it was at launch, so an

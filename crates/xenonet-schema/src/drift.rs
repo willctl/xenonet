@@ -53,6 +53,10 @@ pub const SOURCES: &[(&str, &str)] = &[
     ("nous/hermes-agent/cron-jobs", "Hermes Agent's scheduled jobs"),
     ("nous/hermes-agent/cron-ticker", "Hermes Agent's scheduler ticker"),
     ("nous/hermes-agent/install-stamp", "Hermes Agent's build stamp"),
+    ("anomaly/opencode/db", "OpenCode's database"),
+    ("google/gemini-cli/chat-record", "Gemini CLI's chat records"),
+    ("github/copilot-cli/session-event", "Copilot CLI's session events"),
+    ("anysphere/cursor/hook-input", "Cursor's hook input"),
 ];
 
 pub fn source_name(source: &str) -> &str {
@@ -211,7 +215,7 @@ pub fn clean_version(v: &str) -> Option<&str> {
 
 fn root_type(shape: Option<&str>) -> String {
     let s = shape.unwrap_or("");
-    let t: String = s.chars().take_while(|c| c.is_ascii_lowercase()).collect();
+    let t: String = s.chars().take_while(char::is_ascii_lowercase).collect();
     if t == "record" {
         "object".into()
     } else {

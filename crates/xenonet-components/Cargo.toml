@@ -1,0 +1,22 @@
+[package]
+name = "xenonet-components"
+description = "XenoNet's separately updated components: their packages and checksums, installing and switching them, the service's local connection, and the installed console."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+flate2.workspace = true
+getrandom.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+xenonet-app.workspace = true
+xenonet-base.workspace = true
+
+[lints]
+workspace = true

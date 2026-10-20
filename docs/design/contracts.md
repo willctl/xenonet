@@ -566,20 +566,27 @@ What XenoNet writes into other programs outlives any one version of its
 Desktop, Service and Tools, so these stay as they are, and a change to
 one is a new version of it beside the old, never an edit:
 
-- The launcher, at `<state>/runtime/launcher/`: its own `node` and
-  `cli/xenonet.js` (`core/components/launcher.cjs`). Hooks, MCP servers,
-  the `xenonet` command on PATH, `ssh … xenonet relay`, actors' scripts and
-  OpenAI's tunnel-client all run this path, so it never moves. Its first
-  line says its version (`// xenonet-launcher <n> (protocol <p>)`); XenoNet
-  replaces it only with a newer one, through a temporary file and a
-  rename. `--launcher` prints `{launcher, protocol, tools, node}`.
+- The launcher, at `<state>/runtime/launcher/xenonet` (`xenonet.exe` on
+  Windows): the xenonet binary, a copy of the Tools' own, copied again
+  through a temporary file and a rename when the Tools change. Hooks, MCP
+  servers, the `xenonet` command on PATH, `ssh … xenonet relay`, actors'
+  scripts and OpenAI's tunnel-client all run this path, so it never moves.
+  `--launcher` prints `{launcher, protocol, tools, node}`: launcher 3, with
+  no node.
+- Beside it, while the Tools carry a node, the launcher that entries an
+  earlier XenoNet wrote run: its own `node` and `cli/xenonet.js`
+  (`core/components/launcher.cjs`). Its first line says its version
+  (`// xenonet-launcher <n> (protocol <p>)`); XenoNet replaces it only with
+  a newer one, through a temporary file and a rename. From version 3 it
+  runs the Tools' binary. Connecting again moves those entries to the
+  binary.
 - Its argument forms: `hook <app>` (protocol 1: the event on stdin is
   posted to `/api/hook/<app>` on `XENONET_PORT`, or `--port`, and the
   answer printed; always exit 0, nothing on stderr; it runs in the
   launcher itself, without the Tools component), `mcp`, `mcp console`,
   `mcp assistant --grant <id> [--port <n>]`, `relay`, `actor …`,
-  `disconnect --yes --port <n>`. Without Tools, any form but `hook`
-  exits 1 with one line on stderr.
+  `disconnect --yes --port <n>`. The node launcher without Tools exits 1
+  on any form but `hook`, with one line on stderr.
 - `XENONET_PORT` says which XenoNet; each instance has its own port
   (`core/instances.js`). Hook routes are `/api/hook/claude` and
   `/api/hook/codex`; a change to what they take is a new route beside

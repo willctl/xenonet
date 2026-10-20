@@ -9,6 +9,7 @@ import { spawn } from "node:child_process";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { command } from "./harness/xenonet-bin.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const T = Date.now();
@@ -57,7 +58,7 @@ async function fakeXenoNet(routes) {
 
 function xenonet(args) {
   return new Promise((resolve) => {
-    const proc = spawn(process.execPath, [path.join(root, "cli", "xenonet.js"), ...args], { cwd: root, env: { ...process.env, NO_COLOR: "1", XENONET_PORT: "" }, stdio: ["ignore", "pipe", "pipe"] });
+    const proc = spawn(...command(args), { cwd: root, env: { ...process.env, NO_COLOR: "1", XENONET_PORT: "" }, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "";
     proc.stdout.on("data", (d) => (stdout += d));
     proc.stderr.on("data", (d) => (stderr += d));

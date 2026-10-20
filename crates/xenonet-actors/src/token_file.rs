@@ -36,7 +36,7 @@ fn said(m: String) -> Error {
 }
 
 /// The token in a file, when only you can read it.
-pub fn read_token_file(file: &str, windows: bool, run: &mut Run) -> Result<String, Error> {
+pub fn read_token_file(file: &str, windows: bool, run: &mut Run<'_>) -> Result<String, Error> {
     let st = std::fs::metadata(file).map_err(|_| said(format!("there's no token file at {file}")))?;
     if !st.is_file() {
         return Err(said(format!("{file} isn't a file")));
@@ -68,7 +68,7 @@ pub fn read_token_file(file: &str, windows: bool, run: &mut Run) -> Result<Strin
 /// The token an actor runs with, from its environment (`env` reads one
 /// variable): the token and the file it came from, or None when it has
 /// none.
-pub fn token_from_env(env: &dyn Fn(&str) -> Option<String>, windows: bool, run: &mut Run) -> Result<Option<(String, Option<String>)>, Error> {
+pub fn token_from_env(env: &dyn Fn(&str) -> Option<String>, windows: bool, run: &mut Run<'_>) -> Result<Option<(String, Option<String>)>, Error> {
     if let Some(file) = env("XENONET_ACTOR_TOKEN_FILE").filter(|f| !f.is_empty()) {
         return Ok(Some((read_token_file(&file, windows, run)?, Some(file))));
     }
@@ -135,7 +135,7 @@ fn write_new(full: &str, text: &str) -> Result<(), Error> {
 /// Writes a token to a file only you can read (0600, or on Windows an ACL
 /// with your account alone and nothing inherited), in a folder made only
 /// for you if it isn't there. Says where.
-pub fn write_token_file(file: &str, token: &str, windows: bool, run: &mut Run, force: bool, projects_dir: Option<&str>) -> Result<String, Error> {
+pub fn write_token_file(file: &str, token: &str, windows: bool, run: &mut Run<'_>, force: bool, projects_dir: Option<&str>) -> Result<String, Error> {
     if !is_token(token) {
         return Err(said("that isn't an actor's token".into()));
     }
@@ -176,7 +176,10 @@ pub fn write_token_file(file: &str, token: &str, windows: bool, run: &mut Run, f
     Ok(full)
 }
 
+// Its one test is about unix file modes. (Two attributes, not
+// cfg(all(test, unix)): clippy takes only a plain cfg(test) for test code.)
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
 
@@ -194,7 +197,6 @@ mod tests {
         std::fs::canonicalize(d).unwrap().to_string_lossy().into_owned()
     }
 
-    #[cfg(unix)]
     #[test]
     fn written_yours_alone_and_read_back() {
         let dir = temp();

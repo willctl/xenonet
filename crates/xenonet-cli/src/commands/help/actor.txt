@@ -1,0 +1,51 @@
+An actor works across sessions. It's an always-on agent, or a program of
+your own that reports to XenoNet. Every registered actor waits for you to
+allow it in XenoNet's window.
+
+For anyone:
+  xenonet actor list                 the actors (also xenonet actors)
+  xenonet actor show <slug>          one actor and what it did lately
+  xenonet actor observe [<product> on|off]
+                                   the products XenoNet observes; turning one
+                                   off is yours, from your own terminal
+
+To register a program (you, or its setup script):
+  xenonet actor register --name <name> [--slug <slug>] [--capabilities a,b]
+      [--heartbeat <seconds>] [--product <id>] [--token-file <file>] [--force]
+                                   asks, waits up to 10 minutes for you to
+                                   allow it in XenoNet's window, then writes
+                                   its token to the file (0600) or prints it
+
+For an actor, with XENONET_ACTOR_TOKEN_FILE=<file> (or XENONET_ACTOR_TOKEN):
+  xenonet actor heartbeat [--presence working|idle|offline] [--status <text>]
+      [--instance <name>] [--cwd <dir>] [--pid <n>]
+                                   it's here (beat for short); cwd is this
+                                   folder, and pid this command's parent
+                                   unless that's a shell, or you say
+  xenonet actor status               whether it's allowed, and its unread mail
+  xenonet actor event <kind> [--target <id> | --path <dir>] [--count <n>]
+      [--paths <file> …] [--platform <p>] [--subject <s>] [--app <a>] [--ref <r>]
+                                   what it did: spawned, edited, ran,
+                                   messaged, finished or failed
+  xenonet actor targets [--add <id or path>=<relation> …] [--remove <id or path>[=<relation>] …] [--replace]
+  xenonet actor inbox [--wait <seconds>]
+  xenonet actor listen [--exec <program>]
+                                   waits for messages and reads each as it
+                                   arrives: printed (as JSON lines with
+                                   --json), or given to the program on its
+                                   standard input, one run per message
+  xenonet actor send <to> <text>     to a session or actor, "repo" or "all"
+  xenonet actor leave                its token stops working
+
+Yours, from your own terminal:
+  xenonet actor remove <slug>        removes an actor that reports itself; asks
+                                   first unless --yes. One XenoNet only
+                                   observes goes off the map with
+                                   xenonet actor observe <product> off
+  xenonet actor wake <slug> [test|off]
+                                   how it's woken when a message arrives;
+                                   test calls its webhook now, off stops
+                                   waking it. A webhook is set in XenoNet's
+                                   window: Actors, then Wake… on the actor
+
+  --json   answers as JSON

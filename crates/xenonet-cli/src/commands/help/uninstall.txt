@@ -1,0 +1,3 @@
+Takes the xenonet command out of ~/.local/bin, if XenoNet put it there.
+
+  --dir <folder>  where you installed it, if somewhere else

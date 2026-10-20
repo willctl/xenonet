@@ -1,0 +1,23 @@
+[package]
+name = "xenonet-assistant"
+description = "What remote actors (cloud assistants) may read of XenoNet: grant credentials on disk, page tokens, the projection of the map a grant sees, the six reads' checks and answers, the adapter's way to the service, and the tunnels XenoNet runs for them."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+getrandom.workspace = true
+icu_normalizer.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+xenonet-app.workspace = true
+xenonet-base.workspace = true
+xenonet-components.workspace = true
+
+[lints]
+workspace = true

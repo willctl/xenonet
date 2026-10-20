@@ -1,4 +1,7 @@
-// Self-contained service/tools archives use Node, never Desktop's Electron.
+// Self-contained service/tools archives, never Desktop's Electron. Each
+// carries the Rust xenonet binary in bin/ (scripts/rust-release.mjs): the
+// service Desktop runs (electron/service-runtime.js), and the command. A
+// package can't be built without it.
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -6,6 +9,7 @@ import * as tar from "tar";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import { SERVICE_API, CONSOLE_API } from "../core/components/protocol.js";
+import { buildBinary, binaryName } from "./rust-release.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const versions = JSON.parse(fs.readFileSync(path.join(root, "components/versions.json"), "utf8"));
@@ -37,6 +41,7 @@ export async function buildComponents({ app, platform, arch, output = path.join(
   const node = await runtime(platform, arch);
   const nodeLicense = path.join(root, ".xenonet", "node", `LICENSE-${versions.node}.txt`);
   if (!fs.existsSync(nodeLicense)) await download(`https://raw.githubusercontent.com/nodejs/node/v${versions.node}/LICENSE`, nodeLicense);
+  const xenonet = buildBinary({ platform, arch });
   const packages = [];
   fs.mkdirSync(output, { recursive: true });
   fs.mkdirSync(bundle, { recursive: true });
@@ -50,6 +55,9 @@ export async function buildComponents({ app, platform, arch, output = path.join(
     for (const folder of ["core", "server", "cli", "mcp", "schemas", "node_modules", ...(component === "service" ? ["dist"] : [])]) fs.cpSync(path.join(app, folder), path.join(staging, folder), { recursive: true, dereference: true, filter: (file) => !file.split(path.sep).some((name) => [".bin", ".package-lock.json", "electron-updater"].includes(name)) });
     fs.copyFileSync(node, path.join(staging, platform === "win32" ? "node.exe" : "node"));
     if (platform !== "win32") fs.chmodSync(path.join(staging, "node"), 0o755);
+    fs.mkdirSync(path.join(staging, "bin"));
+    fs.copyFileSync(xenonet, path.join(staging, "bin", binaryName(platform)));
+    if (platform !== "win32") fs.chmodSync(path.join(staging, "bin", binaryName(platform)), 0o755);
     const manifest = { format: 1, component, version: versions[component], platform, arch, node: versions.node, api: SERVICE_API, consoleApi: CONSOLE_API, dataSchema: 1 };
     fs.writeFileSync(path.join(staging, "component.json"), JSON.stringify(manifest, null, 2) + "\n");
     fs.writeFileSync(path.join(staging, "package.json"), JSON.stringify({ name: `xenonet-${component}`, productName: "XenoNet", version: versions[component], type: "module", xenonetComponent: component, dependencies: pkg.dependencies }, null, 2) + "\n");

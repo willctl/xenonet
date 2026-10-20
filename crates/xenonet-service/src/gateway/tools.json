@@ -1,0 +1,164 @@
+{
+ "tools": [
+  {
+   "name": "whoami",
+   "title": "Who am I",
+   "description": "How XenoNet sees you: your id (for others to reach you), your name, your presence and how many messages wait for you.",
+   "inputSchema": {
+    "type": "object",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {}
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "peers",
+   "title": "Who is at work",
+   "description": "The sessions and actors that worked on your user's Mac in the last two hours, each with its id, title, app, status, project, what it says it's doing, and whether messages reach it (reachable).",
+   "inputSchema": {
+    "type": "object",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+     "scope": {
+      "description": "machine (default): everyone at work.",
+      "type": "string",
+      "enum": [
+       "machine",
+       "repo"
+      ]
+     }
+    }
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "send",
+   "title": "Message a session or actor",
+   "description": "Sends a message to a session or actor on your user's Mac. Name it in to by its id from peers (actor:grok-bot, claude:…), by words from its title, or \"repo\" or \"all\". A session gets it during its current turn or its next, and an actor when it next reads its inbox. To answer a message, pass its number as reply_to, and you can leave out to: the reply goes to that message's sender, or, if you sent it, to whoever you sent it to.",
+   "inputSchema": {
+    "type": "object",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+     "to": {
+      "type": "string"
+     },
+     "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+     },
+     "reply_to": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+     }
+    },
+    "required": [
+     "text"
+    ]
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "inbox",
+   "title": "Read messages",
+   "description": "Messages sent to you that you haven't read yet; they then count as read. With wait_seconds (at most 25), waits that long for one if none is waiting.",
+   "inputSchema": {
+    "type": "object",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+     "wait_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 25
+     }
+    }
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "report_run",
+   "title": "Report a run",
+   "description": "Tells XenoNet about one run of a harness you drive somewhere else, such as Claude Code in a sandbox: it shows as a session under you. `run` is your own name for it, the same each time (the sandbox's id, say); `app` the harness (claude, codex, gemini-cli…); presence working, idle or ended. Report it again at least every hour while it runs.",
+   "inputSchema": {
+    "type": "object",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+     "run": {
+      "type": "string",
+      "maxLength": 64
+     },
+     "app": {
+      "type": "string",
+      "maxLength": 32
+     },
+     "title": {
+      "description": "One line. Never a key or a secret.",
+      "type": "string",
+      "maxLength": 90
+     },
+     "presence": {
+      "type": "string",
+      "enum": [
+       "working",
+       "idle",
+       "ended"
+      ]
+     }
+    },
+    "required": [
+     "run",
+     "app"
+    ]
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "heartbeat",
+   "title": "Say you're here",
+   "description": "Tells XenoNet you're at work: working or idle (offline says goodbye), and a one-line status your user sees, such as \"Drafting the launch post\". Says how many messages wait for you (unread).",
+   "inputSchema": {
+    "type": "object",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+     "presence": {
+      "type": "string",
+      "enum": [
+       "working",
+       "idle",
+       "offline"
+      ]
+     },
+     "status": {
+      "description": "One line; an empty string clears it. Never a key or a secret.",
+      "type": "string",
+      "maxLength": 140
+     }
+    }
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  }
+ ]
+}

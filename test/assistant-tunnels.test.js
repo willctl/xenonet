@@ -43,11 +43,11 @@ test("a profile of your own that runs xenonet mcp assistant is recognized, with 
 });
 
 test("the profile XenoNet writes: its tunnel, the key from the environment only, and the launcher's command in forward slashes", () => {
-  const argv = adapterArgv({ exec: "C:\\Users\\nova\\AppData\\Local\\XenoNet\\runtime\\launcher\\node.exe", entry: "C:\\Program Files\\XenoNet\\cli\\xenonet.js", grant: "gr_0a1b2c3d4e5f60718293a4b5", port: 47842 });
+  const argv = adapterArgv({ bin: "C:\\Users\\nova Smith\\AppData\\Local\\XenoNet\\runtime\\launcher\\xenonet.exe", grant: "gr_0a1b2c3d4e5f60718293a4b5", port: 47842 });
   const line = commandLine(argv);
-  assert.equal(line, 'C:/Users/nova/AppData/Local/XenoNet/runtime/launcher/node.exe "C:/Program Files/XenoNet/cli/xenonet.js" mcp assistant --grant gr_0a1b2c3d4e5f60718293a4b5 --port 47842');
-  assert.ok(!commandLine(adapterArgv({ exec: "/n", entry: "/s.js", grant: "gr_0a1b2c3d4e5f60718293a4b5" })).includes("--port"), "the default port needs no flag");
-  assert.throws(() => adapterArgv({ exec: "/n", entry: "/s.js", grant: "gr_x; rm -rf /" }));
+  assert.equal(line, '"C:/Users/nova Smith/AppData/Local/XenoNet/runtime/launcher/xenonet.exe" mcp assistant --grant gr_0a1b2c3d4e5f60718293a4b5 --port 47842');
+  assert.ok(!commandLine(adapterArgv({ bin: "/x/xenonet", grant: "gr_0a1b2c3d4e5f60718293a4b5" })).includes("--port"), "the default port needs no flag");
+  assert.throws(() => adapterArgv({ bin: "/x/xenonet", grant: "gr_x; rm -rf /" }));
   const yaml = profileYaml({ tunnelId: TUNNEL, command: line, label: "My dot" });
   assert.match(yaml, /tunnel_id: 'tunnel_0123456789abcdef0123456789abcdef'/);
   assert.match(yaml, /api_key: "env:CONTROL_PLANE_API_KEY"/);
@@ -135,7 +135,7 @@ function rig(w, { found = "C:/tc/tunnel-client.exe", profiles = [], kept = new M
     secrets,
     home: "C:\\Users\\nova",
     env: { PATH: "", OPENAI_API_KEY: "sk-should-not-pass-through-0000000000" },
-    launch: { exec: "C:\\Users\\nova\\AppData\\Local\\XenoNet\\runtime\\launcher\\node.exe", entry: "C:\\Users\\nova\\AppData\\Local\\XenoNet\\runtime\\launcher\\cli\\xenonet.js", runAsNode: false, port: 47840 },
+    launch: { bin: "C:\\Users\\nova\\AppData\\Local\\XenoNet\\runtime\\launcher\\xenonet.exe", port: 47840 },
     find: () => found,
     version: async () => "0.0.16",
     profiles: () => profiles,
@@ -179,7 +179,7 @@ test("set up and run: its tunnel and key kept, the key only in tunnel-client's e
     assert.equal(p.env.OPENAI_API_KEY, undefined, "and no other key passed on");
     assert.ok(!p.args.join(" ").includes(KEY) && !p.profile.includes(KEY), "never on its command line or in its profile");
     assert.match(p.profile, new RegExp(`--grant ${dot.grant_id}`));
-    assert.match(p.profile, /C:\/Users\/nova\/AppData\/Local\/XenoNet\/runtime\/launcher\/node\.exe/);
+    assert.match(p.profile, /C:\/Users\/nova\/AppData\/Local\/XenoNet\/runtime\/launcher\/xenonet\.exe mcp assistant --grant/);
     assert.equal((await tunnels.start(dot.grant_id)).pid, p.pid, "starting it again keeps the one running");
 
     p.stdout.write(`${JSON.stringify({ level: "error", msg: "poll failed", error: `401 for ${KEY} at C:\\Users\\nova\\x` })}\n`);

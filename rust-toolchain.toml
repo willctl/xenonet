@@ -1,0 +1,7 @@
+# The Rust that builds XenoNet (docs/design/rust-core.md, "Toolchain"): the
+# latest stable release, so clippy has its latest checks. rustup installs
+# this toolchain for the checkout without changing anyone's default. The
+# crates still declare the oldest Rust each builds on (rmcp needs 1.88).
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]

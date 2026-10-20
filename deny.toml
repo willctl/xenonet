@@ -1,0 +1,48 @@
+# What `cargo deny check` holds the Rust core's dependencies to
+# (docs/design/rust-core.md, "Static analysis"): known advisories, licenses
+# that fit XenoNet's MIT, no wildcards, and crates only from crates.io.
+[graph]
+# The platforms XenoNet ships for.
+targets = [
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-pc-windows-msvc",
+  "aarch64-pc-windows-msvc",
+]
+
+[advisories]
+# Every RustSec advisory fails the check: vulnerable, unsound, unmaintained
+# or yanked. An exception goes in `ignore` with its reason.
+unmaintained = "all"
+unsound = "all"
+yanked = "deny"
+ignore = []
+
+[licenses]
+confidence-threshold = 0.93
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "ISC",
+  "Unicode-3.0",
+  "Zlib",
+  # subtle, which rustls (the service's HTTPS client) uses for its
+  # constant-time comparisons.
+  "BSD-3-Clause",
+]
+
+[licenses.private]
+# XenoNet's own crates aren't published.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# The workspace's own crates are path dependencies.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

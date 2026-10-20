@@ -1,0 +1,33 @@
+Other machines' XenoNets on this one's map, read over SSH (a prototype: XenoNet
+shows them with XENONET_HOSTS=1). Each machine runs its own XenoNet; this one
+runs ssh <host> xenonet relay for each host, with an ssh config of its own,
+so your ~/.ssh/config is never read or changed.
+
+  xenonet hosts                      the hosts, and how each is doing
+  xenonet hosts self [name]          what this XenoNet calls itself as a host,
+                                   or name it (a name you choose: studio, vm1);
+                                   --clear takes the name away
+  xenonet hosts add <id> [user@host] add one; the host is <id> when not given
+      --ssh-port <n>               ssh's port, when it isn't 22
+      --identity <file>            a key of its own for this host
+      --known-hosts <file>         a known_hosts file of its own
+      --host-key-alias <name>      the name its host key is kept under
+      --xenonet-port <n>             the XenoNet to read there (47840)
+      --command <path>             the xenonet command there, when ssh's
+                                   PATH doesn't find it
+      --since <age>                sessions this recent: 7d, 12h, 90m
+      --detail                     live detail too, not only titles,
+                                   states and counts
+      --start                      start a XenoNet there when none is
+                                   running, for as long as the relay runs
+      --local                      another XenoNet on this machine instead
+      --replace                    replace one of the same id
+  xenonet hosts remove <id>          forget it (--forget also forgets where you
+                                   placed its nodes; --yes doesn't ask)
+  xenonet hosts test <id>            one try, saying how far it got
+  xenonet hosts reconnect <id>       try now
+  --json                           the answer as JSON
+
+Before the first connection to a machine, accept its host key once in a
+terminal, with the command xenonet hosts add prints. Adding and removing
+hosts are yours to do. XenoNet refuses them from under a session.

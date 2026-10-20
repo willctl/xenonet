@@ -165,7 +165,7 @@ pub fn in_scratch_zone(i: u32, key: String) -> bool {
 /// The first `cmd` on `path_var` that `can_run` accepts (it throws for a
 /// file it can't run), or that this process may run when there's none.
 #[napi(js_name = "onPath")]
-pub fn on_path(cmd: String, path_var: String, pathext: Option<String>, windows: bool, can_run: Option<Function<String, Unknown>>) -> Option<String> {
+pub fn on_path(cmd: String, path_var: String, pathext: Option<String>, windows: bool, can_run: Option<Function<'_, String, Unknown<'_>>>) -> Option<String> {
     let mut check = |file: &str| match &can_run {
         Some(f) => f.call(file.to_string()).is_ok(),
         None => paths::can_run(file),
@@ -174,7 +174,7 @@ pub fn on_path(cmd: String, path_var: String, pathext: Option<String>, windows: 
 }
 
 #[napi(js_name = "listFiles")]
-pub fn list_files(dir: String, pick: Function<String, bool>, depth: u32) -> Result<Vec<String>> {
+pub fn list_files(dir: String, pick: Function<'_, String, bool>, depth: u32) -> Result<Vec<String>> {
     // Once `pick` throws, JS would read no further: it isn't called again,
     // and its error is thrown.
     let mut failed = None;
@@ -382,7 +382,7 @@ pub fn app_dir(kind: String, xdg_state: Option<String>, xdg_cache: Option<String
 }
 
 #[napi(js_name = "findClaudeDesktopDir")]
-pub fn find_claude_desktop_dir(env: DirsEnv, platform: String, home: String, exists: Function<String, bool>, readdir: Function<String, Vec<String>>) -> Option<String> {
+pub fn find_claude_desktop_dir(env: DirsEnv, platform: String, home: String, exists: Function<'_, String, bool>, readdir: Function<'_, String, Vec<String>>) -> Option<String> {
     dirs::find_claude_desktop_dir(&env_of(env), &platform, &home, &mut JsLook { exists, readdir, mtime: None })
 }
 
@@ -391,9 +391,9 @@ pub fn bundled_codex_binaries(
     env: DirsEnv,
     platform: String,
     home: String,
-    exists: Function<String, bool>,
-    readdir: Function<String, Vec<String>>,
-    mtime: Function<String, f64>,
+    exists: Function<'_, String, bool>,
+    readdir: Function<'_, String, Vec<String>>,
+    mtime: Function<'_, String, f64>,
 ) -> Vec<String> {
     dirs::bundled_codex_binaries(&env_of(env), &platform, &home, &mut JsLook { exists, readdir, mtime: Some(mtime) })
 }
@@ -413,8 +413,8 @@ pub struct LogConstants {
 #[napi(js_name = "logConstants")]
 pub fn log_constants() -> LogConstants {
     LogConstants {
-        levels: xlog::LEVELS.iter().map(|s| s.to_string()).collect(),
-        components: xlog::COMPONENTS.iter().map(|s| s.to_string()).collect(),
+        levels: xlog::LEVELS.iter().map(ToString::to_string).collect(),
+        components: xlog::COMPONENTS.iter().map(ToString::to_string).collect(),
         max_bytes: xlog::MAX_BYTES as f64,
     }
 }
@@ -442,6 +442,10 @@ pub struct JsLog {
 }
 
 #[napi]
+// On the impl, not the methods: napi-derive copies a method's attributes
+// onto the two-argument wrapper it generates for it, and an expectation
+// there goes unfulfilled.
+#[expect(clippy::too_many_arguments, reason = "write takes the twin's arguments one by one, as LogCore's JS method did")]
 impl JsLog {
     #[napi(constructor)]
     pub fn new(dir: Option<String>, component: String, instance: Option<String>, version: Option<String>, home: String, max_bytes: f64) -> Self {
@@ -451,7 +455,6 @@ impl JsLog {
     }
 
     /// The entry written, or null when the same came too soon.
-    #[allow(clippy::too_many_arguments)]
     #[napi]
     pub fn write(&mut self, level: String, code: String, message: Option<String>, err: Option<LogErr>, fix: Option<String>, ctx: Option<Json>, now: f64) -> Option<Json> {
         let err = err.map(|e| ErrInfo { message: e.message, stack: e.stack, code: e.code });
@@ -552,12 +555,12 @@ pub(crate) fn text(s: String) -> Jv {
 }
 
 #[napi(js_name = "userSid")]
-pub fn user_sid(run: Function<Vec<String>, RunAnswer>) -> Jv {
+pub fn user_sid(run: Function<'_, Vec<String>, RunAnswer>) -> Jv {
     outcome(private_file::user_sid(&mut runner(&run)).map(text))
 }
 
 #[napi(js_name = "aclOf")]
-pub fn acl_of(file: String, run: Function<Vec<String>, RunAnswer>) -> Jv {
+pub fn acl_of(file: String, run: Function<'_, Vec<String>, RunAnswer>) -> Jv {
     outcome(private_file::acl_of(&file, &mut runner(&run)).map(text))
 }
 
@@ -567,12 +570,12 @@ pub fn others_in(sddl: String, sid: String) -> Vec<String> {
 }
 
 #[napi(js_name = "otherReaders")]
-pub fn other_readers(file: String, windows: bool, run: Function<Vec<String>, RunAnswer>) -> Jv {
+pub fn other_readers(file: String, windows: bool, run: Function<'_, Vec<String>, RunAnswer>) -> Jv {
     outcome(private_file::other_readers(&file, windows, &mut runner(&run)).map(|v| Jv::Json(json!(v))))
 }
 
 #[napi(js_name = "protectFile")]
-pub fn protect_file(file: String, windows: bool, run: Function<Vec<String>, RunAnswer>) -> Jv {
+pub fn protect_file(file: String, windows: bool, run: Function<'_, Vec<String>, RunAnswer>) -> Jv {
     outcome(private_file::protect_file(&file, windows, &mut runner(&run)).map(|()| Jv::Undef))
 }
 

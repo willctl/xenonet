@@ -10,11 +10,13 @@
 //                hooks in ~/.codex/hooks.json, which Codex asks you to trust
 //                once (/hooks)
 //
-// Both run the xenonet command (cli/xenonet.js: `xenonet mcp`, `xenonet hook <app>`)
-// on the app's own runtime (Electron run as Node), so they work wherever
-// XenoNet does, Node installed or not. XenoNet's hooks are told apart from yours
-// by their URL or command, and a copy of each settings file is kept the
-// first time XenoNet changes it (<file>.before-xenonet).
+// Both run the xenonet binary (`xenonet mcp`, `xenonet hook <app>`): installed
+// XenoNet's launcher, which never moves (components/runtime.js's xenonetBin).
+// Entries an earlier XenoNet wrote run Node and cli/xenonet.js instead;
+// they're still its own, so connecting again replaces them and disconnecting
+// takes them out. XenoNet's hooks are told apart from yours by their URL or
+// command, and a copy of each settings file is kept the first time XenoNet
+// changes it (<file>.before-xenonet).
 //
 // Each XenoNet on this machine (the installed one, XenoNet Dev) is told apart
 // by its port: connecting or disconnecting one changes its own entries and
@@ -25,9 +27,10 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { onPath, tilde, pathStyle } from "../paths.js";
+import { onPath, tilde } from "../paths.js";
 import { parseJson } from "../vendor.js";
 import { INSTANCES } from "../instances.js";
+import { xenonetBin } from "../components/runtime.js";
 
 // The names a XenoNet's MCP servers take: the installed XenoNet's xenonet and
 // xenonet-console, another's with its instance (xenonet-dev).
@@ -88,20 +91,22 @@ export function mergeHooks(settings, ours, add = null) {
 // Whether every group in `add` is already in place.
 const hooksInPlace = (settings, ours, add) => Object.entries(add).every(([event, group]) => (settings.hooks?.[event] ?? []).some((g) => (g.matcher ?? null) === (group.matcher ?? null) && g.hooks?.some((h) => ours(h) && JSON.stringify(h) === JSON.stringify(group.hooks[0]))));
 
-export function createConnect({ port, root, demo = false, exec = process.execPath, runAsNode = false, home = os.homedir(), env = process.env, platform = process.platform, run = runFile, consoleMcp = !!env.XENONET_LAUNCHER_EXEC }) {
-  const entry = pathStyle(root).join(root, "cli", "xenonet.js");
-  const serverEnv = { XENONET_PORT: String(port), ...(runAsNode ? { ELECTRON_RUN_AS_NODE: "1" } : {}) };
-  const mcp = { type: "stdio", command: exec, args: [entry, "mcp"], env: serverEnv };
+// `bin`: the xenonet binary the entries run, xenonetBin's by default.
+// `consoleMcp`: whether the console operator's entry is XenoNet's too, as
+// for the installed XenoNet, which Desktop registers it for.
+export function createConnect({ port, root, demo = false, home = os.homedir(), env = process.env, platform = process.platform, bin = xenonetBin({ env, root, platform }), run = runFile, consoleMcp = !!(env.XENONET_LAUNCHER_BIN || env.XENONET_LAUNCHER_EXEC) }) {
+  const serverEnv = { XENONET_PORT: String(port) };
+  const mcp = { type: "stdio", command: bin, args: ["mcp"], env: serverEnv };
   const hookUrl = `http://127.0.0.1:${port}/api/hook/claude`;
   const claudeSettings = path.join(env.CLAUDE_CONFIG_DIR ?? path.join(home, ".claude"), "settings.json");
   // Claude Code keeps user-scope MCP servers in .claude.json, in
   // CLAUDE_CONFIG_DIR when that's set.
   const claudeState = env.CLAUDE_CONFIG_DIR ? path.join(env.CLAUDE_CONFIG_DIR, ".claude.json") : path.join(home, ".claude.json");
   const codexHooks = path.join(env.CODEX_HOME ?? path.join(home, ".codex"), "hooks.json");
-  const hookCommand = (app) => `${Object.entries(serverEnv).map(([k, v]) => `${k}=${v}`).join(" ")} ${quote(exec)} ${quote(entry)} hook ${app}`;
+  const hookCommand = (app) => `${Object.entries(serverEnv).map(([k, v]) => `${k}=${v}`).join(" ")} ${quote(bin)} hook ${app}`;
   const psQuote = (s) => `'${String(s).replace(/'/g, "''")}'`;
   const windowsHook = (app) => {
-    const script = `# XenoNet hook ${app}\n${Object.entries(serverEnv).map(([k, v]) => `$env:${k}=${psQuote(v)}`).join("; ")}; & ${psQuote(exec)} ${psQuote(entry)} hook ${psQuote(app)}; exit $LASTEXITCODE`;
+    const script = `# XenoNet hook ${app}\n${Object.entries(serverEnv).map(([k, v]) => `$env:${k}=${psQuote(v)}`).join("; ")}; & ${psQuote(bin)} hook ${psQuote(app)}; exit $LASTEXITCODE`;
     return `powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(script, "utf16le").toString("base64")}`;
   };
   const hookText = (h) => {
@@ -110,9 +115,10 @@ export function createConnect({ port, root, demo = false, exec = process.execPat
     return encoded ? Buffer.from(encoded, "base64").toString("utf16le") : command;
   };
 
-  // Any XenoNet's entries, whichever XenoNet (port) or checkout added them, in
-  // this form or the hook.js of earlier versions.
-  const xenonetCommand = (app) => (h) => h?.type === "command" && (new RegExp(`(cli[\\\\/]xenonet\\.js['"]? hook|(cli|server[\\\\/]engine)[\\\\/]hook\\.js['"]?) ${app}$`).test(h.command ?? "") || (hookText(h).startsWith(`# XenoNet hook ${app}\n`) && hookText(h).endsWith(` hook '${app}'; exit $LASTEXITCODE`)));
+  // Any XenoNet's entries, whichever XenoNet (port) or checkout added them:
+  // the binary's, cli/xenonet.js's with Node, or the hook.js of earlier
+  // versions.
+  const xenonetCommand = (app) => (h) => h?.type === "command" && (new RegExp(`(cli[\\\\/]xenonet\\.js['"]? hook|(cli|server[\\\\/]engine)[\\\\/]hook\\.js['"]?|[\\\\/]xenonet(\\.exe)?['"]? hook) ${app}$`).test(h.command ?? "") || (hookText(h).startsWith(`# XenoNet hook ${app}\n`) && hookText(h).endsWith(` hook '${app}'; exit $LASTEXITCODE`)));
   const xenonetClaudeHook = (h) => (h?.type === "http" && /^http:\/\/(127\.0\.0\.1|localhost):\d+\/api\/hook\/claude$/.test(h.url ?? "")) || xenonetCommand("claude")(h);
   // Which XenoNet an entry is for: its port, from its URL or XENONET_PORT; null
   // for an early form that didn't say.
@@ -125,6 +131,17 @@ export function createConnect({ port, root, demo = false, exec = process.execPat
   const mine = (isXenoNet) => (h) => isXenoNet(h) && (portOf(h) === port || portOf(h) == null || hookFiles({ x: [{ hooks: [h] }] }, isXenoNet).some((f) => !fs.existsSync(f)));
   const ourClaudeHook = mine(xenonetClaudeHook);
   const ourCodexHook = mine(xenonetCommand("codex"));
+  // Whether this XenoNet has hooks here, in place or not: its port's, or an
+  // early form's that named none.
+  const ownHooks = (hooks, isXenoNet) => Object.values(hooks ?? {}).flat().flatMap((g) => g.hooks ?? []).filter((h) => isXenoNet(h) && (portOf(h) === port || portOf(h) == null));
+  // Whether this XenoNet's entries here are an earlier XenoNet's, which run
+  // Node and cli/xenonet.js (or hook.js) rather than the binary: a hook of
+  // its own, or its MCP server.
+  const earlier = (hooks, isXenoNet, server) => ownHooks(hooks, isXenoNet).some((h) => h.type === "command" && /xenonet\.js|hook\.js/.test(hookText(h))) || (Array.isArray(server?.args) && server.args.some((a) => /\.m?js$/.test(String(a))));
+  const EARLIER = "XenoNet's entries here run cli/xenonet.js with Node, as an earlier XenoNet wrote them. Connecting again has them run the xenonet binary.";
+  // A hooks change's state: as XenoNet would add them, or there but not so
+  // (an earlier XenoNet's, say), or not there.
+  const hooksState = (settings, ours, add, isXenoNet) => (hooksInPlace(settings, ours, add) ? "present" : ownHooks(settings.hooks, isXenoNet).length ? "different" : "missing");
   // Other XenoNets connected here too, by port, for the preview.
   const others = (hooks, isXenoNet) => [...new Set(Object.values(hooks ?? {}).flat().flatMap((g) => g.hooks ?? []).filter((h) => isXenoNet(h) && !mine(isXenoNet)(h)).map(portOf))].sort();
   const names = serverNames(port);
@@ -170,7 +187,7 @@ export function createConnect({ port, root, demo = false, exec = process.execPat
     // installed one): its entries stay as they are.
     const besides = (list) => list.map((p) => `Another XenoNet (port ${p}${Object.values(INSTANCES).find((i) => i.port === p) ? `, ${Object.values(INSTANCES).find((i) => i.port === p).name}` : ""}) is connected here too; its entries stay as they are.`);
     const broken = (entry, hooks, ours) => [...(entry ? gone(entry.command, entry.args) : []), ...hookFiles(hooks, ours).filter((f) => !fs.existsSync(f))].map((f) => `${tilde(f, home)} is gone`);
-    const command = `${tilde(exec, home)} ${tilde(entry, home)}`;
+    const command = tilde(bin, home);
     return {
       port,
       demo,
@@ -182,9 +199,13 @@ export function createConnect({ port, root, demo = false, exec = process.execPat
           changes: [
             ...consoleChange("claude"),
             { id: "mcp", what: `The ${names.xenonet} MCP server, for every project`, where: "Claude Code's user settings, through claude mcp add-json --scope user", state: serverState(claudeEntry), detail: `${command} mcp (XENONET_PORT=${port})` },
-            { id: "hooks", what: `Hooks: ${CLAUDE_EVENTS.map(([e, m]) => (m ? `${e} (edits)` : e)).join(", ")}`, where: tilde(claudeSettings, home), state: hooksInPlace(readJson(claudeSettings, home), ourClaudeHook, claudeHooks) ? "present" : "missing", detail: `posting to ${hookUrl}; SessionStart runs ${command} hook claude` },
+            { id: "hooks", what: `Hooks: ${CLAUDE_EVENTS.map(([e, m]) => (m ? `${e} (edits)` : e)).join(", ")}`, where: tilde(claudeSettings, home), state: hooksState(readJson(claudeSettings, home), ourClaudeHook, claudeHooks, xenonetClaudeHook), detail: `posting to ${hookUrl}; SessionStart runs ${command} hook claude` },
           ],
-          notes: [...(claude ? [] : ["XenoNet can't find the claude command, so it can add the hooks but not the MCP server. Install Claude Code's CLI, or add the server by hand."]), ...besides(others(readJson(claudeSettings, home).hooks, xenonetClaudeHook))],
+          notes: [
+            ...(claude ? [] : ["XenoNet can't find the claude command, so it can add the hooks but not the MCP server. Install Claude Code's CLI, or add the server by hand."]),
+            ...(earlier(readJson(claudeSettings, home).hooks, xenonetClaudeHook, claudeEntry) ? [EARLIER] : []),
+            ...besides(others(readJson(claudeSettings, home).hooks, xenonetClaudeHook)),
+          ],
           broken: broken(claudeEntry, readJson(claudeSettings, home).hooks, ourClaudeHook),
         },
         {
@@ -194,11 +215,12 @@ export function createConnect({ port, root, demo = false, exec = process.execPat
           changes: [
             ...consoleChange("codex"),
             { id: "mcp", what: `The ${names.xenonet} MCP server, for every project`, where: "Codex's config, through codex mcp add", state: serverState(codexServer), detail: `${command} mcp (XENONET_PORT=${port})` },
-            { id: "hooks", what: `Hooks: ${CODEX_EVENTS.map(([e, m]) => (m ? `${e} (edits)` : e)).join(", ")}`, where: tilde(codexHooks, home), state: hooksInPlace(readJson(codexHooks, home), ourCodexHook, codexHookSet) ? "present" : "missing", detail: `running ${command} hook codex` },
+            { id: "hooks", what: `Hooks: ${CODEX_EVENTS.map(([e, m]) => (m ? `${e} (edits)` : e)).join(", ")}`, where: tilde(codexHooks, home), state: hooksState(readJson(codexHooks, home), ourCodexHook, codexHookSet, xenonetCommand("codex")), detail: `running ${command} hook codex` },
           ],
           notes: [
             ...(codex ? [] : ["XenoNet can't find the codex command, so it can add the hooks but not the MCP server."]),
             "Codex runs new hooks only once you trust them: run /hooks in Codex and trust XenoNet's.",
+            ...(earlier(readJson(codexHooks, home).hooks, xenonetCommand("codex"), codexServer) ? [EARLIER] : []),
             ...besides(others(readJson(codexHooks, home).hooks, xenonetCommand("codex"))),
           ],
           broken: broken(codexServer, readJson(codexHooks, home).hooks, ourCodexHook),

@@ -51,3 +51,17 @@ test("the secret goes only on the window's API requests to Desktop", () => {
     assert.equal(send(url)[PAGE_HEADER], undefined, url);
   }
 });
+
+test("on port 0 it takes any free port, and its host check follows the one it got", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-desktop-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "dist"));
+  fs.writeFileSync(path.join(root, "dist", "index.html"), "<!doctype html><title>XenoNet</title>");
+  const desktop = await desktopServer({ root, port: 0, service: "http://127.0.0.1:9", secret: SECRET });
+  t.after(() => desktop.close());
+  const port = Number(new URL(desktop.base).port);
+  assert.ok(port > 0, desktop.base);
+  assert.equal((await fetch(`${desktop.base}/`)).status, 200);
+  const other = await new Promise((resolve) => http.get({ host: "127.0.0.1", port, path: "/", headers: { host: "127.0.0.1:0" } }, (res) => (res.resume(), resolve(res.statusCode))));
+  assert.equal(other, 421, "a request for port 0 isn't one for this server");
+});

@@ -26,7 +26,7 @@ pub fn app_dir(kind: &str, xdg: Option<&str>, local_app_data: Option<&str>, plat
     }
     match platform {
         "win32" => {
-            let local = local_app_data.map(str::to_string).unwrap_or_else(|| join_all(&[home, "AppData", "Local"]));
+            let local = local_app_data.map_or_else(|| join_all(&[home, "AppData", "Local"]), str::to_string);
             if state {
                 join_all(&[&local, name])
             } else {
@@ -150,7 +150,11 @@ pub fn bundled_codex_binaries(env: &Env, platform: &str, home: &str, look: &mut 
     }
 }
 
+// Spelled as on a unix host, where Node's path module is posix; on Windows
+// the JS tests run against the Rust (test:rust) check the same. (Two
+// attributes: clippy takes only a plain cfg(test) for test code.)
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
 

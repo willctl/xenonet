@@ -1,0 +1,1 @@
+Check with xenonet update --check. Run xenonet update tools, service or all to install. If terminals are running, close them and run the service update again. Desktop updates are in the app's Updates panel.

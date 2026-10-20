@@ -1,7 +1,9 @@
 // The resolve hook register.js installs. An import of core/<path>.js loads
-// ./core/<path>.js when there is one, from the tests and from the JS that
-// imports the module alike. What a twin imports itself is left alone, so a
-// twin can import the JS it doesn't replace (its own module included).
+// ./core/<path>.js when there is one, from the tests, from the JS that
+// imports the module, and from other twins alike, so the service has one of
+// each module whoever imports it (a twin that loaded another's JS would keep
+// a second copy of its state: config's folders, say). A twin's import of its
+// own module is the JS it wraps, and is left alone.
 import fs from "node:fs";
 
 // XENONET_TWIN_LOG names a file each twin loaded is written to, one a line,
@@ -20,10 +22,10 @@ const hasTwin = (url) => {
 export async function resolve(specifier, context, next) {
   const found = await next(specifier, context);
   if (log && found.url.startsWith(twins)) fs.appendFileSync(log, `core/${found.url.slice(twins.length)}\n`);
-  if (!found.url.startsWith(core) || context.parentURL?.startsWith(twins)) return found;
+  if (!found.url.startsWith(core)) return found;
   const [file, query = ""] = found.url.slice(core.length).split(/(?=[?#])/);
   const twin = twins + file;
-  if (!hasTwin(twin)) return found;
+  if (context.parentURL?.split(/[?#]/)[0] === twin || !hasTwin(twin)) return found;
   if (log) fs.appendFileSync(log, `core/${file}\n`);
   return { ...found, url: twin + query };
 }

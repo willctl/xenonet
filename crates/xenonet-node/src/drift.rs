@@ -30,8 +30,8 @@ pub fn drift_constants() -> DriftConstants {
     DriftConstants {
         max: drift::DRIFT_MAX as u32,
         file: drift::DRIFT_FILE.into(),
-        kinds: drift::KINDS.iter().map(|k| k.to_string()).collect(),
-        additions: drift::ADDITIONS.iter().map(|k| k.to_string()).collect(),
+        kinds: drift::KINDS.iter().map(ToString::to_string).collect(),
+        additions: drift::ADDITIONS.iter().map(ToString::to_string).collect(),
     }
 }
 
@@ -209,7 +209,6 @@ pub struct JsSampling {
 #[napi]
 impl JsSampling {
     #[napi(constructor)]
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         JsSampling { s: Sampling::default() }
     }
@@ -270,7 +269,7 @@ impl JsVendorReader {
     }
 
     #[napi]
-    pub fn majors(&mut self, env: &Env) -> Result<Jv> {
+    pub fn majors(&mut self, env: Env) -> Result<Jv> {
         let majors = self.ready().majors().to_vec();
         let out = majors.into_iter().map(|m| crate::schema::major_jv(env, m)).collect::<Result<Vec<_>>>()?;
         Ok(Jv::Arr(out))
