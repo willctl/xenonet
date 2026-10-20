@@ -2,7 +2,10 @@
 
 A design for running XenoNet's service all the time, with a small tray app
 of its own, and the console as a separate app that connects to it. It
-covers macOS first, then Linux and Windows. Nothing here is built yet.
+covers macOS first, then Linux and Windows. Step 1 of the build plan is
+built for macOS and Linux, off unless you turn it on (see "What step 1
+built" below, and the guide's [Keeping the service running](../guide/always-on.md)).
+The rest isn't built yet.
 
 **In short:**
 
@@ -288,6 +291,54 @@ organization's certificate exists.
 5. **The move from 0.1.x.** The first-run question, moving Open at Login,
    and the guide's components page.
 6. **Windows.** After the open question is settled.
+
+## What step 1 built
+
+The service under a supervisor, for macOS and Linux, with Desktop's offer
+of it from step 5. Where it departs from the plan above, and why:
+
+- **The binary, not node.** The service is the Rust binary now. The
+  launch agent and the unit run `xenonet service run` from the launcher's
+  copy of the binary, `<state>/runtime/launcher/xenonet`, which never
+  moves, or from the binary itself when there's no launcher (a build of
+  your own). `service run` finishes an interrupted update, then runs the
+  selected Service's `bin/xenonet serve` with the environment Desktop
+  gives it, the login shell's `PATH` included, and on Unix becomes it, so
+  launchd's and systemd's signals reach the service.
+- **Off by default.** Nothing registers unless the person chooses it:
+  Desktop asks once, during setup, and Background service (in the palette,
+  the tray and the macOS menu) has the switch. Both call `xenonet service
+  install` and `uninstall`. Open at Login stays Desktop's, since there's no
+  tray app to move it to.
+- **A plist on every Mac.** Without the tray app there's no bundle to
+  register with `SMAppService`, so the desktop case writes and bootstraps
+  the same plist as a headless Mac. `status` doesn't report
+  `requiresApproval`; turning the agent off in Login Items keeps launchd
+  from starting it.
+- **Waiting for the port.** `service run` waits while another service has
+  its port, instead of exiting. So a registration made while Desktop's own
+  service runs takes over when that one stops, rather than failing and
+  being restarted every few seconds. `install` stops the running service
+  at once when the supervisor's copy is waiting and no terminals are open.
+- **Uninstall, not disable.** `xenonet service uninstall` stops the
+  supervised copy and removes the registration; it's refused while that
+  copy has terminals open, unless `--force`. There's no separate `disable`.
+  Desktop's macOS uninstaller runs it, with or without a purge.
+- **Who may.** `install` and `uninstall` ask the running service whether
+  the command comes from you, as the routes that are yours do (a `yours`
+  request on the component socket). With no service running, the command
+  looks at its own parent processes the same way: the nearer of an agent,
+  an actor's app and XenoNet's Desktop decides.
+- **Starting it.** `xenonet service start`, `xenonet update service` and
+  Desktop at startup ask the supervisor to start a registered service for
+  their port (`launchctl kickstart`, `systemctl --user start`) instead of
+  starting one beside it. XenoNet Dev starts and stops its own, as before.
+
+Not built yet from step 1: the doctor's checks of the registration and of
+lingering, and the JS core's `ensureService` asking the supervisor (an
+update installed from Desktop's Updates panel still starts the new service
+itself, and the supervisor's copy takes over at the next login). Windows
+waits on the open question above, and the tray on steps 2 and 3.
 
 ## Sources
 

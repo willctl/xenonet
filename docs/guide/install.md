@@ -51,11 +51,11 @@ To install from the disk image, `XenoNet-<version>-arm64.dmg`, open it and drag 
 
 The installer package, `XenoNet-<version>-arm64.pkg`, is a guided installer. It asks who to install for. Everyone on the Mac means `/Applications`, which needs an administrator password. Just you means `~/Applications`, which doesn't. If XenoNet is running, the installer closes it first, and it opens XenoNet when it's done.
 
-The first time XenoNet opens, it asks whether to open at login, waiting in the menu bar. You can change that later from the menu bar icon or the XenoNet menu.
+The first time XenoNet opens, it asks whether to open at login, waiting in the menu bar. You can change that later from the menu bar icon or the XenoNet menu. It also offers to start its service at login, so sessions keep coordinating while the window is closed. Background service in the palette changes that later. See [Keeping the service running](always-on.md).
 
 Closing the window keeps XenoNet running in the menu bar, the way Windows keeps it in the tray. The Dock icon shows only while the window is open. Reinstalling keeps your login choice.
 
-To uninstall, choose Uninstall XenoNet… from the XenoNet menu. It asks whether to remove your data too, and keeps it by default. Then it moves XenoNet to the Trash.
+To uninstall, choose Uninstall XenoNet… from the XenoNet menu. It asks whether to remove your data too, and keeps it by default. Then it moves XenoNet to the Trash, and stops the service starting at login if you'd turned that on.
 
 ### Opening XenoNet the first time
 

@@ -24,7 +24,9 @@ From each extracted folder, run:
 
 On Windows, use `./node.exe cli/xenonet.js setup`. Either component can be installed first. Tools installs the `xenonet` command. Start the service with `xenonet service start`; `xenonet service status` reports its version and running terminals. `xenonet service stop` refuses while terminals are running. `--force` stops them too.
 
-The service runs as your account, independently of Desktop. It stays running until stopped or you sign out. Opening Desktop starts it when needed. This release does not register an operating-system service or a separate login task.
+The service runs as your account, independently of Desktop. It stays running until stopped or you sign out. Opening Desktop starts it when needed. On macOS and Linux, `xenonet service install` has it start at login instead, and start again if it stops unexpectedly, under launchd or systemd. `xenonet service uninstall` turns that off. See [Keeping the service running](always-on.md).
+
+A machine that only serves as a host for another machine's console needs the Service and Tools, `xenonet setup` from each, and `xenonet service install`. On Linux, `loginctl enable-linger $USER` starts it at boot, before anyone logs in.
 
 ### The console in a browser
 

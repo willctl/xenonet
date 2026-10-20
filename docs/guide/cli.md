@@ -46,6 +46,7 @@ $ xenonet
 | `xenonet mcp assistant --grant <grant>` | The read-only MCP server a tunnel client runs for a remote actor you paired. `--fixture` serves made-up data with no XenoNet, to try a client first. |
 | `xenonet hosts` | Shows [other machines' XenoNets](other-machines.md) beside this one, a prototype. `self` names this XenoNet as a host. `add`, `remove`, `test` and `reconnect` manage the hosts it shows. |
 | `xenonet console <steps>` | Drives XenoNet Dev, to check a change to XenoNet. See [Driving XenoNet](development.md#driving-xenonet-from-agents-scripts-and-tests). |
+| `xenonet service` | The background service. `start`, `status` and `stop` start it, say how it is and stop it; `stop` refuses while terminals run, unless `--force`. `install` starts it at login, and again if it stops unexpectedly, under launchd on macOS or systemd on Linux; `uninstall` turns that off. `run` is what launchd and systemd run. See [Keeping the service running](always-on.md). |
 | `xenonet install`, `xenonet uninstall` | Puts the command on your PATH, or takes it off. |
 | `xenonet completion zsh` | Prints tab completion for zsh. Add `eval "$(xenonet completion zsh)"` to `~/.zshrc`, or the `bash` one to `~/.bashrc`. |
 
