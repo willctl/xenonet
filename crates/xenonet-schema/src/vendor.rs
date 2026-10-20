@@ -20,8 +20,10 @@ use crate::lenient::{self, json_type, Finding, Key, Major, SpecRef};
 use serde_json::Value;
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use xenonet_base::ordered::OrderedMap;
+use xenonet_base::sync::Locked;
 
 // ---------- versions ----------
 
@@ -610,6 +612,58 @@ impl VendorReader {
         let zero: Version = (0.0, 0.0, 0.0, None);
         v.sort_by(|a, b| compare_versions(&parse_version(a).unwrap_or(zero.clone()), &parse_version(b).unwrap_or(zero.clone())));
         v
+    }
+}
+
+/// Every source's reader, made the first time it's asked for, and the drift
+/// log they record in (core/vendor.js's one `readers` Map). The service
+/// keeps one, which the map's readers and the actors' observers share, so
+/// the drift report counts what each has read.
+pub struct Readers {
+    dir: PathBuf,
+    drift: Arc<Mutex<DriftLog>>,
+    by_source: Mutex<HashMap<String, VendorReader>>,
+}
+
+impl Readers {
+    /// `dir`: XenoNet's schemas/ folder.
+    pub fn new(dir: PathBuf, drift: Arc<Mutex<DriftLog>>) -> Readers {
+        Readers { dir, drift, by_source: Mutex::new(HashMap::new()) }
+    }
+
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    pub fn drift(&self) -> &Arc<Mutex<DriftLog>> {
+        &self.drift
+    }
+
+    /// `f` with `source`'s reader and the log. The readers are locked
+    /// before the log, always, so callers on other threads never wait on
+    /// each other; don't hold the log while calling this.
+    pub fn with<T>(&self, source: &str, f: impl FnOnce(&mut VendorReader, &mut DriftLog) -> T) -> T {
+        let mut readers = self.by_source.locked();
+        let r = readers.entry(source.to_string()).or_insert_with(|| VendorReader::new(source, self.dir.clone(), None));
+        let mut log = self.drift.locked();
+        f(r, &mut log)
+    }
+
+    /// reader(source).check(record, { version, kind }): counted and checked
+    /// whole.
+    pub fn check(&self, source: &str, record: &Value, version: Option<&str>, kind: Option<&str>, now: f64) -> Checked {
+        self.with(source, |r, log| {
+            r.stats.records += 1;
+            r.inspect(record, version, kind.map(str::to_string), log, now)
+        })
+    }
+
+    /// What a source's reader has read, as the drift report says: { records,
+    /// checked, dropped, stripped, versions }, None when it has read nothing.
+    pub fn read_of(&self, source: &str) -> Option<Value> {
+        let readers = self.by_source.locked();
+        let r = readers.get(source).filter(|r| r.stats.records + r.stats.checked > 0)?;
+        Some(serde_json::json!({ "records": r.stats.records, "checked": r.stats.checked, "dropped": r.stats.dropped, "stripped": r.stats.stripped, "versions": r.versions() }))
     }
 }
 

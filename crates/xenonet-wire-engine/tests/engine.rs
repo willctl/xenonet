@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use xenonet_service::config::Config;
 use xenonet_service::cores::{Channels, Cores, Engine, State, R};
-use xenonet_service::wire::{Emitter, WireEnv};
+use xenonet_service::wire::{Emitter, VendorReaders, WireEnv};
 use xenonet_wire_engine::world::World;
 
 const A: &str = "claude:aaaaaaaa-0001";
@@ -100,7 +100,7 @@ fn world(name: &str) -> (Arc<World>, std::path::PathBuf) {
     let mut config = Config::from(&[], &get);
     let mut cores = Cores::pending(false, false, false);
     cores.state = Arc::new(Fake { at: now() });
-    let env = WireEnv { version: "0.0.0".into(), emitter: Emitter::new(), drift: Arc::default() };
+    let env = WireEnv { version: "0.0.0".into(), emitter: Emitter::new(), drift: Arc::default(), readers: VendorReaders::default() };
     let w = xenonet_wire_engine::world(&cores, &mut config, &env).expect("the engine's parts");
     (w, dir)
 }

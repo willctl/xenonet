@@ -13,7 +13,6 @@ use crate::actors::{collab_call, collab_get, collab_kind};
 use crate::js::{arg, at, json, no_method, now_ms, text, Locked};
 use crate::world::World;
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use xenonet_actors::app_bundle::AppBundle;
 use xenonet_actors::attribution::{self, Paths, SpawnsState};
@@ -26,7 +25,7 @@ use xenonet_engine::peer::{Calls, Result, Thrown};
 use xenonet_engine::products::{product_of, Product};
 use xenonet_engine::sql::Arg;
 use xenonet_schema::drift::{DriftLog, Piece};
-use xenonet_schema::vendor::{Checked, VendorReader};
+use xenonet_schema::vendor::{Checked, Readers};
 
 /// Each kind's own look.
 enum Kind {
@@ -56,18 +55,9 @@ pub struct One {
     home: String,
 }
 
-/// The lenient readers of the vendor sources the observers read (Hermes's
-/// files), recording drift in the service's one log.
-#[derive(Default)]
-struct Vendor {
-    dir: std::path::PathBuf,
-    readers: Mutex<HashMap<String, VendorReader>>,
-}
-
 pub struct Observers {
     list: Vec<One>,
     reported: Arc<SpawnsState>,
-    vendor: Vendor,
     timers: Mutex<Vec<tokio::task::JoinHandle<()>>>,
 }
 
@@ -111,8 +101,7 @@ pub fn make(w: &Arc<World>) {
         ),
         one("muse-observer", "muse", Kind::Muse(Muse::default()), Some(App { bundle: AppBundle::default(), apps: apps_of(&home, "Muse.app"), id: id(r"^com\.meta\.endo(\.|$)") })),
     ];
-    let vendor = Vendor { dir: w.setup.root.join("schemas"), ..Vendor::default() };
-    if w.observers.set(Observers { list, reported: Arc::new(SpawnsState::default()), vendor, timers: Mutex::new(Vec::new()) }).is_err() {
+    if w.observers.set(Observers { list, reported: Arc::new(SpawnsState::default()), timers: Mutex::new(Vec::new()) }).is_err() {
         return;
     }
     for i in 0..3 {
@@ -131,7 +120,6 @@ pub fn make(w: &Arc<World>) {
 /// One observer's collaborators: its own fields and methods.
 struct ObsCalls<'a> {
     w: &'a World,
-    obs: &'a Observers,
     o: &'a One,
 }
 
@@ -186,12 +174,16 @@ impl ObsCalls<'_> {
         self.w.registration.as_ref().is_none_or(|r| r.observing(self.w, self.o.product.id))
     }
 
+    /// The service's vendor readers, which the map's readers share, so the
+    /// drift report counts what the observers read (Hermes's files). Made
+    /// here only when the map isn't wired, as in a test of this area alone.
+    fn readers(&self) -> Arc<Readers> {
+        self.w.env.readers.get_or_make(|| Readers::new(self.w.setup.root.join("schemas"), self.w.env.drift.clone()))
+    }
+
     fn vendor(&self, op: &str, args: &[Arg]) -> Result<Arg> {
         let source = text(&at(args, 0));
         let version = |i: usize| at(args, i).as_str().map(str::to_string);
-        let v = &self.obs.vendor;
-        let mut log = self.w.env.drift.locked();
-        let log: &mut DriftLog = &mut log;
         let piece = |kind: &str, path: Value, version: Option<String>| Piece {
             source: source.clone(),
             kind: kind.into(),
@@ -199,24 +191,24 @@ impl ObsCalls<'_> {
             vendor_version: version.map_or(Value::Null, Value::String),
             ..Default::default()
         };
+        let record = |p: &Piece| {
+            let mut log = self.w.env.drift.locked();
+            let log: &mut DriftLog = &mut log;
+            log.record(p, now_ms());
+        };
         match op {
-            "check" => {
-                let record = json(&at(args, 1));
-                let mut readers = v.readers.locked();
-                let r = readers.entry(source.clone()).or_insert_with(|| VendorReader::new(&source, v.dir.clone(), None));
-                r.stats.records += 1;
-                Ok(match r.inspect(&record, version(2).as_deref(), None, log, now_ms()) {
-                    Checked::Same => at(args, 1),
-                    Checked::Stripped(x) => arg(&x),
-                    Checked::Dropped => Arg::Null,
-                })
-            }
+            // The readers lock the log themselves, after their own lock.
+            "check" => Ok(match self.readers().check(&source, &json(&at(args, 1)), version(2).as_deref(), None, now_ms()) {
+                Checked::Same => at(args, 1),
+                Checked::Stripped(x) => arg(&x),
+                Checked::Dropped => Arg::Null,
+            }),
             "unparsable" => {
-                log.record(&piece("unparsable", Value::Null, version(1)), now_ms());
+                record(&piece("unparsable", Value::Null, version(1)));
                 Ok(Arg::Undef)
             }
             "missing" => {
-                log.record(&piece("missing-field", json(&at(args, 1)), version(2)), now_ms());
+                record(&piece("missing-field", json(&at(args, 1)), version(2)));
                 Ok(Arg::Undef)
             }
             _ => Err(no_method("vendor", op)),
@@ -403,8 +395,8 @@ impl Calls for ReportedCalls<'_> {
 
 impl Observers {
     /// One observer's look, unless it's off or the map isn't there yet.
-    fn tick(&self, w: &World, o: &One) {
-        let mut c = ObsCalls { w, obs: self, o };
+    fn tick(w: &World, o: &One) {
+        let mut c = ObsCalls { w, o };
         if !Core::may_look(&mut c).unwrap_or(false) {
             return;
         }
@@ -422,7 +414,7 @@ impl Observers {
     /// Every observer's look, one after the other, then the waiting reports.
     fn look(&self, w: &World) {
         for o in &self.list {
-            self.tick(w, o);
+            Self::tick(w, o);
         }
         if !w.map.ready() {
             return;
@@ -434,7 +426,7 @@ impl Observers {
     fn poll(&self, w: &World) {
         for o in &self.list {
             let Kind::Grok(g) = &o.kind else { continue };
-            let mut c = ObsCalls { w, obs: self, o };
+            let mut c = ObsCalls { w, o };
             if !g.may_poll(&mut c).unwrap_or(false) {
                 continue;
             }
@@ -457,7 +449,7 @@ impl Observers {
             self.list
                 .iter()
                 .map(|o| {
-                    let mut c = ObsCalls { w, obs: self, o };
+                    let mut c = ObsCalls { w, o };
                     let s = match &o.kind {
                         Kind::Hermes(h) => h.status(&mut c),
                         Kind::Grok(g) => g.status(&mut c, &o.home),
