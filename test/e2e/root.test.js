@@ -12,6 +12,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { xenonet } from "../../core/control.js";
+import { limit } from "../harness/software.js";
 
 const port = await new Promise((resolve) => {
   const probe = net.createServer().listen(0, "127.0.0.1", () => {
@@ -51,7 +52,7 @@ const shoot = (name, body) => async () => {
 before(async () => {
   await xenonet("test").quit();
   await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
-}, { timeout: 180000 });
+}, { timeout: limit(180000) });
 
 after(async () => {
   if (process.env.XENONET_E2E_KEEP === "1") return;
@@ -59,7 +60,7 @@ after(async () => {
   fs.rmSync(path.join(fs.realpathSync.native(os.tmpdir()), `xenonet-demo-${port}`), { recursive: true, force: true, maxRetries: 10 });
 });
 
-test("the projects folder and where it comes from, and a check of another", { timeout: 60000 }, shoot("root-check", async () => {
+test("the projects folder and where it comes from, and a check of another", { timeout: limit(60000) }, shoot("root-check", async () => {
   const root = await s.driver("root");
   assert.deepEqual([root.source, path.basename(root.path), root.scan.ok], ["default", "Projects", true]);
   assert.equal(await s.eval('document.getElementById("root-name").textContent'), "~/Projects");
@@ -70,7 +71,7 @@ test("the projects folder and where it comes from, and a check of another", { ti
   assert.equal((await s.driver("checkRoot", root.path)).current, true);
 }));
 
-test("the palette's panel checks a folder as you type, and Use this folder reads it", { timeout: 90000 }, shoot("root-panel", async () => {
+test("the palette's panel checks a folder as you type, and Use this folder reads it", { timeout: limit(90000) }, shoot("root-panel", async () => {
   await s.input({ keys: "Escape" });
   const before = await s.driver("state");
   await s.input({ keys: "Mod+K" });
@@ -101,7 +102,7 @@ test("the palette's panel checks a folder as you type, and Use this folder reads
   assert.ok((await projects()).includes("atlas-api"));
 }));
 
-test("going back to a folder brings its layout back", { timeout: 90000 }, shoot("root-layout", async () => {
+test("going back to a folder brings its layout back", { timeout: limit(90000) }, shoot("root-layout", async () => {
   const atlas = (await s.driver("find", { query: "atlas-api", kind: "project", limit: 1 })).nodes[0].id;
   await api("/api/layout", "POST", { positions: { [atlas]: { x: 40, y: -20, z: 10 } } });
   const away = await s.driver("setRoot", "~/Clients");
@@ -115,7 +116,7 @@ test("going back to a folder brings its layout back", { timeout: 90000 }, shoot(
   await api("/api/layout", "POST", { positions: { [atlas]: null } });
 }));
 
-test("your rules and Codex's picks stay with their folder", { timeout: 120000 }, shoot("root-rules", async () => {
+test("your rules and Codex's picks stay with their folder", { timeout: limit(120000) }, shoot("root-rules", async () => {
   const home = (await s.driver("root")).path;
   const docs = path.join(home, "docs");
   // In ~/Projects: a rule of yours, and Codex's picks.
@@ -157,7 +158,7 @@ test("your rules and Codex's picks stay with their folder", { timeout: 120000 },
   assert.ok(end.includes("docs") && !end.includes("labs/snippets:codex"), end.join(", "));
 }));
 
-test("the script step and no page errors", { timeout: 60000 }, async () => {
+test("the script step and no page errors", { timeout: limit(60000) }, async () => {
   const { runStep } = await import("../../core/script.js");
   const said = [];
   await runStep(s, "root:~/Clients", (v) => said.push(v));

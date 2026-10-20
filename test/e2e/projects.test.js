@@ -10,6 +10,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { xenonet } from "../../core/control.js";
+import { limit } from "../harness/software.js";
 
 const port = await new Promise((resolve) => {
   const probe = net.createServer().listen(0, "127.0.0.1", () => {
@@ -47,7 +48,7 @@ const shoot = (name, body) => async () => {
 before(async () => {
   await xenonet("test").quit();
   await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
-}, { timeout: 180000 });
+}, { timeout: limit(180000) });
 
 after(async () => {
   if (process.env.XENONET_E2E_KEEP === "1") return;
@@ -55,7 +56,7 @@ after(async () => {
   fs.rmSync(path.join(fs.realpathSync.native(os.tmpdir()), `xenonet-demo-${port}`), { recursive: true, force: true, maxRetries: 10 });
 });
 
-test("a folder of repos is a group, and selecting it gathers its projects", { timeout: 60000 }, shoot("projects-group", async () => {
+test("a folder of repos is a group, and selecting it gathers its projects", { timeout: limit(60000) }, shoot("projects-group", async () => {
   assert.deepEqual(await labs(), ["labs/geofence:project", "labs/route-sim:project", "labs:group"]);
   const { nodes } = await s.driver("find", { query: "labs", kind: "project", limit: 1 });
   const st = await s.driver("select", nodes[0].id);
@@ -64,7 +65,7 @@ test("a folder of repos is a group, and selecting it gathers its projects", { ti
   for (const id of projects) assert.ok(st.gathered.members.includes(id), `${id} is gathered`);
 }));
 
-test("the palette makes the group one project, and undoes it", { timeout: 60000 }, shoot("projects-rule", async () => {
+test("the palette makes the group one project, and undoes it", { timeout: limit(60000) }, shoot("projects-rule", async () => {
   await s.input({ keys: "Mod+K" });
   await s.input({ text: "> treat labs as one project" });
   await s.input({ keys: "Enter" });
@@ -75,7 +76,7 @@ test("the palette makes the group one project, and undoes it", { timeout: 60000 
   assert.deepEqual(await until((g) => g.length === 3), ["labs/geofence:project", "labs/route-sim:project", "labs:group"]);
 }));
 
-test("asking Codex shows the outline first, and Send records its picks", { timeout: 60000 }, shoot("projects-codex", async () => {
+test("asking Codex shows the outline first, and Send records its picks", { timeout: limit(60000) }, shoot("projects-codex", async () => {
   await s.input({ keys: "Escape" });
   await s.driver("command", "projects-codex");
   let rows = 0;
@@ -92,7 +93,7 @@ test("asking Codex shows the outline first, and Send records its picks", { timeo
   await s.input({ keys: "Escape" });
 }));
 
-test("no page errors", { timeout: 30000 }, async () => {
+test("no page errors", { timeout: limit(30000) }, async () => {
   const { entries } = await s.logs({ level: "error", source: "page" });
   assert.deepEqual(entries.map((e) => e.text), []);
   assert.deepEqual(await s.driver("errors"), []);

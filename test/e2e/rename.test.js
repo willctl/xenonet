@@ -11,6 +11,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { xenonet } from "../../core/control.js";
+import { limit } from "../harness/software.js";
 
 const port = await new Promise((resolve) => {
   const probe = net.createServer().listen(0, "127.0.0.1", () => {
@@ -48,7 +49,7 @@ before(async () => {
   await xenonet("test").quit();
   await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
   ({ nodes: [session] } = await s.driver("find", { query: "", kind: "session", limit: 1 }));
-}, { timeout: 180000 });
+}, { timeout: limit(180000) });
 
 after(async () => {
   if (process.env.XENONET_E2E_KEEP === "1") return;
@@ -56,7 +57,7 @@ after(async () => {
   fs.rmSync(path.join(fs.realpathSync.native(os.tmpdir()), `xenonet-demo-${port}`), { recursive: true, force: true, maxRetries: 10 });
 });
 
-test("F2 opens the selected session's name, Enter saves it, and the map shows it", { timeout: 60000 }, shoot("rename-f2", async () => {
+test("F2 opens the selected session's name, Enter saves it, and the map shows it", { timeout: limit(60000) }, shoot("rename-f2", async () => {
   await s.driver("select", session.id);
   const before = await shown();
   assert.equal(before.title, session.title, "the inspector shows the session's name");
@@ -77,7 +78,7 @@ test("F2 opens the selected session's name, Enter saves it, and the map shows it
   assert.equal(await s.eval(`return document.querySelector("#toast").textContent`), "Renamed in the demo");
 }));
 
-test("Esc puts the name back and keeps the selection; an empty name isn't taken", { timeout: 60000 }, shoot("rename-cancel", async () => {
+test("Esc puts the name back and keeps the selection; an empty name isn't taken", { timeout: limit(60000) }, shoot("rename-cancel", async () => {
   await s.input({ keys: "F2" });
   await s.input({ text: "Not this" });
   await s.input({ keys: "Escape" });
@@ -94,7 +95,7 @@ test("Esc puts the name back and keeps the selection; an empty name isn't taken"
   assert.equal(await titleOf(session.id), "Refunds: final pass", "nothing was saved");
 }));
 
-test("the palette renames the selected session, and the driver does too", { timeout: 60000 }, shoot("rename-palette", async () => {
+test("the palette renames the selected session, and the driver does too", { timeout: limit(60000) }, shoot("rename-palette", async () => {
   await s.input({ keys: "Mod+K" });
   await s.input({ text: "> rename" });
   await s.input({ keys: "Enter" });
@@ -108,7 +109,7 @@ test("the palette renames the selected session, and the driver does too", { time
   await assert.rejects(s.driver("rename", session.id, "  "), /needs a name|can't be empty/);
 }));
 
-test("no page errors", { timeout: 30000 }, async () => {
+test("no page errors", { timeout: limit(30000) }, async () => {
   const { entries } = await s.logs({ level: "error", source: "page" });
   assert.deepEqual(entries.map((e) => e.text), []);
   assert.deepEqual(await s.driver("errors"), []);

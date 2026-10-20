@@ -11,6 +11,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { xenonet } from "../../core/control.js";
+import { limit } from "../harness/software.js";
 
 const port = await new Promise((resolve) => {
   const probe = net.createServer().listen(0, "127.0.0.1", () => {
@@ -49,7 +50,7 @@ before(async () => {
   await xenonet("test").quit();
   await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
   ({ themes: all, current: first } = await s.driver("themes"));
-}, { timeout: 180000 });
+}, { timeout: limit(180000) });
 
 after(async () => {
   if (process.env.XENONET_E2E_KEEP === "1") return;
@@ -57,7 +58,7 @@ after(async () => {
   fs.rmSync(path.join(fs.realpathSync.native(os.tmpdir()), `xenonet-demo-${port}`), { recursive: true, force: true, maxRetries: 10 });
 });
 
-test("switching through every theme and back is live: drawn in place, never a reload", { timeout: 180000 }, shoot("themes-live", async () => {
+test("switching through every theme and back is live: drawn in place, never a reload", { timeout: limit(180000) }, shoot("themes-live", async () => {
   assert.ok(all.length >= 5, `themes: ${all.map((t) => t.id)}`);
   const { origin } = await look();
   for (const t of [...all.filter((x) => x.id !== first), all.find((x) => x.id === first)]) {
@@ -72,7 +73,7 @@ test("switching through every theme and back is live: drawn in place, never a re
   }
 }));
 
-test("every theme draws with no page errors", { timeout: 180000 }, shoot("themes-draw", async () => {
+test("every theme draws with no page errors", { timeout: limit(180000) }, shoot("themes-draw", async () => {
   const { cursor } = await s.logs({ limit: 1 });
   for (const t of all) {
     await s.driver("theme", t.id);
@@ -84,7 +85,7 @@ test("every theme draws with no page errors", { timeout: 180000 }, shoot("themes
   assert.deepEqual(await s.driver("errors"), []);
 }));
 
-test("what you did survives a switch: the op log, with each switch logged once", { timeout: 60000 }, shoot("themes-ops", async () => {
+test("what you did survives a switch: the op log, with each switch logged once", { timeout: limit(60000) }, shoot("themes-ops", async () => {
   await s.driver("select", null);
   await s.driver("clearOps");
   const { nodes } = await s.driver("find", { query: "atlas-api", kind: "project", limit: 1 });
@@ -100,7 +101,7 @@ test("what you did survives a switch: the op log, with each switch logged once",
   await s.driver("theme", first);
 }));
 
-test("a preview shows a theme in this window alone, and goes back or is kept", { timeout: 60000 }, shoot("themes-preview", async () => {
+test("a preview shows a theme in this window alone, and goes back or is kept", { timeout: limit(60000) }, shoot("themes-preview", async () => {
   let st = await s.driver("previewTheme", "gridline");
   assert.deepEqual([st.theme.id, st.theme.preview, st.theme.inUse], ["gridline", "gridline", first]);
   assert.equal((await s.api("/api/themes")).current, first, "a preview isn't saved");
@@ -114,7 +115,7 @@ test("a preview shows a theme in this window alone, and goes back or is kept", {
   await s.driver("theme", first);
 }));
 
-test("a theme file of yours named for a built-in takes its place, live", { timeout: 60000 }, shoot("themes-yours", async () => {
+test("a theme file of yours named for a built-in takes its place, live", { timeout: limit(60000) }, shoot("themes-yours", async () => {
   const { folder } = await s.api("/api/themes");
   const builtIn = (await s.api("/api/themes/phosphor")).colors.accent;
   await s.driver("theme", "phosphor");
@@ -133,7 +134,7 @@ test("a theme file of yours named for a built-in takes its place, live", { timeo
   await s.driver("theme", first);
 }));
 
-test("a theme file that tries to get past the checks is drawn as XenoNet's would be, in the gallery and on the map", { timeout: 60000 }, shoot("themes-hostile", async () => {
+test("a theme file that tries to get past the checks is drawn as XenoNet's would be, in the gallery and on the map", { timeout: limit(60000) }, shoot("themes-hostile", async () => {
   const { folder } = await s.api("/api/themes");
   const file = path.join(folder, "hostile.json");
   // Made up, as a theme someone shared might be: it starts from a name
@@ -177,7 +178,7 @@ async function untilState(want, ms = 10000) {
   return st;
 }
 
-test("Theme… shows each theme on the map as you move through it: Esc puts yours back, Enter keeps one", { timeout: 90000 }, shoot("themes-switcher", async () => {
+test("Theme… shows each theme on the map as you move through it: Esc puts yours back, Enter keeps one", { timeout: limit(90000) }, shoot("themes-switcher", async () => {
   await s.driver("theme", first);
   const { origin } = await look();
   // From the palette, with keys, as a person would.
@@ -220,7 +221,7 @@ test("Theme… shows each theme on the map as you move through it: Esc puts your
   await s.driver("theme", first);
 }));
 
-test("the gallery: a card for every theme, yours too; looking at one shows it, a click keeps it, and you make your own from it", { timeout: 120000 }, shoot("themes-gallery", async () => {
+test("the gallery: a card for every theme, yours too; looking at one shows it, a click keeps it, and you make your own from it", { timeout: limit(120000) }, shoot("themes-gallery", async () => {
   await s.driver("theme", first);
   const { origin } = await look();
   let st = await s.driver("command", "theme-gallery");

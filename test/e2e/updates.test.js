@@ -1,12 +1,13 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { xenonet } from "../../core/control.js";
+import { limit } from "../harness/software.js";
 
 const s = xenonet("test");
-before(async () => { await s.quit(); await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" }); }, { timeout: 180000 });
+before(async () => { await s.quit(); await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" }); }, { timeout: limit(180000) });
 after(async () => { await s.quit().catch(() => {}); });
 
-test("Updates is reachable from the palette and driver, and source builds cannot update", { timeout: 60000 }, async () => {
+test("Updates is reachable from the palette and driver, and source builds cannot update", { timeout: limit(60000) }, async () => {
   await s.driver("command", "updates");
   const state = await s.driver("updates");
   assert.equal(state.status, "development");
@@ -17,7 +18,7 @@ test("Updates is reachable from the palette and driver, and source builds cannot
   assert.deepEqual((await s.logs({ source: "page", level: "error" })).entries, []);
 });
 
-test("the update panel renders progress, restart and manual Mac downloads", { timeout: 60000 }, async () => {
+test("the update panel renders progress, restart and manual Mac downloads", { timeout: limit(60000) }, async () => {
   await s.eval(`
     const { createUpdatesPanel } = await import('/src/updates.js');
     window.updatePreview = { status: 'downloading', current: '0.5.0', version: '0.6.0', progress: 42, automaticInstall: true, automaticChecks: true };

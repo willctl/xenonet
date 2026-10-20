@@ -16,6 +16,7 @@ import os from "node:os";
 import path from "node:path";
 import { xenonet, root } from "../../core/control.js";
 import { service } from "../harness/xenonet-bin.js";
+import { limit } from "../harness/software.js";
 
 // The test instance takes this from the environment it starts in.
 process.env.XENONET_HOSTS = "1";
@@ -83,7 +84,7 @@ before(async () => {
   const live = await until(hostOf, (h) => h?.state === "live" && h.drawn, 60000);
   assert.equal(live?.state, "live", `the host didn't come up live: ${JSON.stringify(live)}`);
   await s.driver("settled", { timeout: 30000 });
-}, { timeout: 240000 });
+}, { timeout: limit(240000) });
 
 after(async () => {
   if (process.env.XENONET_E2E_KEEP !== "1") await s.quit().catch(() => {});
@@ -96,7 +97,7 @@ after(async () => {
   fs.rmSync(home, { recursive: true, force: true, maxRetries: 10 });
 });
 
-test("the other machine is a constellation of its own beside this one's, with bridges between checkouts of one repo", { timeout: 60000 }, shoot("hosts-map", async () => {
+test("the other machine is a constellation of its own beside this one's, with bridges between checkouts of one repo", { timeout: limit(60000) }, shoot("hosts-map", async () => {
   await home$();
   const { hosts, bridges, chips } = await s.driver("hosts");
   const h = hosts.find((x) => x.id === HOST);
@@ -125,7 +126,7 @@ test("the other machine is a constellation of its own beside this one's, with br
   assert.equal(st.errors, 0, JSON.stringify(await s.driver("errors")));
 }));
 
-test("a host you're not looking at is drawn only in part, and looking at it draws all of it", { timeout: 60000 }, shoot("hosts-cap", async () => {
+test("a host you're not looking at is drawn only in part, and looking at it draws all of it", { timeout: limit(60000) }, shoot("hosts-cap", async () => {
   await home$();
   const chipOf = async () => (await s.driver("hosts")).chips.find((c) => c.key === HOST);
   // The other machine's nodes drawn now: its host node, and what the cap
@@ -146,7 +147,7 @@ test("a host you're not looking at is drawn only in part, and looking at it draw
   assert.equal((await s.driver("state")).errors, 0, JSON.stringify(await s.driver("errors")));
 }));
 
-test("a remote project gathers its sessions, and they say where they live and stay read-only", { timeout: 90000 }, shoot("hosts-gather", async () => {
+test("a remote project gathers its sessions, and they say where they live and stay read-only", { timeout: limit(90000) }, shoot("hosts-gather", async () => {
   await home$();
   const project = await findRemote("atlas-api", "project");
   assert.ok(project, "the other machine has atlas-api");
@@ -173,7 +174,7 @@ test("a remote project gathers its sessions, and they say where they live and st
   assert.match(seen.where, new RegExp(`on ${HOST}`));
 }));
 
-test("a remote session's stats come through the other machine's relay", { timeout: 60000 }, shoot("hosts-stats", async () => {
+test("a remote session's stats come through the other machine's relay", { timeout: limit(60000) }, shoot("hosts-stats", async () => {
   // The demo's first session, which has tool calls, on the other machine.
   const session = `@${HOST}:claude:0190d3e0-0000-7000-8000-000000000001`;
   const st = await s.driver("stats", session);
@@ -182,7 +183,7 @@ test("a remote session's stats come through the other machine's relay", { timeou
   await s.input({ keys: "Escape" });
 }));
 
-test("the alert strip names the host of a remote alert and offers nothing to do there", { timeout: 60000 }, shoot("hosts-alerts", async () => {
+test("the alert strip names the host of a remote alert and offers nothing to do there", { timeout: limit(60000) }, shoot("hosts-alerts", async () => {
   await home$();
   const cards = await until(
     () => s.eval(`return ([...document.querySelectorAll("#alerts .al.need")].map((el) => ({ text: el.textContent.replace(/\\s+/g, " "), buttons: el.querySelectorAll("[data-al-open], [data-al-ack]").length })))`),
@@ -195,7 +196,7 @@ test("the alert strip names the host of a remote alert and offers nothing to do 
   assert.ok(cards.some((c) => !c.text.includes(`on ${HOST}`) && c.buttons === 2), "this machine's own still opens and dismisses");
 }));
 
-test("going offline dims the host and holds its constellation still, and coming back restores it", { timeout: 90000 }, shoot("hosts-offline", async () => {
+test("going offline dims the host and holds its constellation still, and coming back restores it", { timeout: limit(90000) }, shoot("hosts-offline", async () => {
   await home$();
   const project = await findRemote("atlas-api", "project");
   await s.simulate("host-offline", { a: HOST });
@@ -218,7 +219,7 @@ test("going offline dims the host and holds its constellation still, and coming 
   assert.equal((await s.driver("state")).errors, 0, JSON.stringify(await s.driver("errors")));
 }));
 
-test("a machine's chip shows only its work, and show all brings the rest back", { timeout: 60000 }, shoot("hosts-chips", async () => {
+test("a machine's chip shows only its work, and show all brings the rest back", { timeout: limit(60000) }, shoot("hosts-chips", async () => {
   await home$();
   const local = (await s.driver("find", { query: "atlas-api", kind: "project", limit: 50 })).nodes.find((n) => !n.host);
   const remote = await findRemote("atlas-api", "project");

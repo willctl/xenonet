@@ -15,16 +15,17 @@ import { createRequire } from "node:module";
 import { xenonet } from "../../core/control.js";
 import { installedConsole } from "../../core/components/console.js";
 import { connectService } from "../../core/components/runtime.js";
+import { limit } from "../harness/software.js";
 
 const s = xenonet("test");
-before(async () => { await s.quit(); await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" }); }, { timeout: 180000 });
+before(async () => { await s.quit(); await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" }); }, { timeout: limit(180000) });
 after(async () => { await s.quit().catch(() => {}); });
 
 const freePort = () => new Promise((r) => { const v = net.createServer().listen(0, "127.0.0.1", () => { const { port } = v.address(); v.close(() => r(port)); }); });
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const until = async (fn, ms = 60000) => { for (const end = Date.now() + ms; Date.now() < end;) { const v = await fn(); if (v) return v; await new Promise((r) => setTimeout(r, 100)); } throw new Error("The expected state did not arrive."); };
 
-test("Background service is reachable from the palette and driver, and XenoNet Dev starts its own service", { timeout: 60000 }, async () => {
+test("Background service is reachable from the palette and driver, and XenoNet Dev starts its own service", { timeout: limit(60000) }, async () => {
   await s.driver("command", "background");
   const st = await s.driver("background");
   assert.equal(st.live, false);
@@ -38,7 +39,7 @@ test("Background service is reachable from the palette and driver, and XenoNet D
   assert.deepEqual((await s.logs({ source: "page", level: "error" })).entries, []);
 });
 
-test("the setup offer and the switch ask Desktop, and Windows says it isn't available", { timeout: 60000 }, async () => {
+test("the setup offer and the switch ask Desktop, and Windows says it isn't available", { timeout: limit(60000) }, async () => {
   await s.eval(`
     const { createBackground } = await import('/src/background.js');
     window.bgCalls = [];
@@ -113,7 +114,7 @@ exit 0
 
 const supported = ["darwin", "linux"].includes(process.platform);
 
-test("a production Desktop offers it once, and registers and unregisters it through the xenonet command", { timeout: 300000, skip: !supported && "starting the service at login isn't available here yet" }, async () => {
+test("a production Desktop offers it once, and registers and unregisters it through the xenonet command", { timeout: limit(300000), skip: !supported && "starting the service at login isn't available here yet" }, async () => {
   // The shared test instance isn't needed here, and this Desktop is another.
   await s.quit();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-background-"));

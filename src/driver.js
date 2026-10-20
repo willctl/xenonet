@@ -146,6 +146,22 @@ export function createDriver(app) {
     return { ...d, fps: Number.isFinite(d.fps) ? d.fps : null };
   }
 
+  // Resolves once the map has drawn its next frame, or after `ms` if none
+  // comes. What's under the pointer is worked out as a frame is drawn, and
+  // a map drawn in software (as on a machine with no GPU) can be a second
+  // between frames, longer than frame() waits.
+  const waiting = new Set();
+  scene.onDrawn(() => {
+    for (const done of waiting) done();
+    waiting.clear();
+  });
+  const drawn = (ms = 5000) =>
+    new Promise((resolve) => {
+      const done = () => (clearTimeout(timer), resolve());
+      const timer = setTimeout(() => (waiting.delete(done), resolve()), ms);
+      waiting.add(done);
+    });
+
   // Resolves once the view has stayed settled for a few frames, and the
   // map has drawn it (at rest it draws only so often; see render-budget.js).
   async function settled({ timeout = 15000 } = {}) {
@@ -156,10 +172,14 @@ export function createDriver(app) {
       calm = m.settled ? calm + 1 : 0;
       if (calm >= 3) {
         scene.wake();
-        await frame();
-        return { waitedMs: Math.round(performance.now() - t0) };
+        await drawn();
+        // Still settled once drawn; something that moved meanwhile is
+        // waited out too.
+        if (motion(scene).settled) return { waitedMs: Math.round(performance.now() - t0) };
+        calm = 0;
       }
       if (performance.now() - t0 > timeout) {
+        const m = motion(scene);
         const what = [m.layout && "the layout", m.camera && "the camera", m.moves && `${m.moves} gathering nodes`, m.theme && "a change of theme", m.transitions && `${m.transitions} CSS transitions`].filter(Boolean).join(", ");
         throw new Error(`still moving after ${timeout} ms: ${what}`);
       }
@@ -194,6 +214,17 @@ export function createDriver(app) {
     },
     state,
     settled,
+    // Resolves once the map has drawn its next frame, with the frames drawn
+    // so far. Given a point `at` with no map under it (a panel, say), it
+    // doesn't wait.
+    async drawn({ timeout = 5000, at = null } = {}) {
+      const onMap = !at || !!document.elementFromPoint(at.x, at.y)?.closest("#scene");
+      if (onMap) {
+        scene.wake();
+        await drawn(timeout);
+      }
+      return { frames: scene.drawingState().frames, waited: onMap };
+    },
 
     // Nodes whose id, title or name contain every word of `query`, drawn
     // ones first, then the most recent. `kind` narrows it: session, project,

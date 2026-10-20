@@ -22,6 +22,8 @@ export function createReplay({ scene, hud, sfx, onEnter, onExit, getCanvas }) {
   let speed = 0;
   let raf = 0;
   let lastFrame = 0;
+  // How far apart frames have come lately (ms): see frame().
+  let frameGap = 1000 / 60;
   let recorder = null;
   let chunks = [];
   let active = false;
@@ -84,7 +86,12 @@ export function createReplay({ scene, hud, sfx, onEnter, onExit, getCanvas }) {
 
   function frame(now) {
     raf = requestAnimationFrame(frame);
-    const dt = Math.min(0.1, (now - lastFrame) / 1000);
+    // A frame's time, capped so a stall (a hidden window) doesn't leap the
+    // replay ahead. Frames that only ever come slowly (drawn in software, a
+    // second or two apart) get their whole gap, so a film keeps its length.
+    const gap = now - lastFrame;
+    const dt = Math.max(0, Math.min(Math.max(0.1, (1.5 * frameGap) / 1000), gap / 1000));
+    frameGap += (Math.min(Math.max(gap, 0), 3000) - frameGap) * 0.2;
     lastFrame = now;
     if (playing) {
       const span = end - start;

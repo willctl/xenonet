@@ -12,6 +12,7 @@ import { installLauncher, installBundle, activatePackage } from "../../core/comp
 import { connectService } from "../../core/components/runtime.js";
 import { currentComponent } from "../../core/components/packages.js";
 import { nextComponent } from "../harness/component-fixture.js";
+import { limit } from "../harness/software.js";
 
 const freePort = () => new Promise((r) => { const s = net.createServer().listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => r(port)); }); });
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -27,7 +28,7 @@ const until = async (fn) => { for (const end = Date.now() + 60000; Date.now() < 
 // XENONET_E2E_RESTART=1 runs it on a hosted runner anyway.
 const hosted = process.env.CI === "true" && process.env.XENONET_E2E_RESTART !== "1";
 
-test("production Desktop restarts without losing its service, console connection or terminal", { timeout: 300000, skip: hosted && "hosted runners have lost the service or Desktop part way through this test (see the note above); XENONET_E2E_RESTART=1 runs it anyway" }, async () => {
+test("production Desktop restarts without losing its service, console connection or terminal", { timeout: limit(300000), skip: hosted && "hosted runners have lost the service or Desktop part way through this test (see the note above); XENONET_E2E_RESTART=1 runs it anyway" }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-components-"));
   const port = await freePort();
   const env = { ...process.env, XENONET_INSTANCE: "test", XENONET_DEMO: "1", XENONET_STANDALONE: "1", XENONET_RUNTIME_DIR: dir, XENONET_RUNTIME_EXEC: process.execPath, XENONET_PORT: String(port), XENONET_DESKTOP_PORT: String(await freePort()), XENONET_SHOW: process.env.XENONET_E2E_SHOW ?? "hidden" };

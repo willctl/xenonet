@@ -5,18 +5,19 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { xenonet } from "../../core/control.js";
+import { limit } from "../harness/software.js";
 
 const port = await new Promise((resolve) => {
   const probe = net.createServer().listen(0, "127.0.0.1", () => { const { port } = probe.address(); probe.close(() => resolve(port)); });
 });
 const s = xenonet("test", { port });
-before(async () => { await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" }); }, { timeout: 180000 });
+before(async () => { await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" }); }, { timeout: limit(180000) });
 after(async () => {
   await s.quit().catch(() => {});
   fs.rmSync(path.join(fs.realpathSync.native(os.tmpdir()), `xenonet-demo-${port}`), { recursive: true, force: true, maxRetries: 10 });
 });
 
-test("the refusal command opens a searchable browser with outcome filters and details", { timeout: 60000 }, async () => {
+test("the refusal command opens a searchable browser with outcome filters and details", { timeout: limit(60000) }, async () => {
   assert.ok((await s.driver("commands")).some((c) => c.id === "refusals" && c.label === "Review provider refusals"));
   await s.driver("command", "refusals");
   let st = (await s.driver("refusals", "refresh")).refusals;

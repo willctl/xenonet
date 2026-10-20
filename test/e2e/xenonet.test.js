@@ -12,6 +12,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { xenonet, root } from "../../core/control.js";
+import { limit } from "../harness/software.js";
 
 // The test instance, on a spare port only this run knows, so nothing else
 // drives it meanwhile.
@@ -56,7 +57,7 @@ before(async () => {
   // copy quits first.
   await xenonet("test").quit();
   await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
-}, { timeout: 180000 });
+}, { timeout: limit(180000) });
 
 after(async () => {
   if (process.env.XENONET_E2E_KEEP === "1") return;
@@ -64,7 +65,7 @@ after(async () => {
   fs.rmSync(path.join(fs.realpathSync.native(os.tmpdir()), `xenonet-demo-${port}`), { recursive: true, force: true, maxRetries: 10 });
 });
 
-test("boots on the demo world with its alerts and no page errors", { timeout: 60000 }, shoot("boot", async () => {
+test("boots on the demo world with its alerts and no page errors", { timeout: limit(60000) }, shoot("boot", async () => {
   const st = await s.driver("state");
   assert.ok(st.counts.projects >= 8, `projects: ${st.counts.projects}`);
   assert.ok(st.counts.sessions >= 10, `sessions: ${st.counts.sessions}`);
@@ -73,7 +74,7 @@ test("boots on the demo world with its alerts and no page errors", { timeout: 60
   assert.equal(st.errors, 0, JSON.stringify(await s.driver("errors")));
 }));
 
-test("selecting a project gathers its sessions; arrows step through, Esc puts them back", { timeout: 60000 }, shoot("gather", async () => {
+test("selecting a project gathers its sessions; arrows step through, Esc puts them back", { timeout: limit(60000) }, shoot("gather", async () => {
   await home();
   const project = await findOne("atlas-api", "project");
   let st = await s.driver("select", project.id);
@@ -96,19 +97,46 @@ test("selecting a project gathers its sessions; arrows step through, Esc puts th
   assert.equal(st.gathered, null);
 }));
 
-test("a real click on a gathered session selects it", { timeout: 60000 }, shoot("click", async () => {
+test("a real click on a gathered session selects it", { timeout: limit(120000) }, shoot("click", async () => {
   await home();
   const project = await findOne("atlas-api", "project");
-  const { gathered } = await s.driver("select", project.id);
-  const session = gathered.members.find((id) => /^(claude|codex):/.test(id));
-  const { did, state } = await s.input({ click: { node: session } });
-  assert.ok(did.click, "clicked");
+  // As a person would, where hovering shows one, its body or its label
+  // beside it: once the selection has held 3 s, you are drawn looking at
+  // the project (you.js), and can stand in front of a session's body, as
+  // on a machine that draws slowly. The demo's sessions come and go, and
+  // each one moves the map a little, so a click that took another looks
+  // again.
+  let session = null, found = false, did = null, state = null;
+  for (let tries = 0; tries < 3 && !(state && state.selection?.id === session); tries++) {
+    const { gathered } = await s.driver("select", project.id);
+    session = null;
+    let spot = null;
+    for (const id of gathered.members.filter((id) => /^(claude|codex):/.test(id))) {
+      const at = await s.driver("screenPos", id);
+      const { title } = (await s.driver("find", { query: id, limit: 1 })).nodes[0] ?? {};
+      if (!at?.onScreen || !title) continue;
+      for (const dx of [0, 30, 60]) {
+        const p = { x: at.x + dx, y: at.y };
+        await s.input({ move: p });
+        if ((await s.eval(`return document.querySelector("#tooltip").hidden ? "" : document.querySelector("#tooltip").textContent`)).includes(title)) {
+          [session, spot] = [id, p];
+          break;
+        }
+      }
+      if (session) break;
+    }
+    if (!session) continue;
+    found = true;
+    ({ did, state } = await s.input({ click: spot }));
+  }
+  assert.ok(found, "hovering shows one of its sessions");
+  assert.ok(did?.click, "clicked");
   assert.equal(state.selection?.id, session);
   // Still gathered: picking one of its sessions keeps the gathering.
   assert.equal(state.gathered?.root, project.id);
 }));
 
-test("something selected, the right column is its inspector alone; nothing selected, the rest come back", { timeout: 60000 }, shoot("context", async () => {
+test("something selected, the right column is its inspector alone; nothing selected, the rest come back", { timeout: limit(60000) }, shoot("context", async () => {
   await home();
   try {
     await s.window({ size: "1600x1000" });
@@ -127,7 +155,7 @@ test("something selected, the right column is its inspector alone; nothing selec
   }
 }));
 
-test("the palette opens with Mod+K and runs a command with Enter", { timeout: 60000 }, shoot("palette", async () => {
+test("the palette opens with Mod+K and runs a command with Enter", { timeout: limit(60000) }, shoot("palette", async () => {
   await home();
   let st = (await s.input({ keys: "Mod+K" })).state;
   assert.ok(st.overlays.palette, "palette open");
@@ -139,7 +167,7 @@ test("the palette opens with Mod+K and runs a command with Enter", { timeout: 60
   assert.equal(st.overlays.wallpaper, false);
 }));
 
-test("simulated states reach the alert strip, and clear undoes them", { timeout: 60000 }, shoot("simulate", async () => {
+test("simulated states reach the alert strip, and clear undoes them", { timeout: limit(60000) }, shoot("simulate", async () => {
   await home();
   const before = await s.driver("state");
   const stuck = new Set(before.alerts.filter((a) => a.kind === "stuck").map((a) => a.session));
@@ -158,7 +186,7 @@ test("simulated states reach the alert strip, and clear undoes them", { timeout:
   assert.ok(!st.alerts.some((x) => x.kind === "stuck" && x.session === calm.id), "cleared");
 }));
 
-test("a screenshot of the hidden window is the page at full size, and lets go of still", { timeout: 60000 }, shoot("screenshot", async () => {
+test("a screenshot of the hidden window is the page at full size, and lets go of still", { timeout: limit(60000) }, shoot("screenshot", async () => {
   await home();
   const st = await s.driver("state");
   const shot = await s.screenshot({ name: "e2e-overview", maxWidth: 400 });
@@ -173,12 +201,15 @@ test("a screenshot of the hidden window is the page at full size, and lets go of
   assert.equal((await s.driver("state")).still, false);
 }));
 
-test("still holds the view: two shots in a row match", { timeout: 60000 }, shoot("still", async () => {
+test("still holds the view: two shots in a row match", { timeout: limit(60000) }, shoot("still", async () => {
   await home();
   await s.driver("still", true);
   try {
     const a = await s.screenshot({ name: "e2e-still-a", inline: false });
-    const b = await s.screenshot({ name: "e2e-still-b", inline: false });
+    // Right after the first, without settling again: drawn in software,
+    // settling takes seconds, time enough for the demo's live activity to
+    // change the panels and move the map.
+    const b = await s.screenshot({ name: "e2e-still-b", inline: false, settle: false });
     const [pa, pb] = [a, b].map((x) => fs.readFileSync(path.join(root, x.file)));
     // Live demo activity can still change a panel's text between the two,
     // so the map is compared, not every byte.
@@ -188,7 +219,7 @@ test("still holds the view: two shots in a row match", { timeout: 60000 }, shoot
   }
 }));
 
-test("identity chips filter the map to one identity's work, and hiding identities masks them", { timeout: 60000 }, shoot("identities", async () => {
+test("identity chips filter the map to one identity's work, and hiding identities masks them", { timeout: limit(60000) }, shoot("identities", async () => {
   await home();
   let ids = await s.driver("identities");
   const label = (c) => c.label;
@@ -216,7 +247,7 @@ test("identity chips filter the map to one identity's work, and hiding identitie
   await home();
 }));
 
-test("a session's stats: Mod+I in the palette opens them, with a cost and a table for each chart", { timeout: 60000 }, shoot("stats", async () => {
+test("a session's stats: Mod+I in the palette opens them, with a cost and a table for each chart", { timeout: limit(60000) }, shoot("stats", async () => {
   await home();
   const n = await findOne("partial refunds", "session");
   const opened = await s.driver("stats", n.id);
@@ -237,7 +268,7 @@ test("a session's stats: Mod+I in the palette opens them, with a cost and a tabl
   await home();
 }));
 
-test("a theme change redraws every window in the new look, and back", { timeout: 90000 }, shoot("theme", async () => {
+test("a theme change redraws every window in the new look, and back", { timeout: limit(90000) }, shoot("theme", async () => {
   // Choosing the theme is yours (verify.person), and these tests run under
   // an agent, so the change is sent from the page, as XenoNet's own window
   // sends it, but straight to the server rather than through the page's
@@ -262,7 +293,7 @@ test("a theme change redraws every window in the new look, and back", { timeout:
   await s.driver("settled", { timeout: 30000 });
 }));
 
-test("what you do is logged as steps, which play back to the same state", { timeout: 60000 }, shoot("ops", async () => {
+test("what you do is logged as steps, which play back to the same state", { timeout: limit(60000) }, shoot("ops", async () => {
   await home();
   await s.driver("clearOps");
   const project = await findOne("atlas-api", "project");
@@ -278,7 +309,7 @@ test("what you do is logged as steps, which play back to the same state", { time
   await home();
 }));
 
-test("a film of the day plays to its end card and records an MP4", { timeout: 90000, skip: !(await import("../../core/dirs.js")).findFfmpeg() && "no ffmpeg" }, shoot("film", async () => {
+test("a film of the day plays to its end card and records an MP4", { timeout: limit(90000), skip: !(await import("../../core/dirs.js")).findFfmpeg() && "no ffmpeg" }, shoot("film", async () => {
   await home();
   const file = path.join(root, ".xenonet", "e2e-film.mp4");
   fs.rmSync(file, { force: true });
@@ -298,7 +329,7 @@ test("a film of the day plays to its end card and records an MP4", { timeout: 90
   assert.equal(fs.readFileSync(file).subarray(4, 8).toString(), "ftyp", "an MP4");
 }));
 
-test("the doctor lists what went wrong lately, copies diagnostics safe to share, and offers an agent to look at them", { timeout: 60000 }, shoot("doctor", async () => {
+test("the doctor lists what went wrong lately, copies diagnostics safe to share, and offers an agent to look at them", { timeout: limit(60000) }, shoot("doctor", async () => {
   await home();
   const diag = await s.api("/api/diagnose");
   assert.equal(diag.bundle.schema, "diagnostics/bundle/v1");
@@ -326,7 +357,7 @@ test("the doctor lists what went wrong lately, copies diagnostics safe to share,
   await home();
 }));
 
-test("sounds come from where things happen: an actor's act is placed on its side of the screen, and flat places nothing", { timeout: 60000 }, shoot("sound", async () => {
+test("sounds come from where things happen: an actor's act is placed on its side of the screen, and flat places nothing", { timeout: limit(60000) }, shoot("sound", async () => {
   await home();
   await s.driver("command", "sound-speakers");
   assert.equal((await s.driver("sound")).mode, "speakers");
@@ -359,7 +390,7 @@ test("sounds come from where things happen: an actor's act is placed on its side
   await s.driver("command", "sound-speakers");
 }));
 
-test("on a narrow screen the panels are one sheet the tabs pick, and a selection opens in it", { timeout: 90000 }, shoot("narrow", async () => {
+test("on a narrow screen the panels are one sheet the tabs pick, and a selection opens in it", { timeout: limit(90000) }, shoot("narrow", async () => {
   await home();
   try {
     await s.window({ size: "390x844" });
@@ -383,7 +414,7 @@ test("on a narrow screen the panels are one sheet the tabs pick, and a selection
   assert.equal((await s.driver("state")).sheet.narrow, false, "wide again, every panel in its column");
 }));
 
-test("each panel's icon sits before its title, the same as its tab's; the Link panel keeps its signal light", { timeout: 60000 }, shoot("panel-icons", async () => {
+test("each panel's icon sits before its title, the same as its tab's; the Link panel keeps its signal light", { timeout: limit(60000) }, shoot("panel-icons", async () => {
   await home();
   try {
     // Wide, where every panel is in its column and the tabs don't show.
@@ -403,7 +434,7 @@ test("each panel's icon sits before its title, the same as its tab's; the Link p
   }
 }));
 
-test("This computer's panel shows the demo's made-up load, each core and the system's mark, and the palette hides and shows it", { timeout: 60000 }, shoot("system", async () => {
+test("This computer's panel shows the demo's made-up load, each core and the system's mark, and the palette hides and shows it", { timeout: limit(60000) }, shoot("system", async () => {
   await home();
   const until = async (fn, ms = 8000) => {
     const end = Date.now() + ms;
@@ -426,7 +457,7 @@ test("This computer's panel shows the demo's made-up load, each core and the sys
   assert.equal((await s.driver("system")).shown, true, "and back");
 }));
 
-test("Token use says about what today's work would cost, and what the demo's made-up OpenRouter key has spent", { timeout: 60000 }, shoot("spend", async () => {
+test("Token use says about what today's work would cost, and what the demo's made-up OpenRouter key has spent", { timeout: limit(60000) }, shoot("spend", async () => {
   await home();
   const until = async (fn, ms = 8000) => {
     const end = Date.now() + ms;
@@ -445,7 +476,7 @@ test("Token use says about what today's work would cost, and what the demo's mad
   assert.equal(sp.openrouter.limit, 50);
 }));
 
-test("Token use says what each actor's work cost today: the demo's Wren, and the rest unattributed, adding up to the day's", { timeout: 60000 }, shoot("spend-actors", async () => {
+test("Token use says what each actor's work cost today: the demo's Wren, and the rest unattributed, adding up to the day's", { timeout: limit(60000) }, shoot("spend-actors", async () => {
   await home();
   const errors = (await s.driver("errors")).length;
   const until = async (fn, ms = 20000) => {
@@ -483,7 +514,7 @@ test("Token use says what each actor's work cost today: the demo's Wren, and the
   assert.deepEqual((await s.driver("errors")).slice(errors), [], "no page errors");
 }));
 
-test("Spotify's chip shows what's playing in the demo's made-up player, pauses it, and XenoNet's music steps aside while it plays", { timeout: 60000 }, shoot("spotify", async () => {
+test("Spotify's chip shows what's playing in the demo's made-up player, pauses it, and XenoNet's music steps aside while it plays", { timeout: limit(60000) }, shoot("spotify", async () => {
   await home();
   const until = async (fn, ms = 8000) => {
     const end = Date.now() + ms;
@@ -515,7 +546,7 @@ test("Spotify's chip shows what's playing in the demo's made-up player, pauses i
   assert.equal(outside.status, 403, "only the window plays and pauses");
 }));
 
-test("no page errors after all that", { timeout: 30000 }, async () => {
+test("no page errors after all that", { timeout: limit(30000) }, async () => {
   const { entries } = await s.logs({ level: "error", source: "page" });
   assert.deepEqual(entries.map((e) => e.text), []);
   assert.deepEqual(await s.driver("errors"), []);

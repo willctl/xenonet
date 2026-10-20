@@ -147,6 +147,18 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
     if (hovered && hovered !== selected) unhighlight(hovered);
     hovered = node;
     if (node) highlight(node);
+    // The actor under the pointer was weighed against the node hovered when
+    // the pointer moved, but the graph finds the node as it draws, which can
+    // be a frame later: weighed again against this one, what's hovered stays
+    // what a click takes.
+    if (lastPointer && !dragging) {
+      const hit = actorAt(lastPointer);
+      const rec = actorInFront(hit, node) ? hit.rec : null;
+      if (rec !== hoveredActor) {
+        hoveredActor = rec;
+        actors.hover(rec?.id ?? null);
+      }
+    }
     el.style.cursor = node || hoveredActor ? "pointer" : "grab";
     onHover?.(hoveredActor ?? node);
   }
@@ -271,7 +283,12 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
   controls.autoRotate = true;
   controls.autoRotateSpeed = 0.28;
   controls.enableDamping = true;
-  controls.dampingFactor = 0.06;
+  // Damping eases a turn out by this share each frame at 60 a second. The
+  // controls ease out per frame, so each frame takes its share for the time
+  // it covers (see drawFrame): drawn in software, at a frame a second, a
+  // turn would otherwise take a minute and a half to come to rest.
+  const DAMPING = 0.06;
+  controls.dampingFactor = DAMPING;
   let idleTimer = null;
   controls.addEventListener("start", () => {
     controls.autoRotate = false;
@@ -1034,9 +1051,13 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
   // moves go through `fly`, which notes when they end, and the frame loop
   // notes when the camera last moved for any other reason (a drag easing out).
   // Auto-rotation and wallpaper mode's drift are ambient and don't count.
+  // A fly counts until two frames are drawn after it ends: its last step
+  // lands on the first and is drawn on the second, which drawn in software
+  // can be a second or two later.
 
   let cameraUntil = 0;
   let cameraMovedAt = 0;
+  let sinceFly = 2;
   const lastCamera = new THREE.Vector3(), lastTarget = new THREE.Vector3();
   function fly(pos, look, ms) {
     cameraUntil = Math.max(cameraUntil, performance.now() + ms);
@@ -1045,7 +1066,7 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
   function motion() {
     const now = performance.now();
     const drifting = !still && (controls.autoRotate || !!wallpaper);
-    const cameraMoving = now < cameraUntil || (!drifting && now - cameraMovedAt < 150);
+    const cameraMoving = now < cameraUntil || sinceFly < 2 || (!drifting && now - cameraMovedAt < 150);
     // A change of theme counts until its new lines are placed.
     return { layout: engineRunning, camera: cameraMoving, moves: moves.size, theme: !!relinking, settled: !engineRunning && !cameraMoving && !moves.size && !relinking };
   }
@@ -1141,7 +1162,7 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
   // The pointer's last move, looked at once a frame.
   let pointerMove = null;
   el.addEventListener("pointermove", (e) => (pointerMove = e.buttons ? null : e), { passive: true });
-  el.addEventListener("pointerleave", () => ((pointerMove = null), hoverActor(null)));
+  el.addEventListener("pointerleave", () => ((pointerMove = null), (lastPointer = null), hoverActor(null)));
 
   // ---------- frame loop ----------
   //
@@ -1174,6 +1195,10 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
   addEventListener("keydown", onInput, { passive: true });
   const pacer = createPacer();
   let forced = true, rafId = null, waitTimer = null, lastFrameAt = -Infinity, frames = 0, forcedFrames = 0;
+  // How far apart frames have come lately (ms), so that a pause stands out
+  // from a map that's slow to draw: drawn in software, with no GPU, frames
+  // can be a second apart.
+  let frameGap = 1000 / 60;
   const drawnHooks = [];
   // The frame rate now (0: none, Infinity: every frame).
   function rate() {
@@ -1219,14 +1244,17 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
   function drawFrame(at) {
     timer.update();
     // Long enough for the slowest pace, and short enough that the map
-    // doesn't leap after a pause.
-    const dt = Math.min(timer.getDelta(), 0.2);
+    // doesn't leap after a pause. Frames that only ever come slowly (drawn
+    // in software) get their whole gap, so the map keeps time.
+    const dt = Math.min(timer.getDelta(), Math.max(0.2, (1.5 * frameGap) / 1000));
     // Ambient animation runs on its own clock, at the theme's pace, and
     // stops while still.
     ambientClock += dt * THEME.motion.pace;
     const t = still ? STILL_T : ambientClock;
     const adt = still ? 0 : dt;
-    if (camera.position.distanceToSquared(lastCamera) > 1e-6 || controls.target.distanceToSquared(lastTarget) > 1e-6) cameraMovedAt = performance.now();
+    const viewMoved = camera.position.distanceToSquared(lastCamera) > 1e-6 || controls.target.distanceToSquared(lastTarget) > 1e-6;
+    if (viewMoved) cameraMovedAt = performance.now();
+    sinceFly = performance.now() > cameraUntil ? sinceFly + 1 : 0;
     lastCamera.copy(camera.position);
     lastTarget.copy(controls.target);
     sky.material.uniforms.time.value = t;
@@ -1277,9 +1305,12 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
     if (selected?.kind === "actor" && performance.now() - actorBranchAt > 500) (actorBranchAt = performance.now()), (branch = actorBranch(selected));
     Object.assign(actorLighting, { focusLevel, selectedId: selected?.id ?? null, branch, dimmed, labelFade });
     actors.step({ t, dt, adt, still, lighting: actorLighting });
-    if (pointerMove) {
+    // What's under the pointer changes when the view moves, as well as
+    // when the pointer does.
+    const pointer = pointerMove ?? (viewMoved ? lastPointer : null);
+    if (pointer) {
       if (!dragging) {
-        const hit = actorAt(pointerMove);
+        const hit = actorAt(pointer);
         hoverActor(actorInFront(hit, hovered) ? hit.rec : null);
       }
       pointerMove = null;
@@ -1315,10 +1346,21 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
     }
     // The layout stops on its own clock (cooldownTime). After a pause
     // (nobody could see the window) it gets that time afresh, so a layout
-    // that started meanwhile finishes rather than stopping half done.
+    // that started meanwhile finishes rather than stopping half done. A
+    // pause is a gap of a second or more, and well beyond the usual one:
+    // frames that only ever come slowly would otherwise restart the clock
+    // every time, and the layout would never stop.
     const t0 = performance.now();
-    if (engineRunning && t0 - lastFrameAt > 1000) forceGraph?.resetCountdown();
+    const since = t0 - lastFrameAt;
+    if (engineRunning && since > Math.max(1000, 3 * frameGap)) forceGraph?.resetCountdown();
+    if (Number.isFinite(since)) frameGap += (Math.min(since, 3000) - frameGap) * 0.2;
     lastFrameAt = t0;
+    controls.dampingFactor = 1 - (1 - DAMPING) ** (dt * 60);
+    // The layout takes a step each frame (the graph's own, below) until its
+    // clock runs out: a frame that comes slowly takes the steps of the
+    // frames it stands for first, so the layout settles as far as it would
+    // at 60 a second.
+    if (engineRunning && forceGraph) for (let i = Math.min(60, Math.round(dt * 60)); i > 1; i--) forceGraph.tickFrame();
     if (ownFrames) {
       graph._animationCycle();
       graph.pauseAnimation();

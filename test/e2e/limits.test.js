@@ -12,6 +12,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { xenonet } from "../../core/control.js";
+import { limit } from "../harness/software.js";
 
 const port = await new Promise((resolve) => {
   const probe = net.createServer().listen(0, "127.0.0.1", () => {
@@ -35,7 +36,7 @@ const shoot = (name, body) => async () => {
 before(async () => {
   await xenonet("test").quit();
   await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
-}, { timeout: 180000 });
+}, { timeout: limit(180000) });
 
 after(async () => {
   if (process.env.XENONET_E2E_KEEP === "1") return;
@@ -56,7 +57,7 @@ const look = (cx) =>
     return { drawn, want };
   })()`);
 
-test("Codex's gauges show the windows /api/live sends in XenoNet's shape, and when the week resets", { timeout: 60000 }, shoot("limits-codex", async () => {
+test("Codex's gauges show the windows /api/live sends in XenoNet's shape, and when the week resets", { timeout: limit(60000) }, shoot("limits-codex", async () => {
   let cx = null;
   for (const end = Date.now() + 20000; Date.now() < end && !cx?.primary; await sleep(300)) cx = (await s.api("/api/live")).limits?.codex ?? null;
   assert.ok(cx?.primary && cx?.secondary, "the demo's Codex sessions report both windows");

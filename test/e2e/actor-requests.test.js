@@ -16,6 +16,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { xenonet } from "../../core/control.js";
+import { limit } from "../harness/software.js";
 
 const port = await new Promise((resolve) => {
   const probe = net.createServer().listen(0, "127.0.0.1", () => {
@@ -64,7 +65,7 @@ before(async () => {
   process.env.XENONET_GATEWAY_PROBE = "local";
   await xenonet("test").quit();
   await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
-}, { timeout: 180000 });
+}, { timeout: limit(180000) });
 
 after(async () => {
   if (process.env.XENONET_E2E_KEEP === "1") return;
@@ -72,7 +73,7 @@ after(async () => {
   fs.rmSync(path.join(fs.realpathSync.native(os.tmpdir()), `xenonet-demo-${port}`), { recursive: true, force: true, maxRetries: 10 });
 });
 
-test("a made-up registration waits for the window, which allows one and denies another", { timeout: 60000 }, shoot("actor-requests", async () => {
+test("a made-up registration waits for the window, which allows one and denies another", { timeout: limit(60000) }, shoot("actor-requests", async () => {
   const heron = await s.simulate("actor-request");
   const osprey = await s.simulate("actor-request", { a: "Osprey" });
   assert.deepEqual([heron.ok, heron.a, osprey.a], [true, "actor:heron", "actor:osprey"]);
@@ -103,7 +104,7 @@ test("a made-up registration waits for the window, which allows one and denies a
   assert.equal((await s.driver("state")).errors, 0, JSON.stringify(await s.driver("errors")));
 }));
 
-test("an actor added from the window gets its token once; a new token stops the old; removing it stops both", { timeout: 60000 }, shoot("actor-tokens", async () => {
+test("an actor added from the window gets its token once; a new token stops the old; removing it stops both", { timeout: limit(60000) }, shoot("actor-tokens", async () => {
   const added = await fromWindow(`return await call("POST", "/api/actors", { name: "Kite", capabilities: ["run-commands"] });`);
   assert.deepEqual([added.status, added.body.state, added.body.id], [201, "allowed", "actor:kite"]);
   assert.match(added.body.token, /^xenonet_actor_[0-9a-f]{64}$/);
@@ -121,7 +122,7 @@ test("an actor added from the window gets its token once; a new token stops the 
   assert.equal(await listed("actor:kite"), false);
 }));
 
-test("an observer turned off in the window takes the actor it knows off the list, and on brings it back", { timeout: 60000 }, shoot("actor-observers", async () => {
+test("an observer turned off in the window takes the actor it knows off the list, and on brings it back", { timeout: limit(60000) }, shoot("actor-observers", async () => {
   assert.equal(await listed("actor:kestrel"), true, "the demo's Grok Bot");
   const off = await fromWindow(`return await call("POST", "/api/actors/observers", { product: "grok-bot", on: false });`);
   assert.deepEqual([off.status, off.body.on, off.body.actors], [200, false, ["actor:kestrel"]]);
@@ -131,7 +132,7 @@ test("an observer turned off in the window takes the actor it knows off the list
   assert.equal(await listed("actor:kestrel"), true);
 }));
 
-test("the actor gateway: set up in the window with a tunnel of your own, its address checked, a gateway token made there, and a client outside this machine reaching it with only that token", { timeout: 90000 }, shoot("actor-gateway", async () => {
+test("the actor gateway: set up in the window with a tunnel of your own, its address checked, a gateway token made there, and a client outside this machine reaching it with only that token", { timeout: limit(90000) }, shoot("actor-gateway", async () => {
   const click = (sel) => s.eval(`return (() => { const b = document.querySelector(${JSON.stringify(sel)}); if (!b || b.disabled) return false; b.click(); return true; })()`);
   const text = (sel) => s.eval(`return document.querySelector(${JSON.stringify(sel)})?.innerText ?? null`);
   const until = async (fn, ms = 8000) => {
@@ -202,7 +203,7 @@ test("the actor gateway: set up in the window with a tunnel of your own, its add
   await fromWindow(`return await call("DELETE", "/api/actors/lark");`);
 }));
 
-test("a session asks for an actor's gateway token: it is told none exists, the card waits in the window, and Allow shows the token masked there alone", { timeout: 90000 }, shoot("actor-gateway-ask", async () => {
+test("a session asks for an actor's gateway token: it is told none exists, the card waits in the window, and Allow shows the token masked there alone", { timeout: limit(90000) }, shoot("actor-gateway-ask", async () => {
   const click = (sel) => s.eval(`return (() => { const b = document.querySelector(${JSON.stringify(sel)}); if (!b || b.disabled) return false; b.click(); return true; })()`);
   const until = async (fn, ms = 8000) => {
     const end = Date.now() + ms;
@@ -250,7 +251,7 @@ test("a session asks for an actor's gateway token: it is told none exists, the c
   await s.input({ keys: "Escape" });
 }));
 
-test("waking an actor: a webhook set in the window, its key hidden as it's typed, a test, then a call within seconds of a message, saying only how many wait", { timeout: 90000 }, shoot("actor-wake", async () => {
+test("waking an actor: a webhook set in the window, its key hidden as it's typed, a test, then a call within seconds of a message, saying only how many wait", { timeout: limit(90000) }, shoot("actor-wake", async () => {
   const click = (sel) => s.eval(`return (() => { const b = document.querySelector(${JSON.stringify(sel)}); if (!b || b.disabled) return false; b.click(); return true; })()`);
   const text = (sel) => s.eval(`return document.querySelector(${JSON.stringify(sel)})?.innerText ?? null`);
   const until = async (fn, ms = 10000) => {
