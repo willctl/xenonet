@@ -446,6 +446,32 @@ test("Claude Code's hooks honor the sender's process identity", async () => {
   assert.equal((await hook({ session_id: id, hook_event_name: "SessionStart", cwd: root })).ok, true);
 });
 
+test("XenoNet's plugin for Claude Code: its copy of an event stands by while connect's own hook for it is in Claude Code's settings", { skip: process.env.CLAUDE_CONFIG_DIR ? "Claude Code's settings are elsewhere" : false }, async () => {
+  const hook = (body, query = "") => fetch(`${base}/api/hook/claude${query}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const id = "0190d3e0-0000-7000-8000-0000000000ab";
+  // Claude Code's settings where this service reads them: the home folder,
+  // or for the binary's demo, the demo world's.
+  const files = [home, path.join(worldOf(port), "home")].map((h) => path.join(h, ".claude", "settings.json"));
+  for (const file of files) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "http", url: `${base}/api/hook/claude`, timeout: 5 }] }] } }));
+  }
+  try {
+    const stop = { session_id: id, hook_event_name: "Stop" };
+    assert.equal((await hook(stop, "?via=plugin")).status, 204, "connect's own Stop hook counts");
+    // Where a hook from outside Claude Code is refused, connect's own copy
+    // shows the plugin's wasn't even checked.
+    const fromClaude = procs.supported && (await procs.chain(process.pid)).some((p) => p.agent === "claude");
+    if (procs.supported && !fromClaude) assert.equal((await hook(stop)).status, 403);
+    // No hook of connect's for Notification: the plugin's goes through, as
+    // connect's own would.
+    const theirs = (await hook({ session_id: id, hook_event_name: "Notification", message: "x" })).status;
+    assert.equal((await hook({ session_id: id, hook_event_name: "Notification", message: "x" }, "?via=plugin")).status, theirs);
+  } finally {
+    for (const file of files) fs.rmSync(file, { force: true });
+  }
+});
+
 test("XenoNet Dev's simulations, its control channel and captures", async () => {
   for (const kind of ["needs-you", "collision", "stuck", "turn-end", "wiki-write"]) {
     assert.equal((await post("/api/dev/simulate", { kind })).data.kind, kind, kind);

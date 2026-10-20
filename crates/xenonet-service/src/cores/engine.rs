@@ -94,6 +94,12 @@ pub trait Connect: Send + Sync {
     async fn remove(&self) -> R<Value> {
         pending(CONNECT)
     }
+    /// Whether connect's own Claude Code hook for `event` is in Claude
+    /// Code's settings, so the copy XenoNet's plugin posts stands by. None
+    /// is, until connect is there.
+    async fn hook_connected(&self, _event: &str) -> R<bool> {
+        Ok(false)
+    }
 }
 
 /// The process checks: each answers `{ ok, reason?, … }` for the process

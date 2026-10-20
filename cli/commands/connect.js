@@ -16,7 +16,8 @@ export const help = `Adds XenoNet to Claude Code's and Codex's own settings: the
 and hooks (XenoNet says who else is working when a session starts, warns before
 an edit to a file another session has in hand, and passes on messages). It
 shows what will change and asks first. xenonet disconnect takes it all out
-again.
+again. While XenoNet's plugin for Claude Code is installed, Claude Code is
+left to it, and connecting takes out connect's own entries there.
 
   xenonet connect [claude] [codex]   both unless you name one
   --yes                            don't ask

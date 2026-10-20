@@ -21,6 +21,13 @@
 //! leaves another's alone. Entries whose files are gone are anyone's to
 //! clear.
 //!
+//! XenoNet's plugin for Claude Code (plugins/xenonet) carries the same
+//! server and hooks for the installed XenoNet, so they're kept to one:
+//! while the plugin is installed and turned on, connecting leaves Claude
+//! Code to it and takes connect's own copies out; and while connect's own
+//! hook for an event is in Claude Code's settings, the service ignores the
+//! plugin's copy of it (`hook_connected`), so an event never arrives twice.
+//!
 //! The files and the CLIs are the twin's, called as the JS called them,
 //! through `Calls`: "fs" (node:fs), "run" (a CLI, its output) and "cli" (a
 //! CLI on PATH, or null).
@@ -42,6 +49,9 @@ const CLAUDE_EVENTS: [(&str, Option<&str>); 7] = [
     ("SessionEnd", None),
     ("Notification", None),
 ];
+/// XenoNet's plugin for Claude Code, which Claude Code knows as
+/// `xenonet@<marketplace>` once it's installed.
+const PLUGIN: &str = "xenonet";
 const CODEX_EVENTS: [(&str, Option<&str>); 6] =
     [("SessionStart", None), ("UserPromptSubmit", None), ("PreToolUse", Some("apply_patch|Edit|Write")), ("PostToolUse", None), ("Stop", None), ("SessionEnd", None)];
 
@@ -291,6 +301,11 @@ pub struct Connect {
     hook_url: String,
     claude_settings: String,
     claude_state: String,
+    /// Claude Code's list of the plugins it has installed.
+    claude_plugins: String,
+    /// Whether XenoNet's plugin, which reaches the installed XenoNet, is
+    /// for this XenoNet.
+    plugin_port: bool,
     codex_hooks: String,
     names: (String, String),
     claude_hooks: Value,
@@ -317,9 +332,24 @@ impl Connect {
             Some(d) => join(d, ".claude.json"),
             None => join(&o.home, ".claude.json"),
         };
+        let claude_plugins = join(&join(&claude_dir, "plugins"), "installed_plugins.json");
+        let plugin_port = o.instances.iter().any(|i| i.id == "installed" && same_arg(&i.port, &o.port));
         let codex_hooks = join(&o.codex_home.clone().unwrap_or_else(|| join(&o.home, ".codex")), "hooks.json");
         let names = server_names(&o.port, &o.instances);
-        let mut c = Connect { o, server_env, mcp, hook_url, claude_settings, claude_state, codex_hooks, names, claude_hooks: Value::Null, codex_hook_set: Value::Null };
+        let mut c = Connect {
+            o,
+            server_env,
+            mcp,
+            hook_url,
+            claude_settings,
+            claude_state,
+            claude_plugins,
+            plugin_port,
+            codex_hooks,
+            names,
+            claude_hooks: Value::Null,
+            codex_hook_set: Value::Null,
+        };
         let win = c.o.platform == "win32";
         // Claude Code takes HTTP hooks, which cost nothing to run, except at
         // SessionStart, which takes only commands.
@@ -470,6 +500,59 @@ impl Connect {
     /// or an early form's that named none.
     fn has_own(&self, hooks: Option<&Value>, kind: Kind) -> bool {
         flat(values(hooks)).iter().flat_map(hooks_of).any(|h| Self::xenonet_hook(kind, &h) && Self::port_of(&h).is_none_or(|p| matches!(self.o.port, Arg::Num(q) if q == p)))
+    }
+
+    /// XenoNet's plugin for Claude Code, as Claude Code knows it
+    /// (`xenonet@<marketplace>`), when it's installed and turned on in
+    /// Claude Code's user settings. The plugin reaches the installed
+    /// XenoNet, so only that XenoNet counts it. A list of plugins that
+    /// can't be read counts as none.
+    fn plugin(&self, c: &mut dyn Calls, settings: &Value) -> Option<String> {
+        if !self.plugin_port {
+            return None;
+        }
+        let enabled = settings.get("enabledPlugins").and_then(Value::as_object)?;
+        let installed = self.read_json(c, &self.claude_plugins).ok()?;
+        let installed = installed.get("plugins").and_then(Value::as_object)?;
+        enabled
+            .iter()
+            .find(|(key, on)| {
+                key.split_once('@').is_some_and(|(name, _)| name == PLUGIN)
+                    && **on == Value::Bool(true)
+                    && installed.get(*key).and_then(Value::as_array).is_some_and(|a| !a.is_empty())
+            })
+            .map(|(key, _)| key.clone())
+    }
+
+    /// Whether this XenoNet's own Claude Code hook for `event`, as connect
+    /// adds it, is in Claude Code's settings and can run (a command's files
+    /// are all there). While it is, the copy XenoNet's plugin posts stands
+    /// by, so the event reaches XenoNet once. Settings that can't be read
+    /// hold no hook Claude Code runs.
+    pub fn hook_connected(&self, c: &mut dyn Calls, event: &str) -> Result<bool> {
+        let Ok(settings) = self.read_json(c, &self.claude_settings) else {
+            return Ok(false);
+        };
+        let groups = match settings.get("hooks").and_then(|h| h.get(event)) {
+            Some(Value::Array(a)) => a.clone(),
+            _ => return Ok(false),
+        };
+        for h in groups.iter().flat_map(hooks_of) {
+            if !Self::xenonet_hook(Kind::Claude, &h) || !Self::port_of(&h).is_none_or(|p| matches!(self.o.port, Arg::Num(q) if q == p)) {
+                continue;
+            }
+            let one = json!({ "x": [{ "hooks": [h] }] });
+            let mut runs = true;
+            for f in Self::hook_files(Some(&one), &mut |_| true) {
+                if !Self::exists(c, &f)? {
+                    runs = false;
+                }
+            }
+            if runs {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Whether this XenoNet's entries here are an earlier XenoNet's, which
@@ -720,24 +803,59 @@ impl Connect {
         let events = |list: &[(&str, Option<&str>)]| list.iter().map(|(e, m)| if m.is_some() { format!("{e} (edits)") } else { e.to_string() }).collect::<Vec<_>>().join(", ");
 
         let mut claude_changes = console_change("claude", console_claude.as_ref());
-        claude_changes.push(json!({ "id": "mcp", "what": format!("The {xenonet} MCP server, for every project"), "where": "Claude Code's user settings, through claude mcp add-json --scope user", "state": self.server_state(claude_entry.as_ref(), None), "detail": format!("{command} mcp (XENONET_PORT={port})") }));
         let settings = self.read_json(c, &self.claude_settings)?;
-        let in_place = self.hooks_in_place(c, &settings, Kind::Claude, &self.claude_hooks)?;
-        let state = hooks_state(in_place, self.has_own(settings.get("hooks"), Kind::Claude));
-        claude_changes.push(json!({ "id": "hooks", "what": format!("Hooks: {}", events(&CLAUDE_EVENTS)), "where": tilde(&self.claude_settings, home), "state": state, "detail": format!("posting to {}; SessionStart runs {command} hook claude", self.hook_url) }));
-        let mut claude_notes: Vec<Value> = if claude.truthy() {
+        let plugin = self.plugin(c, &settings);
+        let mcp_what = format!("The {xenonet} MCP server, for every project");
+        let mcp_detail = format!("{command} mcp (XENONET_PORT={port})");
+        let hooks_what = format!("Hooks: {}", events(&CLAUDE_EVENTS));
+        let hooks_detail = format!("posting to {}; SessionStart runs {command} hook claude", self.hook_url);
+        let own_hooks = self.has_own(settings.get("hooks"), Kind::Claude);
+        let mut twice = false;
+        if let Some(key) = &plugin {
+            // The plugin carries the server and the hooks; connect's own
+            // copies beside it are to come out.
+            let carried = format!("XenoNet's plugin for Claude Code ({key})");
+            if self.server_state(claude_entry.as_ref(), None) == "missing" {
+                claude_changes.push(json!({ "id": "mcp", "what": mcp_what, "where": carried, "state": "present", "via": "plugin", "detail": format!("xenonet mcp, from your PATH (XENONET_PORT={port})") }));
+            } else {
+                twice = true;
+                claude_changes
+                    .push(json!({ "id": "mcp", "what": mcp_what, "where": "Claude Code's user settings, beside the plugin's copy", "state": "remove", "detail": mcp_detail }));
+            }
+            if own_hooks {
+                twice = true;
+                claude_changes.push(json!({ "id": "hooks", "what": hooks_what, "where": format!("{}, beside the plugin's copies", tilde(&self.claude_settings, home)), "state": "remove", "detail": hooks_detail }));
+            } else {
+                claude_changes.push(json!({ "id": "hooks", "what": hooks_what, "where": carried, "state": "present", "via": "plugin", "detail": format!("posting to {}?via=plugin; SessionStart runs xenonet hook claude", self.hook_url) }));
+            }
+        } else {
+            claude_changes.push(json!({ "id": "mcp", "what": mcp_what, "where": "Claude Code's user settings, through claude mcp add-json --scope user", "state": self.server_state(claude_entry.as_ref(), None), "detail": mcp_detail }));
+            let in_place = self.hooks_in_place(c, &settings, Kind::Claude, &self.claude_hooks)?;
+            claude_changes
+                .push(json!({ "id": "hooks", "what": hooks_what, "where": tilde(&self.claude_settings, home), "state": hooks_state(in_place, own_hooks), "detail": hooks_detail }));
+        }
+        // With the plugin, connecting adds nothing through the claude
+        // command, so whether it's there doesn't matter.
+        let mut claude_notes: Vec<Value> = if claude.truthy() || plugin.is_some() {
             Vec::new()
         } else {
             vec![json!("XenoNet can't find the claude command, so it can add the hooks but not the MCP server. Install Claude Code's CLI, or add the server by hand.")]
         };
-        let settings = self.read_json(c, &self.claude_settings)?;
+        if let Some(key) = &plugin {
+            claude_notes.push(json!(format!("Claude Code has XenoNet's plugin ({key}), which carries the {xenonet} MCP server and the hooks, so connecting leaves them to it.")));
+        }
+        if twice {
+            claude_notes.push(json!(TWICE));
+        }
         if self.earlier(settings.get("hooks"), Kind::Claude, claude_entry.as_ref()) {
             claude_notes.push(json!(EARLIER));
         }
         let others = self.others(c, settings.get("hooks"), Kind::Claude)?;
         claude_notes.extend(self.besides(&others));
-        let settings = self.read_json(c, &self.claude_settings)?;
-        let claude_broken = self.broken(c, claude_entry.as_ref(), settings.get("hooks"), Kind::Claude)?;
+        let mut claude_broken = self.broken(c, claude_entry.as_ref(), settings.get("hooks"), Kind::Claude)?;
+        if plugin.is_some() && !Self::cli(c, "xenonet")?.truthy() {
+            claude_broken.push(json!(NO_COMMAND));
+        }
 
         let mut codex_changes = console_change("codex", console_codex.as_ref());
         codex_changes.push(json!({ "id": "mcp", "what": format!("The {xenonet} MCP server, for every project"), "where": "Codex's config, through codex mcp add", "state": self.server_state(codex_server.as_ref(), None), "detail": format!("{command} mcp (XENONET_PORT={port})") }));
@@ -780,12 +898,22 @@ impl Connect {
         }
         if has("claude") {
             let settings = self.read_json(c, &self.claude_settings)?;
-            let merged = merge_hooks(c, &settings, &mut |c, h| self.mine(c, Kind::Claude, h), Some(&self.claude_hooks))?;
-            Self::write_json(c, &self.claude_settings, &merged)?;
+            // With XenoNet's plugin there, connect's own copies of the
+            // server and the hooks come out, and none go in.
+            let plugin = self.plugin(c, &settings).is_some();
+            if !plugin {
+                let merged = merge_hooks(c, &settings, &mut |c, h| self.mine(c, Kind::Claude, h), Some(&self.claude_hooks))?;
+                Self::write_json(c, &self.claude_settings, &merged)?;
+            } else if self.has_own(settings.get("hooks"), Kind::Claude) {
+                let merged = merge_hooks(c, &settings, &mut |c, h| self.mine(c, Kind::Claude, h), None)?;
+                Self::write_json(c, &self.claude_settings, &merged)?;
+            }
             let bin = Self::cli(c, "claude")?;
             if bin.truthy() {
                 let _ = Self::run(c, &bin, vec!["mcp".into(), "remove".into(), xenonet.clone(), "--scope".into(), "user".into()]);
-                Self::run(c, &bin, vec!["mcp".into(), "add-json".into(), xenonet.clone(), json_text(&self.mcp), "--scope".into(), "user".into()])?;
+                if !plugin {
+                    Self::run(c, &bin, vec!["mcp".into(), "add-json".into(), xenonet.clone(), json_text(&self.mcp), "--scope".into(), "user".into()])?;
+                }
                 if self.o.console_mcp {
                     let _ = Self::run(c, &bin, vec!["mcp".into(), "remove".into(), console.clone(), "--scope".into(), "user".into()]);
                     Self::run(c, &bin, vec!["mcp".into(), "add-json".into(), console.clone(), json_text(&console_mcp), "--scope".into(), "user".into()])?;
@@ -854,6 +982,13 @@ impl Connect {
     }
 }
 
+/// What the preview says while connect's own entries are in Claude Code's
+/// settings beside the plugin's.
+const TWICE: &str = "xenonet connect's own entries are in Claude Code's settings beside the plugin's. XenoNet ignores the plugin's copy of any hook connect added, so each event still arrives once. Connecting takes connect's entries out.";
+
+/// What the preview says when the plugin can't find the command it runs.
+const NO_COMMAND: &str = "XenoNet's plugin runs the xenonet command, which isn't on your PATH";
+
 /// What the preview says of entries an earlier XenoNet wrote.
 const EARLIER: &str = "XenoNet's entries here run cli/xenonet.js with Node, as an earlier XenoNet wrote them. Connecting again has them run the xenonet binary.";
 
@@ -897,6 +1032,88 @@ mod tests {
         fn kind(&mut self, _: &str) -> Result<String> {
             Ok("undefined".into())
         }
+    }
+
+    /// Files by path, as node:fs reads them: a missing one is ENOENT.
+    struct Files(std::collections::HashMap<String, String>);
+    impl Calls for Files {
+        fn call(&mut self, path: &str, method: &str, args: Vec<Arg>) -> Result<Arg> {
+            let file = args.first().and_then(Arg::as_str).unwrap_or_default().to_string();
+            match (path, method) {
+                ("fs", "readFileSync") => self.0.get(&file).map(|t| Arg::text(t.clone())).ok_or_else(|| Thrown::coded("no such file", "ENOENT")),
+                ("fs", "existsSync") => Ok(Arg::Bool(self.0.contains_key(&file))),
+                ("", "cli") => Ok(Arg::Null),
+                _ => Err(Thrown::new(format!("connect asked for {path}.{method}"))),
+            }
+        }
+        fn get(&mut self, _: &str) -> Result<Arg> {
+            Ok(Arg::Undef)
+        }
+        fn kind(&mut self, _: &str) -> Result<String> {
+            Ok("undefined".into())
+        }
+    }
+
+    fn at(port: f64) -> Connect {
+        Connect::new(Options {
+            port: Arg::num(port),
+            demo: Arg::Bool(false),
+            bin: "/x/xenonet".into(),
+            home: "/h".into(),
+            claude_config_dir: None,
+            codex_home: None,
+            console_mcp: false,
+            platform: "darwin".into(),
+            instances: vec![
+                Instance { id: "installed".into(), name: "XenoNet".into(), port: Arg::num(47840.0) },
+                Instance { id: "dev".into(), name: "XenoNet Dev".into(), port: Arg::num(47842.0) },
+            ],
+        })
+    }
+
+    #[test]
+    fn the_plugin_counts_when_installed_and_turned_on_and_only_for_the_installed_xenonet() {
+        let installed = r#"{ "version": 2, "plugins": { "xenonet@xenonet": [{ "scope": "user" }] } }"#;
+        // The paths as this machine joins them.
+        let (settings_file, list_file) = (at(47840.0).claude_settings, at(47840.0).claude_plugins);
+        let files = |enabled: &str, list: Option<&str>| {
+            let mut m = std::collections::HashMap::new();
+            m.insert(settings_file.clone(), format!(r#"{{ "enabledPlugins": {enabled} }}"#));
+            if let Some(l) = list {
+                m.insert(list_file.clone(), l.to_string());
+            }
+            Files(m)
+        };
+        let plugin = |c: &Connect, mut f: Files| {
+            let settings = c.read_json(&mut f, &c.claude_settings).unwrap();
+            c.plugin(&mut f, &settings)
+        };
+        let on = r#"{ "xenonet@xenonet": true }"#;
+        assert_eq!(plugin(&at(47840.0), files(on, Some(installed))), Some("xenonet@xenonet".into()));
+        assert_eq!(plugin(&at(47842.0), files(on, Some(installed))), None, "XenoNet Dev's own connect");
+        assert_eq!(plugin(&at(47840.0), files(r#"{ "xenonet@xenonet": false }"#, Some(installed))), None, "turned off");
+        assert_eq!(plugin(&at(47840.0), files(on, None)), None, "not installed");
+        assert_eq!(plugin(&at(47840.0), files(on, Some("{ not json"))), None, "a list that can't be read");
+        assert_eq!(plugin(&at(47840.0), files(r#"{ "xenonet-tools@xenonet": true }"#, Some(installed))), None, "another plugin");
+    }
+
+    #[test]
+    fn connects_own_hook_for_an_event_is_there_only_when_it_can_run() {
+        let c = at(47840.0);
+        let start = c.claude_hooks["SessionStart"].clone();
+        let stop = c.claude_hooks["Stop"].clone();
+        let settings = json!({ "hooks": { "SessionStart": [start], "Stop": [stop] } }).to_string();
+        let mut m = std::collections::HashMap::new();
+        m.insert(c.claude_settings.clone(), settings);
+        let mut f = Files(m.clone());
+        assert!(c.hook_connected(&mut f, "Stop").unwrap());
+        assert!(!c.hook_connected(&mut f, "SessionStart").unwrap(), "the binary it runs is gone");
+        assert!(!c.hook_connected(&mut f, "Notification").unwrap());
+        assert!(!at(47842.0).hook_connected(&mut f, "Stop").unwrap(), "another XenoNet's");
+        m.insert("/x/xenonet".to_string(), String::new());
+        assert!(c.hook_connected(&mut Files(m.clone()), "SessionStart").unwrap());
+        m.insert(c.claude_settings.clone(), "{ not json".into());
+        assert!(!c.hook_connected(&mut Files(m), "Stop").unwrap(), "settings that can't be read");
     }
 
     #[test]

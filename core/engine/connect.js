@@ -23,6 +23,13 @@
 // leaves another's alone, and its MCP servers have names of their own
 // (xenonet for the installed XenoNet, xenonet-dev for XenoNet Dev). Entries whose
 // files are gone, such as a deleted checkout's, are anyone's to clear.
+//
+// XenoNet's plugin for Claude Code (plugins/xenonet) carries the same server
+// and hooks for the installed XenoNet, so they're kept to one: while the
+// plugin is installed and turned on, connecting leaves Claude Code to it and
+// takes connect's own copies out; and while connect's own hook for an event
+// is in Claude Code's settings, the server ignores the plugin's copy of it
+// (hookConnected), so an event never arrives twice.
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -41,7 +48,16 @@ export function serverNames(port) {
 }
 
 const CLAUDE_EVENTS = [["SessionStart"], ["UserPromptSubmit"], ["PreToolUse", "Edit|Write|MultiEdit|NotebookEdit"], ["PostToolUse"], ["Stop"], ["SessionEnd"], ["Notification"]];
+// XenoNet's plugin for Claude Code, which Claude Code knows as
+// xenonet@<marketplace> once it's installed.
+const PLUGIN = "xenonet";
 const CODEX_EVENTS = [["SessionStart"], ["UserPromptSubmit"], ["PreToolUse", "apply_patch|Edit|Write"], ["PostToolUse"], ["Stop"], ["SessionEnd"]];
+
+// What the preview says while connect's own entries are in Claude Code's
+// settings beside the plugin's.
+const TWICE = "xenonet connect's own entries are in Claude Code's settings beside the plugin's. XenoNet ignores the plugin's copy of any hook connect added, so each event still arrives once. Connecting takes connect's entries out.";
+// What the preview says when the plugin can't find the command it runs.
+const NO_COMMAND = "XenoNet's plugin runs the xenonet command, which isn't on your PATH";
 
 const quote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
@@ -103,6 +119,11 @@ export function createConnect({ port, root, demo = false, home = os.homedir(), e
   // CLAUDE_CONFIG_DIR when that's set.
   const claudeState = env.CLAUDE_CONFIG_DIR ? path.join(env.CLAUDE_CONFIG_DIR, ".claude.json") : path.join(home, ".claude.json");
   const codexHooks = path.join(env.CODEX_HOME ?? path.join(home, ".codex"), "hooks.json");
+  // Claude Code's list of the plugins it has installed.
+  const claudePlugins = path.join(env.CLAUDE_CONFIG_DIR ?? path.join(home, ".claude"), "plugins", "installed_plugins.json");
+  // Whether XenoNet's plugin, which reaches the installed XenoNet, is for
+  // this XenoNet.
+  const pluginPort = port === INSTANCES.installed.port;
   const hookCommand = (app) => `${Object.entries(serverEnv).map(([k, v]) => `${k}=${v}`).join(" ")} ${quote(bin)} hook ${app}`;
   const psQuote = (s) => `'${String(s).replace(/'/g, "''")}'`;
   const windowsHook = (app) => {
@@ -133,15 +154,51 @@ export function createConnect({ port, root, demo = false, home = os.homedir(), e
   const ourCodexHook = mine(xenonetCommand("codex"));
   // Whether this XenoNet has hooks here, in place or not: its port's, or an
   // early form's that named none.
-  const ownHooks = (hooks, isXenoNet) => Object.values(hooks ?? {}).flat().flatMap((g) => g.hooks ?? []).filter((h) => isXenoNet(h) && (portOf(h) === port || portOf(h) == null));
+  const ownHooksOf = (hooks, isXenoNet) => Object.values(hooks ?? {}).flat().flatMap((g) => g.hooks ?? []).filter((h) => isXenoNet(h) && (portOf(h) === port || portOf(h) == null));
+  // XenoNet's plugin for Claude Code, as Claude Code knows it
+  // (xenonet@<marketplace>), when it's installed and turned on in Claude
+  // Code's user settings. The plugin reaches the installed XenoNet, so only
+  // that XenoNet counts it. A list of plugins that can't be read counts as
+  // none.
+  const pluginKey = (settings) => {
+    if (!pluginPort) return null;
+    const enabled = settings?.enabledPlugins;
+    if (!enabled || typeof enabled !== "object" || Array.isArray(enabled)) return null;
+    let installed;
+    try {
+      installed = readJson(claudePlugins, home).plugins;
+    } catch {
+      return null;
+    }
+    if (!installed || typeof installed !== "object" || Array.isArray(installed)) return null;
+    return Object.entries(enabled).find(([key, on]) => key.includes("@") && key.slice(0, key.indexOf("@")) === PLUGIN && on === true && Array.isArray(installed[key]) && installed[key].length > 0)?.[0] ?? null;
+  };
+
+  // Whether this XenoNet's own Claude Code hook for `event`, as connect adds
+  // it, is in Claude Code's settings and can run (a command's files are all
+  // there). While it is, the copy XenoNet's plugin posts stands by, so the
+  // event reaches XenoNet once. Settings that can't be read hold no hook
+  // Claude Code runs.
+  async function hookConnected(event) {
+    let settings;
+    try {
+      settings = readJson(claudeSettings, home);
+    } catch {
+      return false;
+    }
+    const groups = settings.hooks?.[event];
+    if (!Array.isArray(groups)) return false;
+    return groups.flatMap((g) => g?.hooks ?? []).some((h) => xenonetClaudeHook(h) && (portOf(h) === port || portOf(h) == null) && hookFiles({ x: [{ hooks: [h] }] }, () => true).every((f) => fs.existsSync(f)));
+  }
+
   // Whether this XenoNet's entries here are an earlier XenoNet's, which run
   // Node and cli/xenonet.js (or hook.js) rather than the binary: a hook of
   // its own, or its MCP server.
-  const earlier = (hooks, isXenoNet, server) => ownHooks(hooks, isXenoNet).some((h) => h.type === "command" && /xenonet\.js|hook\.js/.test(hookText(h))) || (Array.isArray(server?.args) && server.args.some((a) => /\.m?js$/.test(String(a))));
+  const earlier = (hooks, isXenoNet, server) => ownHooksOf(hooks, isXenoNet).some((h) => h.type === "command" && /xenonet\.js|hook\.js/.test(hookText(h))) || (Array.isArray(server?.args) && server.args.some((a) => /\.m?js$/.test(String(a))));
   const EARLIER = "XenoNet's entries here run cli/xenonet.js with Node, as an earlier XenoNet wrote them. Connecting again has them run the xenonet binary.";
   // A hooks change's state: as XenoNet would add them, or there but not so
   // (an earlier XenoNet's, say), or not there.
-  const hooksState = (settings, ours, add, isXenoNet) => (hooksInPlace(settings, ours, add) ? "present" : ownHooks(settings.hooks, isXenoNet).length ? "different" : "missing");
+  const hooksState = (settings, ours, add, isXenoNet) => (hooksInPlace(settings, ours, add) ? "present" : ownHooksOf(settings.hooks, isXenoNet).length ? "different" : "missing");
   // Other XenoNets connected here too, by port, for the preview.
   const others = (hooks, isXenoNet) => [...new Set(Object.values(hooks ?? {}).flat().flatMap((g) => g.hooks ?? []).filter((h) => isXenoNet(h) && !mine(isXenoNet)(h)).map(portOf))].sort();
   const names = serverNames(port);
@@ -188,6 +245,30 @@ export function createConnect({ port, root, demo = false, home = os.homedir(), e
     const besides = (list) => list.map((p) => `Another XenoNet (port ${p}${Object.values(INSTANCES).find((i) => i.port === p) ? `, ${Object.values(INSTANCES).find((i) => i.port === p).name}` : ""}) is connected here too; its entries stay as they are.`);
     const broken = (entry, hooks, ours) => [...(entry ? gone(entry.command, entry.args) : []), ...hookFiles(hooks, ours).filter((f) => !fs.existsSync(f))].map((f) => `${tilde(f, home)} is gone`);
     const command = tilde(bin, home);
+    const settings = readJson(claudeSettings, home);
+    const plugin = pluginKey(settings);
+    const mcpWhat = `The ${names.xenonet} MCP server, for every project`, mcpDetail = `${command} mcp (XENONET_PORT=${port})`;
+    const hooksWhat = `Hooks: ${CLAUDE_EVENTS.map(([e, m]) => (m ? `${e} (edits)` : e)).join(", ")}`, hooksDetail = `posting to ${hookUrl}; SessionStart runs ${command} hook claude`;
+    const ownHooks = ownHooksOf(settings.hooks, xenonetClaudeHook).length > 0;
+    let twice = false;
+    const claudeChanges = [...consoleChange("claude")];
+    if (plugin) {
+      // The plugin carries the server and the hooks; connect's own copies
+      // beside it are to come out.
+      const carried = `XenoNet's plugin for Claude Code (${plugin})`;
+      if (serverState(claudeEntry) === "missing") claudeChanges.push({ id: "mcp", what: mcpWhat, where: carried, state: "present", via: "plugin", detail: `xenonet mcp, from your PATH (XENONET_PORT=${port})` });
+      else {
+        twice = true;
+        claudeChanges.push({ id: "mcp", what: mcpWhat, where: "Claude Code's user settings, beside the plugin's copy", state: "remove", detail: mcpDetail });
+      }
+      if (ownHooks) {
+        twice = true;
+        claudeChanges.push({ id: "hooks", what: hooksWhat, where: `${tilde(claudeSettings, home)}, beside the plugin's copies`, state: "remove", detail: hooksDetail });
+      } else claudeChanges.push({ id: "hooks", what: hooksWhat, where: carried, state: "present", via: "plugin", detail: `posting to ${hookUrl}?via=plugin; SessionStart runs xenonet hook claude` });
+    } else {
+      claudeChanges.push({ id: "mcp", what: mcpWhat, where: "Claude Code's user settings, through claude mcp add-json --scope user", state: serverState(claudeEntry), detail: mcpDetail });
+      claudeChanges.push({ id: "hooks", what: hooksWhat, where: tilde(claudeSettings, home), state: hooksState(settings, ourClaudeHook, claudeHooks, xenonetClaudeHook), detail: hooksDetail });
+    }
     return {
       port,
       demo,
@@ -196,17 +277,17 @@ export function createConnect({ port, root, demo = false, home = os.homedir(), e
           app: "claude",
           name: "Claude Code",
           cli: claude,
-          changes: [
-            ...consoleChange("claude"),
-            { id: "mcp", what: `The ${names.xenonet} MCP server, for every project`, where: "Claude Code's user settings, through claude mcp add-json --scope user", state: serverState(claudeEntry), detail: `${command} mcp (XENONET_PORT=${port})` },
-            { id: "hooks", what: `Hooks: ${CLAUDE_EVENTS.map(([e, m]) => (m ? `${e} (edits)` : e)).join(", ")}`, where: tilde(claudeSettings, home), state: hooksState(readJson(claudeSettings, home), ourClaudeHook, claudeHooks, xenonetClaudeHook), detail: `posting to ${hookUrl}; SessionStart runs ${command} hook claude` },
-          ],
+          changes: claudeChanges,
           notes: [
-            ...(claude ? [] : ["XenoNet can't find the claude command, so it can add the hooks but not the MCP server. Install Claude Code's CLI, or add the server by hand."]),
-            ...(earlier(readJson(claudeSettings, home).hooks, xenonetClaudeHook, claudeEntry) ? [EARLIER] : []),
-            ...besides(others(readJson(claudeSettings, home).hooks, xenonetClaudeHook)),
+            // With the plugin, connecting adds nothing through the claude
+            // command, so whether it's there doesn't matter.
+            ...(claude || plugin ? [] : ["XenoNet can't find the claude command, so it can add the hooks but not the MCP server. Install Claude Code's CLI, or add the server by hand."]),
+            ...(plugin ? [`Claude Code has XenoNet's plugin (${plugin}), which carries the ${names.xenonet} MCP server and the hooks, so connecting leaves them to it.`] : []),
+            ...(twice ? [TWICE] : []),
+            ...(earlier(settings.hooks, xenonetClaudeHook, claudeEntry) ? [EARLIER] : []),
+            ...besides(others(settings.hooks, xenonetClaudeHook)),
           ],
-          broken: broken(claudeEntry, readJson(claudeSettings, home).hooks, ourClaudeHook),
+          broken: [...broken(claudeEntry, settings.hooks, ourClaudeHook), ...(plugin && !cli("xenonet") ? [NO_COMMAND] : [])],
         },
         {
           app: "codex",
@@ -233,11 +314,16 @@ export function createConnect({ port, root, demo = false, home = os.homedir(), e
     // Agents connected to the demo would see only its made-up sessions.
     if (demo) throw new Error("this is the demo, so connect Claude Code and Codex from XenoNet, with your own sessions");
     if (apps.includes("claude")) {
-      writeJson(claudeSettings, mergeHooks(readJson(claudeSettings, home), ourClaudeHook, claudeHooks));
+      const settings = readJson(claudeSettings, home);
+      // With XenoNet's plugin there, connect's own copies of the server and
+      // the hooks come out, and none go in.
+      const plugin = !!pluginKey(settings);
+      if (!plugin) writeJson(claudeSettings, mergeHooks(settings, ourClaudeHook, claudeHooks));
+      else if (ownHooksOf(settings.hooks, xenonetClaudeHook).length) writeJson(claudeSettings, mergeHooks(settings, ourClaudeHook));
       const bin = cli("claude");
       if (bin) {
         await run(bin, ["mcp", "remove", names.xenonet, "--scope", "user"]).catch(() => {});
-        await run(bin, ["mcp", "add-json", names.xenonet, JSON.stringify(mcp), "--scope", "user"]);
+        if (!plugin) await run(bin, ["mcp", "add-json", names.xenonet, JSON.stringify(mcp), "--scope", "user"]);
         if (consoleMcp) {
           await run(bin, ["mcp", "remove", names.console, "--scope", "user"]).catch(() => {});
           await run(bin, ["mcp", "add-json", names.console, JSON.stringify({ ...mcp, args: [...mcp.args, "console"] }), "--scope", "user"]);
@@ -272,7 +358,7 @@ export function createConnect({ port, root, demo = false, home = os.homedir(), e
     return preview();
   }
 
-  return { preview, apply, remove };
+  return { preview, apply, remove, hookConnected };
 }
 
 function runFile(file, args) {

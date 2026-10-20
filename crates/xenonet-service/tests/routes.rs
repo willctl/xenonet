@@ -32,6 +32,8 @@ struct Fake {
     root_info: Value,
     fail_send: Mutex<Option<String>>,
     fail_integration: Mutex<Option<CoreError>>,
+    /// The events connect's own Claude Code hooks are there for.
+    connected: Mutex<Vec<String>>,
 }
 
 impl Fake {
@@ -122,6 +124,10 @@ impl cores::Connect for Fake {
     async fn remove(&self) -> R<Value> {
         Ok(json!({ "removed": true }))
     }
+    async fn hook_connected(&self, event: &str) -> R<bool> {
+        self.note("hookConnected", json!(event));
+        Ok(self.connected.lock().unwrap().iter().any(|e| e == event))
+    }
 }
 
 #[async_trait]
@@ -149,6 +155,10 @@ impl cores::Channels for Fake {
 
 #[async_trait]
 impl cores::State for Fake {
+    fn note_hook(&self, id: &str, body: &Value) -> R<()> {
+        self.note("noteHook", json!([id, body["hook_event_name"]]));
+        Ok(())
+    }
     fn root_info(&self) -> R<Value> {
         Ok(self.root_info.clone())
     }
@@ -678,6 +688,23 @@ async fn the_windows_message_to_an_actor_needs_its_key_and_an_actor() {
     assert_eq!(r.status, 200);
     assert_eq!(f.was("send")[0][0], json!("actor:you"));
     assert_eq!(f.was("send")[0][2], json!({ "method": "window", "process": "n/a", "strength": "strong" }));
+}
+
+#[tokio::test]
+async fn the_plugins_copy_of_a_hook_stands_by_while_connects_own_is_there() {
+    let (ctx, f) = service(false);
+    *f.connected.lock().unwrap() = vec!["Stop".into()];
+    let event = |name: &str| Some(json!({ "session_id": "11111111-2222-3333-4444-555555555555", "hook_event_name": name }));
+    assert_eq!(go(&ctx, "POST", "/api/hook/claude?via=plugin", &[], event("Stop")).await.status, 204);
+    assert_eq!((f.was("check").len(), f.was("hook").len()), (0, 0), "neither checked nor heard");
+    assert_eq!(f.was("hookConnected"), vec![json!("Stop")]);
+    // connect's own copy counts, and isn't asked about.
+    go(&ctx, "POST", "/api/hook/claude", &[], event("Stop")).await;
+    assert_eq!((f.was("hook").len(), f.was("hookConnected").len()), (1, 1));
+    // An event connect has no hook for: the plugin's copy is heard.
+    go(&ctx, "POST", "/api/hook/claude?via=plugin", &[], event("UserPromptSubmit")).await;
+    assert_eq!(f.was("hook"), vec![json!(["claude", "Stop"]), json!(["claude", "UserPromptSubmit"])]);
+    assert_eq!(f.was("noteHook"), vec![json!([ME, "Stop"]), json!([ME, "UserPromptSubmit"])], "each event noted once");
 }
 
 #[tokio::test]
