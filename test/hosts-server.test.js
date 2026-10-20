@@ -254,17 +254,24 @@ test("when the other XenoNet stops, the host goes offline with its nodes kept an
   await stop("demo-b");
   const off = await until("demo-b offline", async () => ((await hostState())?.state === "offline" ? hostState() : null), 10000);
   assert.equal(off.error.code, "xenonet-gone");
-  const graph = (await get("/api/graph")).data;
+  // The link tries again while the host is gone, so for a moment between
+  // tries the map can say connecting; the map's own view of it is waited
+  // for, as the host's was.
+  const graph = await until("demo-b offline on the map", async () => {
+    const g = (await get("/api/graph")).data;
+    return g.nodes?.find((n) => n.id === "@demo-b:core")?.state === "offline" ? g : null;
+  }, 10000);
   valid("graph/v1", graph, "the map with an offline host");
   const theirs = graph.nodes.filter((n) => n.host === "demo-b");
   assert.ok(theirs.length > 5 && theirs.every((n) => n.stale === true), "kept, and marked stale");
-  assert.equal(graph.nodes.find((n) => n.id === "@demo-b:core").state, "offline");
   const live = (await get("/api/live")).data;
   assert.ok(live.sessions.filter((s) => s.host === "demo-b").every((s) => s.status === "idle" && s.stale));
   assert.equal((await get(`/api/session/${encodeURIComponent(REMOTE(SESSION(1)))}/stats`)).status, 503, "a transcript needs the host there");
-  const doctor = (await post("/api/doctor")).data.results.find((r) => r.id === "hosts.demo-b");
+  const doctor = await until("the doctor finds demo-b offline", async () => {
+    const d = (await post("/api/doctor")).data.results.find((r) => r.id === "hosts.demo-b");
+    return /^offline/.test(d?.detail ?? "") ? d : null;
+  }, 10000);
   assert.equal(doctor.status, "warn");
-  assert.match(doctor.detail, /^offline/);
 
   // Back: the same port, a world made afresh (and so a new key, which a
   // demo world may have).
