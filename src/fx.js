@@ -11,6 +11,12 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { THEME } from "./theme.js";
 
 export const Additive = THREE.AdditiveBlending;
+// three draws a transparent, double-sided material in two passes, its back
+// faces and then its front ones, and looks its shader up again for each:
+// twice a frame for every ring and shell on the map. Light that's added
+// and writes no depth comes out the same whatever order its faces land in,
+// so every such material (here and in looks/) sets forceSinglePass and
+// draws in one.
 
 // ---------- textures ----------
 
@@ -330,6 +336,7 @@ export function pillarMaterial(color) {
     depthWrite: false,
     blending: Additive,
     side: THREE.DoubleSide,
+    forceSinglePass: true,
     uniforms: { color: { value: new THREE.Color(color) }, opacity: { value: 1 }, time: { value: 0 } },
     vertexShader: /* glsl */ `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: /* glsl */ `
@@ -353,6 +360,7 @@ export function fresnelMaterial(color, opacity = 1, power = 2.5) {
     depthWrite: false,
     blending: Additive,
     side: THREE.DoubleSide,
+    forceSinglePass: true,
     uniforms: { color: { value: new THREE.Color(color) }, opacity: { value: opacity }, power: { value: power } },
     vertexShader: /* glsl */ `
       varying vec3 vN; varying vec3 vV;
@@ -407,4 +415,33 @@ export function lensOutputPass() {
     .replace("varying vec2 vUv;", "varying vec2 vUv;\nuniform float time; uniform float aberration; uniform float vignette; uniform float grain;\nfloat rand(vec2 co) { return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453); }")
     .replace(read, `${lens}gl_FragColor = vec4(max(col, 0.0), base.a);`);
   return pass;
+}
+
+// The bloom added where the lens reads the frame, instead of by the bloom
+// pass itself. Its last step blends the glow over the whole frame, which
+// is multisampled and half-float at the screen's density: one more
+// full-screen read, write and resolve of the largest target there is, each
+// frame. The lens samples the frame anyway, so it adds the glow as it
+// reads (texel + glow, as the blend's ONE, ONE did), and the bloom pass
+// skips the blend. Rounding aside, the picture is the same. False, with
+// both passes left as they were, if either isn't as expected.
+export function addBloomToLens(lens, bloom) {
+  const blend = bloom.blendMaterial;
+  const quad = bloom._fsQuad;
+  const reads = /texture2D\(tDiffuse, vUv/g;
+  const shader = lens.material?.fragmentShader ?? "";
+  const additive = blend?.blending === THREE.AdditiveBlending && blend.premultipliedAlpha === true;
+  if (!additive || typeof quad?.render !== "function" || !bloom.renderTargetsHorizontal?.[0] || !bloom.copyUniforms?.opacity || shader.match(reads)?.length !== 3 || !shader.includes("varying vec2 vUv;")) return false;
+  // Read each frame, so a resize or a bloom turned off still holds.
+  lens.uniforms.tBloom = { get value() { return bloom.renderTargetsHorizontal[0].texture; } };
+  lens.uniforms.bloomOpacity = { get value() { return bloom.enabled ? bloom.copyUniforms.opacity.value : 0; } };
+  lens.material.fragmentShader = shader
+    .replace("varying vec2 vUv;", "varying vec2 vUv;\nuniform sampler2D tBloom; uniform float bloomOpacity;\nvec4 lit(vec2 uv) { return texture2D(tDiffuse, uv) + bloomOpacity * texture2D(tBloom, uv); }")
+    .replace(reads, "lit(vUv");
+  lens.material.needsUpdate = true;
+  const render = quad.render;
+  quad.render = function (renderer) {
+    if (this.material !== blend) return render.call(this, renderer);
+  };
+  return true;
 }

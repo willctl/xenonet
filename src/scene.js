@@ -6,7 +6,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { COLORS, CATEGORY_COLORS, nodeColor, THEME, onTheme } from "./theme.js";
 import {
   Additive, glowTex, sparkTex, ringTex, reticleTex, fatEdges, fatLine, writeLine, arcPoints, pointsArray,
-  releaseMaterial, setLineResolution, nebula, LensShader, lensOutputPass, skyColors,
+  releaseMaterial, setLineResolution, nebula, LensShader, lensOutputPass, addBloomToLens, skyColors,
 } from "./fx.js";
 import { STARS, GRID, SWEEP, SONAR, LINES, pick } from "./looks/index.js";
 import { sonarGap } from "../core/themes.js";
@@ -187,11 +187,18 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
   composer.setPixelRatio(renderer.getPixelRatio());
   const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), THEME.glow.bloom, THEME.glow.radius, THEME.glow.threshold);
   composer.addPass(bloom);
-  // The lens and the output in one pass where it can (see fx.js).
+  // The lens and the output in one pass where it can, which adds the bloom
+  // as it reads the frame (see fx.js).
   const merged = lensOutputPass();
   const lens = merged ?? new ShaderPass(LensShader);
+  addBloomToLens(lens, bloom);
   composer.addPass(lens);
   if (!merged) composer.addPass(new OutputPass());
+  // The last pass draws on the screen, so what it would swap in is never
+  // read. Without the swap each frame renders into the same target, and
+  // the composer's other one, as large (multisampled, half-float, at the
+  // screen's density: some 200 MB on a Retina screen), is never allocated.
+  composer.passes.at(-1).needsSwap = false;
 
   const scene = graph.scene();
   const camera = graph.camera();

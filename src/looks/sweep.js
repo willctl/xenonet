@@ -40,7 +40,7 @@ export const SWEEP = {
     build(theme, { radius, y, color }) {
       const sweep = new THREE.Mesh(
         new THREE.CircleGeometry(radius, 96, 0, 0.32),
-        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: theme.sweep.opacity, side: THREE.DoubleSide, depthWrite: false, blending: Additive }),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: theme.sweep.opacity, side: THREE.DoubleSide, forceSinglePass: true, depthWrite: false, blending: Additive }),
       );
       sweep.rotation.x = -Math.PI / 2;
       sweep.position.y = y + 1;
@@ -62,6 +62,7 @@ export const SWEEP = {
         depthWrite: false,
         blending: Additive,
         side: THREE.DoubleSide,
+        forceSinglePass: true,
         uniforms: { time: { value: 0 }, opacity: { value: Math.min(1, theme.sweep.opacity * 8) }, low: { value: new THREE.Color(theme.colors.codex) }, high: { value: new THREE.Color(theme.colors.native) } },
         vertexShader: /* glsl */ `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
         fragmentShader: /* glsl */ `
@@ -99,6 +100,7 @@ export const SWEEP = {
         depthWrite: false,
         blending: Additive,
         side: THREE.DoubleSide,
+        forceSinglePass: true,
         uniforms: { time: { value: 0 }, opacity: { value: Math.min(1, theme.sweep.opacity * 14) }, hot: { value: new THREE.Color(theme.colors.gold) }, cool: { value: new THREE.Color(theme.colors.claude) } },
         vertexShader: /* glsl */ `
           varying vec2 vUv; varying vec3 vN; varying vec3 vV;

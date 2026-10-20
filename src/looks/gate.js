@@ -44,6 +44,7 @@ function irisMaterial(color, style, seed) {
     depthWrite: false,
     blending: Additive,
     side: THREE.DoubleSide,
+    forceSinglePass: true,
     uniforms: {
       color: { value: color.clone() },
       time: { value: 0 },
