@@ -534,7 +534,8 @@
     "core/engine/connect.js": {
       "rust": "crates/xenonet-engine/src/connect.rs",
       "differences": [
-        "The files, the CLIs and core/instances.js's table are the twin's, called as the JS called them."
+        "The files, the CLIs and core/instances.js's table are the twin's, called as the JS called them.",
+        "A registry or config formats a test gives (registry, formats) are JS code, so createConnect with either is the JS's."
       ]
     },
     "core/engine/engine.js": {

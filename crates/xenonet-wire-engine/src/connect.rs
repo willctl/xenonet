@@ -104,13 +104,17 @@ impl Connect for ConnectDriver {
         self.run(|c, k| c.preview(k)).await
     }
     async fn apply(&self, apps: Value) -> R<Value> {
-        // apply(apps = ["claude", "codex"]).
-        let apps: Vec<Arg> = match apps {
-            Value::Null => vec![Arg::text("claude"), Arg::text("codex")],
-            Value::Array(a) => a.iter().map(crate::js::arg).collect(),
-            other => vec![crate::js::arg(&other)],
+        // apply(apps = every app connect goes through).
+        let apps: Option<Vec<Arg>> = match apps {
+            Value::Null => None,
+            Value::Array(a) => Some(a.iter().map(crate::js::arg).collect()),
+            other => Some(vec![crate::js::arg(&other)]),
         };
-        self.run(move |c, k| c.apply(k, &apps)).await
+        self.run(move |c, k| {
+            let apps = apps.unwrap_or_else(|| c.ids().into_iter().map(Arg::Text).collect());
+            c.apply(k, &apps)
+        })
+        .await
     }
     async fn remove(&self) -> R<Value> {
         self.run(|c, k| c.remove(k)).await

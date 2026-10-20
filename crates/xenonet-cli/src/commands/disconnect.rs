@@ -4,7 +4,7 @@
 //! names, it takes that XenoNet's entries out by itself, so uninstalling
 //! XenoNet leaves no hook behind that runs files about to be deleted.
 
-use super::connect::{local_options, render};
+use super::connect::{connected, local_options, render};
 use crate::args::Flags;
 use crate::cores;
 use crate::js::{list, str, t};
@@ -55,7 +55,7 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
             Value::Object(a)
         })
         .collect();
-    render(&json!({ "apps": shown }), &["claude", "codex"]);
+    render(&json!({ "apps": shown }), &connected());
     let names = there.iter().map(|a| t(a, "name")).collect::<Vec<_>>().join(" and ");
     if !confirm(&format!("Take XenoNet out of {names}?"), flags)? {
         print(c::dim("Nothing changed."));
