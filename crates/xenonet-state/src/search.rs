@@ -323,6 +323,10 @@ pub struct Plan {
     pub offset: f64,
     /// Whether the rollout has a completed user message.
     pub items: bool,
+    /// Whether the index has read the file before. One it hasn't has no
+    /// documents in it yet (a file's documents and its row go in
+    /// together), so reading it whole has none to take out first.
+    known: bool,
     checked: bool,
     next_offset: f64,
 }
@@ -481,7 +485,8 @@ impl Search {
         // indexed so far by its events that has a completed user message now
         // is indexed again, whole, by those.
         let items = app == "codex" && !whole && row.as_ref().is_some_and(|r| sql_is(&r[3], 1.0));
-        Ok(Some(Plan { file: file.into(), app: app.into(), session_id, size, mtime, zst, whole, offset, items, checked: false, next_offset: 0.0 }))
+        let known = row.is_some();
+        Ok(Some(Plan { file: file.into(), app: app.into(), session_id, size, mtime, zst, whole, offset, items, known, checked: false, next_offset: 0.0 }))
     }
 
     /// Starts indexing what was read (all of it, or what was added since the
@@ -508,7 +513,11 @@ impl Search {
         let indexed = &text[..body(text)];
         let db = self.ready("exec")?;
         db.execute_batch("begin")?;
-        if plan.whole {
+        // Taking a file's documents out reads every document, as FTS5 has
+        // no index on the file, so it's done only when there are some:
+        // across a first index of thousands of transcripts, it was most of
+        // the time the index took.
+        if plan.whole && plan.known {
             if let Err(e) = db.prepare_cached("delete from docs where file = ?").and_then(|mut s| s.execute([&plan.file])) {
                 self.rollback()?;
                 return Err(e.into());
@@ -773,7 +782,8 @@ mod tests {
         let f = file.to_string_lossy().into_owned();
         let index = |s: &Search| -> f64 {
             let Some(mut plan) = s.plan(&f, "claude").unwrap() else { return 0.0 };
-            let text = String::from_utf8_lossy(&std::fs::read(&f).unwrap()[plan.offset as usize..]).into_owned();
+            let from = if plan.whole { 0 } else { plan.offset as usize };
+            let text = String::from_utf8_lossy(&std::fs::read(&f).unwrap()[from..]).into_owned();
             let Begun::Lines(lines) = s.begin(&mut plan, &text).unwrap() else { panic!("read whole") };
             let mut run = Search::run(&f, "claude", &plan.session_id, false);
             for l in lines {
@@ -791,6 +801,11 @@ mod tests {
         assert_eq!(s.counts().unwrap(), (1.0, 2.0));
         assert_eq!(s.search("mailgun", 30.0).unwrap().len(), 1);
         assert_eq!(s.search("mailgun", f64::NAN).unwrap().len(), 0);
+        // Written again, shorter: read whole, and what it said before goes.
+        std::fs::write(&file, line("Postmark, then.")).unwrap();
+        assert_eq!(index(&s), 1.0);
+        assert_eq!(s.counts().unwrap(), (1.0, 1.0));
+        assert_eq!(s.search("mailgun", 30.0).unwrap().len(), 0);
         let rows = s.query(s.generation, "select typeof(ts) t, ts from docs", &[], true).unwrap();
         assert_eq!(rows[0][0].1, Out::Str("real".into()), "a JS number goes in as a double");
         s.close();
