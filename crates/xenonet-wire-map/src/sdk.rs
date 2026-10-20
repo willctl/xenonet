@@ -964,9 +964,11 @@ impl Messages {
         self.list.is_empty()
     }
 
-    /// The messages from `start` to `end`, whole.
+    /// The messages from `start` to `end`, whole, as `slice` takes them: a
+    /// range past the end is cut to it.
     pub fn page(&self, start: usize, end: usize) -> Vec<Value> {
-        self.list[start..end]
+        let end = end.min(self.list.len());
+        self.list[start.min(end)..end]
             .iter()
             .map(|(m, line)| {
                 let mut m = m.clone();
@@ -1573,6 +1575,10 @@ mod tests {
             let (a, b) = (d.roll(want.len() + 1), d.roll(want.len() + 1));
             let (a, b) = (a.min(b), a.max(b));
             assert_eq!(got.page(a, b), want[a..b], "round {round}, {a}..{b}");
+            // Past the end, as slice takes it: cut to what there is.
+            let n = want.len();
+            assert_eq!(got.page(a, n + 5), want[a..], "round {round}, {a}..past the end");
+            assert!(got.page(n + 1, n + 5).is_empty() && got.page(b, a.saturating_sub(1)).is_empty());
             shown += want.len();
         }
         assert!(shown > 500, "the transcripts have messages to show: {shown}");
