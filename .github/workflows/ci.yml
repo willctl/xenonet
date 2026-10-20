@@ -127,12 +127,14 @@ jobs:
           restore-keys: e2e-linux-cargo-
       - run: rustup toolchain install
       - run: npm ci
-      # Electron fetches its binary on first use. Ubuntu 24.04's AppArmor
+      # Electron fetches its binary on first use, and says so on stdout, so
+      # it's fetched first and its path asked for after. Ubuntu 24.04's AppArmor
       # stops unprivileged programs from making the user namespaces
       # Chromium's sandbox runs in, so Electron aborts. This profile lets
       # the checkout's Electron, and nothing else, make them, and keeps the
       # sandbox on.
       - run: |
+          node -e 'require("electron")' > /dev/null
           electron=$(realpath "$(node -p 'require("electron")')")
           sudo tee /etc/apparmor.d/xenonet-e2e-electron > /dev/null <<EOF
           abi <abi/4.0>,
