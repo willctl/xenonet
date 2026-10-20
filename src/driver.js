@@ -215,11 +215,15 @@ export function createDriver(app) {
     state,
     settled,
     // Resolves once the map has drawn its next frame, with the frames drawn
-    // so far.
-    async drawn({ timeout = 5000 } = {}) {
-      scene.wake();
-      await drawn(timeout);
-      return { frames: scene.drawingState().frames };
+    // so far. Given a point `at` with no map under it (a panel, say), it
+    // doesn't wait.
+    async drawn({ timeout = 5000, at = null } = {}) {
+      const onMap = !at || !!document.elementFromPoint(at.x, at.y)?.closest("#scene");
+      if (onMap) {
+        scene.wake();
+        await drawn(timeout);
+      }
+      return { frames: scene.drawingState().frames, waited: onMap };
     },
 
     // Nodes whose id, title or name contain every word of `query`, drawn
