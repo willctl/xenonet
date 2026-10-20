@@ -213,7 +213,7 @@ test("a click on an actor selects it, over whatever glows behind it", { timeout:
   }
 }));
 
-test("the pointer takes whatever is drawn in front: Wren before a node's body, and the body before Wren", { timeout: limit(60000) }, shoot("actors-front", async () => {
+test("the pointer takes whatever is drawn in front: Wren before a node's body, and the body before Wren", { timeout: limit(120000) }, shoot("actors-front", async () => {
   await s.driver("still", true);
   try {
     const wren = byId(await untilActors((l) => byId(l, "actor:wren")?.beams.length > 0), "actor:wren");
@@ -232,29 +232,39 @@ test("the pointer takes whatever is drawn in front: Wren before a node's body, a
         sc.graph.cameraPosition(eye, { x: far.x, y: far.y, z: far.z }, 0);
         return true;
       })()`);
-    // What hovering shows and a click takes there. Wren's script moves it
-    // now and then, so a try that finds it moved looks again; drawn in
-    // software, a try takes seconds, long enough for a move.
-    const takes = async (from, want) => {
-      let got = null;
-      for (let tries = 0; tries < 6 && got?.picked !== want; tries++) {
+    // What hovering shows and a click takes there. Wren's script gives it
+    // new work every ten seconds or so (crates/xenonet-actors/src/demo.rs),
+    // and it moves to it; drawn in software, a try takes seconds, long
+    // enough for that. So a try counts only if Wren and the node stayed
+    // where the look put them, and one in which either moved is made again.
+    const places = () => s.eval(`return (() => {
+      const sc = window.__xenonet.scene, n = sc.getNode(${JSON.stringify(node)});
+      return [...sc.actor("actor:wren").group.position.toArray(), n.x, n.y, n.z];
+    })()`);
+    const takes = async (from) => {
+      for (let tries = 0; tries < 12; tries++) {
         await look(from);
+        const before = await places();
         await sleep(250);
         const p = await s.driver("screenPos", node);
         await s.input({ move: p });
         const tip = await s.eval(`return document.querySelector("#tooltip").hidden ? "" : document.querySelector("#tooltip").textContent`);
         await s.input({ click: p });
         await sleep(300);
-        got = { tip, picked: (await s.driver("state")).selection?.id ?? null };
+        const picked = (await s.driver("state")).selection?.id ?? null;
+        const moved = (await places()).some((v, i) => Math.abs(v - before[i]) > 2);
         // Letting go waits for the camera the selection moved.
         await s.driver("select", null);
+        if (!moved) return { tip, picked };
       }
-      return got;
+      return null;
     };
-    let got = await takes("wren", "actor:wren");
+    let got = await takes("wren");
+    assert.ok(got, "a try with Wren and the node held where the look put them");
     assert.equal(got.picked, "actor:wren", "Wren in front takes the click");
     assert.match(got.tip, /Wren/, "and hovering shows Wren");
-    got = await takes("node", node);
+    got = await takes("node");
+    assert.ok(got, "a try with Wren and the node held where the look put them");
     assert.equal(got.picked, node, "the node's body in front takes it");
     assert.ok(got.tip.includes(title) && !/Wren/.test(got.tip), `and hovering shows the node: ${got.tip}`);
   } finally {

@@ -1059,6 +1059,21 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
   let cameraMovedAt = 0;
   let sinceFly = 2;
   const lastCamera = new THREE.Vector3(), lastTarget = new THREE.Vector3();
+
+  // The camera as the next frame draws it. A camera just moved (a fly, or
+  // the view set in place) turns to its target only as the orbit controls
+  // update, in the graph's frame, and its matrices follow only when it's
+  // drawn: until then, projecting through it gives where things were. With
+  // frames a second or two apart, drawn in software, that's long enough
+  // for a script to point at the old place.
+  const nextView = new THREE.PerspectiveCamera();
+  function cameraAsDrawn() {
+    nextView.copy(camera, false);
+    nextView.lookAt(controls.target);
+    nextView.updateMatrixWorld();
+    return nextView;
+  }
+
   function fly(pos, look, ms) {
     cameraUntil = Math.max(cameraUntil, performance.now() + ms);
     graph.cameraPosition({ x: pos.x, y: pos.y, z: pos.z }, { x: look.x, y: look.y, z: look.z }, ms);
@@ -1820,12 +1835,13 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
     drawingState: () => ({ ...drawing, recording: [...recording], lively: [...lively], fps: rate(), frames, forced: forcedFrames }),
     gathering: () => (fan ? { root: fan.root.id, members: fan.order.map((n) => n.id), sessions: fan.sessions } : null),
     view: () => ({ camera: camera.position.toArray().map(Math.round), target: controls.target.toArray().map(Math.round), autoRotate: controls.autoRotate }),
-    // In CSS pixels from the page's top left; null if it isn't drawn.
+    // In CSS pixels from the page's top left, as the next frame draws it;
+    // null if it isn't drawn.
     screenPos(id) {
       const rec = isActorId(id) ? actors.get(id) : null;
       const n = rec ? null : nodeIndex.get(id);
       if (!rec && (!n?.__obs || !Number.isFinite(n.x) || (visible && !visible.has(id)))) return null;
-      const p = (rec ? rec.group.position.clone() : posOf(n)).project(camera);
+      const p = (rec ? rec.group.position.clone() : posOf(n)).project(cameraAsDrawn());
       const r = renderer.domElement.getBoundingClientRect();
       const onScreen = p.z < 1 && Math.abs(p.x) <= 1 && Math.abs(p.y) <= 1;
       return { x: Math.round(r.left + ((p.x + 1) / 2) * r.width), y: Math.round(r.top + ((1 - p.y) / 2) * r.height), onScreen };
