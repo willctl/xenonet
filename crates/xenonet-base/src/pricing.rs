@@ -268,9 +268,8 @@ fn price_rows(id: &str) -> Option<&'static [usize]> {
     if let Some(v) = kept.locked().get(id) {
         return *v;
     }
-    let all = rows();
-    let mut best: Option<(&str, &str)> = None;
-    for r in all {
+    let mut best: Option<(&str, &'static str)> = None;
+    for r in rows() {
         for alt in &r.ids {
             let fits = id == *alt || (id.starts_with(alt) && id.as_bytes().get(alt.len()) == Some(&b'-'));
             if fits && best.is_none_or(|(b, _)| alt.len() > b.len()) {
@@ -278,17 +277,31 @@ fn price_rows(id: &str) -> Option<&'static [usize]> {
             }
         }
     }
-    let found = best.map(|(_, key)| {
-        let mut idx: Vec<usize> = (0..all.len()).filter(|&i| all[i].ids[0] == key).collect();
-        idx.sort_by(|&a, &b| all[a].from.total_cmp(&all[b].from));
-        &*Box::leak(idx.into_boxed_slice())
-    });
+    let found = best.map(|(_, key)| rows_of(key));
     let mut kept = kept.locked();
     if kept.len() >= 500 {
         kept.clear();
     }
     kept.insert(id.to_string(), found);
     found
+}
+
+// A model's rows, oldest first, by its first id. Worked out once for each
+// model the table has and kept for good: the ids a transcript names are
+// anyone's, but the models they price to are the table's few dozen.
+fn rows_of(key: &'static str) -> &'static [usize] {
+    type Kept = Mutex<HashMap<&'static str, &'static [usize]>>;
+    static KEPT: OnceLock<Kept> = OnceLock::new();
+    let mut kept = KEPT.get_or_init(Default::default).locked();
+    if let Some(v) = kept.get(key) {
+        return v;
+    }
+    let all = rows();
+    let mut idx: Vec<usize> = (0..all.len()).filter(|&i| all[i].ids[0] == key).collect();
+    idx.sort_by(|&a, &b| all[a].from.total_cmp(&all[b].from));
+    let v: &'static [usize] = Box::leak(idx.into_boxed_slice());
+    kept.insert(key, v);
+    v
 }
 
 /// The price row for a model on a day, or None when XenoNet doesn't know
@@ -374,6 +387,16 @@ pub fn cost_of(model: &str, at: Option<f64>, u: &Tokens, fast: bool, priority: b
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ids_of_one_model_share_its_rows() {
+        // Each id is looked up once, and those of one model share its rows:
+        // a thousand made-up ids in a transcript keep one copy, not one each.
+        let first = price_rows("claude-3-5-haiku-a").unwrap();
+        for i in 0..1000 {
+            assert!(std::ptr::eq(first, price_rows(&format!("claude-3-5-haiku-{i}")).unwrap()));
+        }
+    }
 
     #[test]
     fn plain_ids() {
