@@ -202,11 +202,13 @@ async fn delivery_records_a_message_handed_to_a_listening_hook_and_the_pause_swi
     let sent = e.send(A, json!({ "to": C, "text": "ping" }), None).await.unwrap();
     assert_eq!(sent["to"][0]["delivery"], "right away: it's listening for messages", "{sent}");
     listening.await.unwrap().unwrap().expect("handed over");
-    // The router's record, once its route has run.
+    // The router's record, once its route has run: it's "queued" from the
+    // moment the message is sent until then, which on a slow machine can be
+    // a while after the hand-over.
     let mut recent = Value::Null;
-    for _ in 0..50 {
+    for _ in 0..100 {
         recent = router.list(50).unwrap();
-        if recent.as_array().is_some_and(|l| !l.is_empty()) {
+        if recent.as_array().and_then(|l| l.first()).is_some_and(|r| r["state"] != "queued") {
             break;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
