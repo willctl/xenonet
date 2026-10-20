@@ -1,9 +1,9 @@
 //! The small pieces every XenoNet crate uses: JSON as JS reads and writes it
-//! (`json`), times as the transcripts write
-//! them (`time`), paths as XenoNet compares and shows them (`paths`), what
-//! a call to a model cost at API prices (`pricing`), the client that
-//! reaches a running XenoNet (`client`, over `http`), whether a process
-//! runs (`process`), and locks that outlive a panic (`sync`).
+//! (`json`), times as the transcripts write them (`time`), paths as XenoNet
+//! compares and shows them (`paths`) and as Node's `path` builds them
+//! (`nodepath`), what a call to a model cost at API prices (`pricing`), the
+//! client that reaches a running XenoNet (`client`, over `http`), whether a
+//! process runs (`process`), and locks that outlive a panic (`sync`).
 
 pub mod client;
 pub mod dirs;
@@ -13,6 +13,7 @@ pub mod ids;
 pub mod json;
 pub mod jsstr;
 pub mod log;
+pub mod nodepath;
 pub mod ordered;
 pub mod paths;
 pub mod pricing;

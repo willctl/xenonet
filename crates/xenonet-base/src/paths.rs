@@ -5,6 +5,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::nodepath::Style;
+
 /// A path's key: compared case-insensitively with forward slashes, because
 /// the apps report the same Windows folder as `C:\x`, `c:/x` or `\\?\C:\x`.
 /// On macOS, /tmp, /var and /etc are links into /private, and tools report
@@ -190,8 +192,7 @@ pub fn join_all(parts: &[&str]) -> String {
         return ".".into();
     }
     if cfg!(windows) {
-        let p: PathBuf = parts.iter().collect();
-        return p.to_string_lossy().into_owned();
+        return Style::Win32.join(&parts);
     }
     normalize_posix(&parts.join("/"))
 }
@@ -199,8 +200,7 @@ pub fn join_all(parts: &[&str]) -> String {
 /// Joins and normalizes as Node's path.join does for this platform.
 pub fn join(dir: &str, name: &str) -> String {
     if cfg!(windows) {
-        let p: PathBuf = [dir, name].iter().collect();
-        return p.to_string_lossy().into_owned();
+        return Style::Win32.join(&[dir, name]);
     }
     normalize_posix(&format!("{dir}/{name}"))
 }
