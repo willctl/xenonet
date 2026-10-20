@@ -5,9 +5,9 @@ XenoNet ships a first-install bundle and a Desktop-only update, plus separate Se
 ## Prepare a version
 
 1. Choose a new version. Use a patch for fixes and a minor version for new behavior while XenoNet is below 1.0.
-2. Run `npm version 0.1.1 --no-git-tag-version`, with the Desktop version you chose. Update `components/versions.json` for each changed Service or Tools package. Keep unchanged component versions unchanged; changing their runtime or shared code requires a new component version. This updates both package files.
+2. Run `npm version 0.1.1 --no-git-tag-version`, with the Desktop version you chose. Update `components/versions.json` for each changed Service or Tools package. Keep unchanged component versions unchanged; changing their runtime or shared code requires a new component version. This updates both package files, and the version of XenoNet's plugin for Claude Code in `plugins/xenonet/.claude-plugin/plugin.json`.
 3. Write `docs/releases/0.1.1.md`. Describe what changed for the person using XenoNet, any install limits and anything they must do. Review public copy with the [unslop guidance](https://github.com/cursor/plugins/blob/main/pstack/skills/unslop/SKILL.md).
-4. Run `npm run release:check`, `npm test` and `npm run test:e2e`. Check the desktop UI in the demo instance when it changed.
+4. Run `npm run release:check`, `npm test` and `npm run test:e2e`. The release check stops if the package files and the plugin's manifest name different versions. Check the desktop UI in the demo instance when it changed.
 5. Commit the changes, push them, then create and push an annotated tag that matches the package version.
 
 ```sh

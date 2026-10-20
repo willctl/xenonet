@@ -43,6 +43,7 @@
     "dist:dir": "node scripts/dist.mjs dir",
     "shortcut": "release\\win-unpacked\\XenoNet.exe --install-shortcut",
     "release:check": "node scripts/release.mjs check",
+    "version": "node scripts/release.mjs plugin",
     "release:build": "node scripts/release-build.mjs",
     "release:verify": "node scripts/release.mjs verify"
   },

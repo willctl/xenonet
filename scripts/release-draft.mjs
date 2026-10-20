@@ -1,10 +1,11 @@
 import fs from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
-import { checkVersion, verifyArtifacts } from "./release.mjs";
+import { checkVersion, checkPlugin, verifyArtifacts, PLUGIN_MANIFEST } from "./release.mjs";
 
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
 const tag = process.env.GITHUB_REF_NAME;
 checkVersion(pkg, JSON.parse(fs.readFileSync("package-lock.json", "utf8")), tag);
+checkPlugin(pkg, JSON.parse(fs.readFileSync(PLUGIN_MANIFEST, "utf8")));
 const assets = verifyArtifacts("release", pkg.version, { components: true }).map((file) => `release/${file}`);
 const existing = spawnSync("gh", ["release", "view", tag, "--json", "isDraft"], { encoding: "utf8" });
 if (existing.status === 0) {
