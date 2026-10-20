@@ -5,14 +5,13 @@
 
 use super::files::Files;
 use super::node_path;
-use super::{
-    by_num, edit_file, edits_out, fits_id, js_max, js_min, ms_of, patch_headers, push_edit, str_of, titled, Check, Checked, Edits, Out, Threw, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX,
-};
+use super::{by_num, edit_file, edits_out, fits_id, js_max, js_min, ms_of, push_edit, str_of, titled, Check, Checked, Edits, Out, Threw, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 use xenonet_base::json::{self, number_string};
 use xenonet_base::jsstr::is_array_index;
 use xenonet_base::ordered::OrderedMap;
+use xenonet_base::patch;
 use xenonet_base::paths::PathStyle;
 use xenonet_base::text::{is_blank, truthy};
 
@@ -49,7 +48,7 @@ fn js_values(m: &Map<String, Value>) -> Vec<&Value> {
 pub fn edited_by(tool: Option<&Value>, args: Option<&Value>) -> Vec<String> {
     let Some(tool) = str_of(tool).filter(|t| EDIT_TOOLS.contains(t)) else { return Vec::new() };
     let args = match args {
-        Some(Value::String(s)) => return if tool == "apply_patch" { patch_headers(s) } else { Vec::new() },
+        Some(Value::String(s)) => return if tool == "apply_patch" { patch::paths(s, true) } else { Vec::new() },
         Some(a @ (Value::Object(_) | Value::Array(_))) => a,
         _ => return Vec::new(),
     };
@@ -65,7 +64,7 @@ pub fn edited_by(tool: Option<&Value>, args: Option<&Value>) -> Vec<String> {
         };
         for v in values {
             if let Value::String(s) = v {
-                out.extend(patch_headers(s));
+                out.extend(patch::paths(s, true));
             }
         }
     }

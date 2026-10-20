@@ -827,6 +827,12 @@
         "The key (the credential store), the request (fetch) and the reading kept for a minute stay in the twin; Rust says what OpenRouter's answer means and how long it stands."
       ]
     },
+    "core/patch.js": {
+      "rust": "crates/xenonet-base/src/patch.rs",
+      "differences": [
+        "A lone surrogate in the text reaches the Rust with U+FFFD in its place."
+      ]
+    },
     "core/paths.js": {
       "rust": "crates/xenonet-base/src/paths.rs",
       "differences": [
@@ -1356,6 +1362,7 @@
     "test/open.test.js",
     "test/opencode.test.js",
     "test/page-markup.test.js",
+    "test/patch.test.js",
     "test/platform.test.js",
     "test/poster.test.js",
     "test/private-file.test.js",

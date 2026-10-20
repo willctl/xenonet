@@ -13,6 +13,7 @@ import { Block } from "../blocks/lifecycle.js";
 import { pathStyle } from "../paths.js";
 import { reader } from "../vendor.js";
 import { cleanVersion } from "../drift.js";
+import { patchPaths } from "../patch.js";
 
 export const SOURCE = "anomaly/opencode/db";
 export const EDIT_TOOLS = ["edit", "write", "multiedit"];
@@ -28,10 +29,11 @@ const EDITS_MAX = 5000;
 export const localId = (id) => String(id).replace(/_/g, "-");
 export const sessionIdOf = (id) => `opencode:${localId(id)}`;
 
-// The files an apply_patch text names, from its headers only.
+// The files an apply_patch text names, from its headers only: those it
+// adds, updates, deletes and moves to, less a header with no path.
 export function patchFiles(text) {
   if (typeof text !== "string") return [];
-  return [...text.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$/gm)].map((m) => (m[1] ?? m[2]).trim()).filter(Boolean);
+  return patchPaths(text).filter(Boolean);
 }
 
 // The files edit tools changed since `since`, taken out by SQLite: a part's

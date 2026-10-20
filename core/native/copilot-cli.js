@@ -13,6 +13,7 @@ import path from "node:path";
 import { Block } from "../blocks/lifecycle.js";
 import { pathStyle } from "../paths.js";
 import { reader } from "../vendor.js";
+import { patchPaths } from "../patch.js";
 
 export const SOURCE = "github/copilot-cli/session-event";
 // Copilot CLI's built-in file tools; str_replace_editor's view isn't an edit.
@@ -29,17 +30,16 @@ const ms = (v) => {
   const t = typeof v === "string" ? Date.parse(v) : NaN;
   return Number.isFinite(t) ? t : null;
 };
-const patchFiles = (text) => [...String(text).matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$/gm)].map((m) => (m[1] ?? m[2]).trim());
 
 // The files a tool call names, if it's an edit.
 export function editedBy(toolName, args) {
   if (!EDIT_TOOLS.has(toolName)) return [];
-  if (typeof args === "string") return toolName === "apply_patch" ? patchFiles(args) : [];
+  if (typeof args === "string") return toolName === "apply_patch" ? patchPaths(args) : [];
   if (!args || typeof args !== "object") return [];
   if (toolName === "str_replace_editor" && args.command === "view") return [];
   const out = [];
   for (const k of ["path", "file_path", "filePath"]) if (typeof args[k] === "string" && args[k]) out.push(args[k]);
-  if (toolName === "apply_patch") for (const v of Object.values(args)) if (typeof v === "string") out.push(...patchFiles(v));
+  if (toolName === "apply_patch") for (const v of Object.values(args)) if (typeof v === "string") out.push(...patchPaths(v));
   return out;
 }
 

@@ -1,10 +1,11 @@
-//! xenonet-base for the twins of core/pricing.js and core/paths.js.
+//! xenonet-base for the twins of core/pricing.js, core/patch.js and
+//! core/paths.js.
 
 use crate::js::Json;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde_json::{json, Map, Value};
-use xenonet_base::{paths, pricing, time, units};
+use xenonet_base::{patch, paths, pricing, time, units};
 
 // ----- pricing -----
 
@@ -95,6 +96,24 @@ pub fn cost_parts(model: String, at: Option<f64>, u: Usage, fast: bool, priority
         output: c.output,
         total: c.total,
     })
+}
+
+// ----- patch -----
+
+#[napi(object)]
+pub struct PatchHeader {
+    pub kind: String,
+    pub path: String,
+}
+
+#[napi(js_name = "patchHeaders")]
+pub fn patch_headers(text: String) -> Vec<PatchHeader> {
+    patch::headers(&text).into_iter().map(|h| PatchHeader { kind: h.kind.as_str().into(), path: h.path }).collect()
+}
+
+#[napi(js_name = "patchPaths")]
+pub fn patch_paths(text: String, moves: bool) -> Vec<String> {
+    patch::paths(&text, moves)
 }
 
 // ----- time -----

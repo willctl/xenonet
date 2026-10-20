@@ -249,13 +249,9 @@ pub fn edit_paths(tool_name: &Arg, input: &Arg, cwd: &Arg) -> Vec<String> {
     }
     fn scan(v: &Arg, found: &mut Vec<String>) {
         match v {
-            Arg::Text(s) => {
-                let re = patch_files();
-                for m in re.captures_iter(s) {
-                    let name = m.get(1).or_else(|| m.get(2)).map_or("", |x| x.as_str());
-                    found.push(xenonet_base::text::js_trim(name).to_string());
-                }
-            }
+            // The files it adds, updates and deletes, and the names it
+            // moves them to.
+            Arg::Text(s) => found.extend(xenonet_base::patch::paths(s, true)),
             Arg::List(l) => l.iter().for_each(|x| scan(x, found)),
             Arg::Obj(o) => o.iter().for_each(|(_, x)| scan(x, found)),
             _ => {}
@@ -270,15 +266,6 @@ pub fn edit_paths(tool_name: &Arg, input: &Arg, cwd: &Arg) -> Vec<String> {
         }
     }
     out
-}
-
-/// A patch's lines that name a file, with the JS's m flag (\r too ends a
-/// line) and its dot.
-fn patch_files() -> &'static regex::Regex {
-    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    RE.get_or_init(|| {
-        regex::Regex::new(r"(?mR)^\*\*\* (?:Add|Update|Delete) File: ([^\n\r\x{2028}\x{2029}]+)$|^\*\*\* Move to: ([^\n\r\x{2028}\x{2029}]+)$").expect("a fixed pattern")
-    })
 }
 
 /// What git printed for `rev-parse`, as a repo, or None when it didn't print

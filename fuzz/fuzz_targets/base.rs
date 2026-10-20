@@ -1,15 +1,15 @@
 #![no_main]
 
 // xenonet-base's helpers over text another program wrote: JS's string
-// functions, times, paths (XenoNet's and Node's, for both platforms), ids
-// and git remotes, model names and prices, the log's scrubbing, and the
-// numbers the page shows. The first byte picks a group; NULs split the
-// rest into arguments.
+// functions, apply_patch texts, times, paths (XenoNet's and Node's, for both
+// platforms), ids and git remotes, model names and prices, the log's
+// scrubbing, and the numbers the page shows. The first byte picks a group;
+// NULs split the rest into arguments.
 
 use libfuzzer_sys::fuzz_target;
 use serde_json::Value;
 use xenonet_base::nodepath::Style;
-use xenonet_base::{ids, jsstr, log, paths, pricing, text, time, units};
+use xenonet_base::{ids, jsstr, log, patch, paths, pricing, text, time, units};
 
 fn num(s: &str) -> f64 {
     text::js_number(Some(&Value::String(s.to_string())))
@@ -35,7 +35,7 @@ fuzz_target!(|data: &[u8]| {
             let _ = (jsstr::len(a), jsstr::head(a, n), jsstr::last(a, n), jsstr::slice(a, start, Some(end)), jsstr::slice(a, start, None));
             let _ = (jsstr::substring(a, start, Some(end)), jsstr::pad_start(a, n, c), jsstr::cmp_units(a, b), jsstr::collapse_space(a));
             let _ = (jsstr::is_array_index(a), jsstr::locale_compare(a, b), jsstr::locale_compare_num(a, b), jsstr::hex(a.as_bytes()));
-            let _ = (text::js_trim(a), text::js_trim_start(a), text::is_blank(a), num(a));
+            let _ = (text::js_trim(a), text::js_trim_start(a), text::is_blank(a), num(a), patch::headers(a));
             if let Some(Value::Object(m)) = xenonet_fuzz::json(a.as_bytes()) {
                 let _ = jsstr::js_key_order(m);
             }
