@@ -7,11 +7,11 @@
 // instead. vendor.js's checks and drift stay vendor.js's, called back from
 // Rust.
 import fs from "node:fs";
-import { Block } from "../blocks/lifecycle.js";
+import { NativeReader } from "../../../../../core/native/reader.js";
 import { reader } from "../vendor.js";
 import { native } from "../../index.js";
 import { APP } from "../../../../../core/apps.js";
-import { FAILED, guarded, liveOf, mapOfRuns, pathArg } from "../../native-readers.js";
+import { FAILED, guarded, mapOfRuns, pathArg } from "../../native-readers.js";
 
 export const SOURCE = "anomaly/opencode/db";
 export const EDIT_TOOLS = [...APP.opencode.editTools];
@@ -64,12 +64,12 @@ export function readDb(file, { sinceMs = 0, editsSinceMs = sinceMs, open, files 
   return got;
 }
 
-export class OpenCodeSessions extends Block {
+export class OpenCodeSessions extends NativeReader {
   #core = new native.OpenCodeCore();
   #runs = null;
 
   constructor({ file, open, files = fs, clock } = {}) {
-    super({ name: "opencode-sessions", kind: "gatherer", ...(clock ? { clock } : {}) });
+    super({ name: "opencode-sessions", clock });
     this.file = file;
     this.open = open;
     this.files = files;
@@ -103,12 +103,6 @@ export class OpenCodeSessions extends Block {
 
   sessions() {
     return this.#core.sessions();
-  }
-
-  // What the engine reads of a session: its edits, read from OpenCode's own
-  // records (so not observed), and that XenoNet can't send to it.
-  live(id) {
-    return liveOf(this.runs.get(id), false);
   }
 
   ids() {

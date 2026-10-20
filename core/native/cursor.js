@@ -10,20 +10,16 @@
 // Schema: core/schema/vendor/anysphere/cursor.js.
 import fs from "node:fs";
 import path from "node:path";
-import { Block } from "../blocks/lifecycle.js";
 import { pathStyle } from "../paths.js";
 import { reader } from "../vendor.js";
 import { cleanVersion } from "../drift.js";
+import { NativeReader, DAY_MS, capRuns, fitsId, pruneRuns, pushEdit, runSession, titled } from "./reader.js";
 
 export const SOURCE = "anysphere/cursor/hook-input";
-const DAY_MS = 24 * 3600e3;
-const EDIT_KEEP_MS = 30 * 60e3;
-const SESSIONS_MAX = 500;
 const READ_MAX = 4 << 20;
 const CHECKS_MAX = 32;
-const ID = /^[0-9A-Za-z][0-9A-Za-z-]{6,127}$/;
 
-export const sessionIdOf = (id) => (typeof id === "string" && ID.test(id) ? `cursor:${id}` : null);
+export const sessionIdOf = (id) => (typeof id === "string" && fitsId(id) ? `cursor:${id}` : null);
 
 // The last READ_MAX of the file, whole lines only.
 function tail(file, files) {
@@ -41,9 +37,9 @@ function tail(file, files) {
   return { lines, mtimeMs: st.mtimeMs, size: st.size };
 }
 
-export class CursorSessions extends Block {
+export class CursorSessions extends NativeReader {
   constructor({ file, files = fs, clock } = {}) {
-    super({ name: "cursor-sessions", kind: "gatherer", ...(clock ? { clock } : {}) });
+    super({ name: "cursor-sessions", clock });
     this.file = file;
     this.files = files;
     this.runs = new Map();
@@ -66,7 +62,7 @@ export class CursorSessions extends Block {
       if (stamp !== this.seen) {
         this.seen = stamp;
         this.runs = this.#parse(t.lines, now);
-      } else this.#prune(now);
+      } else pruneRuns(this.runs, now);
       this.ok(now);
     } catch (err) {
       this.problem(err, now);
@@ -102,53 +98,18 @@ export class CursorSessions extends Block {
       if (e.hook_event_name === "sessionEnd") run.endedAt = at;
       else if (run.endedAt != null && at > run.endedAt) run.endedAt = null;
       if (e.hook_event_name === "afterFileEdit" && typeof e.file_path === "string" && pathStyle(e.file_path).isAbsolute(e.file_path)) {
-        const file = pathStyle(e.file_path).resolve(e.file_path);
-        const list = run.edits.get(file) ?? [];
-        list.push({ ts: Math.min(at, now), path: file });
-        if (list.length > 8) list.shift();
-        run.edits.set(file, list);
+        pushEdit(run.edits, pathStyle(e.file_path).resolve(e.file_path), Math.min(at, now));
       }
     }
-    if (runs.size > SESSIONS_MAX) for (const k of [...runs.values()].sort((a, b) => a.updatedAt - b.updatedAt).slice(0, runs.size - SESSIONS_MAX).map((x) => x.id)) runs.delete(k);
+    capRuns(runs);
     this.runs = runs;
-    this.#prune(now);
+    pruneRuns(this.runs, now);
     return runs;
   }
 
-  #prune(now) {
-    for (const [id, r] of this.runs) {
-      if (now - r.updatedAt > DAY_MS) this.runs.delete(id);
-      else for (const [p, list] of r.edits) if (now - list[list.length - 1].ts > EDIT_KEEP_MS) r.edits.delete(p);
-    }
-  }
-
-  sessions() {
-    return [...this.runs.values()].map((r) => ({
-      id: r.id,
-      app: "cursor",
-      rawId: r.rawId,
-      title: `Cursor${r.cwd ? ` in ${pathStyle(r.cwd).basename(r.cwd)}` : ""}`,
-      preview: null,
-      cwd: r.cwd,
-      createdAt: r.createdAt,
-      updatedAt: r.updatedAt,
-      archived: false,
-      model: null,
-      branch: null,
-      parentId: null,
-      parentKind: null,
-      reader: "experimental",
-    }));
-  }
-
-  live(id) {
-    const r = this.runs.get(id);
-    if (!r) return null;
-    return { lastEventAt: r.updatedAt, endedAt: r.endedAt, edits: r.edits, observed: false, status: () => "idle", needsYou: () => null };
-  }
-
-  ids() {
-    return [...this.runs.keys()];
+  // A run as a session, named for where it ran.
+  session(r) {
+    return runSession(r, { app: "cursor", title: titled("Cursor", r.cwd) });
   }
 
   status() {

@@ -9,21 +9,18 @@
 // Schema: core/schema/vendor/anomaly/opencode.js.
 import fs from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { Block } from "../blocks/lifecycle.js";
 import { pathStyle } from "../paths.js";
 import { reader } from "../vendor.js";
 import { cleanVersion } from "../drift.js";
 import { APP } from "../apps.js";
 import { patchPaths } from "../patch.js";
+import { NativeReader, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX, editFile, pushEdit, runSession, titled } from "./reader.js";
 
 export const SOURCE = "anomaly/opencode/db";
 export const EDIT_TOOLS = [...APP.opencode.editTools];
 export const PATCH_TOOLS = ["apply_patch", "patch"];
 const SESSION_COLUMNS = ["id", "parent_id", "directory", "title", "version", "time_created", "time_updated", "time_archived"];
 const NEEDED = { session: ["id", "directory", "time_created", "time_updated"], part: ["session_id", "time_created", "data"] };
-const DAY_MS = 24 * 3600e3;
-const EDIT_KEEP_MS = 30 * 60e3;
-const SESSIONS_MAX = 500;
 const EDITS_MAX = 5000;
 
 // OpenCode's ids (ses_…) as XenoNet's session ids take them.
@@ -94,9 +91,9 @@ export function readDb(file, { sinceMs = 0, editsSinceMs = sinceMs, open = (f) =
   }
 }
 
-export class OpenCodeSessions extends Block {
+export class OpenCodeSessions extends NativeReader {
   constructor({ file, open, files = fs, clock } = {}) {
-    super({ name: "opencode-sessions", kind: "gatherer", ...(clock ? { clock } : {}) });
+    super({ name: "opencode-sessions", clock });
     this.file = file;
     this.open = open;
     this.files = files;
@@ -136,13 +133,9 @@ export class OpenCodeSessions extends Block {
       for (const e of got.edits) {
         const run = runs.get(sessionIdOf(e.session_id));
         if (!run || typeof e.path !== "string" || now - e.time_created > EDIT_KEEP_MS) continue;
-        const ps = pathStyle(run.cwd ?? e.path);
-        const file = ps.isAbsolute(e.path) ? ps.resolve(e.path) : run.cwd ? ps.resolve(run.cwd, e.path) : null;
+        const file = editFile(run.cwd, e.path);
         if (!file) continue;
-        const list = run.edits.get(file) ?? [];
-        list.push({ ts: Math.min(e.time_created, now), path: file });
-        if (list.length > 8) list.shift();
-        run.edits.set(file, list);
+        pushEdit(run.edits, file, Math.min(e.time_created, now));
         run.updatedAt = Math.max(run.updatedAt, e.time_created);
       }
       this.runs = runs;
@@ -153,35 +146,11 @@ export class OpenCodeSessions extends Block {
     return this;
   }
 
-  sessions() {
-    return [...this.runs.values()].map((r) => ({
-      id: r.id,
-      app: "opencode",
-      rawId: r.rawId,
-      title: r.title ?? `OpenCode${r.cwd ? ` in ${pathStyle(r.cwd).basename(r.cwd)}` : ""}`,
-      preview: null,
-      cwd: r.cwd,
-      createdAt: r.createdAt,
-      updatedAt: r.updatedAt,
-      archived: r.archived,
-      model: null,
-      branch: null,
-      parentId: r.parentId,
-      parentKind: r.parentId ? "subagent" : null,
-      reader: "experimental",
-    }));
-  }
-
-  // What the engine reads of a session: its edits, read from OpenCode's own
-  // records (so not observed), and that XenoNet can't send to it.
-  live(id) {
-    const r = this.runs.get(id);
-    if (!r) return null;
-    return { lastEventAt: r.updatedAt, endedAt: null, edits: r.edits, observed: false, status: () => "idle", needsYou: () => null };
-  }
-
-  ids() {
-    return [...this.runs.keys()];
+  // A run as a session: OpenCode's title for it, and its parent when it's
+  // a subagent's. Its edits are read from OpenCode's own records, so the
+  // engine doesn't take them as observed.
+  session(r) {
+    return runSession(r, { app: "opencode", title: r.title ?? titled("OpenCode", r.cwd), archived: r.archived, parentId: r.parentId });
   }
 
   status() {

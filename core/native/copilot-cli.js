@@ -10,27 +10,18 @@
 // Schema: core/schema/vendor/github/copilot-cli.js.
 import fs from "node:fs";
 import path from "node:path";
-import { Block } from "../blocks/lifecycle.js";
-import { pathStyle } from "../paths.js";
 import { reader } from "../vendor.js";
 import { APP } from "../apps.js";
 import { patchPaths } from "../patch.js";
+import { NativeReader, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX, FileCache, editFile, fitsId, ms, pushEdit, runSession, titled } from "./reader.js";
 
 export const SOURCE = "github/copilot-cli/session-event";
 // Copilot CLI's built-in file tools; str_replace_editor's view isn't an edit.
 export const EDIT_TOOLS = new Set(APP.copilot.editTools);
-const DAY_MS = 24 * 3600e3;
-const EDIT_KEEP_MS = 30 * 60e3;
-const SESSIONS_MAX = 500;
 const FILE_MAX = 32 << 20;
 const CHECKS_PER_FILE = 16;
-const ID = /^[0-9A-Za-z][0-9A-Za-z-]{6,127}$/;
 
-export const sessionIdOf = (id) => (ID.test(id) ? `copilot:${id}` : null);
-const ms = (v) => {
-  const t = typeof v === "string" ? Date.parse(v) : NaN;
-  return Number.isFinite(t) ? t : null;
-};
+export const sessionIdOf = (id) => (fitsId(id) ? `copilot:${id}` : null);
 
 // The files a tool call names, if it's an edit.
 export function editedBy(toolName, args) {
@@ -93,13 +84,13 @@ export function readEvents(text, { check = (r) => r } = {}) {
 
 export const copilotRoot = ({ home }) => path.join(home, ".copilot", "session-state");
 
-export class CopilotCliSessions extends Block {
+export class CopilotCliSessions extends NativeReader {
   constructor({ root, files = fs, clock } = {}) {
-    super({ name: "copilot-sessions", kind: "gatherer", ...(clock ? { clock } : {}) });
+    super({ name: "copilot-sessions", clock });
     this.root = root;
     this.files = files;
     this.runs = new Map();
-    this.cache = new Map();
+    this.cache = new FileCache(); // each event log as read
     this.rootState = "unread";
   }
 
@@ -131,35 +122,27 @@ export class CopilotCliSessions extends Block {
       const seen = new Set();
       for (const f of this.#files(now)) {
         seen.add(f.file);
-        let hit = this.cache.get(f.file);
-        if (!hit || hit.mtimeMs !== f.mtimeMs || hit.size !== f.size) {
-          let log = null;
+        const l = this.cache.get(f, () => {
           try {
             let version = null;
-            log = readEvents(this.files.readFileSync(f.file, "utf8"), { check: (rec) => (rec.type === "session.start" && typeof rec.data?.version === "number" && (version = String(rec.data.version)), r.check(rec, { version })) });
-          } catch {}
-          hit = { mtimeMs: f.mtimeMs, size: f.size, log };
-          this.cache.set(f.file, hit);
-        }
-        const l = hit.log;
+            return readEvents(this.files.readFileSync(f.file, "utf8"), { check: (rec) => (rec.type === "session.start" && typeof rec.data?.version === "number" && (version = String(rec.data.version)), r.check(rec, { version })) });
+          } catch {
+            return null;
+          }
+        });
         const id = l && sessionIdOf(l.id);
         if (!id) continue;
         const run = { id, rawId: l.id, cwd: l.cwd, branch: l.branch, title: l.title, createdAt: l.startedAt ?? f.mtimeMs, updatedAt: l.updatedAt ?? f.mtimeMs, endedAt: l.endedAt, edits: new Map() };
         for (const e of l.edits) {
           const at = Math.min(e.at ?? run.updatedAt, now);
           if (now - at > EDIT_KEEP_MS) continue;
-          const base = e.cwd ?? run.cwd;
-          const ps = pathStyle(base ?? e.path);
-          const file = ps.isAbsolute(e.path) ? ps.resolve(e.path) : base ? ps.resolve(base, e.path) : null;
-          if (!file) continue;
-          const list = run.edits.get(file) ?? [];
-          list.push({ ts: at, path: file });
-          if (list.length > 8) list.shift();
-          run.edits.set(file, list);
+          // Under the folder the session was in when it made the edit.
+          const file = editFile(e.cwd ?? run.cwd, e.path);
+          if (file) pushEdit(run.edits, file, at);
         }
         runs.set(id, run);
       }
-      for (const k of this.cache.keys()) if (!seen.has(k)) this.cache.delete(k);
+      this.cache.keep(seen);
       this.runs = runs;
       this.ok(now);
     } catch (err) {
@@ -168,33 +151,9 @@ export class CopilotCliSessions extends Block {
     return this;
   }
 
-  sessions() {
-    return [...this.runs.values()].map((r) => ({
-      id: r.id,
-      app: "copilot",
-      rawId: r.rawId,
-      title: r.title ?? `Copilot CLI${r.cwd ? ` in ${pathStyle(r.cwd).basename(r.cwd)}` : ""}`,
-      preview: null,
-      cwd: r.cwd,
-      createdAt: r.createdAt,
-      updatedAt: r.updatedAt,
-      archived: false,
-      model: null,
-      branch: r.branch ?? null,
-      parentId: null,
-      parentKind: null,
-      reader: "experimental",
-    }));
-  }
-
-  live(id) {
-    const r = this.runs.get(id);
-    if (!r) return null;
-    return { lastEventAt: r.updatedAt, endedAt: r.endedAt, edits: r.edits, observed: false, status: () => "idle", needsYou: () => null };
-  }
-
-  ids() {
-    return [...this.runs.keys()];
+  // A run as a session: the title Copilot CLI gave it, and its branch.
+  session(r) {
+    return runSession(r, { app: "copilot", title: r.title ?? titled("Copilot CLI", r.cwd), branch: r.branch ?? null });
   }
 
   status() {

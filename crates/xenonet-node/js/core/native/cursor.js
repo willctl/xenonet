@@ -6,21 +6,21 @@
 // vendor check stays vendor.js's, called back from Rust.
 import fs from "node:fs";
 import path from "node:path";
-import { Block } from "../blocks/lifecycle.js";
+import { NativeReader } from "../../../../../core/native/reader.js";
 import { reader } from "../vendor.js";
 import { native } from "../../index.js";
-import { FAILED, guarded, ioOf, liveOf, mapOfRuns, pathArg } from "../../native-readers.js";
+import { FAILED, guarded, ioOf, mapOfRuns, pathArg } from "../../native-readers.js";
 
 export const SOURCE = "anysphere/cursor/hook-input";
 
 export const sessionIdOf = (id) => (typeof id === "string" ? (native.cursorSessionIdOf(id) ?? null) : null);
 
-export class CursorSessions extends Block {
+export class CursorSessions extends NativeReader {
   #core = new native.CursorCore();
   #runs = null;
 
   constructor({ file, files = fs, clock } = {}) {
-    super({ name: "cursor-sessions", kind: "gatherer", ...(clock ? { clock } : {}) });
+    super({ name: "cursor-sessions", clock });
     this.file = file;
     this.files = files;
   }
@@ -57,10 +57,6 @@ export class CursorSessions extends Block {
 
   sessions() {
     return this.#core.sessions();
-  }
-
-  live(id) {
-    return liveOf(this.runs.get(id), false);
   }
 
   ids() {
