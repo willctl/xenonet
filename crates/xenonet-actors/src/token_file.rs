@@ -189,6 +189,7 @@ mod tests {
     const TOKEN: &str = concat!("xenonet_", "actor_", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
     const SID: &str = "S-1-5-21-1111111111-2222222222-3333333333-1001";
 
+    #[cfg(unix)]
     fn temp() -> String {
         let d = std::env::temp_dir().join(format!(
             "xenonet-token-file-{}-{}",

@@ -288,7 +288,8 @@ mod tests {
         for body in [utf16, line.clone().into_bytes()] {
             let asked = std::cell::RefCell::new(Vec::new());
             assert_eq!(acl_of("x.token", &mut windows(&asked, Some(body))).unwrap(), format!("D:P(A;;FA;;;{SID})"));
-            let saved = asked.borrow()[0].split(' ').nth(3).unwrap().to_string();
+            // icacls x.token /save <the file> /q, with the file's path as it is, spaces and all.
+            let saved = asked.borrow()[0].strip_prefix("icacls x.token /save ").and_then(|s| s.strip_suffix(" /q")).unwrap().to_string();
             assert!(saved.starts_with(&std::env::temp_dir().join("xenonet-acl-").to_string_lossy().into_owned()));
             assert!(!Path::new(&saved).exists(), "the saved ACL is taken away");
         }
