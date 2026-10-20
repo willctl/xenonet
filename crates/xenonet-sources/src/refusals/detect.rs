@@ -17,7 +17,8 @@
 //! possible-refusal (an invalid_prompt, which isn't always a policy). A
 //! credit token the API sends with a fallback is never kept.
 
-use crate::lines::opt_prop;
+use crate::line_events::{self, Kind, LineEvent, LineFile};
+use crate::lines::{opt_prop, ClaudeLine, CodexLine};
 use serde_json::{Map, Value};
 use xenonet_base::jsstr;
 use xenonet_base::text::{join, js_string, truthy};
@@ -121,14 +122,26 @@ fn is_object(v: Option<&Value>) -> bool {
     matches!(v, Some(Value::Object(_) | Value::Array(_)))
 }
 
-/// A Claude Code line's refusal, or None.
-pub fn claude_signal(raw: Option<&Value>) -> Option<Value> {
-    claude_refusal(raw)
+// A line's refusal, from its events.
+fn refusal_of(events: &[LineEvent<'_>]) -> Option<Value> {
+    events.iter().find_map(|e| match &e.kind {
+        Kind::Refusal(signal) => Some(signal.clone()),
+        _ => None,
+    })
 }
 
-/// A Codex rollout line's refusal (or reroute), or None.
+/// A Claude Code line's refusal event, or None.
+pub fn claude_signal(raw: Option<&Value>) -> Option<Value> {
+    let raw = raw.filter(|r| truthy(Some(r)) && is_object(Some(r)))?;
+    let o = ClaudeLine { raw: raw.clone() };
+    refusal_of(&line_events::claude(&o, &LineFile::default()))
+}
+
+/// A Codex rollout line's refusal (or reroute) event, or None.
 pub fn codex_signal(raw: Option<&Value>) -> Option<Value> {
-    codex_refusal(raw)
+    let raw = raw.filter(|r| truthy(Some(r)) && is_object(Some(r)))?;
+    let o = CodexLine { raw: raw.clone() };
+    refusal_of(&line_events::codex(&o, &mut LineFile::default()))
 }
 
 /// A Claude Code line's refusal, as the transcripts' mapper reads it

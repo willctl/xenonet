@@ -16,7 +16,8 @@ import { tilde, baseName } from "./paths.js";
 import { Tailer } from "./blocks/tailer.js";
 import { claudeUsageGatherer, desktopUsageGatherer } from "./claude-usage.js";
 import { ClaudeLine, CodexLine, linesOf, isCodexPrompt } from "./lines.js";
-import { claudeSignal, codexSignal } from "./refusals/detect.js";
+import { codexSignal } from "./refusals/detect.js";
+import { mapperOf, fail } from "./events.js";
 import { costParts, plainModel, priorityTier, PRICES_CHECKED } from "./pricing.js";
 import { isContextServer } from "./xenolith.js";
 import { patchPaths } from "./patch.js";
@@ -537,10 +538,13 @@ export class LiveTelemetry extends EventEmitter {
       const rec = linesOf(f.app).line(line, f);
       if (!rec) return;
       this.status.lines++;
-      // A provider's refusal, as its line marks it (core/refusals): kept
-      // whether read as history or live, told to you only when live.
-      const sig = f.app === "codex" ? codexSignal(rec.raw) : claudeSignal(rec.raw);
-      if (sig) this.emit("refusal", { signal: sig, sessionId: f.sessionId, app: f.app, agentId: f.agentId ?? null, file: f.file ?? null, cwd: typeof rec.raw?.cwd === "string" ? rec.raw.cwd : null, model: this.sessions.get(f.sessionId)?.model ?? null, live: !prime });
+      // A provider's refusal, as its line marks it (core/refusals), read
+      // first: kept whether read as history or live, told to you only when
+      // live.
+      for (const e of mapperOf(f.app).events(rec, { agentId: f.agentId ?? null })) {
+        if (e.kind === "broken" && e.at === "refusal") fail(e);
+        if (e.kind === "refusal") this.emit("refusal", { signal: e.signal, sessionId: f.sessionId, app: f.app, agentId: f.agentId ?? null, file: f.file ?? null, cwd: typeof rec.raw?.cwd === "string" ? rec.raw.cwd : null, model: this.sessions.get(f.sessionId)?.model ?? null, live: !prime });
+      }
       if (f.app === "codex") this.applyCodex(f, rec, !prime);
       else this.applyClaude(f, rec, !prime);
     } catch {

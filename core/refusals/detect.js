@@ -15,12 +15,14 @@
 //
 // claudeRefusal(raw) and codexRefusal(raw) read a line as the file has it,
 // for the transcripts' mapper (core/events.js), and claudeSignal(raw) and
-// codexSignal(raw) are a line's refusal as the mapper reads it. Each
-// returns { provider, kind, source, category, explanation, text,
-// requestId, messageId, uuid, parentUuid, model, fallbackModel, code, at }
-// or null. kind is refusal, refusal-recovered, reroute or possible-refusal
-// (an invalid_prompt, which isn't always a policy). A credit token the API
-// sends with a fallback is never kept.
+// codexSignal(raw) are a line's refusal event. Each returns { provider,
+// kind, source, category, explanation, text, requestId, messageId, uuid,
+// parentUuid, model, fallbackModel, code, at } or null. kind is refusal,
+// refusal-recovered, reroute or possible-refusal (an invalid_prompt, which
+// isn't always a policy). A credit token the API sends with a fallback is
+// never kept.
+import { ClaudeLine, CodexLine } from "../lines.js";
+import { claude, codex } from "../events.js";
 
 const POLICY = /policy|cyber|bio|misalignment|safety|content_filter/i;
 const textOf = (content) =>
@@ -89,8 +91,19 @@ export function codexRefusal(raw) {
   return null;
 }
 
-export const claudeSignal = claudeRefusal;
-export const codexSignal = codexRefusal;
+// A line's refusal, from its events: the refusal event, or what reading it
+// threw.
+function refusalOf(events) {
+  for (const e of events) {
+    if (e.kind === "refusal") return e.signal;
+    if (e.kind === "broken" && e.at === "refusal") throw e.error;
+  }
+  return null;
+}
+
+export const claudeSignal = (raw) => (raw && typeof raw === "object" ? refusalOf(claude.events(new ClaudeLine(raw))) : null);
+
+export const codexSignal = (raw) => (raw && typeof raw === "object" ? refusalOf(codex.events(new CodexLine(raw))) : null);
 
 // What makes two sightings of a refusal the same one: the request's id
 // when there is one, else where it was written.

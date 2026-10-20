@@ -18,8 +18,9 @@ use super::{
     categorize, claude_edits, clip, clip_value, codex_edits, command_text, day_key, file_key, files_of, looks_like_question, mcp_server_of, median, patch_files, slope, string_of,
     tail, tool_detail, tool_key, wiki_pages_of,
 };
+use crate::line_events::{self, Kind, LineEvent, LineFile};
 use crate::lines::{is_codex_prompt, opt_prop, prop, ClaudeLine, CodexLine, TypeError};
-use crate::refusals::detect::{claude_signal, codex_signal};
+use crate::refusals::detect::codex_signal;
 use serde_json::{Map, Value};
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -913,7 +914,22 @@ impl Telemetry {
     /// (kept whether read as history or live, told to you only when live)
     /// and what it says. What it emitted before an error is in `out`.
     pub fn line(&mut self, codex: bool, f: &Where, raw: Value, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
-        let sig = if codex { codex_signal(Some(&raw)) } else { claude_signal(Some(&raw)) };
+        // A provider's refusal, as its line marks it, read first from the
+        // line's events.
+        let sig = {
+            let mut file = LineFile::new(Some(f.agent_id.clone()));
+            let refusal = |events: &[LineEvent<'_>]| {
+                events.iter().find_map(|e| match &e.kind {
+                    Kind::Refusal(signal) => Some(signal.clone()),
+                    _ => None,
+                })
+            };
+            if codex {
+                refusal(&line_events::codex(&CodexLine { raw: raw.clone() }, &mut file))
+            } else {
+                refusal(&line_events::claude(&ClaudeLine { raw: raw.clone() }, &file))
+            }
+        };
         if let Some(signal) = sig {
             let model = self.find(&f.session_id).map_or(Value::Null, |i| self.sessions[i].model.clone());
             let cwd = opt_prop(Some(&raw), "cwd").filter(|c| c.is_string()).cloned().unwrap_or(Value::Null);
