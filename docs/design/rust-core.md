@@ -500,6 +500,11 @@ port. The service stays the only writer of `state.json` and
   under the home folder. Release builds remap them
   (`--remap-path-prefix`) and strip debug info, and the build's existing
   check for the home folder's path in packaged files covers the binaries.
+- **The dist profile.** Published binaries build with Cargo's `dist`
+  profile: whole-program LTO in one codegen unit, no debug info and no
+  symbol table. On an M-series Mac that took the service from 34.5 MB to
+  22.1 MB and made scanning and search 5-10% quicker than the `release`
+  profile, for a build about three times as long.
 - SQLite is compiled in, so no platform needs its own.
 - CI builds every target, runs `cargo test` and the parity tests on each,
   and attaches the binaries to the release with the rest of its files.

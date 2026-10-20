@@ -1,5 +1,6 @@
 // The xenonet binary for a release (docs/design/rust-core.md, "Building for
-// each platform"): built for one platform and CPU, with no source path from
+// each platform"): built for one platform and CPU with Cargo's dist profile
+// (whole-program optimized, no symbols), with no source path from
 // this machine in it (the home folder, cargo's registry and the checkout
 // remapped, and no debug info), ad hoc signed on macOS as the app is, and
 // checked for the home folder's path as the packaged files are.
@@ -62,11 +63,12 @@ export function buildBinary({ platform = process.platform, arch = process.arch, 
   }
   const target = rustTarget(platform, arch);
   const rustflags = [env.RUSTFLAGS, ...remapFlags()].filter(Boolean).join(" ");
-  cargo(["build", "--release", "-p", "xenonet-cli", "--target", target], {
+  // The dist profile (Cargo.toml) has no debug info and no symbol table.
+  cargo(["build", "--profile", "dist", "-p", "xenonet-cli", "--target", target], {
     stdio: "inherit",
-    env: { ...env, RUSTFLAGS: rustflags, CARGO_PROFILE_RELEASE_DEBUG: "0", CARGO_PROFILE_RELEASE_STRIP: "debuginfo" },
+    env: { ...env, RUSTFLAGS: rustflags },
   });
-  const file = path.join(root, "target", target, "release", binaryName(platform));
+  const file = path.join(root, "target", target, "dist", binaryName(platform));
   // Ad hoc, as the app is: a certificate carries its owner's name.
   if (platform === "darwin" && process.platform === "darwin" && env.XENONET_SIGN !== "1") execFileSync("codesign", ["--sign", "-", "--force", file], { stdio: "inherit" });
   checkBinary(file);

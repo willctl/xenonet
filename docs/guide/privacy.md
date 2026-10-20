@@ -4,7 +4,7 @@
 
 - The server listens on `127.0.0.1` only. It rejects other `Host` headers, which blocks DNS rebinding, and it rejects cross-origin POST requests.
 - The page runs under a Content-Security-Policy. Its scripts come only from XenoNet's own server, and nothing inline or evaluated runs. It connects only to that server, and no other page can frame it. So a slip in escaping what it shows from transcripts, actors or other machines can't run script.
-- The terminal runs in the desktop app's main process, and talks to the page over IPC. The web server never exposes it.
+- The terminal runs in the service, and reaches the page only through the desktop app: over the service's local socket, which only the desktop app's connection may use for it, then over IPC. The HTTP API never exposes it.
 - Every URL XenoNet opens is built from IDs it already knows. A handoff brief is the only text that reaches a URL, as an encoded query parameter.
 
 ## What leaves this computer
