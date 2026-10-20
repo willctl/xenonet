@@ -225,10 +225,11 @@ test("the pointer takes whatever is drawn in front: Wren before a node's body, a
         return true;
       })()`);
     // What hovering shows and a click takes there. Wren's script moves it
-    // now and then, so a try that finds it moved looks again.
+    // now and then, so a try that finds it moved looks again; drawn in
+    // software, a try takes seconds, long enough for a move.
     const takes = async (from, want) => {
       let got = null;
-      for (let tries = 0; tries < 3 && got?.picked !== want; tries++) {
+      for (let tries = 0; tries < 6 && got?.picked !== want; tries++) {
         await look(from);
         await sleep(250);
         const p = await s.driver("screenPos", node);
