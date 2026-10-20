@@ -100,29 +100,37 @@ test("selecting a project gathers its sessions; arrows step through, Esc puts th
 test("a real click on a gathered session selects it", { timeout: limit(120000) }, shoot("click", async () => {
   await home();
   const project = await findOne("atlas-api", "project");
-  const { gathered } = await s.driver("select", project.id);
   // As a person would, where hovering shows one, its body or its label
   // beside it: once the selection has held 3 s, you are drawn looking at
   // the project (you.js), and can stand in front of a session's body, as
-  // on a machine that draws slowly.
-  let session = null, spot = null;
-  for (const id of gathered.members.filter((id) => /^(claude|codex):/.test(id))) {
-    const at = await s.driver("screenPos", id);
-    const { title } = (await s.driver("find", { query: id, limit: 1 })).nodes[0] ?? {};
-    if (!at?.onScreen || !title) continue;
-    for (const dx of [0, 30, 60]) {
-      const p = { x: at.x + dx, y: at.y };
-      await s.input({ move: p });
-      if ((await s.eval(`return document.querySelector("#tooltip").hidden ? "" : document.querySelector("#tooltip").textContent`)).includes(title)) {
-        [session, spot] = [id, p];
-        break;
+  // on a machine that draws slowly. The demo's sessions come and go, and
+  // each one moves the map a little, so a click that took another looks
+  // again.
+  let session = null, found = false, did = null, state = null;
+  for (let tries = 0; tries < 3 && !(state && state.selection?.id === session); tries++) {
+    const { gathered } = await s.driver("select", project.id);
+    session = null;
+    let spot = null;
+    for (const id of gathered.members.filter((id) => /^(claude|codex):/.test(id))) {
+      const at = await s.driver("screenPos", id);
+      const { title } = (await s.driver("find", { query: id, limit: 1 })).nodes[0] ?? {};
+      if (!at?.onScreen || !title) continue;
+      for (const dx of [0, 30, 60]) {
+        const p = { x: at.x + dx, y: at.y };
+        await s.input({ move: p });
+        if ((await s.eval(`return document.querySelector("#tooltip").hidden ? "" : document.querySelector("#tooltip").textContent`)).includes(title)) {
+          [session, spot] = [id, p];
+          break;
+        }
       }
+      if (session) break;
     }
-    if (session) break;
+    if (!session) continue;
+    found = true;
+    ({ did, state } = await s.input({ click: spot }));
   }
-  assert.ok(session, "hovering shows one of its sessions");
-  const { did, state } = await s.input({ click: spot });
-  assert.ok(did.click, "clicked");
+  assert.ok(found, "hovering shows one of its sessions");
+  assert.ok(did?.click, "clicked");
   assert.equal(state.selection?.id, session);
   // Still gathered: picking one of its sessions keeps the gathering.
   assert.equal(state.gathered?.root, project.id);
@@ -198,7 +206,10 @@ test("still holds the view: two shots in a row match", { timeout: limit(60000) }
   await s.driver("still", true);
   try {
     const a = await s.screenshot({ name: "e2e-still-a", inline: false });
-    const b = await s.screenshot({ name: "e2e-still-b", inline: false });
+    // Right after the first, without settling again: drawn in software,
+    // settling takes seconds, time enough for the demo's live activity to
+    // change the panels and move the map.
+    const b = await s.screenshot({ name: "e2e-still-b", inline: false, settle: false });
     const [pa, pb] = [a, b].map((x) => fs.readFileSync(path.join(root, x.file)));
     // Live demo activity can still change a panel's text between the two,
     // so the map is compared, not every byte.
