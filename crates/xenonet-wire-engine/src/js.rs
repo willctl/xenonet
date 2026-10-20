@@ -149,24 +149,9 @@ pub fn type_of(a: &Arg) -> &'static str {
     }
 }
 
-/// Whether a process still runs: signal 0 only checks, and a process of
-/// another user's (EPERM) is still there.
-#[cfg_attr(unix, expect(unsafe_code, reason = "kill(2) with signal 0, which std doesn't wrap"))]
+/// Whether a process still runs, a process of another user's included.
 pub fn alive(pid: f64) -> bool {
-    if !(pid.is_finite() && pid.fract() == 0.0 && pid > 0.0 && pid <= f64::from(i32::MAX)) {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        // SAFETY: kill with signal 0 sends nothing; it only checks.
-        let r = unsafe { libc::kill(pid as libc::pid_t, 0) };
-        r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = pid;
-        false
-    }
+    pid.is_finite() && pid.fract() == 0.0 && pid > 0.0 && pid <= f64::from(i32::MAX) && xenonet_base::process::running(pid as u32, true)
 }
 
 /// JS's truthiness of a JSON value.

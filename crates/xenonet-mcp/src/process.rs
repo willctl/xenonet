@@ -53,7 +53,7 @@ fn alive_pid(pid: i32) -> bool {
 
 #[cfg(windows)]
 fn alive_pid(pid: i32) -> bool {
-    windows::alive(pid as u32)
+    u32::try_from(pid).is_ok_and(|pid| xenonet_base::process::running(pid, false))
 }
 
 /// A process's command line, as mcp/xenonet.js reads it: /proc on Linux,
@@ -122,18 +122,12 @@ mod windows {
 
     const TH32CS_SNAPPROCESS: u32 = 0x2;
     const INVALID_HANDLE_VALUE: isize = -1;
-    const PROCESS_TERMINATE: u32 = 0x0001;
-    const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
-    const SYNCHRONIZE: u32 = 0x0010_0000;
-    const STILL_ACTIVE: u32 = 259;
 
     #[link(name = "kernel32")]
     extern "system" {
         fn CreateToolhelp32Snapshot(flags: u32, pid: u32) -> isize;
         fn Process32FirstW(snapshot: isize, entry: *mut ProcessEntry32W) -> i32;
         fn Process32NextW(snapshot: isize, entry: *mut ProcessEntry32W) -> i32;
-        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> isize;
-        fn GetExitCodeProcess(process: isize, code: *mut u32) -> i32;
         fn CloseHandle(handle: isize) -> i32;
     }
 
@@ -158,21 +152,6 @@ mod windows {
             }
             CloseHandle(snapshot);
             found
-        }
-    }
-
-    // As libuv's uv_kill(pid, 0): a process it can open that hasn't exited.
-    pub fn alive(pid: u32) -> bool {
-        // SAFETY: the handle is closed once it's been asked.
-        unsafe {
-            let h = OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_INFORMATION | SYNCHRONIZE, 0, pid);
-            if h == 0 {
-                return false;
-            }
-            let mut code = 0u32;
-            let ok = GetExitCodeProcess(h, &raw mut code) != 0 && code == STILL_ACTIVE;
-            CloseHandle(h);
-            ok
         }
     }
 }
