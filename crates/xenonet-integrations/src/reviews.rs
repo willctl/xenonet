@@ -945,4 +945,263 @@ mod tests {
         let p = text_patch(&[json!({ "path": "a.txt", "content": enc("one\n") })], &[json!({ "path": "a.txt", "content": enc("two") }), json!({ "path": "e", "content": "" })]);
         assert_eq!(p["patch"], json!("diff --git \"a/a.txt\" \"b/a.txt\"\n--- \"a/a.txt\"\n+++ \"b/a.txt\"\n@@ -1,1 +1,1 @@\n-one\n+two\n\\ No newline at end of file\ndiff --git \"a/e\" \"b/e\"\nnew file mode 100644\nindex 0000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391\n"));
     }
+
+    fn file(path: &str, text: &[u8]) -> Value {
+        json!({ "path": path, "content": b64::encode(text) })
+    }
+
+    fn handed_back(files: Vec<Value>, problems: Value) -> Value {
+        json!({ "files": files, "problems": problems, "omissions": [] })
+    }
+
+    fn why(r: Result<Value, Fail>) -> String {
+        r.map_or_else(|f| f.message, |v| format!("taken: {v}"))
+    }
+
+    #[test]
+    fn what_a_sandbox_hands_back_is_checked_as_untrusted() {
+        let ok = handed_back(vec![file("src/main.rs", b"fn main() {}\n")], json!([{ "path": "src/x.rs", "reason": "too big" }]));
+        assert_eq!(validate_result(&ok), Ok(ok.clone()));
+        let snapshot = "The gateway returned an invalid text snapshot.";
+        for bad in [
+            json!(null),
+            json!({ "files": [], "problems": [] }),
+            json!({ "files": {}, "problems": [], "omissions": [] }),
+            handed_back(vec![], Value::Array(vec![json!({ "path": "a", "reason": "b" }); 31])),
+        ] {
+            assert_eq!(why(validate_result(&bad)), snapshot, "{bad}");
+        }
+        assert_eq!(why(validate_result(&handed_back(vec![file("a.txt", b"a"); FILES + 1], json!([])))), snapshot);
+        // Paths it may not write, or that would land on each other on
+        // another system.
+        let paths = "The gateway returned colliding or unsupported file paths.";
+        for set in
+            [&["../escape.txt"][..], &["/etc/passwd"], &["a\\b.txt"], &["C:x.txt"], &["CON.txt"], &["dir/"], &["A.txt", "a.txt"], &["x", "x/y.txt"], &["same.txt", "same.txt"]]
+        {
+            let files = set.iter().map(|p| file(p, b"text")).collect();
+            assert_eq!(why(validate_result(&handed_back(files, json!([])))), paths, "{set:?}");
+        }
+        assert_eq!(why(validate_result(&handed_back(vec![json!(null)], json!([])))), paths);
+        // Files it may not hand back, or whose text isn't plain, canonical
+        // base64 of UTF-8 within the limits.
+        let unsupported = "The gateway returned an unsupported file.";
+        for f in [
+            file(".env", b"KEY=1"),
+            file("keys/server.pem", b"x"),
+            json!({ "path": "a.txt", "content": 7 }),
+            json!({ "path": "a.txt", "content": "A".repeat(FILE_BYTES.div_ceil(3) * 4 + 4) }),
+        ] {
+            assert_eq!(why(validate_result(&handed_back(vec![f.clone()], json!([])))), unsupported, "{f}");
+        }
+        let text = "The gateway returned invalid or oversized text.";
+        for f in [file("zero.txt", b"a\0b"), file("latin1.txt", &[0xe9]), json!({ "path": "a.txt", "content": "YQ" }), json!({ "path": "a.txt", "content": "Y Q==" })] {
+            assert_eq!(why(validate_result(&handed_back(vec![f.clone()], json!([])))), text, "{f}");
+        }
+        let full = vec![b'a'; FILE_BYTES];
+        let many = (0..=TOTAL_BYTES / FILE_BYTES).map(|i| file(&format!("f{i}.txt"), &full)).collect();
+        assert_eq!(why(validate_result(&handed_back(many, json!([])))), text);
+        // What it says about the files it left out is bounded too.
+        let diagnostics = "The gateway returned invalid retrieval diagnostics.";
+        for p in [
+            json!(null),
+            json!({ "path": "a" }),
+            json!({ "path": "a".repeat(241), "reason": "x" }),
+            json!({ "path": "a", "reason": "x".repeat(161) }),
+            json!({ "path": 1, "reason": "x" }),
+        ] {
+            assert_eq!(why(validate_result(&handed_back(vec![], json!([p.clone()])))), diagnostics, "{p}");
+        }
+    }
+
+    fn store(name: &str) -> (std::path::PathBuf, String) {
+        let dir = std::env::temp_dir().join(format!("xenonet-reviews-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let root = dir.join("reviews").to_string_lossy().into_owned();
+        (dir, root)
+    }
+
+    #[test]
+    fn a_local_review_is_found_only_by_its_own_id_and_holds_to_its_manifest() {
+        let (dir, root) = store("ids");
+        assert_eq!(why(Reviews::new(Some(root.clone()), false).seed(&json!({}), 1.0)), "Synthetic reviews belong to the demo instance.");
+        let mut r = Reviews::new(Some(root.clone()), true);
+        let id = r.seed(&json!({ "before": { "a.txt": "one\n" }, "after": { "a.txt": "two\n" } }), 1.0).unwrap();
+        assert_eq!(r.view(&id).unwrap()["baseline"]["files"][0]["path"], json!("a.txt"));
+        for other in [json!("../../outside"), json!("../reviews/x"), json!(id.as_str().unwrap().to_uppercase()), json!(7), json!(null)] {
+            let f = r.view(&other).unwrap_err();
+            assert_eq!((f.status, f.code.as_str(), f.message.as_str()), (404, "missing", "No such local review."), "{other}");
+        }
+        // The upload has to be the frozen files, and all of them.
+        let frozen = vec![file("a.txt", b"one\n")];
+        assert_eq!(r.verify_uploaded(&id, &handed_back(frozen.clone(), json!([]))), Ok(()));
+        let mismatch = "The uploaded files do not match the frozen manifest. The agent was not released.";
+        for upload in [
+            handed_back(vec![file("a.txt", b"one!\n")], json!([])),
+            handed_back(vec![], json!([])),
+            handed_back(frozen.clone(), json!([{ "path": "a.txt", "reason": "unreadable" }])),
+        ] {
+            assert_eq!(why(r.verify_uploaded(&id, &upload).map(|()| json!(null))), mismatch, "{upload}");
+        }
+        // An export is of the result that was reviewed, complete, with changes.
+        let revision = r.view(&id).unwrap()["result"]["revision"].clone();
+        assert!(r.export(&id, &revision).unwrap()["patch"].as_str().unwrap().contains("+two"));
+        assert_eq!(why(r.export(&id, &json!("another revision"))), "The reviewed result changed. Open it again before exporting.");
+        let incomplete = r.seed(&json!({ "before": { "a.txt": "one\n" }, "after": { "a.txt": "two\n" }, "problems": [{ "path": "b.txt", "reason": "too big" }] }), 2.0).unwrap();
+        let revision = r.view(&incomplete).unwrap()["result"]["revision"].clone();
+        assert_eq!(why(r.export(&incomplete, &revision)), "Retrieval is incomplete. Resolve the reported files before exporting.");
+        let same = r.seed(&json!({ "before": { "a.txt": "one\n" }, "after": { "a.txt": "one\n" } }), 3.0).unwrap();
+        let revision = r.view(&same).unwrap()["result"]["revision"].clone();
+        assert_eq!(why(r.export(&same, &revision)), "There are no text changes to export.");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn isolated_git_refuses_a_config_that_isnt_its_empty_one() {
+        let (dir, root) = store("git");
+        let mut r = Reviews::new(Some(root.clone()), false);
+        let folder = NATIVE.join(&[&root, "00000000-0000-4000-8000-000000000000"]);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut env = Map::new();
+        env.insert("GIT_DIR".into(), json!("/elsewhere"));
+        env.insert("PATH".into(), json!("/bin"));
+        let git = r.isolated_git(&folder, &["status"], &env).unwrap();
+        assert_eq!(git["options"]["env"]["GIT_DIR"], json!(null), "git's own settings from XenoNet's environment are dropped");
+        assert_eq!(git["options"]["env"]["GIT_CONFIG_NOSYSTEM"], json!("1"));
+        std::fs::write(NATIVE.join(&[&root, "empty-git-config"]), "[core]\n\thooksPath = /tmp/hooks\n").unwrap();
+        assert_eq!(why(r.isolated_git(&folder, &["status"], &env)), "The isolated Git configuration changed.");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_review_storage_refuses_links() {
+        let (dir, root) = store("links");
+        let mut r = Reviews::new(Some(root.clone()), true);
+        let id = r.seed(&json!({ "before": { "a.txt": "one\n" } }), 1.0).unwrap();
+        let review = NATIVE.join(&[&root, id.as_str().unwrap(), "review.json"]);
+        // A review.json that's a link to one elsewhere isn't read.
+        let elsewhere = dir.join("elsewhere.json");
+        std::fs::rename(&review, &elsewhere).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &review).unwrap();
+        let f = Reviews::new(Some(root.clone()), true).view(&id).unwrap_err();
+        assert_eq!((f.code.as_str(), f.message.as_str()), ("missing", "No local baseline remains for this job."));
+        // Nor is anything saved while the storage holds a link.
+        assert_eq!(why(Reviews::new(Some(root.clone()), true).seed(&json!({}), 2.0)), "The review storage contains an unexpected link.");
+        std::fs::remove_file(&review).unwrap();
+        std::os::unix::fs::symlink(&dir, NATIVE.join(&[&root, "out"])).unwrap();
+        let f = Reviews::new(Some(root.clone()), true).seed(&json!({}), 2.0).unwrap_err();
+        assert_eq!((f.status, f.code.as_str()), (409, "storage-invalid"));
+        // Nor is a link taken for git's empty config.
+        std::fs::remove_file(NATIVE.join(&[&root, "out"])).unwrap();
+        let config = NATIVE.join(&[&root, "empty-git-config"]);
+        std::os::unix::fs::symlink(dir.join("nothing"), &config).unwrap();
+        assert_eq!(why(Reviews::new(Some(root.clone()), false).isolated_git(&NATIVE.join(&[&root, "x"]), &["status"], &Map::new())), "The isolated Git configuration changed.");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A Git project's text frozen with git stood in for: `listed` is
+    /// what ls-files names, `top` what rev-parse says the root is.
+    fn snapshot(source: &str, top: &str, listed: &[&str], ignored: &[String]) -> Result<Value, String> {
+        let (listed, ignored, top) = (listed.join("\0"), ignored.join("\0"), top.to_string());
+        let task = xenonet_app::task::Task::new({
+            let source = source.to_string();
+            move |io| async move { source_snapshot(io, source, Map::new()).await }
+        });
+        xenonet_app::task::run_with(task, |q| {
+            let args: Vec<&str> = q["args"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+            Ok(json!({ "stdout": if args.contains(&"rev-parse") { top.clone() } else if args.contains(&"--ignored") { ignored.clone() } else { listed.clone() } }))
+        })
+        .map_err(|f| f.message().to_string())
+    }
+
+    fn project(name: &str) -> (std::path::PathBuf, String) {
+        let (dir, _) = store(&format!("project-{name}"));
+        let source = dir.join("project");
+        std::fs::create_dir_all(source.join("src")).unwrap();
+        std::fs::write(source.join("src/a.txt"), "text\n").unwrap();
+        (dir, fsx::realpath_native(&source.to_string_lossy()).unwrap())
+    }
+
+    #[test]
+    fn a_projects_text_is_frozen_within_its_limits() {
+        let (dir, source) = project("frozen");
+        let at = |p: &str| std::path::Path::new(&source).join(p);
+        std::fs::write(at(".env"), "KEY=1").unwrap();
+        std::fs::write(at("data.bin"), [0u8, 1, 2]).unwrap();
+        std::fs::write(at("big.txt"), vec![b'a'; FILE_BYTES + 1]).unwrap();
+        // CON.txt is refused by its name alone; Windows can't make one.
+        let listed = ["src/a.txt", ".env", "data.bin", "big.txt", "CON.txt", "gone.txt", "src/a.txt"];
+        let s = snapshot(&source, &source, &listed, &[]).unwrap();
+        assert_eq!(s["files"], json!([file("src/a.txt", b"text\n")]));
+        let reasons: Vec<(String, String)> = s["excluded"].as_array().unwrap().iter().map(|e| (js_string(&e["path"]), js_string(&e["reason"]))).collect();
+        let want = [
+            (".env", "Excluded from upload and review scope"),
+            ("CON.txt", "Unsupported portable path"),
+            ("big.txt", "Larger than the per-file limit"),
+            ("data.bin", "Binary or invalid UTF-8 file"),
+        ];
+        assert_eq!(reasons, want.map(|(p, r)| (p.to_string(), r.to_string())));
+        // Only the root of a working tree, and only text within the limits.
+        let inside = std::path::Path::new(&source).join("src").to_string_lossy().into_owned();
+        assert_eq!(snapshot(&inside, &source, &listed, &[]).unwrap_err(), "Change review needs the root of a Git working tree.");
+        assert_eq!(snapshot(&source, &source, &[".env", "data.bin"], &[]).unwrap_err(), "No supported text files remain in this Git project.");
+        let many: Vec<String> = (0..=10000).map(|i| format!("f{i}.txt")).collect();
+        assert_eq!(
+            snapshot(&source, &source, &many.iter().map(String::as_str).collect::<Vec<_>>(), &[]).unwrap_err(),
+            "This project has too many files to prepare a bounded review. Choose a smaller project."
+        );
+        let ignored: Vec<String> = (0..=FILES).map(|i| format!("build{i}/")).collect();
+        assert_eq!(snapshot(&source, &source, &listed, &ignored).unwrap_err(), "Too many existing ignored paths to freeze the review scope.");
+        // .gitignore's rules are frozen with it, so one that can't be is refused.
+        std::fs::write(at(".gitignore"), vec![b'#'; FILE_BYTES + 1]).unwrap();
+        assert_eq!(snapshot(&source, &source, &["src/a.txt", ".gitignore"], &[]).unwrap_err(), "A repository .gitignore exceeds the review limit.");
+        std::fs::write(at(".gitignore"), [0xff, 0xfe]).unwrap();
+        assert_eq!(snapshot(&source, &source, &["src/a.txt", ".gitignore"], &[]).unwrap_err(), "A repository .gitignore is not valid UTF-8 text.");
+        // Names that would land on each other where case doesn't count.
+        std::fs::write(at("src/Doc.md"), "x").unwrap();
+        if !at("src/doc.md").exists() {
+            std::fs::write(at("src/doc.md"), "y").unwrap();
+        }
+        assert_eq!(
+            snapshot(&source, &source, &["src/Doc.md", "src/doc.md"], &[]).unwrap_err(),
+            "The project has paths that collide on another platform. Rename them before preparing a review."
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_projects_links_are_never_followed() {
+        let (dir, source) = project("links");
+        let at = |p: &str| std::path::Path::new(&source).join(p);
+        std::fs::create_dir_all(dir.join("outside")).unwrap();
+        std::fs::write(dir.join("outside/notes.txt"), "not the project's").unwrap();
+        std::os::unix::fs::symlink(dir.join("outside/notes.txt"), at("link.txt")).unwrap();
+        std::os::unix::fs::symlink(dir.join("outside"), at("linked")).unwrap();
+        std::os::unix::fs::symlink(at("src/a.txt"), at("inside-link.txt")).unwrap();
+        // A folder that's a link to one inside: the file is the project's
+        // own, but not by the path git named.
+        std::os::unix::fs::symlink(at("src"), at("alias")).unwrap();
+        let s = snapshot(&source, &source, &["src/a.txt", "link.txt", "linked/notes.txt", "inside-link.txt", "alias/a.txt"], &[]).unwrap();
+        assert_eq!(s["files"], json!([file("src/a.txt", b"text\n")]));
+        let reasons: Vec<String> = s["excluded"].as_array().unwrap().iter().map(|e| format!("{} {}", js_string(&e["path"]), js_string(&e["reason"]))).collect();
+        assert_eq!(
+            reasons,
+            [
+                "alias/a.txt A parent directory is a link",
+                "inside-link.txt Links and non-regular files are excluded",
+                "link.txt Links and non-regular files are excluded",
+                "linked/notes.txt Links and non-regular files are excluded"
+            ]
+        );
+        assert!(!xenonet_base::json::stringify(&s, 0).contains(&b64::encode(b"not the project's")));
+        // A .gitignore that's a link can't have its rules frozen.
+        std::os::unix::fs::symlink(dir.join("outside/notes.txt"), at(".gitignore")).unwrap();
+        assert_eq!(
+            snapshot(&source, &source, &["src/a.txt", ".gitignore"], &[]).unwrap_err(),
+            "A repository .gitignore is a link or unsupported file. Change review cannot freeze its rules."
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

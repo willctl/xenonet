@@ -96,6 +96,20 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 lto = "thin"
 codegen-units = 4
 
+# What a published binary is built with (scripts/rust-release.mjs): the
+# whole program optimized as one unit, with no debug info or symbol table.
+# Measured against `release` on the same Mac, the service came out about a
+# third smaller (34.5 MB to 22.1 MB) and 5-10% quicker to scan and search,
+# for a build about three times as long, so local release builds and the
+# test addon stay on `release`. Panic messages keep their file and line
+# without symbols.
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+debug = 0
+strip = "symbols"
+
 # What the compiler and clippy hold the Rust core to (docs/design/rust-core.md,
 # "Static analysis"). Each crate takes these with `[lints] workspace = true`,
 # and CI fails on any warning. Code that needs an exception says why where it

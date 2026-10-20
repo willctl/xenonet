@@ -686,4 +686,291 @@ mod tests {
         assert_eq!(a_app("opencode"), "an OpenCode");
         assert_eq!(app_lookup("nobody"), None);
     }
+
+    // ---------- a made-up process table ----------
+
+    const XENONET: &str = "/Applications/XenoNet.app/Contents/MacOS/XenoNet";
+    const TERMINAL: &str = "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal";
+    const GROK: &str = "/Applications/Grok Bot.app/Contents/MacOS/Grok Bot";
+
+    /// A process as procs.chain gives one: its pid and start time, the
+    /// file it runs, and the agent or actor product ps took it for.
+    fn proc(pid: f64, exe: &str, agent: Option<&str>, product: Option<(&str, &str)>) -> Arg {
+        let product = product.map_or(Arg::Null, |(id, role)| obj(vec![("product", Arg::text(id)), ("role", Arg::text(role))]));
+        obj(vec![
+            ("pid", Arg::num(pid)),
+            ("start", Arg::num(pid * 10.0)),
+            ("program", Arg::text(exe)),
+            ("exe", Arg::text(exe)),
+            ("agent", agent.map_or(Arg::Null, Arg::text)),
+            ("product", product),
+        ])
+    }
+
+    /// procs and the clock as a test has them: whether XenoNet can look,
+    /// the time, the process on the other end of the request, each
+    /// process's chain (nearest first), the ones that have gone, the ones
+    /// signed, and a working folder.
+    struct Table {
+        supported: bool,
+        now: f64,
+        peer: Arg,
+        chains: Vec<Vec<Arg>>,
+        gone: Vec<f64>,
+        signed: Vec<f64>,
+        cwd: Option<&'static str>,
+    }
+
+    impl Table {
+        fn new(chains: Vec<Vec<Arg>>) -> Table {
+            Table { supported: true, now: 1_000_000.0, peer: Arg::Null, chains, gone: vec![], signed: vec![], cwd: None }
+        }
+        /// A request from this process.
+        fn from(&mut self, pid: f64) -> &mut Table {
+            self.peer = Arg::num(pid);
+            self
+        }
+    }
+
+    impl Calls for Table {
+        fn call(&mut self, path: &str, method: &str, args: Vec<Arg>) -> Result<Arg> {
+            let pid_of = |a: &Arg| a.as_f64().or_else(|| a.field("pid").as_f64()).unwrap_or(f64::NAN);
+            Ok(match (path, method) {
+                ("", "now") => Arg::num(self.now),
+                ("", "peerOf") => self.peer.clone(),
+                ("procs", "chain") => Arg::List(self.chains.iter().find(|c| c.first().is_some_and(|p| pid_of(p) == pid_of(&args[0]))).cloned().unwrap_or_default()),
+                ("procs", "alive") => Arg::Bool(!self.gone.contains(&pid_of(&args[0]))),
+                ("procs", "signed") => Arg::Bool(self.signed.contains(&pid_of(&args[0]))),
+                ("procs", "cwd") => Arg::opt_text(self.cwd),
+                _ => return Err(crate::peer::Thrown::new(format!("no {path}.{method} here"))),
+            })
+        }
+        fn get(&mut self, path: &str) -> Result<Arg> {
+            Ok(if path == "procs.supported" { Arg::Bool(self.supported) } else { Arg::Undef })
+        }
+        fn kind(&mut self, path: &str) -> Result<String> {
+            Ok(if path == "procs.cwd" { "function" } else { "undefined" }.into())
+        }
+    }
+
+    fn verifier(home: Arg) -> Verifier {
+        Verifier::new(Shared::new(crate::store::EngineStore::open(":memory:", 0.0).unwrap()), home)
+    }
+
+    /// A verdict, as (ok, the reason it says).
+    fn said(v: &Result<Arg>) -> (bool, String) {
+        let v = v.as_ref().unwrap();
+        (v.field("ok").truthy(), if v.field("reason").is_nullish() { String::new() } else { js_text(&v.field("reason")) })
+    }
+
+    fn passed() -> (bool, String) {
+        (true, String::new())
+    }
+
+    fn refused(why: &str) -> (bool, String) {
+        (false, why.to_string())
+    }
+
+    #[test]
+    fn a_sessions_requests_come_from_its_own_apps_process() {
+        let shell = proc(40.0, "/bin/zsh", None, None);
+        let claude = |pid: f64| proc(pid, "/Users/me/.local/bin/claude", Some("claude"), None);
+        let mut t = Table::new(vec![
+            vec![proc(30.0, "/usr/bin/curl", None, None), shell.clone(), proc(5.0, TERMINAL, None, None)],
+            vec![proc(31.0, "/usr/bin/node", None, None), claude(20.0)],
+            vec![proc(32.0, "/usr/bin/node", None, None), claude(21.0)],
+            vec![claude(22.0)],
+            vec![proc(33.0, "/usr/bin/node", None, None), proc(23.0, "/usr/local/bin/codex", Some("codex"), None)],
+            vec![proc(34.0, "/usr/bin/node", None, None), proc(24.0, "/usr/local/bin/opencode", Some("opencode"), None)],
+            vec![proc(35.0, "/usr/bin/node", None, None), proc(25.0, "/usr/local/bin/opencode", Some("opencode"), None)],
+        ]);
+        let v = verifier(Arg::Null);
+        let a = Arg::text("claude:a");
+        // Where XenoNet can't look, or the name isn't an app's it checks.
+        t.supported = false;
+        assert_eq!(said(&v.check(&mut t, &a, false)), passed());
+        t.supported = true;
+        assert_eq!(said(&v.check(&mut t, &Arg::text("cursor:a"), false)), passed());
+        assert_eq!(said(&v.check(&mut t, &a, false)), passed(), "no peer to look at");
+        assert_eq!(v.counts().unchecked, 3.0);
+        // A process that's gone, or isn't the app's.
+        let gone = "requests in claude:a's name have to come from a Claude Code process, and this one had gone before XenoNet could look";
+        assert_eq!(said(&v.check(t.from(99.0), &a, false)), refused(gone));
+        assert_eq!(v.counts().unseen, 1.0);
+        let not = "requests in claude:a's name have to come from a Claude Code process, and this one doesn't";
+        assert_eq!(said(&v.check(t.from(30.0), &a, false)), refused(not));
+        assert_eq!(said(&v.check(t.from(33.0), &a, false)), refused(not), "a Codex process for a Claude Code session");
+        assert_eq!(said(&v.check(t.from(33.0), &Arg::text("codex:b"), false)), passed());
+        // The first process to name a session holds it while it runs.
+        let r = v.check(t.from(31.0), &a, false).unwrap();
+        assert_eq!((r.field("ok"), r.field("root").field("pid"), r.field("sure")), (Arg::Bool(true), Arg::num(20.0), Arg::Undef));
+        assert_eq!(said(&v.check(t.from(31.0), &a, false)), passed());
+        assert_eq!(said(&v.check(t.from(32.0), &a, false)), refused("claude:a belongs to another Claude Code process"));
+        t.gone.push(20.0);
+        assert_eq!(said(&v.check(t.from(32.0), &a, false)), passed(), "once it's gone, another may have it");
+        // Claude Code's own hook, from a signed Claude Code, pins it surely,
+        // and takes back the guesses.
+        let b = Arg::text("claude:b");
+        assert_eq!(said(&v.check(t.from(32.0), &b, false)), passed());
+        assert_eq!(said(&v.check(t.from(22.0), &b, true)), refused("claude:b belongs to another Claude Code process"), "a hook from a Claude Code not signed");
+        t.signed.push(22.0);
+        let r = v.check(t.from(22.0), &b, true).unwrap();
+        assert_eq!((r.field("ok"), r.field("sure")), (Arg::Bool(true), Arg::Bool(true)));
+        assert_eq!(said(&v.check(t.from(32.0), &b, false)), refused("claude:b belongs to another Claude Code process"));
+        // Any OpenCode may have an OpenCode session open.
+        let o = Arg::text("opencode:c");
+        assert_eq!((said(&v.check(t.from(34.0), &o, false)), said(&v.check(t.from(35.0), &o, false))), (passed(), passed()));
+        let last = v.counts().last_refusal.unwrap();
+        assert_eq!((last.field("agent"), last.field("at")), (b, Arg::num(1_000_000.0)));
+    }
+
+    #[test]
+    fn whats_yours_comes_only_from_outside_every_agent_and_actor_product() {
+        let mut t = Table::new(vec![
+            vec![proc(30.0, "/usr/bin/curl", None, None), proc(29.0, "/bin/zsh", None, None), proc(5.0, TERMINAL, None, None)],
+            vec![proc(31.0, "/usr/bin/curl", None, None), proc(23.0, "/usr/local/bin/codex", Some("codex"), None), proc(5.0, TERMINAL, None, None)],
+            vec![proc(32.0, "/usr/bin/curl", None, None), proc(7.0, GROK, None, Some(("grok-bot", "app")))],
+            vec![proc(33.0, "/bin/zsh", None, None), proc(100.0, XENONET, None, None), proc(23.0, "/usr/local/bin/codex", Some("codex"), None)],
+        ]);
+        let v = verifier(Arg::num(100.0));
+        assert_eq!(said(&v.person(t.from(30.0))), passed());
+        assert_eq!(said(&v.person(t.from(31.0))), refused("this is yours to do, and it came from under a Codex process; run it in your own terminal or in XenoNet"));
+        assert_eq!(said(&v.person(t.from(32.0))), refused("this is yours to do, and it came from under Grok Bot; run it in your own terminal or in XenoNet"));
+        assert_eq!(said(&v.person(t.from(33.0))), passed(), "XenoNet's own terminal is nearer than the agent that opened XenoNet");
+        assert_eq!(said(&v.person(t.from(99.0))), refused("this is yours to do, and XenoNet couldn't see which program asked; run it in your own terminal or in XenoNet"));
+        // Asking for a gateway token: a session may, a product's program may not.
+        assert_eq!(said(&v.asker(t.from(31.0))), passed());
+        assert_eq!(said(&v.asker(t.from(32.0))), refused("a program under Grok Bot can't ask for a gateway token: it could be relaying for its cloud"));
+        assert_eq!(said(&v.asker(t.from(99.0))), refused("XenoNet couldn't see which program asked, so it can't show you who asked"));
+        t.cwd = Some("/Users/me/projects/atlas");
+        assert_eq!(v.asker(t.from(30.0)).unwrap().field("cwd"), Arg::text("/Users/me/projects/atlas"));
+        t.supported = false;
+        assert_eq!((said(&v.person(&mut t)), said(&v.asker(&mut t))), (passed(), passed()));
+    }
+
+    #[test]
+    fn the_windows_routes_answer_only_xenonets_own_app() {
+        let helper = "/Applications/XenoNet.app/Contents/Frameworks/XenoNet Helper (Renderer).app/Contents/MacOS/XenoNet Helper (Renderer)";
+        let home = proc(100.0, XENONET, None, None);
+        let mut t = Table::new(vec![
+            vec![proc(101.0, helper, None, None), home.clone()],
+            vec![proc(102.0, "/bin/zsh", None, None), home.clone()],
+            vec![proc(103.0, "/Applications/XenoNet.app2/Contents/MacOS/x", None, None), home.clone()],
+            vec![proc(104.0, "/Users/me/.local/bin/claude", Some("claude"), None), home.clone()],
+            vec![proc(105.0, "/usr/bin/curl", None, None), proc(5.0, TERMINAL, None, None)],
+        ]);
+        let v = verifier(Arg::Null);
+        // Until a Desktop connects there's no XenoNet app to come from.
+        assert_eq!(said(&v.window(t.from(101.0))), refused("this is for XenoNet's own window, and it came from outside XenoNet"));
+        t.now += 60e3;
+        // The Desktop: an app's own executable, not an agent's or a product's.
+        let mut d = Table::new(vec![
+            vec![proc(110.0, "/Users/me/.local/bin/claude", Some("claude"), None)],
+            vec![proc(111.0, GROK, None, Some(("grok-bot", "app")))],
+            vec![proc(112.0, "/usr/local/bin/node", None, None)],
+            vec![home.clone()],
+        ]);
+        assert_eq!(said(&v.desktop(&mut d, true)), refused("XenoNet couldn't see which program connected as its Desktop"));
+        assert_eq!(said(&v.desktop(d.from(110.0), true)), refused("a Claude Code process can't be XenoNet's Desktop"));
+        assert_eq!(said(&v.desktop(d.from(111.0), true)), refused("Grok Bot's processes can't be XenoNet's Desktop"));
+        assert_eq!(said(&v.desktop(d.from(112.0), true)), refused("only an app's own executable can be XenoNet's Desktop"));
+        assert_eq!(said(&v.desktop(d.from(100.0), true)), passed());
+        // Now the window's own processes pass, and nothing else.
+        assert_eq!(said(&v.window(t.from(101.0))), passed());
+        assert_eq!(said(&v.window(t.from(102.0))), refused("this is for XenoNet's own window, and it came from a program run in XenoNet"));
+        assert_eq!(said(&v.window(t.from(103.0))), refused("this is for XenoNet's own window, and it came from a program run in XenoNet"));
+        assert_eq!(said(&v.window(t.from(104.0))), refused("this is for XenoNet's own window, and it came from under a Claude Code process"));
+        assert_eq!(said(&v.window(t.from(105.0))), refused("this is for XenoNet's own window, and it came from outside XenoNet"));
+        assert_eq!(said(&v.window(t.from(99.0))), refused("this is for XenoNet's own window, and XenoNet couldn't see which program asked"));
+        t.peer = Arg::Null;
+        assert_eq!(said(&v.window(&mut t)), refused("this is for XenoNet's own window, and XenoNet couldn't see which program asked"));
+        // A verdict holds for a minute per process.
+        t.chains[1][0] = proc(102.0, helper, None, None);
+        assert_eq!(said(&v.window(t.from(102.0))), refused("this is for XenoNet's own window, and it came from a program run in XenoNet"));
+        t.now += 60e3;
+        assert_eq!(said(&v.window(t.from(102.0))), passed());
+        // The Desktop going takes its process's standing with it.
+        assert_eq!(said(&v.desktop(&mut d, false)), passed());
+        assert_eq!(said(&v.window(t.from(101.0))), refused("this is for XenoNet's own window, and it came from outside XenoNet"));
+        t.supported = false;
+        assert_eq!(said(&v.window(&mut t)), passed());
+    }
+
+    #[test]
+    fn an_actors_token_works_only_from_its_own_processes() {
+        let script = proc(50.0, "/Users/me/bin/wren", None, None);
+        let shell = proc(49.0, "/bin/zsh", None, None);
+        let terminal = proc(5.0, TERMINAL, None, None);
+        let grok_app = proc(7.0, GROK, None, Some(("grok-bot", "app")));
+        let mut t = Table::new(vec![
+            vec![script.clone(), shell.clone(), terminal.clone()],
+            vec![proc(51.0, "/usr/bin/node", None, None), proc(20.0, "/Users/me/.local/bin/claude", Some("claude"), None)],
+            vec![proc(52.0, "/Applications/Grok Bot.app/Contents/Resources/relay", None, None), grok_app.clone()],
+            vec![grok_app.clone()],
+            vec![
+                proc(53.0, "/Applications/Muse.app/Contents/Resources/helper", None, Some(("muse", "host"))),
+                proc(8.0, "/Applications/Muse.app/Contents/MacOS/Muse", None, Some(("muse", "app"))),
+            ],
+            vec![proc(54.0, "/opt/hermes/bin/agent", None, Some(("hermes-agent", "host"))), terminal.clone()],
+            vec![proc(55.0, "/usr/bin/python3", None, None), terminal.clone()],
+        ]);
+        let v = verifier(Arg::Null);
+        let own = obj(vec![("slug", Arg::text("wren")), ("product", Arg::Null)]);
+        let grok = obj(vec![("slug", Arg::text("grok")), ("product", Arg::text("grok-bot"))]);
+        let hermes = obj(vec![("slug", Arg::text("hermes")), ("product", Arg::text("hermes-agent"))]);
+        assert_eq!(said(&v.actor(&mut t, &own, &Arg::Null)), refused("XenoNet couldn't see which program sent this, so it doesn't take the token from it"));
+        let ok = v.actor(t.from(50.0), &own, &Arg::Null).unwrap();
+        assert_eq!((ok.field("ok"), ok.field("root").field("pid")), (Arg::Bool(true), Arg::num(50.0)));
+        assert_eq!(said(&v.actor(t.from(50.0), &own, &Arg::num(49.0))), passed(), "its shell, below the terminal");
+        assert_eq!(
+            said(&v.actor(t.from(50.0), &own, &Arg::num(5.0))),
+            refused("the pid it names is an app's, which other programs run under too; name the actor's own process, or a parent of it below the app it runs in")
+        );
+        assert_eq!(said(&v.actor(t.from(50.0), &own, &Arg::num(999.0))), refused("the pid it names has to be the calling process or one of its parents"));
+        assert_eq!(said(&v.actor(t.from(51.0), &own, &Arg::Null)), refused("an actor's token doesn't work from under a session, and this came from under a Claude Code process"));
+        assert_eq!(said(&v.actor(t.from(7.0), &grok, &Arg::Null)), refused("Grok Bot's own processes can't use an actor's token: they could be relaying for its cloud"));
+        assert_eq!(said(&v.actor(t.from(55.0), &grok, &Arg::Null)), refused("Grok Bot's actor works only from under Grok Bot's own processes"));
+        assert_eq!(said(&v.actor(t.from(53.0), &own, &Arg::Null)), refused("an actor of your own can't use its token from under Muse"));
+        // A product its maker signs: only from under the app as signed.
+        let unsigned = "Grok Bot's actor works only from under Grok Bot's app as Cursor signed it, and the app this came from isn't signed by Cursor";
+        assert_eq!(said(&v.actor(t.from(52.0), &grok, &Arg::Null)), refused(unsigned));
+        t.signed.push(7.0);
+        assert_eq!(said(&v.actor(t.from(52.0), &grok, &Arg::Null)), refused(unsigned), "a verdict holds for a minute");
+        t.now += 60e3;
+        assert_eq!(said(&v.actor(t.from(52.0), &grok, &Arg::Null)), passed());
+        // Hermes Agent's actor runs under one of its agent hosts.
+        assert_eq!(said(&v.actor(t.from(54.0), &hermes, &Arg::Null)), passed());
+        assert_eq!(said(&v.actor(t.from(55.0), &hermes, &Arg::Null)), refused("Hermes Agent's actor works only from under Hermes Agent's own processes"));
+        t.supported = false;
+        assert_eq!(said(&v.actor(&mut t, &own, &Arg::Null)), passed());
+    }
+
+    #[test]
+    fn registering_an_actor_is_held_to_the_same_and_shows_who_asked() {
+        let mut t = Table::new(vec![
+            vec![proc(50.0, "/Users/me/bin/wren", None, None), proc(5.0, TERMINAL, None, None)],
+            vec![proc(51.0, "/usr/bin/node", None, None), proc(23.0, "/usr/local/bin/codex", Some("codex"), None)],
+            vec![proc(52.0, "/usr/bin/python3", None, None), proc(7.0, GROK, None, Some(("grok-bot", "app")))],
+        ]);
+        t.cwd = Some("/Users/me/wren");
+        let v = verifier(Arg::Null);
+        let r = v.register(t.from(50.0), &Arg::Null, &Arg::Null).unwrap();
+        assert_eq!((r.field("ok"), r.field("cwd"), list(r.field("chain")).len()), (Arg::Bool(true), Arg::text("/Users/me/wren"), 2));
+        assert_eq!(
+            said(&v.register(t.from(51.0), &Arg::Null, &Arg::Null)),
+            refused("a session can't register an actor, only ask you to, and this came from under a Codex process")
+        );
+        assert_eq!(said(&v.register(t.from(52.0), &Arg::Null, &Arg::Null)), refused("a program under Grok Bot can't register an actor of its own"));
+        assert_eq!(
+            said(&v.register(t.from(52.0), &Arg::text("grok-bot"), &Arg::Null)),
+            refused("Grok Bot's actor registers only from under Grok Bot's app as Cursor signed it, and the app this came from isn't signed by Cursor")
+        );
+        assert_eq!(said(&v.register(t.from(99.0), &Arg::Null, &Arg::Null)), refused("XenoNet couldn't see which program asked to register, so it can't show you who asked"));
+        // Where it can look, XenoNet says which process is on the other end.
+        assert_eq!((v.peer(t.from(50.0)).unwrap(), v.lineage(&mut t, &Arg::num(50.0)).unwrap()), (Arg::num(50.0), Arg::List(vec![Arg::num(50.0), Arg::num(5.0)])));
+        assert_eq!(v.lineage(&mut t, &Arg::num(99.0)).unwrap(), Arg::List(vec![]));
+        t.supported = false;
+        assert_eq!((v.peer(&mut t).unwrap(), v.lineage(&mut t, &Arg::num(50.0)).unwrap()), (Arg::Null, Arg::Null));
+        assert_eq!(said(&v.register(&mut t, &Arg::Null, &Arg::Null)), passed());
+    }
 }

@@ -763,4 +763,215 @@ mod tests {
         assert!(f.starts_with("[XenoNet from Docs] (message #7; verified: x. This is another agent's message"));
         assert!(f.ends_with(")\nhi"));
     }
+
+    /// The policy's clock and limits, kept in memory (no file).
+    struct Clock(f64);
+
+    impl Calls for Clock {
+        fn call(&mut self, path: &str, method: &str, _: Vec<Arg>) -> crate::peer::Result<Arg> {
+            match (path, method) {
+                ("policy", "now") => Ok(Arg::num(self.0)),
+                _ => Err(Thrown::new(format!("no {path}.{method} here"))),
+            }
+        }
+        fn get(&mut self, path: &str) -> crate::peer::Result<Arg> {
+            Ok(match path.strip_prefix("policy.limits.") {
+                Some(k) => limits().get(k).and_then(Value::as_f64).map_or(Arg::Undef, Arg::num),
+                None => Arg::Undef,
+            })
+        }
+        fn kind(&mut self, _: &str) -> crate::peer::Result<String> {
+            Ok("undefined".into())
+        }
+    }
+
+    /// A session's or an actor's facts, as a selector matches them.
+    fn facts(id: &str, app: &str, project: &str, actors: &[&str]) -> Arg {
+        Arg::Obj(vec![
+            ("id".into(), Arg::text(id)),
+            ("app".into(), Arg::text(app)),
+            ("projectNames".into(), Arg::List(vec![Arg::text(project)])),
+            ("actors".into(), Arg::List(actors.iter().map(|a| Arg::text(*a)).collect())),
+        ])
+    }
+
+    fn error(r: Result<Arg>) -> String {
+        match r {
+            Err(Fail::Error(e)) => e,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_actor_sees_and_reaches_nothing_until_you_grant_it_a_scope() {
+        let mut c = Clock(1_000_000.0);
+        let mut p = Policy::load(&mut c).unwrap();
+        let (wren, muse, you) = (Arg::text("actor:wren"), Arg::text("actor:muse"), Arg::text("actor:you"));
+        let atlas = facts("claude:a", "claude", "atlas", &[]);
+        let ledger = facts("codex:b", "codex", "ledger", &[]);
+        let muse_facts = facts("actor:muse", "actor", "", &[]);
+        // You and this machine's sessions see everything; an actor nothing.
+        for free in [Arg::text("claude:a"), you.clone(), Arg::text("you")] {
+            assert!(matches!(p.scope_of(&mut c, &free).unwrap(), Scope::Free));
+            assert!(p.visible(&mut c, &free, &muse_facts).unwrap());
+        }
+        assert!(matches!(p.scope_of(&mut c, &wren).unwrap(), Scope::Deny));
+        assert!(!p.visible(&mut c, &wren, &atlas).unwrap() && !p.visible(&mut c, &wren, &muse_facts).unwrap());
+        // Scopes are for actors, and say what they cover.
+        for not_actor in [Arg::text("claude:a"), you.clone(), Arg::text("you"), Arg::Null] {
+            assert_eq!(error(p.grant(&mut c, &not_actor, &Arg::text("project:atlas"), None, &you)), "scopes are granted to actors (actor:<slug>)");
+        }
+        let use_terms = |s: &str| format!("\"{s}\" isn't a scope: use terms like project:xenonet identity:adal app:opencode");
+        for bad in ["repo", "", "project:", "owner:me", "project:atlas repo"] {
+            assert_eq!(error(p.grant(&mut c, &wren, &Arg::text(bad), None, &you)), use_terms(bad), "{bad}");
+        }
+        assert_eq!(error(p.grant(&mut c, &wren, &Arg::text("+"), None, &you)), "say what the scope covers");
+        assert!(p.data["grants"].as_object().unwrap().is_empty());
+        // A grant: what it covers, for at least a minute.
+        let g = p.grant(&mut c, &wren, &Arg::text("Project:Atlas"), Some(&Arg::num(1000.0)), &you).unwrap();
+        assert_eq!((g.field("selector"), g.field("expiresAt")), (Arg::text("project:atlas"), Arg::num(1_060_000.0)));
+        assert!(p.visible(&mut c, &wren, &atlas).unwrap());
+        assert!(!p.visible(&mut c, &wren, &ledger).unwrap());
+        assert!(!p.visible(&mut c, &wren, &muse_facts).unwrap(), "another actor only when a grant names it");
+        p.grant(&mut c, &wren, &Arg::text("project:atlas by:muse"), None, &you).unwrap();
+        assert!(p.visible(&mut c, &wren, &muse_facts).unwrap());
+        assert!(p.visible(&mut c, &wren, &facts("claude:c", "claude", "atlas", &["muse"])).unwrap());
+        assert!(!p.visible(&mut c, &wren, &atlas).unwrap(), "by:muse covers what muse works on, not all of atlas");
+        // An actor's own reports of what it works on can't widen its scope.
+        p.grant(&mut c, &wren, &Arg::text("by:wren"), None, &you).unwrap();
+        assert!(!p.visible(&mut c, &wren, &facts("claude:c", "claude", "atlas", &["wren"])).unwrap());
+        // A grant ends at its time, or when you take it back.
+        p.grant(&mut c, &muse, &Arg::text("all"), Some(&Arg::num(60e3)), &you).unwrap();
+        assert!(p.visible(&mut c, &muse, &ledger).unwrap());
+        c.0 += 60e3;
+        assert!(matches!(p.scope_of(&mut c, &muse).unwrap(), Scope::Deny));
+        assert_eq!(
+            p.grants(&mut c).unwrap(),
+            Arg::List(vec![
+                Arg::Obj(vec![
+                    ("actor".into(), wren.clone()),
+                    ("selector".into(), Arg::text("by:wren")),
+                    ("at".into(), Arg::num(1_000_000.0)),
+                    ("expiresAt".into(), Arg::num(1_000_000.0 + 30.0 * 24.0 * 3600e3)),
+                    ("expired".into(), Arg::Bool(false))
+                ]),
+                Arg::Obj(vec![
+                    ("actor".into(), muse.clone()),
+                    ("selector".into(), Arg::text("all")),
+                    ("at".into(), Arg::num(1_000_000.0)),
+                    ("expiresAt".into(), Arg::num(1_060_000.0)),
+                    ("expired".into(), Arg::Bool(true))
+                ]),
+            ])
+        );
+        assert_eq!(p.revoke(&mut c, &wren, &you).unwrap(), Arg::Obj(vec![("revoked".into(), Arg::Bool(true))]));
+        assert_eq!(p.revoke(&mut c, &wren, &you).unwrap(), Arg::Obj(vec![("revoked".into(), Arg::Bool(false))]));
+        assert!(matches!(p.scope_of(&mut c, &wren).unwrap(), Scope::Deny));
+        let kinds: Vec<String> = p.memory_audit.iter().map(|e| js_text(&e.field("kind"))).collect();
+        assert_eq!(kinds, ["grant", "grant", "grant", "grant", "revoke", "revoke"]);
+    }
+
+    fn refusal(r: Result<()>) -> (&'static str, String) {
+        match r {
+            Err(Fail::Refused { why, code }) => (code, why),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_message_stops_at_the_pause_the_fan_out_the_depth_and_the_rates() {
+        let mut c = Clock(1_000_000.0);
+        let mut p = Policy::load(&mut c).unwrap();
+        let (a, b, you) = (Arg::text("claude:a"), Arg::text("codex:b"), Arg::text("actor:you"));
+        let to_b = [b.clone()];
+        let text = |i: usize| Arg::text(format!("message {i}"));
+        p.set_paused(&mut c, true, &you).unwrap();
+        assert_eq!(refusal(p.check_send(&mut c, &a, &to_b, &text(0), 0.0)).0, "paused");
+        assert_eq!(p.check_send(&mut c, &you, &to_b, &text(0), 0.0), Ok(()), "you, while it's paused");
+        p.set_paused(&mut c, false, &you).unwrap();
+        let many: Vec<Arg> = (0..26).map(|i| Arg::text(format!("codex:{i}"))).collect();
+        assert_eq!(
+            refusal(p.check_send(&mut c, &a, &many, &text(1), 0.0)),
+            ("fan-out", "a message reaches at most 25 sessions; narrow it with a scope such as project:… or app:…".into())
+        );
+        assert_eq!(p.check_send(&mut c, &a, &many[..25], &text(1), 0.0), Ok(()));
+        assert_eq!(refusal(p.check_send(&mut c, &a, &to_b, &text(2), 6.0)).0, "hops");
+        assert_eq!(p.check_send(&mut c, &a, &to_b, &text(2), 5.0), Ok(()));
+        assert_eq!(refusal(p.check_send(&mut c, &a, &to_b, &text(2), 0.0)).0, "duplicate");
+        // Twenty a minute from one sender.
+        for i in 3..21 {
+            assert_eq!(p.check_send(&mut c, &a, &[Arg::text(format!("codex:x{i}"))], &text(i), 0.0), Ok(()), "{i}");
+        }
+        assert_eq!(refusal(p.check_send(&mut c, &a, &to_b, &text(21), 0.0)), ("sender-rate", "at most 20 messages a minute from one sender".into()));
+        // Thirty a minute to one session, from anyone.
+        c.0 += 60e3;
+        for i in 0..30 {
+            assert_eq!(p.check_send(&mut c, &Arg::text(format!("claude:s{i}")), &to_b, &text(i), 0.0), Ok(()), "{i}");
+        }
+        assert_eq!(
+            refusal(p.check_send(&mut c, &Arg::text("claude:s99"), &to_b, &text(99), 0.0)),
+            ("target-rate", "codex:b is getting too many messages; try again in a minute".into())
+        );
+        // Two sessions trading messages: 24 in ten minutes looks like a loop.
+        let (x, y) = (Arg::text("claude:x"), Arg::text("codex:y"));
+        for i in 0..24 {
+            c.0 += 20e3;
+            let (from, to) = if i % 2 == 0 { (&x, &y) } else { (&y, &x) };
+            assert_eq!(p.check_send(&mut c, from, std::slice::from_ref(to), &text(i), 1.0), Ok(()), "{i}");
+        }
+        c.0 += 20e3;
+        let (code, why) = refusal(p.check_send(&mut c, &x, std::slice::from_ref(&y), &text(24), 1.0));
+        assert_eq!(code, "storm");
+        assert!(why.starts_with("you and codex:y have exchanged 24 messages in ten minutes"), "{why}");
+        // Each refusal is in the audit, with the message's text never.
+        let refused: Vec<String> = p.memory_audit.iter().filter(|e| e.field("kind").as_str() == Some("refused")).map(|e| js_text(&e.field("why"))).collect();
+        assert_eq!(refused, ["paused", "fan-out", "hops", "duplicate", "sender-rate", "target-rate", "storm"]);
+        assert!(!format!("{:?}", p.memory_audit).contains("message 2"));
+    }
+
+    #[test]
+    fn a_wake_needs_consent_and_fits_a_budget() {
+        let mut c = Clock(1_000_000.0);
+        let mut p = Policy::load(&mut c).unwrap();
+        let (a, b, you) = (Arg::text("claude:a"), Arg::text("codex:b"), Arg::text("actor:you"));
+        assert_eq!(p.consented(&mut c, &b, false).unwrap(), Arg::Bool(false));
+        p.allow(&mut c, &b, false, Some(&Arg::num(60e3)), &you).unwrap();
+        assert_eq!(p.consented(&mut c, &b, false).unwrap(), Arg::Bool(true));
+        assert_eq!(p.consented(&mut c, &b, true).unwrap(), Arg::Bool(false), "consent to wake it here isn't consent from elsewhere");
+        c.0 += 60e3;
+        assert_eq!(p.consented(&mut c, &b, false).unwrap(), Arg::Bool(false), "consent runs out");
+        p.allow(&mut c, &b, true, None, &you).unwrap();
+        assert_eq!(p.consented(&mut c, &b, true).unwrap(), Arg::Bool(true));
+        p.disallow(&mut c, &b, &you).unwrap();
+        assert_eq!(p.consented(&mut c, &b, false).unwrap(), Arg::Bool(false));
+        // The budget: a dozen wakes an hour from a sender, thirty of a target.
+        let why = |v: Arg| js_text(&v.field("why"));
+        assert_eq!(why(p.wake_allowed(&mut c, &a, &b, &Arg::num(0.95)).unwrap()), "plan-limit");
+        for _ in 0..12 {
+            assert_eq!(p.wake_allowed(&mut c, &a, &b, &Arg::Null).unwrap().field("ok"), Arg::Bool(true));
+            p.spend_wake(&mut c, &a, &b).unwrap();
+        }
+        assert_eq!(why(p.wake_allowed(&mut c, &a, &b, &Arg::Null).unwrap()), "sender-wake-budget");
+        for i in 0..18 {
+            p.spend_wake(&mut c, &Arg::text(format!("claude:s{i}")), &b).unwrap();
+        }
+        assert_eq!(why(p.wake_allowed(&mut c, &Arg::text("claude:new"), &b, &Arg::Null).unwrap()), "target-wake-budget");
+        c.0 += 3600e3;
+        assert_eq!(p.wake_allowed(&mut c, &a, &b, &Arg::Null).unwrap().field("ok"), Arg::Bool(true), "an hour on");
+        p.set_paused(&mut c, true, &you).unwrap();
+        assert_eq!(why(p.wake_allowed(&mut c, &a, &b, &Arg::Null).unwrap()), "paused");
+    }
+
+    #[test]
+    fn secrets_are_taken_out_of_what_crosses_identities_or_involves_an_actor() {
+        let text = Arg::text("deploy with DEPLOY_TOKEN=abc123");
+        let mine = Arg::Obj(vec![("identities".into(), Arg::List(vec![Arg::text("adal")]))]);
+        let theirs = Arg::Obj(vec![("identities".into(), Arg::List(vec![Arg::text("work")]))]);
+        let actor = Arg::Obj(vec![("app".into(), Arg::text("actor"))]);
+        assert_eq!(text_for(&text, &Arg::text("claude:a"), &mine, &mine), (text.clone(), 0));
+        assert_eq!(text_for(&text, &Arg::text("claude:a"), &Arg::Obj(vec![]), &Arg::Obj(vec![])), (text.clone(), 0), "nothing known: this machine's sessions");
+        for (sender, from, to) in [("claude:a", &mine, &theirs), ("claude:a", &mine, &actor), ("actor:wren", &mine, &mine)] {
+            assert_eq!(text_for(&text, &Arg::text(sender), from, to), (Arg::text("deploy with DEPLOY_TOKEN=[redacted]"), 1), "{sender}");
+        }
+    }
 }

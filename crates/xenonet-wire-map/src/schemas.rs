@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use xenonet_base::json::number;
 use xenonet_schema::check::{compile, Checker, Data};
-use xenonet_schema::drift::{source_name, DriftLog, ADDITIONS};
+use xenonet_schema::drift::{source_name, DriftView, ADDITIONS};
 use xenonet_schema::lenient::{load_vendor, vendor_sources};
 use xenonet_service::cores::{DriftReport, Schemas, R};
 
@@ -90,8 +90,8 @@ fn first_seen(r: &Value) -> f64 {
 }
 
 impl DriftReport for Drift {
-    fn report(&self, log: &mut DriftLog, all: bool, home: &str, now: f64) -> R<Value> {
-        let (file, looked_at, records) = log.view();
+    fn report(&self, view: DriftView, all: bool, home: &str, now: f64) -> R<Value> {
+        let (file, looked_at, records) = view;
         let newer = |r: &Value| looked_at.is_none_or(|l| first_seen(r) > l);
         let dir = self.vendor.dir();
         let sources: Vec<Value> = vendor_sources(dir)
@@ -130,6 +130,7 @@ impl DriftReport for Drift {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+    use xenonet_schema::drift::DriftLog;
 
     fn checkout() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas")
@@ -147,9 +148,41 @@ mod tests {
     #[test]
     fn the_report_names_every_source() {
         let vendor = Vendor::new(checkout(), Arc::new(Mutex::new(DriftLog::default())));
-        let mut log = DriftLog::default();
-        let r = Drift { vendor }.report(&mut log, false, "", 5.0).unwrap();
+        let r = Drift { vendor }.report(DriftLog::default().view(), false, "", 5.0).unwrap();
         assert_eq!(r["sources"].as_array().unwrap().len(), vendor_sources(&checkout()).len());
         assert_eq!((r["new"].as_u64(), r["changes"].as_u64(), r["all"].as_bool()), (Some(0), Some(0), Some(false)));
+    }
+
+    // The service's GET /api/drift takes the log's view and asks for the
+    // report while the readers record drift in the same log. Holding the
+    // log's lock across the report used to deadlock the two.
+    #[test]
+    fn the_report_and_busy_readers_never_wait_on_each_other() {
+        let log = Arc::new(Mutex::new(DriftLog::default()));
+        let vendor = Vendor::new(checkout(), log.clone());
+        let source = vendor_sources(&checkout()).into_iter().next().expect("a source");
+        let (done, finished) = std::sync::mpsc::channel();
+        let reading = {
+            let (vendor, source, done) = (vendor.clone(), source.clone(), done.clone());
+            std::thread::spawn(move || {
+                for i in 0..2000 {
+                    vendor.check(&source, json!({ "odd": i }), None, None);
+                }
+                let _ = done.send("reader");
+            })
+        };
+        let reporting = std::thread::spawn(move || {
+            let drift = Drift { vendor };
+            for _ in 0..200 {
+                let view = log.lock().unwrap_or_else(std::sync::PoisonError::into_inner).view();
+                drift.report(view, true, "", 5.0).unwrap();
+            }
+            let _ = done.send("report");
+        });
+        for _ in 0..2 {
+            finished.recv_timeout(std::time::Duration::from_secs(60)).expect("the reader and the report both finish");
+        }
+        reading.join().unwrap();
+        reporting.join().unwrap();
     }
 }
