@@ -1305,16 +1305,6 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
     if (selected?.kind === "actor" && performance.now() - actorBranchAt > 500) (actorBranchAt = performance.now()), (branch = actorBranch(selected));
     Object.assign(actorLighting, { focusLevel, selectedId: selected?.id ?? null, branch, dimmed, labelFade });
     actors.step({ t, dt, adt, still, lighting: actorLighting });
-    // What's under the pointer changes when the view moves, as well as
-    // when the pointer does.
-    const pointer = pointerMove ?? (viewMoved ? lastPointer : null);
-    if (pointer) {
-      if (!dragging) {
-        const hit = actorAt(pointer);
-        hoverActor(actorInFront(hit, hovered) ? hit.rec : null);
-      }
-      pointerMove = null;
-    }
     stepLinks(t, dt);
     stepArcs(t, adt);
     hosts.step();
@@ -1364,6 +1354,19 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
     if (ownFrames) {
       graph._animationCycle();
       graph.pauseAnimation();
+    }
+    // The actor under the pointer, weighed against the node hovered, once
+    // the frame is drawn: the graph's own frame turns the camera to where
+    // it was moved and finds the hovered node, and before it the pointer's
+    // ray came from where the camera had been. What's under the pointer
+    // changes when the view moves, as well as when the pointer does.
+    const pointer = pointerMove ?? (viewMoved ? lastPointer : null);
+    if (pointer) {
+      if (!dragging) {
+        const hit = actorAt(pointer);
+        hoverActor(actorInFront(hit, hovered) ? hit.rec : null);
+      }
+      pointerMove = null;
     }
     frames++;
     for (const fn of drawnHooks) fn(at);
