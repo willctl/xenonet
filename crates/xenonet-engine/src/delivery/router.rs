@@ -153,7 +153,7 @@ impl Router {
     /// Whether a session can be reached without hooks (an OpenCode run
     /// XenoNet has a way into).
     pub fn reaches(&self, c: &mut dyn Calls, id: &Arg) -> Result<Arg> {
-        if !starts(id, "opencode:") || !truthy_at(c, "router.opencode")? {
+        if !super::apps::served(&js_text(id)) || !truthy_at(c, "router.opencode")? {
             return Ok(Arg::Bool(false));
         }
         c.call("router.policy", "consented", vec![id.clone()])
@@ -174,7 +174,7 @@ impl Router {
         };
         let mut out = Vec::new();
         for id in ids {
-            if id.starts_with("opencode:") && c.call("router.policy", "consented", vec![Arg::text(id.clone())])?.truthy() {
+            if super::apps::served(&id) && c.call("router.policy", "consented", vec![Arg::text(id.clone())])?.truthy() {
                 out.push(Arg::text(id));
             }
         }
@@ -218,14 +218,15 @@ impl Router {
             return Ok(Some("right away: it's listening for messages"));
         }
         let app = a.field("app");
-        if app.as_str() == Some("claude") && status.as_str() == Some("idle") && opt_call(c, "router.channels", "live", vec![id.clone()])?.truthy() {
+        let ways = app.as_str().and_then(super::apps::of);
+        if ways.is_some_and(|w| w.channel) && status.as_str() == Some("idle") && opt_call(c, "router.channels", "live", vec![id.clone()])?.truthy() {
             return Ok(Some("right away, through its channel"));
         }
         let remote = starts(from, "actor:");
         if status.as_str() == Some("ended") && self.resumable(c, a)?.truthy() && Self::consented(c, &id, remote)? {
             return Ok(Some("right away, in a turn XenoNet resumes it for"));
         }
-        if app.as_str() == Some("opencode") && truthy_at(c, "router.opencode")? && Self::consented(c, &id, remote)? {
+        if ways.is_some_and(|w| w.server) && truthy_at(c, "router.opencode")? && Self::consented(c, &id, remote)? {
             return Ok(Some("right away, through its OpenCode server"));
         }
         Ok(None)
@@ -233,7 +234,7 @@ impl Router {
 
     /// What its own OpenCode says of an OpenCode session.
     pub fn describe(&self, c: &mut dyn Calls, id: &Arg) -> Result<Arg> {
-        if !starts(id, "opencode:") || !truthy_at(c, "router.opencode.info")? {
+        if !super::apps::served(&js_text(id)) || !truthy_at(c, "router.opencode.info")? {
             return Ok(Arg::Null);
         }
         Ok(c.call("router.opencode", "info", vec![id.clone()]).unwrap_or(Arg::Null))
@@ -355,7 +356,8 @@ impl Router {
             tried.push(format!("no wake: {}", js_text(&wake.field("why"))));
         } else {
             // 1. A Claude Code channel, only to wake an idle session.
-            if app == "claude" && idle && opt_call(c, "router.channels", "live", vec![agent.clone()])?.truthy() {
+            let ways = super::apps::of(&app);
+            if ways.is_some_and(|w| w.channel) && idle && opt_call(c, "router.channels", "live", vec![agent.clone()])?.truthy() {
                 let item = obj(vec![("id", m.field("id")), ("from", from_name.clone()), ("text", text.clone())]);
                 if c.call("router.channels", "push", vec![agent.clone(), item])?.truthy() {
                     return success(self, c, "channel", vec![]);
@@ -363,7 +365,7 @@ impl Router {
                 tried.push("channel closed".into());
             }
             // 2. OpenCode's own server, with your consent for that session.
-            if app == "opencode" && truthy_at(c, "router.opencode")? {
+            if ways.is_some_and(|w| w.server) && truthy_at(c, "router.opencode")? {
                 if !Self::consented(c, &agent, remote)? {
                     tried.push("opencode: no consent".into());
                 } else {

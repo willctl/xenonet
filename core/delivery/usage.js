@@ -3,15 +3,22 @@
 // the live limit readings (core/live.js): the fuller of the provider's
 // windows that hasn't reset yet. null when there's no fresh reading, and for
 // a provider XenoNet reads no limits for.
+import { APP } from "../apps.js";
+
 const FRESH_MS = 6 * 3600e3;
+
+// The plan limits an app has, as live/snapshot/v1 names them (the
+// registry's limits): Claude Code's or Codex's.
+const limitsOf = (app) => (typeof app === "string" && Object.hasOwn(APP, app) ? APP[app].limits : undefined);
 
 export function planUsage(limits, app, now = Date.now()) {
   const pcts = [];
-  if (app === "codex") {
+  const kind = limitsOf(app);
+  if (kind === "codex") {
     const c = limits?.codex;
     if (!c || now - (c.observedAt ?? 0) > FRESH_MS) return null;
     for (const w of [c.primary, c.secondary]) if (Number.isFinite(w?.pct) && !(w.resetsAt && w.resetsAt <= now)) pcts.push(w.pct);
-  } else if (app === "claude") {
+  } else if (kind === "claude") {
     const c = limits?.claude;
     if (!c || c.stale) return null;
     if (Number.isFinite(c.fiveHour) && !(c.resets?.fiveHour && c.resets.fiveHour <= now)) pcts.push(c.fiveHour);

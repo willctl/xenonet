@@ -12,21 +12,32 @@
 //! message goes in on stdin, never as an argument. Starting the process and
 //! watching it are the twin's.
 
+use super::apps::{self, Ways};
 use crate::peer::{Calls, Result};
 use crate::sql::Arg;
 use crate::store::js_text;
+use xenonet_base::apps::App;
 
 fn is_uuid(s: &str) -> bool {
     let b = s.as_bytes();
     b.len() == 36 && b.iter().enumerate().all(|(i, c)| if [8, 13, 18, 23].contains(&i) { *c == b'-' } else { c.is_ascii_hexdigit() })
 }
 
+/// The apps whose sessions can be resumed, each with its command
+/// (`apps`).
+fn resumed() -> impl Iterator<Item = &'static (&'static App, Ways)> {
+    apps::apps().iter().filter(|(_, w)| w.resume.is_some())
+}
+
 /// The environment a resumed turn runs with: XenoNet's own, without what
 /// marks a process as part of another session (Claude Code's and Codex's
 /// session variables, XenoNet's channel switch and actor tokens). Where
-/// sessions are kept (CLAUDE_CONFIG_DIR, CODEX_HOME) stays.
+/// sessions are kept (CLAUDE_CONFIG_DIR, CODEX_HOME: each app's roots.env)
+/// stays.
 pub fn resume_env(env: Vec<(String, Arg)>) -> Vec<(String, Arg)> {
-    env.into_iter().filter(|(k, _)| k == "CLAUDE_CONFIG_DIR" || k == "CODEX_HOME" || !(k.starts_with("CLAUDE") || k.starts_with("CODEX_") || k.starts_with("XENONET_"))).collect()
+    let keep: Vec<&str> = resumed().filter_map(|(a, _)| a.roots.as_ref().map(|r| r.env.as_str())).collect();
+    let marks: Vec<&str> = resumed().filter_map(|(_, w)| w.marks).chain(["XENONET_"]).collect();
+    env.into_iter().filter(|(k, _)| keep.contains(&k.as_str()) || !marks.iter().any(|m| k.starts_with(m))).collect()
 }
 
 /// The command for one resumed turn, or None for an app or id it can't
@@ -38,18 +49,8 @@ pub fn resume_command(agent: &Arg, settings: &Arg) -> Option<(String, Vec<Arg>)>
     if !is_uuid(id) {
         return None;
     }
-    match app {
-        "claude" => {
-            let mut args = vec![Arg::text("-p"), Arg::text("--resume"), Arg::text(id)];
-            if settings.truthy() {
-                args.push(Arg::text("--settings"));
-                args.push(settings.clone());
-            }
-            Some(("claude".into(), args))
-        }
-        "codex" => Some(("codex".into(), vec![Arg::text("exec"), Arg::text("resume"), Arg::text(id), Arg::text("-")])),
-        _ => None,
-    }
+    let resume = resumed().find(|(a, _)| a.id == app)?.1.resume?;
+    Some(resume(id, settings))
 }
 
 /// What a deliver comes to before anything starts: Err(why) it can't, or
@@ -96,5 +97,9 @@ mod tests {
         assert!(resume_command(&Arg::text(format!("opencode:{id}")), &Arg::Null).is_none());
         let env = resume_env(vec![("PATH".into(), Arg::text("/bin")), ("CLAUDE_PID".into(), Arg::text("1")), ("CLAUDE_CONFIG_DIR".into(), Arg::text("/c"))]);
         assert_eq!(env.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["PATH", "CLAUDE_CONFIG_DIR"]);
+        let env = resume_env(
+            ["CLAUDECODE", "CODEX_HOME", "CODEX_THREAD_ID", "CODEXX", "XENONET_PORT", "OPENCODE_X", "HOME"].iter().map(|k| ((*k).to_string(), Arg::text("x"))).collect(),
+        );
+        assert_eq!(env.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["CODEX_HOME", "CODEXX", "OPENCODE_X", "HOME"]);
     }
 }

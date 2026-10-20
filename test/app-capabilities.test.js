@@ -13,6 +13,9 @@ import { createVerifier } from "../core/engine/verify.js";
 import { EngineStore } from "../core/engine/store.js";
 import { CALLERS, callingApps, callingSession } from "../mcp/xenonet.js";
 import { actionsFor, urlFor, handoffUrl } from "../core/open.js";
+import { DELIVERY, deliveryApps } from "../core/delivery/apps.js";
+import { resumeCommand, resumeEnv } from "../core/delivery/resume.js";
+import { planUsage } from "../core/delivery/usage.js";
 
 // A made-up app, Wren, whose config format keeps command hooks in
 // ~/.wren/hooks.json and its MCP server through `wren mcp`, built from what
@@ -188,4 +191,25 @@ test("open: each app opens its own sessions, starts its own in a project, and ta
   assert.equal(handoffUrl("claude", "/p", "go"), "claude://code/new?folder=%2Fp&q=go");
   assert.equal(handoffUrl("codex", "", "go"), "codex://threads/new?prompt=go");
   assert.equal(handoffUrl("opencode", "/p", "go"), null);
+});
+
+test("delivery: each app's resume, the environment a resumed turn keeps, its plan's usage, as before", () => {
+  assert.deepEqual(deliveryApps().map((a) => [a.id, !!a.resume, !!a.channel, !!a.server]), [["claude", true, true, false], ["codex", true, false, false], ["opencode", false, false, true]]);
+  const id = "0190d3e0-0000-7000-8000-00000000ab01";
+  assert.deepEqual(resumeCommand(`claude:${id}`), ["claude", ["-p", "--resume", id]]);
+  assert.deepEqual(resumeCommand(`claude:${id}`, { settings: "/s/listen.json" }), ["claude", ["-p", "--resume", id, "--settings", "/s/listen.json"]]);
+  assert.deepEqual(resumeCommand(`codex:${id}`, { settings: "/s/listen.json" }), ["codex", ["exec", "resume", id, "-"]]);
+  for (const agent of [`opencode:${id}`, `gemini-cli:${id}`, "claude:abc", "claude", `Claude:${id}`]) assert.equal(resumeCommand(agent), null, agent);
+  const env = { PATH: "/bin", CLAUDECODE: "1", CLAUDE_CONFIG_DIR: "/c", CODEX_HOME: "/x", CODEX_THREAD_ID: "t", CODEXX: "1", XENONET_PORT: "47840", OPENCODE_X: "1" };
+  assert.deepEqual(Object.keys(resumeEnv(env)), ["PATH", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "CODEXX", "OPENCODE_X"]);
+  const now = Date.UTC(2026, 9, 20);
+  const limits = { claude: { fiveHour: 40, sevenDay: 70, resets: {} }, codex: { observedAt: now, primary: { pct: 20 }, secondary: { pct: 90, resetsAt: now - 1 } } };
+  assert.equal(planUsage(limits, "claude", now), 0.7);
+  assert.equal(planUsage(limits, "codex", now), 0.2, "a window that's reset doesn't count");
+  for (const app of ["opencode", "gemini-cli", "toString", ""]) assert.equal(planUsage(limits, app, now), null, app);
+  // A made-up app's own ways, in a registry of its own.
+  const registry = [{ id: "wren", name: "Wren", numbat: ["wren"], roots: { env: "WREN_HOME", default: "~/.wren" }, has: ["delivery"] }, { id: "lark", name: "Lark", numbat: ["lark"] }];
+  const wren = deliveryApps(registry, { ...DELIVERY, wren: { resume: (sid) => ["wren", ["resume", sid]], marks: "WREN_" }, lark: { server: true } });
+  assert.deepEqual(wren.map((a) => [a.id, a.roots.env]), [["wren", "WREN_HOME"]]);
+  assert.deepEqual(wren[0].resume(id), ["wren", ["resume", id]]);
 });
