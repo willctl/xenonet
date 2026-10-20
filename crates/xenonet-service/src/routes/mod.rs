@@ -335,7 +335,8 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             return Ok(r);
         }
         let body = req.json(4096).await?;
-        let app = if body.get("app").and_then(Value::as_str) == Some("claude") { "claude" } else { "codex" };
+        // Codex, unless you ask for Claude Code.
+        let app = xenonet_base::apps::tailed_app(body.get("app").and_then(Value::as_str).unwrap_or_default(), "codex");
         let model = body.get("model").and_then(Value::as_str).filter(|s| model_ok(s)).map(str::to_string);
         let b = cores.diagnostics.bundle().await?;
         let dir = cores.diagnostics.write_look(&b)?;
@@ -419,7 +420,8 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     }
     if route == "/api/handoff" {
         if m == "GET" {
-            let target = if req.param("target") == Some("codex") { "codex" } else { "claude" };
+            // Claude Code, unless you ask for Codex.
+            let target = xenonet_base::apps::tailed_app(req.param("target").unwrap_or_default(), "claude");
             let node = req.param("nodeId").map(str::to_string);
             return Ok(match cores.state.handoff(node.as_deref(), target).await {
                 Ok(v) => {

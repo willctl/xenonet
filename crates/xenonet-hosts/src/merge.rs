@@ -1112,9 +1112,9 @@ pub fn qualify_event(name: &str, data: &Value, host: &Value, schemas: &mut dyn S
         "tokens" => {
             let session = remote_id(&h, data.get("sessionId"))?;
             let tokens = finite(data.get("n"))?;
-            Some(
-                json!({ "sessionId": session, "app": if data.get("app") == Some(&json!("codex")) { "codex" } else { "claude" }, "n": n(tokens), "ts": shift.at(data.get("ts")), "host": h }),
-            )
+            // Any app but Codex counts as Claude Code's.
+            let app = xenonet_base::apps::tailed_app(data.get("app").and_then(Value::as_str).unwrap_or_default(), "claude");
+            Some(json!({ "sessionId": session, "app": app, "n": n(tokens), "ts": shift.at(data.get("ts")), "host": h }))
         }
         "pulse" => {
             let node = if data.get("nodeId") == Some(&json!("core")) { Some(format!("@{h}:core")) } else { remote_id(&h, data.get("nodeId")) }?;

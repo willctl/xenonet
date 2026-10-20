@@ -30,6 +30,7 @@ import { GeminiCliSessions, geminiRoot } from "./native/gemini-cli.js";
 import { CopilotCliSessions, copilotRoot } from "./native/copilot-cli.js";
 import { CursorSessions, cursorEventsFile } from "./native/cursor.js";
 import { ReportedRuns, observedSessions } from "./reported-runs.js";
+import { tailedApp } from "./apps.js";
 import { demoSessions, demoNativeProjects, demoTranscript, demoNarration, demoPicks, startDriver, clientsReady } from "./demo.js";
 
 const LIVE_THROTTLE_MS = 500;
@@ -482,7 +483,7 @@ export class XenoNetState extends EventEmitter {
     const saved = [];
     let note = null;
     if (config.demo) this.demoTitles.set(node.id, name);
-    else if (node.app === "codex") {
+    else if (tailedApp(node.app, "claude") === "codex") {
       await renameCodexThread(node.rawId, name);
       saved.push("Codex");
     } else {
@@ -701,7 +702,7 @@ export class XenoNetState extends EventEmitter {
     if (!node || node.kind !== "session") throw new Error("unknown session");
     let notes = this.live.sessionNotes(nodeId) ?? { prompts: [], messages: [], files: [], edits: [] };
     if (!notes.firstPrompt || !notes.messages.length) {
-      const page = await this.readTranscript(node, { limit: node.app === "codex" ? 60 : 80 });
+      const page = await this.readTranscript(node, { limit: tailedApp(node.app, "claude") === "codex" ? 60 : 80 });
       const users = page.entries.filter((e) => e.role === "user" && e.text);
       const agents = page.entries.filter((e) => e.role === "assistant" && e.text);
       notes = {
@@ -715,10 +716,11 @@ export class XenoNetState extends EventEmitter {
   }
 
   // A session's transcript, a page at a time. A Codex thread whose items
-  // the app-server can't list is read from its rollout (see codex.js).
+  // the app-server can't list is read from its rollout (see codex.js). Any
+  // session but a Codex thread is read as Claude Code's.
   readTranscript(node, opts) {
     if (config.demo) return demoTranscript(node.rawId);
-    if (node.app === "codex") return readCodexThread(node.rawId, { ...opts, rollout: async () => (await this.transcripts.files(node.id))[0]?.file ?? null });
+    if (tailedApp(node.app, "claude") === "codex") return readCodexThread(node.rawId, { ...opts, rollout: async () => (await this.transcripts.files(node.id))[0]?.file ?? null });
     return readClaudeSession(node.rawId, opts);
   }
 

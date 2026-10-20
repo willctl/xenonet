@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { APPS, APP, TAILED, appsWith } from "../core/apps.js";
+import { APPS, APP, TAILED, appsWith, tailedApp } from "../core/apps.js";
 import { SESSION_APPS, appOfSession } from "../core/schema/ids.js";
 import { check, explain } from "../core/schema/index.js";
 import { CAPABILITIES } from "../core/schema/app.js";
@@ -58,4 +58,12 @@ test("what the code reads from the registry", async () => {
   const { LiveTelemetry } = await import("../core/live.js");
   const live = new LiveTelemetry({ claudeRoot: path.join(root, "no-such-folder"), codexRoot: path.join(root, "no-such-folder"), claudeDesktopDir: null });
   assert.deepEqual(["claude", "codex", "opencode"].map((app, i) => live.session(`${app}:x${i}`, app).context.window), [200000, 258400, 200000], "a session's context window, until a line says");
+});
+
+test("the fallbacks: an app that's neither Claude Code nor Codex reads as one of the two, as it always has", () => {
+  const inputs = ["claude", "codex", ...APPS.map((a) => a.id), "Codex", "", "toString", "__proto__", undefined, null, 1, {}];
+  for (const x of inputs) {
+    assert.equal(tailedApp(x, "claude"), x === "codex" ? "codex" : "claude", String(x));
+    assert.equal(tailedApp(x, "codex"), x === "claude" ? "claude" : "codex", String(x));
+  }
 });

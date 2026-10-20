@@ -52,7 +52,8 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
         return Ok(0);
     }
     let asked = flags.text("app").or_else(|| sys::var("XENONET_DIAGNOSE_APP")).unwrap_or_else(|| "codex".into());
-    let app = if asked == "claude" { "claude" } else { "codex" };
+    // Codex, unless you ask for Claude Code.
+    let app = xenonet_base::apps::tailed_app(&asked, "codex");
     let model = flags.text("model").or_else(|| sys::var("XENONET_DIAGNOSE_MODEL"));
     let named = if app == "claude" { "Claude Code" } else { "Codex" };
     let path_var = std::env::var("PATH").unwrap_or_default();

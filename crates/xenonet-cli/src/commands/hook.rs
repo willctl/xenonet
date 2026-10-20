@@ -36,7 +36,8 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
 }
 
 pub fn hook(app: Option<&str>, port_flag: Option<&str>, plugin: bool) -> i32 {
-    let app = if app == Some("claude") { "claude" } else { "codex" };
+    // Any app but Claude Code is read as Codex.
+    let app = xenonet_base::apps::tailed_app(app.unwrap_or_default(), "codex");
     let mut input = Vec::new();
     let _ = std::io::stdin().read_to_end(&mut input);
     // As text, the way the agent wrote it; nothing at all is an empty event.

@@ -13,11 +13,13 @@ import fsp from "node:fs/promises";
 import zlib from "node:zlib";
 import { native } from "../index.js";
 import { ClaudeLine, CodexLine, linesOf } from "./lines.js";
+import { tailedApp } from "../../../../core/apps.js";
 
 // One searchable record per human or agent message, from a line:
-// normalized (see lines.js), or as the transcript has it.
+// normalized (see lines.js), or as the transcript has it. Any app but
+// Claude Code is read as Codex.
 export function docsFromLine(line, app, { userEvents = false } = {}) {
-  const own = app === "claude" ? line instanceof ClaudeLine : line instanceof CodexLine;
+  const own = tailedApp(app, "codex") === "claude" ? line instanceof ClaudeLine : line instanceof CodexLine;
   return native.searchDocsFromLine(own ? line.raw : line, String(app), !!userEvents);
 }
 

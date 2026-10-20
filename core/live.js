@@ -537,11 +537,13 @@ export class LiveTelemetry extends EventEmitter {
       const rec = linesOf(f.app).line(line, f);
       if (!rec) return;
       this.status.lines++;
+      // Any app but Codex is read as Claude Code, as linesOf reads it.
+      const codex = tailedApp(f.app, "claude") === "codex";
       // A provider's refusal, as its line marks it (core/refusals): kept
       // whether read as history or live, told to you only when live.
-      const sig = f.app === "codex" ? codexSignal(rec.raw) : claudeSignal(rec.raw);
+      const sig = codex ? codexSignal(rec.raw) : claudeSignal(rec.raw);
       if (sig) this.emit("refusal", { signal: sig, sessionId: f.sessionId, app: f.app, agentId: f.agentId ?? null, file: f.file ?? null, cwd: typeof rec.raw?.cwd === "string" ? rec.raw.cwd : null, model: this.sessions.get(f.sessionId)?.model ?? null, live: !prime });
-      if (f.app === "codex") this.applyCodex(f, rec, !prime);
+      if (codex) this.applyCodex(f, rec, !prime);
       else this.applyClaude(f, rec, !prime);
     } catch {
       this.status.errors++;

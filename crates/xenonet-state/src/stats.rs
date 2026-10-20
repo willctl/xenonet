@@ -1181,7 +1181,12 @@ impl Kept {
 pub fn session_stats(session_id: &str, files: Vec<File>) -> Result<Out, TypeError> {
     let app = session_id.split(':').next().unwrap_or_default();
     let mut ids = EventIds::default();
-    let events = if app == "codex" { codex_events(files.into_iter().next().map(|f| f.lines).unwrap_or_default(), &mut ids)? } else { claude_events(files, &mut ids)? };
+    // Any app but Codex is read as Claude Code.
+    let events = if xenonet_base::apps::tailed_app(app, "claude") == "codex" {
+        codex_events(files.into_iter().next().map(|f| f.lines).unwrap_or_default(), &mut ids)?
+    } else {
+        claude_events(files, &mut ids)?
+    };
     let Out::Obj(mut fields) = summarize(&events, Some(&Value::String(app.to_string())))? else { unreachable!() };
     fields.insert(0, ("id".into(), Out::Str(session_id.to_string())));
     Ok(Out::Obj(fields))

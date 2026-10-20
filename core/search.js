@@ -14,6 +14,7 @@ import zlib from "node:zlib";
 import { DatabaseSync } from "node:sqlite";
 import { listFiles } from "./paths.js";
 import { ClaudeLine, CodexLine, linesOf } from "./lines.js";
+import { tailedApp } from "./apps.js";
 
 const UUID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(\.zst)?$/i;
 const MAX_TEXT = 6000;
@@ -36,7 +37,8 @@ const doc = (role, text, ts) => (skippable(text) || !Number.isFinite(ts) ? [] : 
 // Codex rollout with no completed user messages at all, whose prompts are
 // its user_message events.
 export function docsFromLine(line, app, { userEvents = false } = {}) {
-  if (app === "claude") {
+  // Any app but Claude Code is read as Codex.
+  if (tailedApp(app, "codex") === "claude") {
     const o = line instanceof ClaudeLine ? line : new ClaudeLine(line);
     const type = o.type;
     if (type === "user" && !o.meta) {
@@ -162,7 +164,8 @@ export class TranscriptSearch {
 
   sessionOf(file, app) {
     const norm = file.replace(/\\/g, "/");
-    if (app === "claude") {
+    // Any app but Claude Code is read as Codex.
+    if (tailedApp(app, "codex") === "claude") {
       const sub = /\/([0-9a-f-]{36})\/subagents\/[^/]+\.jsonl$/i.exec(norm);
       if (sub) return `claude:${sub[1]}`;
     } else if (!/rollout-/.test(norm)) return null;
