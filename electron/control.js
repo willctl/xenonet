@@ -195,13 +195,21 @@ export function createControl({ root, production = false, instance, port, getWin
     await cdp("Input.dispatchKeyEvent", { type: "keyUp", ...base });
   }
 
+  // The map works out what's under the pointer as it draws a frame, at most
+  // every 50 ms, and a press takes what it found. So a press waits for a
+  // frame drawn after that: on a GPU the next one, and drawn in software
+  // (no GPU, as on a hosted Linux runner) up to a second away.
+  async function hovered() {
+    await sleep(80);
+    await driver("drawn", []).catch(() => {});
+  }
+
   async function click(at, { button = "left", count = 1, modifiers } = {}) {
     const p = await point(at);
     await yours.point(p);
     const m = modifierBits(modifiers);
     await mouse("mouseMoved", p, { modifiers: m });
-    // The map works out what's under the pointer as it draws a frame.
-    await sleep(80);
+    await hovered();
     for (let i = 1; i <= count; i++) {
       await mouse("mousePressed", p, { button, buttons: BUTTONS[button], clickCount: i, modifiers: m });
       await mouse("mouseReleased", p, { button, buttons: 0, clickCount: i, modifiers: m });
@@ -216,7 +224,7 @@ export function createControl({ root, production = false, instance, port, getWin
     await yours.point(b);
     const m = modifierBits(modifiers);
     await mouse("mouseMoved", a, { modifiers: m });
-    await sleep(80);
+    await hovered();
     await mouse("mousePressed", a, { button: "left", buttons: 1, clickCount: 1, modifiers: m });
     for (let i = 1; i <= steps; i++) {
       await mouse("mouseMoved", { x: a.x + ((b.x - a.x) * i) / steps, y: a.y + ((b.y - a.y) * i) / steps }, { button: "left", buttons: 1, modifiers: m });

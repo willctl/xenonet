@@ -146,6 +146,22 @@ export function createDriver(app) {
     return { ...d, fps: Number.isFinite(d.fps) ? d.fps : null };
   }
 
+  // Resolves once the map has drawn its next frame, or after `ms` if none
+  // comes. What's under the pointer is worked out as a frame is drawn, and
+  // a map drawn in software (as on a machine with no GPU) can be a second
+  // between frames, longer than frame() waits.
+  const waiting = new Set();
+  scene.onDrawn(() => {
+    for (const done of waiting) done();
+    waiting.clear();
+  });
+  const drawn = (ms = 5000) =>
+    new Promise((resolve) => {
+      const done = () => (clearTimeout(timer), resolve());
+      const timer = setTimeout(() => (waiting.delete(done), resolve()), ms);
+      waiting.add(done);
+    });
+
   // Resolves once the view has stayed settled for a few frames, and the
   // map has drawn it (at rest it draws only so often; see render-budget.js).
   async function settled({ timeout = 15000 } = {}) {
@@ -194,6 +210,13 @@ export function createDriver(app) {
     },
     state,
     settled,
+    // Resolves once the map has drawn its next frame, with the frames drawn
+    // so far.
+    async drawn({ timeout = 5000 } = {}) {
+      scene.wake();
+      await drawn(timeout);
+      return { frames: scene.drawingState().frames };
+    },
 
     // Nodes whose id, title or name contain every word of `query`, drawn
     // ones first, then the most recent. `kind` narrows it: session, project,
