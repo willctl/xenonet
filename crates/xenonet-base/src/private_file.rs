@@ -250,6 +250,85 @@ mod tests {
         assert_eq!(user_sid(&mut silent), Err(Error::Said("whoami didn't say which account this is".into())));
     }
 
+    #[test]
+    fn who_else_an_acl_lets_in_by_kind_flags_and_trustee() {
+        // Allow entries of every kind count; inherit-only and deny ones don't.
+        let acl = format!("D:PAI(OA;;FR;;;AU)(XA;;FR;;;WD)(ZA;;FR;;;S-1-5-21-9)(A;IO;FA;;;BU)(A;OICIIO;FA;;;IU)(D;;FA;;;AN)(AU;;FA;;;NU)()(A;;FA;;;{SID})");
+        assert_eq!(others_in(&acl, SID), ["AU", "WD", "S-1-5-21-9"]);
+        // SYSTEM, the Administrators (by name, SID or the renamed built-in
+        // account), the owner rights and yours are trusted.
+        assert_eq!(others_in(&format!("D:(A;;FA;;;S-1-5-18)(A;;FA;;;S-1-5-32-544)(A;;FA;;;LA)(A;;FA;;;OW)(A;;FA;;;S-1-3-4)(A;;FA;;;{SID})"), SID), Vec::<String>::new());
+        // A SID that only starts like yours is someone else's.
+        assert_eq!(others_in(&format!("D:(A;;FA;;;{SID}0)"), SID), [format!("{SID}0")]);
+        assert_eq!(others_in("D:AINO_ACCESS_CONTROL", SID), ["everyone"]);
+        assert_eq!(others_in("D:", SID), Vec::<String>::new());
+    }
+
+    /// whoami and icacls on a made-up Windows: what each was asked, with
+    /// icacls /save writing `saved` as the ACL's file.
+    fn windows(asked: &std::cell::RefCell<Vec<String>>, saved: Option<Vec<u8>>) -> impl FnMut(&str, &[&str]) -> Result<String, String> + '_ {
+        move |file: &str, args: &[&str]| {
+            asked.borrow_mut().push(std::iter::once(file).chain(args.iter().copied()).collect::<Vec<_>>().join(" "));
+            match (file, args.get(1).copied(), &saved) {
+                ("whoami", ..) => Ok(format!("\"pc\\\\someone\",\"{SID}\"\r\n")),
+                ("icacls", Some("/save"), Some(body)) => {
+                    std::fs::write(args[2], body).unwrap();
+                    Ok(String::new())
+                }
+                ("icacls", Some("/inheritance:r"), _) => Ok(String::new()),
+                _ => Err(format!("{file} failed\nAccess is denied.")),
+            }
+        }
+    }
+
+    #[test]
+    fn an_acl_saved_in_any_of_icacls_encodings_and_the_file_taken_away() {
+        let line = format!("x.token\r\nD:P(A;;FA;;;{SID})\r\n");
+        let utf16: Vec<u8> = line.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        for body in [utf16, line.clone().into_bytes()] {
+            let asked = std::cell::RefCell::new(Vec::new());
+            assert_eq!(acl_of("x.token", &mut windows(&asked, Some(body))).unwrap(), format!("D:P(A;;FA;;;{SID})"));
+            // icacls x.token /save <the file> /q, with the file's path as it is, spaces and all.
+            let saved = asked.borrow()[0].strip_prefix("icacls x.token /save ").and_then(|s| s.strip_suffix(" /q")).unwrap().to_string();
+            assert!(saved.starts_with(&std::env::temp_dir().join("xenonet-acl-").to_string_lossy().into_owned()));
+            assert!(!Path::new(&saved).exists(), "the saved ACL is taken away");
+        }
+        let asked = std::cell::RefCell::new(Vec::new());
+        assert_eq!(acl_of("x.token", &mut windows(&asked, Some(b"x.token\r\nno ACL here\r\n".to_vec()))), Err(Error::Said("icacls gave no ACL for x.token".into())));
+        assert_eq!(acl_of("x.token", &mut windows(&asked, None)), Err(Error::Run("icacls failed\nAccess is denied.".into())));
+        assert_eq!(other_readers("x.token", true, &mut windows(&asked, None)).unwrap_err().message(), "icacls failed\nAccess is denied.");
+    }
+
+    #[test]
+    fn made_yours_alone_on_a_made_up_windows() {
+        let asked = std::cell::RefCell::new(Vec::new());
+        protect_file("C:\\Users\\someone\\x.token", true, &mut windows(&asked, None)).unwrap();
+        assert_eq!(asked.borrow().clone(), ["whoami /user /fo csv /nh".to_string(), format!("icacls C:\\Users\\someone\\x.token /inheritance:r /grant:r *{SID}:F /q")]);
+        // Without the account, nothing is granted.
+        let mut no_whoami = |file: &str, _: &[&str]| Err(format!("{file} failed"));
+        assert_eq!(protect_file("x.token", true, &mut no_whoami), Err(Error::Run("whoami failed".into())));
+        assert_eq!(Error::Fs(FsError { code: Some("EPERM".into()), message: "EPERM: operation not permitted".into() }).message(), "EPERM: operation not permitted");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn elsewhere_who_can_read_a_file_is_its_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let file = std::env::temp_dir().join(format!("xenonet-private-file-{}", std::process::id()));
+        std::fs::write(&file, "x").unwrap();
+        let name = file.to_string_lossy().into_owned();
+        let mut never = |_: &str, _: &[&str]| -> Result<String, String> { panic!("no commands on unix") };
+        for (mode, others) in [(0o644, vec!["others".to_string()]), (0o640, vec!["others".into()]), (0o604, vec!["others".into()]), (0o600, vec![]), (0o400, vec![])] {
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert_eq!(other_readers(&name, false, &mut never).unwrap(), others, "{mode:o}");
+        }
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o666)).unwrap();
+        protect_file(&name, false, &mut never).unwrap();
+        assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+        std::fs::remove_file(&file).unwrap();
+        assert!(other_readers(&name, false, &mut never).unwrap_err().message().starts_with("ENOENT"));
+    }
+
     #[cfg(unix)]
     #[test]
     fn commands_and_their_timeout() {

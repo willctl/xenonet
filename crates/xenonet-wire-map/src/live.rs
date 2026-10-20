@@ -36,6 +36,8 @@ const FOLLOW_MS: u64 = 250;
 // The JS's sweeps that walk: every 15th, so every 30 seconds.
 const JS_WALK_EVERY: u64 = 15;
 const DEPTH: f64 = 6.0;
+// The most of a transcript read in one go.
+const TAKE_PIECE: u64 = 4 << 20;
 const LIMITS_EVERY_MS: u64 = 30_000;
 
 /// What the telemetry says, for the state to pass on: activity, tokens
@@ -182,22 +184,31 @@ impl Live {
         let Some((from, to)) = t.tailer.plan_take(file, size, until) else { return Ok(()) };
         let mut f = std::fs::File::open(file)?;
         f.seek(SeekFrom::Start(from))?;
-        let mut buf = vec![0u8; (to - from) as usize];
-        let mut got = 0;
-        while got < buf.len() {
-            let n = f.read(&mut buf[got..])?;
-            if n == 0 {
+        // A piece at a time, so a long transcript read as history never
+        // has to be held whole, nor its lines all at once.
+        let mut at = from;
+        let mut buf = vec![0u8; (to - from).min(TAKE_PIECE) as usize];
+        while at < to {
+            let want = (to - at).min(TAKE_PIECE) as usize;
+            let mut got = 0;
+            while got < want {
+                let n = f.read(&mut buf[got..want])?;
+                if n == 0 {
+                    break;
+                }
+                got += n;
+            }
+            at += got as u64;
+            let lines = t.tailer.took(file, &buf[..got], at);
+            if let Some(mut e) = t.entries.remove(file) {
+                for l in &lines {
+                    self.line(l, file, &mut e, prime, out);
+                }
+                t.entries.insert(file.to_string(), e);
+            }
+            if got < want {
                 break;
             }
-            got += n;
-        }
-        buf.truncate(got);
-        let lines = t.tailer.took(file, &buf, from + got as u64);
-        if let Some(mut e) = t.entries.remove(file) {
-            for l in &lines {
-                self.line(l, file, &mut e, prime, out);
-            }
-            t.entries.insert(file.to_string(), e);
         }
         // The sweep stands in for the watches, so every root counts as
         // watched once it has started.

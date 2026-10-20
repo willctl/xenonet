@@ -33,12 +33,18 @@ pub struct TranscriptSearch {
     one: tokio::sync::Mutex<()>,
 }
 
+// The bytes as text, bad UTF-8 replaced, without a copy when there's none:
+// a transcript can be hundreds of megabytes.
+fn text_of(bytes: Vec<u8>) -> String {
+    String::from_utf8(bytes).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
+}
+
 fn read_from(file: &str, offset: f64, size: f64) -> std::io::Result<String> {
     let mut f = std::fs::File::open(file)?;
     f.seek(SeekFrom::Start(offset as u64))?;
     let mut buf = Vec::with_capacity((size - offset).max(0.0) as usize);
     f.take((size - offset).max(0.0) as u64).read_to_end(&mut buf)?;
-    Ok(String::from_utf8_lossy(&buf).into_owned())
+    Ok(text_of(buf))
 }
 
 #[expect(clippy::case_sensitive_file_extension_comparisons, reason = "as the JS's endsWith, which tells .zst from .ZST")]
@@ -46,7 +52,7 @@ fn read_whole(file: &str) -> std::io::Result<String> {
     if file.ends_with(".zst") {
         return Err(std::io::Error::other("XenoNet can't read a compressed archive here yet"));
     }
-    Ok(String::from_utf8_lossy(&std::fs::read(file)?).into_owned())
+    Ok(text_of(std::fs::read(file)?))
 }
 
 fn message(e: xenonet_state::search::Error) -> String {
@@ -83,10 +89,11 @@ impl TranscriptSearch {
         let text = if plan.whole { read_whole(file) } else { read_from(file, plan.offset, plan.size) }.map_err(|e| e.to_string())?;
         // A Codex rollout found to have a completed user message is read
         // whole.
+        let whole;
         let lines = match core.begin(&mut plan, &text).map_err(message)? {
             Begun::Lines(l) => l,
             Begun::ReadWhole => {
-                let whole = read_whole(file).map_err(|e| e.to_string())?;
+                whole = read_whole(file).map_err(|e| e.to_string())?;
                 match core.begin(&mut plan, &whole).map_err(message)? {
                     Begun::Lines(l) => l,
                     Begun::ReadWhole => Vec::new(),

@@ -27,11 +27,13 @@ pub struct Claude {
     /// Where each desktop session's file is, by its desktop id, as the last
     /// listing found them, for renaming one.
     desktop_files: Mutex<HashMap<String, String>>,
+    /// What the last listing read of each transcript.
+    listings: Mutex<crate::sdk::Listings>,
 }
 
 impl Claude {
     pub fn new(projects_dir: &str, desktop_dir: Option<&str>, vendor: Arc<Vendor>) -> Arc<Claude> {
-        Arc::new(Claude { projects_dir: projects_dir.into(), desktop_dir: desktop_dir.map(str::to_string), vendor, desktop_files: Mutex::default() })
+        Arc::new(Claude { projects_dir: projects_dir.into(), desktop_dir: desktop_dir.map(str::to_string), vendor, desktop_files: Mutex::default(), listings: Mutex::default() })
     }
 
     // Claude desktop's records, by the CLI session each is of. Sessions sit
@@ -57,7 +59,7 @@ impl Claude {
         let me = self.clone();
         crate::util::blocking(move || {
             let version = crate::sdk::VERSION;
-            let listed: Vec<Value> = crate::sdk::list_sessions(&me.projects_dir)
+            let listed: Vec<Value> = crate::sdk::list_sessions_with(&me.projects_dir, &mut lock(&me.listings))
                 .into_iter()
                 .filter_map(|s| me.vendor.sample("anthropic/agent-sdk/session-listing", s, Some(version), None, 16))
                 .collect();
@@ -73,14 +75,16 @@ impl Claude {
         let me = self.clone();
         let (raw, cursor) = (raw_id.to_string(), cursor.map(|c| Value::String(c.into())));
         crate::util::blocking(move || {
-            let all = crate::sdk::session_messages(&me.projects_dir, &raw);
+            // Only the page's messages are read whole.
+            let all = crate::sdk::messages(&me.projects_dir, &raw);
             let (start, end, next) = core::page(all.len(), cursor.as_ref(), limit);
             let version = crate::sdk::VERSION;
-            let page: Vec<Value> = all[start..end]
-                .iter()
+            let page: Vec<Value> = all
+                .page(start, end)
+                .into_iter()
                 .filter_map(|m| {
                     let kind = m.get("type").and_then(Value::as_str).map(str::to_string);
-                    me.vendor.sample("anthropic/agent-sdk/session-message", m.clone(), Some(version), kind.as_deref(), 16)
+                    me.vendor.sample("anthropic/agent-sdk/session-message", m, Some(version), kind.as_deref(), 16)
                 })
                 .collect();
             let entries: Vec<Value> = core::entries(&page).map_err(|e| e.0)?.iter().map(codex_obj).collect();

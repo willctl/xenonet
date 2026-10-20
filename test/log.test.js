@@ -21,6 +21,9 @@ test("scrubbed as written: the home folder as ~, in each of its forms, and keys 
   assert.equal(unsafe("C:\\Users\\nova\\x", HOME), "the home folder");
   assert.equal(unsafe(`a ${KEY}`, HOME), "something that looks like a key");
   assert.equal(unsafe("~\\x [key]", HOME), null);
+  // In JSON, as a bundle is checked: backslashes doubled.
+  assert.equal(unsafe(JSON.stringify({ x: "C:\\Users\\Nova\\x" }), HOME), "the home folder");
+  assert.equal(unsafe(JSON.stringify({ x: "~\\x" }), HOME), null);
 });
 
 test("written as JSON lines, the same code with the same words once every ten seconds, and read back newest first", () => {
@@ -85,6 +88,7 @@ test("diagnostics: what's wrong by code, safe to share, refused if anything priv
   assert.match(md, /port 47840 is already in use by XenoNet Dev/);
   assert.ok(!md.includes("nova"));
   assert.throws(() => makeBundle({ xenonet: { instance: KEY }, env: {}, home: HOME }), /still held something that looks like a key/, "anything private left is refused");
+  assert.throws(() => makeBundle({ xenonet: { instance: "C:\\Users\\nova\\dev" }, env: {}, home: HOME }), /still held the home folder/, "a Windows home folder too, though JSON doubles its backslashes");
 });
 
 test("asking an agent: a folder of its own with the bundle and a brief that rules out filing anything, and a read-only session", () => {

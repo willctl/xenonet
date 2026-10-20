@@ -13,8 +13,10 @@ use xenonet_base::sync::Locked;
 
 pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Reply, CoreError> {
     if req.method == "GET" && req.path == "/api/drift" {
-        let mut log = ctx.drift.locked();
-        return Ok(Reply::json(200, ctx.cores.drift.report(&mut log, req.param("all") == Some("1"), &ctx.config.home, ctx.now())?));
+        // The view is taken and the log let go before the report asks the
+        // readers what they've read (DriftReport says why).
+        let view = ctx.drift.locked().view();
+        return Ok(Reply::json(200, ctx.cores.drift.report(view, req.param("all") == Some("1"), &ctx.config.home, ctx.now())?));
     }
     if req.method == "POST" && req.path == "/api/drift/seen" {
         let body = req.json_body().await?;

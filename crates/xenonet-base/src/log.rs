@@ -78,7 +78,9 @@ pub fn scrub(text: &str, home: &str) -> String {
 /// what leaves XenoNet is checked with this last.
 pub fn unsafe_text(text: &str, home: &str) -> Option<&'static str> {
     let h = trimmed_home(home);
-    let forms: Vec<String> = if h.encode_utf16().count() > 2 { vec![h.to_string(), h.replace('\\', "/"), h.replace('/', "\\")] } else { Vec::new() };
+    // And as JSON writes it, backslashes doubled: what's checked is often a
+    // bundle as JSON, where C:\Users\nova reads C:\\Users\\nova.
+    let forms: Vec<String> = if h.encode_utf16().count() > 2 { vec![h.to_string(), h.replace('\\', "/"), h.replace('/', "\\"), h.replace('\\', "\\\\")] } else { Vec::new() };
     let lower = text.to_lowercase();
     if forms.iter().any(|f| lower.contains(&f.to_lowercase())) {
         return Some("the home folder");
@@ -356,6 +358,10 @@ mod tests {
         assert_eq!(scrub("bell\u{7} and tab\tkept\nand lines", HOME), "bell and tab\tkept\nand lines");
         assert_eq!(unsafe_text("C:\\Users\\nova\\x", HOME), Some("the home folder"));
         assert_eq!(unsafe_text("~\\x [key]", HOME), None);
+        // In JSON, as a bundle is checked: backslashes doubled.
+        assert_eq!(unsafe_text(&json::stringify(&serde_json::json!({ "x": "C:\\Users\\Nova\\x" }), 0), HOME), Some("the home folder"));
+        assert_eq!(unsafe_text("{\"x\":\"/home/nova/x\"}", "/home/nova"), Some("the home folder"));
+        assert_eq!(unsafe_text("{\"x\":\"~\\\\x\"}", HOME), None);
         assert_eq!(js_slice("a😀b", 2), "a", "half a pair is left out");
     }
     #[test]
