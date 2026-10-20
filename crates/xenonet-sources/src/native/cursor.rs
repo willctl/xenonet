@@ -261,6 +261,9 @@ mod tests {
         c.read(Some(&format!("{file}.none")), now, &mut StdFiles, &mut no_check).unwrap();
         assert_eq!(c.file_state, "missing");
         std::fs::remove_dir_all(&dir).unwrap();
-        assert_eq!(cursor_events_file(None, "/s"), xenonet_base::paths::join("/s", "cursor-hooks.ndjson"));
+        // Spelled as on a unix host; Windows writes the same file with backslashes.
+        if cfg!(unix) {
+            assert_eq!(cursor_events_file(None, "/s"), "/s/cursor-hooks.ndjson");
+        }
     }
 }
