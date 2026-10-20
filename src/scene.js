@@ -194,6 +194,11 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
   addBloomToLens(lens, bloom);
   composer.addPass(lens);
   if (!merged) composer.addPass(new OutputPass());
+  // The last pass draws on the screen, so what it would swap in is never
+  // read. Without the swap each frame renders into the same target, and
+  // the composer's other one, as large (multisampled, half-float, at the
+  // screen's density: some 200 MB on a Retina screen), is never allocated.
+  composer.passes.at(-1).needsSwap = false;
 
   const scene = graph.scene();
   const camera = graph.camera();
