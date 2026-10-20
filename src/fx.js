@@ -11,6 +11,12 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { THEME } from "./theme.js";
 
 export const Additive = THREE.AdditiveBlending;
+// three draws a transparent, double-sided material in two passes, its back
+// faces and then its front ones, and looks its shader up again for each:
+// twice a frame for every ring and shell on the map. Light that's added
+// and writes no depth comes out the same whatever order its faces land in,
+// so every such material (here and in looks/) sets forceSinglePass and
+// draws in one.
 
 // ---------- textures ----------
 
@@ -330,6 +336,7 @@ export function pillarMaterial(color) {
     depthWrite: false,
     blending: Additive,
     side: THREE.DoubleSide,
+    forceSinglePass: true,
     uniforms: { color: { value: new THREE.Color(color) }, opacity: { value: 1 }, time: { value: 0 } },
     vertexShader: /* glsl */ `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: /* glsl */ `
@@ -353,6 +360,7 @@ export function fresnelMaterial(color, opacity = 1, power = 2.5) {
     depthWrite: false,
     blending: Additive,
     side: THREE.DoubleSide,
+    forceSinglePass: true,
     uniforms: { color: { value: new THREE.Color(color) }, opacity: { value: opacity }, power: { value: power } },
     vertexShader: /* glsl */ `
       varying vec3 vN; varying vec3 vV;
