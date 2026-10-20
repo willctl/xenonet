@@ -7,6 +7,8 @@
 //   npm run test:bin                 builds the binary, runs the files below
 //   npm run test:bin -- <files>      these files
 //   npm run test:bin -- --no-build   with the binary as it is
+//   npm run test:bin -- --bin=<file> against that binary, without building
+//                                    (coverage:rust -- --js gives its own)
 //   npm run test:bin -- --write      and keeps the counts in
 //                                    crates/xenonet-cli/bin-tests.json
 import { spawn } from "node:child_process";
@@ -34,9 +36,10 @@ const FILES = [
   "test/assistant-endpoint.test.js",
 ];
 const files = named.length ? named : FILES;
-const bin = path.join(root, "target", "debug", process.platform === "win32" ? "xenonet.exe" : "xenonet");
+const given = args.find((a) => a.startsWith("--bin="))?.slice("--bin=".length);
+const bin = given ? path.resolve(given) : path.join(root, "target", "debug", process.platform === "win32" ? "xenonet.exe" : "xenonet");
 
-if (!args.includes("--no-build")) cargo(["build", "-p", "xenonet-cli"], { stdio: "inherit", env: { ...process.env, CARGO_PROFILE_DEV_DEBUG: "0" } });
+if (!given && !args.includes("--no-build")) cargo(["build", "-p", "xenonet-cli"], { stdio: "inherit", env: { ...process.env, CARGO_PROFILE_DEV_DEBUG: "0" } });
 
 // node --test's TAP summary: # tests, # pass, # fail, # skipped.
 const count = (out, key) => Number(new RegExp(`^# ${key} (\\d+)$`, "m").exec(out)?.[1] ?? 0);

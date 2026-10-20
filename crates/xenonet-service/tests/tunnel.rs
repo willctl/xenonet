@@ -54,6 +54,9 @@ struct Fake {
     ran: Mutex<Vec<Vec<String>>>,
     now: Mutex<f64>,
     children: Mutex<Vec<Child>>,
+    /// What ps says each pid runs, and the pids XenoNet stopped.
+    comms: Mutex<HashMap<String, String>>,
+    stopped: Mutex<Vec<u32>>,
 }
 
 impl Fake {
@@ -66,6 +69,8 @@ impl Fake {
             ran: Mutex::new(vec![]),
             now: Mutex::new(1_000_000.0),
             children: Mutex::new(vec![]),
+            comms: Mutex::new(HashMap::new()),
+            stopped: Mutex::new(vec![]),
         })
     }
     fn tailscale(on_funnel: Option<OnFunnel>, conf: &str, status_text: String) -> Arc<Fake> {
@@ -84,6 +89,13 @@ impl TunnelHost for Fake {
     async fn run(&self, file: &str, args: &[String], _timeout: Duration) -> RunOut {
         self.ran.lock().unwrap().push(std::iter::once(file.to_string()).chain(args.iter().cloned()).collect());
         let ok = |stdout: String| RunOut { ok: true, stdout, stderr: String::new(), timed_out: false };
+        if file == "ps" {
+            // ps -o comm= -p <pid>: what it runs, or a failure for a pid that's gone.
+            return match self.comms.lock().unwrap().get(&args[3]) {
+                Some(comm) => ok(format!("{comm}\n")),
+                None => RunOut { ok: false, stdout: String::new(), stderr: String::new(), timed_out: false },
+            };
+        }
         match args.first().map(String::as_str) {
             Some("version" | "--version") => ok(format!("{}\n  tailscale commit: abc\n", self.tools.get(file).cloned().unwrap_or_default())),
             Some("status") => ok(self.status.clone()),
@@ -118,6 +130,9 @@ impl TunnelHost for Fake {
     }
     fn platform(&self) -> &'static str {
         "darwin"
+    }
+    fn kill_pid(&self, pid: u32) {
+        self.stopped.lock().unwrap().push(pid);
     }
 }
 
@@ -311,3 +326,43 @@ async fn a_tunnel_xenonet_runs_learned_restarted_failed_and_stopped() {
 }
 
 fn settle_sync() {}
+
+#[tokio::test(start_paused = true)]
+async fn a_tunnel_left_running_is_stopped_only_while_its_pid_is_still_that_tool() {
+    let dir = std::env::temp_dir().join(format!("xenonet-tunnel-pid-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let pid_file = dir.join("gateway-tunnel.pid");
+    // What the file says, what ps says that pid runs now, and whether
+    // XenoNet stops it.
+    for (left, comm, stopped) in [
+        ("4242", Some("/opt/homebrew/bin/ngrok"), true),
+        ("4242\n", Some("NGROK"), true),
+        ("4242", Some("/bin/zsh"), false),
+        ("4242", Some("/Applications/Safari.app/Contents/MacOS/Safari"), false),
+        ("4242", None, false),
+        ("1", Some("ngrok"), false),
+        ("0", Some("ngrok"), false),
+        ("-4242", Some("ngrok"), false),
+        ("4242; kill -9 1", Some("ngrok"), false),
+        ("", Some("ngrok"), false),
+    ] {
+        let host = Fake::new(&[("/opt/homebrew/bin/ngrok", "3.24.0")], String::new(), "{}", None);
+        let pid = left.trim().to_string();
+        if let Some(c) = comm {
+            host.comms.lock().unwrap().insert(pid.clone(), c.to_string());
+        }
+        std::fs::write(&pid_file, left).unwrap();
+        let t = Tunnel::new(PORT, Some(&dir.to_string_lossy()), "/Users/nova", host.clone(), TunnelHooks::default());
+        t.up("ngrok", None, None, false).await.unwrap();
+        settle().await;
+        let want: Vec<u32> = if stopped { vec![pid.parse().unwrap()] } else { vec![] };
+        assert_eq!(*host.stopped.lock().unwrap(), want, "{left:?} {comm:?}");
+        let asked_ps = host.ran().iter().any(|r| r[0] == "ps");
+        assert_eq!(asked_ps, pid.parse::<u32>().is_ok_and(|p| p > 1), "ps only for a pid past init: {left:?}");
+        // The file now names the tunnel this XenoNet started.
+        assert_eq!(std::fs::read_to_string(&pid_file).unwrap(), "4000");
+        t.stop();
+        settle().await;
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}

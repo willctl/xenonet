@@ -49,7 +49,9 @@ export function scrub(text, home = os.homedir()) {
 // what leaves XenoNet (xenonet diagnose) is checked with this last.
 export function unsafe(text, home = os.homedir()) {
   const h = String(home ?? "").replace(/[\\/]+$/, "");
-  const forms = h.length > 2 ? [h, h.replace(/\\/g, "/"), h.replace(/\//g, "\\")] : [];
+  // And as JSON writes it, backslashes doubled: what's checked is often a
+  // bundle as JSON, where C:\Users\nova reads C:\\Users\\nova.
+  const forms = h.length > 2 ? [h, h.replace(/\\/g, "/"), h.replace(/\//g, "\\"), h.replace(/\\/g, "\\\\")] : [];
   const lower = String(text).toLowerCase();
   if (forms.some((f) => lower.includes(f.toLowerCase()))) return "the home folder";
   SECRETS.lastIndex = 0;
