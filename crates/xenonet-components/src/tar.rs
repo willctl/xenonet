@@ -264,8 +264,12 @@ pub fn unpack(bytes: &[u8], cwd: &Path) -> Result<(), Unpack> {
         }
         let mut f = o.open(&target).map_err(|err| fs_err(err, "open"))?;
         std::io::Write::write_all(&mut f, &tar[e.data.0..e.data.1]).map_err(|err| fs_err(err, "write"))?;
-        if let Some(m) = e.mtime.filter(|m| *m >= 0.0) {
-            let _ = f.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs_f64(m));
+        // A time no file can have (a pax mtime of 1e30 or inf, a base-256
+        // one past what the system counts to) leaves the file with the
+        // time it was written: Duration and SystemTime would panic on it.
+        let mtime = e.mtime.filter(|m| *m >= 0.0).and_then(|m| std::time::Duration::try_from_secs_f64(m).ok()).and_then(|d| std::time::UNIX_EPOCH.checked_add(d));
+        if let Some(t) = mtime {
+            let _ = f.set_modified(t);
         }
     }
     if filter.invalid {
@@ -294,6 +298,12 @@ fn make_dir(p: &Path, mode: u32) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
+    fn checksum(h: &mut [u8]) {
+        let sum: u32 = h.iter().enumerate().map(|(i, &c)| if (148..156).contains(&i) { 0x20 } else { u32::from(c) }).sum();
+        h[148..155].copy_from_slice(format!("{sum:06o}\0").as_bytes());
+        h[155] = b' ';
+    }
+
     fn header(name: &str, flag: u8, size: usize, mode: u32) -> Vec<u8> {
         let mut h = vec![0u8; 512];
         h[..name.len()].copy_from_slice(name.as_bytes());
@@ -303,10 +313,25 @@ mod tests {
         h[156] = flag;
         h[257..263].copy_from_slice(b"ustar\0");
         h[263..265].copy_from_slice(b"00");
-        let sum: u32 = h.iter().enumerate().map(|(i, &c)| if (148..156).contains(&i) { 0x20 } else { u32::from(c) }).sum();
-        h[148..155].copy_from_slice(format!("{sum:06o}\0").as_bytes());
-        h[155] = b' ';
+        checksum(&mut h);
         h
+    }
+
+    /// A pax record, "<length> <key>=<value>\n", its length counting itself.
+    fn pax_record(key: &str, value: &str) -> String {
+        let rest = format!(" {key}={value}\n");
+        let mut len = rest.len();
+        while len != rest.len() + len.to_string().len() {
+            len = rest.len() + len.to_string().len();
+        }
+        format!("{len}{rest}")
+    }
+
+    fn temp(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("xenonet-tar-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("in")).unwrap();
+        dir
     }
 
     fn archive(entries: &[(&str, u8, &[u8], u32)]) -> Vec<u8> {
@@ -357,5 +382,26 @@ mod tests {
         ]);
         let es = entries(&t).unwrap();
         assert_eq!(es.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(), [long.as_str(), &format!("{long}2")]);
+    }
+
+    #[test]
+    fn a_time_no_file_can_have_leaves_the_files_own() {
+        let dir = temp("mtime");
+        let into = dir.join("in");
+        for mtime in ["1e30", "inf", "18446744073709551616"] {
+            let t = archive(&[("PaxHeader", b'x', pax_record("mtime", mtime).as_bytes(), 0o644), ("pax", b'0', b"x", 0o644)]);
+            assert_eq!(unpack(&t, &into), Ok(()), "{mtime}");
+        }
+        // A base-256 mtime of 2^88 - 1 seconds.
+        let mut big = header("b256", b'0', 1, 0o644);
+        big[136] = 0x80;
+        big[137..148].fill(0xff);
+        checksum(&mut big);
+        let mut t = big;
+        t.push(b'y');
+        t.resize(t.len().div_ceil(512) * 512 + 1024, 0);
+        assert_eq!(unpack(&t, &into), Ok(()));
+        assert_eq!(std::fs::read_to_string(into.join("b256")).unwrap(), "y");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
