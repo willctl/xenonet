@@ -710,52 +710,99 @@ fn chain(entries: &mut [Value]) -> Vec<usize> {
         cur = parent(&entries[i]).and_then(|p| by.get(p).copied());
     }
     out.reverse();
-    // What ran beside the chain: a reply's other parts, and the results of
-    // its tool calls, after the last of its parts.
+    beside(entries, out)
+}
+
+// What ran beside the chain: a reply's other parts, and the results of its
+// tool calls, after the last of its parts. Each reply's parts and results
+// are found once, by index, so a long transcript costs no more than a
+// short one does per line.
+fn beside(entries: &[Value], out: Vec<usize>) -> Vec<usize> {
     let in_chain: HashSet<usize> = out.iter().copied().collect();
-    let mut owner: HashMap<String, Option<String>> = HashMap::new();
-    for e in entries.iter() {
+    // Whose each tool call is: the reply that made it, unless more than one
+    // reply says it made it.
+    let mut owner: HashMap<String, Option<&str>> = HashMap::new();
+    // Each reply's parts, in the file's order, and the replies each uuid is
+    // a part of.
+    let mut parts: HashMap<&str, Vec<usize>> = HashMap::new();
+    let mut replies_of: HashMap<&str, Vec<&str>> = HashMap::new();
+    for (i, e) in entries.iter().enumerate() {
         if let Some(m) = msg_id(e) {
             for t in tool_uses(e) {
-                let slot = owner.entry(t).or_insert_with(|| Some(m.to_string()));
-                if slot.as_deref() != Some(m) {
+                let slot = owner.entry(t).or_insert(Some(m));
+                if *slot != Some(m) {
                     *slot = None;
+                }
+            }
+            parts.entry(m).or_default().push(i);
+            if let Some(u) = uuid(e) {
+                let of = replies_of.entry(u).or_default();
+                if !of.contains(&m) {
+                    of.push(m);
                 }
             }
         }
     }
-    let mut ids: Vec<String> = Vec::new();
-    for &i in &out {
+    // Each reply's tool results off the chain, in the file's order: those
+    // that follow one of its parts, or answer a call only it made.
+    let mut results: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (i, e) in entries.iter().enumerate() {
+        if in_chain.contains(&i) || !is_tool_result(e) {
+            continue;
+        }
+        let mut of: Vec<&str> = parent(e).and_then(|p| replies_of.get(p)).cloned().unwrap_or_default();
+        for t in tool_results(e) {
+            if let Some(Some(m)) = owner.get(&t) {
+                if !of.contains(m) {
+                    of.push(m);
+                }
+            }
+        }
+        for m in of {
+            results.entry(m).or_default().push(i);
+        }
+    }
+    // The replies on the chain, each once, in its order, and where each
+    // last appears on it.
+    let mut ids: Vec<&str> = Vec::new();
+    let mut last_at: HashMap<&str, usize> = HashMap::new();
+    for (at, &i) in out.iter().enumerate() {
         if let Some(m) = msg_id(&entries[i]) {
-            if !ids.iter().any(|x| x == m) {
-                ids.push(m.to_string());
+            if last_at.insert(m, at).is_none() {
+                ids.push(m);
             }
         }
     }
+    let ts = |i: &usize| entries[*i].get("timestamp").and_then(Value::as_str).unwrap_or("");
     let mut added: HashSet<usize> = HashSet::new();
+    // What goes after each place on the chain. What's put in is a reply's
+    // own parts and tool results, never another reply's part, so where a
+    // reply last appears is where it did on the chain.
+    let mut after: HashMap<usize, Vec<usize>> = HashMap::new();
     for m in ids {
-        let group: Vec<usize> = (0..entries.len()).filter(|&i| msg_id(&entries[i]) == Some(m.as_str())).collect();
-        let group_uuids: HashSet<&str> = group.iter().filter_map(|&i| uuid(&entries[i])).collect();
-        let mut missing: Vec<usize> = group.iter().copied().filter(|i| !in_chain.contains(i) && !added.contains(i)).collect();
-        let mut direct: Vec<usize> = (0..entries.len())
-            .filter(|&i| is_tool_result(&entries[i]) && !in_chain.contains(&i) && !added.contains(&i))
-            .filter(|&i| {
-                parent(&entries[i]).is_some_and(|p| group_uuids.contains(p))
-                    || tool_results(&entries[i]).iter().any(|t| owner.get(t).is_some_and(|o| o.as_deref() == Some(m.as_str())))
-            })
-            .collect();
-        let ts = |i: &usize| entries[*i].get("timestamp").and_then(Value::as_str).unwrap_or("").to_string();
-        missing.sort_by_key(ts);
-        direct.sort_by_key(ts);
+        let mut missing: Vec<usize> = parts.get(m).map_or(&[][..], Vec::as_slice).iter().copied().filter(|i| !in_chain.contains(i) && !added.contains(i)).collect();
+        let mut direct: Vec<usize> = results.get(m).map_or(&[][..], Vec::as_slice).iter().copied().filter(|i| !added.contains(i)).collect();
+        missing.sort_by(|a, b| ts(a).cmp(ts(b)));
+        direct.sort_by(|a, b| ts(a).cmp(ts(b)));
         if missing.is_empty() && direct.is_empty() {
             continue;
         }
-        let Some(last) = out.iter().rposition(|&i| msg_id(&entries[i]) == Some(m.as_str())) else { continue };
+        let Some(&last) = last_at.get(m) else { continue };
         let insert: Vec<usize> = missing.into_iter().chain(direct).collect();
         added.extend(insert.iter().copied());
-        out.splice((last + 1)..=last, insert);
+        after.insert(last, insert);
     }
-    out
+    if after.is_empty() {
+        return out;
+    }
+    let mut full = Vec::with_capacity(out.len() + added.len());
+    for (at, i) in out.into_iter().enumerate() {
+        full.push(i);
+        if let Some(insert) = after.remove(&at) {
+            full.extend(insert);
+        }
+    }
+    full
 }
 
 // A queued command: the prompt typed while a turn ran, as the message it
@@ -818,7 +865,9 @@ pub fn session_messages(projects_dir: &str, id: &str) -> Vec<Value> {
         .filter(|e| matches!(kind(e), "user" | "assistant" | "progress" | "system" | "attachment") && uuid(e).is_some())
         .collect();
     let order = chain(&mut entries);
-    let mut list: Vec<Value> = order.iter().map(|&i| entries[i].clone()).collect();
+    // The chain names each entry once, so each is moved out, not copied.
+    let mut list: Vec<Value> = order.iter().map(|&i| std::mem::take(&mut entries[i])).collect();
+    drop(entries);
     // A local command's records, after its caveat, until the next reply.
     let mut marking = false;
     for e in &mut list {
@@ -1030,6 +1079,99 @@ mod tests {
             }
             assert_eq!(first_value(&text, "k"), first_value_whole(&text, "k"), "{text:?}");
         }
+    }
+
+    // What ran beside the chain, found as it was: each reply's parts and
+    // results looked for through every entry.
+    fn beside_as_it_was(entries: &[Value], mut out: Vec<usize>) -> Vec<usize> {
+        let in_chain: HashSet<usize> = out.iter().copied().collect();
+        let mut owner: HashMap<String, Option<String>> = HashMap::new();
+        for e in entries {
+            if let Some(m) = msg_id(e) {
+                for t in tool_uses(e) {
+                    let slot = owner.entry(t).or_insert_with(|| Some(m.to_string()));
+                    if slot.as_deref() != Some(m) {
+                        *slot = None;
+                    }
+                }
+            }
+        }
+        let mut ids: Vec<String> = Vec::new();
+        for &i in &out {
+            if let Some(m) = msg_id(&entries[i]) {
+                if !ids.iter().any(|x| x == m) {
+                    ids.push(m.to_string());
+                }
+            }
+        }
+        let mut added: HashSet<usize> = HashSet::new();
+        for m in ids {
+            let group: Vec<usize> = (0..entries.len()).filter(|&i| msg_id(&entries[i]) == Some(m.as_str())).collect();
+            let group_uuids: HashSet<&str> = group.iter().filter_map(|&i| uuid(&entries[i])).collect();
+            let mut missing: Vec<usize> = group.iter().copied().filter(|i| !in_chain.contains(i) && !added.contains(i)).collect();
+            let mut direct: Vec<usize> = (0..entries.len())
+                .filter(|&i| is_tool_result(&entries[i]) && !in_chain.contains(&i) && !added.contains(&i))
+                .filter(|&i| {
+                    parent(&entries[i]).is_some_and(|p| group_uuids.contains(p))
+                        || tool_results(&entries[i]).iter().any(|t| owner.get(t).is_some_and(|o| o.as_deref() == Some(m.as_str())))
+                })
+                .collect();
+            let ts = |i: &usize| entries[*i].get("timestamp").and_then(Value::as_str).unwrap_or("").to_string();
+            missing.sort_by_key(ts);
+            direct.sort_by_key(ts);
+            if missing.is_empty() && direct.is_empty() {
+                continue;
+            }
+            let Some(last) = out.iter().rposition(|&i| msg_id(&entries[i]) == Some(m.as_str())) else { continue };
+            let insert: Vec<usize> = missing.into_iter().chain(direct).collect();
+            added.extend(insert.iter().copied());
+            out.splice((last + 1)..=last, insert);
+        }
+        out
+    }
+
+    #[test]
+    fn what_ran_beside_the_chain_is_found_as_it_was() {
+        let mut d = Dice(0x2545_f491_4f6c_dd1d);
+        let mut grew = 0;
+        for round in 0..400 {
+            let n = 1 + d.roll(48);
+            let mut entries = Vec::new();
+            for _ in 0..n {
+                let mut e = json!({ "uuid": format!("u{}", d.roll(n + 4)) });
+                if d.roll(6) > 0 {
+                    e["parentUuid"] = json!(format!("u{}", d.roll(n + 4)));
+                }
+                if d.roll(8) > 0 {
+                    e["timestamp"] = json!(format!("2026-10-17T10:00:{:02}.000Z", d.roll(12)));
+                }
+                let calls = |d: &mut Dice, kind: &str, key: &str| -> Vec<Value> { (0..d.roll(3)).map(|_| json!({ "type": kind, key: format!("t{}", d.roll(10)) })).collect() };
+                match d.roll(3) {
+                    0 => {
+                        e["type"] = json!("assistant");
+                        e["message"] = json!({ "id": format!("m{}", d.roll(8)), "content": calls(&mut d, "tool_use", "id") });
+                    }
+                    1 => {
+                        e["type"] = json!("user");
+                        e["message"] = json!({ "content": calls(&mut d, "tool_result", "tool_use_id") });
+                    }
+                    _ => {
+                        e["type"] = json!("user");
+                        e["message"] = json!({ "content": "a prompt" });
+                    }
+                }
+                entries.push(e);
+            }
+            // A chain: some of the entries, each once, in any order.
+            let mut out: Vec<usize> = (0..n).filter(|_| d.roll(3) > 0).collect();
+            for i in (1..out.len()).rev() {
+                out.swap(i, d.roll(i + 1));
+            }
+            let found = beside(&entries, out.clone());
+            grew += usize::from(found.len() > out.len());
+            assert_eq!(found, beside_as_it_was(&entries, out), "round {round}: {entries:?}");
+        }
+        assert!(grew > 100, "most rounds find something beside the chain: {grew}");
     }
 
     #[test]
