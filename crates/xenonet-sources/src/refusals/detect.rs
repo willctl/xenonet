@@ -123,6 +123,17 @@ fn is_object(v: Option<&Value>) -> bool {
 
 /// A Claude Code line's refusal, or None.
 pub fn claude_signal(raw: Option<&Value>) -> Option<Value> {
+    claude_refusal(raw)
+}
+
+/// A Codex rollout line's refusal (or reroute), or None.
+pub fn codex_signal(raw: Option<&Value>) -> Option<Value> {
+    codex_refusal(raw)
+}
+
+/// A Claude Code line's refusal, as the transcripts' mapper reads it
+/// (line_events.rs).
+pub fn claude_refusal(raw: Option<&Value>) -> Option<Value> {
     let raw = raw.filter(|r| truthy(Some(r)) && is_object(Some(r)))?;
     let r = Some(raw);
     let get = |k: &str| opt_prop(r, k);
@@ -210,8 +221,9 @@ fn first_key(v: &Value) -> Option<String> {
     }
 }
 
-/// A Codex rollout line's refusal (or reroute), or None.
-pub fn codex_signal(raw: Option<&Value>) -> Option<Value> {
+/// A Codex rollout line's refusal (or reroute), as the transcripts' mapper
+/// reads it.
+pub fn codex_refusal(raw: Option<&Value>) -> Option<Value> {
     let raw = raw.filter(|r| truthy(Some(r)) && is_object(Some(r)))?;
     let r = Some(raw);
     if opt_prop(r, "type").and_then(Value::as_str) != Some("event_msg") {

@@ -13,8 +13,10 @@
 // policy (cyber_policy, bio_policy, misalignment_policy_violation), and a
 // model_reroute when it moved the turn to another model.
 //
-// claudeSignal(raw) and codexSignal(raw) take a line as the file has it
-// and return { provider, kind, source, category, explanation, text,
+// claudeRefusal(raw) and codexRefusal(raw) read a line as the file has it,
+// for the transcripts' mapper (core/events.js), and claudeSignal(raw) and
+// codexSignal(raw) are a line's refusal as the mapper reads it. Each
+// returns { provider, kind, source, category, explanation, text,
 // requestId, messageId, uuid, parentUuid, model, fallbackModel, code, at }
 // or null. kind is refusal, refusal-recovered, reroute or possible-refusal
 // (an invalid_prompt, which isn't always a policy). A credit token the API
@@ -32,7 +34,7 @@ const words = (v, max = 2000) => (typeof v === "string" && v ? v.slice(0, max) :
 
 const base = (provider, raw) => ({ provider, kind: "refusal", source: null, category: null, explanation: null, text: null, requestId: null, messageId: null, uuid: raw?.uuid ?? null, parentUuid: raw?.parentUuid ?? null, model: null, fallbackModel: null, code: null, at: timeOf(raw?.timestamp) });
 
-export function claudeSignal(raw) {
+export function claudeRefusal(raw) {
   if (!raw || typeof raw !== "object") return null;
   const m = raw.message && typeof raw.message === "object" ? raw.message : null;
   if (raw.type === "assistant" && m) {
@@ -71,7 +73,7 @@ export function claudeSignal(raw) {
   return null;
 }
 
-export function codexSignal(raw) {
+export function codexRefusal(raw) {
   if (!raw || typeof raw !== "object" || raw.type !== "event_msg") return null;
   const p = raw.payload ?? {};
   if (p.type === "error") {
@@ -86,6 +88,9 @@ export function codexSignal(raw) {
   if (p.type === "model_reroute") return { ...base("openai", raw), kind: "reroute", source: "model-reroute", category: words(p.reason, 80), model: words(p.from_model, 120), fallbackModel: words(p.to_model, 120) };
   return null;
 }
+
+export const claudeSignal = claudeRefusal;
+export const codexSignal = codexRefusal;
 
 // What makes two sightings of a refusal the same one: the request's id
 // when there is one, else where it was written.
