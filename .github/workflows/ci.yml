@@ -90,3 +90,75 @@ jobs:
       - run: npm run build
       - run: npm run rust:bin
       - run: node scripts/ci-desktop.mjs test/e2e/updates.test.js test/e2e/components.test.js
+  # Desktop's end-to-end tests (test/e2e), all of them, on Linux: Electron on
+  # a virtual display (Xvfb) with Chromium's software renderer, since the
+  # runner has no GPU (docs/guide/development.md). Drawn in software, the
+  # map makes a frame or two a second, so the suite takes about half an hour.
+  e2e-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+      # The virtual display, the libraries Electron links that a bare Ubuntu
+      # 24.04 lacks, and ffmpeg for the tests that record a film. The runner
+      # image has most of them already.
+      - run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends xvfb xauth \
+            libnss3 libgbm1 libasound2t64 libgtk-3-0t64 libcups2t64 \
+            libatk-bridge2.0-0t64 libxcomposite1 libxdamage1 ffmpeg
+      # The registry and the debug build, keyed on the toolchain and the lock
+      # file. A source change rebuilds only the crates it touches.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: e2e-linux-cargo-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: e2e-linux-cargo-
+      - run: rustup toolchain install
+      - run: npm ci
+      # Electron fetches its binary on first use. Ubuntu 24.04's AppArmor
+      # stops unprivileged programs from making the user namespaces
+      # Chromium's sandbox runs in, so Electron aborts. This profile lets
+      # the checkout's Electron, and nothing else, make them, and keeps the
+      # sandbox on.
+      - run: |
+          electron=$(realpath "$(node -p 'require("electron")')")
+          sudo tee /etc/apparmor.d/xenonet-e2e-electron > /dev/null <<EOF
+          abi <abi/4.0>,
+          include <tunables/global>
+
+          profile xenonet-e2e-electron $electron flags=(unconfined) {
+            userns,
+          }
+          EOF
+          sudo apparmor_parser -r /etc/apparmor.d/xenonet-e2e-electron
+      - run: npm run build
+      - run: npm run rust:bin
+      # A screen that holds Desktop's 1600 by 960 window: Xvfb's default,
+      # 1280 by 1024, narrows it and crowds the map.
+      - run: xvfb-run -a -s "-screen 0 1920x1080x24" node scripts/ci-desktop.mjs
+        env:
+          XENONET_E2E_SHOW: inactive
+          XENONET_SOFTWARE_RENDERING: "1"
+      # A failing test saves what the window showed (the test instance's
+      # made-up data only), and Desktop's log is beside it.
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-linux
+          path: |
+            .xenonet/e2e-*.png
+            .xenonet/logs/
+          if-no-files-found: ignore
+          retention-days: 7
