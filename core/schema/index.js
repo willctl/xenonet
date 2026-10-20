@@ -1,5 +1,6 @@
 // Every schema XenoNet has, registered (see registry.js and
 // docs/design/schemas.md). Import from here to look schemas up by id.
+import "./app.js";
 import "./session.js";
 import "./project.js";
 import "./identity.js";
