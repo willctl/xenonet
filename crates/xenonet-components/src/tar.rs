@@ -264,8 +264,12 @@ pub fn unpack(bytes: &[u8], cwd: &Path) -> Result<(), Unpack> {
         }
         let mut f = o.open(&target).map_err(|err| fs_err(err, "open"))?;
         std::io::Write::write_all(&mut f, &tar[e.data.0..e.data.1]).map_err(|err| fs_err(err, "write"))?;
-        if let Some(m) = e.mtime.filter(|m| *m >= 0.0) {
-            let _ = f.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs_f64(m));
+        // A time no file can have (a pax mtime of 1e30 or inf, a base-256
+        // one past what the system counts to) leaves the file with the
+        // time it was written: Duration and SystemTime would panic on it.
+        let mtime = e.mtime.filter(|m| *m >= 0.0).and_then(|m| std::time::Duration::try_from_secs_f64(m).ok()).and_then(|d| std::time::UNIX_EPOCH.checked_add(d));
+        if let Some(t) = mtime {
+            let _ = f.set_modified(t);
         }
     }
     if filter.invalid {
@@ -290,9 +294,16 @@ fn make_dir(p: &Path, mode: u32) -> std::io::Result<()> {
     b.create(p)
 }
 
+// The made-up archives are the packages' tests' too.
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    fn checksum(h: &mut [u8]) {
+        let sum: u32 = h.iter().enumerate().map(|(i, &c)| if (148..156).contains(&i) { 0x20 } else { u32::from(c) }).sum();
+        h[148..155].copy_from_slice(format!("{sum:06o}\0").as_bytes());
+        h[155] = b' ';
+    }
 
     fn header(name: &str, flag: u8, size: usize, mode: u32) -> Vec<u8> {
         let mut h = vec![0u8; 512];
@@ -303,13 +314,28 @@ mod tests {
         h[156] = flag;
         h[257..263].copy_from_slice(b"ustar\0");
         h[263..265].copy_from_slice(b"00");
-        let sum: u32 = h.iter().enumerate().map(|(i, &c)| if (148..156).contains(&i) { 0x20 } else { u32::from(c) }).sum();
-        h[148..155].copy_from_slice(format!("{sum:06o}\0").as_bytes());
-        h[155] = b' ';
+        checksum(&mut h);
         h
     }
 
-    fn archive(entries: &[(&str, u8, &[u8], u32)]) -> Vec<u8> {
+    /// A pax record, "<length> <key>=<value>\n", its length counting itself.
+    fn pax_record(key: &str, value: &str) -> String {
+        let rest = format!(" {key}={value}\n");
+        let mut len = rest.len();
+        while len != rest.len() + len.to_string().len() {
+            len = rest.len() + len.to_string().len();
+        }
+        format!("{len}{rest}")
+    }
+
+    fn temp(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("xenonet-tar-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("in")).unwrap();
+        dir
+    }
+
+    pub(crate) fn archive(entries: &[(&str, u8, &[u8], u32)]) -> Vec<u8> {
         let mut t = Vec::new();
         for (name, flag, data, mode) in entries {
             t.extend(header(name, *flag, data.len(), *mode));
@@ -357,5 +383,96 @@ mod tests {
         ]);
         let es = entries(&t).unwrap();
         assert_eq!(es.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(), [long.as_str(), &format!("{long}2")]);
+    }
+
+    #[test]
+    fn links_devices_and_names_that_reach_outside_are_never_written() {
+        let dir = temp("refused");
+        let into = dir.join("in");
+        let kinds = [("link", b'2'), ("hard", b'1'), ("tty", b'3'), ("disk", b'4'), ("pipe", b'6'), ("sparse", b'S'), ("odd", b'Z')];
+        let names = ["a/../../escape", "C:escape", "/escape", "a\\..\\escape", ".."];
+        for (name, flag) in kinds.iter().copied().chain(names.iter().map(|n| (*n, b'0'))) {
+            let t = archive(&[(name, flag, b"", 0o644), ("kept", b'0', b"ok", 0o644)]);
+            assert_eq!(unpack(&t, &into), Err(Unpack::Refused), "{name}");
+            // The rest is unpacked into the staging folder, which the caller
+            // then leaves unused: the archive as a whole is refused.
+            assert_eq!(std::fs::read_to_string(into.join("kept")).unwrap(), "ok");
+        }
+        // A name from a pax header, a global one or a GNU long name is the
+        // one checked, not the short name in the entry's own header.
+        let cases = [
+            ("PaxHeader", b'x', pax_record("path", "../pax-escape")),
+            ("PaxHeader", b'x', pax_record("path", "/pax-absolute")),
+            ("GlobalHead", b'g', pax_record("path", "../global-escape")),
+            ("././@LongLink", b'L', "../gnu-escape\0".to_string()),
+        ];
+        for (name, flag, body) in cases {
+            let t = archive(&[(name, flag, body.as_bytes(), 0o644), ("innocent", b'0', b"x", 0o644)]);
+            assert_eq!(unpack(&t, &into), Err(Unpack::Refused), "{body}");
+            assert!(!into.join("innocent").exists(), "{body}");
+        }
+        for gone in ["escape", "pax-escape", "global-escape", "gnu-escape"] {
+            assert!(!dir.join(gone).exists() && !into.join(gone).exists(), "{gone}");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_time_no_file_can_have_leaves_the_files_own() {
+        let dir = temp("mtime");
+        let into = dir.join("in");
+        for mtime in ["1e30", "inf", "18446744073709551616"] {
+            let t = archive(&[("PaxHeader", b'x', pax_record("mtime", mtime).as_bytes(), 0o644), ("pax", b'0', b"x", 0o644)]);
+            assert_eq!(unpack(&t, &into), Ok(()), "{mtime}");
+        }
+        // A base-256 mtime of 2^88 - 1 seconds.
+        let mut big = header("b256", b'0', 1, 0o644);
+        big[136] = 0x80;
+        big[137..148].fill(0xff);
+        checksum(&mut big);
+        let mut t = big;
+        t.push(b'y');
+        t.resize(t.len().div_ceil(512) * 512 + 1024, 0);
+        assert_eq!(unpack(&t, &into), Ok(()));
+        assert_eq!(std::fs::read_to_string(into.join("b256")).unwrap(), "y");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn broken_archives_say_how() {
+        let dir = temp("broken");
+        let into = dir.join("in");
+        let invalid = Err(Unpack::Bad("TAR_ENTRY_INVALID: invalid size".into()));
+        let truncated = Err(Unpack::Bad("TAR_BAD_ARCHIVE: Truncated input (needed more data)".into()));
+        for (size, want) in [("-1", &invalid), ("NaN", &invalid), ("1e30", &truncated)] {
+            let t = archive(&[("PaxHeader", b'x', pax_record("size", size).as_bytes(), 0o644), ("f", b'0', b"", 0o644)]);
+            assert_eq!(&unpack(&t, &into), want, "{size}");
+        }
+        let mut cut = archive(&[("f", b'0', &[b'x'; 2000][..], 0o644)]);
+        cut.truncate(1024);
+        assert_eq!(unpack(&cut, &into), truncated);
+        assert!(matches!(unpack(&[0x1f, 0x8b, 8, 0, 1, 2, 3], &into), Err(Unpack::Bad(m)) if m.starts_with("zlib")));
+        // A plain tar, and a gzipped one, are both read.
+        use std::io::Write;
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        gz.write_all(&archive(&[("gz", b'0', b"zipped", 0o644)])).unwrap();
+        assert_eq!(unpack(&gz.finish().unwrap(), &into), Ok(()));
+        assert_eq!(unpack(&archive(&[("plain", b'0', b"tar", 0o644)]), &into), Ok(()));
+        assert_eq!(std::fs::read_to_string(into.join("gz")).unwrap() + &std::fs::read_to_string(into.join("plain")).unwrap(), "zippedtar");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn at_most_a_hundred_thousand_entries_and_a_gibibyte_of_files_and_folders() {
+        let mut f = Filter::new();
+        for _ in 0..MAX_ENTRIES {
+            assert!(f.allows("a", "File", 0.0));
+        }
+        assert!(!f.allows("a", "File", 0.0) && f.invalid);
+        let mut f = Filter::default();
+        assert!(f.allows("big", "File", MAX_BYTES) && f.allows("dir/", "Directory", 0.0));
+        assert!(!f.allows("one-more", "File", 1.0) && f.invalid);
+        let mut f = Filter::new();
+        assert!(!f.allows("odd", "Unsupported", 0.0) && f.invalid);
     }
 }

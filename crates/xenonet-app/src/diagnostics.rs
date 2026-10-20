@@ -434,6 +434,36 @@ mod tests {
     }
 
     #[test]
+    fn a_home_folder_left_anywhere_in_the_bundle_is_refused_in_each_of_its_forms() {
+        // A field the bundle takes as it is, holding the home folder as
+        // Windows writes it, with forward slashes, or in another case: the
+        // last check reads the bundle as JSON, which doubles backslashes.
+        for instance in ["C:\\Users\\nova\\dev", "C:/Users/nova/dev", "c:\\users\\NOVA"] {
+            let x = json!({ "instance": instance });
+            assert_eq!(
+                make_bundle(&gathered(&x, None, &[], &Map::new())).unwrap_err(),
+                "the diagnostics still held the home folder after scrubbing, so XenoNet won't show them; xenonet logs --json shows what's there",
+                "{instance}"
+            );
+        }
+        // What the bundle scrubs goes in as ~, keys as [key].
+        let connect = json!({ "port": 47840, "apps": [{ "app": "codex", "changes": [{ "id": "hooks", "state": "missing" }], "broken": ["C:\\Users\\nova\\.codex\\config.toml isn't valid TOML"], "notes": ["Bearer abcdefgh12345678 in C:/Users/nova/.codex"] }] });
+        let x = json!({ "version": "0.8.0" });
+        let errors = [
+            json!({ "at": 1791367200000.0, "component": "service", "level": "warn", "code": "x", "message": "read C:\\Users\\nova\\a with sk-proj-CANARY0123456789abcdef", "fix": "chmod C:/Users/nova/b" }),
+        ];
+        let env = Map::new();
+        let mut g = gathered(&x, None, &errors, &env);
+        g.connect = Some(&connect);
+        let b = make_bundle(&g).unwrap();
+        assert_eq!(b["integrations"]["apps"][0]["broken"], json!(["~\\.codex\\config.toml isn't valid TOML"]));
+        assert_eq!(b["integrations"]["apps"][0]["notes"], json!(["[key] in ~/.codex"]));
+        assert_eq!((b["errors"][0]["message"].clone(), b["errors"][0]["fix"].clone()), (json!("read ~\\a with [key]"), json!("chmod ~/b")));
+        let text = stringify(&b, 0).to_lowercase();
+        assert!(!text.contains("nova") && !text.contains("canary"), "{text}");
+    }
+
+    #[test]
     fn asks_read_only() {
         let c = ask_command("codex", Some("gpt-5.1-codex"), &json!("/d"), &["/opt/x".into()]);
         assert_eq!(

@@ -18,6 +18,7 @@ npm run rust:build  # the Rust core's Node addon, which the JS tests load in pla
 npm run test:rust   # the unit tests, with the Rust core in place of the JS
 npm run lint:rust   # formatting, clippy, docs and the dependency checks
 cargo test        # the Rust core's own tests
+npm run coverage:rust  # how much of the Rust core the tests run, crate by crate (see Coverage)
 ```
 
 ## XenoNet Dev
@@ -81,6 +82,51 @@ What acts on the sessions' computer (opening a session in its app, handoffs, ter
 - The icon is drawn in code, in `electron/icons.js`, at every size from 16 to 256 pixels, with a macOS cut on Apple's icon grid. `npm run icon` regenerates it, along with the installer art for both platforms.
 
 [Install](install.md) says how to install what you build.
+
+## Coverage
+
+`npm run coverage:rust` measures how much of the Rust core the tests run, with cargo-llvm-cov. It runs `cargo test` instrumented, then prints each crate's lines and the share of its lines, functions and regions the tests ran.
+
+- `-- --js` counts the JS tests too: the ones `npm run test:rust` runs on the twins, and the ones `npm run test:bin` runs against the binary. Run `npm run build` first, as for `test:bin`.
+- `-- --html` writes the report, line by line, to `target/llvm-cov/html/index.html`.
+- `-- --no-run` shows the last run's numbers again, and `-- --json` gives them as JSON.
+
+It needs cargo-llvm-cov and the pinned toolchain's llvm-tools:
+
+```sh
+cargo install --locked cargo-llvm-cov
+rustup component add llvm-tools --toolchain 1.99.1  # the channel rust-toolchain.toml pins
+```
+
+The instrumented builds go to `target/llvm-cov-target` and `target/llvm-cov-js`, apart from the usual ones, so `cargo test`, `npm run lint:rust` and the addon don't build again after a run. Once built, a run takes about a minute, and `--js` about four. While `--js` runs, the twins load an instrumented addon, and the one that was there is put back after. llvm-cov counts the `#[cfg(test)]` modules in a crate's own files among its lines.
+
+On 2026-10-19 the tests ran this share of each crate's lines:
+
+| Crate | `cargo test` | With the JS tests |
+| --- | --- | --- |
+| xenonet-actors | 40.7% | 93.0% |
+| xenonet-app | 69.0% | 90.2% |
+| xenonet-assistant | 58.8% | 94.7% |
+| xenonet-base | 81.5% | 91.2% |
+| xenonet-blocks | 85.8% | 97.2% |
+| xenonet-cli | 21.4% | 55.5% |
+| xenonet-components | 59.7% | 89.7% |
+| xenonet-doctor | 42.8% | 92.9% |
+| xenonet-engine | 68.1% | 91.1% |
+| xenonet-hosts | 33.6% | 95.2% |
+| xenonet-integrations | 53.9% | 93.9% |
+| xenonet-mcp | 56.6% | 56.9% |
+| xenonet-node | (not run) | 77.2% |
+| xenonet-schema | 72.3% | 84.9% |
+| xenonet-service | 60.0% | 70.0% |
+| xenonet-sources | 79.6% | 91.6% |
+| xenonet-state | 82.4% | 93.6% |
+| xenonet-wire-app | 54.0% | 66.2% |
+| xenonet-wire-engine | 55.3% | 60.7% |
+| xenonet-wire-map | 74.4% | 80.4% |
+| All | 59.9% | 81.3% |
+
+The JS tests reach most of the core through the twins, and the binary only through `test:bin`'s files, so the binary's own parts (`xenonet-cli`, `xenonet-mcp`, `xenonet-service` and the `xenonet-wire-*` crates) are the least covered.
 
 ## Driving XenoNet from agents, scripts and tests
 
@@ -259,6 +305,7 @@ The console page imports only the core modules that have no Node in them, `theme
 - `schemas.mjs`, for the schema files in `schemas/`
 - `bench.mjs`, the benchmark
 - `gpu-bench.mjs` (`npm run bench:gpu`), what the console costs the machine on a Mac: GPU time, CPU and memory with the window at rest, turning, busy, behind another app, covered, minimized and hidden
+- `bench-history.mjs`, a made-up history of Claude Code and Codex sessions in a folder of its own, from a few hundred sessions to a few thousand, with long ones, subagents and files that keep growing, for measuring the service at scale
 - `hook-snippet.mjs`
 - `dev-install.mjs`
 - `dist.mjs`

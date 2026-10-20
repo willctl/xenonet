@@ -158,3 +158,83 @@ impl Download {
         let _ = fsx::rm_rf(&self.tmp);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const AT: &str = "https://github.com/willctl/xenonet/releases/latest/download/";
+
+    fn place(name: &str) -> (std::path::PathBuf, Env, Machine) {
+        let dir = std::env::temp_dir().join(format!("xenonet-updates-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut env = Env::new();
+        env.insert("XENONET_RUNTIME_DIR".into(), json!(dir.join("runtime").to_string_lossy()));
+        let m = Machine { platform: "linux".into(), arch: "x64".into(), home: dir.to_string_lossy().into_owned() };
+        (dir, env, m)
+    }
+
+    #[test]
+    fn a_download_comes_only_from_the_release_and_says_its_hash_and_size() {
+        let (dir, env, m) = place("plan");
+        let sha = digest(b"abcd");
+        let item = |url: &str, sha: Value, size: Value| json!({ "url": url, "sha256": sha, "size": size });
+        for url in [
+            "https://github.example/willctl/xenonet/releases/latest/download/XenoNet-tools-1.2.3.tar.gz",
+            "http://github.com/willctl/xenonet/releases/latest/download/XenoNet-tools-1.2.3.tar.gz",
+            "https://github.com/someone/xenonet/releases/latest/download/XenoNet-tools-1.2.3.tar.gz",
+            "https://github.com/willctl/xenonet/releases/latest/download/../XenoNet-tools-1.2.3.tar.gz",
+            "https://github.com/willctl/xenonet/releases/latest/download/XenoNet-tools-1.2.3.tar.gz?to=elsewhere",
+            "https://github.com/willctl/xenonet/releases/latest/download/XenoNet-tools-1.2.3.tar.gz.exe",
+            "https://github.com/willctl/xenonet/releases/latest/download/xenonet.exe",
+        ] {
+            assert_eq!(download_plan(&item(url, json!(sha), json!(4)), &env, &m).unwrap_err().message, "Unexpected component download address.", "{url}");
+        }
+        assert_eq!(download_plan(&json!({ "sha256": sha, "size": 4 }), &env, &m).unwrap_err().message, "Unexpected component download address.");
+        let url = format!("{AT}XenoNet-tools-1.2.3.tar.gz");
+        for (sha, size) in
+            [(json!("ABCD"), json!(4)), (json!(null), json!(4)), (json!(sha), json!(0)), (json!(sha), json!(1.5)), (json!(sha), json!("4")), (json!(sha), json!(MAX_PACKAGE + 1))]
+        {
+            assert_eq!(download_plan(&item(&url, sha.clone(), size.clone()), &env, &m).unwrap_err().message, "Invalid component download.", "{sha} {size}");
+        }
+        assert!(!dir.join("runtime").exists(), "nothing was made for a download refused");
+        // A copy that's there already is kept only when it's whole and its own.
+        let (file, have) = download_plan(&item(&url, json!(sha), json!(4)), &env, &m).unwrap();
+        assert!(!have && file.ends_with(&format!("{sha}.tar.gz")));
+        std::fs::write(&file, "abce").unwrap();
+        assert_eq!(download_plan(&item(&url, json!(sha), json!(4)), &env, &m).unwrap(), (file.clone(), false));
+        assert!(!std::path::Path::new(&file).exists(), "a bad copy is taken away");
+        std::fs::write(&file, "abcd").unwrap();
+        assert_eq!(download_plan(&item(&url, json!(sha), json!(4)), &env, &m).unwrap(), (file.clone(), true));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_download_is_refused_past_its_size_and_kept_only_when_its_hash_is_the_releases() {
+        let (dir, _, _) = place("download");
+        let file = dir.join("p.tar.gz").to_string_lossy().into_owned();
+        let sha = digest(b"abcd");
+        let tmps = || std::fs::read_dir(&dir).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().ends_with(".tmp")).count();
+        // More than it said.
+        let mut d = Download::new(&file, 4.0, &sha).unwrap();
+        d.write(b"abc").unwrap();
+        assert_eq!(d.write(b"de").unwrap_err().message, "Component download exceeds its expected size.");
+        d.discard();
+        assert_eq!(tmps(), 0);
+        // Its size, but not its bytes; or less than it said.
+        for got in [&b"abce"[..], b"abc"] {
+            let mut d = Download::new(&file, 4.0, &sha).unwrap();
+            d.write(got).unwrap();
+            assert_eq!(d.finish().unwrap_err().message, "Component download failed its hash or size check. Try again.");
+            d.discard();
+            assert!(!std::path::Path::new(&file).exists() && tmps() == 0);
+        }
+        let mut d = Download::new(&file, 4.0, &sha).unwrap();
+        d.write(b"ab").unwrap();
+        d.write(b"cd").unwrap();
+        assert_eq!(d.finish().unwrap(), file);
+        assert_eq!(std::fs::read(&file).unwrap(), b"abcd");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}

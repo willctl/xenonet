@@ -368,7 +368,7 @@ impl JsSearch {
     pub fn begin(&self, env: Env, plan: &mut JsPlan, text: String) -> Result<Option<Vec<String>>> {
         match self.s.begin(&mut plan.p, &text) {
             Ok(Begun::ReadWhole) => Ok(None),
-            Ok(Begun::Lines(lines)) => Ok(Some(lines)),
+            Ok(Begun::Lines(lines)) => Ok(Some(lines.into_iter().map(String::from).collect())),
             Err(e) => failed(env, e),
         }
     }
@@ -456,5 +456,5 @@ pub fn search_list_files(dir: String) -> Vec<String> {
 
 #[napi(js_name = "searchLines")]
 pub fn search_lines(text: String) -> Vec<String> {
-    search::lines_of(&text)
+    search::lines_of(&text).into_iter().map(String::from).collect()
 }
