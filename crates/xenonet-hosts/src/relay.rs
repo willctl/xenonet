@@ -41,17 +41,19 @@ pub const EXIT_OLD_XENONET: i32 = 5;
 
 /// "7d" → 604800000; None for anything else.
 pub fn parse_since(text: &str) -> Option<f64> {
-    let (digits, unit) = text.split_at(text.len().checked_sub(1)?);
-    if digits.is_empty() || digits.len() > 4 || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    let ms = match unit {
+    // The digits, then the unit: split after the digits, which are ASCII,
+    // so the split never falls inside a character, whatever comes after.
+    let digits = text.bytes().take_while(u8::is_ascii_digit).count();
+    let ms = match &text[digits..] {
         "m" => 60e3,
         "h" => 3600e3,
         "d" => 86400e3,
         _ => return None,
     };
-    Some(digits.parse::<f64>().ok()? * ms)
+    if !(1..=4).contains(&digits) {
+        return None;
+    }
+    Some(text[..digits].parse::<f64>().ok()? * ms)
 }
 
 /// A key restricted to the relay in authorized_keys runs that command
@@ -868,6 +870,10 @@ mod tests {
         assert_eq!(route_to_read(Shape::Graph, "/api/graph"), "/api/graph?hosts=0");
         assert_eq!(parse_since("90m"), Some(5_400_000.0));
         assert_eq!(parse_since("7x"), None);
+        for odd in ["é", "7é", "7dé", "", "d", "12345d"] {
+            assert_eq!(parse_since(odd), None, "{odd}");
+        }
+        assert_eq!(from_original_command("xenonet relay --since 7€"), None);
         assert_eq!(from_original_command("xenonet relay --since 12h"), Some(43_200_000.0));
     }
 }
