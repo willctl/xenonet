@@ -848,29 +848,179 @@ fn last_text(e: &Value) -> String {
     }
 }
 
+// A line's entry, if it's JSON.
+fn parse_line(l: &[u8]) -> Option<Value> {
+    let start = l.iter().position(|b| *b > 0x20)?;
+    xenonet_base::json::parse(&String::from_utf8_lossy(&l[start..])).ok()
+}
+
+// The fields of an entry that finding its session's messages reads, with
+// its message cut to what's read of that: its id, and of each block its
+// type, a call's id, the call a result answers and, in what you said, the
+// text. The rest (tool results, file contents, thinking) stays in the
+// line until the message is shown. A field read below that isn't kept
+// here reads as missing, so a field newly read is added here too.
+fn slim(e: Value) -> Value {
+    let Value::Object(mut all) = e else { return e };
+    let user = all.get("type").and_then(Value::as_str) == Some("user");
+    let mut m = Map::new();
+    for k in [
+        "type",
+        "uuid",
+        "parentUuid",
+        "isSidechain",
+        "teamName",
+        "subtype",
+        "compactMetadata",
+        "isMeta",
+        "promptSource",
+        "sessionId",
+        "timestamp",
+        "interruptedByShutdown",
+        "toolDenialUnanswered",
+        "isCompactSummary",
+        "isVisibleInTranscriptOnly",
+        "isQueuedCommand",
+        "isCompletedLocalCommand",
+        "origin",
+    ] {
+        if let Some(v) = all.shift_remove(k) {
+            m.insert(k.into(), v);
+        }
+    }
+    // A queued command's attachment becomes the message, so it's kept
+    // whole; of any other, only its type is read.
+    if let Some(a) = all.shift_remove("attachment") {
+        let queued = a.get("type").and_then(Value::as_str) == Some("queued_command");
+        let a = match a {
+            Value::Object(o) if !queued => Value::Object(o.into_iter().filter(|(k, _)| k == "type").collect()),
+            a => a,
+        };
+        m.insert("attachment".into(), a);
+    }
+    if let Some(message) = all.shift_remove("message") {
+        let message = match message {
+            Value::Object(mut msg) => {
+                let mut cut = Map::new();
+                if let Some(id) = msg.shift_remove("id") {
+                    cut.insert("id".into(), id);
+                }
+                if let Some(content) = msg.shift_remove("content") {
+                    let content = match content {
+                        Value::Array(blocks) => Value::Array(
+                            blocks
+                                .into_iter()
+                                .map(|b| match b {
+                                    Value::Object(mut b) => {
+                                        let text = user && b.get("type").and_then(Value::as_str) == Some("text");
+                                        let mut kept = Map::new();
+                                        for k in ["type", "id", "tool_use_id"] {
+                                            if let Some(v) = b.shift_remove(k) {
+                                                kept.insert(k.into(), v);
+                                            }
+                                        }
+                                        if let Some(t) = b.shift_remove("text").filter(|_| text) {
+                                            kept.insert("text".into(), t);
+                                        }
+                                        Value::Object(kept)
+                                    }
+                                    b => b,
+                                })
+                                .collect(),
+                        ),
+                        c => c,
+                    };
+                    cut.insert("content".into(), content);
+                }
+                Value::Object(cut)
+            }
+            message => message,
+        };
+        m.insert("message".into(), message);
+    }
+    Value::Object(m)
+}
+
+/// A session's messages, root first, as getSessionMessages gives them,
+/// each one's message left in its line in the transcript until it's
+/// taken: a long session's messages, all held at once, would take several
+/// times their size in the file.
+pub struct Messages {
+    data: Vec<u8>,
+    /// Each message, with where its line is, or none when it was made here
+    /// (a queued command), whole.
+    list: Vec<(Value, Line)>,
+}
+
+impl Messages {
+    pub fn len(&self) -> usize {
+        self.list.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.list.is_empty()
+    }
+
+    /// The messages from `start` to `end`, whole.
+    pub fn page(&self, start: usize, end: usize) -> Vec<Value> {
+        self.list[start..end]
+            .iter()
+            .map(|(m, line)| {
+                let mut m = m.clone();
+                if let Some(line) = line {
+                    m["message"] = parse_line(&self.data[line.clone()]).and_then(|mut e| e.get_mut("message").map(Value::take)).unwrap_or(Value::Null);
+                }
+                m
+            })
+            .collect()
+    }
+
+    pub fn all(&self) -> Vec<Value> {
+        self.page(0, self.len())
+    }
+}
+
 /// getSessionMessages(id): a session's messages, root first, as the SDK
 /// gives them; none for an id that isn't one or a session not found.
 pub fn session_messages(projects_dir: &str, id: &str) -> Vec<Value> {
+    messages(projects_dir, id).all()
+}
+
+/// The same, each message read whole only when it's taken.
+pub fn messages(projects_dir: &str, id: &str) -> Messages {
+    let none = || Messages { data: Vec::new(), list: Vec::new() };
     if !is_uuid(id) {
-        return Vec::new();
+        return none();
     }
-    let Some(file) = find_file(projects_dir, id) else { return Vec::new() };
-    let Ok(data) = std::fs::read(&file) else { return Vec::new() };
-    let mut entries: Vec<Value> = data
-        .split(|b| *b == b'\n')
-        .filter_map(|l| {
-            let start = l.iter().position(|b| *b > 0x20)?;
-            xenonet_base::json::parse(&String::from_utf8_lossy(&l[start..])).ok()
-        })
-        .filter(|e| matches!(kind(e), "user" | "assistant" | "progress" | "system" | "attachment") && uuid(e).is_some())
-        .collect();
+    let Some(file) = find_file(projects_dir, id) else { return none() };
+    let Ok(data) = std::fs::read(&file) else { return none() };
+    let mut entries: Vec<Value> = Vec::new();
+    let mut lines: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut at = 0;
+    for l in data.split(|b| *b == b'\n') {
+        let range = at..at + l.len();
+        at = range.end + 1;
+        let Some(e) = parse_line(l) else { continue };
+        if matches!(kind(&e), "user" | "assistant" | "progress" | "system" | "attachment") && uuid(&e).is_some() {
+            entries.push(slim(e));
+            lines.push(range);
+        }
+    }
     let order = chain(&mut entries);
     // The chain names each entry once, so each is moved out, not copied.
-    let mut list: Vec<Value> = order.iter().map(|&i| std::mem::take(&mut entries[i])).collect();
+    let list: Vec<(Value, Line)> = order.iter().map(|&i| (std::mem::take(&mut entries[i]), Some(lines[i].clone()))).collect();
     drop(entries);
+    Messages { list: shown(list), data }
+}
+
+type Line = Option<std::ops::Range<usize>>;
+
+// What of the chain's entries getSessionMessages gives, and how; each
+// one's message is put in when it's taken, from its line.
+fn shown(mut list: Vec<(Value, Line)>) -> Vec<(Value, Line)> {
     // A local command's records, after its caveat, until the next reply.
     let mut marking = false;
-    for e in &mut list {
+    for (e, _) in &mut list {
         if kind(e) == "assistant" {
             marking = false;
             continue;
@@ -892,14 +1042,17 @@ pub fn session_messages(projects_dir: &str, id: &str) -> Vec<Value> {
     // Queued commands a reply took up become the messages they were.
     let n = list.len();
     for i in 0..n {
-        if kind(&list[i]) != "attachment" {
+        if kind(&list[i].0) != "attachment" {
             continue;
         }
-        let consumed =
-            list[i + 1..].iter().find(|x| is_message(x)).is_some_and(|x| kind(x) == "assistant" || is_tool_result(x) || last_text(x).starts_with("[Request interrupted by user"));
+        let consumed = list[i + 1..]
+            .iter()
+            .map(|(x, _)| x)
+            .find(|x| is_message(x))
+            .is_some_and(|x| kind(x) == "assistant" || is_tool_result(x) || last_text(x).starts_with("[Request interrupted by user"));
         if consumed || i + 1 == n {
-            if let Some(q) = queued_message(&list[i]) {
-                list[i] = q;
+            if let Some(q) = queued_message(&list[i].0) {
+                list[i] = (q, None);
             }
         }
     }
@@ -907,13 +1060,14 @@ pub fn session_messages(projects_dir: &str, id: &str) -> Vec<Value> {
         o.and_then(|o| o.get("kind")).and_then(Value::as_str).is_some_and(|k| matches!(k, "channel" | "observer" | "observer-activity" | "slack-ping" | "peer"))
     };
     list.into_iter()
-        .filter(|e| is_message(e) && (!truthy(e.get("isMeta")) || special(e.get("origin"))) && !truthy(e.get("isSidechain")) && !truthy(e.get("teamName")))
-        .map(|e| {
+        .filter(|(e, _)| is_message(e) && (!truthy(e.get("isMeta")) || special(e.get("origin"))) && !truthy(e.get("isSidechain")) && !truthy(e.get("teamName")))
+        .map(|(e, line)| {
             let mut m = Map::new();
             m.insert("type".into(), e.get("type").cloned().unwrap_or(Value::Null));
             m.insert("uuid".into(), e.get("uuid").cloned().unwrap_or(Value::Null));
             m.insert("session_id".into(), e.get("sessionId").cloned().unwrap_or(Value::Null));
-            m.insert("message".into(), e.get("message").cloned().unwrap_or(Value::Null));
+            // A line's message is read from it when it's taken.
+            m.insert("message".into(), if line.is_some() { Value::Null } else { e.get("message").cloned().unwrap_or(Value::Null) });
             m.insert("parent_tool_use_id".into(), Value::Null);
             m.insert("parent_agent_id".into(), Value::Null);
             let on = |k: &str| e.get(k) == Some(&Value::Bool(true));
@@ -946,7 +1100,7 @@ pub fn session_messages(projects_dir: &str, id: &str) -> Vec<Value> {
                 };
                 m.insert("origin".into(), o);
             }
-            Value::Object(m)
+            (Value::Object(m), line)
         })
         .collect()
 }
@@ -1201,6 +1355,220 @@ mod tests {
         std::fs::remove_file(p.join(format!("{A}.jsonl"))).expect("removed");
         assert_eq!(list_sessions_with(&dir, &mut l).len(), 1);
         assert_eq!(l.seen.len(), 1);
+        std::fs::remove_dir_all(&root).expect("cleaned up");
+    }
+
+    // getSessionMessages as it was: every entry held whole throughout.
+    fn session_messages_as_it_was(projects_dir: &str, id: &str) -> Vec<Value> {
+        let Some(file) = find_file(projects_dir, id) else { return Vec::new() };
+        let data = std::fs::read(file).expect("a transcript");
+        let mut entries: Vec<Value> = data
+            .split(|b| *b == b'\n')
+            .filter_map(parse_line)
+            .filter(|e| matches!(kind(e), "user" | "assistant" | "progress" | "system" | "attachment") && uuid(e).is_some())
+            .collect();
+        let order = chain(&mut entries);
+        let mut list: Vec<Value> = order.iter().map(|&i| entries[i].clone()).collect();
+        let mut marking = false;
+        for e in &mut list {
+            if kind(e) == "assistant" {
+                marking = false;
+                continue;
+            }
+            if kind(e) != "user" {
+                continue;
+            }
+            if truthy(e.get("isMeta")) {
+                if last_text(e).starts_with("<local-command-caveat>") {
+                    marking = true;
+                }
+                continue;
+            }
+            let t = last_text(e);
+            if marking && e.get("promptSource").is_none() && (t.contains("<command-name>") || t.contains("<local-command-stdout>") || t.contains("<local-command-stderr>")) {
+                e["isCompletedLocalCommand"] = json!(true);
+            }
+        }
+        let n = list.len();
+        for i in 0..n {
+            if kind(&list[i]) != "attachment" {
+                continue;
+            }
+            let consumed = list[i + 1..]
+                .iter()
+                .find(|x| is_message(x))
+                .is_some_and(|x| kind(x) == "assistant" || is_tool_result(x) || last_text(x).starts_with("[Request interrupted by user"));
+            if consumed || i + 1 == n {
+                if let Some(q) = queued_message(&list[i]) {
+                    list[i] = q;
+                }
+            }
+        }
+        let special = |o: Option<&Value>| {
+            o.and_then(|o| o.get("kind")).and_then(Value::as_str).is_some_and(|k| matches!(k, "channel" | "observer" | "observer-activity" | "slack-ping" | "peer"))
+        };
+        list.into_iter()
+            .filter(|e| is_message(e) && (!truthy(e.get("isMeta")) || special(e.get("origin"))) && !truthy(e.get("isSidechain")) && !truthy(e.get("teamName")))
+            .map(|e| {
+                let mut m = Map::new();
+                m.insert("type".into(), e.get("type").cloned().unwrap_or(Value::Null));
+                m.insert("uuid".into(), e.get("uuid").cloned().unwrap_or(Value::Null));
+                m.insert("session_id".into(), e.get("sessionId").cloned().unwrap_or(Value::Null));
+                m.insert("message".into(), e.get("message").cloned().unwrap_or(Value::Null));
+                m.insert("parent_tool_use_id".into(), Value::Null);
+                m.insert("parent_agent_id".into(), Value::Null);
+                let on = |k: &str| e.get(k) == Some(&Value::Bool(true));
+                if on("interruptedByShutdown") {
+                    m.insert("interruptedByShutdown".into(), json!(true));
+                }
+                if e.get("toolDenialUnanswered").and_then(Value::as_str) == Some("stream-closed") {
+                    m.insert("toolDenialUnanswered".into(), json!("stream-closed"));
+                }
+                if on("isCompactSummary") {
+                    m.insert("isCompactSummary".into(), json!(true));
+                }
+                if on("isMeta") || on("isCompactSummary") || on("isVisibleInTranscriptOnly") {
+                    m.insert("is_meta".into(), json!(true));
+                }
+                if on("isQueuedCommand") {
+                    m.insert("isQueuedCommand".into(), json!(true));
+                }
+                if on("isCompletedLocalCommand") {
+                    m.insert("isCompletedLocalCommand".into(), json!(true));
+                }
+                if let Some(t) = e.get("timestamp").filter(|t| !t.is_null()) {
+                    m.insert("timestamp".into(), t.clone());
+                }
+                if let Some(o) = e.get("origin").filter(|o| truthy(Some(o))) {
+                    let o = if o.get("kind").and_then(Value::as_str) == Some("task-notification") {
+                        Value::Object(["kind", "subkind", "fireReason", "producer"].iter().filter_map(|k| o.get(*k).map(|v| (k.to_string(), v.clone()))).collect())
+                    } else {
+                        o.clone()
+                    };
+                    m.insert("origin".into(), o);
+                }
+                Value::Object(m)
+            })
+            .collect()
+    }
+
+    // A made-up transcript's entry, of every kind getSessionMessages reads.
+    fn entry(d: &mut Dice, n: usize, prev: &str) -> Value {
+        let pick = |d: &mut Dice, list: &[Value]| list[d.roll(list.len())].clone();
+        let mut e = json!({ "uuid": format!("u{}", d.roll(n + 4)), "sessionId": A });
+        e["parentUuid"] = match d.roll(8) {
+            0 => Value::Null,
+            1 => json!(format!("u{}", d.roll(n + 4))),
+            _ => json!(prev),
+        };
+        if d.roll(8) > 0 {
+            e["timestamp"] = json!(format!("2026-10-17T10:{:02}:00.000Z", d.roll(30)));
+        }
+        let texts = [
+            json!("Add partial refunds"),
+            json!("<local-command-caveat>Caveat</local-command-caveat>"),
+            json!("<command-name>/cost</command-name>"),
+            json!("<local-command-stdout>ok</local-command-stdout>"),
+            json!("[Request interrupted by user]"),
+        ];
+        let block = |d: &mut Dice| match d.roll(6) {
+            0 => json!({ "type": "text", "text": pick(d, &texts) }),
+            1 => json!({ "type": "tool_result", "tool_use_id": format!("t{}", d.roll(8)), "content": [{ "type": "text", "text": "x".repeat(300) }], "is_error": false }),
+            2 => json!({ "type": "image", "source": { "data": "aGk=".repeat(50) } }),
+            3 => json!({ "type": "tool_use", "id": format!("t{}", d.roll(8)), "name": "Bash", "input": { "command": "npm test" } }),
+            4 => json!({ "type": "thinking", "thinking": "Where are refunds?", "signature": "sig" }),
+            _ => json!("a bare string"),
+        };
+        match d.roll(7) {
+            0 | 1 => {
+                e["type"] = json!("user");
+                let content = if d.roll(2) == 0 { pick(d, &texts) } else { Value::Array((0..=d.roll(3)).map(|_| block(d)).collect()) };
+                e["message"] = json!({ "role": "user", "content": content });
+                e["toolUseResult"] = json!({ "stdout": "y".repeat(200) });
+            }
+            2 | 3 => {
+                e["type"] = json!("assistant");
+                e["message"] =
+                    json!({ "id": format!("m{}", d.roll(6)), "role": "assistant", "model": "claude-x", "content": (0..=d.roll(3)).map(|_| block(d)).collect::<Vec<_>>() });
+            }
+            4 => {
+                e["type"] = json!("attachment");
+                e["attachment"] = match d.roll(3) {
+                    0 => json!({ "type": "queued_command", "prompt": pick(d, &texts), "source_uuid": format!("q{}", d.roll(5)) }),
+                    1 => {
+                        json!({ "type": "queued_command", "prompt": [{ "type": "text", "text": "later" }], "isMeta": d.roll(2) == 0, "origin": pick(d, &[json!({ "kind": "peer" }), json!({ "kind": "x" })]), "commandMode": pick(d, &[json!("task-notification"), json!("prompt")]) })
+                    }
+                    _ => json!({ "type": pick(d, &[json!("file"), json!("fork_briefing")]), "content": "z".repeat(300) }),
+                };
+            }
+            5 => {
+                e["type"] = json!("system");
+                e["subtype"] = json!("compact_boundary");
+                let u: Vec<String> = (0..3).map(|_| format!("u{}", d.roll(n))).collect();
+                e["compactMetadata"] = if d.roll(2) == 0 {
+                    json!({ "preservedSegment": { "headUuid": u[0], "anchorUuid": u[1], "tailUuid": u[2] } })
+                } else {
+                    json!({ "preservedMessages": { "anchorUuid": u[0], "uuids": [u[1], u[2]] } })
+                };
+            }
+            _ => e["type"] = pick(d, &[json!("progress"), json!("summary")]),
+        }
+        for (k, v) in [
+            ("isMeta", json!(true)),
+            ("isSidechain", json!(true)),
+            ("teamName", json!("crew")),
+            ("promptSource", json!("typed")),
+            ("interruptedByShutdown", json!(true)),
+            ("toolDenialUnanswered", json!("stream-closed")),
+            ("isCompactSummary", json!(true)),
+            ("isVisibleInTranscriptOnly", json!(true)),
+            ("isQueuedCommand", json!(true)),
+            ("origin", json!({ "kind": "task-notification", "subkind": "done", "extra": 1 })),
+        ] {
+            if d.roll(12) == 0 {
+                e[k] = v;
+            }
+        }
+        if d.roll(30) == 0 {
+            e.as_object_mut().expect("an object").shift_remove("uuid");
+        }
+        e
+    }
+
+    #[test]
+    fn messages_read_whole_only_when_taken_are_those_held_whole() {
+        let root = std::env::temp_dir().join(format!("xenonet-wire-sdk-messages-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let p = root.join("-Users-nova-Projects-atlas");
+        std::fs::create_dir_all(&p).expect("a folder");
+        let dir = root.to_string_lossy().into_owned();
+        let mut d = Dice(0x1234_5678_9abc_def1);
+        let mut shown = 0;
+        for round in 0..300 {
+            let n = 1 + d.roll(60);
+            let mut text = String::new();
+            let mut prev = String::from("u0");
+            for _ in 0..n {
+                let e = entry(&mut d, n, &prev);
+                prev = e["uuid"].as_str().unwrap_or("u0").to_string();
+                match d.roll(20) {
+                    0 => text.push_str("not json\n"),
+                    1 => text.push_str("\n  "),
+                    _ => {}
+                }
+                text.push_str(&xenonet_base::json::stringify(&e, 0));
+                text.push('\n');
+            }
+            std::fs::write(p.join(format!("{A}.jsonl")), &text).expect("a transcript");
+            let want = session_messages_as_it_was(&dir, A);
+            let got = messages(&dir, A);
+            assert_eq!(got.all(), want, "round {round}: {text}");
+            let (a, b) = (d.roll(want.len() + 1), d.roll(want.len() + 1));
+            let (a, b) = (a.min(b), a.max(b));
+            assert_eq!(got.page(a, b), want[a..b], "round {round}, {a}..{b}");
+            shown += want.len();
+        }
+        assert!(shown > 500, "the transcripts have messages to show: {shown}");
         std::fs::remove_dir_all(&root).expect("cleaned up");
     }
 }

@@ -75,14 +75,16 @@ impl Claude {
         let me = self.clone();
         let (raw, cursor) = (raw_id.to_string(), cursor.map(|c| Value::String(c.into())));
         crate::util::blocking(move || {
-            let all = crate::sdk::session_messages(&me.projects_dir, &raw);
+            // Only the page's messages are read whole.
+            let all = crate::sdk::messages(&me.projects_dir, &raw);
             let (start, end, next) = core::page(all.len(), cursor.as_ref(), limit);
             let version = crate::sdk::VERSION;
-            let page: Vec<Value> = all[start..end]
-                .iter()
+            let page: Vec<Value> = all
+                .page(start, end)
+                .into_iter()
                 .filter_map(|m| {
                     let kind = m.get("type").and_then(Value::as_str).map(str::to_string);
-                    me.vendor.sample("anthropic/agent-sdk/session-message", m.clone(), Some(version), kind.as_deref(), 16)
+                    me.vendor.sample("anthropic/agent-sdk/session-message", m, Some(version), kind.as_deref(), 16)
                 })
                 .collect();
             let entries: Vec<Value> = core::entries(&page).map_err(|e| e.0)?.iter().map(codex_obj).collect();
