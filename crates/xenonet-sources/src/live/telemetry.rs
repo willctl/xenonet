@@ -27,6 +27,7 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use xenonet_base::json::{number, number_string};
 use xenonet_base::ordered::OrderedMap;
 use xenonet_base::text::{join, js_number, js_string, js_trim, truthy};
+use xenonet_base::usage::{Speed, TokenUsage};
 use xenonet_base::{apps, jsstr, paths, pricing};
 
 pub const PRIME_WINDOW_MS: f64 = 24.0 * 3600e3;
@@ -308,9 +309,7 @@ struct ToolRec {
 /// A call's tokens and how it ran, for its price.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Call {
-    pub tokens: pricing::Tokens,
-    pub fast: bool,
-    pub priority: bool,
+    pub tokens: TokenUsage,
 }
 
 /// A tool call, as noteTool takes it. `agent` is None where JS passed no
@@ -461,7 +460,7 @@ impl Session {
             }
         }
         let name = string_of(Some(model));
-        let parts = pricing::cost_parts(&name, Some(ts), &call.tokens, call.fast, call.priority);
+        let parts = pricing::cost_parts(&name, Some(ts), &call.tokens);
         let d = &mut self.spend.get_mut(&tag).expect("added above when missing, and the newest stays").1;
         match parts {
             None => {
@@ -478,10 +477,8 @@ impl Session {
                 }
             }
             Some(c) => {
-                let t = call.tokens;
-                let z = |v: Option<f64>| v.unwrap_or(0.0);
                 d.cost += c.total;
-                d.tokens += z(t.input) + z(t.cache_read) + z(t.cache_write5m) + z(t.cache_write1h) + z(t.output);
+                d.tokens += call.tokens.total();
             }
         }
     }
@@ -1178,26 +1175,12 @@ impl Telemetry {
             if s.seen_messages.len() > 400 {
                 drop_first(&mut s.seen_messages);
             }
-            let num = |v: &Value| js_number(Some(v));
-            let ctx = num(&u.input) + num(&u.cache_read) + num(&u.cache_write);
-            let output = num(&u.output);
+            let t = &u.tokens;
+            let ctx = t.input.number() + t.cache_read.number() + js_number(Some(&u.cache_write));
+            let output = t.output.number();
             s.tokens_output += output;
             s.add_tokens(ctx + output, ts, live);
-            let price = |v: &Value| if v.is_null() { None } else { Some(num(v)) };
-            let call = Call {
-                tokens: pricing::Tokens {
-                    input: price(&u.input),
-                    cache_read: price(&u.cache_read),
-                    cache_write5m: match &u.cache_write5m {
-                        Ok(v) => price(v),
-                        Err(x) => Some(*x),
-                    },
-                    cache_write1h: price(&u.cache_write1h),
-                    output: price(&u.output),
-                },
-                fast: u.fast,
-                priority: false,
-            };
+            let call = Call { tokens: u.tokens.map(|f| f.priced()) };
             let call_model = nn(model.as_ref()).cloned().or_else(|| nn(Some(&s.model)).cloned()).unwrap_or_else(|| "unknown".into());
             s.add_call(&call_model, &call, ts);
             if !has_agent {
@@ -1561,15 +1544,14 @@ impl Telemetry {
                     model
                 };
                 let call = Call {
-                    tokens: pricing::Tokens {
+                    tokens: TokenUsage {
                         input: Some(js_max(0.0, input - cached - write)),
                         cache_read: Some(cached),
-                        cache_write5m: Some(write),
-                        cache_write1h: Some(0.0),
+                        cache_write_5m: Some(write),
+                        cache_write_1h: Some(0.0),
                         output: Some(or0(opt_prop(last, "output_tokens"))),
+                        speed: Speed { fast: false, priority: s.priority },
                     },
-                    fast: false,
-                    priority: s.priority,
                 };
                 s.add_call(&call_model, &call, ts);
                 if live {

@@ -6,7 +6,7 @@
 //! a transcript's messages as the console shows them are xenonet-sources'
 //! claude.rs.
 
-use crate::util::{codex_obj, lock};
+use crate::util::{lock, record_json};
 use crate::vendor::Vendor;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -64,7 +64,7 @@ impl Claude {
                 .filter_map(|s| me.vendor.sample("anthropic/agent-sdk/session-listing", s, Some(version), None, 16))
                 .collect();
             let desktop = me.desktop();
-            core::sessions(&listed, &desktop).map(|list| list.iter().map(codex_obj).collect()).map_err(|e| e.0)
+            core::sessions(&listed, &desktop).map(|list| list.iter().map(record_json).collect()).map_err(|e| e.0)
         })
         .await
     }
@@ -87,7 +87,7 @@ impl Claude {
                     me.vendor.sample("anthropic/agent-sdk/session-message", m, Some(version), kind.as_deref(), 16)
                 })
                 .collect();
-            let entries: Vec<Value> = core::entries(&page).map_err(|e| e.0)?.iter().map(codex_obj).collect();
+            let entries: Vec<Value> = core::entries(&page).map_err(|e| e.0)?.iter().map(record_json).collect();
             Ok(json!({ "entries": entries, "cursor": next, "total": all.len() }))
         })
         .await

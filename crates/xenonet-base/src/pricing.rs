@@ -10,6 +10,7 @@
 
 use crate::sync::Locked;
 use crate::time::parse_iso;
+use crate::usage::TokenUsage;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -322,17 +323,6 @@ fn now_ms() -> f64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_millis() as f64)
 }
 
-/// A call's tokens: input (not cached), cache reads, cache writes kept five
-/// minutes and an hour, and output (reasoning included). None counts as 0.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Tokens {
-    pub input: Option<f64>,
-    pub cache_read: Option<f64>,
-    pub cache_write5m: Option<f64>,
-    pub cache_write1h: Option<f64>,
-    pub output: Option<f64>,
-}
-
 /// What one call cost, in dollars, by kind of token.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Cost {
@@ -343,15 +333,16 @@ pub struct Cost {
     pub total: f64,
 }
 
-/// What one call cost, or None for a model without a price. `fast` is
-/// Anthropic's fast mode, `priority` OpenAI's priority tier.
-pub fn cost_parts(model: &str, at: Option<f64>, u: &Tokens, fast: bool, priority: bool) -> Option<Cost> {
+/// What one call cost, or None for a model without a price. Its speed's
+/// `fast` is Anthropic's fast mode, `priority` OpenAI's priority tier; a
+/// figure that's None counts as 0.
+pub fn cost_parts(model: &str, at: Option<f64>, u: &TokenUsage) -> Option<Cost> {
     if plain_model(model) == "<synthetic>" {
         return Some(Cost { input: 0.0, cache_read: 0.0, cache_write: 0.0, output: 0.0, total: 0.0 });
     }
     let p = price_of(model, at)?;
     let n = |v: Option<f64>| v.unwrap_or(0.0);
-    let prompt = n(u.input) + n(u.cache_read) + n(u.cache_write5m) + n(u.cache_write1h);
+    let prompt = n(u.input) + n(u.cache_read) + n(u.cache_write_5m) + n(u.cache_write_1h);
     let l = p.long_context.as_ref();
     // As JS compares with a missing `at`: never inside a dated window.
     let after = |d: Option<&str>| d.is_none_or(|d| at.is_some_and(|at| at >= day(d)));
@@ -360,12 +351,12 @@ pub fn cost_parts(model: &str, at: Option<f64>, u: &Tokens, fast: bool, priority
     let (input, output) = long.map_or((p.input, p.output), |l| (l.input, l.output));
     let cache_scale = long.map_or(1.0, |l| l.scale_cache.unwrap_or(l.input / p.input));
     let mut scale = 1.0;
-    if fast {
+    if u.speed.fast {
         if let Some(f) = p.fast {
             scale = f.input / p.input;
         }
     }
-    if priority && p.provider == Provider::OpenAi {
+    if u.speed.priority && p.provider == Provider::OpenAi {
         scale = priority_scale(p.ids[0]);
     }
     // Cache writes without a price of their own: Anthropic's are 1.25x input
@@ -375,13 +366,13 @@ pub fn cost_parts(model: &str, at: Option<f64>, u: &Tokens, fast: bool, priority
     let d = |v: Option<f64>, rate: f64| (n(v) * rate * scale) / 1e6;
     let input = d(u.input, input);
     let cache_read = d(u.cache_read, p.read * cache_scale);
-    let cache_write = d(u.cache_write5m, write5m * cache_scale) + d(u.cache_write1h, write1h * cache_scale);
+    let cache_write = d(u.cache_write_5m, write5m * cache_scale) + d(u.cache_write_1h, write1h * cache_scale);
     let output = d(u.output, output);
     Some(Cost { input, cache_read, cache_write, output, total: input + cache_read + cache_write + output })
 }
 
-pub fn cost_of(model: &str, at: Option<f64>, u: &Tokens, fast: bool, priority: bool) -> Option<f64> {
-    cost_parts(model, at, u, fast, priority).map(|c| c.total)
+pub fn cost_of(model: &str, at: Option<f64>, u: &TokenUsage) -> Option<f64> {
+    cost_parts(model, at, u).map(|c| c.total)
 }
 
 #[cfg(test)]

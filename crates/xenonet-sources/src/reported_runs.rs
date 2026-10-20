@@ -6,6 +6,7 @@
 //! ended, and with the actor's gateway token.
 
 use crate::native::{older, Out};
+use crate::session::{RunSession, Via};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{HashSet, VecDeque};
@@ -145,23 +146,21 @@ impl ReportedRuns {
             .iter()
             .map(|(_, r)| {
                 let name = session_apps().iter().find(|(a, _)| *a == r.app).map_or("", |(_, n)| *n);
-                Out::Obj(vec![
-                    ("id", Out::str(&r.id)),
-                    ("app", Out::str(&r.app)),
-                    ("rawId", Out::str(&r.run)),
-                    ("title", Out::str(&r.title.clone().unwrap_or_else(|| format!("{name}, {}", r.run)))),
-                    ("preview", Out::null()),
-                    ("cwd", Out::null()),
-                    ("createdAt", Out::Num(r.created_at)),
-                    ("updatedAt", Out::Num(r.updated_at)),
-                    ("archived", Out::bool(false)),
-                    ("model", Out::null()),
-                    ("branch", Out::null()),
-                    ("parentId", Out::null()),
-                    ("parentKind", Out::null()),
-                    ("observed", Out::str("gateway")),
-                    ("reportedBy", Out::str(&r.actor)),
-                ])
+                RunSession {
+                    id: &r.id,
+                    app: &r.app,
+                    raw_id: &r.run,
+                    title: r.title.clone().unwrap_or_else(|| format!("{name}, {}", r.run)),
+                    cwd: None,
+                    created_at: Out::Num(r.created_at),
+                    updated_at: Out::Num(r.updated_at),
+                    archived: false,
+                    model: None,
+                    branch: None,
+                    subagent_of: None,
+                    via: Via::Gateway { actor: &r.actor },
+                }
+                .record()
             })
             .collect()
     }

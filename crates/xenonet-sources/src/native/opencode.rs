@@ -6,10 +6,12 @@
 //! apply_patch's text, whose file headers are kept and the rest dropped.
 
 use super::node_path;
-use super::{edit_file, edits_out, js_max, js_min, patch_headers, push_edit, str_of, titled, Checked, Edits, Out, Threw, EDIT_KEEP_MS, SESSIONS_MAX};
+use super::{edit_file, edits_out, js_max, js_min, push_edit, str_of, titled, Checked, Edits, Out, Threw, EDIT_KEEP_MS, SESSIONS_MAX};
+use crate::session::{RunSession, Via};
 use serde_json::{json, Map, Value};
 use xenonet_base::json;
 use xenonet_base::ordered::OrderedMap;
+use xenonet_base::patch;
 use xenonet_base::paths::path_style;
 use xenonet_base::text::{js_number, js_string, truthy};
 use xenonet_schema::drift::clean_version;
@@ -34,10 +36,11 @@ pub fn session_id_of(id: &str) -> String {
     format!("opencode:{}", local_id(id))
 }
 
-/// The files an apply_patch text names, from its headers only.
+/// The files an apply_patch text names, from its headers only: those it
+/// adds, updates, deletes and moves to, less a header with no path.
 pub fn patch_files(text: Option<&Value>) -> Vec<String> {
     match text {
-        Some(Value::String(s)) => patch_headers(s).into_iter().filter(|p| !p.is_empty()).collect(),
+        Some(Value::String(s)) => patch::paths(s, true).into_iter().filter(|p| !p.is_empty()).collect(),
         _ => Vec::new(),
     }
 }
@@ -403,22 +406,21 @@ impl OpenCode {
         self.runs
             .iter()
             .map(|(_, r)| {
-                Out::Obj(vec![
-                    ("id", Out::str(&r.id)),
-                    ("app", Out::str("opencode")),
-                    ("rawId", Out::str(&r.raw_id)),
-                    ("title", Out::str(&r.title.clone().unwrap_or_else(|| titled("OpenCode", r.cwd.as_deref())))),
-                    ("preview", Out::null()),
-                    ("cwd", Out::opt_str(r.cwd.as_deref())),
-                    ("createdAt", r.created_at.out()),
-                    ("updatedAt", r.updated_at.out()),
-                    ("archived", Out::bool(r.archived)),
-                    ("model", Out::null()),
-                    ("branch", Out::null()),
-                    ("parentId", Out::opt_str(r.parent_id.as_deref())),
-                    ("parentKind", if r.parent_id.is_some() { Out::str("subagent") } else { Out::null() }),
-                    ("reader", Out::str("experimental")),
-                ])
+                RunSession {
+                    id: &r.id,
+                    app: "opencode",
+                    raw_id: &r.raw_id,
+                    title: r.title.clone().unwrap_or_else(|| titled("OpenCode", r.cwd.as_deref())),
+                    cwd: r.cwd.as_deref(),
+                    created_at: r.created_at.out(),
+                    updated_at: r.updated_at.out(),
+                    archived: r.archived,
+                    model: None,
+                    branch: None,
+                    subagent_of: r.parent_id.as_deref(),
+                    via: Via::Reader,
+                }
+                .record()
             })
             .collect()
     }

@@ -15,7 +15,6 @@ pub mod opencode;
 use serde_json::Value;
 use xenonet_base::ordered::OrderedMap;
 use xenonet_base::paths::path_style;
-use xenonet_base::text::js_trim;
 
 pub(crate) const DAY_MS: f64 = 24.0 * 3600e3;
 pub(crate) const EDIT_KEEP_MS: f64 = 30.0 * 60e3;
@@ -177,16 +176,6 @@ pub(crate) fn titled(name: &str, cwd: Option<&str>) -> String {
     }
 }
 
-/// The files an apply_patch text names, from its headers, as
-/// /^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$/gm
-/// reads them (JS's line terminators), each trimmed.
-pub(crate) fn patch_headers(text: &str) -> Vec<String> {
-    const HEADS: [&str; 4] = ["*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: "];
-    text.split(['\n', '\r', '\u{2028}', '\u{2029}'])
-        .filter_map(|line| HEADS.iter().find_map(|h| line.strip_prefix(h).filter(|rest| !rest.is_empty())).map(|rest| js_trim(rest).to_string()))
-        .collect()
-}
-
 /// `typeof v === "string" ? v : null`.
 pub(crate) fn str_of(v: Option<&Value>) -> Option<&str> {
     v.and_then(Value::as_str)
@@ -206,13 +195,6 @@ pub(crate) fn by_num<T>(items: &mut [T], key: impl Fn(&T) -> f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn patch_headers_are_the_files() {
-        let text = "*** Begin Patch\n*** Add File: a.txt\n+x\n*** Update File: b.txt\r\n*** Move to:  c.txt \n*** Delete File: d.txt\n*** Add File: \n*** End Patch";
-        assert_eq!(patch_headers(text), ["a.txt", "b.txt", "c.txt", "d.txt"]);
-        assert_eq!(patch_headers("*** Add File:  "), [""]);
-    }
 
     #[test]
     fn ids_and_edits() {

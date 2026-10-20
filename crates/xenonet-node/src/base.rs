@@ -1,10 +1,12 @@
-//! xenonet-base for the twins of core/pricing.js and core/paths.js.
+//! xenonet-base for the twins of core/pricing.js, core/patch.js and
+//! core/paths.js.
 
 use crate::js::Json;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde_json::{json, Map, Value};
-use xenonet_base::{paths, pricing, time, units};
+use xenonet_base::usage::{Speed, TokenUsage};
+use xenonet_base::{patch, paths, pricing, time, units};
 
 // ----- pricing -----
 
@@ -87,14 +89,33 @@ pub struct CostParts {
 
 #[napi(js_name = "costParts")]
 pub fn cost_parts(model: String, at: Option<f64>, u: Usage, fast: bool, priority: bool) -> Option<CostParts> {
-    let tokens = pricing::Tokens { input: u.input, cache_read: u.cache_read, cache_write5m: u.cache_write5m, cache_write1h: u.cache_write1h, output: u.output };
-    pricing::cost_parts(&model, at, &tokens, fast, priority).map(|c| CostParts {
-        input: c.input,
-        cache_read: c.cache_read,
-        cache_write: c.cache_write,
-        output: c.output,
-        total: c.total,
-    })
+    let tokens = TokenUsage {
+        input: u.input,
+        cache_read: u.cache_read,
+        cache_write_5m: u.cache_write5m,
+        cache_write_1h: u.cache_write1h,
+        output: u.output,
+        speed: Speed { fast, priority },
+    };
+    pricing::cost_parts(&model, at, &tokens).map(|c| CostParts { input: c.input, cache_read: c.cache_read, cache_write: c.cache_write, output: c.output, total: c.total })
+}
+
+// ----- patch -----
+
+#[napi(object)]
+pub struct PatchHeader {
+    pub kind: String,
+    pub path: String,
+}
+
+#[napi(js_name = "patchHeaders")]
+pub fn patch_headers(text: String) -> Vec<PatchHeader> {
+    patch::headers(&text).into_iter().map(|h| PatchHeader { kind: h.kind.as_str().into(), path: h.path }).collect()
+}
+
+#[napi(js_name = "patchPaths")]
+pub fn patch_paths(text: String, moves: bool) -> Vec<String> {
+    patch::paths(&text, moves)
 }
 
 // ----- time -----

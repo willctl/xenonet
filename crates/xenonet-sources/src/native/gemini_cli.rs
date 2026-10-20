@@ -7,6 +7,7 @@
 use super::files::Files;
 use super::node_path;
 use super::{by_num, edit_file, edits_out, fits_id, js_max, js_min, ms_of, push_edit, str_of, titled, Check, Checked, Edits, Out, Threw, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX};
+use crate::session::{RunSession, Via};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 use xenonet_base::json;
@@ -296,22 +297,21 @@ impl GeminiCli {
         self.runs
             .iter()
             .map(|(_, r)| {
-                Out::Obj(vec![
-                    ("id", Out::str(&r.id)),
-                    ("app", Out::str("gemini-cli")),
-                    ("rawId", Out::str(&r.raw_id)),
-                    ("title", Out::str(&r.summary.clone().unwrap_or_else(|| titled("Gemini CLI", r.cwd.as_deref())))),
-                    ("preview", Out::null()),
-                    ("cwd", Out::opt_str(r.cwd.as_deref())),
-                    ("createdAt", Out::Num(r.created_at)),
-                    ("updatedAt", Out::Num(r.updated_at)),
-                    ("archived", Out::bool(false)),
-                    ("model", Out::null()),
-                    ("branch", Out::null()),
-                    ("parentId", Out::opt_str(r.parent_id.as_deref())),
-                    ("parentKind", if r.parent_id.is_some() { Out::str("subagent") } else { Out::null() }),
-                    ("reader", Out::str("experimental")),
-                ])
+                RunSession {
+                    id: &r.id,
+                    app: "gemini-cli",
+                    raw_id: &r.raw_id,
+                    title: r.summary.clone().unwrap_or_else(|| titled("Gemini CLI", r.cwd.as_deref())),
+                    cwd: r.cwd.as_deref(),
+                    created_at: Out::Num(r.created_at),
+                    updated_at: Out::Num(r.updated_at),
+                    archived: false,
+                    model: None,
+                    branch: None,
+                    subagent_of: r.parent_id.as_deref(),
+                    via: Via::Reader,
+                }
+                .record()
             })
             .collect()
     }

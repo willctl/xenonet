@@ -11,7 +11,7 @@ use crate::cores::{CoreError, Cores};
 use crate::ctx::Ctx;
 use crate::http::{node_headers, parse_target, Body, Peer, Reply, ReplyBody, Req};
 use crate::routes;
-use crate::wire::{Emitter, WireEnv};
+use crate::wire::{Emitter, VendorReaders, WireEnv};
 use bytes::Bytes;
 use hyper::body::{Frame, Incoming};
 use hyper::server::conn::http1;
@@ -241,7 +241,7 @@ pub fn run_with(args: &[String], built: &str, build: Builder) -> i32 {
     let built = built.to_string();
     let code = rt.block_on(async move {
         let mut config = Config::from_env(&args);
-        let env = WireEnv { version: config.version(&built), emitter: Emitter::new(), drift: Arc::new(Mutex::new(DriftLog::default())) };
+        let env = WireEnv { version: config.version(&built), emitter: Emitter::new(), drift: Arc::new(Mutex::new(DriftLog::default())), readers: VendorReaders::default() };
         // The drivers run on the runtime: some start tasks of their own.
         let cores = build(&mut config, &env);
         serve_with(&mut config, cores, &built, env).await
@@ -256,7 +256,13 @@ pub fn run_with(args: &[String], built: &str, build: Builder) -> i32 {
 pub async fn main(args: Vec<String>, built: String) -> i32 {
     let mut config = Config::from_env(&args);
     let cores = Cores::pending(config.actors, config.assistant, config.hosts);
-    serve_with(&mut config, cores, &built, WireEnv { version: String::new(), emitter: Emitter::new(), drift: Arc::new(Mutex::new(DriftLog::default())) }).await
+    serve_with(
+        &mut config,
+        cores,
+        &built,
+        WireEnv { version: String::new(), emitter: Emitter::new(), drift: Arc::new(Mutex::new(DriftLog::default())), readers: VendorReaders::default() },
+    )
+    .await
 }
 
 pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: WireEnv) -> i32 {
