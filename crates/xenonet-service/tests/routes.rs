@@ -638,6 +638,70 @@ async fn an_actor_reports_only_as_itself_from_its_own_process_and_within_its_rat
 }
 
 #[tokio::test]
+async fn remote_access_narrows_from_your_terminal_and_widens_only_from_the_window() {
+    let f = Arc::new(Fake::new());
+    let mut c = Cores::pending(true, true, false);
+    c.verify = f.clone();
+    let ctx = Ctx::for_tests(c);
+    let key = ctx.window_key.reveal().to_string();
+    let wren = token('a');
+    let grant = "gr_0123456789abcdef01234567";
+    let code = |r: &Reply| (r.status, r.body_json()["code"].clone(), r.body_json()["error"].clone());
+    let at = |p: &str| p.replace("GRANT", grant);
+    // What narrows it, or only reads it: yours, from your terminal too.
+    let under_codex = "this is yours to do, and it came from under a Codex process; run it in your own terminal or in XenoNet";
+    for (m, p) in [
+        ("GET", "/api/assistant"),
+        ("GET", "/api/assistant/places"),
+        ("GET", "/api/assistant/audit"),
+        ("GET", "/api/assistant/tunnels"),
+        ("POST", "/api/assistant/disable"),
+        ("POST", "/api/assistant/GRANT/revoke"),
+        ("POST", "/api/assistant/GRANT/tunnel/stop"),
+        ("POST", "/api/assistant/GRANT/tunnel/forget"),
+    ] {
+        let p = at(p);
+        assert_eq!(
+            code(&go(&ctx, m, &p, &[("authorization", &wren)], Some(json!({}))).await),
+            (403, json!("yours"), json!("this is yours to do, and an actor can't do it")),
+            "{m} {p}"
+        );
+        *f.person.lock().unwrap() = json!({ "ok": false, "reason": under_codex });
+        assert_eq!(code(&go(&ctx, m, &p, &[], Some(json!({}))).await), (403, json!("yours"), json!(under_codex)), "{m} {p}");
+        *f.person.lock().unwrap() = json!({ "ok": true });
+        assert_ne!(go(&ctx, m, &p, &[], Some(json!({}))).await.status, 403, "{m} {p}: from your terminal");
+        assert_ne!(go(&ctx, m, &p, &[("x-xenonet-window", &key)], Some(json!({}))).await.status, 403, "{m} {p}: from the window");
+    }
+    // What widens it: the window's alone, never your terminal or an actor.
+    let no_key = json!("this is for XenoNet's own window, and the request didn't come with its key");
+    for (m, p) in [
+        ("POST", "/api/assistant/enable"),
+        ("POST", "/api/assistant/preview"),
+        ("POST", "/api/assistant/pair"),
+        ("POST", "/api/assistant/GRANT"),
+        ("POST", "/api/assistant/GRANT/rotate"),
+        ("POST", "/api/assistant/GRANT/tunnel"),
+        ("POST", "/api/assistant/GRANT/tunnel/key"),
+        ("POST", "/api/assistant/GRANT/tunnel/start"),
+        ("POST", "/api/assistant/GRANT/tunnel/check"),
+    ] {
+        let p = at(p);
+        assert_eq!(code(&go(&ctx, m, &p, &[], Some(json!({}))).await), (403, json!("yours"), no_key.clone()), "{m} {p}: your terminal");
+        let both = [("x-xenonet-window", key.as_str()), ("authorization", wren.as_str())];
+        assert_eq!(code(&go(&ctx, m, &p, &both, Some(json!({}))).await).1, json!("yours"), "{m} {p}: an actor");
+        assert_ne!(go(&ctx, m, &p, &[("x-xenonet-window", &key)], Some(json!({}))).await.status, 403, "{m} {p}: the window");
+    }
+    // A grant is named by its id alone.
+    for p in ["/api/assistant/gr_0123/revoke", "/api/assistant/gr_0123456789ABCDEF01234567", "/api/assistant/../actors/revoke", "/api/assistant/GRANT/tunnel/delete"] {
+        assert_eq!(go(&ctx, "POST", &at(p), &[("x-xenonet-window", &key)], Some(json!({}))).await.status, 404, "{p}");
+    }
+    assert_eq!(code(&go(&ctx, "GET", "/api/assistant/audit?grant=everyone", &[], None).await), (400, json!("bad-request"), json!("grant is a grant's id")));
+    // With remote actors off, there's nothing to reach.
+    let off = Ctx::for_tests(Cores::pending(true, false, false));
+    assert_eq!(code(&go(&off, "GET", "/api/assistant", &[], None).await).1, json!("off"));
+}
+
+#[tokio::test]
 async fn with_actors_off_a_token_reaches_nothing() {
     let mut c = Cores::pending(false, false, false);
     c.engine = Arc::new(Fake::new());
