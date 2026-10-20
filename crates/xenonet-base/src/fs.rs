@@ -188,6 +188,77 @@ pub fn code_of(e: &io::Error) -> Option<&'static str> {
     table.iter().find(|(k, _)| *k == n).map(|(_, v)| *v)
 }
 
+/// fs.realpathSync: `p` absolute, with its links followed. On unix that's
+/// canonicalize. On Windows it's Node's own walk, which checks each part
+/// for a link and follows it, and leaves every other part as written: a
+/// short name such as RUNNER~1 isn't spelled out and no `\\?\` goes in
+/// front, as canonicalize would do there.
+pub fn realpath(p: &str) -> io::Result<String> {
+    #[cfg(windows)]
+    {
+        realpath_windows(p)
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::canonicalize(p).map(|r| r.to_string_lossy().into_owned())
+    }
+}
+
+#[cfg(windows)]
+fn realpath_windows(p: &str) -> io::Result<String> {
+    use crate::nodepath::Style::Win32;
+    // ERROR_CANT_RESOLVE_FILENAME, which Node reports as ELOOP.
+    const TOO_MANY_LINKS: i32 = 1921;
+    let mut p = Win32.resolve(&[p]);
+    for _ in 0..64 {
+        let mut pos = win32_root_len(&p);
+        std::fs::symlink_metadata(&p[..pos])?;
+        let mut link = None;
+        while pos < p.len() {
+            let end = p[pos..].find('\\').map_or(p.len(), |i| pos + i);
+            let next = (end + 1).min(p.len());
+            if std::fs::symlink_metadata(&p[..end])?.file_type().is_symlink() {
+                link = Some((pos, end, next));
+                break;
+            }
+            pos = next;
+        }
+        let Some((at, end, next)) = link else { return Ok(p) };
+        // Node stats the link first, so one that leads nowhere fails here.
+        std::fs::metadata(&p[..end])?;
+        let target = std::fs::read_link(&p[..end])?.to_string_lossy().into_owned();
+        // libuv undoes the \\?\ that Windows writes into an absolute link.
+        let target = match target.strip_prefix(r"\\?\UNC\") {
+            Some(rest) => format!(r"\\{rest}"),
+            None => target.strip_prefix(r"\\?\").map_or_else(|| target.clone(), str::to_string),
+        };
+        let resolved = Win32.resolve(&[&p[..at], &target]);
+        p = Win32.resolve(&[&resolved, &p[next..]]);
+    }
+    Err(io::Error::from_raw_os_error(TOO_MANY_LINKS))
+}
+
+/// How much of a resolved Windows path is its root, as Node's splitRoot
+/// finds it: a drive or a `\\server\share`, and the separators after it.
+#[cfg(windows)]
+fn win32_root_len(p: &str) -> usize {
+    let b = p.as_bytes();
+    let sep = |c: u8| c == b'\\' || c == b'/';
+    let mut i = 0;
+    if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
+        i = 2;
+    } else if b.len() >= 2 && sep(b[0]) && sep(b[1]) {
+        let server = 2 + b[2..].iter().take_while(|&&c| !sep(c)).count();
+        if server > 2 && server < b.len() {
+            let share = server + 1 + b[server + 1..].iter().take_while(|&&c| !sep(c)).count();
+            if share > server + 1 {
+                i = share;
+            }
+        }
+    }
+    i + b[i..].iter().take_while(|&&c| sep(c)).count()
+}
+
 /// A Windows file's index on its volume, which Node's fs.stat gives as
 /// `ino` there: the one thing that tells a file from another put under the
 /// same name, since NTFS hands a file created under a name just freed the
@@ -223,4 +294,39 @@ pub fn file_index(path: &str) -> Option<u64> {
     // `info` is laid out as BY_HANDLE_FILE_INFORMATION.
     let ok = unsafe { GetFileInformationByHandle(f.as_raw_handle(), &raw mut info) } != 0;
     ok.then(|| (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::realpath;
+    use std::path::{Path, PathBuf};
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("xenonet-realpath-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("a")).expect("a folder");
+        dir
+    }
+
+    fn text(p: &Path) -> String {
+        p.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn realpath_works_out_dots_and_names_a_missing_file() {
+        let dir = temp("dots");
+        let a = realpath(&text(&dir.join("a"))).expect("a");
+        assert_eq!(realpath(&text(&dir.join("a").join("..").join("a"))).expect("a again"), a);
+        assert!(a.ends_with('a') && !a.starts_with(r"\\?\"), "{a}");
+        assert_eq!(realpath(&text(&dir.join("missing"))).map_err(|e| e.kind()), Err(std::io::ErrorKind::NotFound));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn realpath_follows_a_link() {
+        let dir = temp("link");
+        std::os::unix::fs::symlink(dir.join("a"), dir.join("l")).expect("a link");
+        assert_eq!(realpath(&text(&dir.join("l"))).expect("l"), realpath(&text(&dir.join("a"))).expect("a"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

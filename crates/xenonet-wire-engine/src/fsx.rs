@@ -131,7 +131,7 @@ pub fn call(method: &str, args: &[Arg]) -> Result<Arg> {
             ))
         }
         "readlinkSync" => std::fs::read_link(&p).map(|t| Arg::Text(t.to_string_lossy().into_owned())).map_err(|e| of(e, "readlink", &p)),
-        "realpathSync" => std::fs::canonicalize(&p).map(|t| Arg::Text(t.to_string_lossy().into_owned())).map_err(|e| of(e, "realpath", &p)),
+        "realpathSync" => xenonet_base::fs::realpath(&p).map(Arg::Text).map_err(|e| of(e, "realpath", &p)),
         "accessSync" => std::fs::metadata(&p).map(|_| Arg::Undef).map_err(|e| of(e, "access", &p)),
         "chmodSync" => {
             #[cfg(unix)]

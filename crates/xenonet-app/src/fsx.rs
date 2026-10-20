@@ -96,7 +96,7 @@ pub fn rm_rf(p: &str) -> Result<(), FsError> {
 
 /// fs.realpathSync.
 pub fn realpath(p: &str) -> Result<String, FsError> {
-    std::fs::canonicalize(p).map(|r| r.to_string_lossy().into_owned()).map_err(|e| FsError::of(e, "realpath", p))
+    xenonet_base::fs::realpath(p).map_err(|e| FsError::of(e, "realpath", p))
 }
 
 /// fs.readdirSync(p): names in Node's order.
