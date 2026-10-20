@@ -450,10 +450,17 @@ export const CHECKS = [
       if (!a) return skip("needs XenoNet running");
       const states = a.changes.map((c) => c.state);
       if (states.every((s) => s === "missing")) return info("not connected, so these sessions can't see or message each other through XenoNet", "Connect them from XenoNet's palette (Connect Claude Code and Codex to XenoNet), or run xenonet connect.");
+      // XenoNet's plugin for Claude Code carries what connect would add;
+      // connect's own entries beside it are to come out.
+      if (states.includes("remove")) {
+        const tools = a.changes.some((c) => c.id === "mcp" && c.state === "remove");
+        return warn(`connected twice, through XenoNet's plugin and through xenonet connect's own entries: each event still arrives once${tools ? ", but sessions get XenoNet's tools twice" : ""}`, "Run xenonet connect claude, which takes connect's own entries out and keeps the plugin.");
+      }
+      const plugin = a.changes.some((c) => c.via === "plugin");
       const stale = a.changes.filter((c) => c.state !== "present");
       if (stale.length) return warn(`partly connected (${stale.map((c) => `${c.id} ${c.state}`).join(", ")})`, "Run xenonet connect again.");
-      if (a.broken?.length) return fail(`connected, but ${a.broken.join("; ")}`, "Run xenonet connect again.");
-      return ok(`connected to XenoNet on port ${ctx.connect.port}`);
+      if (a.broken?.length) return fail(`connected, but ${a.broken.join("; ")}`, plugin ? "Install XenoNet, or put its xenonet command on your PATH." : "Run xenonet connect again.");
+      return ok(`connected to XenoNet on port ${ctx.connect.port}${plugin ? ", through its plugin for Claude Code" : ""}`);
     },
   })),
   {

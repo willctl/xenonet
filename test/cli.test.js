@@ -279,6 +279,39 @@ test("xenonet connect: shows what will change, needs a yes, then asks XenoNet to
   }
 });
 
+test("xenonet disconnect takes out connect's own entries and leaves what XenoNet's plugin for Claude Code carries", async () => {
+  let codex = "present";
+  const change = (id, state, via) => ({ id, what: `The ${id}`, where: via ? "XenoNet's plugin for Claude Code (xenonet@xenonet)" : "settings", state, ...(via ? { via } : {}), detail: id });
+  const preview = () => ({
+    port: 47842,
+    demo: false,
+    apps: [
+      { app: "claude", name: "Claude Code", changes: [change("mcp", "present", "plugin"), change("hooks", "present", "plugin")], notes: [], broken: [] },
+      { app: "codex", name: "Codex", changes: [change("mcp", codex), change("hooks", codex)], notes: [], broken: [] },
+    ],
+  });
+  const s = await fakeXenoNet({
+    "GET /api/health": () => [200, health],
+    "GET /api/engine/connect": () => [200, preview()],
+    "DELETE /api/engine/connect": () => ((codex = "missing"), [200, preview()]),
+  });
+  const port = ["--port", String(s.port)];
+  try {
+    const out = await xenonet(["disconnect", "--yes", ...port]);
+    assert.equal(out.code, 0, out.stderr);
+    assert.match(out.stdout, /Took XenoNet out of Codex /);
+    assert.doesNotMatch(out.stdout, /^Claude Code$/m, "nothing of the plugin's to take out");
+    assert.match(out.stdout, /XenoNet's plugin for Claude Code stays\. \/plugin in Claude Code uninstalls it\./);
+    assert.equal(s.seen.filter((r) => r.method === "DELETE").length, 1);
+    const again = await xenonet(["disconnect", "--yes", ...port]);
+    assert.match(again.stdout, /nothing to take out/);
+    assert.match(again.stdout, /XenoNet's plugin for Claude Code stays/);
+    assert.equal(s.seen.filter((r) => r.method === "DELETE").length, 1, "nothing more to take out");
+  } finally {
+    s.close();
+  }
+});
+
 test("xenonet hook --via=plugin marks the event as the copy XenoNet's plugin for Claude Code sends", async () => {
   const s = await fakeXenoNet({ "POST /api/hook/claude": () => [200, { systemMessage: "from XenoNet" }] });
   try {
