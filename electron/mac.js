@@ -32,6 +32,7 @@ export function installMenu({ send, dev, uninstall }) {
             { label: "Updates...", click: () => send("updates") },
             { type: "separator" },
             { label: "Open at Login", type: "checkbox", checked: opensAtLogin(), click: (item) => setOpensAtLogin(item.checked) },
+            { label: "Background Service…", click: () => send("background") },
             { type: "separator" },
             { role: "services" },
             { type: "separator" },
