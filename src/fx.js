@@ -416,3 +416,32 @@ export function lensOutputPass() {
     .replace(read, `${lens}gl_FragColor = vec4(max(col, 0.0), base.a);`);
   return pass;
 }
+
+// The bloom added where the lens reads the frame, instead of by the bloom
+// pass itself. Its last step blends the glow over the whole frame, which
+// is multisampled and half-float at the screen's density: one more
+// full-screen read, write and resolve of the largest target there is, each
+// frame. The lens samples the frame anyway, so it adds the glow as it
+// reads (texel + glow, as the blend's ONE, ONE did), and the bloom pass
+// skips the blend. Rounding aside, the picture is the same. False, with
+// both passes left as they were, if either isn't as expected.
+export function addBloomToLens(lens, bloom) {
+  const blend = bloom.blendMaterial;
+  const quad = bloom._fsQuad;
+  const reads = /texture2D\(tDiffuse, vUv/g;
+  const shader = lens.material?.fragmentShader ?? "";
+  const additive = blend?.blending === THREE.AdditiveBlending && blend.premultipliedAlpha === true;
+  if (!additive || typeof quad?.render !== "function" || !bloom.renderTargetsHorizontal?.[0] || !bloom.copyUniforms?.opacity || shader.match(reads)?.length !== 3 || !shader.includes("varying vec2 vUv;")) return false;
+  // Read each frame, so a resize or a bloom turned off still holds.
+  lens.uniforms.tBloom = { get value() { return bloom.renderTargetsHorizontal[0].texture; } };
+  lens.uniforms.bloomOpacity = { get value() { return bloom.enabled ? bloom.copyUniforms.opacity.value : 0; } };
+  lens.material.fragmentShader = shader
+    .replace("varying vec2 vUv;", "varying vec2 vUv;\nuniform sampler2D tBloom; uniform float bloomOpacity;\nvec4 lit(vec2 uv) { return texture2D(tDiffuse, uv) + bloomOpacity * texture2D(tBloom, uv); }")
+    .replace(reads, "lit(vUv");
+  lens.material.needsUpdate = true;
+  const render = quad.render;
+  quad.render = function (renderer) {
+    if (this.material !== blend) return render.call(this, renderer);
+  };
+  return true;
+}
