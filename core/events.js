@@ -7,10 +7,12 @@
 //   mapper.events(line, file) → [event]
 //
 // `file` is what a reader keeps for a file (mapper.file(...)): a
-// subagent's id, and for Codex the prompt mode. Stats and search set the
-// mode from the whole file before mapping (hasUserMessages); the live
-// tailer has the mapper set it as lines come (`follow`). What's kept per
-// session stays the reader's: the message ids it counted, live's turn
+// subagent's id, and for Codex the prompt mode (`items`: whether the
+// rollout has a completed user message). Stats and search set the mode
+// from the whole file before mapping (hasUserMessages); the live tailer
+// sets it as the lines come, and has the mapper read every completed user
+// message (`follow`), since the first one changes the mode. What's kept
+// per session stays the reader's: the message ids it counted, live's turn
 // marks and its last token total.
 //
 // Every event has `kind`, `t` (the line's time, NaN when it can't be
@@ -20,8 +22,7 @@
 //   refusal    signal: as detect.js builds it
 //   prompt     text (text blocks joined with spaces), parts (the content as
 //              written: its blocks, or its text), and for Claude Code
-//              command, meta, sidechain, compactSummary and interruption;
-//              for Codex first (a rollout's first completed user message)
+//              command, meta, sidechain, compactSummary and interruption
 //   said       parts: what the assistant wrote, as written; sidechain
 //   call       messageId, usage (lines.js's shape); Claude Code's model and
 //              effort; Codex's last (last_token_usage), total
@@ -36,9 +37,10 @@
 //              Code's interruption)
 //   settings   model, effort, tier (only when the line says one), provider
 //   compact    meta, sidechain
-//   context    usage and window, as a token_count says them
+//   context    used and window, as a token_count says them
 //   limits     rateLimits, as written
-//   broken     at: the field that couldn't be read
+//   broken     at: the field that couldn't be read; error: what reading it
+//              threw
 //
 // Where the readers agree, the mapper decides: a compacted summary and an
 // interruption aren't prompts (they're flagged, and an interruption is a
@@ -194,7 +196,8 @@ function itemEvents(it, base, file, out, said = () => userText(it)) {
   if (it.type === "UserMessage") {
     // A rollout's prompts are its completed user messages, or its
     // user_message events while it has none (lines.js); live finds out as
-    // the lines come, and the first one counts from then on.
+    // the lines come, the first one counting from then on, so it reads
+    // every one.
     if (!file.follow && !file.items) return;
     let text;
     try {
@@ -202,9 +205,7 @@ function itemEvents(it, base, file, out, said = () => userText(it)) {
     } catch (error) {
       return void out.push(broken(base, "text", error));
     }
-    const first = !file.items;
-    if (file.follow) file.items = true;
-    if (isCodexPrompt(text)) out.push({ kind: "prompt", ...base, text, parts: it.content, first });
+    if (isCodexPrompt(text)) out.push({ kind: "prompt", ...base, text, parts: it.content });
   } else if (it.type === "AgentMessage") out.push({ kind: "said", ...base, parts: it.content });
 }
 
@@ -238,7 +239,7 @@ function codexEvent(o, p, base, signal, file, out) {
       return itemEvents(p.item ?? {}, base, file, out, () => o.userMessage);
     case "user_message": {
       const text = o.userEvent;
-      if (!file.items && isCodexPrompt(text)) out.push({ kind: "prompt", ...base, text, parts: text, first: false });
+      if (!file.items && isCodexPrompt(text)) out.push({ kind: "prompt", ...base, text, parts: text });
       return;
     }
     // You stopped the turn (Esc, or Ctrl-C). A turn the next one replaced,
@@ -279,8 +280,9 @@ export const codex = {
   lines: codexLines,
   Line: CodexLine,
   sorted: false,
-  // `items`: whether the rollout has a completed user message, as read from
-  // the whole file; `follow`: found out as the lines come.
+  // `items`: whether the rollout has a completed user message; `follow`:
+  // read every completed user message, for a reader finding that out as
+  // the lines come.
   file: ({ agentId = null, items = false, follow = false } = {}) => ({ agentId, items, follow }),
   events(o, file = codex.file()) {
     const out = [];
@@ -315,7 +317,16 @@ export const codex = {
   // codexItem).
   item(it, base, file) {
     const out = [];
-    itemEvents(it, { t: NaN, agentId: null, origin: `event_msg:item_completed:${kindPart(it?.type)}`, ...base }, file, out);
+    const b = { t: NaN, agentId: null, origin: `event_msg:item_completed:${kindPart(it?.type)}`, ...base };
+    // An item that isn't there can't be read.
+    if (it == null) {
+      try {
+        void it.type;
+      } catch (error) {
+        return [broken(b, "line", error)];
+      }
+    }
+    itemEvents(it, b, file, out);
     return out;
   },
 };
@@ -345,4 +356,12 @@ export const brokenAt = (events, ...fields) => events.find((e) => e.kind === "br
 // reading it threw.
 export function fail(e) {
   throw e.error;
+}
+
+// A call's usage, which a reader reads only for a call it counts: what
+// reading it threw, when it couldn't be read.
+export function usageOf(events, call) {
+  const bad = brokenAt(events, "usage");
+  if (bad) fail(bad);
+  return call.usage;
 }

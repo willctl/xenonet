@@ -207,13 +207,13 @@ fn field<'a>(v: &'a Value, k: &str) -> Js<'a> {
 /// whose prompts are its user_message events. An app that isn't Claude
 /// Code reads as Codex.
 pub fn docs_from_line(raw: Value, app: &str, user_events: bool) -> Result<Vec<Doc>, TypeError> {
-    let mut file = LineFile { items: !user_events, ..LineFile::default() };
+    let file = LineFile { items: !user_events, ..LineFile::default() };
     if app == "claude" {
         let o = ClaudeLine { raw };
         return docs_of(&line_events::claude(&o, &file));
     }
     let o = CodexLine { raw };
-    docs_of(&line_events::codex(&o, &mut file))
+    docs_of(&line_events::codex(&o, &file))
 }
 
 /// Whether a rollout's text has a completed user message: only the lines

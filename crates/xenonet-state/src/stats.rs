@@ -25,8 +25,8 @@ use std::sync::LazyLock;
 use xenonet_base::text::{js_number, js_trim, truthy};
 use xenonet_base::usage::{Figure, Speed, TokenUsage};
 use xenonet_base::{fs as xfs, json, jsstr, paths, pricing};
-use xenonet_sources::line_events::{self as le, broken_at, command_of, Broken, Call, Command, End, Field, LineEvent, LineFile};
-use xenonet_sources::lines::{has_user_messages, opt_prop, prop, ClaudeLine, CodexLine, Js, TypeError, Usage};
+use xenonet_sources::line_events::{self as le, command_of, usage_of, Broken, Command, End, Field, LineEvent, LineFile};
+use xenonet_sources::lines::{has_user_messages, opt_prop, prop, ClaudeLine, CodexLine, Js, TypeError};
 use xenonet_sources::live::{categorize, clip, mcp_server_of};
 use xenonet_sources::wiki::{to_str, to_str_or_empty, Out};
 
@@ -443,9 +443,9 @@ pub fn session_events(codex: bool, files: Vec<File>, ids: &mut EventIds) -> Resu
             let lines: Vec<CodexLine> = f.lines.into_iter().map(|raw| CodexLine { raw }).collect();
             // A rollout's prompts are its completed user messages, or in one
             // with none at all, its user_message events (see lines.rs).
-            let mut file = LineFile { items: has_user_messages(&lines)?, ..LineFile::new(f.agent) };
+            let file = LineFile { items: has_user_messages(&lines)?, ..LineFile::new(f.agent) };
             for o in &lines {
-                line_events(&le::codex(o, &mut file), &agent, &mut seen, &mut said, ids, &mut events)?;
+                line_events(&le::codex(o, &file), &agent, &mut seen, &mut said, ids, &mut events)?;
             }
         } else {
             let file = LineFile::new(f.agent);
@@ -459,14 +459,6 @@ pub fn session_events(codex: bool, files: Vec<File>, ids: &mut EventIds) -> Resu
         xenonet_base::sort::sort_by(&mut events, |a, b| order(a.t - b.t));
     }
     Ok(events)
-}
-
-// A call's usage, which stats reads only for a call it counts.
-fn usage_of(evs: &[LineEvent<'_>], c: &Call<'_>) -> Result<Option<Usage>, TypeError> {
-    if let Some(b) = broken_at(evs, Field::Usage) {
-        return Err(b.error());
-    }
-    Ok(c.usage.clone())
 }
 
 // Whether stats reads the field a line broke at: every one but the

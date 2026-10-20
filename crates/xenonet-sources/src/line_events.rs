@@ -6,9 +6,11 @@
 //! (refusals/detect.rs).
 //!
 //! `file` is what a reader keeps for a file (`LineFile`): a subagent's id,
-//! and for Codex the prompt mode. Stats and search set the mode from the
-//! whole file before mapping; the live tailer has the mapper set it as
-//! lines come (`follow`). What's kept per session stays the reader's.
+//! and for Codex the prompt mode (`items`: whether the rollout has a
+//! completed user message). Stats and search set the mode from the whole
+//! file before mapping; the live tailer sets it as the lines come, and has
+//! the mapper read every completed user message (`follow`), since the first
+//! one changes the mode. What's kept per session stays the reader's.
 //!
 //! Every event has the line's time (`t`, NaN when it can't be read), its
 //! subagent (`agent`, null for none) and its kind as the sampling hooks
@@ -108,14 +110,12 @@ pub struct ClaudePrompt<'a> {
 }
 
 /// A prompt: its text blocks joined with spaces, the content as written,
-/// and what's Claude Code's own (`claude`) or, for Codex, whether it's the
-/// rollout's first completed user message (`first`).
+/// and what's Claude Code's own (`claude`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Prompt<'a> {
     pub text: String,
     pub parts: Js<'a>,
     pub claude: Option<ClaudePrompt<'a>>,
-    pub first: bool,
 }
 
 /// A call's tokens: Claude Code's once per message id (`message_id`, with
@@ -214,8 +214,9 @@ pub struct LineEvent<'a> {
 }
 
 /// What a reader keeps for a file: whose it is, and for Codex whether its
-/// prompts are its completed user messages (`items`), as read from the
-/// whole file or, with `follow`, found out as the lines come.
+/// prompts are its completed user messages (`items`), and whether to read
+/// every completed user message (`follow`), for a reader finding that out
+/// as the lines come.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LineFile {
     pub agent: Value,
@@ -227,6 +228,15 @@ impl LineFile {
     pub fn new(agent: Option<Value>) -> Self {
         LineFile { agent: agent.unwrap_or(Value::Null), ..LineFile::default() }
     }
+}
+
+/// A call's usage, which a reader reads only for a call it counts: what
+/// reading it failed with, when it couldn't be read.
+pub fn usage_of(events: &[LineEvent<'_>], c: &Call<'_>) -> Result<Option<Usage>, TypeError> {
+    if let Some(b) = broken_at(events, Field::Usage) {
+        return Err(b.error());
+    }
+    Ok(c.usage.clone())
 }
 
 /// The `Broken` among a line's events at `field`, if there is one.
@@ -394,7 +404,7 @@ fn claude_user<'a>(o: &'a ClaudeLine, out: &mut Out<'a>) {
     let interruption = js_trim_start(&text).starts_with("[Request interrupted");
     if results == 0 {
         let claude = ClaudePrompt { command: command_of(&text), meta, sidechain, compact_summary, interruption };
-        out.push(Kind::Prompt(Prompt { text, parts: content, claude: Some(claude), first: false }));
+        out.push(Kind::Prompt(Prompt { text, parts: content, claude: Some(claude) }));
     }
     if interruption {
         out.push(Kind::TurnEnd(End::Interrupted { gate: Some((meta, sidechain)) }));
@@ -450,7 +460,7 @@ pub fn codex_usage(last: Js<'_>) -> Result<Usage, TypeError> {
 
 /// What a completed user message says: its parts' text joined with spaces
 /// (as CodexLine::user_message reads it).
-fn user_text(it: &Value) -> Result<String, TypeError> {
+pub fn user_text(it: &Value) -> Result<String, TypeError> {
     match nn(field(it, "content")) {
         None => Ok(String::new()),
         Some(Value::Array(parts)) => Ok(join(parts.iter().map(|c| opt_prop(Some(c), "text")), " ")),
@@ -460,13 +470,14 @@ fn user_text(it: &Value) -> Result<String, TypeError> {
 
 // A completed item's events: the item, and what a user or agent message
 // says (`said`: the user message's text, as read from its line).
-fn item_events<'a>(it: &'a Value, file: &mut LineFile, out: &mut Out<'a>, said: impl FnOnce() -> Result<String, TypeError>) {
+fn item_events<'a>(it: &'a Value, file: &LineFile, out: &mut Out<'a>, said: impl FnOnce() -> Result<String, TypeError>) {
     out.push(Kind::Item(it));
     let kind = field(it, "type");
     if is_str(kind, "UserMessage") {
         // A rollout's prompts are its completed user messages, or its
         // user_message events while it has none; live finds out as the
-        // lines come, and the first one counts from then on.
+        // lines come, the first one counting from then on, so it reads
+        // every one.
         if !file.follow && !file.items {
             return;
         }
@@ -474,12 +485,8 @@ fn item_events<'a>(it: &'a Value, file: &mut LineFile, out: &mut Out<'a>, said: 
             Ok(text) => text,
             Err(why) => return out.broken(Broken::at(Field::Text, why)),
         };
-        let first = !file.items;
-        if file.follow {
-            file.items = true;
-        }
         if is_codex_prompt(Some(&Value::String(text.clone()))) {
-            out.push(Kind::Prompt(Prompt { text, parts: field(it, "content"), claude: None, first }));
+            out.push(Kind::Prompt(Prompt { text, parts: field(it, "content"), claude: None }));
         }
     } else if is_str(kind, "AgentMessage") {
         out.push(Kind::Said { parts: field(it, "content"), sidechain: None });
@@ -491,7 +498,7 @@ const OUTPUTS: [&str; 3] = ["function_call_output", "custom_tool_call_output", "
 
 static EMPTY_OBJECT: std::sync::LazyLock<Value> = std::sync::LazyLock::new(|| Value::Object(serde_json::Map::new()));
 
-fn codex_event<'a>(o: &'a CodexLine, p: &'a Value, signal: Option<&Value>, file: &mut LineFile, out: &mut Out<'a>) {
+fn codex_event<'a>(o: &'a CodexLine, p: &'a Value, signal: Option<&Value>, file: &LineFile, out: &mut Out<'a>) {
     let get = |k: &str| field(p, k);
     match get("type").and_then(Value::as_str) {
         Some("task_started") => out.push(Kind::TurnStart { window: get("model_context_window") }),
@@ -534,7 +541,7 @@ fn codex_event<'a>(o: &'a CodexLine, p: &'a Value, signal: Option<&Value>, file:
                 _ => String::new(),
             };
             if !file.items && is_codex_prompt(Some(&Value::String(text.clone()))) {
-                out.push(Kind::Prompt(Prompt { text, parts: get("message"), claude: None, first: false }));
+                out.push(Kind::Prompt(Prompt { text, parts: get("message"), claude: None }));
             }
         }
         // You stopped the turn (Esc, or Ctrl-C). A turn the next one
@@ -584,7 +591,7 @@ fn response_item<'a>(p: &'a Value, out: &mut Out<'a>) {
 }
 
 /// A Codex rollout's line, as events.
-pub fn codex<'a>(o: &'a CodexLine, file: &mut LineFile) -> Vec<LineEvent<'a>> {
+pub fn codex<'a>(o: &'a CodexLine, file: &LineFile) -> Vec<LineEvent<'a>> {
     let payload = field(&o.raw, "payload");
     let origin: Rc<str> =
         Rc::from(codex_kind_of(field(&o.raw, "type"), payload.and_then(|p| field(p, "type")), payload.and_then(|p| field(p, "item")).and_then(|i| field(i, "type"))));
@@ -616,7 +623,7 @@ pub fn codex<'a>(o: &'a CodexLine, file: &mut LineFile) -> Vec<LineEvent<'a>> {
 
 /// A completed item's events, for a reader handed the item (live's
 /// codex_item), at `t`.
-pub fn codex_item<'a>(it: &'a Value, t: f64, file: &mut LineFile) -> Vec<LineEvent<'a>> {
+pub fn codex_item<'a>(it: &'a Value, t: f64, file: &LineFile) -> Vec<LineEvent<'a>> {
     let kind = match field(it, "type") {
         Some(Value::String(s)) => s.clone(),
         v => type_of(v).to_string(),
@@ -671,26 +678,26 @@ mod tests {
     #[test]
     fn codex_prompts_by_the_mode() {
         let line = |p: Value| CodexLine { raw: json!({ "type": "event_msg", "timestamp": "2026-10-03T12:00:00.000Z", "payload": p }) };
-        let mut live = LineFile { follow: true, ..LineFile::default() };
+        let live = LineFile { follow: true, ..LineFile::default() };
         let said = line(json!({ "type": "user_message", "message": "hi" }));
-        assert_eq!(kinds(&codex(&said, &mut live)), ["Prompt"]);
+        assert_eq!(kinds(&codex(&said, &live)), ["Prompt"]);
         let done = line(json!({ "type": "item_completed", "item": { "type": "UserMessage", "content": [{ "text": "hi" }] } }));
-        let evs = codex(&done, &mut live);
-        assert!(matches!(&evs[1].kind, Kind::Prompt(p) if p.first && p.text == "hi"));
-        assert!(live.items, "found out as the lines come");
-        assert!(kinds(&codex(&said, &mut live)).is_empty(), "events aren't prompts once it has one");
-        let mut whole = LineFile::default();
-        assert_eq!(kinds(&codex(&done, &mut whole)), ["Item"], "a rollout read whole as having none");
+        let evs = codex(&done, &live);
+        assert!(matches!(&evs[1].kind, Kind::Prompt(p) if p.text == "hi"), "live reads every completed user message");
+        let items = LineFile { items: true, ..live };
+        assert!(kinds(&codex(&said, &items)).is_empty(), "events aren't prompts once it has one");
+        let whole = LineFile::default();
+        assert_eq!(kinds(&codex(&done, &whole)), ["Item"], "a rollout read whole as having none");
         let count = line(
             json!({ "type": "token_count", "info": { "total_token_usage": { "total_tokens": 5 }, "last_token_usage": { "input_tokens": 10, "cached_input_tokens": 4 } }, "rate_limits": { "primary": {} } }),
         );
-        let evs = codex(&count, &mut whole);
+        let evs = codex(&count, &whole);
         assert_eq!(kinds(&evs), ["Call", "Context", "Limits"]);
         let Kind::Call(c) = &evs[0].kind else { panic!("a call") };
         assert_eq!(c.usage.as_ref().map(|u| (u.tokens.input.clone(), u.tokens.cache_read.clone())), Some((Figure::Worked(6.0), Figure::Written(Some(json!(4))))));
         let refused = line(json!({ "type": "error", "codex_error_info": "cyber_policy" }));
-        assert_eq!(kinds(&codex(&refused, &mut whole)), ["Refusal", "TurnEnd"]);
+        assert_eq!(kinds(&codex(&refused, &whole)), ["Refusal", "TurnEnd"]);
         let odd = CodexLine { raw: json!({ "type": "response_item", "payload": { "type": { "toString": 1 } } }) };
-        assert_eq!(kinds(&codex(&odd, &mut whole)), ["broken:type"]);
+        assert_eq!(kinds(&codex(&odd, &whole)), ["broken:type"]);
     }
 }

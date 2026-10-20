@@ -17,7 +17,7 @@ import { categorize, mcpServerOf, clip } from "./live.js";
 import { costParts, plainModel, priorityTier, PRICES_CHECKED } from "./pricing.js";
 import { listFiles } from "./paths.js";
 import { readLines, hasUserMessages } from "./lines.js";
-import { mapperOf, brokenAt, fail } from "./events.js";
+import { mapperOf, fail, usageOf } from "./events.js";
 
 const UUID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
 const CONTEXT_POINTS = 400;
@@ -177,13 +177,6 @@ function reaches(e) {
   if (e.at === "refusal" || e.at === "usage") return false;
   if (e.at === "text") return !e.results && (!!e.agentId || (!e.meta && !e.sidechain && !e.compactSummary));
   return true;
-}
-
-// A call's usage, which stats reads only for a call it counts.
-function usageOf(evs, e) {
-  const bad = brokenAt(evs, "usage");
-  if (bad) fail(bad);
-  return e.usage;
 }
 
 const tokensOf = (u) => ({ input: u.input, cacheRead: u.cacheRead, cacheWrite5m: u.cacheWrite5m, cacheWrite1h: u.cacheWrite1h, output: u.output });

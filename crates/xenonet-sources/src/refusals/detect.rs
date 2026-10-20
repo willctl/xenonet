@@ -141,7 +141,7 @@ pub fn claude_signal(raw: Option<&Value>) -> Option<Value> {
 pub fn codex_signal(raw: Option<&Value>) -> Option<Value> {
     let raw = raw.filter(|r| truthy(Some(r)) && is_object(Some(r)))?;
     let o = CodexLine { raw: raw.clone() };
-    refusal_of(&line_events::codex(&o, &mut LineFile::default()))
+    refusal_of(&line_events::codex(&o, &LineFile::default()))
 }
 
 /// A Claude Code line's refusal, as the transcripts' mapper reads it
