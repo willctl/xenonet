@@ -187,3 +187,40 @@ pub fn code_of(e: &io::Error) -> Option<&'static str> {
     ];
     table.iter().find(|(k, _)| *k == n).map(|(_, v)| *v)
 }
+
+/// A Windows file's index on its volume, which Node's fs.stat gives as
+/// `ino` there: the one thing that tells a file from another put under the
+/// same name, since NTFS hands a file created under a name just freed the
+/// old file's creation time. std keeps it behind an unstable API.
+#[cfg(windows)]
+#[expect(unsafe_code, reason = "GetFileInformationByHandle, whose file index std doesn't give")]
+pub fn file_index(path: &str) -> Option<u64> {
+    use std::os::windows::io::AsRawHandle;
+    #[repr(C)]
+    #[derive(Default)]
+    #[expect(non_snake_case, reason = "the fields keep the names BY_HANDLE_FILE_INFORMATION has in Windows's headers")]
+    struct ByHandleFileInformation {
+        dwFileAttributes: u32,
+        ftCreationTime: [u32; 2],
+        ftLastAccessTime: [u32; 2],
+        ftLastWriteTime: [u32; 2],
+        dwVolumeSerialNumber: u32,
+        nFileSizeHigh: u32,
+        nFileSizeLow: u32,
+        nNumberOfLinks: u32,
+        nFileIndexHigh: u32,
+        nFileIndexLow: u32,
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetFileInformationByHandle(file: *mut std::ffi::c_void, info: *mut ByHandleFileInformation) -> i32;
+    }
+    // std opens it sharing read, write and delete, so it stands in no
+    // writer's way.
+    let f = std::fs::File::open(path).ok()?;
+    let mut info = ByHandleFileInformation::default();
+    // SAFETY: the handle is the open file's, which outlives the call, and
+    // `info` is laid out as BY_HANDLE_FILE_INFORMATION.
+    let ok = unsafe { GetFileInformationByHandle(f.as_raw_handle(), &raw mut info) } != 0;
+    ok.then(|| (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow))
+}

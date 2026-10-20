@@ -66,7 +66,9 @@ impl Files for StdFiles {
             use std::os::unix::fs::MetadataExt;
             Some(m.ino() as f64)
         };
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        let ino = xenonet_base::fs::file_index(file).map(|i| i as f64);
+        #[cfg(not(any(unix, windows)))]
         let ino = None;
         Ok(Stat { mtime_ms: mtime_ms_of(&m).map_err(|e| FsError::of(e, "stat", file))?, size: m.len() as f64, ino })
     }
@@ -74,8 +76,12 @@ impl Files for StdFiles {
     fn read_text(&mut self, file: &str) -> Result<String, FsError> {
         let bytes = std::fs::read(file).map_err(|e| {
             // Node opens, then reads: a folder opens and fails its read.
+            // Windows refuses to open a folder at all (access denied), where
+            // Node, which opens it with backup semantics, fails the read too.
             if code_of(&e) == Some("EISDIR") {
                 read_error(e)
+            } else if cfg!(windows) && std::path::Path::new(file).is_dir() {
+                FsError { code: Some("EISDIR".into()), message: "EISDIR: illegal operation on a directory, read".into() }
             } else {
                 FsError::of(e, "open", file)
             }
