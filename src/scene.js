@@ -1245,7 +1245,8 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
     ambientClock += dt * THEME.motion.pace;
     const t = still ? STILL_T : ambientClock;
     const adt = still ? 0 : dt;
-    if (camera.position.distanceToSquared(lastCamera) > 1e-6 || controls.target.distanceToSquared(lastTarget) > 1e-6) cameraMovedAt = performance.now();
+    const viewMoved = camera.position.distanceToSquared(lastCamera) > 1e-6 || controls.target.distanceToSquared(lastTarget) > 1e-6;
+    if (viewMoved) cameraMovedAt = performance.now();
     sinceFly = performance.now() > cameraUntil ? sinceFly + 1 : 0;
     lastCamera.copy(camera.position);
     lastTarget.copy(controls.target);
@@ -1297,9 +1298,12 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
     if (selected?.kind === "actor" && performance.now() - actorBranchAt > 500) (actorBranchAt = performance.now()), (branch = actorBranch(selected));
     Object.assign(actorLighting, { focusLevel, selectedId: selected?.id ?? null, branch, dimmed, labelFade });
     actors.step({ t, dt, adt, still, lighting: actorLighting });
-    if (pointerMove) {
+    // What's under the pointer changes when the view moves, as well as
+    // when the pointer does.
+    const pointer = pointerMove ?? (viewMoved ? lastPointer : null);
+    if (pointer) {
       if (!dragging) {
-        const hit = actorAt(pointerMove);
+        const hit = actorAt(pointer);
         hoverActor(actorInFront(hit, hovered) ? hit.rec : null);
       }
       pointerMove = null;
