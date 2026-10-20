@@ -85,6 +85,27 @@ pub fn xenonet_root() -> String {
         .unwrap_or_default()
 }
 
+/// Whether this is installed Tools' command, whose console operator drives
+/// installed XenoNet only: as it was built (package.json's
+/// xenonetComponent), the Tools package's binary (the package.json beside
+/// it says so), or the launcher's copy of that binary, which hooks and MCP
+/// entries run and which has a `.from` file beside it naming the Tools it
+/// was copied from (docs/design/contracts.md, section 12). One binary goes
+/// in a checkout, the Service and the Tools.
+pub fn installed_tools() -> bool {
+    if crate::commands::console::INSTALLED {
+        return true;
+    }
+    let exe = std::env::current_exe().unwrap_or_default();
+    if exe.file_name().is_some_and(|n| exe.with_file_name(format!("{}.from", n.to_string_lossy())).is_file()) {
+        return true;
+    }
+    std::fs::read_to_string(std::path::Path::new(&xenonet_root()).join("package.json"))
+        .ok()
+        .and_then(|t| xenonet_base::json::parse(&t).ok())
+        .is_some_and(|p| p.get("xenonetComponent").and_then(serde_json::Value::as_str) == Some("tools"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -16,24 +16,9 @@ fn serve<F: std::future::Future<Output = Result<(), String>>>(f: impl FnOnce() -
     Ok(0)
 }
 
-/// Whether this is installed Tools' command, whose console operator drives
-/// installed XenoNet only: package.json's xenonetComponent, as it was built
-/// or as the package beside the binary says (one binary goes in a checkout
-/// and in the Tools package).
-fn installed_tools() -> bool {
-    if super::console::INSTALLED {
-        return true;
-    }
-    let file = std::path::Path::new(&crate::sys::xenonet_root()).join("package.json");
-    std::fs::read_to_string(file)
-        .ok()
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .is_some_and(|p| p.get("xenonetComponent").and_then(serde_json::Value::as_str) == Some("tools"))
-}
-
 pub fn run(args: &[String], flags: &Flags) -> Done {
     match args.first().map(String::as_str) {
-        Some("console") => serve(|| xenonet_mcp::serve_console(std::sync::Arc::new(crate::cores::ConsoleControl), installed_tools())),
+        Some("console") => serve(|| xenonet_mcp::serve_console(std::sync::Arc::new(crate::cores::ConsoleControl), crate::sys::installed_tools())),
         Some("assistant") => {
             if args.len() > 1 {
                 return Err(Fail::error("xenonet mcp assistant takes --grant <id> (and --port <n>), or --fixture."));
