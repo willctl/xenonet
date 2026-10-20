@@ -77,8 +77,13 @@ fn windows_profiles() -> Vec<Profile> {
     let sys = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into());
     let exists = |f: &str| Path::new(f).exists();
     let mut out = Vec::new();
-    let p =
-        |id: &str, label: &str, file: String, args: &[&str]| Profile { id: id.into(), label: label.into(), file, args: args.iter().map(|s| s.to_string()).collect(), env: vec![] };
+    let p = |id: &str, label: &str, file: String, args: &[&str]| Profile {
+        id: id.into(),
+        label: label.into(),
+        file,
+        args: args.iter().map(ToString::to_string).collect(),
+        env: vec![],
+    };
     if let Some(pwsh) = which("pwsh").or_else(|| Some("C:\\Program Files\\PowerShell\\7\\pwsh.exe".to_string()).filter(|f| exists(f))) {
         out.push(p("pwsh", "PowerShell 7", pwsh, &["-NoLogo"]));
     }

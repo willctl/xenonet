@@ -45,6 +45,7 @@ fn breakdown(secs: i64) -> Option<Local> {
 }
 
 #[cfg(windows)]
+#[expect(unsafe_code, reason = "_localtime64_s, the C runtime's localtime, which std doesn't wrap")]
 fn breakdown(secs: i64) -> Option<Local> {
     // The C runtime's struct tm, nine ints.
     #[repr(C)]
@@ -54,7 +55,9 @@ fn breakdown(secs: i64) -> Option<Local> {
         fn _localtime64_s(tm: *mut Tm, time: *const i64) -> i32;
     }
     let mut tm = Tm::default();
-    // SAFETY: _localtime64_s reads the time given and fills the tm given.
+    // SAFETY: _localtime64_s reads the time given and fills the tm given;
+    // both are locals that outlive the call, and Tm is laid out as the C
+    // runtime's struct tm, nine ints.
     let ok = unsafe { _localtime64_s(&mut tm, &secs) } == 0;
     let [sec, min, hour, mday, mon, year, ..] = tm.0;
     ok.then(|| Local { year: i64::from(year) + 1900, month: (mon + 1) as u32, day: mday as u32, hour: hour as u32, minute: min as u32, second: sec as u32 })

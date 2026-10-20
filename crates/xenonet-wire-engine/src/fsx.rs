@@ -3,7 +3,7 @@
 //! and coded as Node words and codes it ("ENOENT: no such file or
 //! directory, open '/x'").
 
-use crate::js::{at, no_method, num, obj, text};
+use crate::js::{at, no_method, obj, text};
 use std::io::Write;
 use std::path::Path;
 use xenonet_base::fs::{mtime_ms_of, FsError};
@@ -137,7 +137,7 @@ pub fn call(method: &str, args: &[Arg]) -> Result<Arg> {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&p, std::fs::Permissions::from_mode(num(&at(args, 1)) as u32)).map_err(|e| of(e, "chmod", &p))?;
+                std::fs::set_permissions(&p, std::fs::Permissions::from_mode(crate::js::num(&at(args, 1)) as u32)).map_err(|e| of(e, "chmod", &p))?;
             }
             Ok(Arg::Undef)
         }

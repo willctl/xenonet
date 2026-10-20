@@ -146,7 +146,7 @@ mod windows {
                 return None;
             }
             let mut entry: ProcessEntry32W = std::mem::zeroed();
-            entry.dwSize = std::mem::size_of::<ProcessEntry32W>() as u32;
+            entry.dwSize = size_of::<ProcessEntry32W>() as u32;
             let mut found = None;
             let mut more = Process32FirstW(snapshot, &mut entry) != 0;
             while more {
