@@ -16,7 +16,7 @@ XenoNet is at 0.x. Fixes go into the latest release only, and installed copies m
 
 ## What's in scope
 
-Everything in this repository as it ships from [GitHub Releases](https://github.com/willctl/xenonet/releases): the background service (`server/`, `core/`), the console page (`src/`), Desktop (`electron/`), the `xenonet` command (`cli/`), the hooks it installs and the two MCP servers (`mcp/`), the actor gateway, the installers and the update path, and the Service and Tools archives. The JevRouter SDK in `vendor/` is in scope too; `vendor/SOURCE.md` says which upstream commit it is.
+Everything in this repository as it ships from [GitHub Releases](https://github.com/willctl/xenonet/releases): the `xenonet` binary, built from `crates/`, which is the background service, the `xenonet` command, the hooks it installs and the MCP servers; the console page (`src/`); Desktop (`electron/`, with the `core/` modules it runs itself); the actor gateway; the installers and the update path; and the Service and Tools archives. The JavaScript in `core/`, `server/`, `cli/` and `mcp/` that the binary replaced is the contract its tests check, and still ships in the archives: a problem in it counts wherever something still runs it. The JevRouter SDK in `vendor/` is in scope too; `vendor/SOURCE.md` says which upstream commit it is.
 
 Examples of what to report:
 

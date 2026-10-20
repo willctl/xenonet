@@ -34,6 +34,9 @@ struct Fake {
     fail_integration: Mutex<Option<CoreError>>,
     /// The events connect's own Claude Code hooks are there for.
     connected: Mutex<Vec<String>>,
+    /// An actor's side: the verdict on its process, and what you allowed it.
+    actor_verdict: Mutex<Value>,
+    allowed: Mutex<Vec<&'static str>>,
 }
 
 impl Fake {
@@ -43,6 +46,7 @@ impl Fake {
         *f.person.lock().unwrap() = json!({ "ok": true });
         *f.window.lock().unwrap() = json!({ "ok": true });
         *f.environment.lock().unwrap() = json!("trench");
+        *f.actor_verdict.lock().unwrap() = json!({ "ok": true, "checked": true, "chain": [{ "pid": 50, "exe": "/home/nova/bin/wren" }] });
         f
     }
     fn note(&self, name: &str, args: Value) {
@@ -142,6 +146,44 @@ impl cores::Verify for Fake {
     }
     async fn window(&self, _peer: Peer) -> Value {
         self.window.lock().unwrap().clone()
+    }
+    async fn actor(&self, _peer: Peer, slug: &str, _product: Value, _pid: Value) -> Value {
+        self.note("actor", json!(slug));
+        self.actor_verdict.lock().unwrap().clone()
+    }
+}
+
+/// Wren's token, one for an actor still waiting for you, and one XenoNet
+/// doesn't know (made up, and split so the doctor's look for tokens left in
+/// repos passes over this file).
+fn token(which: char) -> String {
+    format!("Bearer {}{}", concat!("xenonet_", "actor_"), which.to_string().repeat(64))
+}
+
+impl cores::Registration for Fake {
+    fn authenticate(&self, token: &str) -> Value {
+        match token.chars().last() {
+            Some('a') => json!({ "ok": true, "id": "actor:wren", "slug": "wren", "state": "allowed" }),
+            Some('b') => json!({ "ok": true, "id": "actor:kite", "slug": "kite", "state": "waiting" }),
+            _ => json!({ "ok": false, "code": "bad-token", "error": "XenoNet doesn't know that token" }),
+        }
+    }
+}
+
+impl cores::Actors for Fake {
+    fn can(&self, _id: &str, capability: &str) -> bool {
+        self.allowed.lock().unwrap().contains(&capability)
+    }
+    fn info(&self, _id: &str) -> Option<Value> {
+        Some(json!({ "name": "Wren", "product": null }))
+    }
+}
+
+// Every body passes the schemas here, so a route's own checks are what
+// the tests reach.
+impl cores::Schemas for Fake {
+    fn check(&self, _schema: &str, _value: &Value) -> Result<(), String> {
+        Ok(())
     }
 }
 
@@ -298,6 +340,19 @@ fn service(hub: bool) -> (Arc<Ctx>, Arc<Fake>) {
     (Ctx::for_tests(c), f)
 }
 
+/// The same, with actors on: tokens, their processes and what you allowed.
+fn with_actors() -> (Arc<Ctx>, Arc<Fake>) {
+    let f = Arc::new(Fake::new());
+    let mut c = Cores::pending(true, false, false);
+    c.engine = f.clone();
+    c.verify = f.clone();
+    c.policy = f.clone();
+    c.registration = Some(f.clone());
+    c.actors = Some(f.clone());
+    c.schemas = f.clone();
+    (Ctx::for_tests(c), f)
+}
+
 async fn go(ctx: &Arc<Ctx>, method: &str, path: &str, headers: &[(&str, &str)], body: Option<Value>) -> Reply {
     let text = body.map(|b| b.to_string());
     let answer = api(ctx, Req::fake(method, path, headers, text.as_deref())).await;
@@ -415,6 +470,254 @@ async fn a_token_goes_in_the_header_never_in_a_url() {
     assert_eq!((r.status, r.body_json()["code"].clone()), (400, json!("bad-request")));
     let r = go(&ctx, "GET", "/api/actors?x=xenonet_actor_00", &[], None).await;
     assert_eq!(r.status, 400);
+}
+
+#[tokio::test]
+async fn an_actors_calls_need_its_token_its_own_process_and_what_you_allowed_it() {
+    let (ctx, f) = with_actors();
+    let wren = token('a');
+    let as_wren: [(&str, &str); 1] = [("authorization", &wren)];
+    let code = |r: &Reply| (r.status, r.body_json()["code"].clone(), r.body_json()["error"].clone());
+    // Reading needs no capability; sending and claiming do.
+    assert_eq!(go(&ctx, "POST", "/api/engine/whoami", &as_wren, Some(json!({}))).await.body_json(), json!({ "you": ME }));
+    assert_eq!(go(&ctx, "POST", "/api/engine/peers", &as_wren, Some(json!({}))).await.status, 200);
+    let r = go(&ctx, "POST", "/api/engine/send", &as_wren, Some(json!({ "to": "repo", "text": "hi" }))).await;
+    assert_eq!(code(&r), (403, json!("not-allowed"), json!("send needs the message-agents capability, which this actor wasn't allowed")));
+    let r = go(&ctx, "POST", "/api/engine/claim", &as_wren, Some(json!({ "paths": ["src/"] }))).await;
+    assert_eq!(code(&r), (403, json!("not-allowed"), json!("claim needs the edit-repos capability, which this actor wasn't allowed")));
+    assert!(f.was("send").is_empty() && f.was("claim").is_empty());
+    f.allowed.lock().unwrap().extend(["message-agents", "edit-repos"]);
+    assert_eq!(go(&ctx, "POST", "/api/engine/claim", &as_wren, Some(json!({ "paths": ["src/"] }))).await.status, 200);
+    assert_eq!(f.was("claim")[0], json!(["actor:wren", { "paths": ["src/"] }]));
+    // A send says how XenoNet knew who sent it: the token, from a process it checked.
+    assert_eq!(go(&ctx, "POST", "/api/engine/send", &as_wren, Some(json!({ "to": "claude:x", "text": "hi" }))).await.status, 200);
+    assert_eq!(f.was("send")[0], json!(["actor:wren", { "to": "claude:x", "text": "hi" }, { "method": "token", "process": "checked", "strength": "partial" }]));
+    // Six messages an hour to a repo or to all, sixty in all.
+    for i in 0..6 {
+        assert_eq!(go(&ctx, "POST", "/api/engine/send", &as_wren, Some(json!({ "to": "all", "text": format!("all {i}") }))).await.status, 200);
+    }
+    let r = go(&ctx, "POST", "/api/engine/send", &as_wren, Some(json!({ "to": "repo", "text": "one more" }))).await;
+    assert_eq!(code(&r), (429, json!("too-many"), json!("an actor sends at most 6 messages an hour to a repo or to all")));
+    assert!(r.header("retry-after").is_some());
+    for i in 0..53 {
+        assert_eq!(go(&ctx, "POST", "/api/engine/send", &as_wren, Some(json!({ "to": "claude:x", "text": format!("{i}") }))).await.status, 200, "{i}");
+    }
+    let r = go(&ctx, "POST", "/api/engine/send", &as_wren, Some(json!({ "to": "claude:x", "text": "sixty-one" }))).await;
+    assert_eq!(code(&r), (429, json!("too-many"), json!("an actor sends at most 60 messages an hour")));
+    assert_eq!(f.was("send").len(), 60);
+    // Its focus is an event on the feed: 120 at once at most.
+    for i in 0..120 {
+        assert_eq!(go(&ctx, "POST", "/api/engine/focus", &as_wren, Some(json!({ "text": format!("{i}") }))).await.status, 200, "{i}");
+    }
+    assert_eq!(go(&ctx, "POST", "/api/engine/focus", &as_wren, Some(json!({ "text": "again" }))).await.status, 429);
+    // What it sends has to be JSON, and small.
+    let r = api(&ctx, Req::fake("POST", "/api/engine/whoami", &as_wren, Some("{"))).await;
+    assert_eq!(code(&answered(&ctx, "POST", "/api/engine/whoami", r)), (400, json!("bad-request"), json!("that body isn't JSON")));
+    let big = json!({ "text": "x".repeat(17 << 10) });
+    assert_eq!(code(&go(&ctx, "POST", "/api/engine/whoami", &as_wren, Some(big)).await), (413, json!("too-big"), json!("that body is over the size this route takes")));
+    // Only from its own processes, only once you've allowed it, only with
+    // a token XenoNet knows, and as an actor or a session, never both.
+    *f.actor_verdict.lock().unwrap() = json!({ "ok": false, "checked": true, "reason": "the pid it names has to be the calling process or one of its parents" });
+    let r = go(&ctx, "POST", "/api/engine/whoami", &as_wren, Some(json!({}))).await;
+    assert_eq!(code(&r), (403, json!("wrong-process"), json!("the pid it names has to be the calling process or one of its parents")));
+    let kite = token('b');
+    let r = go(&ctx, "POST", "/api/engine/whoami", &[("authorization", &kite)], Some(json!({}))).await;
+    assert_eq!(code(&r).0, 403);
+    assert_eq!(code(&r).1, json!("waiting"));
+    let unknown = token('c');
+    let r = go(&ctx, "POST", "/api/engine/whoami", &[("authorization", &unknown)], Some(json!({}))).await;
+    assert_eq!((code(&r).0, code(&r).1, r.header("www-authenticate")), (401, json!("bad-token"), Some("Bearer realm=\"xenonet\", error=\"invalid_token\"")));
+    let r = go(&ctx, "POST", "/api/engine/whoami", &[("authorization", "Basic d3Jlbg==")], Some(json!({}))).await;
+    assert_eq!(code(&r).1, json!("no-token"));
+    let r = go(&ctx, "POST", "/api/engine/whoami", &[("authorization", &wren), AGENT], Some(json!({}))).await;
+    assert_eq!(code(&r), (400, json!("bad-request"), json!("a caller is a session or an actor, never both, so send x-xenonet-agent or a token, not both")));
+    // A Claude Code channel is a session's alone.
+    assert_eq!(go(&ctx, "POST", "/api/engine/channel", &as_wren, Some(json!({}))).await.status, 404);
+}
+
+#[tokio::test]
+async fn managing_actors_is_the_windows_or_yours_never_an_actors() {
+    let (ctx, f) = with_actors();
+    let key = ctx.window_key.reveal().to_string();
+    let wren = token('a');
+    let code = |r: &Reply| (r.status, r.body_json()["code"].clone(), r.body_json()["error"].clone());
+    // The window's own: with its key, no token, from its own process.
+    let no_key = json!("this is for XenoNet's own window, and the request didn't come with its key");
+    let in_xenonet = "this is for XenoNet's own window, and it came from a program run in XenoNet";
+    for (m, p) in [
+        ("POST", "/api/actors"),
+        ("GET", "/api/actors/requests"),
+        ("GET", "/api/actors/tokens"),
+        ("POST", "/api/actors/requests/r1"),
+        ("POST", "/api/actors/wren/token"),
+        ("POST", "/api/actors/wren/gateway"),
+        ("PUT", "/api/actors/wren/wake"),
+        ("POST", "/api/actors/you"),
+        ("DELETE", "/api/actors/you"),
+    ] {
+        let at = format!("{m} {p}");
+        assert_eq!(code(&go(&ctx, m, p, &[], Some(json!({}))).await), (403, json!("yours"), no_key.clone()), "{at}");
+        assert_eq!(code(&go(&ctx, m, p, &[("x-xenonet-window", "not-its-key")], Some(json!({}))).await), (403, json!("yours"), no_key.clone()), "{at}");
+        let both = [("x-xenonet-window", key.as_str()), ("authorization", wren.as_str())];
+        assert_eq!(code(&go(&ctx, m, p, &both, Some(json!({}))).await), (403, json!("yours"), json!("this is for XenoNet's own window, and an actor can't do it")), "{at}");
+        *f.window.lock().unwrap() = json!({ "ok": false, "reason": in_xenonet });
+        assert_eq!(code(&go(&ctx, m, p, &[("x-xenonet-window", &key)], Some(json!({}))).await), (403, json!("yours"), json!(in_xenonet)), "{at}");
+        *f.window.lock().unwrap() = json!({ "ok": true });
+        assert_ne!(go(&ctx, m, p, &[("x-xenonet-window", &key)], Some(json!({}))).await.status, 403, "{at}: the window's own gets past");
+    }
+    // Yours: from the window, or your own terminal, never an actor.
+    let under_codex = "this is yours to do, and it came from under a Codex process; run it in your own terminal or in XenoNet";
+    for (m, p) in [
+        ("DELETE", "/api/actors/wren"),
+        ("DELETE", "/api/actors/wren/gateway"),
+        ("GET", "/api/actors/wakes"),
+        ("POST", "/api/actors/wren/wake/test"),
+        ("DELETE", "/api/actors/wren/wake"),
+    ] {
+        let at = format!("{m} {p}");
+        assert_eq!(code(&go(&ctx, m, p, &[("authorization", &wren)], None).await), (403, json!("yours"), json!("this is yours to do, and an actor can't do it")), "{at}");
+        assert_eq!(code(&go(&ctx, m, p, &[("x-xenonet-window", "not-its-key")], None).await), (403, json!("yours"), no_key.clone()), "{at}");
+        *f.person.lock().unwrap() = json!({ "ok": false, "reason": under_codex });
+        assert_eq!(code(&go(&ctx, m, p, &[], None).await), (403, json!("yours"), json!(under_codex)), "{at}");
+        *f.person.lock().unwrap() = json!({ "ok": true });
+        assert_ne!(go(&ctx, m, p, &[], None).await.status, 403, "{at}: from your terminal");
+        assert_ne!(go(&ctx, m, p, &[("x-xenonet-window", &key)], None).await.status, 403, "{at}: from the window");
+    }
+    // An actor registers no actors and asks for no gateway token; a
+    // program asking for either is held to its process.
+    let r = go(&ctx, "POST", "/api/actors/register", &[("authorization", &wren)], Some(json!({}))).await;
+    assert_eq!(code(&r), (403, json!("not-allowed"), json!("an actor can't register actors: that's for you, in XenoNet's window or your own terminal")));
+    assert_eq!(code(&go(&ctx, "POST", "/api/actors/register", &[], Some(json!({}))).await).1, json!("wrong-process"));
+    let r = go(&ctx, "POST", "/api/actors/wren/gateway/ask", &[("authorization", &wren)], Some(json!({}))).await;
+    assert_eq!(code(&r).1, json!("not-allowed"));
+    assert_eq!(code(&go(&ctx, "POST", "/api/actors/wren/gateway/ask", &[], Some(json!({}))).await).1, json!("wrong-process"));
+    assert_eq!(go(&ctx, "POST", "/api/actors/%20not%20a%20slug/gateway/ask", &[], Some(json!({}))).await.status, 404);
+}
+
+#[tokio::test]
+async fn an_actor_reports_only_as_itself_from_its_own_process_and_within_its_rates() {
+    let (ctx, f) = with_actors();
+    let (wren, kite) = (token('a'), token('b'));
+    let as_wren: [(&str, &str); 1] = [("authorization", &wren)];
+    let code = |r: &Reply| (r.status, r.body_json()["code"].clone(), r.body_json()["error"].clone());
+    // A heartbeat is only a heartbeat.
+    for (k, to) in [("events", "events"), ("targets", "targets"), ("remove", "targets"), ("replace", "targets")] {
+        let r = go(&ctx, "POST", "/api/actors/heartbeat", &as_wren, Some(json!({ k: [] }))).await;
+        assert_eq!(code(&r), (400, json!("bad-request"), json!(format!("{k} go to POST /api/actors/{to}, not to a heartbeat"))));
+    }
+    // Two a second per instance, at most.
+    for _ in 0..2 {
+        assert_ne!(go(&ctx, "POST", "/api/actors/heartbeat", &as_wren, Some(json!({}))).await.status, 429);
+    }
+    let r = go(&ctx, "POST", "/api/actors/heartbeat", &as_wren, Some(json!({}))).await;
+    assert_eq!((r.status, r.header("retry-after")), (429, Some("1")));
+    assert_ne!(go(&ctx, "POST", "/api/actors/heartbeat", &as_wren, Some(json!({ "instance": "phone" }))).await.status, 429, "another instance has its own");
+    // Events and targets come as lists, of a bounded size.
+    let r = go(&ctx, "POST", "/api/actors/events", &as_wren, Some(json!({ "events": vec![json!({}); 51] }))).await;
+    assert_eq!(code(&r), (413, json!("too-big"), json!("50 events a call at most")));
+    assert_eq!(code(&go(&ctx, "POST", "/api/actors/events", &as_wren, Some(json!({ "events": 5 }))).await).2, json!("events is a list of what it did"));
+    assert_eq!(code(&go(&ctx, "POST", "/api/actors/targets", &as_wren, Some(json!({ "targets": "src" }))).await).2, json!("targets is a list"));
+    assert_eq!(code(&go(&ctx, "POST", "/api/actors/targets", &as_wren, Some(json!({ "remove": {} }))).await).2, json!("remove is a list"));
+    assert_eq!(code(&go(&ctx, "POST", "/api/actors/heartbeat", &as_wren, Some(json!([]))).await).2, json!("the body is a JSON object"));
+    // One still waiting for you may ask how it stands, and nothing else.
+    assert_ne!(go(&ctx, "GET", "/api/actors/me", &[("authorization", &kite)], None).await.status, 403);
+    for (m, p) in
+        [("POST", "/api/actors/heartbeat"), ("POST", "/api/actors/events"), ("POST", "/api/actors/targets"), ("DELETE", "/api/actors/me"), ("GET", "/api/actors/me/stream")]
+    {
+        assert_eq!(code(&go(&ctx, m, p, &[("authorization", &kite)], Some(json!({}))).await).1, json!("waiting"), "{m} {p}");
+    }
+    // And each comes from the actor's own processes.
+    *f.actor_verdict.lock().unwrap() =
+        json!({ "ok": false, "checked": true, "reason": "an actor's token doesn't work from under a session, and this came from under a Codex process" });
+    for (m, p) in [
+        ("GET", "/api/actors/me"),
+        ("POST", "/api/actors/heartbeat"),
+        ("POST", "/api/actors/events"),
+        ("POST", "/api/actors/targets"),
+        ("DELETE", "/api/actors/me"),
+        ("GET", "/api/actors/me/stream"),
+    ] {
+        let body = match (m, p) {
+            ("POST", "/api/actors/heartbeat") => Some(json!({})),
+            ("POST", _) => Some(json!({ "events": [], "targets": [] })),
+            _ => None,
+        };
+        assert_eq!(code(&go(&ctx, m, p, &as_wren, body).await).1, json!("wrong-process"), "{m} {p}");
+    }
+    assert_eq!(code(&go(&ctx, "GET", "/api/actors/me/stream", &[], None).await).1, json!("no-token"));
+}
+
+#[tokio::test]
+async fn remote_access_narrows_from_your_terminal_and_widens_only_from_the_window() {
+    let f = Arc::new(Fake::new());
+    let mut c = Cores::pending(true, true, false);
+    c.verify = f.clone();
+    let ctx = Ctx::for_tests(c);
+    let key = ctx.window_key.reveal().to_string();
+    let wren = token('a');
+    let grant = "gr_0123456789abcdef01234567";
+    let code = |r: &Reply| (r.status, r.body_json()["code"].clone(), r.body_json()["error"].clone());
+    let at = |p: &str| p.replace("GRANT", grant);
+    // What narrows it, or only reads it: yours, from your terminal too.
+    let under_codex = "this is yours to do, and it came from under a Codex process; run it in your own terminal or in XenoNet";
+    for (m, p) in [
+        ("GET", "/api/assistant"),
+        ("GET", "/api/assistant/places"),
+        ("GET", "/api/assistant/audit"),
+        ("GET", "/api/assistant/tunnels"),
+        ("POST", "/api/assistant/disable"),
+        ("POST", "/api/assistant/GRANT/revoke"),
+        ("POST", "/api/assistant/GRANT/tunnel/stop"),
+        ("POST", "/api/assistant/GRANT/tunnel/forget"),
+    ] {
+        let p = at(p);
+        assert_eq!(
+            code(&go(&ctx, m, &p, &[("authorization", &wren)], Some(json!({}))).await),
+            (403, json!("yours"), json!("this is yours to do, and an actor can't do it")),
+            "{m} {p}"
+        );
+        *f.person.lock().unwrap() = json!({ "ok": false, "reason": under_codex });
+        assert_eq!(code(&go(&ctx, m, &p, &[], Some(json!({}))).await), (403, json!("yours"), json!(under_codex)), "{m} {p}");
+        *f.person.lock().unwrap() = json!({ "ok": true });
+        assert_ne!(go(&ctx, m, &p, &[], Some(json!({}))).await.status, 403, "{m} {p}: from your terminal");
+        assert_ne!(go(&ctx, m, &p, &[("x-xenonet-window", &key)], Some(json!({}))).await.status, 403, "{m} {p}: from the window");
+    }
+    // What widens it: the window's alone, never your terminal or an actor.
+    let no_key = json!("this is for XenoNet's own window, and the request didn't come with its key");
+    for (m, p) in [
+        ("POST", "/api/assistant/enable"),
+        ("POST", "/api/assistant/preview"),
+        ("POST", "/api/assistant/pair"),
+        ("POST", "/api/assistant/GRANT"),
+        ("POST", "/api/assistant/GRANT/rotate"),
+        ("POST", "/api/assistant/GRANT/tunnel"),
+        ("POST", "/api/assistant/GRANT/tunnel/key"),
+        ("POST", "/api/assistant/GRANT/tunnel/start"),
+        ("POST", "/api/assistant/GRANT/tunnel/check"),
+    ] {
+        let p = at(p);
+        assert_eq!(code(&go(&ctx, m, &p, &[], Some(json!({}))).await), (403, json!("yours"), no_key.clone()), "{m} {p}: your terminal");
+        let both = [("x-xenonet-window", key.as_str()), ("authorization", wren.as_str())];
+        assert_eq!(code(&go(&ctx, m, &p, &both, Some(json!({}))).await).1, json!("yours"), "{m} {p}: an actor");
+        assert_ne!(go(&ctx, m, &p, &[("x-xenonet-window", &key)], Some(json!({}))).await.status, 403, "{m} {p}: the window");
+    }
+    // A grant is named by its id alone.
+    for p in ["/api/assistant/gr_0123/revoke", "/api/assistant/gr_0123456789ABCDEF01234567", "/api/assistant/../actors/revoke", "/api/assistant/GRANT/tunnel/delete"] {
+        assert_eq!(go(&ctx, "POST", &at(p), &[("x-xenonet-window", &key)], Some(json!({}))).await.status, 404, "{p}");
+    }
+    assert_eq!(code(&go(&ctx, "GET", "/api/assistant/audit?grant=everyone", &[], None).await), (400, json!("bad-request"), json!("grant is a grant's id")));
+    // With remote actors off, there's nothing to reach.
+    let off = Ctx::for_tests(Cores::pending(true, false, false));
+    assert_eq!(code(&go(&off, "GET", "/api/assistant", &[], None).await).1, json!("off"));
+}
+
+#[tokio::test]
+async fn with_actors_off_a_token_reaches_nothing() {
+    let mut c = Cores::pending(false, false, false);
+    c.engine = Arc::new(Fake::new());
+    let off = Ctx::for_tests(c);
+    let r = go(&off, "POST", "/api/engine/whoami", &[("authorization", &token('a'))], Some(json!({}))).await;
+    assert_eq!((r.status, r.body_json()["code"].clone()), (503, json!("off")));
 }
 
 // ---------- test/delivery-routes.test.js ----------

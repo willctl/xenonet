@@ -176,17 +176,20 @@ pub fn write_token_file(file: &str, token: &str, windows: bool, run: &mut Run<'_
     Ok(full)
 }
 
-// Its one test is about unix file modes. (Two attributes, not
-// cfg(all(test, unix)): clippy takes only a plain cfg(test) for test code.)
+// The tests of unix file modes are unix's alone; the made-up Windows runs
+// everywhere. (cfg(unix) on each such test, not cfg(all(test, unix)):
+// clippy takes only a plain cfg(test) for test code.)
 #[cfg(test)]
-#[cfg(unix)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
 
     // Made up, and split so the doctor's search for tokens left in repos
     // doesn't take this file for one that holds a real token.
     const TOKEN: &str = concat!("xenonet_", "actor_", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    const SID: &str = "S-1-5-21-1111111111-2222222222-3333333333-1001";
 
+    #[cfg(unix)]
     fn temp() -> String {
         let d = std::env::temp_dir().join(format!(
             "xenonet-token-file-{}-{}",
@@ -197,6 +200,99 @@ mod tests {
         std::fs::canonicalize(d).unwrap().to_string_lossy().into_owned()
     }
 
+    /// A made-up Windows whose icacls says a file's ACL is `acl` and
+    /// whose whoami says this account is SID; `None` for a command that
+    /// fails.
+    fn windows(acl: Option<String>, whoami: bool) -> impl FnMut(&str, &[&str]) -> Result<String, String> {
+        move |cmd: &str, args: &[&str]| match (cmd, args.get(1).copied()) {
+            ("whoami", _) if whoami => Ok(format!("\"pc\\\\someone\",\"{SID}\"\r\n")),
+            ("icacls", Some("/save")) if acl.is_some() => {
+                let text = format!("{}\r\n{}\r\n", args[0], acl.as_deref().unwrap_or(""));
+                let body: Vec<u8> = [0xff, 0xfe].into_iter().chain(text.encode_utf16().flat_map(u16::to_le_bytes)).collect();
+                std::fs::write(args[2], body).unwrap();
+                Ok(String::new())
+            }
+            _ => Err(format!("{cmd} failed\nwith more on the next line")),
+        }
+    }
+
+    #[test]
+    fn on_windows_a_token_file_is_used_only_when_its_acl_lets_no_one_else_read_it() {
+        let dir = std::env::temp_dir().join(format!("xenonet-token-file-acl-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("xenonet.token").to_string_lossy().into_owned();
+        std::fs::write(&file, format!("{TOKEN}\n")).unwrap();
+        let read = |acl: Option<String>, whoami: bool| read_token_file(&file, true, &mut windows(acl, whoami)).map_err(|e| e.message().to_string());
+        for yours in [format!("D:P(A;;FA;;;{SID})"), format!("D:PAI(A;;FA;;;{SID})(A;;FA;;;SY)(A;;FA;;;BA)(A;OICIIO;GA;;;BU)(D;;FA;;;WD)")] {
+            assert_eq!(read(Some(yours.clone()), true), Ok(TOKEN.to_string()), "{yours}");
+        }
+        let loose =
+            format!("other users can read {file}, so XenoNet won't use the token in it; make it yours alone with icacls \"{file}\" /inheritance:r /grant:r \"%USERNAME%:F\"");
+        for others in [format!("D:AI(A;ID;FA;;;{SID})(A;ID;0x1200a9;;;BU)"), "D:NO_ACCESS_CONTROL".into(), format!("D:(A;;FR;;;{SID}0)"), "D:(XA;;FR;;;AU)".into()] {
+            assert_eq!(read(Some(others.clone()), true), Err(loose.clone()), "{others}");
+        }
+        // When it can't tell, it doesn't use the token.
+        let blind = format!("XenoNet couldn't tell who else can read {file}, so it won't use the token in it; keep it in a folder of your own, such as one in your user folder");
+        for (acl, whoami) in [(None, true), (Some(format!("D:P(A;;FA;;;{SID})")), false), (Some("no ACL here".to_string()), true)] {
+            assert_eq!(read(acl, whoami), Err(blind.clone()));
+        }
+        // Nor one that isn't a file, or holds no token.
+        assert_eq!(read_token_file(&dir.to_string_lossy(), true, &mut windows(None, true)).unwrap_err().message(), format!("{} isn't a file", dir.to_string_lossy()));
+        std::fs::write(&file, "xenonet_actor_short\n").unwrap();
+        assert_eq!(read(Some(format!("D:P(A;;FA;;;{SID})")), true), Err(format!("{file} doesn't hold an actor's token")));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn on_windows_a_token_is_written_only_once_the_file_is_yours_alone() {
+        let dir = std::env::temp_dir().join(format!("xenonet-token-file-write-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let file = dir.join("wren").join("xenonet.token").to_string_lossy().into_owned();
+        let full = resolve(&file);
+        // What icacls was asked, and what the file held when it was.
+        let asked = RefCell::new(Vec::new());
+        let mut run = |cmd: &str, args: &[&str]| -> Result<String, String> {
+            match cmd {
+                "whoami" => Ok(format!("\"pc\\\\someone\",\"{SID}\"\r\n")),
+                "icacls" => {
+                    asked.borrow_mut().push((args.join(" "), std::fs::read_to_string(args[0]).unwrap()));
+                    Ok(String::new())
+                }
+                _ => Err(format!("no {cmd} here")),
+            }
+        };
+        assert_eq!(write_token_file(&file, "not a token", true, &mut run, false, None).unwrap_err().message(), "that isn't an actor's token");
+        assert_eq!(write_token_file(&file, TOKEN, true, &mut run, false, None).unwrap(), full);
+        assert_eq!(asked.borrow().clone(), [(format!("{full} /inheritance:r /grant:r *{SID}:F /q"), String::new())]);
+        assert_eq!(std::fs::read_to_string(&full).unwrap(), format!("{TOKEN}\n"));
+        assert_eq!(write_token_file(&file, TOKEN, true, &mut run, false, None).unwrap_err().message(), format!("{full} is there already; pass --force to replace it"));
+        assert_eq!(write_token_file(&file, TOKEN, true, &mut run, true, None).unwrap(), full);
+        // When it can't be made yours alone, no token is left in it.
+        for whoami in [true, false] {
+            let other = dir.join(format!("other-{whoami}.token")).to_string_lossy().into_owned();
+            let e = write_token_file(&other, TOKEN, true, &mut windows(None, whoami), false, None).unwrap_err();
+            let first = if whoami { "icacls failed" } else { "whoami failed" };
+            assert_eq!(e.message(), format!("XenoNet couldn't make {} yours alone, so it didn't write the token there ({first})", resolve(&other)));
+            assert!(!Path::new(&other).exists());
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_token_from_the_environment() {
+        let mut run = windows(None, false);
+        let none = |_: &str| None;
+        assert_eq!(token_from_env(&none, false, &mut run).unwrap(), None);
+        let empty = |_: &str| Some(String::new());
+        assert_eq!(token_from_env(&empty, false, &mut run).unwrap(), None);
+        let bad = |k: &str| (k == "XENONET_ACTOR_TOKEN").then(|| "xenonet_actor_nope".to_string());
+        assert_eq!(token_from_env(&bad, false, &mut run).unwrap_err().message(), "XENONET_ACTOR_TOKEN doesn't hold an actor's token");
+        // The file, when both are set, and its own checks with it.
+        let both = |k: &str| Some(if k == "XENONET_ACTOR_TOKEN_FILE" { "/no/such/xenonet.token".to_string() } else { TOKEN.to_string() });
+        assert_eq!(token_from_env(&both, false, &mut run).unwrap_err().message(), "there's no token file at /no/such/xenonet.token");
+    }
+
+    #[cfg(unix)]
     #[test]
     fn written_yours_alone_and_read_back() {
         let dir = temp();
@@ -220,6 +316,29 @@ mod tests {
         assert_eq!(read_token_file(&format!("{dir}/none"), false, &mut run), Err(Error::Said(format!("there's no token file at {dir}/none"))));
         let env = |k: &str| (k == "XENONET_ACTOR_TOKEN").then(|| format!(" {TOKEN}\n"));
         assert_eq!(token_from_env(&env, false, &mut run).unwrap(), Some((TOKEN.to_string(), None)));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_is_held_to_the_file_it_names_and_force_makes_a_loose_file_yours() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp();
+        let mut run = |_: &str, _: &[&str]| Err("no commands here".to_string());
+        let (loose, link) = (format!("{dir}/loose.token"), format!("{dir}/link.token"));
+        std::fs::write(&loose, format!("{TOKEN}\n")).unwrap();
+        std::fs::set_permissions(&loose, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::os::unix::fs::symlink(&loose, &link).unwrap();
+        // A link to a file others can read is refused as that file is.
+        let refused = format!("other users can read {link}, so XenoNet won't use the token in it; make it yours alone with chmod 600");
+        assert_eq!(read_token_file(&link, false, &mut run).unwrap_err().message(), refused);
+        // Written again with --force, it's yours alone before the token goes in.
+        assert_eq!(write_token_file(&loose, TOKEN, false, &mut run, true, None).unwrap(), loose);
+        assert_eq!(std::fs::metadata(&loose).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(read_token_file(&link, false, &mut run).unwrap(), TOKEN);
+        std::fs::write(&loose, "a note, not a token\n").unwrap();
+        assert_eq!(read_token_file(&loose, false, &mut run).unwrap_err().message(), format!("{loose} doesn't hold an actor's token"));
+        assert_eq!(read_token_file(&dir, false, &mut run).unwrap_err().message(), format!("{dir} isn't a file"));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
