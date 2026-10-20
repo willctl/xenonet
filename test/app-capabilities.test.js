@@ -8,6 +8,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createConnect, mergeHooks, FORMATS } from "../core/engine/connect.js";
+import { PROCESSES, agentApps, agentOf } from "../core/processes.js";
+import { createVerifier } from "../core/engine/verify.js";
+import { EngineStore } from "../core/engine/store.js";
 
 // A made-up app, Wren, whose config format keeps command hooks in
 // ~/.wren/hooks.json and its MCP server through `wren mcp`, built from what
@@ -72,4 +75,67 @@ test("connect: the registry connects Claude Code and Codex, through their own fo
   const connect = createConnect({ platform: "darwin", port: 47840, bin: "/x/xenonet", home: "/nowhere", env: { PATH: "" }, demo: true });
   await assert.rejects(connect.apply(), { message: "this is the demo, so connect Claude Code and Codex from XenoNet, with your own sessions" });
   assert.deepEqual(Object.keys(FORMATS), ["claude-settings", "codex-hooks"]);
+});
+
+test("processes: the apps whose processes XenoNet tells apart, and so the apps verify checks, are exactly Claude Code, Codex and OpenCode", () => {
+  assert.deepEqual(agentApps().map((a) => [a.id, a.name]), [["claude", "Claude Code"], ["codex", "Codex"], ["opencode", "OpenCode"]]);
+  assert.deepEqual(Object.keys(PROCESSES), ["claude", "codex", "opencode"]);
+  assert.deepEqual(agentApps().filter((a) => a.pinsByHook).map((a) => a.id), ["claude"], "only Claude Code's hooks pin a session");
+  assert.deepEqual(agentApps().filter((a) => a.anyProcess).map((a) => a.id), ["opencode"], "only OpenCode's sessions are any of its processes'");
+  for (const [program, args, agent] of [
+    ["/Users/me/.local/bin/claude", "", "claude"],
+    ["/Users/me/.local/share/claude/versions/2.1.288", "", "claude"],
+    ["C:\\Users\\me\\.local\\bin\\claude", "", "claude"],
+    ["/path/codex-aarch64-apple-darwin", "", "codex"],
+    ["/usr/local/bin/opencode", "", "opencode"],
+    ["C:\\tools\\opencode.exe", "", "opencode"],
+    ["/usr/local/bin/node", "node /x/@anthropic-ai/claude-code/cli.js", "claude"],
+    ["/usr/local/bin/bun", "bun /x/@openai/codex/bin/codex.js", "codex"],
+    ["/usr/local/bin/node", "node /x/opencode-ai/bin/opencode", null],
+    ["/usr/local/bin/python3", "python3 /x/@openai/codex/x", null],
+    ["/tmp/claude-decoy/run", "", null],
+    ["/usr/bin/codexterm", "", null],
+    ["", "", null],
+  ]) assert.equal(agentOf(program, args), agent, `${program} ${args}`);
+});
+
+test("processes: a made-up app in a registry of its own is told by its own rules, with no change to agentOf", () => {
+  const registry = [
+    { id: "wren", name: "Wren", numbat: ["wren"], has: ["processes"] },
+    { id: "claude", name: "Claude Code", numbat: ["claude-code"], has: ["processes"] },
+    { id: "finch", name: "Finch", numbat: ["finch"] },
+    { id: "lark", name: "Lark", numbat: ["lark"], has: ["processes"] },
+  ];
+  const rules = { ...PROCESSES, wren: { program: (_p, base) => base === "wren", script: (args) => /@wren\/cli\//.test(args) } };
+  const agents = agentApps(registry, rules);
+  assert.deepEqual(agents.map((a) => a.id), ["wren", "claude"], "finch has no processes, lark no rules");
+  assert.equal(agentOf("/usr/local/bin/wren", "", agents), "wren");
+  assert.equal(agentOf("/usr/local/bin/node", "node /x/@wren/cli/main.js", agents), "wren");
+  assert.equal(agentOf("/usr/local/bin/claude", "", agents), "claude");
+  assert.equal(agentOf("/usr/local/bin/codex", "", agents), null, "not in this registry");
+});
+
+test("processes: verify checks a session's app by its processes, and passes an app outside them unchecked, as before", async (t) => {
+  const dir = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), "xenonet-capabilities-"));
+  const stores = [];
+  t.after(() => {
+    for (const s of stores) s.close();
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
+  });
+  // One process, whichever app the test says it is, and a store of its own.
+  const verifier = (agent) => {
+    const procs = { supported: true, peer: async () => 50, chain: async () => [{ pid: 50, start: 1, program: "/x", agent, product: null }], alive: async () => true, signed: async () => true };
+    const store = new EngineStore(path.join(dir, `engine-${stores.length}.sqlite`));
+    stores.push(store);
+    return createVerifier({ procs, store });
+  };
+  const socket = { remotePort: 1, localPort: 2 };
+  assert.deepEqual(await verifier("claude").check(socket, "gemini-cli:x"), { ok: true, checked: false }, "an app whose processes XenoNet doesn't tell apart");
+  assert.deepEqual(await verifier("claude").check(socket, "wren:x"), { ok: true, checked: false });
+  assert.deepEqual(await verifier("opencode").check(socket, "opencode:x"), { ok: true, checked: true, root: { pid: 50, start: 1 } });
+  assert.deepEqual(await verifier("claude").check(socket, "opencode:x"), { ok: false, checked: true, reason: "requests in opencode:x's name have to come from an OpenCode process, and this one doesn't" });
+  assert.deepEqual(await verifier("opencode").check(socket, "codex:x"), { ok: false, checked: true, reason: "requests in codex:x's name have to come from a Codex process, and this one doesn't" });
+  assert.deepEqual(await verifier("codex").check(socket, "claude:x"), { ok: false, checked: true, reason: "requests in claude:x's name have to come from a Claude Code process, and this one doesn't" });
+  assert.deepEqual(await verifier("claude").check(socket, "claude:x", { hook: true }), { ok: true, checked: true, root: { pid: 50, start: 1 }, sure: true }, "Claude Code's own hook pins its session");
+  assert.deepEqual(await verifier("codex").check(socket, "codex:x", { hook: true }), { ok: true, checked: true, root: { pid: 50, start: 1 } }, "Codex's hooks don't");
 });
