@@ -58,6 +58,13 @@ function buildServer() {
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, async ({ instance, action = "status", enabled, component }) => reply(await target(instance).driver("updates", action, action === "component-update" ? component : enabled)));
 
+  tool("background", {
+    title: "XenoNet background service",
+    description: "Open Background service and read whether XenoNet's service starts at login, show Desktop's setup offer of it if that's due, or answer the offer Not now. Turning it on or off is yours alone, in XenoNet's window or with xenonet service install.",
+    inputSchema: z.object({ instance: instanceArg, action: z.enum(["status", "offer", "dismiss"]).optional() }),
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  }, async ({ instance, action = "status" }) => reply(await target(instance).driver("background", action)));
+
   tool(
     "status",
     {
