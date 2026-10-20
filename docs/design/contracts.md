@@ -573,13 +573,14 @@ one is a new version of it beside the old, never an edit:
   scripts and OpenAI's tunnel-client all run this path, so it never moves.
   `--launcher` prints `{launcher, protocol, tools, node}`: launcher 3, with
   no node.
-- Beside it, while the Tools carry a node, the launcher that entries an
-  earlier XenoNet wrote run: its own `node` and `cli/xenonet.js`
-  (`core/components/launcher.cjs`). Its first line says its version
-  (`// xenonet-launcher <n> (protocol <p>)`); XenoNet replaces it only with
-  a newer one, through a temporary file and a rename. From version 3 it
-  runs the Tools' binary. Connecting again moves those entries to the
-  binary.
+- Beside it, where an earlier XenoNet put one, the launcher that entries
+  it wrote run: its own `node` and `cli/xenonet.js`
+  (`core/components/launcher.cjs`, built into the binary). Its first line
+  says its version (`// xenonet-launcher <n> (protocol <p>)`); XenoNet
+  replaces it only with a newer one, through a temporary file and a
+  rename, and keeps that node as it is. From version 3 it runs the Tools'
+  binary. The Tools carry no node, and XenoNet never puts one there
+  itself. Connecting again moves those entries to the binary.
 - Its argument forms: `hook <app>` (protocol 1: the event on stdin is
   posted to `/api/hook/<app>` on `XENONET_PORT`, or `--port`, and the
   answer printed; always exit 0, nothing on stderr; it runs in the
