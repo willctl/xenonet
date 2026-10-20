@@ -243,7 +243,12 @@ pub fn remote_parts(url: &str) -> Option<(String, String)> {
         UrlForm::No => scp_form(s)?,
     };
     let repo = rest.trim_start_matches('/').trim_end_matches('/');
-    let repo = if repo.len() >= 4 && repo[repo.len() - 4..].eq_ignore_ascii_case(".git") { &repo[..repo.len() - 4] } else { repo };
+    // The last four bytes, when they're whole characters: a repo whose name
+    // ends inside one (gh:éabc) has no ".git" to take off.
+    let repo = match repo.len().checked_sub(4).and_then(|i| Some((i, repo.get(i..)?))) {
+        Some((i, end)) if end.eq_ignore_ascii_case(".git") => &repo[..i],
+        _ => repo,
+    };
     (!repo.is_empty()).then(|| (host.to_lowercase(), repo.to_string()))
 }
 
@@ -350,5 +355,7 @@ mod tests {
         assert_eq!(remote_parts("file:///srv/git/x"), None);
         assert_eq!(remote_parts("/srv/git/x"), None);
         assert_eq!(remote_parts("C:/x"), None, "a drive letter is no host");
+        assert_eq!(remote_parts("gh:éabc"), Some(("gh".into(), "éabc".into())), "a name that ends inside a character has no .git");
+        assert_eq!(remote_parts("gh:dépôt.GIT"), Some(("gh".into(), "dépôt".into())));
     }
 }
