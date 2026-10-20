@@ -1,0 +1,3 @@
+```json
+{"picks":[{"path":"labs/snippets","as":"project","reason":"a manifest and tests"},{"path":"labs","as":"group"}]}
+```

@@ -243,5 +243,17 @@ seed("jsregex", "host", 2, "@vm1:project:/home/nova/projects/atlas-api");
 seed("jsregex", "compile", 1, "^(?:@[a-z][a-z0-9-]{1,31}:)?(claude|codex):(?=.)[^\\s]+$", "\0", "@vm1:claude:x");
 seed("jsregex", "classes", 1, "[\\w\\d\\s\\u00e9-\\u00ff]+?(?<!x)\\b", "\0", "café au lait");
 
+// ---------- tools ----------
+seed("tools", "gh-hosts", 0, "github.com:\n    git_protocol: https\n    users:\n        nova-dev:\n        orbitworks:\n            oauth_token: gho_made_up\n    user: nova-dev\nghe.atlas.example:\n    user: nova\n");
+seed("tools", "ssh-config", 0, "Host gh-orbit\n  HostName github.com\n  User git\nHost *\n  AddKeysToAgent yes\ngit@gh-orbit:orbitworks/pathfinder.git\nhttps://github.com/atlas-co/atlas-api.git\n");
+seed("tools", "git-config", 0, "user.name Nova\ncredential.https://github.com.helper\ncredential.https://github.com.helper !/opt/homebrew/bin/gh auth git-credential\nuser.email hello@atlas.example\n");
+seed("tools", "ps", 1, "  510     1 Fri Oct  3 16:34:29 2026 /Applications/Claude.app/Contents/MacOS/claude\n  702   510 Sun Oct  5 07:30:00 2026 /bin/zsh\n");
+seed("tools", "netstat", 1, "tcp4       0      0  127.0.0.1.51234        127.0.0.1.47840        ESTABLISHED    111   2970  406912  146988 node:4242            00102 00000104 0000000003bca9cb\n");
+seed("tools", "lsof", 1, "p4242\nftxt\nn/usr/local/bin/node\nfcwd\nn/home/nova/Projects/atlas-api\n");
+seed("tools", "tmux", 2, "%1 main:0.0 4242 /home/nova/Projects/atlas-api claude 1\n%2 main:0.1 4243 /home/nova codex 0\n");
+seed("tools", "picks", 3, '```json\n{"picks":[{"path":"labs/snippets","as":"project","reason":"a manifest and tests"},{"path":"labs","as":"group"}]}\n```');
+seed("tools", "selector", 4, "project:xeno* app:codex identity:github:nova-dev");
+seed("tools", "gpu", 5, "0, 45, 1024, 8192\n\"Utilization Percentage\" = 37\n");
+
 fs.rmSync(tmp, { recursive: true, force: true });
 process.stderr.write(`${written} seeds in ${path.relative(repo, out)}\n`);

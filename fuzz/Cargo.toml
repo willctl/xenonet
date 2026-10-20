@@ -141,3 +141,10 @@ path = "fuzz_targets/jsregex.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "tools"
+path = "fuzz_targets/tools.rs"
+test = false
+doc = false
+bench = false
