@@ -599,9 +599,11 @@ mod tests {
     #[test]
     fn collecting_asks_codex_then_discovers_then_reads_the_package() {
         let spec = json!({ "command": "node", "args": ["/workspace/library/index.js"], "env": { "API_TOKEN": "private-value" } });
+        // The package's path as this host spells it.
+        let package = NATIVE.join(&["/workspace/library", "package.json"]);
         let mut read = |f: Option<&str>| match f {
             Some("claude-config") => json!({ "mcpServers": { "library": spec.clone(), "other": { "command": "never-run" } } }),
-            Some("/workspace/library/package.json") => json!({ "name": "library", "author": { "name": "Library authors", "email": "not-needed" }, "version": "2" }),
+            Some(p) if p == package => json!({ "name": "library", "author": { "name": "Library authors", "email": "not-needed" }, "version": "2" }),
             _ => json!({}),
         };
         let settings = json!({ "homeDir": "/workspace", "claudeConfigFile": "claude-config" });

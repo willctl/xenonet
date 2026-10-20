@@ -535,6 +535,9 @@ mod tests {
     use super::*;
     use crate::task::{run_with, Task};
 
+    // Spelled as on a unix host; on Windows the JS tests run against the
+    // Rust (test:rust) check where data lives.
+    #[cfg(unix)]
     #[test]
     fn where_data_lives() {
         assert_eq!(user_data_dir("XenoNet Dev (demo)", "darwin", None, None, "/Users/nova"), "/Users/nova/Library/Application Support/XenoNet Dev (demo)");
