@@ -89,6 +89,7 @@ export function createTray({ baseUrl, showWindow, sendCommand, select, themes = 
       ...(themeMenu ? [{ label: "Theme", submenu: themeItems(themeMenu, (t) => sendCommand(t.command), { mnemonics: !isMac }) }] : []),
       { type: "separator" },
       ...(loginSupported ? [{ label: loginLabel, type: "checkbox", checked: opensAtLogin(), click: (item) => setOpensAtLogin(item.checked) }] : []),
+      { label: "Background service...", click: () => (showWindow(), sendCommand("background")) },
       { label: "Updates...", click: () => (showWindow(), sendCommand("updates")) },
       { label: app.isPackaged ? "Quit XenoNet Desktop" : `Quit ${app.name}`, accelerator: isMac ? "Cmd+Q" : undefined, click: () => app.quit() },
     ]);

@@ -140,6 +140,7 @@ The control channel operates the console. The engine that connects sessions to e
 - XenoNet Dev keeps a log of what you do in it, as the same steps. Selecting a node, a palette command, a session's stats, a theme and a film all go in the log. `xenonet script record --instance dev > tour.json` saves it, and `xenonet script run tour.json` plays it back, in any instance, shown or hidden.
 - A script is a JSON list of steps, written as strings such as `"select:atlas-api"`, or as objects such as `{ "op": "select", "args": [...] }`. Any driver method is a step. For anything else, a script can be a JS module whose default export gets the instance and a `step` function.
 - `npm run test:e2e` drives a hidden XenoNet Dev with the demo's data through the same channel, in about five minutes. Run it before you send a change to the UI. A failing test saves a screenshot of what it saw to `.xenonet/`.
+- Starting the service at login is tested without the machine's own launchd or systemd. `XENONET_SUPERVISOR_BIN` names the `launchctl` or `systemctl` the `xenonet` command runs, and `XENONET_SUPERVISOR_DIR` the folder the launch agent or unit goes in. `test/e2e/background.test.js` points both at a made-up supervisor in a temporary folder.
 - `npm run test:real` checks, on a real Mac, that Grok Bot and Muse message each other through XenoNet Dev (the dev instance), through the actor gateway, or with `XENONET_REAL_ROUTE=local` from commands their apps run. It needs both apps signed in, you at XenoNet's window to set up the gateway and connect each, and someone to ask Grok Bot and Muse to do what it prints. It only reads XenoNet's state. `XENONET_REAL_PORT`, `XENONET_REAL_WORD` and `XENONET_REAL_MINUTES` change where it looks, the word the messages carry and how long it waits.
 - Scripts import `core/control.js`, which all of the above use.
 
@@ -259,6 +260,7 @@ The console page imports only the core modules that have no Node in them, `theme
 | `hud.js`, `telemetry.js`, `actor-spend-view.js`, `alerts.js`, `needs-you.js`, `modals.js`, `palette.js`, `replay.js`, `terminal.js`, `identities.js` | The panels around the map. `actor-spend-view.js` has Token use's rows of spend by actor. |
 | `export-panel.js`, `poster.js`, `poster-draw.js`, `mark.js` | The export panel, and posters of the day: the preview, the sizes, what an export reveals, and the mark |
 | `connect.js` | The panel for connecting Claude Code and Codex |
+| `background.js` | The Background service panel, and Desktop's offer of it during setup |
 | `doctor.js` | The panel for XenoNet's doctor |
 | `stats.js` | The panel for a session's stats |
 | `film.js`, `film-cards.js` | Films of the day, and their cards |
@@ -281,7 +283,8 @@ The console page imports only the core modules that have no Node in them, `theme
 | `pty.js` | Shells |
 | `tray.js`, `icons.js`, `preload.cjs` | The tray, the icons and the preload bridge |
 | `trust.js` | The only page the app answers |
-| `login.js` | Starting at login |
+| `login.js` | Opening Desktop at login |
+| `background.js` | Starting the service at login, through the `xenonet` command |
 | `shellenv.js` | The login shell's `PATH` |
 | `mac.js` | The macOS menu bar, the first run and the uninstaller |
 | `theme-menu.js` | The Theme menu in the tray and the menu bar |

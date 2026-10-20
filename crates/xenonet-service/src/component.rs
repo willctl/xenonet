@@ -2,7 +2,8 @@
 //! 127.0.0.1 that XenoNet Desktop and the Tools connect to, found through
 //! `runtime/service-<port>.json`, which holds its port and a token new at each
 //! start. JSON lines (rpc.rs): a hello carrying the token, then status,
-//! console (relayed to the Desktop), stop, and the Desktop's own requests
+//! console (relayed to the Desktop), stop, yours (whether the connection
+//! comes from you, for the command), and the Desktop's own requests
 //! (where its window is, the terminals). The service sends the Desktop
 //! `notification` events, and asks it to open things and, for XenoNet Dev's
 //! control channel, to act on its window (`console`).
@@ -42,6 +43,10 @@ pub struct Hooks {
     /// Whether the Desktop that connected is XenoNet's app (verify.desktop);
     /// None when it went.
     pub on_desktop: Arc<dyn Fn(Option<Peer>) -> Seen + Send + Sync>,
+    /// Whether a connection comes from you, as the routes that are yours
+    /// to do ask (verify.person): from XenoNet's window or your own
+    /// terminal, not from under an agent.
+    pub on_person: Arc<dyn Fn(Peer) -> Seen + Send + Sync>,
     pub terminals: Arc<dyn Terminals>,
 }
 
@@ -142,6 +147,9 @@ impl Components {
                 return Ok(out);
             }
             "console" => return self.console(params).await,
+            // What the command does itself and is yours to do, such as
+            // starting the service at login, asks here first.
+            "yours" => return Ok((self.hooks.on_person)(conn.peer).await),
             "stop" => {
                 let running = self.hooks.terminals.list().as_array().is_some_and(|l| l.iter().any(|t| !xenonet_base::text::truthy(t.get("exited"))));
                 if running && !xenonet_base::text::truthy(params.get("force")) {

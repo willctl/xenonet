@@ -9,7 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerServicePty } from "./service-pty.js";
-import { connectService, ensureService, runtimeDir } from "../core/components/runtime.js";
+import { connectService, ensureService, launcherBin, runtimeDir, xenonetBin } from "../core/components/runtime.js";
 import { currentComponent } from "../core/components/packages.js";
 import { installBundle, installedRuntime, recoverServiceUpdate } from "../core/components/install.js";
 import { componentUpdates, updateComponent } from "../core/components/updates.js";
@@ -19,6 +19,7 @@ import { createUpdates } from "./updates.js";
 import { registerWindowsIdentity, windowsToastActivator } from "./windows-identity.js";
 import { createTray } from "./tray.js";
 import { launchedAtLogin } from "./login.js";
+import { createBackground } from "./background.js";
 import { loadShellEnv } from "./shellenv.js";
 import { prefs } from "./prefs.js";
 import { rustBinary, missingBinary } from "./service-runtime.js";
@@ -243,11 +244,32 @@ async function openTarget(target) {
   throw new Error("XenoNet opens only apps' links, folders and pages.");
 }
 
-// The service this Desktop runs, the environment it runs it in, and its
-// pid when it's XenoNet Dev's own to stop (see stop()).
+// The service this Desktop runs, the environment it runs it in, how
+// ensureService starts it, and its pid when it's XenoNet Dev's own to stop
+// (see stop()).
 let serviceBin = null;
 let serviceEnv = null;
+let serviceStart = null;
 let ownService = null;
+
+// Starting the service at login (background.js): installed XenoNet's
+// setting, and a --prod run's, which stands in for one. XenoNet Dev starts
+// and stops its own service. Turned off, the copy the supervisor ran stops,
+// and Desktop starts its own again.
+const serviceAtLogin = createBackground({
+  // The launcher's binary, which an uninstall started before the service
+  // was found (XenoNet --uninstall) has no other way to name.
+  bin: () => {
+    const env = serviceEnv ?? process.env;
+    if (!fromSource && !env.XENONET_LAUNCHER_BIN && fs.existsSync(launcherBin(env))) return launcherBin(env);
+    return xenonetBin({ env, root: fromSource ? root : undefined });
+  },
+  env: () => serviceEnv ?? serverEnv(),
+  live: !dev,
+  port: PORT,
+  prefs: { get: (key) => prefs().get(key), set: (key, value) => prefs().set(key, value) },
+  afterStop: () => ensureService(serviceStart),
+});
 
 // Starts the service, or finds it running, and connects to it. The service
 // is the xenonet binary (service-runtime.js): the installed Service's in a
@@ -280,7 +302,17 @@ async function startServer() {
   // From a checkout, the service has the dev instances' routes
   // (/api/dev/simulate and capture) unless --prod is passed, as the JS
   // server it replaces had.
-  const how = await ensureService({ root: serviceRoot, exec: serviceBin, args: ["serve", ...(dev ? ["--dev"] : [])], env });
+  serviceStart = { root: serviceRoot, exec: serviceBin, args: ["serve", ...(dev ? ["--dev"] : [])], env };
+  // One registered to start at login is started by launchd or systemd, not
+  // beside it; if that fails, Desktop starts its own, as before.
+  let how = null;
+  if (!dev) {
+    try { (await connectService({ env })).close(); how = "reused"; } catch (err) {
+      if (/incompatible/.test(err.message)) throw err;
+    }
+    how ??= await serviceAtLogin.startRegistered().catch((err) => (desktopLog.warn("desktop.service-login", `the service set to start at login didn't start: ${err.message}`, { fix: "Desktop started its own. xenonet service status says how it stands." }), null));
+  }
+  how ??= await ensureService(serviceStart);
   serviceClient = await desktopClient({ env, handle: (method, body) => {
     if (method === "open") return openTarget(body?.target);
     if (method !== "console") throw new Error("Unsupported Desktop request.");
@@ -595,6 +627,9 @@ function wireIpc() {
     }
     return updates?.act(action, value);
   });
+  // Background service (background.js): whether the service starts at
+  // login, the setup offer, and the switch. Only from XenoNet's own page.
+  ipcMain.handle("app:background", (e, action, value) => (ownPage(e) ? serviceAtLogin.act(action, value) : null));
   // ⌘W with no terminal tab focused (macOS).
   ipcMain.on("app:hide", (e) => ownPage(e) && win?.close());
   // The window key, for the page's reports of you (src/you.js): only to
@@ -820,7 +855,7 @@ if (iconsArg >= 0) {
     app.exit(0);
   });
 } else {
-  const uninstallFrom = (argv) => uninstall({ ask: false, purge: argv.includes("--purge"), stop });
+  const uninstallFrom = (argv) => uninstall({ ask: false, purge: argv.includes("--purge"), stop, serviceAtLogin });
   app.on("second-instance", (_e, argv) => (isMac && argv.includes("--uninstall") ? uninstallFrom(argv) : showWindow()));
   app.on("before-quit", stop);
   // `pkill XenoNet`, and the installer package closing a running copy, quit
@@ -850,7 +885,7 @@ if (iconsArg >= 0) {
     if (isMac) {
       if (startHidden || offscreen) app.dock?.hide();
       if (!offscreen && !startHidden && (await offerMove())) return;
-      appMenu = installMenu({ send: (cmd) => (showWindow(), win?.webContents.send("app:command", cmd)), dev, uninstall: () => uninstall({ win, stop }) });
+      appMenu = installMenu({ send: (cmd) => (showWindow(), win?.webContents.send("app:command", cmd)), dev, uninstall: () => uninstall({ win, stop, serviceAtLogin }) });
       if (!app.isPackaged) app.dock?.setIcon(nativeImage.createFromDataURL(await iconDataUrl(512, 0, 0, { mac: true })));
     }
     const { default: updaterModule } = await import("electron-updater");

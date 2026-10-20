@@ -124,6 +124,13 @@ fn defs(installed: bool) -> Vec<Def> {
             json!({ "readOnlyHint": false, "destructiveHint": false, "openWorldHint": true }),
         ),
         def(
+            "background",
+            "XenoNet background service",
+            "Open Background service and read whether XenoNet's service starts at login, show Desktop's setup offer of it if that's due, or answer the offer Not now. Turning it on or off is yours alone, in XenoNet's window or with xenonet service install.",
+            object(vec![("instance", inst()), ("action", enumeration(&["status", "offer", "dismiss"]).optional())]),
+            write(),
+        ),
+        def(
             "status",
             "XenoNet status",
             "Which XenoNet instances are running, and for the current one its window and the page's state: the selection, what's gathered, open panels, alerts, counts and whether the view is still moving.",
@@ -564,6 +571,7 @@ impl Console {
                 let second = if action == "component-update" { arg(a, "component") } else { arg(a, "enabled") };
                 one(self.driver(&s, "updates", vec![action, second]).await?)
             }
+            "background" => one(self.driver(&s, "background", vec![a.get("action").cloned().unwrap_or_else(|| json!("status"))]).await?),
             "status" => {
                 let mut instances = Map::new();
                 for i in &INSTANCES {
@@ -910,6 +918,7 @@ mod tests {
             [
                 "terminal",
                 "updates",
+                "background",
                 "status",
                 "launch",
                 "quit",
@@ -942,6 +951,6 @@ mod tests {
             ]
         );
         let installed: Vec<&str> = defs(true).iter().map(|d| d.name).collect();
-        assert!(!installed.contains(&"eval") && !installed.contains(&"simulate") && installed.len() == 29);
+        assert!(!installed.contains(&"eval") && !installed.contains(&"simulate") && installed.len() == 30);
     }
 }
