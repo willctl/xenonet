@@ -240,8 +240,8 @@ pub fn list_transcripts(dir: &str) -> Vec<String> {
 }
 
 /// `text.split("\n")`, without the blank lines.
-pub fn lines_of(text: &str) -> Vec<String> {
-    text.split('\n').filter(|l| !js_trim(l).is_empty()).map(String::from).collect()
+pub fn lines_of(text: &str) -> Vec<&str> {
+    text.split('\n').filter(|l| !js_trim(l).is_empty()).collect()
 }
 
 // ---------- SQLite's values ----------
@@ -333,9 +333,9 @@ pub struct Plan {
 
 /// What `begin` says: read the file whole first, or index these lines.
 #[derive(Clone, Debug, PartialEq)]
-pub enum Begun {
+pub enum Begun<'a> {
     ReadWhole,
-    Lines(Vec<String>),
+    Lines(Vec<&'a str>),
 }
 
 /// One text being indexed: its records' documents go in once each.
@@ -493,7 +493,7 @@ impl Search {
     /// last time): the lines to index, or that the file must be read whole
     /// first. Only complete lines are indexed; a half-written last line
     /// waits for next time.
-    pub fn begin(&self, plan: &mut Plan, text: &str) -> Result<Begun, Error> {
+    pub fn begin<'a>(&self, plan: &mut Plan, text: &'a str) -> Result<Begun<'a>, Error> {
         let body = |text: &'_ str| -> usize {
             if plan.zst {
                 text.len()
@@ -787,7 +787,7 @@ mod tests {
             let Begun::Lines(lines) = s.begin(&mut plan, &text).unwrap() else { panic!("read whole") };
             let mut run = Search::run(&f, "claude", &plan.session_id, false);
             for l in lines {
-                s.add(&mut run, json::parse(&l).unwrap()).unwrap();
+                s.add(&mut run, json::parse(l).unwrap()).unwrap();
             }
             s.commit(&plan).unwrap();
             run.n
