@@ -53,7 +53,8 @@ jobs:
       - run: rustup toolchain install
       - run: npm ci
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo test --workspace --locked
+      # Every crate's tests, so one run shows every failure.
+      - run: cargo test --workspace --locked --no-fail-fast
       - run: npm run rust:build -- --debug
       - run: npm run test:rust
       # The service serves the built page, which one route test asks for.
