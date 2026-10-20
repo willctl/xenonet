@@ -258,7 +258,7 @@ The console page imports only the core modules that have no Node in them, `theme
 - `provider-drift.mjs` and `provider-drift/`, the daily check of new provider releases against the vendor schemas (see [Provider drift](provider-drift.md))
 - `schemas.mjs`, for the schema files in `schemas/`
 - `bench.mjs`, the benchmark
-- `gpu-bench.mjs` (`npm run bench:gpu`), what the console costs the machine on a Mac: GPU time, CPU and memory with the window at rest, turning, busy, behind another app, covered, minimized and hidden
+- `gpu-bench.mjs` (`npm run bench:gpu`), what the console costs the machine on a Mac: GPU time, frame time, and the CPU and memory of Desktop and the service, with the window at rest, turning, busy, behind another app, covered, minimized and hidden, beside the machine's GPU use without XenoNet
 - `hook-snippet.mjs`
 - `dev-install.mjs`
 - `dist.mjs`
