@@ -27,7 +27,7 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use xenonet_base::json::{number, number_string};
 use xenonet_base::ordered::OrderedMap;
 use xenonet_base::text::{join, js_number, js_string, js_trim, truthy};
-use xenonet_base::{jsstr, paths, pricing};
+use xenonet_base::{apps, jsstr, paths, pricing};
 
 pub const PRIME_WINDOW_MS: f64 = 24.0 * 3600e3;
 const RATE_WINDOW_S: f64 = 300.0;
@@ -390,7 +390,9 @@ impl Session {
             provider: Value::Null,
             priority: false,
             context_used: number(0.0),
-            context_window: number(if app == "codex" { 258400.0 } else { 200000.0 }),
+            // The app's context window until a line says otherwise; any app
+            // but Codex has Claude Code's.
+            context_window: number(apps::app(apps::tailed_app(app, "claude")).and_then(|a| a.context).unwrap_or_default()),
             turn_contexts: Vec::new(),
             model: Value::Null,
             turn_active: false,

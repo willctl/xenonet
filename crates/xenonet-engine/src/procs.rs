@@ -36,13 +36,10 @@ const TABLE_MS: f64 = 1500.0;
 const BUNDLES_AT_ONCE: usize = 16;
 
 /// The developer team that signs each agent app (codesign's
-/// TeamIdentifier): Anthropic's for Claude Code, OpenAI's for Codex.
+/// TeamIdentifier), as the app registry has it: Anthropic's for Claude
+/// Code, OpenAI's for Codex.
 pub fn team_of_agent(agent: &str) -> Option<&'static str> {
-    match agent {
-        "claude" => Some("Q6L2SF6YDW"),
-        "codex" => Some("2DC432GLL2"),
-        _ => None,
-    }
+    xenonet_base::apps::team(agent)
 }
 
 /// The teams that sign the actor apps whose makers sign them, by product:

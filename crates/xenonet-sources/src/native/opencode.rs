@@ -15,7 +15,10 @@ use xenonet_base::text::{js_number, js_string, truthy};
 use xenonet_schema::drift::clean_version;
 
 pub const SOURCE: &str = "anomaly/opencode/db";
-pub const EDIT_TOOLS: [&str; 3] = ["edit", "write", "multiedit"];
+/// The tools whose calls are edits, as the app registry has them.
+pub fn edit_tools() -> &'static [String] {
+    xenonet_base::apps::edit_tools("opencode")
+}
 pub const PATCH_TOOLS: [&str; 2] = ["apply_patch", "patch"];
 const SESSION_COLUMNS: [&str; 8] = ["id", "parent_id", "directory", "title", "version", "time_created", "time_updated", "time_archived"];
 const NEEDED_SESSION: [&str; 4] = ["id", "directory", "time_created", "time_updated"];
@@ -46,7 +49,7 @@ fn quoted(names: &[&str]) -> String {
 /// The edit tools' files since a time, newest first, so a busy day can't
 /// crowd out the edits that matter: the last ones.
 pub fn edits_sql() -> String {
-    let all: Vec<&str> = EDIT_TOOLS.iter().chain(PATCH_TOOLS.iter()).copied().collect();
+    let all: Vec<&str> = edit_tools().iter().map(String::as_str).chain(PATCH_TOOLS.iter().copied()).collect();
     format!(
         "
   SELECT session_id, time_created,

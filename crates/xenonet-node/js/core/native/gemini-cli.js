@@ -8,10 +8,11 @@ import fs from "node:fs";
 import { Block } from "../blocks/lifecycle.js";
 import { reader } from "../vendor.js";
 import { native } from "../../index.js";
+import { APP } from "../../../../../core/apps.js";
 import { FAILED, guarded, ioOf, liveOf, mapOfRuns, pathArg } from "../../native-readers.js";
 
 export const SOURCE = "google/gemini-cli/chat-record";
-export const EDIT_TOOLS = new Set(["write_file", "replace"]);
+export const EDIT_TOOLS = new Set(APP["gemini-cli"].editTools);
 
 export const sessionIdOf = (id) => native.geminiSessionIdOf(String(id)) ?? null;
 

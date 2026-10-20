@@ -10,10 +10,11 @@ import fs from "node:fs";
 import { Block } from "../blocks/lifecycle.js";
 import { reader } from "../vendor.js";
 import { native } from "../../index.js";
+import { APP } from "../../../../../core/apps.js";
 import { FAILED, guarded, liveOf, mapOfRuns, pathArg } from "../../native-readers.js";
 
 export const SOURCE = "anomaly/opencode/db";
-export const EDIT_TOOLS = ["edit", "write", "multiedit"];
+export const EDIT_TOOLS = [...APP.opencode.editTools];
 export const PATCH_TOOLS = ["apply_patch", "patch"];
 
 // OpenCode's ids (ses_…) as XenoNet's session ids take them.

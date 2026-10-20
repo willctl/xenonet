@@ -19,6 +19,7 @@ import { ClaudeLine, CodexLine, linesOf, isCodexPrompt } from "./lines.js";
 import { claudeSignal, codexSignal } from "./refusals/detect.js";
 import { costParts, plainModel, priorityTier, PRICES_CHECKED } from "./pricing.js";
 import { isContextServer } from "./xenolith.js";
+import { APP, tailedApp } from "./apps.js";
 
 const PRIME_WINDOW_MS = 24 * 3600e3;
 const SWEEP_MS = 2000;
@@ -188,7 +189,9 @@ class LiveSession {
     // which prices its calls.
     this.provider = null;
     this.priority = false;
-    this.context = { used: 0, window: app === "codex" ? 258400 : 200000 };
+    // The app's context window until a line says otherwise; any app but
+    // Codex has Claude Code's.
+    this.context = { used: 0, window: APP[tailedApp(app, "claude")].context };
     this.turnContexts = [];
     this.model = null;
     this.turn = { active: false, startedAt: null };

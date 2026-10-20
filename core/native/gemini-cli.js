@@ -14,9 +14,10 @@ import path from "node:path";
 import { Block } from "../blocks/lifecycle.js";
 import { pathStyle } from "../paths.js";
 import { reader } from "../vendor.js";
+import { APP } from "../apps.js";
 
 export const SOURCE = "google/gemini-cli/chat-record";
-export const EDIT_TOOLS = new Set(["write_file", "replace"]);
+export const EDIT_TOOLS = new Set(APP["gemini-cli"].editTools);
 const FAILED = new Set(["error", "cancelled"]);
 const DAY_MS = 24 * 3600e3;
 const EDIT_KEEP_MS = 30 * 60e3;

@@ -15,7 +15,14 @@ use xenonet_base::paths::PathStyle;
 use xenonet_base::text::{is_blank, js_trim, js_trim_start, truthy};
 
 pub const SOURCE: &str = "google/gemini-cli/chat-record";
-pub const EDIT_TOOLS: [&str; 2] = ["write_file", "replace"];
+/// The tools whose calls are edits, as the app registry has them.
+pub fn edit_tools() -> &'static [String] {
+    xenonet_base::apps::edit_tools("gemini-cli")
+}
+
+fn is_edit(tool: &str) -> bool {
+    edit_tools().iter().any(|t| t == tool)
+}
 const FAILED: [&str; 2] = ["error", "cancelled"];
 const FILE_MAX: f64 = (16u64 << 20) as f64;
 const CHECKS_PER_FILE: usize = 12;
@@ -124,7 +131,7 @@ pub fn read_chat(text: &str, check: &mut dyn FnMut(&Value) -> Result<Checked, Th
     for (_, m) in messages.iter() {
         let Some(Value::Array(calls)) = field(m, "toolCalls") else { continue };
         for c in calls {
-            if !truthy(Some(c)) || !str_of(field(c, "name")).is_some_and(|n| EDIT_TOOLS.contains(&n)) || str_of(field(c, "status")).is_some_and(|s| FAILED.contains(&s)) {
+            if !truthy(Some(c)) || !str_of(field(c, "name")).is_some_and(is_edit) || str_of(field(c, "status")).is_some_and(|s| FAILED.contains(&s)) {
                 continue;
             }
             if let Some(file) = str_of(field(c, "args").and_then(|a| field(a, "file_path"))).filter(|f| !f.is_empty()) {

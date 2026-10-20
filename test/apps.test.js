@@ -6,9 +6,10 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { APPS, APP } from "../core/apps.js";
+import { APPS, APP, TAILED, appsWith } from "../core/apps.js";
 import { SESSION_APPS, appOfSession } from "../core/schema/ids.js";
 import { check, explain } from "../core/schema/index.js";
+import { CAPABILITIES } from "../core/schema/app.js";
 import { LEFT_OUT, readRecord } from "../core/numbat.js";
 import { event } from "./fixtures/numbat.js";
 
@@ -44,4 +45,17 @@ test("numbat leaves out the apps XenoNet tails, and reads every other app under 
       assert.equal(r.event?.app, a.id, `numbat reads ${a.id}'s runs`);
     }
   }
+});
+
+test("what the code reads from the registry", async () => {
+  assert.deepEqual(TAILED, ["claude", "codex"]);
+  assert.deepEqual(appsWith("native").map((a) => a.id), ["gemini-cli", "cursor", "copilot", "opencode"]);
+  for (const a of APPS) for (const c of a.has ?? []) assert.ok(CAPABILITIES.includes(c));
+  const [{ EDIT_TOOLS: gemini }, { EDIT_TOOLS: copilot }, { EDIT_TOOLS: opencode }] = await Promise.all([import("../core/native/gemini-cli.js"), import("../core/native/copilot-cli.js"), import("../core/native/opencode.js")]);
+  assert.deepEqual([...gemini], ["write_file", "replace"]);
+  assert.deepEqual([...copilot], ["str_replace_editor", "edit", "create", "write", "apply_patch"]);
+  assert.deepEqual(opencode, ["edit", "write", "multiedit"]);
+  const { LiveTelemetry } = await import("../core/live.js");
+  const live = new LiveTelemetry({ claudeRoot: path.join(root, "no-such-folder"), codexRoot: path.join(root, "no-such-folder"), claudeDesktopDir: null });
+  assert.deepEqual(["claude", "codex", "opencode"].map((app, i) => live.session(`${app}:x${i}`, app).context.window), [200000, 258400, 200000], "a session's context window, until a line says");
 });

@@ -38,6 +38,7 @@ import { onPath, tilde } from "../paths.js";
 import { parseJson } from "../vendor.js";
 import { INSTANCES } from "../instances.js";
 import { xenonetBin } from "../components/runtime.js";
+import { APP } from "../apps.js";
 
 // The names a XenoNet's MCP servers take: the installed XenoNet's xenonet and
 // xenonet-console, another's with its instance (xenonet-dev).
@@ -47,11 +48,13 @@ export function serverNames(port) {
   return { xenonet: base, console: `${base}-console` };
 }
 
-const CLAUDE_EVENTS = [["SessionStart"], ["UserPromptSubmit"], ["PreToolUse", "Edit|Write|MultiEdit|NotebookEdit"], ["PostToolUse"], ["Stop"], ["SessionEnd"], ["Notification"]];
+// The hook events XenoNet adds, each with its matcher when it takes one, as
+// the app registry has them.
+const CLAUDE_EVENTS = APP.claude.connect.events;
 // XenoNet's plugin for Claude Code, which Claude Code knows as
 // xenonet@<marketplace> once it's installed.
 const PLUGIN = "xenonet";
-const CODEX_EVENTS = [["SessionStart"], ["UserPromptSubmit"], ["PreToolUse", "apply_patch|Edit|Write"], ["PostToolUse"], ["Stop"], ["SessionEnd"]];
+const CODEX_EVENTS = APP.codex.connect.events;
 
 // What the preview says while connect's own entries are in Claude Code's
 // settings beside the plugin's.

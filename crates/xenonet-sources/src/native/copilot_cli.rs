@@ -17,8 +17,11 @@ use xenonet_base::paths::PathStyle;
 use xenonet_base::text::{is_blank, truthy};
 
 pub const SOURCE: &str = "github/copilot-cli/session-event";
-/// Copilot CLI's built-in file tools; str_replace_editor's view isn't an edit.
-pub const EDIT_TOOLS: [&str; 5] = ["str_replace_editor", "edit", "create", "write", "apply_patch"];
+/// Copilot CLI's built-in file tools, as the app registry has them;
+/// str_replace_editor's view isn't an edit.
+pub fn edit_tools() -> &'static [String] {
+    xenonet_base::apps::edit_tools("copilot")
+}
 const FILE_MAX: f64 = (32u64 << 20) as f64;
 const CHECKS_PER_FILE: usize = 16;
 
@@ -47,7 +50,7 @@ fn js_values(m: &Map<String, Value>) -> Vec<&Value> {
 
 /// The files a tool call names, if it's an edit.
 pub fn edited_by(tool: Option<&Value>, args: Option<&Value>) -> Vec<String> {
-    let Some(tool) = str_of(tool).filter(|t| EDIT_TOOLS.contains(t)) else { return Vec::new() };
+    let Some(tool) = str_of(tool).filter(|t| edit_tools().iter().any(|e| e == t)) else { return Vec::new() };
     let args = match args {
         Some(Value::String(s)) => return if tool == "apply_patch" { patch_headers(s) } else { Vec::new() },
         Some(a @ (Value::Object(_) | Value::Array(_))) => a,

@@ -40,20 +40,17 @@ use serde_json::{json, Map, Value};
 use xenonet_base::json::stringify;
 use xenonet_base::paths::tilde;
 
-const CLAUDE_EVENTS: [(&str, Option<&str>); 7] = [
-    ("SessionStart", None),
-    ("UserPromptSubmit", None),
-    ("PreToolUse", Some("Edit|Write|MultiEdit|NotebookEdit")),
-    ("PostToolUse", None),
-    ("Stop", None),
-    ("SessionEnd", None),
-    ("Notification", None),
-];
+/// The hook events XenoNet adds to Claude Code's and Codex's settings, each
+/// with its matcher when it takes one, as the app registry has them.
+fn claude_events() -> &'static [(String, Option<String>)] {
+    xenonet_base::apps::hook_events("claude")
+}
+fn codex_events() -> &'static [(String, Option<String>)] {
+    xenonet_base::apps::hook_events("codex")
+}
 /// XenoNet's plugin for Claude Code, which Claude Code knows as
 /// `xenonet@<marketplace>` once it's installed.
 const PLUGIN: &str = "xenonet";
-const CODEX_EVENTS: [(&str, Option<&str>); 6] =
-    [("SessionStart", None), ("UserPromptSubmit", None), ("PreToolUse", Some("apply_patch|Edit|Write")), ("PostToolUse", None), ("Stop", None), ("SessionEnd", None)];
 
 pub type Result<T> = std::result::Result<T, Thrown>;
 
@@ -354,7 +351,7 @@ impl Connect {
         // Claude Code takes HTTP hooks, which cost nothing to run, except at
         // SessionStart, which takes only commands.
         let mut claude = Map::new();
-        for (event, matcher) in CLAUDE_EVENTS {
+        for (event, matcher) in claude_events() {
             let hook = if event == "SessionStart" {
                 let mut h = Map::new();
                 h.insert("type".into(), json!("command"));
@@ -367,11 +364,11 @@ impl Connect {
             } else {
                 json!({ "type": "http", "url": c.hook_url, "timeout": 5 })
             };
-            claude.insert(event.into(), group(matcher, hook));
+            claude.insert(event.clone(), group(matcher.as_deref(), hook));
         }
         // Codex allows SessionEnd hooks 3 seconds at most.
         let mut codex = Map::new();
-        for (event, matcher) in CODEX_EVENTS {
+        for (event, matcher) in codex_events() {
             let mut h = Map::new();
             h.insert("type".into(), json!("command"));
             h.insert("command".into(), json!(c.hook_command("codex")));
@@ -379,7 +376,7 @@ impl Connect {
                 h.insert("commandWindows".into(), json!(c.windows_hook("codex")));
             }
             h.insert("timeout".into(), json!(if event == "SessionEnd" { 3 } else { 10 }));
-            codex.insert(event.into(), group(matcher, Value::Object(h)));
+            codex.insert(event.clone(), group(matcher.as_deref(), Value::Object(h)));
         }
         c.claude_hooks = Value::Object(claude);
         c.codex_hook_set = Value::Object(codex);
@@ -800,14 +797,14 @@ impl Connect {
                 json!({ "id": "console", "what": format!("The {console} MCP server, to operate Desktop"), "where": format!("{app} user settings"), "state": self.server_state(s, Some(&console_args)), "detail": format!("{command} mcp console (XENONET_PORT={port})") }),
             ]
         };
-        let events = |list: &[(&str, Option<&str>)]| list.iter().map(|(e, m)| if m.is_some() { format!("{e} (edits)") } else { e.to_string() }).collect::<Vec<_>>().join(", ");
+        let events = |list: &[(String, Option<String>)]| list.iter().map(|(e, m)| if m.is_some() { format!("{e} (edits)") } else { e.clone() }).collect::<Vec<_>>().join(", ");
 
         let mut claude_changes = console_change("claude", console_claude.as_ref());
         let settings = self.read_json(c, &self.claude_settings)?;
         let plugin = self.plugin(c, &settings);
         let mcp_what = format!("The {xenonet} MCP server, for every project");
         let mcp_detail = format!("{command} mcp (XENONET_PORT={port})");
-        let hooks_what = format!("Hooks: {}", events(&CLAUDE_EVENTS));
+        let hooks_what = format!("Hooks: {}", events(claude_events()));
         let hooks_detail = format!("posting to {}; SessionStart runs {command} hook claude", self.hook_url);
         let own_hooks = self.has_own(settings.get("hooks"), Kind::Claude);
         let mut twice = false;
@@ -862,7 +859,7 @@ impl Connect {
         let hooks_file = self.read_json(c, &self.codex_hooks)?;
         let in_place = self.hooks_in_place(c, &hooks_file, Kind::Codex, &self.codex_hook_set)?;
         let state = hooks_state(in_place, self.has_own(hooks_file.get("hooks"), Kind::Codex));
-        codex_changes.push(json!({ "id": "hooks", "what": format!("Hooks: {}", events(&CODEX_EVENTS)), "where": tilde(&self.codex_hooks, home), "state": state, "detail": format!("running {command} hook codex") }));
+        codex_changes.push(json!({ "id": "hooks", "what": format!("Hooks: {}", events(codex_events())), "where": tilde(&self.codex_hooks, home), "state": state, "detail": format!("running {command} hook codex") }));
         let mut codex_notes: Vec<Value> =
             if codex.truthy() { Vec::new() } else { vec![json!("XenoNet can't find the codex command, so it can add the hooks but not the MCP server.")] };
         codex_notes.push(json!("Codex runs new hooks only once you trust them: run /hooks in Codex and trust XenoNet's."));
