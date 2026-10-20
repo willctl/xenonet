@@ -1,14 +1,19 @@
 #![no_main]
 
 // A transcript file as the service reads it from disk: Claude Code's
-// session listing and messages (the Agent SDK's, in Rust), every line
-// through its app's lenient normalizer, a Codex rollout's pages, and a
-// session's stats. The first byte picks Claude Code or Codex; a NUL splits
-// the transcript from its custom-title.json sidecar.
+// session listing (again after the file grew, from what the first listing
+// kept) and its messages, whole and a page at a time (the Agent SDK's, in
+// Rust), every line through its app's lenient normalizer, a Codex
+// rollout's pages, and a session's stats; and the tailer, which reads a
+// transcript in pieces that can end anywhere and must find the same lines
+// as one read of it. The first byte picks Claude Code or Codex and where
+// the tailer's pieces end; a NUL splits the transcript from its
+// custom-title.json sidecar.
 
 use libfuzzer_sys::fuzz_target;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
+use xenonet_blocks::tailer::Tailer;
 use xenonet_schema::drift::DriftLog;
 use xenonet_state::stats::{session_stats, File};
 use xenonet_wire_map::codex::CodexClient;
@@ -62,8 +67,24 @@ fuzz_target!(|data: &[u8]| {
     let root = root.to_string_lossy().into_owned();
     let file = file.to_string_lossy().into_owned();
     xenonet_fuzz::run(data, || {
-        let _ = sdk::list_sessions(&root);
+        let mut listings = sdk::Listings::default();
+        let _ = sdk::list_sessions_with(&root, &mut listings);
+        let m = sdk::messages(&root, ID);
+        let n = m.len();
+        let _ = (m.page(0, n / 2), m.page(usize::from(how) % (n + 1), n), m.page(n, n + 5), m.all());
         let _ = sdk::session_messages(&root, ID);
+        // The tailer, in pieces of 1 to 64 bytes, finds what one read finds.
+        let mut whole = Tailer::new("fuzz", 0.0, 0.0);
+        whole.add_file(&file);
+        let at_once = whole.took(&file, transcript, transcript.len() as u64);
+        let mut pieces = Tailer::new("fuzz", 0.0, 0.0);
+        pieces.add_file(&file);
+        let mut found = Vec::new();
+        let step = usize::from(how >> 2) % 64 + 1;
+        for (i, piece) in transcript.chunks(step).enumerate() {
+            found.extend(pieces.took(&file, piece, ((i + 1) * step).min(transcript.len()) as u64));
+        }
+        assert_eq!(found, at_once, "the same lines, however the reads were cut");
         let vendor = vendor();
         if let Ok(lines) = stats::read_lines(&vendor, &file, codex) {
             let id = if codex { format!("codex:{ID}") } else { format!("claude:{ID}") };
@@ -77,6 +98,14 @@ fuzz_target!(|data: &[u8]| {
                 }
             }
             let _ = client.rollout_page(&file, Some("rollout:3"), 1.0);
+        }
+        // The file grows by a line, and is listed again from what the
+        // first listing kept.
+        let mut grown = transcript.to_vec();
+        grown.extend_from_slice(b"\n{\"type\":\"user\",\"message\":{\"content\":\"and more\"}}\n");
+        if std::fs::write(&file, &grown).is_ok() {
+            let _ = sdk::list_sessions_with(&root, &mut listings);
+            let _ = std::fs::write(&file, transcript);
         }
     });
 });

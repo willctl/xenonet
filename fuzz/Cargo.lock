@@ -1938,6 +1938,7 @@ dependencies = [
  "xenonet-app",
  "xenonet-assistant",
  "xenonet-base",
+ "xenonet-blocks",
  "xenonet-components",
  "xenonet-engine",
  "xenonet-hosts",

@@ -26,6 +26,7 @@ xenonet-actors = { path = "../crates/xenonet-actors" }
 xenonet-app = { path = "../crates/xenonet-app" }
 xenonet-assistant = { path = "../crates/xenonet-assistant" }
 xenonet-base = { path = "../crates/xenonet-base" }
+xenonet-blocks = { path = "../crates/xenonet-blocks" }
 xenonet-components = { path = "../crates/xenonet-components" }
 xenonet-engine = { path = "../crates/xenonet-engine" }
 xenonet-hosts = { path = "../crates/xenonet-hosts" }
