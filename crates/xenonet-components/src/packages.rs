@@ -315,16 +315,15 @@ mod tests {
             .into_bytes()
     }
 
-    /// A Tools package: its component.json, node and cli/xenonet.js, less
-    /// the ones `leave` names, and `more` entries.
+    /// A Tools package: its component.json and bin/xenonet, less the ones
+    /// `leave` names, and `more` entries.
     fn tools(version: &str, leave: &[&str], more: &[(&str, u8, &[u8], u32)]) -> Vec<u8> {
         let manifest = component_json("tools", version, "linux");
-        let all: Vec<(&str, u8, &[u8], u32)> =
-            [("component.json", b'0', &manifest[..], 0o644), ("node", b'0', &b"#!/bin/sh\n"[..], 0o755), ("cli/xenonet.js", b'0', &b"// tools"[..], 0o644)]
-                .into_iter()
-                .filter(|(n, ..)| !leave.contains(n))
-                .chain(more.iter().copied())
-                .collect();
+        let all: Vec<(&str, u8, &[u8], u32)> = [("component.json", b'0', &manifest[..], 0o644), ("bin/xenonet", b'0', &b"#!/bin/sh\n"[..], 0o755)]
+            .into_iter()
+            .filter(|(n, ..)| !leave.contains(n))
+            .chain(more.iter().copied())
+            .collect();
         archive(&all)
     }
 
@@ -389,9 +388,15 @@ mod tests {
         assert_eq!(refused(service, "1.2.3"), "Component archive differs from its release manifest.");
         let elsewhere = archive(&[("component.json", b'0', &component_json("tools", "1.2.3", "win32"), 0o644)]);
         assert_eq!(refused(elsewhere, "1.2.3"), "This component package is not compatible with this XenoNet installation.");
-        assert!(refused(tools("1.2.3", &["node"], &[]), "1.2.3").starts_with("ENOENT"));
-        assert!(refused(tools("1.2.3", &["cli/xenonet.js"], &[]), "1.2.3").starts_with("ENOENT"));
-        assert_eq!(refused(tools("1.2.3", &["node"], &[("node/", b'5', b"", 0o755)]), "1.2.3"), "Component is missing node.");
+        assert_eq!(refused(tools("1.2.3", &["bin/xenonet"], &[]), "1.2.3"), "Component is missing bin/xenonet.");
+        assert_eq!(refused(tools("1.2.3", &["bin/xenonet"], &[("bin/xenonet/", b'5', b"", 0o755)]), "1.2.3"), "Component is missing bin/xenonet.");
+        // An earlier XenoNet's package, a node and its JS, has no binary.
+        let earlier = archive(&[
+            ("component.json", b'0', &component_json("tools", "1.2.3", "linux"), 0o644),
+            ("node", b'0', b"#!/bin/sh\n", 0o755),
+            ("cli/xenonet.js", b'0', b"// tools", 0o644),
+        ]);
+        assert_eq!(refused(earlier, "1.2.3"), "Component is missing bin/xenonet.");
         assert!(refused(b"not a package at all".repeat(40), "1.2.3").starts_with("TAR_ENTRY_INVALID"));
         // None of them went in beside the versions that are.
         let left: Vec<String> = std::fs::read_dir(tools_dir(&p)).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
@@ -413,9 +418,9 @@ mod tests {
         let other = tools("1.2.3", &[], &[("extra.js", b'0', b"// more", 0o644)]);
         assert_eq!(refusal(stage(&p, &other, &release(&other, "1.2.3"))), "A published component version cannot be replaced. Release a new version.");
         // The same package again: the version unpacked already, as it is.
-        std::fs::write(PathBuf::from(&root).join("cli/xenonet.js"), "// as it was").unwrap();
+        std::fs::write(PathBuf::from(&root).join("bin/xenonet"), "// as it was").unwrap();
         assert_eq!(stage(&p, &bytes, &release(&bytes, "1.2.3")).unwrap()["root"], json!(root));
-        assert_eq!(std::fs::read_to_string(PathBuf::from(&root).join("cli/xenonet.js")).unwrap(), "// as it was");
+        assert_eq!(std::fs::read_to_string(PathBuf::from(&root).join("bin/xenonet")).unwrap(), "// as it was");
         std::fs::remove_dir_all(&p.dir).unwrap();
     }
 
