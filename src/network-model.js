@@ -1,9 +1,10 @@
 // The network across machines (docs/design/network.md) as the console
 // words it: GET /api/net/state (network/state/v1) read leniently, the link
 // to the gateway in a word, each machine's line, other machines' agents
-// from the engine's list, and what of theirs waits on you. No DOM here:
-// the Network panel (network.js), the attention strip (alerts.js) and the
-// tests share it.
+// from the engine's list, what of theirs waits on you or seems stuck, and
+// whether what waits sounds here. No DOM here: the Network panel
+// (network.js), the attention strip (alerts.js), the map (network-map.js)
+// and the tests share it.
 import { hostOfId } from "./hosts.js";
 
 // A machine's id in a network, which the person picks.
@@ -121,32 +122,46 @@ export function proposalWords(p) {
   return `${what}, asked by ${by}`;
 }
 
+// Text from another machine, as the page keeps it: a string, cut to `max`,
+// or null. It's shown escaped, as transcripts are, and never reaches an
+// agent.
+const words = (v, max) => (typeof v === "string" && v.trim() ? v.slice(0, max) : null);
+
 // Other machines' agents from the engine's list (GET /api/engine/agents):
 // those with an @<host>: id, each with what waits on you, however the
-// engine words it (needsYou as a kind or as { kind, text, since }).
+// engine words it (needsYou as a kind or as { kind, text, since }), and
+// the detail their machine shares unless it shares titles only: the
+// question's text, the last message and why it seems stuck.
 export function remoteAgents(raw) {
   const out = [];
   for (const a of list(raw)) {
     const host = typeof a?.host === "string" && a.host ? a.host : hostOfId(a?.id);
-    if (!HOST_ID.test(host ?? "") || typeof a.id !== "string" || !a.id.startsWith("@")) continue;
+    if (!HOST_ID.test(host ?? "") || typeof a.id !== "string" || !a.id.startsWith(`@${host}:`) || a.id.length > 300) continue;
     const need = a.needsYou && typeof a.needsYou === "object" ? a.needsYou : null;
     const kind = need?.kind ?? (typeof a.needsYou === "string" ? a.needsYou : null);
     const waits = a.waitsOnYou === true || !!kind;
+    const stuck = list(a.stuck).map((r) => words(r, 280)).filter(Boolean).slice(0, 8);
     out.push({
       id: a.id,
       host,
       app: typeof a.app === "string" ? a.app : null,
-      title: typeof a.title === "string" && a.title ? a.title : a.id,
+      title: words(a.title, 200) ?? a.id,
       status: a.status ?? null,
-      project: a.project ?? null,
-      branch: a.branch ?? null,
-      focus: a.focus ?? a.doing ?? null,
+      project: words(a.project, 200),
+      repoKey: words(a.repoKey, 300),
+      cwd: words(a.cwd, 500),
+      branch: words(a.branch, 200),
+      focus: words(a.focus ?? a.doing, 280),
       lastActive: Number.isFinite(a.lastActive) ? a.lastActive : null,
       seen: Number.isFinite(a.seen) ? a.seen : null,
+      online: a.online !== false,
       waits,
       kind: waits ? (kind ?? "question") : null,
-      text: waits ? (need?.text ?? a.question ?? a.focus ?? null) : null,
+      // The question's text, from a machine that shares more than titles.
+      text: waits ? words(need?.text ?? a.question, 320) : null,
       since: waits ? (need?.since ?? a.since ?? a.lastActive ?? null) : null,
+      lastMessage: words(a.lastMessage, 280),
+      stuck: stuck.length ? stuck : null,
     });
   }
   return out;
@@ -161,19 +176,24 @@ export function chimeHere(state) {
   return !hosts.some((x) => x.you);
 }
 
-// What waits on you on other machines, as cards for the attention strip.
-export function remoteWaits(state, agents) {
+// What waits on you or seems stuck on other machines, as cards for the
+// attention strip, with the question's text and the stuck reason as their
+// machine shares them.
+export function remoteWaits(state, agents, now = Date.now()) {
   if (!inNetwork(state)) return [];
   const chime = chimeHere(state);
   const online = new Map(list(state.hosts).map((x) => [x.id, x]));
-  return list(agents)
-    .filter((a) => a.waits)
-    .map((a) => {
-      const host = online.get(a.host);
+  const out = [];
+  for (const a of list(agents)) {
+    const host = online.get(a.host);
+    const where = { host: a.host, app: a.app, name: a.title, stale: !!host && !host.online, asOf: host?.seen ?? null };
+    if (a.waits) {
       // A machine that shares titles only sends no question's text.
       const text = a.text || `The question shows in ${a.host}'s console.`;
-      return { kind: "remote-need", id: a.id, host: a.host, app: a.app, name: a.title, sub: a.kind === "permission" ? "needs permission" : "is waiting for you", text, since: a.since ?? Date.now(), chime, stale: !!host && !host.online, asOf: host?.seen ?? null };
-    });
+      out.push({ kind: "remote-need", id: a.id, ...where, sub: a.kind === "permission" ? "needs permission" : "is waiting for you", text, since: a.since ?? now, chime });
+    } else if (a.stuck) out.push({ kind: "remote-stuck", id: a.id, ...where, text: a.stuck.join(" · ") });
+  }
+  return out;
 }
 
 // Why a new machine's id won't do, or null.

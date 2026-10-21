@@ -1,8 +1,9 @@
 // The attention strip: programs asking to be actors, agents and actors
 // waiting on you (on this machine, and in a network on the others), edit
-// collisions, stuck agents, sessions ready for review, and problems
-// XenoNet's doctor found. Also the tab-title badge, and notifications:
-// native ones in the desktop app, the browser's (opt-in) otherwise.
+// collisions, stuck agents (here and on the others), sessions ready for
+// review, and problems XenoNet's doctor found. Also the tab-title badge,
+// and notifications: native ones in the desktop app, the browser's
+// (opt-in) otherwise.
 //
 // Live snapshots arrive several times a second, so the strip is reconciled
 // rather than redrawn: a card that hasn't changed keeps its element, so it
@@ -59,8 +60,8 @@ export function createAlerts({ sfx, select, ack, openApp, collision, doctor = ()
   let armTimer = null;
   // Actors waiting on you (see setActors), after the sessions that are.
   let actorItems = [];
-  // Other machines' agents waiting on you, in a network (see setRemote),
-  // after this machine's.
+  // Other machines' agents waiting on you or stuck, in a network (see
+  // setRemote), after this machine's.
   let remoteItems = [];
 
   const title = (id) => index.get(id)?.title ?? id;
@@ -205,6 +206,13 @@ export function createAlerts({ sfx, select, ack, openApp, collision, doctor = ()
       return `<div class="al need remote-need" data-al-remote="${h(it.id)}">
         <span class="al-icon">◉</span>
         <div class="al-body"><div class="al-title"><i class="sw ${h(it.app ?? "")}"></i><span class="al-name">${h(it.name)}</span> <em>${h(it.sub)}</em>${alertHostHtml(it)}<span class="al-time" data-since="${h(it.since)}">${timeAgo(it.since)}</span></div><div class="al-text" title="${h(alertText(it))}">${h(gist(alertText(it)))}</div></div>
+      </div>`;
+    // Another machine's agent that seems stuck, with why, as its machine
+    // shares it.
+    if (it.kind === "remote-stuck")
+      return `<div class="al stuck remote-stuck" data-al-remote="${h(it.id)}">
+        <span class="al-icon">⟳</span>
+        <div class="al-body"><div class="al-title"><i class="sw ${h(it.app ?? "")}"></i><span class="al-name">${h(it.name)}</span> <em>may be stuck</em>${alertHostHtml(it)}</div><div class="al-text">${h(it.text)}</div></div>
       </div>`;
     if (it.kind === "need")
       return `<div class="al need" data-al-goto="${h(it.id)}">
@@ -424,7 +432,7 @@ export function createAlerts({ sfx, select, ack, openApp, collision, doctor = ()
       requestItems = view?.canDecide ? [...list.map((r) => ({ kind: "request", id: r.id, request: r, since: r.at })), ...asks.map((g) => ({ kind: "request", id: g.id, request: { ...g, gateway: true }, since: g.at }))] : view?.waiting > 0 && !view.off ? [{ kind: "requests", count: view.waiting }] : [];
       if (lastSnap) update(lastSnap, index);
     },
-    // Other machines' agents waiting on you (network-model.js's
+    // Other machines' agents waiting on you or stuck (network-model.js's
     // remoteWaits): a card each, with its machine.
     setRemote(list) {
       remoteItems = Array.isArray(list) ? list : [];

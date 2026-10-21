@@ -33,7 +33,9 @@
 .net .net-agent-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
 .net .net-agent-what { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 11px; }
 .net .net-agent.waits .net-agent-what { color: var(--attention); }
-.net .net-agent.waits em { font-style: normal; text-transform: uppercase; letter-spacing: 0.08em; font-size: 9.5px; }
+.net .net-agent.waits em,
+.net .net-agent.stuck em { font-style: normal; text-transform: uppercase; letter-spacing: 0.08em; font-size: 9.5px; }
+.net .net-agent.stuck .net-agent-what { color: var(--stuck); }
 
 .net .net-warn {
   color: var(--attention);
