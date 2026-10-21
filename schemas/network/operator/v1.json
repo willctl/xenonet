@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/network/operator/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "An action for the person",
+  "description": "Something the person did in a console on one host, for another host to carry out.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "network/operator/v1"
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "message",
+        "ticket",
+        "remove",
+        "replace"
+      ]
+    },
+    "args": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    },
+    "checked": {
+      "type": "string",
+      "enum": [
+        "window",
+        "person"
+      ],
+      "description": "window: the window key; person: a terminal, by process checks"
+    },
+    "strength": {
+      "type": "string",
+      "enum": [
+        "strong",
+        "weak"
+      ],
+      "description": "strong: checked by the window key, or by process checks on macOS; weak: claimed, not checked"
+    },
+    "nonce": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]*$",
+      "description": "base64url, no padding"
+    },
+    "at": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    }
+  },
+  "required": [
+    "schema",
+    "action",
+    "args",
+    "checked",
+    "strength",
+    "nonce",
+    "at"
+  ],
+  "additionalProperties": {}
+}

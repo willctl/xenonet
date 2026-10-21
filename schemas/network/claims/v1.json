@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/network/claims/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "Claims across clones",
+  "description": "What a host's agents claimed or are changing, by repo remote and path inside the repo, so agents on other hosts are warned.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "network/claims/v1"
+    },
+    "full": {
+      "type": "boolean"
+    },
+    "claims": {
+      "maxItems": 5000,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "repoKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "Inside the repo, with / between parts"
+          },
+          "agent": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "branch": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "claim",
+              "edit"
+            ],
+            "description": "claim: the agent claimed it; edit: XenoNet saw it change"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "number",
+                "description": "Epoch milliseconds"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "repoKey",
+          "path",
+          "agent",
+          "branch",
+          "kind",
+          "until"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "released": {
+      "maxItems": 5000,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "repoKey": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "agent": {
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "repoKey",
+          "path",
+          "agent"
+        ],
+        "additionalProperties": {}
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "full",
+    "claims",
+    "released"
+  ],
+  "additionalProperties": {}
+}

@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/network/receipt/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A receipt",
+  "description": "What happened to a message on the host it went to.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "network/receipt/v1"
+    },
+    "mid": {
+      "type": "string",
+      "pattern": "^msg_[0-9a-f-]{36}$",
+      "description": "The message's id across the network (its envelope's mid)"
+    },
+    "agent": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "The recipient, unqualified"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "stored",
+        "delivered",
+        "seen",
+        "held",
+        "refused"
+      ],
+      "description": "stored: the receiving engine has it (the sender may drop it from its outbox); held: it waits because the session bypasses permission checks"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 280
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "at": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    }
+  },
+  "required": [
+    "schema",
+    "mid",
+    "agent",
+    "state",
+    "reason",
+    "at"
+  ],
+  "additionalProperties": {}
+}
