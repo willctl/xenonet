@@ -119,7 +119,8 @@ async fn the_card_and_a2a_through_the_front_door_in_mcps_order() {
     let stand = Arc::new(Stand::default());
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
     let heard = calls.clone();
-    let hooks = GatewayHooks { on_call: Arc::new(move |id: &str, _slug: &str, _host: Option<&str>, _at: f64| heard.lock().unwrap().push(id.to_string())), ..GatewayHooks::default() };
+    let hooks =
+        GatewayHooks { on_call: Arc::new(move |id: &str, _slug: &str, _host: Option<&str>, _at: f64| heard.lock().unwrap().push(id.to_string())), ..GatewayHooks::default() };
     let g = ActorGateway::new(
         GatewayCores { engine: stand.clone(), registration: stand.clone(), actors: stand.clone(), reports: stand.clone(), runs: None },
         hooks,

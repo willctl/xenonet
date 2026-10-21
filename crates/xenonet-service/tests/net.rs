@@ -348,7 +348,8 @@ async fn a_time_comes_only_signed_by_the_gateway_and_frames_only_within_the_week
     assert!(laptop.clock_answer(&json!({ "code": "clock", "now": now_ms() + 3600e3 }), "bm9uY2Vub25jZQ").is_err());
     let other = xenonet_net::keys::HostKey::generate().unwrap();
     let net = laptop.network().unwrap();
-    let draft = xenonet_net::frame::Draft { network: &net.id, id: xenonet_net::codec::frame_id().unwrap(), kind: "ping", from: &net.gateway.host, to: "laptop", at: now_ms() as i64 };
+    let draft =
+        xenonet_net::frame::Draft { network: &net.id, id: xenonet_net::codec::frame_id().unwrap(), kind: "ping", from: &net.gateway.host, to: "laptop", at: now_ms() as i64 };
     let forged = xenonet_net::frame::gateway_frame(&draft, &other, &json!({ "now": now_ms() + 3600e3, "nonce": "bm9uY2Vub25jZQ" }));
     let v = json!({ "code": "clock", "frame": forged.line().trim_end() });
     assert!(laptop.clock_answer(&v, "bm9uY2Vub25jZQ").unwrap_err().contains("didn't check"));
@@ -372,7 +373,8 @@ async fn a_time_comes_only_signed_by_the_gateway_and_frames_only_within_the_week
     }
     assert_eq!(c.sink.texts("message"), [format!("at {now}")]);
     // An up batch's frames are 64 KiB at most each, but relay frames.
-    let d = xenonet_net::frame::Draft { network: &net.id, id: xenonet_net::codec::frame_id().unwrap(), kind: "message", from: "laptop", to: "desk", at: laptop.gateway_now() as i64 };
+    let d =
+        xenonet_net::frame::Draft { network: &net.id, id: xenonet_net::codec::frame_id().unwrap(), kind: "message", from: "laptop", to: "desk", at: laptop.gateway_now() as i64 };
     let big = xenonet_net::frame::host_frame(&d, &key, &desk_keys, &json!({ "body": "x".repeat(70 << 10) }), None).unwrap();
     let batch = format!("{{\"frames\":[{}],\"ack\":null}}", big.line().trim_end());
     let (req, _) = laptop.signed_request("POST", "/net/v1/frames", batch.into_bytes()).unwrap();
@@ -402,10 +404,7 @@ async fn a_time_comes_only_signed_by_the_gateway_and_frames_only_within_the_week
     let mut first = open().await;
     let _second = open().await;
     let _third = open().await;
-    let ended = tokio::time::timeout(Duration::from_secs(5), async {
-        while first.recv().await.is_some() {}
-    })
-    .await;
+    let ended = tokio::time::timeout(Duration::from_secs(5), async { while first.recv().await.is_some() {} }).await;
     assert!(ended.is_ok(), "the oldest stream ended");
 }
 
@@ -557,7 +556,13 @@ async fn the_lan_door_checks_its_host_and_bad_tickets_get_404() {
     let join = |code: &str, source: &str| {
         let key = xenonet_net::keys::HostKey::generate().unwrap();
         let body = xenonet_net::gateway::join_body(&key, code, "bm9uY2Vub25jZW5vbmNlMTIz", "linux", "0", false);
-        xenonet_net::gateway::NetRequest { method: "POST".into(), target: "/net/v1/join".into(), headers: Vec::new(), body: body.to_string().into_bytes(), source: Some(source.into()) }
+        xenonet_net::gateway::NetRequest {
+            method: "POST".into(),
+            target: "/net/v1/join".into(),
+            headers: Vec::new(),
+            body: body.to_string().into_bytes(),
+            source: Some(source.into()),
+        }
     };
     assert_eq!(gw.handle(join(&code, "198.51.100.7")).await.status, 200, "another source joins");
     // Five wrong tries aimed at a ticket (by its tag) retire it.
@@ -581,7 +586,8 @@ async fn the_lan_door_checks_its_host_and_bad_tickets_get_404() {
     let st = a.state().await;
     assert!(st["joinClosedUntil"].as_f64().is_some_and(|t| t > now_ms()), "{st}");
     a.svc.node().shared().write_link(true);
-    let doctor: std::collections::HashMap<String, Value> = xenonet_net::doctor::checks(&a.dir.join("state").join("network"), now_ms()).into_iter().map(|(id, _, v)| (id.to_string(), v)).collect();
+    let doctor: std::collections::HashMap<String, Value> =
+        xenonet_net::doctor::checks(&a.dir.join("state").join("network"), now_ms()).into_iter().map(|(id, _, v)| (id.to_string(), v)).collect();
     assert_eq!(doctor["network.join"]["status"], "warn", "{:?}", doctor["network.join"]);
     // The routes are the owner's: an agent's process is refused.
     let mut cores = Cores::pending(false, false, false);

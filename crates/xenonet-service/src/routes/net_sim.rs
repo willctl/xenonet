@@ -140,7 +140,8 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreE
             Ok(Some(Reply::json(200, state)))
         }
         ("POST", "/api/actors/you/message") => message(ctx, req).await,
-        ("POST", "/api/net/ticket" | "/api/net/replace" | "/api/net/remove" | "/api/net/create" | "/api/net/join" | "/api/net/leave" | "/api/net/approve") | ("PUT", "/api/net/settings") => {
+        ("POST", "/api/net/ticket" | "/api/net/replace" | "/api/net/remove" | "/api/net/create" | "/api/net/join" | "/api/net/leave" | "/api/net/approve")
+        | ("PUT", "/api/net/settings") => {
             if let Some(why) = ctx.from_window(req).await {
                 return Ok(Some(Reply::coded(403, "yours", why)));
             }

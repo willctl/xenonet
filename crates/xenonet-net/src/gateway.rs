@@ -361,7 +361,10 @@ impl Gateway {
             // request's nonce: a host takes a time only from its own
             // gateway, and only in answer to the request it made.
             let f = Self::frame(&me, "ping", &signed.host, now as i64, &json!({ "now": now as i64, "nonce": signed.nonce })).map_err(|e| NetReply::error(&e))?;
-            return Err(NetReply::json(401, &json!({ "error": "the request's time is more than a minute off the gateway's", "code": "clock", "now": now as i64, "frame": f.line().trim_end() })));
+            return Err(NetReply::json(
+                401,
+                &json!({ "error": "the request's time is more than a minute off the gateway's", "code": "clock", "now": now as i64, "frame": f.line().trim_end() }),
+            ));
         }
         let mut nonces = self.nonces.locked();
         nonces.retain(|_, at| now - *at < NONCE_MS);
@@ -833,7 +836,8 @@ impl Gateway {
         if view.member(host).is_some() {
             return Err(NetError::new(409, "taken", format!("{host} is in the network already: Replace it to add a reinstalled machine")));
         }
-        let hash = body.get("hash").and_then(Value::as_str).filter(|h| unb64(h).is_some_and(|b| b.len() == 32)).ok_or_else(|| NetError::bad("a ticket's hash is 32 bytes, base64url"))?;
+        let hash =
+            body.get("hash").and_then(Value::as_str).filter(|h| unb64(h).is_some_and(|b| b.len() == 32)).ok_or_else(|| NetError::bad("a ticket's hash is 32 bytes, base64url"))?;
         let window = body.get("window").and_then(Value::as_bool).ok_or_else(|| NetError::bad("a ticket says whether it's for a window host"))?;
         let now = Self::now(n) as i64;
         let expires = now + ticket::TICKET_MS as i64;
@@ -919,7 +923,9 @@ impl Gateway {
         };
         let in_roster = |n: &Shared| n.roster().view().member(&t.host).map(|m| m.keys == keys);
         match in_roster(n) {
-            Some(false) => return Err(NetError::new(409, "taken", format!("{} is in the network already: Replace it from a window host's console, then make a new ticket", t.host))),
+            Some(false) => {
+                return Err(NetError::new(409, "taken", format!("{} is in the network already: Replace it from a window host's console, then make a new ticket", t.host)))
+            }
             Some(true) => {}
             None if t.maker == me.host => {
                 // Made here: the gateway's host signs the new host in.

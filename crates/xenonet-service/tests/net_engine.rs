@@ -198,7 +198,13 @@ impl Host {
             Some(port) => {
                 let c = &ctx.cores;
                 let g = ActorGateway::new(
-                    GatewayCores { engine: c.engine.clone(), registration: c.registration.clone().unwrap(), actors: c.actors.clone().unwrap(), reports: c.reports.clone(), runs: c.runs.clone() },
+                    GatewayCores {
+                        engine: c.engine.clone(),
+                        registration: c.registration.clone().unwrap(),
+                        actors: c.actors.clone().unwrap(),
+                        reports: c.reports.clone(),
+                        runs: c.runs.clone(),
+                    },
                     GatewayHooks::default(),
                     port,
                     None,
@@ -427,7 +433,11 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     let got = c.agent(D1, "inbox", json!({})).await;
     assert_eq!(texts(&got), ["Are the ledger fixtures stable?"], "{got}");
     let m = &got[0];
-    assert_eq!((m["from"]["id"].clone(), m["envelope"]["transport"].clone(), m["envelope"]["auth"]["method"].clone(), m["envelope"]["host"].clone()), (json!(format!("@laptop:{L1}")), json!("network"), json!("host"), json!("laptop")), "{m}");
+    assert_eq!(
+        (m["from"]["id"].clone(), m["envelope"]["transport"].clone(), m["envelope"]["auth"]["method"].clone(), m["envelope"]["host"].clone()),
+        (json!(format!("@laptop:{L1}")), json!("network"), json!("host"), json!("laptop")),
+        "{m}"
+    );
     assert!(m["envelope"]["mid"].as_str().unwrap().starts_with("msg_"), "{m}");
     until("the seen receipt at laptop", 10, || async { b.receipts() == [(format!("@desk:{D1}"), Some("seen".to_string()))] }).await;
     // The reply goes back by reply_to.

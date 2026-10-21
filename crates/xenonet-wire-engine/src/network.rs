@@ -1228,7 +1228,8 @@ fn handoff_in(w: &World, from: &str, b: &Value) -> Result<()> {
             }
             // As the schema has them: what's past its limits is cut.
             let field = |k: &str, max: usize| s(b, k).map(|t| clip(&t, max));
-            let files: Vec<Value> = b.get("files").and_then(Value::as_array).map(|f| f.iter().filter_map(Value::as_str).take(200).map(|p| json!(clip(p, 1000))).collect()).unwrap_or_default();
+            let files: Vec<Value> =
+                b.get("files").and_then(Value::as_array).map(|f| f.iter().filter_map(Value::as_str).take(200).map(|p| json!(clip(p, 1000))).collect()).unwrap_or_default();
             let commit = s(b, "commit").filter(|c| (7..=64).contains(&c.len()) && c.bytes().all(|x| x.is_ascii_hexdigit()));
             let to = b.get("to").cloned().unwrap_or(Value::Null);
             let to_agent = s(&to, "agent").filter(|a| a.chars().count() <= 200).map(|a| here(&a));

@@ -559,7 +559,8 @@ async fn another_host_keeps_only_so_much_here_and_as_the_schema_has_it() {
     n.link_up().await;
     // Claims: cut to the schema's lengths, and 5000 a host at most.
     let long = "x".repeat(2000);
-    let mut claims: Vec<Value> = (0..5001).map(|i| json!({ "repoKey": "github.com/acme/atlas", "path": format!("src/f{i}.ts"), "agent": A, "branch": "main", "kind": "claim", "until": null })).collect();
+    let mut claims: Vec<Value> =
+        (0..5001).map(|i| json!({ "repoKey": "github.com/acme/atlas", "path": format!("src/f{i}.ts"), "agent": A, "branch": "main", "kind": "claim", "until": null })).collect();
     claims.push(json!({ "repoKey": long, "path": long, "agent": A, "branch": long, "kind": "edit", "until": null }));
     let body = json!({ "schema": "network/claims/v1", "full": true, "claims": claims, "released": [] });
     n.on("laptop", move |w| network::receive(w, Incoming { from: "studio".into(), kind: Kind::Claims, body, at: now(), from_window_host: true })).await;

@@ -241,8 +241,11 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             let which = arg(args, 1, "which machine the waiting entry is about, or the entry's id")?;
             let st = call(&s, "GET", "/api/net/state", None)?;
             let op = flags.text("op");
-            let found: Vec<Value> =
-                list(&st, "proposals").iter().filter(|p| str(p, "id") == Some(which.as_str()) || (str(p, "host") == Some(which.as_str()) && op.as_deref().is_none_or(|o| str(p, "op") == Some(o)))).cloned().collect();
+            let found: Vec<Value> = list(&st, "proposals")
+                .iter()
+                .filter(|p| str(p, "id") == Some(which.as_str()) || (str(p, "host") == Some(which.as_str()) && op.as_deref().is_none_or(|o| str(p, "op") == Some(o))))
+                .cloned()
+                .collect();
             let p = match found.as_slice() {
                 [one] => one.clone(),
                 [] => return Err(Fail::new(format!("nothing waits for approval about {which}: xenonet net status lists what does"), 1)),
