@@ -7,8 +7,8 @@
 import { define } from "./registry.js";
 import { z, obj, ms, count, nstr, openEnum } from "./common.js";
 
-const AgentRef = z.string().describe("An agent: claude:<session id> or codex:<thread id>, or an actor, actor:<slug>");
-const App = z.enum(["claude", "codex", "actor"]);
+const AgentRef = z.string().describe("An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>");
+const App = z.enum(["claude", "codex", "grok", "actor"]);
 
 const HeldClaim = obj({
   pattern: z.string().describe("An absolute path, a folder (ending in /) or a glob"),

@@ -818,6 +818,11 @@ pub fn hosts_qualify_event(
     with_schemas!(clean, activity, |sc| Json(merge::qualify_event(&name, &d, &host.0, &mut sc).unwrap_or(Value::Null)))
 }
 
+#[napi(js_name = "hostsEventNote")]
+pub fn hosts_event_note(name: String, data: MaybeJson, host: Json) -> Option<String> {
+    merge::event_note(&name, &data.0.unwrap_or(Value::Null), &host.0)
+}
+
 #[napi(js_name = "hostsQualifyEngine")]
 pub fn hosts_qualify_engine(
     engine: MaybeJson,

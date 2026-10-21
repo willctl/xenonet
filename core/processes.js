@@ -30,6 +30,12 @@ export const PROCESSES = {
     program: (_p, base) => base === "codex" || /^codex-(aarch64|x86_64)/.test(base),
     script: (args) => /@openai\/codex\//.test(args),
   },
+  // The grok binary its installer puts in ~/.grok/downloads and links
+  // from ~/.grok/bin (as grok, and as agent, which Cursor's CLI is called
+  // too, so that name counts only there).
+  grok: {
+    program: (p, base) => base === "grok" || base === "grok.exe" || /^grok-(macos|linux|windows)-(aarch64|arm64|x86_64|x64)(\.exe)?$/.test(base) || /\/\.grok\/(bin|downloads)\/[^/]+$/.test(p),
+  },
   // Its one binary, however it was installed. Every OpenCode reads the
   // same database and can open any session.
   opencode: {

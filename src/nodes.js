@@ -241,7 +241,9 @@ export function buildNode(node) {
           rock.rotation.y += 0.03;
         }
       });
-      lbl = label(debris.length ? `AGENT WIKI · ${debris.length} UNFILED` : "AGENT WIKI", COLORS.wiki, 3.4);
+      // Its name: Xenolith, or Agent Wiki for a wiki from before it.
+      const title = String(node.name || "Xenolith").toUpperCase();
+      lbl = label(debris.length ? `${title} · ${debris.length} UNFILED` : title, COLORS.wiki, 3.4);
       lbl.position.y = r + 5;
       break;
     }

@@ -83,6 +83,16 @@ test("a field the mapper can't read is broken: the readers that read it throw wh
   assert.throws(() => live.applyClaude({ sessionId: "claude:s" }, gap, false), /reading 'type'/);
 });
 
+test("search refuses an app XenoNet doesn't tail: no session for its files, and no documents from its lines", () => {
+  const search = new TranscriptSearch({ dbFile: path.join(home, "refused.sqlite") });
+  const rollout = "/x/sessions/2026/10/03/rollout-2026-10-03T11-00-00-0190d3e0-0000-7000-8000-000000000001.jsonl";
+  assert.equal(search.sessionOf(rollout, "codex"), "codex:0190d3e0-0000-7000-8000-000000000001");
+  assert.equal(search.sessionOf(rollout, "gemini-cli"), null, "not read as Codex's");
+  assert.equal(search.sessionOf("/x/projects/p/0190d3e0-0000-7000-8000-000000000001.jsonl", "claude"), "claude:0190d3e0-0000-7000-8000-000000000001");
+  assert.equal(search.sessionOf("/x/projects/p/0190d3e0-0000-7000-8000-000000000001.jsonl", "opencode"), null);
+  assert.throws(() => docsFromLine({ type: "user", timestamp: at(0), message: { content: "hello" } }, "gemini-cli"), { message: "XenoNet doesn't read Gemini CLI's transcripts" });
+});
+
 // ----- a made-up third app -----
 
 // Its transcripts: one JSON line per message, `{ at, by: "me" | "bot",

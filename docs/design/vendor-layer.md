@@ -164,7 +164,9 @@ aren't lists of apps or are public inputs:
 - the theme tokens `--claude` and `--codex` (`theme/v1`).
 
 Widening any of these is a contract change of its own when an app needs
-it.
+it. Grok Build widened two, by adding to them: `engine/agent/v1`'s `App`
+has `grok`, since its sessions connect to the engine, and `theme/v1` has
+`colors.grok` (see [Grok Build in XenoNet](grok-build.md)).
 
 **The fallbacks stay, as one lookup.** About 15 places pick one of the two
 apps by testing for the other: most read an app that isn't Codex as
@@ -173,7 +175,7 @@ Claude Code; a few (`cli/commands/hook.js`, `/api/diagnose/ask`,
 isn't Claude Code as Codex. Each becomes a lookup in the registry with the
 same fallback as today, so `xenonet hook <app>` and the routes behave as
 they do now. Refusing an app the registry doesn't have is a later step
-(step 6), since it changes behaviour on the wire.
+(step 6), since it changes behaviour on the wire; it's done (below).
 
 ## 2. One event stream
 
@@ -299,8 +301,8 @@ In Rust, with the JS shapes they mirror:
 - **The patch parser**: one parser reads `apply_patch` text into the
   paths it adds, updates, deletes and moves to. Live, the engine and the
   native readers use it and keep their own records (live's
-  `{ path, kind, diff }`, the engine's `{ ts, path }`). Live still leaves
-  out `*** Move to:` until step 6.
+  `{ path, kind, diff }`, the engine's `{ ts, path }`). Live left out
+  `*** Move to:` until step 6, and reads it too now.
 - **One drift-reader pool**: `wire-map`'s `Vendor` is made once and
   handed to the actors' observers, which drop their own pool.
 
@@ -378,14 +380,37 @@ Each step is its own PR. Steps 1 to 5 leave output unchanged:
      output (`core/pricing.js`), but `blocks.md` records live keeping
      both as its own way, so this is a decision to revisit, not a bug fix
      on its own say.
-   - `*** Move to:` in live.
-   - OpenCode ids that don't round-trip with numbat.
+   - `*** Move to:` in live. Decided and done on 2026-10-21: live counts
+     the names a patch moves files to, as the engine and the native
+     readers do, so a moved file shows as activity and as a file two
+     sessions share.
+   - OpenCode ids that don't round-trip with numbat. Decided and done on
+     2026-10-21: one reading of OpenCode's ids (`localId` and `openCodeId`
+     in `core/native/opencode.js`, `xenonet_base::opencode` in Rust) serves
+     the reader, numbat and delivery. An id of letters and digits in runs
+     joined by single underscores takes a dash for each, as before; any
+     other is `x--` and its bytes in hex. Both read back whole, and
+     numbat's OpenCode runs take the reader's ids, so a run both read is
+     one session.
    - Refusing an app the registry doesn't have, instead of falling back.
+     Decided and done on 2026-10-21: where a command, a route, another
+     host or a reader of transcripts is given an app XenoNet doesn't tail,
+     it's refused, naming the app (`tailedOr` in `core/apps.js`,
+     `apps::tailed_or`): a 400 on routes, a usage error from the command,
+     and a host's tokens left out with a note in the log. `xenonet hook`
+     refuses quietly, with a line in the log, and still exits 0. Leaving
+     the app out still takes the default. The live tailer, the
+     normalizers and the command's refusal scan keep their fallback.
    - What `engine/verify.js` does with a calling app that has no
-     `processes` capability. Today a caller outside Claude Code, Codex and
-     OpenCode isn't process-checked, and its messages are marked
-     unchecked. Refusing such callers would keep a new app from adding to
-     that.
+     `processes` capability. A caller outside Claude Code, Codex and
+     OpenCode wasn't process-checked, and its messages were marked
+     unchecked. Decided and done on 2026-10-21: a request in such a
+     session's name is refused, on every system, with a reason that names
+     the app. Actors and the gateway's reported runs don't meet the rule.
+   - Also decided on 2026-10-21, and done: each Rust native reader reports
+     a failed vendor check where its JS does (Gemini CLI's and Copilot
+     CLI's when the vendor reader can't be got, Cursor's then and when a
+     check throws, OpenCode's as before).
 
 ## Testing
 

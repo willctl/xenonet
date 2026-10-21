@@ -240,6 +240,19 @@ test("a Codex rollout with no completed user messages, as codex exec writes: its
   assert.deepEqual(s.turns.map((t) => [t.prompt, t.start, t.end]), [["summarize the failing tests", Date.parse(at(0)), Date.parse(at(2))], ["and suggest fixes", Date.parse(at(4)), Date.parse(at(5))]]);
 });
 
+test("a session of an app XenoNet doesn't tail is refused, not read as Claude Code's", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-stats-other-"));
+  try {
+    const file = path.join(dir, "run.jsonl");
+    fs.writeFileSync(file, `${JSON.stringify({ type: "user", timestamp: "2026-10-03T11:00:00Z", message: { content: "hello" } })}\n`);
+    const stats = createStats({ transcripts: { files: async () => [{ file, agentId: null }] } });
+    await assert.rejects(stats("gemini-cli:0190d3e0-0000-7000-8000-000000000001"), { message: "XenoNet doesn't read Gemini CLI's transcripts" });
+    await assert.rejects(stats("nobody:0190d3e0-0000-7000-8000-000000000001"), { message: 'XenoNet doesn\'t read "nobody"\'s transcripts' });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a Codex local shell call is a shell call, by its type, as it has no name", async () => {
   const s = await codexStats([
     { type: "turn_context", timestamp: at(0), payload: { model: "gpt-5.5" } },

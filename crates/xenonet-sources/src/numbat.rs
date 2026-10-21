@@ -42,7 +42,16 @@ pub fn run_id(sid: &str) -> String {
     format!("n{}", &hex[..31])
 }
 
+/// A run's session id. OpenCode's runs take the id its own reader gives
+/// them (ses_… as ses-…, native/opencode.rs) when that fits, so a run both
+/// read is one session, and delivery finds it.
 pub fn session_id_of(app: &str, sid: &str) -> String {
+    if app == "opencode" {
+        let own = crate::native::opencode::local_id(sid);
+        if fits_id(&own, 128) {
+            return format!("opencode:{own}");
+        }
+    }
     format!("{app}:{}", run_id(sid))
 }
 
@@ -377,6 +386,19 @@ mod tests {
         let id = session_id_of("cursor", "has spaces/and slashes");
         assert!(id.starts_with("cursor:n") && id.len() == "cursor:n".len() + 31, "{id}");
         assert_eq!(run_id("g-0000001"), "g-0000001");
+    }
+
+    #[test]
+    fn an_opencode_run_has_the_id_its_reader_gives_it() {
+        for sid in ["ses_eb95b1836ffexD4vYDGuLeJDCy", "ses_ab_cd", "ses_ab-cd", "ses-abcdef"] {
+            assert_eq!(session_id_of("opencode", sid), crate::native::opencode::session_id_of(sid), "{sid}");
+        }
+        assert_eq!(session_id_of("opencode", "ses_eb95b1836ffexD4vYDGuLeJDCy"), "opencode:ses-eb95b1836ffexD4vYDGuLeJDCy");
+        assert_eq!(session_id_of("opencode", "abcdefg"), "opencode:abcdefg");
+        let long = session_id_of("opencode", &format!("{} ", "x".repeat(65)));
+        assert!(long.starts_with("opencode:n") && long.len() == "opencode:n".len() + 31, "{long}");
+        let other = session_id_of("cursor", "ses_ab");
+        assert!(other.starts_with("cursor:n") && other.len() == "cursor:n".len() + 31, "{other}");
     }
 
     #[test]

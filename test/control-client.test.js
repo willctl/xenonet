@@ -187,6 +187,7 @@ function fakeMachine() {
   const system = {
     alive: (pid) => m.table.has(pid),
     kill: (pid, signal) => (signals.push([pid, signal]), handlers.get(pid)?.(signal)),
+    processes: () => [...m.table.values()].map(({ pid, ppid, start }) => ({ pid, ppid, start })),
     spawn: m.spawn,
     command: () => ({ command: "electron", args: ["/src/xenonet"] }),
   };
@@ -291,6 +292,101 @@ test("quit kills a process stuck on its way out, once its server is gone", async
     assert.deepEqual(fm.signals, [[pid, "SIGKILL"]]);
   } finally {
     await i.close();
+  }
+});
+
+// A copy of XenoNet Dev on the made-up machine, as Chromium runs one: the
+// app, its GPU and network helpers, the service it started and a shell the
+// service runs; and another app's processes beside it. Each of the copy's
+// goes on SIGKILL; the app, quitting already, takes SIGTERM as one more
+// request to quit.
+function fakeTree(fm) {
+  const app = fm.m.add({ program: "Electron" });
+  const gpu = fm.m.add({ ppid: app, program: "Electron Helper (GPU)" });
+  const network = fm.m.add({ ppid: app, program: "Electron Helper" });
+  const service = fm.m.add({ ppid: app, program: "xenonet", args: ["serve", "--dev"] });
+  const shell = fm.m.add({ ppid: service, program: "/bin/zsh" });
+  const other = fm.m.add({ program: "Electron" });
+  const theirs = fm.m.add({ ppid: other, program: "Electron Helper (GPU)" });
+  for (const p of [app, gpu, network, service, shell]) fm.handlers.set(p, (signal) => signal === "SIGKILL" && fm.m.table.has(p) && fm.m.remove(p));
+  return { app, gpu, network, service, shell, other, theirs };
+}
+
+test("a test instance stuck on its way out is ended with its whole tree: its helpers and the service it started, and nothing else", async () => {
+  const fm = fakeMachine();
+  const t = fakeTree(fm);
+  const i = await instance({ pid: t.app });
+  const s = xenonet("test", { port: i.port, userData: tmp(), system: fm.system });
+  try {
+    assert.deepEqual(await s.quit({ timeout: 800 }), { quit: true, killed: t.app, ended: [t.gpu, t.network, t.service, t.shell] });
+    assert.deepEqual(fm.signals, [t.app, t.gpu, t.network, t.service, t.shell].map((p) => [p, "SIGKILL"]));
+    assert.ok(fm.system.alive(t.other) && fm.system.alive(t.theirs), "another app's processes are left alone");
+  } finally {
+    await i.close();
+  }
+});
+
+test("a test instance's hard stop takes what its tree held before it quit, but not a process that has its pid since", async () => {
+  const fm = fakeMachine();
+  const t = fakeTree(fm);
+  // On its way out, the app loses its service (now the system's child),
+  // and its GPU helper exits, its pid soon another program's.
+  const quitting = () => {
+    fm.m.table.get(t.service).ppid = 1;
+    fm.m.remove(t.gpu);
+    fm.m.add({ pid: t.gpu, ppid: 1, start: Date.now() + 5000, program: "/usr/bin/another" });
+  };
+  const i = await instance({ pid: t.app, onQuit: quitting });
+  const s = xenonet("test", { port: i.port, userData: tmp(), system: fm.system });
+  try {
+    assert.deepEqual(await s.quit({ timeout: 800 }), { quit: true, killed: t.app, ended: [t.network, t.service, t.shell] });
+    assert.ok(fm.system.alive(t.gpu), "the program that has the GPU helper's pid now is left alone");
+    assert.equal(fm.signals.some(([p]) => p === t.gpu), false);
+  } finally {
+    await i.close();
+  }
+});
+
+test("a test instance whose app has gone while its service still holds the port: the service it started is ended", async () => {
+  const fm = fakeMachine();
+  const t = fakeTree(fm);
+  let stuck = null;
+  // The app exits, its server goes, and its service, now the system's
+  // child, holds the port without answering.
+  const i = await instance({
+    pid: t.app,
+    onQuit: () =>
+      setTimeout(() => {
+        fm.m.remove(t.app);
+        for (const p of [t.gpu, t.network]) fm.m.remove(p);
+        fm.m.table.get(t.service).ppid = 1;
+        stuck = http.createServer((_req, res) => res.writeHead(503).end());
+        stuck.listen(i.port, "127.0.0.1");
+      }, 150),
+  });
+  fm.handlers.set(t.service, (signal) => signal === "SIGKILL" && (fm.m.remove(t.service), stuck?.closeAllConnections(), stuck?.close()));
+  const s = xenonet("test", { port: i.port, userData: tmp(), system: fm.system });
+  try {
+    assert.deepEqual(await s.quit({ timeout: 900 }), { quit: true, ended: [t.service, t.shell] });
+    assert.ok(fm.system.alive(t.other) && fm.system.alive(t.theirs));
+  } finally {
+    stuck?.close();
+  }
+});
+
+test("a hard stop of a dev or demo copy kills the app alone, as before", async () => {
+  for (const id of ["dev", "demo"]) {
+    const fm = fakeMachine();
+    const t = fakeTree(fm);
+    const i = await instance({ pid: t.app });
+    const s = xenonet(id, { port: i.port, userData: tmp(), system: fm.system });
+    try {
+      assert.deepEqual(await s.quit({ timeout: 800 }), { quit: true, killed: t.app }, id);
+      assert.deepEqual(fm.signals, [[t.app, "SIGKILL"]], id);
+      assert.ok(fm.system.alive(t.service), `${id}: its service is yours`);
+    } finally {
+      await i.close();
+    }
   }
 });
 

@@ -451,7 +451,7 @@ pub fn color_distance(a: &str, b: &str) -> f64 {
 }
 
 const RING_SPARES: [&str; 9] = ["#c3f584", "#f5a3ff", "#9fd0ff", "#ffc29e", "#d6c2ff", "#a8ffd1", "#ffe0f0", "#e2f5a8", "#ffffff"];
-const MEANINGFUL: [&str; 11] = ["project", "satellite", "claude", "codex", "gold", "pressure", "attention", "danger", "collision", "stuck", "lineage"];
+const MEANINGFUL: [&str; 12] = ["project", "satellite", "claude", "codex", "grok", "gold", "pressure", "attention", "danger", "collision", "stuck", "lineage"];
 const CLEAR_OF_MEANING: f64 = 20.0;
 const CLEAR_OF_RINGS: f64 = 15.0;
 

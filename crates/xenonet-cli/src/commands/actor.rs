@@ -42,12 +42,13 @@ fn dot(presence: &str) -> String {
 /// session by its app.
 pub fn node_words(id: &str) -> String {
     let Some((kind, rest)) = id.split_once(':') else { return id.to_string() };
-    if !matches!(kind, "project" | "zone" | "native" | "claude" | "codex") || rest.contains(['\n', '\r', '\u{2028}', '\u{2029}']) {
+    if !matches!(kind, "project" | "zone" | "native" | "claude" | "codex" | "grok") || rest.contains(['\n', '\r', '\u{2028}', '\u{2029}']) {
         return id.to_string();
     }
     match kind {
         "claude" => "a Claude Code session".into(),
         "codex" => "a Codex session".into(),
+        "grok" => "a Grok Build session".into(),
         "native" => "a project".into(),
         _ => Some(sys::base_name(rest)).filter(|b| !b.is_empty()).unwrap_or_else(|| rest.to_string()),
     }
@@ -460,7 +461,7 @@ pub fn target_of(spec: &str, fallback: Option<&str>) -> Value {
         Some(i) => (&spec[..i], Some(&spec[i + 1..])),
         None => (spec, fallback),
     };
-    let id = ["project:", "zone:", "native:", "claude:", "codex:"].iter().any(|p| node.starts_with(p));
+    let id = ["project:", "zone:", "native:", "claude:", "codex:", "grok:"].iter().any(|p| node.starts_with(p));
     let mut out = Map::new();
     if id {
         out.insert("id".into(), json!(node));
@@ -978,10 +979,12 @@ mod tests {
     fn nodes_and_targets_as_people_read_them() {
         assert_eq!(node_words("project:/users/nova/projects/docs-site"), "docs-site");
         assert_eq!(node_words("claude:abc"), "a Claude Code session");
+        assert_eq!(node_words("grok:abc"), "a Grok Build session");
         assert_eq!(node_words("native:x"), "a project");
         assert_eq!(node_words("actor:wren"), "actor:wren");
         assert_eq!(target_of("claude:x=spawned", Some("works-on")), json!({ "id": "claude:x", "relation": "spawned" }));
         assert_eq!(target_of("project:/a", None), json!({ "id": "project:/a" }));
+        assert_eq!(target_of("grok:g=works-on", None), json!({ "id": "grok:g", "relation": "works-on" }));
         assert_eq!(target_of("=x", None)["path"], json!(sys::resolve("=x")));
     }
 

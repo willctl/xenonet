@@ -1,6 +1,7 @@
-// Transcript lines as XenoNet reads them: a Claude Code transcript's lines
-// and a Codex rollout's, through one normalizer each (core/blocks/
-// normalizer.js), which the three readers share: the live tailer
+// Transcript lines as XenoNet reads them: a Claude Code transcript's lines,
+// a Codex rollout's and a Grok Build session's updates, through one
+// normalizer each (core/blocks/normalizer.js), which the three readers
+// share: the live tailer
 // (live.js), a session's stats (stats.js) and search (search.js). Each
 // line is checked against the vendor's schema on the way (vendor.js's
 // transcript hooks): a sample of each file's lines of each kind whole, the
@@ -162,6 +163,76 @@ export class CodexLine {
   }
 }
 
+// An MCP tool's name as Grok writes it: <server>__<tool>.
+const MCP_TOOL = /^[A-Za-z0-9][A-Za-z0-9_-]*?__[A-Za-z0-9][A-Za-z0-9_.-]*$/;
+
+// A line of a Grok Build session's updates.jsonl (~/.grok/sessions/<encoded
+// cwd>/<session id>/updates.jsonl): a session update, in the envelope Grok
+// writes ({ timestamp, method, params: { sessionId, update } }), or the
+// params alone, as older lines are. An update's kind is its sessionUpdate:
+// user_message_chunk and agent_message_chunk carry what you and the agent
+// said, a block at a time; tool_call and tool_call_update a tool call and
+// how it went; usage_update the context's fill.
+export class GrokLine {
+  constructor(raw) {
+    this.raw = raw;
+  }
+
+  // The update, or {} when the line has none. The envelope's params, or the
+  // line itself for one without an envelope.
+  get update() {
+    const r = this.raw;
+    const params = r.method !== undefined || r.params !== undefined ? r.params : r;
+    const u = params?.update;
+    return u && typeof u === "object" && !Array.isArray(u) ? u : {};
+  }
+  // The update's kind: "user_message_chunk", "tool_call", …
+  get kind() {
+    return this.update.sessionUpdate;
+  }
+  // Whether it's one of Grok's own updates rather than ACP's.
+  get own() {
+    return this.raw.method === "_x.ai/session/update";
+  }
+  // When it was written: the envelope's time is Unix seconds. NaN when it
+  // doesn't say.
+  get ts() {
+    const t = this.raw.timestamp;
+    return typeof t === "number" && t > 0 ? t * 1000 : typeof t === "string" ? Date.parse(t) : NaN;
+  }
+  // A chunk's text: its text block's; "" for another kind of block.
+  get text() {
+    const c = this.update.content;
+    return c?.type === "text" && typeof c.text === "string" ? c.text : "";
+  }
+  // Whether a chunk of yours isn't something you asked: a turn Grok's host
+  // started, or a shell command you ran from its prompt.
+  get notAsked() {
+    const u = this.update;
+    return u._meta?.hostTurn === true || u.content?._meta?.bash_command != null;
+  }
+  // A tool call's name: the one Grok gives its own tools (_meta's
+  // x.ai/tool), or an MCP tool's, which Grok calls by its title
+  // (<server>__<tool>), as XenoNet names them (mcp__<server>__<tool>); else
+  // the call's kind, as ACP has it.
+  get toolName() {
+    const u = this.update;
+    const name = u._meta?.["x.ai/tool"]?.name;
+    if (typeof name === "string" && name) return name;
+    if (typeof u.title === "string" && MCP_TOOL.test(u.title)) return `mcp__${u.title}`;
+    return typeof u.kind === "string" && u.kind ? u.kind : "tool";
+  }
+  // What a tool call was given: its input, with the files it works on (its
+  // locations) as file_path where the input doesn't name one.
+  get toolInput() {
+    const u = this.update;
+    const input = u.rawInput && typeof u.rawInput === "object" && !Array.isArray(u.rawInput) ? u.rawInput : {};
+    const at = Array.isArray(u.locations) ? u.locations.find((l) => typeof l?.path === "string")?.path : undefined;
+    const path = input.file_path ?? input.path ?? input.target_file ?? at;
+    return typeof path === "string" && input.file_path === undefined ? { ...input, file_path: path } : input;
+  }
+}
+
 // Whether a rollout's lines have a completed user message: when they have
 // none at all, its prompts are its user_message events (userEvent).
 export const hasUserMessages = (lines) => lines.some((o) => o.userMessage != null);
@@ -193,12 +264,20 @@ const codexHooks = {
   versionOf: (o, current) => (o.type === "session_meta" && typeof o.payload?.cli_version === "string" ? o.payload.cli_version : current),
 };
 
+// Grok Build's lines say no version, and are sampled by their update's
+// kind.
+const grokHooks = {
+  kindOf: (o) => kindPart((o.method !== undefined || o.params !== undefined ? o.params : o)?.update?.sessionUpdate),
+  versionOf: (_o, current) => current,
+};
+
 export const claudeLines = new Normalizer({ name: "claude-lines", source: "anthropic/claude-code/transcript-line", normalize: (raw) => new ClaudeLine(raw) }).use(transcriptHooks("anthropic/claude-code/transcript-line", claudeHooks));
 export const codexLines = new Normalizer({ name: "codex-lines", source: "openai/codex/rollout-line", normalize: (raw) => new CodexLine(raw) }).use(transcriptHooks("openai/codex/rollout-line", codexHooks));
+export const grokLines = new Normalizer({ name: "grok-lines", source: "spacexai/grok-build/update-line", normalize: (raw) => new GrokLine(raw) }).use(transcriptHooks("spacexai/grok-build/update-line", grokHooks));
 
-// The normalizer for an app's transcripts: any app but Codex's are read as
-// Claude Code's.
-const NORMALIZERS = { claude: claudeLines, codex: codexLines };
+// The normalizer for an app's transcripts: any app that isn't tailed is
+// read as Claude Code's.
+const NORMALIZERS = { claude: claudeLines, codex: codexLines, grok: grokLines };
 export const linesOf = (app) => NORMALIZERS[tailedApp(app, "claude")];
 
 const NOTHING = Buffer.alloc(0);

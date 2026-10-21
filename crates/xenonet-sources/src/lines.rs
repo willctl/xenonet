@@ -270,6 +270,160 @@ impl CodexLine {
     }
 }
 
+/// A line of a Grok Build session's updates.jsonl
+/// (`~/.grok/sessions/<encoded cwd>/<session id>/updates.jsonl`): a session update, in the envelope Grok
+/// writes ({ timestamp, method, params: { sessionId, update } }), or the
+/// params alone, as older lines are. An update's kind is its sessionUpdate.
+///
+/// What the readers read of it in Claude Code's shapes (line_events.rs) is
+/// made once, when the line is: a chunk's text, and a reply's blocks (its
+/// text, or a tool call).
+#[derive(Clone, Debug, PartialEq)]
+pub struct GrokLine {
+    pub raw: Value,
+    text: Value,
+    blocks: Value,
+}
+
+// An MCP tool's name as Grok writes it: <server>__<tool>.
+fn mcp_tool(name: &str) -> bool {
+    let word = |s: &str, more: &[u8]| s.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric) && s.bytes().all(|b| b.is_ascii_alphanumeric() || more.contains(&b));
+    // Split at any "__", as the pattern can: both halves are ASCII there.
+    name.as_bytes().windows(2).enumerate().any(|(i, w)| w == b"__" && word(&name[..i], b"_-") && word(&name[i + 2..], b"_.-"))
+}
+
+impl GrokLine {
+    pub fn new(raw: Value) -> Self {
+        let mut line = GrokLine { raw, text: Value::Null, blocks: Value::Array(Vec::new()) };
+        let Ok(kind) = line.kind().map(|k| k.and_then(Value::as_str).map(str::to_string)) else { return line };
+        let text = line.text();
+        line.blocks = match kind.as_deref() {
+            Some("agent_message_chunk") => serde_json::json!([{ "type": "text", "text": text }]),
+            Some("tool_call") => {
+                let u = line.update();
+                let mut b = Map::new();
+                b.insert("type".into(), "tool_use".into());
+                if let Some(id) = opt_prop(Some(u), "toolCallId") {
+                    b.insert("id".into(), id.clone());
+                }
+                b.insert("name".into(), Value::String(line.tool_name()));
+                b.insert("input".into(), line.tool_input());
+                Value::Array(vec![Value::Object(b)])
+            }
+            _ => Value::Array(Vec::new()),
+        };
+        line.text = Value::String(text);
+        line
+    }
+
+    #[expect(clippy::unnecessary_wraps, reason = "the readers' helpers take a Js, an Option, so this hands them the line as one")]
+    fn r(&self) -> Js<'_> {
+        Some(&self.raw)
+    }
+
+    // The envelope's params, or the line itself for one without an
+    // envelope.
+    fn params(&self) -> Result<Js<'_>, TypeError> {
+        let (method, params) = (prop(self.r(), "method")?, prop(self.r(), "params")?);
+        Ok(if method.is_some() || params.is_some() { params } else { self.r() })
+    }
+
+    /// The update, or {} when the line has none.
+    pub fn update(&self) -> &Value {
+        match self.params().map(|p| opt_prop(p, "update")) {
+            Ok(Some(u @ Value::Object(_))) => u,
+            _ => &EMPTY_OBJECT,
+        }
+    }
+    /// The update's kind: "user_message_chunk", "tool_call", …
+    pub fn kind(&self) -> Result<Js<'_>, TypeError> {
+        self.params()?;
+        Ok(self.update().get("sessionUpdate"))
+    }
+    /// Whether it's one of Grok's own updates rather than ACP's.
+    pub fn own(&self) -> Result<bool, TypeError> {
+        Ok(is_str(prop(self.r(), "method")?, "_x.ai/session/update"))
+    }
+    /// When it was written: the envelope's time is Unix seconds. NaN when
+    /// it doesn't say.
+    pub fn ts(&self) -> Result<f64, TypeError> {
+        Ok(match prop(self.r(), "timestamp")? {
+            Some(Value::Number(n)) => n.as_f64().filter(|t| *t > 0.0).map_or(f64::NAN, |t| t * 1000.0),
+            t => time_of(t),
+        })
+    }
+    /// A chunk's text: its text block's; "" for another kind of block.
+    pub fn text(&self) -> String {
+        let c = self.update().get("content");
+        match (opt_prop(c, "type"), opt_prop(c, "text")) {
+            (Some(Value::String(t)), Some(Value::String(s))) if t == "text" => s.clone(),
+            _ => String::new(),
+        }
+    }
+    /// The chunk's text, as a value the events can hold.
+    pub fn text_value(&self) -> &Value {
+        &self.text
+    }
+    /// A reply's blocks, in Claude Code's shapes: a chunk's text, or a tool
+    /// call as a tool_use.
+    pub fn blocks(&self) -> &Value {
+        &self.blocks
+    }
+    /// Whether a chunk of yours isn't something you asked: a turn Grok's
+    /// host started, or a shell command you ran from its prompt.
+    pub fn not_asked(&self) -> bool {
+        let u = Some(self.update());
+        opt_prop(opt_prop(u, "_meta"), "hostTurn") == Some(&Value::Bool(true)) || nn(opt_prop(opt_prop(opt_prop(u, "content"), "_meta"), "bash_command")).is_some()
+    }
+    /// A tool call's name: the one Grok gives its own tools (_meta's
+    /// x.ai/tool), or an MCP tool's, which Grok calls by its title
+    /// (`<server>__<tool>`), as XenoNet names them (`mcp__<server>__<tool>`);
+    /// else the call's kind, as ACP has it.
+    pub fn tool_name(&self) -> String {
+        let u = Some(self.update());
+        if let Some(Value::String(n)) = opt_prop(opt_prop(opt_prop(u, "_meta"), "x.ai/tool"), "name") {
+            if !n.is_empty() {
+                return n.clone();
+            }
+        }
+        if let Some(Value::String(t)) = opt_prop(u, "title") {
+            if mcp_tool(t) {
+                return format!("mcp__{t}");
+            }
+        }
+        match opt_prop(u, "kind") {
+            Some(Value::String(k)) if !k.is_empty() => k.clone(),
+            _ => "tool".into(),
+        }
+    }
+    /// What a tool call was given: its input, with the files it works on
+    /// (its locations) as file_path where the input doesn't name one.
+    pub fn tool_input(&self) -> Value {
+        let u = Some(self.update());
+        let input = match opt_prop(u, "rawInput") {
+            Some(Value::Object(m)) => m.clone(),
+            _ => Map::new(),
+        };
+        let at = match opt_prop(u, "locations") {
+            Some(Value::Array(list)) => list.iter().find_map(|l| opt_prop(Some(l), "path").filter(|p| p.is_string())),
+            _ => None,
+        };
+        let path = nn(input.get("file_path")).or(nn(input.get("path"))).or(nn(input.get("target_file"))).or(at).cloned();
+        let mut out = input;
+        if let (Some(p @ Value::String(_)), false) = (path, out.contains_key("file_path")) {
+            out.insert("file_path".into(), p);
+        }
+        Value::Object(out)
+    }
+}
+
+/// Grok Build's lines are sampled by their update's kind.
+pub fn grok_kind_of(raw: Js<'_>) -> String {
+    let (method, params) = (opt_prop(raw, "method"), opt_prop(raw, "params"));
+    let p = if method.is_some() || params.is_some() { params } else { raw };
+    kind_part(opt_prop(opt_prop(p, "update"), "sessionUpdate"))
+}
+
 /// Whether a rollout's lines have a completed user message: when they have
 /// none at all, its prompts are its user_message events.
 pub fn has_user_messages(lines: &[CodexLine]) -> Result<bool, TypeError> {
@@ -396,6 +550,31 @@ mod tests {
         assert_eq!(codex_kind_of(Some(&json!("event_msg")), Some(&json!({ "toString": 1 })), None), "event_msg:object");
         assert_eq!(codex_kind_of(Some(&json!("event_msg")), Some(&json!("item_completed")), None), "event_msg:item_completed:undefined");
         assert!(is_codex_prompt(Some(&json!("Why?"))) && !is_codex_prompt(Some(&json!("  "))) && !is_codex_prompt(Some(&json!("<x>"))));
+    }
+
+    #[test]
+    fn grok_lines() {
+        let up = |update: Value| GrokLine::new(json!({ "timestamp": 1791201600, "method": "session/update", "params": { "sessionId": "s", "update": update } }));
+        let said = up(json!({ "sessionUpdate": "user_message_chunk", "content": { "type": "text", "text": "Add refunds" } }));
+        assert_eq!(
+            (said.kind().unwrap(), said.ts().unwrap(), said.text(), said.not_asked()),
+            (Some(&json!("user_message_chunk")), 1791201600000.0, "Add refunds".to_string(), false)
+        );
+        let bare = GrokLine::new(json!({ "sessionId": "s", "update": { "sessionUpdate": "agent_message_chunk", "content": { "type": "text", "text": "Hi" } } }));
+        assert_eq!((bare.text(), bare.ts().unwrap().is_nan(), bare.blocks()), ("Hi".to_string(), true, &json!([{ "type": "text", "text": "Hi" }])));
+        let call = up(
+            json!({ "sessionUpdate": "tool_call", "toolCallId": "c1", "kind": "edit", "locations": [{ "path": "/a/b.ts" }], "rawInput": { "old_string": "x" }, "_meta": { "x.ai/tool": { "name": "search_replace" } } }),
+        );
+        assert_eq!(call.blocks(), &json!([{ "type": "tool_use", "id": "c1", "name": "search_replace", "input": { "old_string": "x", "file_path": "/a/b.ts" } }]));
+        assert_eq!(up(json!({ "sessionUpdate": "tool_call", "title": "linear__save_issue", "kind": "other" })).tool_name(), "mcp__linear__save_issue");
+        assert_eq!(up(json!({ "sessionUpdate": "tool_call", "title": "Run `ls`" })).tool_name(), "tool");
+        assert!(mcp_tool("a___b") && mcp_tool("my-server__get.thing") && !mcp_tool("__x") && !mcp_tool("x__") && !mcp_tool("run tests"));
+        assert!(up(json!({ "sessionUpdate": "user_message_chunk", "_meta": { "hostTurn": true } })).not_asked());
+        let own = GrokLine::new(json!({ "method": "_x.ai/session/update", "params": { "update": { "sessionUpdate": "auto_compact_started" } } }));
+        assert!(own.own().unwrap());
+        assert!(GrokLine::new(Value::Null).kind().is_err(), "a line that isn't an object has nothing to read");
+        assert_eq!(grok_kind_of(Some(&json!({ "params": { "update": { "sessionUpdate": "plan" } } }))), "plan");
+        assert_eq!(grok_kind_of(Some(&json!({ "update": [1] }))), "undefined");
     }
 
     #[test]

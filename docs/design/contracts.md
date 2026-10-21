@@ -357,6 +357,7 @@ theme file people already have stays valid, and `theme/v1` only grows.
 
 | Token | Values |
 |---|---|
+| `colors.grok` | Grok Build's sessions, as `colors.claude` and `colors.codex` are Claude Code's and Codex's |
 | `motion.pace` | A multiplier for ambient motion (1 is today's) |
 | `motion.ease` | `smooth`, `stepped` (everything moves in ticks) |
 | `motion.breathe` | How much nodes swell and fade at rest: 0.1 is today's bob (4.5 × breathe), 0 holds still |

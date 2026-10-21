@@ -169,7 +169,7 @@ const forecast = { pct: 61, perHour: 4.2, eta: null, resetsAt: T + 3600e3, hitsB
 const quietLive = {
   at: T,
   sessions: [],
-  series: { claude: [0, 0, 0], codex: [0, 0, 0] },
+  series: { claude: [0, 0, 0], codex: [0, 0, 0], grok: [0, 0, 0] },
   tpm: 0,
   total24h: 0,
   today: 0,

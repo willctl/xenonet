@@ -31,11 +31,18 @@
           "items": {
             "type": "number"
           }
+        },
+        "grok": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
         }
       },
       "required": [
         "claude",
-        "codex"
+        "codex",
+        "grok"
       ],
       "additionalProperties": {},
       "description": "Tokens a second over the last five minutes, oldest first"
@@ -323,7 +330,8 @@
                 "type": "string",
                 "enum": [
                   "claude",
-                  "codex"
+                  "codex",
+                  "grok"
                 ]
               },
               "identity": {
@@ -532,11 +540,15 @@
             },
             "codex": {
               "type": "number"
+            },
+            "grok": {
+              "type": "number"
             }
           },
           "required": [
             "claude",
-            "codex"
+            "codex",
+            "grok"
           ],
           "additionalProperties": {}
         },

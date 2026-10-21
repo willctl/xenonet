@@ -19,4 +19,5 @@ pub mod procs;
 pub mod products;
 pub mod sql;
 pub mod store;
+pub mod toml;
 pub mod verify;

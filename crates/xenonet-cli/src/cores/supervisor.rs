@@ -11,36 +11,14 @@ use crate::sys;
 use serde_json::{json, Value};
 use xenonet_base::nodepath::NATIVE;
 use xenonet_components::runtime::{self, Env};
-use xenonet_components::supervisor::{self, Disk, Files, Job, Place, System, Where};
-
-/// The account's uid, for launchd's `gui/<uid>` domain.
-#[cfg_attr(unix, expect(unsafe_code, reason = "getuid(2), which std doesn't wrap"))]
-fn uid() -> String {
-    #[cfg(unix)]
-    {
-        // SAFETY: getuid(2) takes nothing and can't fail.
-        unsafe { libc::getuid() }.to_string()
-    }
-    #[cfg(not(unix))]
-    {
-        String::new()
-    }
-}
+use xenonet_components::supervisor::{self, Disk, Files, Job, Place, System};
 
 /// Where this machine keeps the registration, or None where there's no
-/// supervisor XenoNet registers with (Windows, for now).
-/// XENONET_SUPERVISOR_DIR and XENONET_SUPERVISOR_BIN put it in another
-/// folder and ask another launchctl or systemctl, for tests.
+/// supervisor XenoNet registers with. XENONET_SUPERVISOR_DIR and
+/// XENONET_SUPERVISOR_BIN put it in another folder and ask another
+/// launchctl, systemctl or schtasks, for tests.
 pub fn place() -> Option<Place> {
-    Place::of(&Where {
-        platform: sys::platform().into(),
-        home: sys::home(),
-        xdg_config: sys::var("XDG_CONFIG_HOME"),
-        uid: uid(),
-        user: sys::var("USER").or_else(|| sys::var("LOGNAME")).unwrap_or_default(),
-        dir: sys::var("XENONET_SUPERVISOR_DIR"),
-        supervisor: sys::var("XENONET_SUPERVISOR_BIN"),
-    })
+    supervisor::here()
 }
 
 /// Set in `service run`, which is the supervisor's copy: a service it
@@ -68,23 +46,7 @@ fn this_binary() -> String {
 /// launcher: a build of your own), with the settings that say where
 /// XenoNet keeps things, less those that only say the default.
 pub fn job(env: &Env) -> Job {
-    let m = machine();
-    let launcher = runtime::launcher_bin(env, &m);
-    let program = if std::path::Path::new(&launcher).is_file() { launcher } else { this_binary() };
-    let port = runtime::port_of(env);
-    let log = NATIVE.join(&[&runtime::runtime_dir(env, &m), &format!("service-{port}.log")]);
-    let mut bare = env.clone();
-    bare.shift_remove("XENONET_RUNTIME_DIR");
-    let default_runtime = runtime::runtime_dir(&bare, &m);
-    let kept = supervisor::kept_env(|k| runtime::var(env, k).map(str::to_string))
-        .into_iter()
-        .filter(|(k, v)| match k.as_str() {
-            "XENONET_PORT" => v != "47840",
-            "XENONET_RUNTIME_DIR" => *v != default_runtime,
-            _ => true,
-        })
-        .collect();
-    Job { program, args: vec!["service".into(), "run".into()], env: kept, dir: m.home, log }
+    supervisor::job(env, &machine(), &this_binary(), |p| std::path::Path::new(p).is_file())
 }
 
 /// "a Claude Code process", as the service's own refusals name one.
@@ -167,7 +129,7 @@ pub fn supervised(status: &Value, login: &Value) -> bool {
 /// when there's nothing to hand over.
 pub fn hand_over(env: &Value, place: &Place) -> Option<&'static str> {
     let status = running(env)?;
-    let seen = supervisor::seen(place, &mut System);
+    let seen = supervisor::seen(place, &Disk, &mut System);
     if seen.pid.is_some() && seen.pid.map(u64::from) == status.get("pid").and_then(Value::as_u64) {
         return None;
     }
@@ -254,16 +216,44 @@ fn port_taken(port: u16) -> bool {
     std::net::TcpListener::bind(("127.0.0.1", port)).is_err_and(|e| e.kind() == std::io::ErrorKind::AddrInUse)
 }
 
-/// `xenonet service run`: the service in the foreground, for launchd or
-/// systemd. It finishes an interrupted update first, then runs the
-/// installed Service's binary (or this one, with no Service installed)
-/// with the environment Desktop gives it. While another XenoNet service
-/// has the port, such as one Desktop started before this was registered,
-/// it waits for that one to stop rather than failing and being started
-/// again and again. On Unix it becomes the service, so the supervisor's
-/// signals reach the service itself.
-pub fn run(given: &Value) -> Result<i32, Fail> {
+// While another XenoNet service has the port, such as one Desktop started
+// before this was registered: waits for it to stop, saying so once.
+fn wait_for_port(port: u16, say: impl Fn(&str)) {
+    let mut said = false;
+    while port_taken(port) {
+        if !said {
+            say(&format!("another XenoNet service has port {port}; this one starts when it stops"));
+            said = true;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+}
+
+/// The settings a scheduled task gives `service run` as its arguments
+/// (NAME=VALUE, XenoNet's own only, since a task has no environment of its
+/// own), over those `given` has.
+pub fn with_settings(given: &Value, settings: &[String]) -> Value {
+    let mut out = given.as_object().cloned().unwrap_or_default();
+    for (k, v) in settings.iter().filter_map(|s| s.split_once('=')) {
+        if supervisor::KEPT.contains(&k) {
+            out.insert(k.into(), json!(v));
+        }
+    }
+    Value::Object(out)
+}
+
+/// `xenonet service run`: the service in the foreground, for launchd,
+/// systemd or Task Scheduler. It finishes an interrupted update first, then
+/// runs the installed Service's binary (or this one, with no Service
+/// installed) with the environment Desktop gives it. While another XenoNet
+/// service has the port, such as one Desktop started before this was
+/// registered, it waits for that one to stop rather than failing and being
+/// started again and again. On Unix it becomes the service, so the
+/// supervisor's signals reach the service itself; on Windows it stays as
+/// its parent (`supervise`).
+pub fn run(given: &Value, settings: &[String]) -> Result<i32, Fail> {
     SUPERVISED.store(true, std::sync::atomic::Ordering::Relaxed);
+    let given = &with_settings(given, settings);
     let _ = super::recover_service_update(given);
     let (bin, mut env) = match super::installed_runtime(given) {
         Ok(rt) => {
@@ -285,14 +275,6 @@ pub fn run(given: &Value) -> Result<i32, Fail> {
     env.shift_remove("XENONET_EXEC");
     shell_env(&mut env);
     let port: u16 = runtime::port_of(&env).parse().unwrap_or(47840);
-    let mut said = false;
-    while port_taken(port) {
-        if !said {
-            eprintln!("[xenonet] another XenoNet service has port {port}; this one starts when it stops");
-            said = true;
-        }
-        std::thread::sleep(std::time::Duration::from_secs(1));
-    }
     let mut cmd = std::process::Command::new(&bin);
     cmd.arg("serve").env_clear();
     for (k, v) in &env {
@@ -301,13 +283,73 @@ pub fn run(given: &Value) -> Result<i32, Fail> {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
+        wait_for_port(port, |t| eprintln!("[xenonet] {t}"));
         let err = cmd.exec();
         Err(Fail::error(format!("couldn't run {bin}: {err}")))
     }
     #[cfg(not(unix))]
     {
-        let status = cmd.status().map_err(|e| Fail::error(format!("couldn't run {bin}: {e}")))?;
-        Ok(status.code().unwrap_or(1))
+        supervise(cmd, &bin, port, &env)
+    }
+}
+
+/// `service run` on Windows, where Task Scheduler restarts a task only when
+/// it fails to start and can't say which process it runs: it stays as the
+/// service's parent, appends the service's output to its log as launchd
+/// and systemd do, starts it again RESTART_S seconds after it fails unless
+/// it keeps failing (supervisor::Restarts, systemd's limits), and keeps its
+/// own process and the service's in the pids file for `service status`. A
+/// clean stop ends it too, until the next sign-in.
+#[cfg(not(unix))]
+fn supervise(mut cmd: std::process::Command, bin: &str, port: u16, env: &Env) -> Result<i32, Fail> {
+    use std::io::Write;
+    use xenonet_components::supervisor::{BURST, BURST_S, RESTART_S};
+    let pids = place().filter(|p| p.kind == supervisor::Kind::TaskScheduler).map(|p| p.pids());
+    let log_file = NATIVE.join(&[&runtime::runtime_dir(env, &machine()), &format!("service-{port}.log")]);
+    let keep = |service: Option<u32>, last: Option<i32>| {
+        if let Some(f) = &pids {
+            let _ = Disk.write(f, &supervisor::pids_text(std::process::id(), service, last));
+        }
+    };
+    let done = || {
+        if let Some(f) = &pids {
+            let _ = Disk.remove(f);
+        }
+    };
+    let note = |text: &str| {
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_file) {
+            let _ = writeln!(f, "[xenonet] {text}");
+        }
+    };
+    let open = || std::fs::OpenOptions::new().create(true).append(true).open(&log_file).map_err(|e| Fail::error(format!("couldn't open {log_file}: {e}")));
+    keep(None, None);
+    wait_for_port(port, note);
+    let mut restarts = supervisor::Restarts::default();
+    let mut last = None;
+    loop {
+        let mut child = match cmd.stdout(open()?).stderr(open()?).spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                done();
+                return Err(Fail::error(format!("couldn't run {bin}: {e}")));
+            }
+        };
+        keep(Some(child.id()), last);
+        let code = child.wait().map_or(1, |s| s.code().unwrap_or(1));
+        if code == 0 {
+            done();
+            return Ok(0);
+        }
+        last = Some(code);
+        if !restarts.again(std::time::Instant::now()) {
+            note(&format!("the service stopped unexpectedly {BURST} times in {} minutes, so it isn't started again until you next sign in", BURST_S / 60));
+            done();
+            return Ok(code);
+        }
+        keep(None, last);
+        note(&format!("the service stopped unexpectedly (exit code {code}); starting it again in {RESTART_S} seconds"));
+        std::thread::sleep(std::time::Duration::from_secs(RESTART_S.into()));
+        wait_for_port(port, note);
     }
 }
 
@@ -337,6 +379,14 @@ mod tests {
         assert_eq!(lang_for("de-de\n", has), "de_DE.UTF-8");
         assert_eq!(lang_for("fr_FR", has), "en_US.UTF-8");
         assert_eq!(lang_for("", has), "en_US.UTF-8");
+    }
+
+    #[test]
+    fn a_tasks_arguments_are_xenonets_own_settings() {
+        let given = json!({ "XENONET_PORT": "47850" });
+        let settings: Vec<String> = ["XENONET_STATE_DIR=D:\\Xeno Net\\state", "PATH=C:\\elsewhere", "XENONET_HOSTS=1", "plain"].map(String::from).to_vec();
+        assert_eq!(with_settings(&given, &settings), json!({ "XENONET_PORT": "47850", "XENONET_STATE_DIR": "D:\\Xeno Net\\state", "XENONET_HOSTS": "1" }));
+        assert_eq!(with_settings(&given, &[]), given);
     }
 
     #[test]

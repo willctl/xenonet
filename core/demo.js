@@ -1,8 +1,9 @@
 // Demo mode: a made-up workspace that runs through XenoNet's real pipeline.
-// It writes projects (real git repos), Claude Code transcripts, Codex rollouts
-// and a small wiki into a temp folder, lists the sessions the way the adapters
-// would, and keeps appending transcript lines so the map stays busy. Your real
-// projects and sessions are never read while it runs.
+// It writes projects (real git repos), Claude Code transcripts, Codex
+// rollouts, Grok Build sessions and a small wiki into a temp folder, lists
+// the sessions the way the adapters would, and keeps appending transcript
+// lines so the map stays busy. Your real projects and sessions are never
+// read while it runs.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -28,6 +29,7 @@ export const world = {
   claudeRoot: path.join(HOME, ".claude", "projects"),
   claudeDesktopDir: path.join(HOME, "claude-desktop"),
   codexHome: path.join(HOME, ".codex"),
+  grokHome: path.join(HOME, ".grok"),
   wikiDir: path.join(HOME, "wiki"),
   stateDir: path.join(ROOT, "state"),
   cacheDir: path.join(ROOT, "cache"),
@@ -132,7 +134,7 @@ const SESSIONS = [
     app: "claude", project: "atlas-api", title: "Add partial refunds to the orders API", branch: "feat/partial-refunds", live: true, desktop: true,
     turns: [
       { prompt: "Add partial refunds to the orders API. Keep the existing full-refund path working.", steps: [["read", "src/orders/refunds.ts"], ["edit", "src/orders/routes.ts", "routes = []", "routes = [refundRoute]"], ["run", "npm test -- orders", true], ["edit", "src/orders/refunds.ts", "refund()", "refund(amount?: number)"]], reply: "Partial refunds work. `POST /orders/:id/refunds` takes an optional amount, and the full-refund path is unchanged. All 48 order tests pass." },
-      { prompt: "Log the refund rules in the wiki.", steps: [["mcp", "agent-wiki", "wiki_log", { pages: ["atlas-api", "refunds"] }], ["run", "npm run lint", true]], reply: "Logged the refund rules on the atlas-api and refunds pages." },
+      { prompt: "Log the refund rules in the wiki.", steps: [["mcp", "xenolith", "context_log", { pages: ["atlas-api", "refunds"] }], ["run", "npm run lint", true]], reply: "Logged the refund rules on the atlas-api and refunds pages." },
     ],
   },
   {
@@ -171,6 +173,15 @@ const SESSIONS = [
   { app: "codex", project: "pathfinder", title: "Benchmark solver variants", ago: 60, parent: 4, subagent: true, turns: [{ prompt: "Benchmark the cached solver against the old one.", steps: [["run", "cargo bench", true]], reply: "The cached solver is 10.5 times faster on 500 stops." }] },
   { app: "codex", project: "labs/geofence", title: "Draw delivery zones from postcodes", ago: 35, turns: [{ prompt: "Turn the postcode list into delivery zones.", steps: [["read", "src/zones.ts"], ["edit", "src/zones.ts", "zones = []", "zones = loadPostcodes()"], ["run", "npm test", true]], reply: "Zones now load from the postcode list. Each one is the convex hull of its postcodes." }] },
   { app: "claude", project: "labs", title: "Sort out which experiments to keep", ago: 240, turns: [{ prompt: "Which of these experiments are worth keeping?", steps: [["read", "ideas.md"]], reply: "Keep geofence and route-sim. Snippets is turning into a tool of its own." }] },
+  // Grok Build's, after the rest so the others keep their ids: one at work
+  // in atlas-web, the subagent it runs to check contrast, and an older one
+  // in pathfinder.
+  {
+    app: "grok", project: "atlas-web", title: "Add dark mode to the storefront", branch: "feat/dark-mode", live: true,
+    turns: [{ prompt: "Add a dark mode to the storefront. Follow the system setting, with a toggle in the header.", steps: [["read", "app/layout.tsx"], ["edit", "app/theme.css", ":root {", ":root, [data-theme=dark] {"], ["run", "npm run build", true]], reply: "Dark mode follows the system setting, and the header has a toggle that remembers your choice. Every page passes the contrast check." }],
+  },
+  { app: "grok", project: "atlas-web", title: "Check contrast on every page", ago: 3, parent: 14, subagent: true, turns: [{ prompt: "Check contrast on every page in dark mode.", steps: [["run", "npm run test:contrast", true]], reply: "All 23 pages pass. The sale badge was closest, at 4.6 to 1." }] },
+  { app: "grok", project: "pathfinder", title: "Map the depot loading rules", ago: 75, turns: [{ prompt: "Write down the depot's loading rules as constraints the solver can use.", steps: [["read", "src/solver.rs"], ["mcp", "xenolith", "context_log", { pages: ["pathfinder"] }]], reply: "The loading rules are on the pathfinder wiki page as seven constraints. Two need data the depot doesn't send yet." }] },
 ];
 
 // Stable IDs, so a saved layout survives a restart of the demo.
@@ -180,7 +191,9 @@ const cwdOf = (s) => (s.cwd ? path.join(HOME, ...s.cwd) : P(s.project));
 
 // ---------- transcript writers ----------
 
-const MODELS = { claude: "claude-sonnet-4-5", codex: "gpt-5-codex" };
+const MODELS = { claude: "claude-sonnet-4-5", codex: "gpt-5-codex", grok: "grok-build" };
+// The context window Grok Build reports in its usage updates.
+const GROK_WINDOW = 256000;
 
 class Writer {
   constructor(s, i) {
@@ -195,6 +208,12 @@ class Writer {
     const now = new Date();
     if (s.app === "claude") {
       this.file = path.join(world.claudeRoot, `demo-${path.basename(this.cwd)}`, `${this.id}.jsonl`);
+    } else if (s.app === "grok") {
+      // As Grok Build keeps a session: a folder of its own, in its working
+      // folder's group, with its summary and its updates.
+      this.dir = path.join(world.grokHome, "sessions", encodeURIComponent(this.cwd), this.id);
+      this.file = path.join(this.dir, "updates.jsonl");
+      this.started = null;
     } else {
       const day = path.join(world.codexHome, "sessions", String(now.getFullYear()), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0"));
       this.file = path.join(day, `rollout-${iso(now).slice(0, 19).replace(/:/g, "-")}-${this.id}.jsonl`);
@@ -252,6 +271,7 @@ class Writer {
   prompt(text, ts) {
     this.entries.push({ id: randomUUID(), ts, role: "user", text });
     if (this.s.app === "claude") return this.write({ type: "user", timestamp: iso(ts), message: { role: "user", content: text } });
+    if (this.s.app === "grok") return this.grok(ts, { sessionUpdate: "user_message_chunk", content: { type: "text", text } });
     this.write(
       { type: "turn_context", timestamp: iso(ts), payload: { model: MODELS.codex } },
       { type: "event_msg", timestamp: iso(ts), payload: { type: "task_started", model_context_window: 258400 } },
@@ -264,6 +284,12 @@ class Writer {
     if (this.s.app === "claude") {
       return this.write({ type: "assistant", timestamp: iso(ts), message: { id: `msg_${randomUUID()}`, model: MODELS.claude, stop_reason: "end_turn", usage: this.usage(), content: [{ type: "text", text }] } });
     }
+    if (this.s.app === "grok") {
+      this.grok(ts, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+      this.usage();
+      this.grok(ts, { sessionUpdate: "usage_update", used: this.ctx, size: GROK_WINDOW });
+      return this.grokSummary(ts);
+    }
     this.codexTokens(ts);
     this.write({ type: "event_msg", timestamp: iso(ts), payload: { type: "task_complete", last_agent_message: text, duration_ms: 95000 } });
   }
@@ -273,6 +299,7 @@ class Writer {
     const title = { read: `Read ${a}`, edit: `Edit ${a}`, run: a, mcp: `${a}.${b}`, agent: a, ask: "AskUserQuestion" }[kind];
     this.entries.push({ id: randomUUID(), ts, role: "tool", kind: "tool_use", title, text: kind === "edit" ? `- ${b}\n+ ${c}` : kind === "ask" ? a : "", status: kind === "run" && b === false ? "failed" : "completed" });
     if (this.s.app === "claude") return this.claudeAct(kind, a, b, c, file, ts);
+    if (this.s.app === "grok") return this.grokAct(kind, a, b, c, file, ts);
     if (kind === "read") return this.codexTokens(ts);
     if (kind === "edit") return this.write({ type: "event_msg", timestamp: iso(ts), payload: { type: "item_completed", item: { type: "FileChange", status: "completed", changes: { [file]: { type: "update", unified_diff: `@@ -1 +1 @@\n-${b}\n+${c}` } } } } });
     if (kind === "run") {
@@ -297,6 +324,40 @@ class Writer {
     if (kind === "agent") this.subagent(a, ts);
     const ok = kind !== "run" || b !== false;
     this.write({ type: "user", timestamp: iso(ts + 4000), message: { role: "user", content: [{ type: "tool_result", tool_use_id: callId, is_error: !ok, content: ok ? "ok" : "1 failed" }] } });
+  }
+
+  // ----- Grok Build: session updates in their envelope, and a summary -----
+
+  grok(ts, update) {
+    this.write({ timestamp: Math.floor(ts / 1000), method: "session/update", params: { sessionId: this.id, update } });
+  }
+
+  // A tool call as Grok Build writes it, named as it names its own tools (an
+  // MCP tool by its title), and how it went. Its scripts read, edit, run
+  // and call MCP tools.
+  grokAct(kind, a, b, c, file, ts) {
+    const own = (name, k) => ({ _meta: { "x.ai/tool": { version: 1, name, kind: k } } });
+    const call = {
+      read: { title: `Read ${a}`, kind: "read", rawInput: { target_file: file }, locations: [{ path: file }], ...own("read_file", "read") },
+      edit: { title: `Edit ${a}`, kind: "edit", rawInput: { file_path: file, old_string: b, new_string: c }, locations: [{ path: file }], ...own("search_replace", "edit") },
+      run: { title: a, kind: "execute", rawInput: { command: a }, ...own("run_terminal_cmd", "execute") },
+      mcp: { title: `${a}__${b}`, kind: "other", rawInput: c ?? {} },
+    }[kind];
+    if (!call) return;
+    const id = `call_${randomUUID().slice(0, 8)}`;
+    this.grok(ts, { sessionUpdate: "tool_call", toolCallId: id, status: "pending", ...call });
+    const ok = kind !== "run" || b !== false;
+    const content = kind === "edit" ? [{ type: "diff", path: file, oldText: b, newText: c }] : [{ type: "content", content: { type: "text", text: ok ? "ok" : "1 failed" } }];
+    this.grok(ts + 3000, { sessionUpdate: "tool_call_update", toolCallId: id, status: ok ? "completed" : "failed", content });
+  }
+
+  // Its summary beside the updates, written when the session starts and
+  // after each turn. A subagent's names the session that runs it.
+  grokSummary(ts) {
+    this.started ??= ts;
+    const parent = this.s.parent != null ? { parent_session_id: ids[this.s.parent], session_kind: this.s.subagent ? "subagent" : "fork" } : {};
+    const summary = { info: { id: this.id, cwd: this.cwd }, session_summary: "", generated_title: this.s.title, title_is_manual: false, created_at: iso(this.started), updated_at: iso(ts), current_model_id: MODELS.grok, head_branch: this.s.branch ?? null, ...parent };
+    fs.writeFileSync(path.join(this.dir, "summary.json"), JSON.stringify(summary, null, 2) + "\n");
   }
 
   subagent(task, ts) {
@@ -326,6 +387,7 @@ function writeHistory(now) {
     const end = s.live || s.ask ? now - 1 * MIN : s.review ? now - 9 * MIN : now - (s.ago ?? 60) * MIN;
     const steps = s.turns.reduce((n, t) => n + t.steps.length + 2, 0) * (s.live ? 2 : 1);
     let ts = end - steps * 50e3;
+    if (s.app === "grok") w.grokSummary(ts);
     for (let k = 0; k < steps; k++, ts += 50e3) if (!w.next(ts) && !s.stuck) break;
   }
 }
@@ -457,7 +519,8 @@ export function demoSessions(app) {
       model: MODELS[app],
       branch: s.branch ?? null,
       status: null,
-      source: s.subagent ? "subAgent" : null,
+      // A subagent's session says it's one as its app does.
+      source: s.subagent ? (app === "grok" ? "subagent" : "subAgent") : null,
       nativeProjectId: s.native ? "demo-atlas" : null,
       parentId: parent,
       parentKind: parent ? (s.subagent ? "subagent" : "spawn") : null,

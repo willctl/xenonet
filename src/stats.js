@@ -18,7 +18,7 @@ const KINDS = [
   ["cacheWrite", "written to cache"],
   ["output", "output"],
 ];
-const APP_NAME = { claude: "Claude Code", codex: "Codex" };
+const APP_NAME = { claude: "Claude Code", codex: "Codex", grok: "Grok Build" };
 const clockOf = (t) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 // Round ticks from 0 to at least `max`: steps of 1, 2, 2.5 or 5 × 10^n.
@@ -339,7 +339,7 @@ export function createStatsPanel({ modals, sfx, toast }) {
     clearInterval(timer);
     panel = modals.open(
       `<header class="m-head"><div><div class="m-chip">◫ stats · ${h(APP_NAME[n.app] ?? n.app)}</div><h2>${h(n.title ?? n.id)}</h2><div class="m-sub">Reading the transcript…</div></div><button class="act" data-mclose>Close ✕</button></header><div class="m-body st-body"><div class="m-empty">Adding up tokens and costs…</div></div><div class="st-tip" hidden></div>`,
-      { cls: "full st", accent: n.app === "codex" ? "var(--codex)" : "var(--claude)" },
+      { cls: "full st", accent: n.app === "codex" || n.app === "grok" ? `var(--${n.app})` : "var(--claude)" },
     );
     const me = panel;
     panel.addEventListener("click", (e) => {

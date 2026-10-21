@@ -38,6 +38,13 @@ export function machine(overrides = {}) {
     node: process.versions.node,
     electron: process.versions.electron ?? null,
     exists: (p) => fs.existsSync(p),
+    readText: (p) => {
+      try {
+        return fs.readFileSync(p, "utf8");
+      } catch {
+        return null;
+      }
+    },
     readdir: (p) => fs.promises.readdir(p),
     access: (p, mode) => fs.promises.access(p, mode),
     statfs: (p) => fs.promises.statfs(p),
@@ -98,6 +105,7 @@ function factsOf(ctx) {
     byHand: ctx.byHand ?? null,
     stateLoad: ctx.stateLoad ?? null,
     projectsDirSet: !!ctx.env?.XENONET_PROJECTS_DIR,
+    grokKeySet: !!ctx.env?.XAI_API_KEY,
     actors: ctx.actors === null ? "off" : ctx.actors ? "on" : "none",
   };
 }

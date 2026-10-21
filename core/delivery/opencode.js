@@ -5,17 +5,18 @@
 // starts a turn in the live TUI.
 import { execFile } from "node:child_process";
 import fs from "node:fs";
+import { openCodeId, sessionIdOf } from "../native/opencode.js";
 
 const run = (cmd, args) => new Promise((resolve) => execFile(cmd, args, { timeout: 3000, windowsHide: true, maxBuffer: 4 << 20 }, (err, out) => resolve(err ? "" : String(out))));
 
-// XenoNet's ids take OpenCode's ses_… with "-" for "_" (see core/native/opencode.js).
-export const openCodeId = (id) => String(id).replace(/^opencode:/, "").replace(/^ses-/, "ses_");
+// OpenCode's own id for XenoNet's, as its reader wrote it (core/native/opencode.js).
+export { openCodeId };
 // And back: XenoNet's id for a session named the way OpenCode shows it
 // (ses_…, or opencode:ses_…). Any other id comes back as it was.
 export const fromOpenCodeId = (id) => {
   const s = String(id ?? "").trim();
-  const m = /^(?:opencode:)?ses_([0-9A-Za-z]+)$/.exec(s);
-  return m ? `opencode:ses-${m[1]}` : s;
+  const m = /^(?:opencode:)?(ses(?:_[0-9A-Za-z]+)+)$/.exec(s);
+  return m ? sessionIdOf(m[1]) : s;
 };
 
 // opencode processes: [{ pid, args }].

@@ -28,9 +28,9 @@ use xenonet_base::text::truthy;
 
 const NAME: &str = "xenonet-console";
 
-const INSTRUCTIONS_TOOLS: &str = "XenoNet maps the Claude Code and Codex sessions on this machine, through a background service, a CLI, MCP tools and a desktop console. These tools operate installed Desktop. They launch it, find sessions, inspect panels, control terminals and take screenshots. Each action waits for the view to settle and returns the new state. Use logs to read page errors. The service, terminals and coordination keep running when Desktop closes or restarts, and window actions report that Desktop is unavailable until it returns. Allowing actors, connecting Claude Code and Codex, and trusting hosts are the person's to do. This console has no simulation and no arbitrary page execution.";
+const INSTRUCTIONS_TOOLS: &str = "XenoNet maps the Claude Code, Codex and Grok Build sessions on this machine, through a background service, a CLI, MCP tools and a desktop console. These tools operate installed Desktop. They launch it, find sessions, inspect panels, control terminals and take screenshots. Each action waits for the view to settle and returns the new state. Use logs to read page errors. The service, terminals and coordination keep running when Desktop closes or restarts, and window actions report that Desktop is unavailable until it returns. Allowing actors, connecting agents, and trusting hosts are the person's to do. This console has no simulation and no arbitrary page execution.";
 
-const INSTRUCTIONS: &str = "XenoNet maps the Claude Code and Codex sessions on this machine, through a background service, a CLI, MCP tools and a desktop console. These tools operate installed XenoNet and development instances. Use installed for the person's app, or demo for made-up data. The service and the coordination between sessions keep running when Desktop closes or restarts. Simulation and arbitrary page execution work only in development instances.
+const INSTRUCTIONS: &str = "XenoNet maps the Claude Code, Codex and Grok Build sessions on this machine, through a background service, a CLI, MCP tools and a desktop console. These tools operate installed XenoNet and development instances. Use installed for the person's app, or demo for made-up data. The service and the coordination between sessions keep running when Desktop closes or restarts. Simulation and arbitrary page execution work only in development instances.
 
 The loop: `launch` (the demo instance, with made-up data, unless you need the user's real sessions: instance \"dev\"), then act with `find`, `select`, `navigate`, `command` and `input`, then `screenshot` to look. Every action waits until the view has settled (the layout cooled, the camera and any gathering at rest) and returns the new state, so don't sleep between calls. `simulate` puts sessions into rare states (a question waiting, an edit collision, a stuck loop) and has actors act. `actors` lists the actors beside the map, and `feed` reads the activity feed. After a change, check `logs` for page errors.
 
@@ -70,6 +70,8 @@ const SIMULATIONS: [&str; 21] = [
     "host-online",
     "host-skew",
 ];
+
+const LOOK: &str = "Read or change how the console draws its panels. plainPanels true draws them solid, without the glass blur behind them, a large share of a visible frame's GPU time; false brings the glass back. It's kept for this window, as the palette's \"Turn plain panels on or off\" keeps it. Returns the state once the view has settled: state.look says how the panels are drawn.";
 
 fn instance_arg(installed: bool) -> Z {
     let ids: Vec<&'static str> = if installed { vec!["installed"] } else { INSTANCES.iter().map(|i| i.id).collect() };
@@ -306,6 +308,28 @@ fn defs(installed: bool) -> Vec<Def> {
             read(),
         ),
         def(
+            "filters",
+            "Filters",
+            "The toggles under Filters: claude, codex and grok show or hide each app's sessions (Claude Code, Codex, Grok Build), archived shows or hides archived ones, and external the folders outside the projects folder. `set` turns some on or off, as a click on each toggle does ({ grok: false } hides Grok Build's sessions). Returns the toggles and how many sessions of each app the map has and draws, once the view has settled.",
+            object(vec![
+                (
+                    "set",
+                    object(vec![
+                        ("claude", boolean().optional()),
+                        ("codex", boolean().optional()),
+                        ("grok", boolean().optional()),
+                        ("archived", boolean().optional()),
+                        ("external", boolean().optional()),
+                    ])
+                    .optional()
+                    .describe("Toggles by name, on (true) or off (false)."),
+                ),
+                ("settle", settle_arg()),
+                ("instance", inst()),
+            ]),
+            write(),
+        ),
+        def(
             "identities",
             "Identities",
             "The identities sessions ran as and projects belong to (Claude and ChatGPT accounts, GitHub accounts, git identities), as the chips under Filters show them, each with a key. `only` shows just those identities' sessions and projects ([] shows everything again); `masked` hides them as \"GitHub A\", \"Claude B\"… for screenshots, or shows them. Returns the chips, and the state once the view has settled when something changed.",
@@ -479,6 +503,17 @@ fn defs(installed: bool) -> Vec<Def> {
                 ("settle", settle_arg()),
             ]),
             write(),
+        ),
+        def(
+            "look",
+            "How the console draws its panels",
+            LOOK,
+            object(vec![
+                ("plainPanels", boolean().optional().describe("true: solid panels, without the glass blur; false: glass panels, the default. Leave it out to only read.")),
+                ("instance", inst()),
+                ("settle", settle_arg()),
+            ]),
+            idempotent(),
         ),
     ];
     if installed {
@@ -676,6 +711,22 @@ impl Console {
                 one(self.driver(&s, "poster", vec![Value::Object(o)]).await?)
             }
             "labels" => one(self.driver(&s, "labels", vec![]).await?),
+            "filters" => {
+                let set = a.get("set").filter(|v| truthy(Some(v)));
+                let state = match set {
+                    Some(set) => self.driver(&s, "filters", vec![set.clone(), settle(a)]).await?,
+                    None => self.driver(&s, "state", vec![]).await?,
+                };
+                let mut out = Map::new();
+                out.insert("filters".into(), state.get("filters").cloned().unwrap_or(Value::Null));
+                if let Some(apps) = state.get("counts").and_then(|c| c.get("apps")) {
+                    out.insert("apps".into(), apps.clone());
+                }
+                if set.is_some() {
+                    out.insert("state".into(), state);
+                }
+                one(Value::Object(out))
+            }
             "identities" => {
                 let mut state = Value::Null;
                 if let Some(masked) = a.get("masked") {
@@ -852,6 +903,10 @@ impl Console {
                 args.push(settle(a));
                 one(self.driver(&s, method, args).await?)
             }
+            "look" => match a.get("plainPanels").and_then(Value::as_bool) {
+                Some(on) => one(self.driver(&s, "plainPanels", vec![json!(on), settle(a)]).await?),
+                None => one(self.driver(&s, "state", vec![]).await?),
+            },
             _ => Err(format!("Tool {name} not found")),
         }
     }
@@ -934,6 +989,7 @@ mod tests {
                 "command",
                 "poster",
                 "labels",
+                "filters",
                 "identities",
                 "hosts",
                 "root",
@@ -947,10 +1003,11 @@ mod tests {
                 "eval",
                 "theme",
                 "mcp_info",
-                "environment"
+                "environment",
+                "look"
             ]
         );
         let installed: Vec<&str> = defs(true).iter().map(|d| d.name).collect();
-        assert!(!installed.contains(&"eval") && !installed.contains(&"simulate") && installed.len() == 30);
+        assert!(!installed.contains(&"eval") && !installed.contains(&"simulate") && installed.len() == 32);
     }
 }

@@ -199,6 +199,29 @@ test("where XenoNet can't look, requests go through unchecked", async () => {
   assert.equal(verify.state.unchecked, 2);
 });
 
+test("a request in the name of a session whose app XenoNet doesn't check is refused, never passed unchecked", async () => {
+  const gemini = "requests in gemini-cli:G's name are refused: XenoNet can't tell Gemini CLI's processes apart, so it can't check that the request comes from that session";
+  for (const supported of [true, false]) {
+    const { verify, from } = setup({ supported });
+    // From anywhere, Claude Code's own process too, and as a hook.
+    for (const pid of [200, 220, 400]) assert.deepEqual(await verify.check(from(pid), "gemini-cli:G"), { ok: false, checked: true, reason: gemini }, `from ${pid}`);
+    assert.equal((await verify.check(from(220), "gemini-cli:G", { hook: true })).reason, gemini);
+    assert.deepEqual(await verify.check({ pid: null }, "gemini-cli:G"), { ok: false, checked: true, reason: gemini }, "with no process to look at");
+    assert.match((await verify.check(from(220), "copilot:C")).reason, /XenoNet can't tell GitHub Copilot CLI's processes apart/);
+    // A name that isn't an app's at all, a property every object has
+    // included.
+    assert.equal((await verify.check(from(220), "nobody:N")).reason, 'requests in nobody:N\'s name are refused: XenoNet doesn\'t know an app called "nobody"');
+    assert.equal((await verify.check(from(220), "toString:N")).reason, 'requests in toString:N\'s name are refused: XenoNet doesn\'t know an app called "toString"');
+    assert.deepEqual([verify.state.unchecked, verify.state.refused, verify.state.checked], [0, 8, 0], "each counted as refused, none as checked or unchecked");
+    assert.deepEqual(verify.state.lastRefusal.agent, "toString:N");
+    // The apps XenoNet checks are as before: unchecked where it can't look,
+    // and where it can, an OpenCode session from any OpenCode process.
+    assert.equal((await verify.check(from(220), "claude:A")).ok, true);
+    assert.deepEqual(await verify.check(from(300), "claude:A"), supported ? { ok: false, checked: true, reason: "claude:A belongs to another Claude Code process" } : { ok: true, checked: false });
+    assert.deepEqual(await verify.check({ pid: null }, "codex:T"), { ok: true, checked: false }, "netstat had no line: taken at its word, as before");
+  }
+});
+
 test("connecting agents is for people: refused under an agent, fine in a terminal or XenoNet's window", async () => {
   const { verify, from } = setup();
   const agent = await verify.person(from(220));

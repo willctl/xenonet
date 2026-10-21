@@ -235,11 +235,12 @@ function golden(name, actual) {
 
 const sessionIds = [...demoSessionList().map((s) => s.id), ...["claude", "claudeOdd"].map((k) => `claude:${EDGE[k]}`), ...["codex", "archived", "codexOdd"].map((k) => `codex:${EDGE[k]}`)];
 const codexRoots = [path.join(world.codexHome, "sessions"), path.join(world.codexHome, "archived_sessions")];
+const grokRoot = path.join(world.grokHome, "sessions");
 
 // ---------- the tests ----------
 
 test("the live tailer: what it learns from the history, and from lines as they come", async () => {
-  const live = new LiveTelemetry({ claudeRoot: world.claudeRoot, codexRoot: codexRoots[0], claudeDesktopDir: world.claudeDesktopDir, home: world.home });
+  const live = new LiveTelemetry({ claudeRoot: world.claudeRoot, codexRoot: codexRoots[0], grokRoot, claudeDesktopDir: world.claudeDesktopDir, home: world.home });
   await live.start();
   live.stop();
   const primed = {
@@ -289,14 +290,14 @@ test("the live tailer: what it learns from the history, and from lines as they c
 });
 
 test("each session's stats", async () => {
-  const stats = createStats({ transcripts: new Transcripts({ claudeRoot: world.claudeRoot, codexRoots }) });
+  const stats = createStats({ transcripts: new Transcripts({ claudeRoot: world.claudeRoot, codexRoots, grokRoot }) });
   const out = {};
   for (const id of sessionIds) out[id] = await stats(id).catch((err) => ({ error: err.message }));
   golden("stats", out);
 });
 
 test("the search index, and what a few searches find", async () => {
-  const search = new TranscriptSearch({ dbFile: path.join(world.cacheDir, "golden-search.sqlite"), claudeRoot: world.claudeRoot, codexRoots });
+  const search = new TranscriptSearch({ dbFile: path.join(world.cacheDir, "golden-search.sqlite"), claudeRoot: world.claudeRoot, codexRoots, grokRoot });
   await search.index();
   const docs = search.db.prepare("select session_id, app, role, ts, text from docs order by session_id, ts, rowid").all();
   const found = Object.fromEntries(["refunds", "rounding solver", "make", "invoices", "Why is the build"].map((q) => [q, search.search(q)]));

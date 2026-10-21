@@ -43,6 +43,16 @@ fn codex_script(args: &str) -> bool {
     args.contains("@openai/codex/")
 }
 
+// Grok Build: the grok binary its installer puts in ~/.grok/downloads and
+// links from ~/.grok/bin (as grok, and as agent, which Cursor's CLI is
+// called too, so that name counts only there).
+fn grok_program(p: &str, base: &str) -> bool {
+    base == "grok"
+        || base == "grok.exe"
+        || re!(r"^grok-(macos|linux|windows)-(aarch64|arm64|x86_64|x64)(\.exe)?$").is_match(base)
+        || re!(r"\/\.grok\/(bin|downloads)\/[^/]+$").is_match(p)
+}
+
 // OpenCode: its one binary, however it was installed. Every OpenCode reads
 // the same database and can open any session.
 fn opencode_program(_: &str, base: &str) -> bool {
@@ -55,6 +65,7 @@ pub fn rules(id: &str) -> Option<Rules> {
     match id {
         "claude" => Some(Rules { program: claude_program, script: Some(claude_script), pins_by_hook: true, ..none }),
         "codex" => Some(Rules { program: codex_program, script: Some(codex_script), ..none }),
+        "grok" => Some(Rules { program: grok_program, ..none }),
         "opencode" => Some(Rules { program: opencode_program, any_process: true, ..none }),
         _ => None,
     }
@@ -113,8 +124,18 @@ mod tests {
     #[test]
     fn the_apps_whose_processes_xenonet_tells_apart_are_the_registrys() {
         let ids: Vec<&str> = agents().iter().map(|a| a.id.as_str()).collect();
-        assert_eq!(ids, ["claude", "codex", "opencode"], "and so the apps verify checks");
-        assert_eq!(agents().iter().map(|a| a.name.as_str()).collect::<Vec<_>>(), ["Claude Code", "Codex", "OpenCode"]);
+        assert_eq!(ids, ["claude", "codex", "grok", "opencode"], "and so the apps verify checks");
+        assert_eq!(agents().iter().map(|a| a.name.as_str()).collect::<Vec<_>>(), ["Claude Code", "Codex", "Grok Build", "OpenCode"]);
+        for (program, agent) in [
+            ("/Users/me/.grok/downloads/grok-macos-aarch64", Some("grok")),
+            ("/Users/me/.grok/bin/agent", Some("grok")),
+            ("/usr/local/bin/grok", Some("grok")),
+            ("C:\\Users\\me\\.grok\\bin\\grok.exe", Some("grok")),
+            ("/usr/local/bin/agent", None),
+            ("/usr/local/bin/grokker", None),
+        ] {
+            assert_eq!(agent_of(program, ""), agent, "{program}");
+        }
         assert!(agent("claude").unwrap().rules.pins_by_hook && !agent("codex").unwrap().rules.pins_by_hook);
         assert!(agent("opencode").unwrap().rules.any_process && !agent("claude").unwrap().rules.any_process);
         assert!(agent("gemini-cli").is_none() && rules("gemini-cli").is_none());

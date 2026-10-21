@@ -1,0 +1,121 @@
+// Grok Build's session updates as line events (core/lines.js's GrokLine,
+// core/events.js's mapper), and through the readers: a session's stats,
+// search and the live tailer, which read them as they read Claude Code's.
+import { test, after } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { grok, mapperOf } from "../core/events.js";
+import { GrokLine, grokLines, linesOf } from "../core/lines.js";
+import { Transcripts, createStats } from "../core/stats.js";
+import { TranscriptSearch, docsFromLine } from "../core/search.js";
+import { LiveTelemetry } from "../core/live.js";
+import { grokHome, IDS, MAIN_UPDATES, T, up, text, jsonl } from "./fixtures/grok.js";
+
+const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-grok-lines-")));
+after(() => fs.rmSync(dir, { recursive: true, force: true }));
+const home = grokHome(path.join(dir, "grok"));
+const root = path.join(home, "sessions");
+const kinds = (events) => events.map((e) => (e.kind === "broken" ? `broken:${e.at}` : e.kind));
+
+test("a line reads its update in the envelope Grok writes, or bare", () => {
+  const o = new GrokLine(MAIN_UPDATES[0]);
+  assert.equal(o.kind, "user_message_chunk");
+  assert.equal(o.ts, Math.floor(T / 1000) * 1000, "the envelope's time is in seconds");
+  assert.equal(o.text, "Add partial refunds ");
+  const bare = new GrokLine({ sessionId: IDS.main, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hi" } } });
+  assert.deepEqual([bare.kind, bare.text, Number.isNaN(bare.ts)], ["agent_message_chunk", "Hi", true]);
+  assert.equal(new GrokLine(MAIN_UPDATES[5]).toolName, "run_terminal_cmd", "Grok's own name for its tool");
+  assert.equal(new GrokLine(MAIN_UPDATES[9]).toolName, "mcp__linear__save_issue", "an MCP tool, as XenoNet names them");
+  assert.deepEqual(new GrokLine(MAIN_UPDATES[7]).toolInput.file_path, "/Users/ada/atlas/src/refunds.ts", "a tool's file, from its locations");
+  assert.equal(new GrokLine(MAIN_UPDATES[12]).own, true);
+  assert.equal(linesOf("grok"), grokLines);
+  assert.equal(mapperOf("grok"), grok);
+});
+
+test("a session's updates as events: a run of chunks is one message, its first chunk's", () => {
+  const file = grok.file();
+  const events = MAIN_UPDATES.map((u) => grok.events(new GrokLine(u), file));
+  assert.deepEqual(events.map(kinds), [
+    ["prompt"],
+    [],
+    [],
+    ["call", "said"],
+    [],
+    ["call", "said", "tool"],
+    ["result"],
+    ["call", "said", "tool"],
+    ["result"],
+    ["call", "said", "tool"],
+    ["result"],
+    ["context"],
+    [],
+    ["call", "said"],
+  ]);
+  const [prompt] = events[0];
+  assert.deepEqual([prompt.origin, prompt.text, prompt.meta, prompt.command], ["user", "Add partial refunds ", false, null]);
+  assert.deepEqual(events[5][1].parts, [{ type: "tool_use", id: "call-1", name: "run_terminal_cmd", input: { command: "npm test -- orders" } }]);
+  assert.deepEqual([events[10][0].origin, events[10][0].error], ["user", true]);
+  assert.deepEqual([events[11][0].used, events[11][0].window], [41000, 500000]);
+  // What Grok's host asked, or a shell command you ran from its prompt,
+  // isn't a prompt of yours.
+  assert.equal(grok.events(new GrokLine(up(T, text("user_message_chunk", "ls", { _meta: { hostTurn: true } }))), grok.file())[0].meta, true);
+  assert.equal(grok.events(new GrokLine(up(T, { sessionUpdate: "user_message_chunk", content: { type: "text", text: "ls", _meta: { bash_command: "ls" } } })), grok.file())[0].meta, true);
+  assert.deepEqual(kinds(grok.events(new GrokLine(null), grok.file())), ["broken:line"]);
+});
+
+test("a Grok Build session's stats and search, through the readers Claude Code's go through", async () => {
+  const transcripts = new Transcripts({ grokRoot: root });
+  assert.deepEqual(await transcripts.files(`grok:${IDS.main}`), [{ file: path.join(root, encodeURIComponent("/Users/ada/atlas"), IDS.main, "updates.jsonl"), agentId: null }]);
+  assert.deepEqual(await transcripts.files(`grok:${IDS.headless}`), [], "a session with no updates has no transcript");
+  const stats = await createStats({ transcripts })(`grok:${IDS.main}`);
+  assert.equal(stats.app, "grok");
+  assert.deepEqual(stats.turns.map((t) => t.prompt), ["Add partial refunds"]);
+  assert.deepEqual(stats.tools.map((t) => [t.name, t.calls, t.errors]).sort(), [["mcp__linear__save_issue", 1, 1], ["run_terminal_cmd", 1, 0], ["search_replace", 1, 0]]);
+  assert.equal(stats.totals.calls, 0, "Grok's lines don't say what a call took");
+
+  const search = new TranscriptSearch({ dbFile: path.join(dir, "search.sqlite"), grokRoot: root });
+  await search.index();
+  assert.deepEqual(search.search("partial refunds").map((h) => [h.sessionId, h.app]), [[`grok:${IDS.main}`, "grok"]]);
+  assert.deepEqual(search.search("feature flag").map((h) => h.sessionId), [`grok:${IDS.fork}`]);
+  assert.deepEqual(search.search("Should I open").map((h) => h.snippets[0].role), ["assistant"]);
+  assert.equal(search.sessionOf(path.join(root, "x", IDS.main, "chat_history.jsonl"), "grok"), null, "only a session's updates are read");
+  assert.deepEqual(docsFromLine(MAIN_UPDATES[0], "grok").map((d) => d.role), ["user"]);
+  search.close();
+});
+
+test("the live tailer follows a Grok Build session; its hooks end its turns, and a quiet one ends without them", async () => {
+  const live = new LiveTelemetry({ claudeRoot: null, codexRoot: null, grokRoot: root, claudeDesktopDir: null });
+  const file = path.join(root, encodeURIComponent("/Users/ada/atlas"), IDS.main, "updates.jsonl");
+  assert.deepEqual(live.classify(file), { app: "grok", sessionId: `grok:${IDS.main}` });
+  assert.equal(live.classify(path.join(path.dirname(file), "chat_history.jsonl")), null);
+  const now = Date.now();
+  const [busy, quiet] = ["019a3b5c-0000-7000-8000-0000000000a1", "019a3b5c-0000-7000-8000-0000000000a2"];
+  const busyFile = path.join(root, "fresh", busy, "updates.jsonl");
+  const quietFile = path.join(root, "fresh", quiet, "updates.jsonl");
+  fs.mkdirSync(path.dirname(busyFile), { recursive: true });
+  fs.mkdirSync(path.dirname(quietFile), { recursive: true });
+  fs.writeFileSync(busyFile, jsonl([up(now - 5000, text("user_message_chunk", "Rename the refund flag")), up(now - 4000, { sessionUpdate: "tool_call", toolCallId: "c1", kind: "execute", status: "in_progress", rawInput: { command: "rg refund" } })]));
+  fs.writeFileSync(quietFile, jsonl([up(now - 180e3, text("user_message_chunk", "What does reconcile do?")), up(now - 120e3, text("agent_message_chunk", "It matches the bank's lines to the ledger's."))]));
+  const events = [];
+  live.on("activity", (e) => events.push(e));
+  await live.start();
+  live.stop();
+  const of = (id) => live.snapshot().sessions.find((x) => x.id === `grok:${id}`);
+  let s = of(busy);
+  assert.deepEqual([s.app, s.status, s.lastTool.name, s.lastTool.detail, s.context.window], ["grok", "tool", "execute", "rg refund", 256000]);
+  fs.appendFileSync(busyFile, jsonl([up(now - 3000, { sessionUpdate: "tool_call_update", toolCallId: "c1", status: "completed" }), up(now - 2000, text("agent_message_chunk", "Renamed it.")), up(now - 1000, { sessionUpdate: "usage_update", used: 9000, size: 300000 })]));
+  await live.track(busyFile, { prime: false });
+  s = of(busy);
+  assert.deepEqual([s.status, s.lastMessage, s.context.used, s.context.window], ["thinking", "Renamed it.", 9000, 300000]);
+  // Its hook says the turn ended.
+  live.noteHook(`grok:${busy}`, { hook_event_name: "Stop", sessionId: busy });
+  assert.equal(of(busy).status, "idle");
+  assert.ok(events.some((e) => e.kind === "turn-end" && e.sessionId === `grok:${busy}`));
+  // Without hooks, a turn that's been quiet a while, with nothing in
+  // flight, has ended when its last line was written.
+  s = of(quiet);
+  assert.deepEqual([s.status, s.lastTurnEndAt], ["idle", Math.floor((now - 120e3) / 1000) * 1000]);
+  assert.equal(of(IDS.main), undefined, "a day-old session isn't in the snapshot");
+});

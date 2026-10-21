@@ -40,12 +40,15 @@ export class CursorSessions extends NativeReader {
 
   read(now = this.clock.now()) {
     try {
-      // The reader is got when a record is first checked, as JS got it to
-      // parse the file.
+      // The reader is got when Rust begins to parse a changed file, as JS
+      // got it.
       const box = {};
       let r = null;
-      const check = guarded((rec, version) => (r ??= reader(SOURCE)).check(rec, { version }), box);
-      const threw = this.#core.read(this.file == null ? null : String(this.file), Number(now), check, FAILED, ioOf(this.files, ["statSync", "openSync", "readSync", "closeSync"]));
+      const ready = guarded(() => {
+        r = reader(SOURCE);
+      }, box);
+      const check = guarded((rec, version) => r.check(rec, { version }), box);
+      const threw = this.#core.read(this.file == null ? null : String(this.file), Number(now), ready, check, FAILED, ioOf(this.files, ["statSync", "openSync", "readSync", "closeSync"]));
       this.#runs = null;
       if (threw) throw box.err;
       this.ok(now);

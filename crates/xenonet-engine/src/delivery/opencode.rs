@@ -17,23 +17,19 @@ use std::fmt::Write as _;
 use std::sync::Mutex;
 use xenonet_base::sync::Locked;
 
-/// XenoNet's ids take OpenCode's ses_… with "-" for "_".
+/// OpenCode's own id for XenoNet's (xenonet_base::opencode, as its reader
+/// wrote it).
 pub fn open_code_id(id: &Arg) -> String {
-    let s = js_text(id);
-    let s = s.strip_prefix("opencode:").unwrap_or(&s);
-    match s.strip_prefix("ses-") {
-        Some(rest) => format!("ses_{rest}"),
-        None => s.to_string(),
-    }
+    xenonet_base::opencode::open_code_id(&js_text(id))
 }
 
-/// And back: XenoNet's id for a session named the way OpenCode shows it.
-/// Any other id comes back as it was.
+/// And back: XenoNet's id for a session named the way OpenCode shows it
+/// (ses_…, or opencode:ses_…). Any other id comes back as it was.
 pub fn from_open_code_id(id: &Arg) -> String {
     let s = if id.is_nullish() { String::new() } else { js_text(id) };
     let s = xenonet_base::text::js_trim(&s);
-    match crate::re!(r"^(?:opencode:)?ses_([0-9A-Za-z]+)$").captures(s) {
-        Some(m) => format!("opencode:ses-{}", &m[1]),
+    match crate::re!(r"^(?:opencode:)?(ses(?:_[0-9A-Za-z]+)+)$").captures(s) {
+        Some(m) => format!("opencode:{}", xenonet_base::opencode::local_id(&m[1])),
         None => s.to_string(),
     }
 }

@@ -24,7 +24,7 @@ From each extracted folder, run:
 
 On Windows, use `bin\xenonet.exe setup`. Either component can be installed first. Tools installs the `xenonet` command. Start the service with `xenonet service start`; `xenonet service status` reports its version and running terminals. `xenonet service stop` refuses while terminals are running. `--force` stops them too.
 
-The service runs as your account, independently of Desktop. It stays running until stopped or you sign out. Opening Desktop starts it when needed. On macOS and Linux, `xenonet service install` has it start at login instead, and start again if it stops unexpectedly, under launchd or systemd. `xenonet service uninstall` turns that off. See [Keeping the service running](always-on.md).
+The service runs as your account, independently of Desktop. It stays running until stopped or you sign out. Opening Desktop starts it when needed. `xenonet service install` has it start at login instead, and start again if it stops unexpectedly, under launchd, systemd or Task Scheduler. `xenonet service uninstall` turns that off. See [Keeping the service running](always-on.md).
 
 A machine that only serves as a host for another machine's console needs the Service and Tools, `xenonet setup` from each, and `xenonet service install`. On Linux, `loginctl enable-linger $USER` starts it at boot, before anyone logs in.
 
@@ -40,7 +40,7 @@ The service serves the console too: open http://127.0.0.1:47840 in a browser on 
 
 `xenonet mcp assistant --grant <grant>` runs the read-only server for a [remote actor](cloud-assistants.md) you paired. A tunnel client runs it, not Claude Code or Codex, and it reaches the service only through a private endpoint of its own, with that grant's credential; it never gets the Tools credential.
 
-Use `Connect Claude Code and Codex to XenoNet` in the palette, or `xenonet connect`, to review both MCP servers and add them to Claude Code and Codex. Their configuration points to a stable launcher outside Desktop. A new Tools version applies to new commands and new MCP connections. MCP processes already running keep their code and runtime until their client reconnects.
+Use `Connect your agents to XenoNet` in the palette, or `xenonet connect`, to review both MCP servers and add them to Claude Code, Codex and Grok Build. Their configuration points to a stable launcher outside Desktop. A new Tools version applies to new commands and new MCP connections. MCP processes already running keep their code and runtime until their client reconnects.
 
 Console MCP stays connected while Desktop restarts. Window actions report that Desktop is unavailable until it returns. Coordination continues through the service. Simulations, arbitrary JavaScript evaluation and raw DevTools commands remain available only in development instances. Actions marked as yours alone in the app keep that restriction.
 

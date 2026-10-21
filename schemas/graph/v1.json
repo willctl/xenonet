@@ -3,7 +3,7 @@
   "$id": "https://xenonet.dev/schemas/graph/v1.json",
   "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
   "title": "Graph",
-  "description": "The map: the projects folder, its groups and projects, Codex desktop projects, the folders outside it where sessions ran, the sessions, Agent Wiki and the MCP servers sessions share, with the identities work ran as.",
+  "description": "The map: the projects folder, its groups and projects, Codex desktop projects, the folders outside it where sessions ran, the sessions, Xenolith and the MCP servers sessions share, with the identities work ran as.",
   "type": "object",
   "properties": {
     "generatedAt": {
@@ -1126,6 +1126,17 @@
                   "additionalProperties": {}
                 }
               },
+              "aliases": {
+                "description": "Other names it goes by, from its aliases, in lowercase; left out when it has none",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "space": {
+                "description": "The Xenolith space it's in, such as project:atlas, when that isn't this machine's own; its id is then wiki:<space>/<slug>",
+                "type": "string"
+              },
               "fx": {
                 "type": [
                   "number",
@@ -1245,7 +1256,7 @@
               "lastSessionAt"
             ],
             "additionalProperties": {},
-            "description": "An Agent Wiki page"
+            "description": "A page of the shared context's wiki"
           },
           {
             "type": "object",

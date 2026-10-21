@@ -58,6 +58,7 @@ fn core(opts: &Value) -> Connect {
         home: sys::home(),
         claude_config_dir: std::env::var("CLAUDE_CONFIG_DIR").ok(),
         codex_home: std::env::var("CODEX_HOME").ok(),
+        grok_home: std::env::var("GROK_HOME").ok(),
         console_mcp: sys::var("XENONET_LAUNCHER_BIN").or_else(|| sys::var("XENONET_LAUNCHER_EXEC")).is_some(),
         platform: sys::platform().into(),
         instances: xenonet_app::instances::INSTANCES.iter().map(|i| Instance { id: i.id.into(), name: i.name.into(), port: Arg::Num(f64::from(i.port)) }).collect(),

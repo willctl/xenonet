@@ -1,6 +1,7 @@
 // core/lines.js in Rust (crates/xenonet-sources/src/lines.rs): transcript
-// lines as XenoNet reads them, a Claude Code transcript's and a Codex
-// rollout's, through one normalizer each, which the three readers share.
+// lines as XenoNet reads them, a Claude Code transcript's, a Codex
+// rollout's and a Grok Build session's updates, through one normalizer
+// each, which the three readers share.
 //
 // A view is a Rust object over the record, which reads it when asked the
 // way the JS did: what JS would throw reading a field of an odd record, it
@@ -109,6 +110,41 @@ export class CodexLine {
   }
 }
 
+// A line of a Grok Build session's updates.jsonl: a session update, in the
+// envelope Grok writes, or the params alone.
+export class GrokLine {
+  #core;
+  constructor(raw) {
+    this.raw = raw;
+    this.#core = new native.GrokLineCore(raw);
+  }
+
+  get update() {
+    return this.#core.update;
+  }
+  get kind() {
+    return this.#core.kind;
+  }
+  get own() {
+    return this.#core.own;
+  }
+  get ts() {
+    return this.#core.ts;
+  }
+  get text() {
+    return this.#core.text;
+  }
+  get notAsked() {
+    return this.#core.notAsked;
+  }
+  get toolName() {
+    return this.#core.toolName;
+  }
+  get toolInput() {
+    return this.#core.toolInput;
+  }
+}
+
 // Whether a rollout's lines have a completed user message.
 export const hasUserMessages = (lines) => lines.some((o) => o.userMessage != null);
 
@@ -125,13 +161,19 @@ const codexHooks = {
   kindOf: (o) => native.codexLineKindOf(o.type, o.payload?.type, o.payload?.item?.type),
   versionOf: (o, current) => native.codexLineVersionOf(o.type, o.payload?.cli_version, current ?? null),
 };
+// Grok Build's lines say no version.
+const grokHooks = {
+  kindOf: (o) => native.grokLineKindOf(o),
+  versionOf: (_o, current) => current,
+};
 
 export const claudeLines = new Normalizer({ name: "claude-lines", source: "anthropic/claude-code/transcript-line", normalize: (raw) => new ClaudeLine(raw) }).use(transcriptHooks("anthropic/claude-code/transcript-line", claudeHooks));
 export const codexLines = new Normalizer({ name: "codex-lines", source: "openai/codex/rollout-line", normalize: (raw) => new CodexLine(raw) }).use(transcriptHooks("openai/codex/rollout-line", codexHooks));
+export const grokLines = new Normalizer({ name: "grok-lines", source: "spacexai/grok-build/update-line", normalize: (raw) => new GrokLine(raw) }).use(transcriptHooks("spacexai/grok-build/update-line", grokHooks));
 
-// The normalizer for an app's transcripts: any app but Codex's are read as
-// Claude Code's.
-const NORMALIZERS = { claude: claudeLines, codex: codexLines };
+// The normalizer for an app's transcripts: any app that isn't tailed is
+// read as Claude Code's.
+const NORMALIZERS = { claude: claudeLines, codex: codexLines, grok: grokLines };
 export const linesOf = (app) => NORMALIZERS[tailedApp(app, "claude")];
 
 const NOTHING = Buffer.alloc(0);

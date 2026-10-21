@@ -101,6 +101,9 @@ function xenonet(args, { cwd = root, input = "", env = {} } = {}) {
     let stdout = "", stderr = "";
     proc.stdout.on("data", (d) => (stdout += d));
     proc.stderr.on("data", (d) => (stderr += d));
+    // A command that's done before it reads its input (one refused at
+    // once) closes the pipe first, which isn't the test's to fail on.
+    proc.stdin.on("error", () => {});
     proc.stdin.end(input);
     proc.on("exit", (code) => resolve({ code, stdout, stderr }));
   });
@@ -325,6 +328,55 @@ test("xenonet hook --via=plugin marks the event as the copy XenoNet's plugin for
   }
 });
 
+test("xenonet hook grok passes Grok Build's events to its own route, as Grok wrote them", async () => {
+  const s = await fakeXenoNet({ "POST /api/hook/grok": () => [200, { decision: "block", reason: "a message" }] });
+  try {
+    const r = await xenonet(["hook", "grok", `--port=${s.port}`], { input: '{"hook_event_name":"Stop","sessionId":"019a3b5c-0000-7000-8000-00000000000a"}' });
+    assert.deepEqual([r.code, JSON.parse(r.stdout)], [0, { decision: "block", reason: "a message" }]);
+    assert.deepEqual(s.seen.map((x) => [x.path, x.body]), [["/api/hook/grok", { hook_event_name: "Stop", sessionId: "019a3b5c-0000-7000-8000-00000000000a" }]]);
+  } finally {
+    s.close();
+  }
+});
+
+test("xenonet hook for an app XenoNet doesn't tail passes the event nowhere, says why in XenoNet's log, and lets the agent carry on", async () => {
+  const s = await fakeXenoNet({ "POST /api/hook/codex": () => [200, { systemMessage: "from XenoNet" }], "POST /api/hook/claude": () => [200, { systemMessage: "from XenoNet" }] });
+  const state = tmp();
+  try {
+    for (const app of ["gemini-cli", "Codex"]) {
+      const r = await xenonet(["hook", app, `--port=${s.port}`], { input: '{"hook_event_name":"SessionStart"}', env: { XENONET_STATE_DIR: state } });
+      assert.deepEqual([r.code, r.stdout, r.stderr], [0, "", ""], app);
+    }
+    assert.deepEqual(s.seen, [], "nothing reached XenoNet");
+    const logged = fs.readFileSync(path.join(state, "logs", "cli.ndjson"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    assert.deepEqual(logged.map((e) => [e.level, e.code, e.message]), [
+      ["warn", "cli.hook", 'xenonet hook takes claude, codex or grok, not "gemini-cli"'],
+      ["warn", "cli.hook", 'xenonet hook takes claude, codex or grok, not "Codex"'],
+    ]);
+    // No app named is Codex, as it always was.
+    const none = await xenonet(["hook", `--port=${s.port}`], { input: "{}", env: { XENONET_STATE_DIR: state } });
+    assert.deepEqual([none.code, JSON.parse(none.stdout), s.seen.map((x) => x.path)], [0, { systemMessage: "from XenoNet" }, ["/api/hook/codex"]]);
+  } finally {
+    s.close();
+  }
+});
+
+test("xenonet diagnose --ask refuses an app XenoNet can't ask, before it writes anything", async () => {
+  const state = tmp();
+  for (const [args, env, shown] of [
+    [["--app", "gemini-cli"], {}, '"gemini-cli"'],
+    [[], { XENONET_DIAGNOSE_APP: "cursor" }, '"cursor"'],
+    // Grok Build is tailed, but XenoNet doesn't ask it.
+    [["--app", "grok"], {}, '"grok"'],
+  ]) {
+    const r = await xenonet(["diagnose", "--ask", ...args], { env: { XENONET_STATE_DIR: state, ...env } });
+    assert.equal(r.code, 2, r.stderr);
+    assert.equal(r.stderr, `xenonet: --app takes claude or codex, not ${shown}\n`);
+    assert.equal(r.stdout, "");
+  }
+  assert.equal(fs.existsSync(path.join(state, "diagnostics")), false, "no folder written for it");
+});
+
 test("xenonet connect --here: a XenoNet answering through a forwarded port is connected in this computer's settings, never by asking it", async () => {
   const s = await fakeXenoNet({ "GET /api/health": () => [200, health], "GET /api/engine/connect": () => [200, { port: 1, apps: [] }] });
   try {
@@ -335,7 +387,7 @@ test("xenonet connect --here: a XenoNet answering through a forwarded port is co
     assert.equal(r.code, 0, r.stderr);
     const preview = JSON.parse(r.stdout);
     assert.equal(preview.port, s.port, "that XenoNet's entries, by its port");
-    assert.deepEqual(preview.apps.map((a) => a.app), ["claude", "codex"]);
+    assert.deepEqual(preview.apps.map((a) => a.app), ["claude", "codex", "grok"]);
     assert.ok(preview.apps.every((a) => a.changes.length), "what would be added here");
     assert.deepEqual(s.seen, [], "the XenoNet on that port is never asked: it would write its own computer's settings");
   } finally {

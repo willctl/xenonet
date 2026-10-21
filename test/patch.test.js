@@ -1,6 +1,6 @@
 // The one reading of an apply_patch text (core/patch.js), and what each of
-// its readers keeps of it: live leaves out the names files move to, the
-// engine and the native readers keep them.
+// its readers keeps of it: live, the engine and the native readers all keep
+// the names files move to.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { patchHeaders, patchPaths } from "../core/patch.js";
@@ -36,10 +36,11 @@ test("each reader keeps its own record of a patch", () => {
   // OpenCode's reader leaves out a header with no path; Copilot CLI's keeps it.
   assert.deepEqual(opencodeFiles("*** Update File: b.txt\n*** Move to: c.txt\n*** Add File:  "), ["b.txt", "c.txt"]);
   assert.deepEqual(editedBy("apply_patch", "*** Update File: b.txt\n*** Move to: c.txt\n*** Add File:  "), ["b.txt", "c.txt", ""]);
-  // Live counts the files it adds, updates and deletes, not where one moved.
+  // Live counts the files it adds, updates and deletes, and where one moved,
+  // as the engine warns about them.
   const live = new LiveTelemetry({ claudeRoot: null, codexRoot: null, claudeDesktopDir: null });
   const cx = { app: "codex", sessionId: "codex:bbbbbbbb-0000-0000-0000-000000000002" };
   const ts = new Date(Date.now() - 30e3).toISOString();
   live.applyCodex(cx, { type: "response_item", timestamp: ts, payload: { type: "function_call", call_id: "p1", name: "apply_patch", arguments: PATCH } }, false);
-  assert.deepEqual([...live.sessions.get(cx.sessionId).files.keys()], ["a.txt", "b.txt", "d.txt"]);
+  assert.deepEqual([...live.sessions.get(cx.sessionId).files.keys()], ["a.txt", "b.txt", "c.txt", "d.txt"]);
 });

@@ -40,6 +40,15 @@ pub fn gather(flags: &Flags) -> Result<(String, Value), Fail> {
 
 #[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the name is lowercased first")]
 pub fn run(_args: &[String], flags: &Flags) -> Done {
+    // Codex, unless you ask for Claude Code; another app is refused before
+    // anything is gathered.
+    let asked = flags.text("app").or_else(|| sys::var("XENONET_DIAGNOSE_APP")).unwrap_or_else(|| "codex".into());
+    let app = xenonet_base::apps::asked_or_text(Some(&asked), Some("codex"));
+    let app = match app {
+        Some(app) => app,
+        None if flags.on("ask") => return Err(Fail::new(xenonet_base::apps::app_refusal_among("--app", &Value::String(asked), &xenonet_base::apps::ASKED), 2)),
+        None => "codex",
+    };
     let (state_dir, bundle) = gather(flags)?;
     if !flags.on("ask") {
         let text = if flags.on("json") { format!("{}\n", xenonet_base::json::stringify(&bundle, 2)) } else { cores::bundle_markdown(&bundle)? };
@@ -51,9 +60,6 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
         write(&text);
         return Ok(0);
     }
-    let asked = flags.text("app").or_else(|| sys::var("XENONET_DIAGNOSE_APP")).unwrap_or_else(|| "codex".into());
-    // Codex, unless you ask for Claude Code.
-    let app = xenonet_base::apps::tailed_app(&asked, "codex");
     let model = flags.text("model").or_else(|| sys::var("XENONET_DIAGNOSE_MODEL"));
     let named = if app == "claude" { "Claude Code" } else { "Codex" };
     let path_var = std::env::var("PATH").unwrap_or_default();

@@ -57,6 +57,7 @@ impl ConnectCore {
             home: js_text(&o.field("home")),
             claude_config_dir: text(o.field("claudeConfigDir")),
             codex_home: text(o.field("codexHome")),
+            grok_home: text(o.field("grokHome")),
             console_mcp: o.field("consoleMcp").truthy(),
             platform: js_text(&o.field("platform")),
             instances: instances(o.field("instances")),
@@ -69,11 +70,19 @@ impl ConnectCore {
         let c = self.inner.clone();
         start(move |asker| c.preview(&mut AskCalls(asker)).map(|v| crate::args::value_to_arg(&v)))
     }
+    /// `apps`: the ids to connect; null for every app that's here.
     #[napi]
     pub fn apply(&self, apps: JsArg) -> Machine {
         let c = self.inner.clone();
-        let apps = list(apps.0);
-        start(move |asker| c.apply(&mut AskCalls(asker), &apps).map(|v| crate::args::value_to_arg(&v)))
+        let apps = (!apps.0.is_nullish()).then(|| list(apps.0));
+        start(move |asker| {
+            let mut calls = AskCalls(asker);
+            let apps = match apps {
+                Some(a) => a,
+                None => c.installed_ids(&mut calls)?,
+            };
+            c.apply(&mut calls, &apps).map(|v| crate::args::value_to_arg(&v))
+        })
     }
     #[napi(js_name = "hookConnected")]
     pub fn hook_connected(&self, event: JsArg) -> Machine {

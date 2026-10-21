@@ -17,6 +17,7 @@ pub struct Config {
     pub home_dir: String,
     pub claude_projects_dir: String,
     pub codex_home: String,
+    pub grok_home: String,
 }
 
 fn argv_has(flag: &str) -> bool {
@@ -46,6 +47,7 @@ pub fn config() -> Result<Config, Fail> {
         home_dir: sys::home(),
         claude_projects_dir: claude_projects_dir(),
         codex_home: codex_home(),
+        grok_home: grok_home(),
     })
 }
 
@@ -58,6 +60,11 @@ pub fn claude_projects_dir() -> String {
 /// config.codexHome: Codex's own folder.
 pub fn codex_home() -> String {
     sys::resolve(&std::env::var("CODEX_HOME").unwrap_or_else(|_| sys::join(&sys::home(), ".codex")))
+}
+
+/// config.grokHome: Grok Build's own folder.
+pub fn grok_home() -> String {
+    sys::resolve(&std::env::var("GROK_HOME").unwrap_or_else(|_| sys::join(&sys::home(), ".grok")))
 }
 
 /// instanceDir(kind, name): the folder an instance keeps its "state" or

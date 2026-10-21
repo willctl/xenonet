@@ -1519,6 +1519,12 @@ impl Engine {
         if sub.is_some() {
             return Ok(Arg::Null);
         }
+        // An app that passes over what an event answers (Grok Build's
+        // SessionStart and UserPromptSubmit) hears nothing then: its
+        // messages wait for an event it hears.
+        if app.as_str().and_then(xenonet_base::apps::app).and_then(|a| a.connect.as_ref()).is_some_and(|c| c.unheard.iter().any(|e| e == ev)) {
+            return Ok(Arg::Null);
+        }
         match ev {
             "SessionStart" => {
                 let brief = self.briefing(c, &me)?;
@@ -1527,7 +1533,7 @@ impl Engine {
                 let mail = Self::mail(c, &taken)?;
                 Ok(say([brief, mail].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n\n")))
             }
-            "UserPromptSubmit" | "PostToolUse" => {
+            "UserPromptSubmit" | "PostToolUse" | "PostToolUseFailure" => {
                 let taken = self.take(c, &me)?;
                 Ok(say(Self::mail(c, &taken)?))
             }

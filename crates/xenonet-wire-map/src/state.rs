@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use tokio::sync::watch;
-use xenonet_base::apps::tailed_app;
+use xenonet_base::apps::{tailed_or_text, untailed};
 use xenonet_base::paths::path_key;
 use xenonet_base::text::{js_string, truthy};
 use xenonet_service::cores::{CoreError, Runs, State, R};
@@ -103,6 +103,7 @@ pub struct MapState {
     claude_sessions: Arc<Gather>,
     codex_threads: Arc<Gather>,
     codex_projects: Arc<Gather>,
+    grok_sessions: Arc<Gather>,
     pub runs: Mutex<ReportedRuns>,
     /// The native readers and numbat's, when they're on.
     observed: Vec<Arc<crate::observed::Observed>>,
@@ -152,8 +153,15 @@ impl MapState {
     ) -> Arc<MapState> {
         let codex_roots =
             [std::path::Path::new(&cfg.codex_home).join("sessions"), std::path::Path::new(&cfg.codex_home).join("archived_sessions")].map(|p| p.to_string_lossy().into_owned());
-        let search = TranscriptSearch::new(&std::path::Path::new(&cfg.cache_dir).join("search.sqlite").to_string_lossy(), &cfg.claude_projects_dir, &codex_roots, vendor.clone());
-        let stats = Stats::new(&cfg.claude_projects_dir, &codex_roots, vendor.clone());
+        let grok_root = std::path::Path::new(&cfg.grok_home).join("sessions").to_string_lossy().into_owned();
+        let search = TranscriptSearch::new(
+            &std::path::Path::new(&cfg.cache_dir).join("search.sqlite").to_string_lossy(),
+            &cfg.claude_projects_dir,
+            &codex_roots,
+            &grok_root,
+            vendor.clone(),
+        );
+        let stats = Stats::new(&cfg.claude_projects_dir, &codex_roots, &grok_root, vendor.clone());
         let identities = cfg.identities.then(|| {
             IdentityWatch::new(
                 crate::identities::Files {
@@ -168,7 +176,8 @@ impl MapState {
             )
         });
         let gatherer = |name: &str| Arc::new(Gather::new(name, Options { fallback: json!([]), ..Default::default() }));
-        let (claude_sessions, codex_threads, codex_projects) = (gatherer("claude-sessions"), gatherer("codex-threads"), gatherer("codex-projects"));
+        let (claude_sessions, codex_threads, codex_projects, grok_sessions) =
+            (gatherer("claude-sessions"), gatherer("codex-threads"), gatherer("codex-projects"), gatherer("grok-sessions"));
         // The projects folder you chose, if you did (workspace.js), as
         // state.json has it: the store itself is read at the first refresh,
         // with the rest of what it saves then.
@@ -193,6 +202,7 @@ impl MapState {
             claude_sessions,
             codex_threads,
             codex_projects,
+            grok_sessions,
             runs: Mutex::new(ReportedRuns::new()),
             observed: crate::observed::Observed::all(&cfg, &vendor),
             inner: Mutex::new(Inner { map: Map_ { sources: json!([]), ..Default::default() }, memory: Memory::new(), projects_dir, demo_titles: Vec::new(), repo_pass_for: None }),
@@ -215,6 +225,7 @@ impl MapState {
         let _ = b.add(state.codex_threads.clone(), Some("codex"));
         let _ = b.add(state.codex_projects.clone(), Some("codex-projects"));
         let _ = b.add(codex, Some("codex"));
+        let _ = b.add(state.grok_sessions.clone(), Some("grok"));
         let _ = b.add(live.block(), Some("live"));
         for l in vendor.blocks() {
             let _ = b.add(l, None);
@@ -336,13 +347,20 @@ impl MapState {
     async fn gather_sessions(&self, app: &str) -> Result<Value, String> {
         match &self.readers {
             Readers::Demo(d) => d.sessions(app).map(Value::Array),
-            Readers::Real { claude } => {
-                if tailed_app(app, "claude") == "codex" {
-                    self.codex.threads().await.map(Value::Array)
-                } else {
-                    claude.sessions().await.map(Value::Array)
+            Readers::Real { claude } => match app {
+                "codex" => self.codex.threads().await.map(Value::Array),
+                "claude" => claude.sessions().await.map(Value::Array),
+                "grok" => {
+                    let (home, vendor) = (self.cfg.grok_home.clone(), self.vendor.clone());
+                    Ok(Value::Array(
+                        crate::util::blocking(move || {
+                            xenonet_sources::grok::list_sessions(&home, &mut |raw| vendor.sample("spacexai/grok-build/session-summary", raw, None, None, 16))
+                        })
+                        .await,
+                    ))
                 }
-            }
+                _ => Err(format!("XenoNet doesn't list {app}'s sessions")),
+            },
         }
     }
 
@@ -367,14 +385,16 @@ impl MapState {
     async fn refresh_now(&self) -> Result<Value, String> {
         // The projects folder as this refresh found it, for all of it.
         let root = self.projects_dir();
-        let (codex, native, claude) = tokio::join!(
+        let (codex, native, claude, grok) = tokio::join!(
             self.codex_threads.run(false, None, || self.gather_sessions("codex")),
             self.codex_projects.run(false, None, || self.gather_native()),
             self.claude_sessions.run(false, None, || self.gather_sessions("claude")),
+            self.grok_sessions.run(false, None, || self.gather_sessions("grok")),
         );
         let (codex, codex_st) = gathered("codex", &self.codex_threads, codex);
         let (native, native_st) = gathered("codex-projects", &self.codex_projects, native);
         let (claude, claude_st) = gathered("claude", &self.claude_sessions, claude);
+        let (grok, grok_st) = gathered("grok", &self.grok_sessions, grok);
         // Keep the previous sessions for a source that failed this round, so
         // a transient error doesn't make half the graph vanish.
         let prev: Vec<Value> = self.all_nodes().into_iter().filter(|n| s(n, "kind") == Some("session")).collect();
@@ -384,7 +404,8 @@ impl MapState {
         let observed = self.observed_sessions();
         let titles: HashMap<String, Value> = lock(&self.inner).demo_titles.iter().cloned().collect();
         let ok = |st: &Value| st.get("ok") == Some(&Value::Bool(true));
-        let sessions = decide::merge_sessions(&prev, (ok(&codex_st), items(Some(&codex))), (ok(&claude_st), items(Some(&claude))), &observed, &titles);
+        let lists = [("codex", ok(&codex_st), items(Some(&codex))), ("claude", ok(&claude_st), items(Some(&claude))), ("grok", ok(&grok_st), items(Some(&grok)))];
+        let sessions = decide::merge_sessions(&prev, &lists, &observed, &titles);
         // Where sessions ran is evidence of where the projects are, so the
         // scan comes after the session lists.
         let session_dirs = decide::session_dirs(&sessions);
@@ -495,12 +516,12 @@ impl MapState {
         }
         let live = lock(&self.live.status).clone();
         let search = self.search.status_json();
-        let mut sources = vec![projects_st, codex_st, native_st, claude_st];
+        let mut sources = vec![projects_st, codex_st, native_st, claude_st, grok_st];
         sources.extend(self.observed.iter().map(|o| o.status()));
         sources.push(json!({ "name": "live", "ok": live.watching, "count": live.files }));
         let mut wiki_st = json!({ "name": "wiki", "ok": wiki.is_some(), "count": wiki.as_ref().map_or(0, |w| items(w.get("pages")).len()) });
         if wiki.is_none() {
-            wiki_st["error"] = json!("Agent Wiki folder not found");
+            wiki_st["error"] = json!("Xenolith folder not found");
         }
         sources.push(wiki_st);
         sources.push(json!({ "name": "search", "ok": !truthy(search.get("errors")), "count": search.get("docs").cloned().unwrap_or(Value::Null), "ms": search.get("ms").cloned().unwrap_or(Value::Null) }));
@@ -806,15 +827,27 @@ impl MapState {
         let raw = s(node, "rawId").unwrap_or_default().to_string();
         match &self.readers {
             Readers::Demo(d) => d.transcript(&raw),
-            Readers::Real { claude } => {
-                if tailed_app(s(node, "app").unwrap_or_default(), "claude") == "codex" {
+            // A session of an app XenoNet doesn't tail isn't read as Claude
+            // Code's.
+            Readers::Real { claude } => match tailed_or_text(s(node, "app"), None) {
+                Some("codex") => {
                     let id = s(node, "id").unwrap_or_default().to_string();
                     let rollout = self.stats.files(&id).into_iter().next().map(|(f, _)| f);
                     self.codex.read_thread(&raw, cursor, limit, rollout).await
-                } else {
-                    claude.read(&raw, cursor, limit).await
                 }
-            }
+                Some("grok") => {
+                    let (home, vendor, cursor) = (self.cfg.grok_home.clone(), self.vendor.clone(), cursor.map(str::to_string));
+                    crate::util::blocking(move || {
+                        let dir = xenonet_sources::grok::folder(&home, &raw).ok_or("XenoNet can't find this Grok Build session's folder")?;
+                        let lines = crate::stats::read_lines(&vendor, &dir.join("updates.jsonl").to_string_lossy(), crate::vendor::Tailed::Grok).map_err(|e| e.to_string())?;
+                        let lines: Vec<_> = lines.into_iter().map(xenonet_sources::lines::GrokLine::new).collect();
+                        Ok(xenonet_sources::grok::page(xenonet_sources::grok::entries(&lines), cursor.as_deref(), limit as usize))
+                    })
+                    .await
+                }
+                Some(_) => claude.read(&raw, cursor, limit).await,
+                None => Err(untailed(s(node, "app").unwrap_or_default())),
+            },
         }
     }
 
@@ -915,14 +948,19 @@ impl MapState {
             }
             "wiki-write" => {
                 ia?;
+                // A note logged through the server that owns the map's
+                // wiki: Xenolith's context_log, or wiki_log for a wiki from
+                // before it.
+                let server = self.cfg.wiki_server.as_str().unwrap_or("xenolith").to_string();
+                let tool = if server == "agent-wiki" { "wiki_log" } else { "context_log" };
                 acts.push((
                     a.clone().unwrap_or_default(),
                     f(vec![
                         ("kind", json!("tool")),
-                        ("tool", json!("mcp__agent-wiki__wiki_log")),
+                        ("tool", json!(format!("mcp__{server}__{tool}"))),
                         ("category", json!("mcp")),
-                        ("detail", json!("agent-wiki.wiki_log")),
-                        ("server", json!("agent-wiki")),
+                        ("detail", json!(format!("{server}.{tool}"))),
+                        ("server", json!(server)),
                         ("pages", json!(["xenonet", "ledger"])),
                         ("files", json!([])),
                         ("ts", num(now)),
@@ -1078,8 +1116,11 @@ impl State for MapState {
         if notes.is_null() {
             notes = json!({ "prompts": [], "messages": [], "files": [], "edits": [] });
         }
-        if decide::handoff_needs_transcript(&notes) {
-            let limit = if tailed_app(s(&n, "app").unwrap_or_default(), "claude") == "codex" { 60.0 } else { 80.0 };
+        // A session of an app XenoNet doesn't read the transcripts of is
+        // handed off with what the tailer saw of it.
+        let app = if matches!(self.readers, Readers::Demo(_)) { s(&n, "app") } else { tailed_or_text(s(&n, "app"), None) };
+        if let Some(app) = app.filter(|_| decide::handoff_needs_transcript(&notes)) {
+            let limit = if app == "codex" { 60.0 } else { 80.0 };
             let page = self.transcript(&n, None, limit).await.map_err(err)?;
             notes = decide::handoff_notes(&notes, Some(&page));
         }
@@ -1111,7 +1152,7 @@ impl State for MapState {
             return Ok(json!(xenonet_app::demo::NARRATION));
         }
         let text = if kind == "day" { digest::summary_text(&self.day(), "Today so far") } else { digest::summary_text(&self.digest(since)?, "While the user was away") };
-        crate::narrate::ask_codex(&self.cfg.codex_binary(), &digest::narrate_prompt(&text), None).await.map(Value::String).map_err(err)
+        crate::narrate::ask_codex(&self.cfg.codex_binary(), &digest::narrate_prompt(&text), None, &self.cfg.codex_home).await.map(Value::String).map_err(err)
     }
     async fn project_detection(&self) -> R<Value> {
         self.detection().await
@@ -1161,7 +1202,7 @@ impl State for MapState {
                 Err(e) => return Err(status(if e.status == Some(409) { 409 } else { 502 }, format!("The decision model couldn't sort the folders: {}", e.message))),
             }
         } else {
-            match crate::narrate::ask_codex(&self.cfg.codex_binary(), &classify::picks_prompt(&outline), Some(classify::picks_schema()))
+            match crate::narrate::ask_codex(&self.cfg.codex_binary(), &classify::picks_prompt(&outline), Some(classify::picks_schema()), &self.cfg.codex_home)
                 .await
                 .and_then(|text| classify::parse_picks(&text, &outline))
             {
@@ -1248,6 +1289,10 @@ impl State for MapState {
         self.stats.stats(id).await.map_err(err)
     }
     async fn read_transcript(&self, node: &Value, cursor: Option<&str>, limit: f64) -> R<Value> {
+        // A session of an app XenoNet doesn't tail is refused, a 400.
+        if matches!(self.readers, Readers::Real { .. }) && tailed_or_text(s(node, "app"), None).is_none() {
+            return Err(status(400, untailed(s(node, "app").unwrap_or_default())));
+        }
         self.transcript(node, cursor, limit).await.map_err(err)
     }
     async fn rename_session(&self, node: Value, title: Value) -> R<Value> {
@@ -1272,7 +1317,8 @@ impl State for MapState {
                 }
             }
             Readers::Real { claude } => {
-                if tailed_app(s(&n, "app").unwrap_or_default(), "claude") == "codex" {
+                // renamable takes Claude Code's sessions and Codex's alone.
+                if s(&n, "app") == Some("codex") {
                     self.codex.rename(s(&n, "rawId").unwrap_or_default(), &name).await.map_err(err)?;
                     saved.push("Codex");
                 } else {

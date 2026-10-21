@@ -145,7 +145,7 @@ cl && !cl.stale ? ok(`claude plan usage from ${cl.source}: 5h ${cl.fiveHour}% ·
 heading("wiki", config.wikiDir ? home(config.wikiDir) : "not found");
 const wiki = await readWiki(config.wikiDir, projects, { root: config.projectsDir }).catch((e) => (fail(`wiki: ${home(e.message)}`), null));
 if (wiki) wiki.pages.length ? ok(`${wiki.pages.length} pages, ${wiki.log.length} log entries, ${wiki.inbox.length} unfiled`) : warn("wiki folder has no pages");
-else if (!config.wikiDir) warn("Agent Wiki folder not found (optional)");
+else if (!config.wikiDir) warn("Xenolith folder not found (optional)");
 
 // An index of its own, made afresh: XenoNet's has its server for a writer,
 // and a second would trip over it. TranscriptSearch reads how far a file

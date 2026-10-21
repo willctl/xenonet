@@ -24,10 +24,11 @@
 //! apart from the rest of the line, so their `Broken` stands in their place
 //! and the line's events go on: the refusal and a message's usage.
 
-use crate::lines::{claude_kind_of, codex_kind_of, is_codex_prompt, opt_prop, prop, ClaudeLine, CodexLine, Js, TypeError, Usage};
+use crate::lines::{claude_kind_of, codex_kind_of, grok_kind_of, is_codex_prompt, opt_prop, prop, ClaudeLine, CodexLine, GrokLine, Js, TypeError, Usage};
 use crate::refusals::detect::{claude_refusal, codex_refusal};
 use crate::wiki::to_str;
 use serde_json::Value;
+use std::cell::Cell;
 use std::rc::Rc;
 use xenonet_base::text::{join, js_number, js_trim, js_trim_start, truthy, type_of};
 use xenonet_base::usage::{Figure, Speed, TokenUsage};
@@ -216,12 +217,25 @@ pub struct LineEvent<'a> {
 /// What a reader keeps for a file: whose it is, and for Codex whether its
 /// prompts are its completed user messages (`items`), and whether to read
 /// every completed user message (`follow`), for a reader finding that out
-/// as the lines come.
+/// as the lines come; for Grok Build, what the line before was a chunk of
+/// (`run`), which the mapper keeps as the lines come.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LineFile {
     pub agent: Value,
     pub items: bool,
     pub follow: bool,
+    pub run: Cell<Run>,
+}
+
+/// What a Grok Build line was a chunk of: a run of chunks of one kind is
+/// one message.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Run {
+    #[default]
+    None,
+    User,
+    Assistant,
+    Thought,
 }
 
 impl LineFile {
@@ -634,6 +648,88 @@ pub fn codex_item<'a>(it: &'a Value, t: f64, file: &LineFile) -> Vec<LineEvent<'
     out.events
 }
 
+// ---------- Grok Build ----------
+
+/// Whether an app's lines say when a turn ends (events.js's mapper's
+/// turnEnds): Grok Build's don't, and its hooks do.
+pub fn lines_end_turns(app: &str) -> bool {
+    app != "grok"
+}
+
+static TRUE: Value = Value::Bool(true);
+static FALSE: Value = Value::Bool(false);
+static NULL: Value = Value::Null;
+
+/// A Grok Build session's line, as events (events.js's grok): Claude Code's
+/// shapes, with its origins (user for what you said and a tool's result,
+/// assistant for what the agent said and its tool calls), so the readers
+/// read them as they read Claude Code's. A run of chunks of the same kind
+/// is one message, which its first chunk speaks for: the chunks after it
+/// make no events (`file.run`). Its lines don't say when a turn ends, nor
+/// what a call cost.
+pub fn grok<'a>(o: &'a GrokLine, file: &LineFile) -> Vec<LineEvent<'a>> {
+    let mut out = Out { t: f64::NAN, agent: file.agent.clone(), origin: Rc::from("undefined"), events: Vec::new() };
+    let (t, kind, own) = match (o.ts(), o.kind(), o.own()) {
+        (Ok(t), Ok(kind), Ok(own)) => (t, kind, own),
+        (Err(why), _, _) | (_, Err(why), _) | (_, _, Err(why)) => {
+            out.broken(Broken::at(Field::Line, why));
+            return out.events;
+        }
+    };
+    out.t = t;
+    out.origin = Rc::from(grok_kind_of(Some(&o.raw)));
+    let kind = kind.and_then(Value::as_str);
+    let run = match kind {
+        Some("user_message_chunk") => Run::User,
+        Some("agent_message_chunk") => Run::Assistant,
+        Some("agent_thought_chunk") => Run::Thought,
+        _ => Run::None,
+    };
+    let more = run != Run::None && run == file.run.get();
+    file.run.set(run);
+    if more || own {
+        return out.events;
+    }
+    let u = Some(o.update());
+    let done = |status: Js<'_>| is_str(status, "completed") || is_str(status, "failed");
+    let call = || Kind::Call(Box::new(Call { message_id: Some(&NULL), model: Some(&NULL), effort: Some(&NULL), usage: None, total: None, last: None, window: None }));
+    match kind {
+        Some("user_message_chunk") => {
+            out.origin = Rc::from("user");
+            let meta = if o.not_asked() { &TRUE } else { &FALSE };
+            let claude = ClaudePrompt { command: None, meta: Some(meta), sidechain: Some(&FALSE), compact_summary: Some(&FALSE), interruption: false };
+            out.push(Kind::Prompt(Prompt { text: o.text(), parts: Some(o.text_value()), claude: Some(claude) }));
+        }
+        Some("agent_message_chunk") => {
+            out.origin = Rc::from("assistant");
+            out.push(call());
+            out.push(Kind::Said { parts: Some(o.blocks()), sidechain: Some(&FALSE) });
+        }
+        Some("tool_call") => {
+            out.origin = Rc::from("assistant");
+            let b = o.blocks().get(0);
+            out.push(call());
+            out.push(Kind::Said { parts: Some(o.blocks()), sidechain: Some(&FALSE) });
+            let id = opt_prop(b, "id");
+            out.push(Kind::Tool { id, name: opt_prop(b, "name"), input: opt_prop(b, "input"), call: None });
+            let status = opt_prop(u, "status");
+            if done(status) {
+                out.push(Kind::Result { id, error: Some(is_str(status, "failed")), call: None });
+            }
+        }
+        Some("tool_call_update") => {
+            let status = opt_prop(u, "status");
+            if done(status) {
+                out.origin = Rc::from("user");
+                out.push(Kind::Result { id: opt_prop(u, "toolCallId"), error: Some(is_str(status, "failed")), call: None });
+            }
+        }
+        Some("usage_update") => out.push(Kind::Context { used: opt_prop(u, "used"), window: opt_prop(u, "size") }),
+        _ => {}
+    }
+    out.events
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -673,6 +769,51 @@ mod tests {
         assert_eq!(kinds(&claude(&o, &f)), ["Call", "Said", "broken:blocks"]);
         let o = ClaudeLine { raw: Value::Null };
         assert_eq!(kinds(&claude(&o, &f)), ["broken:line"]);
+    }
+
+    #[test]
+    fn grok_lines_as_events() {
+        let up = |update: Value| GrokLine::new(json!({ "timestamp": 1791201600, "method": "session/update", "params": { "update": update } }));
+        let text = |kind: &str, t: &str| up(json!({ "sessionUpdate": kind, "content": { "type": "text", "text": t } }));
+        let lines = [
+            text("user_message_chunk", "Add refunds "),
+            text("user_message_chunk", "to the API."),
+            text("agent_thought_chunk", "Hm."),
+            text("agent_message_chunk", "On it."),
+            text("agent_message_chunk", " Testing."),
+            up(json!({ "sessionUpdate": "tool_call", "toolCallId": "c1", "kind": "execute", "status": "in_progress", "rawInput": { "command": "npm test" } })),
+            up(json!({ "sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": "failed" })),
+            up(json!({ "sessionUpdate": "tool_call", "toolCallId": "c2", "kind": "read", "status": "completed" })),
+            up(json!({ "sessionUpdate": "usage_update", "used": 10, "size": 20 })),
+            GrokLine::new(
+                json!({ "method": "_x.ai/session/update", "params": { "update": { "sessionUpdate": "agent_message_chunk", "content": { "type": "text", "text": "x" } } } }),
+            ),
+            GrokLine::new(Value::Null),
+        ];
+        let file = LineFile::default();
+        let evs: Vec<Vec<LineEvent<'_>>> = lines.iter().map(|o| grok(o, &file)).collect();
+        assert_eq!(
+            evs.iter().map(|e| kinds(e)).collect::<Vec<_>>(),
+            [
+                vec!["Prompt"],
+                vec![],
+                vec![],
+                vec!["Call", "Said"],
+                vec![],
+                vec!["Call", "Said", "Tool"],
+                vec!["Result"],
+                vec!["Call", "Said", "Tool", "Result"],
+                vec!["Context"],
+                vec![],
+                vec!["broken:line"],
+            ]
+            .map(|v| v.into_iter().map(String::from).collect::<Vec<_>>())
+        );
+        let Kind::Prompt(p) = &evs[0][0].kind else { panic!("a prompt") };
+        assert_eq!((p.text.as_str(), &*evs[0][0].origin, evs[0][0].t), ("Add refunds ", "user", 1791201600000.0));
+        assert!(matches!(&evs[6][0].kind, Kind::Result { error: Some(true), .. }) && &*evs[6][0].origin == "user");
+        assert!(matches!(&evs[8][0].kind, Kind::Context { used: Some(u), .. } if **u == json!(10)) && &*evs[8][0].origin == "usage_update");
+        assert!(!lines_end_turns("grok") && lines_end_turns("claude"));
     }
 
     #[test]

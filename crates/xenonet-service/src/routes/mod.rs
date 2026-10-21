@@ -335,8 +335,10 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             return Ok(r);
         }
         let body = req.json(4096).await?;
-        // Codex, unless you ask for Claude Code.
-        let app = xenonet_base::apps::tailed_app(body.get("app").and_then(Value::as_str).unwrap_or_default(), "codex");
+        // Codex, unless you ask for Claude Code; another app is refused.
+        let Some(app) = xenonet_base::apps::asked_or(body.get("app"), Some("codex")) else {
+            return Ok(Reply::error(400, xenonet_base::apps::app_refusal_among("app", body.get("app").unwrap_or(&Value::Null), &xenonet_base::apps::ASKED)));
+        };
         let model = body.get("model").and_then(Value::as_str).filter(|s| model_ok(s)).map(str::to_string);
         let b = cores.diagnostics.bundle().await?;
         let dir = cores.diagnostics.write_look(&b)?;
@@ -420,8 +422,13 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     }
     if route == "/api/handoff" {
         if m == "GET" {
-            // Claude Code, unless you ask for Codex.
-            let target = xenonet_base::apps::tailed_app(req.param("target").unwrap_or_default(), "claude");
+            // Claude Code, unless you ask for Codex; another app is refused.
+            let Some(target) = xenonet_base::apps::asked_or_text(req.param("target"), Some("claude")) else {
+                return Ok(Reply::error(
+                    400,
+                    xenonet_base::apps::app_refusal_among("target", &Value::String(req.param("target").unwrap_or_default().to_string()), &xenonet_base::apps::ASKED),
+                ));
+            };
             let node = req.param("nodeId").map(str::to_string);
             return Ok(match cores.state.handoff(node.as_deref(), target).await {
                 Ok(v) => {
@@ -589,7 +596,9 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             return Ok(match cores.state.read_transcript(&node, cursor.as_deref(), limit).await {
                 Ok(page) => Reply::json(200, page),
                 Err(e) if e.is_pending() => pending_reply(&e),
-                Err(e) => Reply::error(502, e.message),
+                // A session of an app XenoNet doesn't read the transcripts
+                // of is a 400.
+                Err(e) => Reply::error(e.status.unwrap_or(502), e.message),
             });
         }
     }
@@ -663,6 +672,52 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             // What the engine wants the agent to hear.
             let event = body.get("hook_event_name").and_then(Value::as_str).map(str::to_string);
             if let Ok(Some(out)) = cores.engine.hook("claude", event.as_deref(), &body).await {
+                if truthy(Some(&out)) {
+                    return Ok(Reply::json(200, out));
+                }
+            }
+        }
+        return Ok(Reply::empty(204));
+    }
+
+    // Grok Build's hooks (xenonet hook grok): its events in Claude Code's
+    // format, with its own names for the session and the tool (sessionId,
+    // toolName, toolInput, stopHookActive), read as Claude Code's. They
+    // tell the tailer when a turn ends, which its lines don't.
+    if m == "POST" && route == "/api/hook/grok" {
+        let raw = req.json_body().await.unwrap_or_else(|_| json!({}));
+        let mut body = match &raw {
+            Value::Object(o) => o.clone(),
+            _ => serde_json::Map::new(),
+        };
+        // Grok's keys are camelCase. An event inside a subagent's own run
+        // names its subagentType, which the engine reads as a subagent's
+        // agent_id: it hears edit warnings, never its session's messages.
+        for (ours, theirs) in
+            [("session_id", "sessionId"), ("tool_name", "toolName"), ("tool_input", "toolInput"), ("stop_hook_active", "stopHookActive"), ("agent_id", "subagentType")]
+        {
+            if !body.contains_key(ours) {
+                if let Some(v) = raw.get(theirs) {
+                    body.insert(ours.into(), v.clone());
+                }
+            }
+        }
+        let body = Value::Object(body);
+        if let Some(sid) = body.get("session_id").and_then(Value::as_str).filter(|s| is_uuid_like(s)) {
+            let id = format!("grok:{sid}");
+            let verdict = cores.verify.check(req.peer, &id, true).await;
+            if !ok(&verdict) {
+                return Ok(Reply::send(403, &json!({ "error": verdict.get("reason").cloned().unwrap_or(Value::Null) }), &[]));
+            }
+            cores.state.note_hook(&id, &body)?;
+            if body.get("hook_event_name").and_then(Value::as_str) == Some("SessionStart") {
+                let c = ctx.clone();
+                tokio::spawn(async move {
+                    let _ = c.cores.state.refresh().await;
+                });
+            }
+            let event = body.get("hook_event_name").and_then(Value::as_str).map(str::to_string);
+            if let Ok(Some(out)) = cores.engine.hook("grok", event.as_deref(), &body).await {
                 if truthy(Some(&out)) {
                     return Ok(Reply::json(200, out));
                 }

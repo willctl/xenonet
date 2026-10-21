@@ -97,6 +97,9 @@ export function createDriver(app) {
       selection: selected ? brief(nodeOf(selected)) : null,
       gathered: scene.gathering(),
       identities: { filter: app.identities?.selected ?? [], masked: !!app.identities?.masked },
+      // The toggles under Filters: each app's sessions, archived ones, and
+      // the folders outside the projects folder.
+      filters: app.hud?.filters ? { ...app.hud.filters } : null,
       overlays: { palette: palette.isOpen, modal: modals.isOpen, needsYou: !!app.needsYou?.isOpen, preview: preview.isOpen, rename: !!app.hud?.renaming, terminal: !!app.terminal()?.isOpen, wallpaper: app.wallpaper(), replay: replay.active, film: app.film && app.film.state !== "idle" ? app.film.state : false, export: !!app.exportPanel?.isOpen, switcher: !!app.themes?.switcher.isOpen, gallery: !!app.themes?.gallery.isOpen },
       alerts: alerts.items.map(alertBrief),
       counts: {
@@ -104,6 +107,8 @@ export function createDriver(app) {
         drawn: scene.nodes().length,
         projects: count(["project", "native", "zone"]),
         sessions: count(["session"]),
+        // Sessions by app, on the map and drawn now, through the filters.
+        apps: Object.fromEntries(["claude", "codex", "grok"].map((a) => [a, { sessions: graph?.nodes.filter((n) => n.kind === "session" && n.app === a).length ?? 0, drawn: scene.nodes().filter((n) => n.kind === "session" && n.app === a && scene.shown(n.id)).length }])),
         working: live?.sessions.filter((s) => s.status !== "idle").length ?? 0,
         actors: scene.actors().length,
         beams: scene.actorLayer.beams().length,
@@ -118,6 +123,9 @@ export function createDriver(app) {
       // it keeps (null for every frame the display offers) and the frames
       // drawn so far.
       render: renderState(),
+      // How the console draws its panels: plainPanels, solid without the
+      // glass blur behind them (the palette's plain panels).
+      look: app.look?.get() ?? null,
       view: scene.view(),
       viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
       // The narrow screen's sheet of panels: which is open, if the screen is narrow.
@@ -539,6 +547,9 @@ export function createDriver(app) {
     filterIdentities: (keys = [], opts) => act(() => app.identities.setSelected(Array.isArray(keys) ? keys : [keys]), opts),
     // Hides identities ("GitHub A", "Claude B"…) or shows them.
     maskIdentities: (on = true, opts) => act(() => app.identities.setMasked(!!on), opts),
+    // The toggles under Filters, on or off by name ({ grok: false }), as a
+    // click on each would set them.
+    filters: (set = {}, opts) => act(() => Object.entries(set ?? {}).forEach(([name, on]) => app.hud.setFilter(name, on)), opts),
 
     // The projects folder XenoNet reads (core/workspace.js): its path, where
     // that comes from (source: env for XENONET_PROJECTS_DIR, chosen or
@@ -577,6 +588,13 @@ export function createDriver(app) {
       return { ...renderState(), drawn, forcedDrawn: now.forced - before.forced, rates: [...rates].map((r) => (Number.isFinite(r) ? r : null)), perSecond: Math.round((drawn / ((performance.now() - t0) / 1000)) * 10) / 10 };
     },
 
+    // How the console draws its panels, as state().look says; and plain
+    // panels on or off (solid, without the glass blur behind them, a large
+    // share of a visible frame's GPU time), as the palette's switch does,
+    // kept for this window. Returns the state once the view has settled.
+    look: () => app.look.get(),
+    plainPanels: (on = true, opts) => act(() => app.look.plainPanels(yes(on)), opts),
+
     // Holds every ambient animation still, CSS included, for screenshots.
     async still(on = true) {
       scene.setStill(on);
@@ -594,7 +612,7 @@ export function createDriver(app) {
     },
     async mcp(id, opts) {
       const node = nodeOf(known(id));
-      if (!node || !["resource", "wiki"].includes(node.kind)) throw new Error("choose an MCP shared system or Agent Wiki");
+      if (!node || !["resource", "wiki"].includes(node.kind)) throw new Error("choose an MCP shared system or Xenolith");
       return act(async () => { await app.select(node.id); await app.hud.mcp.open(node); }, opts);
     },
     mcpTab: (tab, opts) => act(() => app.hud.mcp.tab(tab), opts),

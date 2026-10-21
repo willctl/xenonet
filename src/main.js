@@ -31,7 +31,7 @@ import { filmPlaySeconds } from "../core/frames.js";
 import { createIdentities } from "./identities.js";
 import { keyLabel } from "./platform.js";
 import { WINDOWS, loadScope, saveScope, scopeGraph, scopeCounts } from "./scope.js";
-import { syncTheme, themeFonts } from "./theme.js";
+import { syncTheme, themeFonts, APP_LABEL } from "./theme.js";
 import { createThemes } from "./themes-ui.js";
 import { createMcpUi } from "./mcp-ui.js";
 import { createEnvironments } from "./environments-ui.js";
@@ -194,6 +194,13 @@ function showGather(g) {
 async function openInApp(nodeOrId) {
   const node = typeof nodeOrId === "string" ? scene.getNode(nodeOrId) : nodeOrId;
   if (!node) return { ok: false, error: "it isn't on the map" };
+  // A session no desktop app opens (Grok Build's): XenoNet shows it itself.
+  if (node.kind === "session" && !node.host && !node.actions?.some((a) => a.id === "open-app")) {
+    select(node);
+    const said = `${APP_LABEL[node.app] ?? "This app"} has no desktop app to open it in`;
+    hud.toast(said);
+    return { ok: false, error: said };
+  }
   const res = await post("/api/open", { nodeId: node.id, action: "open-app" });
   if (res.ok) you.did("opened", node.id);
   sfx(res.ok ? "success" : "error");
@@ -587,7 +594,7 @@ const commandList = [
   { id: "updates", label: "Check for XenoNet updates", keywords: "version release download install restart", run: () => updatesPanel.open() },
   { id: "background", label: "Background service: start XenoNet's service at login", keywords: "settings login startup boot always on keep running daemon launchd systemd launch agent", run: () => backgroundPanel.open() },
   { id: "doctor", label: "Check XenoNet's setup", keywords: "doctor health sign in login auth permissions problems diagnose", run: () => doctorPanel.open() },
-  { id: "connect-agents", label: "Connect Claude Code and Codex to XenoNet", keywords: "si super intelligence agents claude code codex mcp hooks engine coordinate messages work together", run: () => connectPanel.open() },
+  { id: "connect-agents", label: "Connect your agents to XenoNet", keywords: "si super intelligence agents claude code codex grok build mcp hooks engine coordinate messages work together", run: () => connectPanel.open() },
   // The kill switch for messages between sessions and actors, and every wake (core/delivery/policy.js).
   { id: "pause-messages", label: "Pause or resume messages between sessions", keywords: "si agents stop kill switch halt wake live delivery actors abuse", run: () => toggleDelivery() },
   { id: "actors", label: "Actors", keywords: "si agents hermes grok bot muse programs allow deny requests register tokens observers you show me on the map add remove", run: () => openActors() },
@@ -648,6 +655,7 @@ const commandList = [
     run: () => setScope({ window: w.id }),
   })),
   { id: "focus-lighting", label: "Turn focus lighting on or off", keywords: "glare glow bloom dim zoom distance", run: () => setFocusLighting(!focusLighting) },
+  { id: "plain-panels", label: "Turn plain panels on or off", keywords: "glass blur transparent solid opaque panels gpu power battery energy performance laptop", run: () => setPlainPanels(!plainPanels) },
   // How often the map draws (render-budget.js), kept for this window.
   ...[
     ["balanced", "Frame rate: balanced (the default)"],
@@ -745,7 +753,9 @@ function identityCommands(n) {
   };
   const current = n.kind === "session" ? n.ranAs : n.identities?.find((l) => l.role === "owner");
   const github = identities.list.some((i) => i.kind === "github");
-  const kinds = n.kind === "project" ? [github ? "github" : "git"] : n.app === "codex" ? ["chatgpt", "openai"] : ["claude"];
+  // Grok Build records no account on its sessions, and XenoNet doesn't read
+  // its sign-in.
+  const kinds = n.kind === "project" ? [github ? "github" : "git"] : n.app === "codex" ? ["chatgpt", "openai"] : n.app === "grok" ? [] : ["claude"];
   for (const i of identities.list.filter((i) => kinds.includes(i.kind) && i.id !== current?.id)) {
     const who = identities.label(i.id);
     out.push({ id: `identity-pin:${i.id}`, label: n.kind === "session" ? `${what} ran as ${who}` : `${what} belongs to ${who}`, keywords: "identity account pin", run: pin(i.id, `${what} is pinned to ${who}`) });
@@ -784,7 +794,7 @@ const palette = createPalette({
   actions: (n) => {
     const acts = [{ key: "Enter", label: "go to", mod: null, run: () => select(n) }];
     if (n.kind === "session") {
-      if (!n.host) acts.push({ key: "Mod+O", label: "open in app", mod: "ctrl-o", run: () => openInApp(n) });
+      if (!n.host && n.actions?.some((a) => a.id === "open-app")) acts.push({ key: "Mod+O", label: "open in app", mod: "ctrl-o", run: () => openInApp(n) });
       acts.push({ key: "Mod+P", label: "preview", mod: "ctrl-p", run: () => (select(n), preview.open(n)) });
       acts.push({ key: "Mod+I", label: "stats", mod: "ctrl-i", run: () => (select(n), openStats(n)) });
       if (!n.host) acts.push({ key: "Mod+H", label: "hand off", mod: "ctrl-h", run: () => modals.handoff(n) });
@@ -867,6 +877,28 @@ function setFocusLighting(on) {
     localStorage.setItem("xenonet.focusLighting", on ? "on" : "off");
   } catch {}
   hud.toast(`Focus lighting ${on ? "on" : "off"}`);
+}
+
+// ---------- plain panels (see style.css), remembered ----------
+//
+// The panels' glass blur (their backdrop-filter) is a large share of a
+// visible frame's GPU time. Plain panels draws them solid, without it. Off
+// unless you turn it on, and kept for this window, as the frame rate is.
+
+const PLAIN_KEY = "xenonet.plainPanels";
+let plainPanels = false;
+try {
+  plainPanels = localStorage.getItem(PLAIN_KEY) === "on";
+} catch {}
+document.body.classList.toggle("plain-panels", plainPanels);
+function setPlainPanels(on, { quiet = false } = {}) {
+  plainPanels = !!on;
+  document.body.classList.toggle("plain-panels", plainPanels);
+  scene.wake();
+  try {
+    localStorage.setItem(PLAIN_KEY, plainPanels ? "on" : "off");
+  } catch {}
+  if (!quiet) hud.toast(plainPanels ? "Panels are drawn solid, without the glass blur, which uses less GPU" : "Panels are drawn as glass again");
 }
 
 // ---------- session scope (see scope.js) ----------
@@ -1286,6 +1318,7 @@ if (import.meta.env.DEV || desktop) {
     live: () => lastLive,
     selectedId: () => selectedId,
     wallpaper: () => wallpaperOn,
+    look: { get: () => ({ plainPanels }), plainPanels: (on) => setPlainPanels(on, { quiet: true }) },
     terminal: () => terminal,
     errors: pageErrors,
   });

@@ -10,7 +10,8 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { CursorSessions, cursorEventsFile } from "../core/native/cursor.js";
+import { CursorSessions, cursorEventsFile, SOURCE } from "../core/native/cursor.js";
+import { reader } from "../core/vendor.js";
 import { observedSessions } from "../core/reported-runs.js";
 import { Engine } from "../core/engine/engine.js";
 import { EngineStore } from "../core/engine/store.js";
@@ -64,6 +65,27 @@ test("each Cursor conversation is a session, cursor:<id>, in its workspace, with
     assert.equal(c.live(s.id).endedAt, null);
     hook(w.file, { ...common, hook_event_name: "sessionEnd", session_id: CID, reason: "completed" });
     assert.ok(c.read(Date.now()).live(s.id).endedAt != null);
+  } finally {
+    w.done();
+  }
+});
+
+test("a vendor check that throws is the reader's problem, and the file is read again once it changes", (t) => {
+  const w = setup();
+  try {
+    hook(w.file, { ...common, hook_event_name: "sessionStart", session_id: CID });
+    const check = t.mock.method(reader(SOURCE), "check", () => {
+      throw new Error("a broken schema");
+    });
+    const c = new CursorSessions({ file: w.file }).read(Date.now());
+    assert.equal(c.health().state, "degraded");
+    assert.deepEqual([c.status().state, c.sessions()], ["ok", []]);
+    check.mock.restore();
+    c.read(Date.now());
+    assert.deepEqual(c.sessions(), [], "the same file isn't parsed again");
+    hook(w.file, { ...common, hook_event_name: "afterFileEdit", file_path: "/w/atlas/notes.txt" });
+    assert.deepEqual(c.read(Date.now()).sessions().map((s) => s.id), [`cursor:${CID}`]);
+    assert.ok(!["degraded", "failed"].includes(c.health().state), c.health().state);
   } finally {
     w.done();
   }

@@ -1,5 +1,5 @@
 // core/engine/connect.js in Rust (crates/xenonet-engine/src/connect.rs):
-// what XenoNet adds to Claude Code's and Codex's own settings, shown first
+// what XenoNet adds to Claude Code's, Codex's and Grok Build's own settings, shown first
 // (preview) and taken out again (remove). Which entries are XenoNet's, the
 // hooks and servers it adds and the preview are Rust's; the files, the
 // CLIs and core/instances.js's table are the twin's. A registry or config
@@ -13,7 +13,6 @@ import { drive, calls } from "../../drive.js";
 import { onPath } from "../paths.js";
 import { xenonetBin } from "../components/runtime.js";
 import { INSTANCES } from "../../../../../core/instances.js";
-import { appsWith } from "../../../../../core/apps.js";
 import * as js from "../../../../../core/engine/connect.js";
 
 const instances = () => Object.entries(INSTANCES).map(([id, v]) => ({ id, name: v.name, port: v.port }));
@@ -38,6 +37,7 @@ function twin({ port, root, demo = false, home = os.homedir(), env = process.env
     home: String(home),
     claudeConfigDir: env.CLAUDE_CONFIG_DIR ?? null,
     codexHome: env.CODEX_HOME ?? null,
+    grokHome: env.GROK_HOME ?? null,
     consoleMcp,
     platform: String(platform),
     instances: instances(),
@@ -47,7 +47,8 @@ function twin({ port, root, demo = false, home = os.homedir(), env = process.env
   const go = (machine) => drive(machine, calls(deps));
   return {
     preview: () => go(core.preview()),
-    apply: (apps = appsWith("connect").map((a) => a.id)) => go(core.apply(apps)),
+    // Every app connect goes through that's here, unless it's given which.
+    apply: (apps = null) => go(core.apply(apps)),
     remove: () => go(core.remove()),
     hookConnected: (event) => go(core.hookConnected(event)),
   };

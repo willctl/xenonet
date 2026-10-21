@@ -33,7 +33,7 @@ export const COMMANDS = {
   uninstall: { about: "Take the xenonet command off your PATH" },
   completion: { about: "Tab completion for zsh or bash", args: "<zsh|bash>" },
   mcp: { about: "Run the xenonet MCP server (Claude Code and Codex start it)", hidden: true },
-  hook: { about: "Pass a Claude Code or Codex hook to XenoNet (their settings run it)", args: "<claude|codex>", hidden: true },
+  hook: { about: "Pass a Claude Code, Codex or Grok Build hook to XenoNet (their settings run it)", args: "<claude|codex|grok>", hidden: true },
   relay: { about: "Stream this XenoNet's map to a console on another machine (consoles run it over SSH)", hidden: true },
 };
 

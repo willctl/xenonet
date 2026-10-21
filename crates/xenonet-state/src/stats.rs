@@ -26,7 +26,7 @@ use xenonet_base::text::{js_number, js_trim, truthy};
 use xenonet_base::usage::{Figure, Speed, TokenUsage};
 use xenonet_base::{fs as xfs, json, jsstr, paths, pricing};
 use xenonet_sources::line_events::{self as le, command_of, usage_of, Broken, Command, End, Field, LineEvent, LineFile};
-use xenonet_sources::lines::{has_user_messages, opt_prop, prop, ClaudeLine, CodexLine, Js, TypeError};
+use xenonet_sources::lines::{has_user_messages, opt_prop, prop, ClaudeLine, CodexLine, GrokLine, Js, TypeError};
 use xenonet_sources::live::{categorize, clip, mcp_server_of};
 use xenonet_sources::wiki::{to_str, to_str_or_empty, Out};
 
@@ -428,10 +428,13 @@ struct Rollout {
 
 /// Calls, prompts, turn ends and tool calls, in the order they happened,
 /// from a session's files (Claude Code's main file and its subagents', a
-/// Codex rollout), as stats counts each line's events (line_events.rs).
-/// `codex` picks the app's mapper: an app that isn't Codex reads as
-/// Claude Code, whose events are put in time order.
-pub fn session_events(codex: bool, files: Vec<File>, ids: &mut EventIds) -> Result<Vec<Event>, TypeError> {
+/// Codex rollout, a Grok Build session's updates), as stats counts each
+/// line's events (line_events.rs). `app` picks the app's mapper: an app
+/// that isn't tailed reads as Claude Code, whose events are put in time
+/// order.
+pub fn session_events(app: &str, files: Vec<File>, ids: &mut EventIds) -> Result<Vec<Event>, TypeError> {
+    let app = xenonet_base::apps::tailed_app(app, "claude");
+    let codex = app == "codex";
     let ids = &mut ids.0;
     let mut events = Vec::new();
     let mut seen: HashSet<Key> = HashSet::new();
@@ -447,6 +450,12 @@ pub fn session_events(codex: bool, files: Vec<File>, ids: &mut EventIds) -> Resu
             for o in &lines {
                 line_events(&le::codex(o, &file), &agent, &mut seen, &mut said, ids, &mut events)?;
             }
+        } else if app == "grok" {
+            let file = LineFile::new(f.agent);
+            for raw in f.lines {
+                let o = GrokLine::new(raw);
+                line_events(&le::grok(&o, &file), &agent, &mut seen, &mut said, ids, &mut events)?;
+            }
         } else {
             let file = LineFile::new(f.agent);
             for raw in f.lines {
@@ -455,7 +464,7 @@ pub fn session_events(codex: bool, files: Vec<File>, ids: &mut EventIds) -> Resu
             }
         }
     }
-    if !codex {
+    if app == "claude" {
         xenonet_base::sort::sort_by(&mut events, |a, b| order(a.t - b.t));
     }
     Ok(events)
@@ -1024,8 +1033,9 @@ pub struct Transcripts {
 
 impl Transcripts {
     /// A session's files (its own, then its subagents'), each with the
-    /// subagent it's from, as of `now`.
-    pub fn files(&mut self, session_id: &str, claude_root: Option<&str>, codex_roots: &[String], now: f64) -> Vec<(String, Option<String>)> {
+    /// subagent it's from, as of `now`. A Grok Build session's updates are
+    /// in its own folder, under the one for its working directory.
+    pub fn files(&mut self, session_id: &str, claude_root: Option<&str>, codex_roots: &[String], grok_root: Option<&str>, now: f64) -> Vec<(String, Option<String>)> {
         // sessionId.slice(0, i) and .slice(i + 1), i its first colon (or -1).
         let colon = session_id.find(':').map_or(-1, |i| jsstr::len(&session_id[..i]) as i64);
         let app = jsstr::slice(session_id, 0, Some(colon));
@@ -1060,6 +1070,16 @@ impl Transcripts {
                 self.list(codex_roots, now);
             }
             return self.rollouts.iter().find(|(k, _)| *k == raw).map(|(_, f)| vec![(f.clone(), None)]).unwrap_or_default();
+        }
+        if app == "grok" {
+            let root = grok_root.unwrap_or("");
+            for (name, is_dir) in dir_names(root).unwrap_or_default() {
+                let file = paths::join_all(&[root, &name, &raw, "updates.jsonl"]);
+                if is_dir && Path::new(&file).exists() {
+                    return vec![(file, None)];
+                }
+            }
+            return Vec::new();
         }
         Vec::new()
     }
@@ -1120,8 +1140,11 @@ impl Kept {
 pub fn session_stats(session_id: &str, files: Vec<File>) -> Result<Out, TypeError> {
     let app = session_id.split(':').next().unwrap_or_default();
     let mut ids = EventIds::default();
-    // Any app but Codex is read as Claude Code.
-    let events = session_events(xenonet_base::apps::tailed_app(app, "claude") == "codex", files, &mut ids)?;
+    // An app XenoNet doesn't tail is refused, not read as Claude Code.
+    let Some(tailed) = xenonet_base::apps::tailed_or_text(Some(app), None) else {
+        return Err(TypeError(xenonet_base::apps::untailed(app)));
+    };
+    let events = session_events(tailed, files, &mut ids)?;
     let Out::Obj(mut fields) = summarize(&events, Some(&Value::String(app.to_string())))? else { unreachable!() };
     fields.insert(0, ("id".into(), Out::Str(session_id.to_string())));
     Ok(Out::Obj(fields))
@@ -1135,6 +1158,12 @@ mod tests {
     fn field<'a>(o: &'a Out, k: &str) -> &'a Out {
         let Out::Obj(fs) = o else { panic!("not an object") };
         &fs.iter().find(|(x, _)| x == k).unwrap_or_else(|| panic!("no {k}")).1
+    }
+
+    #[test]
+    fn a_session_of_an_app_xenonet_doesnt_tail_is_refused() {
+        assert_eq!(session_stats("gemini-cli:x0000001", Vec::new()).map(|_| ()), Err(TypeError("XenoNet doesn't read Gemini CLI's transcripts".into())));
+        assert!(session_stats("claude:x0000001", Vec::new()).is_ok());
     }
 
     #[test]

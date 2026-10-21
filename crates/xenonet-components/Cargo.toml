@@ -18,5 +18,10 @@ sha2.workspace = true
 xenonet-app.workspace = true
 xenonet-base.workspace = true
 
+# The account's uid, for the launch agent's domain (supervisor.rs), which
+# the doctor asks for as well as the xenonet command.
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [lints]
 workspace = true
