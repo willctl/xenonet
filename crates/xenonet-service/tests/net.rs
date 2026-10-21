@@ -378,6 +378,35 @@ async fn a_time_comes_only_signed_by_the_gateway_and_frames_only_within_the_week
     let (req, _) = laptop.signed_request("POST", "/net/v1/frames", batch.into_bytes()).unwrap();
     let answer = a.svc.node().gateway().unwrap().handle(req).await.body_json();
     assert_eq!(answer["refused"][0]["code"], "too-big", "{answer}");
+    // The gateway remembers the ids of frames it keeps, not of presence.
+    let gw = a.svc.node().gateway().unwrap();
+    let send = |kind: &'static str| {
+        let d = xenonet_net::frame::Draft { network: &net.id, id: xenonet_net::codec::frame_id().unwrap(), kind, from: "laptop", to: "desk", at: laptop.gateway_now() as i64 };
+        let f = xenonet_net::frame::host_frame(&d, &key, &desk_keys, &json!({ "schema": format!("network/{kind}/v1") }), None).unwrap();
+        let batch = format!("{{\"frames\":[{}],\"ack\":null}}", f.line().trim_end());
+        (f.id.clone(), laptop.signed_request("POST", "/net/v1/frames", batch.into_bytes()).unwrap().0)
+    };
+    let (presence, req) = send("presence");
+    gw.handle(req).await;
+    let (message, req) = send("message");
+    gw.handle(req).await;
+    assert_eq!((gw.remembers(&presence), gw.remembers(&message)), (false, true));
+    // A host holds two down streams at most: a third ends the oldest.
+    let open = || async {
+        let (req, _) = laptop.signed_request("GET", &format!("/net/v1/link?epoch={}&after=0", gw.epoch()), Vec::new()).unwrap();
+        match gw.handle(req).await.body {
+            xenonet_net::gateway::NetBody::Stream(rx) => rx,
+            xenonet_net::gateway::NetBody::Full(_) => panic!("a stream"),
+        }
+    };
+    let mut first = open().await;
+    let _second = open().await;
+    let _third = open().await;
+    let ended = tokio::time::timeout(Duration::from_secs(5), async {
+        while first.recv().await.is_some() {}
+    })
+    .await;
+    assert!(ended.is_ok(), "the oldest stream ended");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

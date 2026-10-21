@@ -142,7 +142,13 @@ struct Live {
     notify: Arc<Notify>,
     streams: usize,
     polled: f64,
+    /// Its open streams, oldest first, each with what ends it.
+    open: std::collections::VecDeque<(u64, Arc<Notify>)>,
+    next: u64,
 }
+
+/// Down streams one host may hold open at once: a new one ends the oldest.
+const STREAMS_PER_HOST: usize = 2;
 
 #[derive(Clone, Copy)]
 struct Bucket {
@@ -285,6 +291,12 @@ impl Gateway {
 
     fn wake(&self, host: &str) {
         self.notifier(host).notify_waiters();
+    }
+
+    /// Whether the gateway remembers a frame's id, and so takes a repeat
+    /// of it as accepted without queueing it again.
+    pub fn remembers(&self, id: &str) -> bool {
+        self.store.locked().was_seen(id).unwrap_or(false)
     }
 
     /// Queue sizes, for the state and the doctor: (host, frames, bytes).
@@ -453,18 +465,28 @@ impl Gateway {
         for p in presences {
             let _ = tx.send(Bytes::from(format!("{p}\n")));
         }
-        let notify = {
+        let (notify, end, me_id) = {
             let mut live = self.live.locked();
             let l = live.entry(host.clone()).or_default();
             l.streams += 1;
-            l.notify.clone()
+            let end = Arc::new(Notify::new());
+            let id = l.next;
+            l.next += 1;
+            l.open.push_back((id, end.clone()));
+            // A host holds two streams at most: the oldest goes.
+            while l.open.len() > STREAMS_PER_HOST {
+                if let Some((_, old)) = l.open.pop_front() {
+                    old.notify_one();
+                }
+            }
+            (l.notify.clone(), end, id)
         };
         let me_gw = self.clone();
         let node = Arc::downgrade(n);
         tokio::spawn(async move {
             let mut last = after;
             let start = tokio::time::Instant::now();
-            let end = start + Duration::from_millis(timing.stream_ms);
+            let until = start + Duration::from_millis(timing.stream_ms);
             let ping_every = Duration::from_millis(timing.ping_ms);
             let mut next_ping = start + ping_every;
             loop {
@@ -502,13 +524,15 @@ impl Gateway {
                             break;
                         }
                     }
-                    () = tokio::time::sleep_until(end) => break,
+                    () = tokio::time::sleep_until(until) => break,
                     () = tx.closed() => break,
                     () = me_gw.stopped.notified() => break,
+                    () = end.notified() => break,
                 }
             }
             if let Some(l) = me_gw.live.locked().get_mut(&host) {
                 l.streams = l.streams.saturating_sub(1);
+                l.open.retain(|(id, _)| *id != me_id);
             }
         });
         let mut headers = ndjson();
@@ -581,7 +605,10 @@ impl Gateway {
                 refuse("bad-signature", "the frame's signature doesn't check");
                 continue;
             }
-            if self.store.locked().was_seen(&f.id)? {
+            // Only frames kept for a host that's away are remembered by
+            // id; presence, claims and relay frames say the latest, and a
+            // repeat of one does no harm, so they'd only fill the store.
+            if f.queued() && self.store.locked().was_seen(&f.id)? {
                 accepted.push(f.id.clone());
                 continue;
             }
@@ -603,7 +630,9 @@ impl Gateway {
             let line = plain.line();
             let line = line.trim_end();
             let store = self.store.locked();
-            store.seen(&f.id, now as i64)?;
+            if f.queued() {
+                store.seen(&f.id, now as i64)?;
+            }
             if f.kind == "presence" {
                 store.set_presence(&host, &f.to, line, now as i64)?;
             }
