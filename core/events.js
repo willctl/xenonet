@@ -334,8 +334,9 @@ export const codex = {
 // ---------- which app's ----------
 
 // The tailed apps' mappers. Until the app registry (core/apps.js) holds
-// them, an app is looked up here, with the fallback each reader had; `use`
-// adds one, for a test.
+// them, an app is looked up here, with a fallback for a reader that has
+// one; stats and search have none, and refuse an app without a mapper.
+// `use` adds one, for a test.
 const MAPPERS = new Map([
   ["claude", claude],
   ["codex", codex],
