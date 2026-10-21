@@ -54,7 +54,7 @@ const SEED_MS = 6 * 3600e3;
 // `actorBeams(id)` the nodes it beams into (see actors.js).
 // `onRename(id, title)` saves a session's new name and answers { ok, title,
 // error }; without it, sessions can't be renamed here.
-export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPreview, onStats, onReset, onHandoff, onTerminal, onAck, onOpenApp, onOpened = null, onRename = null, onMessageActor = null, identities = null, actorOf = () => null, actorBeams = () => [], sfx = () => {}, mcp = null }) {
+export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPreview, onStats, onReset, onHandoff, onTerminal, onAck, onOpenApp, onOpened = null, onRename = null, onMessageActor = null, onMessageSession = null, identities = null, actorOf = () => null, actorBeams = () => [], sfx = () => {}, mcp = null }) {
   const filters = { claude: true, codex: true, grok: true, archived: true, external: true };
   let data = null;
   let index = new Map();
@@ -531,7 +531,9 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     }
 
     const canTerminal = onTerminal && !node.host && (node.kind === "project" || node.kind === "zone" || node.kind === "wiki" || (isSession && node.cwd));
-    const actions = [...(node.actions ?? []), ...(canTerminal ? [{ id: "terminal", label: "›_ Open terminal here", client: true }] : [])]
+    // A session of this machine's takes a message from you, from here.
+    const canMessage = onMessageSession && isSession && !node.host;
+    const actions = [...(node.actions ?? []), ...(canMessage ? [{ id: "message", label: "✉ Message", client: true }] : []), ...(canTerminal ? [{ id: "terminal", label: "›_ Open terminal here", client: true }] : [])]
       .map((a, i) => `<button class="act ${i === 0 && isSession ? `primary ${h(node.app)}` : ""}" data-action="${h(a.id)}">${h(a.label)}</button>`)
       .join("");
 
@@ -583,6 +585,7 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     if (action === "stats") return onStats?.(node);
     if (action === "handoff") return onHandoff?.(node);
     if (action === "terminal") return onTerminal?.(node);
+    if (action === "message") return onMessageSession?.(node);
     try {
       const res = await fetch("/api/open", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ nodeId: node.id, action }) });
       const body = await res.json();

@@ -133,7 +133,13 @@ fn serve(args: &[String]) -> i32 {
         Box::new(|config, env| {
             let mut cores = xenonet_service::cores::Cores::pending(config.actors, config.assistant, config.hosts);
             xenonet_wire_map::wire(&mut cores, config, env);
-            xenonet_wire_engine::wire(&mut cores, config, env);
+            // The engine's world, which the network's link plugs into once
+            // the service has made it.
+            if let Some(world) = xenonet_wire_engine::wire(&mut cores, config, env) {
+                cores.on_net = Some(std::sync::Arc::new(move |svc: &xenonet_service::gateway::network::NetService| {
+                    svc.sinks().set(xenonet_wire_engine::network::plug(&world, svc.net()));
+                }));
+            }
             xenonet_wire_app::wire(&mut cores, config, env);
             // The terminal drawer's shells live in the service.
             cores.terminals = std::sync::Arc::new(xenonet_service::terminals::Shells::new());

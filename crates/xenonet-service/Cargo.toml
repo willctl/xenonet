@@ -27,6 +27,8 @@ hyper-util.workspace = true
 # has node-pty).
 portable-pty = "0.9"
 reqwest.workspace = true
+# A2A's task table, <state>/a2a.sqlite (a2a/store.rs).
+rusqlite.workspace = true
 rustls.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
@@ -36,11 +38,18 @@ xenonet-app.workspace = true
 xenonet-base.workspace = true
 # The engine's ids, selectors and envelopes, which the routes check with.
 xenonet-engine.workspace = true
+# One network across machines: the gateway's routes behind the front door,
+# the link, and /api/net.
+xenonet-net.workspace = true
 xenonet-schema.workspace = true
 
 [dev-dependencies]
 # Paused time, for the tunnel's waits between restarts.
 tokio = { workspace = true, features = ["test-util"] }
+# The binary's engine driver on every host of the network's end-to-end
+# test (tests/net_engine.rs), as `xenonet serve` plugs it in; it depends on
+# this crate, which Cargo allows for dev-dependencies.
+xenonet-wire-engine.workspace = true
 
 [lints]
 workspace = true

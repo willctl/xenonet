@@ -1024,6 +1024,12 @@
         "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
       ]
     },
+    "core/schema/network.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
     "core/schema/project.js": {
       "rust": "crates/xenonet-schema/src/check.rs",
       "differences": [
@@ -1265,6 +1271,7 @@
     }
   },
   "tests": [
+    "test/a2a.test.js",
     "test/actor-detail.test.js",
     "test/actor-gateway.test.js",
     "test/actor-limits.test.js",

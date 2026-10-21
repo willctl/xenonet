@@ -319,5 +319,9 @@ mod tests {
         assert!(h["message"].as_str().unwrap().contains("Change your \"XenoNet\" connector's host to xenonet-demo.ngrok-free.app and keep its key"));
         assert_eq!(new_address(None, "https://x.example/mcp")["steps"][0]["copy"], "url");
         assert_eq!(new_address(None, "https://x.example/mcp")["message"], Value::Null);
+        let a2a = new_address(Some("a2a"), "https://x.example/.well-known/agent-card.json");
+        assert_eq!(a2a["app"], "A2A agent");
+        assert_eq!(a2a["steps"][0]["copy"], "url");
+        assert_eq!(a2a["message"], Value::Null);
     }
 }

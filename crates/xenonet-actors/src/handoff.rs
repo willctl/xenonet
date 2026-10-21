@@ -16,9 +16,16 @@ pub struct Handoff {
 }
 
 /// For `product`, at `url` (whose host is `host`), with a new `token` or
-/// none (a new address alone).
+/// none (a new address alone). For an agent that speaks A2A (product
+/// "a2a"), `url` is XenoNet's Agent Card, and the token goes as A2A's bearer.
 pub fn handoff(product: Option<&str>, url: &str, host: &str, token: Option<&str>) -> Handoff {
     match (product, token) {
+        (Some("a2a"), Some(_)) => Handoff {
+            app: Some("A2A agent"),
+            steps: vec![("Give the agent XenoNet's Agent Card URL.", Some("url")), ("Have it send the token in the header Authorization: Bearer <token>.", Some("token"))],
+            message: None,
+        },
+        (Some("a2a"), None) => Handoff { app: Some("A2A agent"), steps: vec![("Give the agent XenoNet's new Agent Card URL. Its token still works.", Some("url"))], message: None },
         (Some("grok-bot"), Some(token)) => Handoff {
             app: Some("Grok Bot"),
             steps: vec![("Paste this into a new Grok Bot chat.", Some("message")), ("Once it's added, delete that chat: the token stays in it.", None), ("For answers within seconds, give XenoNet a way to wake it.", Some("wake"))],
@@ -53,4 +60,17 @@ pub fn wake_help(product: Option<&str>) -> Option<([&'static str; 2], &'static s
         ["Paste this into a Grok Bot chat to make the routine.", "Open the routine's settings and copy its Webhook URL and Webhook key below."],
         "Create a routine named \"XenoNet inbox\" that starts from a webhook. Its instruction: read your XenoNet inbox with your xenonet tools and answer anything that needs an answer. Tell me when it's made.",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_a2a_agent_gets_the_card_and_the_bearer() {
+        let h = handoff(Some("a2a"), "https://x.example/.well-known/agent-card.json", "x.example", Some("t"));
+        assert_eq!(h.app, Some("A2A agent"));
+        assert_eq!(h.steps.iter().map(|(_, copy)| *copy).collect::<Vec<_>>(), [Some("url"), Some("token")]);
+        assert_eq!(h.message, None, "the token never goes in a message to paste");
+    }
 }
