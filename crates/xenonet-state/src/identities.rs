@@ -13,7 +13,7 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::LazyLock;
-use xenonet_base::text::{js_number, js_string, js_trim, js_trim_start, truthy};
+use xenonet_base::text::{is_js_line_terminator, js_number, js_string, js_trim, js_trim_start, truthy, JS_DOT, JS_SPACE};
 use xenonet_base::{json as js_json, jsstr, paths};
 use xenonet_sources::lines::{opt_prop, prop, Js, TypeError};
 
@@ -23,19 +23,15 @@ pub const SIGNIN_STEP_MS: f64 = 10.0 * 60e3;
 pub const MAX_SPANS: usize = 50;
 pub const HEAD_BYTES: u64 = 64 * 1024;
 
-// JS's \s, `.` and \S, for the regex crate (whose own are Unicode's).
-const S: &str = r"[\t\n\x0B\x0C\r \x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}]";
-const NOT_S: &str = r"[^\t\n\x0B\x0C\r \x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}]";
-const DOT: &str = r"[^\n\r\x{2028}\x{2029}]";
-
 fn re(pattern: &str) -> Regex {
-    let p = pattern.replace("\\s", S).replace("\\S", NOT_S).replace("DOT", DOT);
+    // JS's \s, \S and `.` (written DOT), as the regex crate has them.
+    let p = pattern.replace("\\s", &format!("[{JS_SPACE}]")).replace("\\S", &format!("[^{JS_SPACE}]")).replace("DOT", JS_DOT);
     Regex::new(&p).expect("a regular expression of identities.rs")
 }
 
 // /^\s*([^:#\s][^:]*?)\s*:(?:\s+(.*?))?\s*$/
 static KEY_LINE: LazyLock<Regex> = LazyLock::new(|| {
-    let first = format!("[^:#{}]", &S[1..S.len() - 1]);
+    let first = format!("[^:#{JS_SPACE}]");
     re(&format!(r"^\s*({first}[^:]*?)\s*:(?:\s+(DOT*?))?\s*$"))
 });
 // /^\s*(\w+)\s*(?:=\s*|\s+)(.+?)\s*$/
@@ -86,7 +82,7 @@ fn unquote(v: &str) -> String {
     match (cs.next(), cs.next_back()) {
         (Some(a), Some(b)) if a == b && (a == '\'' || a == '"') => {
             let mid = &v[1..v.len() - 1];
-            if mid.contains(jsre::is_term) {
+            if mid.contains(is_js_line_terminator) {
                 v.to_string()
             } else {
                 mid.to_string()
@@ -393,7 +389,7 @@ fn scp_form(s: &str) -> Option<(String, String)> {
             continue;
         }
         let path = &rest[end + 1..];
-        if path.starts_with("//") || path.is_empty() || path.contains(jsre::is_term) {
+        if path.starts_with("//") || path.is_empty() || path.contains(is_js_line_terminator) {
             continue;
         }
         return Some((host.to_string(), path.to_string()));

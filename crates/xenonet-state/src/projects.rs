@@ -203,7 +203,7 @@ impl GitInfo {
 // /^(.*)[\\/]\.git[\\/]modules[\\/]/: what comes before a git dir's
 // .git/modules/, the last on its first line.
 fn superproject(git_dir: &str) -> Option<String> {
-    let line: &str = git_dir.split(jsre::is_term).next().unwrap_or("");
+    let line: &str = git_dir.split(text::is_js_line_terminator).next().unwrap_or("");
     let b = line.as_bytes();
     let sep = |c: u8| c == b'/' || c == b'\\';
     (0..b.len())

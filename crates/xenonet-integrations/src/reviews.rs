@@ -24,7 +24,7 @@ use xenonet_app::fsx;
 use xenonet_app::jsv::truthy;
 use xenonet_app::nodepath::NATIVE;
 use xenonet_app::task::{Failure, Io};
-use xenonet_base::text::js_string;
+use xenonet_base::text::{js_string, JS_DOT};
 
 pub const FILES: usize = 512;
 pub const FILE_BYTES: usize = 256 * 1024;
@@ -59,16 +59,13 @@ pub fn digest(files: &[Value]) -> String {
     hash(&xenonet_base::json::stringify(&Value::Array(pairs.into_iter().map(|(_, p)| p).collect()), 0))
 }
 
-// JS's `.` (no line terminators), as a class.
-const DOT: &str = r"[^\n\r\u{2028}\u{2029}]";
-
 fn excluded_res() -> &'static [Regex; 4] {
     static R: OnceLock<[Regex; 4]> = OnceLock::new();
     R.get_or_init(|| {
         [
             Regex::new(r"^(?i-u:\.git|node_modules|\.ssh|\.aws|\.azure|\.gnupg|\.venv|venv|__pycache__|\.cache|\.xenonet)$").expect("a fixed pattern"),
-            Regex::new(&format!(r"^(?i-u:\.env)(?:\.{DOT}*)?$")).expect("a fixed pattern"),
-            Regex::new(&format!(r"^(?:(?i-u:\.npmrc|\.pypirc|\.netrc|\.git-credentials|credentials(?:\.json)?|id_rsa|id_ed25519)|(?i-u:secrets?)(?:\.{DOT}*)?)$"))
+            Regex::new(&format!(r"^(?i-u:\.env)(?:\.{JS_DOT}*)?$")).expect("a fixed pattern"),
+            Regex::new(&format!(r"^(?:(?i-u:\.npmrc|\.pypirc|\.netrc|\.git-credentials|credentials(?:\.json)?|id_rsa|id_ed25519)|(?i-u:secrets?)(?:\.{JS_DOT}*)?)$"))
                 .expect("a fixed pattern"),
             Regex::new(r"\.(?i-u:pem|key|p12|pfx|keystore)$").expect("a fixed pattern"),
         ]

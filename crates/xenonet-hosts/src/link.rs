@@ -28,7 +28,7 @@ use std::sync::OnceLock;
 use xenonet_app::jstext::{slice16, utf16_len};
 use xenonet_app::jsv::truthy;
 use xenonet_base::ids::is_host_id;
-use xenonet_base::text::js_string;
+use xenonet_base::text::{js_string, JS_DOT};
 
 pub const HELLO_MS: f64 = 20e3;
 pub const STALE_MS: f64 = 45e3;
@@ -171,7 +171,7 @@ fn why(state: &'static str, code: &'static str, message: String, fix: Option<Str
 fn res() -> &'static [Regex; 3] {
     static R: OnceLock<[Regex; 3]> = OnceLock::new();
     R.get_or_init(|| {
-        let any = r"[^\n\r\x{2028}\x{2029}]*";
+        let any = format!("{JS_DOT}*");
         [
             Regex::new(&format!(r"(?i)host key verification failed|remote host identification has changed|no \S+ host key is known|host key for {any} has changed"))
                 .expect("a fixed pattern"),

@@ -12,7 +12,7 @@ use crate::live::day_key;
 use regex::Regex;
 use serde_json::{Map, Value};
 use std::sync::LazyLock;
-use xenonet_base::text::{is_js_space, js_number, js_trim};
+use xenonet_base::text::{is_js_line_terminator, is_js_space, js_number, js_trim, JS_DOT, JS_SPACE};
 use xenonet_base::{json, jsstr, paths, time};
 
 /// A JS value as an answer is built: what JSON can't hold too (undefined,
@@ -86,10 +86,6 @@ fn truthy(v: Option<&Value>) -> bool {
     xenonet_base::text::truthy(v)
 }
 
-fn is_line_terminator(c: char) -> bool {
-    matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
-}
-
 /// `text.split(/\r?\n/)`.
 fn split_lines(text: &str) -> Vec<&str> {
     let mut out: Vec<&str> = text.split('\n').collect();
@@ -149,7 +145,7 @@ fn key_value(line: &str) -> Option<(&str, &str)> {
         return None;
     }
     let rest = line[i + 1..].trim_start_matches(is_js_space);
-    if rest.chars().any(is_line_terminator) {
+    if rest.chars().any(is_js_line_terminator) {
         return None;
     }
     Some((&line[..i], rest))
@@ -239,7 +235,7 @@ pub fn wiki_links(text: &str) -> Vec<String> {
 }
 
 fn is_line_start(text: &str, i: usize) -> bool {
-    i == 0 || text[..i].chars().next_back().is_some_and(is_line_terminator)
+    i == 0 || text[..i].chars().next_back().is_some_and(is_js_line_terminator)
 }
 
 /// A page's first "# " heading, its title when the frontmatter gives none
@@ -255,7 +251,7 @@ fn first_heading(body: &str) -> String {
         }
         // White space to the very end leaves a match of white space alone,
         // which comes to nothing once trimmed.
-        let line = after.split(is_line_terminator).next().unwrap_or("");
+        let line = after.split(is_js_line_terminator).next().unwrap_or("");
         return js_trim(line).to_string();
     }
     String::new()
@@ -431,17 +427,14 @@ impl LogEntry {
     }
 }
 
-// JS's \s, and . (anything but a line terminator), as classes.
-const S: &str = r"[\t\n\x0B\x0C\r \x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}]";
-const DOT: &str = r"[^\n\r\x{2028}\x{2029}]";
-
 fn entry(lead: &str) -> Regex {
-    Regex::new(&format!(r"\A{lead}{S}+([0-9]{{1,2}}):([0-9]{{2}}){S}+·{S}+([^·]+?){S}+·{S}+({DOT}+)\z")).expect("a pattern of fixed parts")
+    let s = format!("[{JS_SPACE}]");
+    Regex::new(&format!(r"\A{lead}{s}+([0-9]{{1,2}}):([0-9]{{2}}){s}+·{s}+([^·]+?){s}+·{s}+({JS_DOT}+)\z")).expect("a pattern of fixed parts")
 }
 
 static HEADING: LazyLock<Regex> = LazyLock::new(|| entry("##"));
 static BULLET: LazyLock<Regex> = LazyLock::new(|| entry("-"));
-static LINK_AT_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"{S}*\[\[[^\]]+\]\]{S}*\z")).expect("a pattern of fixed parts"));
+static LINK_AT_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"[{JS_SPACE}]*\[\[[^\]]+\]\][{JS_SPACE}]*\z")).expect("a pattern of fixed parts"));
 
 // new Date(y, m, d, h, min).getTime(): a local time, as JS works it out
 // from its parts.
