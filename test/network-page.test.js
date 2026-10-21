@@ -4,7 +4,7 @@
 // where that sounds, and the join line's secret part.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { stateOf, inNetwork, linkWords, skewWords, hostLine, hostTags, outboxWords, remoteAgents, remoteWaits, chimeHere, hostIdProblem, joinOf, joinFields, ALONE, TICKET_MS } from "../src/network-model.js";
+import { stateOf, inNetwork, linkWords, skewWords, hostLine, hostTags, outboxWords, remoteAgents, remoteWaits, chimeHere, hostIdProblem, joinOf, joinFields, proposalWords, ALONE, TICKET_MS } from "../src/network-model.js";
 import { NetworkState } from "../core/schema/network.js";
 
 const NOW = Date.UTC(2026, 9, 20, 14, 30);
@@ -105,4 +105,15 @@ test("a new machine's id, and the join line's secret part", () => {
   assert.deepEqual(joinOf({ line: "xenonet net join 10.0.0.5:47850 AAAA-BBBB-CC" }, NOW), { line: "xenonet net join 10.0.0.5:47850 AAAA-BBBB-CC", secret: "AAAA-BBBB-CC", expires: NOW + TICKET_MS });
   assert.deepEqual(joinFields(" xenonet net join gw.example.net KX7Q-49MZ-T2 ", ""), { address: "gw.example.net", ticket: "KX7Q-49MZ-T2" });
   assert.deepEqual(joinFields(" gw.example.net ", " KX7Q-49MZ-T2"), { address: "gw.example.net", ticket: "KX7Q-49MZ-T2" });
+});
+
+test("what waits for approval says what it does and who asked", () => {
+  const add = { id: "e1", op: "add", host: "den", window: true, gateway: null, signers: ["laptop"], at: NOW };
+  const move = { id: "e2", op: "gateway", host: "desk", window: false, gateway: "10.0.0.7:47850", signers: ["desk"], at: NOW };
+  assert.equal(proposalWords(add), "add den as a window host, asked by laptop");
+  assert.equal(proposalWords(move), "desk to be the gateway, at 10.0.0.7:47850, asked by desk");
+  // Read leniently: one without an id can't be approved, so it isn't listed.
+  const s = stateOf({ ...founder(), proposals: [add, { op: "add", host: "x1" }, null] });
+  assert.deepEqual(s.proposals.map((p) => p.id), ["e1"]);
+  assert.deepEqual(stateOf(null).proposals, []);
 });

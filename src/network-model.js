@@ -19,6 +19,7 @@ export const ALONE = Object.freeze({
   gateway: null,
   hosts: [],
   tickets: [],
+  proposals: [],
   outbox: { frames: 0, bytes: 0, oldest: null },
   rosterHead: null,
   rosterMismatch: [],
@@ -30,12 +31,13 @@ const list = (v) => (Array.isArray(v) ? v : []);
 // The state as the page uses it: a network/state/v1 answer, or a machine on
 // its own for anything else (no answer, an older service, an error).
 export function stateOf(raw) {
-  if (!raw || typeof raw !== "object" || raw.schema !== "network/state/v1") return { ...ALONE, hosts: [], tickets: [], rosterMismatch: [] };
+  if (!raw || typeof raw !== "object" || raw.schema !== "network/state/v1") return { ...ALONE, hosts: [], tickets: [], proposals: [], rosterMismatch: [] };
   return {
     ...ALONE,
     ...raw,
     hosts: list(raw.hosts).filter((x) => x && typeof x.id === "string"),
     tickets: list(raw.tickets),
+    proposals: list(raw.proposals).filter((p) => p && typeof p.id === "string" && typeof p.host === "string"),
     rosterMismatch: list(raw.rosterMismatch).filter((x) => typeof x === "string"),
     outbox: raw.outbox && typeof raw.outbox === "object" ? raw.outbox : ALONE.outbox,
   };
@@ -110,6 +112,14 @@ export function outboxWords(o, now = Date.now()) {
 }
 
 export const ticketWords = (t, now = Date.now()) => `${t.host}${t.window ? ", with a window" : ""}: works until ${clock(t.expires, now)}`;
+
+// An entry that waits for the founder or a second window host to approve
+// it (state.proposals): what it does, and who signed it so far.
+export function proposalWords(p) {
+  const by = list(p?.signers).join(" and ") || "nobody yet";
+  const what = p.op === "gateway" ? `${p.host} to be the gateway${p.gateway ? `, at ${p.gateway}` : ""}` : p.op === "add" ? `add ${p.host}${p.window ? " as a window host" : ""}` : `${p.op} ${p.host}`;
+  return `${what}, asked by ${by}`;
+}
 
 // Other machines' agents from the engine's list (GET /api/engine/agents):
 // those with an @<host>: id, each with what waits on you, however the

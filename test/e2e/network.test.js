@@ -200,6 +200,21 @@ test("net-remote-waiting: another machine's agent waiting on you shows in the st
   assert.ok(quiet, "no chime here while you're at laptop");
 }));
 
+test("net-approval: a window host another one signed in waits for an approval here, and Approve adds it", { timeout: limit(60000) }, shoot("network-approval", async () => {
+  await simulate("net-approval", {}, (n) => n.proposals.length === 1);
+  await served();
+  const { network: n } = await s.driver("network", "open");
+  assert.deepEqual([n.proposals[0].op, n.proposals[0].host, n.proposals[0].window, n.proposals[0].signers], ["add", "den", true, ["laptop"]]);
+  assert.match(n.text, /Waiting for approval.*add den as a window host, asked by laptop\. It needs the founder or a second window host\./);
+  await clickAt(n.at.approve, "Approve");
+  const done = await until(async () => {
+    const got = await network();
+    return got.proposals.length === 0 && got.hosts.some((x) => x.id === "den") ? got : null;
+  });
+  assert.ok(done, "den is in, and nothing waits");
+  await s.driver("network", "close");
+}));
+
 test("net-gateway-down says so: since when, why, and what waits in the outbox", { timeout: limit(60000) }, shoot("network-gateway-down", async () => {
   await simulate("net-gateway-down", {}, (n) => n.gateway?.link === "offline");
   await served();

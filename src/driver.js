@@ -471,7 +471,7 @@ export function createDriver(app) {
     // ticket). "open" shows the panel, "start" and "join" its forms, "add"
     // Add a machine with { host, window } filled in, and "close" closes it;
     // "refresh" reads it again. Making the line, starting, joining,
-    // removing, replacing and the setting are yours: clicks where the
+    // removing, replacing, approving and the setting are yours: clicks where the
     // answer's `at` points, which only the demo and test instances let the
     // control channel make.
     async network(action = "read", arg = null, opts) {

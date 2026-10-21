@@ -28,7 +28,7 @@
 import { escapeHtml as h } from "./format.js";
 import { hostOfId } from "./hosts.js";
 import { keepSecret, forgetSecrets, secretHtml, secretClick, hideOnBlur, secretValue } from "./secret.js";
-import { stateOf, inNetwork, clock, linkWords, skewWords, hostLine, hostTags, outboxWords, ticketWords, remoteAgents, remoteWaits, hostIdProblem, joinOf, joinFields, KIND_WORDS, TICKET_MS } from "./network-model.js";
+import { stateOf, inNetwork, clock, linkWords, skewWords, hostLine, hostTags, outboxWords, ticketWords, proposalWords, remoteAgents, remoteWaits, hostIdProblem, joinOf, joinFields, KIND_WORDS, TICKET_MS } from "./network-model.js";
 
 const EVERY_IN = 10e3;
 const EVERY_OUT = 60e3;
@@ -170,10 +170,18 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     const tickets = state.tickets.length
       ? `<div class="panel-title sub"><span>Waiting to join</span><span class="tick">${state.tickets.length}</span></div><ul class="net-tickets" data-net-tickets>${state.tickets.map((t) => `<li>${h(ticketWords(t))}</li>`).join("")}</ul>`
       : "";
+    // What waits for the founder or a second window host: a window host
+    // signs it too here, unless it has.
+    const mine = (p) => p.signers?.includes(state.self?.id);
+    const approvals = state.proposals.length
+      ? `<div class="panel-title sub"><span>Waiting for approval</span><span class="tick">${state.proposals.length}</span></div><ul class="net-tickets" data-net-proposals>${state.proposals
+          .map((p) => `<li data-net-proposal="${h(p.id)}">${h(proposalWords(p))}. It needs the founder or a second window host.${state.self?.window && !mine(p) ? ` <button class="act" data-net-approve="${h(p.id)}" data-yours>Approve</button>` : ""}</li>`)
+          .join("")}</ul>`
+      : "";
     return `${gatewayHtml()}${mismatch}
       <div class="panel-title sub"><span>Machines</span><span class="tick">${hosts.length}</span></div>
       <ol class="ac-list" data-net-hosts>${hosts.map((x) => hostHtml(x, view.confirm)).join("")}</ol>
-      ${tickets}
+      ${approvals}${tickets}
       <p class="net-outbox" data-net-outbox>${h(outboxWords(state.outbox))}</p>
       <div class="panel-title sub"><span>This machine</span></div>
       <label class="net-check"><input type="checkbox" data-net-titles data-yours ${state.titlesOnly ? "checked" : ""}> Share with the network: titles only</label>
@@ -386,6 +394,18 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     });
   }
 
+  async function approve(id) {
+    const p = state.proposals.find((x) => x.id === id);
+    return busyWith(async () => {
+      const r = await calls.call("POST", "/api/net/approve", { id });
+      if (!r.ok) return failed(r, p ? `xenonet net approve ${p.host} --op ${p.op}` : null);
+      sfx("success");
+      toast(p ? `Approved: ${proposalWords(p)}.` : "Approved.");
+      await refresh();
+      return { ok: true };
+    });
+  }
+
   async function titlesOnly(on) {
     const r = await calls.call("PUT", "/api/net/settings", { titlesOnly: on });
     if (!r.ok) {
@@ -418,6 +438,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     if (t.closest("[data-net-keep]")) return go({ name: "main" });
     if (d.netRemoveYes) return remove(d.netRemoveYes);
     if (d.netReplace) return replace(d.netReplace);
+    if (d.netApprove) return approve(d.netApprove);
   }
 
   // Opens the panel (`at`: start, join or add), or reads it again in place.
@@ -506,6 +527,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
         remote: agents.filter((a) => a.host === x.id).map((a) => ({ id: a.id, title: a.title, app: a.app, status: a.status, waits: a.waits, text: a.text })),
       })),
       tickets: state.tickets.map((t) => ({ host: t.host, window: !!t.window, expires: t.expires })),
+      proposals: state.proposals.map((p) => ({ id: p.id, op: p.op, host: p.host, window: !!p.window, gateway: p.gateway ?? null, signers: p.signers ?? [], words: proposalWords(p) })),
       outbox: { frames: state.outbox.frames ?? 0, bytes: state.outbox.bytes ?? 0, oldest: state.outbox.oldest ?? null },
       mismatch: state.rosterMismatch,
       titlesOnly: !!state.titlesOnly,
@@ -514,7 +536,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       error: isOpen() ? (view.error ?? null) : null,
       // What the panel says, with a join line shown masked all the same.
       text: isOpen() ? masked(body()?.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, 4000) : null,
-      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), add: centre('[data-net-go="add"]') } : null,
+      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), add: centre('[data-net-go="add"]'), approve: centre("[data-net-approve]") } : null,
     };
   }
 

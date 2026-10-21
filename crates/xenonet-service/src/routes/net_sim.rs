@@ -29,11 +29,12 @@ use xenonet_base::ids::{is_host_id, parse_qualified};
 use xenonet_base::sync::Locked;
 
 /// The simulations, for the console tools' list.
-pub const KINDS: [&str; 7] = ["net-none", "net-founder", "net-member", "net-gateway-down", "net-ticket", "net-mismatch", "net-remote-waiting"];
+pub const KINDS: [&str; 8] = ["net-none", "net-founder", "net-member", "net-gateway-down", "net-ticket", "net-mismatch", "net-remote-waiting", "net-approval"];
 
 const NETWORK_ID: &str = "net_5d1e0c7a9b3f4e2d8c6a1b0f9e7d3c25";
 const ADDRESS: &str = "gw.example.net";
 const ROSTER_HEAD: &str = "c2ltdWxhdGVkLXJvc3Rlci1oZWFkLTA0";
+const PROPOSAL_ID: &str = "c2ltdWxhdGVkLWFkZC1kZW4tYXMtd2luZG93";
 const TICKET_MS: f64 = 10.0 * 60e3;
 const MAX_TICKETS: usize = 5;
 const MAX_TEXT: usize = 16000;
@@ -139,7 +140,7 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreE
             Ok(Some(Reply::json(200, state)))
         }
         ("POST", "/api/actors/you/message") => message(ctx, req).await,
-        ("POST", "/api/net/ticket" | "/api/net/replace" | "/api/net/remove" | "/api/net/create" | "/api/net/join" | "/api/net/leave") | ("PUT", "/api/net/settings") => {
+        ("POST", "/api/net/ticket" | "/api/net/replace" | "/api/net/remove" | "/api/net/create" | "/api/net/join" | "/api/net/leave" | "/api/net/approve") | ("PUT", "/api/net/settings") => {
             if let Some(why) = ctx.from_window(req).await {
                 return Ok(Some(Reply::coded(403, "yours", why)));
             }
@@ -289,7 +290,7 @@ fn made_up(kind: &str, you_at: Option<&str>, now: f64) -> Option<(Value, Vec<Val
         return Some((s, vec![]));
     }
     let member = matches!(kind, "net-member" | "net-gateway-down");
-    if !member && !matches!(kind, "net-founder" | "net-ticket" | "net-mismatch" | "net-remote-waiting") {
+    if !member && !matches!(kind, "net-founder" | "net-ticket" | "net-mismatch" | "net-remote-waiting" | "net-approval") {
         return None;
     }
     let down = kind == "net-gateway-down";
@@ -341,6 +342,9 @@ fn made_up(kind: &str, you_at: Option<&str>, now: f64) -> Option<(Value, Vec<Val
     match kind {
         "net-ticket" => state["tickets"] = json!([{ "host": "desk", "window": false, "expires": now + 8.5 * MINUTE }]),
         "net-mismatch" => state["rosterMismatch"] = json!(["laptop"]),
+        // laptop, a window host but not the founder, signed den in as a
+        // window host: that waits for the founder or a second window host.
+        "net-approval" => state["proposals"] = json!([{ "id": PROPOSAL_ID, "op": "add", "host": "den", "window": true, "gateway": null, "signers": ["laptop"], "at": now - 40e3 }]),
         "net-remote-waiting" => {
             if let Some(a) = agents.iter_mut().find(|a| a["host"] == "laptop" && a["app"] == "claude") {
                 a["status"] = json!("waiting");
@@ -494,6 +498,22 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
             sim.agents.retain(|a| a["host"] != host.as_str());
             Reply::json(200, json!({ "ok": true, "removed": host }))
         }
+        "/api/net/approve" => {
+            let id = body.get("id").and_then(Value::as_str).unwrap_or("");
+            let Some(list) = sim.state["proposals"].as_array_mut() else { return fail(404, "nothing", "nothing waits for approval by that id") };
+            let Some(i) = list.iter().position(|p| p["id"] == id) else { return fail(404, "nothing", "nothing waits for approval by that id") };
+            let p = list.remove(i);
+            let host = p["host"].as_str().unwrap_or("").to_string();
+            if p["op"] == "add" {
+                let mut row = host_row(&LAPTOP, true, Some(now), 0, false);
+                row["id"] = json!(host);
+                row["keyId"] = json!(key_id(&host));
+                if let Some(h) = sim.state["hosts"].as_array_mut() {
+                    h.push(row);
+                }
+            }
+            Reply::json(200, sim.state.clone())
+        }
         "/api/net/settings" => {
             if !in_network {
                 return outside();
@@ -640,6 +660,20 @@ mod tests {
         assert!(waiting[0]["id"].as_str().unwrap().starts_with("@laptop:claude:") && waiting[0]["question"].is_string());
         assert_eq!((row(&w, "laptop")["waitsOnYou"].clone(), row(&w, "laptop")["you"].clone(), row(&w, "studio")["you"].clone()), (json!(1), json!(true), json!(false)));
         assert_eq!(made_up("net-none", None, now).unwrap().0["network"], Value::Null);
+        let (a, _) = made_up("net-approval", None, now).unwrap();
+        assert_eq!((a["proposals"][0]["host"].clone(), a["proposals"][0]["signers"].clone()), (json!("den"), json!(["laptop"])));
+    }
+
+    #[test]
+    fn an_approval_by_its_id_adds_the_window_host() {
+        let now = 1.8e12;
+        let mut s = sim("net-approval");
+        assert_eq!(apply(&mut s, "/api/net/approve", &json!({ "id": "nope" }), now).status, 404);
+        let r = apply(&mut s, "/api/net/approve", &json!({ "id": PROPOSAL_ID }), now);
+        assert_eq!(r.status, 200);
+        well_formed(&s.state);
+        assert_eq!(s.state["proposals"], json!([]));
+        assert!(has_host(&s.state, "den"));
     }
 
     fn sim(kind: &str) -> Sim {
