@@ -180,8 +180,14 @@ impl Store {
                 if let Some(dir) = p.parent() {
                     let _ = std::fs::create_dir_all(dir);
                 }
+                // What agents and sessions wrote: the owner's alone, from
+                // the start, so SQLite's own files beside it are too.
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    let _ = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(p);
+                }
                 let db = Connection::open(p)?;
-                // What agents and sessions wrote: the owner's alone.
                 let _ = xenonet_base::private_file::chmod_600(p);
                 db.execute_batch("PRAGMA journal_mode = WAL")?;
                 db
@@ -588,8 +594,11 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("xenonet-a2a-mode-{}", std::process::id()));
         let file = dir.join("a2a.sqlite");
-        Store::open(Some(&file)).unwrap();
+        let s = Store::open(Some(&file)).unwrap();
+        s.set_setting("on", "true").unwrap();
         assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+        let wal = dir.join("a2a.sqlite-wal");
+        assert_eq!(std::fs::metadata(&wal).unwrap().permissions().mode() & 0o777, 0o600, "and its write-ahead log");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
