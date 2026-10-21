@@ -120,7 +120,7 @@ test("processes: a made-up app in a registry of its own is told by its own rules
   assert.equal(agentOf("/usr/local/bin/codex", "", agents), null, "not in this registry");
 });
 
-test("processes: verify checks a session's app by its processes, and passes an app outside them unchecked, as before", async (t) => {
+test("processes: verify checks a session's app by its processes, and refuses an app outside them", async (t) => {
   const dir = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), "xenonet-capabilities-"));
   const stores = [];
   t.after(() => {
@@ -135,8 +135,12 @@ test("processes: verify checks a session's app by its processes, and passes an a
     return createVerifier({ procs, store });
   };
   const socket = { remotePort: 1, localPort: 2 };
-  assert.deepEqual(await verifier("claude").check(socket, "gemini-cli:x"), { ok: true, checked: false }, "an app whose processes XenoNet doesn't tell apart");
-  assert.deepEqual(await verifier("claude").check(socket, "wren:x"), { ok: true, checked: false });
+  assert.deepEqual(
+    await verifier("claude").check(socket, "gemini-cli:x"),
+    { ok: false, checked: true, reason: "requests in gemini-cli:x's name are refused: XenoNet can't tell Gemini CLI's processes apart, so it can't check that the request comes from that session" },
+    "an app whose processes XenoNet doesn't tell apart",
+  );
+  assert.deepEqual(await verifier("wren").check(socket, "wren:x"), { ok: false, checked: true, reason: 'requests in wren:x\'s name are refused: XenoNet doesn\'t know an app called "wren"' }, "one it doesn't know");
   assert.deepEqual(await verifier("opencode").check(socket, "opencode:x"), { ok: true, checked: true, root: { pid: 50, start: 1 } });
   assert.deepEqual(await verifier("claude").check(socket, "opencode:x"), { ok: false, checked: true, reason: "requests in opencode:x's name have to come from an OpenCode process, and this one doesn't" });
   assert.deepEqual(await verifier("opencode").check(socket, "codex:x"), { ok: false, checked: true, reason: "requests in codex:x's name have to come from a Codex process, and this one doesn't" });

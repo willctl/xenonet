@@ -60,10 +60,12 @@ function setup({ clock = fakeClock(), stateDir = tmp(), cacheDir = tmp(), key = 
   };
   machine.program("ssh", script);
   machine.program(BIN, script);
-  const hub = createHub({ hosts, cacheDir, root: "/src/xenonet", home: "/Users/nova", local: { graph: () => mine, live: liveOf, layout: () => ({}), identities: () => ({}), aliases: () => new Map(), forgetLayout: () => 0 }, clock, linkOptions: { spawn: machine.spawn, random: () => 0.5, bin: BIN } });
-  const out = { graph: [], live: [], hosts: [], activity: [] };
+  const notes = [];
+  const log = { info: (code, message) => notes.push([code, message]) };
+  const hub = createHub({ hosts, cacheDir, root: "/src/xenonet", home: "/Users/nova", local: { graph: () => mine, live: liveOf, layout: () => ({}), identities: () => ({}), aliases: () => new Map(), forgetLayout: () => 0 }, clock, linkOptions: { spawn: machine.spawn, random: () => 0.5, bin: BIN }, log });
+  const out = { graph: [], live: [], hosts: [], activity: [], tokens: [] };
   for (const name of Object.keys(out)) hub.on(name, (d) => out[name].push(d));
-  return { clock, machine, hosts, hub, out, mine, theirs, relay: () => relay, stateDir, cacheDir, settle: () => clock.flush(40) };
+  return { clock, machine, hosts, hub, out, notes, mine, theirs, relay: () => relay, stateDir, cacheDir, settle: () => clock.flush(40) };
 }
 
 test("a host's map joins this one, and goes out at most once a second however often it changes", async () => {
@@ -86,6 +88,18 @@ test("a host's map joins this one, and goes out at most once a second however of
   await w.settle();
   assert.deepEqual(w.out.activity.at(-1).sessionId, `@vm1:${S}`);
   assert.equal(w.hub.detail("vm1").engine.agents[0].id, `@vm1:${S}`);
+  w.hub.stop();
+});
+
+test("a host's tokens for an app this XenoNet doesn't tail are left out, and the log says so", async () => {
+  const w = setup();
+  w.hub.start();
+  await w.settle();
+  w.relay().json({ t: "event", name: "tokens", data: { sessionId: S, app: "grok-build", n: 40, ts: w.clock.now() } });
+  w.relay().json({ t: "event", name: "tokens", data: { sessionId: S, app: "claude", n: 50, ts: w.clock.now() } });
+  await w.settle();
+  assert.deepEqual(w.out.tokens.map((t) => [t.sessionId, t.app, t.n]), [[`@vm1:${S}`, "claude", 50]], "not counted as Claude Code's");
+  assert.deepEqual(w.notes, [["hosts.unknown-app", 'vm1 sent tokens for "grok-build", an app this XenoNet doesn\'t tail, and they were left out']]);
   w.hub.stop();
 });
 

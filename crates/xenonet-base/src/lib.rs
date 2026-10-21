@@ -2,10 +2,11 @@
 //! (`json`), times as the transcripts write them (`time`), paths as XenoNet
 //! compares and shows them (`paths`) and as Node's `path` builds them
 //! (`nodepath`), a call's tokens (`usage`) and what they cost at API prices
-//! (`pricing`), the files an apply_patch text names (`patch`), the
-//! client that reaches a running XenoNet (`client`, over `http`), whether a
-//! process runs (`process`), sorting as JS sorts (`sort`), locks that outlive
-//! a panic (`sync`), and the apps XenoNet knows (`apps`).
+//! (`pricing`), the files an apply_patch text names (`patch`), OpenCode's
+//! ids as session ids take them (`opencode`), the client that reaches a
+//! running XenoNet (`client`, over `http`), whether a process runs
+//! (`process`), sorting as JS sorts (`sort`), locks that outlive a panic
+//! (`sync`), and the apps XenoNet knows (`apps`).
 
 pub mod apps;
 pub mod client;
@@ -17,6 +18,7 @@ pub mod json;
 pub mod jsstr;
 pub mod log;
 pub mod nodepath;
+pub mod opencode;
 pub mod ordered;
 pub mod patch;
 pub mod paths;

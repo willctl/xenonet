@@ -61,8 +61,10 @@ impl Stats {
                 return Ok(k.1.get(session_id).cloned());
             }
         }
-        // Any app but Codex is read as Claude Code.
-        let codex = xenonet_base::apps::tailed_app(session_id.split(':').next().unwrap_or_default(), "claude") == "codex";
+        // An app XenoNet doesn't tail is refused, not read as Claude Code.
+        let app = session_id.split(':').next().unwrap_or_default();
+        let Some(tailed) = xenonet_base::apps::tailed_or_text(Some(app), None) else { return Err(xenonet_base::apps::untailed(app)) };
+        let codex = tailed == "codex";
         let read: Vec<File> = files
             .iter()
             .map(|(f, agent)| File { agent: Some(agent.clone().map_or(Value::Null, Value::String)), lines: read_lines(&self.vendor, f, codex).unwrap_or_default() })

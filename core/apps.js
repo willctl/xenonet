@@ -122,7 +122,21 @@ export const appsWith = (capability) => APPS.filter((a) => a.has?.includes(capab
 // The apps whose transcripts XenoNet tails: Claude Code and Codex.
 export const TAILED = appsWith("lines").map((a) => a.id);
 
-// The tailed app `app` names, or `fallback` for any other. The places that
-// pick between Claude Code and Codex read an app that's neither as one of
-// the two, and `fallback` says which, as each always has.
+// The tailed app `app` names, or `fallback` for any other. The live tailer
+// and the normalizers still read an app that's neither Claude Code nor
+// Codex as one of the two, and `fallback` says which.
 export const tailedApp = (app, fallback) => (TAILED.includes(app) ? app : fallback);
+
+// The tailed app `app` names; `fallback` when it names none (nothing, or
+// ""); or null for any other app. What a command, a route, another host or
+// a reader of transcripts is given is refused when it's an app XenoNet
+// doesn't tail, not read as one of the two. Where there's no default,
+// `fallback` is null.
+export const tailedOr = (app, fallback) => (app == null || app === "" ? fallback : TAILED.includes(app) ? app : null);
+
+// Why a command or a route refused `app` where `what` takes a tailed app:
+// --app takes claude or codex, not "gemini-cli".
+export const appRefusal = (what, app) => `${what} takes ${TAILED.join(" or ")}, not ${JSON.stringify(app)}`;
+
+// What a reader of transcripts says of an app XenoNet doesn't tail.
+export const untailed = (app) => `XenoNet doesn't read ${Object.hasOwn(APP, app) ? APP[app].name : JSON.stringify(String(app))}'s transcripts`;

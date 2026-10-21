@@ -10,7 +10,7 @@ import { native } from "../../index.js";
 import { peer } from "../../peer.js";
 import { hostEntry } from "./config.js";
 import { HostLink } from "./link.js";
-import { mergeGraph, mergeLive, mergeSummary, qualifyEvent, qualifyEngine, cleanOnce, DEFAULT_WINDOWS } from "./merge.js";
+import { mergeGraph, mergeLive, mergeSummary, qualifyEvent, qualifyEngine, eventNote, cleanOnce, DEFAULT_WINDOWS } from "./merge.js";
 import { readCache, writeCache, removeCache } from "./cache.js";
 
 const { systemClock } = await import(peer("blocks/clock.js"));
@@ -19,7 +19,7 @@ const { tilde } = await import(peer("paths.js"));
 const C = native.hostsHubConstants();
 const fail = (message, status) => Object.assign(new Error(message), { status });
 
-export function createHub({ hosts, cacheDir, root, home = null, demo = false, windows = DEFAULT_WINDOWS, local, clock = systemClock, linkOptions = {} }) {
+export function createHub({ hosts, cacheDir, root, home = null, demo = false, windows = DEFAULT_WINDOWS, local, clock = systemClock, linkOptions = {}, log = null }) {
   const hub = new EventEmitter();
   const runtimes = new Map();
   const timers = { graph: null, live: null };
@@ -141,7 +141,9 @@ export function createHub({ hosts, cacheDir, root, home = null, demo = false, wi
         return hub.emit("hosts", forPage());
       }
       const q = qualifyEvent(name, data, infoOf(rt));
-      if (q) hub.emit(name, q);
+      if (q) return hub.emit(name, q);
+      const note = eventNote(name, data, infoOf(rt));
+      if (note) log?.info("hosts.unknown-app", note);
     });
     runtimes.set(entry.id, rt);
     link.start();
