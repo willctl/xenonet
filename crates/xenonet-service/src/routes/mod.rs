@@ -12,6 +12,7 @@ pub mod environments;
 pub mod hosts;
 pub mod integrations;
 pub mod mcp;
+pub mod net;
 pub mod net_sim;
 pub mod refusals;
 pub mod themes;
@@ -122,6 +123,12 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     if route == "/api/assistant" || route.starts_with("/api/assistant/") {
         let taken = std::mem::replace(req, Req::fake("GET", "/", &[], None));
         return assistant::AssistantRoutes { ctx }.route(taken).await;
+    }
+    // The network across machines: Rust-only, with no JS twin.
+    if route.starts_with("/api/net/") {
+        if let Some(a) = net::route(ctx, req).await {
+            return a;
+        }
     }
     if let Some(r) = (hosts::HostRoutes { hosts: cores.hosts.clone(), hub: cores.hub.clone(), verify: cores.verify.clone(), home: &ctx.config.home }).route(req).await {
         return Ok(r);

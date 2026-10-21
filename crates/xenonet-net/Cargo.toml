@@ -1,0 +1,27 @@
+[package]
+name = "xenonet-net"
+description = "One network across machines: a host's keys, signed and sealed frames, the roster chain, tickets, the gateway's routes and queues, and a host's link to its gateway."
+version.workspace = true
+edition.workspace = true
+# It runs on tokio beside the service (Rust 1.88+, as the service).
+rust-version = "1.88"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64.workspace = true
+# A link's down stream, as the service's front door hands it to hyper.
+bytes.workspace = true
+ring.workspace = true
+rusqlite.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+x25519-dalek.workspace = true
+xenonet-base.workspace = true
+
+[lints]
+workspace = true

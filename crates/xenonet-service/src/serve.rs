@@ -368,6 +368,28 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
             Err(e) => ctx.log("warn", "a2a.error", &e, None, None),
         }
     }
+    // The network across machines (docs/design/network.md): this machine's
+    // node, whose gateway routes the actor gateway's front door serves
+    // while this host is the network's gateway.
+    {
+        let c = ctx.clone();
+        let log: xenonet_net::sink::LogFn = Arc::new(move |code: &str, words: &str| c.log("info", code, words, None, None));
+        match crate::gateway::network::NetService::open(crate::gateway::network::NetService::options(&config.state_dir, &version, log)) {
+            Ok(svc) => {
+                if let Some(g) = ctx.gateway.get() {
+                    g.gateway().set_net(svc.node().clone());
+                }
+                let _ = ctx.net.set(svc);
+            }
+            Err(e) => ctx.log(
+                "warn",
+                "net.open",
+                &format!("the network's files couldn't be read: {}", e.message),
+                None,
+                Some("xenonet doctor says more; xenonet net leave forgets the network"),
+            ),
+        }
+    }
 
     let listener = match TcpListener::bind((config.host.as_str(), config.port)).await {
         Ok(l) => l,
@@ -477,6 +499,14 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
             let _ = t.autostart().await;
         });
     }
+    if let Some(n) = ctx.net.get().cloned() {
+        let c = ctx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = n.start().await {
+                c.log("warn", "net.start", &format!("the network's link didn't start: {}", e.message), None, None);
+            }
+        });
+    }
     tokio::spawn(poll_spotify(ctx.clone(), again_rx));
     {
         let c = ctx.clone();
@@ -547,6 +577,9 @@ fn shutdown(ctx: &Arc<Ctx>) {
     if let Some(g) = ctx.gateway.get() {
         g.tunnel().stop();
         g.gateway().stop();
+    }
+    if let Some(n) = ctx.net.get() {
+        n.stop();
     }
     if let Some(comp) = ctx.components.locked().take() {
         comp.close();

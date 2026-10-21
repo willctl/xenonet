@@ -253,6 +253,10 @@ xenonet-net/1
 - The body is ChaCha20-Poly1305 with a zero nonce (each key is used once),
   the head as associated data, and the ephemeral public key in front of
   the ciphertext.
+- The head's last line is the hash of the sealed bytes, which only exist
+  once sealing is done, so sealing binds the head's first eight lines. The
+  signature, made after, covers all nine. `test/fixtures/net/` has known
+  answers for all of it.
 - A frame for every host (presence, claims) is sealed once per host.
 - The gateway sees the head: who, to whom, the kind, the size and the
   time.
@@ -279,6 +283,7 @@ What each `op` needs:
 | `add` a window host, `window` on, `remove` a window host, `gateway` | the founder, or two different window hosts |
 | `remove` a host that isn't a window host | any window host |
 | `remove` the founder | nobody: a network whose founder is lost is made again |
+| `remove` itself (leaving), any host but the founder | that host |
 
 **How hosts use it:**
 
@@ -600,6 +605,19 @@ twins, are unchanged.
    only from a gateway that proves a roster key and shows a newer
    `gateway` entry.
 
+As built:
+
+- An entry signed by too few (a host that isn't the founder taking the
+  gateway) waits at the gateway as a proposal for ten minutes. Window
+  hosts see it in their state, and `xenonet net approve <host>` (`POST
+  /api/net/approve`) adds their signature.
+- The old gateway keeps its streams for 30 s after the move, so the hosts
+  on them hear of it, and takes no new frames: they wait in their senders'
+  outboxes for the new gateway.
+- Its queues aren't passed on. The new gateway's queues are a new epoch,
+  which every host takes as a `gap`, so senders send again what has no
+  receipt.
+
 Moving the actors' rows (hashed tokens, scopes) with the gateway is a
 later step. Until then their apps are told to reconnect, as an address
 change already handles. Automatic failover to a standby is left out: it's
@@ -756,6 +774,7 @@ never trusted as a particular process, and weak checks travel as weak.
 | `GET link` | hosts | The down stream |
 | `POST frames` | hosts | The up batch |
 | `GET roster` | hosts | The chain from an index |
+| `POST roster` | hosts | An entry the sending host signed; the roster's rules decide |
 
 A request with an `Origin` is refused. `Host` must be the gateway's
 address.
@@ -779,7 +798,11 @@ address.
   gateway's address and key id.
 - `<state>/network/roster.json`: the chain.
 - `<state>/network/net.sqlite`: the outbox, frame ids seen, and the epoch
-  and `seq` per gateway.
+  and `seq` per gateway. A frame leaves the outbox once the gateway accepts
+  it; the gateway keeps it until the host it's for has read it. A frame
+  the gateway lets go is a `gap` to both hosts, and a new epoch is one
+  too: the engine then sends again the messages with no `stored` receipt.
+- `<state>/network/link.json`: how the link last stood, for the doctor.
 - `<state>/network/gateway.sqlite`, on the gateway only: tickets (hashed),
   queues, frame ids, the epoch, and the last presence of each host.
 - `engine.sqlite` gains:

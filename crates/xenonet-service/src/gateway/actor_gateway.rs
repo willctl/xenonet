@@ -6,7 +6,9 @@
 //!
 //! It listens on 127.0.0.1 alone, on a port of its own, and a tunnel of the
 //! owner's choosing puts it on the internet, forwarding `https://<host>/mcp`
-//! to it. So: only POST, GET and DELETE on /mcp, for the host the owner
+//! to it. Its listener is the gateway's front door (front_door.rs), which
+//! also serves the network's routes and A2A by path; what reaches the
+//! actor gateway is the rest. So: only POST, GET and DELETE on /mcp, for the host the owner
 //! named or this machine on its own port; no browser (an Origin is
 //! refused); each request carries an actor's gateway token, and past 20
 //! unknown tokens in a minute it answers 429 for a minute; the tools are
@@ -27,12 +29,8 @@ use crate::cores::{Actors, Engine, Registration, Reports, Runs};
 use crate::http::{node_headers, parse_target, Reply};
 use bytes::Bytes;
 use http_body_util::BodyExt;
-use hyper::server::conn::http1;
-use hyper::service::service_fn;
-use hyper_util::rt::TokioIo;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -46,6 +44,9 @@ const BODY_MAX: usize = 64 << 10;
 // An HTTP request waits at most this long in inbox: the proxies in front of
 // cloud agents cut off long requests.
 const INBOX_WAIT_MAX: f64 = 25.0;
+/// How long a connection to the front door lives: long enough for an inbox
+/// that waits, and no longer. A network link's stream is the exception.
+pub const CONNECTION_SECS: u64 = (INBOX_WAIT_MAX as u64) + 15 + 60;
 const BAD_TOKENS: Rate = Rate { rate: 20.0 / 60.0, burst: 20.0 };
 const BLOCK_MS: f64 = 60e3;
 const MESSAGES: Rate = Rate { rate: 60.0 / 3600.0, burst: 60.0 };
@@ -150,6 +151,9 @@ struct Inner {
     stats: Mutex<Stats>,
     server: Mutex<Option<tokio::task::JoinHandle<()>>>,
     now: Arc<dyn Fn() -> f64 + Send + Sync>,
+    /// The network's node, whose gateway routes the front door serves
+    /// while this host is the network's gateway.
+    net: std::sync::OnceLock<Arc<xenonet_net::node::Node>>,
 }
 
 #[derive(Clone)]
@@ -184,12 +188,27 @@ impl ActorGateway {
                 stats: Mutex::new(Stats::default()),
                 server: Mutex::new(None),
                 now,
+                net: std::sync::OnceLock::new(),
             }),
         }
     }
 
     pub fn port(&self) -> u16 {
         self.inner.port
+    }
+
+    /// The network's node, for the front door's `/net/v1/` routes.
+    pub fn set_net(&self, node: Arc<xenonet_net::node::Node>) {
+        let _ = self.inner.net.set(node);
+    }
+
+    pub fn net(&self) -> Option<Arc<xenonet_net::node::Node>> {
+        self.inner.net.get().cloned()
+    }
+
+    /// The public host the owner named, or None.
+    pub fn public_host(&self) -> Option<String> {
+        self.inner.host.locked().clone()
     }
 
     /// The word XenoNet's own reachability check will carry, answered once
@@ -218,27 +237,11 @@ impl ActorGateway {
         }
         // Its port taken: no server, so the next start tries again.
         let listener = TcpListener::bind(("127.0.0.1", self.inner.port)).await?;
-        let me = self.clone();
-        let task = tokio::spawn(async move {
-            // Its connections are this task's, so stopping the gateway closes
-            // them too, as the JS's closeAllConnections does: a client's
-            // kept-alive connection doesn't outlive the gateway turned off.
-            let mut conns = tokio::task::JoinSet::new();
-            loop {
-                let Ok((stream, _)) = listener.accept().await else { continue };
-                while conns.try_join_next().is_some() {}
-                let me = me.clone();
-                conns.spawn(async move {
-                    let svc = service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
-                        let me = me.clone();
-                        async move { Ok::<_, Infallible>(me.serve_hyper(req).await) }
-                    });
-                    // Long enough for an inbox that waits, and no longer.
-                    let conn = http1::Builder::new().serve_connection(TokioIo::new(stream), svc);
-                    let _ = tokio::time::timeout(Duration::from_secs((INBOX_WAIT_MAX as u64) + 15 + 60), conn).await;
-                });
-            }
-        });
+        let door = super::front_door::Door { kind: super::front_door::DoorKind::Tunnel { port: self.inner.port }, actor: Some(self.clone()), node: None };
+        // Its connections are the task's, so stopping the gateway closes
+        // them too, as the JS's closeAllConnections does: a client's
+        // kept-alive connection doesn't outlive the gateway turned off.
+        let task = tokio::spawn(door.listen(listener));
         *self.inner.server.locked() = Some(task);
         Ok(self.status())
     }
@@ -268,7 +271,46 @@ impl ActorGateway {
         })
     }
 
-    async fn serve_hyper(&self, req: hyper::Request<hyper::body::Incoming>) -> hyper::Response<crate::serve::OutBody> {
+    /// The bearer token of a request the front door sends somewhere other
+    /// than `/mcp` (A2A): the door's checks in the same order (the host,
+    /// no web pages, unknown tokens held off), then the token. The actor it
+    /// authenticated, or the answer that refuses it.
+    pub fn door_auth(&self, headers: &[(String, String)]) -> Result<Value, Reply> {
+        let t = (self.inner.now)();
+        let header = |k: &str| headers.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+        let host = header("host").unwrap_or("").to_lowercase();
+        let port = self.inner.port;
+        let public = self.inner.host.locked().clone();
+        if public.as_deref() != Some(host.as_str()) && host != format!("127.0.0.1:{port}") && host != format!("localhost:{port}") {
+            return Err(Self::reply(421, json!({ "error": "this gateway doesn't answer for that host" }), &[]));
+        }
+        if header("origin").is_some() {
+            return Err(Self::reply(403, json!({ "error": "the gateway takes no requests from web pages" }), &[]));
+        }
+        let blocked = *self.inner.blocked_until.locked();
+        if blocked > t {
+            let (k, v) = retry_after(blocked - t);
+            return Err(Self::reply(429, json!({ "error": "too many tokens XenoNet doesn't know; wait a minute" }), &[(&k, &v)]));
+        }
+        let token = header("authorization").and_then(bearer_of).map(str::to_string);
+        let auth = match &token {
+            Some(tok) => self.inner.cores.registration.authenticate_gateway(tok),
+            None => json!({ "ok": false, "status": 401, "code": "no-token", "error": "the gateway takes a gateway token, as Authorization: Bearer <token>" }),
+        };
+        if auth["ok"] != json!(true) {
+            self.inner.stats.locked().refused += 1;
+            let code = auth["code"].as_str().unwrap_or("bad-token").to_string();
+            (self.inner.hooks.on_refused)(auth["actor"].as_str(), &code, auth["reason"].as_str(), t);
+            if code != "no-token" && self.inner.buckets.locked().take("bad-tokens", BAD_TOKENS, 1.0, t) != 0.0 {
+                *self.inner.blocked_until.locked() = t + BLOCK_MS;
+            }
+            let status = auth["status"].as_u64().unwrap_or(401) as u16;
+            return Err(Self::reply(status, json!({ "error": auth["error"], "code": code }), &[("www-authenticate", "Bearer realm=\"xenonet-gateway\"")]));
+        }
+        Ok(auth)
+    }
+
+    pub(crate) async fn serve_hyper(&self, req: hyper::Request<hyper::body::Incoming>) -> hyper::Response<crate::serve::OutBody> {
         let method = req.method().as_str().to_string();
         let target = req.uri().to_string();
         let headers = node_headers(req.headers());

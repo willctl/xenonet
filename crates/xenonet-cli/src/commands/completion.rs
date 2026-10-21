@@ -23,6 +23,7 @@ fn args() -> Vec<(&'static str, String)> {
         ("theme", themes),
         ("actor", "list show register heartbeat status event targets inbox send leave remove observe".into()),
         ("hosts", "self add remove test reconnect".into()),
+        ("net", "create join status hosts add-machine remove replace leave set approve gateway".into()),
     ]
 }
 
