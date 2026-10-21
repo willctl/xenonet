@@ -379,6 +379,10 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
                 if let Some(g) = ctx.gateway.get() {
                     g.gateway().set_net(svc.node().clone());
                 }
+                // The engine takes what arrives, and sends through it.
+                if let Some(plug) = &ctx.cores.on_net {
+                    plug(&svc);
+                }
                 let _ = ctx.net.set(svc);
             }
             Err(e) => ctx.log(
