@@ -20,6 +20,7 @@
 // wake anything still waits for the next turn.
 import { EventEmitter } from "node:events";
 import { framed, hashText, isYou } from "./policy.js";
+import { waysOf, served } from "./apps.js";
 
 export const ACK_MS = 60e3;
 const KEEP = 500;
@@ -38,7 +39,7 @@ export class DeliveryRouter extends EventEmitter {
   // Whether a session can be reached without hooks (an OpenCode run XenoNet
   // has a way into), so the engine counts it as reachable.
   reaches(id) {
-    return String(id).startsWith("opencode:") && !!this.opencode && this.policy.consented(id);
+    return served(id) && !!this.opencode && this.policy.consented(id);
   }
 
   // The OpenCode sessions you allowed XenoNet to wake. XenoNet has no
@@ -47,14 +48,14 @@ export class DeliveryRouter extends EventEmitter {
   // touch. Only these: XenoNet doesn't list every OpenCode session it finds.
   known() {
     if (!this.opencode) return [];
-    return Object.keys(this.policy.data?.consent ?? {}).filter((id) => id.startsWith("opencode:") && this.policy.consented(id));
+    return Object.keys(this.policy.data?.consent ?? {}).filter((id) => served(id) && this.policy.consented(id));
   }
 
   // What its own OpenCode says of an OpenCode session (its title, folder,
   // last change, and whether a turn is under way), for the engine's view of
   // a session the map hasn't read; null for any other.
   async describe(id) {
-    if (!String(id).startsWith("opencode:") || !this.opencode?.info) return null;
+    if (!served(id) || !this.opencode?.info) return null;
     return this.opencode.info(id).catch(() => null);
   }
 
@@ -78,9 +79,9 @@ export class DeliveryRouter extends EventEmitter {
     const idle = a.status === "idle" || a.status === "ended";
     if (idle && !this.policy.wakeAllowed(from, a.id, { usage: this.usage(a.app) }).ok) return null;
     if (this.engine.listening?.has(a.id)) return "right away: it's listening for messages";
-    if (a.app === "claude" && a.status === "idle" && this.channels?.live(a.id)) return "right away, through its channel";
+    if (waysOf(a.app)?.channel && a.status === "idle" && this.channels?.live(a.id)) return "right away, through its channel";
     if (a.status === "ended" && this.resumable(a) && this.policy.consented(a.id, { remote: String(from).startsWith("actor:") })) return "right away, in a turn XenoNet resumes it for";
-    if (a.app === "opencode" && this.opencode && this.policy.consented(a.id, { remote: String(from).startsWith("actor:") })) return "right away, through its OpenCode server";
+    if (waysOf(a.app)?.server && this.opencode && this.policy.consented(a.id, { remote: String(from).startsWith("actor:") })) return "right away, through its OpenCode server";
     return null;
   }
 
@@ -132,12 +133,12 @@ export class DeliveryRouter extends EventEmitter {
       // Only to wake an idle one: a working session gets the message from its
       // hooks during the turn under way, sooner than from a channel, which
       // Claude Code holds until that turn ends.
-      if (app === "claude" && idle && this.channels?.live(rec.agent)) {
+      if (waysOf(app)?.channel && idle && this.channels?.live(rec.agent)) {
         if (this.channels.push(rec.agent, { id: m.id, from: fromName, text })) return success("channel");
         tried.push("channel closed");
       }
       // 2. OpenCode's own server, with your consent for that session.
-      if (app === "opencode" && this.opencode) {
+      if (waysOf(app)?.server && this.opencode) {
         if (!this.policy.consented(rec.agent, { remote: m.from.startsWith("actor:") })) tried.push("opencode: no consent");
         else {
           const r = await this.opencode.deliver(rec.agent, text).catch((err) => ({ ok: false, why: err.message }));

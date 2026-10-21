@@ -30,9 +30,15 @@ fn finite(a: &Arg) -> Option<f64> {
     }
 }
 
+/// The plan limits an app has, as live/snapshot/v1 names them (the
+/// registry's limits): Claude Code's or Codex's.
+fn limits_of(app: &Arg) -> Option<&'static str> {
+    xenonet_base::apps::app(app.as_str()?)?.limits.as_deref()
+}
+
 pub fn plan_usage(limits: &Arg, app: &Arg, now: f64) -> Option<f64> {
     let mut pcts = Vec::new();
-    match app.as_str() {
+    match limits_of(app) {
         Some("codex") => {
             let c = limits.field("codex");
             if !c.truthy() || now - num(&c.field("observedAt").or(Arg::num(0.0))) > FRESH_MS {

@@ -14,6 +14,7 @@ pub mod engine;
 pub mod js;
 pub mod jsre;
 pub mod peer;
+pub mod processes;
 pub mod procs;
 pub mod products;
 pub mod sql;

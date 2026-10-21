@@ -1,9 +1,42 @@
 // Hands actions back to the desktop apps through their URL schemes.
 // URLs are built here from nodes the server already knows, never from client input.
 import { spawn } from "node:child_process";
+import { APPS } from "./apps.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DESKTOP_ID = /^local_[A-Za-z0-9-]{1,64}$/;
+
+// What opens a session or project in each app, for the apps the registry
+// gives `open`, by the app's id:
+//
+//   action(node)          the label of the action that opens a session in
+//                         the app, when it offers one
+//   url(node)             the URL that opens a session in the app, or null
+//   newSession            the action that starts a session in a project's
+//                         folder: its id, its label and url(folder)
+//   handoff(folder, text) a new session, filled in with a handoff brief
+const OPENERS = {
+  // Claude desktop opens its own Code sessions by their id, and imports
+  // Claude Code's by theirs.
+  claude: {
+    action: (node) => (node.desktopId && DESKTOP_ID.test(node.desktopId) ? "Open in Claude desktop" : !node.desktopId && UUID.test(node.rawId) ? "Import into Claude desktop" : null),
+    url: (node) => (node.desktopId && DESKTOP_ID.test(node.desktopId) ? `claude://code/continue?session=${encodeURIComponent(node.desktopId)}` : UUID.test(node.rawId) ? `claude://resume?session=${node.rawId}` : null),
+    newSession: { id: "new-claude", label: "New Claude Code session here", url: (folder) => `claude://code/new?folder=${encodeURIComponent(folder)}` },
+    handoff: (folder, text) => `claude://code/new?${new URLSearchParams({ ...(folder ? { folder } : {}), q: text })}`,
+  },
+  // The ChatGPT app opens Codex's threads.
+  codex: {
+    action: (node) => (UUID.test(node.rawId) ? "Open in ChatGPT · Codex" : null),
+    url: (node) => (UUID.test(node.rawId) ? `codex://threads/${node.rawId}` : null),
+    handoff: (folder, text) => `codex://threads/new?${new URLSearchParams({ prompt: text, ...(folder ? { path: folder } : {}) })}`,
+  },
+};
+const OPEN = Object.fromEntries(APPS.filter((a) => a.has?.includes("open") && Object.hasOwn(OPENERS, a.id)).map((a) => [a.id, OPENERS[a.id]]));
+// An app's opener, by its id: none for anything but an id it has.
+const opener = (app) => (typeof app === "string" && Object.hasOwn(OPEN, app) ? OPEN[app] : null);
+// The actions that start a session in a project's folder, one for each app
+// that has one.
+const NEW_SESSION = Object.values(OPEN).flatMap((o) => (o.newSession ? [o.newSession] : []));
 
 // Which actions a node offers. The UI renders these as buttons.
 export function actionsFor(node) {
@@ -17,9 +50,8 @@ export function actionsFor(node) {
     return acts;
   }
   if (node.kind === "session") {
-    if (node.app === "codex" && UUID.test(node.rawId)) acts.push({ id: "open-app", label: "Open in ChatGPT · Codex" });
-    if (node.app === "claude" && node.desktopId && DESKTOP_ID.test(node.desktopId)) acts.push({ id: "open-app", label: "Open in Claude desktop" });
-    if (node.app === "claude" && !node.desktopId && UUID.test(node.rawId)) acts.push({ id: "open-app", label: "Import into Claude desktop" });
+    const label = opener(node.app)?.action(node);
+    if (label) acts.push({ id: "open-app", label });
     acts.push({ id: "preview", label: "Preview transcript", client: true });
     acts.push({ id: "stats", label: "Stats", client: true });
     acts.push({ id: "handoff", label: "Hand off…", client: true });
@@ -30,7 +62,7 @@ export function actionsFor(node) {
   if (node.kind === "project") {
     acts.push({ id: "open-folder", label: "Open folder" });
     acts.push({ id: "open-vscode", label: "Open in VS Code" });
-    acts.push({ id: "new-claude", label: "New Claude Code session here" });
+    for (const n of NEW_SESSION) acts.push({ id: n.id, label: n.label });
   }
   if (node.kind === "zone" && node.path) acts.push({ id: "open-folder", label: "Open folder" });
   return acts;
@@ -40,21 +72,18 @@ export function urlFor(node, action) {
   const folder = node.kind === "session" ? node.worktree || node.cwd : node.path;
   switch (action) {
     case "open-app":
-      if (node.app === "codex" && UUID.test(node.rawId)) return `codex://threads/${node.rawId}`;
-      if (node.app === "claude" && node.desktopId && DESKTOP_ID.test(node.desktopId))
-        return `claude://code/continue?session=${encodeURIComponent(node.desktopId)}`;
-      if (node.app === "claude" && UUID.test(node.rawId)) return `claude://resume?session=${node.rawId}`;
-      return null;
+      return opener(node.app)?.url(node) ?? null;
     case "open-folder":
       return folder ?? null;
     case "open-file":
       return node.kind === "page" ? node.path : null;
     case "open-vscode":
       return folder ? vscodeUrl(folder) : null;
-    case "new-claude":
-      return folder ? `claude://code/new?folder=${encodeURIComponent(folder)}` : null;
-    default:
-      return null;
+    default: {
+      // An app's new session in the folder.
+      const n = NEW_SESSION.find((x) => x.id === action);
+      return n && folder ? n.url(folder) : null;
+    }
   }
 }
 
@@ -72,9 +101,7 @@ export const MAX_BRIEF = 6000;
 // A new session in the other (or same) app, pre-filled with a handoff brief.
 export function handoffUrl(target, folder, brief) {
   const text = String(brief ?? "").slice(0, MAX_BRIEF);
-  if (target === "claude") return `claude://code/new?${new URLSearchParams({ ...(folder ? { folder } : {}), q: text })}`;
-  if (target === "codex") return `codex://threads/new?${new URLSearchParams({ prompt: text, ...(folder ? { path: folder } : {}) })}`;
-  return null;
+  return opener(target)?.handoff(folder, text) ?? null;
 }
 
 // Claude desktop's list of Code sessions that are waiting for you.

@@ -1,6 +1,7 @@
 //! Live delivery (core/delivery/): into a session now, by the fastest way
 //! in that's allowed, under the policy's guards.
 
+pub mod apps;
 pub mod channel;
 pub mod opencode;
 pub mod policy;

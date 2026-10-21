@@ -19,6 +19,7 @@ import { execFile } from "node:child_process";
 import net from "node:net";
 import path from "node:path";
 import { APPS } from "./apps.js";
+import { agentOf } from "./processes.js";
 
 const TABLE_MS = 1500;
 // New Hermes.app bundles a census reads the ids of, at most.
@@ -53,24 +54,10 @@ function run(file, args) {
   return new Promise((resolve, reject) => execFile(file, args, { maxBuffer: 16 * 1024 * 1024, timeout: 5000, windowsHide: true, env: envFor() }, (err, stdout) => (err ? reject(Object.assign(err, { stdout })) : resolve(stdout))));
 }
 
-// The agent app a program is, from its path: Claude Code (the CLI, the
-// native install under ~/.local/share/claude/versions, or the one Claude
-// desktop runs from its claude.app), Codex (the CLI, or the one the
-// ChatGPT app bundles) or OpenCode (its one binary, however it was
-// installed). Programs run by Node or Bun are told by their arguments, when
-// given.
-export function agentOf(program, args = "") {
-  const p = String(program ?? "").replace(/\\/g, "/");
-  const base = path.posix.basename(p);
-  if (base === "claude" || /\/claude\/versions\/[^/]+$/.test(p)) return "claude";
-  if (base === "codex" || /^codex-(aarch64|x86_64)/.test(base)) return "codex";
-  if (base === "opencode" || base === "opencode.exe") return "opencode";
-  if (/^(node|bun)$/.test(base)) {
-    if (/@anthropic-ai\/claude-code\/cli\.js/.test(args)) return "claude";
-    if (/@openai\/codex\//.test(args)) return "codex";
-  }
-  return null;
-}
+// The agent app a program is, from its path: Claude Code, Codex or
+// OpenCode, each by its own rules (processes.js). Programs run by Node or
+// Bun are told by their arguments, when given.
+export { agentOf };
 
 // The apps of actors whose own processes could be relaying for a cloud
 // (docs/design/actors/interface.md, section 5), by their bundle's name:

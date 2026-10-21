@@ -175,43 +175,19 @@ impl<V> PidMap<V> {
 
 pub type Table = PidMap<Row>;
 
-fn posix_basename(p: &str) -> &str {
+pub(crate) fn posix_basename(p: &str) -> &str {
     let t = p.trim_end_matches('/');
     t.rsplit('/').next().unwrap_or(t)
 }
 
-fn slashes(p: &str) -> String {
+pub(crate) fn slashes(p: &str) -> String {
     p.replace('\\', "/")
 }
 
-/// The agent app a program is, from its path: Claude Code (the CLI, the
-/// native install under ~/.local/share/claude/versions, or the one Claude
-/// desktop runs from its claude.app), Codex (the CLI, or the one the
-/// ChatGPT app bundles) or OpenCode (its one binary, however it was
-/// installed). Programs run by Node or Bun are told by their arguments,
-/// when given.
-pub fn agent_of(program: &str, args: &str) -> Option<&'static str> {
-    let p = slashes(program);
-    let base = posix_basename(&p);
-    if base == "claude" || re!(r"\/claude\/versions\/[^/]+$").is_match(&p) {
-        return Some("claude");
-    }
-    if base == "codex" || re!(r"^codex-(aarch64|x86_64)").is_match(base) {
-        return Some("codex");
-    }
-    if base == "opencode" || base == "opencode.exe" {
-        return Some("opencode");
-    }
-    if base == "node" || base == "bun" {
-        if args.contains("@anthropic-ai/claude-code/cli.js") {
-            return Some("claude");
-        }
-        if args.contains("@openai/codex/") {
-            return Some("codex");
-        }
-    }
-    None
-}
+/// The agent app a program is, from its path: Claude Code, Codex or
+/// OpenCode, each by its own rules (`processes`). Programs run by Node or
+/// Bun are told by their arguments, when given.
+pub use crate::processes::agent_of;
 
 /// The apps of actors whose own processes could be relaying for a cloud,
 /// by their bundle's name: Hermes.app (the desktop app, and its setup
