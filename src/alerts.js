@@ -1,6 +1,7 @@
 // The attention strip: programs asking to be actors, agents and actors
-// waiting on you, edit collisions, stuck agents, sessions ready for review,
-// and problems XenoNet's doctor found. Also the tab-title badge, and notifications:
+// waiting on you (on this machine, and in a network on the others), edit
+// collisions, stuck agents, sessions ready for review, and problems
+// XenoNet's doctor found. Also the tab-title badge, and notifications:
 // native ones in the desktop app, the browser's (opt-in) otherwise.
 //
 // Live snapshots arrive several times a second, so the strip is reconciled
@@ -33,8 +34,9 @@ const keyOf = (it) => (it.kind === "review" || it.kind === "requests" ? it.kind 
 // deny(id), open() for the Actors panel, and armed(id) / armsIn(id) for
 // Allow's moment of wait after a card shows. `queue` is the Needs you panel
 // (needs-you.js): count() of what waits on you, and open(), for the
-// strip's button that opens it.
-export function createAlerts({ sfx, select, ack, openApp, collision, doctor = () => {}, requests = null, native = null, queue = null }) {
+// strip's button that opens it. `remote(id)` shows another machine's agent
+// waiting on you, in the Network panel (network.js).
+export function createAlerts({ sfx, select, ack, openApp, collision, doctor = () => {}, requests = null, native = null, queue = null, remote = () => {} }) {
   const el = document.getElementById("alerts");
   const tpl = document.createElement("template");
   const cards = new Map(); // key → { el, sig }
@@ -57,6 +59,9 @@ export function createAlerts({ sfx, select, ack, openApp, collision, doctor = ()
   let armTimer = null;
   // Actors waiting on you (see setActors), after the sessions that are.
   let actorItems = [];
+  // Other machines' agents waiting on you, in a network (see setRemote),
+  // after this machine's.
+  let remoteItems = [];
 
   const title = (id) => index.get(id)?.title ?? id;
 
@@ -95,22 +100,25 @@ export function createAlerts({ sfx, select, ack, openApp, collision, doctor = ()
       const fresh = items.filter((it) => !seen.has(stamp(it)) && it.kind !== "review" && !it.stale && now - (it.since ?? it.at ?? now) < FRESH_MS);
       const front = document.hasFocus();
       const notifies = !!native || ("Notification" in window && Notification.permission === "granted");
-      for (const kind of ["collision", "need", "stuck", "request", "actor-need"]) {
+      for (const kind of ["collision", "need", "stuck", "request", "actor-need", "remote-need"]) {
         // Stuck sessions have no notification to carry a sound, and the
         // server's for a request goes up silent.
         // From where it happened on the map: the session (or actor)
-        // waiting, a collision's two sessions.
-        const first = fresh.find((it) => it.kind === kind);
-        if ((front || !notifies || kind === "stuck" || kind === "request") && first) sfx(kind === "collision" || kind === "stuck" ? kind : "alert", kind === "collision" ? { id: first.a, to: first.b } : kind === "request" ? undefined : { id: first.id });
+        // waiting, a collision's two sessions. Another machine's wait
+        // sounds only on the machine you're at (its chime), and from no
+        // place on this map.
+        const first = fresh.find((it) => it.kind === kind && (kind !== "remote-need" || it.chime));
+        if ((front || !notifies || kind === "stuck" || kind === "request") && first) sfx(kind === "collision" || kind === "stuck" ? kind : "alert", kind === "collision" ? { id: first.a, to: first.b } : kind === "request" || kind === "remote-need" ? undefined : { id: first.id });
       }
       for (const it of fresh) {
         if (it.kind === "need") notify({ key: keyOf(it), id: it.id, title: it.host ? `${it.host} · ${title(it.id)}` : title(it.id), subtitle: it.sub === "asks" ? "is waiting for you" : "needs permission", body: gist(alertText(it)), sound: !front });
         else if (it.kind === "actor-need") notify({ key: keyOf(it), id: it.id, title: it.name, subtitle: it.sub === "needs permission" ? "needs permission" : "is waiting for you", body: it.text, sound: !front });
+        else if (it.kind === "remote-need" && it.chime) notify({ key: keyOf(it), id: it.id, title: `${it.host} · ${it.name}`, subtitle: it.sub, body: gist(it.text), sound: !front });
         else if (it.kind === "collision") notify({ key: keyOf(it), id: it.a, title: it.host ? `${it.host} · Two sessions edited the same file` : "Two sessions edited the same file", subtitle: it.files.join(", "), body: `${title(it.a)} and ${title(it.b)}`, sound: !front });
       }
       // Answered, dismissed or gone: take its notification back.
       const live = new Set(items.map(keyOf));
-      withdraw([...seen].map((s) => s.slice(0, s.lastIndexOf("@"))).filter((k) => !live.has(k) && (k.startsWith("need:") || k.startsWith("actor-need:") || k.startsWith("collision:"))));
+      withdraw([...seen].map((s) => s.slice(0, s.lastIndexOf("@"))).filter((k) => !live.has(k) && (k.startsWith("need:") || k.startsWith("actor-need:") || k.startsWith("remote-need:") || k.startsWith("collision:"))));
     }
     seen = current;
   }
@@ -126,6 +134,7 @@ export function createAlerts({ sfx, select, ack, openApp, collision, doctor = ()
     const review = need.filter((s) => s.needsYou.kind === "review");
     for (const s of strong) items.push({ kind: "need", id: s.id, app: s.app, text: s.needsYou.text, sub: s.needsYou.kind === "permission" ? "needs permission" : "asks", since: s.needsYou.since, ...alertFrom(s) });
     items.push(...actorItems);
+    items.push(...remoteItems);
     for (const c of snap.collisions ?? []) items.push({ kind: "collision", id: `${c.a}|${c.b}`, a: c.a, b: c.b, files: c.files, sameBranch: c.sameBranch, branches: c.branches, at: c.ts, ...collisionFrom(c) });
     for (const s of snap.sessions.filter((x) => x.stuck && index.has(x.id))) items.push({ kind: "stuck", id: s.id, app: s.app, text: s.stuck.reasons.join(" · "), ...alertFrom(s) });
     // Only this machine's can be dismissed from here: hosts are read-only.
@@ -188,6 +197,14 @@ export function createAlerts({ sfx, select, ack, openApp, collision, doctor = ()
       return `<div class="al need actor-need" data-al-goto="${h(it.id)}">
         <span class="al-icon">◉</span>
         <div class="al-body"><div class="al-title"><span class="al-actor" title="An actor">◇</span><span class="al-name">${h(it.name)}</span> <em>${h(it.sub)}</em><span class="al-time" data-since="${h(it.since)}">${timeAgo(it.since)}</span></div><div class="al-text">${h(it.text)}</div></div>
+      </div>`;
+    // Another machine's agent waiting on you: where it is, and what it
+    // asks, as the network carries it. It has no node on this map yet, so
+    // it opens the Network panel at its machine.
+    if (it.kind === "remote-need")
+      return `<div class="al need remote-need" data-al-remote="${h(it.id)}">
+        <span class="al-icon">◉</span>
+        <div class="al-body"><div class="al-title"><i class="sw ${h(it.app ?? "")}"></i><span class="al-name">${h(it.name)}</span> <em>${h(it.sub)}</em>${alertHostHtml(it)}<span class="al-time" data-since="${h(it.since)}">${timeAgo(it.since)}</span></div><div class="al-text" title="${h(alertText(it))}">${h(gist(alertText(it)))}</div></div>
       </div>`;
     if (it.kind === "need")
       return `<div class="al need" data-al-goto="${h(it.id)}">
@@ -374,6 +391,8 @@ export function createAlerts({ sfx, select, ack, openApp, collision, doctor = ()
       sfx("toggle");
       return render();
     }
+    const far = e.target.closest("[data-al-remote]");
+    if (far) return remote(far.dataset.alRemote);
     const col = e.target.closest("[data-al-collision]");
     if (col) {
       const [a, b] = col.dataset.alCollision.split("|");
@@ -403,6 +422,12 @@ export function createAlerts({ sfx, select, ack, openApp, collision, doctor = ()
       // marked, which Allow makes the token for.
       const asks = view?.off ? [] : (view?.gatewayAsks ?? []);
       requestItems = view?.canDecide ? [...list.map((r) => ({ kind: "request", id: r.id, request: r, since: r.at })), ...asks.map((g) => ({ kind: "request", id: g.id, request: { ...g, gateway: true }, since: g.at }))] : view?.waiting > 0 && !view.off ? [{ kind: "requests", count: view.waiting }] : [];
+      if (lastSnap) update(lastSnap, index);
+    },
+    // Other machines' agents waiting on you (network-model.js's
+    // remoteWaits): a card each, with its machine.
+    setRemote(list) {
+      remoteItems = Array.isArray(list) ? list : [];
       if (lastSnap) update(lastSnap, index);
     },
     // The actors' list (actor/list/v1): those waiting on you join the strip.
