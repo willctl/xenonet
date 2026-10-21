@@ -11,8 +11,8 @@
 //!   the hook the core's route asks first);
 //! - the network's writes from the window (ticket, replace, remove,
 //!   settings, create, join, leave), on the simulated state;
-//! - GET /api/engine/agents, with the simulated hosts' agents after this
-//!   machine's own;
+//! - GET /api/engine/state and GET /api/engine/agents, with the simulated
+//!   hosts' agents after this machine's own;
 //! - POST /api/actors/you/message to a simulated host's agent, which goes
 //!   into the simulated outbox while its host is away.
 //!
@@ -140,6 +140,14 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreE
             let mut list = ctx.cores.engine.agents().await.ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
             list.extend(simulated_remote_agents(ctx).unwrap_or_default());
             Ok(Some(Reply::json(200, Value::Array(list))))
+        }
+        // The engine's state lists other hosts' agents after this one's.
+        ("GET", "/api/engine/state") => {
+            let mut state = ctx.cores.engine.snapshot().await.ok().filter(Value::is_object).unwrap_or_else(|| json!({ "agents": [], "messages": [] }));
+            let mut list = state["agents"].as_array().cloned().unwrap_or_default();
+            list.extend(simulated_remote_agents(ctx).unwrap_or_default());
+            state["agents"] = Value::Array(list);
+            Ok(Some(Reply::json(200, state)))
         }
         ("POST", "/api/actors/you/message") => message(ctx, req).await,
         ("POST", "/api/net/ticket" | "/api/net/replace" | "/api/net/remove" | "/api/net/create" | "/api/net/join" | "/api/net/leave") | ("PUT", "/api/net/settings") => {
@@ -724,6 +732,12 @@ mod tests {
         assert!(simulate(&ctx, "net-founder", None).is_some());
         assert_eq!(get(ctx.clone()).await["network"]["name"], "home");
         assert!(simulated_net_state(&ctx).is_some());
+        // The engine's state and its list have the other hosts' agents.
+        for path in ["/api/engine/state", "/api/engine/agents"] {
+            let got = route(&ctx, &mut Req::fake("GET", path, &[], None)).await.unwrap().unwrap().body_json();
+            let list = if path.ends_with("state") { got["agents"].clone() } else { got };
+            assert!(list.as_array().unwrap().iter().any(|a| a["host"] == "laptop"), "{path}");
+        }
         // Another service's simulation is its own.
         assert!(simulated_net_state(&dev_ctx()).is_none());
         assert!(clear(&ctx) && !clear(&ctx));

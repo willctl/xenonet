@@ -68,16 +68,32 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     timer = setTimeout(() => void refresh().catch(() => {}), inNetwork(state) ? EVERY_IN : EVERY_OUT);
   }
 
+  // A read, with the window's key where this window has it: the network's
+  // routes are the owner's.
   async function getJson(path) {
+    if (await calls.ready?.()) {
+      const r = await calls.call("GET", path);
+      return r.ok ? r.data : null;
+    }
     const res = await request(path);
     return res.ok ? res.json() : null;
+  }
+
+  // Other machines' agents, as the engine has them: in its state, beside
+  // this machine's, and else in its list of agents at work.
+  async function engineAgents() {
+    const state = await getJson("/api/engine/state").catch(() => null);
+    const list = Array.isArray(state?.agents) ? state.agents : [];
+    if (list.some((a) => typeof a?.id === "string" && a.id.startsWith("@"))) return list;
+    const at = await getJson("/api/engine/agents").catch(() => null);
+    return Array.isArray(at) ? at : list;
   }
 
   // The state and other machines' agents, read again.
   async function refresh() {
     const n = ++seq;
     const next = stateOf(await getJson("/api/net/state").catch(() => null));
-    const list = inNetwork(next) ? await getJson("/api/engine/agents").catch(() => null) : [];
+    const list = inNetwork(next) ? await engineAgents() : [];
     if (n !== seq) return state;
     state = next;
     agents = remoteAgents(list);
