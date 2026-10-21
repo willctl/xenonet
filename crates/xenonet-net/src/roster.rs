@@ -40,6 +40,12 @@ use xenonet_base::ids::is_host_id;
 
 pub const ROSTER_TAG: &str = "xenonet-roster/1";
 pub const MAX_SIGNERS: usize = 4;
+/// The longest gateway address an entry carries, in bytes.
+pub const ADDRESS_MAX: usize = 300;
+
+fn address_ok(address: &str) -> bool {
+    !address.is_empty() && address.len() <= ADDRESS_MAX
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
@@ -164,6 +170,37 @@ impl Entry {
         self.op == other.op && self.host == other.host && self.gateway == other.gateway && self.network == other.network
     }
 
+    /// What `parse` holds an entry to, for one made on this host: the
+    /// roster takes only an entry it can read back from its own file, and
+    /// that the other hosts can read from its frame.
+    pub fn well_formed(&self) -> R<()> {
+        let bad = |what: &str| NetError::bad(format!("a roster entry's {what} isn't right"));
+        if !crate::codec::is_b64(&self.prev) {
+            return Err(bad("prev"));
+        }
+        if !is_network_id(&self.network) {
+            return Err(bad("network"));
+        }
+        if !is_host_id(&self.host.id) {
+            return Err(bad("host id"));
+        }
+        if self.gateway.as_ref().is_some_and(|g| !address_ok(&g.address)) {
+            return Err(bad("gateway address"));
+        }
+        if self.signers.is_empty() || self.signers.len() > MAX_SIGNERS {
+            return Err(bad("signers"));
+        }
+        for s in &self.signers {
+            if !is_host_id(&s.host) {
+                return Err(bad("signer"));
+            }
+            if s.sig.len() != 64 {
+                return Err(bad("signature"));
+            }
+        }
+        Ok(())
+    }
+
     pub fn parse(v: &Value) -> R<Entry> {
         let bad = |what: &str| NetError::bad(format!("a roster entry's {what} isn't right"));
         let n = v.get("n").and_then(Value::as_u64).ok_or_else(|| bad("index"))?;
@@ -180,7 +217,7 @@ impl Entry {
         let gateway = match v.get("gateway") {
             None | Some(Value::Null) => None,
             Some(g) => Some(GatewayAt {
-                address: g.get("address").and_then(Value::as_str).filter(|a| !a.is_empty() && a.len() <= 300).ok_or_else(|| bad("gateway address"))?.to_string(),
+                address: g.get("address").and_then(Value::as_str).filter(|a| address_ok(a)).ok_or_else(|| bad("gateway address"))?.to_string(),
                 version: g.get("version").and_then(Value::as_u64).ok_or_else(|| bad("gateway version"))?,
             }),
         };
@@ -271,6 +308,10 @@ fn check(view: Option<&View>, prev: &str, n: u64, e: &Entry) -> R<()> {
     if e.prev != prev {
         return Err(NetError::new(409, "roster-fork", "that entry doesn't follow the roster's head"));
     }
+    // An entry made here goes to roster.json and to the other hosts, which
+    // read it with `parse`: one it couldn't read back would leave this
+    // host's file unreadable and the others a gap they can't fill.
+    e.well_formed()?;
     let mut seen = Vec::new();
     for s in &e.signers {
         if seen.contains(&s.host.as_str()) {
@@ -286,9 +327,6 @@ fn check(view: Option<&View>, prev: &str, n: u64, e: &Entry) -> R<()> {
         }
         if e.signers.len() != 1 || e.signers[0].host != e.host.id || !e.host.keys.verify(&msg, &e.signers[0].sig) {
             return Err(refused("the founder signs the first entry, alone"));
-        }
-        if !is_network_id(&e.network) {
-            return Err(NetError::bad("that isn't a network id"));
         }
         return Ok(());
     };
@@ -730,6 +768,32 @@ mod tests {
         assert_eq!(r.offer(e).unwrap_err().code, "taken");
         let e = h.entry(&r, Op::Add, HostRef { id: "other".into(), ..h.r("spare", false) }, &["desk"]);
         assert_eq!(r.offer(e).unwrap_err().code, "taken");
+    }
+
+    #[test]
+    fn an_entry_the_roster_couldnt_read_back_is_refused() {
+        let h = hosts();
+        let mut r = network(&h);
+        // A gateway entry made here with an address past 300 bytes was
+        // taken, and then roster.json didn't read.
+        let long = GatewayAt { address: "\u{fffd}".repeat(101), version: 1 };
+        let mut e = r.draft(Op::Gateway, h.r("desk", true), Some(long), 5);
+        e.sign_by("studio", &h.keys["studio"]);
+        assert_eq!(r.clone().offer(e).unwrap_err().code, "bad-request");
+        let mut e = r.draft(Op::Gateway, h.r("desk", true), Some(GatewayAt { address: String::new(), version: 1 }), 5);
+        e.sign_by("studio", &h.keys["studio"]);
+        assert_eq!(r.clone().offer(e).unwrap_err().code, "bad-request", "nor an empty one");
+        // A host id that isn't one.
+        let mut e = r.draft(Op::Add, HostRef { id: "Spare Host".into(), ..h.r("spare", false) }, None, 5);
+        e.sign_by("studio", &h.keys["studio"]);
+        assert_eq!(r.clone().offer(e).unwrap_err().code, "bad-request");
+        // Five signers, where an entry carries four at most.
+        let e = h.entry(&r, Op::Add, h.r("tablet", false), &["studio"]);
+        r.offer(e).unwrap();
+        let e = h.entry(&r, Op::Add, h.r("spare", true), &["studio", "desk", "nook", "laptop", "tablet"]);
+        assert_eq!(r.clone().offer(e).unwrap_err().code, "bad-request");
+        let back = Roster::from_json(&r.to_json()).unwrap();
+        assert_eq!(back.view(), r.view());
     }
 
     #[test]
