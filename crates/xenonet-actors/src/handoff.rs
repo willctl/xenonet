@@ -16,9 +16,16 @@ pub struct Handoff {
 }
 
 /// For `product`, at `url` (whose host is `host`), with a new `token` or
-/// none (a new address alone).
+/// none (a new address alone). For an agent that speaks A2A (product
+/// "a2a"), `url` is XenoNet's Agent Card, and the token goes as A2A's bearer.
 pub fn handoff(product: Option<&str>, url: &str, host: &str, token: Option<&str>) -> Handoff {
     match (product, token) {
+        (Some("a2a"), Some(_)) => Handoff {
+            app: Some("A2A agent"),
+            steps: vec![("Give the agent XenoNet's Agent Card URL.", Some("url")), ("Have it send the token in the header Authorization: Bearer <token>.", Some("token"))],
+            message: None,
+        },
+        (Some("a2a"), None) => Handoff { app: Some("A2A agent"), steps: vec![("Give the agent XenoNet's new Agent Card URL. Its token still works.", Some("url"))], message: None },
         (Some("grok-bot"), Some(token)) => Handoff {
             app: Some("Grok Bot"),
             steps: vec![("Paste this into a new Grok Bot chat.", Some("message")), ("Once it's added, delete that chat: the token stays in it.", None), ("For answers within seconds, give XenoNet a way to wake it.", Some("wake"))],

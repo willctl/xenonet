@@ -1270,6 +1270,7 @@
     }
   },
   "tests": [
+    "test/a2a.test.js",
     "test/actor-detail.test.js",
     "test/actor-gateway.test.js",
     "test/actor-limits.test.js",

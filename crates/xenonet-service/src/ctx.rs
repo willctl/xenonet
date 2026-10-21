@@ -30,6 +30,8 @@ pub struct Ctx {
     pub components: Mutex<Option<Arc<Components>>>,
     /// The actor gateway's switch, made once the service is (it logs to it).
     pub gateway: std::sync::OnceLock<Arc<GatewayControl>>,
+    /// A2A agents' side of the gateway (a2a/), made with it.
+    pub a2a: std::sync::OnceLock<Arc<crate::a2a::A2a>>,
     pub endpoint: Mutex<Option<Arc<crate::assistant_endpoint::Endpoint>>>,
     pub themes_dir: String,
     pub music: Mutex<Music>,
@@ -85,6 +87,7 @@ impl Ctx {
             caller,
             components: Mutex::new(None),
             gateway: std::sync::OnceLock::new(),
+            a2a: std::sync::OnceLock::new(),
             endpoint: Mutex::new(None),
             themes_dir,
             music: Mutex::new(Music::default()),

@@ -27,6 +27,8 @@ hyper-util.workspace = true
 # has node-pty).
 portable-pty = "0.9"
 reqwest.workspace = true
+# A2A's task table, <state>/a2a.sqlite (a2a/store.rs).
+rusqlite.workspace = true
 rustls.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

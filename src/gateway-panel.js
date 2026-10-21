@@ -101,16 +101,19 @@ export const readPick = (body, pick) => ({ ...pick, ...(body.querySelector("[dat
 // once, numbered steps with what each copies, and a last one that waits
 // for the app's first call; and, when the gateway's address changed, the
 // steps that give an app the new one. `a` is the actor, if XenoNet knows it,
-// and `again` whether its app has a gateway token already.
-export function gatewayAskHtml(v, { gateway, a, name: who, again }) {
+// `again` whether its app has a gateway token already, and `a2a` the Agent
+// Card's address while A2A agents may reach XenoNet (a2a-panel.js), for an
+// agent that speaks A2A rather than MCP.
+export function gatewayAskHtml(v, { gateway, a, name: who, again, a2a = null }) {
   const name = h(who);
   if (!gateway?.on || !gateway?.url)
     return `<p class="ac-lead">Set up the gateway first</p><p class="pj-note">${name}'s app needs an address on the internet to reach.</p>
         <div class="m-foot"><button class="act" data-ac-back>Cancel</button><span class="grow"></span><button class="act primary" data-ac-gateway-setup data-yours>Set up…</button></div>`;
   const joins = a && !a.via?.includes("registered") ? ` ${name} reports itself from then on.` : "";
+  const viaA2a = a2a ? `<button class="act" data-ac-gateway-make="${h(v.id)}" data-ac-kind="a2a" data-yours title="For an agent that speaks A2A: it gets the Agent Card's address and the token">As an A2A agent</button>` : "";
   return `<p class="ac-lead">Let ${name} message the sessions here from its cloud?</p>
-      <p class="pj-note">XenoNet makes a token for ${name}'s app${again ? ", and the old one stops working" : ""}.${joins}</p>
-      <div class="m-foot"><button class="act" data-ac-back>Cancel</button><span class="grow"></span><button class="act primary" data-ac-gateway-make="${h(v.id)}" data-yours>${again ? "Make a new token" : "Connect"}</button></div>`;
+      <p class="pj-note">XenoNet makes a token for ${name}'s app${again ? ", and the old one stops working" : ""}.${joins}${a2a ? " An agent that speaks A2A uses it with XenoNet's Agent Card." : ""}</p>
+      <div class="m-foot"><button class="act" data-ac-back>Cancel</button><span class="grow"></span>${viaA2a}<button class="act primary" data-ac-gateway-make="${h(v.id)}" data-yours>${again ? "Make a new token" : "Connect"}</button></div>`;
 }
 
 // The steps, each with its Copy and what it copies: the message (masked
