@@ -253,6 +253,10 @@ xenonet-net/1
 - The body is ChaCha20-Poly1305 with a zero nonce (each key is used once),
   the head as associated data, and the ephemeral public key in front of
   the ciphertext.
+- The head's last line is the hash of the sealed bytes, which only exist
+  once sealing is done, so sealing binds the head's first eight lines. The
+  signature, made after, covers all nine. `test/fixtures/net/` has known
+  answers for all of it.
 - A frame for every host (presence, claims) is sealed once per host.
 - The gateway sees the head: who, to whom, the kind, the size and the
   time.
@@ -279,6 +283,7 @@ What each `op` needs:
 | `add` a window host, `window` on, `remove` a window host, `gateway` | the founder, or two different window hosts |
 | `remove` a host that isn't a window host | any window host |
 | `remove` the founder | nobody: a network whose founder is lost is made again |
+| `remove` itself (leaving), any host but the founder | that host |
 
 **How hosts use it:**
 
@@ -756,6 +761,7 @@ never trusted as a particular process, and weak checks travel as weak.
 | `GET link` | hosts | The down stream |
 | `POST frames` | hosts | The up batch |
 | `GET roster` | hosts | The chain from an index |
+| `POST roster` | hosts | An entry the sending host signed; the roster's rules decide |
 
 A request with an `Origin` is refused. `Host` must be the gateway's
 address.
@@ -779,7 +785,11 @@ address.
   gateway's address and key id.
 - `<state>/network/roster.json`: the chain.
 - `<state>/network/net.sqlite`: the outbox, frame ids seen, and the epoch
-  and `seq` per gateway.
+  and `seq` per gateway. A frame leaves the outbox once the gateway accepts
+  it; the gateway keeps it until the host it's for has read it. A frame
+  the gateway lets go is a `gap` to both hosts, and a new epoch is one
+  too: the engine then sends again the messages with no `stored` receipt.
+- `<state>/network/link.json`: how the link last stood, for the doctor.
 - `<state>/network/gateway.sqlite`, on the gateway only: tickets (hashed),
   queues, frame ids, the epoch, and the last presence of each host.
 - `engine.sqlite` gains:
