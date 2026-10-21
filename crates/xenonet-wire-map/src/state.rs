@@ -498,7 +498,7 @@ impl MapState {
         sources.push(json!({ "name": "live", "ok": live.watching, "count": live.files }));
         let mut wiki_st = json!({ "name": "wiki", "ok": wiki.is_some(), "count": wiki.as_ref().map_or(0, |w| items(w.get("pages")).len()) });
         if wiki.is_none() {
-            wiki_st["error"] = json!("Agent Wiki folder not found");
+            wiki_st["error"] = json!("Xenolith folder not found");
         }
         sources.push(wiki_st);
         sources.push(json!({ "name": "search", "ok": !truthy(search.get("errors")), "count": search.get("docs").cloned().unwrap_or(Value::Null), "ms": search.get("ms").cloned().unwrap_or(Value::Null) }));
@@ -915,14 +915,19 @@ impl MapState {
             }
             "wiki-write" => {
                 ia?;
+                // A note logged through the server that owns the map's
+                // wiki: Xenolith's context_log, or wiki_log for a wiki from
+                // before it.
+                let server = self.cfg.wiki_server.as_str().unwrap_or("xenolith").to_string();
+                let tool = if server == "agent-wiki" { "wiki_log" } else { "context_log" };
                 acts.push((
                     a.clone().unwrap_or_default(),
                     f(vec![
                         ("kind", json!("tool")),
-                        ("tool", json!("mcp__agent-wiki__wiki_log")),
+                        ("tool", json!(format!("mcp__{server}__{tool}"))),
                         ("category", json!("mcp")),
-                        ("detail", json!("agent-wiki.wiki_log")),
-                        ("server", json!("agent-wiki")),
+                        ("detail", json!(format!("{server}.{tool}"))),
+                        ("server", json!(server)),
                         ("pages", json!(["xenonet", "ledger"])),
                         ("files", json!([])),
                         ("ts", num(now)),

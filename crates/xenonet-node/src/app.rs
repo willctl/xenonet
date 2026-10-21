@@ -98,7 +98,7 @@ pub fn app_demo_root_use_sibling(platform: String, code: Option<String>) -> bool
 
 struct JsFinds<'a> {
     world: Function<'a, (), Json>,
-    context_dir: Function<'a, (), Option<String>>,
+    context: Function<'a, (), Json>,
     context_server: Function<'a, Option<String>, Json>,
     claude_desktop_dir: Function<'a, (), Option<String>>,
     failed: Option<Error>,
@@ -121,8 +121,8 @@ impl config::Finds for JsFinds<'_> {
         let r = self.world.call(()).map(|j| j.0);
         self.keep(r)
     }
-    fn context_dir(&mut self) -> Option<String> {
-        let r = self.context_dir.call(());
+    fn context(&mut self) -> Value {
+        let r = self.context.call(()).map(|j| j.0);
         self.keep(r)
     }
     fn context_server(&mut self, dir: Option<&str>) -> Value {
@@ -144,7 +144,7 @@ pub fn app_config(
     home: String,
     platform: String,
     world: Function<'_, (), Json>,
-    context_dir: Function<'_, (), Option<String>>,
+    context: Function<'_, (), Json>,
     context_server: Function<'_, Option<String>, Json>,
     claude_desktop_dir: Function<'_, (), Option<String>>,
 ) -> Result<Jv> {
@@ -152,7 +152,7 @@ pub fn app_config(
         Value::Object(m) => m,
         _ => serde_json::Map::new(),
     };
-    let mut finds = JsFinds { world, context_dir, context_server, claude_desktop_dir, failed: None };
+    let mut finds = JsFinds { world, context, context_server, claude_desktop_dir, failed: None };
     let c = config::config(&argv, &env, &home, &platform, &mut finds);
     if let Some(e) = finds.failed {
         return Err(e);

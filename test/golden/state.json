@@ -1625,10 +1625,10 @@
     "actions": []
    },
    {
-    "id": "resource:agent-wiki",
+    "id": "resource:xenolith",
     "kind": "wiki",
-    "name": "Agent Wiki",
-    "server": "agent-wiki",
+    "name": "Xenolith",
+    "server": "xenolith",
     "path": "<world>/home/wiki",
     "pageCount": 5,
     "inbox": [
@@ -1962,31 +1962,31 @@
    },
    {
     "source": "core",
-    "target": "resource:agent-wiki",
+    "target": "resource:xenolith",
     "kind": "wiki"
    },
    {
-    "source": "resource:agent-wiki",
+    "source": "resource:xenolith",
     "target": "wiki:atlas-api",
     "kind": "page"
    },
    {
-    "source": "resource:agent-wiki",
+    "source": "resource:xenolith",
     "target": "wiki:ledger",
     "kind": "page"
    },
    {
-    "source": "resource:agent-wiki",
+    "source": "resource:xenolith",
     "target": "wiki:q4-close",
     "kind": "page"
    },
    {
-    "source": "resource:agent-wiki",
+    "source": "resource:xenolith",
     "target": "wiki:refunds",
     "kind": "page"
    },
    {
-    "source": "resource:agent-wiki",
+    "source": "resource:xenolith",
     "target": "wiki:staging-cluster",
     "kind": "page"
    },

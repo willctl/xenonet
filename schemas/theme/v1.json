@@ -254,7 +254,7 @@
       "additionalProperties": {}
     },
     "pages": {
-      "description": "Agent Wiki page types",
+      "description": "Wiki page types",
       "type": "object",
       "properties": {
         "project": {

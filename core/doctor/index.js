@@ -141,7 +141,7 @@ const unreadable = (tool) => `${tool} answered in a way XenoNet doesn't read; up
 const privacyFix = (ctx, what) =>
   ctx.platform === "darwin" ? `Let XenoNet read ${what}: System Settings › Privacy & Security › Files and Folders (or Full Disk Access), then restart XenoNet.` : `Check the permissions on ${what}.`;
 
-// The sources of the map that xenonet.sources reports as failed: Agent Wiki
+// The sources of the map that xenonet.sources reports as failed: Xenolith
 // and identities are extras, so theirs go without a word.
 const OPTIONAL_SOURCES = new Set(["wiki", "identities"]);
 const failedSources = (health) => (health?.sources ?? []).filter((s) => !s.ok && !OPTIONAL_SOURCES.has(s.name));

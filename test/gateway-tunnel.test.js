@@ -13,7 +13,7 @@ import { createTunnel, tailscaleSelf, funnelOf, readLine, childArgs, findTools, 
 import { checkReach } from "../server/gateway-reach.js";
 import { handoff } from "../core/actors/handoff.js";
 
-const PORT = 47850;
+const PORT = 48850;
 const HOST = "mac.example-tailnet.ts.net";
 const APP = "/Applications/Tailscale.app/Contents/MacOS/Tailscale";
 const BREW = "/opt/homebrew/bin/tailscale";
@@ -52,7 +52,7 @@ test("Tailscale's status and Funnel's settings, as the gateway needs them", () =
   assert.deepEqual(funnelOf({}, HOST, PORT), { state: "none" });
   assert.deepEqual(funnelOf(JSON.parse(served(`http://127.0.0.1:${PORT}`)), HOST, PORT), { state: "ours" });
   assert.deepEqual(funnelOf(JSON.parse(served(`http://localhost:${PORT}`, { allow: false })), HOST, PORT), { state: "tailnet" });
-  assert.deepEqual(funnelOf(JSON.parse(served("http://127.0.0.1:47852")), HOST, PORT), { state: "elsewhere", target: "http://127.0.0.1:47852" });
+  assert.deepEqual(funnelOf(JSON.parse(served("http://127.0.0.1:48852")), HOST, PORT), { state: "elsewhere", target: "http://127.0.0.1:48852" });
   assert.deepEqual(funnelOf(JSON.parse(served(`http://127.0.0.1:${PORT}`, { more: true })), HOST, PORT), { state: "shared", target: "/, /grafana" });
 });
 
@@ -85,9 +85,9 @@ test("Tailscale Funnel: set up with the command that matches the running Tailsca
 });
 
 test("Tailscale Funnel: what it already forwards elsewhere is left alone until Repair, other paths never, and what Tailscale asks for is passed on", async () => {
-  const elsewhere = tailscaleHere({ funnel: served("http://127.0.0.1:47852"), onFunnel: () => ({ ok: true, stdout: "", stderr: "", conf: served(`http://127.0.0.1:${PORT}`) }) });
+  const elsewhere = tailscaleHere({ funnel: served("http://127.0.0.1:48852"), onFunnel: () => ({ ok: true, stdout: "", stderr: "", conf: served(`http://127.0.0.1:${PORT}`) }) });
   const t1 = createTunnel({ port: PORT, env: { PATH: "" }, platform: "darwin", exists: elsewhere.exists, run: elsewhere.run });
-  assert.match((await t1.up({ kind: "tailscale" })).why, /already forwards to http:\/\/127\.0\.0\.1:47852, not to this XenoNet's gateway: Repair points it here/);
+  assert.match((await t1.up({ kind: "tailscale" })).why, /already forwards to http:\/\/127\.0\.0\.1:48852, not to this XenoNet's gateway: Repair points it here/);
   assert.equal(elsewhere.ran.some((r) => r[2] === "--bg"), false);
   assert.equal((await t1.up({ kind: "tailscale" }, { takeOver: true })).state, "up");
   // Turning off leaves what isn't this gateway's alone.

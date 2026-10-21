@@ -58,7 +58,7 @@ const xenonet = {
   identities: ["#8fa8ff", "#ff8fb3", "#f2ead3", "#7ef0dd", "#b69bff"],
   // What an agent is doing, by tool family.
   categories: { shell: "#7cf7ff", edit: "#ffd76a", read: "#8ab4ff", web: "#c792ff", mcp: "#ff7ad9", agent: "#ffffff", code: "#5dffc1", other: "#9fb3c8" },
-  // Agent Wiki page types.
+  // Wiki page types.
   pages: { project: "#7fe7ff", preference: "#ffd76a", reference: "#c9b8ff", howto: "#7dffb2", decision: "#ffa36b", person: "#ff9be4", topic: "#e8f4ff" },
   // Titles and the map's labels (display), code and numbers (mono), and the
   // panels' body text (body), which is the display font unless a theme

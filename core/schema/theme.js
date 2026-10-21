@@ -39,7 +39,7 @@ export const Theme = define(
       .optional()
       .describe("The rings named identities' projects stand on: five colors that mean nothing else on the map. One a theme brings close to a color with a meaning is swapped for a spare"),
     categories: colors(["shell", "edit", "read", "web", "mcp", "agent", "code", "other"]).optional().describe("What an agent is doing, by tool family"),
-    pages: colors(["project", "preference", "reference", "howto", "decision", "person", "topic"]).optional().describe("Agent Wiki page types"),
+    pages: colors(["project", "preference", "reference", "howto", "decision", "person", "topic"]).optional().describe("Wiki page types"),
     fonts: obj({
       display: z.string().optional().describe("Titles, and the map's labels"),
       mono: z.string().optional(),

@@ -7,8 +7,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { contextName, contextServerOf, findContextDir, isContextServer } from "../core/xenolith.js";
-import { readWiki } from "../core/wiki.js";
+import { contextName, contextServerOf, findContextDir, isContextServer, SPACE_KINDS, spaceOf } from "../core/xenolith.js";
+import { parseLog, readWiki, wikiLinks } from "../core/wiki.js";
 import { buildGraph } from "../core/graph.js";
 import { GRAPH_NODES } from "../core/schema/graph.js";
 import { LiveTelemetry, mcpServerOf } from "../core/live.js";
@@ -73,18 +73,75 @@ test("the shared context is Xenolith's where Xenolith is, else Agent Wiki's", ()
   assert.deepEqual(findContextDir({ env: {}, home: old, platform: "darwin" }), { dir: path.join(old, "kept"), server: "agent-wiki" }, "the pre-1.3 config");
 });
 
-test("a wiki folder belongs to the server its protocol names", () => {
-  assert.equal(contextServerOf(wikiAt(tmp(), "# Xenolith protocol\n\nThis folder is...")), "xenolith");
-  assert.equal(contextServerOf(wikiAt(tmp(), "# Agent Wiki protocol\n")), "agent-wiki");
-  assert.equal(contextServerOf(wikiAt(tmp())), "agent-wiki", "no protocol: as XenoNet always read it");
-  assert.equal(contextServerOf(null), null);
+test("Xenolith's config is found where Xenolith's own programs look", () => {
+  const home = tmp();
+  const find = (env = {}) => findContextDir({ env, home, platform: "linux" });
+  const config = (dir, wikiDir) => {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ wikiDir }));
+  };
+
+  // XENOLITH_DIR counts before Xenolith has made the folder.
+  const later = path.join(home, "not-yet");
+  assert.deepEqual(find({ XENOLITH_DIR: later }), { dir: later, server: "xenolith" });
+  assert.equal(fs.existsSync(later), false, "XenoNet only reads");
+  assert.equal(findContextDir({ env: { AGENT_WIKI_DIR: later }, home, platform: "linux" }), null, "Agent Wiki's must be there");
+
+  // The config from before the platform's folder, ~/.xenolith/config.json,
+  // until one is in the platform's folder.
+  const legacyWiki = wikiAt(path.join(home, "legacy"));
+  config(path.join(home, ".xenolith"), legacyWiki);
+  assert.deepEqual(find(), { dir: legacyWiki, server: "xenolith" });
+  const portable = tmp();
+  assert.equal(find({ XENOLITH_HOME: portable }), null, "never in portable mode");
+  assert.equal(find({ XENOLITH_CONFIG_DIR: "" }), null, "nor with XENOLITH_CONFIG_DIR set at all");
+  const newWiki = wikiAt(path.join(home, "new"));
+  config(path.join(home, ".config", "xenolith"), newWiki);
+  assert.deepEqual(find(), { dir: newWiki, server: "xenolith" });
+
+  // XENOLITH_CONFIG_DIR wins over XENOLITH_HOME, as a folder of its own
+  // does over portable mode.
+  const cfgWiki = wikiAt(path.join(home, "cfg-wiki"));
+  config(path.join(home, "cfg"), cfgWiki);
+  config(portable, legacyWiki);
+  assert.equal(find({ XENOLITH_HOME: portable })?.dir, legacyWiki);
+  assert.equal(find({ XENOLITH_HOME: portable, XENOLITH_CONFIG_DIR: path.join(home, "cfg") })?.dir, cfgWiki);
+});
+
+test("a wiki folder belongs to the server whose lookup found it, and to its protocol only as a last resort", () => {
+  const home = tmp();
+  const of = (dir, env = {}) => contextServerOf(dir, { env, home, platform: "linux" });
+  assert.equal(of(wikiAt(tmp(), "# Xenolith protocol\n\nThis folder is...")), "xenolith");
+  assert.equal(of(wikiAt(tmp(), "# Agent Wiki protocol\n")), "agent-wiki");
+  assert.equal(of(wikiAt(tmp())), "agent-wiki", "no protocol: as XenoNet always read it");
+  assert.equal(of(null), null);
   assert.deepEqual([contextName("xenolith"), contextName("agent-wiki")], ["Xenolith", "Agent Wiki"]);
+
+  // A wiki moved somewhere Xenolith's config names, its protocol edited:
+  // still Xenolith's, so its writes don't make a second node.
+  const moved = wikiAt(path.join(home, "Notes", "wiki"), "# Our notes\n\nRules for this folder.");
+  assert.equal(of(moved), "agent-wiki");
+  fs.mkdirSync(path.join(home, ".config", "xenolith"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".config", "xenolith", "config.json"), JSON.stringify({ wikiDir: moved }));
+  assert.equal(of(moved), "xenolith");
+  assert.deepEqual(findContextDir({ env: {}, home, platform: "linux" }), { dir: moved, server: "xenolith" });
+  assert.equal(of(`${moved}/`), "xenolith", "however the folder is spelled");
+  // XENOLITH_DIR names it, there or not; and Agent Wiki's own folder is
+  // Agent Wiki's, whatever its protocol says.
+  const aside = wikiAt(tmp(), "# Notes\n");
+  assert.equal(of(aside, { XENOLITH_DIR: aside }), "xenolith");
+  assert.equal(of(wikiAt(path.join(home, "AgentWiki"), "# Xenolith protocol\n")), "agent-wiki");
+  if (process.platform !== "win32") {
+    const link = path.join(tmp(), "link");
+    fs.symlinkSync(moved, link);
+    assert.equal(of(link), "xenolith", "a link to it");
+  }
 });
 
 test("the map's wiki takes its server's id and name, so beams to xenolith land on it", async () => {
   const dir = wikiAt(tmp(), "# Xenolith protocol\n");
   fs.writeFileSync(path.join(dir, "pages", "atlas.md"), "---\ntitle: Atlas\ntype: project\n---\nSee [[db]].");
-  const wiki = await readWiki(dir, [], { server: contextServerOf(dir) });
+  const wiki = await readWiki(dir, [], { server: contextServerOf(dir, { env: {}, home: tmp() }) });
   const g = buildGraph({ projectsDir: "/p", projects: [], sessions: [], wiki, resources: [{ server: "xenolith", ts: 1 }], layout: {}, windows: { activeWindowMs: 1, recentWindowMs: 1 } });
   const root = g.nodes.find((n) => n.kind === "wiki");
   assert.deepEqual([root.id, root.name, root.server], ["resource:xenolith", "Xenolith", "xenolith"]);
@@ -95,6 +152,121 @@ test("the map's wiki takes its server's id and name, so beams to xenolith land o
   assert.equal(GRAPH_NODES.wiki.safeParse({ ...root, actions: [], id: "resource:github" }).success, false, "only the context servers' ids");
   const old = buildGraph({ projectsDir: "/p", projects: [], sessions: [], wiki: await readWiki(wikiAt(tmp()), []), layout: {}, windows: { activeWindowMs: 1, recentWindowMs: 1 } });
   assert.equal(old.nodes.find((n) => n.kind === "wiki").id, "resource:agent-wiki", "Agent Wiki's map is as it was");
+});
+
+test("pages read as Xenolith reads them: [[slug|text]] links, titles from headings, types in lowercase, aliases", async () => {
+  assert.deepEqual(wikiLinks("See [[atlas|the Atlas API]], [[DB]] and [[db|again]]; not [[x|a]b]] or [[y|z]."), ["atlas", "db"]);
+  assert.deepEqual(parseLog("## 13:27 · codex · Filed\n\npages: [[atlas|Atlas]], [[refunds]]\n", "2026-10-02")[0].pages, ["atlas", "refunds"]);
+  const dir = wikiAt(tmp(), "# Xenolith protocol\n");
+  const page = (slug, text) => fs.writeFileSync(path.join(dir, "pages", `${slug}.md`), text);
+  page("atlas", '---\ntitle: Atlas\ntype: Project\naliases: ["Atlas API", "#Orders", "atlas api"]\n---\n# Not the title\n\nSee [[db|the database]].');
+  page("db", "---\ntype: HowTo\naliases: Postgres, #pg ,\n---\n\n#\tThe database \n\nText.");
+  page("bare", "No heading here.\n#hashtag\n");
+  const wiki = await readWiki(dir, []);
+  const by = Object.fromEntries(wiki.pages.map((p) => [p.slug, p]));
+  assert.deepEqual([by.atlas.title, by.atlas.type, by.atlas.aliases, by.atlas.links], ["Atlas", "project", ["atlas api", "orders"], ["db"]]);
+  assert.deepEqual([by.db.title, by.db.type, by.db.aliases], ["The database", "howto", ["postgres", "pg"]]);
+  assert.deepEqual([by.bare.title, by.bare.type, by.bare.aliases], ["bare", "topic", []], "no heading: the slug");
+  const g = buildGraph({ projectsDir: "/p", projects: [], sessions: [], wiki, layout: {}, windows: { activeWindowMs: 1, recentWindowMs: 1 } });
+  const node = (id) => g.nodes.find((n) => n.id === id);
+  assert.deepEqual(node("wiki:atlas").aliases, ["atlas api", "orders"]);
+  assert.equal("aliases" in node("wiki:bare"), false, "left out when there are none");
+  assert.ok(g.relations.some((r) => r.kind === "wikilink" && r.a === "wiki:atlas" && r.b === "wiki:db"));
+  const parsed = GRAPH_NODES.page.safeParse({ ...node("wiki:atlas"), actions: [] });
+  assert.equal(parsed.success, true, JSON.stringify(parsed.error?.issues));
+});
+
+test("pages, logs and notes linked in from elsewhere are passed over, as Xenolith refuses them", { skip: process.platform === "win32" && "links need privileges on Windows" }, async () => {
+  const outside = tmp();
+  fs.writeFileSync(path.join(outside, "secret.md"), "---\ntitle: Not the wiki's\n---\n");
+  fs.mkdirSync(path.join(outside, "2026"));
+  fs.writeFileSync(path.join(outside, "2026", "2026-10-03.md"), "## 09:00 · codex · Elsewhere\n\npages: [[atlas]]\n");
+  const now = new Date(2026, 9, 3, 12).getTime();
+  const dir = wikiAt(tmp(), "# Xenolith protocol\n");
+  fs.writeFileSync(path.join(dir, "pages", "atlas.md"), "---\ntitle: Atlas\n---\n");
+  fs.symlinkSync(path.join(outside, "secret.md"), path.join(dir, "pages", "linked.md"));
+  fs.mkdirSync(path.join(dir, "inbox"));
+  fs.writeFileSync(path.join(dir, "inbox", "kept.md"), "# Kept\n");
+  fs.symlinkSync(path.join(outside, "secret.md"), path.join(dir, "inbox", "linked.md"));
+  fs.mkdirSync(path.join(dir, "log"));
+  fs.symlinkSync(path.join(outside, "2026"), path.join(dir, "log", "2026"));
+  const wiki = await readWiki(dir, [], { now });
+  assert.deepEqual(wiki.pages.map((p) => p.slug), ["atlas"]);
+  assert.deepEqual(wiki.inbox.map((n) => n.id), ["kept"]);
+  assert.deepEqual(wiki.log, [], "a year of the log linked in");
+  fs.rmSync(path.join(dir, "log", "2026"));
+  fs.mkdirSync(path.join(dir, "log", "2026"));
+  fs.symlinkSync(path.join(outside, "2026", "2026-10-03.md"), path.join(dir, "log", "2026", "2026-10-03.md"));
+  assert.deepEqual((await readWiki(dir, [], { now })).log, [], "a day of it");
+  fs.copyFileSync(path.join(outside, "2026", "2026-10-03.md"), path.join(dir, "log", "2026", "2026-10-02.md"));
+  assert.deepEqual((await readWiki(dir, [], { now })).log.map((e) => e.title), ["Elsewhere"], "a day that's the wiki's own");
+
+  // The pages folder linked in, and the wiki's own folder a link, which
+  // Xenolith allows.
+  const other = wikiAt(tmp());
+  fs.writeFileSync(path.join(other, "pages", "x.md"), "# X\n");
+  const linkedPages = wikiAt(tmp());
+  fs.rmSync(path.join(linkedPages, "pages"), { recursive: true });
+  fs.symlinkSync(path.join(other, "pages"), path.join(linkedPages, "pages"));
+  assert.deepEqual((await readWiki(linkedPages, [])).pages, []);
+  const root = path.join(tmp(), "wiki");
+  fs.symlinkSync(other, root);
+  assert.deepEqual((await readWiki(root, [])).pages.map((p) => p.slug), ["x"]);
+});
+
+test("Xenolith's spaces show as their own pages, tied to a project's space's project", async () => {
+  const now = new Date(2026, 9, 3, 12).getTime();
+  const dir = wikiAt(tmp(), "# Xenolith protocol\n");
+  const write = (rel, text) => {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+    fs.writeFileSync(path.join(dir, rel), text);
+  };
+  write("pages/refunds.md", "---\ntitle: Refunds here\n---\n");
+  write("spaces/project/atlas/pages/refunds.md", "---\ntitle: Atlas refunds\n---\nSee [[guide|the guide]] and [[elsewhere]].");
+  write("spaces/project/atlas/pages/guide.md", "# Atlas guide\n");
+  write("spaces/project/atlas/log/2026/2026-10-03.md", "## 09:00 · codex · Filed the refund rules\n\npages: [[refunds]]\n");
+  write("spaces/identity/adal/pages/prefs.md", "# Preferences\n");
+  // Not spaces: a name Xenolith wouldn't make, this machine's own, a kind
+  // it doesn't have.
+  write("spaces/project/Atlas-Old/pages/x.md", "# X\n");
+  write("spaces/machine/local/pages/x.md", "# X\n");
+  write("spaces/notes/x/pages/x.md", "# X\n");
+  if (process.platform !== "win32") {
+    write("outside/pages/x.md", "# X\n");
+    fs.symlinkSync(path.join(dir, "outside"), path.join(dir, "spaces", "project", "linked"));
+  }
+  const projects = [{ name: "Atlas", key: "/p/atlas", rel: "atlas" }, { name: "ledger", key: "/p/ledger", rel: "ledger" }];
+  const wiki = await readWiki(dir, projects, { now });
+  assert.deepEqual(wiki.pages.map((p) => [p.space, p.slug]), [[null, "refunds"], ["identity:adal", "prefs"], ["project:atlas", "guide"], ["project:atlas", "refunds"]], "this machine's, then by kind and name");
+  const by = (space, slug) => wiki.pages.find((p) => p.space === space && p.slug === slug);
+  assert.deepEqual(by("project:atlas", "refunds").writes.map((w) => w.title), ["Filed the refund rules"]);
+  assert.deepEqual(by(null, "refunds").writes, [], "a write in a space isn't the same-named page's here");
+  assert.deepEqual(by("project:atlas", "guide").projects, ["/p/atlas"], "a project's space is its context");
+  assert.deepEqual(by("identity:adal", "prefs").projects, []);
+  assert.equal(wiki.log.length, 1);
+
+  const g = buildGraph({ projectsDir: "/p", projects: projects.map((p) => ({ ...p, path: p.key })), sessions: [], wiki, layout: {}, windows: { activeWindowMs: 1, recentWindowMs: 1 } });
+  const page = g.nodes.find((n) => n.id === "wiki:project:atlas/refunds");
+  assert.deepEqual([page.name, page.slug, page.space], ["Atlas refunds", "refunds", "project:atlas"]);
+  assert.equal("space" in g.nodes.find((n) => n.id === "wiki:refunds"), false, "this machine's pages are as they were");
+  assert.ok(g.relations.some((r) => r.kind === "wikilink" && r.a === "wiki:project:atlas/refunds" && r.b === "wiki:project:atlas/guide"), "links stay in their space");
+  assert.ok(g.relations.some((r) => r.kind === "mentions" && r.a === "wiki:project:atlas/guide" && r.b === "project:/p/atlas"));
+  assert.ok(g.links.some((l) => l.kind === "page" && l.source === "resource:agent-wiki" && l.target === "wiki:identity:adal/prefs"), "a space's pages hang from the wiki");
+  const parsed = GRAPH_NODES.page.safeParse({ ...page, actions: [] });
+  assert.equal(parsed.success, true, JSON.stringify(parsed.error?.issues));
+});
+
+test("a write to a space beams to that space's pages, and one Xenolith refuses to none", () => {
+  const live = new LiveTelemetry({ claudeRoot: "/nowhere", codexRoot: "/nowhere", claudeDesktopDir: null });
+  const of = (space) => live.wikiPagesOf("xenolith", { title: "x", pages: ["refunds"], space });
+  assert.deepEqual(of("project:atlas"), ["project:atlas/refunds"]);
+  assert.deepEqual(of(" Project:Atlas "), ["project:atlas/refunds"], "as Xenolith reads it");
+  assert.deepEqual(of("machine:local"), ["refunds"], "this machine's own");
+  assert.deepEqual([of(undefined), of(""), of(5)], [["refunds"], ["refunds"], ["refunds"]], "none given: this machine's");
+  for (const bad of ["atlas", "team:atlas", "project:../x", "project:a b", "project:.x", "project:a..b"]) assert.equal(of(bad), null, bad);
+  assert.deepEqual(live.wikiPagesOf("xenolith", { slug: "guide", space: "identity:adal" }), ["identity:adal/guide"]);
+  assert.deepEqual([spaceOf("ACTOR:hermes"), spaceOf("machine:local"), spaceOf(null), spaceOf("project:")], ["actor:hermes", null, null, undefined]);
+  assert.deepEqual(SPACE_KINDS, ["project", "identity", "actor", "machine"]);
 });
 
 test("context_* writes, and the wiki_* names before them, beam to the pages they name", () => {

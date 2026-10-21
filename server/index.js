@@ -315,9 +315,10 @@ state.on("graph", () => actors?.refresh());
 // server is up.
 const windowKey = createWindowKey();
 // The actor gateway (server/actor-gateway.js), for actors outside this
-// machine: off until you turn it on, on a port of its own beside this one,
-// put on the internet by the tunnel you pick (server/gateway-control.js).
-// XENONET_GATEWAY_PROBE=local checks it without the internet, for tests.
+// machine: off until you turn it on, on a port of its own (1010 above this
+// one, or XENONET_GATEWAY_PORT), put on the internet by the tunnel you pick
+// (server/gateway-control.js). XENONET_GATEWAY_PROBE=local checks it
+// without the internet, for tests.
 const gatewayControl =
   actors && registration
     ? (await import("./gateway-control.js")).createGatewayControl({
@@ -329,7 +330,8 @@ const gatewayControl =
         runs: state.reportedRuns,
         onRun: ({ actor, id }) => state.refreshAfterChange().then(() => actors.target(actor, id, "works-on")).catch(() => {}),
         store: engineStore,
-        port: Number(process.env.XENONET_GATEWAY_PORT) || config.port + 10,
+        port: Number(process.env.XENONET_GATEWAY_PORT) || null,
+        servicePort: config.port,
         version: VERSION,
         dir: config.demo ? null : config.stateDir,
         probe: process.env.XENONET_GATEWAY_PROBE === "local" ? "local" : null,
@@ -640,7 +642,11 @@ function simulate(kind, { a, b, ...more }) {
   } else if (kind === "turn-end" && sa) {
     live.activity(sa, { kind: "turn-end", duration: 42000, ts: now }, true);
   } else if (kind === "wiki-write" && sa) {
-    live.activity(sa, { kind: "tool", tool: "mcp__agent-wiki__wiki_log", category: "mcp", detail: "agent-wiki.wiki_log", server: "agent-wiki", pages: ["xenonet", "ledger"], files: [], ts: now }, true);
+    // A note logged through the server that owns the map's wiki: Xenolith's
+    // context_log, or wiki_log for a wiki from before it.
+    const server = config.wikiServer ?? "xenolith";
+    const tool = server === "agent-wiki" ? "wiki_log" : "context_log";
+    live.activity(sa, { kind: "tool", tool: `mcp__${server}__${tool}`, category: "mcp", detail: `${server}.${tool}`, server, pages: ["xenonet", "ledger"], files: [], ts: now }, true);
   } else if (kind === "doctor") {
     // The doctor finding a problem, reported as a real run would be; the
     // next real run (or clear) puts back what's true.

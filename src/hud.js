@@ -9,7 +9,7 @@ import { cleanTitle, renamable, MAX_TITLE } from "../core/rename.js";
 
 const $ = (sel) => document.querySelector(sel);
 
-const KIND_LABEL = { core: "Root", host: "Host", project: "Project", native: "Codex project", session: "Session", resource: "Shared system", wiki: "Agent Wiki", page: "Wiki page" };
+const KIND_LABEL = { core: "Root", host: "Host", project: "Project", native: "Codex project", session: "Session", resource: "Shared system", wiki: "Xenolith", page: "Wiki page" };
 // The projects folder's name (see graph.js), which the page shows in a few
 // places; it changes with the folder.
 let rootName = "~/Projects";
@@ -500,10 +500,12 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     } else if (node.kind === "page") {
       grid =
         row("type", `<span class="tag">${h(node.type)}</span>`) +
+        row("space", node.space ? h(node.space) : null) +
         row("about", node.summary ? h(node.summary) : null, "wrap") +
         row("updated", node.updated ? `${timeAgo(node.updated)} <span class="dim">by ${h(node.updatedBy ?? "?")}</span>` : "—") +
         row("recent writes", node.writes?.length ? node.writes.slice().reverse().map((w) => `<span class="dim">${new Date(w.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · ${h(w.app)}</span> ${h(w.title)}`).join("<br>") : null, "wrap") +
-        row("tags", node.tags?.length ? node.tags.map((t) => `<span class="tag">${h(t)}</span>`).join(" ") : null);
+        row("tags", node.tags?.length ? node.tags.map((t) => `<span class="tag">${h(t)}</span>`).join(" ") : null) +
+        row("also called", node.aliases?.length ? node.aliases.map((a) => h(a)).join(", ") : null, "wrap");
     } else if (node.kind === "resource") {
       const users = live ? live.sessions.filter((s) => (s.host ?? null) === (node.host ?? null) && s.mcp.some((m) => m.server === node.name)) : [];
       grid =

@@ -18,7 +18,7 @@ import { claudeUsageGatherer, desktopUsageGatherer } from "./claude-usage.js";
 import { ClaudeLine, CodexLine, linesOf } from "./lines.js";
 import { claude, codex, brokenAt, fail, usageOf, userText } from "./events.js";
 import { costParts, plainModel, priorityTier, PRICES_CHECKED } from "./pricing.js";
-import { isContextServer } from "./xenolith.js";
+import { isContextServer, spaceOf } from "./xenolith.js";
 import { APP, tailedApp } from "./apps.js";
 import { patchPaths } from "./patch.js";
 
@@ -619,11 +619,16 @@ export class LiveTelemetry extends EventEmitter {
     return tool;
   }
 
-  // Wiki writes name the pages they touch; the UI beams to them.
+  // Wiki writes name the pages they touch; the UI beams to them. A write to
+  // another space than this machine's (its `space`, such as project:atlas)
+  // names that space's pages, as <space>/<slug>, the end of their ids on the
+  // map; one to a space Xenolith refuses wrote nothing.
   wikiPagesOf(server, input) {
     if (!isContextServer(server) || !input || typeof input !== "object") return null;
+    const space = spaceOf(input.space);
+    if (space === undefined) return null;
     const pages = [].concat(input.pages ?? [], input.slug ?? []).filter((p) => typeof p === "string");
-    return pages.length ? pages.slice(0, 6) : null;
+    return pages.length ? pages.slice(0, 6).map((p) => (space ? `${space}/${p}` : p)) : null;
   }
 
   // Claude Code Notification hooks carry permission prompts the transcript doesn't.

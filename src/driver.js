@@ -604,7 +604,7 @@ export function createDriver(app) {
     },
     async mcp(id, opts) {
       const node = nodeOf(known(id));
-      if (!node || !["resource", "wiki"].includes(node.kind)) throw new Error("choose an MCP shared system or Agent Wiki");
+      if (!node || !["resource", "wiki"].includes(node.kind)) throw new Error("choose an MCP shared system or Xenolith");
       return act(async () => { await app.select(node.id); await app.hud.mcp.open(node); }, opts);
     },
     mcpTab: (tab, opts) => act(() => app.hud.mcp.tab(tab), opts),

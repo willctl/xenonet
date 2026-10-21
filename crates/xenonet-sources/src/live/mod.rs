@@ -368,11 +368,20 @@ pub fn tool_key(name: &str, input: Option<&Value>) -> String {
 }
 
 /// The pages a write to the shared context names, for the map to beam to.
+/// A write to another space than this machine's (its `space`, such as
+/// project:atlas) names that space's pages, as `<space>/<slug>`, the end of
+/// their ids on the map; one to a space Xenolith refuses wrote nothing.
 pub fn wiki_pages_of(server: Option<&str>, input: Option<&Value>) -> Option<Vec<String>> {
+    use crate::xenolith::{space_of, Space};
     if !server.is_some_and(crate::xenolith::is_context_server) {
         return None;
     }
     let Some(Value::Object(m)) = input else { return None };
+    let prefix = match space_of(m.get("space")) {
+        Space::Refused => return None,
+        Space::Local => String::new(),
+        Space::Other(id) => format!("{id}/"),
+    };
     let concat = |v: Option<&Value>| -> Vec<Value> {
         match v {
             None | Some(Value::Null) => Vec::new(),
@@ -384,13 +393,27 @@ pub fn wiki_pages_of(server: Option<&str>, input: Option<&Value>) -> Option<Vec<
     if pages.is_empty() {
         None
     } else {
-        Some(pages.into_iter().take(6).collect())
+        Some(pages.into_iter().take(6).map(|p| format!("{prefix}{p}")).collect())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wiki_writes_name_their_spaces_pages() {
+        let of = |input: Value| wiki_pages_of(Some("xenolith"), Some(&input));
+        assert_eq!(of(json!({ "pages": ["refunds"], "space": " Project:Atlas " })), Some(vec!["project:atlas/refunds".to_string()]));
+        assert_eq!(of(json!({ "slug": "guide", "space": "identity:adal" })), Some(vec!["identity:adal/guide".to_string()]));
+        for local in [json!("machine:local"), json!(""), json!(5), Value::Null] {
+            assert_eq!(of(json!({ "pages": ["refunds"], "space": local })), Some(vec!["refunds".to_string()]), "{local}");
+        }
+        for bad in ["atlas", "team:atlas", "project:../x", "project:a b", "project:.x", "project:a..b", "project:Ü"] {
+            assert_eq!(of(json!({ "pages": ["refunds"], "space": bad })), None, "{bad}");
+        }
+        assert_eq!(of(json!({ "pages": ["x"], "space": format!("project:{}", "a".repeat(65)) })), None, "a name of up to 64");
+    }
 
     #[test]
     fn tools_by_kind() {
