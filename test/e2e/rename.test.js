@@ -48,7 +48,9 @@ let session;
 before(async () => {
   await xenonet("test").quit();
   await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
-  ({ nodes: [session] } = await s.driver("find", { query: "", kind: "session", limit: 1 }));
+  // The newest session whose app XenoNet renames in: Claude Code's or
+  // Codex's (core/rename.js).
+  session = (await s.driver("find", { query: "", kind: "session", limit: 40 })).nodes.find((n) => n.app === "claude" || n.app === "codex");
 }, { timeout: limit(180000) });
 
 after(async () => {
