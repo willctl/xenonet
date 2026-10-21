@@ -3,20 +3,20 @@
 //! harness's own files (or, for numbat and the gateway, from what reports
 //! them). What the readers share is here (core/native/reader.js): what the
 //! map asks of each (`NativeReader`), the files they read (`files`), the
-//! vendor checks of their records (`Vendor`), Node's path rules
-//! (`node_path`), a run's edits, what each made of a file (`FileCache`), and
-//! the answers as JS values (`Out`).
+//! vendor checks of their records (`Vendor`), a run's edits, what each made
+//! of a file (`FileCache`), and the answers as JS values (`Out`). Paths keep
+//! the syntax of the machine that wrote them, through xenonet_base::nodepath.
 
 pub mod copilot_cli;
 pub mod cursor;
 pub mod files;
 pub mod gemini_cli;
-pub(crate) mod node_path;
 pub mod opencode;
 
 use files::Files;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+use xenonet_base::nodepath::Style;
 use xenonet_base::ordered::OrderedMap;
 use xenonet_base::paths::path_style;
 
@@ -242,18 +242,18 @@ pub(crate) fn fits_id(id: &str, max: usize) -> bool {
 /// None for a relative path with no base. As the readers did with
 /// pathStyle(base ?? path).
 pub(crate) fn edit_file(base: Option<&str>, path: &str) -> Option<String> {
-    let style = path_style(base.unwrap_or(path));
-    if node_path::is_absolute(style, path) {
-        Some(node_path::resolve(style, &[path]))
+    let style = Style::from(path_style(base.unwrap_or(path)));
+    if style.is_absolute(path) {
+        Some(style.resolve(&[path]))
     } else {
-        base.filter(|b| !b.is_empty()).map(|b| node_path::resolve(style, &[b, path]))
+        base.filter(|b| !b.is_empty()).map(|b| style.resolve(&[b, path]))
     }
 }
 
 /// "<name> in <the folder's name>", or the name alone without a folder.
 pub(crate) fn titled(name: &str, cwd: Option<&str>) -> String {
     match cwd.filter(|c| !c.is_empty()) {
-        Some(c) => format!("{name} in {}", node_path::basename(path_style(c), c)),
+        Some(c) => format!("{name} in {}", Style::from(path_style(c)).basename(c, None)),
         None => name.to_string(),
     }
 }
