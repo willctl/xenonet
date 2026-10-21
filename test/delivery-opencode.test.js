@@ -62,6 +62,10 @@ test("xenonet live allow takes the id OpenCode shows, keeps it as XenoNet's, and
   assert.equal(fromOpenCodeId("opencode:ses-abc123"), "opencode:ses-abc123");
   assert.equal(fromOpenCodeId("claude:11111111-2222"), "claude:11111111-2222");
   assert.equal(openCodeId(fromOpenCodeId("ses_abc123")), "ses_abc123");
+  assert.equal(fromOpenCodeId("ses_abc_123"), "opencode:ses-abc-123");
+  assert.equal(openCodeId(fromOpenCodeId("ses_abc_123")), "ses_abc_123", "an id with more underscores comes back whole");
+  assert.equal(openCodeId("opencode:x--7365735f61622d6364"), "ses_ab-cd", "as does one in hex");
+  assert.equal(fromOpenCodeId("ses__abc"), "ses__abc", "OpenCode doesn't make that, so it's left as it was");
   const policy = new DeliveryPolicy();
   const route = deliveryRoutes({ policy, router: { list: () => [] }, verify: { person: async () => ({ ok: true }) }, readJson: async (r) => r.body, send: (res, status, body) => Object.assign(res, { status, body }) });
   const go = async (path, body) => {

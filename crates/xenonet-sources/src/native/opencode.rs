@@ -28,9 +28,11 @@ const NEEDED_SESSION: [&str; 4] = ["id", "directory", "time_created", "time_upda
 const NEEDED_PART: [&str; 3] = ["session_id", "time_created", "data"];
 const EDITS_MAX: usize = 5000;
 
-/// OpenCode's ids (ses_…) as XenoNet's session ids take them.
+/// OpenCode's ids (ses_…) as XenoNet's session ids take them: a dash for
+/// each underscore, or for an id OpenCode doesn't make, its bytes in hex
+/// (xenonet_base::opencode). Delivery reads either back.
 pub fn local_id(id: &str) -> String {
-    id.replace('_', "-")
+    xenonet_base::opencode::local_id(id)
 }
 
 pub fn session_id_of(id: &str) -> String {
