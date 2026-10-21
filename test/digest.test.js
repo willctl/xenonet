@@ -104,11 +104,11 @@ test("codex exec runs isolated: a Codex home of its own with your sign-in, and n
   assert.equal(linked, true, "your sign-in is linked, never copied, so a refreshed token reaches yours");
   assert.equal(auth, fs.realpathSync(path.join(yours, "auth.json")));
   assert.equal(fs.readFileSync(path.join(yours, "auth.json"), "utf8"), JSON.stringify({ auth_mode: "chatgpt" }), "yours is as it was");
-  for (const a of ["--ignore-user-config", "--ignore-rules"]) assert.ok(args.includes(a), a);
   const set = args.filter((_, i) => args[i - 1] === "-c");
   for (const kv of ["features.plugins=false", "features.hooks=false", "features.shell_tool=false", "features.unified_exec=false", 'web_search="disabled"', "project_doc_max_bytes=0", 'cli_auth_credentials_store="file"']) assert.ok(set.includes(kv), kv);
-  // --disable fails a run on a Codex that doesn't know the feature.
-  assert.equal(args.includes("--disable"), false);
+  // A Codex that doesn't know a flag, or a feature --disable names, fails
+  // the run; the home of its own leaves nothing for the others to skip.
+  for (const flag of ["--disable", "--ignore-user-config", "--ignore-rules", "--strict-config"]) assert.equal(args.includes(flag), false, flag);
 
   // Signed out of Codex: the run has no sign-in of yours to use.
   const out = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-signed-out-"));

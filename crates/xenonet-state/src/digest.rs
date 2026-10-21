@@ -370,15 +370,14 @@ const FEATURES_OFF: [&str; 16] = [
 
 /// The arguments of one `codex exec` turn: ephemeral, read-only, in its own
 /// folder, its last message written to `out`, in a schema's shape when
-/// there's one. It runs in a Codex home of its own (codex_run_home), and
-/// reads no config.toml, rules, AGENTS.md or skills, with no shell, web
-/// search or plugins; sign-in stays in auth.json, never the keychain, so
-/// a token refreshed during the run lands in the file it links to.
+/// there's one. It runs in a Codex home of its own (codex_run_home), which
+/// has no config.toml or rules to load, so it needs no
+/// --ignore-user-config or --ignore-rules, which an older Codex would
+/// refuse. It reads no AGENTS.md or skills, with no shell, web search or
+/// plugins; sign-in stays in auth.json, never the keychain, so a token
+/// refreshed during the run lands in the file it links to.
 pub fn codex_exec_args(dir: &str, out: &str, schema_file: Option<&str>) -> Vec<String> {
-    let mut args: Vec<String> = ["exec", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", "-s", "read-only", "--color", "never", "-C", dir]
-        .iter()
-        .map(ToString::to_string)
-        .collect();
+    let mut args: Vec<String> = ["exec", "--ephemeral", "--skip-git-repo-check", "-s", "read-only", "--color", "never", "-C", dir].iter().map(ToString::to_string).collect();
     let settings = [
         "web_search=\"disabled\"",
         "project_doc_max_bytes=0",
@@ -464,9 +463,7 @@ mod tests {
             (after("-C"), after("-o"), after("--output-schema"), args.last().map(String::as_str)),
             (Some("/t/run"), Some("/t/run/last.txt"), Some("/t/run/schema.json"), Some("-"))
         );
-        for flag in ["--ephemeral", "--ignore-user-config", "--ignore-rules"] {
-            assert!(args.iter().any(|a| a == flag), "{flag}");
-        }
+        assert!(args.iter().any(|a| a == "--ephemeral"));
         let set: Vec<&str> = args.windows(2).filter(|w| w[0] == "-c").map(|w| w[1].as_str()).collect();
         for kv in [
             "features.plugins=false",
@@ -478,7 +475,9 @@ mod tests {
         ] {
             assert!(set.contains(&kv), "{kv}");
         }
-        assert!(!args.iter().any(|a| a == "--disable"), "a feature this Codex doesn't know would fail the run");
+        for flag in ["--disable", "--ignore-user-config", "--ignore-rules", "--strict-config"] {
+            assert!(!args.iter().any(|a| a == flag), "{flag}: a Codex that doesn't know it, or a feature, fails the run");
+        }
         assert!(!codex_exec_args("/t", "/t/o", None).iter().any(|a| a == "--output-schema"));
     }
 

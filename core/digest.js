@@ -115,13 +115,15 @@ const FEATURES_OFF = ["plugins", "apps", "hooks", "memories", "multi_agent", "go
 
 // The arguments of one `codex exec` turn: ephemeral, read-only, in its own
 // folder, its last message written to `out`, in a schema's shape when
-// there's one. It runs in a Codex home of its own (runHome), and reads no
-// config.toml, rules, AGENTS.md or skills, with no shell, web search or
-// plugins; sign-in stays in auth.json, never the keychain, so a token
-// refreshed during the run lands in the file it links to.
+// there's one. It runs in a Codex home of its own (runHome), which has no
+// config.toml or rules to load, so it needs no --ignore-user-config or
+// --ignore-rules, which an older Codex would refuse. It reads no AGENTS.md
+// or skills, with no shell, web search or plugins; sign-in stays in
+// auth.json, never the keychain, so a token refreshed during the run lands
+// in the file it links to.
 function codexExecArgs(dir, out, schemaFile = null) {
   const settings = ['web_search="disabled"', "project_doc_max_bytes=0", 'history.persistence="none"', "skills.include_instructions=false", "skills.bundled.enabled=false", 'cli_auth_credentials_store="file"', ...FEATURES_OFF.map((f) => `features.${f}=false`)];
-  const args = ["exec", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", "-s", "read-only", "--color", "never", "-C", dir, ...settings.flatMap((kv) => ["-c", kv]), "-o", out];
+  const args = ["exec", "--ephemeral", "--skip-git-repo-check", "-s", "read-only", "--color", "never", "-C", dir, ...settings.flatMap((kv) => ["-c", kv]), "-o", out];
   if (schemaFile) args.push("--output-schema", schemaFile);
   return [...args, "-"];
 }
