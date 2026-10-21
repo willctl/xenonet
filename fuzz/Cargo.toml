@@ -181,3 +181,10 @@ path = "fuzz_targets/net_bodies.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "a2a_rpc"
+path = "fuzz_targets/a2a_rpc.rs"
+test = false
+doc = false
+bench = false
