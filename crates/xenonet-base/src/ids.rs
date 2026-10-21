@@ -206,10 +206,6 @@ pub fn repo_id(remote: &str) -> Option<String> {
     (!r.is_empty()).then(|| format!("repo:{r}"))
 }
 
-fn line_break(c: char) -> bool {
-    matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
-}
-
 /// A remote's host and the repo's path, as repoKey reads them: a URL
 /// (`scheme://[user@]host[:port][/path]`) or the scp form (`[user@]host:path`).
 /// None for a remote that's a folder on disk (file://, /srv/git/x), which
@@ -262,7 +258,7 @@ fn url_form(s: &str) -> UrlForm<'_> {
             let digits = port.len() - port.trim_start_matches(|c: char| c.is_ascii_digit()).len();
             rest = &port[digits..];
         }
-        if !(rest.is_empty() || rest.starts_with('/')) || rest.contains(line_break) {
+        if !(rest.is_empty() || rest.starts_with('/')) || rest.contains(crate::text::is_js_line_terminator) {
             continue;
         }
         if scheme.eq_ignore_ascii_case("file") {
@@ -286,7 +282,7 @@ fn scp_form(s: &str) -> Option<(&str, &str)> {
             continue;
         }
         let rest = &t[end + 1..];
-        if rest.starts_with("//") || rest.is_empty() || rest.contains(line_break) {
+        if rest.starts_with("//") || rest.is_empty() || rest.contains(crate::text::is_js_line_terminator) {
             continue;
         }
         return Some((&t[..end], rest));
@@ -296,7 +292,7 @@ fn scp_form(s: &str) -> Option<(&str, &str)> {
 
 /// `repo:<remote>` → the normalized remote; None for any other id.
 pub fn parse_repo_id(id: &str) -> Option<&str> {
-    id.strip_prefix("repo:").filter(|r| !r.is_empty() && !r.starts_with(line_break))
+    id.strip_prefix("repo:").filter(|r| !r.is_empty() && !r.starts_with(crate::text::is_js_line_terminator))
 }
 
 #[cfg(test)]

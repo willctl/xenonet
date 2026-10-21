@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::nodepath::Style;
+use crate::nodepath::{self, Style};
 
 /// A path's key: compared case-insensitively with forward slashes, because
 /// the apps report the same Windows folder as `C:\x`, `c:/x` or `\\?\C:\x`.
@@ -184,85 +184,27 @@ pub fn path_style(p: &str) -> PathStyle {
     }
 }
 
-/// Joins any number of parts and normalizes, as Node's path.join does for
-/// this platform: empty parts are left out, and nothing at all is ".".
+/// path.join on this machine (nodepath's): empty parts are left out, and
+/// nothing at all is ".".
 pub fn join_all(parts: &[&str]) -> String {
-    let parts: Vec<&str> = parts.iter().copied().filter(|p| !p.is_empty()).collect();
-    if parts.is_empty() {
-        return ".".into();
-    }
-    if cfg!(windows) {
-        return Style::Win32.join(&parts);
-    }
-    normalize_posix(&parts.join("/"))
+    nodepath::join(parts)
 }
 
-/// Joins and normalizes as Node's path.join does for this platform.
+/// path.join(dir, name) on this machine (nodepath's).
 pub fn join(dir: &str, name: &str) -> String {
-    if cfg!(windows) {
-        return Style::Win32.join(&[dir, name]);
-    }
-    normalize_posix(&format!("{dir}/{name}"))
+    nodepath::join(&[dir, name])
 }
 
-/// path.resolve on this machine: absolute, `.` and `..` worked out, and no
-/// slash at the end.
+/// path.resolve on this machine (nodepath's): absolute, `.` and `..`
+/// worked out, and no separator at the end but a root's.
 pub fn resolve(p: &str) -> String {
-    #[cfg(windows)]
-    {
-        let full = std::path::absolute(if p.is_empty() { "." } else { p }).map_or_else(|_| p.to_string(), |a| a.to_string_lossy().into_owned());
-        if full.len() > 3 {
-            full.trim_end_matches(['\\', '/']).to_string()
-        } else {
-            full
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        let full = if p.starts_with('/') { p.to_string() } else { format!("{}/{p}", std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default()) };
-        let n = normalize_posix(&full);
-        if n.len() > 1 {
-            n.trim_end_matches('/').to_string()
-        } else {
-            n
-        }
-    }
+    nodepath::resolve(&[p])
 }
 
-/// path.posix.normalize: `.` and `..` worked out, slashes collapsed, a
-/// trailing slash kept.
+/// path.posix.normalize (nodepath's): `.` and `..` worked out, slashes
+/// collapsed, a trailing slash kept.
 pub fn normalize_posix(p: &str) -> String {
-    if p.is_empty() {
-        return ".".into();
-    }
-    let absolute = p.starts_with('/');
-    let trailing = p.ends_with('/');
-    let mut parts: Vec<&str> = Vec::new();
-    for seg in p.split('/') {
-        match seg {
-            "" | "." => {}
-            ".." => {
-                if parts.last().is_some_and(|l| *l != "..") {
-                    parts.pop();
-                } else if !absolute {
-                    parts.push("..");
-                }
-            }
-            s => parts.push(s),
-        }
-    }
-    let mut out = parts.join("/");
-    if out.is_empty() && !absolute {
-        out = ".".into();
-    }
-    if trailing && !out.is_empty() && out != "." {
-        out.push('/');
-    }
-    if absolute {
-        format!("/{out}")
-    } else {
-        out
-    }
+    Style::Posix.normalize(p)
 }
 
 /// The first `cmd` on a PATH that `can_run` accepts, or None. `pathext` is

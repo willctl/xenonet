@@ -1012,11 +1012,6 @@ fn is_rollout(name: &str) -> bool {
     middle.is_some_and(|m| !m.contains(['\n', '\r', '\u{2028}', '\u{2029}']))
 }
 
-fn base(p: &str) -> &str {
-    let cut = if cfg!(windows) { p.rfind(['/', '\\']) } else { p.rfind('/') };
-    cut.map_or(p, |i| &p[i + 1..])
-}
-
 fn dir_names(dir: &str) -> Option<Vec<(String, bool)>> {
     let ents = paths::read_dir_sorted(Path::new(dir)).ok()?;
     Some(ents.into_iter().map(|e| (e.file_name().to_string_lossy().into_owned(), e.file_type().is_ok_and(|t| t.is_dir()))).collect())
@@ -1089,7 +1084,7 @@ impl Transcripts {
         self.listed_at = now;
         for root in codex_roots {
             for file in paths::list_files(root, &mut |name| is_rollout(name), 4) {
-                if let Some(id) = uuid_in(base(&file)) {
+                if let Some(id) = uuid_in(&xenonet_base::nodepath::basename(&file)) {
                     match self.rollouts.iter_mut().find(|(k, _)| *k == id) {
                         Some(r) => r.1 = file,
                         None => self.rollouts.push((id, file)),

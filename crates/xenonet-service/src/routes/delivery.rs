@@ -3,7 +3,6 @@
 //! tokens, consent to wake or type into a session, and the audit log. GET
 //! /api/delivery reads them; the POSTs change them.
 
-use crate::borrowed::from_opencode_id;
 use crate::cores::{ok, reason, CoreError, Engine, Policy, Router, Verify};
 use crate::ctx::pending_reply;
 use crate::http::{Reply, Req};
@@ -11,6 +10,8 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use xenonet_base::ids::is_session_id;
 use xenonet_base::text::{js_number, js_string, truthy};
+use xenonet_engine::delivery::opencode::from_open_code_id;
+use xenonet_engine::sql::Arg;
 
 pub struct DeliveryRoutes {
     pub policy: Arc<dyn Policy>,
@@ -24,7 +25,7 @@ pub struct DeliveryRoutes {
 // isn't a session's id is refused rather than kept where nothing would
 // ever read it.
 fn session_of(text: &Value) -> Result<String, CoreError> {
-    let id = from_opencode_id(text);
+    let id = from_open_code_id(&Arg::from(text));
     if !is_session_id(&id) {
         let shown = if text.is_null() { String::new() } else { js_string(text) };
         return Err(CoreError::new(format!("\"{shown}\" isn't a session's id: give its id, such as opencode:ses-… or claude:…, which xenonet agents --json lists")));
@@ -105,7 +106,7 @@ impl DeliveryRoutes {
             // Taking consent back works for any key, so one kept before this
             // check can still go.
             "/api/delivery/disallow" => {
-                self.policy.disallow(&from_opencode_id(b.get("session").unwrap_or(&Value::Null)))?;
+                self.policy.disallow(&from_open_code_id(&Arg::from(b.get("session").unwrap_or(&Value::Null))))?;
                 ans(json!({ "ok": true }))
             }
             _ => Ok(Reply::error(404, "not found")),

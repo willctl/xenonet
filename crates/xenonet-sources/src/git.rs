@@ -35,7 +35,7 @@ fn count_after(head: &str, word: &str) -> f64 {
 
 /// A text split as `split(/\r?\n/)` splits it: at each newline, with a
 /// carriage return before one taken too.
-pub(crate) fn split_lines(s: &str) -> Vec<&str> {
+pub fn split_lines(s: &str) -> Vec<&str> {
     let parts: Vec<&str> = s.split('\n').collect();
     let last = parts.len() - 1;
     parts.into_iter().enumerate().map(|(i, l)| if i < last { l.strip_suffix('\r').unwrap_or(l) } else { l }).collect()

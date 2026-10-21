@@ -47,10 +47,10 @@ pub struct Z {
     description: Option<String>,
 }
 
-// A pattern as JS's RegExp reads it: \d is an ASCII digit there, and any
-// Unicode digit in the regex crate.
+// A pattern as JS's RegExp reads it, through the engine's translation (\d,
+// \s, \w, \b and . are JS's, not the regex crate's).
 fn compile(pattern: &str) -> Regex {
-    Regex::new(&pattern.replace(r"\d", "[0-9]")).expect("a pattern of the schemas")
+    xenonet_engine::jsre::js(pattern, false)
 }
 
 // zod's last pass over what it wrote (compactTypeUnion): an anyOf whose

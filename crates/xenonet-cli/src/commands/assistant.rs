@@ -14,16 +14,11 @@ use crate::out::{ago, c, json, json_at, now, print, table, Done, Fail, Layout};
 use crate::reach::find;
 use crate::sys;
 use serde_json::{json, Value};
+use xenonet_assistant::credentials::is_grant;
 use xenonet_base::client::{name_of, Server};
 use xenonet_base::json::number_string;
 
 pub const HELP: &str = include_str!("help/assistant.txt");
-
-/// A grant's id, gr_ and 24 hex digits (core/schema/assistant.js's
-/// GRANT_ID).
-pub fn is_grant_id(s: &str) -> bool {
-    s.len() == 27 && s.starts_with("gr_") && s[3..].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-}
 
 // XenoNet's state folder, for the tombstones: XenoNet Dev's with --dev.
 fn state_dir(flags: &Flags) -> String {
@@ -141,7 +136,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         "audit" => {
             let Some(s) = s else { return Err(Fail::new("XenoNet isn't running, so its log can't be read: open XenoNet first.", 1)) };
             let given = flags.text("grant");
-            if given.as_deref().is_some_and(|g| !is_grant_id(g)) {
+            if given.as_deref().is_some_and(|g| !is_grant(g)) {
                 return Err(Fail::new("--grant takes a grant's id (gr_…).", 2));
             }
             let limit = flags.number("limit");
@@ -187,7 +182,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             out(&json!({ "disabled": true }), &words, flags)
         }
         "revoke" => {
-            let grant = grant.filter(|g| is_grant_id(g)).ok_or_else(|| Fail::new("xenonet assistant revoke takes a grant's id (gr_…), as xenonet assistant lists them.", 2))?;
+            let grant = grant.filter(|g| is_grant(g)).ok_or_else(|| Fail::new("xenonet assistant revoke takes a grant's id (gr_…), as xenonet assistant lists them.", 2))?;
             let dir = assistant_dir(&state_dir(flags));
             cores::mark_revoked(&dir, &grant)?;
             cores::delete_credential(&dir, &grant)?;
@@ -209,8 +204,8 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
 mod tests {
     #[test]
     fn grant_ids() {
-        assert!(super::is_grant_id("gr_0a1b2c3d4e5f60718293a4b5"));
-        assert!(!super::is_grant_id("gr_0A1B2C3D4E5F60718293A4B5"));
-        assert!(!super::is_grant_id("gr_0a1b"));
+        assert!(super::is_grant("gr_0a1b2c3d4e5f60718293a4b5"));
+        assert!(!super::is_grant("gr_0A1B2C3D4E5F60718293A4B5"));
+        assert!(!super::is_grant("gr_0a1b"));
     }
 }

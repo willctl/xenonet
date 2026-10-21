@@ -7,13 +7,12 @@ use super::rpc::RpcError;
 use super::store::{ReplyRow, TaskRow, CANCELED, COMPLETED, FAILED, REJECTED, WORKING};
 use serde_json::{json, Map, Value};
 use xenonet_base::time::iso;
+use xenonet_engine::delivery::selector::KEYS as SELECTOR_KEYS;
 
 /// The longest id XenoNet keeps of a client's (message ids, contexts).
 pub const ID_MAX: usize = 200;
 /// The longest target a message may name.
 const TARGET_MAX: usize = 300;
-/// The selector keys a target may use (xenonet-engine's delivery selector).
-const SELECTOR_KEYS: [&str; 6] = ["project", "identity", "app", "machine", "status", "by"];
 
 /// A client's message, as XenoNet takes it.
 #[derive(Clone, Debug, PartialEq)]

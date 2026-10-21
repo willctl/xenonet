@@ -1,6 +1,6 @@
 //! xenonet mcp (cli/commands/mcp.js): the xenonet MCP server on stdio
-//! (mcp/xenonet.js, crates/xenonet-mcp). Claude Code and Codex start it
-//! once your agents are connected. xenonet mcp console is the console
+//! (mcp/xenonet.js, crates/xenonet-mcp). Claude Code, Codex and Grok Build
+//! start it once they're connected. xenonet mcp console is the console
 //! operator (mcp/console.js), and xenonet mcp assistant the read-only
 //! server for a remote actor you paired (mcp/assistant.js).
 

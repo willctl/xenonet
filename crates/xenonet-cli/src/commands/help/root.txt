@@ -1,11 +1,12 @@
 The projects folder XenoNet reads, and where that comes from: XENONET_PROJECTS_DIR
 when it's set, a folder you chose, or ~/Projects.
 
-  xenonet root                  the folder, and what XenoNet found in it
-  xenonet root ~/code           read ~/code instead: XenoNet checks it, reads it
+  xenonet root                the folder, and what XenoNet found in it
+  xenonet root ~/code         read ~/code instead: XenoNet checks it, reads it
                               and redraws the map
-  xenonet root --check ~/code   what XenoNet would find there, without reading it
-  xenonet root --reset          back to ~/Projects
+  xenonet root --check ~/code
+                              what XenoNet would find there, without reading it
+  xenonet root --reset        back to ~/Projects
   --json                      the answer as JSON
 
 Your layout, your rules and Codex's picks stay with each folder, so coming

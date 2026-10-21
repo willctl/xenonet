@@ -15,11 +15,7 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::sync::LazyLock;
 use xenonet_base::jsstr;
-use xenonet_base::text::{is_js_space, js_string, js_trim, truthy};
-
-fn is_line_terminator(c: char) -> bool {
-    matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
-}
+use xenonet_base::text::{is_js_line_terminator, is_js_space, js_string, js_trim, truthy};
 
 /// `String(v ?? "")`.
 pub fn string_of(v: Option<&Value>) -> String {
@@ -39,7 +35,7 @@ pub fn mcp_server_of(tool_name: &str) -> Option<String> {
     let rest = tool_name.strip_prefix("mcp__")?;
     let chars: Vec<(usize, char)> = rest.char_indices().collect();
     for i in 1..chars.len() {
-        if is_line_terminator(chars[i - 1].1) {
+        if is_js_line_terminator(chars[i - 1].1) {
             return None;
         }
         let at = chars[i].0;
@@ -50,7 +46,7 @@ pub fn mcp_server_of(tool_name: &str) -> Option<String> {
         if next == '_' {
             continue;
         }
-        if chars[i + 3..].iter().any(|&(_, c)| is_line_terminator(c)) {
+        if chars[i + 3..].iter().any(|&(_, c)| is_js_line_terminator(c)) {
             continue;
         }
         let server = &rest[..at];

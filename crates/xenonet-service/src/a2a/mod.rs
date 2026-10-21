@@ -34,8 +34,8 @@ pub mod rpc;
 pub mod store;
 pub mod tasks;
 
+use crate::actor_caller::{Rate, BUCKETS};
 use crate::borrowed::{attest, platform, random_uuid, Sender};
-use crate::buckets::{Buckets, Rate};
 use crate::cores::{Actors, Engine};
 use crate::http::{parse_target, Reply, ReplyBody};
 use bytes::Bytes;
@@ -49,6 +49,7 @@ use std::time::{Duration, Instant};
 use store::{ReplyRow, Store, TaskRow};
 use tasks::Shown;
 use tokio::sync::{mpsc, watch};
+use xenonet_actors::limits::Buckets;
 use xenonet_base::sync::Locked;
 
 /// The most of a body XenoNet reads, as the gateway's own limit.
@@ -227,7 +228,7 @@ impl A2a {
             cores: parts.cores,
             store: Mutex::new(store),
             problem,
-            buckets: Mutex::new(Buckets::default()),
+            buckets: Mutex::new(Buckets::new(BUCKETS)),
             watches: Mutex::new(HashMap::new()),
             pulling: Mutex::new(HashSet::new()),
             version: parts.version,
@@ -664,9 +665,9 @@ impl A2a {
         let t = self.now();
         let mut b = self.buckets.locked();
         let wide = tasks::is_wide(to);
-        let mut wait = if wide { b.take(&format!("{}|wide", actor.slug), WIDE, 1.0, t) } else { 0.0 };
+        let mut wait = if wide { b.take(&format!("{}|wide", actor.slug), WIDE.rate, WIDE.burst, 1.0, t) } else { 0.0 };
         if wait == 0.0 {
-            wait = b.take(&format!("{}|messages", actor.slug), MESSAGES, 1.0, t);
+            wait = b.take(&format!("{}|messages", actor.slug), MESSAGES.rate, MESSAGES.burst, 1.0, t);
         }
         (wait != 0.0).then(|| {
             let why = if wide { "an actor sends at most 6 messages an hour to a repo, a selector or all" } else { "an actor sends at most 60 messages an hour" };

@@ -752,6 +752,6 @@ impl ActorRoutes<'_> {
     }
 }
 
-pub fn you_reports_bucket(now: f64) -> crate::buckets::Bucket {
-    crate::buckets::Bucket::new(YOU_REPORTS, now)
+pub fn you_reports_bucket(now: f64) -> xenonet_actors::limits::Bucket {
+    xenonet_actors::limits::Bucket::new(YOU_REPORTS.rate, YOU_REPORTS.burst, now)
 }

@@ -3,7 +3,6 @@
 //! it when it isn't running.
 
 use serde_json::{json, Map, Value};
-use std::sync::OnceLock;
 use xenonet_app::fsx::{self, FsError};
 use xenonet_app::nodepath::NATIVE;
 use xenonet_app::task::{now_ms, Failure, Io};
@@ -78,18 +77,13 @@ pub fn descriptor_file(env: &Env, m: &Machine) -> String {
     NATIVE.join(&[&runtime_dir(env, m), &format!("service-{}.json", port_of(env))])
 }
 
-fn token_re() -> &'static regex::Regex {
-    static R: OnceLock<regex::Regex> = OnceLock::new();
-    R.get_or_init(|| regex::Regex::new("^[a-f0-9]{64}$").expect("a fixed pattern"))
-}
-
 /// The service's descriptor: its port and the token its hello wants.
 pub fn read_descriptor(env: &Env, m: &Machine) -> Result<(f64, String), FsError> {
     let file = descriptor_file(env, m);
     let text = fsx::read_text(&file)?;
     let d = xenonet_base::json::parse(&text).map_err(|e| fsx::said(e.to_string()))?;
     let port = d.get("port").and_then(Value::as_f64).filter(|p| p.fract() == 0.0 && (1.0..=65535.0).contains(p));
-    let token = d.get("token").map(xenonet_base::text::js_string).filter(|t| token_re().is_match(t));
+    let token = d.get("token").map(xenonet_base::text::js_string).filter(|t| crate::packages::sha_re().is_match(t));
     match (port, token) {
         (Some(p), Some(t)) => Ok((p, t)),
         _ => Err(fsx::said("Invalid XenoNet service connection file.")),

@@ -43,13 +43,9 @@ pub struct Header {
 
 const HEADS: [(&str, Kind); 4] = [("*** Add File: ", Kind::Add), ("*** Update File: ", Kind::Update), ("*** Delete File: ", Kind::Delete), ("*** Move to: ", Kind::Move)];
 
-fn is_line_terminator(c: char) -> bool {
-    matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
-}
-
 /// The headers of an apply_patch text, in the order they come.
 pub fn headers(text: &str) -> Vec<Header> {
-    text.split(is_line_terminator)
+    text.split(crate::text::is_js_line_terminator)
         .filter_map(|line| {
             HEADS.iter().find_map(|(head, kind)| line.strip_prefix(head).filter(|rest| !rest.is_empty()).map(|rest| Header { kind: *kind, path: js_trim(rest).to_string() }))
         })

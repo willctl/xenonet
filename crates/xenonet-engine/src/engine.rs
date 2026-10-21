@@ -27,7 +27,6 @@
 
 use crate::attest::quoted;
 use crate::delivery::selector::{format_selector, matches as selects, parse_selector};
-use crate::js::{basename_host, dirname_style, is_absolute_host, join_in, relative_host, resolve_in};
 use crate::network::{self, network_host, NetHandle};
 use crate::peer::{list, opt_call, Calls, Thrown};
 use crate::products::product_of;
@@ -36,6 +35,7 @@ use crate::store::js_text;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use xenonet_base::ids::{is_session_id, parse_actor_id, YOU};
+use xenonet_base::nodepath::{style_of, NATIVE};
 use xenonet_base::sync::Locked;
 
 pub const ACTIVE_MS: f64 = 2.0 * 3600e3;
@@ -230,11 +230,11 @@ pub fn matches(pattern: &Arg, file: &Arg) -> bool {
 pub fn edit_paths(tool_name: &Arg, input: &Arg, cwd: &Arg) -> Vec<String> {
     let cwd = if cwd.is_nullish() { None } else { Some(js_text(cwd)) };
     let abs = |p: &str| -> String {
-        if is_absolute_host(p) {
+        if NATIVE.is_absolute(p) {
             p.to_string()
         } else {
             let style = cwd.clone().unwrap_or_else(|| p.to_string());
-            resolve_in(&style, cwd.as_deref().unwrap_or("/"), p)
+            style_of(&style).resolve(&[cwd.as_deref().unwrap_or("/"), p])
         }
     };
     let mut out: Vec<String> = Vec::new();
@@ -383,8 +383,10 @@ fn line(a: &Arg, me: &Arg, kind: &str, reads: bool) -> String {
     if !editing.is_empty() {
         let shown = &editing[..editing.len().min(4)];
         let all = shown.iter().all(|e| e.field("observed").truthy());
-        let names: Vec<String> =
-            shown.iter().map(|e| format!("{}{}", basename_host(&js_text(&e.field("path"))), if e.field("observed").truthy() && !all { " (observed)" } else { "" })).collect();
+        let names: Vec<String> = shown
+            .iter()
+            .map(|e| format!("{}{}", NATIVE.basename(&js_text(&e.field("path")), None), if e.field("observed").truthy() && !all { " (observed)" } else { "" }))
+            .collect();
         parts.push(format!("editing {}{}{}", names.join(", "), if editing.len() > 4 { "…" } else { "" }, if all { " (observed by XenoNet)" } else { "" }));
     }
     let claims = list(a.field("claims"));
@@ -800,7 +802,7 @@ impl Engine {
             .iter()
             .map(|e| {
                 let p = js_text(&e.field("path"));
-                let path = if is_absolute_host(&p) { p } else { resolve_in(base.as_deref().unwrap_or(&p), base.as_deref().unwrap_or("/"), &p) };
+                let path = if NATIVE.is_absolute(&p) { p } else { style_of(base.as_deref().unwrap_or(&p)).resolve(&[base.as_deref().unwrap_or("/"), &p]) };
                 let mut f = vec![("path", Arg::text(path)), ("at", e.field("ts"))];
                 if observed {
                     f.push(("observed", Arg::Bool(true)));
@@ -827,7 +829,7 @@ impl Engine {
             } else if told.field("title").truthy() {
                 told.field("title")
             } else if cwd.truthy() {
-                Arg::text(format!("{app} in {}", basename_host(&js_text(&cwd))))
+                Arg::text(format!("{app} in {}", NATIVE.basename(&js_text(&cwd), None)))
             } else {
                 Arg::text(short(&js_text(&id)))
             }
@@ -1073,7 +1075,8 @@ impl Engine {
     }
 
     fn place_at(c: &mut dyn Calls, file: &Arg) -> Result<Arg> {
-        let dir = dirname_style(&js_text(file));
+        let file = js_text(file);
+        let dir = style_of(&file).dirname(&file);
         let repo = c.call("engine.repos", "of", vec![Arg::text(dir.clone())])?;
         Self::hop(c)?;
         Ok(obj(vec![
@@ -1134,7 +1137,8 @@ impl Engine {
             (r, format_selector(Some(s)))
         } else if matches!(to.as_str(), Some("repo" | "project")) {
             let top = me_view.field("top");
-            let target = if top.truthy() { format!("repo:{}", basename_host(&js_text(&top))) } else { format!("repo:{}", js_text(&me_view.field("project").or(Arg::text("?")))) };
+            let target =
+                if top.truthy() { format!("repo:{}", NATIVE.basename(&js_text(&top), None)) } else { format!("repo:{}", js_text(&me_view.field("project").or(Arg::text("?")))) };
             scope = repo_key(&me_view);
             let mut r: Vec<Arg> = active.iter().filter(|a| together(a, &me_view)).cloned().collect();
             // Clones of the same remote on other hosts.
@@ -1533,12 +1537,12 @@ impl Engine {
         let abs: Vec<String> = list_
             .iter()
             .map(|p| {
-                let full = if is_absolute_host(p) {
+                let full = if NATIVE.is_absolute(p) {
                     p.clone()
                 } else {
                     let style = base.as_ref().map_or_else(|| p.clone(), js_text);
                     let root = base.as_ref().map_or_else(|| "/".to_string(), js_text);
-                    join_in(&style, &root, &[p])
+                    style_of(&style).join(&[&root, p])
                 };
                 let slash = |s: &str| s.ends_with('/') || s.ends_with('\\');
                 if slash(p) && !slash(&full) {
@@ -1670,7 +1674,7 @@ impl Engine {
         }
         let top = a.field("top");
         if top.truthy() {
-            let b = basename_host(&js_text(&top));
+            let b = NATIVE.basename(&js_text(&top), None);
             if !b.is_empty() {
                 names.push(Arg::text(b));
             }
@@ -1943,7 +1947,7 @@ impl Engine {
             lines.push(match x.field("how").as_str() {
                 Some("editing") => format!(
                     "- {who} edited {} {}, in this same working tree{}.",
-                    basename_host(&file),
+                    NATIVE.basename(&file, None),
                     ago(now - num(&x.field("at"))),
                     seen.map_or(String::new(), |s| format!(" ({s})"))
                 ),
@@ -1998,7 +2002,7 @@ impl Engine {
         };
         let mut names: Vec<String> = Vec::new();
         for x in fresh.iter().chain(far.iter()) {
-            let n = basename_host(&js_text(&x.field("file")));
+            let n = NATIVE.basename(&js_text(&x.field("file")), None);
             if !names.contains(&n) {
                 names.push(n);
             }
@@ -2156,7 +2160,7 @@ fn rel(agent: &Arg, file: &Arg) -> String {
     let top = agent.field("top");
     let f = js_text(file);
     if top.truthy() && key_of(&f).starts_with(&key_of(&format!("{}/", js_text(&top)))) {
-        key_of(&relative_host(&js_text(&top), &f))
+        key_of(&NATIVE.relative(&js_text(&top), &f))
     } else {
         key_of(&f)
     }

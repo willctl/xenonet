@@ -32,7 +32,7 @@ use crate::{NetError, R};
 use bytes::Bytes;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 use tokio::sync::{mpsc, Notify};
 use xenonet_base::sync::Locked;
@@ -206,7 +206,8 @@ struct Bad {
 
 pub struct Gateway {
     node: Weak<Shared>,
-    store: Mutex<GwStore>,
+    /// Its store, until `close`.
+    store: Mutex<Option<GwStore>>,
     epoch: String,
     live: Mutex<HashMap<String, Live>>,
     nonces: Mutex<HashMap<String, f64>>,
@@ -223,6 +224,17 @@ pub struct Gateway {
     asked: Mutex<HashMap<String, (u64, f64)>>,
 }
 
+/// A gateway's store while it's open: `Gateway::store` makes one only
+/// over a store that's there.
+struct Open<'a>(MutexGuard<'a, Option<GwStore>>);
+
+impl std::ops::Deref for Open<'_> {
+    type Target = GwStore;
+    fn deref(&self) -> &GwStore {
+        self.0.as_ref().expect("an Open is made only over an open store")
+    }
+}
+
 /// What the gateway knows of itself, from its host's node.
 struct Me {
     network: String,
@@ -237,7 +249,7 @@ impl Gateway {
         let epoch = store.epoch()?;
         Ok(Arc::new(Gateway {
             node,
-            store: Mutex::new(store),
+            store: Mutex::new(Some(store)),
             epoch,
             live: Mutex::new(HashMap::new()),
             nonces: Mutex::new(HashMap::new()),
@@ -257,6 +269,24 @@ impl Gateway {
     /// Ends every stream: the gateway stops answering.
     pub fn stop(&self) {
         self.stopped.notify_waiters();
+    }
+
+    /// Stops it and closes its store for good, as its host leaves the
+    /// network: the store's file goes next, and Windows won't delete a file
+    /// that's open. Streams that haven't ended yet hold the gateway, not
+    /// the file; anything it's asked from now on is refused.
+    pub fn close(&self) {
+        self.stop();
+        *self.store.locked() = None;
+    }
+
+    /// Its store, while it has one.
+    fn store(&self) -> R<Open<'_>> {
+        let store = self.store.locked();
+        if store.is_none() {
+            return Err(NetError::new(503, "stopped", "the gateway stopped"));
+        }
+        Ok(Open(store))
     }
 
     fn me(n: &Shared) -> R<Me> {
@@ -296,17 +326,17 @@ impl Gateway {
     /// Whether the gateway remembers a frame's id, and so takes a repeat
     /// of it as accepted without queueing it again.
     pub fn remembers(&self, id: &str) -> bool {
-        self.store.locked().was_seen(id).unwrap_or(false)
+        self.store().and_then(|s| s.was_seen(id)).unwrap_or(false)
     }
 
     /// Queue sizes, for the state and the doctor: (host, frames, bytes).
     pub fn queues(&self) -> Vec<(String, u64, u64)> {
-        self.store.locked().sizes().unwrap_or_default()
+        self.store().and_then(|s| s.sizes()).unwrap_or_default()
     }
 
     /// What each host said of itself when it joined: id → (platform, version).
     pub fn host_info(&self) -> HashMap<String, (Option<String>, Option<String>)> {
-        self.store.locked().hosts().unwrap_or_default().into_iter().map(|(id, p, v)| (id, (p, v))).collect()
+        self.store().and_then(|s| s.hosts()).unwrap_or_default().into_iter().map(|(id, p, v)| (id, (p, v))).collect()
     }
 
     /// One request, by its path.
@@ -407,7 +437,7 @@ impl Gateway {
     /// The queue's lines after `after`, each with its seq: the lines and the
     /// last seq.
     fn backlog(&self, host: &str, after: u64) -> R<(Vec<String>, u64)> {
-        let rows = self.store.locked().after(host, after, BATCH_ROWS)?;
+        let rows = self.store()?.after(host, after, BATCH_ROWS)?;
         let mut last = after;
         let mut out = Vec::new();
         for (seq, line) in rows {
@@ -431,9 +461,9 @@ impl Gateway {
         let after = if req.query("epoch").as_deref() == Some(self.epoch.as_str()) { asked } else { 0 };
         // Never past what was given out: a host that says it has more would
         // wait for frames that never come.
-        let after = after.min(self.store.locked().last_seq(&host)?);
+        let after = after.min(self.store()?.last_seq(&host)?);
         if after > 0 {
-            self.store.locked().ack(&host, after)?;
+            self.store()?.ack(&host, after)?;
         }
         let hello = self.hello(n, &me, &host, &signed.nonce)?;
         let timing = n.timing();
@@ -464,7 +494,7 @@ impl Gateway {
         }
         let (tx, rx) = mpsc::unbounded_channel::<Bytes>();
         let _ = tx.send(Bytes::from(hello));
-        let presences = self.store.locked().presences(&host)?;
+        let presences = self.store()?.presences(&host)?;
         for p in presences {
             let _ = tx.send(Bytes::from(format!("{p}\n")));
         }
@@ -557,7 +587,7 @@ impl Gateway {
         if let Some(ack) = body.get("ack") {
             if ack.get("epoch").and_then(Value::as_str) == Some(self.epoch.as_str()) {
                 if let Some(seq) = ack.get("seq").and_then(Value::as_u64) {
-                    self.store.locked().ack(&host, seq)?;
+                    self.store()?.ack(&host, seq)?;
                 }
             }
         }
@@ -611,7 +641,7 @@ impl Gateway {
             // Only frames kept for a host that's away are remembered by
             // id; presence, claims and relay frames say the latest, and a
             // repeat of one does no harm, so they'd only fill the store.
-            if f.queued() && self.store.locked().was_seen(&f.id)? {
+            if f.queued() && self.store()?.was_seen(&f.id)? {
                 accepted.push(f.id.clone());
                 continue;
             }
@@ -632,7 +662,7 @@ impl Gateway {
             plain.seq = None;
             let line = plain.line();
             let line = line.trim_end();
-            let store = self.store.locked();
+            let store = self.store()?;
             if f.queued() {
                 store.seen(&f.id, now as i64)?;
             }
@@ -673,7 +703,7 @@ impl Gateway {
                 senders.entry((&d.sender, &d.host)).or_default().push(&d.id);
             }
         }
-        let store = self.store.locked();
+        let store = self.store()?;
         let mut woken = Vec::new();
         for (host, count) in lost {
             let f = Self::frame(me, "gap", host, now as i64, &json!({ "lost": count, "at": now as i64 }))?;
@@ -695,7 +725,7 @@ impl Gateway {
         let Some(n) = self.node.upgrade() else { return Ok(()) };
         let me = Self::me(&n)?;
         let now = Self::now(&n);
-        let old = self.store.locked().prune(now as i64, n.caps().keep_ms)?;
+        let old = self.store()?.prune(now as i64, n.caps().keep_ms)?;
         if !old.is_empty() {
             for h in self.gaps(&me, &old, now)? {
                 self.wake(&h);
@@ -767,7 +797,7 @@ impl Gateway {
         let body = json!({ "proposals": [entry.to_json()] });
         for host in view.members.keys().filter(|h| **h != me.host && view.is_window(h) && !entry.signers.iter().any(|s| s.host == **h)) {
             let f = Self::frame(&me, "roster", host, now as i64, &body)?;
-            self.store.locked().enqueue(Item { host, id: &f.id, kind: "roster", sender: "", line: f.line().trim_end() }, now as i64, &caps)?;
+            self.store()?.enqueue(Item { host, id: &f.id, kind: "roster", sender: "", line: f.line().trim_end() }, now as i64, &caps)?;
             self.wake(host);
         }
         Ok(())
@@ -791,7 +821,7 @@ impl Gateway {
             // What waited for the removed host goes, and it's told, signed,
             // on its stream if it has one open.
             let gone = &entry.host.id;
-            let store = self.store.locked();
+            let store = self.store()?;
             store.forget_host(gone)?;
             let by: Vec<&str> = entry.signers.iter().map(|s| s.host.as_str()).collect();
             let f = Self::frame(&me, "removed", gone, now as i64, &json!({ "network": me.network, "host": gone, "by": by, "at": entry.at, "n": entry.n }))?;
@@ -803,7 +833,7 @@ impl Gateway {
         for host in to {
             let f = Self::frame(&me, "roster", &host, now as i64, &body)?;
             let line = f.line();
-            self.store.locked().enqueue(Item { host: &host, id: &f.id, kind: "roster", sender: "", line: line.trim_end() }, now as i64, &caps)?;
+            self.store()?.enqueue(Item { host: &host, id: &f.id, kind: "roster", sender: "", line: line.trim_end() }, now as i64, &caps)?;
             self.wake(&host);
         }
         Ok(offered)
@@ -811,11 +841,11 @@ impl Gateway {
 
     /// Keeps a ticket's hash, made on this host.
     pub fn add_ticket(&self, t: &TicketRow, now: i64) -> R<()> {
-        self.store.locked().add_ticket(t, now)
+        self.store()?.add_ticket(t, now)
     }
 
     pub fn waiting_tickets(&self, now: i64) -> Vec<TicketRow> {
-        self.store.locked().waiting_tickets(now).unwrap_or_default()
+        self.store().and_then(|s| s.waiting_tickets(now)).unwrap_or_default()
     }
 
     /// `POST tickets`: a ticket made on another window host, whose hash and
@@ -884,7 +914,7 @@ impl Gateway {
                 *n >= WRONG_PROOFS
             };
             if retire {
-                self.store.locked().use_ticket(&t.hash, now as i64)?;
+                self.store()?.use_ticket(&t.hash, now as i64)?;
                 self.bad.locked().wrong.remove(&t.hash);
                 if let Some(n) = self.node.upgrade() {
                     n.log("net.join", &format!("the ticket for {} had five wrong tries, and was retired: make a new one", t.host));
@@ -911,7 +941,7 @@ impl Gateway {
         let desktop = body.get("desktop").and_then(Value::as_bool).unwrap_or(false);
         let sig = unb64(&s("sig")).unwrap_or_default();
         let signed_text = join_signing(&nonce, &key_id, &proof);
-        let tickets = self.store.locked().waiting_tickets(now as i64)?;
+        let tickets = self.store()?.waiting_tickets(now as i64)?;
         let found = tickets.iter().find(|t| unb64(&t.hash).is_some_and(|h| ticket::check_join(&h, &nonce, &key_id, &proof))).cloned();
         let Some(t) = found.filter(|_| nonce.len() >= 16 && keys.verify(signed_text.as_bytes(), &sig)) else {
             self.bad_ticket(source, now);
@@ -929,7 +959,7 @@ impl Gateway {
             Some(true) => {}
             None if t.maker == me.host => {
                 // Made here: the gateway's host signs the new host in.
-                if !self.store.locked().use_ticket(&t.hash, now as i64)? {
+                if !self.store()?.use_ticket(&t.hash, now as i64)? {
                     self.bad_ticket(source, now);
                     return Err(NetError::new(404, "no-ticket", "not found"));
                 }
@@ -967,8 +997,8 @@ impl Gateway {
             }
         }
         // The new host is in the roster with these keys: the ticket is used.
-        let _ = self.store.locked().use_ticket(&t.hash, now as i64)?;
-        self.store.locked().set_host(&t.host, platform.as_deref(), version.as_deref(), desktop, now as i64)?;
+        let _ = self.store()?.use_ticket(&t.hash, now as i64)?;
+        self.store()?.set_host(&t.host, platform.as_deref(), version.as_deref(), desktop, now as i64)?;
         let hash = unb64(&t.hash).unwrap_or_default();
         let gw = me.key.public();
         let roster = n.roster();
@@ -1003,7 +1033,7 @@ impl Gateway {
         }
         let body = json!({ "asks": [{ "host": t.host, "window": t.window, "join": join, "expires": t.expires }] });
         let f = Self::frame(me, "roster", &t.maker, now as i64, &body)?;
-        self.store.locked().enqueue(Item { host: &t.maker, id: &f.id, kind: "roster", sender: "", line: f.line().trim_end() }, now as i64, &n.caps())?;
+        self.store()?.enqueue(Item { host: &t.maker, id: &f.id, kind: "roster", sender: "", line: f.line().trim_end() }, now as i64, &n.caps())?;
         self.wake(&t.maker);
         Ok(())
     }

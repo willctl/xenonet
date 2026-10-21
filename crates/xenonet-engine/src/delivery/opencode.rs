@@ -165,7 +165,7 @@ pub fn listening_ports(c: &mut dyn Calls, pid: f64, platform: &str) -> Result<Ve
 /// /^n.*:(\d+)$/gm, with \r a line's end as JS's m flag has it.
 fn regex_lsof() -> &'static regex::Regex {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    RE.get_or_init(|| regex::Regex::new(r"(?mR)^n[^\n\r\x{2028}\x{2029}]*:([0-9]+)$").expect("a fixed pattern"))
+    RE.get_or_init(|| regex::Regex::new(&format!(r"(?mR)^n{}*:([0-9]+)$", xenonet_base::text::JS_DOT)).expect("a fixed pattern"))
 }
 
 /// One folder, as OpenCode spells it in two places: the same once a

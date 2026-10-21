@@ -22,9 +22,8 @@
 //! Mcp-Method and Mcp-Name headers), checked against its answers in
 //! tests/fixtures/gateway.json.
 
-use crate::actor_caller::retry_after;
-use crate::borrowed::{attest, platform, Sender};
-use crate::buckets::{now_ms, Buckets, Rate};
+use crate::actor_caller::{retry_after, Rate, BUCKETS};
+use crate::borrowed::{attest, now_ms, platform, Sender};
 use crate::cores::{Actors, Engine, Registration, Reports, Runs};
 use crate::http::{node_headers, parse_target, Reply};
 use bytes::Bytes;
@@ -34,6 +33,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::TcpListener;
+use xenonet_actors::limits::Buckets;
 use xenonet_actors::tokens::{bearer_of, token_in_url};
 use xenonet_base::json;
 use xenonet_base::sync::Locked;
@@ -193,7 +193,7 @@ impl ActorGateway {
                 host: Mutex::new(normal_host(host)),
                 probes: Mutex::new(HashMap::new()),
                 blocked_until: Mutex::new(HashMap::new()),
-                buckets: Mutex::new(Buckets::default()),
+                buckets: Mutex::new(Buckets::new(BUCKETS)),
                 stats: Mutex::new(Stats::default()),
                 server: Mutex::new(None),
                 now,
@@ -368,8 +368,8 @@ impl ActorGateway {
         if code != "no-token" {
             let source = Self::source_of(headers);
             let mut buckets = self.inner.buckets.locked();
-            let one = buckets.take(&format!("bad-tokens|{source}"), BAD_TOKENS, 1.0, t) != 0.0;
-            let all = buckets.take("bad-tokens|*", BAD_TOKENS_ALL, 1.0, t) != 0.0;
+            let one = buckets.take(&format!("bad-tokens|{source}"), BAD_TOKENS.rate, BAD_TOKENS.burst, 1.0, t) != 0.0;
+            let all = buckets.take("bad-tokens|*", BAD_TOKENS_ALL.rate, BAD_TOKENS_ALL.burst, 1.0, t) != 0.0;
             drop(buckets);
             let mut blocked = self.inner.blocked_until.locked();
             blocked.retain(|_, until| *until > t);
@@ -735,9 +735,9 @@ impl ActorGateway {
                 }
                 let to = a.get("to").and_then(Value::as_str);
                 let wide = matches!(to, Some("repo" | "project" | "all"));
-                let mut wait = if wide { self.inner.buckets.locked().take(&format!("{slug}|wide"), WIDE, 1.0, t) } else { 0.0 };
+                let mut wait = if wide { self.inner.buckets.locked().take(&format!("{slug}|wide"), WIDE.rate, WIDE.burst, 1.0, t) } else { 0.0 };
                 if wait == 0.0 {
-                    wait = self.inner.buckets.locked().take(&format!("{slug}|messages"), MESSAGES, 1.0, t);
+                    wait = self.inner.buckets.locked().take(&format!("{slug}|messages"), MESSAGES.rate, MESSAGES.burst, 1.0, t);
                 }
                 if wait != 0.0 {
                     let why = if wide { "an actor sends at most 6 messages an hour to a repo or to all" } else { "an actor sends at most 60 messages an hour" };
@@ -767,7 +767,7 @@ impl ActorGateway {
             }
             "report_run" => {
                 let Some(runs) = &c.runs else { return Err("Tool report_run not found".into()) };
-                if self.inner.buckets.locked().take(&format!("{slug}|run"), RUN_REPORTS, 1.0, t) != 0.0 {
+                if self.inner.buckets.locked().take(&format!("{slug}|run"), RUN_REPORTS.rate, RUN_REPORTS.burst, 1.0, t) != 0.0 {
                     return Err("too many run reports: one a second is the most the gateway takes".into());
                 }
                 let mut run = json!({ "run": a["run"], "app": a["app"], "presence": a.get("presence").cloned().unwrap_or(json!("working")) });
@@ -783,7 +783,7 @@ impl ActorGateway {
                 Ok(json!({ "session": session, "actor": id }))
             }
             "heartbeat" => {
-                if self.inner.buckets.locked().take(&format!("{slug}|beat"), BEATS, 1.0, t) != 0.0 {
+                if self.inner.buckets.locked().take(&format!("{slug}|beat"), BEATS.rate, BEATS.burst, 1.0, t) != 0.0 {
                     return Err("one heartbeat a second is the most the gateway takes".into());
                 }
                 let mut beat = json!({ "schema": "actor/report/v1" });

@@ -49,13 +49,6 @@ fn strength_of(method: &str, process: &str) -> &'static str {
     }
 }
 
-/// path.basename on this machine.
-fn basename(p: &str) -> String {
-    let seps: &[char] = if cfg!(windows) { &['/', '\\'] } else { &['/'] };
-    let s = p.trim_end_matches(seps);
-    s.rsplit(seps).next().unwrap_or("").to_string()
-}
-
 fn uuid() -> Result<String, Thrown> {
     let mut b = [0u8; 16];
     getrandom::fill(&mut b).map_err(|e| Thrown::new(format!("no random bytes: {e}")))?;
@@ -84,7 +77,7 @@ pub fn attest(sender: &Arg, method: &Arg, verdict: &Arg, home: &Arg, now: &Arg, 
         let text = js_text(&exe);
         let home = if home.truthy() { js_text(home) } else { String::new() };
         let shown = if home.is_empty() { text.clone() } else { xenonet_base::paths::tilde(&text, &home) };
-        obj(vec![("exe", Arg::text(shown)), ("name", Arg::text(basename(&text)))])
+        obj(vec![("exe", Arg::text(shown)), ("name", Arg::text(xenonet_base::nodepath::basename(&text)))])
     } else {
         Arg::Null
     };

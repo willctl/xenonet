@@ -3,8 +3,8 @@
 //! keeps at its top level (the component service, the actor gateway, the
 //! assistant's endpoint, Spotify's poll).
 
-use crate::actor_caller::ActorCaller;
-use crate::buckets::{now_ms, Bucket, Rate};
+use crate::actor_caller::{ActorCaller, Rate};
+use crate::borrowed::now_ms;
 use crate::component::Components;
 use crate::config::Config;
 use crate::cores::{ok, reason, CoreError, Cores};
@@ -14,6 +14,7 @@ use crate::http::{BodyError, Reply, Req};
 use crate::window_key::WindowKey;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
+use xenonet_actors::limits::Bucket;
 use xenonet_base::log::{ErrInfo, Log};
 use xenonet_base::sync::Locked;
 use xenonet_schema::drift::DriftLog;
@@ -94,7 +95,7 @@ impl Ctx {
             endpoint: Mutex::new(None),
             themes_dir,
             music: Mutex::new(Music::default()),
-            you_reports: Mutex::new(Bucket::new(YOU_REPORTS, now_ms())),
+            you_reports: Mutex::new(Bucket::new(YOU_REPORTS.rate, YOU_REPORTS.burst, now_ms())),
             refusal_notes: Mutex::new(RefusalNotes::default()),
             upstream: None,
             net: std::sync::OnceLock::new(),
