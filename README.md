@@ -109,7 +109,7 @@ On a Mac, use ⌘ wherever this page says Ctrl. The terminal's key stays
 
 ### Lets sessions work together
 
-Run `Connect Claude Code and Codex to XenoNet` from the palette once.
+Run `Connect your agents to XenoNet` from the palette once.
 XenoNet shows what it will add to their settings and adds it when you
 confirm. From then on, each session hears when it starts which other
 sessions work in its repo and what each is doing. It gets a warning before
@@ -286,7 +286,7 @@ To build installers yourself, see [Releasing XenoNet](docs/guide/releases.md).
 ### Install as a Claude Code plugin
 
 Claude Code can get XenoNet's MCP server and hooks from a plugin instead of
-`Connect Claude Code and Codex to XenoNet`. Install XenoNet first, since the
+`Connect your agents to XenoNet`. Install XenoNet first, since the
 plugin runs the `xenonet` command from your PATH. Then, in Claude Code:
 
 ```text

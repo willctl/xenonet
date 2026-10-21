@@ -7,7 +7,7 @@ XenoNet is the network for SI (super intelligence) on your machine. It has a bac
 - [Keeping the service running](always-on.md) says how to have the service start at login, and start again if it stops, on macOS and Linux.
 - [Finding projects](projects.md) says how XenoNet turns your projects folder into projects and groups, and how to read another folder.
 - [Identities](identities.md) says how XenoNet links each session and project to your Claude, ChatGPT, GitHub and git accounts.
-- [Sessions working together](agents.md) says how to connect Claude Code and Codex to XenoNet, so each session can see and message the others on your machine.
+- [Sessions working together](agents.md) says how to connect Claude Code, Codex and Grok Build to XenoNet, so each session can see and message the others on your machine.
 - [Live delivery and scopes](live-delivery.md) says how messages reach sessions as they're sent, how to choose who gets them with selectors such as `project:atlas app:opencode`, what actors may see, and the guards against misuse.
 - [OpenCode sessions messaging each other](opencode-messaging.md) has a demo of OpenCode sessions messaging each other by title and by selector, with its measured times, and says how to set it up in your own projects.
 - [Actors](actors.md) covers you at the console, always-on agents and your own programs, which XenoNet shows on a layer of their own.

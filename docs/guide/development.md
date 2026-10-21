@@ -27,7 +27,7 @@ The desktop app run from source is XenoNet Dev. It has its own settings, port, l
 
 XenoNet's service is the `xenonet` binary, built from `crates/` with the Rust that `rust-toolchain.toml` pins (rustup installs it on the first build). XenoNet Dev runs the checkout's newer build of `target/debug/xenonet` and `target/release/xenonet`. `npm run app`, `npm run dev` and `npm run test:e2e` build it first; started any other way, XenoNet Dev says to run `npm run rust:bin` when there's none. The service runs on its own, as an installed one does, and keeps running when XenoNet Dev quits.
 
-Connecting Claude Code and Codex from XenoNet Dev adds its own entries beside the installed XenoNet's, with its MCP server named `xenonet-dev`, and leaves the installed XenoNet's entries alone. Disconnecting takes away only its own. Whichever XenoNet connects next clears entries that point at a checkout that's gone. Terminals XenoNet opens don't pass on its own `XENONET_*` settings, so `npm run app` started in one runs as XenoNet Dev, not on the installed XenoNet's port.
+Connecting your agents from XenoNet Dev adds its own entries beside the installed XenoNet's, with its MCP server named `xenonet-dev`, and leaves the installed XenoNet's entries alone. Disconnecting takes away only its own. Whichever XenoNet connects next clears entries that point at a checkout that's gone. Terminals XenoNet opens don't pass on its own `XENONET_*` settings, so `npm run app` started in one runs as XenoNet Dev, not on the installed XenoNet's port.
 
 XenoNet Dev picks up edits as you save them:
 
@@ -240,7 +240,7 @@ The console page imports only the core modules that have no Node in them, such a
 | Files | What they cover |
 | --- | --- |
 | `apps.js` | The app registry: the apps XenoNet knows sessions of, and what's fixed about each (its folder, hook events, signing team, edit tools and what XenoNet can do with it). The page uses it too, and `node scripts/apps.mjs` writes the Rust's copy, `crates/xenonet-base/src/apps.json` |
-| `claude.js`, `codex.js`, `git.js`, `wiki.js`, `demo.js` | The sources XenoNet reads |
+| `claude.js`, `codex.js`, `grok.js`, `git.js`, `wiki.js`, `demo.js` | The sources XenoNet reads |
 | `native/`, `numbat.js`, `reported-runs.js` | Runs of other apps: the experimental native readers, one for each app the registry gives `native` (the table in `native/index.js`, the contract each keeps in `native/reader.js`), numbat's records, and the runs actors report |
 | `lines.js` | Transcript lines, as all three of XenoNet's readers take them |
 | `vendor.js`, `drift.js`, `schema/` | The apps' data, read leniently against XenoNet's schemas, and the drift kept from it. The schemas themselves are in `schema/`. |
@@ -257,7 +257,7 @@ The console page imports only the core modules that have no Node in them, such a
 | `statefile.js`, `migrate.js` | The versions of `state.json` |
 | `blocks/` | The building blocks XenoNet's subsystems are made of: scanners, gatherers, tailers, normalizers and stores |
 | `open.js` | Opening sessions in their apps |
-| `engine/` | The engine that connects sessions to each other |
+| `engine/` | The engine that connects sessions to each other, and connecting the apps to it (`connect.js`, with `toml.js` for Grok Build's `config.toml`) |
 | `procs.js` | Which process is on the other end of a connection to the engine |
 | `actors/` | Actors, with the registry, registering and tokens, you, the observers of Hermes Agent, Grok Bot and Muse, remote actors' connections, account links, provider adapters and presence, and what each actor's work costs (`spend.js`) |
 | `assistant/` | What remote actors read: the projection, the read service, the made-up fixture, page tokens, the log, credentials and tombstones, and the adapter's client (see [Remote actors](../design/cloud-assistants.md)) |
@@ -291,7 +291,7 @@ The console page imports only the core modules that have no Node in them, such a
 | `framing.js` | Where the camera stands to frame the map |
 | `hud.js`, `telemetry.js`, `actor-spend-view.js`, `alerts.js`, `needs-you.js`, `modals.js`, `palette.js`, `replay.js`, `terminal.js`, `identities.js` | The panels around the map. `actor-spend-view.js` has Token use's rows of spend by actor. |
 | `export-panel.js`, `poster.js`, `poster-draw.js`, `mark.js` | The export panel, and posters of the day: the preview, the sizes, what an export reveals, and the mark |
-| `connect.js` | The panel for connecting Claude Code and Codex |
+| `connect.js` | The panel for connecting Claude Code, Codex and Grok Build |
 | `background.js` | The Background service panel, and Desktop's offer of it during setup |
 | `doctor.js` | The panel for XenoNet's doctor |
 | `stats.js` | The panel for a session's stats |

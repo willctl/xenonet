@@ -164,7 +164,9 @@ aren't lists of apps or are public inputs:
 - the theme tokens `--claude` and `--codex` (`theme/v1`).
 
 Widening any of these is a contract change of its own when an app needs
-it.
+it. Grok Build widened two, by adding to them: `engine/agent/v1`'s `App`
+has `grok`, since its sessions connect to the engine, and `theme/v1` has
+`colors.grok` (see [Grok Build in XenoNet](grok-build.md)).
 
 **The fallbacks stay, as one lookup.** About 15 places pick one of the two
 apps by testing for the other: most read an app that isn't Codex as

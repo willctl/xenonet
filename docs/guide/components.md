@@ -40,7 +40,7 @@ The service serves the console too: open http://127.0.0.1:47840 in a browser on 
 
 `xenonet mcp assistant --grant <grant>` runs the read-only server for a [remote actor](cloud-assistants.md) you paired. A tunnel client runs it, not Claude Code or Codex, and it reaches the service only through a private endpoint of its own, with that grant's credential; it never gets the Tools credential.
 
-Use `Connect Claude Code and Codex to XenoNet` in the palette, or `xenonet connect`, to review both MCP servers and add them to Claude Code and Codex. Their configuration points to a stable launcher outside Desktop. A new Tools version applies to new commands and new MCP connections. MCP processes already running keep their code and runtime until their client reconnects.
+Use `Connect your agents to XenoNet` in the palette, or `xenonet connect`, to review both MCP servers and add them to Claude Code, Codex and Grok Build. Their configuration points to a stable launcher outside Desktop. A new Tools version applies to new commands and new MCP connections. MCP processes already running keep their code and runtime until their client reconnects.
 
 Console MCP stays connected while Desktop restarts. Window actions report that Desktop is unavailable until it returns. Coordination continues through the service. Simulations, arbitrary JavaScript evaluation and raw DevTools commands remain available only in development instances. Actions marked as yours alone in the app keep that restriction.
 

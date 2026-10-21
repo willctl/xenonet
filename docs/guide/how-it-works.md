@@ -1,6 +1,6 @@
 # How it works
 
-XenoNet reads Claude Code's and Codex's files. It acts only when you ask it to open a session, hand one off, start a terminal or rename a session. Renaming is the one time it writes to the apps' session files, and connecting Claude Code and Codex is the one time it changes their settings.
+XenoNet reads Claude Code's, Codex's and Grok Build's files. It acts only when you ask it to open a session, hand one off, start a terminal or rename a session. Renaming is the one time it writes to the apps' session files, and connecting your agents is the one time it changes their settings.
 
 ## Where the data comes from
 
@@ -9,6 +9,7 @@ XenoNet reads Claude Code's and Codex's files. It acts only when you ask it to o
 | Projects and repo status | A scan of `~/Projects`, described in [Finding projects](projects.md), and `git status --porcelain -b` every 20 seconds | Yours |
 | Codex sessions and transcripts | `codex app-server` JSON-RPC, started from the ChatGPT desktop app's bundled binary or the Codex CLI | Official API, labelled experimental |
 | Claude Code sessions and transcripts | The Agent SDK's `listSessions` and `getSessionMessages` | Official API |
+| Grok Build sessions and transcripts | Each session's folder under `~/.grok/sessions`, or `GROK_HOME`'s: its `summary.json` and its `updates.jsonl` of ACP session updates. See [Grok Build in XenoNet](../design/grok-build.md). | `summary.json` is in Grok's guide; the rest is undocumented, best effort |
 | Live activity, tokens, context, subagents and edits | The end of each app's transcript files, read as they grow | Internal format, best effort |
 | Codex rate limits | `token_count` events in Codex rollouts | Undocumented, optional |
 | Claude plan usage | Anthropic's `/api/oauth/usage`, the endpoint Claude Code's `/usage` reads. XenoNet asks every 5 minutes, with Claude Code's sign-in. It reads the sign-in from the "Claude Code-credentials" keychain item on macOS, or else from `~/.claude/.credentials.json`. Claude desktop's `plan-usage-history.json` fills in when it's newer. | Undocumented, optional |
