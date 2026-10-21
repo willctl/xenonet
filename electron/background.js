@@ -1,10 +1,10 @@
 // Starting XenoNet's service at login (docs/guide/always-on.md): the
 // Background service setting, and the offer Desktop makes once during
 // setup. Desktop asks the xenonet command (xenonet service status, install,
-// uninstall and start), which registers the service with launchd or
-// systemd; Desktop registers nothing itself. XenoNet Dev starts and stops
-// its own service, so there the setting only says so (`live` false), and
-// Windows has no supervisor for it yet (`supported` false).
+// uninstall and start), which registers the service with launchd, systemd
+// or Task Scheduler; Desktop registers nothing itself. XenoNet Dev starts
+// and stops its own service, so there the setting only says so (`live`
+// false). Systems with none of the three say so (`supported` false).
 import { execFile } from "node:child_process";
 import os from "node:os";
 import { tilde } from "../core/paths.js";
@@ -68,7 +68,7 @@ export function createBackground({ bin, env, live, prefs, port, platform = proce
   }
 
   // XenoNet Dev doesn't ask: it starts and stops its own service.
-  const status = async () => (live ? shape(await raw()) : shape({ login: { supported: ["darwin", "linux"].includes(platform), registered: false } }));
+  const status = async () => (live ? shape(await raw()) : shape({ login: { supported: ["darwin", "linux", "win32"].includes(platform), registered: false } }));
 
   async function set(on, { force = false } = {}) {
     if (!live) throw new Error("XenoNet Dev starts and stops its own service. This setting is for installed XenoNet.");
