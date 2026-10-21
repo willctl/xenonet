@@ -1,6 +1,8 @@
 import { createUpdatesPanel } from "./updates.js";
 import { createBackground } from "./background.js";
 import { createNetwork } from "./network.js";
+import { chimeHere } from "./network-model.js";
+import { networkPart, withNetwork, partKey } from "./network-map.js";
 import "@fontsource/chakra-petch/400.css";
 import "@fontsource/chakra-petch/500.css";
 import "@fontsource/chakra-petch/600.css";
@@ -467,18 +469,25 @@ const alerts = createAlerts({
 });
 
 // The network across machines (network.js): Network settings and Add a
-// machine, and other machines' agents waiting on you in the strip.
+// machine, other machines' agents waiting on you in the strip, and the
+// other machines on the map, from their presence (network-map.js).
 const network = createNetwork({
   modals,
   calls: windowCalls,
   sfx,
   toast: (m, b) => hud.toast(m, b),
-  onChange: (v) => alerts.setRemote(v.waits),
+  onChange: (v) => {
+    alerts.setRemote(v.waits);
+    mapNetwork(v);
+  },
   message: (id) => messageTo(id),
   // The gateway's tunnel or LAN address is set where the actor gateway's
   // is, in the Actors panel.
   gateway: () => openActors(),
 });
+// What waits on you sounds only where you are, in a network: one rule for
+// this machine's waits and the others'.
+alerts.setChime(() => chimeHere(network.state));
 
 // Everything waiting on you, the longest wait first (core/needs-you.js),
 // from what the strip shows: the map's sessions waiting on a question or a
@@ -951,6 +960,11 @@ function setPlainPanels(on, { quiet = false } = {}) {
 
 let fullGraph = null;
 let fullIndex = new Map();
+// The map as the server sent it, and the network's other machines drawn
+// from their presence (network-map.js), merged into it as it's drawn.
+let serverGraph = null;
+let netPart = null;
+let netKey = "";
 const scope = loadScope();
 const revealed = new Set();
 const scopeEl = document.getElementById("session-scope");
@@ -964,10 +978,15 @@ function keepIds() {
   if (selectedId) keep.add(selectedId);
   for (const s of lastLive?.sessions ?? []) if (s.status !== "idle" || s.needsYou || s.stuck) keep.add(s.id);
   for (const id of actorTargets()) keep.add(id);
+  // Another machine's sessions that wait on you or seem stuck, as their
+  // presence says.
+  for (const n of netPart?.nodes ?? []) if (n.presence?.waits || n.presence?.stuck) keep.add(n.id);
   return keep;
 }
 
-function applyGraph(graph = fullGraph) {
+function applyGraph(graph = serverGraph) {
+  serverGraph = graph;
+  graph = withNetwork(graph, netPart);
   fullGraph = graph;
   fullIndex = new Map(graph.nodes.map((n) => [n.id, n]));
   decorateHosts(graph);
@@ -979,6 +998,17 @@ function applyGraph(graph = fullGraph) {
   hud.setData(scene.setData(scoped));
   renderScope(scoped.scope, scopeCounts(graph, scope));
   if (!replay.active) hud.refreshFilters();
+}
+
+// The network's other machines changed (network.js's view): drawn again
+// only when what the map shows of them did.
+function mapNetwork(view) {
+  const part = networkPart(view.state, view.agents);
+  const key = partKey(part);
+  if (key === netKey) return;
+  netKey = key;
+  netPart = part;
+  if (serverGraph) applyGraph();
 }
 
 function reveal(id) {

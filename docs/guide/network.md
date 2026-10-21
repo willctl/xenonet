@@ -71,7 +71,11 @@ A message from another machine reaches a session framed as "Message from an agen
 
 ## You, at any machine
 
-Every console's Network panel lists every machine: whether it's online, its sessions, how many wait on you, and which machine you're at. A session on another machine that waits on you shows in the attention strip with its machine's name. The chime plays only on the machine you're at.
+Every console shows every machine. On the map, each other machine is a constellation of its own beside this one's: its projects, one for each repo (or each folder that isn't a repo), and its sessions with their state, drawn from what that machine says of them. A machine that's offline dims. Select one of its sessions to see its state, what waits on you there and what it said last, and to message it.
+
+The Network panel lists every machine: whether it's online, its sessions, how many wait on you, and which machine you're at. A session on another machine that waits on you shows in the attention strip with its machine's name and its question's text, and one that seems stuck shows with why.
+
+The chime and the notification for anything that waits on you, on this machine or another, play only on the machine where you last worked. Once you've been away from every console for five minutes, they play on all of them. A machine on its own always plays them.
 
 From a window host's console you can:
 
@@ -120,10 +124,14 @@ To take a machine out from the machine itself, run `xenonet net leave`. Its Xeno
 Crosses, signed and sealed:
 
 - each machine's sessions: id, app, title, state, the line each says it's doing, the repo's remote and branch, its folder with the home folder as `~`, when it was last active, and whether it waits on you;
+- unless the machine shares titles only, each session's detail: the text of what waits on you (a question, or the permission it asks for), its last message (up to 280 characters) and why it seems stuck, with the home folder as `~`;
+- when you last worked at each machine's console, so the chime plays where you are;
 - claims and the files sessions are changing, as the repo's remote and the path inside the repo;
 - messages, their receipts and handoffs.
 
-Doesn't cross: transcripts, prompts, a waiting question's text, tool calls, file contents and the map's own data. The Network panel's **Share with the network: titles only** is kept for each machine, and has nothing to hold back yet, since none of that detail crosses today.
+Doesn't cross: transcripts, prompts, tool calls, file contents and the map's own data. With **Share with the network: titles only** on in a machine's Network panel, its sessions' detail stays on it too: the other consoles show that something waits there, and say the question is in that machine's console.
+
+What crosses is for the consoles. It never reaches an agent: `peers` and the other tools show other machines' sessions without their questions, messages or stuck reasons. Only messages and handoffs reach agents.
 
 The gateway sees, for each frame, which machine sent it, which it's for, its kind, its size and when.
 

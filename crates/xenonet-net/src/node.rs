@@ -121,6 +121,8 @@ pub struct Peer {
     /// Its agents, and whether each waits on the person.
     pub agents: BTreeMap<String, bool>,
     pub you: bool,
+    /// When the person last worked at its console, by this host's clock.
+    pub you_at: Option<f64>,
     pub roster: Option<String>,
     pub platform: Option<String>,
 }
@@ -166,6 +168,9 @@ pub struct Shared {
     /// `add` entries this host signed for its tickets, for the link to take
     /// to the gateway.
     signed: Mutex<Vec<Entry>>,
+    /// What this host's own presence last said of the person: whether
+    /// they're here, and when they last worked at its console.
+    me_you: Mutex<(bool, Option<f64>)>,
 }
 
 const OPERATOR_ACTIONS: [&str; 4] = ["message", "ticket", "remove", "replace"];
@@ -821,6 +826,19 @@ impl Shared {
         Ok(())
     }
 
+    /// This host's own presence on its way out: what it says of the person
+    /// is kept for this host's row, and when they last worked here goes by
+    /// the gateway's clock, as the frame's time does.
+    fn own_presence(&self, mut body: Value) -> Value {
+        let you = body.get("you").and_then(Value::as_bool).unwrap_or(false);
+        let at = body.get("youAt").and_then(Value::as_f64).filter(|t| t.is_finite() && *t > 0.0);
+        *self.me_you.locked() = (you, at);
+        if let Some(t) = at {
+            body["youAt"] = json!((t + self.status.locked().offset_ms).round() as i64);
+        }
+        body
+    }
+
     /// A presence, kept for the hosts' list: false when it's older than one
     /// already had.
     fn note_presence(&self, from: &str, body: &Value) -> bool {
@@ -845,6 +863,10 @@ impl Shared {
             }
         }
         p.you = body.get("you").and_then(Value::as_bool).unwrap_or(false);
+        // Sent by the gateway's clock, kept by this one's, so consoles on
+        // clocks that disagree still agree where the person last worked.
+        let offset = self.status.locked().offset_ms;
+        p.you_at = body.get("youAt").and_then(Value::as_f64).filter(|t| t.is_finite() && *t > 0.0).map(|t| t - offset);
         // An empty head says nothing about the sender's roster: no mismatch.
         p.roster = body.get("roster").and_then(Value::as_str).filter(|r| !r.is_empty()).map(str::to_string);
         true
@@ -896,6 +918,10 @@ impl Net for Shared {
         self.roster().head()
     }
 
+    fn titles_only(&self) -> bool {
+        self.network().is_some_and(|n| n.titles_only)
+    }
+
     fn hosts(&self) -> Vec<Host> {
         let Some(net) = self.network() else { return Vec::new() };
         let view = self.roster().view();
@@ -916,6 +942,10 @@ impl Net for Shared {
             return Err("this machine was removed from its network".into());
         }
         let key = self.key().ok_or("this machine has no network key")?;
+        let mut body = out.body;
+        if out.kind == Kind::Presence {
+            body = self.own_presence(body);
+        }
         let targets: Vec<(String, PublicKeys)> = {
             let r = self.roster();
             let v = r.view_ref().ok_or("this machine's roster is empty")?;
@@ -930,7 +960,7 @@ impl Net for Shared {
         for (to, keys) in targets {
             let id = frame_id().map_err(|e| e.message)?;
             let d = Draft { network: &net.id, id, kind: out.kind.as_str(), from: &net.host, to: &to, at };
-            let f = host_frame(&d, &key, &keys, &out.body, None).map_err(|e| e.message)?;
+            let f = host_frame(&d, &key, &keys, &body, None).map_err(|e| e.message)?;
             if out.kind.queued() {
                 let line = f.line();
                 self.with_store(|s| s.push(&f.id, &to, &f.kind, line.trim_end(), now, &self.opts.outbox)).map_err(|e| e.message)?;
@@ -980,6 +1010,7 @@ impl Node {
             relink: Notify::new(),
             pending: Mutex::new(Vec::new()),
             signed: Mutex::new(Vec::new()),
+            me_you: Mutex::new((false, None)),
         });
         Ok(Arc::new(Node { shared, tasks: Mutex::new(Vec::new()) }))
     }
@@ -1223,7 +1254,7 @@ impl Node {
         *n.status.locked() = Status::default();
         n.peers.locked().clear();
         n.log("net.leave", &format!("this machine left the network {}", net.name));
-        Ok(json!({ "left": net.name, "removed": asked }))
+        Ok(json!({ "left": net.name, "removed": asked, "founder": founder }))
     }
 
     /// An entry this host signed, to the gateway: here when it's the
@@ -1396,6 +1427,7 @@ impl Node {
         };
         let s = n.status();
         let peers = n.peers();
+        let me_you = *n.me_you.locked();
         let key_id = n.key().map(|k| k.key_id()).unwrap_or_default();
         let is_gateway = view.gateway == net.host;
         let gw = n.gateway();
@@ -1419,7 +1451,8 @@ impl Node {
                 "seen": if me { Some(now as i64) } else { p.and_then(|p| p.seen).map(|x| x as i64) },
                 "agents": p.map_or(0, |p| p.agents.len()),
                 "waitsOnYou": p.map_or(0, |p| p.agents.values().filter(|w| **w).count()),
-                "you": p.is_some_and(|p| p.you),
+                "you": if me { me_you.0 } else { p.is_some_and(|p| p.you) },
+                "youAt": if me { me_you.1 } else { p.and_then(|p| p.you_at) }.map(|t| t.round() as i64),
                 "platform": platform,
                 "self": me,
             }));

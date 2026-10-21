@@ -59,6 +59,11 @@ const RemoteAgent = obj({
   cwd: z.string().max(500).nullable().describe("Its folder, with the home folder as ~"),
   lastActive: ms.nullable(),
   waitsOnYou: z.boolean().describe("A question or a stuck state waits on the person"),
+  // Detail (docs/design/network.md, section 7): left out when the sending
+  // host shares titles only, and never shown to agents.
+  question: z.string().max(320).nullable().optional().describe("While it waits on the person: the text of its question, or of the permission it asks for, with the home folder as ~"),
+  lastMessage: z.string().max(280).nullable().optional().describe("What it said last, its last 280 characters, with the home folder as ~"),
+  stuck: z.array(z.string().max(280)).max(8).nullable().optional().describe("Why it seems stuck, with the home folder as ~"),
 });
 
 export const NetworkPresence = define(
@@ -71,6 +76,7 @@ export const NetworkPresence = define(
     agents: z.array(RemoteAgent).max(1000),
     removed: z.array(z.string().max(200)).max(1000).describe("Agents that went since the last presence"),
     you: z.boolean().describe("The person's last input was in this host's console: they're here"),
+    youAt: ms.nullable().optional().describe("When the person last worked at this host's console (input in the last two minutes), to the half minute, by the gateway's clock: the consoles chime only where it's latest, or everywhere once it's five minutes old"),
     roster: B64.describe("The hash of the sender's roster head, so hosts that see different rosters notice"),
   }),
   { title: "A host's presence", description: "Which agents are on a host, what each is doing, and whether the person is there." },
@@ -223,6 +229,7 @@ export const NetworkState = define(
         agents: count,
         waitsOnYou: count,
         you: z.boolean(),
+        youAt: ms.nullable().optional().describe("When the person last worked at its console, by this machine's clock"),
         platform: z.string().max(32).nullable(),
         self: z.boolean().optional().describe("This machine's own row"),
       }),

@@ -1,10 +1,11 @@
 // The network across machines as the console words it (src/network-model.js):
 // the state read leniently, the link in a word, each machine's line, other
-// machines' agents from the engine's list, what of theirs waits on you and
-// where that sounds, and the join line's secret part.
+// machines' agents from the engine's list with the detail their machine
+// shares, what of theirs waits on you or seems stuck, where what waits
+// sounds, and the join line's secret part.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { stateOf, inNetwork, linkWords, skewWords, hostLine, hostTags, outboxWords, remoteAgents, remoteWaits, chimeHere, hostIdProblem, joinOf, joinFields, proposalWords, ALONE, TICKET_MS } from "../src/network-model.js";
+import { stateOf, inNetwork, linkWords, skewWords, hostLine, hostTags, outboxWords, remoteAgents, remoteWaits, chimeHere, hostIdProblem, joinOf, joinFields, proposalWords, ALONE, TICKET_MS, AWAY_MS } from "../src/network-model.js";
 import { NetworkState } from "../core/schema/network.js";
 
 const NOW = Date.UTC(2026, 9, 20, 14, 30);
@@ -91,6 +92,49 @@ test("other machines' agents come from the engine's list by their @<host>: ids, 
   assert.equal(remoteWaits(s, [{ ...agents[0], text: null }])[0].text, "The question shows in laptop's console.");
   // Out of a network, nothing.
   assert.deepEqual(remoteWaits(stateOf(null), agents), []);
+});
+
+test("detail from another machine: the question's text, the last message and why it seems stuck, cut to the schema's lengths", () => {
+  const [a, b, c] = remoteAgents([
+    { id: "@laptop:claude:6f1c2b9e-0d4a-4c1e-9b7a-3e5d2a1f0c11", host: "laptop", title: "Fix the login redirect", waitsOnYou: true, needsYou: "question", question: "q".repeat(500), lastMessage: "<b>done</b>", stuck: null, repoKey: "github.com/acme/atlas-web", cwd: "~/src/atlas-web" },
+    { id: "@laptop:codex:019a7c55-1e2f-7a3b-8c4d-5e6f7a8b9c0d", host: "laptop", title: "Tidy the tests", status: "working", stuck: ["ran cargo test 3 times in a row", 7, ""], lastMessage: "  " },
+    // A machine that shares titles only: it waits, with no text.
+    { id: "@rack:claude:8d0f6a21-7b3c-4e9d-a1f2-5c6e7d8b9a03", host: "rack", title: "Import", waitsOnYou: true, question: null, focus: "importing" },
+  ]);
+  assert.deepEqual([a.text.length, a.lastMessage, a.repoKey, a.cwd, a.stuck], [320, "<b>done</b>", "github.com/acme/atlas-web", "~/src/atlas-web", null]);
+  assert.deepEqual([b.waits, b.stuck, b.lastMessage], [false, ["ran cargo test 3 times in a row"], null]);
+  assert.deepEqual([c.waits, c.text], [true, null], "what it says it's doing is never taken for its question");
+  // An id that isn't its host's is dropped.
+  assert.deepEqual(remoteAgents([{ id: "@laptop:claude:x", host: "rack" }]), []);
+  const cards = remoteWaits(founder(), [a, b, c], NOW);
+  assert.deepEqual(cards.map((x) => [x.kind, x.id === a.id ? "a" : x.id === b.id ? "b" : "c", x.text.slice(0, 32)]), [
+    ["remote-need", "a", "q".repeat(32)],
+    ["remote-stuck", "b", "ran cargo test 3 times in a row"],
+    ["remote-need", "c", "The question shows in rack's con"],
+  ]);
+  assert.equal(cards[1].name, "Tidy the tests");
+});
+
+test("what waits sounds where you last worked, or everywhere after five minutes away from every console", () => {
+  const s = founder();
+  const at = (studio, laptop, more = {}) => ({ ...s, hosts: s.hosts.map((x) => ({ ...x, you: false, youAt: x.id === "studio" ? studio : x.id === "laptop" ? laptop : null, ...(more[x.id] ?? {}) })) });
+  // A machine on its own always chimes.
+  assert.equal(chimeHere(stateOf(null), NOW), true);
+  // You worked here last: here, not on laptop.
+  assert.equal(chimeHere(at(NOW - 20e3, NOW - 40 * 60e3), NOW), true);
+  const fromLaptop = { ...at(NOW - 20e3, NOW - 40 * 60e3), self: { ...s.self, id: "laptop" } };
+  assert.equal(chimeHere(fromLaptop, NOW), false);
+  // You moved to laptop: there, not here.
+  assert.equal(chimeHere(at(NOW - 3 * 60e3, NOW - 30e3), NOW), false);
+  // Both in the same half minute: both.
+  assert.equal(chimeHere(at(NOW - 30e3, NOW - 30e3), NOW), true);
+  // Five minutes away from every console: everywhere.
+  assert.equal(chimeHere(at(NOW - AWAY_MS - 60e3, NOW - AWAY_MS), NOW), true);
+  // A machine that's down doesn't keep you there.
+  assert.equal(chimeHere(at(NOW - 3 * 60e3, NOW - 30e3, { laptop: { online: false } }), NOW), true);
+  // The cards say so, local or not: it's one rule.
+  const agents = remoteAgents([{ id: "@laptop:claude:a", host: "laptop", title: "t", waitsOnYou: true, question: "?" }]);
+  assert.equal(remoteWaits(at(NOW - 3 * 60e3, NOW - 30e3), agents, NOW)[0].chime, false);
 });
 
 test("a new machine's id, and the join line's secret part", () => {

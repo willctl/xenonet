@@ -9,9 +9,10 @@
 //     kind and link, since when, why it's down, clock skew), each machine
 //     (online or since when, its agents and what waits on you, founder,
 //     gateway, window, where you're at) with Remove and Replace, other
-//     machines' agents under them with Message, the tickets waiting, the
-//     outbox, a roster mismatch, and "Share with the network: titles
-//     only".
+//     machines' agents under them with Message (with the text of what
+//     waits on you, or why one seems stuck, as their machine shares it,
+//     escaped as transcripts are), the tickets waiting, the outbox, a
+//     roster mismatch, and "Share with the network: titles only".
 //   - Add a machine asks the new machine's id and whether you'll use a
 //     XenoNet window on it, then shows the join line once, masked as a
 //     token is (secret.js): out of the page's text until Show, then for ten
@@ -135,9 +136,13 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       </div>`;
   }
 
+  // Another machine's agent: what waits on you, or why it seems stuck, in
+  // its machine's words when it shares them; what it said last on hover.
   function agentHtml(a) {
-    const what = a.waits ? (a.text || "Waiting for you") : [a.status, a.project, a.branch].filter(Boolean).join(" · ");
-    return `<li class="net-agent${a.waits ? " waits" : ""}" data-net-agent="${h(a.id)}"><i class="sw ${h(a.app ?? "")}"></i><span class="net-agent-title">${h(a.title)}</span><span class="net-agent-what">${a.waits ? `<em>${h(a.kind === "permission" ? "needs permission" : "waits on you")}</em> ` : ""}${h(what)}</span><button class="ac-link" data-net-message="${h(a.id)}" title="Message this session as you">Message</button></li>`;
+    const tag = a.waits ? (a.kind === "permission" ? "needs permission" : "waits on you") : a.stuck ? "may be stuck" : null;
+    const what = a.waits ? (a.text || `The question shows in ${a.host}'s console.`) : a.stuck ? a.stuck.join(" · ") : [a.status, a.project, a.branch].filter(Boolean).join(" · ");
+    const said = a.lastMessage ? ` title="${h(`Said last: ${a.lastMessage}`)}"` : "";
+    return `<li class="net-agent${a.waits ? " waits" : ""}${a.stuck && !a.waits ? " stuck" : ""}" data-net-agent="${h(a.id)}"${said}><i class="sw ${h(a.app ?? "")}"></i><span class="net-agent-title">${h(a.title)}</span><span class="net-agent-what">${tag ? `<em>${h(tag)}</em> ` : ""}${h(what)}</span><button class="ac-link" data-net-message="${h(a.id)}" title="Message this session as you">Message</button></li>`;
   }
 
   function hostHtml(x, confirm) {
@@ -524,14 +529,15 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
         waitsOnYou: x.waitsOnYou ?? 0,
         line: hostLine(x),
         row: isOpen() ? (panel.querySelector(`[data-net-host="${CSS.escape(x.id)}"] [data-net-host-line]`)?.textContent ?? null) : null,
-        remote: agents.filter((a) => a.host === x.id).map((a) => ({ id: a.id, title: a.title, app: a.app, status: a.status, waits: a.waits, text: a.text })),
+        remote: agents.filter((a) => a.host === x.id).map((a) => ({ id: a.id, title: a.title, app: a.app, status: a.status, waits: a.waits, text: a.text, stuck: a.stuck, lastMessage: a.lastMessage, repoKey: a.repoKey })),
       })),
       tickets: state.tickets.map((t) => ({ host: t.host, window: !!t.window, expires: t.expires })),
       proposals: state.proposals.map((p) => ({ id: p.id, op: p.op, host: p.host, window: !!p.window, gateway: p.gateway ?? null, signers: p.signers ?? [], words: proposalWords(p) })),
       outbox: { frames: state.outbox.frames ?? 0, bytes: state.outbox.bytes ?? 0, oldest: state.outbox.oldest ?? null },
       mismatch: state.rosterMismatch,
       titlesOnly: !!state.titlesOnly,
-      waits: remoteWaits(state, agents).map((w) => ({ agent: w.id, host: w.host, text: w.text, chime: w.chime })),
+      waits: remoteWaits(state, agents).filter((w) => w.kind === "remote-need").map((w) => ({ agent: w.id, host: w.host, text: w.text, chime: w.chime })),
+      stuck: remoteWaits(state, agents).filter((w) => w.kind === "remote-stuck").map((w) => ({ agent: w.id, host: w.host, text: w.text })),
       join: joinState(),
       error: isOpen() ? (view.error ?? null) : null,
       // What the panel says, with a join line shown masked all the same.

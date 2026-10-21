@@ -71,8 +71,9 @@ export function createDriver(app) {
       out.active = !!n.active;
       if (n.repo?.dirty) out.uncommitted = n.repo.dirty;
     } else if (n.kind === "host") out.state = n.state;
-    // From another machine (hosts.js): which, and whether it's live.
-    if (n.host) Object.assign(out, { host: n.host, ...(n.stale ? { stale: true } : {}) });
+    // From another machine (hosts.js): which, and whether it's live; one in
+    // your network says so, and for a session whether it waits on you.
+    if (n.host) Object.assign(out, { host: n.host, ...(n.stale ? { stale: true } : {}), ...(n.network ? { network: true } : {}), ...(n.presence ? { waits: !!n.presence.waits } : {}) });
     return out;
   }
 
@@ -83,10 +84,14 @@ export function createDriver(app) {
     // many ask, in a window without the key; an actor waiting on you.
     if (it.kind === "request") return { kind: "request", request: it.id, actor: it.request.actor, name: it.request.name, ...(it.request.gateway ? { gatewayToken: true } : {}) };
     if (it.kind === "requests") return { kind: "requests", count: it.count };
-    if (it.kind === "actor-need") return { kind: "actor-need", actor: it.id, waits: it.sub, text: it.text };
-    // Another machine's agent waiting on you, in a network: which machine,
-    // and whether it sounds here (only where you are).
+    // What waits on you says whether it sounds here: only where you are,
+    // in a network.
+    if (it.kind === "actor-need") return { kind: "actor-need", actor: it.id, waits: it.sub, text: it.text, chime: it.chime !== false };
+    // Another machine's agent waiting on you or stuck, in a network: which
+    // machine, and for a wait whether it sounds here.
     if (it.kind === "remote-need") return { kind: "remote-need", agent: it.id, host: it.host, waits: it.sub, text: it.text, chime: !!it.chime, ...(it.stale ? { stale: true } : {}) };
+    if (it.kind === "remote-stuck") return { kind: "remote-stuck", agent: it.id, host: it.host, text: it.text, ...(it.stale ? { stale: true } : {}) };
+    if (it.kind === "need") return { kind: "need", session: it.id, text: it.text, chime: it.chime !== false };
     return { kind: it.kind, session: it.id, text: it.text };
   }
 
@@ -240,8 +245,8 @@ export function createDriver(app) {
     // Nodes whose id, title or name contain every word of `query`, drawn
     // ones first, then the most recent. `kind` narrows it: session, project,
     // native (a Codex project), zone (a folder outside the projects folder),
-    // resource, wiki, page, core, host (another machine's XenoNet, with
-    // XENONET_HOSTS=1) or actor (actors beside the map, by id, name and
+    // resource, wiki, page, core, host (another machine's XenoNet: over SSH
+    // with XENONET_HOSTS=1, or in your network) or actor (actors beside the map, by id, name and
     // product, after the nodes when not narrowed, so words that found a node
     // still find it first). A node from another machine has an id that
     // starts with @<host>: and says which host it's on.
@@ -705,8 +710,8 @@ export function createDriver(app) {
       return { ...st, made };
     },
 
-    // Other machines on the map (hosts.js, with XENONET_HOSTS=1): each host
-    // with how it stands, its node and where that is on screen, its
+    // Other machines on the map (hosts.js: over SSH with XENONET_HOSTS=1,
+    // and your network's, from their presence): each host with how it stands, its node and where that is on screen, its
     // constellation, and the machines' chips under Filters with the ones
     // picked; the bridges between checkouts of one repo, drawn or not.
     hosts() {

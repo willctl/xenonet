@@ -43,6 +43,8 @@ struct Hub {
     sent: Mutex<Vec<(String, Outgoing)>>,
     hosts: Mutex<Vec<(String, bool)>>,
     drop: Mutex<usize>,
+    /// The hosts that share titles only.
+    titles: Mutex<Vec<String>>,
 }
 
 struct FakeNet {
@@ -56,6 +58,9 @@ impl Net for FakeNet {
     }
     fn hosts(&self) -> Vec<Host> {
         self.hub.hosts.lock().unwrap().iter().filter(|(h, _)| *h != self.host).map(|(h, on)| Host { id: h.clone(), window: true, online: *on, seen: Some(now()) }).collect()
+    }
+    fn titles_only(&self) -> bool {
+        self.hub.titles.lock().unwrap().contains(&self.host)
     }
     fn send(&self, out: Outgoing) -> Result<(), String> {
         if let To::Host(h) = &out.to {
@@ -83,9 +88,14 @@ struct Sess {
     edits: Vec<String>,
 }
 
+/// What the live state adds to a session's info, by its id: a waiting
+/// question's text, its last message, why it seems stuck.
+type Detail = Arc<Mutex<HashMap<String, Value>>>;
+
 struct Fake {
     at: f64,
     sessions: Vec<Sess>,
+    detail: Detail,
 }
 
 #[async_trait]
@@ -110,7 +120,11 @@ impl State for Fake {
     }
     fn live_info(&self, id: &str, _now: f64) -> R<Option<Value>> {
         Ok(self.sessions.iter().find(|s| s.id == id).map(|s| {
-            json!({ "lastEventAt": self.at, "endedAt": null, "status": "tool", "needsYou": null, "edits": s.edits.iter().map(|p| json!({ "path": p, "ts": self.at - 60e3 })).collect::<Vec<_>>() })
+            let mut info = json!({ "lastEventAt": self.at, "endedAt": null, "status": "tool", "needsYou": null, "edits": s.edits.iter().map(|p| json!({ "path": p, "ts": self.at - 60e3 })).collect::<Vec<_>>() });
+            for (k, v) in self.detail.lock().unwrap().get(id).and_then(Value::as_object).into_iter().flatten() {
+                info[k] = v.clone();
+            }
+            info
         }))
     }
     fn observed_live(&self, _id: &str) -> R<bool> {
@@ -146,6 +160,7 @@ struct Net3 {
     hub: Arc<Hub>,
     worlds: HashMap<String, Arc<World>>,
     dir: PathBuf,
+    detail: Detail,
 }
 
 impl Net3 {
@@ -213,6 +228,7 @@ fn net3(name: &str) -> Net3 {
     let laptop_atlas = clone(&dir.join("laptop/work/atlas"), "https://github.com/acme/atlas", "fix/login");
     let vm1_ledger = clone(&dir.join("vm1/ledger"), "git@github.com:acme/ledger.git", "main");
     let at = now();
+    let detail = Detail::default();
     let mut worlds = HashMap::new();
     for (host, sessions) in [
         (
@@ -231,13 +247,13 @@ fn net3(name: &str) -> Net3 {
         let get = |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
         let mut config = Config::from(&[], &get);
         let mut cores = Cores::pending(false, false, false);
-        cores.state = Arc::new(Fake { at, sessions });
+        cores.state = Arc::new(Fake { at, sessions, detail: detail.clone() });
         let env = WireEnv { version: "0.0.0".into(), emitter: Emitter::new(), drift: Arc::default(), readers: VendorReaders::default() };
         let w = xenonet_wire_engine::world(&cores, &mut config, &env).expect("the engine's parts");
         network::set_net(&w, Arc::new(FakeNet { host: host.into(), hub: hub.clone() }));
         worlds.insert(host.to_string(), w);
     }
-    Net3 { hub, worlds, dir }
+    Net3 { hub, worlds, dir, detail }
 }
 
 fn ids(v: &Value) -> Vec<String> {
@@ -616,4 +632,73 @@ async fn the_hop_limit_counts_the_thread_as_stored_here_whatever_the_sender_says
     n.on("laptop", move |w| network::receive(w, Incoming { from: "studio".into(), kind: Kind::Message, body, at: now(), from_window_host: true })).await;
     let r = n.sent("laptop", Kind::Receipt).pop().unwrap();
     assert_eq!((r["state"].clone(), r["mid"].clone()), (json!("refused"), json!("msg_00000000-0000-4000-8000-0000000000d7")));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn detail_crosses_for_the_console_never_for_agents_and_titles_only_keeps_it_home() {
+    let n = net3("detail");
+    let home = n.dir.join("laptop").to_string_lossy().into_owned();
+    n.detail.lock().unwrap().insert(
+        B.into(),
+        json!({
+            "needsYou": "question",
+            "question": format!("Should {home}/work/atlas/src/login.ts keep the old redirect?"),
+            "lastMessage": format!("{}I checked {home}/work/atlas.", "x".repeat(400)),
+            "stuck": ["ran npm test 3 times in a row", "silent for 5 min"],
+        }),
+    );
+    n.link_up().await;
+    // laptop's presence carries it, the home folder as ~ and each part to
+    // its limit.
+    let sent = n.sent("laptop", Kind::Presence).pop().unwrap();
+    let b = sent["agents"].as_array().unwrap().iter().find(|a| a["id"] == B).unwrap().clone();
+    assert_eq!(b["waitsOnYou"], true);
+    assert_eq!(b["question"], "Should ~/work/atlas/src/login.ts keep the old redirect?");
+    let last = b["lastMessage"].as_str().unwrap();
+    assert_eq!(last.chars().count(), 280);
+    assert!(!last.contains(&home), "{last}");
+    assert_eq!(b["stuck"], json!(["ran npm test 3 times in a row", "silent for 5 min"]));
+    // studio's console reads it; no agent does, in peers or who_has.
+    let far_id = format!("@laptop:{B}");
+    let snap = n.e("studio").snapshot().await.unwrap();
+    let far = snap["agents"].as_array().unwrap().iter().find(|x| x["id"] == far_id).unwrap().clone();
+    assert_eq!((far["question"].clone(), far["stuck"][0].clone()), (json!("Should ~/work/atlas/src/login.ts keep the old redirect?"), json!("ran npm test 3 times in a row")));
+    assert_eq!(far["repoKey"], "github.com/acme/atlas");
+    let peers = n.e("studio").peers(A, "machine").await.unwrap();
+    let seen = peers.as_array().unwrap().iter().find(|x| x["id"] == far_id).unwrap();
+    assert!(seen.get("question").is_none() && seen.get("lastMessage").is_none() && seen.get("stuck").is_none(), "{seen}");
+    assert!(!peers.to_string().contains("old redirect") && !peers.to_string().contains("npm test"), "{peers}");
+    // Titles only on laptop: its next presence leaves the detail out, and
+    // studio's console has none of it.
+    n.hub.titles.lock().unwrap().push("laptop".into());
+    n.on("laptop", network::tick).await;
+    let sent = n.sent("laptop", Kind::Presence).pop().unwrap();
+    assert_eq!((sent["full"].clone(), ids(&sent["agents"])), (json!(false), vec![B.to_string()]));
+    let b = &sent["agents"][0];
+    assert!(b.get("question").is_none() && b.get("lastMessage").is_none() && b.get("stuck").is_none(), "{b}");
+    assert_eq!(b["waitsOnYou"], true, "it still says it waits");
+    n.pump().await;
+    let snap = n.e("studio").snapshot().await.unwrap();
+    let far = snap["agents"].as_array().unwrap().iter().find(|x| x["id"] == far_id).unwrap().clone();
+    assert_eq!((far["question"].clone(), far["lastMessage"].clone(), far["stuck"].clone(), far["waitsOnYou"].clone()), (Value::Null, Value::Null, Value::Null, json!(true)));
+    // What another host sends is kept as the schema has it: its fields,
+    // each to its limit, and nothing else.
+    let body = json!({ "schema": "network/presence/v1", "counter": 9e15, "full": true, "removed": [], "you": false, "roster": "",
+        "agents": [{ "id": C, "app": "codex", "title": "t", "state": "waiting", "doing": null, "repoKey": null, "branch": null, "cwd": null, "lastActive": null, "waitsOnYou": true,
+            "question": "q".repeat(1000), "lastMessage": "m".repeat(1000), "stuck": (0..20).map(|i| format!("{i}{}", "r".repeat(400))).collect::<Vec<_>>(), "markup": "<b>bold</b>" }] });
+    n.on("studio", move |w| network::receive(w, Incoming { from: "vm1".into(), kind: Kind::Presence, body, at: now(), from_window_host: true })).await;
+    let snap = n.e("studio").snapshot().await.unwrap();
+    let far = snap["agents"].as_array().unwrap().iter().find(|x| x["id"] == format!("@vm1:{C}")).unwrap().clone();
+    let stuck = far["stuck"].as_array().unwrap();
+    assert_eq!((far["question"].as_str().unwrap().len(), far["lastMessage"].as_str().unwrap().len(), stuck.len(), stuck[0].as_str().unwrap().len()), (320, 280, 8, 280));
+    let kept = n.w("studio").store.with(|s| s.net_presence("vm1").unwrap().unwrap());
+    assert!(!kept.text("agents").unwrap().contains("markup"), "only declared fields are kept");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn presence_says_when_you_last_worked_at_this_console() {
+    let n = net3("you-at");
+    n.link_up().await;
+    let sent = n.sent("studio", Kind::Presence).pop().unwrap();
+    assert_eq!((sent["you"].clone(), sent["youAt"].clone()), (json!(false), Value::Null), "with actors off, XenoNet doesn't know");
 }

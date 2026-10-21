@@ -96,3 +96,16 @@
   letter-spacing: 0.06em;
   color: var(--dim);
 }
+
+/* Another machine's session in a network, as its presence says (hud.js). */
+.net-said {
+  margin: 2px 0 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.net-from {
+  font-size: 11px;
+  color: var(--dim);
+}
