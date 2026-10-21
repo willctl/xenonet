@@ -42,7 +42,7 @@ fuzz_target!(|data: &[u8]| {
                 t.desktop_read(&v);
                 t.note_codex_limits(&v, now);
             }
-            let _ = t.line(codex, &f, v.clone(), n % 3 != 0, now, &mut out);
+            let _ = t.line(if codex { "codex" } else { "claude" }, &f, v.clone(), n % 3 != 0, now, &mut out);
             all.push(v);
         }
         for v in &all {

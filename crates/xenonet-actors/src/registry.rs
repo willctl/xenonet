@@ -30,6 +30,7 @@ use crate::you::You;
 use serde_json::{json, Map, Value};
 use xenonet_base::ids::{app_of_session, parse_actor_id, YOU};
 use xenonet_base::json::number;
+use xenonet_base::nodepath::{style_of, NATIVE};
 use xenonet_engine::js::truthy;
 use xenonet_engine::sql::{Arg, Row, SqlError};
 use xenonet_engine::store::Shared;
@@ -1353,10 +1354,10 @@ impl Actors {
     /// null.
     pub fn place_of(&self, p: &Value, host: &mut dyn Host) -> Value {
         let Some(p) = p.as_str() else { return Value::Null };
-        if !is_absolute(p) {
+        if !NATIVE.is_absolute(p) {
             return Value::Null;
         }
-        let d = host.place_of(&resolve(p));
+        let d = host.place_of(&style_of(p).resolve(&[p]));
         if d.is_null() {
             Value::Null
         } else {
@@ -1983,30 +1984,6 @@ pub fn js_min(a: f64, b: f64) -> f64 {
         f64::NAN
     } else {
         a.min(b)
-    }
-}
-
-/// path.isAbsolute on this machine.
-pub fn is_absolute(p: &str) -> bool {
-    if cfg!(windows) {
-        let b = p.as_bytes();
-        p.starts_with('\\') || p.starts_with('/') || (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/'))
-    } else {
-        p.starts_with('/')
-    }
-}
-
-fn resolve(p: &str) -> String {
-    match xenonet_base::paths::path_style(p) {
-        xenonet_base::paths::PathStyle::Posix => {
-            let n = xenonet_base::paths::normalize_posix(p);
-            if n.len() > 1 {
-                n.trim_end_matches('/').to_string()
-            } else {
-                n
-            }
-        }
-        _ => xenonet_base::paths::resolve(p),
     }
 }
 

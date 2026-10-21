@@ -18,7 +18,7 @@ use xenonet_blocks::tailer::Tailer;
 use xenonet_schema::drift::DriftLog;
 use xenonet_state::stats::{session_stats, File};
 use xenonet_wire_map::codex::CodexClient;
-use xenonet_wire_map::vendor::Vendor;
+use xenonet_wire_map::vendor::{Tailed, Vendor};
 use xenonet_wire_map::{sdk, stats};
 
 const ID: &str = "0190d3e0-0000-7000-8000-000000000001";
@@ -87,7 +87,7 @@ fuzz_target!(|data: &[u8]| {
         }
         assert_eq!(found, at_once, "the same lines, however the reads were cut");
         let vendor = vendor();
-        if let Ok(lines) = stats::read_lines(&vendor, &file, codex) {
+        if let Ok(lines) = stats::read_lines(&vendor, &file, if codex { Tailed::Codex } else { Tailed::Claude }) {
             let id = if codex { format!("codex:{ID}") } else { format!("claude:{ID}") };
             let _ = session_stats(&id, vec![File { agent: None, lines }]);
         }

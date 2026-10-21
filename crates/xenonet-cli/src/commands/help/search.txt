@@ -1,4 +1,4 @@
-Searches every Claude Code and Codex transcript on this machine for the
+Searches every {apps lines} transcript on this machine for the
 messages that have every word (or a word that starts with it), grouped by
 session, best matches first.
 

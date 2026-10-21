@@ -13,7 +13,6 @@
 use crate::args::Flags;
 use crate::js::{encode, have, list, num, on, str, t};
 use crate::out::{ago, c, clip, eprint, json, json_at, now, print, table, write, Done, Fail, Layout};
-use crate::products::known;
 use crate::prompt::confirm;
 use crate::reach::{bearer, need};
 use crate::sys;
@@ -25,6 +24,7 @@ use std::time::Duration;
 use xenonet_actors::token_file::{run_token_command, token_file_refusal, token_from_env, write_token_file};
 use xenonet_base::client::{name_of, Server};
 use xenonet_base::json::{number, stringify};
+use xenonet_engine::products::product_of;
 
 pub const HELP: &str = include_str!("help/actor.txt");
 
@@ -109,7 +109,7 @@ pub fn default_pid(ppid: Option<u32>, program: impl Fn(u32) -> Option<String>) -
 /// since any program can send any id, maker and version.
 fn product_words(p: &Value) -> String {
     let id = t(p, "id");
-    if known(&id) {
+    if product_of(&id).is_some() {
         let mut parts = vec![id];
         if on(p, "vendor") {
             parts.push(format!("by {}", t(p, "vendor")));

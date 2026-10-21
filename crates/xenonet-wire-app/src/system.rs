@@ -15,7 +15,8 @@ use tokio::io::AsyncReadExt;
 use xenonet_app::system_stats::{self as stats, Times};
 use xenonet_service::cores::{SystemStats, R};
 
-/// os.cpus(), os.totalmem(), os.freemem(), os.uptime(), as Node reads them.
+/// os.cpus(), os.totalmem(), os.freemem(), os.uptime(), as Node reads them
+/// on macOS, Linux and Windows.
 pub mod os {
     use super::Times;
 
@@ -154,25 +155,238 @@ pub mod os {
         std::fs::read_to_string("/proc/uptime").ok().and_then(|t| t.split_whitespace().next().and_then(|s| s.parse::<f64>().ok())).map_or(0.0, f64::floor)
     }
 
-    // Elsewhere (Windows among them) the panel shows what it can read:
-    // the cores' count and nothing of their use.
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(windows)]
     pub fn cpus() -> Cpus {
-        let n = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
-        Cpus { model: None, speed: None, times: vec![Times { user: 0.0, nice: 0.0, sys: 0.0, idle: 0.0, irq: 0.0 }; n] }
+        Cpus { model: win::processor_name(), speed: win::processor_mhz().map(f64::from), times: win::processor_times().unwrap_or_else(idle_cores) }
     }
 
+    #[cfg(windows)]
+    pub fn totalmem() -> f64 {
+        win::memory().map_or(0.0, |m| win::physical(&m).0)
+    }
+
+    #[cfg(windows)]
+    pub fn freemem() -> f64 {
+        win::memory().map_or(0.0, |m| win::physical(&m).1)
+    }
+
+    #[cfg(windows)]
+    pub fn uptime() -> f64 {
+        win::uptime(win::tick_count())
+    }
+
+    /// Windows, read as libuv reads it for Node's os module: each core's
+    /// times from NtQuerySystemInformation (as uv_cpu_info does, since the
+    /// panel shows each core), the processor's name and speed from the
+    /// registry, memory from GlobalMemoryStatusEx and the uptime from
+    /// GetTickCount64. What the calls fill in becomes the os module's
+    /// numbers apart from the calls, so that's tested on every platform;
+    /// the calls themselves only on Windows.
+    #[cfg(any(windows, test))]
+    pub mod win {
+        use super::Times;
+
+        /// SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION: a core's times since
+        /// boot, in 100 ns units. The kernel's time counts its idle time too.
+        #[repr(C)]
+        #[derive(Clone, Copy, Debug, Default)]
+        pub struct ProcessorTimes {
+            pub idle: i64,
+            pub kernel: i64,
+            pub user: i64,
+            pub dpc: i64,
+            pub interrupt: i64,
+            pub interrupts: u32,
+        }
+
+        /// MEMORYSTATUSEX, in bytes.
+        #[repr(C)]
+        #[derive(Clone, Copy, Debug, Default)]
+        pub struct MemoryStatus {
+            pub length: u32,
+            pub load: u32,
+            pub total_phys: u64,
+            pub avail_phys: u64,
+            pub total_page_file: u64,
+            pub avail_page_file: u64,
+            pub total_virtual: u64,
+            pub avail_virtual: u64,
+            pub avail_extended_virtual: u64,
+        }
+
+        /// A core's times in milliseconds, as uv_cpu_info gives them: sys is
+        /// the kernel's time less the idle time, irq the interrupts', and
+        /// there's no nice.
+        pub fn times(p: &ProcessorTimes) -> Times {
+            let ms = |t: i64| (t / 10_000) as f64;
+            Times { user: ms(p.user), nice: 0.0, sys: ms(p.kernel.saturating_sub(p.idle).max(0)), irq: ms(p.interrupt), idle: ms(p.idle) }
+        }
+
+        /// The cores a query filled in, by the bytes it says it returned.
+        pub fn filled(cores: &[ProcessorTimes], returned: u32) -> &[ProcessorTimes] {
+            let n = returned as usize / size_of::<ProcessorTimes>();
+            &cores[..n.min(cores.len())]
+        }
+
+        /// os.totalmem() and os.freemem(), as libuv reads them: the
+        /// physical memory, and how much of it is available.
+        pub fn physical(m: &MemoryStatus) -> (f64, f64) {
+            (m.total_phys as f64, m.avail_phys as f64)
+        }
+
+        /// os.uptime() in whole seconds, as on Linux, from GetTickCount64's
+        /// milliseconds.
+        pub fn uptime(ms: u64) -> f64 {
+            (ms / 1000) as f64
+        }
+
+        /// A REG_SZ value's bytes as RegGetValueW writes them: UTF-16 (little
+        /// endian, as Windows is), up to its NUL. None when it's empty.
+        pub fn text(bytes: &[u8]) -> Option<String> {
+            let wide: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|b| u16::from_le_bytes(*b)).take_while(|c| *c != 0).collect();
+            let s = String::from_utf16_lossy(&wide);
+            (!s.is_empty()).then_some(s)
+        }
+
+        /// A REG_DWORD value's bytes as a number.
+        pub fn dword(bytes: &[u8]) -> Option<u32> {
+            Some(u32::from_le_bytes(bytes.get(..4)?.try_into().ok()?))
+        }
+
+        /// Text as the Windows calls take it: UTF-16, ending in a NUL.
+        pub fn wide(s: &str) -> Vec<u16> {
+            s.encode_utf16().chain(std::iter::once(0)).collect()
+        }
+
+        /// The first processor's key, where libuv reads its name and speed.
+        #[cfg(windows)]
+        const PROCESSOR: &str = r"HARDWARE\DESCRIPTION\System\CentralProcessor\0";
+
+        /// Each core's times, or None when Windows won't say. The buffer
+        /// starts with room for 64 cores, a processor group's most, and
+        /// grows if Windows says it's too small.
+        #[cfg(windows)]
+        #[expect(unsafe_code, reason = "NtQuerySystemInformation, which std doesn't wrap")]
+        pub fn processor_times() -> Option<Vec<Times>> {
+            const SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION: u32 = 8;
+            const STATUS_INFO_LENGTH_MISMATCH: i32 = 0xC000_0004_u32 as i32;
+            #[link(name = "ntdll")]
+            extern "system" {
+                fn NtQuerySystemInformation(class: u32, info: *mut std::ffi::c_void, length: u32, returned: *mut u32) -> i32;
+            }
+            let mut n = std::thread::available_parallelism().map_or(1, std::num::NonZero::get).max(64);
+            for _ in 0..4 {
+                let mut cores = vec![ProcessorTimes::default(); n];
+                let length = u32::try_from(n * size_of::<ProcessorTimes>()).ok()?;
+                let mut returned = 0u32;
+                // SAFETY: `cores` is `length` bytes of ProcessorTimes, laid
+                // out as SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION, which
+                // Windows writes no more than; it and `returned` outlive the
+                // call.
+                let status = unsafe { NtQuerySystemInformation(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION, cores.as_mut_ptr().cast(), length, &raw mut returned) };
+                if status == STATUS_INFO_LENGTH_MISMATCH {
+                    n = (returned as usize / size_of::<ProcessorTimes>()).max(n * 2);
+                    continue;
+                }
+                // An NTSTATUS below zero is an error or a warning.
+                let read: Vec<Times> = if status >= 0 { filled(&cores, returned).iter().map(times).collect() } else { Vec::new() };
+                return (!read.is_empty()).then_some(read);
+            }
+            None
+        }
+
+        /// The processor's name, as the registry has it.
+        #[cfg(windows)]
+        pub fn processor_name() -> Option<String> {
+            const RRF_RT_REG_SZ: u32 = 0x0000_0002;
+            text(&processor_value("ProcessorNameString", RRF_RT_REG_SZ, 512)?)
+        }
+
+        /// The processor's speed in MHz, as the registry has it.
+        #[cfg(windows)]
+        pub fn processor_mhz() -> Option<u32> {
+            const RRF_RT_REG_DWORD: u32 = 0x0000_0010;
+            dword(&processor_value("~MHz", RRF_RT_REG_DWORD, 4)?).filter(|mhz| *mhz != 0)
+        }
+
+        /// A value of the first processor's key, of the type `flags` lets
+        /// through, as RegGetValueW writes it into `room` bytes; None when
+        /// there's none, or it doesn't fit.
+        #[cfg(windows)]
+        #[expect(unsafe_code, reason = "RegGetValueW, which std doesn't wrap")]
+        fn processor_value(name: &str, flags: u32, room: usize) -> Option<Vec<u8>> {
+            // HKEY_LOCAL_MACHINE: (HKEY)(LONG)0x80000002, sign-extended.
+            const HKEY_LOCAL_MACHINE: isize = 0x8000_0002_u32 as i32 as isize;
+            #[link(name = "advapi32")]
+            extern "system" {
+                fn RegGetValueW(key: isize, sub_key: *const u16, value: *const u16, flags: u32, kind: *mut u32, data: *mut std::ffi::c_void, bytes: *mut u32) -> i32;
+            }
+            let (key, value) = (wide(PROCESSOR), wide(name));
+            let mut buf = vec![0u8; room];
+            let mut bytes = u32::try_from(room).ok()?;
+            // SAFETY: the key's and the value's names are NUL-terminated
+            // UTF-16, and `buf` has room for `bytes`, which RegGetValueW
+            // writes no more than (it fails rather than overrun); all of them
+            // outlive the call.
+            let status = unsafe { RegGetValueW(HKEY_LOCAL_MACHINE, key.as_ptr(), value.as_ptr(), flags, std::ptr::null_mut(), buf.as_mut_ptr().cast(), &raw mut bytes) };
+            if status != 0 {
+                return None;
+            }
+            buf.truncate(bytes as usize);
+            Some(buf)
+        }
+
+        /// The memory, or None when Windows won't say.
+        #[cfg(windows)]
+        #[expect(unsafe_code, reason = "GlobalMemoryStatusEx, which std doesn't wrap")]
+        pub fn memory() -> Option<MemoryStatus> {
+            #[link(name = "kernel32")]
+            extern "system" {
+                fn GlobalMemoryStatusEx(status: *mut MemoryStatus) -> i32;
+            }
+            let mut m = MemoryStatus { length: size_of::<MemoryStatus>() as u32, ..MemoryStatus::default() };
+            // SAFETY: `m` is a MEMORYSTATUSEX with its length set, as the
+            // call asks, and outlives it.
+            (unsafe { GlobalMemoryStatusEx(&raw mut m) } != 0).then_some(m)
+        }
+
+        /// Milliseconds since Windows started.
+        #[cfg(windows)]
+        #[expect(unsafe_code, reason = "GetTickCount64, which std doesn't wrap")]
+        pub fn tick_count() -> u64 {
+            #[link(name = "kernel32")]
+            extern "system" {
+                fn GetTickCount64() -> u64;
+            }
+            // SAFETY: GetTickCount64 takes nothing and returns a number.
+            unsafe { GetTickCount64() }
+        }
+    }
+
+    // Where the cores' use can't be read (Windows when it won't say, and
+    // any other system), the panel shows their count, idle.
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    fn idle_cores() -> Vec<Times> {
+        let n = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+        vec![Times { user: 0.0, nice: 0.0, sys: 0.0, idle: 0.0, irq: 0.0 }; n]
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+    pub fn cpus() -> Cpus {
+        Cpus { model: None, speed: None, times: idle_cores() }
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     pub fn totalmem() -> f64 {
         0.0
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     pub fn freemem() -> f64 {
         0.0
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     pub fn uptime() -> f64 {
         0.0
     }
@@ -452,12 +666,58 @@ mod tests {
         assert!(DemoSystem.read().await.unwrap()["cpu"]["cores"].as_array().unwrap().len() > 1);
     }
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
     #[test]
     fn the_os_module_reads_something_real() {
         let c = os::cpus();
         assert!(!c.times.is_empty());
-        assert!(os::totalmem() > 0.0 && os::freemem() <= os::totalmem());
+        assert!(c.times.iter().any(|t| t.idle > 0.0 || t.user > 0.0), "the cores' times, not only their count");
+        assert!(os::totalmem() > 0.0 && os::freemem() > 0.0 && os::freemem() <= os::totalmem());
         assert!(os::uptime() > 0.0);
+        if cfg!(windows) {
+            assert!(c.model.is_some() && c.speed.is_some_and(|mhz| mhz > 0.0), "{:?} {:?}", c.model, c.speed);
+        }
+    }
+
+    #[test]
+    fn windows_numbers_as_libuv_reads_them() {
+        use os::win;
+        assert_eq!((size_of::<win::ProcessorTimes>(), size_of::<win::MemoryStatus>()), (48, 64), "laid out as Windows' structs");
+        // 100 ns units: the kernel's time counts its idle time, which
+        // isn't sys; there's no nice.
+        let core = win::ProcessorTimes { idle: 90_000_000, kernel: 120_000_000, user: 45_000_000, dpc: 1_000_000, interrupt: 2_500_000, interrupts: 7 };
+        let t = win::times(&core);
+        assert_eq!((t.user, t.nice, t.sys, t.irq, t.idle), (4500.0, 0.0, 3000.0, 250.0, 9000.0));
+        // Whole milliseconds, as uv_cpu_info divides; never a negative sys.
+        let odd = win::times(&win::ProcessorTimes { idle: 19_999, kernel: 9_999, user: 10_001, ..Default::default() });
+        assert_eq!((odd.user, odd.sys, odd.idle), (1.0, 0.0, 1.0));
+        // Only the cores the query filled in.
+        let cores = [core; 4];
+        assert_eq!(win::filled(&cores, 96).len(), 2);
+        assert_eq!(win::filled(&cores, 48 * 9).len(), 4);
+        assert_eq!(win::filled(&cores, 47).len(), 0);
+        // The panel's arithmetic reads them as it reads macOS's and Linux's.
+        let mut s = stats::Stats::default();
+        s.set_prev(&[win::times(&core)]);
+        // A quarter of a second busy (user) in a second, the rest idle.
+        let later = win::ProcessorTimes { idle: 90_000_000 + 7_500_000, kernel: 120_000_000 + 7_500_000, user: 45_000_000 + 2_500_000, ..core };
+        let cpu = s.cpu(Some("Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz"), Some(3192.0), 1, &[win::times(&later)]);
+        assert_eq!((cpu["usage"].as_f64(), cpu["cores"][0].as_f64(), cpu["ghz"].as_f64()), (Some(0.25), Some(0.25), Some(3.2)));
+        assert_eq!(cpu["model"], "Intel Core i7-8700");
+        let m = win::MemoryStatus { total_phys: 17_179_869_184, avail_phys: 6_442_450_944, ..Default::default() };
+        assert_eq!(win::physical(&m), (17_179_869_184.0, 6_442_450_944.0));
+        assert_eq!((win::uptime(3_725_999), win::uptime(999)), (3725.0, 0.0));
+    }
+
+    #[test]
+    fn windows_registry_values_as_regget_value_writes_them() {
+        use os::win;
+        let bytes = |s: &str| s.encode_utf16().chain([0, 0x41]).flat_map(u16::to_le_bytes).collect::<Vec<u8>>();
+        assert_eq!(win::text(&bytes("AMD Ryzen 9 7950X 16-Core Processor  ")).as_deref(), Some("AMD Ryzen 9 7950X 16-Core Processor  "), "up to its NUL, as Node gives it");
+        assert_eq!(win::text(&bytes("")), None);
+        assert_eq!(win::text(&[0x49, 0x00, 0x6e]).as_deref(), Some("I"), "an odd byte at the end is left");
+        assert_eq!(win::dword(&3192u32.to_le_bytes()), Some(3192));
+        assert_eq!(win::dword(&[1, 2]), None);
+        assert_eq!(win::wide("~MHz"), [0x7e, 0x4d, 0x48, 0x7a, 0]);
     }
 }

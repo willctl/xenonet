@@ -61,3 +61,16 @@ pub fn wake_help(product: Option<&str>) -> Option<([&'static str; 2], &'static s
         "Create a routine named \"XenoNet inbox\" that starts from a webhook. Its instruction: read your XenoNet inbox with your xenonet tools and answer anything that needs an answer. Tell me when it's made.",
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_a2a_agent_gets_the_card_and_the_bearer() {
+        let h = handoff(Some("a2a"), "https://x.example/.well-known/agent-card.json", "x.example", Some("t"));
+        assert_eq!(h.app, Some("A2A agent"));
+        assert_eq!(h.steps.iter().map(|(_, copy)| *copy).collect::<Vec<_>>(), [Some("url"), Some("token")]);
+        assert_eq!(h.message, None, "the token never goes in a message to paste");
+    }
+}

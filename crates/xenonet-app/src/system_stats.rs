@@ -15,7 +15,7 @@ use regex::Regex;
 use serde_json::{json, Value};
 use std::sync::OnceLock;
 use xenonet_base::json::number as num_v;
-use xenonet_base::text::{js_number, js_string, js_trim};
+use xenonet_base::text::{js_number, js_string, js_trim, JS_SPACE};
 use xenonet_base::units::js_round;
 
 /// Samples kept for the traces: three minutes at 2 s.
@@ -26,9 +26,6 @@ pub const IDLE_MS: f64 = 60e3;
 /// A GPU reading older than this isn't shown.
 pub const STALE_MS: f64 = 15e3;
 const MIB: f64 = 1024.0 * 1024.0;
-
-// JS's \s, which Rust's differs from at U+0085 and U+FEFF.
-const SPACE: &str = r"[\t\n\x0B\x0C\r \x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}]";
 
 pub fn frac(part: f64, whole: f64) -> f64 {
     if whole > 0.0 {
@@ -58,10 +55,10 @@ pub fn cpu_model(model: &str) -> Option<String> {
         [
             Regex::new(r"(?i)\((?:R|TM|C)\)").expect("a fixed pattern"),
             Regex::new(r"(?-u:\b)CPU(?-u:\b)").expect("a fixed pattern"),
-            Regex::new(&format!(r"(?i)@{SPACE}*[0-9.]+{SPACE}*GHz")).expect("a fixed pattern"),
+            Regex::new(&format!(r"(?i)@[{JS_SPACE}]*[0-9.]+[{JS_SPACE}]*GHz")).expect("a fixed pattern"),
             Regex::new(r"(?i)(?-u:\b)[0-9]+-Core Processor(?-u:\b)").expect("a fixed pattern"),
             Regex::new(r"(?i)(?-u:\b)Processor(?-u:\b)").expect("a fixed pattern"),
-            Regex::new(&format!("{SPACE}+")).expect("a fixed pattern"),
+            Regex::new(&format!("[{JS_SPACE}]+")).expect("a fixed pattern"),
         ]
     });
     let s = r[0].replace_all(model, "");

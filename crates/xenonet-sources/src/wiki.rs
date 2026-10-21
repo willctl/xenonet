@@ -12,7 +12,7 @@ use crate::live::day_key;
 use regex::Regex;
 use serde_json::{Map, Value};
 use std::sync::LazyLock;
-use xenonet_base::text::{is_js_space, js_number, js_trim};
+use xenonet_base::text::{is_js_line_terminator, is_js_space, js_number, js_trim, JS_DOT, JS_SPACE};
 use xenonet_base::{json, jsstr, paths, time};
 
 /// A JS value as an answer is built: what JSON can't hold too (undefined,
@@ -86,22 +86,6 @@ fn truthy(v: Option<&Value>) -> bool {
     xenonet_base::text::truthy(v)
 }
 
-fn is_line_terminator(c: char) -> bool {
-    matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
-}
-
-/// `text.split(/\r?\n/)`.
-fn split_lines(text: &str) -> Vec<&str> {
-    let mut out: Vec<&str> = text.split('\n').collect();
-    let n = out.len();
-    for (i, part) in out.iter_mut().enumerate() {
-        if i + 1 < n {
-            *part = part.strip_suffix('\r').unwrap_or(part);
-        }
-    }
-    out
-}
-
 // ---------- frontmatter ----------
 
 // /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/: where the block's lines start and
@@ -149,7 +133,7 @@ fn key_value(line: &str) -> Option<(&str, &str)> {
         return None;
     }
     let rest = line[i + 1..].trim_start_matches(is_js_space);
-    if rest.chars().any(is_line_terminator) {
+    if rest.chars().any(is_js_line_terminator) {
         return None;
     }
     Some((&line[..i], rest))
@@ -166,7 +150,7 @@ fn key_value(line: &str) -> Option<(&str, &str)> {
 pub fn frontmatter_at(text: &str) -> (Map<String, Value>, Option<usize>) {
     let mut meta = Map::new();
     let Some((start, end, after)) = frontmatter(text) else { return (meta, None) };
-    for line in split_lines(&text[start..end]) {
+    for line in crate::git::split_lines(&text[start..end]) {
         let Some((key, raw)) = key_value(line) else { continue };
         let v = js_trim(raw);
         let value = if v.starts_with('[') {
@@ -239,7 +223,7 @@ pub fn wiki_links(text: &str) -> Vec<String> {
 }
 
 fn is_line_start(text: &str, i: usize) -> bool {
-    i == 0 || text[..i].chars().next_back().is_some_and(is_line_terminator)
+    i == 0 || text[..i].chars().next_back().is_some_and(is_js_line_terminator)
 }
 
 /// A page's first "# " heading, its title when the frontmatter gives none
@@ -255,7 +239,7 @@ fn first_heading(body: &str) -> String {
         }
         // White space to the very end leaves a match of white space alone,
         // which comes to nothing once trimmed.
-        let line = after.split(is_line_terminator).next().unwrap_or("");
+        let line = after.split(is_js_line_terminator).next().unwrap_or("");
         return js_trim(line).to_string();
     }
     String::new()
@@ -431,17 +415,14 @@ impl LogEntry {
     }
 }
 
-// JS's \s, and . (anything but a line terminator), as classes.
-const S: &str = r"[\t\n\x0B\x0C\r \x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}]";
-const DOT: &str = r"[^\n\r\x{2028}\x{2029}]";
-
 fn entry(lead: &str) -> Regex {
-    Regex::new(&format!(r"\A{lead}{S}+([0-9]{{1,2}}):([0-9]{{2}}){S}+·{S}+([^·]+?){S}+·{S}+({DOT}+)\z")).expect("a pattern of fixed parts")
+    let s = format!("[{JS_SPACE}]");
+    Regex::new(&format!(r"\A{lead}{s}+([0-9]{{1,2}}):([0-9]{{2}}){s}+·{s}+([^·]+?){s}+·{s}+({JS_DOT}+)\z")).expect("a pattern of fixed parts")
 }
 
 static HEADING: LazyLock<Regex> = LazyLock::new(|| entry("##"));
 static BULLET: LazyLock<Regex> = LazyLock::new(|| entry("-"));
-static LINK_AT_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"{S}*\[\[[^\]]+\]\]{S}*\z")).expect("a pattern of fixed parts"));
+static LINK_AT_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"[{JS_SPACE}]*\[\[[^\]]+\]\][{JS_SPACE}]*\z")).expect("a pattern of fixed parts"));
 
 // new Date(y, m, d, h, min).getTime(): a local time, as JS works it out
 // from its parts.
@@ -485,7 +466,7 @@ fn date_parts(date: Option<&Value>) -> Result<[f64; 3], TypeError> {
 pub fn parse_log(text: &str, date: Option<&Value>) -> Result<Vec<LogEntry>, TypeError> {
     let mut out: Vec<LogEntry> = Vec::new();
     let mut cur: Option<usize> = None;
-    for line in split_lines(text) {
+    for line in crate::git::split_lines(text) {
         let h = HEADING.captures(line);
         let b = BULLET.captures(line);
         let bullet = b.is_some();
@@ -706,7 +687,7 @@ pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now:
         }
         let text = read_text(&paths::join(&inbox_dir, &f)).unwrap_or_default();
         let (meta, body) = parse_frontmatter(&text);
-        let first = split_lines(&body).into_iter().find(|l| !js_trim(l).is_empty()).map(|l| {
+        let first = crate::git::split_lines(&body).into_iter().find(|l| !js_trim(l).is_empty()).map(|l| {
             let rest = l.trim_start_matches('#');
             if rest.len() < l.len() {
                 rest.trim_start_matches(is_js_space).to_string()

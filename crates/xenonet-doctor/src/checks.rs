@@ -781,11 +781,7 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
 }
 
 fn style_of(p: &str) -> Style {
-    match xenonet_base::paths::path_style(p) {
-        xenonet_base::paths::PathStyle::Windows => Style::Win32,
-        xenonet_base::paths::PathStyle::Posix => Style::Posix,
-        xenonet_base::paths::PathStyle::Native => NATIVE,
-    }
+    Style::from(xenonet_base::paths::path_style(p))
 }
 
 async fn state(c: &Ctx<'_>) -> Result<Value, Failure> {

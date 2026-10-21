@@ -1217,14 +1217,18 @@ impl Node {
     pub async fn leave(&self, force: bool) -> R<Value> {
         let n = &self.shared;
         let (net, key) = self.me()?;
-        let others = n.roster().view().members.len() > 1;
-        if others && !force && (n.is_gateway() || net.founder == net.host) {
-            let what = if net.founder == net.host { "founded the network, and its key is the network's root" } else { "is the network's gateway" };
-            return Err(NetError::new(
-                409,
-                "needed",
-                format!("this machine {what}: the other hosts lose it if it leaves. Move the gateway or remove the other hosts first, or leave with --force."),
-            ));
+        // The founder's key is the network's root, which nothing hands on,
+        // so the founder leaves only with --force, alone or not; the
+        // gateway's machine can move the gateway first.
+        let founder = net.founder == net.host;
+        if !force && (founder || n.is_gateway()) {
+            let others = n.roster().view().members.len() > 1;
+            let why = match (founder, others) {
+                (true, false) => "this machine founded the network, and its key is the network's root: the network ends when it leaves. Leave with --force to end it.",
+                (true, true) => "this machine founded the network, and its key is the network's root: the other hosts lose it if it leaves. Leave with --force all the same.",
+                (false, _) => "this machine is the network's gateway: the other hosts lose it if it leaves. Move the gateway first, or leave with --force.",
+            };
+            return Err(NetError::new(409, "needed", why));
         }
         let mut asked = false;
         if net.founder != net.host && !n.is_removed() {
@@ -1235,9 +1239,15 @@ impl Node {
                 asked = self.submit(e).await.is_ok();
             }
         }
+        // The stores close before their files go: Windows won't delete a
+        // file that's open, and the gateway's streams may not have ended yet.
+        let gateway = n.gateway();
         self.stop();
-        n.dir.forget()?;
+        if let Some(g) = gateway {
+            g.close();
+        }
         *n.store.locked() = None;
+        n.dir.forget()?;
         *n.key.writing() = None;
         *n.roster.writing() = Roster::new();
         *n.net.writing() = None;

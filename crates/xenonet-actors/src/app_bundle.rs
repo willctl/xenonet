@@ -12,9 +12,9 @@
 
 use serde_json::{json, Value};
 use std::sync::Mutex;
+use xenonet_base::nodepath::style_of;
 use xenonet_base::paths::tilde;
 use xenonet_base::sync::Locked;
-use xenonet_engine::js::join_style;
 use xenonet_engine::jsre::js;
 use xenonet_engine::peer::{list, Calls, Result, Thrown};
 use xenonet_engine::sql::Arg;
@@ -109,7 +109,7 @@ impl AppBundle {
     /// for, read again only when the file changes.
     pub fn read(&self, c: &mut dyn Calls) -> Result<Plist> {
         let app = self.where_(c)?;
-        let file = app.as_ref().map(|a| join_style(a, &["Contents", "Info.plist"]));
+        let file = app.as_ref().map(|a| style_of(a).join(&[a, "Contents", "Info.plist"]));
         let mut stamp = Value::Null;
         let mut failed: Option<Thrown> = None;
         if let Some(f) = &file {
@@ -182,7 +182,7 @@ impl AppBundle {
         } else {
             "ok"
         };
-        let version_file = plist.as_ref().and_then(|p| p.file.clone()).unwrap_or_else(|| join_style(&at, &["Contents", "Info.plist"]));
+        let version_file = plist.as_ref().and_then(|p| p.file.clone()).unwrap_or_else(|| style_of(&at).join(&[&at, "Contents", "Info.plist"]));
         Ok(json!([
             { "name": "app", "file": tilde(&at, home), "state": state },
             { "name": "app's version", "file": tilde(&version_file, home), "state": plist.map_or_else(|| "missing".to_string(), |p| p.state) },

@@ -241,4 +241,25 @@ mod tests {
         assert_eq!(waits_words(&q[0]), "is ready for review");
         assert_eq!(count_of(&q), 5.0);
     }
+
+    #[test]
+    fn the_summarys_queue_has_programs_that_ask_last() {
+        let summary = json!({
+            "needsYou": [{ "id": "codex:x", "app": "codex", "title": "Rate-limit the API", "kind": "question", "since": 2000 }, { "id": "claude:y", "kind": "review" }],
+            "actorsNeedYou": [{ "id": "actor:wren", "name": "Wren", "kind": "permission", "text": "May I?", "since": 1000 }],
+            "requests": 2,
+        });
+        let q = queue_of_summary(Some(&summary));
+        let kinds: Vec<_> = q.iter().map(|it| it["kind"].as_str().unwrap()).collect();
+        assert_eq!(kinds, ["actor", "question", "requests"]);
+        assert_eq!(
+            q[0],
+            json!({ "key": "actor:actor:wren", "kind": "actor", "id": "actor:wren", "title": "Wren", "waits": "permission", "text": "May I?", "since": 1000, "actions": ["show"] })
+        );
+        assert_eq!(waits_words(&q[0]), "needs permission");
+        assert_eq!(q[2]["title"], "2 programs");
+        assert_eq!(waits_words(&q[2]), "ask to join XenoNet");
+        assert_eq!(waits_words(&json!({ "kind": "requests", "count": 1 })), "asks to join XenoNet");
+        assert_eq!(queue_of_summary(Some(&json!({}))), Vec::<Value>::new());
+    }
 }

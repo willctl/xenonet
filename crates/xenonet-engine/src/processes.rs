@@ -4,10 +4,11 @@
 //! processes with these, and `verify` checks that a request in a session's
 //! name comes from its app's process.
 
-use crate::procs::{posix_basename, slashes};
+use crate::procs::slashes;
 use crate::re;
 use std::sync::OnceLock;
 use xenonet_base::apps::App;
+use xenonet_base::nodepath::Style;
 
 /// An app's rules.
 #[derive(Clone, Copy, Debug)]
@@ -107,7 +108,7 @@ pub fn agent_of(program: &str, args: &str) -> Option<&'static str> {
 /// The same, among these apps.
 pub fn agent_among<'a>(program: &str, args: &str, agents: &'a [Agent]) -> Option<&'a str> {
     let p = slashes(program);
-    let base = posix_basename(&p);
+    let base = &Style::Posix.basename(&p, None);
     if let Some(a) = agents.iter().find(|a| (a.rules.program)(&p, base)) {
         return Some(&a.id);
     }

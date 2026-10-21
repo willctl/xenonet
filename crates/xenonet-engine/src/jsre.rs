@@ -5,8 +5,7 @@
 
 use regex::Regex;
 use std::fmt::Write as _;
-
-const SPACE: &str = r"\t\n\x0B\x0C\r \x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}";
+use xenonet_base::text::{JS_DOT, JS_SPACE};
 
 /// A JS pattern (without its slashes) in Rust's syntax.
 pub fn translate(js: &str) -> String {
@@ -26,14 +25,14 @@ pub fn translate(js: &str) -> String {
                     ('w', false) => out.push_str("[0-9A-Za-z_]"),
                     ('W', false) => out.push_str("[^0-9A-Za-z_]"),
                     ('s', false) => {
-                        let _ = write!(out, "[{SPACE}]");
+                        let _ = write!(out, "[{JS_SPACE}]");
                     }
                     ('S', false) => {
-                        let _ = write!(out, "[^{SPACE}]");
+                        let _ = write!(out, "[^{JS_SPACE}]");
                     }
                     ('d', true) => out.push_str("0-9"),
                     ('w', true) => out.push_str("0-9A-Za-z_"),
-                    ('s', true) => out.push_str(SPACE),
+                    ('s', true) => out.push_str(JS_SPACE),
                     ('b', false) => out.push_str(r"(?-u:\b)"),
                     ('B', false) => out.push_str(r"(?-u:\B)"),
                     ('/', _) => out.push('/'),
@@ -64,7 +63,7 @@ pub fn translate(js: &str) -> String {
                 class = false;
                 out.push(']');
             }
-            '.' if !class => out.push_str(r"[^\n\r\x{2028}\x{2029}]"),
+            '.' if !class => out.push_str(JS_DOT),
             // Rust reads these as set operations inside a class.
             '&' | '~' | '-' if class && chars.peek() == Some(&c) => {
                 out.push('\\');

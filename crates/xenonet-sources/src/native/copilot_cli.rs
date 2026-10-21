@@ -4,7 +4,6 @@
 //! its edit tools' files and its shutdown's changed files as its edits.
 
 use super::files::Files;
-use super::node_path;
 use super::{
     by_num, edit_file, edits_out, fits_id, js_max, js_min, ms_of, push_edit, str_of, titled, Check, Checked, Edits, FileCache, NativeReader, Out, Threw, Vendor, DAY_MS,
     EDIT_KEEP_MS, SESSIONS_MAX, VENDOR_FAILED,
@@ -14,9 +13,9 @@ use serde_json::{Map, Value};
 use std::collections::HashSet;
 use xenonet_base::json::{self, number_string};
 use xenonet_base::jsstr::is_array_index;
+use xenonet_base::nodepath::NATIVE;
 use xenonet_base::ordered::OrderedMap;
 use xenonet_base::patch;
-use xenonet_base::paths::PathStyle;
 use xenonet_base::text::{is_blank, truthy};
 
 pub const SOURCE: &str = "github/copilot-cli/session-event";
@@ -178,7 +177,7 @@ pub fn read_events(text: &str, check: &mut dyn FnMut(&Value) -> Result<Checked, 
 
 /// ~/.copilot/session-state, as path.join makes it.
 pub fn copilot_root(home: &str) -> String {
-    node_path::join(PathStyle::Native, &[home, ".copilot", "session-state"])
+    NATIVE.join(&[home, ".copilot", "session-state"])
 }
 
 #[derive(Clone, Debug)]
@@ -237,9 +236,9 @@ impl CopilotCli {
         let mut out = Vec::new();
         for e in entries {
             let file = if e.is_dir {
-                node_path::join(PathStyle::Native, &[root, &e.name, "events.jsonl"])
+                NATIVE.join(&[root, &e.name, "events.jsonl"])
             } else if e.is_file && e.name.ends_with(".jsonl") {
-                node_path::join(PathStyle::Native, &[root, &e.name])
+                NATIVE.join(&[root, &e.name])
             } else {
                 continue;
             };

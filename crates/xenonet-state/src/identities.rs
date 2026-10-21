@@ -13,7 +13,7 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::LazyLock;
-use xenonet_base::text::{js_number, js_string, js_trim, js_trim_start, truthy};
+use xenonet_base::text::{is_js_line_terminator, js_number, js_string, js_trim, js_trim_start, truthy, JS_DOT, JS_SPACE};
 use xenonet_base::{json as js_json, jsstr, paths};
 use xenonet_sources::lines::{opt_prop, prop, Js, TypeError};
 
@@ -23,19 +23,15 @@ pub const SIGNIN_STEP_MS: f64 = 10.0 * 60e3;
 pub const MAX_SPANS: usize = 50;
 pub const HEAD_BYTES: u64 = 64 * 1024;
 
-// JS's \s, `.` and \S, for the regex crate (whose own are Unicode's).
-const S: &str = r"[\t\n\x0B\x0C\r \x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}]";
-const NOT_S: &str = r"[^\t\n\x0B\x0C\r \x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}]";
-const DOT: &str = r"[^\n\r\x{2028}\x{2029}]";
-
 fn re(pattern: &str) -> Regex {
-    let p = pattern.replace("\\s", S).replace("\\S", NOT_S).replace("DOT", DOT);
+    // JS's \s, \S and `.` (written DOT), as the regex crate has them.
+    let p = pattern.replace("\\s", &format!("[{JS_SPACE}]")).replace("\\S", &format!("[^{JS_SPACE}]")).replace("DOT", JS_DOT);
     Regex::new(&p).expect("a regular expression of identities.rs")
 }
 
 // /^\s*([^:#\s][^:]*?)\s*:(?:\s+(.*?))?\s*$/
 static KEY_LINE: LazyLock<Regex> = LazyLock::new(|| {
-    let first = format!("[^:#{}]", &S[1..S.len() - 1]);
+    let first = format!("[^:#{JS_SPACE}]");
     re(&format!(r"^\s*({first}[^:]*?)\s*:(?:\s+(DOT*?))?\s*$"))
 });
 // /^\s*(\w+)\s*(?:=\s*|\s+)(.+?)\s*$/
@@ -68,13 +64,6 @@ fn opt_str(v: Option<String>) -> Value {
     v.map_or(Value::Null, Value::String)
 }
 
-// A text split as split(/\r?\n/) splits it.
-fn split_lines(s: &str) -> Vec<&str> {
-    let parts: Vec<&str> = s.split('\n').collect();
-    let last = parts.len() - 1;
-    parts.into_iter().enumerate().map(|(i, l)| if i < last { l.strip_suffix('\r').unwrap_or(l) } else { l }).collect()
-}
-
 // raw.length - raw.trimStart().length
 fn indent_of(raw: &str) -> usize {
     jsstr::len(raw) - jsstr::len(js_trim_start(raw))
@@ -86,7 +75,7 @@ fn unquote(v: &str) -> String {
     match (cs.next(), cs.next_back()) {
         (Some(a), Some(b)) if a == b && (a == '\'' || a == '"') => {
             let mid = &v[1..v.len() - 1];
-            if mid.contains(jsre::is_term) {
+            if mid.contains(is_js_line_terminator) {
                 v.to_string()
             } else {
                 mid.to_string()
@@ -203,7 +192,7 @@ pub fn parse_gh_hosts(text: &str) -> Vec<Value> {
     let mut hosts: Vec<Host> = Vec::new();
     let mut users_at: i64 = -1;
     let mut user_at: i64 = -1;
-    for raw in split_lines(text) {
+    for raw in xenonet_sources::git::split_lines(text) {
         let t = js_trim(raw);
         if t.is_empty() || t.starts_with('#') {
             continue;
@@ -292,7 +281,7 @@ pub fn gh_hosts_shape(text: &str) -> Value {
     }
     let mut nodes = vec![Node::Obj(Vec::new())];
     let mut stack = vec![Frame { indent: -1, parent: None, key: String::new(), obj: Some(0) }];
-    for raw in split_lines(text) {
+    for raw in xenonet_sources::git::split_lines(text) {
         let line = js_trim(raw);
         if line.is_empty() || line.starts_with('#') {
             continue;
@@ -346,7 +335,7 @@ pub fn gh_hosts_shape(text: &str) -> Value {
 pub fn parse_ssh_aliases(text: &str) -> Vec<(String, String)> {
     let mut aliases: Vec<(String, String)> = Vec::new();
     let mut names: Vec<String> = Vec::new();
-    for raw in split_lines(text) {
+    for raw in xenonet_sources::git::split_lines(text) {
         let Some(m) = SSH_LINE.captures(raw) else { continue };
         let key = m[1].to_lowercase();
         let value = &m[2];
@@ -393,7 +382,7 @@ fn scp_form(s: &str) -> Option<(String, String)> {
             continue;
         }
         let path = &rest[end + 1..];
-        if path.starts_with("//") || path.is_empty() || path.contains(jsre::is_term) {
+        if path.starts_with("//") || path.is_empty() || path.contains(is_js_line_terminator) {
             continue;
         }
         return Some((host.to_string(), path.to_string()));
@@ -429,7 +418,7 @@ pub fn parse_remote(url: &str, aliases: &[(String, String)]) -> Option<Remote> {
 pub fn parse_git_config(out: &str) -> Value {
     let (mut name, mut email) = (Value::Null, Value::Null);
     let (mut helpers, mut usernames) = (Vec::new(), Vec::new());
-    for line in split_lines(out) {
+    for line in xenonet_sources::git::split_lines(out) {
         if line.is_empty() {
             continue;
         }
@@ -1234,12 +1223,12 @@ pub fn repo_config_file(dir: &str) -> Option<String> {
     if std::fs::metadata(&git_dir).ok()?.is_file() {
         let text = String::from_utf8_lossy(&std::fs::read(&git_dir).ok()?).into_owned();
         let to = jsre::rest_after(&text, "gitdir:")?;
-        git_dir = jsre::resolve_from(dir, js_trim(&to));
+        git_dir = xenonet_base::nodepath::resolve(&[dir, js_trim(&to)]);
     }
     let common_file = paths::join(&git_dir, "commondir");
     let common = if std::path::Path::new(&common_file).exists() { Some(js_trim(&String::from_utf8_lossy(&std::fs::read(&common_file).ok()?)).to_string()) } else { None };
     let base = match common.filter(|c| !c.is_empty()) {
-        Some(c) => jsre::resolve_from(&git_dir, &c),
+        Some(c) => xenonet_base::nodepath::resolve(&[git_dir.as_str(), c.as_str()]),
         None => git_dir,
     };
     Some(paths::join(&base, "config"))

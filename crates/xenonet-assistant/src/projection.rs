@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use xenonet_app::jsv::truthy;
 use xenonet_base::json::number as num;
-use xenonet_base::text::js_string;
+use xenonet_base::text::{js_string, JS_SPACE};
 
 pub const LABEL_MAX: usize = 240;
 pub const LIVE_MS: f64 = 30e3;
@@ -42,9 +42,6 @@ fn control(c: char) -> bool {
     matches!(c, '\u{0}'..='\u{1f}' | '\u{7f}'..='\u{9f}' | '\u{2028}' | '\u{2029}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}')
 }
 
-// JS's \s, as a class's contents.
-const SPACE: &str = r"\t\n\x0B\x0C\r \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}";
-
 struct Res {
     bearer: Regex,
     key: Regex,
@@ -60,7 +57,8 @@ fn res() -> &'static Res {
     static R: OnceLock<Res> = OnceLock::new();
     R.get_or_init(|| Res {
         // \b and /i as JS has them without /u: ASCII words, ASCII case.
-        bearer: Regex::new(&format!(r"(?-u:\b)((?i-u:bearer|token|password|passwd|secret|api[_-]?key))(?-u:\b)[{SPACE}]*[:=][{SPACE}]*[^{SPACE}]+")).expect("a fixed pattern"),
+        bearer: Regex::new(&format!(r"(?-u:\b)((?i-u:bearer|token|password|passwd|secret|api[_-]?key))(?-u:\b)[{JS_SPACE}]*[:=][{JS_SPACE}]*[^{JS_SPACE}]+"))
+            .expect("a fixed pattern"),
         key: Regex::new(
             r"(?:sk-|sk_|pk_|rk_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[abprs]-|AKIA|ASIA|AIza|npm_|pypi-|hf_|xenonet_actor_|xenonet_assistant_)[A-Za-z0-9_-]*",
         )
@@ -68,10 +66,10 @@ fn res() -> &'static Res {
         email: Regex::new(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}").expect("a fixed pattern"),
         // Followed by a separator or the end, checked after (a lookahead).
         user_folder: Regex::new(r#"(?:[A-Za-z]:)?[\\/](?i-u:Users|home)[\\/][^\\/"'`]+"#).expect("a fixed pattern"),
-        windows_path: Regex::new(&format!(r#"[A-Za-z]:[\\/][^{SPACE}"'`<>|]*"#)).expect("a fixed pattern"),
+        windows_path: Regex::new(&format!(r#"[A-Za-z]:[\\/][^{JS_SPACE}"'`<>|]*"#)).expect("a fixed pattern"),
         posix_path: Regex::new(r"/(?:[A-Za-z0-9_.@+-]+/)+[A-Za-z0-9_.@+-]*").expect("a fixed pattern"),
         run: Regex::new(r"[A-Za-z0-9+/=_-]{32,}").expect("a fixed pattern"),
-        spaces: Regex::new(&format!("[{SPACE}]+")).expect("a fixed pattern"),
+        spaces: Regex::new(&format!("[{JS_SPACE}]+")).expect("a fixed pattern"),
     })
 }
 

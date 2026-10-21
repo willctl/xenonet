@@ -4,11 +4,11 @@
 
 use crate::args::Flags;
 use crate::js::{have, list, num, on, str, t};
-use crate::needs_you::{queue_of_summary, waits_words};
 use crate::out::{ago, c, json, now, plural, print, table, Done, Layout};
 use crate::reach::{find, where_};
 use serde_json::{json, Map, Value};
 use xenonet_base::client::name_of;
+use xenonet_state::needs_you::{queue_of_summary, waits_words};
 
 pub const HELP: &str = include_str!("help/status.txt");
 
@@ -61,7 +61,7 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
             .collect()
     });
     // What waits on you, in the order the Needs you panel lists it.
-    let queue = queue_of_summary(&summary);
+    let queue = queue_of_summary(Some(&summary));
     let health = &s.health;
     if flags.on("json") {
         let mut out = Map::new();

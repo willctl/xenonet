@@ -766,7 +766,7 @@
         "vendor.js's check stays JS: Rust calls the twin's guarded reader(SOURCE).check back for the first 16 session events and tool starts of each log, with the version session.start gives, so each of those records crosses to JS and back. A test's own `files` (readdirSync, statSync, readFileSync) is read through the same way; a Dirent without isDirectory makes the folder unreadable, where JS threw out of read() (a problem).",
         "Logs are parsed as in core/blocks/normalizer.js's entry (crates/xenonet-base/src/json.rs).",
         "Times are read by crates/xenonet-base/src/time.rs: ISO 8601 only, a time without a zone as UTC; V8's Date.parse fallback for other forms isn't kept.",
-        "Paths keep the writing machine's style through Node 22's path.win32 and path.posix rules, ported in crates/xenonet-sources/src/native/node_path.rs; a drive-relative Windows path (C:foo) resolves against the process's folder, not the drive's own (=C:).",
+        "Paths keep the writing machine's style through Node 22's path.win32 and path.posix rules, ported in crates/xenonet-base/src/nodepath.rs; a drive-relative Windows path (C:foo) resolves against the process's folder, not the drive's own (=C:).",
         "`runs` is a Map rebuilt from Rust after each read (the same Map until the next one); `cache` isn't exposed; EDIT_TOOLS is a copy, so changing either changes nothing in Rust."
       ]
     },

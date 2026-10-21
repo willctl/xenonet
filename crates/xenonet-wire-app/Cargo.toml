@@ -40,7 +40,8 @@ xenonet-state.workspace = true
 regex.workspace = true
 
 # os.cpus(), os.totalmem() and os.freemem(), as Node reads them: the mach
-# calls on macOS (and /proc on Linux, read as files).
+# calls on macOS (and /proc on Linux, read as files). Windows' few calls
+# are declared in src/system.rs.
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 

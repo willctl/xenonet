@@ -6,11 +6,11 @@
 //! apply_patch's text, whose file headers are kept and the rest dropped.
 
 use super::files::Files;
-use super::node_path;
 use super::{edit_file, edits_out, js_max, js_min, push_edit, str_of, titled, Checked, Edits, NativeReader, Out, Threw, Vendor, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX, VENDOR_FAILED};
 use crate::session::{RunSession, Via};
 use serde_json::{json, Map, Value};
 use xenonet_base::json;
+use xenonet_base::nodepath::Style;
 use xenonet_base::ordered::OrderedMap;
 use xenonet_base::patch;
 use xenonet_base::paths::path_style;
@@ -269,16 +269,16 @@ fn read_open(db: &mut dyn Db, vendor: &mut dyn Vendor, since_ms: f64, edits_sinc
 /// its data folder), else $XDG_DATA_HOME/opencode/opencode.db, else
 /// ~/.local/share/opencode/opencode.db, on every OS.
 pub fn opencode_db_path(home: &str, xdg_data_home: Option<&str>, named: Option<&str>) -> String {
-    let st = path_style(home);
+    let st = Style::from(path_style(home));
     let data = match xdg_data_home.filter(|x| !x.is_empty()) {
         Some(x) => x.to_string(),
-        None => node_path::join(st, &[home, ".local", "share"]),
+        None => st.join(&[home, ".local", "share"]),
     };
-    let dir = node_path::join(st, &[&data, "opencode"]);
+    let dir = st.join(&[&data, "opencode"]);
     if let Some(n) = named.filter(|n| !n.is_empty() && *n != ":memory:") {
-        return if node_path::is_absolute(st, n) { n.to_string() } else { node_path::join(st, &[&dir, n]) };
+        return if st.is_absolute(n) { n.to_string() } else { st.join(&[&dir, n]) };
     }
-    node_path::join(st, &[&dir, "opencode.db"])
+    st.join(&[&dir, "opencode.db"])
 }
 
 /// A session's time as the database had it (missing when the vendor check

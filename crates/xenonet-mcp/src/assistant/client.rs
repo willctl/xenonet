@@ -19,7 +19,6 @@
 
 use super::{error_envelope, now, random};
 use crate::process;
-use regex::Regex;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -28,6 +27,7 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot, watch};
+use xenonet_assistant::credentials::{is_grant, is_token};
 use xenonet_base::json as js;
 use xenonet_base::paths::join_all;
 use xenonet_base::text::{js_number, js_string, js_trim, truthy};
@@ -69,14 +69,6 @@ fn runtime_dir() -> String {
 /// folder, named for the XenoNet's port.
 pub fn endpoint_file(runtime: &str, port: &str) -> String {
     join_all(&[runtime, &format!("assistant-{port}.json")])
-}
-
-fn is_grant(grant: &str) -> bool {
-    Regex::new(super::schema::GRANT_ID).expect("a pattern").is_match(grant)
-}
-
-fn is_token(s: &str) -> bool {
-    s.strip_prefix("xenonet_assistant_").is_some_and(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
 }
 
 fn read_json(file: &str) -> Option<Value> {

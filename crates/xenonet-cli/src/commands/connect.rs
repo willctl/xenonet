@@ -158,7 +158,8 @@ pub fn run(words: &[String], flags: &Flags) -> Done {
     let apps = chosen(words, &preview);
     let name = name_of(&s);
     if crate::js::on(&preview, "demo") {
-        return Err(Fail::new(format!("{name} shows made-up data, so it can't connect Claude Code and Codex. Use XenoNet or XenoNet Dev."), 1));
+        let apps = super::words::listed(&super::words::names("connect"), "and");
+        return Err(Fail::new(format!("{name} shows made-up data, so it can't connect {apps}. Use XenoNet or XenoNet Dev."), 1));
     }
     let todo = todo(&preview, &apps);
     if todo.is_empty() {

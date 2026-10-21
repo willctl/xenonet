@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 use xenonet_app::fsx;
 use xenonet_app::jsv::truthy;
 use xenonet_app::nodepath::NATIVE;
-use xenonet_base::text::js_string;
+use xenonet_base::text::{js_string, JS_SPACE};
 
 /// An error with its HTTP status and code (IntegrationError).
 #[derive(Clone, Debug, PartialEq)]
@@ -35,14 +35,13 @@ impl From<fsx::FsError> for Fail {
     }
 }
 
-// JS's \s, as a class's contents.
-pub const SPACE: &str = r"\t\n\x0B\x0C\r \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}";
-
 fn secrets() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| {
-        Regex::new(&format!(r"(?i-u:sk-)[A-Za-z0-9_-]{{16,}}|(?i-u:bearer)[{SPACE}]+[^{SPACE}]+|(?i-u:password|api[_-]?key|token|secret)[{SPACE}]*[=:][{SPACE}]*[^{SPACE},;]+"))
-            .expect("a fixed pattern")
+        Regex::new(&format!(
+            r"(?i-u:sk-)[A-Za-z0-9_-]{{16,}}|(?i-u:bearer)[{JS_SPACE}]+[^{JS_SPACE}]+|(?i-u:password|api[_-]?key|token|secret)[{JS_SPACE}]*[=:][{JS_SPACE}]*[^{JS_SPACE},;]+"
+        ))
+        .expect("a fixed pattern")
     })
 }
 
@@ -50,7 +49,8 @@ fn secrets() -> &'static Regex {
 pub fn has_credential(text: &str) -> bool {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| {
-        Regex::new(&format!(r"(?i-u:sk-)[A-Za-z0-9_-]{{16,}}|(?i-u:bearer)[{SPACE}]+[^{SPACE}]+|(?i-u:password|api[_-]?key|token|secret)[{SPACE}]*[=:]")).expect("a fixed pattern")
+        Regex::new(&format!(r"(?i-u:sk-)[A-Za-z0-9_-]{{16,}}|(?i-u:bearer)[{JS_SPACE}]+[^{JS_SPACE}]+|(?i-u:password|api[_-]?key|token|secret)[{JS_SPACE}]*[=:]"))
+            .expect("a fixed pattern")
     })
     .is_match(text)
 }

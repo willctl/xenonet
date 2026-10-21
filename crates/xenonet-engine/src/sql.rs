@@ -126,6 +126,21 @@ impl From<f64> for Arg {
     }
 }
 
+/// A JSON value as JS would hand it over.
+impl From<&serde_json::Value> for Arg {
+    fn from(v: &serde_json::Value) -> Self {
+        use serde_json::Value as V;
+        match v {
+            V::Null => Arg::Null,
+            V::Bool(b) => Arg::Bool(*b),
+            V::Number(n) => Arg::Num(n.as_f64().unwrap_or(f64::NAN)),
+            V::String(s) => Arg::Text(s.clone()),
+            V::Array(a) => Arg::List(a.iter().map(Arg::from).collect()),
+            V::Object(o) => Arg::Obj(o.iter().map(|(k, v)| (k.clone(), Arg::from(v))).collect()),
+        }
+    }
+}
+
 /// A row as node:sqlite reads it.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Cell {
