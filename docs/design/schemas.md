@@ -165,6 +165,8 @@ drift record and the rules; this is how they're built.
 | `google/gemini-cli/chat-record` | `~/.gemini/tmp/*/chats/session-*.jsonl`, Gemini CLI's chat records (experimental reader) | `native/gemini-cli.js` | None; the newest schema | `*` |
 | `github/copilot-cli/session-event` | `~/.copilot/session-state/<id>/events.jsonl`, Copilot CLI's session events (experimental reader) | `native/copilot-cli.js` | `session.start`'s `version` | `1` |
 | `anysphere/cursor/hook-input` | The file `scripts/cursor/hook.mjs` writes from Cursor's hook input (experimental reader) | `native/cursor.js` | `cursor_version` | `*` |
+| `spacexai/grok-build/session-summary` | `~/.grok/sessions/<encoded cwd>/<id>/summary.json`, a Grok Build session's index entry | `grok.js` | None in the file | `*` |
+| `spacexai/grok-build/update-line` | A line of a Grok Build session's `updates.jsonl`, a session update in its envelope | `live.js`, `stats.js` and `search.js`, through `lines.js`'s normalizer | None in the lines | `*` |
 
 Not covered, since the contracts don't list them: the Remote Control
 owner line `identities.js` finds in a transcript's first 64 KB, the

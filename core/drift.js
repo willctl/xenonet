@@ -73,6 +73,8 @@ const SOURCES = {
   "google/gemini-cli/chat-record": "Gemini CLI's chat records",
   "github/copilot-cli/session-event": "Copilot CLI's session events",
   "anysphere/cursor/hook-input": "Cursor's hook input",
+  "spacexai/grok-build/session-summary": "Grok Build's session summaries",
+  "spacexai/grok-build/update-line": "Grok Build's session updates",
 };
 export const sourceName = (source) => SOURCES[source] ?? source;
 

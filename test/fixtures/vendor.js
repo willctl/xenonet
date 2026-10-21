@@ -274,6 +274,29 @@ export const VENDOR = {
       { record: { at: "2026-10-16T12:00:00.000Z" }, drift: [["missing-field", "hook_event_name"]] },
     ],
   },
+  "spacexai/grok-build/session-summary": {
+    fits: [
+      { info: { id: "019a3b5c-0000-7000-8000-00000000000a", cwd: "/Users/ada/atlas" }, session_summary: "Partial refunds for the orders API", generated_title: "Add partial refunds", title_is_manual: false, created_at: "2026-10-16T12:00:00Z", updated_at: "2026-10-16T12:05:00Z", num_messages: 14, current_model_id: "grok-build", head_branch: "feat/refunds" },
+      { info: { id: "019a3b5c-0000-7000-8000-00000000000b", cwd: "/Users/ada/atlas" }, session_summary: "", created_at: "2026-10-16T12:01:00Z", updated_at: "2026-10-16T12:02:00Z", current_model_id: "grok-build", parent_session_id: "019a3b5c-0000-7000-8000-00000000000a", session_kind: "subagent" },
+    ],
+    odd: [
+      { record: { info: { id: 5 }, session_summary: "x" }, drift: [["type-change", "info.id"]], strip: [["info", "id"]] },
+      { record: { info: { id: "019a3b5c-0000-7000-8000-00000000000c" }, hidden: "yes" }, drift: [["type-change", "hidden"]], strip: [["hidden"]] },
+    ],
+  },
+  "spacexai/grok-build/update-line": {
+    fits: [
+      { timestamp: 1791201600, method: "session/update", params: { sessionId: "019a3b5c-0000-7000-8000-00000000000a", update: { sessionUpdate: "user_message_chunk", content: { type: "text", text: "Add partial refunds" } } } },
+      { timestamp: 1791201605, method: "session/update", params: { sessionId: "019a3b5c-0000-7000-8000-00000000000a", update: { sessionUpdate: "tool_call", toolCallId: "call-1", title: "npm test", kind: "execute", status: "pending", rawInput: { command: "npm test" }, locations: [{ path: "/Users/ada/atlas" }] } } },
+      { timestamp: 1791201609, method: "session/update", params: { sessionId: "019a3b5c-0000-7000-8000-00000000000a", update: { sessionUpdate: "tool_call_update", toolCallId: "call-1", status: "completed", content: [{ type: "content", content: { type: "text", text: "48 passing" } }] } } },
+      { timestamp: 1791201610, method: "_x.ai/session/update", params: { sessionId: "019a3b5c-0000-7000-8000-00000000000a", update: { sessionUpdate: "auto_compact_started", tokens_used: 1000, context_window: 2000 } } },
+      { sessionId: "019a3b5c-0000-7000-8000-00000000000a", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Done." } } },
+    ],
+    odd: [
+      { record: { timestamp: 1791201600, params: { update: { sessionUpdate: 5 } } }, drift: [["type-change", "params.update.sessionUpdate"]], strip: [["params", "update", "sessionUpdate"]] },
+      { record: { timestamp: 1791201600, params: { update: { content: { type: "text" } } } }, drift: [["missing-field", "params.update.sessionUpdate"]] },
+    ],
+  },
   "nous/hermes-agent/install-stamp": {
     fits: [{ schemaVersion: 2, commit: "0a1b2c3d4e", commitDate: 1791200000, branch: "main", builtAt: "2026-10-05T12:00:00+00:00", dirty: false, source: "git", distribution: null, updateMechanism: "self", baseVersion: "0.21.5", displayVersion: "0.21.5+12.g0a1b2c3", distance: 12, payload: "bootstrap", tag: null }],
     odd: [

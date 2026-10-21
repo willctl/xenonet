@@ -205,6 +205,16 @@ export const PROVIDERS = [
     sources: ["anysphere/cursor/hook-input"],
     notInspected: "Its hook input is only written by a running Cursor agent with a model behind it, and Cursor publishes no package or source for it to read. The check records nothing; the schema follows Cursor's hooks reference.",
   },
+  {
+    id: "spacexai/grok-build",
+    name: "Grok Build",
+    sources: ["spacexai/grok-build/session-summary", "spacexai/grok-build/update-line"],
+    // Its releases on GitHub (tags like v1.0.50), which its installer
+    // downloads.
+    release: { github: "xai-org/grok-build" },
+    notInspected:
+      "Its session files are written by a signed-in grok with a model behind it, and none of them says Grok's version, so there's no range to check. Their formats are read from its source (docs/design/grok-build.md); the check records the latest version only.",
+  },
 ];
 
 export const providerById = (id) => PROVIDERS.find((p) => p.id === id) ?? null;
