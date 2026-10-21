@@ -73,8 +73,14 @@ test("Windows hooks run, keep other hooks, and can be reinstalled and removed", 
     assert.deepEqual(JSON.parse(result.stdout), { port: "47842", args: ["hook", app], input: '{"hook_event_name":"SessionStart"}' });
   }
   assert.equal(codex.SessionEnd[0].hooks[0].timeout, 3);
+  // Every app that's here is connected; Grok Build isn't here, so
+  // connecting every app leaves it out and the preview says so.
   const preview = await connect.preview();
-  assert.ok(preview.apps.every((app) => app.changes.find((c) => c.id === "hooks").state === "present"));
+  const here = preview.apps.filter((app) => app.installed !== false);
+  assert.deepEqual(here.map((app) => app.app), ["claude", "codex"]);
+  assert.ok(here.every((app) => app.changes.find((c) => c.id === "hooks").state === "present"));
+  assert.deepEqual(preview.apps.filter((app) => app.installed === false).map((app) => [app.app, app.changes.find((c) => c.id === "hooks").state]), [["grok", "missing"]]);
+  assert.equal(fs.existsSync(path.join(home, ".grok")), false);
   await connect.remove();
   assert.deepEqual(JSON.parse(fs.readFileSync(settings)), { hooks: { SessionStart: [own] } });
   assert.deepEqual(JSON.parse(fs.readFileSync(hooks)), {});
