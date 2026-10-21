@@ -1,8 +1,8 @@
 # The xenonet command
 
-`xenonet` does from a terminal what the console does. It says what XenoNet sees, checks your setup and connects Claude Code, Codex and Grok Build. It works on macOS and Linux.
+`xenonet` does from a terminal what the console does. It says what XenoNet sees, checks your setup and connects Claude Code, Codex and Grok Build. It works on Windows, macOS and Linux.
 
-`Install the xenonet command` in the palette puts it in `~/.local/bin`, or `%LOCALAPPDATA%/XenoNet/bin` on Windows, as a small script that runs on XenoNet's own runtime. In a checkout, `node cli/xenonet.js install` does the same with your Node. On Windows, XenoNet's first launch installs it, and Setup puts its folder on your user Path. Elsewhere, if that folder isn't on PATH, the command tells you how to add it.
+`Install the xenonet command` in the palette puts it in `~/.local/bin`, or `%LOCALAPPDATA%/XenoNet/bin` on Windows, as a small script that runs the `xenonet` binary. In a checkout, `node cli/xenonet.js install` does the same. On Windows, XenoNet's first launch installs it, and Setup puts its folder on your user Path. Elsewhere, if that folder isn't on PATH, the command tells you how to add it.
 
 ```console
 $ xenonet
@@ -23,12 +23,13 @@ $ xenonet
 | `xenonet diagnose` | A summary of XenoNet's state that's safe to share. `--ask` has a Codex or Claude Code session on this computer look at it with you. |
 | `xenonet decide` | The decision model XenoNet can ask instead of Codex, and its OpenRouter key, kept in your credential store. See [Decision models](decisions.md). |
 | `xenonet refusals` | The provider refusals XenoNet kept: list, show, export for a dataset, add context, scan older transcripts. See [Provider refusals](refusals.md). |
-| `xenonet drift` | Lists what has changed in the data XenoNet reads from Claude Code, Codex, Claude desktop and gh since you last looked. It goes by source, and shows shapes, never values. Then it marks that seen, which quiets the doctor. `--all` lists every difference kept. `--exit-code`, for scripts, exits 1 on new drift and leaves it unmarked. See [Drift](how-it-works.md#drift). |
+| `xenonet drift` | Lists what has changed in the data XenoNet reads from Claude Code, Codex, Grok Build, Claude desktop and gh since you last looked. It goes by source, and shows shapes, never values. Then it marks that seen, which quiets the doctor. `--all` lists every difference kept. `--exit-code`, for scripts, exits 1 on new drift and leaves it unmarked. See [Drift](how-it-works.md#drift). |
 | `xenonet agents` | Lists the sessions at work in the last two hours, with where each is, what it says it's doing, and the files it's editing or has claimed. The actors at work come after them, in a list of their own. `--repo` keeps only those in the current repo. |
 | `xenonet who <path>` | Says which sessions and actors have a hand in a file. |
 | `xenonet session [words]` | Shows a session's models, tokens, estimated cost, turns and tools. Without words, it shows the latest session in the current folder. With words, it shows the newest session whose title has them. |
 | `xenonet spend` | Says about what today's work would cost at API prices, for Claude Code and for Codex, and by actor. See [What each actor's work costs](actors.md#what-each-actors-work-costs). |
 | `xenonet messages` | Shows what sessions and actors said to each other in the last day. |
+| `xenonet live` | Messages that reach sessions as they're sent: what's paused, granted and allowed, who's listening and the last deliveries. `pause` and `resume` stop every message and wake at once, or start them again. `allow` and `disallow` let XenoNet wake, type into or resume one session. `grant` and `revoke` set what an actor's token may see and message. `audit` lists the audit log's last entries. See [Live delivery and scopes](live-delivery.md). |
 | `xenonet search <words>` | Searches every Claude Code, Codex and Grok Build transcript. |
 | `xenonet root [folder]` | Shows the projects folder XenoNet reads and where that comes from, or reads another folder. `--check` only says what XenoNet would find there. `--reset` goes back to `~/Projects`. See [Changing the projects folder](projects.md#changing-the-projects-folder). |
 | `xenonet film` | Renders a film of today in a hidden XenoNet Dev window, as a 15 to 30 second story (9:16), and saves the MP4 with no tags. Projects show as star names and no clock appears unless `--names` or `--tokens` say otherwise. It also takes `--seconds`, `--theme`, `--size` and `--out`. |
@@ -47,6 +48,8 @@ $ xenonet
 | `xenonet hosts` | Shows [other machines' XenoNets](other-machines.md) beside this one, a prototype. `self` names this XenoNet as a host. `add`, `remove`, `test` and `reconnect` manage the hosts it shows. |
 | `xenonet console <steps>` | Drives XenoNet Dev, to check a change to XenoNet. See [Driving XenoNet](development.md#driving-xenonet-from-agents-scripts-and-tests). |
 | `xenonet service` | The background service. `start`, `status` and `stop` start it, say how it is and stop it; `stop` refuses while terminals run, unless `--force`. `install` starts it at login, and again if it stops unexpectedly, under launchd on macOS, systemd on Linux or Task Scheduler on Windows; `uninstall` turns that off. `run` is what they run. See [Keeping the service running](always-on.md). |
+| `xenonet setup` | Installs a downloaded Service or Tools package for your account. Run it from the package's extracted folder, as `bin/xenonet setup`. See [Install without Desktop](components.md#install-without-desktop). |
+| `xenonet update` | `--check` looks for Service and Tools updates, and `update tools`, `update service` or `update all` installs them. Desktop updates in its Updates panel. See [Updates](components.md#updates). |
 | `xenonet install`, `xenonet uninstall` | Puts the command on your PATH, or takes it off. |
 | `xenonet completion zsh` | Prints tab completion for zsh. Add `eval "$(xenonet completion zsh)"` to `~/.zshrc`, or the `bash` one to `~/.bashrc`. |
 
@@ -61,6 +64,7 @@ Every command takes `--json`, for scripts. A command talks to XenoNet, or to Xen
 - git, the runtime, XenoNet itself and the command
 - whether Claude Code, Codex and Grok Build are connected, and whether Grok Build runs XenoNet's hooks
 - for actors, tokens left in repos or expired, what the observers read, and that tokens are held to their processes
+- when the service starts at login, its registration with launchd, systemd or Task Scheduler
 
 Each problem comes with a fix, and a failed check exits 1. With no XenoNet running, `xenonet doctor` runs the checks itself, and skips the ones that need XenoNet. With [other machines](other-machines.md#checking-on-hosts) turned on, it checks each host too.
 
