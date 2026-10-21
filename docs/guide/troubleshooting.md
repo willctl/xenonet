@@ -57,4 +57,8 @@ This prints the same summary as Markdown, ready to paste into an issue (`--json`
 
 **The doctor says "connected, but … is gone".** XenoNet's hooks run files that aren't there any more, often from a checkout that was moved or deleted. Run `xenonet connect`. Each XenoNet on the computer (the installed one, XenoNet Dev) keeps its own hooks and MCP server, so connecting one never removes the other's.
 
+**`xenonet update` on 0.3.0 stops with an error about `node`.** The 0.3.0 updater can't install 0.4.0's Service and Tools, which have no `node`. Update Desktop instead. Its first start installs them. See [Upgrading from 0.3.0](components.md#upgrading-from-030).
+
+**After an update from 0.3.0, Desktop says to close your terminals.** A terminal open in the 0.3.0 service keeps it from being replaced, so it keeps running. Close the terminals, then quit and reopen XenoNet. `xenonet logs --code desktop.components` shows what Desktop found.
+
 **The launcher can't find XenoNet's Tools.** The `xenonet` command and the MCP servers can't start, though hooks still reach XenoNet. Open XenoNet, which repairs them, or install XenoNet again.

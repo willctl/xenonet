@@ -58,6 +58,26 @@ Downloads are checked against the release manifest's size and SHA-256 hash. Each
 
 Unsigned component archives rely on GitHub's HTTPS release channel and checksums; they do not have a separate publisher signature. Stable releases are the only automatic update channel. Desktop's existing Windows signing and macOS notarization requirements still apply.
 
+## Upgrading from 0.3.0
+
+In 0.3.0, the Service and Tools packages were a `node` of their own with XenoNet's JS beside it. Now each is the `xenonet` binary in `bin/`. The 0.3.0 updater expects a `node` in each package, so `xenonet update` from 0.3.0, and the Updates panel in 0.3.0 Desktop, stop with an error about `node`. Update Desktop instead, or run the new packages' own setup:
+
+- The bundle, XenoNet Setup on Windows or the disk image on a Mac, installs its own Service and Tools when Desktop starts. It replaces any that has no `xenonet` binary, as it would install a missing one. A bundle never replaces a component that has its binary.
+- A Desktop-only update, from the Windows Updates panel or the Mac ZIP, downloads the Service and Tools from the latest release when Desktop starts.
+- Without Desktop, run `./bin/xenonet setup` from the extracted Tools archive, then from the Service archive.
+
+The Tools switch at once. The service switches as a service update does:
+
+- XenoNet asks the running 0.3.0 service to stop over its component connection, starts the new one, and checks that it answers as the new version.
+- While a terminal is open in the 0.3.0 service, XenoNet leaves it running. Desktop connects to it and says so. Close the terminals, then quit and reopen XenoNet. Setup reports the service update as staged. Run it again once the terminals are closed.
+- If the new service doesn't start, XenoNet starts the 0.3.0 service again with its own `node`, and Desktop says why. If Desktop can't download the new components, it runs with the 0.3.0 ones. Either way, quit and reopen XenoNet to try again.
+
+0.3.0 registered nothing to start at login, so there's no registration to change. Its version folders stay in `runtime/components` for MCP processes still running from them and for that rollback.
+
+The new service reads 0.3.0's state where it is. `engine.sqlite` goes from version 7 to 8, which adds the tables and columns for [a network across machines](network.md). XenoNet copies it to `engine.v7.sqlite` first and deletes the copy a week later. If the update is rolled back, the 0.3.0 service leaves the newer file's shape alone and reads the rest as before. `state.json` and the search index keep their versions, and the data schema stays 1.
+
+Hooks and MCP entries that 0.3.0 wrote run the launcher's `node` and `cli/xenonet.js`. XenoNet keeps that script current, and it now runs the `xenonet` binary, so they keep working. `xenonet connect` replaces them with entries that run the binary.
+
 ## Compatibility
 
 Desktop, Service and Tools have separate release versions. Their interface versions are independent: service API 1, console API 1, and assistant API 1 for remote actors' adapters. Connections negotiate a shared version; incompatible components refuse to connect with an update instruction. HTTP clients send `x-xenonet-api-version: 1`. Older clients that omit it retain the original API behavior.
