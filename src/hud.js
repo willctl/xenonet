@@ -9,7 +9,7 @@ import { cleanTitle, renamable, MAX_TITLE } from "../core/rename.js";
 
 const $ = (sel) => document.querySelector(sel);
 
-const KIND_LABEL = { core: "Root", host: "Host", project: "Project", native: "Codex project", session: "Session", resource: "Shared system", wiki: "Agent Wiki", page: "Wiki page" };
+const KIND_LABEL = { core: "Root", host: "Host", project: "Project", native: "Codex project", session: "Session", resource: "Shared system", wiki: "Xenolith", page: "Wiki page" };
 // The projects folder's name (see graph.js), which the page shows in a few
 // places; it changes with the folder.
 let rootName = "~/Projects";

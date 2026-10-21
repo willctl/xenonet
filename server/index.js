@@ -639,7 +639,11 @@ function simulate(kind, { a, b, ...more }) {
   } else if (kind === "turn-end" && sa) {
     live.activity(sa, { kind: "turn-end", duration: 42000, ts: now }, true);
   } else if (kind === "wiki-write" && sa) {
-    live.activity(sa, { kind: "tool", tool: "mcp__agent-wiki__wiki_log", category: "mcp", detail: "agent-wiki.wiki_log", server: "agent-wiki", pages: ["xenonet", "ledger"], files: [], ts: now }, true);
+    // A note logged through the server that owns the map's wiki: Xenolith's
+    // context_log, or wiki_log for a wiki from before it.
+    const server = config.wikiServer ?? "xenolith";
+    const tool = server === "agent-wiki" ? "wiki_log" : "context_log";
+    live.activity(sa, { kind: "tool", tool: `mcp__${server}__${tool}`, category: "mcp", detail: `${server}.${tool}`, server, pages: ["xenonet", "ledger"], files: [], ts: now }, true);
   } else if (kind === "doctor") {
     // The doctor finding a problem, reported as a real run would be; the
     // next real run (or clear) puts back what's true.

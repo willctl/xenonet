@@ -44,7 +44,7 @@ Where the code is loose, the schema is too:
 |---|---|---|
 | `session/v1` | A session as the adapters list it | App-specific fields are all optional: the demo's sessions carry both apps' |
 | `project/v1` | A project or group as the scan finds it, with the rule that applies | |
-| `graph/v1` | The map, as `/api/graph` and the `graph` event send it. Its nodes refer to `session/v1` and `project/v1`, its identities to `identity/v1` | Agent Wiki page fields are front matter: text, or a JSON list when they start with `[` |
+| `graph/v1` | The map, as `/api/graph` and the `graph` event send it. Its nodes refer to `session/v1` and `project/v1`, its identities to `identity/v1` | Wiki page fields are front matter: text, or a JSON list when they start with `[` |
 | `identity/v1` | An account work happens under | |
 | `live/session/v1`, `live/snapshot/v1` | Live state, as `/api/live` and the `live` event send it. Codex's rate limits are in XenoNet's shape: `limits.codex.primary` and `.secondary` as `{ pct, windowMinutes, resetsAt }`, times in ms | |
 | `live/activity/v1` | One thing that happened, in the history and the `activity` event | |
@@ -170,7 +170,7 @@ Not covered, since the contracts don't list them: the Remote Control
 owner line `identities.js` finds in a transcript's first 64 KB, the
 settings files and `codex mcp get` that connecting reads, hook payloads,
 the CLIs' version and sign-in outputs, git's files and output, project
-manifests and Agent Wiki pages. Of Hermes's sources in `hermes.md`, the
+manifests and wiki pages. Of Hermes's sources in `hermes.md`, the
 observer doesn't read a backend's `/api/status`, which says what
 `state.db` and `gateway_state.json` already do, or `tool_calls.log`,
 which only a gateway writes, and only when it's switched on. Grok Bot's

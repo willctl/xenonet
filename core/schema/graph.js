@@ -56,7 +56,7 @@ export const RepoStatus = obj({
   checkedAt: ms,
 });
 
-// Agent Wiki pages take their fields from front matter as it's written: a
+// Wiki pages take their fields from front matter as it's written: a
 // value is text, or JSON when it starts with [ (so a list, or anything).
 const front = z.union([z.string(), z.array(z.unknown())]).describe("A front matter value: text, or a JSON list when it starts with [");
 
@@ -157,7 +157,7 @@ const PageNode = obj({
   ...placed,
   ...rolled,
   ...remote,
-}).describe("An Agent Wiki page");
+}).describe("A page of the shared context's wiki");
 
 const ResourceNode = obj({
   id: z.string().regex(hosted("resource:")),
@@ -249,7 +249,7 @@ export const Graph = define(
   }),
   {
     title: "Graph",
-    description: "The map: the projects folder, its groups and projects, Codex desktop projects, the folders outside it where sessions ran, the sessions, Agent Wiki and the MCP servers sessions share, with the identities work ran as.",
+    description: "The map: the projects folder, its groups and projects, Codex desktop projects, the folders outside it where sessions ran, the sessions, Xenolith and the MCP servers sessions share, with the identities work ran as.",
   },
 );
 

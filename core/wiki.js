@@ -1,6 +1,6 @@
-// Agent Wiki as a constellation: pages, their [[links]], the projects they
-// mention, recent writes from the activity log, and notes still waiting in the
-// inbox for the curator.
+// The shared context's wiki (Xenolith's) as a constellation: pages, their
+// [[links]], the projects they mention, recent writes from the activity log,
+// and notes still waiting in the inbox for the curator.
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { dayKey } from "./live.js";

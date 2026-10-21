@@ -53,7 +53,7 @@ function ctxWith(overrides = {}) {
     statfs: async () => ({ bavail: 50e6, bsize: 4096 }),
     paths: { claudeProjectsDir: `${HOME}/.claude/projects`, codexHome: `${HOME}/.codex`, projectsDir: `${HOME}/Projects`, stateDir: `${HOME}/state` },
     self: { port: 47840, name: "XenoNet" },
-    health: { sources: [{ name: "projects", ok: true, count: 2 }, { name: "claude", ok: true, count: 9 }, { name: "codex", ok: true, count: 4 }, { name: "wiki", ok: false, error: "Agent Wiki folder not found" }], blocks: BLOCKS() },
+    health: { sources: [{ name: "projects", ok: true, count: 2 }, { name: "claude", ok: true, count: 9 }, { name: "codex", ok: true, count: 4 }, { name: "wiki", ok: false, error: "Xenolith folder not found" }], blocks: BLOCKS() },
     live: { limits: { claude: { source: "anthropic" } } },
     connect: { port: 47840, apps: ["claude", "codex"].map((app) => ({ app, changes: [{ id: "mcp", state: "present" }, { id: "hooks", state: "present" }], broken: [] })) },
     gitAvailable: () => true,
