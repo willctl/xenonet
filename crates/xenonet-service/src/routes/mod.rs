@@ -16,7 +16,7 @@ pub mod refusals;
 pub mod themes;
 pub mod workspace;
 
-use crate::borrowed::{attest, is_actor_agent, platform, Sender};
+use crate::borrowed::{attest, is_actor_agent, is_agent_id, platform, Sender};
 use crate::cores::settings::{MAX_BRIEF, NEEDS_INPUT_URL};
 use crate::cores::{ok, CoreError, Kind};
 use crate::ctx::{pending_reply, Answer, Ctx};
@@ -60,9 +60,9 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     }
     let cores = &ctx.cores;
 
-    // You, writing to an actor from XenoNet's own window: only with the
-    // window's key, never with a token, and only to an actor that reads
-    // its inbox.
+    // You, writing from XenoNet's own window to an actor that reads its
+    // inbox, or to a session, here or on another machine of your network
+    // (`@<host>:<id>`): only with the window's key, never with a token.
     if m == "POST" && route == "/api/actors/you/message" {
         if !ctx.window_only(req) {
             return Ok(Reply::coded(403, "yours", "this is for XenoNet's own window"));
@@ -73,8 +73,10 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         }
         let body = req.json(16 << 10).await.unwrap_or(Value::Null);
         let to = body.get("to").and_then(Value::as_str).unwrap_or("").to_string();
-        if !is_actor_agent(&to) {
-            return Ok(Reply::coded(400, "bad-request", "write to an actor here (actor:<slug>); sessions get messages from other sessions and actors"));
+        // Another host's session or actor, by its qualified id.
+        let remote = xenonet_base::ids::parse_qualified(&to).is_some_and(|(h, local)| h.is_some() && (is_agent_id(Some(local)) || is_actor_agent(local)));
+        if !(is_actor_agent(&to) || is_agent_id(Some(&to)) || remote) {
+            return Ok(Reply::coded(400, "bad-request", "write to a session or an actor by its id (claude:<session id>, actor:<slug>, or @<host>:<id> on another machine)"));
         }
         let envelope = attest(Sender { id: YOU, kind: "you", name: Some("you".into()), product: None }, "window", &Value::Null, &ctx.config.home, ctx.now(), platform());
         return Ok(match cores.engine.send(YOU, json!({ "to": to, "text": body.get("text") }), Some(json!({ "envelope": envelope }))).await {
