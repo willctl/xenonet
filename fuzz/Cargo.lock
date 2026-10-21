@@ -2017,11 +2017,13 @@ dependencies = [
  "xenonet-engine",
  "xenonet-hosts",
  "xenonet-integrations",
+ "xenonet-net",
  "xenonet-schema",
  "xenonet-service",
  "xenonet-sources",
  "xenonet-state",
  "xenonet-wire-app",
+ "xenonet-wire-engine",
  "xenonet-wire-map",
 ]
 
@@ -2148,6 +2150,28 @@ dependencies = [
  "xenonet-service",
  "xenonet-sources",
  "xenonet-state",
+]
+
+[[package]]
+name = "xenonet-wire-engine"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "regex",
+ "reqwest",
+ "rusqlite",
+ "serde_json",
+ "tokio",
+ "url",
+ "xenonet-actors",
+ "xenonet-app",
+ "xenonet-base",
+ "xenonet-blocks",
+ "xenonet-components",
+ "xenonet-engine",
+ "xenonet-hosts",
+ "xenonet-schema",
+ "xenonet-service",
 ]
 
 [[package]]

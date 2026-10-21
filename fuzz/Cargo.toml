@@ -17,6 +17,8 @@ members = ["."]
 
 # libfuzzer-sys is the only crate the workspace doesn't have already;
 # async-trait and tokio are for the service's routes and its stand-in cores.
+# The network's targets run xenonet-net's nodes and gateway, and the
+# engine's driver (xenonet-wire-engine) for the bodies other hosts send.
 [dependencies]
 async-trait = "0.1"
 libfuzzer-sys = "0.4"
@@ -31,11 +33,13 @@ xenonet-components = { path = "../crates/xenonet-components" }
 xenonet-engine = { path = "../crates/xenonet-engine" }
 xenonet-hosts = { path = "../crates/xenonet-hosts" }
 xenonet-integrations = { path = "../crates/xenonet-integrations" }
+xenonet-net = { path = "../crates/xenonet-net" }
 xenonet-schema = { path = "../crates/xenonet-schema" }
 xenonet-service = { path = "../crates/xenonet-service" }
 xenonet-sources = { path = "../crates/xenonet-sources" }
 xenonet-state = { path = "../crates/xenonet-state" }
 xenonet-wire-app = { path = "../crates/xenonet-wire-app" }
+xenonet-wire-engine = { path = "../crates/xenonet-wire-engine" }
 xenonet-wire-map = { path = "../crates/xenonet-wire-map" }
 
 [[bin]]
@@ -146,6 +150,41 @@ bench = false
 [[bin]]
 name = "tools"
 path = "fuzz_targets/tools.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "net_frame"
+path = "fuzz_targets/net_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "net_roster"
+path = "fuzz_targets/net_roster.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "net_request"
+path = "fuzz_targets/net_request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "net_bodies"
+path = "fuzz_targets/net_bodies.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "a2a_rpc"
+path = "fuzz_targets/a2a_rpc.rs"
 test = false
 doc = false
 bench = false

@@ -5,6 +5,8 @@
 use serde_json::Value;
 use xenonet_base::json;
 
+pub mod net;
+
 /// The service runs its readers on threads with Rust's and tokio's default
 /// stack, 2 MiB. libFuzzer runs on the main thread, which has more, so a
 /// deeply nested input is read again on a thread like the service's, where
