@@ -414,6 +414,10 @@ impl Machine {
             }
             "verify" => cores.verify.state(),
             "gitAvailable" => json!(git_available().await),
+            // How the service started at login stands (the supervisor's
+            // review): it asks launchctl, systemctl or schtasks, so off
+            // the runtime's threads.
+            "login" => tokio::task::spawn_blocking(xenonet_components::supervisor::review_here).await.unwrap_or(Value::Null),
             f if f.starts_with("actors.") => {
                 let Some(actors) = cores.actors.clone() else { return Ok(json!({ "missing": true })) };
                 match &f["actors.".len()..] {
@@ -523,7 +527,7 @@ pub async fn run_doctor(parts: Arc<Parts>, only: Option<&[String]>, by_hand: boo
     let started = now_ms();
     let hosts: Option<Vec<Value>> = parts.cores.hub.as_ref().and_then(|h| h.list().ok()).map(|l| l.as_array().cloned().unwrap_or_default());
     // Each check: its id, group, title, and the host's view for a host's.
-    let mut all: Vec<(String, String, String, Option<Value>)> = checks::CHECKS.iter().map(|(id, g, t)| (id.to_string(), g.to_string(), t.to_string(), None)).collect();
+    let mut all: Vec<(String, String, String, Option<Value>)> = checks::all().into_iter().map(|(id, g, t)| (id.to_string(), g.to_string(), t.to_string(), None)).collect();
     if let Some(hs) = &hosts {
         for h in hs {
             let id = text(h.get("id"));

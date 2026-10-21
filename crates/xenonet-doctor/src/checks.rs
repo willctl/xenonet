@@ -47,6 +47,12 @@ pub const CHECKS: [(&str, &str, &str); 27] = [
     ("actors.checked", "Actors", "Actors' tokens are held to their processes"),
 ];
 
+/// Every check, in the order they run and show: CHECKS, then the service
+/// started at login's (login.rs).
+pub fn all() -> Vec<(&'static str, &'static str, &'static str)> {
+    CHECKS.iter().chain(crate::login::CHECKS.iter()).copied().collect()
+}
+
 fn verdict(status: &str, detail: impl Into<String>, fix: Option<String>) -> Value {
     let mut m = Map::new();
     m.insert("status".into(), json!(status));
@@ -56,19 +62,19 @@ fn verdict(status: &str, detail: impl Into<String>, fix: Option<String>) -> Valu
     }
     Value::Object(m)
 }
-fn ok(d: impl Into<String>) -> Value {
+pub(crate) fn ok(d: impl Into<String>) -> Value {
     verdict("ok", d, None)
 }
-fn info(d: impl Into<String>, fix: Option<&str>) -> Value {
+pub(crate) fn info(d: impl Into<String>, fix: Option<&str>) -> Value {
     verdict("info", d, fix.map(String::from))
 }
-fn warn(d: impl Into<String>, fix: Option<&str>) -> Value {
+pub(crate) fn warn(d: impl Into<String>, fix: Option<&str>) -> Value {
     verdict("warn", d, fix.map(String::from))
 }
-fn fail(d: impl Into<String>, fix: Option<&str>) -> Value {
+pub(crate) fn fail(d: impl Into<String>, fix: Option<&str>) -> Value {
     verdict("fail", d, fix.map(String::from))
 }
-fn skip(d: impl Into<String>) -> Value {
+pub(crate) fn skip(d: impl Into<String>) -> Value {
     verdict("skip", d, None)
 }
 
@@ -85,7 +91,7 @@ impl Facts {
     fn home(&self) -> String {
         self.get("home").map(js_string).unwrap_or_default()
     }
-    fn platform(&self) -> String {
+    pub(crate) fn platform(&self) -> String {
         self.get("platform").map(js_string).unwrap_or_default()
     }
     fn path(&self, k: &str) -> Option<String> {
@@ -99,13 +105,13 @@ impl Facts {
 
 /// How a check asks the machine: ctx[fn](...args), or None when ctx has no
 /// such function (as `?.()` reads it).
-struct Ctx<'a> {
-    io: &'a Io,
-    f: &'a Facts,
+pub(crate) struct Ctx<'a> {
+    pub(crate) io: &'a Io,
+    pub(crate) f: &'a Facts,
 }
 
 impl Ctx<'_> {
-    async fn call(&self, f: &str, args: Value) -> Result<Option<Value>, Value> {
+    pub(crate) async fn call(&self, f: &str, args: Value) -> Result<Option<Value>, Value> {
         let r = self.io.ask(json!({ "op": "call", "fn": f, "args": args })).await?;
         Ok(if r.get("missing") == Some(&json!(true)) { None } else { Some(r.get("value").cloned().unwrap_or(Value::Null)) })
     }
@@ -126,7 +132,7 @@ impl Ctx<'_> {
     async fn run(&self, file: &str, args: &[&str], ms: f64) -> Result<Value, Failure> {
         self.must("run", json!([file, args, ms])).await
     }
-    fn tilde(&self, p: &str) -> String {
+    pub(crate) fn tilde(&self, p: &str) -> String {
         xenonet_base::paths::tilde(p, &self.f.home())
     }
     async fn now(&self) -> Result<f64, Failure> {
@@ -650,6 +656,7 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
             }
             Ok(ok(said))
         }
+        id if crate::login::CHECKS.iter().any(|(c, ..)| *c == id) => crate::login::run(&c, id).await,
         _ => Err(Failure::msg(format!("no such check: {id}"))),
     }
 }

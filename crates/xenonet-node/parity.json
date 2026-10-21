@@ -506,7 +506,7 @@
       ]
     },
     "core/doctor/index.js": {
-      "rust": "crates/xenonet-doctor/src/checks.rs and run.rs",
+      "rust": "crates/xenonet-doctor/src/checks.rs, login.rs and run.rs",
       "differences": [
         "Each check is a task asking the twin's ctx for what it reads (calls through ctx and ctx.actors, the token files' look, and a local time, which Intl formats in JS); its verdict and words are the Rust's. machine(), the runner's parallel runs with their time limit, and the hosts' key checks' composition stay in the twin.",
         "Of the live state the checks get only its Claude plan reading, and of the health its sources and parts, so a run doesn't convert all of XenoNet's live state for each check.",

@@ -39,7 +39,7 @@ test("Background service is reachable from the palette and driver, and XenoNet D
   assert.deepEqual((await s.logs({ source: "page", level: "error" })).entries, []);
 });
 
-test("the setup offer and the switch ask Desktop, and Windows says it isn't available", { timeout: limit(60000) }, async () => {
+test("the setup offer and the switch ask Desktop, on Windows too, and a system without a supervisor says so", { timeout: limit(60000) }, async () => {
   await s.eval(`
     const { createBackground } = await import('/src/background.js');
     window.bgCalls = [];
@@ -74,11 +74,15 @@ test("the setup offer and the switch ask Desktop, and Windows says it isn't avai
   await s.eval('const box = document.querySelector("[data-background-login]"); box.checked = false; box.dispatchEvent(new Event("change", { bubbles: true })); return true');
   await until(() => s.eval('return window.bgCalls.some(([a, v]) => a === "set" && v.on === false)'));
   await until(() => s.eval('return /^Off\\./.test(document.querySelector("[data-background-status]").textContent)'));
-  // Windows: explained, and the switch can't be turned on.
-  await s.eval("window.bgState = { live: true, supported: false, registered: false, offer: false, reason: \"Starting the service at login isn't available on Windows yet. Desktop starts the service when it opens.\" }; return await window.bgPanel.open()");
-  assert.match(await s.eval('return document.querySelector("[data-background-status]").textContent'), /isn't available on Windows yet/);
-  assert.equal(await s.eval('return document.querySelector("[data-background-login]").disabled'), true);
+  // Windows: Task Scheduler, and the switch works as on the others.
+  await s.eval("window.bgState = { live: true, supported: true, supervisor: 'Task Scheduler', registered: true, running: true, supervised: true, offer: false, file: '~\\\\AppData\\\\Local\\\\XenoNet\\\\xenonet-service.xml' }; return await window.bgPanel.open()");
+  assert.match(await s.eval('return document.querySelector("[data-background-status]").textContent'), /running under Task Scheduler/);
+  assert.equal(await s.eval('return document.querySelector("[data-background-login]").disabled'), false);
   await s.screenshot({ name: "e2e-background-windows", inline: false });
+  // A system with no supervisor: explained, and the switch can't be turned on.
+  await s.eval("window.bgState = { live: true, supported: false, registered: false, offer: false, reason: \"Starting the service at login isn't available on this system. Desktop starts the service when it opens.\" }; return await window.bgPanel.open()");
+  assert.match(await s.eval('return document.querySelector("[data-background-status]").textContent'), /isn't available on this system/);
+  assert.equal(await s.eval('return document.querySelector("[data-background-login]").disabled'), true);
   await s.input({ keys: "Escape" });
   assert.deepEqual((await s.logs({ source: "page", level: "error" })).entries, []);
 });

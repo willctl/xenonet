@@ -180,6 +180,29 @@ button {
   border-top: 0;
 }
 
+/* Plain panels (the palette's switch, main.js): the panels drawn solid,
+   with nothing blurred behind them. The glass blur is a large share of a
+   visible frame's GPU time (npm run bench:gpu -- --plain measures it).
+   Without it the map shows through no panel, and the backdrops behind
+   dialogs and the palette dim it a little more. */
+body.plain-panels,
+body.plain-panels * {
+  backdrop-filter: none !important;
+}
+body.plain-panels {
+  --panel: var(--surface);
+}
+body.plain-panels .al {
+  background: var(--surface);
+}
+body.plain-panels .m-backdrop,
+body.plain-panels .p-backdrop {
+  background: rgb(var(--bg-rgb) / 0.82);
+}
+body.plain-panels .palette .p-backdrop {
+  background: rgb(var(--bg-rgb) / 0.66);
+}
+
 .panel-title {
   display: flex;
   align-items: center;
