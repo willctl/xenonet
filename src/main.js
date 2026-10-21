@@ -1,6 +1,7 @@
 import { createUpdatesPanel } from "./updates.js";
 import { createBackground } from "./background.js";
 import { createNetwork } from "./network.js";
+import { chimeHere } from "./network-model.js";
 import "@fontsource/chakra-petch/400.css";
 import "@fontsource/chakra-petch/500.css";
 import "@fontsource/chakra-petch/600.css";
@@ -479,6 +480,9 @@ const network = createNetwork({
   // is, in the Actors panel.
   gateway: () => openActors(),
 });
+// What waits on you sounds only where you are, in a network: one rule for
+// this machine's waits and the others'.
+alerts.setChime(() => chimeHere(network.state));
 
 // Everything waiting on you, the longest wait first (core/needs-you.js),
 // from what the strip shows: the map's sessions waiting on a question or a

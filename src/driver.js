@@ -83,11 +83,14 @@ export function createDriver(app) {
     // many ask, in a window without the key; an actor waiting on you.
     if (it.kind === "request") return { kind: "request", request: it.id, actor: it.request.actor, name: it.request.name, ...(it.request.gateway ? { gatewayToken: true } : {}) };
     if (it.kind === "requests") return { kind: "requests", count: it.count };
-    if (it.kind === "actor-need") return { kind: "actor-need", actor: it.id, waits: it.sub, text: it.text };
+    // What waits on you says whether it sounds here: only where you are,
+    // in a network.
+    if (it.kind === "actor-need") return { kind: "actor-need", actor: it.id, waits: it.sub, text: it.text, chime: it.chime !== false };
     // Another machine's agent waiting on you or stuck, in a network: which
     // machine, and for a wait whether it sounds here.
     if (it.kind === "remote-need") return { kind: "remote-need", agent: it.id, host: it.host, waits: it.sub, text: it.text, chime: !!it.chime, ...(it.stale ? { stale: true } : {}) };
     if (it.kind === "remote-stuck") return { kind: "remote-stuck", agent: it.id, host: it.host, text: it.text, ...(it.stale ? { stale: true } : {}) };
+    if (it.kind === "need") return { kind: "need", session: it.id, text: it.text, chime: it.chime !== false };
     return { kind: it.kind, session: it.id, text: it.text };
   }
 

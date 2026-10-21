@@ -210,6 +210,18 @@
           "you": {
             "type": "boolean"
           },
+          "youAt": {
+            "description": "When the person last worked at its console, by this machine's clock",
+            "anyOf": [
+              {
+                "type": "number",
+                "description": "Epoch milliseconds"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "platform": {
             "anyOf": [
               {

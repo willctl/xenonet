@@ -450,6 +450,20 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     .await;
     b.window("PUT", "/api/net/settings", json!({ "titlesOnly": false })).await;
     until("laptop's question back at studio", 10, || async { far(&a.engine_state().await)["question"] == asks }).await;
+    // The person at studio's window: studio's row says so, on studio and
+    // on laptop, with when they last worked there.
+    // (The route checks the report against its schema, which this test's
+    // service hasn't; the report itself is the window's, as the route
+    // takes it.)
+    a.ctx.cores.actors.as_ref().unwrap().you_report(&json!({ "schema": "actor/console/v1", "presence": "working" })).unwrap();
+    until("you at studio, as laptop sees it", 10, || async {
+        let st = b.state().await;
+        row(&st, "studio")["you"] == true && row(&st, "studio")["youAt"].is_number()
+    })
+    .await;
+    let st = a.state().await;
+    assert_eq!((row(&st, "studio")["you"].clone(), row(&st, "laptop")["you"].clone()), (json!(true), json!(false)), "{st}");
+    assert!(row(&st, "studio")["youAt"].as_f64().unwrap() > now_ms() - 60e3, "{st}");
 
     // Every host has the same roster, and none sees a mismatch.
     until("the same roster everywhere", 10, || async {

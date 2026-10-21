@@ -167,12 +167,30 @@ export function remoteAgents(raw) {
   return out;
 }
 
-// Whether a wait on another machine sounds here: only on the machine you're
-// at, or on every one when you're at none of them (docs/design/network.md,
-// section 8).
-export function chimeHere(state) {
-  const hosts = list(state?.hosts);
-  if (hosts.find((x) => x.id === state?.self?.id)?.you) return true;
+// How long you can be away from every console before what waits sounds on
+// all of them (docs/design/network.md, section 8).
+export const AWAY_MS = 5 * 60e3;
+
+// Whether what waits on you, here or on another machine, sounds here, with
+// its notification. On its own a machine always does. In a network only
+// the machine where you last worked does (its presence's youAt, the newest
+// of the machines that are up; two that tie both do), or every one once
+// you've been away from all of them for five minutes. Machines that don't
+// say when fall back on where you are (you), or every one when you're at
+// none.
+export function chimeHere(state, now = Date.now()) {
+  if (!inNetwork(state)) return true;
+  const self = state.self?.id;
+  const hosts = list(state.hosts).filter((x) => x.id === self || x.online !== false);
+  const at = (x) => (Number.isFinite(x?.youAt) ? x.youAt : null);
+  const me = hosts.find((x) => x.id === self);
+  const timed = hosts.filter((x) => at(x) != null);
+  if (timed.length) {
+    const latest = Math.max(...timed.map(at));
+    if (now - latest >= AWAY_MS) return true;
+    return at(me) != null && at(me) >= latest;
+  }
+  if (me?.you) return true;
   return !hosts.some((x) => x.you);
 }
 
@@ -181,7 +199,7 @@ export function chimeHere(state) {
 // machine shares them.
 export function remoteWaits(state, agents, now = Date.now()) {
   if (!inNetwork(state)) return [];
-  const chime = chimeHere(state);
+  const chime = chimeHere(state, now);
   const online = new Map(list(state.hosts).map((x) => [x.id, x]));
   const out = [];
   for (const a of list(agents)) {

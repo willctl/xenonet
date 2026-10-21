@@ -59,6 +59,9 @@ const QUESTION_MAX: usize = 320;
 const LAST_MAX: usize = 280;
 const STUCK_MAX: usize = 8;
 const REASON_MAX: usize = 280;
+/// When the person last worked at this console is kept to the half minute,
+/// so presence doesn't change every tick while they type.
+const YOU_STEP_MS: f64 = 30e3;
 
 /// What this host last told the others: its presence (each agent as sent)
 /// and its claims, and the timer that tells them again.
@@ -76,6 +79,8 @@ struct Out {
     counter: f64,
     agents: BTreeMap<String, Value>,
     you: bool,
+    /// When the person last worked at this console, as presence said it.
+    you_at: Option<f64>,
     /// The roster head the last presence carried.
     roster: String,
     claims: BTreeMap<String, Value>,
@@ -363,11 +368,13 @@ fn declared(a: &Value) -> Option<Value> {
     Some(out)
 }
 
-/// Whether the person is here: actor:you's presence, from this console.
-fn you_here(w: &World) -> bool {
-    let Some(a) = &w.actors else { return false };
+/// How the person stands at this console, from actor:you's presence:
+/// whether they're here (working or idle), and whether they're working
+/// now (input in the last two minutes).
+fn you_here(w: &World) -> (bool, bool) {
+    let Some(a) = &w.actors else { return (false, false) };
     let p = a.call(w, "presence", &[Arg::text(YOU)]).unwrap_or(Arg::Null);
-    matches!(p.as_str(), Some("working" | "idle"))
+    (matches!(p.as_str(), Some("working" | "idle")), p.as_str() == Some("working"))
 }
 
 /// This host's presence, sent to every other host when it changed (or in
@@ -381,7 +388,11 @@ pub fn presence(w: &World, full: bool) -> Option<Value> {
             return None;
         }
     };
-    let you = you_here(w);
+    // Where the person is: the consoles chime for what waits only where
+    // they last worked, or everywhere once they've been away from all of
+    // them for five minutes (section 8), so presence says when that was.
+    let (you, working) = you_here(w);
+    let worked = working.then(|| (now_ms() / YOU_STEP_MS).floor() * YOU_STEP_MS);
     // The roster's head as this host has it: hosts that see different
     // rosters notice it from each other's presence. A new head may be a
     // host that joined and has heard nothing yet, so the set goes in full.
@@ -396,14 +407,16 @@ pub fn presence(w: &World, full: bool) -> Option<Value> {
             let gone = out.agents.keys().filter(|k| !now.contains_key(*k)).take(1000).map(|k| json!(k)).collect::<Vec<_>>();
             (changed, gone)
         };
-        if !full && agents.is_empty() && removed.is_empty() && you == out.you && roster == out.roster {
+        let you_at = worked.or(out.you_at);
+        if !full && agents.is_empty() && removed.is_empty() && you == out.you && you_at == out.you_at && roster == out.roster {
             return None;
         }
         out.counter = (out.counter + 1.0).max(now_ms().round());
         out.agents = now;
         out.you = you;
+        out.you_at = you_at;
         out.roster.clone_from(&roster);
-        json!({ "schema": "network/presence/v1", "counter": out.counter, "full": full, "agents": agents, "removed": removed, "you": you, "roster": roster })
+        json!({ "schema": "network/presence/v1", "counter": out.counter, "full": full, "agents": agents, "removed": removed, "you": you, "youAt": you_at.map_or(Value::Null, ms), "roster": roster })
     };
     send(w, To::All, Kind::Presence, body.clone());
     Some(body)

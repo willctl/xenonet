@@ -694,3 +694,11 @@ async fn detail_crosses_for_the_console_never_for_agents_and_titles_only_keeps_i
     let kept = n.w("studio").store.with(|s| s.net_presence("vm1").unwrap().unwrap());
     assert!(!kept.text("agents").unwrap().contains("markup"), "only declared fields are kept");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn presence_says_when_you_last_worked_at_this_console() {
+    let n = net3("you-at");
+    n.link_up().await;
+    let sent = n.sent("studio", Kind::Presence).pop().unwrap();
+    assert_eq!((sent["you"].clone(), sent["youAt"].clone()), (json!(false), Value::Null), "with actors off, XenoNet doesn't know");
+}

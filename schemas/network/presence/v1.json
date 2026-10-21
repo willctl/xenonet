@@ -198,6 +198,18 @@
       "type": "boolean",
       "description": "The person's last input was in this host's console: they're here"
     },
+    "youAt": {
+      "description": "When the person last worked at this host's console (input in the last two minutes), to the half minute, by the gateway's clock: the consoles chime only where it's latest, or everywhere once it's five minutes old",
+      "anyOf": [
+        {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "roster": {
       "type": "string",
       "pattern": "^[A-Za-z0-9_-]*$",

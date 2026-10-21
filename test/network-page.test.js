@@ -5,7 +5,7 @@
 // sounds, and the join line's secret part.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { stateOf, inNetwork, linkWords, skewWords, hostLine, hostTags, outboxWords, remoteAgents, remoteWaits, chimeHere, hostIdProblem, joinOf, joinFields, proposalWords, ALONE, TICKET_MS } from "../src/network-model.js";
+import { stateOf, inNetwork, linkWords, skewWords, hostLine, hostTags, outboxWords, remoteAgents, remoteWaits, chimeHere, hostIdProblem, joinOf, joinFields, proposalWords, ALONE, TICKET_MS, AWAY_MS } from "../src/network-model.js";
 import { NetworkState } from "../core/schema/network.js";
 
 const NOW = Date.UTC(2026, 9, 20, 14, 30);
@@ -113,6 +113,28 @@ test("detail from another machine: the question's text, the last message and why
     ["remote-need", "c", "The question shows in rack's con"],
   ]);
   assert.equal(cards[1].name, "Tidy the tests");
+});
+
+test("what waits sounds where you last worked, or everywhere after five minutes away from every console", () => {
+  const s = founder();
+  const at = (studio, laptop, more = {}) => ({ ...s, hosts: s.hosts.map((x) => ({ ...x, you: false, youAt: x.id === "studio" ? studio : x.id === "laptop" ? laptop : null, ...(more[x.id] ?? {}) })) });
+  // A machine on its own always chimes.
+  assert.equal(chimeHere(stateOf(null), NOW), true);
+  // You worked here last: here, not on laptop.
+  assert.equal(chimeHere(at(NOW - 20e3, NOW - 40 * 60e3), NOW), true);
+  const fromLaptop = { ...at(NOW - 20e3, NOW - 40 * 60e3), self: { ...s.self, id: "laptop" } };
+  assert.equal(chimeHere(fromLaptop, NOW), false);
+  // You moved to laptop: there, not here.
+  assert.equal(chimeHere(at(NOW - 3 * 60e3, NOW - 30e3), NOW), false);
+  // Both in the same half minute: both.
+  assert.equal(chimeHere(at(NOW - 30e3, NOW - 30e3), NOW), true);
+  // Five minutes away from every console: everywhere.
+  assert.equal(chimeHere(at(NOW - AWAY_MS - 60e3, NOW - AWAY_MS), NOW), true);
+  // A machine that's down doesn't keep you there.
+  assert.equal(chimeHere(at(NOW - 3 * 60e3, NOW - 30e3, { laptop: { online: false } }), NOW), true);
+  // The cards say so, local or not: it's one rule.
+  const agents = remoteAgents([{ id: "@laptop:claude:a", host: "laptop", title: "t", waitsOnYou: true, question: "?" }]);
+  assert.equal(remoteWaits(at(NOW - 3 * 60e3, NOW - 30e3), agents, NOW)[0].chime, false);
 });
 
 test("a new machine's id, and the join line's secret part", () => {

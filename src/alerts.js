@@ -3,7 +3,9 @@
 // collisions, stuck agents (here and on the others), sessions ready for
 // review, and problems XenoNet's doctor found. Also the tab-title badge,
 // and notifications: native ones in the desktop app, the browser's
-// (opt-in) otherwise.
+// (opt-in) otherwise. In a network, what waits on you, here or on another
+// machine, sounds and notifies only on the machine where you are, or on
+// every one once you've been away from all of them (setChime).
 //
 // Live snapshots arrive several times a second, so the strip is reconciled
 // rather than redrawn: a card that hasn't changed keeps its element, so it
@@ -30,6 +32,9 @@ export function gist(text) {
 }
 
 const keyOf = (it) => (it.kind === "review" || it.kind === "requests" ? it.kind : `${it.kind}:${it.id}`);
+
+// What waits on you: what sounds and notifies only where you are.
+const WAITS = new Set(["need", "actor-need", "remote-need"]);
 
 // `requests` answers the request cards (see actor-requests.js): allow(id),
 // deny(id), open() for the Actors panel, and armed(id) / armsIn(id) for
@@ -63,6 +68,9 @@ export function createAlerts({ sfx, select, ack, openApp, collision, doctor = ()
   // Other machines' agents waiting on you or stuck, in a network (see
   // setRemote), after this machine's.
   let remoteItems = [];
+  // Whether what waits sounds here (see setChime): always, on a machine on
+  // its own.
+  let chimeNow = () => true;
 
   const title = (id) => index.get(id)?.title ?? id;
 
@@ -105,16 +113,17 @@ export function createAlerts({ sfx, select, ack, openApp, collision, doctor = ()
         // Stuck sessions have no notification to carry a sound, and the
         // server's for a request goes up silent.
         // From where it happened on the map: the session (or actor)
-        // waiting, a collision's two sessions. Another machine's wait
-        // sounds only on the machine you're at (its chime), and from no
+        // waiting, a collision's two sessions. What waits sounds only on
+        // the machine you're at (its chime), and another machine's from no
         // place on this map.
-        const first = fresh.find((it) => it.kind === kind && (kind !== "remote-need" || it.chime));
+        const first = fresh.find((it) => it.kind === kind && (!WAITS.has(kind) || it.chime));
         if ((front || !notifies || kind === "stuck" || kind === "request") && first) sfx(kind === "collision" || kind === "stuck" ? kind : "alert", kind === "collision" ? { id: first.a, to: first.b } : kind === "request" || kind === "remote-need" ? undefined : { id: first.id });
       }
       for (const it of fresh) {
+        if (WAITS.has(it.kind) && !it.chime) continue;
         if (it.kind === "need") notify({ key: keyOf(it), id: it.id, title: it.host ? `${it.host} · ${title(it.id)}` : title(it.id), subtitle: it.sub === "asks" ? "is waiting for you" : "needs permission", body: gist(alertText(it)), sound: !front });
         else if (it.kind === "actor-need") notify({ key: keyOf(it), id: it.id, title: it.name, subtitle: it.sub === "needs permission" ? "needs permission" : "is waiting for you", body: it.text, sound: !front });
-        else if (it.kind === "remote-need" && it.chime) notify({ key: keyOf(it), id: it.id, title: `${it.host} · ${it.name}`, subtitle: it.sub, body: gist(it.text), sound: !front });
+        else if (it.kind === "remote-need") notify({ key: keyOf(it), id: it.id, title: `${it.host} · ${it.name}`, subtitle: it.sub, body: gist(it.text), sound: !front });
         else if (it.kind === "collision") notify({ key: keyOf(it), id: it.a, title: it.host ? `${it.host} · Two sessions edited the same file` : "Two sessions edited the same file", subtitle: it.files.join(", "), body: `${title(it.a)} and ${title(it.b)}`, sound: !front });
       }
       // Answered, dismissed or gone: take its notification back.
@@ -133,9 +142,11 @@ export function createAlerts({ sfx, select, ack, openApp, collision, doctor = ()
     const need = snap.sessions.filter((s) => s.needsYou && index.has(s.id));
     const strong = need.filter((s) => s.needsYou.kind !== "review").sort((a, b) => b.needsYou.since - a.needsYou.since);
     const review = need.filter((s) => s.needsYou.kind === "review");
-    for (const s of strong) items.push({ kind: "need", id: s.id, app: s.app, text: s.needsYou.text, sub: s.needsYou.kind === "permission" ? "needs permission" : "asks", since: s.needsYou.since, ...alertFrom(s) });
-    items.push(...actorItems);
-    items.push(...remoteItems);
+    // One rule for what waits, here or on another machine.
+    const chime = chimeNow() !== false;
+    for (const s of strong) items.push({ kind: "need", id: s.id, app: s.app, text: s.needsYou.text, sub: s.needsYou.kind === "permission" ? "needs permission" : "asks", since: s.needsYou.since, chime, ...alertFrom(s) });
+    items.push(...actorItems.map((it) => ({ ...it, chime })));
+    items.push(...remoteItems.map((it) => (it.kind === "remote-need" ? { ...it, chime } : it)));
     for (const c of snap.collisions ?? []) items.push({ kind: "collision", id: `${c.a}|${c.b}`, a: c.a, b: c.b, files: c.files, sameBranch: c.sameBranch, branches: c.branches, at: c.ts, ...collisionFrom(c) });
     for (const s of snap.sessions.filter((x) => x.stuck && index.has(x.id))) items.push({ kind: "stuck", id: s.id, app: s.app, text: s.stuck.reasons.join(" · "), ...alertFrom(s) });
     // Only this machine's can be dismissed from here: hosts are read-only.
@@ -436,6 +447,12 @@ export function createAlerts({ sfx, select, ack, openApp, collision, doctor = ()
     // remoteWaits): a card each, with its machine.
     setRemote(list) {
       remoteItems = Array.isArray(list) ? list : [];
+      if (lastSnap) update(lastSnap, index);
+    },
+    // Whether what waits sounds here, asked as each new item shows
+    // (network-model.js's chimeHere): only where you are, in a network.
+    setChime(fn) {
+      chimeNow = typeof fn === "function" ? fn : () => true;
       if (lastSnap) update(lastSnap, index);
     },
     // The actors' list (actor/list/v1): those waiting on you join the strip.
