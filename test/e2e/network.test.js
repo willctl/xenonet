@@ -6,12 +6,13 @@
 // a network, a machine that's offline and where you are, Add a machine and
 // its join line shown once and masked, another machine's agent waiting on
 // you in the attention strip with its question's text, one that seems
-// stuck with why, a machine that shares titles only, where what waits
-// sounds (here or on another machine: only where you are), a gateway
-// that's down, and the message box that writes to a session as you, from
-// the panel and from a session's own panel. Each state the page reads is
-// the schema's (network/state/v1). No page errors. The window stays
-// hidden; XENONET_E2E_SHOW=inactive shows it to watch.
+// stuck with why, a machine that shares titles only, the other machines on
+// the map from their presence with a session there found and messaged,
+// where what waits sounds (here or on another machine: only where you
+// are), a gateway that's down, and the message box that writes to a
+// session as you, from the panel and from a session's own panel. Each
+// state the page reads is the schema's (network/state/v1). No page errors.
+// The window stays hidden; XENONET_E2E_SHOW=inactive shows it to watch.
 //
 //   npm run test:e2e
 import { test, before, after } from "node:test";
@@ -244,6 +245,52 @@ test("net-founder: another machine's question and stuck reason in the strip and 
   assert.ok(!/query string|cargo test|session check/.test(m.text), m.text);
   assert.match(m.text, /The question shows in laptop's console\./);
   await s.driver("network", "close");
+}));
+
+test("net-founder: the other machines on the map from their presence, one dimmed while it's away, and a session there found, shown and messaged as you", { timeout: limit(60000) }, shoot("network-map", async () => {
+  await simulate("net-founder", {}, (n) => n.inNetwork);
+  const drawn = await until(async () => {
+    const h = await s.driver("hosts");
+    return h.hosts.some((x) => x.id === "laptop" && x.drawn && x.constellation) && h.hosts.some((x) => x.id === "rack" && x.drawn) ? h : null;
+  });
+  assert.ok(drawn, "laptop and rack are constellations on the map");
+  const laptop = drawn.hosts.find((x) => x.id === "laptop");
+  const rack = drawn.hosts.find((x) => x.id === "rack");
+  assert.deepEqual([laptop.state, laptop.network, rack.state, rack.stale], ["live", true, "offline", true], "the one that's away dims");
+  assert.equal(drawn.self, "studio");
+  assert.ok(!drawn.hosts.some((x) => x.id === "studio"), "this machine isn't one of them");
+  // Projects by repo, and a folder that isn't one.
+  const projects = await s.driver("find", { kind: "project", query: "@laptop:" });
+  assert.deepEqual(projects.nodes.map((p) => p.id).sort(), ["@laptop:project:repo:github.com/acme/atlas-web", "@laptop:project:repo:github.com/acme/ledger"]);
+  assert.equal((await s.driver("find", { kind: "project", query: "importer" })).nodes[0]?.id, "@rack:project:folder:~/jobs/importer");
+  // A session there, found by its title.
+  const found = await s.driver("find", { kind: "session", query: "login redirect" });
+  const far = found.nodes.find((n) => n.id.startsWith("@laptop:"));
+  assert.ok(far, JSON.stringify(found));
+  assert.deepEqual([far.host, far.network, far.waits], ["laptop", true, true]);
+  // Selected, it shows what its presence says, escaped, with Message.
+  await s.driver("select", far.id);
+  const panel = await until(async () => {
+    const t = await s.eval(`return document.querySelector('#inspector')?.innerText.replace(/\\s+/g, " ") ?? ""`);
+    return /Presence/i.test(t) ? t : null;
+  });
+  assert.ok(panel, "the inspector shows it");
+  assert.match(panel, /on laptop · live · in your network/);
+  assert.match(panel, /Should the redirect in <LoginForm> keep the old query string, or drop it\?/);
+  assert.match(panel, /said last The redirect now waits for the session check\./i);
+  assert.match(panel, /From laptop's presence/);
+  await s.screenshot({ name: "e2e-network-map", inline: false });
+  const button = await s.eval(`return (() => { const b = document.querySelector('#inspector [data-action="message"]'); const r = b?.getBoundingClientRect(); return r?.width ? { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), label: b.textContent.trim() } : null; })()`);
+  assert.equal(button?.label, "✉ Message");
+  await clickAt(button, "Message");
+  const box = await until(async () => ((await s.driver("message")).open ? s.driver("message") : null));
+  assert.deepEqual([box?.to, box?.name], [far.id, "Fix the login redirect"]);
+  assert.match(await s.eval(`return document.querySelector("#modal .m-sub").textContent`), /A session on laptop\. It gets it as from you, at studio's console/);
+  await clickAt(await s.eval(`return (() => { const r = document.querySelector("#modal [data-mclose]").getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`), "Close");
+  await s.driver("select", null);
+  // On its own again, the other machines leave the map.
+  await simulate("net-none", {}, (n) => !n.inNetwork);
+  assert.ok(await until(async () => !(await s.driver("hosts")).hosts.some((x) => x.network)), "they go");
 }));
 
 test("what waits here sounds only where you are too, and everywhere is the rule's: one rule for this machine's waits and the others'", { timeout: limit(60000) }, shoot("network-chime", async () => {

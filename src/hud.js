@@ -339,7 +339,29 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     return out.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
   }
 
+  // Another machine's session in a network, as its presence says
+  // (network-map.js): its state and what it's doing, what waits on you or
+  // why it seems stuck, and what it said last, each escaped. Its transcript
+  // and stats stay on its machine.
+  function presenceHtml(node) {
+    const p = node.presence ?? {};
+    const as = node.stale ? ` · as of ${timeAgo(index.get(`@${node.host}:core`)?.lastHeard)}` : "";
+    const need = p.waits
+      ? `<div class="need-box ${h(p.kind ?? "question")}"><div class="need-k">${p.kind === "permission" ? "◉ needs permission" : "◉ waiting for you"}${p.since ? ` · ${timeAgo(p.since)}` : ""}</div><div class="need-text">${h(p.question ?? `The question shows in ${node.host}'s console.`)}</div></div>`
+      : "";
+    const stuck = p.stuck?.length ? `<div class="stuck-box">⟳ may be stuck · ${p.stuck.map(h).join(" · ")}</div>` : "";
+    const state = p.state === "working" ? "working" : p.state === "waiting" ? "waiting for you" : p.state === "ended" ? "ended" : "idle";
+    // Its state, unless the box above says it waits.
+    const head = p.waits && !as ? "" : `<div class="live-head"><span class="live-status ${p.state === "working" ? "thinking" : "idle"}">${h(state)}${h(as)}</span></div>`;
+    return `${need}${stuck}
+      ${head}
+      ${p.focus ? `<div class="sub-k">doing</div><div class="net-said">${h(p.focus)}</div>` : ""}
+      ${p.lastMessage ? `<div class="sub-k">said last</div><div class="net-said">${h(p.lastMessage)}</div>` : ""}
+      <div class="net-from">From ${h(node.host)}'s presence. Its transcript and stats stay on ${h(node.host)}.</div>`;
+  }
+
   function liveSectionHtml(node) {
+    if (node.network) return presenceHtml(node);
     const s = liveById.get(node.id);
     if (!s) return `<div class="live-none">No activity in the last 24 hours</div>`;
     const pct = s.context.window ? Math.min(100, (s.context.used / s.context.window) * 100) : 0;
@@ -466,7 +488,7 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
         row("branch", mono(node.branch)) +
         row("folder", mono(shortPath(node.cwd, 40))) +
         row("worktree", mono(node.worktree && shortPath(node.worktree, 40))) +
-        row("origin", mono(node.originator ?? (node.observed || node.reader ? null : node.inDesktop ? "Claude desktop" : node.app === "claude" ? "CLI / SDK" : node.app === "grok" ? grokOrigin(node) : null))) +
+        row("origin", mono(node.originator ?? (node.observed || node.reader || node.network ? null : node.inDesktop ? "Claude desktop" : node.app === "claude" ? "CLI / SDK" : node.app === "grok" ? grokOrigin(node) : null))) +
         row("seen", node.reader === "experimental" ? `read from ${h(APP_LABEL[node.app] ?? node.app)}'s own records (experimental)` : node.observed === "numbat" ? "observed through numbat's records" : node.observed === "gateway" ? `reported through the gateway${node.reportedBy ? ` by ${h(node.reportedBy)}` : ""}` : null) +
         row("parent", p ? `<a href="#" data-goto="${h(p.id)}">${h(p.title)}</a> <span class="dim">${h(node.parentKind ?? "")}</span>` : null) +
         row("id", `<code class="copy" data-copy="${h(node.rawId)}" title="copy">${h(node.rawId)}</code>`);
@@ -531,8 +553,9 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     }
 
     const canTerminal = onTerminal && !node.host && (node.kind === "project" || node.kind === "zone" || node.kind === "wiki" || (isSession && node.cwd));
-    // A session of this machine's takes a message from you, from here.
-    const canMessage = onMessageSession && isSession && !node.host;
+    // A session of this machine's takes a message from you, from here, and
+    // so does one on another machine in your network.
+    const canMessage = onMessageSession && isSession && (!node.host || node.network);
     const actions = [...(node.actions ?? []), ...(canMessage ? [{ id: "message", label: "✉ Message", client: true }] : []), ...(canTerminal ? [{ id: "terminal", label: "›_ Open terminal here", client: true }] : [])]
       .map((a, i) => `<button class="act ${i === 0 && isSession ? `primary ${h(node.app)}` : ""}" data-action="${h(a.id)}">${h(a.label)}</button>`)
       .join("");
@@ -564,7 +587,7 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
       <div class="insp-sub">${h(sub)}</div>
       ${whereHtml(node, index)}
       ${actions ? `<div class="actions">${actions}</div>` : ""}
-      ${isSession ? `<div class="panel-title sub"><span>Live</span><span class="tick live-tick">● live</span></div><div id="insp-live" class="insp-live">${liveSectionHtml(node)}</div>` : ""}
+      ${isSession ? `<div class="panel-title sub"><span>${node.network ? "Presence" : "Live"}</span><span class="tick live-tick">● live</span></div><div id="insp-live" class="insp-live">${liveSectionHtml(node)}</div>` : ""}
       <div class="panel-title sub"><span>Details</span></div>
       <div class="grid">${grid}</div>
       ${mcp && ["resource", "wiki"].includes(node.kind) ? '<div class="panel-title sub"><span>MCP server</span></div><div id="insp-mcp"></div>' : ""}

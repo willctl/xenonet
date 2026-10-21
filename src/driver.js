@@ -71,8 +71,9 @@ export function createDriver(app) {
       out.active = !!n.active;
       if (n.repo?.dirty) out.uncommitted = n.repo.dirty;
     } else if (n.kind === "host") out.state = n.state;
-    // From another machine (hosts.js): which, and whether it's live.
-    if (n.host) Object.assign(out, { host: n.host, ...(n.stale ? { stale: true } : {}) });
+    // From another machine (hosts.js): which, and whether it's live; one in
+    // your network says so, and for a session whether it waits on you.
+    if (n.host) Object.assign(out, { host: n.host, ...(n.stale ? { stale: true } : {}), ...(n.network ? { network: true } : {}), ...(n.presence ? { waits: !!n.presence.waits } : {}) });
     return out;
   }
 
@@ -244,8 +245,8 @@ export function createDriver(app) {
     // Nodes whose id, title or name contain every word of `query`, drawn
     // ones first, then the most recent. `kind` narrows it: session, project,
     // native (a Codex project), zone (a folder outside the projects folder),
-    // resource, wiki, page, core, host (another machine's XenoNet, with
-    // XENONET_HOSTS=1) or actor (actors beside the map, by id, name and
+    // resource, wiki, page, core, host (another machine's XenoNet: over SSH
+    // with XENONET_HOSTS=1, or in your network) or actor (actors beside the map, by id, name and
     // product, after the nodes when not narrowed, so words that found a node
     // still find it first). A node from another machine has an id that
     // starts with @<host>: and says which host it's on.
@@ -709,8 +710,8 @@ export function createDriver(app) {
       return { ...st, made };
     },
 
-    // Other machines on the map (hosts.js, with XENONET_HOSTS=1): each host
-    // with how it stands, its node and where that is on screen, its
+    // Other machines on the map (hosts.js: over SSH with XENONET_HOSTS=1,
+    // and your network's, from their presence): each host with how it stands, its node and where that is on screen, its
     // constellation, and the machines' chips under Filters with the ones
     // picked; the bridges between checkouts of one repo, drawn or not.
     hosts() {

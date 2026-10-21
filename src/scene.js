@@ -1573,6 +1573,14 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
         applyLive(n, s);
         setAttention(n, { need: s?.stale ? null : (s?.needsYou ?? null), stuck: s?.stuck ?? null });
       }
+      // Another machine's sessions in a network have no live state here:
+      // their presence says what waits on you and why one seems stuck
+      // (network-map.js), as of when their machine was last heard.
+      for (const n of nodeIndex.values()) {
+        const p = n.network && n.kind === "session" ? n.presence : null;
+        if (!p || !(p.waits || p.stuck || n.__obs?.userData.rig)) continue;
+        setAttention(n, { need: p.waits && !n.stale ? { kind: p.kind ?? "question" } : null, stuck: p.stuck && !n.stale ? { reasons: p.stuck } : null });
+      }
       recomputeFlow();
       busy = new Set();
       for (const s of snap.sessions) if (s.status !== "idle") for (let up = parentOf.get(s.id); up; up = parentOf.get(up)) busy.add(up);
