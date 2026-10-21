@@ -15,7 +15,8 @@
 //! at every two seconds too. It listens only while a grant could be used,
 //! and says where in `runtime/assistant-<port>.json`, which holds no secret.
 
-use crate::buckets::{now_ms, Bucket, Rate};
+use crate::actor_caller::Rate;
+use crate::borrowed::now_ms;
 use crate::cores::{AssistantService, Audit, Connections};
 use crate::rpc::{negotiate, Handler, Rpc};
 use serde_json::{json, Value};
@@ -23,6 +24,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::TcpListener;
+use xenonet_actors::limits::Bucket;
 use xenonet_base::sync::Locked;
 
 const HELLO: Duration = Duration::from_secs(5);
@@ -93,7 +95,7 @@ impl Endpoint {
                 log,
                 server: Mutex::new(None),
                 sessions: Mutex::new(Vec::new()),
-                refusals: Mutex::new(Bucket::new(REFUSALS, now_ms())),
+                refusals: Mutex::new(Bucket::new(REFUSALS.rate, REFUSALS.burst, now_ms())),
                 quiet_until: Mutex::new(0.0),
             }),
         };

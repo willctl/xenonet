@@ -134,5 +134,7 @@ mod tests {
         assert_eq!(all.take("a", 1.0, 1.0, 1.0, 0.0), 0.0);
         assert_eq!(all.take("b", 1.0, 1.0, 1.0, 0.0), 1000.0, "a is in use");
         assert_eq!(all.take("b", 1.0, 1.0, 1.0, 1000.0), 0.0, "a is full again, so it goes");
+        all.forget("b");
+        assert_eq!(all.size(), 0);
     }
 }

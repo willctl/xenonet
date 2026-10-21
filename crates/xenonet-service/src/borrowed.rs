@@ -1,9 +1,14 @@
 //! What the routes, the gateway and the wire crates take from JS's
-//! built-ins (crypto.randomUUID(), process.platform), and the engine's
-//! attest for a sender they name with plain values.
+//! built-ins (Date.now(), crypto.randomUUID(), process.platform), and the
+//! engine's attest for a sender they name with plain values.
 
 use serde_json::Value;
 use xenonet_engine::sql::Arg;
+
+/// Milliseconds since the epoch, as Date.now() gives them.
+pub fn now_ms() -> f64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_millis() as f64)
+}
 
 /// crypto.randomUUID(): a version 4 UUID.
 pub fn random_uuid() -> String {

@@ -4,7 +4,7 @@
 //! when it runs standalone, and the background work, and stops on SIGINT,
 //! SIGTERM or the component service's stop.
 
-use crate::buckets::now_ms;
+use crate::borrowed::now_ms;
 use crate::component::{self, Hooks};
 use crate::config::Config;
 use crate::cores::{CoreError, Cores};

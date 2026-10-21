@@ -14,7 +14,6 @@
 pub mod actor_caller;
 pub mod assistant_endpoint;
 pub mod borrowed;
-pub mod buckets;
 pub mod component;
 pub mod config;
 pub mod cores;

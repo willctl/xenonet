@@ -405,7 +405,7 @@ impl TunnelHost for SystemHost {
         })
     }
     fn now(&self) -> f64 {
-        crate::buckets::now_ms()
+        crate::borrowed::now_ms()
     }
     fn path_var(&self) -> String {
         std::env::var("PATH").unwrap_or_default()
