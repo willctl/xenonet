@@ -45,6 +45,9 @@ impl cores::Verify for You {
 #[derive(Default)]
 struct TestSink {
     got: Mutex<Vec<(String, String, Value)>>,
+    /// Who each body came from, and whether the link said that host is a
+    /// window host.
+    window: Mutex<Vec<(String, bool)>>,
     links: Mutex<Vec<bool>>,
     removed: Mutex<Vec<String>>,
     gaps: Mutex<u32>,
@@ -52,6 +55,7 @@ struct TestSink {
 
 impl Sink for TestSink {
     fn receive(&self, i: Incoming) {
+        self.window.lock().unwrap().push((i.from.clone(), i.from_window_host));
         self.got.lock().unwrap().push((i.from, i.kind.as_str().to_string(), i.body));
     }
     fn linked(&self, up: bool) {
@@ -233,6 +237,12 @@ async fn three_hosts_join_message_both_ways_and_survive_a_gateway_restart() {
     a.send("laptop", Kind::Message, "from the gateway's host");
     b.send("studio", Kind::Message, "to the gateway's host");
     until("both", 10, || b.sink.texts("message") == ["from the gateway's host"] && a.sink.texts("message") == ["to the gateway's host"]).await;
+    // The engine is told whether the sender is a window host, from the
+    // roster: studio founded the network; laptop and desk were added
+    // without a window.
+    assert!(b.sink.window.lock().unwrap().iter().all(|(from, w)| *w == (from == "studio")), "{:?}", b.sink.window.lock().unwrap());
+    assert_eq!(*a.sink.window.lock().unwrap(), [("laptop".to_string(), false)]);
+    assert_eq!(*c.sink.window.lock().unwrap(), [("laptop".to_string(), false)]);
     // Presence goes to every host.
     b.svc.net().send(Outgoing { to: To::All, kind: Kind::Presence, body: json!({ "schema": "network/presence/v1", "counter": 1, "full": true, "agents": [{ "id": "claude:1", "waitsOnYou": true }], "removed": [], "you": false, "roster": "x" }) }).unwrap();
     until("presence", 10, || a.sink.got.lock().unwrap().iter().any(|g| g.1 == "presence") && c.sink.got.lock().unwrap().iter().any(|g| g.1 == "presence")).await;
