@@ -392,7 +392,11 @@ async fn the_gateway_moves_by_hand_and_a_host_that_missed_it_follows() {
     let st = until_state(&a, "the proposal at studio", |s| s["proposals"].as_array().is_some_and(|p| !p.is_empty())).await;
     assert_eq!((st["proposals"][0]["op"].clone(), st["proposals"][0]["host"].clone()), (json!("gateway"), json!("desk")));
     assert_eq!(st["proposals"][0]["signers"], json!(["desk"]));
-    let (s, v) = a.call("POST", "/api/net/approve", json!({ "host": "desk" }), true).await;
+    assert_eq!(st["proposals"][0]["gateway"], "127.0.0.1:48118");
+    // Approved by its id: an id nothing waits under signs nothing.
+    let (s, v) = a.call("POST", "/api/net/approve", json!({ "id": "bm90LXRoaXMtb25l" }), true).await;
+    assert_eq!(s, 404, "{v}");
+    let (s, v) = a.call("POST", "/api/net/approve", json!({ "id": st["proposals"][0]["id"] }), true).await;
     assert_eq!(s, 200, "{v}");
     // desk is the gateway now, studio links to it, and frames go through it.
     until_state(&c, "desk as the gateway", |s| s["self"]["gateway"] == true && s["gateway"]["link"] == "live").await;

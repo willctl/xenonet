@@ -10,7 +10,8 @@
 //! - `POST create`, `POST join`, `POST leave`: on this machine only.
 //! - `POST ticket`, `POST remove`, `POST replace`.
 //! - `POST approve`: signs an entry that waits for the founder or a second
-//!   window host (a move of the gateway, say).
+//!   window host (a move of the gateway, or a window host's add), by the
+//!   id the state lists it under.
 //! - `POST gateway/take`, `POST gateway/set`: moving the gateway by hand.
 //! - `PUT settings`: titles only, and a LAN-only gateway's address.
 
@@ -106,7 +107,7 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
         "remove" => node.remove(&text("host")).await,
         "replace" => node.replace(&text("host")).await,
         "settings" => settings(&svc, &body).await,
-        "approve" => node.approve(body.get("op").and_then(Value::as_str).unwrap_or("gateway"), &text("host")).await,
+        "approve" => node.approve(&text("id")).await,
         "gateway/take" => take(ctx, &svc, &body).await,
         _ => node.set_gateway(&text("address")).await,
     };

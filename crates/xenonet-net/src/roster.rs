@@ -131,6 +131,12 @@ impl Entry {
         format!("{ROSTER_TAG}\n{}", self.unsigned()).into_bytes()
     }
 
+    /// What an entry says, apart from who signed it: what's approved, by
+    /// its hash, so an approval signs exactly the entry the person saw.
+    pub fn id(&self) -> String {
+        hash_b64(&self.signing_bytes())
+    }
+
     /// What the next entry's `prev` is.
     pub fn hash(&self) -> String {
         hash_b64(self.to_json().to_string().as_bytes())

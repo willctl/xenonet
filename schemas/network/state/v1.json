@@ -366,6 +366,11 @@
       "items": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]*$",
+            "description": "The entry's id, the hash of what it says apart from its signers: what POST /api/net/approve takes"
+          },
           "op": {
             "type": "string",
             "enum": [
@@ -411,6 +416,7 @@
           }
         },
         "required": [
+          "id",
           "op",
           "host",
           "window",

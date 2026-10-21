@@ -237,6 +237,7 @@ export const NetworkState = define(
     proposals: z
       .array(
         obj({
+          id: B64.describe("The entry's id, the hash of what it says apart from its signers: what POST /api/net/approve takes"),
           op: z.enum(ROSTER_OPS),
           host: HostId,
           window: z.boolean(),

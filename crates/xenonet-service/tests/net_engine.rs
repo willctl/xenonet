@@ -603,7 +603,7 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     let (s, v) = e.window("POST", "/api/net/join", json!({ "address": address, "ticket": code })).await;
     assert_eq!((s, v["code"].clone()), (409, json!("waiting")), "{v}");
     assert!(v["error"].as_str().unwrap().contains("needs the founder or a second window host"), "{v}");
-    let (s, v) = a.window("POST", "/api/net/approve", json!({ "op": "add", "host": "den" })).await;
+    let (s, v) = a.window("POST", "/api/net/approve", json!({ "id": st["proposals"][0]["id"] })).await;
     assert_eq!(s, 200, "{v}");
     join(&e, &address, &code).await;
     live(&e, 3).await;

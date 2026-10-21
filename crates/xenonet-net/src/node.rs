@@ -1400,6 +1400,7 @@ impl Node {
             .iter()
             .map(|p| {
                 json!({
+                    "id": p.id(),
                     "op": p.op.as_str(),
                     "host": p.host.id,
                     "window": p.host.window,
@@ -1472,16 +1473,18 @@ impl Node {
         Ok(self.state())
     }
 
-    /// Approves an entry waiting for approval: this host signs it too.
-    pub async fn approve(&self, op: &str, host: &str) -> R<Value> {
+    /// Approves an entry waiting for approval, by its id (`Entry::id`, as
+    /// the state lists it): this host signs exactly that entry too.
+    pub async fn approve(&self, id: &str) -> R<Value> {
         let n = &self.shared;
         let (net, key) = self.me()?;
         if !n.roster().view().is_window(&net.host) {
             return Err(NetError::new(403, "not-window", "approving is a window host's"));
         }
-        let Some(mut e) = n.proposals().into_iter().find(|p| p.op.as_str() == op && p.host.id == host) else {
-            return Err(NetError::new(404, "nothing", format!("nothing waits for approval about {host}")));
+        let Some(mut e) = n.proposals().into_iter().find(|p| p.id() == id) else {
+            return Err(NetError::new(404, "nothing", "nothing waits for approval by that id: xenonet net status lists what does"));
         };
+        let (op, host) = (e.op.as_str(), e.host.id.clone());
         e.sign_by(&net.host, &key);
         self.submit(e).await?;
         n.log("net.approve", &format!("this machine approved {op} for {host}"));

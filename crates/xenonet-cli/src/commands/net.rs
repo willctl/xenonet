@@ -62,14 +62,26 @@ fn show_status(st: &Value) {
         print(format!("  {}  {} waiting for {}", c::dim("queue   "), num(q, "frames"), t(q, "host")));
     }
     for p in list(st, "proposals") {
-        let by: Vec<&str> = list(p, "signers").iter().filter_map(Value::as_str).collect();
-        print(c::yellow(format!("  ! {} {} waits for approval (signed by {}): xenonet net approve {}", t(p, "op"), t(p, "host"), by.join(", "), t(p, "host"))));
+        print(c::yellow(format!("  ! {} waits for approval: xenonet net approve {}", proposal_words(p), t(p, "host"))));
     }
     let mismatch: Vec<String> = list(st, "rosterMismatch").iter().filter_map(Value::as_str).map(str::to_string).collect();
     if !mismatch.is_empty() {
         print(c::yellow(format!("  ! {} shows another roster than this machine's", mismatch.join(", "))));
     }
     print(format!("  {}  {}", c::dim("hosts   "), list(st, "hosts").len()));
+}
+
+/// What an entry waiting for approval says, as the person approves it:
+/// its op and host, the address for a move of the gateway, a window host's
+/// add, and who signed it so far.
+fn proposal_words(p: &Value) -> String {
+    let by: Vec<&str> = list(p, "signers").iter().filter_map(Value::as_str).collect();
+    let what = match (str(p, "op"), str(p, "gateway")) {
+        (Some("gateway"), Some(a)) => format!("{} to be the gateway, at {a}", t(p, "host")),
+        (Some("add"), _) if on(p, "window") => format!("add {}, as a window host", t(p, "host")),
+        _ => format!("{} {}", t(p, "op"), t(p, "host")),
+    };
+    format!("{what} (signed by {})", by.join(", "))
 }
 
 fn show_hosts(st: &Value) {
@@ -206,9 +218,25 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             out(&st, &show_status)
         }
         "approve" => {
-            let host = arg(args, 1, "which machine the waiting entry is about")?;
-            let op = flags.text("op").unwrap_or_else(|| "gateway".into());
-            out(&call(&s, "POST", "/api/net/approve", Some(&json!({ "host": host, "op": op })))?, &show_status)
+            // What's approved is an entry, by its id: the one the person
+            // names, by its host (and op) or its id, shown before it's signed.
+            let which = arg(args, 1, "which machine the waiting entry is about, or the entry's id")?;
+            let st = call(&s, "GET", "/api/net/state", None)?;
+            let op = flags.text("op");
+            let found: Vec<Value> =
+                list(&st, "proposals").iter().filter(|p| str(p, "id") == Some(which.as_str()) || (str(p, "host") == Some(which.as_str()) && op.as_deref().is_none_or(|o| str(p, "op") == Some(o)))).cloned().collect();
+            let p = match found.as_slice() {
+                [one] => one.clone(),
+                [] => return Err(Fail::new(format!("nothing waits for approval about {which}: xenonet net status lists what does"), 1)),
+                many => {
+                    let lines: Vec<String> = many.iter().map(|p| format!("  {}  {}", t(p, "id"), proposal_words(p))).collect();
+                    return Err(Fail::new(format!("more than one entry waits about {which}; approve one by its id:\n{}", lines.join("\n")), 2));
+                }
+            };
+            if !flags.on("json") {
+                print(format!("Approving: {}", proposal_words(&p)));
+            }
+            out(&call(&s, "POST", "/api/net/approve", Some(&json!({ "id": t(&p, "id") })))?, &show_status)
         }
         "gateway" => match args.get(1).map(String::as_str) {
             Some("take") => {

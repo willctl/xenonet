@@ -38,8 +38,12 @@ on and can't read them.
                                    gateway's tunnel. On the founder's machine
                                    it's done; elsewhere it waits for the
                                    founder or another window host to approve
-  xenonet net approve <id>         approves what waits for approval about a
-                                   machine, such as its move to gateway
+  xenonet net approve <id> [--op <op>]
+                                   approves what waits for approval about a
+                                   machine, such as its move to gateway or
+                                   its add as a window host, and shows what
+                                   it approves. Several waiting: name one by
+                                   the entry id the answer lists
   xenonet net gateway set <address>
                                    follows the gateway to a new address, when
                                    this machine missed the move
