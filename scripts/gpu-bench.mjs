@@ -8,6 +8,7 @@
 //   npm run bench:gpu -- rest covered         only these states
 //   npm run bench:gpu -- --big 400            a larger made-up world (see below)
 //   npm run bench:gpu -- --seconds 15 --out before.json
+//   npm run bench:gpu -- --plain --out plain.json   with plain panels (no glass blur)
 //   npm run bench:gpu -- --compare before.json after.json
 //
 // It starts the demo instance (made-up data) at its usual 1600 by 960, or
@@ -31,6 +32,10 @@
 // --big N draws N made-up sessions in about N/8 projects instead of the
 // demo's map (in the page only: the server keeps the demo's), a third of
 // them working, so the costs of a large map show.
+//
+// --plain draws the panels solid, without the glass blur behind them (the
+// palette's plain panels), for the run, and puts them back after, so a run
+// with it and one without show what the blur costs.
 //
 // --seen counts the window as seen in the states where it's shown
 // (unfocused, rest, orbit, busy), whatever the desktop app says, for a run
@@ -400,6 +405,7 @@ async function main() {
   const big = Number(opt("big", 0));
   const outFile = opt("out", null);
   const forceSeen = argv.includes("--seen");
+  const plain = argv.includes("--plain");
   const baseline = Number(opt("baseline", ms / 1000)) * 1000;
   const ALL = ["unfocused", "rest", "orbit", "busy", "covered", "minimized", "hidden"];
   const flags = new Set(["--instance", "--seconds", "--big", "--out", "--baseline"]);
@@ -415,7 +421,7 @@ async function main() {
   const port = id === "test" ? await new Promise((resolve) => { const p = net.createServer().listen(0, "127.0.0.1", () => { const { port } = p.address(); p.close(() => resolve(port)); }); }) : INSTANCES[id].port;
   const s = xenonet(id, { port });
   const front = frontApp();
-  const result = { at: new Date().toISOString(), instance: id, seconds: ms / 1000, big, seen: forceSeen, machine: `${os.cpus()[0]?.model ?? "?"}, ${Math.round(os.totalmem() / 2 ** 30)} GB`, states: {} };
+  const result = { at: new Date().toISOString(), instance: id, seconds: ms / 1000, big, seen: forceSeen, plain, machine: `${os.cpus()[0]?.model ?? "?"}, ${Math.round(os.totalmem() / 2 ** 30)} GB`, states: {} };
   const log = (...a) => console.error("[bench:gpu]", ...a);
   try {
     // The machine without XenoNet, for the device's utilization, which
@@ -435,6 +441,10 @@ async function main() {
     if (big) {
       result.bigWorld = await s.eval(bigWorld(big));
       log(`big world: ${JSON.stringify(result.bigWorld)}`);
+    }
+    if (plain) {
+      await s.driver("plainPanels", true);
+      log("plain panels: drawn solid, without the glass blur");
     }
     await s.driver("settled", { timeout: 60000 }).catch((e) => log(`not settled: ${e.message}`));
     await s.eval(COUNTER);
@@ -498,6 +508,7 @@ async function main() {
     if (big) await s.eval("return (window.__benchRestore?.(), true)");
   } finally {
     giveFocusBack(front);
+    if (plain) await s.driver("plainPanels", false).catch(() => {});
     await s.quit().catch(() => {});
     if (id === "test") fs.rmSync(path.join(fs.realpathSync.native(os.tmpdir()), `xenonet-demo-${port}`), { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   }
