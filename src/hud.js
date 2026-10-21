@@ -475,7 +475,7 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     const isSession = node.kind === "session";
     const chip = isSession ? `${KIND_LABEL.session} · ${APP_LABEL[node.app] ?? node.app}` : kindLabel(node);
     const title = isSession ? node.title : node.name;
-    const sub = isSession ? shortPath(node.cwd, 56) : node.kind === "resource" ? "MCP shared system" : shortPath(node.path, 56);
+    const sub = isSession ? shortPath(node.cwd, 56) : node.kind === "resource" ? "MCP shared system" : node.kind === "host" && node.network ? "a machine in your network" : shortPath(node.path, 56);
 
     let grid = "";
     if (isSession) {
