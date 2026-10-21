@@ -1587,9 +1587,10 @@ impl Telemetry {
         Ok(())
     }
 
-    // A call's tokens: the growth of the total is what's new (output and
-    // reasoning output kept), and the call's own tokens, as stats read
-    // them, from the last one's.
+    // A call's tokens: the growth of the total is what's new, and the
+    // call's own tokens, as stats read them, from the last one's. The
+    // output is output_tokens alone: OpenAI counts reasoning inside it, as
+    // pricing prices it.
     fn codex_tokens(&mut self, i: usize, total_usage: Option<&Value>, last: Option<&Value>, ts: f64, live: bool, out: &mut Vec<Emit>) {
         let s = &mut self.sessions[i];
         if truthy(total_usage) {
@@ -1628,7 +1629,7 @@ impl Telemetry {
                     out.push(Emit::Tokens(obj(vec![("sessionId", Value::String(s.id.clone())), ("app", "codex".into()), ("n", number(delta)), ("ts", number(ts))])));
                 }
             }
-            s.tokens_output = or0(opt_prop(total_usage, "output_tokens")) + or0(opt_prop(total_usage, "reasoning_output_tokens"));
+            s.tokens_output = or0(opt_prop(total_usage, "output_tokens"));
         }
     }
 
