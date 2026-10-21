@@ -106,8 +106,8 @@ pub fn find_context_dir(env: Json, home: String, platform: String) -> Jv {
 }
 
 #[napi(js_name = "contextServerOf")]
-pub fn context_server_of(dir: String) -> &'static str {
-    xenolith::context_server_of(&dir)
+pub fn context_server_of(dir: String, env: Json, home: String, platform: String) -> &'static str {
+    xenolith::context_server_of(&dir, &xenolith::env_of(&env.0), &home, &platform)
 }
 
 #[napi(js_name = "contextName")]

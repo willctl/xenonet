@@ -19,7 +19,7 @@ const made = native.appConfig(
   os.homedir(),
   process.platform,
   () => createWorld(),
-  () => findContextDir()?.dir ?? null,
+  () => findContextDir() ?? null,
   (dir) => contextServerOf(dir) ?? null,
   () => findClaudeDesktopDir() ?? null,
 );

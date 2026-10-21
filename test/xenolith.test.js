@@ -108,18 +108,40 @@ test("Xenolith's config is found where Xenolith's own programs look", () => {
   assert.equal(find({ XENOLITH_HOME: portable, XENOLITH_CONFIG_DIR: path.join(home, "cfg") })?.dir, cfgWiki);
 });
 
-test("a wiki folder belongs to the server its protocol names", () => {
-  assert.equal(contextServerOf(wikiAt(tmp(), "# Xenolith protocol\n\nThis folder is...")), "xenolith");
-  assert.equal(contextServerOf(wikiAt(tmp(), "# Agent Wiki protocol\n")), "agent-wiki");
-  assert.equal(contextServerOf(wikiAt(tmp())), "agent-wiki", "no protocol: as XenoNet always read it");
-  assert.equal(contextServerOf(null), null);
+test("a wiki folder belongs to the server whose lookup found it, and to its protocol only as a last resort", () => {
+  const home = tmp();
+  const of = (dir, env = {}) => contextServerOf(dir, { env, home, platform: "linux" });
+  assert.equal(of(wikiAt(tmp(), "# Xenolith protocol\n\nThis folder is...")), "xenolith");
+  assert.equal(of(wikiAt(tmp(), "# Agent Wiki protocol\n")), "agent-wiki");
+  assert.equal(of(wikiAt(tmp())), "agent-wiki", "no protocol: as XenoNet always read it");
+  assert.equal(of(null), null);
   assert.deepEqual([contextName("xenolith"), contextName("agent-wiki")], ["Xenolith", "Agent Wiki"]);
+
+  // A wiki moved somewhere Xenolith's config names, its protocol edited:
+  // still Xenolith's, so its writes don't make a second node.
+  const moved = wikiAt(path.join(home, "Notes", "wiki"), "# Our notes\n\nRules for this folder.");
+  assert.equal(of(moved), "agent-wiki");
+  fs.mkdirSync(path.join(home, ".config", "xenolith"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".config", "xenolith", "config.json"), JSON.stringify({ wikiDir: moved }));
+  assert.equal(of(moved), "xenolith");
+  assert.deepEqual(findContextDir({ env: {}, home, platform: "linux" }), { dir: moved, server: "xenolith" });
+  assert.equal(of(`${moved}/`), "xenolith", "however the folder is spelled");
+  // XENOLITH_DIR names it, there or not; and Agent Wiki's own folder is
+  // Agent Wiki's, whatever its protocol says.
+  const aside = wikiAt(tmp(), "# Notes\n");
+  assert.equal(of(aside, { XENOLITH_DIR: aside }), "xenolith");
+  assert.equal(of(wikiAt(path.join(home, "AgentWiki"), "# Xenolith protocol\n")), "agent-wiki");
+  if (process.platform !== "win32") {
+    const link = path.join(tmp(), "link");
+    fs.symlinkSync(moved, link);
+    assert.equal(of(link), "xenolith", "a link to it");
+  }
 });
 
 test("the map's wiki takes its server's id and name, so beams to xenolith land on it", async () => {
   const dir = wikiAt(tmp(), "# Xenolith protocol\n");
   fs.writeFileSync(path.join(dir, "pages", "atlas.md"), "---\ntitle: Atlas\ntype: project\n---\nSee [[db]].");
-  const wiki = await readWiki(dir, [], { server: contextServerOf(dir) });
+  const wiki = await readWiki(dir, [], { server: contextServerOf(dir, { env: {}, home: tmp() }) });
   const g = buildGraph({ projectsDir: "/p", projects: [], sessions: [], wiki, resources: [{ server: "xenolith", ts: 1 }], layout: {}, windows: { activeWindowMs: 1, recentWindowMs: 1 } });
   const root = g.nodes.find((n) => n.kind === "wiki");
   assert.deepEqual([root.id, root.name, root.server], ["resource:xenolith", "Xenolith", "xenolith"]);

@@ -11,6 +11,8 @@ export function findContextDir({ env = process.env, home = os.homedir(), platfor
   return native.findContextDir({ ...env }, String(home), String(platform));
 }
 
-export const contextServerOf = (dir) => (dir ? native.contextServerOf(String(dir)) : null);
+export function contextServerOf(dir, { env = process.env, home = os.homedir(), platform = process.platform } = {}) {
+  return dir ? native.contextServerOf(String(dir), { ...env }, String(home), String(platform)) : null;
+}
 
 export const contextName = (server) => native.contextName(typeof server === "string" ? server : null);

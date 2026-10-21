@@ -17,9 +17,10 @@ pub type Env = Map<String, Value>;
 pub trait Finds {
     /// createWorld() from core/demo.js.
     fn world(&mut self) -> Value;
-    /// findContextDir()?.dir from core/xenolith.js.
-    fn context_dir(&mut self) -> Option<String>;
-    /// contextServerOf(dir) from core/xenolith.js.
+    /// findContextDir() from core/xenolith.js: { dir, server }, or null.
+    fn context(&mut self) -> Value;
+    /// contextServerOf(dir) from core/xenolith.js, for the folder
+    /// XENONET_WIKI_DIR names.
     fn context_server(&mut self, dir: Option<&str>) -> Value;
     /// findClaudeDesktopDir() from core/dirs.js.
     fn claude_desktop_dir(&mut self) -> Option<String>;
@@ -86,11 +87,17 @@ pub fn config(argv: &[String], env: &Env, home: &str, platform: &str, finds: &mu
     let dev_dir = |kind: &str| server_dev.then(|| app_dir(kind, "XenoNet Dev"));
     let path = nodepath::NATIVE;
 
-    let wiki_dir: Value = match world {
-        Some(w) => w.get("wikiDir").cloned().unwrap_or(Value::Null),
+    // The shared context's folder and the server that writes to it: the
+    // one the lookup found it for, so a wiki that moved keeps its server.
+    let (wiki_dir, wiki_server): (Value, Value) = match world {
+        Some(w) => (w.get("wikiDir").cloned().unwrap_or(Value::Null), Value::String("agent-wiki".into())),
         None => match set(env, "XENONET_WIKI_DIR") {
-            Some(d) => Value::String(d.into()),
-            None => finds.context_dir().map_or(Value::Null, Value::String),
+            Some(d) => (Value::String(d.into()), finds.context_server(Some(d))),
+            None => {
+                let found = finds.context();
+                let field = |k: &str| found.get(k).filter(|v| !v.is_null()).cloned().unwrap_or(Value::Null);
+                (field("dir"), field("server"))
+            }
         },
     };
 
@@ -148,7 +155,6 @@ pub fn config(argv: &[String], env: &Env, home: &str, platform: &str, finds: &mu
     };
     let state_dir = folder("stateDir", "XENONET_STATE_DIR", "state");
     let cache_dir = folder("cacheDir", "XENONET_CACHE_DIR", "cache");
-    let wiki_server = if world.is_some() { Value::String("agent-wiki".into()) } else { finds.context_server(wiki_dir.as_str()) };
     let hidden = list(var(env, "XENONET_HIDE_RESOURCES").unwrap_or(DEFAULT_HIDDEN_RESOURCES));
     let active_minutes = var(env, "XENONET_ACTIVE_MINUTES").map_or(60.0, number);
 
@@ -203,9 +209,9 @@ mod tests {
             self.asked.push("world");
             json!({ "home": "/w/home", "projectsDir": "/w/projects", "codexHome": "/w/codex", "claudeRoot": "/w/claude", "stateDir": "/w/state", "cacheDir": "/w/cache", "wikiDir": "/w/wiki", "claudeDesktopDir": "/w/desktop" })
         }
-        fn context_dir(&mut self) -> Option<String> {
+        fn context(&mut self) -> Value {
             self.asked.push("context");
-            Some("/ctx".into())
+            json!({ "dir": "/ctx", "server": "xenolith" })
         }
         fn context_server(&mut self, dir: Option<&str>) -> Value {
             self.asked.push("server");
@@ -245,13 +251,13 @@ mod tests {
             "linux",
             &mut f,
         );
-        assert_eq!(f.asked, ["context", "desktop", "server"]);
+        assert_eq!(f.asked, ["context", "desktop"], "the server comes with the folder the lookup found");
         assert_eq!(num_of(&c, "port"), 47840.0);
         assert!(num_of(&c, "pollMs").is_nan());
         assert_eq!(json_of(&c, "projectsDir"), "/home/me/Projects");
         assert!(matches!(c.get("projectLimits"), Some(Field::Nums(n)) if n == &[("depth", 3.0), ("maxDirs", 2000.0)]));
         assert_eq!(json_of(&c, "wikiDir"), "/ctx");
-        assert_eq!(json_of(&c, "wikiServer"), "server:/ctx");
+        assert_eq!(json_of(&c, "wikiServer"), "xenolith");
         assert_eq!(json_of(&c, "stateDir"), "/xdg/xenonet");
         assert_eq!(json_of(&c, "ghConfigDir"), "/home/me/.config/gh");
         assert!(matches!(c.get("readers"), Some(Field::Set(r)) if r == &["opencode", "cursor"]));
@@ -274,7 +280,8 @@ mod tests {
     fn the_server_alone_from_a_checkout_is_xenonet_devs() {
         let mut f = Fake { asked: vec![] };
         let c = config(&["--dev".into()], &env(&[("XENONET_WIKI_DIR", "/wiki")]), "/Users/me", "darwin", &mut f);
-        assert_eq!(f.asked, ["desktop", "server"]);
+        assert_eq!(f.asked, ["server", "desktop"]);
+        assert_eq!((json_of(&c, "wikiDir"), json_of(&c, "wikiServer")), (&json!("/wiki"), &json!("server:/wiki")));
         assert_eq!(num_of(&c, "port"), 47842.0);
         assert_eq!(json_of(&c, "stateDir"), "/Users/me/Library/Application Support/XenoNet Dev");
     }

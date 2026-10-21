@@ -78,11 +78,35 @@ export function findContextDir(options) {
   return null;
 }
 
-// Which server a wiki folder belongs to, by the protocol it was seeded
-// with: Xenolith's says "# Xenolith protocol". Anything else is read as
-// Agent Wiki's, as XenoNet always has.
-export function contextServerOf(dir) {
+const real = (p) => {
+  try {
+    return fs.realpathSync.native(p);
+  } catch {
+    return null;
+  }
+};
+
+// Two spellings of one folder: the same once resolved, or once their links
+// are followed.
+function sameDir(a, b) {
+  if (path.resolve(a) === path.resolve(b)) return true;
+  const [ra, rb] = [real(a), real(b)];
+  return ra !== null && ra === rb;
+}
+
+// Which server a wiki folder belongs to (one XENONET_WIKI_DIR names, say):
+// the product whose own lookup names that folder (its <ENV>_DIR, its
+// config's wikiDir or its folder in home), so a wiki that moved keeps its
+// server. Only for a folder neither names does the protocol it was seeded
+// with decide, since people edit it: Xenolith's starts "# Xenolith
+// protocol". Anything else is read as Agent Wiki's, as XenoNet always has.
+export function contextServerOf(dir, options) {
   if (!dir) return null;
+  const o = optsOf(options);
+  for (const p of PRODUCTS) {
+    const named = [o.env[`${p.env}_DIR`], namedIn(configFile(p, o)), path.join(o.home, p.folder)];
+    if (named.some((d) => d && sameDir(d, dir))) return p.server;
+  }
   try {
     const head = fs.readFileSync(path.join(dir, "PROTOCOL.md"), "utf8").slice(0, 200);
     if (/^#\s*Xenolith protocol/m.test(head)) return "xenolith";
