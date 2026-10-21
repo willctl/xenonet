@@ -61,7 +61,7 @@ async fn a_refresh_maps_the_world_and_says_so_once() {
     assert!(nodes.iter().any(|n| s_of(n, "kind") == Some("project") && s_of(n, "name") == Some("atlas-api")));
     assert_eq!(g["demo"], true);
     let names: Vec<&str> = items(g.get("sources")).iter().filter_map(|x| s_of(x, "name")).collect();
-    assert_eq!(names, ["projects", "codex", "codex-projects", "claude", "live", "wiki", "search", "identities"]);
+    assert_eq!(names, ["projects", "codex", "codex-projects", "claude", "grok", "live", "wiki", "search", "identities"]);
     assert!(items(g.get("sources")).iter().all(|x| x["ok"] == true || s_of(x, "name") == Some("live") || s_of(x, "name") == Some("search")), "{}", g["sources"]);
     assert!(!items(g.get("identities")).is_empty(), "who the demo's work ran as");
     assert_eq!(sent(s, "graph").len(), 1, "a new map goes out");
