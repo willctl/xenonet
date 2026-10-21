@@ -46,6 +46,7 @@ use crate::store::js_text;
 use serde_json::{json, Map, Value};
 use xenonet_base::apps::App;
 use xenonet_base::json::stringify;
+use xenonet_base::nodepath::{Style, NATIVE};
 use xenonet_base::paths::tilde;
 
 /// XenoNet's plugin for Claude Code, which Claude Code knows as
@@ -161,56 +162,9 @@ fn ps_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
-/// path.isAbsolute on this machine.
-fn is_absolute(p: &str) -> bool {
-    if cfg!(windows) {
-        win32_absolute(p)
-    } else {
-        p.starts_with('/')
-    }
-}
-
-fn win32_absolute(p: &str) -> bool {
-    let b = p.as_bytes();
-    p.starts_with('/') || p.starts_with('\\') || (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'/' || b[2] == b'\\'))
-}
-
 /// path.join on this machine: empty parts left out.
 fn join(dir: &str, name: &str) -> String {
-    xenonet_base::paths::join_all(&[dir, name])
-}
-
-/// path.dirname on this machine, as Node works it out.
-fn dirname(p: &str) -> String {
-    let sep = |c: u8| c == b'/' || (cfg!(windows) && c == b'\\');
-    let b = p.as_bytes();
-    if b.is_empty() {
-        return ".".into();
-    }
-    let root = sep(b[0]);
-    let mut end = None;
-    let mut matched_slash = true;
-    for i in (1..b.len()).rev() {
-        if sep(b[i]) {
-            if !matched_slash {
-                end = Some(i);
-                break;
-            }
-        } else {
-            matched_slash = false;
-        }
-    }
-    match end {
-        None => {
-            if root {
-                p[..1].to_string()
-            } else {
-                ".".into()
-            }
-        }
-        Some(1) if root => p[..2].to_string(),
-        Some(e) => p[..e].to_string(),
-    }
+    xenonet_base::nodepath::join(&[dir, name])
 }
 
 /// The names a XenoNet's MCP servers take: the installed XenoNet's xenonet
@@ -403,7 +357,7 @@ impl Shared {
                 }
                 for m in crate::re!(r"'((?:[^']|'')+)'").captures_iter(&Self::hook_text(&h)) {
                     let f = m[1].replace("''", "'");
-                    if is_absolute(&f) || win32_absolute(&f) {
+                    if NATIVE.is_absolute(&f) || Style::Win32.is_absolute(&f) {
                         out.push(f);
                     }
                 }
@@ -503,7 +457,7 @@ impl Shared {
     }
 
     pub fn write_json(c: &mut dyn Calls, file: &str, data: &Value) -> Result<()> {
-        c.call("fs", "mkdirSync", vec![Arg::text(dirname(file)), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])])?;
+        c.call("fs", "mkdirSync", vec![Arg::text(NATIVE.dirname(file)), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])])?;
         let before = format!("{file}.before-xenonet");
         if Self::exists(c, file)? && !Self::exists(c, &before)? {
             c.call("fs", "copyFileSync", vec![Arg::text(file), Arg::text(before)])?;
@@ -607,7 +561,7 @@ impl Shared {
                 continue;
             }
             let f = text_of(Some(&f));
-            if is_absolute(&f) && !Self::exists(c, &f)? {
+            if NATIVE.is_absolute(&f) && !Self::exists(c, &f)? {
                 out.push(f);
             }
         }
@@ -1204,7 +1158,7 @@ impl GrokHooks {
         if after == before {
             return Ok(());
         }
-        c.call("fs", "mkdirSync", vec![Arg::text(dirname(&self.config_file)), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])])?;
+        c.call("fs", "mkdirSync", vec![Arg::text(NATIVE.dirname(&self.config_file)), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])])?;
         let tmp = format!("{}.tmp-xenonet", self.config_file);
         if Shared::exists(c, &self.config_file)? {
             let first = format!("{}.before-xenonet", self.config_file);
@@ -1579,13 +1533,6 @@ mod tests {
         assert!(c.hook_connected(&mut Files(m.clone()), "SessionStart").unwrap());
         m.insert(cf.settings_file.clone(), "{ not json".into());
         assert!(!c.hook_connected(&mut Files(m), "Stop").unwrap(), "settings that can't be read");
-    }
-
-    #[test]
-    fn dirname_works_as_nodes_does() {
-        for (p, d) in [("/a/b", "/a"), ("/a//b", "/a/"), ("/", "/"), ("a", "."), ("", "."), ("//a", "//"), ("/a/b/", "/a")] {
-            assert_eq!(dirname(p), d, "{p}");
-        }
     }
 
     #[test]

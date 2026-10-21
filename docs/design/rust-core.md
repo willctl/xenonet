@@ -608,7 +608,7 @@ place. This table follows it.
 | `core/live.js` | `xenonet-sources/src/live/telemetry.rs`, with `live/mod.rs`'s helpers | `live`, `stall`, `signals`, `costs`, `golden`, `state`, `server` pass |
 | `core/claude-usage.js` | `xenonet-sources/src/claude_usage.rs` (the keychain, files, fetch and timers stay in the twin) | `claude-usage`, `live` pass |
 | `core/refusals/detect.js` | `xenonet-sources/src/refusals/detect.rs` | `refusals`, `refusal-browser`, `live` pass |
-| `core/native/copilot-cli.js`, `gemini-cli.js`, `cursor.js` | `xenonet-sources/src/native/{copilot_cli,gemini_cli,cursor}.rs`, with Node's path rules in `node_path.rs` (vendor.js's check called back) | `copilot-cli`, `gemini-cli`, `cursor` pass |
+| `core/native/copilot-cli.js`, `gemini-cli.js`, `cursor.js` | `xenonet-sources/src/native/{copilot_cli,gemini_cli,cursor}.rs`, with Node's path rules in `xenonet-base`'s `nodepath.rs` (vendor.js's check called back) | `copilot-cli`, `gemini-cli`, `cursor` pass |
 | `core/native/opencode.js` | `xenonet-sources/src/native/opencode.rs`, on rusqlite with SQLite bundled (a test's `open` handle runs its statements) | `opencode` passes |
 | `core/numbat.js` | `xenonet-sources/src/numbat.rs` | `numbat`, `gemini-cli` pass |
 | `core/reported-runs.js` | `xenonet-sources/src/reported_runs.rs` | `space-presence`, `actor-spend`, and `state`, `golden` through core/state.js pass |

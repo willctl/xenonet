@@ -6,18 +6,30 @@
 //! still work). The actors' rates and the bad tokens' are kept apart, so
 //! processes sending bad tokens can't crowd out an actor's buckets.
 
-use crate::buckets::{now_ms, Buckets, Rate};
+use crate::borrowed::now_ms;
 use crate::cores::{Registration, Verify};
 use crate::http::Req;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use xenonet_actors::limits::Buckets;
 use xenonet_actors::tokens::bearer_of;
 use xenonet_base::sync::Locked;
 
+/// A bucket's rate (xenonet_actors::limits): up to `burst` at once, filled
+/// again at `rate` a second.
+#[derive(Clone, Copy, Debug)]
+pub struct Rate {
+    pub rate: f64,
+    pub burst: f64,
+}
+
+/// How many buckets a set keeps at most, createBuckets' own default.
+pub const BUCKETS: usize = 1024;
+
 /// Rates, per the interface's table of limits (server/routes/actors.js).
 pub mod rates {
-    use crate::buckets::Rate;
+    use super::Rate;
     pub const HEARTBEAT: Rate = Rate { rate: 1.0, burst: 2.0 };
     pub const HEARTBEATS: Rate = Rate { rate: 8.0, burst: 16.0 };
     pub const EVENTS: Rate = Rate { rate: 1.0, burst: 120.0 };
@@ -69,7 +81,7 @@ impl ActorCaller {
     }
 
     pub fn with_clock(registration: Arc<dyn Registration>, verify: Arc<dyn Verify>, now: Box<dyn Fn() -> f64 + Send + Sync>) -> ActorCaller {
-        ActorCaller { registration, verify, buckets: Mutex::new(Buckets::default()), bad: Mutex::new(Buckets::default()), blocked: Mutex::new(HashMap::new()), now }
+        ActorCaller { registration, verify, buckets: Mutex::new(Buckets::new(BUCKETS)), bad: Mutex::new(Buckets::new(BUCKETS)), blocked: Mutex::new(HashMap::new()), now }
     }
 
     async fn bad_token(&self, req: &Req) -> Option<Refusal> {
@@ -82,7 +94,7 @@ impl ActorCaller {
             r.headers.push(retry_after(until - t));
             return Some(r);
         }
-        if self.bad.locked().take(&format!("bad|{peer}"), rates::BAD_TOKENS, 1.0, t) != 0.0 {
+        if self.bad.locked().take(&format!("bad|{peer}"), rates::BAD_TOKENS.rate, rates::BAD_TOKENS.burst, 1.0, t) != 0.0 {
             let mut blocked = self.blocked.locked();
             if blocked.len() > 256 {
                 blocked.clear();
@@ -139,7 +151,7 @@ impl ActorCaller {
 
     /// A rate for `key`: 0, or the milliseconds until it allows n.
     pub fn take(&self, key: &str, rate: Rate, n: f64) -> f64 {
-        self.buckets.locked().take(key, rate, n, (self.now)())
+        self.buckets.locked().take(key, rate.rate, rate.burst, n, (self.now)())
     }
 
     pub fn forget(&self, slug: &str) {

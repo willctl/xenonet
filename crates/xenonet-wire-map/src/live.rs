@@ -538,6 +538,19 @@ impl Live {
         if let Some(k) = needs.get("kind") {
             m.insert("needsYou".into(), k.clone());
         }
+        // What the other consoles in a network may show of it (network.md,
+        // section 7): the text of what waits on you, what it said last and
+        // why it seems stuck. Presence reads them; the engine's view of an
+        // agent, which agents read, never carries them.
+        if matches!(needs.get("kind").and_then(Value::as_str), Some("permission" | "question")) {
+            if let Some(t) = needs.get("text").filter(|t| t.is_string()) {
+                m.insert("question".into(), t.clone());
+            }
+        }
+        m.insert("lastMessage".into(), s.last_message());
+        if let Some(r) = s.stuck(now).get("reasons").filter(|r| r.is_array()) {
+            m.insert("stuck".into(), r.clone());
+        }
         m.insert("edits".into(), Value::Array(edits));
         Some(Value::Object(m))
     }

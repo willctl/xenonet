@@ -1482,38 +1482,44 @@ mod tests {
         pairs.iter().map(|(k, v)| ((*k).to_string(), json!(v))).collect()
     }
 
+    /// A path in the made-up home folder as this machine spells it. The
+    /// runtime folder and the launcher are joined as Node's own path
+    /// module would here (runtime.rs), and a registration is only ever
+    /// written on the machine it's for, so on a Windows host a made-up
+    /// Linux or macOS home comes out with backslashes.
+    fn native(p: &str) -> String {
+        NATIVE.join(&[p])
+    }
+
     #[test]
     fn the_job_runs_the_launcher_with_the_settings_that_arent_defaults() {
         let m = Machine { platform: "linux".into(), arch: "x64".into(), home: "/home/will".into() };
-        let launcher = "/home/will/.local/state/xenonet/runtime/launcher/xenonet";
-        let j = super::job(
-            &env_of(&[("XENONET_PORT", "47840"), ("XENONET_RUNTIME_DIR", "/home/will/.local/state/xenonet/runtime"), ("XENONET_HOSTS", "1"), ("PATH", "/bin")]),
-            &m,
-            "/own/xenonet",
-            |p| p == launcher,
-        );
+        let launcher = native("/home/will/.local/state/xenonet/runtime/launcher/xenonet");
+        let runtime = native("/home/will/.local/state/xenonet/runtime");
+        let j =
+            super::job(&env_of(&[("XENONET_PORT", "47840"), ("XENONET_RUNTIME_DIR", &runtime), ("XENONET_HOSTS", "1"), ("PATH", "/bin")]), &m, "/own/xenonet", |p| p == launcher);
         assert_eq!(
             j,
             Job {
-                program: launcher.into(),
+                program: launcher.clone(),
                 args: vec!["service".into(), "run".into()],
                 env: vec![("XENONET_HOSTS".into(), "1".into())],
                 dir: "/home/will".into(),
-                log: "/home/will/.local/state/xenonet/runtime/service-47840.log".into()
+                log: native("/home/will/.local/state/xenonet/runtime/service-47840.log")
             }
         );
         // No launcher: the binary itself, and another port's log.
         let j = super::job(&env_of(&[("XENONET_PORT", "47850")]), &m, "/own/xenonet", |_| false);
         assert_eq!(
-            (j.program.as_str(), j.env.clone(), j.log.as_str()),
-            ("/own/xenonet", vec![("XENONET_PORT".to_string(), "47850".to_string())], "/home/will/.local/state/xenonet/runtime/service-47850.log")
+            (j.program.as_str(), j.env.clone(), j.log),
+            ("/own/xenonet", vec![("XENONET_PORT".to_string(), "47850".to_string())], native("/home/will/.local/state/xenonet/runtime/service-47850.log"))
         );
     }
 
     #[test]
     fn the_doctor_sees_whether_a_registration_is_current() {
         let m = Machine { platform: "darwin".into(), arch: "arm64".into(), home: "/Users/will".into() };
-        let launcher = "/Users/will/Library/Application Support/XenoNet/runtime/launcher/xenonet";
+        let launcher = native("/Users/will/Library/Application Support/XenoNet/runtime/launcher/xenonet");
         let there = |p: &str| p == launcher;
         let (place, mut files, mut run) = (mac(), Mem::default(), Fake::default());
         let r = review(Some(&place), &m, &Env::new(), &files, &mut run, there);

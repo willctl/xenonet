@@ -6,7 +6,8 @@
 //! ids as session ids take them (`opencode`), the client that reaches a
 //! running XenoNet (`client`, over `http`), whether a process runs
 //! (`process`), sorting as JS sorts (`sort`), locks that outlive a panic
-//! (`sync`), and the apps XenoNet knows (`apps`).
+//! (`sync`), the apps XenoNet knows (`apps`), and the seam between the
+//! engine and the network across machines (`network`).
 
 pub mod apps;
 pub mod client;
@@ -17,6 +18,7 @@ pub mod ids;
 pub mod json;
 pub mod jsstr;
 pub mod log;
+pub mod network;
 pub mod nodepath;
 pub mod opencode;
 pub mod ordered;

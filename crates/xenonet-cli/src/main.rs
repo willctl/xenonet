@@ -10,12 +10,8 @@ mod clock;
 mod commands;
 mod config;
 mod cores;
-mod handoff;
-mod instances;
 mod js;
-mod needs_you;
 mod out;
-mod products;
 mod prompt;
 mod reach;
 mod report;
@@ -31,9 +27,9 @@ const VERSION: &str = env!("XENONET_VERSION");
 
 fn help() {
     let shown: Vec<_> = COMMANDS.iter().filter(|c| !c.hidden).collect();
-    let usage = |c: &commands::Command| format!("{} {}", c.name, c.args.unwrap_or("")).trim().to_string();
+    let usage = |c: &commands::Command| format!("{} {}", c.name, c.args().unwrap_or_default()).trim().to_string();
     let w = shown.iter().map(|c| usage(c).chars().count()).max().unwrap_or(0);
-    let list: Vec<String> = shown.iter().map(|cmd| format!("  {:<width$}{}", usage(cmd), c::dim(cmd.about), width = w + 2)).collect();
+    let list: Vec<String> = shown.iter().map(|cmd| format!("  {:<width$}{}", usage(cmd), c::dim(cmd.about()), width = w + 2)).collect();
     print(format!(
         "{} {}
 
@@ -69,7 +65,7 @@ fn help() {
 fn run(name: &str, args: &[String], flags: &Flags) -> Done {
     if flags.on("help") {
         let Some(cmd) = find(name) else { return Err(Fail::error(format!("no command \"{name}\". xenonet --help lists them."))) };
-        print(format!("{}{}\n\n{}", c::bold(format!("xenonet {name}")), cmd.args.map_or(String::new(), |a| format!(" {a}")), commands::help(name)));
+        print(format!("{}{}\n\n{}", c::bold(format!("xenonet {name}")), cmd.args().map_or(String::new(), |a| format!(" {a}")), commands::help(name)));
         return Ok(0);
     }
     commands::run(name, args, flags)
@@ -137,7 +133,13 @@ fn serve(args: &[String]) -> i32 {
         Box::new(|config, env| {
             let mut cores = xenonet_service::cores::Cores::pending(config.actors, config.assistant, config.hosts);
             xenonet_wire_map::wire(&mut cores, config, env);
-            xenonet_wire_engine::wire(&mut cores, config, env);
+            // The engine's world, which the network's link plugs into once
+            // the service has made it.
+            if let Some(world) = xenonet_wire_engine::wire(&mut cores, config, env) {
+                cores.on_net = Some(std::sync::Arc::new(move |svc: &xenonet_service::gateway::network::NetService| {
+                    svc.sinks().set(xenonet_wire_engine::network::plug(&world, svc.net()));
+                }));
+            }
             xenonet_wire_app::wire(&mut cores, config, env);
             // The terminal drawer's shells live in the service.
             cores.terminals = std::sync::Arc::new(xenonet_service::terminals::Shells::new());

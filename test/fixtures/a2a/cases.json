@@ -1,0 +1,965 @@
+{
+  "about": "A2A 1.0's JSON-RPC binding at XenoNet's /a2a: requests written from the specification's examples (https://a2a-protocol.org/latest/specification/, sections 6, 8.5 and 9), each with XenoNet's answer. crates/xenonet-service/tests/a2a.rs sends them in order, as actor:wren, to a made-up engine whose session claude:x answers \"Today will be sunny with a high of 75°F\" to every message, and compares. In answers, $task and $context stand for the first task's id and context, $task2 for the streamed one's, and times are the test clock's.",
+  "card": {
+    "address": "https://gw.example.com",
+    "name": "studio",
+    "version": "0.2.0",
+    "answer": {
+      "name": "XenoNet on studio",
+      "description": "Reach the coding sessions (Claude Code, Codex and others) that XenoNet connects here. Each A2A agent is an actor with its own token and scopes: it reaches only the sessions its user allowed, and a session's reply is the result of the agent's task.",
+      "supportedInterfaces": [
+        {
+          "url": "https://gw.example.com/a2a",
+          "protocolBinding": "JSONRPC",
+          "protocolVersion": "1.0"
+        }
+      ],
+      "version": "0.2.0",
+      "documentationUrl": "https://github.com/willctl/xenonet/blob/main/docs/guide/actors.md#agents-that-speak-a2a",
+      "capabilities": {
+        "streaming": true,
+        "pushNotifications": false,
+        "extendedAgentCard": false
+      },
+      "securitySchemes": {
+        "gateway": {
+          "httpAuthSecurityScheme": {
+            "scheme": "Bearer",
+            "description": "A gateway token made in XenoNet's window for this agent, sent as Authorization: Bearer <token>"
+          }
+        }
+      },
+      "securityRequirements": [
+        {
+          "schemes": {
+            "gateway": {
+              "list": []
+            }
+          }
+        }
+      ],
+      "defaultInputModes": ["text/plain"],
+      "defaultOutputModes": ["text/plain"],
+      "skills": [
+        {
+          "id": "message-session",
+          "name": "Message a coding session",
+          "description": "Sends your message to a session your scope allows, and the session's reply completes the task. Name the session in the message's metadata as \"target\": its id (claude:…, codex:…), or repo:<name> for the sessions in that repo. With no target, the message goes to your default target, or, in a context you used before, back to whoever answered last. A context is one XenoNet thread. Text parts only.",
+          "tags": ["coding", "sessions", "messages", "claude-code", "codex"],
+          "examples": [
+            "{\"message\": {\"role\": \"ROLE_USER\", \"parts\": [{\"text\": \"Which branch has the login fix?\"}], \"metadata\": {\"target\": \"repo:atlas\"}}}",
+            "Ask the session working on the docs site whether the build is green."
+          ],
+          "inputModes": ["text/plain"],
+          "outputModes": ["text/plain"]
+        }
+      ]
+    }
+  },
+  "cases": [
+    {
+      "name": "SendMessage, answered (6.1, 9.4.1)",
+      "headers": {
+        "A2A-Version": "1.0"
+      },
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "SendMessage",
+        "params": {
+          "message": {
+            "role": "ROLE_USER",
+            "parts": [
+              {
+                "text": "What is the weather today?"
+              }
+            ],
+            "messageId": "msg-uuid",
+            "metadata": {
+              "target": "claude:x"
+            }
+          }
+        }
+      },
+      "status": 200,
+      "answer": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "task": {
+            "id": "$task",
+            "contextId": "$context",
+            "status": {
+              "state": "TASK_STATE_COMPLETED",
+              "timestamp": "2026-10-20T16:05:45.678Z",
+              "message": {
+                "messageId": "msg_reply-103",
+                "contextId": "$context",
+                "taskId": "$task",
+                "role": "ROLE_AGENT",
+                "parts": [
+                  {
+                    "text": "Today will be sunny with a high of 75°F",
+                    "mediaType": "text/plain"
+                  }
+                ],
+                "metadata": {
+                  "from": "claude:x",
+                  "fromName": "Weather"
+                }
+              }
+            },
+            "artifacts": [
+              {
+                "artifactId": "reply-103",
+                "name": "Reply from Weather",
+                "parts": [
+                  {
+                    "text": "Today will be sunny with a high of 75°F",
+                    "mediaType": "text/plain"
+                  }
+                ],
+                "metadata": {
+                  "from": "claude:x",
+                  "fromName": "Weather"
+                }
+              }
+            ],
+            "history": [
+              {
+                "role": "ROLE_USER",
+                "parts": [
+                  {
+                    "text": "What is the weather today?"
+                  }
+                ],
+                "messageId": "msg-uuid",
+                "metadata": {
+                  "target": "claude:x"
+                },
+                "taskId": "$task",
+                "contextId": "$context"
+              },
+              {
+                "messageId": "msg_reply-103",
+                "contextId": "$context",
+                "taskId": "$task",
+                "role": "ROLE_AGENT",
+                "parts": [
+                  {
+                    "text": "Today will be sunny with a high of 75°F",
+                    "mediaType": "text/plain"
+                  }
+                ],
+                "metadata": {
+                  "from": "claude:x",
+                  "fromName": "Weather"
+                }
+              }
+            ],
+            "metadata": {
+              "xenonet": {
+                "recipients": ["claude:x"],
+                "target": "claude:x"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "GetTask with historyLength (9.4.3)",
+      "headers": {
+        "A2A-Version": "1.0"
+      },
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "GetTask",
+        "params": {
+          "id": "$task",
+          "historyLength": 10
+        }
+      },
+      "status": 200,
+      "answer": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "result": {
+          "id": "$task",
+          "contextId": "$context",
+          "status": {
+            "state": "TASK_STATE_COMPLETED",
+            "timestamp": "2026-10-20T16:05:45.678Z",
+            "message": {
+              "messageId": "msg_reply-103",
+              "contextId": "$context",
+              "taskId": "$task",
+              "role": "ROLE_AGENT",
+              "parts": [
+                {
+                  "text": "Today will be sunny with a high of 75°F",
+                  "mediaType": "text/plain"
+                }
+              ],
+              "metadata": {
+                "from": "claude:x",
+                "fromName": "Weather"
+              }
+            }
+          },
+          "artifacts": [
+            {
+              "artifactId": "reply-103",
+              "name": "Reply from Weather",
+              "parts": [
+                {
+                  "text": "Today will be sunny with a high of 75°F",
+                  "mediaType": "text/plain"
+                }
+              ],
+              "metadata": {
+                "from": "claude:x",
+                "fromName": "Weather"
+              }
+            }
+          ],
+          "history": [
+            {
+              "role": "ROLE_USER",
+              "parts": [
+                {
+                  "text": "What is the weather today?"
+                }
+              ],
+              "messageId": "msg-uuid",
+              "metadata": {
+                "target": "claude:x"
+              },
+              "taskId": "$task",
+              "contextId": "$context"
+            },
+            {
+              "messageId": "msg_reply-103",
+              "contextId": "$context",
+              "taskId": "$task",
+              "role": "ROLE_AGENT",
+              "parts": [
+                {
+                  "text": "Today will be sunny with a high of 75°F",
+                  "mediaType": "text/plain"
+                }
+              ],
+              "metadata": {
+                "from": "claude:x",
+                "fromName": "Weather"
+              }
+            }
+          ],
+          "metadata": {
+            "xenonet": {
+              "recipients": ["claude:x"],
+              "target": "claude:x"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "ListTasks in a context (6.5, 9.4.4)",
+      "headers": {
+        "A2A-Version": "1.0"
+      },
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "ListTasks",
+        "params": {
+          "contextId": "$context",
+          "pageSize": 10,
+          "historyLength": 3
+        }
+      },
+      "status": 200,
+      "answer": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "result": {
+          "tasks": [
+            {
+              "id": "$task",
+              "contextId": "$context",
+              "status": {
+                "state": "TASK_STATE_COMPLETED",
+                "timestamp": "2026-10-20T16:05:45.678Z",
+                "message": {
+                  "messageId": "msg_reply-103",
+                  "contextId": "$context",
+                  "taskId": "$task",
+                  "role": "ROLE_AGENT",
+                  "parts": [
+                    {
+                      "text": "Today will be sunny with a high of 75°F",
+                      "mediaType": "text/plain"
+                    }
+                  ],
+                  "metadata": {
+                    "from": "claude:x",
+                    "fromName": "Weather"
+                  }
+                }
+              },
+              "history": [
+                {
+                  "role": "ROLE_USER",
+                  "parts": [
+                    {
+                      "text": "What is the weather today?"
+                    }
+                  ],
+                  "messageId": "msg-uuid",
+                  "metadata": {
+                    "target": "claude:x"
+                  },
+                  "taskId": "$task",
+                  "contextId": "$context"
+                },
+                {
+                  "messageId": "msg_reply-103",
+                  "contextId": "$context",
+                  "taskId": "$task",
+                  "role": "ROLE_AGENT",
+                  "parts": [
+                    {
+                      "text": "Today will be sunny with a high of 75°F",
+                      "mediaType": "text/plain"
+                    }
+                  ],
+                  "metadata": {
+                    "from": "claude:x",
+                    "fromName": "Weather"
+                  }
+                }
+              ],
+              "metadata": {
+                "xenonet": {
+                  "recipients": ["claude:x"],
+                  "target": "claude:x"
+                }
+              }
+            }
+          ],
+          "nextPageToken": "",
+          "pageSize": 10,
+          "totalSize": 1
+        }
+      }
+    },
+    {
+      "name": "ListTasks of working tasks (6.5, 9.4.4)",
+      "headers": {
+        "A2A-Version": "1.0"
+      },
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "ListTasks",
+        "params": {
+          "status": "TASK_STATE_WORKING",
+          "pageSize": 50,
+          "pageToken": ""
+        }
+      },
+      "status": 200,
+      "answer": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "result": {
+          "tasks": [],
+          "nextPageToken": "",
+          "pageSize": 50,
+          "totalSize": 0
+        }
+      }
+    },
+    {
+      "name": "ListTasks with a page size out of bounds (6.5's validation error)",
+      "headers": {
+        "A2A-Version": "1.0"
+      },
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "ListTasks",
+        "params": {
+          "pageSize": 150
+        }
+      },
+      "status": 200,
+      "answer": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "error": {
+          "code": -32602,
+          "message": "Invalid parameters: pageSize: must be between 1 and 100 inclusive, got 150",
+          "data": [
+            {
+              "@type": "type.googleapis.com/google.rpc.BadRequest",
+              "fieldViolations": [
+                {
+                  "field": "pageSize",
+                  "description": "must be between 1 and 100 inclusive, got 150"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "CancelTask of a task that isn't there (9.4.5, 9.5)",
+      "headers": {
+        "A2A-Version": "1.0"
+      },
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "CancelTask",
+        "params": {
+          "id": "task-uuid"
+        }
+      },
+      "status": 200,
+      "answer": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "error": {
+          "code": -32001,
+          "message": "Task not found",
+          "data": [
+            {
+              "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+              "reason": "TASK_NOT_FOUND",
+              "domain": "a2a-protocol.org",
+              "metadata": {
+                "taskId": "task-uuid"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "CancelTask of a completed task (3.1.5)",
+      "headers": {
+        "A2A-Version": "1.0"
+      },
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "CancelTask",
+        "params": {
+          "id": "$task"
+        }
+      },
+      "status": 200,
+      "answer": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "error": {
+          "code": -32002,
+          "message": "Task cannot be canceled: it is TASK_STATE_COMPLETED",
+          "data": [
+            {
+              "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+              "reason": "TASK_NOT_CANCELABLE",
+              "domain": "a2a-protocol.org",
+              "metadata": {
+                "taskId": "$task",
+                "state": "TASK_STATE_COMPLETED"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "A message without parts (9.5's validation error)",
+      "headers": {
+        "A2A-Version": "1.0"
+      },
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "SendMessage",
+        "params": {
+          "message": {
+            "role": "ROLE_USER",
+            "parts": [],
+            "messageId": "msg-2"
+          }
+        }
+      },
+      "status": 200,
+      "answer": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "error": {
+          "code": -32602,
+          "message": "Invalid parameters: message.parts: At least one part is required",
+          "data": [
+            {
+              "@type": "type.googleapis.com/google.rpc.BadRequest",
+              "fieldViolations": [
+                {
+                  "field": "message.parts",
+                  "description": "At least one part is required"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "A file part (6.7)",
+      "headers": {
+        "A2A-Version": "1.0"
+      },
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "SendMessage",
+        "params": {
+          "message": {
+            "role": "ROLE_USER",
+            "parts": [
+              {
+                "text": "Analyze this image and highlight any faces."
+              },
+              {
+                "raw": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+                "filename": "input_image.png",
+                "mediaType": "image/png"
+              }
+            ],
+            "messageId": "msg-3"
+          }
+        }
+      },
+      "status": 200,
+      "answer": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "error": {
+          "code": -32005,
+          "message": "Incompatible content types: message.parts[1] is a file part; XenoNet takes text parts only",
+          "data": [
+            {
+              "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+              "reason": "CONTENT_TYPE_NOT_SUPPORTED",
+              "domain": "a2a-protocol.org",
+              "metadata": {
+                "supported": "text/plain"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "A data part (6.8)",
+      "headers": {
+        "A2A-Version": "1.0"
+      },
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "SendMessage",
+        "params": {
+          "message": {
+            "role": "ROLE_USER",
+            "parts": [
+              {
+                "text": "Here is the updated shipping address"
+              },
+              {
+                "data": {
+                  "type": "shipping_address",
+                  "street": "123 Main St"
+                },
+                "mediaType": "application/json"
+              }
+            ],
+            "messageId": "msg-4"
+          }
+        }
+      },
+      "status": 200,
+      "answer": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "error": {
+          "code": -32005,
+          "message": "Incompatible content types: message.parts[1] is a data part; XenoNet takes text parts only",
+          "data": [
+            {
+              "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+              "reason": "CONTENT_TYPE_NOT_SUPPORTED",
+              "domain": "a2a-protocol.org",
+              "metadata": {
+                "supported": "text/plain"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "An unsupported version (6.4)",
+      "headers": {
+        "A2A-Version": "0.5"
+      },
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "SendMessage",
+        "params": {
+          "message": {
+            "role": "ROLE_USER",
+            "parts": [
+              {
+                "text": "Hello"
+              }
+            ],
+            "messageId": "msg-5"
+          }
+        }
+      },
+      "status": 200,
+      "answer": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "error": {
+          "code": -32009,
+          "message": "Protocol version not supported: XenoNet speaks A2A 1.0 (it asked for 0.5); send the header A2A-Version: 1.0",
+          "data": [
+            {
+              "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+              "reason": "VERSION_NOT_SUPPORTED",
+              "domain": "a2a-protocol.org",
+              "metadata": {
+                "requested": "0.5",
+                "supported": "1.0"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "No version: 0.3 (3.6.2)",
+      "headers": {},
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "GetTask",
+        "params": {
+          "id": "$task"
+        }
+      },
+      "status": 200,
+      "answer": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "error": {
+          "code": -32009,
+          "message": "Protocol version not supported: XenoNet speaks A2A 1.0 (no A2A-Version means 0.3); send the header A2A-Version: 1.0",
+          "data": [
+            {
+              "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+              "reason": "VERSION_NOT_SUPPORTED",
+              "domain": "a2a-protocol.org",
+              "metadata": {
+                "requested": "0.3",
+                "supported": "1.0"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Push notification config (9.4.7)",
+      "headers": {
+        "A2A-Version": "1.0"
+      },
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "CreateTaskPushNotificationConfig",
+        "params": {
+          "taskId": "$task",
+          "url": "https://client.example.com/webhook/a2a-notifications",
+          "token": "secure-client-token-for-task-aej34"
+        }
+      },
+      "status": 200,
+      "answer": {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "error": {
+          "code": -32003,
+          "message": "Push Notification is not supported: XenoNet makes no outbound calls; poll GetTask or stream instead",
+          "data": [
+            {
+              "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+              "reason": "PUSH_NOTIFICATION_NOT_SUPPORTED",
+              "domain": "a2a-protocol.org",
+              "metadata": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "GetExtendedAgentCard (9.4.8)",
+      "headers": {
+        "A2A-Version": "1.0"
+      },
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 6,
+        "method": "GetExtendedAgentCard"
+      },
+      "status": 200,
+      "answer": {
+        "jsonrpc": "2.0",
+        "id": 6,
+        "error": {
+          "code": -32004,
+          "message": "This operation is not supported: XenoNet has no extended Agent Card; the public one says it all",
+          "data": [
+            {
+              "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+              "reason": "UNSUPPORTED_OPERATION",
+              "domain": "a2a-protocol.org",
+              "metadata": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "A method that isn't A2A's",
+      "headers": {
+        "A2A-Version": "1.0"
+      },
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 8,
+        "method": "message/send",
+        "params": {}
+      },
+      "status": 200,
+      "answer": {
+        "jsonrpc": "2.0",
+        "id": 8,
+        "error": {
+          "code": -32601,
+          "message": "Method not found",
+          "data": [
+            {
+              "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+              "reason": "METHOD_NOT_FOUND",
+              "domain": "a2a-protocol.org",
+              "metadata": {
+                "method": "message/send"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "SendStreamingMessage (6.2, 9.4.2)",
+      "headers": {
+        "A2A-Version": "1.0"
+      },
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "SendStreamingMessage",
+        "params": {
+          "message": {
+            "role": "ROLE_USER",
+            "parts": [
+              {
+                "text": "Write a detailed report on climate change"
+              }
+            ],
+            "messageId": "msg-6",
+            "metadata": {
+              "target": "claude:x"
+            }
+          }
+        }
+      },
+      "status": 200,
+      "events": [
+        {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "result": {
+            "task": {
+              "id": "$task2",
+              "contextId": "$context2",
+              "status": {
+                "state": "TASK_STATE_SUBMITTED",
+                "timestamp": "2026-10-20T16:05:45.678Z"
+              },
+              "artifacts": [],
+              "history": [
+                {
+                  "role": "ROLE_USER",
+                  "parts": [
+                    {
+                      "text": "Write a detailed report on climate change"
+                    }
+                  ],
+                  "messageId": "msg-6",
+                  "metadata": {
+                    "target": "claude:x"
+                  },
+                  "taskId": "$task2",
+                  "contextId": "$context2"
+                }
+              ],
+              "metadata": {
+                "xenonet": {
+                  "recipients": [],
+                  "target": "claude:x"
+                }
+              }
+            }
+          }
+        },
+        {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "result": {
+            "statusUpdate": {
+              "taskId": "$task2",
+              "contextId": "$context2",
+              "status": {
+                "state": "TASK_STATE_WORKING",
+                "timestamp": "2026-10-20T16:05:45.678Z",
+                "message": {
+                  "messageId": "$task2-working",
+                  "contextId": "$context2",
+                  "taskId": "$task2",
+                  "role": "ROLE_AGENT",
+                  "parts": [
+                    {
+                      "text": "Sent to claude:x. Its reply completes this task.",
+                      "mediaType": "text/plain"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "result": {
+            "artifactUpdate": {
+              "taskId": "$task2",
+              "contextId": "$context2",
+              "artifact": {
+                "artifactId": "reply-105",
+                "name": "Reply from Weather",
+                "parts": [
+                  {
+                    "text": "Today will be sunny with a high of 75°F",
+                    "mediaType": "text/plain"
+                  }
+                ],
+                "metadata": {
+                  "from": "claude:x",
+                  "fromName": "Weather"
+                }
+              },
+              "append": false,
+              "lastChunk": true
+            }
+          }
+        },
+        {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "result": {
+            "statusUpdate": {
+              "taskId": "$task2",
+              "contextId": "$context2",
+              "status": {
+                "state": "TASK_STATE_COMPLETED",
+                "timestamp": "2026-10-20T16:05:45.678Z",
+                "message": {
+                  "messageId": "msg_reply-105",
+                  "contextId": "$context2",
+                  "taskId": "$task2",
+                  "role": "ROLE_AGENT",
+                  "parts": [
+                    {
+                      "text": "Today will be sunny with a high of 75°F",
+                      "mediaType": "text/plain"
+                    }
+                  ],
+                  "metadata": {
+                    "from": "claude:x",
+                    "fromName": "Weather"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "SubscribeToTask of a task that's done (9.4.6)",
+      "headers": {
+        "A2A-Version": "1.0"
+      },
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "SubscribeToTask",
+        "params": {
+          "id": "$task2"
+        }
+      },
+      "status": 200,
+      "events": [
+        {
+          "jsonrpc": "2.0",
+          "id": 5,
+          "error": {
+            "code": -32004,
+            "message": "This operation is not supported: the task is TASK_STATE_COMPLETED; GetTask reads it",
+            "data": [
+              {
+                "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                "reason": "UNSUPPORTED_OPERATION",
+                "domain": "a2a-protocol.org",
+                "metadata": {}
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

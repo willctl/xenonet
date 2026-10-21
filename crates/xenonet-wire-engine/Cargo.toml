@@ -32,6 +32,9 @@ reqwest.workspace = true
 url.workspace = true
 # The token look's names, shown without the token.
 regex.workspace = true
+# The relay's scrubber, for the detail presence carries to other machines:
+# the home folder as ~, as the relay writes it.
+xenonet-hosts.workspace = true
 
 
 [lints]

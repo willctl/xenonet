@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/network/message/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A message between hosts",
+  "description": "One message from an agent, actor or the person on one host to an agent or actor on another.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "network/message/v1"
+    },
+    "mid": {
+      "type": "string",
+      "pattern": "^msg_[0-9a-f-]{36}$",
+      "description": "The message's id across the network (its envelope's mid)"
+    },
+    "sender": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "The sender's id on its own host; the receiver qualifies it"
+    },
+    "senderKind": {
+      "type": "string",
+      "enum": [
+        "agent",
+        "actor",
+        "you"
+      ]
+    },
+    "auth": {
+      "type": "object",
+      "properties": {
+        "method": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "strength": {
+          "type": "string",
+          "enum": [
+            "strong",
+            "weak"
+          ],
+          "description": "strong: checked by the window key, or by process checks on macOS; weak: claimed, not checked"
+        }
+      },
+      "required": [
+        "method",
+        "strength"
+      ],
+      "additionalProperties": {},
+      "description": "How the sender's own host checked it"
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "The recipient's id on the receiving host, unqualified"
+    },
+    "body": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16000
+    },
+    "replyTo": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^msg_[0-9a-f-]{36}$",
+          "description": "The message's id across the network (its envelope's mid)"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 64
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "direct, repo or all: how the sender addressed it"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "message",
+        "handoff"
+      ]
+    },
+    "hops": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "description": "Messages in its thread so far, across hosts, for the hop limit"
+    },
+    "at": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    }
+  },
+  "required": [
+    "schema",
+    "mid",
+    "sender",
+    "senderKind",
+    "auth",
+    "target",
+    "body",
+    "replyTo",
+    "scope",
+    "hops",
+    "at"
+  ],
+  "additionalProperties": {}
+}

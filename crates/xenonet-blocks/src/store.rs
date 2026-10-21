@@ -24,6 +24,7 @@ use std::io::Write;
 use std::path::Path;
 use xenonet_base::fs::FsError;
 use xenonet_base::json::{self, number_string};
+use xenonet_base::nodepath;
 use xenonet_base::time::iso;
 
 pub use crate::Halt;
@@ -69,28 +70,20 @@ pub fn stamp(now: f64) -> String {
     iso(now).replace(':', "-")
 }
 
-fn join(dir: &Path, name: &str) -> String {
-    dir.join(name).to_string_lossy().into_owned()
-}
-
 /// A name beside `file` that isn't taken: `<base><ext>`, then `<base>-<time><ext>`.
 pub fn free_name(file: &str, base: &str, now: f64, ext: &str) -> String {
-    let dir = Path::new(file).parent().unwrap_or(Path::new(""));
-    let first = join(dir, &format!("{base}{ext}"));
+    let dir = nodepath::dirname(file);
+    let first = nodepath::join(&[&dir, &format!("{base}{ext}")]);
     if Path::new(&first).exists() {
-        join(dir, &format!("{base}-{}{ext}", stamp(now)))
+        nodepath::join(&[&dir, &format!("{base}-{}{ext}", stamp(now))])
     } else {
         first
     }
 }
 
-fn base_name(file: &str) -> String {
-    Path::new(file).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
-}
-
 /// Reads a versioned JSON file: the document to use, and what was found.
 pub fn read_versioned<D>(file: &str, latest: f64, now: f64, hooks: &mut dyn DocHooks<D>) -> Result<(D, Report), Halt> {
-    let name = base_name(file);
+    let name = nodepath::basename(file);
     let base = name.strip_suffix(".json").unwrap_or(&name).to_string();
     let report = Report { file: file.to_string(), version: Some(latest), ..Default::default() };
 
@@ -147,7 +140,7 @@ pub fn read_versioned<D>(file: &str, latest: f64, now: f64, hooks: &mut dyn DocH
         } else {
             format!("had a version XenoNet doesn't know ({})", field.as_ref().map_or("undefined".to_string(), |v| json::stringify(v, 0)))
         };
-        let aside = join(Path::new(file).parent().unwrap_or(Path::new("")), &format!("{base}.broken-{}.json", stamp(now)));
+        let aside = nodepath::join(&[&nodepath::dirname(file), &format!("{base}.broken-{}.json", stamp(now))]);
         return match fs::rename(file, &aside) {
             Ok(()) => {
                 let problem = format!("{name} {why}, so XenoNet moved it aside and started afresh");

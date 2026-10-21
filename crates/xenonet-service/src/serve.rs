@@ -4,7 +4,7 @@
 //! when it runs standalone, and the background work, and stops on SIGINT,
 //! SIGTERM or the component service's stop.
 
-use crate::buckets::now_ms;
+use crate::borrowed::now_ms;
 use crate::component::{self, Hooks};
 use crate::config::Config;
 use crate::cores::{CoreError, Cores};
@@ -342,6 +342,63 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
         };
         let _ = ctx.gateway.set(crate::gateway::control::GatewayControl::new(parts));
     }
+    // A2A agents, which reach the sessions as actors through the gateway
+    // (a2a/): off until you turn it on in the Actors panel.
+    if let Some(actors) = ctx.cores.actors.clone() {
+        let state_dir = config.state_dir.clone();
+        let parts = crate::a2a::A2aParts {
+            cores: crate::a2a::A2aCores { engine: ctx.cores.engine.clone(), actors: actors.clone() },
+            file: (!config.demo).then(|| Path::new(&config.state_dir).join("a2a.sqlite")),
+            version: version.clone(),
+            home: config.home.clone(),
+            name: Arc::new(move || crate::a2a::network_name(&state_dir)),
+            now: Arc::new(now_ms),
+            limits: crate::a2a::Limits::default(),
+        };
+        match crate::a2a::A2a::new(parts) {
+            Ok(a) => {
+                // A removed actor's tasks go with its record.
+                let weak = Arc::downgrade(&a);
+                actors.before_remove(Arc::new(move |slug: &str| {
+                    if let Some(a) = weak.upgrade() {
+                        a.forget(&format!("actor:{slug}"));
+                    }
+                }));
+                // The gateway's front door answers /a2a and the card with it.
+                if let Some(g) = ctx.gateway.get() {
+                    g.gateway().set_a2a(a.clone());
+                }
+                let _ = ctx.a2a.set(a);
+            }
+            Err(e) => ctx.log("warn", "a2a.error", &e, None, None),
+        }
+    }
+    // The network across machines (docs/design/network.md): this machine's
+    // node, whose gateway routes the actor gateway's front door serves
+    // while this host is the network's gateway.
+    {
+        let c = ctx.clone();
+        let log: xenonet_net::sink::LogFn = Arc::new(move |code: &str, words: &str| c.log("info", code, words, None, None));
+        match crate::gateway::network::NetService::open(crate::gateway::network::NetService::options(&config.state_dir, &config.home, &version, log)) {
+            Ok(svc) => {
+                if let Some(g) = ctx.gateway.get() {
+                    g.gateway().set_net(svc.node().clone());
+                }
+                // The engine takes what arrives, and sends through it.
+                if let Some(plug) = &ctx.cores.on_net {
+                    plug(&svc);
+                }
+                let _ = ctx.net.set(svc);
+            }
+            Err(e) => ctx.log(
+                "warn",
+                "net.open",
+                &format!("the network's files couldn't be read: {}", e.message),
+                None,
+                Some("xenonet doctor says more; xenonet net leave forgets the network"),
+            ),
+        }
+    }
 
     let listener = match TcpListener::bind((config.host.as_str(), config.port)).await {
         Ok(l) => l,
@@ -451,6 +508,14 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
             let _ = t.autostart().await;
         });
     }
+    if let Some(n) = ctx.net.get().cloned() {
+        let c = ctx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = n.start().await {
+                c.log("warn", "net.start", &format!("the network's link didn't start: {}", e.message), None, None);
+            }
+        });
+    }
     tokio::spawn(poll_spotify(ctx.clone(), again_rx));
     {
         let c = ctx.clone();
@@ -521,6 +586,9 @@ fn shutdown(ctx: &Arc<Ctx>) {
     if let Some(g) = ctx.gateway.get() {
         g.tunnel().stop();
         g.gateway().stop();
+    }
+    if let Some(n) = ctx.net.get() {
+        n.stop();
     }
     if let Some(comp) = ctx.components.locked().take() {
         comp.close();

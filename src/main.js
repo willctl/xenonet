@@ -1,5 +1,8 @@
 import { createUpdatesPanel } from "./updates.js";
 import { createBackground } from "./background.js";
+import { createNetwork } from "./network.js";
+import { chimeHere } from "./network-model.js";
+import { networkPart, withNetwork, partKey } from "./network-map.js";
 import "@fontsource/chakra-petch/400.css";
 import "@fontsource/chakra-petch/500.css";
 import "@fontsource/chakra-petch/600.css";
@@ -45,7 +48,7 @@ import { isActorId } from "./actors.js";
 import { youHere, createTargetWatch, createSaidEcho } from "./actors-model.js";
 import { createWindowCalls, createActorRequests, createActorTokens } from "./actor-requests.js";
 import { createRemoteConnections } from "./remote-panel.js";
-import { createHostFilters, decorate as decorateHosts } from "./hosts.js";
+import { createHostFilters, decorate as decorateHosts, hostOfId } from "./hosts.js";
 import { chimes } from "./live-words.js";
 import { renamable } from "../core/rename.js";
 import "./hosts.css";
@@ -302,19 +305,38 @@ async function decisionKey() {
   });
 }
 
-// A message from you to an actor, from XenoNet's own window, which it reads
-// in its inbox marked as from you (core/engine/attest.js).
-function messageActor(id) {
-  const name = scene.actor(id)?.snapshot.name ?? id;
-  const panel = modals.open(`<header class="m-head"><div><div class="m-chip">✉ message</div><h2>To ${escapeHtml(name)}</h2><div class="m-sub">It reads it in its inbox, marked as from you at XenoNet's window</div></div><button class="act" data-mclose>Close ✕</button></header><div class="m-body"><textarea class="msg-text" data-msg-text data-yours maxlength="4000" rows="6" placeholder="What to tell ${escapeHtml(name)}"></textarea><p class="pj-note">An actor reads it as from you. It's still its own to act on: XenoNet passes it on and approves nothing.</p><div class="m-foot"><span class="grow"></span><button class="act primary" data-msg-send data-yours>Send</button></div></div>`, { accent: "var(--actor)" });
+// A message from you, from XenoNet's own window (core/engine/attest.js): to
+// an actor, which reads it in its inbox marked as from you, or to a session,
+// on this machine or another in your network, which gets it as from you at
+// this console. It approves nothing: a session's permission question is
+// still answered in its own app. The box and Send are yours (data-yours),
+// which the control channel presses only in the demo and test instances;
+// `text` fills the box, for the driver.
+let messaging = null;
+let lastMessage = null;
+function messageTo(id, { text = "" } = {}) {
+  const actor = isActorId(id);
+  const node = actor ? null : (fullIndex.get(id) ?? null);
+  const far = actor ? null : network.agent(id);
+  const host = node?.host ?? far?.host ?? hostOfId(id);
+  const app = node?.app ?? far?.app ?? null;
+  const name = actor ? (scene.actor(id)?.snapshot.name ?? id) : (node?.title ?? far?.title ?? id);
+  const here = network.state.self?.id;
+  const sub = actor ? "It reads it in its inbox, marked as from you at XenoNet's window" : `A session on ${host ?? "this machine"}. It gets it as from you, at ${here ? `${here}'s` : "this"} console`;
+  const note = actor ? "An actor reads it as from you. It's still its own to act on: XenoNet passes it on and approves nothing." : "It's information, as every message is, and approves nothing: a permission question is still answered in the session's own app.";
+  const accent = actor ? "var(--actor)" : app === "claude" || app === "codex" ? `var(--${app})` : "var(--cyan)";
+  const panel = modals.open(`<header class="m-head"><div><div class="m-chip">✉ message</div><h2>To ${escapeHtml(name)}</h2><div class="m-sub">${escapeHtml(sub)}</div></div><button class="act" data-mclose>Close ✕</button></header><div class="m-body"><textarea class="msg-text" data-msg-text data-yours maxlength="4000" rows="6" placeholder="What to tell ${escapeHtml(name)}"></textarea><p class="pj-note">${escapeHtml(note)}</p><div class="m-foot"><span class="grow"></span><button class="act primary" data-msg-send data-yours>Send</button></div></div>`, { accent, onClose: () => (messaging = null) });
+  messaging = { to: id, name, panel };
   const box = panel.querySelector("[data-msg-text]");
+  box.value = text;
   box.focus();
   const send = panel.querySelector("[data-msg-send]");
   send.addEventListener("click", async () => {
-    const text = box.value.trim();
-    if (!text) return box.focus();
+    const words = box.value.trim();
+    if (!words) return box.focus();
     send.disabled = true;
-    const r = await windowCalls.call("POST", "/api/actors/you/message", { to: id, text });
+    const r = await windowCalls.call("POST", "/api/actors/you/message", { to: id, text: words });
+    lastMessage = { to: id, ok: r.ok, status: r.status, error: r.ok ? null : (r.error ?? "It didn't go"), state: r.data?.state ?? null, at: Date.now() };
     if (!r.ok) {
       send.disabled = false;
       sfx("error");
@@ -322,8 +344,15 @@ function messageActor(id) {
     }
     sfx("success");
     modals.close();
-    hud.toast(`Sent to ${name}`);
+    hud.toast(r.data?.state === "queued" ? `It waits to go to ${host}, which is away` : `Sent to ${name}`);
   });
+}
+// The message box as it stands, for the driver: who it's to, where Send
+// is, and how the last one went. Never the words.
+function messageState() {
+  const open = !!messaging?.panel?.isConnected;
+  const r = open ? messaging.panel.querySelector("[data-msg-send]")?.getBoundingClientRect() : null;
+  return { open, to: open ? messaging.to : null, name: open ? messaging.name : null, sendAt: r?.width ? { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } : null, last: lastMessage };
 }
 // A terminal opened in a node's folder (`node`, or what's selected).
 const terminalAt = (node = scene.getNode(selectedId)) => (you.did("terminal", node?.id), terminal?.show({ cwd: folderOf(node), fresh: true }));
@@ -354,7 +383,9 @@ const hud = createHud({
   // Writing to an actor from here (its inspector): yours alone, so the
   // box and Send are marked data-yours, which XenoNet's control channel
   // never presses outside the demo.
-  onMessageActor: (id) => messageActor(id),
+  onMessageActor: (id) => messageTo(id),
+  // And to a session, from its own panel.
+  onMessageSession: (node) => messageTo(node.id),
   identities,
   actorOf: (id) => scene.actor(id),
   actorBeams: (id) => scene.actorLayer.targetsOf(id),
@@ -434,7 +465,29 @@ const alerts = createAlerts({
   },
   native: desktop ? { notify: (n) => desktop.notify(n), clear: (keys) => desktop.clearNotifications(keys) } : null,
   queue: { count: () => countOf(needsYouNow()), open: () => needsYou.open() },
+  remote: (id) => network.show(id),
 });
+
+// The network across machines (network.js): Network settings and Add a
+// machine, other machines' agents waiting on you in the strip, and the
+// other machines on the map, from their presence (network-map.js).
+const network = createNetwork({
+  modals,
+  calls: windowCalls,
+  sfx,
+  toast: (m, b) => hud.toast(m, b),
+  onChange: (v) => {
+    alerts.setRemote(v.waits);
+    mapNetwork(v);
+  },
+  message: (id) => messageTo(id),
+  // The gateway's tunnel or LAN address is set where the actor gateway's
+  // is, in the Actors panel.
+  gateway: () => openActors(),
+});
+// What waits on you sounds only where you are, in a network: one rule for
+// this machine's waits and the others'.
+alerts.setChime(() => chimeHere(network.state));
 
 // Everything waiting on you, the longest wait first (core/needs-you.js),
 // from what the strip shows: the map's sessions waiting on a question or a
@@ -457,7 +510,7 @@ const needsYou = createNeedsYou({
   select,
   openApp: openInApp,
   ack,
-  message: (id) => messageActor(id),
+  message: (id) => messageTo(id),
   decide: decideRequest,
   armed: (id) => actorRequests.armed(id),
 });
@@ -597,6 +650,8 @@ const commandList = [
   { id: "connect-agents", label: "Connect your agents to XenoNet", keywords: "si super intelligence agents claude code codex grok build mcp hooks engine coordinate messages work together", run: () => connectPanel.open() },
   // The kill switch for messages between sessions and actors, and every wake (core/delivery/policy.js).
   { id: "pause-messages", label: "Pause or resume messages between sessions", keywords: "si agents stop kill switch halt wake live delivery actors abuse", run: () => toggleDelivery() },
+  { id: "network", label: "Network settings: your other machines", keywords: "settings network machines computers hosts laptop server gateway start create join leave remove replace tunnel lan titles only share", run: () => network.open() },
+  { id: "add-machine", label: "Add a machine", keywords: "network another computer laptop server host join ticket second machine", run: () => network.addMachine() },
   { id: "actors", label: "Actors", keywords: "si agents hermes grok bot muse programs allow deny requests register tokens observers you show me on the map add remove", run: () => openActors() },
   { id: "install-command", label: "Install the xenonet command", keywords: "cli terminal shell path doctor", run: () => installCommand() },
   { id: "layout", label: "Reset layout and unpin dragged nodes", keywords: "positions", run: async () => (await fetch("/api/layout", { method: "DELETE" }), hud.toast("Layout reset")) },
@@ -905,6 +960,11 @@ function setPlainPanels(on, { quiet = false } = {}) {
 
 let fullGraph = null;
 let fullIndex = new Map();
+// The map as the server sent it, and the network's other machines drawn
+// from their presence (network-map.js), merged into it as it's drawn.
+let serverGraph = null;
+let netPart = null;
+let netKey = "";
 const scope = loadScope();
 const revealed = new Set();
 const scopeEl = document.getElementById("session-scope");
@@ -918,10 +978,15 @@ function keepIds() {
   if (selectedId) keep.add(selectedId);
   for (const s of lastLive?.sessions ?? []) if (s.status !== "idle" || s.needsYou || s.stuck) keep.add(s.id);
   for (const id of actorTargets()) keep.add(id);
+  // Another machine's sessions that wait on you or seem stuck, as their
+  // presence says.
+  for (const n of netPart?.nodes ?? []) if (n.presence?.waits || n.presence?.stuck) keep.add(n.id);
   return keep;
 }
 
-function applyGraph(graph = fullGraph) {
+function applyGraph(graph = serverGraph) {
+  serverGraph = graph;
+  graph = withNetwork(graph, netPart);
   fullGraph = graph;
   fullIndex = new Map(graph.nodes.map((n) => [n.id, n]));
   decorateHosts(graph);
@@ -933,6 +998,17 @@ function applyGraph(graph = fullGraph) {
   hud.setData(scene.setData(scoped));
   renderScope(scoped.scope, scopeCounts(graph, scope));
   if (!replay.active) hud.refreshFilters();
+}
+
+// The network's other machines changed (network.js's view): drawn again
+// only when what the map shows of them did.
+function mapNetwork(view) {
+  const part = networkPart(view.state, view.agents);
+  const key = partKey(part);
+  if (key === netKey) return;
+  netKey = key;
+  netPart = part;
+  if (serverGraph) applyGraph();
 }
 
 function reveal(id) {
@@ -1109,6 +1185,7 @@ applyGraph(graph);
 applyLive(live);
 fetch("/api/actors").then(async (r) => (r.status === 503 ? actorsAreOff() : applyActors(await r.json())), () => {});
 actorRequests.refresh();
+network.refresh().catch(() => {});
 document.getElementById("boot").classList.add("done");
 if (params.has("wallpaper")) setWallpaper(true);
 
@@ -1161,6 +1238,8 @@ events.addEventListener("pulse", (e) => !replay.active && scene.pulse(JSON.parse
 events.addEventListener("doctor", (e) => alerts.setDoctor(JSON.parse(e.data)));
 // How each other machine stands, between maps (hosts.js).
 events.addEventListener("hosts", (e) => hostFilters.setHosts(JSON.parse(e.data)));
+// The network across machines changed: read it again (network.js).
+events.addEventListener("net", () => network.heard());
 // The theme (core/themes.js): the server's choice wins, and a change to it
 // (from the palette, another window, xenonet theme or an edit to a theme of
 // your own) is drawn in place, without a reload.
@@ -1307,6 +1386,9 @@ if (import.meta.env.DEV || desktop) {
     actorTokens,
     remoteConnections,
     needsYou,
+    network,
+    messageTo,
+    message: messageState,
     sound: () => ({ state: ambient.state, mode: ambient.mode, heard: ambient.heard() }),
     spotify: () => spotifyChip.state,
     system: () => systemPanel.state,

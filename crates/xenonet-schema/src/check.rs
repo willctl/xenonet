@@ -185,7 +185,8 @@ pub enum PathKey {
 }
 
 // /^[A-Za-z_$][\w$-]*$/
-fn is_ident(k: &str) -> bool {
+/// /^[A-Za-z_$][\w$-]*$/: a key a path writes after a dot.
+pub(crate) fn is_ident(k: &str) -> bool {
     let b = k.as_bytes();
     let head = |c: u8| c.is_ascii_alphabetic() || c == b'_' || c == b'$';
     let rest = |c: u8| c.is_ascii_alphanumeric() || c == b'_' || c == b'$' || c == b'-';

@@ -14,7 +14,7 @@ use serde_json::{json, Map, Value};
 use std::sync::OnceLock;
 use xenonet_app::jsv::truthy;
 use xenonet_base::ids::is_host_id;
-use xenonet_base::text::{js_number, js_string, js_trim};
+use xenonet_base::text::{js_number, js_string, js_trim, JS_SPACE};
 
 pub const HOSTS_FILE: &str = "hosts.json";
 pub const SSH_CONFIG_FILE: &str = "ssh_config";
@@ -41,13 +41,12 @@ fn say(v: Option<&Value>) -> String {
 fn re(i: usize) -> &'static Regex {
     static R: OnceLock<[Regex; 5]> = OnceLock::new();
     let r = R.get_or_init(|| {
-        let s = r"[\t\n\x0B\x0C\r \x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}]";
         [
             Regex::new(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$").expect("a fixed pattern"),
             Regex::new(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$").expect("a fixed pattern"),
             Regex::new(r"^(?:xenonet|/[A-Za-z0-9._+/-]{1,1023})$").expect("a fixed pattern"),
             Regex::new(r"^[0-9]{1,4}[mhd]$").expect("a fixed pattern"),
-            Regex::new(&format!("^(?:([^@{}]+)@)?([^@{}]+)$", &s[1..s.len() - 1], &s[1..s.len() - 1])).expect("a fixed pattern"),
+            Regex::new(&format!("^(?:([^@{JS_SPACE}]+)@)?([^@{JS_SPACE}]+)$")).expect("a fixed pattern"),
         ]
     });
     &r[i]

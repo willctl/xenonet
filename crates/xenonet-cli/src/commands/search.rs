@@ -1,32 +1,14 @@
-//! `xenonet search <words>` (cli/commands/search.js): every Claude Code and
-//! Codex transcript, through the running XenoNet's index (core/search.js).
+//! `xenonet search <words>` (cli/commands/search.js): every transcript of an
+//! app XenoNet tails, through the running XenoNet's index (core/search.js).
 
 use crate::args::Flags;
 use crate::js::{encode, have, list, num, on, slice_to, str, t};
 use crate::out::{ago, c, clip, json, now, plural, print, width, Done, Fail};
 use crate::reach::need;
 use serde_json::{Map, Value};
-use xenonet_base::text::is_js_space;
+use xenonet_base::jsstr::collapse_space;
 
 pub const HELP: &str = include_str!("help/search.txt");
-
-// text.replace(/\s+/g, " ")
-fn one_line(text: &str) -> String {
-    let mut out = String::new();
-    let mut space = false;
-    for ch in text.chars() {
-        if is_js_space(ch) {
-            if !space {
-                out.push(' ');
-            }
-            space = true;
-        } else {
-            out.push(ch);
-            space = false;
-        }
-    }
-    out
-}
 
 // The words that matched, ⟦marked⟧ by the index, in yellow; a mark left
 // open or closed alone goes.
@@ -88,7 +70,7 @@ pub fn run(words: &[String], flags: &Flags) -> Done {
         print(format!("{} {}", c::bold(title), c::dim(meta.join(" · "))));
         for sn in snippets.iter().take(2) {
             let role = str(sn, "role").unwrap_or("");
-            let text = clip(&one_line(&t(sn, "text")), (room - role.encode_utf16().count() as i64 - 2).max(0) as usize);
+            let text = clip(&collapse_space(&t(sn, "text")), (room - role.encode_utf16().count() as i64 - 2).max(0) as usize);
             print(format!("  {} {}", c::dim(format!("{}:", t(sn, "role"))), marked(&text)));
         }
     }
@@ -106,6 +88,6 @@ mod tests {
     fn matches_marked() {
         assert_eq!(marked("a ⟦refund⟧ b ⟦c"), "a refund b c");
         assert_eq!(marked("⟦a⟦b⟧"), "ab");
-        assert_eq!(one_line("a \n\t b"), "a b");
+        assert_eq!(collapse_space("a \n\t b"), "a b");
     }
 }

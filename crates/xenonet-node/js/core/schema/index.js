@@ -13,6 +13,7 @@ import "./state.js";
 import "./actor.js";
 import "./drift.js";
 import "./host.js";
+import "./network.js";
 import "./assistant.js";
 import "./vendor/index.js";
 

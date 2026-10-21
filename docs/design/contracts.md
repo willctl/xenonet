@@ -602,3 +602,22 @@ one is a new version of it beside the old, never an edit:
   its hooks.
 - Uninstalling with your data removed runs `disconnect` first, so no
   hook is left running a deleted launcher.
+
+## 13. One network across machines (2026-10-21)
+
+A network is one gateway and the hosts that joined it (design:
+`network.md`).
+
+- Schemas (§1): `network/frame/v1`, a line of a link's stream, signed by
+  the host that sent it and, between hosts, sealed for the one it's for.
+  The engine's side is the bodies: `network/presence/v1`,
+  `network/message/v1`, `network/receipt/v1`, `network/claims/v1`,
+  `network/handoff/v1` and `network/operator/v1`. Then
+  `network/roster-entry/v1`, one link in the chain of hosts, and
+  `network/state/v1`, what `GET /api/net/state` answers a host's window.
+- Ids (§2): a network is `net_<32 hex>`, a frame `frm_<uuid>`, a handoff
+  `hof_<uuid>`, and a host's key id `xnk1_<32 base32>`. Remote agents keep
+  the `@<host>:<id>` form, and are targets and senders, never callers.
+- The engine reaches the network through `xenonet_base::network` (`Net`
+  and `Sink`). With no network nothing is behind it, and local behaviour
+  and the JS twins are unchanged.

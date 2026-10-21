@@ -1,0 +1,67 @@
+/* The Network panel (src/network.js). It's an Actors-style panel (.ac)
+   in the theme's own accent: rows, forms, steps and the masked join line
+   come from actors.css; this is what's the network's own. */
+
+.net .act.primary:not(:disabled) { background: rgb(var(--accent-rgb) / 0.14); }
+.net .act.primary.ac-danger:not(:disabled) { background: rgb(var(--danger-rgb) / 0.14); }
+
+/* A machine: green while it's online, dim while it's away. Its agents
+   come under it, across the row. */
+.net .net-host { --c: var(--codex); }
+.net .net-host.offline { --c: var(--dim); }
+.net .net-host.offline .ac-dot { box-shadow: none; }
+.net .net-host.offline .ac-title { color: var(--muted); }
+.net .ac-name { flex-wrap: wrap; }
+.net .net-ask { font-size: 12px; color: var(--text); align-self: center; }
+.net .net-agents {
+  grid-column: 2 / -1;
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.net .net-agent {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) minmax(0, 1.4fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+.net .net-agent .sw:not(.claude, .codex) { background: var(--dim); }
+.net .net-agent-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.net .net-agent-what { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 11px; }
+.net .net-agent.waits .net-agent-what { color: var(--attention); }
+.net .net-agent.waits em,
+.net .net-agent.stuck em { font-style: normal; text-transform: uppercase; letter-spacing: 0.08em; font-size: 9.5px; }
+.net .net-agent.stuck .net-agent-what { color: var(--stuck); }
+
+.net .net-warn {
+  color: var(--attention);
+  font-size: 12px;
+  line-height: 1.5;
+}
+p.net-warn {
+  margin: 4px 0 10px;
+  padding: 8px 10px;
+  border: 1px solid rgb(var(--attention-rgb) / 0.35);
+  background: rgb(var(--attention-rgb) / 0.08);
+}
+.net .net-tickets { margin: 4px 0 8px; padding-left: 18px; font-size: 12px; color: var(--text); }
+.net .net-outbox { margin: 10px 0 4px; font-size: 12px; color: var(--muted); }
+.net .net-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 4px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+.net .net-choices .ac-dot { --c: var(--accent); }
+.net .net-where { font-size: 11px; color: var(--muted); white-space: nowrap; }
+/* An agent opened from its card in the strip. */
+.net .net-flash { animation: net-flash 1.6s ease-out 1; }
+@keyframes net-flash { from { background: rgb(var(--attention-rgb) / 0.18); } to { background: transparent; } }
+.net .ac-message { margin: 6px 0 10px; }

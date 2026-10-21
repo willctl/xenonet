@@ -8,14 +8,56 @@
 //! only asks, and never holds one.
 
 use crate::args::Flags;
-use crate::handoff::handoff;
 use crate::js::{encode, have, list, num, on, str, t};
 use crate::out::{ago, c, json, json_at, now, pad, print, Done, Fail};
 use crate::reach::need;
 use serde_json::{json, Map, Value};
+use xenonet_actors::handoff::handoff;
 use xenonet_base::client::{name_of, Server};
 
 pub const HELP: &str = include_str!("help/gateway.txt");
+
+/// `new URL(url).host`: the host, lowercased, and its port unless it's the
+/// scheme's own; "" for what isn't a URL.
+fn host_of(url: &str) -> String {
+    let Some((scheme, rest)) = url.trim().split_once("://") else { return String::new() };
+    if scheme.is_empty() || !scheme.chars().all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c)) || !scheme.starts_with(|c: char| c.is_ascii_alphabetic()) {
+        return String::new();
+    }
+    let authority = rest.split(['/', '?', '#', '\\']).next().unwrap_or("");
+    let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h).to_ascii_lowercase();
+    if host.is_empty() {
+        return String::new();
+    }
+    let default = match scheme.to_ascii_lowercase().as_str() {
+        "http" | "ws" => Some("80"),
+        "https" | "wss" => Some("443"),
+        "ftp" => Some("21"),
+        _ => None,
+    };
+    match host.rsplit_once(':') {
+        Some((h, port)) if !h.ends_with(']') || h.starts_with('[') => {
+            if port.is_empty() || Some(port) == default {
+                h.to_string()
+            } else {
+                host.clone()
+            }
+        }
+        _ => host,
+    }
+}
+
+/// What to give the app at `product` when the gateway's address changed and
+/// its token still works (core/actors/handoff.js): { app, steps: [{ text,
+/// copy }], message }.
+fn new_address(product: Option<&str>, url: &str) -> Value {
+    let h = handoff(product, url, &host_of(url), None);
+    json!({
+        "app": h.app,
+        "steps": h.steps.iter().map(|(text, copy)| json!({ "text": text, "copy": copy })).collect::<Vec<_>>(),
+        "message": h.message,
+    })
+}
 
 fn reason_words(reason: &str) -> &'static str {
     match reason {
@@ -210,7 +252,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             let Some(url) = crate::js::some(&st, "url").map(|u| crate::js::text(Some(u))) else {
                 return Err(Fail::new("the gateway has no address yet: xenonet gateway on --tunnel <kind>", 1));
             };
-            let h = handoff(str(a, "product"), &url, None);
+            let h = new_address(str(a, "product"), &url);
             if flags.on("json") {
                 let mut m = Map::new();
                 m.insert("actor".into(), json!(id));
@@ -255,5 +297,31 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             Ok(0)
         }
         Some(w) => Err(Fail::new(format!("xenonet gateway doesn't know {w}: tunnels, on, off, check, repair, address, token or revoke"), 2)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hosts_as_url_reads_them() {
+        assert_eq!(host_of("https://xenonet-demo.ngrok-free.app/mcp"), "xenonet-demo.ngrok-free.app");
+        assert_eq!(host_of("https://User@Example.COM:443/x"), "example.com");
+        assert_eq!(host_of("http://127.0.0.1:47850/mcp"), "127.0.0.1:47850");
+        assert_eq!(host_of("xenonet.example.com"), "");
+    }
+
+    #[test]
+    fn a_new_address_alone() {
+        let h = new_address(Some("muse"), "https://xenonet-demo.ngrok-free.app/mcp");
+        assert_eq!(h["app"], "Muse");
+        assert!(h["message"].as_str().unwrap().contains("Change your \"XenoNet\" connector's host to xenonet-demo.ngrok-free.app and keep its key"));
+        assert_eq!(new_address(None, "https://x.example/mcp")["steps"][0]["copy"], "url");
+        assert_eq!(new_address(None, "https://x.example/mcp")["message"], Value::Null);
+        let a2a = new_address(Some("a2a"), "https://x.example/.well-known/agent-card.json");
+        assert_eq!(a2a["app"], "A2A agent");
+        assert_eq!(a2a["steps"][0]["copy"], "url");
+        assert_eq!(a2a["message"], Value::Null);
     }
 }

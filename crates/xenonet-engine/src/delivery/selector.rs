@@ -18,6 +18,7 @@
 use crate::peer::list;
 use crate::sql::Arg;
 use crate::store::js_text;
+use xenonet_base::text::is_js_space;
 
 pub const KEYS: [&str; 6] = ["project", "identity", "app", "machine", "status", "by"];
 
@@ -51,22 +52,13 @@ impl Selector {
     }
 }
 
-/// The JS's white space, for `[\s+]` and `\s`.
-fn js_space(c: char) -> bool {
-    matches!(
-        c,
-        '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
-            ..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'
-    )
-}
-
 /// A term, `key:value`, as the JS's /^(keys):([^\s+]+)$/i takes it: the key
 /// in any case of ASCII's letters, the value anything without white space
 /// or "+".
 fn term(p: &str) -> Option<Term> {
     let (key, value) = p.split_once(':')?;
     let key = KEYS.iter().find(|k| k.eq_ignore_ascii_case(key))?;
-    if value.is_empty() || value.chars().any(|c| js_space(c) || c == '+') {
+    if value.is_empty() || value.chars().any(|c| is_js_space(c) || c == '+') {
         return None;
     }
     Some(Term { key: key.to_string(), value: value.to_lowercase() })
@@ -82,7 +74,7 @@ pub fn parse_selector(text: &Arg) -> Option<Selector> {
         return Some(Selector { terms: Vec::new() });
     }
     let mut terms = Vec::new();
-    for p in s.split(|c: char| js_space(c) || c == '+').filter(|p| !p.is_empty()) {
+    for p in s.split(|c: char| is_js_space(c) || c == '+').filter(|p| !p.is_empty()) {
         terms.push(term(p)?);
     }
     Some(Selector { terms })

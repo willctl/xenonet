@@ -8,6 +8,7 @@
 use serde_json::{json, Value};
 use std::path::Path;
 use xenonet_base::json::number_string;
+use xenonet_base::nodepath::NATIVE;
 use xenonet_base::paths::{self, is_under, path_key};
 use xenonet_base::text::{js_string, js_trim, truthy};
 
@@ -17,10 +18,6 @@ pub fn saved_root(file: &str) -> Option<String> {
     let b = std::fs::read(file).ok()?;
     let v = xenonet_base::json::parse(&String::from_utf8_lossy(&b)).ok()?;
     v.get("workspace")?.get("root")?.as_str().map(String::from)
-}
-
-fn is_absolute(p: &str) -> bool {
-    Path::new(p).is_absolute()
 }
 
 // paths.tilde: nothing to do without a home.
@@ -38,7 +35,7 @@ fn tilde(text: &str, home: &str) -> String {
 pub fn root(env_dir: Option<&str>, saved: Option<&Value>, home: &str) -> Value {
     let env = env_dir.filter(|d| !d.is_empty()).map(paths::resolve);
     // One that isn't a full path (state.json edited by hand) is no choice.
-    let chosen = saved.and_then(Value::as_str).filter(|s| is_absolute(s)).map(String::from);
+    let chosen = saved.and_then(Value::as_str).filter(|s| NATIVE.is_absolute(s)).map(String::from);
     let fallback = paths::join(home, "Projects");
     let path = env.clone().or_else(|| chosen.clone()).unwrap_or_else(|| fallback.clone());
     let source = if env.is_some() {
@@ -94,7 +91,7 @@ pub fn resolve_folder(input: Option<&Value>, home: &str) -> Option<String> {
     if let Some(rest) = s.strip_prefix("~/").or_else(|| s.strip_prefix("~\\")) {
         return Some(paths::resolve(&paths::join(home, rest)));
     }
-    (!s.is_empty() && is_absolute(s)).then(|| paths::resolve(s))
+    (!s.is_empty() && NATIVE.is_absolute(s)).then(|| paths::resolve(s))
 }
 
 fn privacy(shown: &str, platform: &str) -> String {

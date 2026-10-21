@@ -1,10 +1,10 @@
 The decision model XenoNet can ask some of what it now asks Codex, such as
 which folders are projects, through OpenRouter, and its key.
 
-  xenonet decide            which model, and whether a key is kept
-  xenonet decide key        keep an OpenRouter key: paste it, then Enter (or
+  xenonet decide          which model, and whether a key is kept
+  xenonet decide key      keep an OpenRouter key: paste it, then Enter (or
                           pipe it in); it goes to your credential store
-  xenonet decide forget     forget the key
+  xenonet decide forget   forget the key
 
 XENONET_DECISION_MODEL picks another model (the default is Jev,
 ~typesafe/jev-latest). Give the key a credit limit on OpenRouter.

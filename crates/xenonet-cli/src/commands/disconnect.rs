@@ -1,10 +1,12 @@
 //! xenonet disconnect (cli/commands/disconnect.js): takes XenoNet back out
-//! of Claude Code's and Codex's settings (core/engine/connect.js), leaving
-//! everything else as it was. With no XenoNet running on the port it
-//! names, it takes that XenoNet's entries out by itself, so uninstalling
-//! XenoNet leaves no hook behind that runs files about to be deleted.
+//! of the settings of the apps connect goes through (Claude Code, Codex and
+//! Grok Build; core/engine/connect.js), leaving everything else as it was.
+//! With no XenoNet running on the port it names, it takes that XenoNet's
+//! entries out by itself, so uninstalling XenoNet leaves no hook behind
+//! that runs files about to be deleted.
 
 use super::connect::{connected, local_options, render};
+use super::words;
 use crate::args::Flags;
 use crate::cores;
 use crate::js::{list, str, t};
@@ -30,7 +32,8 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
     let plugin = list(&preview, "apps").iter().any(|a| list(a, "changes").iter().any(|ch| str(ch, "via") == Some("plugin")));
     let there: Vec<&Value> = list(&preview, "apps").iter().filter(|a| list(a, "changes").iter().any(|ch| ours(&ch))).collect();
     if there.is_empty() {
-        print(c::dim("XenoNet isn't in Claude Code's or Codex's settings; nothing to take out."));
+        let settings: Vec<String> = words::names("connect").iter().map(|n| format!("{n}'s")).collect();
+        print(c::dim(format!("XenoNet isn't in {} settings; nothing to take out.", words::listed(&settings, "or"))));
         if plugin {
             print(c::dim(PLUGIN_STAYS));
         }
@@ -56,7 +59,7 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
         })
         .collect();
     render(&json!({ "apps": shown }), &connected());
-    let names = there.iter().map(|a| t(a, "name")).collect::<Vec<_>>().join(" and ");
+    let names = words::listed(&there.iter().map(|a| t(a, "name")).collect::<Vec<_>>(), "and");
     if !confirm(&format!("Take XenoNet out of {names}?"), flags)? {
         print(c::dim("Nothing changed."));
         return Ok(0);

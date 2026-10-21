@@ -195,6 +195,65 @@
     "delivery": {
       "description": "From send: when it will see the message",
       "type": "string"
+    },
+    "host": {
+      "description": "In a XenoNet network, the host an agent on another machine is on; its id is @<host>:<id>",
+      "type": "string"
+    },
+    "seen": {
+      "description": "For an agent on another host: when that host was last heard from",
+      "anyOf": [
+        {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "online": {
+      "description": "For an agent on another host: whether its host's link is up; offline since seen when it isn't",
+      "type": "boolean"
+    },
+    "repoKey": {
+      "description": "For an agent on another host: the normalized git remote of its folder, which clones of one repo share",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "waitsOnYou": {
+      "description": "For an agent on another host: a question or a stuck state waits on the person",
+      "type": "boolean"
+    },
+    "question": {
+      "description": "For an agent on another host, in the console's snapshot only: the text of what waits on the person, as its host's presence carries it; null when it shares titles only",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "lastMessage": {
+      "description": "For an agent on another host, in the console's snapshot only: what it said last, at most 280 characters",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "stuck": {
+      "description": "For an agent on another host, in the console's snapshot only: why it seems stuck",
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "required": [

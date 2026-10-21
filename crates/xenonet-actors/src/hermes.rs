@@ -41,6 +41,7 @@ use crate::names::hermes_slug;
 use crate::registry::value_arg;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
+use xenonet_base::nodepath::{style_of, NATIVE};
 use xenonet_base::paths::{is_under, path_key, tilde};
 use xenonet_base::sync::Locked;
 use xenonet_engine::js::{template, truthy};
@@ -163,15 +164,6 @@ fn stamp_of(c: &mut dyn Calls, paths: &[String]) -> String {
 
 fn join(base: &str, parts: &[&str]) -> String {
     parts.iter().fold(base.to_string(), |a, p| xenonet_base::paths::join(&a, p))
-}
-
-fn is_absolute(p: &str) -> bool {
-    if cfg!(windows) {
-        let b = p.as_bytes();
-        p.starts_with('\\') || p.starts_with('/') || (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/'))
-    } else {
-        p.starts_with('/')
-    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -356,7 +348,7 @@ impl Hermes {
     fn place_of_session(c: &mut dyn Calls, s: Option<&Session>) -> Result<Value> {
         let Some(s) = s else { return Ok(Value::Null) };
         for dir in [&s.repo, &s.cwd] {
-            if let Some(d) = dir.as_str().filter(|d| !d.is_empty() && is_absolute(d)) {
+            if let Some(d) = dir.as_str().filter(|d| !d.is_empty() && NATIVE.is_absolute(d)) {
                 let place = c.call("actors", "placeOf", vec![Arg::text(d)])?.to_json();
                 if truthy(Some(&place)) {
                     return Ok(place);
@@ -373,11 +365,11 @@ impl Hermes {
         if p == "~" || p.starts_with("~/") {
             return Some(xenonet_base::paths::join(&self.home, &p[1..]));
         }
-        if is_absolute(p) {
-            return Some(xenonet_engine::js::join_style(p, &[]));
+        if NATIVE.is_absolute(p) {
+            return Some(style_of(p).join(&[p]));
         }
-        let cwd = s.and_then(|s| s.cwd.as_str()).filter(|c| is_absolute(c))?;
-        let joined = xenonet_engine::js::join_style(cwd, &[p]);
+        let cwd = s.and_then(|s| s.cwd.as_str()).filter(|c| NATIVE.is_absolute(c))?;
+        let joined = style_of(cwd).join(&[cwd, p]);
         Some(if joined.len() > 1 { joined.trim_end_matches(['/', '\\']).to_string() } else { joined })
     }
 
@@ -679,7 +671,7 @@ impl Hermes {
             c.call("", "touch", vec![Arg::text(&p.id), value_arg(&place), Arg::text("works-on"), Arg::Num(at)])?;
         }
         for j in &r.jobs {
-            let workdir = j["workdir"].as_str().filter(|w| !w.is_empty() && is_absolute(w));
+            let workdir = j["workdir"].as_str().filter(|w| !w.is_empty() && NATIVE.is_absolute(w));
             if j["enabled"].as_bool() == Some(true) {
                 if let Some(w) = workdir {
                     let place = c.call("actors", "placeOf", vec![Arg::text(w)])?;

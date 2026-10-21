@@ -25,6 +25,7 @@ fn semver() -> &'static Regex {
     R.get_or_init(|| Regex::new(r"^[0-9]+\.[0-9]+\.[0-9]+$").expect("a fixed pattern"))
 }
 
+/// /^[a-f0-9]{64}$/: a SHA-256 in hex, or a runtime file's token.
 pub fn sha_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| Regex::new("^[a-f0-9]{64}$").expect("a fixed pattern"))

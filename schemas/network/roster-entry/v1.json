@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/network/roster-entry/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A roster entry",
+  "description": "One link in a network's chain of hosts: who joined, who left, who's the gateway, and which hosts signed it.",
+  "type": "object",
+  "properties": {
+    "n": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "prev": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]*$",
+      "description": "base64url SHA-256 of the previous entry's canonical bytes; empty for entry 0"
+    },
+    "network": {
+      "type": "string",
+      "pattern": "^net_[0-9a-f]{32}$"
+    },
+    "op": {
+      "type": "string",
+      "enum": [
+        "found",
+        "add",
+        "remove",
+        "window",
+        "gateway"
+      ]
+    },
+    "host": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,31}$",
+          "description": "The host's id in the network, picked by the person: never the machine's own name"
+        },
+        "sign": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]*$",
+          "description": "Ed25519 public key"
+        },
+        "seal": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]*$",
+          "description": "X25519 public key"
+        },
+        "keyId": {
+          "type": "string",
+          "pattern": "^xnk1_[a-z2-7]{32}$",
+          "description": "What people compare: xnk1_ and the base32 of the first 20 bytes of the SHA-256 of both public keys"
+        },
+        "window": {
+          "type": "boolean",
+          "description": "A XenoNet window the person uses: this host may act for them"
+        }
+      },
+      "required": [
+        "id",
+        "sign",
+        "seal",
+        "keyId",
+        "window"
+      ],
+      "additionalProperties": {}
+    },
+    "gateway": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "address": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "address",
+            "version"
+          ],
+          "additionalProperties": {}
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For op gateway: where the network's gateway is now"
+    },
+    "at": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "signers": {
+      "minItems": 1,
+      "maxItems": 4,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,31}$",
+            "description": "The host's id in the network, picked by the person: never the machine's own name"
+          },
+          "sig": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]*$",
+            "description": "base64url, no padding"
+          }
+        },
+        "required": [
+          "host",
+          "sig"
+        ],
+        "additionalProperties": {}
+      }
+    }
+  },
+  "required": [
+    "n",
+    "prev",
+    "network",
+    "op",
+    "host",
+    "gateway",
+    "at",
+    "signers"
+  ],
+  "additionalProperties": {}
+}

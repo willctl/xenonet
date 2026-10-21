@@ -20,7 +20,9 @@ use xenonet_service::gateway::actor_gateway::{self, ActorGateway, GatewayCores, 
 use xenonet_service::gateway::tunnel;
 use xenonet_service::http::{self, Peer, Req};
 use xenonet_service::routes::{self, api};
-use xenonet_service::{borrowed, serve, upstream};
+use xenonet_engine::delivery::{opencode::from_open_code_id, selector::parse_selector};
+use xenonet_engine::sql::Arg;
+use xenonet_service::{serve, upstream};
 
 // What the router may be sent here: the routes that read requests from
 // sessions, hooks, actors and pages. Routes that open apps, run
@@ -161,7 +163,7 @@ fuzz_target!(|data: &[u8]| {
     let _ = http::decode_uri_component(&target);
     let _ = http::percent_decode(target.as_bytes());
     let _ = routes::integrations::params_object(&query);
-    let _ = (routes::assistant::grant_id(&path), routes::themes::theme_id(&path), borrowed::parse_selector(&path));
+    let _ = (routes::assistant::grant_id(&path), routes::themes::theme_id(&path), parse_selector(&Arg::text(path.as_str())));
     let _ = xenonet_actors::tokens::token_in_url(query.iter().map(|(k, v)| (k.as_str(), v.as_str())), &path);
     for (k, v) in &headers {
         let _ = xenonet_actors::tokens::bearer_of(v);
@@ -174,7 +176,7 @@ fuzz_target!(|data: &[u8]| {
     let _ = (tunnel::version_in(&text), tunnel::tailscale_self(&text), tunnel::read_line("tailscale", &text), tunnel::read_line("cloudflared", &text));
     if let Some(v) = xenonet_fuzz::json(&body) {
         let _ = tunnel::funnel_of(&v, "mac.example.ts.net", 47999);
-        let _ = borrowed::from_opencode_id(&v);
+        let _ = from_open_code_id(&Arg::from(&v));
         if let (Some(schema), Some(args)) = (v.get("schema"), v.get("args")) {
             let _ = actor_gateway::validate(schema, args);
         }

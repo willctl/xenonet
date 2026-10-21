@@ -4,7 +4,6 @@
 //! afterFileEdit files as its edits, ended at its sessionEnd.
 
 use super::files::Files;
-use super::node_path;
 use super::{
     by_num, edits_out, fits_id, js_max, js_min, older, prune_edits, push_edit, str_of, titled, Check, Checked, Edits, NativeReader, Out, Threw, Vendor, DAY_MS, SESSIONS_MAX,
     VENDOR_FAILED,
@@ -13,8 +12,9 @@ use crate::session::{RunSession, Via};
 use serde_json::Value;
 use xenonet_base::fs::FsError;
 use xenonet_base::json::{self, number_string};
+use xenonet_base::nodepath::{Style, NATIVE};
 use xenonet_base::ordered::OrderedMap;
-use xenonet_base::paths::{path_style, PathStyle};
+use xenonet_base::paths::path_style;
 use xenonet_base::text::{is_blank, js_string};
 use xenonet_schema::drift::clean_version;
 
@@ -43,8 +43,8 @@ fn date_of(v: Option<&Value>) -> Option<f64> {
 /// cursor-hooks.ndjson in XenoNet's state folder.
 pub fn cursor_events_file(named: Option<&str>, state_dir: &str) -> String {
     match named.filter(|n| !n.is_empty()) {
-        Some(n) => node_path::resolve(PathStyle::Native, &[n]),
-        None => node_path::join(PathStyle::Native, &[state_dir, "cursor-hooks.ndjson"]),
+        Some(n) => NATIVE.resolve(&[n]),
+        None => NATIVE.join(&[state_dir, "cursor-hooks.ndjson"]),
     }
 }
 
@@ -161,7 +161,7 @@ impl Cursor {
             run.created_at = js_min(run.created_at, at);
             run.updated_at = js_max(run.updated_at, at);
             let root = match field(&e, "workspace_roots") {
-                Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).find(|x| node_path::is_absolute(path_style(x), x)),
+                Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).find(|x| Style::from(path_style(x)).is_absolute(x)),
                 _ => None,
             };
             if let Some(root) = root {
@@ -176,8 +176,8 @@ impl Cursor {
                 run.ended_at = None;
             }
             if hook == Some("afterFileEdit") {
-                if let Some(p) = str_of(field(&e, "file_path")).filter(|p| node_path::is_absolute(path_style(p), p)) {
-                    let file = node_path::resolve(path_style(p), &[p]);
+                if let Some(p) = str_of(field(&e, "file_path")).filter(|p| Style::from(path_style(p)).is_absolute(p)) {
+                    let file = Style::from(path_style(p)).resolve(&[p]);
                     push_edit(&mut run.edits, &file, js_min(at, now));
                 }
             }

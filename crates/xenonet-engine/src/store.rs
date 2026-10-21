@@ -130,9 +130,37 @@ const STEP_FIVE: &str = r"
       CREATE INDEX IF NOT EXISTS assistant_audit_by_time ON assistant_audit (at);
     ";
 
+const STEP_EIGHT: &str = r"
+      CREATE INDEX IF NOT EXISTS messages_by_mid ON messages (mid) WHERE mid IS NOT NULL;
+      CREATE TABLE IF NOT EXISTS net_presence (
+        host TEXT PRIMARY KEY, counter INTEGER NOT NULL, at INTEGER NOT NULL,
+        you INTEGER NOT NULL DEFAULT 0, roster TEXT, agents TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS net_claims (
+        host TEXT NOT NULL, repo_key TEXT NOT NULL, path TEXT NOT NULL,
+        agent TEXT NOT NULL, branch TEXT, kind TEXT NOT NULL, until INTEGER,
+        at INTEGER NOT NULL, PRIMARY KEY (host, repo_key, path, agent, kind));
+      CREATE TABLE IF NOT EXISTS handoffs (
+        id TEXT PRIMARY KEY, host TEXT, maker TEXT NOT NULL,
+        to_agent TEXT, to_repo TEXT, to_scope TEXT, to_host TEXT,
+        goal TEXT, done TEXT, next TEXT, files TEXT NOT NULL,
+        branch TEXT, commit_sha TEXT,
+        state TEXT NOT NULL DEFAULT 'open', taken_by TEXT, taken_at INTEGER,
+        asked_by TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+    ";
+
+/// The columns step 8 adds, each to its table.
+const STEP_EIGHT_COLUMNS: [(&str, &str, &str); 6] = [
+    ("messages", "host", "ALTER TABLE messages ADD COLUMN host TEXT"),
+    ("messages", "mid", "ALTER TABLE messages ADD COLUMN mid TEXT"),
+    ("deliveries", "host", "ALTER TABLE deliveries ADD COLUMN host TEXT"),
+    ("deliveries", "receipt", "ALTER TABLE deliveries ADD COLUMN receipt TEXT"),
+    ("deliveries", "receipt_at", "ALTER TABLE deliveries ADD COLUMN receipt_at INTEGER"),
+    ("deliveries", "frame", "ALTER TABLE deliveries ADD COLUMN frame TEXT"),
+];
+
 /// The steps the database's shape takes; PRAGMA user_version counts those
 /// taken.
-pub const ENGINE_VERSION: usize = 7;
+pub const ENGINE_VERSION: usize = 8;
 
 /// The statements step `i` (0 for the first) runs, given whether a table
 /// has a column already: a database from before versions were counted can
@@ -179,6 +207,20 @@ pub fn engine_step<E>(i: usize, has_column: &mut dyn FnMut(&str, &str) -> std::r
             if !has_column("actors", "gateway_at")? {
                 out.push("ALTER TABLE actors ADD COLUMN gateway_at INTEGER");
             }
+            out
+        }
+        // 8: a network across machines (docs/design/network.md): where a
+        // message came from and its id across the network, which host each
+        // delivery is on and its receipt, the latest presence of each other
+        // host, their claims, and handoffs.
+        7 => {
+            let mut out = Vec::new();
+            for (table, column, sql) in STEP_EIGHT_COLUMNS {
+                if !has_column(table, column)? {
+                    out.push(sql);
+                }
+            }
+            out.push(STEP_EIGHT);
             out
         }
         _ => vec![],
@@ -315,8 +357,9 @@ impl EngineStore {
     /// claims until they expire. Actors' events for a week and at most
     /// ACTOR_EVENTS_KEPT each, their targets for a week after they were
     /// last touched, registrations a day, revoked tokens a week; the person
-    /// at the console's events, targets and status for a day. A copy made
-    /// before a migration goes a week after it was made.
+    /// at the console's events, targets and status for a day. Other hosts'
+    /// claims until they lapse, and handoffs a week past theirs. A copy
+    /// made before a migration goes a week after it was made.
     pub fn prune(&mut self, now: f64) -> Result<()> {
         self.block.prune_backups(now);
         self.transaction(|| {
@@ -340,8 +383,197 @@ impl EngineStore {
             self.run("DELETE FROM actor_requests WHERE created_at < ?", &[n(now - DAY_MS)])?;
             self.run("DELETE FROM actor_revoked WHERE at < ?", &[n(now - WEEK_MS)])?;
             self.run("UPDATE actors SET status = NULL, status_at = NULL WHERE slug = ? AND status_at < ?", &[Arg::text(you_slug()), n(now - DAY_MS)])?;
+            self.run("DELETE FROM net_claims WHERE until < ?", &[n(now)])?;
+            self.run("DELETE FROM handoffs WHERE expires_at < ?", &[n(now - WEEK_MS)])?;
             self.prune_audit(now)
         })
+    }
+
+    // ---------- the network (step 8) ----------
+    //
+    // Only the binary calls these, and only while this machine is in a
+    // network, except handoffs, which work on one machine too.
+
+    /// Another host's presence: its row, or None.
+    pub fn net_presence(&self, host: &str) -> Result<Option<Row>> {
+        self.get("SELECT * FROM net_presence WHERE host = ?", &[Arg::text(host)])
+    }
+    /// Every other host's latest presence, by host.
+    pub fn net_presences(&self) -> Result<Vec<Row>> {
+        self.all("SELECT * FROM net_presence ORDER BY host", &[])
+    }
+    /// A host's presence, kept in place of the one before it. `agents` is
+    /// the JSON of its agents, merged already.
+    pub fn set_net_presence(&self, host: &str, counter: f64, at: f64, you: bool, roster: &str, agents: &str) -> Result<()> {
+        self.run(
+            "INSERT INTO net_presence (host, counter, at, you, roster, agents) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(host) DO UPDATE SET counter = excluded.counter, at = excluded.at, you = excluded.you, roster = excluded.roster, agents = excluded.agents",
+            &[Arg::text(host), n(counter), n(at), n(if you { 1.0 } else { 0.0 }), Arg::text(roster), Arg::text(agents)],
+        )?;
+        Ok(())
+    }
+    /// A host removed from the network: its presence, its claims and the
+    /// handoffs it made that wait.
+    pub fn drop_net_host(&self, host: &str) -> Result<()> {
+        let h = Arg::text(host);
+        self.transaction(|| {
+            self.run("DELETE FROM net_presence WHERE host = ?", std::slice::from_ref(&h))?;
+            self.run("DELETE FROM net_claims WHERE host = ?", std::slice::from_ref(&h))?;
+            self.run("DELETE FROM handoffs WHERE host = ? AND state = 'open'", std::slice::from_ref(&h))?;
+            Ok(())
+        })
+    }
+    /// Other hosts' claims and edits that still hold.
+    pub fn net_claims(&self, now: f64) -> Result<Vec<Row>> {
+        self.all("SELECT * FROM net_claims WHERE until IS NULL OR until >= ? ORDER BY host, repo_key, path", &[n(now)])
+    }
+    /// Other hosts' live claims in clones of one repo.
+    pub fn net_claims_in(&self, repo_key: &str, now: f64) -> Result<Vec<Row>> {
+        self.all("SELECT * FROM net_claims WHERE repo_key = ? AND (until IS NULL OR until >= ?) ORDER BY host, path", &[Arg::text(repo_key), n(now)])
+    }
+    /// How many claims a host has here.
+    pub fn net_claim_count(&self, host: &str) -> Result<f64> {
+        Ok(self.get("SELECT COUNT(*) AS n FROM net_claims WHERE host = ?", &[Arg::text(host)])?.and_then(|r| r.num("n")).unwrap_or(0.0))
+    }
+    /// Whether a host's claim is here already.
+    pub fn has_net_claim(&self, host: &str, repo_key: &str, path: &str, agent: &str, kind: &str) -> Result<bool> {
+        Ok(self
+            .get(
+                "SELECT 1 AS one FROM net_claims WHERE host = ? AND repo_key = ? AND path = ? AND agent = ? AND kind = ?",
+                &[Arg::text(host), Arg::text(repo_key), Arg::text(path), Arg::text(agent), Arg::text(kind)],
+            )?
+            .is_some())
+    }
+    /// A host's whole set of claims, in place of what it had.
+    pub fn clear_net_claims(&self, host: &str) -> Result<()> {
+        self.run("DELETE FROM net_claims WHERE host = ?", &[Arg::text(host)])?;
+        Ok(())
+    }
+    #[expect(clippy::too_many_arguments, reason = "one row's columns")]
+    pub fn put_net_claim(&self, host: &str, repo_key: &str, path: &str, agent: &str, branch: Option<&str>, kind: &str, until: Option<f64>, at: f64) -> Result<()> {
+        self.run(
+            "INSERT INTO net_claims (host, repo_key, path, agent, branch, kind, until, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(host, repo_key, path, agent, kind) DO UPDATE SET branch = excluded.branch, until = excluded.until, at = excluded.at",
+            &[Arg::text(host), Arg::text(repo_key), Arg::text(path), Arg::text(agent), Arg::opt_text(branch), Arg::text(kind), Arg::opt_num(until), n(at)],
+        )?;
+        Ok(())
+    }
+    pub fn drop_net_claim(&self, host: &str, repo_key: &str, path: &str, agent: &str) -> Result<()> {
+        self.run("DELETE FROM net_claims WHERE host = ? AND repo_key = ? AND path = ? AND agent = ?", &[Arg::text(host), Arg::text(repo_key), Arg::text(path), Arg::text(agent)])?;
+        Ok(())
+    }
+
+    /// Where a message came from (null: made here) and its id across the
+    /// network.
+    pub fn set_message_net(&self, id: f64, host: Option<&str>, mid: &str) -> Result<()> {
+        self.run("UPDATE messages SET host = ?, mid = ? WHERE id = ?", &[Arg::opt_text(host), Arg::text(mid), n(id)])?;
+        Ok(())
+    }
+    /// A message by its id across the network: one made here (`host`
+    /// None), or one that came from `host`.
+    pub fn message_by_mid(&self, mid: &str, host: Option<&str>) -> Result<Option<Row>> {
+        match host {
+            None => self.get("SELECT * FROM messages WHERE mid = ? AND host IS NULL ORDER BY id LIMIT 1", &[Arg::text(mid)]),
+            Some(h) => self.get("SELECT * FROM messages WHERE mid = ? AND host = ? ORDER BY id LIMIT 1", &[Arg::text(mid), Arg::text(h)]),
+        }
+    }
+    /// A message's delivery to an agent on another host, with the frame
+    /// that carries it, which waits for its stored receipt.
+    pub fn set_delivery_net(&self, id: f64, agent: &str, host: &str, frame: &str) -> Result<()> {
+        self.run("UPDATE deliveries SET host = ?, frame = ? WHERE message_id = ? AND agent = ?", &[Arg::text(host), Arg::text(frame), n(id), Arg::text(agent)])?;
+        Ok(())
+    }
+    pub fn delivery(&self, id: f64, agent: &str) -> Result<Option<Row>> {
+        self.get("SELECT * FROM deliveries WHERE message_id = ? AND agent = ?", &[n(id), Arg::text(agent)])
+    }
+    /// What the other host said of a delivery. A receipt never goes back
+    /// to an earlier state, and seen marks it seen.
+    pub fn set_receipt(&self, id: f64, agent: &str, state: &str, at: f64) -> Result<bool> {
+        let rank = |s: &str| match s {
+            "stored" => 1,
+            "held" => 2,
+            "delivered" => 3,
+            "seen" => 4,
+            "refused" => 5,
+            _ => 0,
+        };
+        let Some(had) = self.delivery(id, agent)? else { return Ok(false) };
+        if rank(had.text("receipt").unwrap_or("")) >= rank(state) {
+            return Ok(false);
+        }
+        self.run("UPDATE deliveries SET receipt = ?, receipt_at = ? WHERE message_id = ? AND agent = ?", &[Arg::text(state), n(at), n(id), Arg::text(agent)])?;
+        if state == "seen" {
+            self.run("UPDATE deliveries SET seen_at = COALESCE(seen_at, ?) WHERE message_id = ? AND agent = ?", &[n(at), n(id), Arg::text(agent)])?;
+        }
+        Ok(true)
+    }
+    /// What waits for a stored receipt: deliveries to other hosts since
+    /// `since`, oldest first, with their frames.
+    pub fn outbox(&self, since: f64) -> Result<Vec<Row>> {
+        self.all(
+            "SELECT d.message_id, d.agent, d.host, d.frame FROM deliveries d JOIN messages m ON m.id = d.message_id WHERE d.host IS NOT NULL AND d.receipt IS NULL AND d.frame IS NOT NULL AND m.created_at >= ? ORDER BY d.message_id",
+            &[n(since)],
+        )
+    }
+    /// Each delivery of a message with its host and receipt, for the
+    /// console.
+    pub fn net_deliveries(&self, id: f64) -> Result<Vec<Row>> {
+        self.all("SELECT agent, seen_at, host, receipt FROM deliveries WHERE message_id = ?", &[n(id)])
+    }
+
+    /// A handoff, made here (`host` null) or by another host.
+    pub fn add_handoff(&self, h: &Arg) -> Result<bool> {
+        let f = |k: &str| def(h.field(k), Arg::Null);
+        Ok(self
+            .run(
+                "INSERT OR IGNORE INTO handoffs (id, host, maker, to_agent, to_repo, to_scope, to_host, goal, done, next, files, branch, commit_sha, state, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)",
+                &[
+                    f("id"),
+                    f("host"),
+                    f("maker"),
+                    f("to_agent"),
+                    f("to_repo"),
+                    f("to_scope"),
+                    f("to_host"),
+                    f("goal"),
+                    f("done"),
+                    f("next"),
+                    def(h.field("files"), Arg::text("[]")),
+                    f("branch"),
+                    f("commit_sha"),
+                    f("created_at"),
+                    f("expires_at"),
+                ],
+            )?
+            .changes
+            > 0)
+    }
+    pub fn handoff(&self, id: &str) -> Result<Option<Row>> {
+        self.get("SELECT * FROM handoffs WHERE id = ?", &[Arg::text(id)])
+    }
+    /// The handoffs no one has taken that haven't lapsed.
+    /// How many handoffs made on `host` are open here.
+    pub fn open_handoffs_from(&self, host: &str, now: f64) -> Result<f64> {
+        Ok(self.get("SELECT COUNT(*) AS n FROM handoffs WHERE host = ? AND state = 'open' AND expires_at > ?", &[Arg::text(host), n(now)])?.and_then(|r| r.num("n")).unwrap_or(0.0))
+    }
+    pub fn open_handoffs(&self, now: f64) -> Result<Vec<Row>> {
+        self.all("SELECT * FROM handoffs WHERE state = 'open' AND expires_at > ? ORDER BY created_at", &[n(now)])
+    }
+    /// Handoffs no one took in time.
+    pub fn lapsing_handoffs(&self, now: f64) -> Result<Vec<Row>> {
+        self.all("SELECT * FROM handoffs WHERE state = 'open' AND expires_at <= ? ORDER BY created_at", &[n(now)])
+    }
+    /// Taken by `by`, if it's still open: whether this was the take.
+    pub fn take_handoff(&self, id: &str, by: &str, at: f64) -> Result<bool> {
+        Ok(self.run("UPDATE handoffs SET state = 'taken', taken_by = ?, taken_at = ? WHERE id = ? AND state = 'open'", &[Arg::text(by), n(at), Arg::text(id)])?.changes > 0)
+    }
+    /// What the making host decided, on another host's copy.
+    pub fn settle_handoff(&self, id: &str, state: &str, by: Option<&str>, at: f64) -> Result<()> {
+        self.run("UPDATE handoffs SET state = ?, taken_by = COALESCE(?, taken_by), taken_at = ? WHERE id = ?", &[Arg::text(state), Arg::opt_text(by), n(at), Arg::text(id)])?;
+        Ok(())
+    }
+    /// A session here asked the making host for it.
+    pub fn ask_handoff(&self, id: &str, by: &str) -> Result<()> {
+        self.run("UPDATE handoffs SET asked_by = ? WHERE id = ?", &[Arg::text(by), Arg::text(id)])?;
+        Ok(())
     }
 
     /// The remote reads logged: a week of them, and at most AUDIT_KEPT.
@@ -887,7 +1119,7 @@ mod tests {
     #[test]
     fn a_new_store_takes_every_step_and_keeps_messages() {
         let s = EngineStore::open(":memory:", 1000.0).unwrap();
-        assert_eq!(s.version().unwrap(), Version { from: 0, version: 7, newer: false });
+        assert_eq!(s.version().unwrap(), Version { from: 0, version: 8, newer: false });
         let id = s
             .send(&obj(&[("sender", "claude:a".into()), ("target", "codex:b".into()), ("body", "hi".into()), ("recipients", Arg::List(vec!["codex:b".into()]))]), n(1000.0))
             .unwrap();
@@ -898,6 +1130,38 @@ mod tests {
         s.touch("claude:a".into(), &obj(&[("app", "claude".into()), ("via", "mcp".into())]), n(5.0)).unwrap();
         assert_eq!(s.contact("claude:a".into()).unwrap().unwrap().get("pid"), &Cell::Null);
         assert!(matches!(s.touch("claude:a".into(), &obj(&[("via", "mcp".into())]), n(5.0)), Err(SqlError::Bind(_))));
+    }
+
+    #[test]
+    fn the_network_keeps_presence_receipts_claims_and_handoffs() {
+        let s = EngineStore::open(":memory:", 1000.0).unwrap();
+        s.set_net_presence("laptop", 5.0, 1000.0, true, "", "[]").unwrap();
+        s.set_net_presence("laptop", 6.0, 1001.0, false, "", "[{\"id\":\"claude:x\"}]").unwrap();
+        assert_eq!(s.net_presence("laptop").unwrap().unwrap().num("counter"), Some(6.0));
+        let id = s
+            .send(
+                &obj(&[("sender", "claude:a".into()), ("target", "@laptop:claude:x".into()), ("body", "hi".into()), ("recipients", Arg::List(vec!["@laptop:claude:x".into()]))]),
+                n(1000.0),
+            )
+            .unwrap();
+        s.set_message_net(id, None, "msg_1").unwrap();
+        s.set_delivery_net(id, "@laptop:claude:x", "laptop", "{}").unwrap();
+        assert_eq!(s.outbox(0.0).unwrap().len(), 1, "it waits for its receipt");
+        assert!(s.set_receipt(id, "@laptop:claude:x", "seen", 1002.0).unwrap());
+        assert!(!s.set_receipt(id, "@laptop:claude:x", "stored", 1003.0).unwrap(), "never back to an earlier state");
+        assert_eq!(s.outbox(0.0).unwrap().len(), 0);
+        assert_eq!(s.message_by_mid("msg_1", None).unwrap().unwrap().num("id"), Some(id));
+        assert!(s.message_by_mid("msg_1", Some("laptop")).unwrap().is_none());
+        s.put_net_claim("laptop", "github.com/x/y", "src/a.rs", "claude:x", Some("main"), "edit", None, 1000.0).unwrap();
+        assert_eq!(s.net_claims(1000.0).unwrap().len(), 1);
+        let h = obj(&[("id", "hof_1".into()), ("host", "laptop".into()), ("maker", "claude:x".into()), ("created_at", n(1000.0)), ("expires_at", n(2000.0))]);
+        assert!(s.add_handoff(&h).unwrap());
+        assert!(!s.add_handoff(&h).unwrap(), "once");
+        assert!(s.take_handoff("hof_1", "claude:a", 1500.0).unwrap());
+        assert!(!s.take_handoff("hof_1", "claude:b", 1501.0).unwrap(), "the first take wins");
+        s.drop_net_host("laptop").unwrap();
+        assert!(s.net_presence("laptop").unwrap().is_none());
+        assert_eq!(s.net_claims(1000.0).unwrap().len(), 0);
     }
 }
 

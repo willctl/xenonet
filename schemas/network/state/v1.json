@@ -1,0 +1,517 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/network/state/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "The network, as a host sees it",
+  "description": "GET /api/net/state: the network this machine is in, its gateway and link, the other hosts, and what waits.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "network/state/v1"
+    },
+    "network": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^net_[0-9a-f]{32}$"
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "id",
+            "name"
+          ],
+          "additionalProperties": {}
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "null: this machine isn't in a network"
+    },
+    "self": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,31}$",
+              "description": "The host's id in the network, picked by the person: never the machine's own name"
+            },
+            "keyId": {
+              "type": "string",
+              "pattern": "^xnk1_[a-z2-7]{32}$",
+              "description": "What people compare: xnk1_ and the base32 of the first 20 bytes of the SHA-256 of both public keys"
+            },
+            "window": {
+              "type": "boolean"
+            },
+            "founder": {
+              "type": "boolean"
+            },
+            "gateway": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "keyId",
+            "window",
+            "founder",
+            "gateway"
+          ],
+          "additionalProperties": {}
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "gateway": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "address": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "keyId": {
+              "type": "string",
+              "pattern": "^xnk1_[a-z2-7]{32}$",
+              "description": "What people compare: xnk1_ and the base32 of the first 20 bytes of the SHA-256 of both public keys"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "tunnel",
+                "lan",
+                "loopback"
+              ]
+            },
+            "link": {
+              "type": "string",
+              "enum": [
+                "off",
+                "connecting",
+                "live",
+                "offline",
+                "refused",
+                "removed"
+              ]
+            },
+            "since": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "description": "Epoch milliseconds"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 280
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "skewMs": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "address",
+            "keyId",
+            "kind",
+            "link",
+            "since",
+            "reason",
+            "skewMs"
+          ],
+          "additionalProperties": {}
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "hosts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,31}$",
+            "description": "The host's id in the network, picked by the person: never the machine's own name"
+          },
+          "keyId": {
+            "type": "string",
+            "pattern": "^xnk1_[a-z2-7]{32}$",
+            "description": "What people compare: xnk1_ and the base32 of the first 20 bytes of the SHA-256 of both public keys"
+          },
+          "window": {
+            "type": "boolean"
+          },
+          "founder": {
+            "type": "boolean"
+          },
+          "gateway": {
+            "type": "boolean"
+          },
+          "online": {
+            "type": "boolean"
+          },
+          "seen": {
+            "anyOf": [
+              {
+                "type": "number",
+                "description": "Epoch milliseconds"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "agents": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "waitsOnYou": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "you": {
+            "type": "boolean"
+          },
+          "youAt": {
+            "description": "When the person last worked at its console, by this machine's clock",
+            "anyOf": [
+              {
+                "type": "number",
+                "description": "Epoch milliseconds"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "self": {
+            "description": "This machine's own row",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "keyId",
+          "window",
+          "founder",
+          "gateway",
+          "online",
+          "seen",
+          "agents",
+          "waitsOnYou",
+          "you",
+          "platform"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "tickets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,31}$",
+            "description": "The host's id in the network, picked by the person: never the machine's own name"
+          },
+          "window": {
+            "type": "boolean"
+          },
+          "expires": {
+            "type": "number",
+            "description": "Epoch milliseconds"
+          }
+        },
+        "required": [
+          "host",
+          "window",
+          "expires"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "Tickets that wait; the ticket itself is shown once, where it was made"
+    },
+    "outbox": {
+      "type": "object",
+      "properties": {
+        "frames": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "oldest": {
+          "anyOf": [
+            {
+              "type": "number",
+              "description": "Epoch milliseconds"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "frames",
+        "bytes",
+        "oldest"
+      ],
+      "additionalProperties": {}
+    },
+    "rosterHead": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]*$",
+          "description": "base64url, no padding"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "rosterMismatch": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]{1,31}$",
+        "description": "The host's id in the network, picked by the person: never the machine's own name"
+      },
+      "description": "Hosts whose presence shows another roster head"
+    },
+    "titlesOnly": {
+      "type": "boolean"
+    },
+    "queues": {
+      "description": "On the gateway's host: what waits at the gateway for each host",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,31}$",
+            "description": "The host's id in the network, picked by the person: never the machine's own name"
+          },
+          "frames": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "host",
+          "frames",
+          "bytes"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "epoch": {
+      "description": "On the gateway's host: its queues' epoch, which hosts resume within",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]*$"
+    },
+    "joinClosedUntil": {
+      "description": "On the gateway's host: when the join route opens again, after 200 bad tickets in an hour; null while it's open",
+      "anyOf": [
+        {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "proposals": {
+      "description": "Roster entries signed by too few, waiting for the founder or a second window host to approve them",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]*$",
+            "description": "The entry's id, the hash of what it says apart from its signers: what POST /api/net/approve takes"
+          },
+          "op": {
+            "type": "string",
+            "enum": [
+              "found",
+              "add",
+              "remove",
+              "window",
+              "gateway"
+            ]
+          },
+          "host": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,31}$",
+            "description": "The host's id in the network, picked by the person: never the machine's own name"
+          },
+          "window": {
+            "type": "boolean"
+          },
+          "gateway": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 300
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For op gateway: the address it moves to"
+          },
+          "signers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,31}$",
+              "description": "The host's id in the network, picked by the person: never the machine's own name"
+            },
+            "description": "The hosts that signed it so far"
+          },
+          "at": {
+            "type": "number",
+            "description": "Epoch milliseconds"
+          }
+        },
+        "required": [
+          "id",
+          "op",
+          "host",
+          "window",
+          "gateway",
+          "signers",
+          "at"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "removed": {
+      "description": "This machine was removed from the network",
+      "type": "object",
+      "properties": {
+        "network": {
+          "type": "string",
+          "pattern": "^net_[0-9a-f]{32}$"
+        },
+        "host": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,31}$",
+          "description": "The host's id in the network, picked by the person: never the machine's own name"
+        },
+        "by": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,31}$",
+            "description": "The host's id in the network, picked by the person: never the machine's own name"
+          },
+          "description": "The hosts that signed the removal"
+        },
+        "at": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "n": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "The removal's place in the roster"
+        }
+      },
+      "required": [
+        "by",
+        "at",
+        "n"
+      ],
+      "additionalProperties": {}
+    },
+    "lan": {
+      "description": "The LAN address this machine's gateway listens on, when it's a LAN-only gateway",
+      "type": "string",
+      "maxLength": 300
+    },
+    "simulated": {
+      "description": "XenoNet Dev's made-up network (simulate net-…)",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "schema",
+    "network",
+    "self",
+    "gateway",
+    "hosts",
+    "tickets",
+    "outbox",
+    "rosterHead",
+    "rosterMismatch",
+    "titlesOnly"
+  ],
+  "additionalProperties": {}
+}

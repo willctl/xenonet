@@ -11,6 +11,9 @@
 //     for each actor that uses it, how its app's connection stands, with
 //     its fix beside it, and Connect…: numbered steps, each with its Copy,
 //     that wait for the app's first call (gateway-panel.js);
+//   - under it, the switch that lets agents that speak A2A reach XenoNet,
+//     the Agent Card's address and each such agent's default target
+//     (a2a-panel.js), and Connect…'s As an A2A agent;
 //   - how each actor that reports itself is woken when a message arrives
 //     (core/actors/wake.js, wake-panel.js), in its row, and Wake… to set
 //     it: a webhook, whose URL and key go to the credential store, a
@@ -44,6 +47,7 @@ import { handoff, wakeHelp } from "../core/actors/handoff.js";
 import { keepSecret, forgetSecrets, secretHtml, secretClick, hideOnBlur } from "./secret.js";
 import { gatewayHtml, gateHtml, gatewaySetupHtml, readPick, gatewayAskHtml, gatewayTokenHtml, gatewayMovedHtml, connected, waitWords } from "./gateway-panel.js";
 import { wakeHtml, wakeViewHtml, readWake } from "./wake-panel.js";
+import { a2aHtml } from "./a2a-panel.js";
 import { remoteSectionHtml, remoteRow, tunnelStateHtml, tunnelFootHtml } from "./remote-panel.js";
 import { createRemoteViews } from "./remote-views.js";
 
@@ -248,6 +252,7 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
       <div data-ac-gateway-section hidden>
         <div class="d-k">actor gateway</div>
         <div data-ac-gateway-state></div>
+        <div data-ac-a2a-state></div>
       </div>
       <div data-ac-remote-section hidden>${remoteSectionHtml()}</div>
       <p class="pj-note ac-keyless" data-ac-keyless hidden>This page can look, but only XenoNet's own window, the desktop app, can allow, add or remove actors, switch observers or give out tokens.</p>
@@ -278,6 +283,17 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
   }
   const gateOf = (id) => gateway?.actors?.find((a) => a.id === id) ?? null;
 
+  // A2A through the gateway (a2a-panel.js): its switch, the card's address
+  // and the agents that called, for a window of the owner's.
+  let a2a = null;
+  let a2aDrawn = "";
+  async function loadA2a() {
+    const r = await calls.call("GET", "/api/a2a").catch(() => null);
+    a2a = r?.ok ? r.data : null;
+  }
+  // The card's address while A2A is on and the gateway has one.
+  const a2aCard = () => (a2a?.on && a2a.card) || null;
+
   // How each actor that reports itself is woken when a message arrives
   // (core/actors/wake.js), for a window that can change it; never a
   // webhook's URL or key, which stay in the credential store.
@@ -294,7 +310,10 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
   // The list as it is now, put in place.
   function drawList() {
     const body = panel.querySelector(".m-body");
-    if (!body.querySelector("[data-ac-actors]")) body.innerHTML = listHtml();
+    if (!body.querySelector("[data-ac-actors]")) {
+      body.innerHTML = listHtml();
+      a2aDrawn = "";
+    }
     const rv = requests.view();
     const waiting = rv.canDecide ? rv.requests : [];
     const asks = rv.canDecide ? rv.gatewayAsks ?? [] : [];
@@ -309,6 +328,9 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
     const gate = body.querySelector("[data-ac-gateway-section]");
     gate.hidden = !gateway;
     if (gateway) body.querySelector("[data-ac-gateway-state]").innerHTML = gatewayHtml(gateway, { canDecide });
+    // Drawn again only when it changed, so a target being typed stays.
+    const a2aNow = a2a ? a2aHtml(a2a, { canDecide }) : "";
+    if (a2aNow !== a2aDrawn) body.querySelector("[data-ac-a2a-state]").innerHTML = a2aDrawn = a2aNow;
     watchGateway();
     // Remote connections, for a window that can see them.
     const remoteView = remote?.view();
@@ -393,7 +415,7 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
       const el = panel.querySelector("[data-ac-wait]");
       if (el && called(v)) {
         el.dataset.acWait = "done";
-        el.querySelector(".ac-step-text").textContent = waitWords(true, handoff(productOf(v.id), { url: "", token: v.token }).app ?? nameOf(v.id));
+        el.querySelector(".ac-step-text").textContent = waitWords(true, handoff(v.kind === "a2a" ? "a2a" : productOf(v.id), { url: "", token: v.token }).app ?? nameOf(v.id));
         panel.querySelector("[data-ac-done]")?.classList.add("primary");
         sfx("success");
       }
@@ -439,7 +461,8 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
     const SUB = { wake: "When a message arrives for it", token: "Shown once", "gateway-token": "Its token shows once", "gateway-moved": "Its token still works", "gateway-setup": "How apps in other clouds reach XenoNet", add: "A script or daemon of your own", preview: "Nothing is approved yet", pair: "Read-only, for the projects you pick" };
     panel.querySelector(".m-sub").textContent = SUB[view.name] ?? "";
     if (REMOTE[view.name]) body.innerHTML = remoteViews.html(view, actors);
-    else if (view.name === "gateway") body.innerHTML = gatewayAskHtml(view, { gateway, a: actorNamed(view.id), name: nameOf(view.id), again: !!gateOf(view.id)?.token });
+    else if (view.name === "gateway") body.innerHTML = gatewayAskHtml(view, { gateway, a: actorNamed(view.id), name: nameOf(view.id), again: !!gateOf(view.id)?.token, a2a: a2aCard() });
+    else if (view.name === "gateway-token" && view.kind === "a2a") body.innerHTML = gatewayTokenHtml(view, { url: a2aCard() ?? "", product: "a2a", name: nameOf(view.id), done: called(view) });
     else if (view.name === "gateway-token") body.innerHTML = gatewayTokenHtml(view, { url: view.url ?? gateway?.url ?? "", product: productOf(view.id), name: nameOf(view.id), done: called(view) });
     else if (view.name === "gateway-moved") body.innerHTML = gatewayMovedHtml(gateway?.url ?? "", productOf(view.id));
     else if (view.name === "gateway-setup") body.innerHTML = gatewaySetupHtml(view, gateway);
@@ -585,7 +608,24 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
       if (!r) return go({ name: "list" });
       readTokens();
       loadGateway();
-      return go({ name: "gateway-token", id: r.data.id, token: r.data.token, url: r.data.url, madeAt: Date.now() });
+      return go({ name: "gateway-token", id: r.data.id, token: r.data.token, url: r.data.url, madeAt: Date.now(), kind: d.acKind === "a2a" ? "a2a" : null });
+    }
+    if (d.acA2aOn !== undefined) {
+      t.disabled = true;
+      const r = await act(
+        () => calls.call("POST", "/api/a2a", { on: !a2a?.on }),
+        (x) => (x.data.on ? "A2A agents can reach XenoNet" : "A2A agents can't reach XenoNet"),
+      );
+      if (r) a2a = r.data;
+      return render();
+    }
+    if (d.acA2aSave) {
+      const input = body.querySelector(`[data-ac-a2a-target="${CSS.escape(d.acA2aSave)}"]`);
+      t.disabled = true;
+      const r = await act(() => calls.call("POST", "/api/a2a", { actor: slugOf(d.acA2aSave), target: input?.value.trim() || null }), `Saved ${nameOf(d.acA2aSave)}'s default target`);
+      if (r) a2a = r.data;
+      t.disabled = false;
+      return render();
     }
     if (d.acGatewaySetup !== undefined) {
       await loadGateway();
@@ -722,10 +762,10 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
       for (const el of panel.querySelectorAll("[data-since]")) el.textContent = timeAgo(Number(el.dataset.since));
       for (const el of panel.querySelectorAll("[data-until]")) el.textContent = leftWords(Number(el.dataset.until));
       // The gateway's checks and its apps' calls, as they come.
-      if (view.name === "list") Promise.all([gateway?.on ? loadGateway() : null, loadWakes()]).then(() => isOpen() && view.name === "list" && drawList());
+      if (view.name === "list") Promise.all([gateway?.on ? loadGateway() : null, a2a?.on ? loadA2a() : null, loadWakes()]).then(() => isOpen() && view.name === "list" && drawList());
     }, 15000);
     const mine = panel;
-    [canDecide] = await Promise.all([calls.ready(), loadObservers(), requests.refresh(), readTokens(), remote?.refresh(), loadGateway()]);
+    [canDecide] = await Promise.all([calls.ready(), loadObservers(), requests.refresh(), readTokens(), remote?.refresh(), loadGateway(), loadA2a()]);
     await loadWakes();
     if (panel !== mine) return;
     loaded = true;

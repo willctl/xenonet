@@ -18,6 +18,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use xenonet_base::text::{js_trim, truthy};
+use xenonet_sources::claude::is_uuid;
 
 /// The Agent SDK release whose readings these are, as the lenient
 /// readers pick their schema by it.
@@ -25,11 +26,6 @@ pub const VERSION: &str = "0.3.287";
 
 const CHUNK: u64 = 65536;
 const SCAN_MAX: u64 = 16 * 1024 * 1024;
-
-fn is_uuid(s: &str) -> bool {
-    let b = s.as_bytes();
-    b.len() == 36 && b.iter().enumerate().all(|(i, c)| if matches!(i, 8 | 13 | 18 | 23) { *c == b'-' } else { c.is_ascii_hexdigit() })
-}
 
 fn sorted_names(dir: &Path) -> Vec<std::fs::DirEntry> {
     xenonet_base::paths::read_dir_sorted(dir).unwrap_or_default()

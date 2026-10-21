@@ -10,7 +10,6 @@
 //! never the endpoint, commands, prompts, previews, tool input or results.
 
 use crate::native::files::Files;
-use crate::native::node_path;
 use crate::native::{by_num, edits_out, fits_id, js_max, js_min, older, prune_edits, push_edit, titled, Edits, NativeReader, Out, Vendor, DAY_MS, SESSIONS_MAX};
 use crate::session::{RunSession, Via};
 use serde_json::Value;
@@ -19,6 +18,7 @@ use xenonet_base::fs::FsError;
 use xenonet_base::ids::{is_session_app, session_apps};
 use xenonet_base::json::{self, number_string};
 use xenonet_base::jsstr;
+use xenonet_base::nodepath::Style;
 use xenonet_base::ordered::OrderedMap;
 use xenonet_base::paths::path_style;
 use xenonet_base::text::{is_blank, js_string};
@@ -74,7 +74,7 @@ fn nonempty(v: Option<&Value>) -> Option<String> {
 }
 
 fn absolute(p: &str) -> bool {
-    !p.is_empty() && node_path::is_absolute(path_style(p), p)
+    !p.is_empty() && Style::from(path_style(p)).is_absolute(p)
 }
 
 /// One NDJSON line: the event, or why it's passed over (malformed,
@@ -100,9 +100,9 @@ pub fn read_record(line: &str) -> Result<Event, &'static str> {
     let project = nonempty(r.get("project_path"));
     let mut file = if EDITS.contains(&kind.as_str()) { nonempty(r.get("file_path")) } else { None };
     if let Some(f) = file.clone().filter(|f| !absolute(f)) {
-        file = project.as_deref().filter(|p| absolute(p)).map(|p| node_path::join(path_style(p), &[p, &f]));
+        file = project.as_deref().filter(|p| absolute(p)).map(|p| Style::from(path_style(p)).join(&[p, &f]));
     }
-    let file = file.map(|f| node_path::resolve(path_style(&f), &[&f]));
+    let file = file.map(|f| Style::from(path_style(&f)).resolve(&[&f]));
     Ok(Event {
         app,
         kind,
