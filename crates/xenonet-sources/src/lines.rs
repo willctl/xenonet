@@ -12,6 +12,7 @@ use serde_json::{Map, Value};
 use xenonet_base::json;
 use xenonet_base::text::{is_blank, join, js_number, js_trim, js_trim_start, truthy, type_of};
 use xenonet_base::time::parse_iso;
+use xenonet_base::usage::{Figure, Speed, TokenUsage};
 
 /// What JS would throw reading a record.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,18 +71,14 @@ fn items<'a>(v: Js<'a>, what: &str) -> Result<&'a [Value], TypeError> {
 static EMPTY_OBJECT: std::sync::LazyLock<Value> = std::sync::LazyLock::new(|| Value::Object(Map::new()));
 static EMPTY_ARRAY: Value = Value::Array(Vec::new());
 
-/// A call's tokens as XenoNet counts them. `cache_write5m` is the record's
-/// own figure, or worked out from the others, so it can be a number JS
-/// would get by arithmetic (NaN included).
+/// A message's usage as an assistant line says it: the call's tokens, each
+/// figure as the line wrote it (`?? 0`) except a five-minute cache write it
+/// doesn't give, worked out from the others with JS's arithmetic (NaN
+/// included); and all its cache writes, which live counts in the context.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Usage {
-    pub input: Value,
-    pub cache_read: Value,
+    pub tokens: TokenUsage<Figure>,
     pub cache_write: Value,
-    pub cache_write5m: Result<Value, f64>,
-    pub cache_write1h: Value,
-    pub output: Value,
-    pub fast: bool,
 }
 
 /// A tool result a user line carries.
@@ -198,22 +195,25 @@ impl ClaudeLine {
         let or0 = |v: Js<'_>| nn(v).cloned().unwrap_or_else(|| Value::from(0));
         let cc = prop(u, "cache_creation")?;
         let write1h = or0(opt_prop(cc, "ephemeral_1h_input_tokens"));
-        let cache_write5m = match nn(opt_prop(cc, "ephemeral_5m_input_tokens")) {
-            Some(v) => Ok(v.clone()),
+        let cache_write_5m = match nn(opt_prop(cc, "ephemeral_5m_input_tokens")) {
+            Some(v) => Figure::of(Some(v)),
             // Math.max(0, written - write1h), with JS's arithmetic.
             None => {
                 let d = js_number(Some(&or0(prop(u, "cache_creation_input_tokens")?))) - js_number(Some(&write1h));
-                Err(if d.is_nan() { f64::NAN } else { d.max(0.0) })
+                Figure::Worked(if d.is_nan() { f64::NAN } else { d.max(0.0) })
             }
         };
+        let written = |v: Value| Figure::Written(Some(v));
         Ok(Some(Usage {
-            input: or0(prop(u, "input_tokens")?),
-            cache_read: or0(prop(u, "cache_read_input_tokens")?),
+            tokens: TokenUsage {
+                input: written(or0(prop(u, "input_tokens")?)),
+                cache_read: written(or0(prop(u, "cache_read_input_tokens")?)),
+                cache_write_5m,
+                cache_write_1h: written(write1h),
+                output: written(or0(prop(u, "output_tokens")?)),
+                speed: if is_str(prop(u, "speed")?, "fast") { Speed::FAST } else { Speed::STANDARD },
+            },
             cache_write: or0(prop(u, "cache_creation_input_tokens")?),
-            cache_write5m,
-            cache_write1h: write1h,
-            output: or0(prop(u, "output_tokens")?),
-            fast: is_str(prop(u, "speed")?, "fast"),
         }))
     }
     /// Its content blocks, as the vendor wrote them.
@@ -380,7 +380,8 @@ mod tests {
         assert_eq!((user.text().unwrap(), user.ts().unwrap()), ("Fix the parser".to_string(), 1791028800000.0));
         assert_eq!(user.effort().unwrap(), None);
         let usage = ClaudeLine { raw: json!({ "message": { "usage": { "input_tokens": 10, "cache_creation_input_tokens": 300, "cache_creation": { "ephemeral_1h_input_tokens": 100 }, "speed": "fast" } } }) }.usage().unwrap().unwrap();
-        assert_eq!((usage.cache_write5m, usage.fast, usage.output), (Err(200.0), true, json!(0)));
+        let t = usage.tokens;
+        assert_eq!((t.cache_write_5m, t.speed, t.output, usage.cache_write), (Figure::Worked(200.0), Speed::FAST, Figure::Written(Some(json!(0))), json!(300)));
         assert!(ClaudeLine { raw: json!({ "message": { "content": [null] } }) }.has_results().is_err(), "x.type of null throws, as in JS");
         assert!(ClaudeLine { raw: json!({ "message": { "content": { "text": "an object" } } }) }.text().is_err());
         assert!(ClaudeLine { raw: Value::Null }.kind().is_err());

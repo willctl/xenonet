@@ -25,6 +25,7 @@ import { execFile } from "node:child_process";
 import path from "node:path";
 import { parseSelector, matches as selects, formatSelector } from "../delivery/selector.js";
 import { pathStyle } from "../paths.js";
+import { patchPaths } from "../patch.js";
 import { YOU, parseActorId, SESSION_LOCAL } from "../schema/ids.js";
 import { productOf } from "../actors/products.js";
 import { quoted } from "./attest.js";
@@ -82,7 +83,7 @@ export function editPaths(toolName, input, cwd) {
   const abs = (p) => (path.isAbsolute(p) ? p : pathStyle(cwd ?? p).resolve(cwd ?? "/", p));
   for (const k of ["file_path", "notebook_path", "path"]) if (typeof input?.[k] === "string") out.add(abs(input[k]));
   const scan = (v) => {
-    if (typeof v === "string") for (const m of v.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$/gm)) out.add(abs((m[1] ?? m[2]).trim()));
+    if (typeof v === "string") for (const p of patchPaths(v)) out.add(abs(p));
     else if (Array.isArray(v)) v.forEach(scan);
     else if (v && typeof v === "object") Object.values(v).forEach(scan);
   };

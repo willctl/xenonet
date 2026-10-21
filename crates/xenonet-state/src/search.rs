@@ -131,7 +131,8 @@ fn doc(role: &'static str, text: String, ts: f64) -> Vec<Doc> {
 /// `user_events`: a Codex rollout with no completed user messages at all,
 /// whose prompts are its user_message events.
 pub fn docs_from_line(raw: Value, app: &str, user_events: bool) -> Result<Vec<Doc>, TypeError> {
-    if app == "claude" {
+    // Any app but Claude Code is read as Codex.
+    if xenonet_base::apps::tailed_app(app, "codex") == "claude" {
         let o = ClaudeLine { raw };
         let kind = o.kind()?;
         if is_str(kind, "user") && !xenonet_base::text::truthy(o.meta()?) {
@@ -222,7 +223,8 @@ static UUID_FILE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([0-9a-f]{8}-[
 pub fn session_of(file: &str, app: &str) -> Option<String> {
     let norm = file.replace('\\', "/");
     let low = norm.to_ascii_lowercase();
-    if app == "claude" {
+    // Any app but Claude Code is read as Codex.
+    if xenonet_base::apps::tailed_app(app, "codex") == "claude" {
         if let Some(m) = SUBAGENT.captures(&low).and_then(|c| c.get(1)) {
             return Some(format!("claude:{}", &norm[m.range()]));
         }

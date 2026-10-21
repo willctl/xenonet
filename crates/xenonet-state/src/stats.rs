@@ -23,6 +23,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::LazyLock;
 use xenonet_base::text::{js_number, js_trim, truthy};
+use xenonet_base::usage::{Figure, Speed, TokenUsage};
 use xenonet_base::{fs as xfs, json, jsstr, paths, pricing};
 use xenonet_sources::lines::{has_user_messages, is_codex_prompt, opt_prop, prop, ClaudeLine, CodexLine, Js, TypeError};
 use xenonet_sources::live::{categorize, clip, mcp_server_of};
@@ -275,40 +276,23 @@ pub enum Kind {
     Other,
 }
 
-/// A call's token figure: as the record wrote it, or worked out.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Tok {
-    V(Option<Value>),
-    N(f64),
+/// A call's token figure as stats adds and prices it.
+trait Tok {
+    fn prim(&self) -> Result<Prim, TypeError>;
+    fn for_price(&self) -> Result<Option<f64>, TypeError>;
 }
 
-impl Default for Tok {
-    fn default() -> Self {
-        Tok::V(None)
-    }
-}
-
-impl Tok {
-    fn of(v: Js<'_>) -> Tok {
-        Tok::V(v.cloned())
-    }
-    // `v ?? 0`.
-    fn or0(v: Js<'_>) -> Tok {
-        match v {
-            None | Some(Value::Null) => Tok::N(0.0),
-            v => Tok::V(v.cloned()),
-        }
-    }
+impl Tok for Figure {
     fn prim(&self) -> Result<Prim, TypeError> {
         match self {
-            Tok::V(v) => Prim::of(v.as_ref()),
-            Tok::N(n) => Ok(Prim::Num(*n)),
+            Figure::Written(v) => Prim::of(v.as_ref()),
+            Figure::Worked(n) => Ok(Prim::Num(*n)),
         }
     }
     // As the pricing twin reads a figure: nothing for null, else Number(v).
-    fn number(&self) -> Result<Option<f64>, TypeError> {
+    fn for_price(&self) -> Result<Option<f64>, TypeError> {
         match self {
-            Tok::V(None | Some(Value::Null)) => Ok(None),
+            Figure::Written(None | Some(Value::Null)) => Ok(None),
             t => Ok(Some(t.prim()?.num())),
         }
     }
@@ -323,10 +307,9 @@ pub struct Event {
     pub agent: Val,
     pub model: Val,
     pub effort: Val,
-    /// input, cacheRead, cacheWrite5m, cacheWrite1h, output.
-    pub tokens: [Tok; 5],
-    pub fast: Option<Value>,
-    pub priority: Option<Value>,
+    /// A call's tokens, each figure as the line wrote it or worked out, and
+    /// its speed (a JS event's fast and priority, as truthy).
+    pub tokens: TokenUsage<Figure>,
     pub window: Option<Value>,
     pub id: Val,
     pub name: Val,
@@ -342,9 +325,7 @@ impl Event {
             agent: Val::default(),
             model: Val::default(),
             effort: Val::default(),
-            tokens: Default::default(),
-            fast: None,
-            priority: None,
+            tokens: TokenUsage::default(),
             window: None,
             id: Val::default(),
             name: Val::default(),
@@ -374,11 +355,16 @@ impl Event {
         ev.model = ids.val(prop(e, "model")?);
         ev.effort = ids.val(prop(e, "effort")?);
         let k = prop(e, "tokens")?;
-        for (i, name) in ["input", "cacheRead", "cacheWrite5m", "cacheWrite1h", "output"].iter().enumerate() {
-            ev.tokens[i] = Tok::of(opt_prop(k, name));
-        }
-        ev.fast = prop(e, "fast")?.cloned();
-        ev.priority = prop(e, "priority")?.cloned();
+        let figure = |name: &str| Figure::of(opt_prop(k, name));
+        let speed = Speed { fast: truthy(prop(e, "fast")?), priority: truthy(prop(e, "priority")?) };
+        ev.tokens = TokenUsage {
+            input: figure("input"),
+            cache_read: figure("cacheRead"),
+            cache_write_5m: figure("cacheWrite5m"),
+            cache_write_1h: figure("cacheWrite1h"),
+            output: figure("output"),
+            speed,
+        };
         ev.window = prop(e, "window")?.cloned();
         ev.id = ids.val(prop(e, "id")?);
         ev.name = ids.val(prop(e, "name")?);
@@ -472,14 +458,7 @@ pub fn claude_events(files: Vec<File>, ids: &mut EventIds) -> Result<Vec<Event>,
                     e.agent = agent.clone();
                     e.model = ids.val(Some(nn(o.model()?).unwrap_or(&Value::String("unknown".into()))));
                     e.effort = ids.val(o.effort()?);
-                    e.tokens = [
-                        Tok::of(Some(&u.input)),
-                        Tok::of(Some(&u.cache_read)),
-                        u.cache_write5m.map_or_else(Tok::N, |v| Tok::V(Some(v))),
-                        Tok::of(Some(&u.cache_write1h)),
-                        Tok::of(Some(&u.output)),
-                    ];
-                    e.fast = Some(Value::Bool(u.fast));
+                    e.tokens = u.tokens;
                     events.push(e);
                 }
                 for b in blocks_of(o.blocks()?)? {
@@ -626,11 +605,11 @@ pub fn codex_events(lines: Vec<Value>, ids: &mut EventIds) -> Result<Vec<Event>,
                 total = now;
                 let u = Some(nn(prop(info, "last_token_usage")?).unwrap_or(&EMPTY));
                 let input = match nn(prop(u, "input_tokens")?) {
-                    Some(v) => Tok::of(Some(v)),
-                    None => Tok::N(max0(Tok::or0(prop(u, "total_tokens")?).prim()?.num() - Tok::or0(prop(u, "output_tokens")?).prim()?.num())),
+                    Some(v) => Figure::of(Some(v)),
+                    None => Figure::Worked(max0(Figure::or0(prop(u, "total_tokens")?).prim()?.num() - Figure::or0(prop(u, "output_tokens")?).prim()?.num())),
                 };
-                let cached = Tok::or0(prop(u, "cached_input_tokens")?);
-                let write = Tok::or0(prop(u, "cache_write_input_tokens")?);
+                let cached = Figure::or0(prop(u, "cached_input_tokens")?);
+                let write = Figure::or0(prop(u, "cache_write_input_tokens")?);
                 let fresh = max0(input.prim()?.num() - cached.prim()?.num() - write.prim()?.num());
                 let mut e = Event::new(Kind::Call, t);
                 e.agent = ids.val(Some(&Value::Null));
@@ -640,8 +619,14 @@ pub fn codex_events(lines: Vec<Value>, ids: &mut EventIds) -> Result<Vec<Event>,
                     model.clone()
                 };
                 e.effort = effort.clone();
-                e.tokens = [Tok::N(fresh), cached, write, Tok::N(0.0), Tok::or0(prop(u, "output_tokens")?)];
-                e.priority = Some(Value::Bool(priority));
+                e.tokens = TokenUsage {
+                    input: Figure::Worked(fresh),
+                    cache_read: cached,
+                    cache_write_5m: write,
+                    cache_write_1h: Figure::Worked(0.0),
+                    output: Figure::or0(prop(u, "output_tokens")?),
+                    speed: Speed { fast: false, priority },
+                };
                 e.window = Some(nn(prop(info, "model_context_window")?).cloned().unwrap_or(Value::Null));
                 events.push(e);
             }
@@ -791,12 +776,11 @@ pub fn summarize(events: &[Event], app: Js<'_>) -> Result<Out, TypeError> {
                 // A call after the turn ended (a subagent finishing, a hook)
                 // still counts towards it.
                 turn.end = max(turn.end, e.t);
-                let k = &e.tokens;
                 let model = to_str_or_empty(e.model.js())?;
-                let figures =
-                    pricing::Tokens { input: k[0].number()?, cache_read: k[1].number()?, cache_write5m: k[2].number()?, cache_write1h: k[3].number()?, output: k[4].number()? };
-                let parts = pricing::cost_parts(&model, Some(e.t), &figures, truthy(e.fast.as_ref()), truthy(e.priority.as_ref()));
-                let [input, cache_read, write5m, write1h, output] = [k[0].prim()?, k[1].prim()?, k[2].prim()?, k[3].prim()?, k[4].prim()?];
+                let figures = e.tokens.as_ref().try_map(Tok::for_price)?;
+                let parts = pricing::cost_parts(&model, Some(e.t), &figures);
+                let k = e.tokens.as_ref().try_map(Tok::prim)?;
+                let [input, cache_read, write5m, write1h, output] = [k.input, k.cache_read, k.cache_write_5m, k.cache_write_1h, k.output];
                 let tokens = [input.clone(), cache_read.clone(), write5m.add(&write1h), output.clone()];
                 let sum = tokens.iter().fold(Prim::Num(0.0), |a, x| a.add(x));
                 let paid = parts.map_or(0.0, |c| c.total);
@@ -1181,7 +1165,12 @@ impl Kept {
 pub fn session_stats(session_id: &str, files: Vec<File>) -> Result<Out, TypeError> {
     let app = session_id.split(':').next().unwrap_or_default();
     let mut ids = EventIds::default();
-    let events = if app == "codex" { codex_events(files.into_iter().next().map(|f| f.lines).unwrap_or_default(), &mut ids)? } else { claude_events(files, &mut ids)? };
+    // Any app but Codex is read as Claude Code.
+    let events = if xenonet_base::apps::tailed_app(app, "claude") == "codex" {
+        codex_events(files.into_iter().next().map(|f| f.lines).unwrap_or_default(), &mut ids)?
+    } else {
+        claude_events(files, &mut ids)?
+    };
     let Out::Obj(mut fields) = summarize(&events, Some(&Value::String(app.to_string())))? else { unreachable!() };
     fields.insert(0, ("id".into(), Out::Str(session_id.to_string())));
     Ok(Out::Obj(fields))

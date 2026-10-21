@@ -8,11 +8,12 @@ import fs from "node:fs";
 import { Block } from "../blocks/lifecycle.js";
 import { reader } from "../vendor.js";
 import { native } from "../../index.js";
+import { APP } from "../../../../../core/apps.js";
 import { FAILED, guarded, ioOf, liveOf, mapOfRuns, pathArg } from "../../native-readers.js";
 
 export const SOURCE = "github/copilot-cli/session-event";
 // Copilot CLI's built-in file tools; str_replace_editor's view isn't an edit.
-export const EDIT_TOOLS = new Set(["str_replace_editor", "edit", "create", "write", "apply_patch"]);
+export const EDIT_TOOLS = new Set(APP.copilot.editTools);
 
 export const sessionIdOf = (id) => native.copilotSessionIdOf(String(id)) ?? null;
 

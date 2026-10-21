@@ -19,6 +19,8 @@ import { ClaudeLine, CodexLine, linesOf, isCodexPrompt } from "./lines.js";
 import { claudeSignal, codexSignal } from "./refusals/detect.js";
 import { costParts, plainModel, priorityTier, PRICES_CHECKED } from "./pricing.js";
 import { isContextServer } from "./xenolith.js";
+import { APP, tailedApp } from "./apps.js";
+import { patchPaths } from "./patch.js";
 
 const PRIME_WINDOW_MS = 24 * 3600e3;
 const SWEEP_MS = 2000;
@@ -123,8 +125,10 @@ function filesOf(input) {
   return [input.file_path, input.notebook_path, input.path].filter((p) => typeof p === "string" && /[\\/]/.test(p));
 }
 
+// The files an apply_patch adds, updates and deletes. Live leaves out the
+// names it moves files to (`*** Move to:`).
 function patchFiles(text) {
-  return [...String(text ?? "").matchAll(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm)].map((m) => m[1].trim());
+  return patchPaths(String(text ?? ""), { moves: false });
 }
 
 function diffLines(prefix, text, max = 40) {
@@ -188,7 +192,9 @@ class LiveSession {
     // which prices its calls.
     this.provider = null;
     this.priority = false;
-    this.context = { used: 0, window: app === "codex" ? 258400 : 200000 };
+    // The app's context window until a line says otherwise; any app but
+    // Codex has Claude Code's.
+    this.context = { used: 0, window: APP[tailedApp(app, "claude")].context };
     this.turnContexts = [];
     this.model = null;
     this.turn = { active: false, startedAt: null };
@@ -534,11 +540,13 @@ export class LiveTelemetry extends EventEmitter {
       const rec = linesOf(f.app).line(line, f);
       if (!rec) return;
       this.status.lines++;
+      // Any app but Codex is read as Claude Code, as linesOf reads it.
+      const codex = tailedApp(f.app, "claude") === "codex";
       // A provider's refusal, as its line marks it (core/refusals): kept
       // whether read as history or live, told to you only when live.
-      const sig = f.app === "codex" ? codexSignal(rec.raw) : claudeSignal(rec.raw);
+      const sig = codex ? codexSignal(rec.raw) : claudeSignal(rec.raw);
       if (sig) this.emit("refusal", { signal: sig, sessionId: f.sessionId, app: f.app, agentId: f.agentId ?? null, file: f.file ?? null, cwd: typeof rec.raw?.cwd === "string" ? rec.raw.cwd : null, model: this.sessions.get(f.sessionId)?.model ?? null, live: !prime });
-      if (f.app === "codex") this.applyCodex(f, rec, !prime);
+      if (codex) this.applyCodex(f, rec, !prime);
       else this.applyClaude(f, rec, !prime);
     } catch {
       this.status.errors++;

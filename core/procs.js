@@ -18,14 +18,16 @@
 import { execFile } from "node:child_process";
 import net from "node:net";
 import path from "node:path";
+import { APPS } from "./apps.js";
 
 const TABLE_MS = 1500;
 // New Hermes.app bundles a census reads the ids of, at most.
 const BUNDLES_AT_ONCE = 16;
 
-// The developer team that signs each agent app (codesign's TeamIdentifier):
-// Anthropic's for Claude Code, OpenAI's for Codex.
-const TEAMS = { claude: "Q6L2SF6YDW", codex: "2DC432GLL2" };
+// The developer team that signs each agent app (codesign's TeamIdentifier),
+// as the app registry has it: Anthropic's for Claude Code, OpenAI's for
+// Codex.
+const TEAMS = Object.fromEntries(APPS.filter((a) => a.team).map((a) => [a.id, a.team]));
 // The teams that sign the actor apps whose makers sign them, by product:
 // Grok Bot is Cursor's (Anysphere), Muse is Meta's. Their actors register
 // and report only from under the app as its maker built it

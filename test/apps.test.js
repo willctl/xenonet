@@ -1,0 +1,90 @@
+// The app registry (core/apps.js): each entry fits app/v1, it is what the
+// session ids and the Rust's copy say, its products are the provider drift
+// check's, and its values are the ones the code it feeds reads.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { APPS, APP, TAILED, appsWith, tailedApp } from "../core/apps.js";
+import { SESSION_APPS, appOfSession } from "../core/schema/ids.js";
+import { check, explain } from "../core/schema/index.js";
+import { CAPABILITIES } from "../core/schema/app.js";
+import { LEFT_OUT, readRecord } from "../core/numbat.js";
+import { PROVIDERS } from "../scripts/provider-drift/registry.mjs";
+import { event } from "./fixtures/numbat.js";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const read = (rel) => fs.readFileSync(path.join(root, rel), "utf8");
+
+test("every entry fits app/v1, strictly", () => {
+  for (const app of APPS) {
+    const r = check("app/v1", JSON.parse(JSON.stringify(app)), { strict: true });
+    assert.ok(r.ok, `${app.id} doesn't fit app/v1:\n${explain(r)}`);
+  }
+  for (const bad of [{ id: "x", name: "X" }, { id: "X", name: "X", numbat: [] }, { id: "x", name: "X", numbat: [], has: ["teleport"] }, { id: "x", name: "X", numbat: [], connect: { format: "claude-settings", events: [["A", "b", "c"]] } }]) {
+    assert.equal(check("app/v1", bad).ok, false, JSON.stringify(bad));
+  }
+});
+
+test("the registry is what session ids say, in their order", () => {
+  assert.deepEqual(Object.entries(SESSION_APPS), APPS.map((a) => [a.id, a.name]));
+  assert.equal(new Set(APPS.map((a) => a.id)).size, APPS.length, "each id once");
+  for (const a of APPS) assert.equal(appOfSession(`${a.id}:0123456789`), a.id);
+  assert.deepEqual(Object.keys(APP), APPS.map((a) => a.id));
+});
+
+test("the Rust's copy of the registry is current: node scripts/apps.mjs writes it", () => {
+  execFileSync(process.execPath, ["scripts/apps.mjs", "--check"], { cwd: root, stdio: "pipe" });
+});
+
+test("every product an entry names is the provider drift check's, and every source the drift log names belongs to one", () => {
+  const providers = new Set(PROVIDERS.map((p) => p.id));
+  for (const a of APPS) for (const p of a.products ?? []) assert.ok(providers.has(p), `${a.id}'s ${p} is in scripts/provider-drift/registry.mjs`);
+  const owners = (source) => PROVIDERS.filter((p) => p.sources.includes(source)).map((p) => p.id);
+  const js = read("core/drift.js");
+  const jsSources = [...js.slice(js.indexOf("const SOURCES = {"), js.indexOf("};", js.indexOf("const SOURCES = {"))).matchAll(/^\s+"([^"]+)": /gm)].map((m) => m[1]);
+  const rs = read("crates/xenonet-schema/src/drift.rs");
+  const rsSources = [...rs.slice(rs.indexOf("pub const SOURCES"), rs.indexOf("];", rs.indexOf("pub const SOURCES"))).matchAll(/^\s+\("([^"]+)", /gm)].map((m) => m[1]);
+  assert.ok(jsSources.length > 20 && rsSources.length > 20, "the tables were found");
+  assert.deepEqual(rsSources, jsSources, "drift.rs names the sources drift.js does");
+  for (const s of jsSources) assert.deepEqual(owners(s).length, 1, `${s} belongs to one provider (${owners(s)})`);
+  // A tailed or natively read app's sources are its own products'.
+  for (const a of APPS.filter((a) => a.has?.includes("lines") || a.has?.includes("native"))) {
+    const sources = PROVIDERS.filter((p) => a.products.includes(p.id)).flatMap((p) => p.sources);
+    assert.ok(sources.length, `${a.id}'s products have sources`);
+  }
+});
+
+test("numbat leaves out the apps XenoNet tails, and reads every other app under its own id", () => {
+  for (const a of APPS) {
+    if (a.has?.includes("lines")) for (const n of a.numbat) assert.ok(LEFT_OUT.has(n), `numbat leaves out ${n}`);
+    else {
+      assert.deepEqual(a.numbat, [a.id]);
+      const r = readRecord(JSON.stringify(event({ source_agent: a.id, session_id: "s-0000001" })));
+      assert.equal(r.event?.app, a.id, `numbat reads ${a.id}'s runs`);
+    }
+  }
+});
+
+test("what the code reads from the registry", async () => {
+  assert.deepEqual(TAILED, ["claude", "codex"]);
+  assert.deepEqual(appsWith("native").map((a) => a.id), ["gemini-cli", "cursor", "copilot", "opencode"]);
+  for (const a of APPS) for (const c of a.has ?? []) assert.ok(CAPABILITIES.includes(c));
+  const [{ EDIT_TOOLS: gemini }, { EDIT_TOOLS: copilot }, { EDIT_TOOLS: opencode }] = await Promise.all([import("../core/native/gemini-cli.js"), import("../core/native/copilot-cli.js"), import("../core/native/opencode.js")]);
+  assert.deepEqual([...gemini], ["write_file", "replace"]);
+  assert.deepEqual([...copilot], ["str_replace_editor", "edit", "create", "write", "apply_patch"]);
+  assert.deepEqual(opencode, ["edit", "write", "multiedit"]);
+  const { LiveTelemetry } = await import("../core/live.js");
+  const live = new LiveTelemetry({ claudeRoot: path.join(root, "no-such-folder"), codexRoot: path.join(root, "no-such-folder"), claudeDesktopDir: null });
+  assert.deepEqual(["claude", "codex", "opencode"].map((app, i) => live.session(`${app}:x${i}`, app).context.window), [200000, 258400, 200000], "a session's context window, until a line says");
+});
+
+test("the fallbacks: an app that's neither Claude Code nor Codex reads as one of the two, as it always has", () => {
+  const inputs = ["claude", "codex", ...APPS.map((a) => a.id), "Codex", "", "toString", "__proto__", undefined, null, 1, {}];
+  for (const x of inputs) {
+    assert.equal(tailedApp(x, "claude"), x === "codex" ? "codex" : "claude", String(x));
+    assert.equal(tailedApp(x, "codex"), x === "claude" ? "claude" : "codex", String(x));
+  }
+});

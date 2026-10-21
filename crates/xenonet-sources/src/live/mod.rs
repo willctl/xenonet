@@ -224,20 +224,10 @@ pub fn files_of(input: Option<&Value>) -> Vec<String> {
     ["file_path", "notebook_path", "path"].iter().filter_map(|k| m.get(*k)?.as_str()).filter(|p| p.contains(['\\', '/'])).map(String::from).collect()
 }
 
-/// The files an apply_patch names (`*** Update File: …`).
+/// The files an apply_patch adds, updates and deletes. Live leaves out the
+/// names it moves files to (`*** Move to: …`).
 pub fn patch_files(text: Option<&Value>) -> Vec<String> {
-    let text = string_of(text);
-    let mut out = Vec::new();
-    for line in text.split(is_line_terminator) {
-        for head in ["*** Update File: ", "*** Add File: ", "*** Delete File: "] {
-            if let Some(rest) = line.strip_prefix(head) {
-                if !rest.is_empty() {
-                    out.push(js_trim(rest).to_string());
-                }
-            }
-        }
-    }
-    out
+    xenonet_base::patch::paths(&string_of(text), false)
 }
 
 /// A text's lines, each after `prefix`, at most `max` of them, with how

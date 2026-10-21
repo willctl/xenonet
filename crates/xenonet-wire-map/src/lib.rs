@@ -63,7 +63,10 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
     }
     let cfg = config::MapConfig::new(config.demo, config.dev, config::process_env(), &home, world.as_ref());
     let dir = vendor::schemas_dir(&config.root);
-    let vendor = vendor::Vendor::new(dir.clone(), env.drift.clone());
+    // The service's one set of vendor readers, which the actors' observers
+    // check their records through too.
+    let readers = env.readers.get_or_make(|| xenonet_schema::vendor::Readers::new(dir.clone(), env.drift.clone()));
+    let vendor = vendor::Vendor::with_readers(readers);
     let store = store::StateStore::new(&cfg.state_dir, &cfg.projects_dir);
     let codex_sessions = std::path::Path::new(&cfg.codex_home).join("sessions").to_string_lossy().into_owned();
     let live = live::Live::new(&cfg.claude_projects_dir, &codex_sessions, cfg.claude_desktop_dir.as_deref(), cfg.claude_usage, &cfg.home_dir, vendor.clone());

@@ -3,26 +3,27 @@
 //! records what differs from XenoNet's schemas in the service's one drift
 //! log (core/drift.js), and the two normalizers every transcript line goes
 //! through (claude-lines, codex-lines), with the transcript hooks that
-//! sample each file's lines. The drift report reads what they've read.
+//! sample each file's lines. The readers are the service's one set
+//! (WireEnv's), which the actors' observers read through too, so the drift
+//! report reads what all of them have read.
 
 use crate::blocks::{health_of, Block};
 use crate::util::{lock, now_ms};
 use serde_json::Value;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use xenonet_blocks::normalizer::{Hooks, Normalizer};
 use xenonet_schema::drift::{DriftLog, Piece};
-use xenonet_schema::vendor::{Checked, Sampling, VendorReader};
+use xenonet_schema::vendor::{Checked, Readers, Sampling, VendorReader};
 
 pub const CLAUDE_LINES: &str = "anthropic/claude-code/transcript-line";
 pub const CODEX_LINES: &str = "openai/codex/rollout-line";
 
-/// Every reader, by its source, and the log they record in.
+/// Every reader, by its source, the log they record in, and the
+/// transcripts' normalizers.
 pub struct Vendor {
-    dir: PathBuf,
+    readers: Arc<Readers>,
     pub drift: Arc<Mutex<DriftLog>>,
-    readers: Mutex<HashMap<String, VendorReader>>,
     claude: Mutex<Normalizer>,
     codex: Mutex<Normalizer>,
 }
@@ -37,36 +38,34 @@ fn out(c: Checked, record: Value) -> Option<Value> {
 }
 
 impl Vendor {
-    /// `dir`: XenoNet's schemas/ folder.
+    /// Readers of its own, over `dir` (XenoNet's schemas/ folder).
     pub fn new(dir: PathBuf, drift: Arc<Mutex<DriftLog>>) -> Arc<Vendor> {
+        Vendor::with_readers(Arc::new(Readers::new(dir, drift)))
+    }
+
+    /// The map's vendor over the service's readers.
+    pub fn with_readers(readers: Arc<Readers>) -> Arc<Vendor> {
         let now = now_ms();
         Arc::new(Vendor {
-            dir,
-            drift,
-            readers: Mutex::new(HashMap::new()),
+            drift: readers.drift().clone(),
+            readers,
             claude: Mutex::new(Normalizer::new("claude-lines", Some(CLAUDE_LINES), now)),
             codex: Mutex::new(Normalizer::new("codex-lines", Some(CODEX_LINES), now)),
         })
     }
 
     pub fn dir(&self) -> &std::path::Path {
-        &self.dir
+        self.readers.dir()
     }
 
     fn reader<T>(&self, source: &str, f: impl FnOnce(&mut VendorReader, &mut DriftLog) -> T) -> T {
-        let mut readers = lock(&self.readers);
-        let r = readers.entry(source.to_string()).or_insert_with(|| VendorReader::new(source, self.dir.clone(), None));
-        let mut log = lock(&self.drift);
-        f(r, &mut log)
+        self.readers.with(source, f)
     }
 
     /// reader(source).check(record, { version, kind }): counted and checked
     /// whole.
     pub fn check(&self, source: &str, record: Value, version: Option<&str>, kind: Option<&str>) -> Option<Value> {
-        let c = self.reader(source, |r, log| {
-            r.stats.records += 1;
-            r.inspect(&record, version, kind.map(str::to_string), log, now_ms())
-        });
+        let c = self.readers.check(source, &record, version, kind, now_ms());
         out(c, record)
     }
 
@@ -110,10 +109,9 @@ impl Vendor {
 
     /// What a source's reader has read, as the drift report says: { records,
     /// checked, dropped, stripped, versions }, None when it has read nothing.
+    /// The observers' reads count too.
     pub fn read_of(&self, source: &str) -> Option<Value> {
-        let readers = lock(&self.readers);
-        let r = readers.get(source).filter(|r| r.stats.records + r.stats.checked > 0)?;
-        Some(serde_json::json!({ "records": r.stats.records, "checked": r.stats.checked, "dropped": r.stats.dropped, "stripped": r.stats.stripped, "versions": r.versions() }))
+        self.readers.read_of(source)
     }
 
     /// A transcript line through its app's normalizer (lines.js's

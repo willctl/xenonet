@@ -231,7 +231,7 @@ Requests reach it as `POST /api/dev/control` on the instance's server, which rel
 
 XenoNet is one core with several ways in: the console, the desktop app, the HTTP API, the `xenonet` command and the MCP servers. The core holds the logic. Each of the others is a thin layer over it, which imports from `core/` and from no other layer. The one exception is `xenonet mcp`, which starts the MCP server in `mcp/`.
 
-The console page imports only the core modules that have no Node in them, `themes.js`, `units.js` and `needs-you.js`. The `xenonet` command and the MCP servers reach a running XenoNet through its HTTP API, with `core/client.js`. They reach XenoNet Dev through its control channel, with `core/control.js`.
+The console page imports only the core modules that have no Node in them, such as `themes.js`, `units.js`, `needs-you.js` and `apps.js`. The `xenonet` command and the MCP servers reach a running XenoNet through its HTTP API, with `core/client.js`. They reach XenoNet Dev through its control channel, with `core/control.js`.
 
 ### `core/`
 
@@ -239,6 +239,7 @@ The console page imports only the core modules that have no Node in them, `theme
 
 | Files | What they cover |
 | --- | --- |
+| `apps.js` | The app registry: the apps XenoNet knows sessions of, and what's fixed about each (its folder, hook events, signing team, edit tools and what XenoNet can do with it). The page uses it too, and `node scripts/apps.mjs` writes the Rust's copy, `crates/xenonet-base/src/apps.json` |
 | `claude.js`, `codex.js`, `git.js`, `wiki.js`, `demo.js` | The sources XenoNet reads |
 | `lines.js` | Transcript lines, as all three of XenoNet's readers take them |
 | `vendor.js`, `drift.js`, `schema/` | The apps' data, read leniently against XenoNet's schemas, and the drift kept from it. The schemas themselves are in `schema/`. |

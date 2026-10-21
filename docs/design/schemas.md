@@ -18,13 +18,13 @@ In `core/schema/`:
 
 | Module | What |
 |---|---|
-| `ids.js` | `$id`s and short ids (`schemaId`, `parseSchemaId`), host-qualified ids (`parseQualified`, `qualify`, `formatQualified`), actor ids (`actorId`, `parseActorId`, `YOU`) and repo ids (`repoId`, `normalizeRemote`). No imports, so the page can use it |
+| `ids.js` | `$id`s and short ids (`schemaId`, `parseSchemaId`), host-qualified ids (`parseQualified`, `qualify`, `formatQualified`), session ids (`SESSION_APPS`, from the app registry, `core/apps.js`), actor ids (`actorId`, `parseActorId`, `YOU`) and repo ids (`repoId`, `normalizeRemote`). It imports only `core/apps.js`, which has no imports, so the page can use it |
 | `registry.js` | `define(path, major, schema, { title, description })`, `schemaFor(id)`, `schemaIds()`, `jsonSchemas()` |
 | `common.js` | What schemas are made of: `obj` (a loose object), `ms`, `count`, `nstr`, `openEnum`, `hex`, `passthrough` |
 | `check.js` | `check(idOrSchema, data, { strict })` and `explain()` |
 | `files.js` | The files in `schemas/` against the definitions, and writing them |
 | `index.js` | Imports every area, so every schema is registered. Import this to look one up by id |
-| `session.js`, `project.js`, `identity.js`, `graph.js`, `live.js`, `engine.js`, `doctor.js`, `theme.js`, `state.js`, `actor.js`, `drift.js` | The internal schemas, by area |
+| `app.js`, `session.js`, `project.js`, `identity.js`, `graph.js`, `live.js`, `engine.js`, `doctor.js`, `theme.js`, `state.js`, `actor.js`, `drift.js` | The internal schemas, by area |
 | `vendor/<vendor>/<product>.js` | The vendor schemas, made of `vendor/common.js`'s `vendor()`, `open`, `closed`, `variants` and `skipped` (see [Vendor data](#vendor-data)) |
 | `lenient.js` | Vendor data checked against the schema files in `schemas/vendor/`, with no zod at runtime: `compile`, `inspect`, `strip`, `recheck`, `loadVendor`, `vendorSources`. No zod import, so the server can load it |
 
@@ -55,6 +55,7 @@ Where the code is loose, the schema is too:
 | `state/v1`, `state/v2` | state.json before versions, and now | v1's parts are all optional |
 | `actor/*/v1`, `drift/record/v1` | As the contracts define them | The actors' enums are open |
 | `drift/log/v1` | drift.json: when you last looked, and the `drift/record/v1`s kept | |
+| `app/v1` | An entry of the app registry (`core/apps.js`): an app XenoNet knows sessions of, and what's fixed about it. `test/apps.test.js` checks every entry | The apps XenoNet only observes have their id, name and numbat's names only |
 
 ## Versions
 

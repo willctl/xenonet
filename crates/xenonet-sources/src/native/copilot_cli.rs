@@ -5,20 +5,23 @@
 
 use super::files::Files;
 use super::node_path;
-use super::{
-    by_num, edit_file, edits_out, fits_id, js_max, js_min, ms_of, patch_headers, push_edit, str_of, titled, Check, Checked, Edits, Out, Threw, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX,
-};
+use super::{by_num, edit_file, edits_out, fits_id, js_max, js_min, ms_of, push_edit, str_of, titled, Check, Checked, Edits, Out, Threw, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX};
+use crate::session::{RunSession, Via};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 use xenonet_base::json::{self, number_string};
 use xenonet_base::jsstr::is_array_index;
 use xenonet_base::ordered::OrderedMap;
+use xenonet_base::patch;
 use xenonet_base::paths::PathStyle;
 use xenonet_base::text::{is_blank, truthy};
 
 pub const SOURCE: &str = "github/copilot-cli/session-event";
-/// Copilot CLI's built-in file tools; str_replace_editor's view isn't an edit.
-pub const EDIT_TOOLS: [&str; 5] = ["str_replace_editor", "edit", "create", "write", "apply_patch"];
+/// Copilot CLI's built-in file tools, as the app registry has them;
+/// str_replace_editor's view isn't an edit.
+pub fn edit_tools() -> &'static [String] {
+    xenonet_base::apps::edit_tools("copilot")
+}
 const FILE_MAX: f64 = (32u64 << 20) as f64;
 const CHECKS_PER_FILE: usize = 16;
 
@@ -47,9 +50,9 @@ fn js_values(m: &Map<String, Value>) -> Vec<&Value> {
 
 /// The files a tool call names, if it's an edit.
 pub fn edited_by(tool: Option<&Value>, args: Option<&Value>) -> Vec<String> {
-    let Some(tool) = str_of(tool).filter(|t| EDIT_TOOLS.contains(t)) else { return Vec::new() };
+    let Some(tool) = str_of(tool).filter(|t| edit_tools().iter().any(|e| e == t)) else { return Vec::new() };
     let args = match args {
-        Some(Value::String(s)) => return if tool == "apply_patch" { patch_headers(s) } else { Vec::new() },
+        Some(Value::String(s)) => return if tool == "apply_patch" { patch::paths(s, true) } else { Vec::new() },
         Some(a @ (Value::Object(_) | Value::Array(_))) => a,
         _ => return Vec::new(),
     };
@@ -65,7 +68,7 @@ pub fn edited_by(tool: Option<&Value>, args: Option<&Value>) -> Vec<String> {
         };
         for v in values {
             if let Value::String(s) = v {
-                out.extend(patch_headers(s));
+                out.extend(patch::paths(s, true));
             }
         }
     }
@@ -311,22 +314,21 @@ impl CopilotCli {
         self.runs
             .iter()
             .map(|(_, r)| {
-                Out::Obj(vec![
-                    ("id", Out::str(&r.id)),
-                    ("app", Out::str("copilot")),
-                    ("rawId", Out::str(&r.raw_id)),
-                    ("title", Out::str(&r.title.clone().unwrap_or_else(|| titled("Copilot CLI", r.cwd.as_deref())))),
-                    ("preview", Out::null()),
-                    ("cwd", Out::opt_str(r.cwd.as_deref())),
-                    ("createdAt", Out::Num(r.created_at)),
-                    ("updatedAt", Out::Num(r.updated_at)),
-                    ("archived", Out::bool(false)),
-                    ("model", Out::null()),
-                    ("branch", Out::opt_str(r.branch.as_deref())),
-                    ("parentId", Out::null()),
-                    ("parentKind", Out::null()),
-                    ("reader", Out::str("experimental")),
-                ])
+                RunSession {
+                    id: &r.id,
+                    app: "copilot",
+                    raw_id: &r.raw_id,
+                    title: r.title.clone().unwrap_or_else(|| titled("Copilot CLI", r.cwd.as_deref())),
+                    cwd: r.cwd.as_deref(),
+                    created_at: Out::Num(r.created_at),
+                    updated_at: Out::Num(r.updated_at),
+                    archived: false,
+                    model: None,
+                    branch: r.branch.as_deref(),
+                    subagent_of: None,
+                    via: Via::Reader,
+                }
+                .record()
             })
             .collect()
     }

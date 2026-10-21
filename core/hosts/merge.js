@@ -28,6 +28,7 @@ import { Identity } from "../schema/identity.js";
 import { LiveSession, LiveActivity } from "../schema/live.js";
 import { EngineAgent, EngineMessage } from "../schema/engine.js";
 import { declared } from "./declared.js";
+import { tailedApp } from "../apps.js";
 
 export const MAX_NODES = 5000;
 export const DEFAULT_WINDOWS = { activeWindowMs: 10 * 60e3, recentWindowMs: 24 * 3600e3, projectActiveMs: 3600e3 };
@@ -559,7 +560,8 @@ export function qualifyEvent(name, data, host) {
     }
     case "tokens": {
       const sessionId = remoteId(h, data.sessionId);
-      return sessionId && Number.isFinite(data.n) ? { sessionId, app: data.app === "codex" ? "codex" : "claude", n: data.n, ts: shift(data.ts), host: h } : null;
+      // Any app but Codex counts as Claude Code's.
+      return sessionId && Number.isFinite(data.n) ? { sessionId, app: tailedApp(data.app, "claude"), n: data.n, ts: shift(data.ts), host: h } : null;
     }
     case "pulse": {
       const nodeId = data.nodeId === "core" ? `@${h}:core` : remoteId(h, data.nodeId);

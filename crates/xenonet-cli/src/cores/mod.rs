@@ -318,9 +318,14 @@ pub fn refusals_record(dir: &str, signal: &Value, at: &Value) -> Res<Option<Valu
     with_store(dir, |s| s.record(signal, at, native::now(), context)).map_err(store_fail)
 }
 
-/// claudeSignal(raw) or codexSignal(raw), by the transcript's app.
+/// claudeSignal(raw) or codexSignal(raw), by the transcript's app: any app
+/// but Claude Code is read as Codex.
 pub fn refusal_signal(app: &str, raw: &Value) -> Res<Option<Value>> {
-    Ok(if app == "claude" { xenonet_sources::refusals::detect::claude_signal(Some(raw)) } else { xenonet_sources::refusals::detect::codex_signal(Some(raw)) })
+    Ok(if xenonet_base::apps::tailed_app(app, "codex") == "claude" {
+        xenonet_sources::refusals::detect::claude_signal(Some(raw))
+    } else {
+        xenonet_sources::refusals::detect::codex_signal(Some(raw))
+    })
 }
 
 // ---------- remote actors' connections ----------

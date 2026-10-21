@@ -17,6 +17,7 @@ import { categorize, mcpServerOf, clip } from "./live.js";
 import { costParts, plainModel, priorityTier, PRICES_CHECKED } from "./pricing.js";
 import { listFiles } from "./paths.js";
 import { readLines, isCodexPrompt, hasUserMessages } from "./lines.js";
+import { tailedApp } from "./apps.js";
 
 const UUID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
 const CONTEXT_POINTS = 400;
@@ -356,7 +357,8 @@ export function createStats({ transcripts }) {
     if (hit?.key === key) return hit.stats;
     const app = sessionId.split(":")[0];
     const read = await Promise.all(files.map(async (f) => ({ ...f, lines: await readLines(f.file, app).catch(() => []) })));
-    const events = app === "codex" ? codexEvents(read[0].lines) : claudeEvents(read);
+    // Any app but Codex is read as Claude Code, as linesOf reads it.
+    const events = tailedApp(app, "claude") === "codex" ? codexEvents(read[0].lines) : claudeEvents(read);
     const stats = { id: sessionId, ...summarize(events, { app }) };
     cache.set(sessionId, { key, stats });
     if (cache.size > 40) cache.delete(cache.keys().next().value);

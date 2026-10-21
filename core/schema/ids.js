@@ -5,7 +5,9 @@
 //     one from another host is @<host>:<local id>;
 //   - actors, actor:<slug> (the person at the console is actor:you), and
 //     projects merged across hosts by their git remote, repo:<remote>.
-// No imports, so the page can use it as well as the server.
+// It imports only core/apps.js, which has no imports, so the page can use it
+// as well as the server.
+import { APPS } from "../apps.js";
 
 export const SCHEMA_BASE = "https://xenonet.dev/schemas";
 
@@ -84,36 +86,11 @@ export const formatQualified = ({ host = null, local }, opts) => qualify(local, 
 // A session is the state around one run of a harness: a Claude Code
 // session, a Codex thread, a Gemini CLI run. Its id is "<app>:<the run's
 // id>". An actor (below) is something that lasts across runs. The apps XenoNet
-// knows sessions of, and what each is called. claude and codex XenoNet reads
-// itself; the others are observed (numbat's records, or a run an actor
-// reports through the gateway) until XenoNet has a reader of its own.
-export const SESSION_APPS = {
-  claude: "Claude Code",
-  codex: "Codex",
-  "gemini-cli": "Gemini CLI",
-  cursor: "Cursor",
-  copilot: "GitHub Copilot CLI",
-  vscode: "VS Code agent mode",
-  opencode: "OpenCode",
-  openclaw: "OpenClaw",
-  antigravity: "Antigravity",
-  factory: "Factory Droid",
-  "devin-cli": "Devin CLI",
-  "kimi-code": "Kimi Code",
-  pi: "Pi",
-  "qwen-code": "Qwen Code",
-  cline: "Cline",
-  amp: "Amp",
-  auggie: "Auggie",
-  kiro: "Kiro",
-  goose: "Goose",
-  kilo: "Kilo Code",
-  openhands: "OpenHands",
-  crush: "Crush",
-  junie: "Junie",
-  windsurf: "Windsurf",
-  cowork: "Claude Cowork",
-};
+// knows sessions of, and what each is called, from core/apps.js. claude and
+// codex XenoNet reads itself; the others are observed (numbat's records, or a
+// run an actor reports through the gateway) until XenoNet has a reader of its
+// own.
+export const SESSION_APPS = Object.fromEntries(APPS.map((a) => [a.id, a.name]));
 export const isSessionApp = (app) => typeof app === "string" && Object.hasOwn(SESSION_APPS, app);
 const APP_ALT = Object.keys(SESSION_APPS).sort((a, b) => b.length - a.length).join("|");
 // A session's id, unqualified: the app, then the run's own id.

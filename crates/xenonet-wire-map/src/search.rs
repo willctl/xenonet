@@ -83,7 +83,8 @@ impl TranscriptSearch {
 
     // Indexes a file's new lines; how many documents went in.
     fn index_file(&self, file: &str, app: &str) -> Result<f64, String> {
-        let codex = app == "codex";
+        // Any app but Codex is read as Claude Code, as linesOf reads it.
+        let codex = xenonet_base::apps::tailed_app(app, "claude") == "codex";
         let core = lock(&self.core);
         let Some(mut plan): Option<Plan> = core.plan(file, app).map_err(message)? else { return Ok(0.0) };
         let text = if plan.whole { read_whole(file) } else { read_from(file, plan.offset, plan.size) }.map_err(|e| e.to_string())?;
