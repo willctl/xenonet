@@ -3,8 +3,8 @@ your own that reports to XenoNet. Every registered actor waits for you to
 allow it in XenoNet's window.
 
 For anyone:
-  xenonet actor list                 the actors (also xenonet actors)
-  xenonet actor show <slug>          one actor and what it did lately
+  xenonet actor list               the actors (also xenonet actors)
+  xenonet actor show <slug>        one actor and what it did lately
   xenonet actor observe [<product> on|off]
                                    the products XenoNet observes; turning one
                                    off is yours, from your own terminal
@@ -22,7 +22,7 @@ For an actor, with XENONET_ACTOR_TOKEN_FILE=<file> (or XENONET_ACTOR_TOKEN):
                                    it's here (beat for short); cwd is this
                                    folder, and pid this command's parent
                                    unless that's a shell, or you say
-  xenonet actor status               whether it's allowed, and its unread mail
+  xenonet actor status             whether it's allowed, and its unread mail
   xenonet actor event <kind> [--target <id> | --path <dir>] [--count <n>]
       [--paths <file> …] [--platform <p>] [--subject <s>] [--app <a>] [--ref <r>]
                                    what it did: spawned, edited, ran,
@@ -34,11 +34,11 @@ For an actor, with XENONET_ACTOR_TOKEN_FILE=<file> (or XENONET_ACTOR_TOKEN):
                                    arrives: printed (as JSON lines with
                                    --json), or given to the program on its
                                    standard input, one run per message
-  xenonet actor send <to> <text>     to a session or actor, "repo" or "all"
-  xenonet actor leave                its token stops working
+  xenonet actor send <to> <text>   to a session or actor, "repo" or "all"
+  xenonet actor leave              its token stops working
 
 Yours, from your own terminal:
-  xenonet actor remove <slug>        removes an actor that reports itself; asks
+  xenonet actor remove <slug>      removes an actor that reports itself; asks
                                    first unless --yes. One XenoNet only
                                    observes goes off the map with
                                    xenonet actor observe <product> off

@@ -39,14 +39,29 @@ pub mod theme;
 pub mod uninstall;
 pub mod update;
 pub mod who;
+pub mod words;
 
 /// A command: what it does, the words it takes, and whether the help
-/// lists it (what agents run stays out of the list).
+/// lists it (what agents run stays out of the list). What it does and the
+/// words it takes can name apps with words.rs's tokens, which about() and
+/// args() fill in from the app registry.
 pub struct Command {
     pub name: &'static str,
-    pub about: &'static str,
-    pub args: Option<&'static str>,
+    about: &'static str,
+    args: Option<&'static str>,
     pub hidden: bool,
+}
+
+impl Command {
+    /// What it does, in a line.
+    pub fn about(&self) -> String {
+        words::line(self.about)
+    }
+
+    /// The words it takes, for its usage.
+    pub fn args(&self) -> Option<String> {
+        self.args.map(words::line)
+    }
 }
 
 const fn cmd(name: &'static str, about: &'static str, args: Option<&'static str>) -> Command {
@@ -75,18 +90,18 @@ pub const COMMANDS: &[Command] = &[
     cmd("messages", "What sessions and actors said to each other today", None),
     cmd("root", "The projects folder XenoNet reads, or read another", Some("[folder]")),
     cmd("hosts", "Other machines' XenoNets on this map, over SSH (a prototype, with XENONET_HOSTS=1)", Some("[self|add|remove|test]")),
-    cmd("search", "Search every Claude Code and Codex transcript", Some("<words>")),
+    cmd("search", "Search every {apps lines} transcript", Some("<words>")),
     cmd("theme", "The console's look and sound: list, switch, or make your own", Some("[id]")),
     cmd("film", "Render a film of today to an MP4, in a hidden window", None),
     cmd("script", "Save what you did in XenoNet Dev as a script, and run scripts", Some("<record|run> [file]")),
-    cmd("connect", "Let Claude Code and Codex sessions see and message each other", Some("[claude] [codex]")),
-    cmd("disconnect", "Take XenoNet out of Claude Code's and Codex's settings", None),
+    cmd("connect", "Let {apps connect} sessions see and message each other", Some("{ids connect}")),
+    cmd("disconnect", "Take XenoNet out of {apps connect's} settings", None),
     cmd("console", "Control installed XenoNet or a development instance", Some("<steps…>")),
     cmd("install", "Put the xenonet command on your PATH", None),
     cmd("uninstall", "Take the xenonet command off your PATH", None),
     cmd("completion", "Tab completion for zsh or bash", Some("<zsh|bash>")),
-    Command { name: "mcp", about: "Run the xenonet MCP server (Claude Code and Codex start it)", args: None, hidden: true },
-    Command { name: "hook", about: "Pass a Claude Code, Codex or Grok Build hook to XenoNet (their settings run it)", args: Some("<claude|codex|grok>"), hidden: true },
+    Command { name: "mcp", about: "Run the xenonet MCP server ({apps connect} start it)", args: None, hidden: true },
+    Command { name: "hook", about: "Pass a {apps connect or} hook to XenoNet (their settings run it)", args: Some("<{ids connect|}>"), hidden: true },
     Command { name: "relay", about: "Stream this XenoNet's map to a console on another machine (consoles run it over SSH)", args: None, hidden: true },
 ];
 
@@ -101,8 +116,14 @@ pub fn find(name: &str) -> Option<&'static Command> {
     COMMANDS.iter().find(|c| c.name == name)
 }
 
-/// A command's help, as `xenonet <name> --help` prints it after its usage.
-pub fn help(name: &str) -> &'static str {
+/// A command's help, as `xenonet <name> --help` prints it after its usage,
+/// with the apps and the doctor's groups it names filled in (words.rs).
+pub fn help(name: &str) -> String {
+    words::help(text(name))
+}
+
+// A command's help as it's written.
+fn text(name: &str) -> &'static str {
     match name {
         "actor" => actor::HELP,
         "agents" => agents::HELP,
@@ -180,5 +201,49 @@ pub fn run(name: &str, args: &[String], flags: &Flags) -> Done {
         "update" => update::run(args, flags),
         "who" => who::run(args, flags),
         _ => Err(crate::out::Fail::error(format!("no command \"{name}\". xenonet --help lists them."))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Every help as `xenonet <name> --help` prints it, usage first.
+    fn every_help() -> Vec<(String, String)> {
+        COMMANDS.iter().map(|c| (c.name.to_string(), format!("xenonet {} {}\n\n{}\n{}", c.name, c.args().unwrap_or_default(), c.about(), help(c.name)))).collect()
+    }
+
+    #[test]
+    fn every_help_names_the_registrys_apps_and_leaves_no_token() {
+        for (name, text) in every_help() {
+            for token in ["{apps ", "{ids ", "{doctor "] {
+                assert!(!text.contains(token), "{name}: {token}");
+            }
+            assert!(!text.contains('\u{a0}'), "{name}");
+            assert!(!text.contains("Node"), "{name}: no Node in the binary's help");
+        }
+        let of = |name: &str| every_help().into_iter().find(|(n, _)| n == name).map(|(_, t)| t).unwrap_or_default();
+        for app in xenonet_base::apps::with("connect") {
+            for name in ["connect", "disconnect", "mcp", "hook", "doctor"] {
+                assert!(of(name).contains(&app.name), "{name} --help names {}, whole on a line", app.name);
+            }
+            assert!(of("connect").contains(&format!("[{}]", app.id)), "connect takes {}", app.id);
+        }
+        for app in xenonet_base::apps::with("lines") {
+            assert!(of("search").contains(&app.name), "search reads {}'s transcripts", app.name);
+        }
+        assert!(of("connect").starts_with("xenonet connect [claude] [codex] [grok]\n"));
+        assert!(of("hook").starts_with("xenonet hook <claude|codex|grok>\n"));
+        assert!(of("disconnect").contains("Take XenoNet out of Claude Code's, Codex's and Grok Build's settings"));
+    }
+
+    #[test]
+    fn doctor_help_lists_every_group_of_checks() {
+        let text = help("doctor");
+        let only: String = text.lines().skip_while(|l| !l.trim_start().starts_with("--only")).take_while(|l| !l.trim_start().starts_with("--json")).collect::<Vec<_>>().join(" ");
+        for group in words::groups() {
+            assert!(only.contains(&format!(" {group},")) || only.contains(&format!(" {group} ")), "--only lists {group}: {only}");
+        }
+        assert!(only.contains("service") && only.contains("grok"));
     }
 }

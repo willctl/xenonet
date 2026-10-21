@@ -3,7 +3,7 @@ at each model's API price on the day, its turns and its tools. Without
 words, the latest session in this folder; with them, the newest session
 whose id starts with them or whose title has them all.
 
-  xenonet session                  the latest session here
-  xenonet session refunds api      the newest one with both words in its title
-  xenonet session 9eddb031         by id
+  xenonet session                the latest session here
+  xenonet session refunds api    the newest one with both words in its title
+  xenonet session 9eddb031       by id
   --json                         everything, as JSON

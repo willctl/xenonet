@@ -1,5 +1,5 @@
-//! `xenonet search <words>` (cli/commands/search.js): every Claude Code and
-//! Codex transcript, through the running XenoNet's index (core/search.js).
+//! `xenonet search <words>` (cli/commands/search.js): every transcript of an
+//! app XenoNet tails, through the running XenoNet's index (core/search.js).
 
 use crate::args::Flags;
 use crate::js::{encode, have, list, num, on, slice_to, str, t};
