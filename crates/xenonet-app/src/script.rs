@@ -46,7 +46,8 @@ pub const STEPS: &str = r#"  launch[:inactive|front|hidden]  start it unless it'
   feed[:<n>]                      the activity feed's last lines, sessions' and actors'
   identities[:<keys>|all]         the identity chips; with chip keys (comma-separated), only their work
   mask:on|off                     hide identities (GitHub A, Claude B…) or show them
-  hosts[:<ids>|all]               other machines on the map (XENONET_HOSTS=1) and how each
+  hosts[:<ids>|all]               other machines on the map (over SSH with XENONET_HOSTS=1,
+                                  or in a network) and how each
                                   stands; with host ids (comma-separated, @here for this
                                   machine), only their work
   network[:open|start|join|add]   the network across machines (Network settings): this

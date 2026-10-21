@@ -120,7 +120,7 @@ function buildServer() {
     "find",
     {
       title: "Find nodes",
-      description: "Finds nodes on the map whose id, title or name contain every word of `query`: projects, sessions, Codex projects (native), folders outside the projects folder (zone), shared systems (resource), wiki pages, other machines' XenoNets (host, with XENONET_HOSTS=1; their nodes' ids start with @<host>: and say which host), and actors beside the map (kind actor, by id, name and product). Drawn nodes come first, then the most recent, then actors. Each has its id, for select and input, and where it is on screen.",
+      description: "Finds nodes on the map whose id, title or name contain every word of `query`: projects, sessions, Codex projects (native), folders outside the projects folder (zone), shared systems (resource), wiki pages, other machines (host: over SSH with XENONET_HOSTS=1, or in a network; their nodes' ids start with @<host>: and say which host), and actors beside the map (kind actor, by id, name and product). Drawn nodes come first, then the most recent, then actors. Each has its id, for select and input, and where it is on screen.",
       inputSchema: z.object({
         query: z.string().optional().describe("Words to match; empty lists everything."),
         kind: z.enum(["project", "session", "native", "zone", "resource", "wiki", "page", "core", "actor", "host"]).optional(),
@@ -358,7 +358,7 @@ function buildServer() {
     "hosts",
     {
       title: "Other machines",
-      description: 'Other machines\' XenoNets on the map, with XENONET_HOSTS=1 (a prototype: the console reads each over SSH with xenonet relay, read-only). Each host with how it stands (connecting, live, stale, offline or error), its host node (@<host>:core) and where that is on screen, and its constellation beside this machine\'s map; the bridges between checkouts of one repo; and the machines\' chips under Filters. `only` shows just those machines\' work: host ids, and "@here" for this machine ([] shows every machine). In XenoNet Dev, simulate host-add shows another XenoNet on this machine as a host. Returns the hosts, and the state once the view has settled when something changed.',
+      description: 'Other machines on the map: other XenoNets over SSH, with XENONET_HOSTS=1 (a prototype: the console reads each with xenonet relay, read-only), and the machines of a network this one is in, drawn from their presence (network: true; their sessions take a message from you). Each host with how it stands (connecting, live, stale, offline or error), its host node (@<host>:core) and where that is on screen, and its constellation beside this machine\'s map; the bridges between checkouts of one repo; and the machines\' chips under Filters. `only` shows just those machines\' work: host ids, and "@here" for this machine ([] shows every machine). In XenoNet Dev, simulate host-add shows another XenoNet on this machine as a host. Returns the hosts, and the state once the view has settled when something changed.',
       inputSchema: z.object({
         only: z.array(z.string()).optional().describe('Host ids, and "@here" for this machine; [] clears the filter.'),
         settle: settleArg,
