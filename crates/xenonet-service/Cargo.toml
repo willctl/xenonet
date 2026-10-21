@@ -42,6 +42,11 @@ xenonet-schema.workspace = true
 [dev-dependencies]
 # Paused time, for the tunnel's waits between restarts.
 tokio = { workspace = true, features = ["test-util"] }
+# The binary's engine driver on every host of the network's end-to-end
+# test (tests/net_engine.rs), as `xenonet serve` plugs it in; it depends on
+# this crate, which Cargo allows for dev-dependencies.
+xenonet-engine.workspace = true
+xenonet-wire-engine.workspace = true
 
 [lints]
 workspace = true

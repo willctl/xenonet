@@ -2499,8 +2499,10 @@ dependencies = [
  "tokio",
  "xenonet-actors",
  "xenonet-base",
+ "xenonet-engine",
  "xenonet-net",
  "xenonet-schema",
+ "xenonet-wire-engine",
 ]
 
 [[package]]
