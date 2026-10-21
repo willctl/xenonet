@@ -38,6 +38,7 @@ const S1: &str = "claude:aaaaaaaa-0001";
 const L1: &str = "claude:bbbbbbbb-0001";
 const D1: &str = "codex:cccccccc-0001";
 const D2: &str = "claude:cccccccc-0002";
+const L2: &str = "claude:bbbbbbbb-0002";
 
 /// The person, at the window and at their own terminal; and any session
 /// is its own process.
@@ -56,13 +57,15 @@ impl cores::Verify for You {
     }
 }
 
-/// A made-up session: its id, title, folder and the files it edits.
+/// A made-up session: its id, title, folder and the files it edits, and
+/// what its live state adds (a waiting question's text, its last message).
 #[derive(Clone)]
 struct Sess {
     id: &'static str,
     title: &'static str,
     cwd: String,
     edits: Vec<String>,
+    live: Value,
 }
 
 struct Map {
@@ -92,7 +95,11 @@ impl State for Map {
     }
     fn live_info(&self, id: &str, _now: f64) -> R<Option<Value>> {
         Ok(self.sessions.iter().find(|s| s.id == id).map(|s| {
-            json!({ "lastEventAt": self.at, "endedAt": null, "status": "tool", "needsYou": null, "edits": s.edits.iter().map(|p| json!({ "path": p, "ts": self.at - 60e3 })).collect::<Vec<_>>() })
+            let mut info = json!({ "lastEventAt": self.at, "endedAt": null, "status": "tool", "needsYou": null, "edits": s.edits.iter().map(|p| json!({ "path": p, "ts": self.at - 60e3 })).collect::<Vec<_>>() });
+            for (k, v) in s.live.as_object().into_iter().flatten() {
+                info[k] = v.clone();
+            }
+            info
         }))
     }
     fn observed_live(&self, _id: &str) -> R<bool> {
@@ -357,7 +364,7 @@ async fn live(h: &Host, hosts: usize) {
 }
 
 fn sess(id: &'static str, title: &'static str, cwd: &str) -> Sess {
-    Sess { id, title, cwd: cwd.to_string(), edits: Vec::new() }
+    Sess { id, title, cwd: cwd.to_string(), edits: Vec::new(), live: Value::Null }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
@@ -371,6 +378,12 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     let laptop_atlas = clone(&root.join("laptop/home/work/atlas"), "https://github.com/acme/atlas", "fix/login");
     let desk_atlas = clone(&root.join("desk/home/atlas"), "git@github.com:acme/atlas.git", "release");
     let desk_ledger = clone(&root.join("desk/home/ledger"), "git@github.com:acme/ledger.git", "main");
+    // laptop's second session waits on you, in a folder that isn't a repo.
+    let laptop_notes = root.join("laptop/home/notes");
+    std::fs::create_dir_all(&laptop_notes).unwrap();
+    let laptop_home = root.join("laptop/home").to_string_lossy().into_owned();
+    let mut asking = sess(L2, "Pick the redirect", &laptop_notes.to_string_lossy());
+    asking.live = json!({ "needsYou": "question", "question": format!("Keep the old query string in {laptop_home}/notes/redirect.md?"), "lastMessage": "The redirect works; one choice is left." });
     let door_port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
 
     // studio founds the network: a LAN-only gateway on loopback.
@@ -382,7 +395,7 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     // host; desk with one from laptop's window, as a server.
     let (address, code) = ticket(&a, "laptop", true).await;
     assert_eq!(address, format!("127.0.0.1:{LAN}"));
-    let b = Host::open("laptop", root.join("laptop"), vec![sess(L1, "Fix the login form", &laptop_atlas)], None).await;
+    let b = Host::open("laptop", root.join("laptop"), vec![sess(L1, "Fix the login form", &laptop_atlas), asking], None).await;
     join(&b, &address, &code).await;
     live(&b, 2).await;
     let (address, code) = ticket(&b, "desk", false).await;
@@ -398,9 +411,9 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     // Presence: every host's peers list the others' agents, after its own,
     // and so does the console's engine state.
     for (h, me, want) in [
-        (&a, S1, vec![format!("@laptop:{L1}"), format!("@desk:{D1}"), format!("@desk:{D2}")]),
-        (&b, L1, vec![format!("@studio:{S1}"), format!("@desk:{D1}"), format!("@desk:{D2}")]),
-        (&c, D1, vec![D2.to_string(), format!("@studio:{S1}"), format!("@laptop:{L1}")]),
+        (&a, S1, vec![format!("@laptop:{L1}"), format!("@laptop:{L2}"), format!("@desk:{D1}"), format!("@desk:{D2}")]),
+        (&b, L1, vec![L2.to_string(), format!("@studio:{S1}"), format!("@desk:{D1}"), format!("@desk:{D2}")]),
+        (&c, D1, vec![D2.to_string(), format!("@studio:{S1}"), format!("@laptop:{L1}"), format!("@laptop:{L2}")]),
     ] {
         until(&format!("{}'s peers", h.name), 20, || async {
             let mut got = h.peers(me).await;
@@ -418,6 +431,26 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
         assert_eq!(remote.len(), want.iter().filter(|w| w.starts_with('@')).count(), "{}: {st}", h.name);
         assert!(remote.iter().all(|x| x["host"].is_string() && x["online"] == true), "{}", h.name);
     }
+    // What waits on you on laptop shows in studio's console with its text,
+    // the home folder as ~; never in an agent's peers.
+    let asks = "Keep the old query string in ~/notes/redirect.md?";
+    let far = |st: &Value| st["agents"].as_array().unwrap().iter().find(|x| x["id"] == format!("@laptop:{L2}")).cloned().unwrap_or(Value::Null);
+    until("laptop's question at studio", 10, || async { far(&a.engine_state().await)["question"] == asks }).await;
+    let shown = far(&a.engine_state().await);
+    assert_eq!((shown["waitsOnYou"].clone(), shown["lastMessage"].clone()), (json!(true), json!("The redirect works; one choice is left.")), "{shown}");
+    let peers = a.agent(S1, "peers", json!({ "scope": "machine" })).await;
+    assert!(!peers.to_string().contains("query string") && !peers.to_string().contains("one choice"), "{peers}");
+    // With titles only on laptop, it stays there, and the wait still shows.
+    let (s, v) = b.window("PUT", "/api/net/settings", json!({ "titlesOnly": true })).await;
+    assert_eq!((s, v["titlesOnly"].clone()), (200, json!(true)), "{v}");
+    until("laptop's question gone from studio", 10, || async {
+        let f = far(&a.engine_state().await);
+        f["question"].is_null() && f["lastMessage"].is_null() && f["waitsOnYou"] == true
+    })
+    .await;
+    b.window("PUT", "/api/net/settings", json!({ "titlesOnly": false })).await;
+    until("laptop's question back at studio", 10, || async { far(&a.engine_state().await)["question"] == asks }).await;
+
     // Every host has the same roster, and none sees a mismatch.
     until("the same roster everywhere", 10, || async {
         let heads = [a.state().await, b.state().await, c.state().await];

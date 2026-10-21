@@ -128,6 +128,46 @@
           "waitsOnYou": {
             "type": "boolean",
             "description": "A question or a stuck state waits on the person"
+          },
+          "question": {
+            "description": "While it waits on the person: the text of its question, or of the permission it asks for, with the home folder as ~",
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 320
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastMessage": {
+            "description": "What it said last, its last 280 characters, with the home folder as ~",
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 280
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stuck": {
+            "description": "Why it seems stuck, with the home folder as ~",
+            "anyOf": [
+              {
+                "maxItems": 8,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 280
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [

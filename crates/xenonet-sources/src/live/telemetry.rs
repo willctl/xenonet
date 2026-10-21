@@ -673,6 +673,11 @@ impl Session {
         Value::Null
     }
 
+    /// What it said last, its last 280 characters, or null.
+    pub fn last_message(&self) -> Value {
+        self.messages.last().map_or(Value::Null, |m| Value::String(tail(&string_of(Some(&m.text)), 280)))
+    }
+
     /// Why it looks stuck ({ reasons }), or null.
     pub fn stuck(&self, now: f64) -> Value {
         if !self.turn_active || self.question_pending() || self.hook_waiting(now) {
@@ -766,7 +771,7 @@ impl Session {
         let files: Vec<Value> = files.into_iter().map(|(path, ts)| obj(vec![("path", path), ("ts", ts)])).collect();
         let mcp: Vec<Value> = self.mcp.iter().map(|(_, (k, ts))| obj(vec![("server", k.clone().unwrap_or(Value::Null)), ("ts", ts.clone())])).collect();
         let today = self.daily.get(&str_tag(&day_key(now))).map_or(0.0, |(_, v)| *v);
-        let last_message = self.messages.last().map_or(Value::Null, |m| Value::String(tail(&string_of(Some(&m.text)), 280)));
+        let last_message = self.last_message();
         let or_null = |v: f64| if v != 0.0 && !v.is_nan() { number(v) } else { Value::Null };
         obj(vec![
             ("id", Value::String(self.id.clone())),

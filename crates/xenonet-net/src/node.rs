@@ -896,6 +896,10 @@ impl Net for Shared {
         self.roster().head()
     }
 
+    fn titles_only(&self) -> bool {
+        self.network().is_some_and(|n| n.titles_only)
+    }
+
     fn hosts(&self) -> Vec<Host> {
         let Some(net) = self.network() else { return Vec::new() };
         let view = self.roster().view();

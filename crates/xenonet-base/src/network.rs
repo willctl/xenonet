@@ -120,6 +120,12 @@ pub trait Net: Send + Sync {
     fn roster_head(&self) -> Option<String> {
         None
     }
+    /// Whether this host shares titles only (Settings → Network): its
+    /// presence then carries no question's text, last message or stuck
+    /// reason (section 7).
+    fn titles_only(&self) -> bool {
+        false
+    }
 }
 
 /// What the network calls in the engine.

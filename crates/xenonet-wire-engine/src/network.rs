@@ -5,7 +5,11 @@
 //! - **Presence.** Every 2 seconds, if its agents changed, this host sends
 //!   them to every other host; a full set when its link comes up or after
 //!   a gap. It keeps the latest presence of each other host, and drops an
-//!   older one.
+//!   older one. Unless the host shares titles only, each agent carries
+//!   its detail (section 7): the text of what waits on you, its last
+//!   message and why it seems stuck. That's for the other consoles: the
+//!   engine's view of another host's agent, which agents read in `peers`,
+//!   never carries it.
 //! - **Messages.** A message to an agent on another host is stored here as
 //!   sent, with its id across the network (its envelope's mid), and its
 //!   frame waits in the outbox until a stored receipt comes back. One from
@@ -48,6 +52,13 @@ const MAX_HOPS: f64 = 6.0;
 /// What another host may keep here: its claims, and handoffs open.
 const MAX_CLAIMS: f64 = 5000.0;
 const MAX_HANDOFFS: f64 = 100.0;
+/// An agent's detail, at most, as network/presence/v1 has it: a waiting
+/// question's text, its last message (as the live state keeps it), and its
+/// stuck reasons.
+const QUESTION_MAX: usize = 320;
+const LAST_MAX: usize = 280;
+const STUCK_MAX: usize = 8;
+const REASON_MAX: usize = 280;
 
 /// What this host last told the others: its presence (each agent as sent)
 /// and its claims, and the timer that tells them again.
@@ -242,13 +253,29 @@ fn tilde(w: &World, p: &str) -> String {
     xenonet_base::paths::tilde(p, &w.setup.home)
 }
 
-/// This host's agents as presence lists them.
-fn agents_now(w: &World) -> Result<BTreeMap<String, Value>> {
+/// This host's agents as presence lists them: with their detail, unless
+/// the host shares titles only.
+fn agents_now(w: &World, titles_only: bool) -> Result<BTreeMap<String, Value>> {
     let mut c = EngineCalls::new(w, None);
     let agents = w.engine.agents(&mut c, ACTIVE_MS).map_err(|e| match e {
         Fail::Error(m) | Fail::Bad(m) => Thrown::new(m),
         Fail::Thrown(t) => t,
     })?;
+    // The relay's rule for text that leaves the machine: the home folder,
+    // and any other folder named for a person that the agents work in, as ~.
+    let scrub = (!titles_only).then(|| {
+        let home = w.setup.home.as_str();
+        let mut also: Vec<String> = Vec::new();
+        for a in &agents {
+            if let Some(f) = xenonet_hosts::relay::user_folder_of(Some(&json(&a.field("cwd"))), Some(home)) {
+                if !also.contains(&f) {
+                    also.push(f);
+                }
+            }
+        }
+        xenonet_hosts::relay::Scrubber::new(Some(home), &also)
+    });
+    let now = now_ms();
     let mut out = BTreeMap::new();
     for a in agents {
         let id = text(&a.field("id"));
@@ -276,8 +303,64 @@ fn agents_now(w: &World) -> Result<BTreeMap<String, Value>> {
                 "waitsOnYou": waits,
             }),
         );
+        if let (Some(scrub), Some(v)) = (&scrub, out.get_mut(&id)) {
+            let live = match w.state().live_info(&id, now) {
+                Ok(Some(l)) => l,
+                _ => Value::Null,
+            };
+            detail(v, &live, waits, scrub);
+        }
     }
     Ok(out)
+}
+
+/// An agent's detail from its live state, as it leaves this host: the text
+/// of what waits on you (only while it waits), its last message and its
+/// stuck reasons, each scrubbed and clipped as the schema has them. What
+/// it doesn't have is left out.
+fn detail(v: &mut Value, live: &Value, waits: bool, scrub: &xenonet_hosts::relay::Scrubber) {
+    let text = |k: &str, max: usize| live.get(k).and_then(Value::as_str).map(|t| clip(&scrub.text(t), max)).filter(|t| !t.trim().is_empty());
+    if let Some(q) = text("question", QUESTION_MAX).filter(|_| waits) {
+        v["question"] = json!(q);
+    }
+    if let Some(m) = text("lastMessage", LAST_MAX) {
+        v["lastMessage"] = json!(m);
+    }
+    let reasons: Vec<Value> =
+        live.get("stuck").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).take(STUCK_MAX).map(|r| json!(clip(&scrub.text(r), REASON_MAX))).collect();
+    if !reasons.is_empty() {
+        v["stuck"] = Value::Array(reasons);
+    }
+}
+
+/// Another host's agent as this host keeps it: the fields
+/// network/presence/v1 declares, each to its limit, and nothing else.
+fn declared(a: &Value) -> Option<Value> {
+    let id = s(a, "id").filter(|id| own_id(id) && id.chars().count() <= 200)?;
+    let text = |k: &str, max: usize| s(a, k).map_or(Value::Null, |t| Value::String(clip(&t, max)));
+    let mut out = json!({
+        "id": id,
+        "app": text("app", 32),
+        "title": text("title", 200),
+        "state": text("state", 32),
+        "doing": text("doing", 280),
+        "repoKey": text("repoKey", 300),
+        "branch": text("branch", 200),
+        "cwd": text("cwd", 500),
+        "lastActive": n(a, "lastActive").map_or(Value::Null, ms),
+        "waitsOnYou": a.get("waitsOnYou").and_then(Value::as_bool).unwrap_or(false),
+    });
+    for (k, max) in [("question", QUESTION_MAX), ("lastMessage", LAST_MAX)] {
+        if let Some(t) = s(a, k) {
+            out[k] = json!(clip(&t, max));
+        }
+    }
+    let reasons: Vec<Value> =
+        a.get("stuck").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).take(STUCK_MAX).map(|r| json!(clip(r, REASON_MAX))).collect();
+    if !reasons.is_empty() {
+        out["stuck"] = Value::Array(reasons);
+    }
+    Some(out)
 }
 
 /// Whether the person is here: actor:you's presence, from this console.
@@ -291,7 +374,7 @@ fn you_here(w: &World) -> bool {
 /// full). The body it sent, if it sent one.
 pub fn presence(w: &World, full: bool) -> Option<Value> {
     net(w).me()?;
-    let now = match agents_now(w) {
+    let now = match agents_now(w, net(w).titles_only()) {
         Ok(a) => a,
         Err(e) => {
             w.log("warn", "net.presence", &e.message);
@@ -346,9 +429,10 @@ fn presence_in(w: &World, from: &str, body: &Value) -> Result<()> {
     let removed: Vec<String> = body.get("removed").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
     agents.retain(|a| s(a, "id").is_some_and(|id| !removed.contains(&id)));
     for a in body.get("agents").and_then(Value::as_array).into_iter().flatten() {
-        let Some(id) = s(a, "id").filter(|id| own_id(id)) else { continue };
+        let Some(kept) = declared(a) else { continue };
+        let id = s(&kept, "id").unwrap_or_default();
         agents.retain(|x| s(x, "id").as_deref() != Some(&id));
-        agents.push(a.clone());
+        agents.push(kept);
     }
     agents.truncate(1000);
     let you = body.get("you").and_then(Value::as_bool).unwrap_or(false);
@@ -356,8 +440,10 @@ fn presence_in(w: &World, from: &str, body: &Value) -> Result<()> {
     store(w, |s| s.set_net_presence(from, counter, now_ms(), you, &roster, &Value::Array(agents).to_string()))
 }
 
-/// Another host's agent as the engine sees it.
-fn view_of(host: &Host, a: &Value) -> Value {
+/// Another host's agent as the engine sees it; with `detail`, as the
+/// console sees it, with what waits on you, its last message and why it
+/// seems stuck, which no agent's view carries.
+fn view_of(host: &Host, a: &Value, detail: bool) -> Value {
     let local = s(a, "id").unwrap_or_default();
     let key = s(a, "repoKey");
     let cwd = s(a, "cwd");
@@ -370,7 +456,7 @@ fn view_of(host: &Host, a: &Value) -> Value {
         _ => "idle",
     };
     let title = s(a, "title").unwrap_or_else(|| local.clone());
-    json!({
+    let mut v = json!({
         "id": format!("@{}:{local}", host.id),
         "app": s(a, "app").unwrap_or_else(|| local.split(':').next().unwrap_or("").to_string()),
         "title": clip(&title, 90),
@@ -394,12 +480,19 @@ fn view_of(host: &Host, a: &Value) -> Value {
         "online": host.online,
         "repoKey": key,
         "waitsOnYou": a.get("waitsOnYou").and_then(Value::as_bool).unwrap_or(false),
-    })
+    });
+    if detail {
+        for k in ["question", "lastMessage", "stuck"] {
+            v[k] = a.get(k).cloned().unwrap_or(Value::Null);
+        }
+    }
+    v
 }
 
 /// Every other host's agents, by the presence each last sent: only hosts
-/// in the roster, each host's working agents first.
-pub fn remote_views(w: &World) -> Vec<Value> {
+/// in the roster, each host's working agents first. With `detail`, for the
+/// console's state, never for an agent.
+pub fn remote_views(w: &World, detail: bool) -> Vec<Value> {
     let net = net(w);
     if net.me().is_none() {
         return Vec::new();
@@ -410,7 +503,7 @@ pub fn remote_views(w: &World) -> Vec<Value> {
     for r in rows {
         let Some(host) = r.text("host").and_then(|h| hosts.iter().find(|x| x.id == h)) else { continue };
         let agents: Vec<Value> = r.text("agents").and_then(|t| serde_json::from_str(t).ok()).unwrap_or_default();
-        let mut views: Vec<Value> = agents.iter().map(|a| view_of(host, a)).collect();
+        let mut views: Vec<Value> = agents.iter().map(|a| view_of(host, a, detail)).collect();
         views.sort_by(|a, b| {
             let w = |x: &Value| u8::from(x["status"] == "working");
             w(b).cmp(&w(a)).then_with(|| n(b, "lastActive").unwrap_or(0.0).partial_cmp(&n(a, "lastActive").unwrap_or(0.0)).unwrap_or(std::cmp::Ordering::Equal))
@@ -426,10 +519,12 @@ pub fn remote_views(w: &World) -> Vec<Value> {
 pub fn call(w: &World, c: &mut EngineCalls<'_>, method: &str, args: &[Arg]) -> Result<Arg> {
     let x = |i| at(args, i);
     match method {
-        "agents" => Ok(Arg::List(remote_views(w).iter().map(arg).collect())),
+        "agents" => Ok(Arg::List(remote_views(w, false).iter().map(arg).collect())),
+        // The console's state: with each agent's detail.
+        "console" => Ok(Arg::List(remote_views(w, true).iter().map(arg).collect())),
         "view" => {
             let id = text(&x(0));
-            Ok(remote_views(w).into_iter().find(|v| v["id"] == id).map_or_else(|| arg(&stub(&id)), |v| arg(&v)))
+            Ok(remote_views(w, false).into_iter().find(|v| v["id"] == id).map_or_else(|| arg(&stub(&id)), |v| arg(&v)))
         }
         "repoKey" => Ok(w.repos.remote_key(&x(0))),
         "sent" => sent(w, &x(0)).map(|()| Arg::Undef),
@@ -616,7 +711,7 @@ fn message_in(w: &World, from: &str, b: &Value, window_host: bool) -> Result<()>
         receipt(w, from, &mid, &target, "refused", Some(&e.message));
         return Ok(());
     }
-    let name = remote_views(w).into_iter().find(|v| v["id"] == sender_id).and_then(|v| s(&v, "title"));
+    let name = remote_views(w, false).into_iter().find(|v| v["id"] == sender_id).and_then(|v| s(&v, "title"));
     let auth = b.get("auth").cloned().unwrap_or(Value::Null);
     let env =
         envelope(from, &mid, now_ms(), &sender_id, &kind, name.as_deref(), &s(&auth, "method").unwrap_or_else(|| "?".into()), &s(&auth, "strength").unwrap_or_default(), hops);

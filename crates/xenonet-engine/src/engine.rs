@@ -2103,18 +2103,22 @@ impl Engine {
             })
             .collect();
         // Then other hosts' agents, in a network, with their host and when
-        // it was last heard from.
+        // it was last heard from, and for the console what their presence
+        // says waits on you (detail no agent's view has).
         let mut agents = agents;
         if self.networked() {
-            for a in list(c.call("engine.net", "agents", vec![])?) {
+            for a in list(c.call("engine.net", "console", vec![])?) {
                 let mut b = brief(&a);
                 for k in ["status", "focus"] {
                     push(&mut b, k, a.field(k));
                 }
                 push(&mut b, "editing", Arg::num(0.0));
                 push(&mut b, "claims", Arg::List(vec![]));
-                for k in ["reachable", "host", "seen", "online", "waitsOnYou"] {
-                    push(&mut b, k, a.field(k));
+                for k in ["reachable", "host", "seen", "online", "waitsOnYou", "repoKey", "cwd", "lastActive", "question", "lastMessage", "stuck"] {
+                    let v = a.field(k);
+                    if k != "lastActive" || !v.is_nullish() {
+                        push(&mut b, k, v);
+                    }
                 }
                 agents.push(b);
             }

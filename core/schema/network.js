@@ -59,6 +59,11 @@ const RemoteAgent = obj({
   cwd: z.string().max(500).nullable().describe("Its folder, with the home folder as ~"),
   lastActive: ms.nullable(),
   waitsOnYou: z.boolean().describe("A question or a stuck state waits on the person"),
+  // Detail (docs/design/network.md, section 7): left out when the sending
+  // host shares titles only, and never shown to agents.
+  question: z.string().max(320).nullable().optional().describe("While it waits on the person: the text of its question, or of the permission it asks for, with the home folder as ~"),
+  lastMessage: z.string().max(280).nullable().optional().describe("What it said last, its last 280 characters, with the home folder as ~"),
+  stuck: z.array(z.string().max(280)).max(8).nullable().optional().describe("Why it seems stuck, with the home folder as ~"),
 });
 
 export const NetworkPresence = define(

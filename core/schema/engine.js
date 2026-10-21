@@ -71,6 +71,9 @@ export const EngineAgent = define(
     online: z.boolean().optional().describe("For an agent on another host: whether its host's link is up; offline since seen when it isn't"),
     repoKey: nstr.optional().describe("For an agent on another host: the normalized git remote of its folder, which clones of one repo share"),
     waitsOnYou: z.boolean().optional().describe("For an agent on another host: a question or a stuck state waits on the person"),
+    question: nstr.optional().describe("For an agent on another host, in the console's snapshot only: the text of what waits on the person, as its host's presence carries it; null when it shares titles only"),
+    lastMessage: nstr.optional().describe("For an agent on another host, in the console's snapshot only: what it said last, at most 280 characters"),
+    stuck: z.array(z.string()).nullable().optional().describe("For an agent on another host, in the console's snapshot only: why it seems stuck"),
   }),
   {
     title: "An agent",

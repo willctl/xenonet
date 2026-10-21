@@ -2591,6 +2591,7 @@ dependencies = [
  "xenonet-blocks",
  "xenonet-components",
  "xenonet-engine",
+ "xenonet-hosts",
  "xenonet-schema",
  "xenonet-service",
 ]
