@@ -227,7 +227,7 @@ mod tests {
         assert!(c.demo && !c.claude_usage);
         assert_eq!((c.home_dir.as_str(), c.projects_dir.as_str(), c.claude_projects_dir.as_str()), ("/w/home", "/w/home/Projects", "/w/home/.claude/projects"));
         assert_eq!(c.claude_config_file, "/w/home/.claude.json");
-        assert_eq!(c.wiki_server, "agent-wiki");
+        assert_eq!(c.wiki_server, "xenolith");
         assert_eq!(c.windows["activeWindowMs"], 600000);
         assert!(c.readers.is_empty() && c.numbat_file.is_none());
         let mut env = Map::new();

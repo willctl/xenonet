@@ -90,7 +90,7 @@ pub fn config(argv: &[String], env: &Env, home: &str, platform: &str, finds: &mu
     // The shared context's folder and the server that writes to it: the
     // one the lookup found it for, so a wiki that moved keeps its server.
     let (wiki_dir, wiki_server): (Value, Value) = match world {
-        Some(w) => (w.get("wikiDir").cloned().unwrap_or(Value::Null), Value::String("agent-wiki".into())),
+        Some(w) => (w.get("wikiDir").cloned().unwrap_or(Value::Null), Value::String("xenolith".into())),
         None => match set(env, "XENONET_WIKI_DIR") {
             Some(d) => (Value::String(d.into()), finds.context_server(Some(d))),
             None => {
@@ -271,7 +271,7 @@ mod tests {
         assert_eq!(num_of(&c, "port"), 47841.0);
         assert_eq!(json_of(&c, "homeDir"), "/w/home");
         assert_eq!(json_of(&c, "claudeConfigFile"), "/w/home/.claude.json");
-        assert_eq!(json_of(&c, "wikiServer"), "agent-wiki");
+        assert_eq!(json_of(&c, "wikiServer"), "xenolith");
         assert_eq!(json_of(&c, "claudeUsage"), false);
         assert!(matches!(c.get("readers"), Some(Field::Set(r)) if r.is_empty()));
     }

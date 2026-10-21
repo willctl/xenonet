@@ -132,7 +132,7 @@ const SESSIONS = [
     app: "claude", project: "atlas-api", title: "Add partial refunds to the orders API", branch: "feat/partial-refunds", live: true, desktop: true,
     turns: [
       { prompt: "Add partial refunds to the orders API. Keep the existing full-refund path working.", steps: [["read", "src/orders/refunds.ts"], ["edit", "src/orders/routes.ts", "routes = []", "routes = [refundRoute]"], ["run", "npm test -- orders", true], ["edit", "src/orders/refunds.ts", "refund()", "refund(amount?: number)"]], reply: "Partial refunds work. `POST /orders/:id/refunds` takes an optional amount, and the full-refund path is unchanged. All 48 order tests pass." },
-      { prompt: "Log the refund rules in the wiki.", steps: [["mcp", "agent-wiki", "wiki_log", { pages: ["atlas-api", "refunds"] }], ["run", "npm run lint", true]], reply: "Logged the refund rules on the atlas-api and refunds pages." },
+      { prompt: "Log the refund rules in the wiki.", steps: [["mcp", "xenolith", "context_log", { pages: ["atlas-api", "refunds"] }], ["run", "npm run lint", true]], reply: "Logged the refund rules on the atlas-api and refunds pages." },
     ],
   },
   {

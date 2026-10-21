@@ -28,7 +28,7 @@ const world = demo ? createWorld() : null;
 const serverDev = !demo && process.argv.includes("--dev") && !process.env.XENONET_PORT;
 const devDir = (kind) => (serverDev ? appDir(kind, { name: "XenoNet Dev" }) : null);
 
-const wiki = world ? { dir: world.wikiDir, server: "agent-wiki" } : findWiki();
+const wiki = world ? { dir: world.wikiDir, server: "xenolith" } : findWiki();
 
 export const config = {
   demo,
