@@ -151,6 +151,12 @@ fn posix_cwd() -> String {
     }
 }
 
+/// pathStyle(p) (core/paths.js): the flavor the path keeps, this machine's
+/// for a relative one.
+pub fn style_of(p: &str) -> Style {
+    Style::from(crate::paths::path_style(p))
+}
+
 /// path.join for this machine.
 pub fn join(parts: &[&str]) -> String {
     NATIVE.join(parts)
