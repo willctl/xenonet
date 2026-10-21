@@ -49,6 +49,9 @@ const BATCH_ROWS: u64 = 500;
 const POLLED_MS: f64 = 40e3;
 /// Entries waiting for approval, at most.
 pub const MAX_PROPOSALS: usize = 16;
+/// A ticket's maker that hasn't signed its new host in is asked again
+/// after this.
+const ASK_AGAIN_MS: f64 = 30e3;
 
 /// A request at the gateway: its method, target (path and query), headers
 /// with lowercase names, and body.
@@ -171,6 +174,12 @@ pub struct Gateway {
     stopped: Notify,
     /// Entries signed by too few, waiting for approval, and when they came.
     proposals: Mutex<Vec<(Entry, f64)>>,
+    /// The roster grew, or an entry came to wait for approval: a join
+    /// waiting on a ticket's maker looks again.
+    roster_changed: Notify,
+    /// Tickets whose makers were asked to sign their new host in: the
+    /// roster's length then, and when.
+    asked: Mutex<HashMap<String, (u64, f64)>>,
 }
 
 /// What the gateway knows of itself, from its host's node.
@@ -195,6 +204,8 @@ impl Gateway {
             rates: Mutex::new(HashMap::new()),
             stopped: Notify::new(),
             proposals: Mutex::new(Vec::new()),
+            roster_changed: Notify::new(),
+            asked: Mutex::new(HashMap::new()),
         }))
     }
 
@@ -265,7 +276,8 @@ impl Gateway {
             return NetReply::json(409, &json!({ "error": format!("the network's gateway moved to {to}"), "code": "moved" }));
         }
         let answer = match (req.method.as_str(), req.path()) {
-            ("POST", "/net/v1/join") => self.join(&n, &req),
+            ("POST", "/net/v1/join") => self.join(&n, &req).await,
+            ("POST", "/net/v1/tickets") => self.ticket_post(&n, &req),
             ("GET", "/net/v1/link") => self.link(&n, &req).await,
             ("POST", "/net/v1/frames") => self.frames(&n, &req),
             ("GET", "/net/v1/roster") => Ok(self.roster_get(&n, &req)),
@@ -671,6 +683,7 @@ impl Gateway {
             let extra = waiting.len().saturating_sub(MAX_PROPOSALS);
             waiting.drain(..extra);
         }
+        self.roster_changed.notify_waiters();
         let me = Self::me(n)?;
         n.note_proposals(vec![entry.clone()]);
         let view = n.roster().view();
@@ -691,6 +704,7 @@ impl Gateway {
         if offered == Offered::Duplicate {
             return Ok(offered);
         }
+        self.roster_changed.notify_waiters();
         let me = Self::me(n)?;
         let now = Self::now(n);
         let view = n.roster().view();
@@ -728,6 +742,32 @@ impl Gateway {
         self.store.locked().waiting_tickets(now).unwrap_or_default()
     }
 
+    /// `POST tickets`: a ticket made on another window host, whose hash and
+    /// terms (the host it's for, and whether that's a window host) the
+    /// maker's signed request carries. The gateway keeps the hash and times
+    /// it from now; at the join, the maker signs the new host in.
+    fn ticket_post(&self, n: &Shared, req: &NetRequest) -> R<NetReply> {
+        let signed = match self.authenticate(n, req) {
+            Ok(s) => s,
+            Err(reply) => return Ok(reply),
+        };
+        let body: Value = serde_json::from_slice(&req.body).map_err(|_| NetError::bad("a ticket's terms are JSON"))?;
+        let view = n.roster().view();
+        if !view.is_window(&signed.host) {
+            return Err(NetError::new(403, "not-window", "a ticket is made on a window host"));
+        }
+        let host = body.get("host").and_then(Value::as_str).filter(|h| xenonet_base::ids::is_host_id(h)).ok_or_else(|| NetError::bad("a ticket names a host id"))?;
+        if view.member(host).is_some() {
+            return Err(NetError::new(409, "taken", format!("{host} is in the network already: Replace it to add a reinstalled machine")));
+        }
+        let hash = body.get("hash").and_then(Value::as_str).filter(|h| unb64(h).is_some_and(|b| b.len() == 32)).ok_or_else(|| NetError::bad("a ticket's hash is 32 bytes, base64url"))?;
+        let window = body.get("window").and_then(Value::as_bool).ok_or_else(|| NetError::bad("a ticket says whether it's for a window host"))?;
+        let now = Self::now(n) as i64;
+        let expires = now + ticket::TICKET_MS as i64;
+        self.add_ticket(&TicketRow { hash: hash.into(), host: host.into(), window, maker: signed.host.clone(), made: now, expires }, now)?;
+        Ok(NetReply::json(200, &json!({ "ok": true, "expires": expires })))
+    }
+
     // ---------- joining ----------
 
     fn bad_ticket(&self, now: f64) {
@@ -740,7 +780,7 @@ impl Gateway {
         }
     }
 
-    fn join(&self, n: &Shared, req: &NetRequest) -> R<NetReply> {
+    async fn join(&self, n: &Arc<Shared>, req: &NetRequest) -> R<NetReply> {
         let now = Self::now(n);
         if self.bad.locked().closed_until > now {
             return Err(NetError::new(404, "closed", "not found"));
@@ -762,20 +802,51 @@ impl Gateway {
             self.bad_ticket(now);
             return Err(NetError::new(404, "no-ticket", "not found"));
         };
-        let view = n.roster().view();
-        if view.member(&t.host).is_some() {
-            return Err(NetError::new(409, "taken", format!("{} is in the network already: Replace it from a window host's console, then make a new ticket", t.host)));
+        let in_roster = |n: &Shared| n.roster().view().member(&t.host).map(|m| m.keys == keys);
+        match in_roster(n) {
+            Some(false) => return Err(NetError::new(409, "taken", format!("{} is in the network already: Replace it from a window host's console, then make a new ticket", t.host))),
+            Some(true) => {}
+            None if t.maker == me.host => {
+                // Made here: the gateway's host signs the new host in.
+                if !self.store.locked().use_ticket(&t.hash, now as i64)? {
+                    self.bad_ticket(now);
+                    return Err(NetError::new(404, "no-ticket", "not found"));
+                }
+                let mut entry = n.roster().draft(Op::Add, HostRef { id: t.host.clone(), keys, window: t.window }, None, now as i64);
+                entry.sign_by(&me.host, &me.key);
+                self.append(n, entry)?;
+            }
+            None => {
+                // Made on another window host, which signs the new host in:
+                // it's asked over its link, and the join waits a while.
+                let join = json!({ "sign": s("sign"), "seal": s("seal"), "nonce": nonce, "proof": proof, "makerProof": s("makerProof"), "sig": s("sig") });
+                self.ask_maker(n, &me, &t, &join, now)?;
+                let wait = Duration::from_millis(n.timing().poll_ms * 4 / 5);
+                let deadline = tokio::time::Instant::now() + wait;
+                loop {
+                    let changed = self.roster_changed.notified();
+                    tokio::pin!(changed);
+                    changed.as_mut().enable();
+                    match in_roster(n) {
+                        Some(true) => break,
+                        Some(false) => return Err(NetError::new(409, "taken", format!("{} is in the network already", t.host))),
+                        None => {}
+                    }
+                    let proposed = self.proposals.locked().iter().any(|(p, _)| p.op == Op::Add && p.host.id == t.host && p.host.keys == keys);
+                    if proposed {
+                        return Ok(self.waiting(n, &t, true));
+                    }
+                    tokio::select! {
+                        () = &mut changed => {}
+                        () = tokio::time::sleep_until(deadline) => return Ok(self.waiting(n, &t, false)),
+                        () = self.stopped.notified() => return Ok(self.waiting(n, &t, false)),
+                    }
+                }
+                self.asked.locked().remove(&t.hash);
+            }
         }
-        if t.maker != me.host {
-            return Err(NetError::new(409, "maker", "that ticket was made on another host, which this gateway can't sign for"));
-        }
-        if !self.store.locked().use_ticket(&t.hash, now as i64)? {
-            self.bad_ticket(now);
-            return Err(NetError::new(404, "no-ticket", "not found"));
-        }
-        let mut entry = n.roster().draft(Op::Add, HostRef { id: t.host.clone(), keys, window: t.window }, None, now as i64);
-        entry.sign_by(&me.host, &me.key);
-        self.append(n, entry)?;
+        // The new host is in the roster with these keys: the ticket is used.
+        let _ = self.store.locked().use_ticket(&t.hash, now as i64)?;
         self.store.locked().set_host(&t.host, platform.as_deref(), version.as_deref(), desktop, now as i64)?;
         let hash = unb64(&t.hash).unwrap_or_default();
         let gw = me.key.public();
@@ -795,6 +866,44 @@ impl Gateway {
             }),
         ))
     }
+
+    /// Asks a ticket's maker to sign its new host in: a `roster` frame with
+    /// the join request, which the maker checks against the ticket it
+    /// keeps. Asked again only once the roster moved, or after a while.
+    fn ask_maker(&self, n: &Shared, me: &Me, t: &TicketRow, join: &Value, now: f64) -> R<()> {
+        let len = n.roster().len();
+        {
+            let mut asked = self.asked.locked();
+            asked.retain(|_, (_, at)| now - *at < ticket::TICKET_MS);
+            if asked.get(&t.hash).is_some_and(|(l, at)| *l == len && now - *at < ASK_AGAIN_MS) {
+                return Ok(());
+            }
+            asked.insert(t.hash.clone(), (len, now));
+        }
+        let body = json!({ "asks": [{ "host": t.host, "window": t.window, "join": join, "expires": t.expires }] });
+        let f = Self::frame(me, "roster", &t.maker, now as i64, &body)?;
+        self.store.locked().enqueue(Item { host: &t.maker, id: &f.id, kind: "roster", sender: "", line: f.line().trim_end() }, now as i64, &n.caps())?;
+        self.wake(&t.maker);
+        Ok(())
+    }
+
+    /// A join that waits on its ticket's maker, or on a second approval:
+    /// what the new machine is told, and asks again with.
+    fn waiting(&self, n: &Shared, t: &TicketRow, approval: bool) -> NetReply {
+        let now = Self::now(n);
+        let online = self.is_linked(&t.maker, now);
+        let error = if approval {
+            format!(
+                "{} is to be a window host, which needs the founder or a second window host to approve: from one of their consoles, or xenonet net approve {} --op add. The join waits for it, for the rest of the ticket's ten minutes.",
+                t.host, t.host
+            )
+        } else if online {
+            format!("{} made this ticket and signs {} in, and hasn't yet. The join waits for it, for the rest of the ticket's ten minutes.", t.maker, t.host)
+        } else {
+            format!("{} made this ticket and signs {} in, and it's offline. The join waits for it, for the rest of the ticket's ten minutes.", t.maker, t.host)
+        };
+        NetReply::json(409, &json!({ "error": error, "code": "waiting", "maker": t.maker, "online": online, "approval": approval, "expires": t.expires }))
+    }
 }
 
 /// What a join request's new key signs: its nonce, key id and proof.
@@ -812,6 +921,7 @@ pub fn join_body(key: &crate::keys::HostKey, code: &str, nonce: &str, platform: 
         "seal": key.public().seal_b64(),
         "nonce": nonce,
         "proof": proof,
+        "makerProof": ticket::maker_proof(code, nonce, &key_id),
         "platform": platform,
         "version": version,
         "desktop": desktop,

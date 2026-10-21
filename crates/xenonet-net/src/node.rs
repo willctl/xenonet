@@ -125,6 +125,16 @@ pub struct Peer {
     pub platform: Option<String>,
 }
 
+/// A ticket this host made while it isn't the gateway's, which it signs
+/// its new host in for when the gateway asks. The ticket itself stays in
+/// memory, never on disk, and goes with its ten minutes.
+pub struct PendingTicket {
+    code: String,
+    pub host: String,
+    pub window: bool,
+    pub expires: i64,
+}
+
 /// A batch on its way up.
 pub struct Batch {
     pub ids: Vec<String>,
@@ -150,6 +160,12 @@ pub struct Shared {
     proposals: Mutex<Vec<Entry>>,
     /// The gateway moved: the service starts the link again, toward it.
     relink: Notify,
+    /// Tickets made here for the gateway to keep, until they're used or
+    /// lapse.
+    pending: Mutex<Vec<PendingTicket>>,
+    /// `add` entries this host signed for its tickets, for the link to take
+    /// to the gateway.
+    signed: Mutex<Vec<Entry>>,
 }
 
 const OPERATOR_ACTIONS: [&str; 4] = ["message", "ticket", "remove", "replace"];
@@ -389,6 +405,8 @@ impl Shared {
                 }
             }
             Op::Gateway => self.follow_gateway(&e),
+            // A ticket made here did its work: it no longer waits.
+            Op::Add => self.pending.locked().retain(|p| p.host != e.host.id),
             _ => {}
         }
         Ok(offered)
@@ -584,6 +602,12 @@ impl Shared {
                 if !proposed.is_empty() {
                     self.note_proposals(proposed);
                 }
+                for ask in body.get("asks").and_then(Value::as_array).into_iter().flatten() {
+                    match self.sign_ask(net, ask) {
+                        Ok(e) => self.signed.locked().push(e),
+                        Err(why) => self.log("net.ticket", &format!("the gateway asked this machine to sign a host in, and it didn't: {why}")),
+                    }
+                }
                 fetch
             }
             "removed" => {
@@ -592,6 +616,69 @@ impl Shared {
             }
             _ => false,
         }
+    }
+
+    /// The gateway's ask to sign a new host in, for a ticket made here: an
+    /// `add` entry this host signs only when the join request matches a
+    /// ticket it keeps (the host id, the window choice, and keys the
+    /// request proves it holds), with a proof keyed by the ticket itself,
+    /// which the gateway can't make.
+    fn sign_ask(&self, net: &NetFile, ask: &Value) -> Result<Entry, String> {
+        let s = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+        let host = s(ask, "host");
+        let window = ask.get("window").and_then(Value::as_bool).ok_or("the ask says no window choice")?;
+        let join = ask.get("join").cloned().unwrap_or(Value::Null);
+        let now = self.now() as i64;
+        let code = {
+            let mut pending = self.pending.locked();
+            pending.retain(|p| p.expires > now);
+            let p = pending.iter().find(|p| p.host == host).ok_or_else(|| format!("this machine keeps no ticket for {host}"))?;
+            if p.window != window {
+                return Err(format!("the ticket for {host} was made with another window choice"));
+            }
+            p.code.clone()
+        };
+        let keys = PublicKeys::from_b64(&s(&join, "sign"), &s(&join, "seal")).ok_or("the join request has no keys")?;
+        let key_id = keys.key_id();
+        let (nonce, proof) = (s(&join, "nonce"), s(&join, "proof"));
+        let sig = crate::codec::unb64(&s(&join, "sig")).unwrap_or_default();
+        let ok = nonce.len() >= 16
+            && ticket::check_join(&ticket::hash(&code), &nonce, &key_id, &proof)
+            && ticket::check_maker(&code, &nonce, &key_id, &s(&join, "makerProof"))
+            && keys.verify(crate::gateway::join_signing(&nonce, &key_id, &proof).as_bytes(), &sig);
+        if !ok {
+            return Err(format!("the join request for {host} didn't prove its ticket"));
+        }
+        let key = self.key().ok_or("this machine has no key")?;
+        let r = self.roster();
+        let v = r.view_ref().ok_or("this machine's roster is empty")?;
+        if !v.is_window(&net.host) {
+            return Err("this machine isn't a window host now".into());
+        }
+        match v.member(&host) {
+            Some(m) if m.keys == keys => return Err(format!("{host} is in already")),
+            Some(_) => return Err(format!("{host} is in the network already, with other keys")),
+            None => {}
+        }
+        let mut e = r.draft(Op::Add, HostRef { id: host.clone(), keys, window }, None, self.gateway_now() as i64);
+        drop(r);
+        e.sign_by(&net.host, &key);
+        self.log("net.ticket", &format!("this machine signed {host} into the network, with the ticket it made"));
+        Ok(e)
+    }
+
+    /// The `add` entries signed for this host's tickets, for the gateway.
+    pub fn take_signed(&self) -> Vec<Entry> {
+        std::mem::take(&mut *self.signed.locked())
+    }
+
+    /// The tickets made here that the gateway keeps, still in their ten
+    /// minutes.
+    pub fn pending_tickets(&self) -> Vec<(String, bool, i64)> {
+        let now = self.now() as i64;
+        let mut p = self.pending.locked();
+        p.retain(|t| t.expires > now);
+        p.iter().map(|t| (t.host.clone(), t.window, t.expires)).collect()
     }
 
     fn host_frame(&self, net: &NetFile, key: &HostKey, f: &Frame) -> bool {
@@ -833,6 +920,8 @@ impl Node {
             link_written: Mutex::new(0.0),
             proposals: Mutex::new(Vec::new()),
             relink: Notify::new(),
+            pending: Mutex::new(Vec::new()),
+            signed: Mutex::new(Vec::new()),
         });
         Ok(Arc::new(Node { shared, tasks: Mutex::new(Vec::new()) }))
     }
@@ -997,6 +1086,11 @@ impl Node {
                     "That ticket didn't work: it was used, it's past its ten minutes, or it was mistyped. Make a new one with Add a machine.",
                 ))
             }
+            // The ticket's maker hasn't signed this machine in yet, or a
+            // second window host hasn't approved it: joining again waits on.
+            409 if v.get("code").and_then(Value::as_str) == Some("waiting") => {
+                return Err(NetError::new(409, "waiting", v.get("error").and_then(Value::as_str).unwrap_or("the join waits for the ticket's maker").to_string()))
+            }
             s => return Err(NetError::new(s, "refused", v.get("error").and_then(Value::as_str).unwrap_or("the gateway refused the join").to_string())),
         }
         let g = v.get("gateway").cloned().unwrap_or(Value::Null);
@@ -1082,8 +1176,13 @@ impl Node {
     }
 
     /// **Add a machine**: a ticket for `host`, and the line to run there.
-    /// The person's alone: the routes check that.
-    pub fn ticket(&self, host: &str, window: bool) -> R<Value> {
+    /// The person's alone: the routes check that. On the gateway's host the
+    /// gateway keeps it at once; on another window host it goes to the
+    /// gateway over the link (its hash and terms, in a signed request), and
+    /// this host signs the new host in when it joins. A window host added by
+    /// anyone but the founder waits, at its join, for a second window host
+    /// to approve it.
+    pub async fn ticket(&self, host: &str, window: bool) -> R<Value> {
         let n = &self.shared;
         let (net, _) = self.me()?;
         if !is_host_id(host) {
@@ -1096,12 +1195,6 @@ impl Node {
         if !view.is_window(&net.host) {
             return Err(NetError::new(403, "not-window", "a ticket is made on a window host"));
         }
-        if window && view.founder != net.host {
-            return Err(NetError::new(403, "needs-founder", format!("adding a window host needs the founder or two window hosts: make this ticket on {}", view.founder)));
-        }
-        let Some(g) = n.gateway() else {
-            return Err(NetError::new(409, "not-gateway", format!("tickets are made on the gateway's host for now: Add a machine on {}", view.gateway)));
-        };
         let Some(address) = net.gateway.address.clone() else {
             return Err(NetError::new(
                 409,
@@ -1111,11 +1204,29 @@ impl Node {
         };
         let code = ticket::make()?;
         let now = n.now() as i64;
-        let expires = now + ticket::TICKET_MS as i64;
-        g.add_ticket(&TicketRow { hash: ticket::hash_b64(&code), host: host.into(), window, maker: net.host.clone(), made: now, expires }, now)?;
+        let expires = match n.gateway() {
+            Some(g) => {
+                let expires = now + ticket::TICKET_MS as i64;
+                g.add_ticket(&TicketRow { hash: ticket::hash_b64(&code), host: host.into(), window, maker: net.host.clone(), made: now, expires }, now)?;
+                expires
+            }
+            None => {
+                let t = self.transport()?;
+                let v = link::call(n, &t, "POST", "/net/v1/tickets", json!({ "hash": ticket::hash_b64(&code), "host": host, "window": window })).await?;
+                let expires = v.get("expires").and_then(Value::as_i64).unwrap_or(now + ticket::TICKET_MS as i64).min(now + ticket::TICKET_MS as i64);
+                let mut pending = n.pending.locked();
+                pending.retain(|p| p.expires > now && p.host != host);
+                pending.push(PendingTicket { code: code.clone(), host: host.into(), window, expires });
+                expires
+            }
+        };
         let shown = ticket::display(&code);
         n.log("net.ticket", &format!("a ticket for {host} was made; it works once, for ten minutes"));
-        Ok(json!({ "host": host, "window": window, "ticket": shown, "line": format!("xenonet net join {address} {shown}"), "expires": expires }))
+        let mut out = json!({ "host": host, "window": window, "ticket": shown, "line": format!("xenonet net join {address} {shown}"), "expires": expires });
+        if window && view.founder != net.host {
+            out["approval"] = json!(true);
+        }
+        Ok(out)
     }
 
     /// Removes another host: an entry this host signs, which the roster's
@@ -1139,7 +1250,7 @@ impl Node {
     pub async fn replace(&self, host: &str) -> R<Value> {
         let window = self.shared.roster().view().member(host).map(|m| m.window).ok_or_else(|| NetError::new(404, "no-host", format!("{host} isn't in the network")))?;
         self.remove(host).await?;
-        let mut t = self.ticket(host, window)?;
+        let mut t = self.ticket(host, window).await?;
         t["replaced"] = json!(host);
         Ok(t)
     }
@@ -1245,10 +1356,12 @@ impl Node {
                 "self": me,
             }));
         }
-        let tickets: Vec<Value> = gw
-            .as_ref()
-            .map(|g| g.waiting_tickets(now as i64).into_iter().map(|t| json!({ "host": t.host, "window": t.window, "expires": t.expires })).collect())
-            .unwrap_or_default();
+        // The gateway's host lists every ticket that waits; another window
+        // host, the ones it made.
+        let tickets: Vec<Value> = match gw.as_ref() {
+            Some(g) => g.waiting_tickets(now as i64).into_iter().map(|t| json!({ "host": t.host, "window": t.window, "expires": t.expires })).collect(),
+            None => n.pending_tickets().into_iter().map(|(host, window, expires)| json!({ "host": host, "window": window, "expires": expires })).collect(),
+        };
         let o = n.outbox();
         let address = net.gateway.address.clone().unwrap_or_default();
         let kind = if address.is_empty() { "tunnel" } else { address_kind(&address) };

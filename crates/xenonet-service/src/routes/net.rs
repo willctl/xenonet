@@ -101,7 +101,7 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
         }
         "ticket" => {
             node.tunnel_address(public_host(ctx).as_deref());
-            node.ticket(&text("host"), on("window"))
+            node.ticket(&text("host"), on("window")).await
         }
         "remove" => node.remove(&text("host")).await,
         "replace" => node.replace(&text("host")).await,

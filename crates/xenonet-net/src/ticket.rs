@@ -96,6 +96,23 @@ pub fn check_gateway(hash: &[u8], gateway_key_id: &str, nonce: &str, proof: &str
     check(hash, &gateway_message(gateway_key_id, nonce), proof)
 }
 
+fn maker_message(nonce: &str, key_id: &str) -> String {
+    format!("xenonet-join-maker/1\n{nonce}\n{key_id}")
+}
+
+/// The join request's proof for a ticket's maker when that isn't the
+/// gateway's host: an HMAC keyed by the ticket itself, which only the new
+/// machine and the maker know. The gateway, which keeps only the hash,
+/// can't make one, so it can't have the maker sign keys of its own choosing
+/// into the roster.
+pub fn maker_proof(code: &str, nonce: &str, key_id: &str) -> String {
+    mac(code.as_bytes(), &maker_message(nonce, key_id))
+}
+
+pub fn check_maker(code: &str, nonce: &str, key_id: &str, proof: &str) -> bool {
+    check(code.as_bytes(), &maker_message(nonce, key_id), proof)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,5 +147,11 @@ mod tests {
         assert!(check_gateway(&h, "xnk1_g", "n1", &g));
         assert!(!check_gateway(&h, "xnk1_x", "n1", &g));
         assert_ne!(g, p, "the two proofs differ");
+        // The maker's proof is keyed by the ticket, not its hash.
+        let m = maker_proof("KX7Q49MZT2", "n1", "xnk1_a");
+        assert!(check_maker("KX7Q49MZT2", "n1", "xnk1_a", &m));
+        assert!(!check_maker("KX7Q49MZT3", "n1", "xnk1_a", &m));
+        assert!(!check_maker("KX7Q49MZT2", "n1", "xnk1_b", &m));
+        assert_ne!(m, mac(&h, &maker_message("n1", "xnk1_a")), "the hash alone can't make it");
     }
 }

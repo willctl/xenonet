@@ -327,10 +327,19 @@ async fn ticket(maker: &Host, host: &str, window: bool) -> (String, String) {
     (address, code)
 }
 
+/// Joins as the window does, again while the join waits on the ticket's
+/// maker.
 async fn join(h: &Host, address: &str, code: &str) {
-    let (s, v) = h.window("POST", "/api/net/join", json!({ "address": address, "ticket": code })).await;
-    assert_eq!(s, 200, "{} joins: {v}", h.name);
-    assert_eq!(v["self"]["id"], h.name);
+    let end = std::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let (s, v) = h.window("POST", "/api/net/join", json!({ "address": address, "ticket": code })).await;
+        if s == 409 && v["code"] == "waiting" && std::time::Instant::now() < end {
+            continue;
+        }
+        assert_eq!(s, 200, "{} joins: {v}", h.name);
+        assert_eq!(v["self"]["id"], h.name);
+        return;
+    }
 }
 
 async fn live(h: &Host, hosts: usize) {
@@ -370,7 +379,7 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     let b = Host::open("laptop", root.join("laptop"), vec![sess(L1, "Fix the login form", &laptop_atlas)], None).await;
     join(&b, &address, &code).await;
     live(&b, 2).await;
-    let (address, code) = ticket(&a, "desk", false).await;
+    let (address, code) = ticket(&b, "desk", false).await;
     let c = Host::open("desk", root.join("desk"), vec![sess(D1, "Ledger fixtures", &desk_ledger), sess(D2, "Release notes", &desk_atlas)], None).await;
     join(&c, &address, &code).await;
     for h in [&a, &b, &c] {
@@ -571,7 +580,36 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
         until(&format!("desk's agents gone from {}'s peers", h.name), 10, || async { !h.peers(me).await.iter().any(|p| p.starts_with("@desk:")) }).await;
     }
     until("desk knows it was removed", 10, || async { c.state().await["gateway"]["link"] == "removed" }).await;
-    drop((a, b, c));
+
+    // laptop adds den as a window host while laptop is away: den's join
+    // waits for it, and says so; once laptop has signed den in, it waits
+    // for the founder's approval, as the roster's rules say.
+    let (s, t) = b.window("POST", "/api/net/ticket", json!({ "host": "den", "window": true })).await;
+    assert_eq!((s, t["approval"].clone()), (200, json!(true)), "{t}");
+    let (address, code) = (t["line"].as_str().unwrap().split(' ').nth(3).unwrap().to_string(), t["ticket"].as_str().unwrap().to_string());
+    assert_eq!(b.state().await["tickets"][0]["host"], "den", "the maker lists its ticket");
+    b.svc.stop();
+    let e = Host::open("den", root.join("den"), vec![], None).await;
+    let (s, v) = e.window("POST", "/api/net/join", json!({ "address": address, "ticket": code })).await;
+    assert_eq!((s, v["code"].clone()), (409, json!("waiting")), "{v}");
+    assert!(v["error"].as_str().unwrap().contains("laptop made this ticket and signs den in, and it's offline"), "{v}");
+    b.svc.start().await.unwrap();
+    let st = until_value("den's add waiting for approval at studio", 20, || async {
+        let st = a.state().await;
+        st["proposals"].as_array().is_some_and(|p| !p.is_empty()).then_some(st)
+    })
+    .await;
+    assert_eq!((st["proposals"][0]["op"].clone(), st["proposals"][0]["host"].clone(), st["proposals"][0]["signers"].clone()), (json!("add"), json!("den"), json!(["laptop"])));
+    let (s, v) = e.window("POST", "/api/net/join", json!({ "address": address, "ticket": code })).await;
+    assert_eq!((s, v["code"].clone()), (409, json!("waiting")), "{v}");
+    assert!(v["error"].as_str().unwrap().contains("needs the founder or a second window host"), "{v}");
+    let (s, v) = a.window("POST", "/api/net/approve", json!({ "op": "add", "host": "den" })).await;
+    assert_eq!(s, 200, "{v}");
+    join(&e, &address, &code).await;
+    live(&e, 3).await;
+    let st = a.state().await;
+    assert_eq!(row(&st, "den")["window"], true, "{st}");
+    drop((a, b, c, e));
     let _ = std::fs::remove_dir_all(root);
 }
 

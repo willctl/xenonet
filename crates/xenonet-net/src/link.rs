@@ -318,6 +318,23 @@ async fn read(n: &Arc<Shared>, t: &Transport, body: NetBody, nonce: &str) -> Rea
             if n.frame(&f) {
                 fetch_roster(n, t).await;
             }
+            // Hosts this one signed in for its tickets go to the gateway.
+            let signed = n.take_signed();
+            if !signed.is_empty() {
+                tokio::spawn(submit_signed(n.clone(), t.clone(), signed));
+            }
+        }
+    }
+}
+
+/// `add` entries this host signed as its tickets' maker, to the gateway:
+/// appended there, or kept waiting for a second approval when the new host
+/// is a window host and this one isn't the founder.
+async fn submit_signed(n: Arc<Shared>, t: Transport, entries: Vec<Entry>) {
+    for e in entries {
+        let body = serde_json::json!({ "entry": e.to_json(), "propose": true });
+        if let Err(err) = call(&n, &t, "POST", "/net/v1/roster", body).await {
+            n.log("net.ticket", &format!("{} was signed in here, and the gateway didn't take it: {}", e.host.id, err.message));
         }
     }
 }
