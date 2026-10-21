@@ -58,7 +58,6 @@ const RELATIONS: [&str; 6] = ["works-on", "spawned", "edited", "messaged", "watc
 // ---------- ids ----------
 
 const UUID: &str = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
-pub const GRANT_ID: &str = "^gr_[0-9a-f]{24}$";
 const ATTENTION_ID: &str = "^att_[0-9a-f]{24}$";
 const ACTOR_ID: &str = "^actor:[a-z0-9][a-z0-9-]{0,31}$";
 // An opaque page token: a payload and its signature, both base64url.
