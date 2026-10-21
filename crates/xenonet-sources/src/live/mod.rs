@@ -224,10 +224,12 @@ pub fn files_of(input: Option<&Value>) -> Vec<String> {
     ["file_path", "notebook_path", "path"].iter().filter_map(|k| m.get(*k)?.as_str()).filter(|p| p.contains(['\\', '/'])).map(String::from).collect()
 }
 
-/// The files an apply_patch adds, updates and deletes. Live leaves out the
-/// names it moves files to (`*** Move to: …`).
+/// The files an apply_patch adds, updates and deletes, and the names it
+/// moves files to (`*** Move to: …`), as the engine and the native readers
+/// read it: a session that moves a file onto one another session works on
+/// shares it.
 pub fn patch_files(text: Option<&Value>) -> Vec<String> {
-    xenonet_base::patch::paths(&string_of(text), false)
+    xenonet_base::patch::paths(&string_of(text), true)
 }
 
 /// A text's lines, each after `prefix`, at most `max` of them, with how
@@ -431,6 +433,7 @@ mod tests {
         assert_eq!(command_text(Some(&json!("ls -la"))), "ls -la");
         assert_eq!(command_text(Some(&json!([null, 1]))), "null 1");
         assert_eq!(patch_files(Some(&json!("*** Begin Patch\n*** Update File: a/b.js\n*** Add File:  c.js \n"))), ["a/b.js", "c.js"]);
+        assert_eq!(patch_files(Some(&json!("*** Update File: a/b.js\n*** Move to: a/c.js\n*** Delete File: d.js\n"))), ["a/b.js", "a/c.js", "d.js"]);
         assert_eq!(diff_lines("+ ", Some(&json!("a\r\nb\nc")), 2), "+ a\n+ b\n+ … (1 more lines)");
         let e = claude_edits("Edit", Some(&json!({ "file_path": "/x", "old_string": "a", "new_string": "b" }))).unwrap();
         assert_eq!(e, [json!({ "path": "/x", "kind": "edit", "diff": "- a\n+ b" })]);

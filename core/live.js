@@ -125,10 +125,11 @@ function filesOf(input) {
   return [input.file_path, input.notebook_path, input.path].filter((p) => typeof p === "string" && /[\\/]/.test(p));
 }
 
-// The files an apply_patch adds, updates and deletes. Live leaves out the
-// names it moves files to (`*** Move to:`).
+// The files an apply_patch adds, updates and deletes, and the names it moves
+// files to (`*** Move to:`), as the engine and the native readers read it:
+// a session that moves a file onto one another session works on shares it.
 function patchFiles(text) {
-  return patchPaths(String(text ?? ""), { moves: false });
+  return patchPaths(String(text ?? ""));
 }
 
 function diffLines(prefix, text, max = 40) {
