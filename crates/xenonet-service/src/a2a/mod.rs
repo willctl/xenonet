@@ -315,6 +315,10 @@ impl A2a {
     /// methods.
     pub async fn handle(self: &Arc<Self>, actor: &A2aActor, req: A2aRequest) -> Reply {
         let t = self.now();
+        // As if there were no /a2a, whatever the front door checked.
+        if !self.enabled() {
+            return json_reply(404, &json!({ "error": "A2A is off here: the owner turns it on in XenoNet's Actors panel" }), &[]);
+        }
         if req.method != "POST" {
             return json_reply(405, &RpcError::invalid_request("A2A's JSON-RPC binding takes POST").to_json(&Value::Null), &[("allow", "POST")]);
         }

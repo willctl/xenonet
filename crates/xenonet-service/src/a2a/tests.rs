@@ -162,6 +162,7 @@ async fn the_card_shows_only_while_a2a_is_on() {
     assert_eq!(a.card("https://gw.example.com").unwrap()["name"], "XenoNet on gw.example.com", "named for the address outside a network");
     a.set_enabled(false).unwrap();
     assert!(a.card("https://gw.example.com").is_none());
+    assert_eq!(call(&a, &wren(), post(&rpc("GetTask", json!({ "id": "x" })))).await.0, 404, "nor /a2a");
     assert_eq!(a.status(Some("https://gw.example.com/mcp"))["card"], "https://gw.example.com/.well-known/agent-card.json");
     assert_eq!(a.status(None)["card"], Value::Null);
 }
