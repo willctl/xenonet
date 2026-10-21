@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use xenonet_service::config::old_gateway_port_of;
 use xenonet_service::cores::{self, R};
 use xenonet_service::gateway::actor_gateway::GatewayCores;
 use xenonet_service::gateway::control::{ControlParts, GatewayControl};
@@ -90,21 +91,42 @@ fn control(store: &Arc<Store>, port: Option<u16>, service_port: u16) -> Arc<Gate
 }
 
 #[tokio::test]
-async fn its_port_is_1010_above_xenonets_and_kept_once_set_up() {
+async fn its_port_is_1010_above_xenonets_kept_once_set_up_and_the_old_one_kept_before() {
     let store = Arc::new(Store::default());
-    assert_eq!(control(&store, None, 47841).gateway().port(), 48851, "nothing set up: the default");
-    // A setting from before ports were kept moves to the default too.
-    store.0.lock().unwrap().insert("gateway".into(), json!({ "on": false, "host": "xenonet.example.com" }).to_string());
-    let first = control(&store, None, 47841);
-    assert_eq!(first.gateway().port(), 48851);
-    first.set(None, Some(json!({ "kind": "own", "host": "xenonet.example.com" })), false, false).await.unwrap();
-    let kept: Value = serde_json::from_str(&store.0.lock().unwrap()["gateway"]).unwrap();
-    assert_eq!(kept["port"], json!(48851), "set up: its port is kept");
+    let saved = |store: &Arc<Store>| -> Value { store.0.lock().unwrap().get("gateway").map_or(Value::Null, |s| serde_json::from_str(s).unwrap()) };
+    let put = |store: &Arc<Store>, v: &Value| {
+        store.0.lock().unwrap().insert("gateway".into(), v.to_string());
+    };
+    // Never set up: the default, nothing saved until it is, then kept.
+    let fresh = control(&store, None, 47841);
+    assert_eq!(fresh.gateway().port(), 48851, "nothing set up: the default");
+    assert_eq!(saved(&store), Value::Null, "nothing saved yet");
+    fresh.set(None, Some(json!({ "kind": "own", "host": "xenonet.example.com" })), false, false).await.unwrap();
+    assert_eq!(saved(&store)["port"], json!(48851), "set up: its port is kept");
     assert_eq!(control(&store, None, 47900).gateway().port(), 48851, "XenoNet's own port moved, the gateway's didn't");
     assert_eq!(control(&store, Some(50123), 47900).gateway().port(), 50123, "XENONET_GATEWAY_PORT wins");
-    store.0.lock().unwrap().insert("gateway".into(), json!({ "on": false, "port": 70000 }).to_string());
+
+    // Set up before ports were saved (on, a tunnel, or a public host
+    // alone): it keeps the old default, 10 above XenoNet's, saved at the
+    // first start so it stays put.
+    assert_eq!((old_gateway_port_of(47840), old_gateway_port_of(65530)), (47850, 64520));
+    for old in [json!({ "on": true }), json!({ "on": false, "tunnel": { "kind": "cloudflare-quick" } }), json!({ "on": false, "host": "xenonet.example.com" })] {
+        put(&store, &old);
+        assert_eq!(control(&store, None, 47840).gateway().port(), 47850, "{old}");
+        assert_eq!(saved(&store)["port"], json!(47850), "saved: {old}");
+        assert_eq!(control(&store, None, 47841).gateway().port(), 47850, "and it stays there");
+    }
+    assert_eq!(saved(&store)["host"], json!("xenonet.example.com"), "the rest of the setting as it was");
+    put(&store, &json!({ "on": true }));
+    assert_eq!(control(&store, Some(50123), 47840).gateway().port(), 50123, "XENONET_GATEWAY_PORT still wins");
+    assert_eq!(saved(&store).get("port"), None, "and nothing is saved for it");
+    // A setting that says nothing was set up, or a port that isn't one.
+    put(&store, &json!({ "on": false }));
+    assert_eq!(control(&store, None, 47841).gateway().port(), 48851);
+    assert_eq!(saved(&store).get("port"), None, "nothing saved");
+    put(&store, &json!({ "on": false, "port": 70000 }));
     assert_eq!(control(&store, None, 47841).gateway().port(), 48851, "not a port");
-    first.stop();
+    fresh.stop();
 }
 
 #[tokio::test]

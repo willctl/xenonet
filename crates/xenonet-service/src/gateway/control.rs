@@ -62,6 +62,20 @@ fn saved_port(store: &dyn EngineStore) -> Option<u16> {
     s.get("port").and_then(Value::as_f64).filter(|p| p.fract() == 0.0 && (1.0..=65535.0).contains(p)).map(|p| p as u16)
 }
 
+// The setting as saved. One from before tunnels were picked here, a host
+// alone, is the owner's own tunnel.
+fn read_saved(store: &dyn EngineStore) -> Saved {
+    let s = store.meta(KEY).ok().flatten().and_then(|t| json::parse(&t).ok()).filter(Value::is_object).unwrap_or_else(|| json!({}));
+    let host = normal_host(s["host"].as_str());
+    let k = s["tunnel"]["kind"].as_str().filter(|k| kind(k).is_some()).map(str::to_string).or_else(|| host.as_ref().map(|_| "own".to_string()));
+    let tunnel = k.map(|k| {
+        let name = s["tunnel"]["name"].as_str().filter(|n| tunnel_name(n)).map(str::to_string);
+        let given = normal_host(s["tunnel"]["host"].as_str()).or_else(|| if k == "own" { host.clone() } else { None });
+        (k, name, given)
+    });
+    Saved { on: s["on"] == json!(true), host, tunnel }
+}
+
 pub struct ControlParts {
     pub cores: GatewayCores,
     pub store: Arc<dyn EngineStore>,
@@ -106,9 +120,18 @@ pub struct GatewayControl {
 impl GatewayControl {
     pub fn new(parts: ControlParts) -> Arc<GatewayControl> {
         let seen = parts.store.meta(SEEN).ok().flatten().and_then(|s| json::parse(&s).ok()).and_then(|v| v.as_object().cloned()).unwrap_or_default();
-        // A gateway once set up keeps its port, so the tunnels pointed at it
-        // keep working when the default moves or XenoNet's own port does.
-        let port = parts.port.or_else(|| saved_port(parts.store.as_ref())).unwrap_or_else(|| crate::config::gateway_port_of(parts.service_port));
+        // A gateway once set up keeps its port, so the tunnels and apps
+        // pointed at it keep working when the default moves or XenoNet's
+        // own port does. One set up before ports were saved (on, with a
+        // tunnel or a public host) was on the old default: it keeps that,
+        // saved now so it stays put. Only one never set up takes the
+        // default.
+        let before = read_saved(parts.store.as_ref());
+        let set_up = before.on || before.tunnel.is_some() || before.host.is_some();
+        let kept = saved_port(parts.store.as_ref());
+        let keep_old = parts.port.is_none() && kept.is_none() && set_up;
+        let port =
+            parts.port.or(kept).unwrap_or_else(|| if set_up { crate::config::old_gateway_port_of(parts.service_port) } else { crate::config::gateway_port_of(parts.service_port) });
         let me = Arc::new(GatewayControl {
             store: parts.store.clone(),
             actors: parts.cores.actors.clone(),
@@ -165,6 +188,9 @@ impl GatewayControl {
         };
         let _ = me.tunnel.set(Tunnel::new(port, parts.dir.as_deref(), &parts.home, parts.tunnel_host, thooks));
         let _ = weak;
+        if keep_old {
+            let _ = me.save(&before);
+        }
         me
     }
 
@@ -176,18 +202,8 @@ impl GatewayControl {
         self.tunnel.get().expect("made in new")
     }
 
-    // A setting from before tunnels were picked here, a host alone, is the
-    // owner's own tunnel.
     fn saved(&self) -> Saved {
-        let s = self.store.meta(KEY).ok().flatten().and_then(|t| json::parse(&t).ok()).filter(Value::is_object).unwrap_or_else(|| json!({}));
-        let host = normal_host(s["host"].as_str());
-        let k = s["tunnel"]["kind"].as_str().filter(|k| kind(k).is_some()).map(str::to_string).or_else(|| host.as_ref().map(|_| "own".to_string()));
-        let tunnel = k.map(|k| {
-            let name = s["tunnel"]["name"].as_str().filter(|n| tunnel_name(n)).map(str::to_string);
-            let given = normal_host(s["tunnel"]["host"].as_str()).or_else(|| if k == "own" { host.clone() } else { None });
-            (k, name, given)
-        });
-        Saved { on: s["on"] == json!(true), host, tunnel }
+        read_saved(self.store.as_ref())
     }
 
     fn save(&self, s: &Saved) -> R<()> {

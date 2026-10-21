@@ -40,6 +40,11 @@ export const EXPIRING_MS = 7 * 24 * 3600e3;
 export const GATEWAY_OFFSET = 1010;
 export const gatewayPortOf = (port) => (port + GATEWAY_OFFSET <= 65535 ? port + GATEWAY_OFFSET : port - GATEWAY_OFFSET);
 
+// The default before that: 10 above the service's (47850, Xenolith's port,
+// for an installed XenoNet). A gateway set up then keeps it.
+export const OLD_GATEWAY_OFFSET = 10;
+export const oldGatewayPortOf = (port) => (port + OLD_GATEWAY_OFFSET <= 65535 ? port + OLD_GATEWAY_OFFSET : gatewayPortOf(port));
+
 const validPort = (p) => (Number.isInteger(p) && p >= 1 && p <= 65535 ? p : null);
 
 const bad = (message) => {
@@ -54,8 +59,8 @@ const parse = (s, fallback) => {
 };
 
 // `port`: the gateway's port when one is named (XENONET_GATEWAY_PORT);
-// otherwise it's the one its saved setting has, else the default for
-// `servicePort`. `probe`: "local" checks the loop on this computer alone,
+// otherwise it's the one its saved setting has, the old default for one set
+// up before ports were saved, else the default for `servicePort`. `probe`: "local" checks the loop on this computer alone,
 // without the internet (XENONET_GATEWAY_PROBE=local, for tests). `dir`: the
 // state folder, for the pid of a tunnel XenoNet runs. The rest stand in for
 // tests.
@@ -72,10 +77,17 @@ export function createGatewayControl({ engine, registration, actors, runs = null
     const tunnel = kind ? { kind, name: TUNNEL_NAME.test(s.tunnel?.name ?? "") ? s.tunnel.name : null, host: normalHost(s.tunnel?.host) ?? (kind === "own" ? host : null) } : null;
     return { on: s.on === true, host, tunnel, port: validPort(s.port) };
   };
-  // A gateway once set up keeps its port, so the tunnels pointed at it keep
-  // working when the default moves or XenoNet's own port does.
-  port ??= saved().port ?? gatewayPortOf(servicePort);
+  // A gateway once set up keeps its port, so the tunnels and apps pointed at
+  // it keep working when the default moves or XenoNet's own port does. One
+  // set up before ports were saved (on, with a tunnel or a public host) was
+  // on the old default: it keeps that, saved now so it stays put. Only one
+  // never set up takes the default.
+  const before = saved();
+  const setUp = before.on || !!before.tunnel || !!before.host;
+  const keepOld = port == null && !before.port && setUp;
+  port ??= before.port ?? (setUp ? oldGatewayPortOf(servicePort) : gatewayPortOf(servicePort));
   const save = (s) => store.setMeta(KEY, JSON.stringify({ ...s, port }));
+  if (keepOld) save(before);
 
   // Each actor's last call through the gateway: { host, at } by slug.
   const seen = new Map(Object.entries(parse(store.meta(SEEN), {})));

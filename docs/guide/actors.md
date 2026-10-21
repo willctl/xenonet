@@ -96,7 +96,7 @@ The actor gateway is an MCP server for actors that work in their makers' clouds,
 
 It listens on this computer alone, on XenoNet's port plus 1010 (48850), or the port `XENONET_GATEWAY_PORT` names. Once you set it up, it keeps that port, even if XenoNet's own port changes. A tunnel puts it on the internet. XenoNet doesn't assume you have any particular one: you pick it, and XenoNet runs it with the sign-in that tool already has.
 
-XenoNet used to put the gateway on its port plus 10 (47850), which is Xenolith's port. A gateway set up then moves to 48850. XenoNet sets up again the tunnels it runs itself, and the window offers Repair for Tailscale Funnel. Point a tunnel of your own at 48850.
+XenoNet used to put the gateway on its port plus 10 (47850), which is Xenolith's port. A gateway you set up then keeps that port, so its tunnel and the apps that use it go on working: XenoNet saves the port with the gateway's settings the first time it starts. To move it off Xenolith's port, start XenoNet with `XENONET_GATEWAY_PORT` set to the port you want, then point the tunnel there: XenoNet sets up again the tunnels it runs itself, and the window offers Repair for Tailscale Funnel.
 
 | Tunnel | What you need | Its address |
 |---|---|---|

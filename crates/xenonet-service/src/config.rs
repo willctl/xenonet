@@ -60,6 +60,15 @@ pub fn gateway_port_of(port: u16) -> u16 {
     port.checked_add(GATEWAY_OFFSET).or_else(|| port.checked_sub(GATEWAY_OFFSET)).unwrap_or(port)
 }
 
+/// The default before that: 10 above the service's (47850, Xenolith's
+/// port, for an installed XenoNet). A gateway set up then keeps it.
+pub const OLD_GATEWAY_OFFSET: u16 = 10;
+
+/// The old default port for a service on `port`.
+pub fn old_gateway_port_of(port: u16) -> u16 {
+    port.checked_add(OLD_GATEWAY_OFFSET).unwrap_or_else(|| gateway_port_of(port))
+}
+
 /// os.homedir(): HOME (USERPROFILE on Windows), as Node reads it.
 pub fn home_dir(env: &dyn Fn(&str) -> Option<String>) -> String {
     let named = if cfg!(windows) { env("USERPROFILE") } else { env("HOME") };
