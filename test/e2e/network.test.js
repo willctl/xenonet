@@ -206,7 +206,8 @@ test("net-approval: a window host another one signed in waits for an approval he
   await served();
   const { network: n } = await s.driver("network", "open");
   assert.deepEqual([n.proposals[0].op, n.proposals[0].host, n.proposals[0].window, n.proposals[0].signers], ["add", "den", true, ["laptop"]]);
-  assert.match(n.text, /Waiting for approval.*add den as a window host, asked by laptop\. It needs the founder or a second window host\./);
+  // The panel's titles show in capitals.
+  assert.match(n.text, /waiting for approval.*add den as a window host, asked by laptop\. It needs the founder or a second window host\./i);
   await clickAt(n.at.approve, "Approve");
   const done = await until(async () => {
     const got = await network();
