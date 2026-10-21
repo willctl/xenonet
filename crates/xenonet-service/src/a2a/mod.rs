@@ -29,6 +29,7 @@
 //! which is off until the owner turns it on in the Actors panel.
 
 pub mod card;
+pub mod routes;
 pub mod rpc;
 pub mod store;
 pub mod tasks;

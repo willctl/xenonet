@@ -100,6 +100,12 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         let r = delivery::DeliveryRoutes { policy: cores.policy.clone(), router: cores.router.clone(), engine: cores.engine.clone(), verify: cores.verify.clone() };
         return Ok(r.route(req).await);
     }
+    // A2A's switch and the agents that called, for the Actors panel: the
+    // owner's (a2a/routes.rs). Not under /api/actors/, where it would be a
+    // slug.
+    if route == "/api/a2a" {
+        return Ok(if m == "GET" || m == "POST" { crate::a2a::routes::route(ctx, req).await } else { Reply::error(404, "not found") });
+    }
     if route == "/api/actors" || route.starts_with("/api/actors/") {
         let taken = std::mem::replace(req, Req::fake("GET", "/", &[], None));
         return actors::ActorRoutes { ctx }.route(taken).await;

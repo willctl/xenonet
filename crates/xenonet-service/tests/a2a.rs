@@ -15,8 +15,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::Notify;
 use xenonet_service::a2a::{A2a, A2aActor, A2aCores, A2aParts, A2aRequest, Limits};
-use xenonet_service::cores::{self, R};
-use xenonet_service::http::ReplyBody;
+use xenonet_service::cores::{self, Cores, R};
+use xenonet_service::ctx::Ctx;
+use xenonet_service::http::{Peer, ReplyBody, Req};
+use xenonet_service::routes::api;
+use xenonet_service::serve::answered;
 
 const CASES: &str = include_str!("../../../test/fixtures/a2a/cases.json");
 const NOW: f64 = 1_792_512_345_678.0;
@@ -114,6 +117,56 @@ impl Names {
             other => other.clone(),
         }
     }
+}
+
+#[async_trait]
+impl cores::Verify for Weather {
+    async fn window(&self, _peer: Peer) -> Value {
+        json!({ "ok": true })
+    }
+}
+
+/// The owner's switch at /api/a2a: the window's alone, never an actor's.
+#[tokio::test]
+async fn the_switch_is_the_owners() {
+    let w = Arc::new(Weather::default());
+    let mut c = Cores::pending(true, false, false);
+    c.verify = w.clone();
+    let ctx = Ctx::for_tests(c);
+    let go = |method: &str, headers: Vec<(&str, String)>, body: Option<Value>| {
+        let h: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let text = body.map(|b| b.to_string());
+        let ctx = ctx.clone();
+        let req = Req::fake(method, "/api/a2a", &h, text.as_deref());
+        async move { answered(&ctx, "", "", api(&ctx, req).await) }
+    };
+    assert_eq!(go("GET", vec![], None).await.status, 503, "not made: actors are pending here");
+    let a = A2a::new(A2aParts {
+        cores: A2aCores { engine: w.clone(), actors: w },
+        file: None,
+        version: "0.2.0".into(),
+        home: "/home/nova".into(),
+        name: Arc::new(|| None),
+        now: Arc::new(|| NOW),
+        limits: Limits::default(),
+    })
+    .unwrap();
+    let _ = ctx.a2a.set(a.clone());
+    let key = ctx.window_key.reveal().to_string();
+    let window = || vec![("x-xenonet-window", key.clone())];
+    assert_eq!(go("GET", vec![("x-xenonet-window", "not-its-key".into())], None).await.status, 403);
+    let actor = vec![("x-xenonet-window", key.clone()), ("authorization", format!("Bearer xenonet_gateway_{}", "a".repeat(64)))];
+    assert_eq!(go("POST", actor, Some(json!({ "on": true }))).await.status, 403, "an actor can't turn it on");
+    assert!(!a.enabled());
+    let r = go("GET", window(), None).await;
+    assert_eq!(r.body_json()["on"], false, "off until the owner says");
+    let r = go("POST", window(), Some(json!({ "on": true }))).await;
+    assert_eq!((r.status, r.body_json()["on"].clone()), (200, json!(true)));
+    assert!(a.enabled());
+    let r = go("POST", window(), Some(json!({ "actor": "wren", "target": "repo:atlas" }))).await;
+    assert_eq!(r.body_json()["agents"][0]["target"], "repo:atlas");
+    assert_eq!(go("POST", window(), Some(json!({ "on": "yes" }))).await.status, 400);
+    assert_eq!(go("DELETE", window(), None).await.status, 404);
 }
 
 #[tokio::test]

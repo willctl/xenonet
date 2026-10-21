@@ -341,6 +341,33 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
         };
         let _ = ctx.gateway.set(crate::gateway::control::GatewayControl::new(parts));
     }
+    // A2A agents, which reach the sessions as actors through the gateway
+    // (a2a/): off until you turn it on in the Actors panel.
+    if let Some(actors) = ctx.cores.actors.clone() {
+        let state_dir = config.state_dir.clone();
+        let parts = crate::a2a::A2aParts {
+            cores: crate::a2a::A2aCores { engine: ctx.cores.engine.clone(), actors: actors.clone() },
+            file: (!config.demo).then(|| Path::new(&config.state_dir).join("a2a.sqlite")),
+            version: version.clone(),
+            home: config.home.clone(),
+            name: Arc::new(move || crate::a2a::network_name(&state_dir)),
+            now: Arc::new(now_ms),
+            limits: crate::a2a::Limits::default(),
+        };
+        match crate::a2a::A2a::new(parts) {
+            Ok(a) => {
+                // A removed actor's tasks go with its record.
+                let weak = Arc::downgrade(&a);
+                actors.before_remove(Arc::new(move |slug: &str| {
+                    if let Some(a) = weak.upgrade() {
+                        a.forget(&format!("actor:{slug}"));
+                    }
+                }));
+                let _ = ctx.a2a.set(a);
+            }
+            Err(e) => ctx.log("warn", "a2a.error", &e, None, None),
+        }
+    }
 
     let listener = match TcpListener::bind((config.host.as_str(), config.port)).await {
         Ok(l) => l,
