@@ -20,6 +20,8 @@ pub struct MapConfig {
     pub projects_dir: String,
     pub project_limits: Value,
     pub codex_home: String,
+    /// Grok Build's folder: GROK_HOME, or ~/.grok.
+    pub grok_home: String,
     pub claude_desktop_dir: Option<String>,
     pub poll_ms: f64,
     pub claude_usage: bool,
@@ -163,6 +165,7 @@ impl MapConfig {
             projects_dir: text("projectsDir"),
             project_limits: json("projectLimits"),
             codex_home: text("codexHome"),
+            grok_home: text("grokHome"),
             claude_desktop_dir: maybe("claudeDesktopDir"),
             poll_ms: numf("pollMs"),
             claude_usage: flag("claudeUsage"),

@@ -1,4 +1,4 @@
-//! core/search.js's runtime: full-text search across both apps'
+//! core/search.js's runtime: full-text search across the apps'
 //! transcripts, in search.sqlite's FTS5 index (xenonet-state's search.rs,
 //! its own connection to the file). Indexing is incremental: what was
 //! added to a file is read from where the last read ended, each line
@@ -9,7 +9,7 @@
 //! has no zstd yet, and the JS's index keeps them.
 
 use crate::util::{blocking, lock, now_ms, num, wiki_out};
-use crate::vendor::Vendor;
+use crate::vendor::{Tailed, Vendor};
 use serde_json::{json, Value};
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::{Arc, Mutex};
@@ -63,10 +63,10 @@ fn message(e: xenonet_state::search::Error) -> String {
 }
 
 impl TranscriptSearch {
-    pub fn new(db_file: &str, claude_root: &str, codex_roots: &[String], vendor: Arc<Vendor>) -> Arc<TranscriptSearch> {
+    pub fn new(db_file: &str, claude_root: &str, codex_roots: &[String], grok_root: &str, vendor: Arc<Vendor>) -> Arc<TranscriptSearch> {
         let codex: Vec<Option<String>> = codex_roots.iter().map(|d| Some(d.clone())).collect();
         Arc::new(TranscriptSearch {
-            core: Mutex::new(Search::new(Some(db_file), Some(claude_root).filter(|r| !r.is_empty()), &codex)),
+            core: Mutex::new(Search::new(Some(db_file), Some(claude_root).filter(|r| !r.is_empty()), &codex, Some(grok_root).filter(|r| !r.is_empty()))),
             status: Mutex::new(Status::default()),
             vendor,
             one: tokio::sync::Mutex::new(()),
@@ -83,8 +83,9 @@ impl TranscriptSearch {
 
     // Indexes a file's new lines; how many documents went in.
     fn index_file(&self, file: &str, app: &str) -> Result<f64, String> {
-        // Any app but Codex is read as Claude Code, as linesOf reads it.
-        let codex = xenonet_base::apps::tailed_app(app, "claude") == "codex";
+        // Any app that isn't tailed is read as Claude Code, as linesOf reads
+        // it.
+        let tailed = Tailed::of(app);
         let core = lock(&self.core);
         let Some(mut plan): Option<Plan> = core.plan(file, app).map_err(message)? else { return Ok(0.0) };
         let text = if plan.whole { read_whole(file) } else { read_from(file, plan.offset, plan.size) }.map_err(|e| e.to_string())?;
@@ -107,7 +108,7 @@ impl TranscriptSearch {
         let mut run = Search::run(file, app, &plan.session_id, user_events);
         let mut sampling = Sampling::default();
         for l in &lines {
-            let Some(raw) = self.vendor.line(codex, l, &mut sampling) else { continue };
+            let Some(raw) = self.vendor.line(tailed, l, &mut sampling) else { continue };
             if let Err(e) = core.add(&mut run, raw) {
                 let _ = core.rollback();
                 return Err(message(e));
@@ -207,7 +208,7 @@ mod tests {
         let line = json!({ "type": "user", "timestamp": "2026-10-17T10:00:00.000Z", "message": { "role": "user", "content": "Add partial refunds to the orders API" } });
         std::fs::write(claude.join(format!("{id}.jsonl")), format!("{}\n", xenonet_base::json::stringify(&line, 0))).expect("a transcript");
         let vendor = Vendor::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas"), Arc::new(Mutex::new(DriftLog::default())));
-        let s = TranscriptSearch::new(&dir.join("search.sqlite").to_string_lossy(), &dir.join("claude").to_string_lossy(), &[], vendor);
+        let s = TranscriptSearch::new(&dir.join("search.sqlite").to_string_lossy(), &dir.join("claude").to_string_lossy(), &[], "", vendor);
         s.index().await;
         assert!(s.status_json()["docs"].as_f64() >= Some(1.0), "{}", s.status_json());
         let hits = s.search("partial refunds", 30.0).await.expect("a search");

@@ -342,13 +342,13 @@ impl CodexClient {
             let t = xenonet_sources::lines::take(&chunk);
             let mut sampling = xenonet_schema::vendor::Sampling::default();
             for l in &t.lines {
-                if let Some(raw) = self.vendor.line(true, l, &mut sampling) {
+                if let Some(raw) = self.vendor.line(crate::vendor::Tailed::Codex, l, &mut sampling) {
                     let _ = r.entries.add(raw);
                 }
             }
             match t.last {
                 Some(last) => {
-                    if let Some(raw) = self.vendor.record(true, last, &mut sampling) {
+                    if let Some(raw) = self.vendor.record(crate::vendor::Tailed::Codex, last, &mut sampling) {
                         let _ = r.entries.add(raw);
                     }
                 }

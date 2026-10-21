@@ -111,6 +111,25 @@
   ]
  },
  {
+  "id": "grok",
+  "name": "Grok Build",
+  "numbat": [
+   "grok"
+  ],
+  "products": [
+   "spacexai/grok-build"
+  ],
+  "roots": {
+   "env": "GROK_HOME",
+   "default": "~/.grok"
+  },
+  "context": 256000,
+  "team": "5Y6N3AJ54S",
+  "has": [
+   "lines"
+  ]
+ },
+ {
   "id": "gemini-cli",
   "name": "Gemini CLI",
   "numbat": [

@@ -891,7 +891,7 @@ pub fn qualify_live(live: &Value, host: &Value, schemas: &mut dyn Schemas) -> Li
         list(v, MAX_PAIRS).iter().filter_map(|c| pair_of(c, &h, &shift, shared)).collect()
     };
     let mut readings = Vec::new();
-    for app in ["claude", "codex"] {
+    for app in limited() {
         let r = live.get("limits").and_then(|l| l.get(app));
         if let Some(Value::Object(mut reading)) = r.and_then(|r| reading_of(app, r, &shift)) {
             let identity = identity_id(&h, r.and_then(|r| r.get("identity"))).map_or(Value::Null, Value::String);
@@ -912,10 +912,20 @@ pub fn qualify_live(live: &Value, host: &Value, schemas: &mut dyn Schemas) -> Li
     }
 }
 
+// The apps with plan limits a host reads (Claude Code's and Codex's), and
+// the ones whose token rates it keeps a series of (the tailed ones).
+fn limited() -> impl Iterator<Item = &'static str> {
+    xenonet_base::apps::apps().iter().filter(|a| a.limits.is_some()).map(|a| a.id.as_str())
+}
+
+fn tailed() -> impl Iterator<Item = &'static str> {
+    xenonet_base::apps::with("lines").map(|a| a.id.as_str())
+}
+
 // Adds a host's per-second series into this machine's, lined up by time:
 // `lag` is how many seconds the host's ends before this one's.
 fn add_series(into: &mut Map<String, Value>, from: &Value, lag: f64) {
-    for app in ["claude", "codex"] {
+    for app in tailed() {
         let b: Vec<Value> = match from.get(app) {
             Some(Value::Array(b)) => b.clone(),
             _ => Vec::new(),
@@ -999,8 +1009,9 @@ pub fn merge_live_with(local: &Value, hosts: &[(Value, Value)], schemas: &mut dy
     let mut collisions = list(local.get("collisions"), usize::MAX);
     let mut collab = list(local.get("collab"), usize::MAX);
     let mut series = Map::new();
-    series.insert("claude".into(), Value::Array(list(local.get("series").and_then(|x| x.get("claude")), usize::MAX)));
-    series.insert("codex".into(), Value::Array(list(local.get("series").and_then(|x| x.get("codex")), usize::MAX)));
+    for app in tailed() {
+        series.insert(app.into(), Value::Array(list(local.get("series").and_then(|x| x.get(app)), usize::MAX)));
+    }
     let mut readings = Vec::new();
     let (mut tpm, mut today, mut total) = (num(local.get("tpm")), num(local.get("today")), num(local.get("total24h")));
     let mut touched = false;

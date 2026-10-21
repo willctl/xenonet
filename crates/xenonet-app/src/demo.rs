@@ -256,6 +256,7 @@ pub struct World {
     pub claude_root: String,
     pub claude_desktop_dir: String,
     pub codex_home: String,
+    pub grok_home: String,
     pub wiki_dir: String,
     pub state_dir: String,
     pub cache_dir: String,
@@ -271,6 +272,7 @@ impl World {
             claude_root: NATIVE.join(&[&home, ".claude", "projects"]),
             claude_desktop_dir: NATIVE.join(&[&home, "claude-desktop"]),
             codex_home: NATIVE.join(&[&home, ".codex"]),
+            grok_home: NATIVE.join(&[&home, ".grok"]),
             wiki_dir: NATIVE.join(&[&home, "wiki"]),
             state_dir: NATIVE.join(&[root, "state"]),
             cache_dir: NATIVE.join(&[root, "cache"]),
@@ -279,7 +281,7 @@ impl World {
     }
 
     pub fn to_value(&self) -> Value {
-        json!({ "root": self.root, "home": self.home, "projectsDir": self.projects_dir, "clientsDir": self.clients_dir, "claudeRoot": self.claude_root, "claudeDesktopDir": self.claude_desktop_dir, "codexHome": self.codex_home, "wikiDir": self.wiki_dir, "stateDir": self.state_dir, "cacheDir": self.cache_dir })
+        json!({ "root": self.root, "home": self.home, "projectsDir": self.projects_dir, "clientsDir": self.clients_dir, "claudeRoot": self.claude_root, "claudeDesktopDir": self.claude_desktop_dir, "codexHome": self.codex_home, "grokHome": self.grok_home, "wikiDir": self.wiki_dir, "stateDir": self.state_dir, "cacheDir": self.cache_dir })
     }
 }
 

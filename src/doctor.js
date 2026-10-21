@@ -9,7 +9,7 @@
 // at it with you. That session never files anything; sending an issue stays
 // yours.
 import { escapeHtml as h, timeAgo } from "./format.js";
-import { tailedApp } from "../core/apps.js";
+import { askedApp } from "../core/apps.js";
 
 const MARK = { ok: "✓", info: "·", warn: "!", fail: "✗", skip: "–" };
 const LEVEL_MARK = { error: "✗", warn: "!", info: "·" };
@@ -19,7 +19,7 @@ const ASK_KEY = "xenonet.diagnose.ask";
 function lastAsk() {
   try {
     const v = JSON.parse(localStorage.getItem(ASK_KEY) ?? "null");
-    return { app: tailedApp(v?.app, "codex"), model: typeof v?.model === "string" ? v.model : "" };
+    return { app: askedApp(v?.app, "codex"), model: typeof v?.model === "string" ? v.model : "" };
   } catch {
     return { app: "codex", model: "" };
   }

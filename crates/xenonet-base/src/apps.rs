@@ -122,12 +122,21 @@ pub fn with(capability: &str) -> impl Iterator<Item = &'static App> + '_ {
     apps().iter().filter(move |a| a.has(capability))
 }
 
-/// The tailed app (one with `lines`: Claude Code or Codex) `app` names, or
-/// `fallback` for any other. The places that pick between Claude Code and
-/// Codex read an app that's neither as one of the two, and `fallback` says
+/// The tailed app (one with `lines`: Claude Code, Codex or Grok Build) `app`
+/// names, or `fallback` for any other. The places that read a transcript by
+/// its app read an app that isn't tailed as one of them, and `fallback` says
 /// which, as each always has.
 pub fn tailed_app(app: &str, fallback: &'static str) -> &'static str {
     with("lines").find(|a| a.id == app).map_or(fallback, |a| a.id.as_str())
+}
+
+/// The apps XenoNet asks a question of or hands a session to (xenonet
+/// diagnose --ask, a handoff).
+pub const ASKED: [&str; 2] = ["claude", "codex"];
+
+/// The asked app `app` names, or `fallback` for any other, as it always has.
+pub fn asked_app(app: &str, fallback: &'static str) -> &'static str {
+    ASKED.into_iter().find(|a| *a == app).unwrap_or(fallback)
 }
 
 /// An app's hook events, with their matchers; none for an app XenoNet
@@ -154,8 +163,10 @@ mod tests {
     #[test]
     fn the_registry_reads_whole() {
         let ids: Vec<&str> = apps().iter().map(|a| a.id.as_str()).collect();
-        assert_eq!(ids.len(), 25, "every entry reads");
-        assert_eq!(&ids[..3], ["claude", "codex", "gemini-cli"]);
+        assert_eq!(ids.len(), 26, "every entry reads");
+        assert_eq!(&ids[..4], ["claude", "codex", "grok", "gemini-cli"]);
+        assert_eq!(team("grok"), Some("5Y6N3AJ54S"));
+        assert_eq!(app("grok").and_then(|a| a.roots.as_ref()).map(|r| r.env.as_str()), Some("GROK_HOME"));
         let claude = app("claude").unwrap();
         assert_eq!(claude.name, "Claude Code");
         assert_eq!(claude.numbat, ["claude-code"]);
@@ -174,17 +185,22 @@ mod tests {
     }
 
     #[test]
-    fn the_fallbacks_read_any_other_app_as_one_of_the_two() {
-        assert_eq!(with("lines").map(|a| a.id.as_str()).collect::<Vec<_>>(), ["claude", "codex"]);
+    fn the_fallbacks_read_any_other_app_as_one_they_know() {
+        assert_eq!(with("lines").map(|a| a.id.as_str()).collect::<Vec<_>>(), ["claude", "codex", "grok"]);
         for (app, fallback, read) in [
             ("claude", "codex", "claude"),
             ("codex", "claude", "codex"),
+            ("grok", "claude", "grok"),
             ("gemini-cli", "claude", "claude"),
             ("opencode", "codex", "codex"),
             ("", "claude", "claude"),
             ("Codex", "claude", "claude"),
         ] {
             assert_eq!(tailed_app(app, fallback), read, "{app}");
+        }
+        for (app, fallback, read) in [("claude", "codex", "claude"), ("codex", "claude", "codex"), ("grok", "codex", "codex"), ("grok", "claude", "claude"), ("", "codex", "codex")]
+        {
+            assert_eq!(asked_app(app, fallback), read, "{app}");
         }
     }
 }

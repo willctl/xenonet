@@ -59,6 +59,16 @@ export const APPS = [
     has: ["lines", "sessions", "connect", "delivery", "processes", "caller", "open"],
   },
   {
+    id: "grok",
+    name: "Grok Build",
+    numbat: ["grok"],
+    products: ["spacexai/grok-build"],
+    roots: { env: "GROK_HOME", default: "~/.grok" },
+    context: 256000,
+    team: "5Y6N3AJ54S",
+    has: ["lines"],
+  },
+  {
     id: "gemini-cli",
     name: "Gemini CLI",
     numbat: ["gemini-cli"],
@@ -119,10 +129,17 @@ export const APP = Object.fromEntries(APPS.map((a) => [a.id, a]));
 // The apps that have a capability, in order.
 export const appsWith = (capability) => APPS.filter((a) => a.has?.includes(capability));
 
-// The apps whose transcripts XenoNet tails: Claude Code and Codex.
+// The apps whose transcripts XenoNet tails: Claude Code, Codex and Grok
+// Build.
 export const TAILED = appsWith("lines").map((a) => a.id);
 
 // The tailed app `app` names, or `fallback` for any other. The places that
-// pick between Claude Code and Codex read an app that's neither as one of
-// the two, and `fallback` says which, as each always has.
+// read a transcript by its app read an app that isn't tailed as one of
+// them, and `fallback` says which, as each always has.
 export const tailedApp = (app, fallback) => (TAILED.includes(app) ? app : fallback);
+
+// The apps XenoNet asks a question of or hands a session to (xenonet
+// diagnose --ask, a handoff): Claude Code and Codex. Any other app reads as
+// `fallback`, as it always has.
+export const ASKED = ["claude", "codex"];
+export const askedApp = (app, fallback) => (ASKED.includes(app) ? app : fallback);

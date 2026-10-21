@@ -1,5 +1,5 @@
 // core/search.js in Rust (crates/xenonet-state/src/search.rs): full-text
-// search across both apps' transcripts, in a local SQLite FTS5 index
+// search across the apps' transcripts, in a local SQLite FTS5 index
 // (search.sqlite in the cache dir; see config.js). Indexing is incremental:
 // appended lines are read from the last offset, and Codex's compressed
 // .jsonl.zst archives are decompressed once.
@@ -12,14 +12,15 @@
 import fsp from "node:fs/promises";
 import zlib from "node:zlib";
 import { native } from "../index.js";
-import { ClaudeLine, CodexLine, linesOf } from "./lines.js";
+import { ClaudeLine, CodexLine, GrokLine, linesOf } from "./lines.js";
 import { tailedApp } from "../../../../core/apps.js";
 
 // One searchable record per human or agent message, from a line:
-// normalized (see lines.js), or as the transcript has it. Any app but
+// normalized (see lines.js), or as the transcript has it. Any other app but
 // Claude Code is read as Codex.
 export function docsFromLine(line, app, { userEvents = false } = {}) {
-  const own = tailedApp(app, "codex") === "claude" ? line instanceof ClaudeLine : line instanceof CodexLine;
+  const read = app === "grok" ? "grok" : tailedApp(app, "codex");
+  const own = read === "grok" ? line instanceof GrokLine : read === "claude" ? line instanceof ClaudeLine : line instanceof CodexLine;
   return native.searchDocsFromLine(own ? line.raw : line, String(app), !!userEvents);
 }
 
@@ -93,9 +94,9 @@ class Database {
 export class TranscriptSearch {
   #core;
 
-  constructor({ dbFile, claudeRoot, codexRoots }) {
+  constructor({ dbFile, claudeRoot, codexRoots, grokRoot = null }) {
     this.dbFile = dbFile;
-    this.#core = new native.SearchCore(typeof dbFile === "string" ? dbFile : null, claudeRoot ? String(claudeRoot) : null, (codexRoots ?? []).map((d) => (typeof d === "string" ? d : null)));
+    this.#core = new native.SearchCore(typeof dbFile === "string" ? dbFile : null, claudeRoot ? String(claudeRoot) : null, (codexRoots ?? []).map((d) => (typeof d === "string" ? d : null)), grokRoot ? String(grokRoot) : null);
     this.roots = this.#core.roots;
     this.status = { files: 0, docs: 0, indexing: false, lastIndexAt: 0, ms: 0 };
   }

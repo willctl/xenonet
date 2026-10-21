@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { APPS, APP, TAILED, appsWith, tailedApp } from "../core/apps.js";
+import { APPS, APP, TAILED, appsWith, tailedApp, askedApp } from "../core/apps.js";
 import { SESSION_APPS, appOfSession } from "../core/schema/ids.js";
 import { check, explain } from "../core/schema/index.js";
 import { CAPABILITIES } from "../core/schema/app.js";
@@ -69,7 +69,7 @@ test("numbat leaves out the apps XenoNet tails, and reads every other app under 
 });
 
 test("what the code reads from the registry", async () => {
-  assert.deepEqual(TAILED, ["claude", "codex"]);
+  assert.deepEqual(TAILED, ["claude", "codex", "grok"]);
   assert.deepEqual(appsWith("native").map((a) => a.id), ["gemini-cli", "cursor", "copilot", "opencode"]);
   for (const a of APPS) for (const c of a.has ?? []) assert.ok(CAPABILITIES.includes(c));
   const [{ EDIT_TOOLS: gemini }, { EDIT_TOOLS: copilot }, { EDIT_TOOLS: opencode }] = await Promise.all([import("../core/native/gemini-cli.js"), import("../core/native/copilot-cli.js"), import("../core/native/opencode.js")]);
@@ -78,13 +78,16 @@ test("what the code reads from the registry", async () => {
   assert.deepEqual(opencode, ["edit", "write", "multiedit"]);
   const { LiveTelemetry } = await import("../core/live.js");
   const live = new LiveTelemetry({ claudeRoot: path.join(root, "no-such-folder"), codexRoot: path.join(root, "no-such-folder"), claudeDesktopDir: null });
-  assert.deepEqual(["claude", "codex", "opencode"].map((app, i) => live.session(`${app}:x${i}`, app).context.window), [200000, 258400, 200000], "a session's context window, until a line says");
+  assert.deepEqual(["claude", "codex", "grok", "opencode"].map((app, i) => live.session(`${app}:x${i}`, app).context.window), [200000, 258400, 256000, 200000], "a session's context window, until a line says");
 });
 
-test("the fallbacks: an app that's neither Claude Code nor Codex reads as one of the two, as it always has", () => {
+test("the fallbacks: an app that isn't tailed reads as one that is, and one that isn't asked as Claude Code or Codex, as they always have", () => {
   const inputs = ["claude", "codex", ...APPS.map((a) => a.id), "Codex", "", "toString", "__proto__", undefined, null, 1, {}];
   for (const x of inputs) {
-    assert.equal(tailedApp(x, "claude"), x === "codex" ? "codex" : "claude", String(x));
-    assert.equal(tailedApp(x, "codex"), x === "claude" ? "claude" : "codex", String(x));
+    const tailed = x === "claude" || x === "codex" || x === "grok";
+    assert.equal(tailedApp(x, "claude"), tailed ? x : "claude", String(x));
+    assert.equal(tailedApp(x, "codex"), tailed ? x : "codex", String(x));
+    assert.equal(askedApp(x, "claude"), x === "codex" ? "codex" : "claude", String(x));
+    assert.equal(askedApp(x, "codex"), x === "claude" ? "claude" : "codex", String(x));
   }
 });

@@ -111,6 +111,8 @@ pub fn config(argv: &[String], env: &Env, home: &str, platform: &str, finds: &mu
     };
     let codex_home =
         world_str(world, "codexHome").unwrap_or_else(|| Value::String(path.resolve(&[&var(env, "CODEX_HOME").map_or_else(|| path.join(&[home, ".codex"]), String::from)])));
+    let grok_home =
+        world_str(world, "grokHome").unwrap_or_else(|| Value::String(path.resolve(&[&var(env, "GROK_HOME").map_or_else(|| path.join(&[home, ".grok"]), String::from)])));
     let claude_desktop_dir = match world {
         Some(w) => w.get("claudeDesktopDir").cloned().unwrap_or(Value::Null),
         None => finds.claude_desktop_dir().map_or(Value::Null, Value::String),
@@ -162,6 +164,7 @@ pub fn config(argv: &[String], env: &Env, home: &str, platform: &str, finds: &mu
             ("projectsDir", Field::Json(projects_dir)),
             ("projectLimits", Field::Nums(vec![("depth", limit("XENONET_PROJECTS_DEPTH", 3.0)), ("maxDirs", limit("XENONET_PROJECTS_MAX_DIRS", 2000.0))])),
             ("codexHome", Field::Json(codex_home)),
+            ("grokHome", Field::Json(grok_home)),
             ("claudeDesktopDir", Field::Json(claude_desktop_dir)),
             ("pollMs", Field::Num(poll_ms)),
             ("claudeUsage", Field::Json(Value::Bool(!demo && !off("XENONET_CLAUDE_USAGE")))),

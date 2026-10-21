@@ -23,7 +23,7 @@ import { summarize, dayLog, summaryText, handoffBrief, narrate } from "./digest.
 import { constellationOf, labelsOf, posterSalt } from "./redact.js";
 import * as store from "./store.js";
 import { Blocks } from "./blocks/lifecycle.js";
-import { claudeLines, codexLines } from "./lines.js";
+import { claudeLines, codexLines, grokLines } from "./lines.js";
 import { NumbatSessions } from "./numbat.js";
 import { nativeReaders } from "./native/index.js";
 import { ReportedRuns, observedSessions } from "./reported-runs.js";
@@ -125,6 +125,7 @@ export class XenoNetState extends EventEmitter {
     this.live = new LiveTelemetry({
       claudeRoot: config.claudeProjectsDir,
       codexRoot: path.join(config.codexHome, "sessions"),
+      grokRoot: path.join(config.grokHome, "sessions"),
       claudeDesktopDir: config.claudeDesktopDir,
       claudeUsage: config.claudeUsage ? () => fetchClaudeUsage() : null,
       home: config.homeDir,
@@ -132,20 +133,23 @@ export class XenoNetState extends EventEmitter {
     this.blocks.add(this.live.tailer, { source: "live" });
     this.blocks.add(claudeLines);
     this.blocks.add(codexLines);
+    this.blocks.add(grokLines);
     for (const reading of [this.live.usage.anthropic, this.live.usage.desktop]) if (reading) this.blocks.add(reading);
     if (this.identities) this.blocks.add(this.identities, { source: "identities" });
     this.blocks.add(this.repos);
     // The projects scan's walk, for the map's scans (see scanProjects).
     this.projectsScanner = this.blocks.add(projectsScanner(), { source: "projects" });
     const codexRoots = [path.join(config.codexHome, "sessions"), path.join(config.codexHome, "archived_sessions")];
+    const grokRoot = path.join(config.grokHome, "sessions");
     this.search = new TranscriptSearch({
       dbFile: path.join(config.cacheDir, "search.sqlite"),
       claudeRoot: config.claudeProjectsDir,
       codexRoots,
+      grokRoot,
     });
     // Where sessions' transcripts are, for a session's models, tokens,
     // costs and timing (see stats.js), and a Codex thread's rollout.
-    this.transcripts = new Transcripts({ claudeRoot: config.claudeProjectsDir, codexRoots });
+    this.transcripts = new Transcripts({ claudeRoot: config.claudeProjectsDir, codexRoots, grokRoot });
     this.sessionStats = createStats({ transcripts: this.transcripts });
   }
 

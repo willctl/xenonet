@@ -26,11 +26,13 @@ const CONTEXT_POINTS = 400;
 
 // Where sessions' transcripts are. Codex rollouts are found by their thread
 // id, from a listing of the rollout folders made once and again when an id
-// isn't in it (at most every 10 seconds).
+// isn't in it (at most every 10 seconds). A Grok Build session's updates
+// are in its own folder, under the one for its working directory.
 export class Transcripts {
-  constructor({ claudeRoot, codexRoots = [] }) {
+  constructor({ claudeRoot, codexRoots = [], grokRoot = null }) {
     this.claudeRoot = claudeRoot;
     this.codexRoots = codexRoots;
+    this.grokRoot = grokRoot;
     this.rollouts = new Map();
     this.listedAt = 0;
   }
@@ -53,6 +55,15 @@ export class Transcripts {
       if (!this.rollouts.has(raw) && Date.now() - this.listedAt > 10e3) await this.list();
       const file = this.rollouts.get(raw);
       return file ? [{ file, agentId: null }] : [];
+    }
+    // A Grok Build session's updates, in its folder in one of the groups
+    // by working directory; a subagent's are in a session of its own.
+    if (app === "grok") {
+      for (const group of await fsp.readdir(this.grokRoot ?? "", { withFileTypes: true }).catch(() => [])) {
+        const file = path.join(this.grokRoot, group.name, raw, "updates.jsonl");
+        if (group.isDirectory() && fs.existsSync(file)) return [{ file, agentId: null }];
+      }
+      return [];
     }
     return [];
   }

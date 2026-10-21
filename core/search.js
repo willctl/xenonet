@@ -1,4 +1,4 @@
-// Full-text search across both apps' transcripts, in a local SQLite FTS5 index
+// Full-text search across the apps' transcripts, in a local SQLite FTS5 index
 // (search.sqlite in the cache dir; see config.js). Indexing is incremental:
 // appended lines are read from the last offset, and Codex's compressed
 // .jsonl.zst archives are decompressed once.
@@ -141,11 +141,12 @@ export function ftsQuery(q) {
 }
 
 export class TranscriptSearch {
-  constructor({ dbFile, claudeRoot, codexRoots }) {
+  constructor({ dbFile, claudeRoot, codexRoots, grokRoot = null }) {
     this.dbFile = dbFile;
     this.roots = [
       ...(claudeRoot ? [{ dir: claudeRoot, app: "claude" }] : []),
       ...(codexRoots ?? []).map((dir) => ({ dir, app: "codex" })),
+      ...(grokRoot ? [{ dir: grokRoot, app: "grok" }] : []),
     ].filter((r) => fs.existsSync(r.dir));
     this.status = { files: 0, docs: 0, indexing: false, lastIndexAt: 0, ms: 0 };
   }
@@ -196,7 +197,13 @@ export class TranscriptSearch {
 
   sessionOf(file, app) {
     const norm = file.replace(/\\/g, "/");
-    // Any app but Claude Code is read as Codex.
+    // A Grok Build session's updates are in its folder, which is named for
+    // it; its other files aren't read.
+    if (app === "grok") {
+      const m = /\/([^/]+)\/updates\.jsonl$/.exec(norm);
+      return m ? `grok:${m[1]}` : null;
+    }
+    // Any other app but Claude Code is read as Codex.
     if (tailedApp(app, "codex") === "claude") {
       const sub = /\/([0-9a-f-]{36})\/subagents\/[^/]+\.jsonl$/i.exec(norm);
       if (sub) return `claude:${sub[1]}`;

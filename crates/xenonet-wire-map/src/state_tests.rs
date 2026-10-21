@@ -34,7 +34,7 @@ fn world() -> World {
     let vendor = Vendor::new(dir, Arc::new(Mutex::new(xenonet_schema::drift::DriftLog::default())));
     let store = StateStore::new(&cfg.state_dir, &cfg.projects_dir);
     let codex_sessions = std::path::Path::new(&cfg.codex_home).join("sessions").to_string_lossy().into_owned();
-    let live = Live::new(&cfg.claude_projects_dir, &codex_sessions, cfg.claude_desktop_dir.as_deref(), false, &cfg.home_dir, vendor.clone());
+    let live = Live::new(&cfg.claude_projects_dir, &codex_sessions, "", cfg.claude_desktop_dir.as_deref(), false, &cfg.home_dir, vendor.clone());
     let codex = CodexClient::new("/nonexistent/codex".into(), "0.0.0".into(), vendor.clone());
     let state = MapState::new(cfg, store, vendor, Emitter::new(), Readers::Demo(demo), live, codex, "0.0.0");
     let root = w["root"].as_str().unwrap_or_default().to_string();
@@ -391,7 +391,7 @@ async fn a_home_folders_own_sessions_and_projects() {
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas");
     let vendor = Vendor::new(dir, Arc::new(Mutex::new(xenonet_schema::drift::DriftLog::default())));
     let store = StateStore::new(&cfg.state_dir, &cfg.projects_dir);
-    let live = Live::new(&cfg.claude_projects_dir, "", None, false, &cfg.home_dir, vendor.clone());
+    let live = Live::new(&cfg.claude_projects_dir, "", "", None, false, &cfg.home_dir, vendor.clone());
     let codex = CodexClient::new(cfg.codex_binary(), "0.0.0".into(), vendor.clone());
     let claude = crate::claude::Claude::new(&cfg.claude_projects_dir, None, vendor.clone());
     let s = MapState::new(cfg, store, vendor, Emitter::new(), Readers::Real { claude }, live, codex, "0.0.0");

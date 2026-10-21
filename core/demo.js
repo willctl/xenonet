@@ -28,6 +28,7 @@ export const world = {
   claudeRoot: path.join(HOME, ".claude", "projects"),
   claudeDesktopDir: path.join(HOME, "claude-desktop"),
   codexHome: path.join(HOME, ".codex"),
+  grokHome: path.join(HOME, ".grok"),
   wikiDir: path.join(HOME, "wiki"),
   stateDir: path.join(ROOT, "state"),
   cacheDir: path.join(ROOT, "cache"),

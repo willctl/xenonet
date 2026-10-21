@@ -57,7 +57,7 @@
 // rest of the line, so their `broken` stands in their place and the line's
 // events go on: the refusal (read first, by the refusals' readers) and a
 // message's usage (read once per message id).
-import { ClaudeLine, CodexLine, claudeLines, codexLines, isCodexPrompt } from "./lines.js";
+import { ClaudeLine, CodexLine, GrokLine, claudeLines, codexLines, grokLines, isCodexPrompt } from "./lines.js";
 import { claudeRefusal, codexRefusal } from "./refusals/detect.js";
 
 // The sampling hooks' names for a line's kind (lines.js): Claude Code's by
@@ -331,6 +331,72 @@ export const codex = {
   },
 };
 
+// ---------- Grok Build ----------
+
+// Grok Build's events have Claude Code's shapes, and its origins (user for
+// what you said and a tool's result, assistant for what the agent said and
+// its tool calls), so the readers read them as they read Claude Code's: a
+// prompt is a user line's, and a reply's text and tool calls are an
+// assistant line's blocks. A chunk carries one block of a message, and a
+// run of chunks of the same kind is one message, which its first chunk
+// speaks for: the chunks after it make no events (`file.run` is the kind of
+// the line before). Its lines don't say when a turn ends (Grok's hooks do:
+// live.js), nor what a call cost (its usage.json does).
+function grokEvents(o, base, file, out) {
+  const kind = o.kind;
+  const run = kind === "user_message_chunk" ? "user" : kind === "agent_message_chunk" ? "assistant" : kind === "agent_thought_chunk" ? "thought" : null;
+  const more = run && run === file.run;
+  file.run = run;
+  if (more || o.own) return;
+  if (kind === "user_message_chunk") {
+    const text = o.text;
+    out.push({ kind: "prompt", ...base, origin: "user", text, parts: text, command: null, meta: o.notAsked, sidechain: false, compactSummary: false, interruption: false });
+  } else if (kind === "agent_message_chunk") {
+    const b = { ...base, origin: "assistant" };
+    out.push({ kind: "call", ...b, messageId: null, model: null, effort: null, usage: null });
+    out.push({ kind: "said", ...b, parts: [{ type: "text", text: o.text }], sidechain: false });
+  } else if (kind === "tool_call") {
+    const u = o.update;
+    const b = { ...base, origin: "assistant" };
+    const use = { type: "tool_use", id: u.toolCallId, name: o.toolName, input: o.toolInput };
+    out.push({ kind: "call", ...b, messageId: null, model: null, effort: null, usage: null });
+    out.push({ kind: "said", ...b, parts: [use], sidechain: false });
+    out.push({ kind: "tool", ...b, id: use.id, name: use.name, input: use.input });
+    if (u.status === "completed" || u.status === "failed") out.push({ kind: "result", ...b, id: use.id, error: u.status === "failed" });
+  } else if (kind === "tool_call_update") {
+    const u = o.update;
+    if (u.status === "completed" || u.status === "failed") out.push({ kind: "result", ...base, origin: "user", id: u.toolCallId, error: u.status === "failed" });
+  } else if (kind === "usage_update") {
+    const u = o.update;
+    out.push({ kind: "context", ...base, used: u.used, window: u.size });
+  }
+}
+
+// Grok Build: a session's updates.jsonl, one per session (a subagent has a
+// session of its own).
+export const grok = {
+  app: "grok",
+  lines: grokLines,
+  Line: GrokLine,
+  sorted: false,
+  // Its lines don't say when a turn ends.
+  turnEnds: false,
+  // `run`: the kind of message the line before was a chunk of, which the
+  // mapper keeps as the lines come.
+  file: ({ agentId = null } = {}) => ({ agentId, run: null }),
+  events(o, file = grok.file()) {
+    const out = [];
+    let base;
+    try {
+      base = { t: o.ts, agentId: file.agentId ?? null, origin: kindPart(o.kind) };
+    } catch (error) {
+      return [broken({ t: NaN, agentId: file.agentId ?? null, origin: "undefined" }, "line", error)];
+    }
+    grokEvents(o, base, file, out);
+    return out;
+  },
+};
+
 // ---------- which app's ----------
 
 // The tailed apps' mappers. Until the app registry (core/apps.js) holds
@@ -339,6 +405,7 @@ export const codex = {
 const MAPPERS = new Map([
   ["claude", claude],
   ["codex", codex],
+  ["grok", grok],
 ]);
 
 export const mapperOf = (app, fallback = "claude") => MAPPERS.get(app) ?? MAPPERS.get(fallback);

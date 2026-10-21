@@ -1,4 +1,4 @@
-//! core/search.js: full-text search across both apps' transcripts, in a
+//! core/search.js: full-text search across the apps' transcripts, in a
 //! local SQLite FTS5 index (search.sqlite in the cache dir). Indexing is
 //! incremental: appended lines are read from the last offset, and Codex's
 //! compressed .jsonl.zst archives are read whole.
@@ -30,7 +30,7 @@ use std::time::Duration;
 use xenonet_base::text::{js_number, js_trim, truthy};
 use xenonet_base::{fs as xfs, json, jsstr};
 use xenonet_sources::line_events::{self, Broken, Field, Kind, LineEvent, LineFile};
-use xenonet_sources::lines::{prop, ClaudeLine, CodexLine, Js, TypeError};
+use xenonet_sources::lines::{prop, ClaudeLine, CodexLine, GrokLine, Js, TypeError};
 use xenonet_sources::wiki::{to_str_or_empty, Out};
 
 const MAX_TEXT: usize = 6000;
@@ -207,16 +207,24 @@ fn field<'a>(v: &'a Value, k: &str) -> Js<'a> {
 /// whose prompts are its user_message events. An app that isn't Claude
 /// Code reads as Codex.
 pub fn docs_from_line(raw: Value, app: &str, user_events: bool) -> Result<Vec<Doc>, TypeError> {
-    let file = LineFile { items: !user_events, ..LineFile::default() };
+    docs_in(raw, app, &LineFile { items: !user_events, ..LineFile::default() })
+}
+
+/// One searchable record per message, from a line of a file whose lines
+/// are read in order (`file`, what the mapper keeps for it).
+pub fn docs_in(raw: Value, app: &str, file: &LineFile) -> Result<Vec<Doc>, TypeError> {
+    if app == "grok" {
+        return docs_of(&line_events::grok(&GrokLine::new(raw), file));
+    }
     // A record that isn't an object fails where search read it first.
     if xenonet_base::apps::tailed_app(app, "codex") == "claude" {
         let o = ClaudeLine { raw };
         o.kind()?;
-        return docs_of(&line_events::claude(&o, &file));
+        return docs_of(&line_events::claude(&o, file));
     }
     let o = CodexLine { raw };
     o.payload()?;
-    docs_of(&line_events::codex(&o, &file))
+    docs_of(&line_events::codex(&o, file))
 }
 
 /// Whether a rollout's text has a completed user message: only the lines
@@ -252,8 +260,15 @@ static UUID_FILE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([0-9a-f]{8}-[
 /// session's, and a Codex file is one only when it's a rollout.
 pub fn session_of(file: &str, app: &str) -> Option<String> {
     let norm = file.replace('\\', "/");
+    // A Grok Build session's updates are in its folder, which is named for
+    // it; its other files aren't read.
+    if app == "grok" {
+        let rest = norm.strip_suffix("/updates.jsonl")?;
+        let id = &rest[rest.rfind('/')? + 1..];
+        return (!id.is_empty()).then(|| format!("grok:{id}"));
+    }
     let low = norm.to_ascii_lowercase();
-    // Any app but Claude Code is read as Codex.
+    // Any other app but Claude Code is read as Codex.
     if xenonet_base::apps::tailed_app(app, "codex") == "claude" {
         if let Some(m) = SUBAGENT.captures(&low).and_then(|c| c.get(1)) {
             return Some(format!("claude:{}", &norm[m.range()]));
@@ -376,7 +391,8 @@ pub struct Run {
     file: String,
     app: String,
     session_id: String,
-    user_events: bool,
+    // What the mapper keeps of the file as its lines are read in order.
+    line: LineFile,
     seen: HashSet<String>,
     pub n: f64,
 }
@@ -395,13 +411,16 @@ const NOT_OPEN: &str = "database is not open";
 impl Search {
     /// The index in `db_file`, of the transcripts under the folders that
     /// are there.
-    pub fn new(db_file: Option<&str>, claude_root: Option<&str>, codex_roots: &[Option<String>]) -> Search {
+    pub fn new(db_file: Option<&str>, claude_root: Option<&str>, codex_roots: &[Option<String>], grok_root: Option<&str>) -> Search {
         let mut roots = Vec::new();
         if let Some(dir) = claude_root.filter(|d| !d.is_empty()) {
             roots.push(Root { dir: dir.to_string(), app: "claude".into() });
         }
         for dir in codex_roots {
             roots.push(Root { dir: dir.clone().unwrap_or_default(), app: "codex".into() });
+        }
+        if let Some(dir) = grok_root.filter(|d| !d.is_empty()) {
+            roots.push(Root { dir: dir.to_string(), app: "grok".into() });
         }
         roots.retain(|r| !r.dir.is_empty() && Path::new(&r.dir).exists());
         Search { db_file: db_file.map(String::from), roots, db: None, prepared: false, generation: 0 }
@@ -562,13 +581,13 @@ impl Search {
     /// The documents of a text of a session's file: `user_events` as in
     /// docs_from_line.
     pub fn run(file: &str, app: &str, session_id: &str, user_events: bool) -> Run {
-        Run { file: file.into(), app: app.into(), session_id: session_id.into(), user_events, seen: HashSet::new(), n: 0.0 }
+        Run { file: file.into(), app: app.into(), session_id: session_id.into(), line: LineFile { items: !user_events, ..LineFile::default() }, seen: HashSet::new(), n: 0.0 }
     }
 
     /// Indexes a record of the text being indexed: each document once, by
     /// how it starts.
     pub fn add(&self, run: &mut Run, raw: Value) -> Result<(), Error> {
-        for d in docs_from_line(raw, &run.app, run.user_events)? {
+        for d in docs_in(raw, &run.app, &run.line)? {
             let body = jsstr::head(&d.text, MAX_TEXT);
             let key = jsstr::head(&body, 200);
             if !run.seen.insert(key) {
@@ -807,7 +826,7 @@ mod tests {
         let file = claude.join("proj").join("11111111-1111-1111-1111-111111111111.jsonl");
         let line = |text: &str| format!("{}\n", json!({ "type": "user", "timestamp": "2026-10-02T10:00:00Z", "message": { "content": text } }));
         std::fs::write(&file, line("Should we use SendGrid for email?") + "{\"half").unwrap();
-        let mut s = Search::new(Some(&d.join("cache").join("search.sqlite").to_string_lossy()), Some(&claude.to_string_lossy()), &[]);
+        let mut s = Search::new(Some(&d.join("cache").join("search.sqlite").to_string_lossy()), Some(&claude.to_string_lossy()), &[], None);
         assert_eq!(s.roots.len(), 1);
         s.connect().unwrap();
         s.prepare().unwrap();

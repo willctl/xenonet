@@ -341,13 +341,14 @@ export class LiveTelemetry extends EventEmitter {
   #core;
   #faces = new Map();
 
-  constructor({ claudeRoot, codexRoot, claudeDesktopDir, claudeUsage = null, home = null }) {
+  constructor({ claudeRoot, codexRoot, grokRoot = null, claudeDesktopDir, claudeUsage = null, home = null }) {
     super();
     // Watch canonical long paths: on Windows, libuv aborts the process when a
     // recursive watch root is an 8.3 short name (C:\Users\ABCDEF~1\...).
     this.roots = [
       { dir: claudeRoot, app: "claude" },
       { dir: codexRoot, app: "codex" },
+      { dir: grokRoot, app: "grok" },
     ]
       .filter((r) => r.dir && fs.existsSync(r.dir))
       .map((r) => ({ ...r, dir: fs.realpathSync.native(r.dir) }));
@@ -478,8 +479,9 @@ export class LiveTelemetry extends EventEmitter {
       if (!rec) return;
       this.status.lines++;
       const id = String(f.sessionId);
-      // Any app but Codex is read as Claude Code, as linesOf reads it.
-      const res = this.#core.line(tailedApp(f.app, "claude") === "codex", id, f.agentId ?? null, f.file ?? null, rec.raw, !prime, Date.now());
+      // Any app that isn't tailed is read as Claude Code, as linesOf reads
+      // it.
+      const res = this.#core.line(tailedApp(f.app, "claude"), id, f.agentId ?? null, f.file ?? null, rec.raw, !prime, Date.now());
       if (this.#run(res, id) != null) this.status.errors++;
     } catch {
       this.status.errors++;
@@ -506,9 +508,15 @@ export class LiveTelemetry extends EventEmitter {
     return native.liveTelemetryPagesOf(server, input) ?? null;
   }
 
-  // Claude Code Notification hooks carry permission prompts the transcript doesn't.
+  // Claude Code Notification hooks carry permission prompts the transcript
+  // doesn't; Grok Build's hooks say when its turns end.
   noteHook(sessionId, body) {
     this.#throw(this.#core.noteHook(String(sessionId), body, Date.now()), String(sessionId));
+  }
+
+  // Turns gone quiet in an app whose lines don't say when a turn ends.
+  settle(now = Date.now()) {
+    this.#core.settle(Number(now));
   }
 
   #throw(res, id) {

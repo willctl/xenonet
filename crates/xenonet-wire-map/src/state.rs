@@ -152,8 +152,15 @@ impl MapState {
     ) -> Arc<MapState> {
         let codex_roots =
             [std::path::Path::new(&cfg.codex_home).join("sessions"), std::path::Path::new(&cfg.codex_home).join("archived_sessions")].map(|p| p.to_string_lossy().into_owned());
-        let search = TranscriptSearch::new(&std::path::Path::new(&cfg.cache_dir).join("search.sqlite").to_string_lossy(), &cfg.claude_projects_dir, &codex_roots, vendor.clone());
-        let stats = Stats::new(&cfg.claude_projects_dir, &codex_roots, vendor.clone());
+        let grok_root = std::path::Path::new(&cfg.grok_home).join("sessions").to_string_lossy().into_owned();
+        let search = TranscriptSearch::new(
+            &std::path::Path::new(&cfg.cache_dir).join("search.sqlite").to_string_lossy(),
+            &cfg.claude_projects_dir,
+            &codex_roots,
+            &grok_root,
+            vendor.clone(),
+        );
+        let stats = Stats::new(&cfg.claude_projects_dir, &codex_roots, &grok_root, vendor.clone());
         let identities = cfg.identities.then(|| {
             IdentityWatch::new(
                 crate::identities::Files {
