@@ -276,7 +276,7 @@ impl Shared {
         let nonce = crate::codec::nonce()?;
         let time = self.gateway_now() as i64;
         let headers = request::sign(&key, &net.id, &net.host, method, target, time, &nonce, &body);
-        Ok((NetRequest { method: method.into(), target: target.into(), headers, body }, nonce))
+        Ok((NetRequest { method: method.into(), target: target.into(), headers, body, source: None }, nonce))
     }
 
     // ---------- how the link stands ----------
@@ -394,7 +394,8 @@ impl Shared {
         let o = self.outbox();
         let dropped = self.with_store(|st| st.meta("dropped")).ok().flatten().and_then(|d| d.parse::<u64>().ok()).unwrap_or(0);
         let gateway = self.gateway();
-        let queues: Vec<Value> = gateway.map(|g| g.queues().into_iter().map(|(h, f, b)| json!({ "host": h, "frames": f, "bytes": b })).collect()).unwrap_or_default();
+        let queues: Vec<Value> = gateway.as_ref().map(|g| g.queues().into_iter().map(|(h, f, b)| json!({ "host": h, "frames": f, "bytes": b })).collect()).unwrap_or_default();
+        let join_closed = gateway.as_ref().and_then(|g| g.join_closed_until(t)).map(|x| x as i64);
         let v = json!({
             "state": s.state,
             "since": s.since.map(|x| x as i64),
@@ -410,6 +411,7 @@ impl Shared {
             "lastOk": s.last_ok.map(|x| x as i64),
             "outbox": { "frames": o.frames, "bytes": o.bytes, "oldest": o.oldest, "dropped": dropped },
             "queues": queues,
+            "joinClosedUntil": join_closed,
             "rosterMismatch": self.roster_mismatch(),
             "at": t as i64,
         });
@@ -1129,7 +1131,7 @@ impl Node {
         let nonce = crate::codec::nonce()?;
         let body = join_body(&key, &code, &nonce, &n.opts.platform, &n.opts.version, n.opts.desktop);
         let t = link::http(address)?;
-        let req = NetRequest { method: "POST".into(), target: "/net/v1/join".into(), headers: Vec::new(), body: body.to_string().into_bytes() };
+        let req = NetRequest { method: "POST".into(), target: "/net/v1/join".into(), headers: Vec::new(), body: body.to_string().into_bytes(), source: None };
         let reply =
             t.request(req, Some(Duration::from_secs(30))).await.map_err(|why| NetError::new(502, "unreachable", format!("the gateway at {address} didn't answer: {why}")))?;
         let v = reply.body_json();
@@ -1444,6 +1446,7 @@ impl Node {
         if let Some(g) = gw {
             out["queues"] = Value::Array(g.queues().into_iter().map(|(h, f, b)| json!({ "host": h, "frames": f, "bytes": b })).collect());
             out["epoch"] = json!(g.epoch());
+            out["joinClosedUntil"] = g.join_closed_until(now).map_or(Value::Null, |t| json!(t as i64));
         }
         if let Some(r) = s.removed {
             out["removed"] = r;

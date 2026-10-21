@@ -360,6 +360,18 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9_-]*$"
     },
+    "joinClosedUntil": {
+      "description": "On the gateway's host: when the join route opens again, after 200 bad tickets in an hour; null while it's open",
+      "anyOf": [
+        {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "proposals": {
       "description": "Roster entries signed by too few, waiting for the founder or a second window host to approve them",
       "type": "array",

@@ -234,6 +234,7 @@ export const NetworkState = define(
     titlesOnly: z.boolean(),
     queues: z.array(obj({ host: HostId, frames: count, bytes: count })).optional().describe("On the gateway's host: what waits at the gateway for each host"),
     epoch: B64.optional().describe("On the gateway's host: its queues' epoch, which hosts resume within"),
+    joinClosedUntil: ms.nullable().optional().describe("On the gateway's host: when the join route opens again, after 200 bad tickets in an hour; null while it's open"),
     proposals: z
       .array(
         obj({

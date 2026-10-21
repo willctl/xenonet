@@ -156,6 +156,23 @@ pub fn checks(dir: &Path, now: f64) -> Vec<Check> {
         },
     ));
 
+    // The join route, on the gateway's host.
+    if gateway_here {
+        let closed = link.get("joinClosedUntil").and_then(Value::as_f64).filter(|t| *t > now);
+        out.push((
+            "network.join",
+            "New machines can join through the gateway",
+            match closed {
+                Some(t) => verdict(
+                    "warn",
+                    format!("200 bad tickets came in an hour, so the join route is shut until {} UTC ({} from now)", clock_time(t), span(t - now)),
+                    Some("Someone may be guessing tickets. A machine joins once it opens again, with a new ticket."),
+                ),
+                None => verdict("ok", "open: each source gets 20 bad tickets an hour, and a ticket five wrong tries", None),
+            },
+        ));
+    }
+
     // The roster.
     let mismatch: Vec<&str> = link.get("rosterMismatch").and_then(Value::as_array).map(|l| l.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
     out.push((

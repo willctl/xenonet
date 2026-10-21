@@ -40,7 +40,12 @@ use xenonet_base::sync::Locked;
 pub const UP_LIMIT: usize = 1 << 20;
 pub const RELAY_LIMIT: usize = 16 << 20;
 pub const SMALL_LIMIT: usize = 64 << 10;
+/// Bad tickets from one source in an hour that shut the join route to it
+/// for an hour; from everywhere, that shut it for everyone.
 const BAD_TICKETS: usize = 20;
+const BAD_TICKETS_ALL: usize = 200;
+/// Wrong proofs aimed at one ticket (by its tag) that retire it.
+const WRONG_PROOFS: u32 = 5;
 const HOUR_MS: f64 = 3600e3;
 const FRAMES_A_MINUTE: f64 = 600.0;
 const MESSAGES_A_MINUTE: f64 = 60.0;
@@ -61,6 +66,9 @@ pub struct NetRequest {
     pub target: String,
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
+    /// Where it came from, as the front door saw it: the peer's address on
+    /// a LAN, the tunnel's forwarded address behind one; None in-process.
+    pub source: Option<String>,
 }
 
 impl NetRequest {
@@ -167,13 +175,36 @@ struct BadTickets {
     closed_until: f64,
 }
 
+impl BadTickets {
+    /// One more in the last hour: true when that shuts the route.
+    fn count(&mut self, now: f64, most: usize) -> bool {
+        self.at.retain(|t| now - *t < HOUR_MS);
+        self.at.push(now);
+        if self.at.len() >= most {
+            self.closed_until = now + HOUR_MS;
+            self.at.clear();
+            return true;
+        }
+        false
+    }
+}
+
+/// Bad tickets: from everywhere, from each source, and wrong proofs aimed
+/// at each waiting ticket.
+#[derive(Default)]
+struct Bad {
+    all: BadTickets,
+    by_source: HashMap<String, BadTickets>,
+    wrong: HashMap<String, u32>,
+}
+
 pub struct Gateway {
     node: Weak<Shared>,
     store: Mutex<GwStore>,
     epoch: String,
     live: Mutex<HashMap<String, Live>>,
     nonces: Mutex<HashMap<String, f64>>,
-    bad: Mutex<BadTickets>,
+    bad: Mutex<Bad>,
     rates: Mutex<HashMap<String, (Bucket, Bucket)>>,
     stopped: Notify,
     /// Entries signed by too few, waiting for approval, and when they came.
@@ -204,7 +235,7 @@ impl Gateway {
             epoch,
             live: Mutex::new(HashMap::new()),
             nonces: Mutex::new(HashMap::new()),
-            bad: Mutex::new(BadTickets::default()),
+            bad: Mutex::new(Bad::default()),
             rates: Mutex::new(HashMap::new()),
             stopped: Notify::new(),
             proposals: Mutex::new(Vec::new()),
@@ -783,19 +814,57 @@ impl Gateway {
 
     // ---------- joining ----------
 
-    fn bad_ticket(&self, now: f64) {
+    /// A bad ticket from `source`: 20 in an hour shut the route to that
+    /// source for an hour, and 200 from everywhere shut it for everyone.
+    fn bad_ticket(&self, source: Option<&str>, now: f64) {
         let mut b = self.bad.locked();
-        b.at.retain(|t| now - *t < HOUR_MS);
-        b.at.push(now);
-        if b.at.len() >= BAD_TICKETS {
-            b.closed_until = now + HOUR_MS;
-            b.at.clear();
+        b.by_source.retain(|_, t| t.closed_until > now || t.at.iter().any(|x| now - x < HOUR_MS));
+        if let Some(src) = source {
+            b.by_source.entry(src.to_string()).or_default().count(now, BAD_TICKETS);
         }
+        if b.all.count(now, BAD_TICKETS_ALL) {
+            if let Some(n) = self.node.upgrade() {
+                n.log("net.join", "200 bad tickets in an hour: the join route is shut for an hour");
+            }
+        }
+    }
+
+    /// When the join route opens again for everyone, while it's shut.
+    pub fn join_closed_until(&self, now: f64) -> Option<f64> {
+        let until = self.bad.locked().all.closed_until;
+        (until > now).then_some(until)
+    }
+
+    fn join_closed(&self, source: Option<&str>, now: f64) -> bool {
+        let b = self.bad.locked();
+        b.all.closed_until > now || source.and_then(|s| b.by_source.get(s)).is_some_and(|t| t.closed_until > now)
+    }
+
+    /// A wrong proof aimed at the waiting tickets with this tag: five
+    /// retire a ticket.
+    fn wrong_proof(&self, tag: &str, tickets: &[TicketRow], now: f64) -> R<()> {
+        for t in tickets.iter().filter(|t| unb64(&t.hash).is_some_and(|h| ticket::tag(&h) == tag)) {
+            let retire = {
+                let mut b = self.bad.locked();
+                let n = b.wrong.entry(t.hash.clone()).or_default();
+                *n += 1;
+                *n >= WRONG_PROOFS
+            };
+            if retire {
+                self.store.locked().use_ticket(&t.hash, now as i64)?;
+                self.bad.locked().wrong.remove(&t.hash);
+                if let Some(n) = self.node.upgrade() {
+                    n.log("net.join", &format!("the ticket for {} had five wrong tries, and was retired: make a new one", t.host));
+                }
+            }
+        }
+        Ok(())
     }
 
     async fn join(&self, n: &Arc<Shared>, req: &NetRequest) -> R<NetReply> {
         let now = Self::now(n);
-        if self.bad.locked().closed_until > now {
+        let source = req.source.as_deref();
+        if self.join_closed(source, now) {
             return Err(NetError::new(404, "closed", "not found"));
         }
         let me = Self::me(n)?;
@@ -810,9 +879,13 @@ impl Gateway {
         let sig = unb64(&s("sig")).unwrap_or_default();
         let signed_text = join_signing(&nonce, &key_id, &proof);
         let tickets = self.store.locked().waiting_tickets(now as i64)?;
-        let found = tickets.into_iter().find(|t| unb64(&t.hash).is_some_and(|h| ticket::check_join(&h, &nonce, &key_id, &proof)));
+        let found = tickets.iter().find(|t| unb64(&t.hash).is_some_and(|h| ticket::check_join(&h, &nonce, &key_id, &proof))).cloned();
         let Some(t) = found.filter(|_| nonce.len() >= 16 && keys.verify(signed_text.as_bytes(), &sig)) else {
-            self.bad_ticket(now);
+            self.bad_ticket(source, now);
+            let tag = s("tag");
+            if tag.len() == 2 {
+                self.wrong_proof(&tag, &tickets, now)?;
+            }
             return Err(NetError::new(404, "no-ticket", "not found"));
         };
         let in_roster = |n: &Shared| n.roster().view().member(&t.host).map(|m| m.keys == keys);
@@ -822,7 +895,7 @@ impl Gateway {
             None if t.maker == me.host => {
                 // Made here: the gateway's host signs the new host in.
                 if !self.store.locked().use_ticket(&t.hash, now as i64)? {
-                    self.bad_ticket(now);
+                    self.bad_ticket(source, now);
                     return Err(NetError::new(404, "no-ticket", "not found"));
                 }
                 let mut entry = n.roster().draft(Op::Add, HostRef { id: t.host.clone(), keys, window: t.window }, None, now as i64);
@@ -935,6 +1008,7 @@ pub fn join_body(key: &crate::keys::HostKey, code: &str, nonce: &str, platform: 
         "nonce": nonce,
         "proof": proof,
         "makerProof": ticket::maker_proof(code, nonce, &key_id),
+        "tag": ticket::tag(&ticket::hash(code)),
         "platform": platform,
         "version": version,
         "desktop": desktop,

@@ -138,9 +138,10 @@ impl Door {
     pub async fn serve(self, stream: TcpStream) {
         let keep = Keep::new();
         let held = keep.clone();
+        let peer = stream.peer_addr().ok();
         let svc = service_fn(move |req: hyper::Request<Incoming>| {
             let (door, keep) = (self.clone(), held.clone());
-            async move { Ok::<_, Infallible>(door.route(req, &keep).await) }
+            async move { Ok::<_, Infallible>(door.route(req, &keep, peer).await) }
         });
         let conn = http1::Builder::new().serve_connection(TokioIo::new(stream), svc);
         tokio::pin!(conn);
@@ -160,10 +161,10 @@ impl Door {
         self.node.clone().or_else(|| self.actor.as_ref().and_then(ActorGateway::net))
     }
 
-    async fn route(&self, req: hyper::Request<Incoming>, keep: &Keep) -> hyper::Response<OutBody> {
+    async fn route(&self, req: hyper::Request<Incoming>, keep: &Keep, peer: Option<SocketAddr>) -> hyper::Response<OutBody> {
         let path = parse_target(&req.uri().to_string()).0;
         if path.starts_with(NET_PREFIX) {
-            return self.network(req, keep).await;
+            return self.network(req, keep, peer).await;
         }
         // A LAN-only door serves the network alone: no actor token, and
         // nothing of A2A, crosses a LAN in the clear.
@@ -192,7 +193,19 @@ impl Door {
         }
     }
 
-    async fn network(&self, req: hyper::Request<Incoming>, keep: &Keep) -> hyper::Response<OutBody> {
+    /// Where a request came from, for counting bad tickets: the peer on a
+    /// LAN; behind a tunnel, whose client is this machine, the address the
+    /// tunnel forwarded for, which only the tunnel door believes.
+    fn source(&self, headers: &[(String, String)], peer: Option<SocketAddr>) -> Option<String> {
+        let header = |k: &str| headers.iter().find(|(n, _)| n == k).map(|(_, v)| v.trim().to_string());
+        let forwarded = match self.kind {
+            DoorKind::Tunnel { .. } => header("cf-connecting-ip").or_else(|| header("x-forwarded-for").and_then(|f| f.split(',').next().map(|x| x.trim().to_string()))).filter(|f| !f.is_empty() && f.len() <= 64),
+            DoorKind::Lan(_) => None,
+        };
+        forwarded.or_else(|| peer.map(|p| p.ip().to_string()))
+    }
+
+    async fn network(&self, req: hyper::Request<Incoming>, keep: &Keep, peer: Option<SocketAddr>) -> hyper::Response<OutBody> {
         let headers = node_headers(req.headers());
         let header = |k: &str| headers.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
         let host = header("host").unwrap_or("").to_ascii_lowercase();
@@ -205,19 +218,21 @@ impl Door {
         // Only while this host is the network's gateway.
         let Some(gateway) = self.node().and_then(|n| n.gateway()) else { return not_found() };
         let target = req.uri().path_and_query().map_or_else(|| req.uri().path().to_string(), |p| p.as_str().to_string());
-        let path = target.split('?').next().unwrap_or("").to_string();
+        let mut net_req = NetRequest { method: req.method().as_str().to_string(), target, headers: Vec::new(), body: Vec::new(), source: self.source(&headers, peer) };
+        let path = net_req.path().to_string();
         // Read as the gateway's route reads it, so the two can't differ.
-        let relay = NetRequest { target: target.clone(), ..NetRequest::default() }.query("relay").as_deref() == Some("1");
+        let relay = net_req.query("relay").as_deref() == Some("1");
         let limit = match path.as_str() {
             "/net/v1/frames" if relay => RELAY_LIMIT,
             "/net/v1/frames" => UP_LIMIT,
             _ => SMALL_LIMIT,
         };
-        let method = req.method().as_str().to_string();
         let Some(body) = read_body(req.into_body(), limit).await else {
             return plain(413, &json!({ "error": format!("that body is over {} KiB", limit >> 10) }));
         };
-        let reply = gateway.handle(NetRequest { method, target, headers, body }).await;
+        net_req.headers = headers;
+        net_req.body = body;
+        let reply = gateway.handle(net_req).await;
         if matches!(reply.body, NetBody::Stream(_)) {
             keep.at_least(Duration::from_secs(STREAM_SECS));
         }

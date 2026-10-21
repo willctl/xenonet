@@ -521,7 +521,39 @@ async fn the_lan_door_checks_its_host_and_bad_tickets_get_404() {
     .unwrap();
     let b = Host::new("lan", "laptop", 0.0, Caps::default()).await;
     let (s, v) = b.call("POST", "/api/net/join", json!({ "address": format!("127.0.0.1:{port}"), "ticket": ticket }), true).await;
-    assert_eq!(s, 404, "the route is shut: {v}");
+    assert_eq!(s, 404, "the route is shut to this source: {v}");
+    // Only to that source: the same ticket works from another.
+    let gw = a.svc.node().gateway().unwrap();
+    let code = xenonet_net::ticket::normalize(&ticket).unwrap();
+    let join = |code: &str, source: &str| {
+        let key = xenonet_net::keys::HostKey::generate().unwrap();
+        let body = xenonet_net::gateway::join_body(&key, code, "bm9uY2Vub25jZW5vbmNlMTIz", "linux", "0", false);
+        xenonet_net::gateway::NetRequest { method: "POST".into(), target: "/net/v1/join".into(), headers: Vec::new(), body: body.to_string().into_bytes(), source: Some(source.into()) }
+    };
+    assert_eq!(gw.handle(join(&code, "198.51.100.7")).await.status, 200, "another source joins");
+    // Five wrong tries aimed at a ticket (by its tag) retire it.
+    let (_, t) = a.call("POST", "/api/net/ticket", json!({ "host": "desk" }), true).await;
+    let desk = xenonet_net::ticket::normalize(t["ticket"].as_str().unwrap()).unwrap();
+    let tag = xenonet_net::ticket::tag(&xenonet_net::ticket::hash(&desk));
+    for i in 0..5 {
+        let mut wrong = join("0000000000", &format!("203.0.113.{i}"));
+        let mut body: Value = serde_json::from_slice(&wrong.body).unwrap();
+        body["tag"] = json!(tag);
+        wrong.body = body.to_string().into_bytes();
+        assert_eq!(gw.handle(wrong).await.status, 404);
+    }
+    assert_eq!(gw.handle(join(&desk, "203.0.113.9")).await.status, 404, "retired");
+    // 200 bad tickets in an hour, from anywhere, shut it for everyone, and
+    // the state and the doctor say until when.
+    assert_eq!(a.state().await["joinClosedUntil"], Value::Null);
+    for i in 0..200 {
+        gw.handle(join("0000000000", &format!("192.0.2.{}", i % 250))).await;
+    }
+    let st = a.state().await;
+    assert!(st["joinClosedUntil"].as_f64().is_some_and(|t| t > now_ms()), "{st}");
+    a.svc.node().shared().write_link(true);
+    let doctor: std::collections::HashMap<String, Value> = xenonet_net::doctor::checks(&a.dir.join("state").join("network"), now_ms()).into_iter().map(|(id, _, v)| (id.to_string(), v)).collect();
+    assert_eq!(doctor["network.join"]["status"], "warn", "{:?}", doctor["network.join"]);
     // The routes are the owner's: an agent's process is refused.
     let mut cores = Cores::pending(false, false, false);
     cores.verify = Arc::new(You { person: json!({ "ok": false, "reason": "it came from under a Claude Code process" }) });

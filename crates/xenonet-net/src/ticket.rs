@@ -96,6 +96,15 @@ pub fn check_gateway(hash: &[u8], gateway_key_id: &str, nonce: &str, proof: &str
     check(hash, &gateway_message(gateway_key_id, nonce), proof)
 }
 
+/// A ticket's tag: two base64url characters (12 bits) of a hash of its
+/// hash, which a join request carries so the gateway can count wrong proofs
+/// against the ticket they're aimed at. Too short to help a guess along.
+pub fn tag(hash: &[u8]) -> String {
+    let mut m = b"xenonet-ticket-tag/1\n".to_vec();
+    m.extend_from_slice(hash);
+    b64(&sha256(&m)).chars().take(2).collect()
+}
+
 fn maker_message(nonce: &str, key_id: &str) -> String {
     format!("xenonet-join-maker/1\n{nonce}\n{key_id}")
 }
