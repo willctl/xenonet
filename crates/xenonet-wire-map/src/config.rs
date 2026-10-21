@@ -85,16 +85,21 @@ pub fn dirs_env(env: &Map<String, Value>) -> xenonet_base::dirs::Env {
     }
 }
 
+impl Found<'_> {
+    fn context_env(&self) -> xenonet_sources::xenolith::Env {
+        self.env.iter().filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string()))).collect()
+    }
+}
+
 impl Finds for Found<'_> {
     fn world(&mut self) -> Value {
         self.world.cloned().unwrap_or(Value::Null)
     }
-    fn context_dir(&mut self) -> Option<String> {
-        let env: xenonet_sources::xenolith::Env = self.env.iter().filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string()))).collect();
-        xenonet_sources::xenolith::find_context_dir(&env, self.home, self.platform).map(|(d, _)| d)
+    fn context(&mut self) -> Value {
+        xenonet_sources::xenolith::find_context_dir(&self.context_env(), self.home, self.platform).map_or(Value::Null, |(dir, server)| json!({ "dir": dir, "server": server }))
     }
     fn context_server(&mut self, dir: Option<&str>) -> Value {
-        dir.map_or(Value::Null, |d| Value::String(xenonet_sources::xenolith::context_server_of(d).into()))
+        dir.map_or(Value::Null, |d| Value::String(xenonet_sources::xenolith::context_server_of(d, &self.context_env(), self.home, self.platform).into()))
     }
     fn claude_desktop_dir(&mut self) -> Option<String> {
         xenonet_base::dirs::find_claude_desktop_dir(&dirs_env(self.env), self.platform, self.home, &mut Disk)
@@ -225,7 +230,7 @@ mod tests {
         assert!(c.demo && !c.claude_usage);
         assert_eq!((c.home_dir.as_str(), c.projects_dir.as_str(), c.claude_projects_dir.as_str()), ("/w/home", "/w/home/Projects", "/w/home/.claude/projects"));
         assert_eq!(c.claude_config_file, "/w/home/.claude.json");
-        assert_eq!(c.wiki_server, "agent-wiki");
+        assert_eq!(c.wiki_server, "xenolith");
         assert_eq!(c.windows["activeWindowMs"], 600000);
         assert!(c.readers.is_empty() && c.numbat_file.is_none());
         let mut env = Map::new();

@@ -157,8 +157,15 @@ mod tests {
         }
         assert_eq!(c.peer(peer).await, "?");
         assert_eq!(c.state()["unchecked"], json!(if c.sys.procs.supported { 1 } else { 2 }));
-        // An app XenoNet doesn't check passes.
-        assert_eq!(c.check(peer, "nobody:x", false).await["ok"], true);
+        // A session of an app XenoNet doesn't check is refused, never let
+        // through unchecked.
+        let other = c.check(peer, "gemini-cli:x", false).await;
+        assert_eq!(other["ok"], false, "{other}");
+        assert_eq!(
+            other["reason"],
+            "requests in gemini-cli:x's name are refused: XenoNet can't tell Gemini CLI's processes apart, so it can't check that the request comes from that session"
+        );
+        assert_eq!(c.state()["unchecked"], json!(if c.sys.procs.supported { 1 } else { 2 }));
     }
 
     // A made-up Mac, answering the commands procs asks for: the Claude app

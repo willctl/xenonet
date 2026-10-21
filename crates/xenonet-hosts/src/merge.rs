@@ -1122,9 +1122,11 @@ pub fn qualify_event(name: &str, data: &Value, host: &Value, schemas: &mut dyn S
         }
         "tokens" => {
             let session = remote_id(&h, data.get("sessionId"))?;
+            // An app this XenoNet doesn't tail (one a newer host knows, say)
+            // isn't counted as Claude Code's: its tokens are left out, and
+            // event_note says so.
+            let app = xenonet_base::apps::tailed_or(data.get("app"), None)?;
             let tokens = finite(data.get("n"))?;
-            // Any app but Codex counts as Claude Code's.
-            let app = xenonet_base::apps::tailed_app(data.get("app").and_then(Value::as_str).unwrap_or_default(), "claude");
             Some(json!({ "sessionId": session, "app": app, "n": n(tokens), "ts": shift.at(data.get("ts")), "host": h }))
         }
         "pulse" => {
@@ -1153,6 +1155,18 @@ pub fn qualify_event(name: &str, data: &Value, host: &Value, schemas: &mut dyn S
         }
         _ => None,
     }
+}
+
+/// What the hub notes in the log of an event it left out for its app, as
+/// the drift log notes a vendor's new variant: tokens for an app this
+/// XenoNet doesn't tail. None for any other event.
+pub fn event_note(name: &str, data: &Value, host: &Value) -> Option<String> {
+    if name != "tokens" || !data.is_object() || xenonet_base::apps::tailed_or(data.get("app"), None).is_some() {
+        return None;
+    }
+    let app = xenonet_base::json::stringify(data.get("app").unwrap_or(&Value::Null), 0);
+    let id = s(host, "id").unwrap_or_else(|| "undefined".into());
+    Some(format!("{id} sent tokens for {}, an app this XenoNet doesn't tail, and they were left out", slice16(&app, 60)))
 }
 
 /// A host's engine under qualified ids: the agents and messages that fit
@@ -1188,4 +1202,23 @@ pub fn qualify_engine(engine: &Value, host: &Value, schemas: &mut dyn Schemas) -
         messages.push(Value::Object(kept));
     }
     json!({ "agents": agents, "messages": messages })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tokens_for_an_app_this_xenonet_doesnt_tail_are_noted_not_counted() {
+        let host = json!({ "id": "vm1" });
+        let tokens = |app: Value| json!({ "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001", "app": app, "n": 40 });
+        assert_eq!(
+            event_note("tokens", &tokens(json!("grok-build")), &host).as_deref(),
+            Some(r#"vm1 sent tokens for "grok-build", an app this XenoNet doesn't tail, and they were left out"#)
+        );
+        assert_eq!(event_note("tokens", &json!({ "n": 40 }), &host).as_deref(), Some("vm1 sent tokens for null, an app this XenoNet doesn't tail, and they were left out"));
+        assert_eq!(event_note("tokens", &tokens(json!("codex")), &host), None);
+        assert_eq!(event_note("pulse", &json!({}), &host), None);
+        assert_eq!(event_note("tokens", &json!(5), &host), None, "not an event at all");
+    }
 }

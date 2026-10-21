@@ -18,6 +18,7 @@ import { costParts, plainModel, priorityTier, PRICES_CHECKED } from "./pricing.j
 import { listFiles } from "./paths.js";
 import { readLines, hasUserMessages } from "./lines.js";
 import { mapperOf, fail, usageOf } from "./events.js";
+import { untailed } from "./apps.js";
 
 const UUID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
 const CONTEXT_POINTS = 400;
@@ -361,7 +362,9 @@ export function createStats({ transcripts }) {
     const hit = cache.get(sessionId);
     if (hit?.key === key) return hit.stats;
     const app = sessionId.split(":")[0];
-    const mapper = mapperOf(app);
+    // An app XenoNet doesn't tail is refused, not read as Claude Code.
+    const mapper = mapperOf(app, null);
+    if (!mapper) throw new Error(untailed(app));
     const read = await Promise.all(files.map(async (f) => ({ ...f, lines: await readLines(f.file, app, mapper.lines).catch(() => []) })));
     const events = sessionEvents(read, mapper);
     const stats = { id: sessionId, ...summarize(events, { app }) };

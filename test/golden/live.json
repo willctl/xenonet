@@ -140,7 +140,7 @@
      ],
      "mcp": [
       {
-       "server": "agent-wiki",
+       "server": "xenolith",
        "ts": 1791028590000
       }
      ],
@@ -448,7 +448,7 @@
      "status": "idle",
      "tokens": {
       "processed": 15000,
-      "output": 1200
+      "output": 900
      },
      "tokensToday": 12000,
      "tpm": 0,
@@ -965,7 +965,7 @@
      "model": null,
      "turnStartedAt": null,
      "lastTool": {
-      "name": "mcp__agent-wiki__wiki_log",
+      "name": "mcp__xenolith__context_log",
       "category": "mcp",
       "detail": "",
       "ts": 1791024200000
@@ -978,7 +978,7 @@
      "files": [],
      "mcp": [
       {
-       "server": "agent-wiki",
+       "server": "xenolith",
        "ts": 1791024200000
       }
      ],
@@ -1988,8 +1988,12 @@
    ],
    "resources": [
     {
-     "server": "agent-wiki",
+     "server": "xenolith",
      "ts": 1791028590000
+    },
+    {
+     "server": "agent-wiki",
+     "ts": 1791027360000
     }
    ],
    "status": {
@@ -2181,11 +2185,11 @@
     "sessionId": "grok:0190d3e0-0000-7000-8000-000000000017",
     "app": "grok",
     "kind": "tool",
-    "tool": "mcp__agent-wiki__wiki_log",
+    "tool": "mcp__xenolith__context_log",
     "category": "mcp",
     "detail": "",
     "files": [],
-    "server": "agent-wiki",
+    "server": "xenolith",
     "agentId": null,
     "pages": [
      "pathfinder"
@@ -2667,11 +2671,11 @@
     "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
     "app": "claude",
     "kind": "tool",
-    "tool": "mcp__agent-wiki__wiki_log",
+    "tool": "mcp__xenolith__context_log",
     "category": "mcp",
     "detail": "",
     "files": [],
-    "server": "agent-wiki",
+    "server": "xenolith",
     "agentId": null,
     "pages": [
      "atlas-api",
@@ -3299,11 +3303,11 @@
     "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
     "app": "claude",
     "kind": "tool",
-    "tool": "mcp__agent-wiki__wiki_log",
+    "tool": "mcp__xenolith__context_log",
     "category": "mcp",
     "detail": "",
     "files": [],
-    "server": "agent-wiki",
+    "server": "xenolith",
     "agentId": null,
     "pages": [
      "atlas-api",
@@ -4498,7 +4502,7 @@
     ],
     "mcp": [
      {
-      "server": "agent-wiki",
+      "server": "xenolith",
       "ts": 1791028590000
      }
     ],
@@ -4806,7 +4810,7 @@
     "status": "thinking",
     "tokens": {
      "processed": 15000,
-     "output": 1200
+     "output": 900
     },
     "tokensToday": 15000,
     "tpm": 3000,
@@ -5319,7 +5323,7 @@
     "model": null,
     "turnStartedAt": null,
     "lastTool": {
-     "name": "mcp__agent-wiki__wiki_log",
+     "name": "mcp__xenolith__context_log",
      "category": "mcp",
      "detail": "",
      "ts": 1791024200000
@@ -5332,7 +5336,7 @@
     "files": [],
     "mcp": [
      {
-      "server": "agent-wiki",
+      "server": "xenolith",
       "ts": 1791024200000
      }
     ],
@@ -6371,8 +6375,12 @@
   ],
   "resources": [
    {
-    "server": "agent-wiki",
+    "server": "xenolith",
     "ts": 1791028590000
+   },
+   {
+    "server": "agent-wiki",
+    "ts": 1791027360000
    }
   ],
   "status": {

@@ -153,9 +153,9 @@
     "ms": 8000
    },
    {
-    "name": "mcp__agent-wiki__wiki_log",
+    "name": "mcp__xenolith__context_log",
     "category": "mcp",
-    "server": "agent-wiki",
+    "server": "xenolith",
     "calls": 2,
     "errors": 0,
     "ms": 8000
@@ -1839,9 +1839,9 @@
     "ms": 3000
    },
    {
-    "name": "mcp__agent-wiki__wiki_log",
+    "name": "mcp__xenolith__context_log",
     "category": "mcp",
-    "server": "agent-wiki",
+    "server": "xenolith",
     "calls": 1,
     "errors": 0,
     "ms": 3000

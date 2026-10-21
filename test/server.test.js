@@ -243,6 +243,9 @@ test("sessions: by words or folder, their stats, transcripts and handoffs", asyn
   assert.equal((await get("/api/handoff?nodeId=core")).status, 400);
   const brief = (await get(`/api/handoff?nodeId=${encodeURIComponent(SESSION(1))}&target=codex`)).data;
   assert.equal(brief.target, "codex");
+  const refused = await get(`/api/handoff?nodeId=${encodeURIComponent(SESSION(1))}&target=gemini-cli`);
+  assert.deepEqual([refused.status, refused.data], [400, { error: 'target takes claude or codex, not "gemini-cli"' }]);
+  assert.equal((await get(`/api/handoff?nodeId=${encodeURIComponent(SESSION(1))}&target=`)).data.target, "claude", "none given is Claude Code, as it was");
   assert.match(brief.brief, /Continue the work from a Claude Code session titled "Add partial refunds/);
   assert.equal((await post("/api/handoff", { nodeId: SESSION(1), target: "codex", brief: "" })).status, 400);
   assert.equal((await post("/api/handoff", { nodeId: SESSION(1), target: "codex", brief: "go on" })).status, 409, "demo sessions can't leave XenoNet");

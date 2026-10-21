@@ -3,9 +3,9 @@
 // xenonet.test.js): at rest it keeps to the rest pace instead of the
 // display's rate, a recording gets every frame (films, the showcase and
 // the X cuts all record through the desktop app's recorder), a replay
-// draws at the moving pace, the palette's frame rate choice holds, a
-// window nobody can see draws nothing, and a frame does no more work than
-// it needs (fx.js, scene.js).
+// draws at the moving pace, the palette's frame rate choice holds, plain
+// panels takes the glass blur away, a window nobody can see draws nothing,
+// and a frame does no more work than it needs (fx.js, scene.js).
 //
 //   npm run test:e2e
 import { test, before, after } from "node:test";
@@ -140,6 +140,29 @@ test("the frame rate choice in the palette: lower GPU use, every frame, then bal
     await s.driver("command", "pace-balanced");
   }
   assert.equal((await s.driver("state")).render.pace, "balanced");
+}));
+
+test("plain panels: off unless turned on, and then nothing blurs what's behind it", { timeout: limit(60000) }, shoot("budget-plain-panels", async () => {
+  // Every element whose backdrop-filter isn't none, by its class.
+  const blurred = () => s.eval(`return [...document.querySelectorAll("*")].filter((e) => getComputedStyle(e).backdropFilter !== "none").map((e) => String(e.className || e.tagName))`);
+  assert.equal((await s.driver("state")).look.plainPanels, false, "off unless you turn it on");
+  assert.ok((await blurred()).some((c) => c.split(" ").includes("panel")), "the panels are glass by default");
+  assert.ok((await s.driver("commands")).some((c) => c.id === "plain-panels"), "the palette has the switch");
+  try {
+    assert.equal((await s.driver("plainPanels", true)).look.plainPanels, true);
+    assert.deepEqual(await blurred(), []);
+    // Drawn solid, and kept for this window as the frame rate is.
+    assert.match(await s.eval(`return getComputedStyle(document.querySelector(".panel")).backgroundColor`), /^rgb\(/);
+    assert.equal(await s.eval(`return localStorage.getItem("xenonet.plainPanels")`), "on");
+    await s.screenshot({ name: "e2e-plain-panels", inline: false });
+    // The palette's switch turns it off again.
+    await s.driver("command", "plain-panels");
+    assert.equal((await s.driver("state")).look.plainPanels, false);
+    assert.ok((await blurred()).length > 0, "glass again");
+  } finally {
+    await s.driver("plainPanels", false);
+  }
+  assert.deepEqual((await s.logs({ source: "page", level: "error" })).entries, []);
 }));
 
 test("a window nobody can see draws nothing, and draws again once it can", { timeout: limit(60000) }, shoot("budget-unseen", async () => {

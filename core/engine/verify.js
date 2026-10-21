@@ -58,8 +58,9 @@
 // ChatGPT app runs many in one), and a session no running process has been
 // seen to hold yet. Codex, and Claude Code built from source or run by
 // Node, never pin for sure, so theirs go to whoever names them first. Where
-// XenoNet can't look (not macOS, for now), requests go through as before, and
-// an actor's token alone decides.
+// XenoNet can't look (not macOS, for now), requests in the checked apps'
+// sessions' names (below) go through as before, and an actor's token alone
+// decides.
 //
 // Where XenoNet can look, a request whose process it can't see is refused:
 // one netstat has no line for, or one gone before the process table was
@@ -73,15 +74,24 @@
 //
 // The apps checked are those whose processes XenoNet tells apart (the
 // registry's `processes`, by core/processes.js): Claude Code, Codex, Grok
-// Build and OpenCode. A request in another app's session's name isn't
-// checked.
+// Build and OpenCode. A request in another app's session's name is refused,
+// wherever XenoNet runs: no check could ever pass it, so it can't call as a
+// session. Actors call with their tokens, and the runs an actor reports
+// come through the gateway, so neither meets this rule.
 import { agentApps } from "../processes.js";
+import { APP as REGISTRY } from "../apps.js";
 
 const AGENTS = Object.fromEntries(agentApps().map((a) => [a.id, a]));
 const APP = Object.fromEntries(Object.values(AGENTS).map((a) => [a.id, a.name]));
 const aApp = (app) => `${/^[AEIOU]/i.test(Object.hasOwn(APP, app) ? APP[app] : "") ? "an" : "a"} ${APP[app]}`;
 // An app's own rules, or none.
 const rules = (app) => (Object.hasOwn(AGENTS, app) ? AGENTS[app] : {});
+// Why a request in `agent`'s name, a session of `app`, which XenoNet doesn't
+// check, is refused.
+function uncheckable(agent, app) {
+  const why = Object.hasOwn(REGISTRY, app) ? `XenoNet can't tell ${REGISTRY[app].name}'s processes apart, so it can't check that the request comes from that session` : `XenoNet doesn't know an app called "${app}"`;
+  return `requests in ${agent}'s name are refused: ${why}`;
+}
 const PRODUCT = { "hermes-agent": "Hermes Agent", "grok-bot": "Grok Bot", muse: "Muse", dots: "the ChatGPT app" };
 // The products whose apps their makers sign, by the maker's name (their
 // teams are in core/procs.js): their actors register and report only from
@@ -171,7 +181,8 @@ export function createVerifier({ procs, store, home = null, now = () => Date.now
   // come from Claude Code itself. Returns { ok, checked, root?, reason? }.
   async function check(socket, agent, { hook = false } = {}) {
     const app = String(agent).split(":")[0];
-    if (!APP[app] || !procs.supported) return pass();
+    if (!Object.hasOwn(APP, app)) return refuse(agent, uncheckable(agent, app));
+    if (!procs.supported) return pass();
     const { pid, chain } = await see(socket);
     if (!pid) return pass();
     if (!chain.length) return unseen(agent, `requests in ${agent}'s name have to come from ${aApp(app)} process, and this one had gone before XenoNet could look`);

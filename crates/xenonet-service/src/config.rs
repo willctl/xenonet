@@ -32,7 +32,9 @@ pub struct Config {
     /// XenoNet Dev's control channel goes through it.
     pub control: bool,
     pub upstream: Option<String>,
-    pub gateway_port: u16,
+    /// The actor gateway's port when XENONET_GATEWAY_PORT names one; else
+    /// the gateway's saved setting has one, or gateway_port_of(port).
+    pub gateway_port: Option<u16>,
     pub gateway_probe_local: bool,
     /// Where XenoNet's files are: package.json, dist/, cli/.
     pub root: PathBuf,
@@ -42,6 +44,29 @@ pub struct Config {
     pub runtime_dir: String,
     /// The demo's made-up world, once it's made (core/demo.js createWorld).
     pub world: Option<Value>,
+}
+
+/// How far above the service's port the actor gateway's is by default
+/// (server/gateway-control.js's GATEWAY_OFFSET).
+pub const GATEWAY_OFFSET: u16 = 1010;
+
+/// The actor gateway's port when nothing names one: 1010 above the
+/// service's, so 48850 for an installed XenoNet on 47840. That's clear of
+/// every instance's port (47840 to 47845), their pages' (1000 above
+/// theirs) and Xenolith's (47850 for its HTTP server, 47859 for its
+/// preview), and below the ports macOS and Windows hand out for outgoing
+/// connections. One that wouldn't fit goes as far below.
+pub fn gateway_port_of(port: u16) -> u16 {
+    port.checked_add(GATEWAY_OFFSET).or_else(|| port.checked_sub(GATEWAY_OFFSET)).unwrap_or(port)
+}
+
+/// The default before that: 10 above the service's (47850, Xenolith's
+/// port, for an installed XenoNet). A gateway set up then keeps it.
+pub const OLD_GATEWAY_OFFSET: u16 = 10;
+
+/// The old default port for a service on `port`.
+pub fn old_gateway_port_of(port: u16) -> u16 {
+    port.checked_add(OLD_GATEWAY_OFFSET).unwrap_or_else(|| gateway_port_of(port))
 }
 
 /// os.homedir(): HOME (USERPROFILE on Windows), as Node reads it.
@@ -131,10 +156,8 @@ impl Config {
         let cache_dir = resolve(&set("XENONET_CACHE_DIR").or_else(|| dev_dir("cache")).unwrap_or_else(|| dir_of("cache", "XenoNet")));
         let runtime_dir = set("XENONET_RUNTIME_DIR").unwrap_or_else(|| Path::new(&dir_of("state", "XenoNet")).join("runtime").to_string_lossy().into_owned());
         let projects_dir = resolve(&set("XENONET_PROJECTS_DIR").unwrap_or_else(|| Path::new(&home).join("Projects").to_string_lossy().into_owned()));
-        let gateway_port = set("XENONET_GATEWAY_PORT")
-            .map(|p| js_number(Some(&Value::String(p))))
-            .filter(|n| *n != 0.0 && n.fract() == 0.0 && (1.0..=65535.0).contains(n))
-            .map_or(port.wrapping_add(10), |n| n as u16);
+        let gateway_port =
+            set("XENONET_GATEWAY_PORT").map(|p| js_number(Some(&Value::String(p)))).filter(|n| *n != 0.0 && n.fract() == 0.0 && (1.0..=65535.0).contains(n)).map(|n| n as u16);
         Config {
             demo,
             dev,
@@ -236,7 +259,15 @@ mod tests {
         let c = config(&["--dev"], &[("HOME", "/home/nova")]);
         assert_eq!((c.port, c.instance.as_deref()), (47842, Some("dev")));
         let c = config(&["--dev"], &[("HOME", "/home/nova"), ("XENONET_PORT", "47999"), ("XENONET_STANDALONE", "1")]);
-        assert_eq!((c.port, c.gateway_port, c.instance.as_deref()), (47999, 48009, Some("installed")));
+        assert_eq!((c.port, c.gateway_port, c.instance.as_deref()), (47999, None, Some("installed")));
+        assert_eq!(config(&[], &[("HOME", "/home/nova"), ("XENONET_GATEWAY_PORT", "50123")]).gateway_port, Some(50123));
+        assert_eq!(config(&[], &[("HOME", "/home/nova"), ("XENONET_GATEWAY_PORT", "70000")]).gateway_port, None, "not a port");
+        // Clear of the instances' ports, their pages' and Xenolith's.
+        let taken: Vec<u16> = (47840..=47845).chain(48840..=48845).chain([47850, 47859]).collect();
+        for p in 47840..=47845 {
+            assert!(!taken.contains(&gateway_port_of(p)), "{p}");
+        }
+        assert_eq!((gateway_port_of(47840), gateway_port_of(65000)), (48850, 63990));
         let c = config(&[], &[("HOME", "/home/nova"), ("XENONET_PORT", "")]);
         assert_eq!(c.port, 0, "Number(\"\") is 0");
     }

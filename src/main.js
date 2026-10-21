@@ -655,6 +655,7 @@ const commandList = [
     run: () => setScope({ window: w.id }),
   })),
   { id: "focus-lighting", label: "Turn focus lighting on or off", keywords: "glare glow bloom dim zoom distance", run: () => setFocusLighting(!focusLighting) },
+  { id: "plain-panels", label: "Turn plain panels on or off", keywords: "glass blur transparent solid opaque panels gpu power battery energy performance laptop", run: () => setPlainPanels(!plainPanels) },
   // How often the map draws (render-budget.js), kept for this window.
   ...[
     ["balanced", "Frame rate: balanced (the default)"],
@@ -876,6 +877,28 @@ function setFocusLighting(on) {
     localStorage.setItem("xenonet.focusLighting", on ? "on" : "off");
   } catch {}
   hud.toast(`Focus lighting ${on ? "on" : "off"}`);
+}
+
+// ---------- plain panels (see style.css), remembered ----------
+//
+// The panels' glass blur (their backdrop-filter) is a large share of a
+// visible frame's GPU time. Plain panels draws them solid, without it. Off
+// unless you turn it on, and kept for this window, as the frame rate is.
+
+const PLAIN_KEY = "xenonet.plainPanels";
+let plainPanels = false;
+try {
+  plainPanels = localStorage.getItem(PLAIN_KEY) === "on";
+} catch {}
+document.body.classList.toggle("plain-panels", plainPanels);
+function setPlainPanels(on, { quiet = false } = {}) {
+  plainPanels = !!on;
+  document.body.classList.toggle("plain-panels", plainPanels);
+  scene.wake();
+  try {
+    localStorage.setItem(PLAIN_KEY, plainPanels ? "on" : "off");
+  } catch {}
+  if (!quiet) hud.toast(plainPanels ? "Panels are drawn solid, without the glass blur, which uses less GPU" : "Panels are drawn as glass again");
 }
 
 // ---------- session scope (see scope.js) ----------
@@ -1295,6 +1318,7 @@ if (import.meta.env.DEV || desktop) {
     live: () => lastLive,
     selectedId: () => selectedId,
     wallpaper: () => wallpaperOn,
+    look: { get: () => ({ plainPanels }), plainPanels: (on) => setPlainPanels(on, { quiet: true }) },
     terminal: () => terminal,
     errors: pageErrors,
   });

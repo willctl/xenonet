@@ -1140,8 +1140,11 @@ impl Kept {
 pub fn session_stats(session_id: &str, files: Vec<File>) -> Result<Out, TypeError> {
     let app = session_id.split(':').next().unwrap_or_default();
     let mut ids = EventIds::default();
-    // Any app but Codex is read as Claude Code.
-    let events = session_events(app, files, &mut ids)?;
+    // An app XenoNet doesn't tail is refused, not read as Claude Code.
+    let Some(tailed) = xenonet_base::apps::tailed_or_text(Some(app), None) else {
+        return Err(TypeError(xenonet_base::apps::untailed(app)));
+    };
+    let events = session_events(tailed, files, &mut ids)?;
     let Out::Obj(mut fields) = summarize(&events, Some(&Value::String(app.to_string())))? else { unreachable!() };
     fields.insert(0, ("id".into(), Out::Str(session_id.to_string())));
     Ok(Out::Obj(fields))
@@ -1155,6 +1158,12 @@ mod tests {
     fn field<'a>(o: &'a Out, k: &str) -> &'a Out {
         let Out::Obj(fs) = o else { panic!("not an object") };
         &fs.iter().find(|(x, _)| x == k).unwrap_or_else(|| panic!("no {k}")).1
+    }
+
+    #[test]
+    fn a_session_of_an_app_xenonet_doesnt_tail_is_refused() {
+        assert_eq!(session_stats("gemini-cli:x0000001", Vec::new()).map(|_| ()), Err(TypeError("XenoNet doesn't read Gemini CLI's transcripts".into())));
+        assert!(session_stats("claude:x0000001", Vec::new()).is_ok());
     }
 
     #[test]

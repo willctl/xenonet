@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { c, print } from "../lib/out.js";
+import { c, print, Fail } from "../lib/out.js";
 import { find, get } from "../../core/client.js";
 import { checkup } from "../../core/doctor/checkup.js";
 import { machine } from "../../core/doctor/index.js";
@@ -13,7 +13,7 @@ import { appDir } from "../../core/dirs.js";
 import { onPath } from "../../core/paths.js";
 import { logDir, readLogs } from "../../core/log.js";
 import { makeBundle, bundleMarkdown, writeLook, askCommand } from "../../core/diagnostics.js";
-import { askedApp } from "../../core/apps.js";
+import { ASKED, askedOr, appRefusal } from "../../core/apps.js";
 
 export const help = `A summary of XenoNet's state that's safe to share: its versions, the doctor's
 findings that aren't ok, its errors from the last day by code, where its
@@ -56,6 +56,11 @@ export async function gather(flags = {}) {
 }
 
 export async function run(_args, flags) {
+  // Codex, unless you ask for Claude Code; another app is refused before
+  // anything is gathered.
+  const asked = String(flags.app || process.env.XENONET_DIAGNOSE_APP || "codex");
+  const app = askedOr(asked, "codex");
+  if (flags.ask && !app) throw new Fail(appRefusal("--app", asked, ASKED), 2);
   const { stateDir, bundle } = await gather(flags);
   if (!flags.ask) {
     const text = flags.json ? `${JSON.stringify(bundle, null, 2)}\n` : bundleMarkdown(bundle);
@@ -65,8 +70,6 @@ export async function run(_args, flags) {
     }
     return process.stdout.write(text);
   }
-  // Codex, unless you ask for Claude Code.
-  const app = askedApp(flags.app || process.env.XENONET_DIAGNOSE_APP || "codex", "codex");
   const model = flags.model || process.env.XENONET_DIAGNOSE_MODEL || null;
   const bin = onPath(app);
   if (!bin) throw new Error(`${app === "claude" ? "Claude Code" : "Codex"} isn't on your PATH; install it, or use --app ${app === "claude" ? "codex" : "claude"}.`);

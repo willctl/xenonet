@@ -153,13 +153,34 @@ export const appsWith = (capability) => APPS.filter((a) => a.has?.includes(capab
 // Build.
 export const TAILED = appsWith("lines").map((a) => a.id);
 
-// The tailed app `app` names, or `fallback` for any other. The places that
-// read a transcript by its app read an app that isn't tailed as one of
-// them, and `fallback` says which, as each always has.
+// The tailed app `app` names, or `fallback` for any other. The live tailer
+// and the normalizers still read an app they don't tail as one they do,
+// and `fallback` says which.
 export const tailedApp = (app, fallback) => (TAILED.includes(app) ? app : fallback);
 
+// The tailed app `app` names; `fallback` when it names none (nothing, or
+// ""); or null for any other app. What a command, a route, another host or
+// a reader of transcripts is given is refused when it's an app XenoNet
+// doesn't tail, not read as one it does. Where there's no default,
+// `fallback` is null.
+export const tailedOr = (app, fallback) => (app == null || app === "" ? fallback : TAILED.includes(app) ? app : null);
+
 // The apps XenoNet asks a question of or hands a session to (xenonet
-// diagnose --ask, a handoff): Claude Code and Codex. Any other app reads as
-// `fallback`, as it always has.
+// diagnose --ask, a handoff): Claude Code and Codex, whose commands and
+// links it knows.
 export const ASKED = ["claude", "codex"];
-export const askedApp = (app, fallback) => (ASKED.includes(app) ? app : fallback);
+
+// The asked app `app` names; `fallback` when it names none; or null for any
+// other app, which is refused, as tailedOr does for the tailed apps.
+export const askedOr = (app, fallback) => (app == null || app === "" ? fallback : ASKED.includes(app) ? app : null);
+
+// Apps as a person reads a list of them: "claude, codex or grok".
+const orList = (ids) => (ids.length < 2 ? ids.join("") : `${ids.slice(0, -1).join(", ")} or ${ids.at(-1)}`);
+
+// Why a command or a route refused `app` where `what` takes one of `apps`
+// (the tailed apps, unless it says): --app takes claude, codex or grok,
+// not "gemini-cli".
+export const appRefusal = (what, app, apps = TAILED) => `${what} takes ${orList(apps)}, not ${JSON.stringify(app)}`;
+
+// What a reader of transcripts says of an app XenoNet doesn't tail.
+export const untailed = (app) => `XenoNet doesn't read ${Object.hasOwn(APP, app) ? APP[app].name : JSON.stringify(String(app))}'s transcripts`;

@@ -9,7 +9,7 @@ use xenonet_doctor::{checks, run};
 
 #[napi(js_name = "doctorConstants")]
 pub fn doctor_constants() -> Json {
-    Json(json!({ "statuses": checks::STATUSES, "checks": checks::CHECKS.iter().map(|(id, group, title)| json!([id, group, title])).collect::<Vec<_>>() }))
+    Json(json!({ "statuses": checks::STATUSES, "checks": checks::all().iter().map(|(id, group, title)| json!([id, group, title])).collect::<Vec<_>>() }))
 }
 
 /// One check, as a task asking the twin's ctx for what it reads.

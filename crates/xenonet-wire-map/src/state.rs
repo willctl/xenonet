@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use tokio::sync::watch;
-use xenonet_base::apps::tailed_app;
+use xenonet_base::apps::{tailed_or_text, untailed};
 use xenonet_base::paths::path_key;
 use xenonet_base::text::{js_string, truthy};
 use xenonet_service::cores::{CoreError, Runs, State, R};
@@ -347,8 +347,9 @@ impl MapState {
     async fn gather_sessions(&self, app: &str) -> Result<Value, String> {
         match &self.readers {
             Readers::Demo(d) => d.sessions(app).map(Value::Array),
-            Readers::Real { claude } => match tailed_app(app, "claude") {
+            Readers::Real { claude } => match app {
                 "codex" => self.codex.threads().await.map(Value::Array),
+                "claude" => claude.sessions().await.map(Value::Array),
                 "grok" => {
                     let (home, vendor) = (self.cfg.grok_home.clone(), self.vendor.clone());
                     Ok(Value::Array(
@@ -358,7 +359,7 @@ impl MapState {
                         .await,
                     ))
                 }
-                _ => claude.sessions().await.map(Value::Array),
+                _ => Err(format!("XenoNet doesn't list {app}'s sessions")),
             },
         }
     }
@@ -520,7 +521,7 @@ impl MapState {
         sources.push(json!({ "name": "live", "ok": live.watching, "count": live.files }));
         let mut wiki_st = json!({ "name": "wiki", "ok": wiki.is_some(), "count": wiki.as_ref().map_or(0, |w| items(w.get("pages")).len()) });
         if wiki.is_none() {
-            wiki_st["error"] = json!("Agent Wiki folder not found");
+            wiki_st["error"] = json!("Xenolith folder not found");
         }
         sources.push(wiki_st);
         sources.push(json!({ "name": "search", "ok": !truthy(search.get("errors")), "count": search.get("docs").cloned().unwrap_or(Value::Null), "ms": search.get("ms").cloned().unwrap_or(Value::Null) }));
@@ -826,13 +827,15 @@ impl MapState {
         let raw = s(node, "rawId").unwrap_or_default().to_string();
         match &self.readers {
             Readers::Demo(d) => d.transcript(&raw),
-            Readers::Real { claude } => match tailed_app(s(node, "app").unwrap_or_default(), "claude") {
-                "codex" => {
+            // A session of an app XenoNet doesn't tail isn't read as Claude
+            // Code's.
+            Readers::Real { claude } => match tailed_or_text(s(node, "app"), None) {
+                Some("codex") => {
                     let id = s(node, "id").unwrap_or_default().to_string();
                     let rollout = self.stats.files(&id).into_iter().next().map(|(f, _)| f);
                     self.codex.read_thread(&raw, cursor, limit, rollout).await
                 }
-                "grok" => {
+                Some("grok") => {
                     let (home, vendor, cursor) = (self.cfg.grok_home.clone(), self.vendor.clone(), cursor.map(str::to_string));
                     crate::util::blocking(move || {
                         let dir = xenonet_sources::grok::folder(&home, &raw).ok_or("XenoNet can't find this Grok Build session's folder")?;
@@ -842,7 +845,8 @@ impl MapState {
                     })
                     .await
                 }
-                _ => claude.read(&raw, cursor, limit).await,
+                Some(_) => claude.read(&raw, cursor, limit).await,
+                None => Err(untailed(s(node, "app").unwrap_or_default())),
             },
         }
     }
@@ -944,14 +948,19 @@ impl MapState {
             }
             "wiki-write" => {
                 ia?;
+                // A note logged through the server that owns the map's
+                // wiki: Xenolith's context_log, or wiki_log for a wiki from
+                // before it.
+                let server = self.cfg.wiki_server.as_str().unwrap_or("xenolith").to_string();
+                let tool = if server == "agent-wiki" { "wiki_log" } else { "context_log" };
                 acts.push((
                     a.clone().unwrap_or_default(),
                     f(vec![
                         ("kind", json!("tool")),
-                        ("tool", json!("mcp__agent-wiki__wiki_log")),
+                        ("tool", json!(format!("mcp__{server}__{tool}"))),
                         ("category", json!("mcp")),
-                        ("detail", json!("agent-wiki.wiki_log")),
-                        ("server", json!("agent-wiki")),
+                        ("detail", json!(format!("{server}.{tool}"))),
+                        ("server", json!(server)),
                         ("pages", json!(["xenonet", "ledger"])),
                         ("files", json!([])),
                         ("ts", num(now)),
@@ -1107,8 +1116,11 @@ impl State for MapState {
         if notes.is_null() {
             notes = json!({ "prompts": [], "messages": [], "files": [], "edits": [] });
         }
-        if decide::handoff_needs_transcript(&notes) {
-            let limit = if tailed_app(s(&n, "app").unwrap_or_default(), "claude") == "codex" { 60.0 } else { 80.0 };
+        // A session of an app XenoNet doesn't read the transcripts of is
+        // handed off with what the tailer saw of it.
+        let app = if matches!(self.readers, Readers::Demo(_)) { s(&n, "app") } else { tailed_or_text(s(&n, "app"), None) };
+        if let Some(app) = app.filter(|_| decide::handoff_needs_transcript(&notes)) {
+            let limit = if app == "codex" { 60.0 } else { 80.0 };
             let page = self.transcript(&n, None, limit).await.map_err(err)?;
             notes = decide::handoff_notes(&notes, Some(&page));
         }
@@ -1140,7 +1152,7 @@ impl State for MapState {
             return Ok(json!(xenonet_app::demo::NARRATION));
         }
         let text = if kind == "day" { digest::summary_text(&self.day(), "Today so far") } else { digest::summary_text(&self.digest(since)?, "While the user was away") };
-        crate::narrate::ask_codex(&self.cfg.codex_binary(), &digest::narrate_prompt(&text), None).await.map(Value::String).map_err(err)
+        crate::narrate::ask_codex(&self.cfg.codex_binary(), &digest::narrate_prompt(&text), None, &self.cfg.codex_home).await.map(Value::String).map_err(err)
     }
     async fn project_detection(&self) -> R<Value> {
         self.detection().await
@@ -1190,7 +1202,7 @@ impl State for MapState {
                 Err(e) => return Err(status(if e.status == Some(409) { 409 } else { 502 }, format!("The decision model couldn't sort the folders: {}", e.message))),
             }
         } else {
-            match crate::narrate::ask_codex(&self.cfg.codex_binary(), &classify::picks_prompt(&outline), Some(classify::picks_schema()))
+            match crate::narrate::ask_codex(&self.cfg.codex_binary(), &classify::picks_prompt(&outline), Some(classify::picks_schema()), &self.cfg.codex_home)
                 .await
                 .and_then(|text| classify::parse_picks(&text, &outline))
             {
@@ -1277,6 +1289,10 @@ impl State for MapState {
         self.stats.stats(id).await.map_err(err)
     }
     async fn read_transcript(&self, node: &Value, cursor: Option<&str>, limit: f64) -> R<Value> {
+        // A session of an app XenoNet doesn't tail is refused, a 400.
+        if matches!(self.readers, Readers::Real { .. }) && tailed_or_text(s(node, "app"), None).is_none() {
+            return Err(status(400, untailed(s(node, "app").unwrap_or_default())));
+        }
         self.transcript(node, cursor, limit).await.map_err(err)
     }
     async fn rename_session(&self, node: Value, title: Value) -> R<Value> {
@@ -1301,7 +1317,8 @@ impl State for MapState {
                 }
             }
             Readers::Real { claude } => {
-                if tailed_app(s(&n, "app").unwrap_or_default(), "claude") == "codex" {
+                // renamable takes Claude Code's sessions and Codex's alone.
+                if s(&n, "app") == Some("codex") {
                     self.codex.rename(s(&n, "rawId").unwrap_or_default(), &name).await.map_err(err)?;
                     saved.push("Codex");
                 } else {

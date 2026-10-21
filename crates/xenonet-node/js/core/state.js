@@ -36,7 +36,7 @@ import { claudeLines, codexLines, grokLines } from "./lines.js";
 import { NumbatSessions } from "./numbat.js";
 import { nativeReaders } from "../../../../core/native/index.js";
 import { ReportedRuns, observedSessions } from "./reported-runs.js";
-import { tailedApp } from "../../../../core/apps.js";
+import { tailedOr, untailed } from "../../../../core/apps.js";
 import { demoSessions, demoNativeProjects, demoTranscript, demoNarration, demoPicks, startDriver, clientsReady } from "../../../../core/demo.js";
 // The addon as `rust`: #refresh has a `native` of its own, Codex's projects.
 import { native as rust } from "../index.js";
@@ -243,7 +243,7 @@ export class XenoNetState extends EventEmitter {
       ...this.nativeReaders.map((n) => readerStatus(n.source, n.reader, n.what)),
       ...(this.numbat ? [readerStatus("numbat", this.numbat, "numbat's file")] : []),
       { name: "live", ok: this.live.status.watching, count: this.live.status.files },
-      { name: "wiki", ok: !!wiki, count: wiki?.pages.length ?? 0, error: wiki ? undefined : "Agent Wiki folder not found" },
+      { name: "wiki", ok: !!wiki, count: wiki?.pages.length ?? 0, error: wiki ? undefined : "Xenolith folder not found" },
       { name: "search", ok: !this.search.status.errors, count: this.search.status.docs, ms: this.search.status.ms },
       ...(this.identities ? [identities.status] : []),
     ];
@@ -433,7 +433,8 @@ export class XenoNetState extends EventEmitter {
     const saved = [];
     let note = null;
     if (config.demo) this.demoTitles.set(node.id, name);
-    else if (tailedApp(node.app, "claude") === "codex") {
+    // renamable takes Claude Code's sessions and Codex's alone.
+    else if (node.app === "codex") {
       await renameCodexThread(node.rawId, name);
       saved.push("Codex");
     } else {
@@ -632,16 +633,23 @@ export class XenoNetState extends EventEmitter {
     const node = this.index.get(nodeId);
     if (!node || node.kind !== "session") throw new Error("unknown session");
     let notes = this.live.sessionNotes(nodeId) ?? { prompts: [], messages: [], files: [], edits: [] };
-    if (rust.handoffNeedsTranscript(notes)) notes = rust.handoffNotes(notes, await this.readTranscript(node, { limit: tailedApp(node.app, "claude") === "codex" ? 60 : 80 }));
+    // A session of an app XenoNet doesn't read the transcripts of is
+    // handed off with what the tailer saw of it.
+    const app = config.demo ? node.app : tailedOr(node.app, null);
+    if (app && rust.handoffNeedsTranscript(notes)) notes = rust.handoffNotes(notes, await this.readTranscript(node, { limit: app === "codex" ? 60 : 80 }));
     return { brief: handoffBrief({ node, notes, target }), folder: node.worktree || node.cwd || null };
   }
 
   // A session's transcript, a page at a time. A Codex thread whose items
-  // the app-server can't list is read from its rollout (see codex.js).
+  // the app-server can't list is read from its rollout (see codex.js). A
+  // session of an app XenoNet doesn't tail is refused (a 400), not read as
+  // Claude Code's.
   readTranscript(node, opts) {
     if (config.demo) return demoTranscript(node.rawId);
-    if (node.app === "grok") return readGrokSession(node.rawId, opts);
-    if (tailedApp(node.app, "claude") === "codex") return readCodexThread(node.rawId, { ...opts, rollout: async () => (await this.transcripts.files(node.id))[0]?.file ?? null });
+    const app = tailedOr(node.app, null);
+    if (!app) throw Object.assign(new Error(untailed(node.app)), { status: 400 });
+    if (app === "grok") return readGrokSession(node.rawId, opts);
+    if (app === "codex") return readCodexThread(node.rawId, { ...opts, rollout: async () => (await this.transcripts.files(node.id))[0]?.file ?? null });
     return readClaudeSession(node.rawId, opts);
   }
 

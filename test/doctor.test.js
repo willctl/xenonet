@@ -56,7 +56,7 @@ function ctxWith(overrides = {}) {
     paths: { claudeProjectsDir: `${HOME}/.claude/projects`, codexHome: `${HOME}/.codex`, grokHome: `${HOME}/.grok`, projectsDir: `${HOME}/Projects`, stateDir: `${HOME}/state` },
     readText: (p) => overrides.files?.[p] ?? null,
     self: { port: 47840, name: "XenoNet" },
-    health: { sources: [{ name: "projects", ok: true, count: 2 }, { name: "claude", ok: true, count: 9 }, { name: "codex", ok: true, count: 4 }, { name: "wiki", ok: false, error: "Agent Wiki folder not found" }], blocks: BLOCKS() },
+    health: { sources: [{ name: "projects", ok: true, count: 2 }, { name: "claude", ok: true, count: 9 }, { name: "codex", ok: true, count: 4 }, { name: "wiki", ok: false, error: "Xenolith folder not found" }], blocks: BLOCKS() },
     live: { limits: { claude: { source: "anthropic" } } },
     connect: { port: 47840, apps: ["claude", "codex", "grok"].map((app) => ({ app, installed: true, changes: [{ id: "mcp", state: "present" }, { id: "hooks", state: "present" }], broken: [] })) },
     gitAvailable: () => true,
@@ -66,19 +66,102 @@ function ctxWith(overrides = {}) {
     drift: () => ({ file: `${HOME}/Library/Caches/XenoNet/drift.json`, lookedAt: null, records: [] }),
     command: () => ({ file: `${HOME}/.local/bin/xenonet`, installed: true, ours: true, runs: ["/usr/local/bin/node", `${HOME}/xenonet/cli/xenonet.js`], broken: false, onPath: true }),
     actors: { expired: () => [], observers: OBSERVERS, repos: () => [`${HOME}/Projects/atlas`, `${HOME}/Projects/ledger`], gateway: async () => ({ on: false }), wakes: async () => [] },
+    login: () => LOGIN(),
     ...overrides.ctx,
   });
 }
+
+// The service started at login, as the supervisor's review sees it: on,
+// current and running under launchd.
+const LOGIN = (over = {}) => ({
+  supported: true,
+  supervisor: "launchd",
+  file: `${HOME}/Library/LaunchAgents/dev.xenonet.service.plist`,
+  registered: true,
+  port: "47840",
+  loaded: true,
+  state: "running",
+  pid: 4242,
+  lastExit: "(never exited)",
+  user: "ada",
+  current: true,
+  program: `${HOME}/Library/Application Support/XenoNet/runtime/launcher/xenonet`,
+  programFound: true,
+  ...over,
+});
 
 const byId = (r) => Object.fromEntries(r.results.map((x) => [x.id, x]));
 
 test("everything in place: every check passes, and the optional wiki doesn't count", async () => {
   const r = await runDoctor(ctxWith());
   assert.deepEqual(r.results.map((x) => x.id), CHECKS.map((c) => c.id));
-  assert.deepEqual(r.results.filter((x) => x.status !== "ok").map((x) => [x.id, x.status, x.detail]), []);
+  // Lingering is Linux's, so on a Mac its check doesn't apply.
+  const elsewhere = ["service.boot"];
+  assert.deepEqual(r.results.filter((x) => x.status !== "ok" && !elsewhere.includes(x.id)).map((x) => [x.id, x.status, x.detail]), []);
+  assert.deepEqual(elsewhere.map((id) => byId(r)[id].status), ["skip"]);
   assert.equal(byId(r)["claude.cli"].detail, "version 2.1.288, ~/.local/bin/claude");
   assert.equal(byId(r)["codex.auth"].detail, "signed in using ChatGPT");
-  assert.equal(r.summary.ok, CHECKS.length);
+  assert.equal(r.summary.ok, CHECKS.length - elsewhere.length);
+});
+
+test("the service started at login: on and current, off, or what to fix, with how", async () => {
+  const run = async (login, ctx = {}) => byId(await runDoctor(ctxWith({ ctx: { login: () => login, ...ctx } }), { only: ["service"] }));
+  const on = await run(LOGIN());
+  assert.deepEqual(Object.keys(on), ["service.login", "service.file", "service.loaded", "service.boot"]);
+  assert.deepEqual([on["service.login"].status, on["service.login"].detail], ["ok", "on, through launchd: ~/Library/LaunchAgents/dev.xenonet.service.plist"]);
+  assert.equal(on["service.file"].detail, "~/Library/LaunchAgents/dev.xenonet.service.plist is what xenonet service install writes");
+  assert.equal(on["service.loaded"].detail, "launchd has it, running as process 4242");
+  assert.deepEqual([on["service.boot"].status, on["service.boot"].detail], ["skip", "for Linux, where lingering starts a user's services at boot"]);
+  // Registered for another XenoNet's port.
+  assert.match((await run(LOGIN({ port: "47850" })))["service.login"].detail, /, for the service on port 47850$/);
+
+  // Off, as it is until you turn it on: a note with how, and the rest
+  // don't apply.
+  const off = await run({ supported: true, supervisor: "launchd", file: LOGIN().file, registered: false, loaded: false });
+  assert.deepEqual([off["service.login"].status, off["service.login"].detail], ["info", "off: Desktop starts the service when it opens, and it runs until you log out"]);
+  assert.match(off["service.login"].fix, /Background service in XenoNet's palette, or run xenonet service install/);
+  for (const id of ["service.file", "service.loaded"]) assert.deepEqual([off[id].status, off[id].detail], ["skip", "the service doesn't start at login"]);
+  // No ctx.login (an older XenoNet, the JS's own machine), or no supervisor here.
+  const none = byId(await runDoctor(ctxWith({ ctx: { login: undefined } }), { only: ["service.login"] }));
+  assert.deepEqual([none["service.login"].status, none["service.login"].detail], ["skip", "XenoNet can't look at how its service starts from here"]);
+  assert.equal((await run({ supported: false, registered: false }))["service.login"].detail, "this system has no supervisor XenoNet registers with");
+
+  // The registration: a program that's gone, or not what install writes now.
+  const gone = await run(LOGIN({ programFound: false, program: `${HOME}/old/xenonet`, current: false }));
+  assert.deepEqual([gone["service.file"].status, gone["service.file"].detail], ["fail", "~/Library/LaunchAgents/dev.xenonet.service.plist runs ~/old/xenonet, which isn't there"]);
+  assert.equal(gone["service.file"].fix, "Run xenonet service install again, which points it at XenoNet's launcher.");
+  const stale = (await run(LOGIN({ current: false })))["service.file"];
+  assert.deepEqual([stale.status, stale.detail], ["warn", "~/Library/LaunchAgents/dev.xenonet.service.plist isn't what xenonet service install writes now, so the service may not start the way this XenoNet expects"]);
+  assert.match(stale.fix, /^Run xenonet service install again, which writes it afresh and reloads it\./);
+  const unsure = (await run(LOGIN({ current: null, expected: "no account to start it for" })))["service.file"];
+  assert.deepEqual([unsure.status, unsure.detail], ["info", "XenoNet couldn't tell whether ~/Library/LaunchAgents/dev.xenonet.service.plist is current: no account to start it for"]);
+
+  // What launchd, systemd or Task Scheduler says.
+  const unloaded = (await run(LOGIN({ loaded: false, state: null, pid: null })))["service.loaded"];
+  assert.deepEqual([unloaded.status, unloaded.detail], ["warn", "launchd doesn't have it, so it doesn't start at login"]);
+  assert.match(unloaded.fix, /Login Items & Extensions/);
+  const asked = (await run(LOGIN({ supervisor: "systemd", error: "Failed to connect to bus: No medium found" })))["service.loaded"];
+  assert.deepEqual([asked.status, asked.detail, asked.fix], ["warn", "XenoNet couldn't ask systemd about it: Failed to connect to bus: No medium found", "systemctl --user status xenonet says more."]);
+  const disabled = (await run(LOGIN({ supervisor: "Task Scheduler", loaded: false, state: "disabled", pid: null })))["service.loaded"];
+  assert.deepEqual([disabled.status, disabled.detail], ["warn", "it's turned off in Task Scheduler, so it doesn't start when you sign in"]);
+  const failed = (await run(LOGIN({ supervisor: "systemd", state: "failed", pid: null, lastExit: "1" })))["service.loaded"];
+  assert.deepEqual([failed.status, failed.detail], ["warn", "systemd gave up on it after it kept stopping (it last exited with 1)"]);
+  const stopped = (await run(LOGIN({ state: "not running", pid: null, lastExit: "0" })))["service.loaded"];
+  assert.deepEqual([stopped.status, stopped.detail], ["info", "launchd has it, but it isn't running now"]);
+
+  // Lingering, on Linux: wanted where there's no graphical session, as on
+  // a host reached over SSH.
+  const linux = (over) => run(LOGIN({ supervisor: "systemd", file: "/home/ada/.config/systemd/user/xenonet.service", ...over }), { platform: "linux" });
+  assert.deepEqual([(await linux({ linger: true }))["service.boot"].status, (await linux({ linger: true }))["service.boot"].detail], ["ok", "lingering is on, so it starts at boot and keeps running after you log out"]);
+  const desk = (await linux({ linger: false, graphical: true }))["service.boot"];
+  assert.deepEqual([desk.status, desk.detail], ["info", "lingering is off: it starts when you log in, and stops when you log out"]);
+  assert.match(desk.fix, /run loginctl enable-linger ada once/);
+  const host = (await linux({ linger: false, graphical: false }))["service.boot"];
+  assert.equal(host.status, "warn");
+  assert.match(host.detail, /no graphical session here, as on a host reached over SSH/);
+  assert.match(host.fix, /sudo loginctl enable-linger ada\.$/);
+  const unknown = (await linux({ linger: null, user: "" }))["service.boot"];
+  assert.deepEqual([unknown.status, unknown.fix], ["info", "loginctl show-user $USER --property=Linger says."]);
 });
 
 test("sign-ins: signed out is a failure with the fix; no Claude Code skips what needs it", async () => {

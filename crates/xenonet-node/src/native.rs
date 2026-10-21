@@ -281,11 +281,14 @@ impl JsCursor {
     pub fn new() -> Self {
         JsCursor { c: cursor::Cursor::new() }
     }
-    /// True when the vendor check threw (the twin has what it threw).
+    /// True when getting the vendor reader, or its check, threw (the twin
+    /// has what it threw). The reader is got with `ready` as a changed file
+    /// is parsed.
     #[napi]
-    pub fn read(&mut self, env: Env, file: Option<String>, now: f64, check: CheckFn<'_>, failed: Unknown<'_>, io: Option<IoFn<'_>>) -> bool {
+    pub fn read(&mut self, env: Env, file: Option<String>, now: f64, ready: Function<'_, (), Unknown<'_>>, check: CheckFn<'_>, failed: Unknown<'_>, io: Option<IoFn<'_>>) -> bool {
         let mut files = files_of(io.as_ref());
-        self.c.read(file.as_deref(), now, files.as_mut(), &mut |r, v| checked(&env, &check, &failed, r, v)).is_err()
+        let mut vendor = JsVendor { env: &env, ready: &ready, missing: None, check: &check, failed: &failed };
+        self.c.read_with(file.as_deref(), now, files.as_mut(), &mut vendor).is_err()
     }
     #[napi(getter, js_name = "fileState")]
     pub fn file_state(&self) -> &'static str {
@@ -338,6 +341,7 @@ pub fn opencode_db_path(home: String, xdg_data_home: Option<String>, named: Opti
 /// A database handle a test opened, through the twin: query(kind, sql,
 /// param) for "open", "all", "get" and "close".
 type QueryFn<'a> = Function<'a, FnArgs<(String, String, Option<f64>)>, Json>;
+type MissingFn<'a> = Function<'a, FnArgs<(String, Option<String>)>, Unknown<'a>>;
 
 struct JsDb<'a> {
     query: &'a QueryFn<'a>,
@@ -369,11 +373,12 @@ impl Db for JsDb<'_> {
 }
 
 /// vendor.js's reader, through the twin: ready(), missing(path, version)
-/// and check(record, version), each giving `failed` when it threw.
+/// (for a reader that says what's missing) and check(record, version), each
+/// giving `failed` when it threw.
 struct JsVendor<'a> {
     env: &'a Env,
     ready: &'a Function<'a, (), Unknown<'a>>,
-    missing: &'a Function<'a, FnArgs<(String, Option<String>)>, Unknown<'a>>,
+    missing: Option<&'a MissingFn<'a>>,
     check: &'a CheckFn<'a>,
     failed: &'a Unknown<'a>,
 }
@@ -388,7 +393,8 @@ impl Vendor for JsVendor<'_> {
         }
     }
     fn missing(&mut self, path: &str, version: Option<&str>) -> std::result::Result<(), Threw> {
-        let v = self.missing.call(FnArgs::from((path.to_string(), version.map(str::to_string)))).map_err(|_| Threw)?;
+        let Some(missing) = self.missing else { return Ok(()) };
+        let v = missing.call(FnArgs::from((path.to_string(), version.map(str::to_string)))).map_err(|_| Threw)?;
         if same(self.env, &v, self.failed) {
             Err(Threw)
         } else {
@@ -412,7 +418,7 @@ fn read_db(
     check: &CheckFn<'_>,
     failed: &Unknown<'_>,
 ) -> std::result::Result<opencode::Read, Threw> {
-    let mut vendor = JsVendor { env: &env, ready, missing, check, failed };
+    let mut vendor = JsVendor { env: &env, ready, missing: Some(missing), check, failed };
     let mut open = || -> std::result::Result<Box<dyn Db + '_>, String> {
         match query {
             Some(q) => {

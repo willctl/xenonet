@@ -243,7 +243,7 @@
 ; happen and its button says Uninstall rather than Next.
 !macro customUnWelcomePage
   !define MUI_WELCOMEPAGE_TITLE "Uninstall XenoNet"
-  !define MUI_WELCOMEPAGE_TEXT "This removes XenoNet Desktop. The background service and tools remain installed. If Desktop is running, it will be closed first.$\r$\n$\r$\nYou'll be asked whether to also delete your saved layout, alerts and search index. Posters and clips you saved, and your Claude Code and Codex sessions, are left alone.$\r$\n$\r$\nClick Uninstall to continue."
+  !define MUI_WELCOMEPAGE_TEXT "This removes XenoNet Desktop. The background service and tools remain installed, and the service no longer starts when you sign in. If Desktop is running, it will be closed first.$\r$\n$\r$\nYou'll be asked whether to also delete your saved layout, alerts and search index. Posters and clips you saved, and your Claude Code and Codex sessions, are left alone.$\r$\n$\r$\nClick Uninstall to continue."
   !define MUI_PAGE_CUSTOMFUNCTION_SHOW un.XenoNetUnWelcomeShow
   !insertmacro MUI_UNPAGE_WELCOME
   Function un.XenoNetUnWelcomeShow
@@ -261,6 +261,19 @@
   ${If} ${Errors}
     DeleteRegValue SHCTX "${XENONET_RUN_KEY}" "${XENONET_RUN_VALUE}"
     DeleteRegValue HKCU "${XENONET_RUN_KEY}" "${XENONET_RUN_VALUE}"
+    ; The service's scheduled task goes with Desktop, as the launch agent does
+    ; on a Mac, so nothing is left starting at sign-in. --force: its
+    ; terminals stop with it, as the purge below stops them anyway.
+    ReadEnvStr $R4 XDG_STATE_HOME
+    ${If} $R4 != ""
+      StrCpy $R4 "$R4\xenonet\runtime\launcher"
+    ${Else}
+      ReadEnvStr $R4 LOCALAPPDATA
+      StrCpy $R4 "$R4\XenoNet\runtime\launcher"
+    ${EndIf}
+    ${If} ${FileExists} "$R4\xenonet.exe"
+      ExecWait '"$R4\xenonet.exe" service uninstall --force' $R2
+    ${EndIf}
     StrCpy $R3 0
     ClearErrors
     ${GetOptions} $R0 "/PURGE" $R1

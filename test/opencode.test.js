@@ -7,7 +7,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { OpenCodeSessions, readDb, patchFiles, sessionIdOf, opencodeDbPath } from "../core/native/opencode.js";
+import { OpenCodeSessions, readDb, patchFiles, sessionIdOf, localId, openCodeId, opencodeDbPath } from "../core/native/opencode.js";
+import { sessionIdOf as numbatSessionIdOf } from "../core/numbat.js";
 import { observedSessions } from "../core/reported-runs.js";
 import { Engine } from "../core/engine/engine.js";
 import { EngineStore } from "../core/engine/store.js";
@@ -80,6 +81,27 @@ test("its edits are the edit tools' files, relative ones joined to where it ran;
   } finally {
     w.done();
   }
+});
+
+test("OpenCode's ids take a dash for each underscore, any other id its bytes in hex, and each comes back as it was", () => {
+  assert.equal(sessionIdOf(A), "opencode:ses-eb95b1836ffexD4vYDGuLeJDCy", "OpenCode's own ids keep the form they had");
+  assert.equal(localId("ses_ab_cd"), "ses-ab-cd");
+  assert.equal(localId("ses_ab-cd"), "x--7365735f61622d6364", "a dash of its own would read back as an underscore");
+  assert.equal(localId("ses__ab"), "x--7365735f5f6162");
+  assert.equal(localId("sés_1"), "x--73c3a9735f31");
+  for (const id of [A, SUB, "ses_ab_cd", "ses_ab-cd", "ses-abc", "ses__ab", "_ses", "ses_", "", "x--61", "sés_1", "a b/c", "abcdefg"]) {
+    assert.equal(openCodeId(localId(id)), id, id);
+    assert.equal(openCodeId(sessionIdOf(id)), id, id);
+  }
+  assert.equal(openCodeId("n0123456789abcdef"), "n0123456789abcdef");
+  for (const [odd, read] of [["x--6", "x__6"], ["x--6A", "x__6A"], ["x--ff", "x__ff"]]) assert.equal(openCodeId(odd), read, "hex that isn't whole bytes, lowercase or UTF-8 reads as the plain form");
+});
+
+test("numbat's run of an OpenCode session has the id the reader gives it", () => {
+  for (const id of [A, "ses_ab_cd", "ses_ab-cd", "ses-abcdef"]) assert.equal(numbatSessionIdOf("opencode", id), sessionIdOf(id), id);
+  assert.equal(numbatSessionIdOf("opencode", "abcdefg"), "opencode:abcdefg", "an id with nothing to change keeps it");
+  assert.match(numbatSessionIdOf("opencode", "x".repeat(65) + " "), /^opencode:n[0-9a-f]{31}$/, "one too long for numbat is digested, as before");
+  assert.match(numbatSessionIdOf("cursor", "ses_ab"), /^cursor:n[0-9a-f]{31}$/, "other apps' runs are numbat's own");
 });
 
 test("apply_patch's files come from its headers alone", () => {

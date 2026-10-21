@@ -19,7 +19,7 @@ import { claudeUsageGatherer, desktopUsageGatherer } from "./claude-usage.js";
 import { ClaudeLine, CodexLine, linesOf } from "./lines.js";
 import { claude, codex, mapperOf, brokenAt, fail, usageOf, userText } from "./events.js";
 import { costParts, plainModel, priorityTier, PRICES_CHECKED } from "./pricing.js";
-import { isContextServer } from "./xenolith.js";
+import { isContextServer, spaceOf } from "./xenolith.js";
 import { APP, TAILED, tailedApp } from "./apps.js";
 import { patchPaths } from "./patch.js";
 
@@ -131,10 +131,11 @@ function filesOf(input) {
   return [input.file_path, input.notebook_path, input.path].filter((p) => typeof p === "string" && /[\\/]/.test(p));
 }
 
-// The files an apply_patch adds, updates and deletes. Live leaves out the
-// names it moves files to (`*** Move to:`).
+// The files an apply_patch adds, updates and deletes, and the names it moves
+// files to (`*** Move to:`), as the engine and the native readers read it:
+// a session that moves a file onto one another session works on shares it.
 function patchFiles(text) {
-  return patchPaths(String(text ?? ""), { moves: false });
+  return patchPaths(String(text ?? ""));
 }
 
 function diffLines(prefix, text, max = 40) {
@@ -646,11 +647,16 @@ export class LiveTelemetry extends EventEmitter {
     return tool;
   }
 
-  // Wiki writes name the pages they touch; the UI beams to them.
+  // Wiki writes name the pages they touch; the UI beams to them. A write to
+  // another space than this machine's (its `space`, such as project:atlas)
+  // names that space's pages, as <space>/<slug>, the end of their ids on the
+  // map; one to a space Xenolith refuses wrote nothing.
   wikiPagesOf(server, input) {
     if (!isContextServer(server) || !input || typeof input !== "object") return null;
+    const space = spaceOf(input.space);
+    if (space === undefined) return null;
     const pages = [].concat(input.pages ?? [], input.slug ?? []).filter((p) => typeof p === "string");
-    return pages.length ? pages.slice(0, 6) : null;
+    return pages.length ? pages.slice(0, 6).map((p) => (space ? `${space}/${p}` : p)) : null;
   }
 
   // Claude Code Notification hooks carry permission prompts the transcript
@@ -906,8 +912,9 @@ export class LiveTelemetry extends EventEmitter {
           }
           break;
         case "call": {
-          // The growth of the total is what's new (output and reasoning
-          // output kept).
+          // The growth of the total is what's new, and the output is
+          // output_tokens alone: OpenAI counts reasoning inside it, as
+          // pricing.js prices it.
           if (!e.total) break;
           const total = e.total.total_tokens ?? 0;
           const delta = total - s.tokens.processed;
@@ -923,7 +930,7 @@ export class LiveTelemetry extends EventEmitter {
             s.addCall(s.provider && s.provider !== "openai" ? `${s.provider}/${model}` : model, { input: Math.max(0, input - cached - write), cacheRead: cached, cacheWrite5m: write, cacheWrite1h: 0, output: last.output_tokens ?? 0 }, ts, { priority: s.priority });
             if (live) this.emit("tokens", { sessionId: s.id, app: "codex", n: delta, ts });
           }
-          s.tokens.output = (e.total.output_tokens ?? 0) + (e.total.reasoning_output_tokens ?? 0);
+          s.tokens.output = e.total.output_tokens ?? 0;
           break;
         }
         // The context from the last call.

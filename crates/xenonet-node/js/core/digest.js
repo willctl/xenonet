@@ -23,9 +23,13 @@ export const handoffBrief = ({ node, notes, target }) => native.handoffBrief(nod
 
 export const narrate = (codexBin, text, opts) => askCodex(codexBin, native.narratePrompt(String(text)), opts);
 
+const yourCodexHome = () => path.resolve(process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex"));
+
 // One `codex exec` turn on `prompt`, resolving to its last message. With a
 // JSON Schema in `schema`, Codex answers in that shape (--output-schema).
-export function askCodex(codexBin, prompt, { schema = null, timeoutMs = 120000 } = {}) {
+// It runs isolated, in a Codex home of its own that shares only the sign-in
+// of yours (`codexHome`): Rust gives its arguments and makes that home.
+export function askCodex(codexBin, prompt, { schema = null, timeoutMs = 120000, codexHome = yourCodexHome() } = {}) {
   return new Promise((resolve, reject) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-codex-"));
     const out = path.join(dir, "last.txt");
@@ -34,7 +38,14 @@ export function askCodex(codexBin, prompt, { schema = null, timeoutMs = 120000 }
       schemaFile = path.join(dir, "schema.json");
       fs.writeFileSync(schemaFile, JSON.stringify(schema));
     }
-    const child = spawn(codexBin, native.codexExecArgs(dir, out, schemaFile), { windowsHide: true });
+    let home;
+    try {
+      home = native.codexRunHome(dir, String(codexHome));
+    } catch (err) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return reject(err);
+    }
+    const child = spawn(codexBin, native.codexExecArgs(dir, out, schemaFile), { windowsHide: true, env: { ...process.env, CODEX_HOME: home } });
     const timer = setTimeout(() => child.kill(), timeoutMs);
     let stderr = "";
     child.stderr.on("data", (d) => (stderr += d).length > 4000 && (stderr = stderr.slice(-4000)));

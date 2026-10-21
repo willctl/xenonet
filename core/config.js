@@ -8,11 +8,14 @@ export { appDir };
 
 const home = os.homedir();
 
-// The shared context's folder: XENONET_WIKI_DIR, or Xenolith's (or Agent
-// Wiki's) as their own programs find it (core/xenolith.js).
-function findWikiDir() {
-  if (process.env.XENONET_WIKI_DIR) return process.env.XENONET_WIKI_DIR;
-  return findContextDir()?.dir ?? null;
+// The shared context's folder and the MCP server that writes to it:
+// Xenolith's (or Agent Wiki's) as their own programs find it, with the
+// server that lookup found it for, or the folder XENONET_WIKI_DIR names
+// (core/xenolith.js).
+function findWiki() {
+  const dir = process.env.XENONET_WIKI_DIR;
+  if (dir) return { dir, server: contextServerOf(dir) };
+  return findContextDir();
 }
 
 // Demo mode swaps every source for a made-up workspace in a temp folder.
@@ -25,7 +28,7 @@ const world = demo ? createWorld() : null;
 const serverDev = !demo && process.argv.includes("--dev") && !process.env.XENONET_PORT;
 const devDir = (kind) => (serverDev ? appDir(kind, { name: "XenoNet Dev" }) : null);
 
-const wikiDir = world ? world.wikiDir : findWikiDir();
+const wiki = world ? { dir: world.wikiDir, server: "xenolith" } : findWiki();
 
 export const config = {
   demo,
@@ -76,10 +79,10 @@ export const config = {
     : process.env.GH_CONFIG_DIR ?? (process.env.XDG_CONFIG_HOME ? path.join(process.env.XDG_CONFIG_HOME, "gh") : process.platform === "win32" && process.env.APPDATA ? path.join(process.env.APPDATA, "GitHub CLI") : path.join(home, ".config", "gh")),
   stateDir: world?.stateDir ?? path.resolve(process.env.XENONET_STATE_DIR ?? devDir("state") ?? appDir("state")),
   cacheDir: world?.cacheDir ?? path.resolve(process.env.XENONET_CACHE_DIR ?? devDir("cache") ?? appDir("cache")),
-  wikiDir,
+  wikiDir: wiki?.dir ?? null,
   // The MCP server that writes to it (xenolith or agent-wiki): the map's
   // wiki takes its name, so a session's calls to it land there.
-  wikiServer: world ? "agent-wiki" : contextServerOf(wikiDir),
+  wikiServer: wiki?.server ?? null,
   // MCP servers that are part of the host apps rather than shared systems;
   // they don't get their own resource node.
   hiddenResources: new Set(

@@ -6,7 +6,8 @@ import path from "node:path";
 import { summarize, dayLog, summaryText, askCodex, narrate } from "../core/digest.js";
 
 // A stand-in for `codex exec`: it writes its answer where -o says, or fails
-// or hangs when told to, and keeps what it was asked.
+// or hangs when told to, and keeps what it was asked and the Codex home it
+// ran in: what's there, and the sign-in it finds.
 const bin = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-fake-codex-"));
 after(() => fs.rmSync(bin, { recursive: true, force: true }));
 const codex = path.join(bin, "codex");
@@ -15,12 +16,16 @@ fs.writeFileSync(
   `#!${process.execPath}
 if (process.env.FAKE_CODEX === "early") process.exit(3);
 const fs = require("fs");
+const path = require("path");
 const args = process.argv.slice(2);
 const out = args[args.indexOf("-o") + 1];
+const home = process.env.CODEX_HOME;
+const auth = path.join(home, "auth.json");
+const seen = { home, files: fs.readdirSync(home), linked: fs.existsSync(auth) && fs.lstatSync(auth).isSymbolicLink(), auth: fs.existsSync(auth) ? fs.realpathSync(auth) : null };
 let prompt = "";
 process.stdin.on("data", (d) => (prompt += d));
 process.stdin.on("end", () => {
-  fs.writeFileSync(${JSON.stringify(path.join(bin, "asked.json"))}, JSON.stringify({ args, prompt }));
+  fs.writeFileSync(${JSON.stringify(path.join(bin, "asked.json"))}, JSON.stringify({ args, prompt, ...seen }));
   if (process.env.FAKE_CODEX === "fail") { process.stderr.write("no auth"); process.exit(3); }
   if (process.env.FAKE_CODEX === "hang") return setTimeout(() => {}, 60000);
   fs.writeFileSync(out, "  All quiet.\\n");
@@ -30,6 +35,17 @@ process.stdin.on("end", () => {
 );
 const asked = () => JSON.parse(fs.readFileSync(path.join(bin, "asked.json"), "utf8"));
 const unix = process.platform !== "win32";
+
+// Your Codex's home, made up: signed in, with hooks, instructions and a
+// plugin a run of XenoNet's own must not load.
+const yours = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-your-codex-"));
+after(() => fs.rmSync(yours, { recursive: true, force: true }));
+fs.writeFileSync(path.join(yours, "auth.json"), JSON.stringify({ auth_mode: "chatgpt" }));
+fs.writeFileSync(path.join(yours, "hooks.json"), "{}");
+fs.writeFileSync(path.join(yours, "AGENTS.md"), "Always answer in French.");
+fs.writeFileSync(path.join(yours, "config.toml"), "[mcp_servers.x]\ncommand = \"x\"\n");
+fs.mkdirSync(path.join(yours, "plugins"));
+const opts = { codexHome: yours };
 
 const at = (h, m = 0) => new Date(2026, 9, 3, h, m).getTime();
 const events = [
@@ -71,24 +87,50 @@ test("a summary reads as lines Codex can turn into prose", () => {
 });
 
 test("narrate asks codex exec, read-only and ephemeral, for its last message", { skip: !unix }, async () => {
-  assert.equal(await narrate(codex, "Today so far: 2 sessions"), "All quiet.");
+  assert.equal(await narrate(codex, "Today so far: 2 sessions", opts), "All quiet.");
   const { args, prompt } = asked();
   for (const a of ["exec", "--ephemeral", "--skip-git-repo-check", "read-only", "-"]) assert.ok(args.includes(a), a);
   assert.match(prompt, /Activity data:\nToday so far: 2 sessions$/);
   assert.equal(args.includes("--output-schema"), false);
 });
 
+test("codex exec runs isolated: a Codex home of its own with your sign-in, and no plugins, hooks, shell or web search", { skip: !unix }, async () => {
+  assert.equal(await askCodex(codex, "Sort these", opts), "All quiet.");
+  const { args, home, files, linked, auth } = asked();
+  assert.notEqual(home, yours);
+  assert.equal(path.basename(home), "home");
+  assert.equal(fs.existsSync(home), false, "gone with the run's folder");
+  assert.deepEqual(files, ["auth.json"], "none of your hooks, instructions, config or plugins");
+  assert.equal(linked, true, "your sign-in is linked, never copied, so a refreshed token reaches yours");
+  assert.equal(auth, fs.realpathSync(path.join(yours, "auth.json")));
+  assert.equal(fs.readFileSync(path.join(yours, "auth.json"), "utf8"), JSON.stringify({ auth_mode: "chatgpt" }), "yours is as it was");
+  const set = args.filter((_, i) => args[i - 1] === "-c");
+  for (const kv of ["features.plugins=false", "features.hooks=false", "features.shell_tool=false", "features.unified_exec=false", 'web_search="disabled"', "project_doc_max_bytes=0", 'cli_auth_credentials_store="file"']) assert.ok(set.includes(kv), kv);
+  // A Codex that doesn't know a flag, or a feature --disable names, fails
+  // the run; the home of its own leaves nothing for the others to skip.
+  for (const flag of ["--disable", "--ignore-user-config", "--ignore-rules", "--strict-config"]) assert.equal(args.includes(flag), false, flag);
+
+  // Signed out of Codex: the run has no sign-in of yours to use.
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-signed-out-"));
+  try {
+    assert.equal(await askCodex(codex, "x", { codexHome: out }), "All quiet.");
+    assert.deepEqual([asked().files, asked().auth], [[], null]);
+  } finally {
+    fs.rmSync(out, { recursive: true, force: true });
+  }
+});
+
 test("askCodex hands Codex a schema, and says why when it fails or takes too long", { skip: !unix }, async () => {
-  assert.equal(await askCodex(codex, "Sort these", { schema: { type: "object" } }), "All quiet.");
+  assert.equal(await askCodex(codex, "Sort these", { schema: { type: "object" }, ...opts }), "All quiet.");
   const schema = asked().args[asked().args.indexOf("--output-schema") + 1];
   assert.ok(schema.endsWith("schema.json"));
   assert.equal(fs.existsSync(schema), false, "its folder is gone afterwards");
 
   process.env.FAKE_CODEX = "fail";
   try {
-    await assert.rejects(askCodex(codex, "x"), /codex exec exited 3: no auth/);
+    await assert.rejects(askCodex(codex, "x", opts), /codex exec exited 3: no auth/);
     process.env.FAKE_CODEX = "hang";
-    await assert.rejects(askCodex(codex, "x", { timeoutMs: 300 }), /codex exec exited null/);
+    await assert.rejects(askCodex(codex, "x", { timeoutMs: 300, ...opts }), /codex exec exited null/);
   } finally {
     delete process.env.FAKE_CODEX;
   }
@@ -98,7 +140,7 @@ test("a codex that quits without reading a long prompt is a failure, not a crash
   process.env.FAKE_CODEX = "early";
   try {
     // More than a pipe holds, as the outline of a big projects folder is.
-    await assert.rejects(askCodex(codex, "x".repeat(2_000_000)), /codex exec exited 3/);
+    await assert.rejects(askCodex(codex, "x".repeat(2_000_000), opts), /codex exec exited 3/);
   } finally {
     delete process.env.FAKE_CODEX;
   }
@@ -109,7 +151,7 @@ test("a codex that can't be started leaves nothing behind", async () => {
   const before = process.env.TMPDIR;
   process.env.TMPDIR = tmp;
   try {
-    await assert.rejects(askCodex(path.join(bin, "no-such-codex"), "x", { timeoutMs: 1000 }), /ENOENT/);
+    await assert.rejects(askCodex(path.join(bin, "no-such-codex"), "x", { timeoutMs: 1000, ...opts }), /ENOENT/);
   } finally {
     process.env.TMPDIR = before;
   }

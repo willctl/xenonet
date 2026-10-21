@@ -58,7 +58,7 @@ import { driftRoutes } from "./routes/drift.js";
 import { createConnections, fingerprintOf } from "../core/actors/connections.js";
 import { createRemotePresence } from "../core/actors/remote-presence.js";
 import { assistantDir } from "../core/assistant/credentials.js";
-import { askedApp } from "../core/apps.js";
+import { ASKED, askedOr, appRefusal } from "../core/apps.js";
 import { stateSource } from "../core/assistant/source.js";
 import { createAudit } from "../core/assistant/audit.js";
 import { createAssistantService } from "../core/assistant/service.js";
@@ -315,9 +315,10 @@ state.on("graph", () => actors?.refresh());
 // server is up.
 const windowKey = createWindowKey();
 // The actor gateway (server/actor-gateway.js), for actors outside this
-// machine: off until you turn it on, on a port of its own beside this one,
-// put on the internet by the tunnel you pick (server/gateway-control.js).
-// XENONET_GATEWAY_PROBE=local checks it without the internet, for tests.
+// machine: off until you turn it on, on a port of its own (1010 above this
+// one, or XENONET_GATEWAY_PORT), put on the internet by the tunnel you pick
+// (server/gateway-control.js). XENONET_GATEWAY_PROBE=local checks it
+// without the internet, for tests.
 const gatewayControl =
   actors && registration
     ? (await import("./gateway-control.js")).createGatewayControl({
@@ -329,7 +330,8 @@ const gatewayControl =
         runs: state.reportedRuns,
         onRun: ({ actor, id }) => state.refreshAfterChange().then(() => actors.target(actor, id, "works-on")).catch(() => {}),
         store: engineStore,
-        port: Number(process.env.XENONET_GATEWAY_PORT) || config.port + 10,
+        port: Number(process.env.XENONET_GATEWAY_PORT) || null,
+        servicePort: config.port,
         version: VERSION,
         dir: config.demo ? null : config.stateDir,
         probe: process.env.XENONET_GATEWAY_PROBE === "local" ? "local" : null,
@@ -432,6 +434,7 @@ const hub =
         home: config.homeDir,
         demo: config.demo,
         windows: config,
+        log,
         local: {
           graph: () => state.graph,
           live: () => state.liveSnapshot(),
@@ -639,7 +642,11 @@ function simulate(kind, { a, b, ...more }) {
   } else if (kind === "turn-end" && sa) {
     live.activity(sa, { kind: "turn-end", duration: 42000, ts: now }, true);
   } else if (kind === "wiki-write" && sa) {
-    live.activity(sa, { kind: "tool", tool: "mcp__agent-wiki__wiki_log", category: "mcp", detail: "agent-wiki.wiki_log", server: "agent-wiki", pages: ["xenonet", "ledger"], files: [], ts: now }, true);
+    // A note logged through the server that owns the map's wiki: Xenolith's
+    // context_log, or wiki_log for a wiki from before it.
+    const server = config.wikiServer ?? "xenolith";
+    const tool = server === "agent-wiki" ? "wiki_log" : "context_log";
+    live.activity(sa, { kind: "tool", tool: `mcp__${server}__${tool}`, category: "mcp", detail: `${server}.${tool}`, server, pages: ["xenonet", "ledger"], files: [], ts: now }, true);
   } else if (kind === "doctor") {
     // The doctor finding a problem, reported as a real run would be; the
     // next real run (or clear) puts back what's true.
@@ -874,8 +881,9 @@ async function api(req, res, url) {
       if (config.demo) return send(res, 409, { error: "this is the demo: ask about the XenoNet with your own sessions", code: "demo" });
       if (!(await yours(req, res))) return;
       const body = await readJson(req, 4096);
-      // Codex, unless you ask for Claude Code.
-      const app = askedApp(body?.app, "codex");
+      // Codex, unless you ask for Claude Code; another app is refused.
+      const app = askedOr(body?.app, "codex");
+      if (!app) return send(res, 400, { error: appRefusal("app", body.app, ASKED) });
       const model = typeof body?.model === "string" && /^[A-Za-z0-9._:\/-]{1,80}$/.test(body.model) ? body.model : null;
       const dir = writeLook(config.stateDir, await bundle(), { sources: [root] });
       const cmd = askCommand({ app, model, dir, sources: [root] });
@@ -921,8 +929,9 @@ async function api(req, res, url) {
 
   if (route === "/api/handoff") {
     if (req.method === "GET") {
-      // Claude Code, unless you ask for Codex.
-      const target = askedApp(url.searchParams.get("target"), "claude");
+      // Claude Code, unless you ask for Codex; another app is refused.
+      const target = askedOr(url.searchParams.get("target"), "claude");
+      if (!target) return send(res, 400, { error: appRefusal("target", url.searchParams.get("target"), ASKED) });
       try {
         return send(res, 200, { target, ...(await state.handoff(url.searchParams.get("nodeId"), target)) });
       } catch (err) {
@@ -1080,7 +1089,8 @@ async function api(req, res, url) {
       const page = await state.readTranscript(node, opts);
       return send(res, 200, page);
     } catch (err) {
-      return send(res, 502, { error: String(err?.message ?? err) });
+      // A session of an app XenoNet doesn't read the transcripts of is a 400.
+      return send(res, err?.status ?? 502, { error: String(err?.message ?? err) });
     }
   }
 

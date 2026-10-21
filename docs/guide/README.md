@@ -4,7 +4,7 @@ XenoNet is the network for SI (super intelligence) on your machine. It has a bac
 
 - [Install](install.md) says how to build XenoNet's installers, and how to install and uninstall it on Windows and macOS.
 - [Components and updates](components.md) explains separate installs, the MCP servers and which processes keep running during an update.
-- [Keeping the service running](always-on.md) says how to have the service start at login, and start again if it stops, on macOS and Linux.
+- [Keeping the service running](always-on.md) says how to have the service start at login, and start again if it stops, on macOS, Linux and Windows.
 - [Finding projects](projects.md) says how XenoNet turns your projects folder into projects and groups, and how to read another folder.
 - [Identities](identities.md) says how XenoNet links each session and project to your Claude, ChatGPT, GitHub and git accounts.
 - [Sessions working together](agents.md) says how to connect Claude Code, Codex and Grok Build to XenoNet, so each session can see and message the others on your machine.

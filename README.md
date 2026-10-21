@@ -105,7 +105,8 @@ On a Mac, use ⌘ wherever this page says Ctrl. The terminal's key stays
   minimized, covered by other windows on a Mac, or the screen is locked, so
   it can stay open all day. `Frame rate: lower GPU use` in the palette
   halves that, and `Frame rate: every frame the screen shows` draws at the
-  screen's own rate.
+  screen's own rate. `Turn plain panels on or off` draws the panels solid,
+  without the blur of the map behind them, which uses less GPU.
 
 ### Lets sessions work together
 

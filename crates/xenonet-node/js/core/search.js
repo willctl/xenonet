@@ -13,14 +13,17 @@ import fsp from "node:fs/promises";
 import zlib from "node:zlib";
 import { native } from "../index.js";
 import { ClaudeLine, CodexLine, GrokLine, linesOf } from "./lines.js";
-import { tailedApp } from "../../../../core/apps.js";
+import { tailedOr } from "../../../../core/apps.js";
+
+// The line class each tailed app's lines are normalized to.
+const LINE = { claude: ClaudeLine, codex: CodexLine, grok: GrokLine };
 
 // One searchable record per human or agent message, from a line:
-// normalized (see lines.js), or as the transcript has it. Any other app but
-// Claude Code is read as Codex.
+// normalized (see lines.js), or as the transcript has it. An app XenoNet
+// doesn't tail is refused, in Rust.
 export function docsFromLine(line, app, { userEvents = false } = {}) {
-  const read = app === "grok" ? "grok" : tailedApp(app, "codex");
-  const own = read === "grok" ? line instanceof GrokLine : read === "claude" ? line instanceof ClaudeLine : line instanceof CodexLine;
+  const tailed = tailedOr(app, null);
+  const own = !!tailed && line instanceof LINE[tailed];
   return native.searchDocsFromLine(own ? line.raw : line, String(app), !!userEvents);
 }
 

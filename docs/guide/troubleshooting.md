@@ -26,7 +26,7 @@ The log lives in XenoNet's state folder, in `logs/`: `service.ndjson`, `desktop.
 xenonet doctor
 ```
 
-This checks sign-ins, the folders XenoNet reads, its own parts, its launcher, whether Claude Code, Codex and Grok Build are connected and recent errors, with a fix for each problem. XenoNet runs the same checks every half hour. When a check finds a new problem, it goes in the log too, so you can see it later even after it clears.
+This checks sign-ins, the folders XenoNet reads, its own parts, its launcher, whether Claude Code, Codex and Grok Build are connected, recent errors and, when the service starts at login, its registration, with a fix for each problem. XenoNet runs the same checks every half hour. When a check finds a new problem, it goes in the log too, so you can see it later even after it clears.
 
 ## Get help from Codex or Claude Code
 

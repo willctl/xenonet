@@ -71,6 +71,8 @@ const SIMULATIONS: [&str; 21] = [
     "host-skew",
 ];
 
+const LOOK: &str = "Read or change how the console draws its panels. plainPanels true draws them solid, without the glass blur behind them, a large share of a visible frame's GPU time; false brings the glass back. It's kept for this window, as the palette's \"Turn plain panels on or off\" keeps it. Returns the state once the view has settled: state.look says how the panels are drawn.";
+
 fn instance_arg(installed: bool) -> Z {
     let ids: Vec<&'static str> = if installed { vec!["installed"] } else { INSTANCES.iter().map(|i| i.id).collect() };
     enumeration(&ids)
@@ -502,6 +504,17 @@ fn defs(installed: bool) -> Vec<Def> {
             ]),
             write(),
         ),
+        def(
+            "look",
+            "How the console draws its panels",
+            LOOK,
+            object(vec![
+                ("plainPanels", boolean().optional().describe("true: solid panels, without the glass blur; false: glass panels, the default. Leave it out to only read.")),
+                ("instance", inst()),
+                ("settle", settle_arg()),
+            ]),
+            idempotent(),
+        ),
     ];
     if installed {
         d.retain(|t| !matches!(t.name, "eval" | "simulate"));
@@ -890,6 +903,10 @@ impl Console {
                 args.push(settle(a));
                 one(self.driver(&s, method, args).await?)
             }
+            "look" => match a.get("plainPanels").and_then(Value::as_bool) {
+                Some(on) => one(self.driver(&s, "plainPanels", vec![json!(on), settle(a)]).await?),
+                None => one(self.driver(&s, "state", vec![]).await?),
+            },
             _ => Err(format!("Tool {name} not found")),
         }
     }
@@ -986,10 +1003,11 @@ mod tests {
                 "eval",
                 "theme",
                 "mcp_info",
-                "environment"
+                "environment",
+                "look"
             ]
         );
         let installed: Vec<&str> = defs(true).iter().map(|d| d.name).collect();
-        assert!(!installed.contains(&"eval") && !installed.contains(&"simulate") && installed.len() == 31);
+        assert!(!installed.contains(&"eval") && !installed.contains(&"simulate") && installed.len() == 32);
     }
 }

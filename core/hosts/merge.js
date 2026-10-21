@@ -28,7 +28,7 @@ import { Identity } from "../schema/identity.js";
 import { LiveSession, LiveActivity } from "../schema/live.js";
 import { EngineAgent, EngineMessage } from "../schema/engine.js";
 import { declared } from "./declared.js";
-import { APPS, TAILED, tailedApp } from "../apps.js";
+import { APPS, TAILED, tailedOr } from "../apps.js";
 
 // The apps with plan limits a host reads (Claude Code's and Codex's), and
 // the ones whose token rates it keeps a series of (the tailed ones).
@@ -564,8 +564,11 @@ export function qualifyEvent(name, data, host) {
     }
     case "tokens": {
       const sessionId = remoteId(h, data.sessionId);
-      // Any app but Codex counts as Claude Code's.
-      return sessionId && Number.isFinite(data.n) ? { sessionId, app: tailedApp(data.app, "claude"), n: data.n, ts: shift(data.ts), host: h } : null;
+      // An app this XenoNet doesn't tail (one a newer host knows, say) isn't
+      // counted as Claude Code's: its tokens are left out, and eventNote
+      // says so.
+      const app = tailedOr(data.app, null);
+      return sessionId && app && Number.isFinite(data.n) ? { sessionId, app, n: data.n, ts: shift(data.ts), host: h } : null;
     }
     case "pulse": {
       const nodeId = data.nodeId === "core" ? `@${h}:core` : remoteId(h, data.nodeId);
@@ -579,6 +582,14 @@ export function qualifyEvent(name, data, host) {
     default:
       return null;
   }
+}
+
+// What the hub notes in the log of an event it left out for its app, as the
+// drift log notes a vendor's new variant: tokens for an app this XenoNet
+// doesn't tail. null for any other event.
+export function eventNote(name, data, host) {
+  if (name !== "tokens" || !isObject(data) || tailedOr(data.app, null)) return null;
+  return `${host.id} sent tokens for ${JSON.stringify(data.app ?? null).slice(0, 60)}, an app this XenoNet doesn't tail, and they were left out`;
 }
 
 // A host's engine (its agents, what each says it's doing, the last day's

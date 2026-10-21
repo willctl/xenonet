@@ -600,6 +600,16 @@ function buildServer() {
     return reply(await s.driver(method, ...(["set", "preview"].includes(action) ? [id] : []), { settle }));
   });
 
+  server.registerTool("look", {
+    title: "How the console draws its panels",
+    description: "Read or change how the console draws its panels. plainPanels true draws them solid, without the glass blur behind them, a large share of a visible frame's GPU time; false brings the glass back. It's kept for this window, as the palette's \"Turn plain panels on or off\" keeps it. Returns the state once the view has settled: state.look says how the panels are drawn.",
+    inputSchema: z.object({ plainPanels: z.boolean().optional().describe("true: solid panels, without the glass blur; false: glass panels, the default. Leave it out to only read."), instance: instanceArg, settle: settleArg }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, async ({ plainPanels, instance, settle }) => {
+    const s = target(instance);
+    return reply(plainPanels === undefined ? await s.driver("state") : await s.driver("plainPanels", plainPanels, { settle }));
+  });
+
   return server;
 }
 

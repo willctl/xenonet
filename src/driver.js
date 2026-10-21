@@ -123,6 +123,9 @@ export function createDriver(app) {
       // it keeps (null for every frame the display offers) and the frames
       // drawn so far.
       render: renderState(),
+      // How the console draws its panels: plainPanels, solid without the
+      // glass blur behind them (the palette's plain panels).
+      look: app.look?.get() ?? null,
       view: scene.view(),
       viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
       // The narrow screen's sheet of panels: which is open, if the screen is narrow.
@@ -585,6 +588,13 @@ export function createDriver(app) {
       return { ...renderState(), drawn, forcedDrawn: now.forced - before.forced, rates: [...rates].map((r) => (Number.isFinite(r) ? r : null)), perSecond: Math.round((drawn / ((performance.now() - t0) / 1000)) * 10) / 10 };
     },
 
+    // How the console draws its panels, as state().look says; and plain
+    // panels on or off (solid, without the glass blur behind them, a large
+    // share of a visible frame's GPU time), as the palette's switch does,
+    // kept for this window. Returns the state once the view has settled.
+    look: () => app.look.get(),
+    plainPanels: (on = true, opts) => act(() => app.look.plainPanels(yes(on)), opts),
+
     // Holds every ambient animation still, CSS included, for screenshots.
     async still(on = true) {
       scene.setStill(on);
@@ -602,7 +612,7 @@ export function createDriver(app) {
     },
     async mcp(id, opts) {
       const node = nodeOf(known(id));
-      if (!node || !["resource", "wiki"].includes(node.kind)) throw new Error("choose an MCP shared system or Agent Wiki");
+      if (!node || !["resource", "wiki"].includes(node.kind)) throw new Error("choose an MCP shared system or Xenolith");
       return act(async () => { await app.select(node.id); await app.hud.mcp.open(node); }, opts);
     },
     mcpTab: (tab, opts) => act(() => app.hud.mcp.tab(tab), opts),

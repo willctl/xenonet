@@ -14,7 +14,7 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use xenonet_service::gateway::tunnel::*;
 
-const PORT: u16 = 47850;
+const PORT: u16 = 48850;
 const HOST: &str = "mac.example-tailnet.ts.net";
 const APP: &str = "/Applications/Tailscale.app/Contents/MacOS/Tailscale";
 const BREW: &str = "/opt/homebrew/bin/tailscale";
@@ -151,7 +151,7 @@ fn tailscales_status_and_funnels_settings_as_the_gateway_needs_them() {
     assert_eq!(funnel_of(&json!({}), HOST, PORT), json!({ "state": "none" }));
     assert_eq!(funnel_of(&p(served(&format!("http://127.0.0.1:{PORT}"), true, false)), HOST, PORT), json!({ "state": "ours" }));
     assert_eq!(funnel_of(&p(served(&format!("http://localhost:{PORT}"), false, false)), HOST, PORT), json!({ "state": "tailnet" }));
-    assert_eq!(funnel_of(&p(served("http://127.0.0.1:47852", true, false)), HOST, PORT), json!({ "state": "elsewhere", "target": "http://127.0.0.1:47852" }));
+    assert_eq!(funnel_of(&p(served("http://127.0.0.1:48852", true, false)), HOST, PORT), json!({ "state": "elsewhere", "target": "http://127.0.0.1:48852" }));
     assert_eq!(funnel_of(&p(served(&format!("http://127.0.0.1:{PORT}"), true, true)), HOST, PORT), json!({ "state": "shared", "target": "/, /grafana" }));
 }
 
@@ -202,7 +202,7 @@ async fn tailscale_funnel_set_up_with_the_command_that_matches_and_nothing_done_
     assert_eq!((v["kind"].clone(), v["state"].clone(), v["why"].clone()), (json!("tailscale"), json!("up"), Value::Null));
     assert_eq!(*hosts.lock().unwrap(), vec![HOST.to_string()]);
     // Homebrew's older command is passed over for the app's, which matches.
-    assert_eq!(host.ran().into_iter().find(|r| r[1] == "funnel" && r[2] == "--bg").unwrap(), vec![APP, "funnel", "--bg", "--yes", "47850"]);
+    assert_eq!(host.ran().into_iter().find(|r| r[1] == "funnel" && r[2] == "--bg").unwrap(), vec![APP, "funnel", "--bg", "--yes", "48850"]);
     let before = host.ran().len();
     t.ensure().await;
     assert_eq!(host.ran()[before..].iter().filter(|r| r[1] == "funnel" && r[2] != "status").count(), 0, "already set up");
@@ -217,12 +217,12 @@ async fn tailscale_funnel_leaves_what_it_forwards_elsewhere_until_repair_and_pas
     let ours = served(&format!("http://127.0.0.1:{PORT}"), true, false);
     let elsewhere = Fake::tailscale(
         Some(Box::new(move |_| (RunOut { ok: true, ..Default::default() }, Some(ours.clone())))),
-        &served("http://127.0.0.1:47852", true, false),
+        &served("http://127.0.0.1:48852", true, false),
         status("Running", "1.104.1", true),
     );
     let t1 = tunnel(elsewhere.clone(), TunnelHooks::default());
     let why = t1.up("tailscale", None, None, false).await.unwrap()["why"].as_str().unwrap().to_string();
-    assert!(why.contains("already forwards to http://127.0.0.1:47852, not to this XenoNet's gateway: Repair points it here"), "{why}");
+    assert!(why.contains("already forwards to http://127.0.0.1:48852, not to this XenoNet's gateway: Repair points it here"), "{why}");
     assert!(!elsewhere.ran().iter().any(|r| r.get(2).map(String::as_str) == Some("--bg")));
     assert_eq!(t1.up("tailscale", None, None, true).await.unwrap()["state"], json!("up"));
 

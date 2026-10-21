@@ -412,6 +412,9 @@ impl Machine {
             "stateFile" => inspect_state(&a(0)),
             "drift" => self.path("cacheDir").map_or(Value::Null, |d| drift(&d)),
             "gitAvailable" => json!(git_available()),
+            // How the service started at login stands (the supervisor's
+            // review).
+            "login" => xenonet_components::supervisor::review_here(),
             // What only a running XenoNet has: its actors, its process
             // checks and its hosts.
             _ => return Ok(json!({ "missing": true })),
@@ -490,7 +493,8 @@ pub fn run_doctor(paths: &Paths, only: Option<&[String]>) -> Value {
         "codexBin": codex_bin(), "byHand": null, "stateLoad": null,
         "projectsDirSet": var("XENONET_PROJECTS_DIR").is_some(), "grokKeySet": var("XAI_API_KEY").is_some(), "actors": "none",
     });
-    let picked: Vec<&(&str, &str, &str)> = checks::CHECKS.iter().filter(|(id, ..)| only.is_none_or(|o| run::kept(id, o))).collect();
+    let all = checks::all();
+    let picked: Vec<&(&str, &str, &str)> = all.iter().filter(|(id, ..)| only.is_none_or(|o| run::kept(id, o))).collect();
     let mut waiting = Vec::new();
     for (i, (id, ..)) in picked.iter().enumerate() {
         let (tx, rx) = mpsc::channel();
