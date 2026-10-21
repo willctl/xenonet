@@ -325,6 +325,17 @@ test("xenonet hook --via=plugin marks the event as the copy XenoNet's plugin for
   }
 });
 
+test("xenonet hook grok passes Grok Build's events to its own route, as Grok wrote them", async () => {
+  const s = await fakeXenoNet({ "POST /api/hook/grok": () => [200, { decision: "block", reason: "a message" }] });
+  try {
+    const r = await xenonet(["hook", "grok", `--port=${s.port}`], { input: '{"hook_event_name":"Stop","sessionId":"019a3b5c-0000-7000-8000-00000000000a"}' });
+    assert.deepEqual([r.code, JSON.parse(r.stdout)], [0, { decision: "block", reason: "a message" }]);
+    assert.deepEqual(s.seen.map((x) => [x.path, x.body]), [["/api/hook/grok", { hook_event_name: "Stop", sessionId: "019a3b5c-0000-7000-8000-00000000000a" }]]);
+  } finally {
+    s.close();
+  }
+});
+
 test("xenonet connect --here: a XenoNet answering through a forwarded port is connected in this computer's settings, never by asking it", async () => {
   const s = await fakeXenoNet({ "GET /api/health": () => [200, health], "GET /api/engine/connect": () => [200, { port: 1, apps: [] }] });
   try {
@@ -335,7 +346,7 @@ test("xenonet connect --here: a XenoNet answering through a forwarded port is co
     assert.equal(r.code, 0, r.stderr);
     const preview = JSON.parse(r.stdout);
     assert.equal(preview.port, s.port, "that XenoNet's entries, by its port");
-    assert.deepEqual(preview.apps.map((a) => a.app), ["claude", "codex"]);
+    assert.deepEqual(preview.apps.map((a) => a.app), ["claude", "codex", "grok"]);
     assert.ok(preview.apps.every((a) => a.changes.length), "what would be added here");
     assert.deepEqual(s.seen, [], "the XenoNet on that port is never asked: it would write its own computer's settings");
   } finally {

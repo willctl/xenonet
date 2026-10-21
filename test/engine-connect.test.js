@@ -6,6 +6,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createConnect } from "../core/engine/connect.js";
 
+// The apps of a preview that are here: Grok Build isn't, in these homes.
+const here = (preview) => preview.apps.filter((a) => a.installed !== false);
+
 test("installed connections register both MCP interfaces through the stable launcher", async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-connect-"));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
@@ -32,9 +35,12 @@ test("installed connections register both MCP interfaces through the stable laun
     return "";
   } });
   const before = await connect.preview();
-  assert.deepEqual(before.apps.map((app) => app.changes.map((change) => change.id)), [["console", "mcp", "hooks"], ["console", "mcp", "hooks"]]);
+  assert.deepEqual(before.apps.map((app) => app.changes.map((change) => change.id)), [["console", "mcp", "hooks"], ["console", "mcp", "hooks"], ["console", "mcp", "hooks"]]);
   const after = await connect.apply();
-  assert.ok(after.apps.every((app) => app.changes.every((change) => change.state === "present")));
+  assert.ok(here(after).every((app) => app.changes.every((change) => change.state === "present")));
+  // Grok Build isn't here, so connecting every app leaves it out.
+  assert.deepEqual(after.apps.filter((a) => a.installed === false).map((a) => [a.app, a.changes.map((c) => c.state)]), [["grok", ["missing", "missing", "missing"]]]);
+  assert.equal(fs.existsSync(path.join(home, ".grok")), false);
   for (const app of ["claude", "codex"]) for (const name of ["xenonet", "xenonet-console"]) {
     const server = entries[app][name];
     assert.equal(server.command, launcher);
@@ -132,7 +138,7 @@ test("on Windows, a connected hook's quoted port and app aren't files gone, and 
   await installed.apply();
   await dev.apply();
   const preview = await installed.preview();
-  assert.deepEqual(preview.apps.map((a) => a.broken), [[], []], "nothing reported gone");
+  assert.deepEqual(here(preview).map((a) => a.broken), [[], []], "nothing reported gone");
   const codex = JSON.parse(fs.readFileSync(path.join(home, ".codex", "hooks.json"), "utf8"));
   const ports = (hooks) => [...new Set(Object.values(hooks).flat().flatMap((g) => g.hooks).map((h) => /XENONET_PORT='(\d+)'/.exec(Buffer.from(/-EncodedCommand ([A-Za-z0-9+/=]+)$/.exec(h.commandWindows)[1], "base64").toString("utf16le"))[1]))].sort();
   assert.deepEqual(ports(codex.hooks), ["47840", "47842"], "both XenoNets' hooks, side by side");
@@ -178,13 +184,13 @@ test("an earlier XenoNet's entries, which ran Node and cli/xenonet.js, show as d
   const hooksOf = (file) => Object.values(JSON.parse(fs.readFileSync(path.join(home, file), "utf8")).hooks ?? {}).flat().flatMap((g) => g.hooks);
 
   const before = await connect.preview();
-  for (const app of before.apps) {
+  for (const app of here(before)) {
     assert.deepEqual(app.changes.map((c) => [c.id, c.state]), [["mcp", "different"], ["hooks", "different"]], app.app);
     assert.ok(app.notes.some((n) => /run cli\/xenonet\.js with Node, as an earlier XenoNet wrote them\. Connecting again has them run the xenonet binary/.test(n)), app.notes.join(" | "));
   }
 
   const after = await connect.apply();
-  assert.ok(after.apps.every((app) => app.changes.every((c) => c.state === "present")));
+  assert.ok(here(after).every((app) => app.changes.every((c) => c.state === "present")));
   assert.ok(after.apps.every((app) => !app.notes.some((n) => /earlier XenoNet/.test(n))));
   for (const file of [".claude/settings.json", ".codex/hooks.json"]) {
     const commands = hooksOf(file).filter((h) => h.type === "command" && h.command !== "my-own-stop-hook").map((h) => h.command);

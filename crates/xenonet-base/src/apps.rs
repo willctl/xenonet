@@ -47,12 +47,14 @@ pub struct Roots {
     pub elsewhere: Vec<(String, String)>,
 }
 
-/// How XenoNet connects an app: its config format, and the hook events it
-/// adds, in order, each with its matcher when it takes one.
+/// How XenoNet connects an app: its config format, the hook events it
+/// adds, in order, each with its matcher when it takes one, and the events
+/// whose answers the app passes over.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Connect {
     pub format: String,
     pub events: Vec<(String, Option<String>)>,
+    pub unheard: Vec<String>,
 }
 
 impl App {
@@ -82,7 +84,7 @@ fn roots(v: &Map<String, Value>) -> Roots {
 
 fn connect(v: &Map<String, Value>) -> Connect {
     let events = v.get("events").and_then(Value::as_array).map(|a| a.iter().filter_map(|e| Some((text(e.get(0))?, text(e.get(1))))).collect()).unwrap_or_default();
-    Connect { format: text(v.get("format")).unwrap_or_default(), events }
+    Connect { format: text(v.get("format")).unwrap_or_default(), events, unheard: texts(v.get("unheard")) }
 }
 
 fn entry(v: &Value) -> Option<App> {
@@ -166,6 +168,8 @@ mod tests {
         assert_eq!(ids.len(), 26, "every entry reads");
         assert_eq!(&ids[..4], ["claude", "codex", "grok", "gemini-cli"]);
         assert_eq!(team("grok"), Some("5Y6N3AJ54S"));
+        assert_eq!(app("grok").and_then(|a| a.connect.as_ref()).map(|c| (c.format.as_str(), c.unheard.len())), Some(("grok-hooks", 2)));
+        assert!(app("codex").and_then(|a| a.connect.as_ref()).is_some_and(|c| c.unheard.is_empty()));
         assert_eq!(app("grok").and_then(|a| a.roots.as_ref()).map(|r| r.env.as_str()), Some("GROK_HOME"));
         let claude = app("claude").unwrap();
         assert_eq!(claude.name, "Claude Code");

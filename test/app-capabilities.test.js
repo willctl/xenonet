@@ -76,10 +76,10 @@ test("connect: a made-up app with a made-up format, in a registry of its own, is
   assert.equal(await connect.hookConnected("Start"), false, "no format here says");
 });
 
-test("connect: the registry connects Claude Code and Codex, through their own formats", async () => {
+test("connect: the registry connects Claude Code, Codex and Grok Build, through their own formats", async () => {
   const connect = createConnect({ platform: "darwin", port: 47840, bin: "/x/xenonet", home: "/nowhere", env: { PATH: "" }, demo: true });
-  await assert.rejects(connect.apply(), { message: "this is the demo, so connect Claude Code and Codex from XenoNet, with your own sessions" });
-  assert.deepEqual(Object.keys(FORMATS), ["claude-settings", "codex-hooks"]);
+  await assert.rejects(connect.apply(), { message: "this is the demo, so connect Claude Code, Codex and Grok Build from XenoNet, with your own sessions" });
+  assert.deepEqual(Object.keys(FORMATS), ["claude-settings", "codex-hooks", "grok-hooks"]);
 });
 
 test("processes: the apps whose processes XenoNet tells apart, and so the apps verify checks, are exactly Claude Code, Codex and OpenCode", () => {

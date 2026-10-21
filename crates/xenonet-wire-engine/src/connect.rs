@@ -81,6 +81,7 @@ impl ConnectDriver {
             home: config.home.clone(),
             claude_config_dir: env("CLAUDE_CONFIG_DIR"),
             codex_home: env("CODEX_HOME"),
+            grok_home: env("GROK_HOME"),
             // Installed XenoNet's console operator, which Desktop registers.
             console_mcp: env("XENONET_LAUNCHER_BIN").is_some_and(|b| !b.is_empty()) || config.launcher_exec.is_some(),
             platform: crate::js::platform().into(),
@@ -104,14 +105,17 @@ impl Connect for ConnectDriver {
         self.run(|c, k| c.preview(k)).await
     }
     async fn apply(&self, apps: Value) -> R<Value> {
-        // apply(apps = every app connect goes through).
+        // apply(apps = every app connect goes through that's here).
         let apps: Option<Vec<Arg>> = match apps {
             Value::Null => None,
             Value::Array(a) => Some(a.iter().map(crate::js::arg).collect()),
             other => Some(vec![crate::js::arg(&other)]),
         };
         self.run(move |c, k| {
-            let apps = apps.unwrap_or_else(|| c.ids().into_iter().map(Arg::Text).collect());
+            let apps = match apps {
+                Some(a) => a,
+                None => c.installed_ids(k)?,
+            };
             c.apply(k, &apps)
         })
         .await

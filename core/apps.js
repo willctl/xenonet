@@ -11,8 +11,9 @@
 //   identity   the kind of account it runs under (identity/v1)
 //   limits     its plan limits in live/snapshot/v1
 //   team       the developer team that signs it (codesign's TeamIdentifier)
-//   connect    how XenoNet connects it: its config format, and the hook
-//              events, each with a matcher when it takes one
+//   connect    how XenoNet connects it: its config format, the hook
+//              events, each with a matcher when it takes one, and the
+//              events whose answers it passes over (unheard)
 //   editTools  for a native reader, the tools whose calls are edits
 //   has        what XenoNet can do with it at most: lines (it tails its
 //              transcripts), sessions, native (an experimental reader),
@@ -66,7 +67,26 @@ export const APPS = [
     roots: { env: "GROK_HOME", default: "~/.grok" },
     context: 256000,
     team: "5Y6N3AJ54S",
-    has: ["lines", "sessions"],
+    // Its matchers name tools exactly: Claude Code's edit tools stand for
+    // its own too, which it names as well. It passes over what
+    // SessionStart and UserPromptSubmit answer.
+    connect: {
+      format: "grok-hooks",
+      events: [
+        ["SessionStart"],
+        ["UserPromptSubmit"],
+        ["PreToolUse", "Edit|Write|MultiEdit|search_replace|write|edit|hashline_edit|apply_patch"],
+        ["PostToolUse"],
+        ["PostToolUseFailure"],
+        ["Stop"],
+        ["StopCancelled"],
+        ["StopFailure"],
+        ["Notification", "permission_prompt"],
+        ["SessionEnd"],
+      ],
+      unheard: ["SessionStart", "UserPromptSubmit"],
+    },
+    has: ["lines", "sessions", "connect"],
   },
   {
     id: "gemini-cli",

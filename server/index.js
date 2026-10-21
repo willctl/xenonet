@@ -1138,6 +1138,27 @@ async function api(req, res, url) {
     return;
   }
 
+  // Grok Build's hooks (xenonet hook grok): its events in Claude Code's
+  // format, with its own names for the session and the tool (sessionId,
+  // toolName, toolInput, stopHookActive), read as Claude Code's. They tell
+  // the tailer when a turn ends, which its lines don't.
+  if (req.method === "POST" && route === "/api/hook/grok") {
+    const raw = await readJson(req).catch(() => ({}));
+    const body = { ...raw };
+    for (const [ours, theirs] of [["session_id", "sessionId"], ["tool_name", "toolName"], ["tool_input", "toolInput"], ["stop_hook_active", "stopHookActive"]]) if (body[ours] === undefined && raw?.[theirs] !== undefined) body[ours] = raw[theirs];
+    if (typeof body.session_id === "string" && /^[0-9a-f-]{36}$/i.test(body.session_id)) {
+      const id = `grok:${body.session_id}`;
+      const ok = await verify.check(req.socket, id, { hook: true });
+      if (!ok.ok) return send(res, 403, { error: ok.reason });
+      state.live.noteHook(id, body);
+      if (body.hook_event_name === "SessionStart") state.refresh().catch(() => {});
+      const out = await engine.hook("grok", body.hook_event_name, body).catch(() => null);
+      if (out) return send(res, 200, out);
+    }
+    res.writeHead(204).end();
+    return;
+  }
+
   // A session's Stop hook that listens after its turns (xenonet doctor
   // --live, core/delivery/setup.js): it waits for a message up to the
   // window the session started with, and hands it over to keep it going.

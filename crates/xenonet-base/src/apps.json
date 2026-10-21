@@ -125,9 +125,51 @@
   },
   "context": 256000,
   "team": "5Y6N3AJ54S",
+  "connect": {
+   "format": "grok-hooks",
+   "events": [
+    [
+     "SessionStart"
+    ],
+    [
+     "UserPromptSubmit"
+    ],
+    [
+     "PreToolUse",
+     "Edit|Write|MultiEdit|search_replace|write|edit|hashline_edit|apply_patch"
+    ],
+    [
+     "PostToolUse"
+    ],
+    [
+     "PostToolUseFailure"
+    ],
+    [
+     "Stop"
+    ],
+    [
+     "StopCancelled"
+    ],
+    [
+     "StopFailure"
+    ],
+    [
+     "Notification",
+     "permission_prompt"
+    ],
+    [
+     "SessionEnd"
+    ]
+   ],
+   "unheard": [
+    "SessionStart",
+    "UserPromptSubmit"
+   ]
+  },
   "has": [
    "lines",
-   "sessions"
+   "sessions",
+   "connect"
   ]
  },
  {

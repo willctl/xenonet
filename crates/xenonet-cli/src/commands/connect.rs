@@ -1,5 +1,6 @@
-//! xenonet connect (cli/commands/connect.js): adds XenoNet to Claude Code's
-//! and Codex's settings, so their sessions can see and message each other
+//! xenonet connect (cli/commands/connect.js): adds XenoNet to Claude Code's,
+//! Codex's and Grok Build's settings, so their sessions can see and message
+//! each other
 //! (core/engine/connect.js, through the running XenoNet, which knows how
 //! its agents' tools should run). It shows what will change and asks
 //! first.
@@ -46,6 +47,23 @@ pub fn render(preview: &Value, apps: &[&str]) {
     }
 }
 
+/// Names as a sentence lists them: "A, B and C".
+fn and_list(names: &[String]) -> String {
+    match names.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+        _ => names.join(""),
+    }
+}
+
+/// The apps to connect: the ones named, or every one that's here (an app
+/// that may not be, Grok Build, says in the preview whether it is).
+fn chosen<'a>(words: &'a [String], preview: &Value) -> Vec<&'a str> {
+    if !words.is_empty() {
+        return words.iter().map(|n| if n == "claude-code" { "claude" } else { n.as_str() }).collect();
+    }
+    connected().into_iter().filter(|id| list(preview, "apps").iter().find(|a| str(a, "app") == Some(id)).is_none_or(|a| a.get("installed") != Some(&Value::Bool(false)))).collect()
+}
+
 /// The apps of a preview that something's to be done for.
 pub fn todo<'a>(preview: &'a Value, apps: &[&str]) -> Vec<&'a Value> {
     list(preview, "apps")
@@ -57,7 +75,7 @@ pub fn todo<'a>(preview: &'a Value, apps: &[&str]) -> Vec<&'a Value> {
 }
 
 fn names(apps: &[&Value]) -> String {
-    apps.iter().map(|a| t(a, "name")).collect::<Vec<_>>().join(" and ")
+    and_list(&apps.iter().map(|a| t(a, "name")).collect::<Vec<_>>())
 }
 
 /// What's left undone after connecting: `"<app>: <what>"` for each change
@@ -82,7 +100,7 @@ pub fn local_options(port: f64) -> Value {
 // computer's settings: they're written here, as disconnect writes them
 // with no XenoNet running, with this computer's launcher and that
 // XenoNet's port.
-fn here(apps: &[&str], flags: &Flags) -> Done {
+fn here(words: &[String], flags: &Flags) -> Done {
     if !flags.on("port") {
         return Err(Fail::new("--here needs --port: the port the other XenoNet answers on here", 2));
     }
@@ -93,6 +111,7 @@ fn here(apps: &[&str], flags: &Flags) -> Done {
         json(&preview);
         return Ok(0);
     }
+    let apps = &chosen(words, &preview);
     let todo = todo(&preview, apps);
     let who = format!("the XenoNet on port {}", xenonet_base::json::number_string(port));
     render(&preview, apps);
@@ -121,13 +140,14 @@ pub fn connected() -> Vec<&'static str> {
 
 pub fn run(words: &[String], flags: &Flags) -> Done {
     let all = connected();
-    let apps: Vec<&str> = if words.is_empty() { all.clone() } else { words.iter().map(|n| if n == "claude-code" { "claude" } else { n.as_str() }).collect() };
-    let bad: Vec<&str> = apps.iter().copied().filter(|a| !all.contains(a)).collect();
+    let named: Vec<&str> = words.iter().map(|n| if n == "claude-code" { "claude" } else { n.as_str() }).collect();
+    let bad: Vec<&str> = named.iter().copied().filter(|a| !all.contains(a)).collect();
     if !bad.is_empty() {
-        return Err(Fail::new(format!("connect works with {}, not {}", all.join(" and "), bad.join(", ")), 2));
+        let all: Vec<String> = all.iter().map(|a| (*a).to_string()).collect();
+        return Err(Fail::new(format!("connect works with {}, not {}", and_list(&all), bad.join(", ")), 2));
     }
     if flags.on("here") {
-        return here(&apps, flags);
+        return here(words, flags);
     }
     let s = need(flags)?;
     let preview = s.get("/api/engine/connect")?;
@@ -135,6 +155,7 @@ pub fn run(words: &[String], flags: &Flags) -> Done {
         json(&preview);
         return Ok(0);
     }
+    let apps = chosen(words, &preview);
     let name = name_of(&s);
     if crate::js::on(&preview, "demo") {
         return Err(Fail::new(format!("{name} shows made-up data, so it can't connect Claude Code and Codex. Use XenoNet or XenoNet Dev."), 1));

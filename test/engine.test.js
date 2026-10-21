@@ -208,6 +208,25 @@ test("hooks: a briefing at the start, a warning before an edit, mail between too
   assert.ok(store.contact(B).ended_at);
 });
 
+test("hooks: Grok Build passes over what SessionStart and UserPromptSubmit say, so its messages wait for a tool's result or its turn's end", async () => {
+  const { engine } = world(Date.now());
+  const G = "grok:019a3b5c-0000-7000-8000-00000000000a";
+  const input = { session_id: G.slice("grok:".length), cwd: "/w/atlas" };
+  assert.equal(await engine.hook("grok", "SessionStart", input), null, "no briefing it would drop");
+  assert.ok((await engine.peers(A)).some((a) => a.id === G), "but it's in touch");
+  await engine.send(A, { to: G, text: "refunds.ts is mid-refactor." });
+  assert.equal(await engine.hook("grok", "UserPromptSubmit", input), null, "and its messages stay unread");
+  const failed = await engine.hook("grok", "PostToolUseFailure", input);
+  assert.match(failed.hookSpecificOutput.additionalContext, /refunds\.ts is mid-refactor/);
+  await engine.send(A, { to: G, text: "Done now." });
+  const stop = await engine.hook("grok", "Stop", input);
+  assert.deepEqual([stop.decision, /Done now/.test(stop.reason)], ["block", true]);
+  // Before an edit to a file another session has in hand, a warning, in
+  // Grok's names for its tool and its input.
+  const warn = await engine.hook("grok", "PreToolUse", { ...input, tool_name: "search_replace", tool_input: { file_path: "/w/atlas/src/routes.ts" } });
+  assert.match(warn.hookSpecificOutput.additionalContext, /Rate-limit the API/);
+});
+
 test("hooks: a subagent's events keep the session's mail for its main thread", async () => {
   const { engine, store, t } = world(Date.now());
   const raw = (id) => id.split(":")[1];
@@ -306,7 +325,7 @@ test("connect: previews, adds and takes out only XenoNet's entries", async () =>
   const before = await connect.preview();
   // The earlier XenoNet's hook makes Claude Code's hooks there but not as
   // this XenoNet adds them.
-  assert.deepEqual(before.apps.map((a) => a.changes.map((c) => c.state)), [["missing", "different"], ["missing", "missing"]]);
+  assert.deepEqual(before.apps.map((a) => a.changes.map((c) => c.state)), [["missing", "different"], ["missing", "missing"], ["missing", "missing"]]);
 
   await connect.apply();
   const settings = JSON.parse(fs.readFileSync(path.join(home, ".claude", "settings.json"), "utf8"));

@@ -587,7 +587,7 @@ const commandList = [
   { id: "updates", label: "Check for XenoNet updates", keywords: "version release download install restart", run: () => updatesPanel.open() },
   { id: "background", label: "Background service: start XenoNet's service at login", keywords: "settings login startup boot always on keep running daemon launchd systemd launch agent", run: () => backgroundPanel.open() },
   { id: "doctor", label: "Check XenoNet's setup", keywords: "doctor health sign in login auth permissions problems diagnose", run: () => doctorPanel.open() },
-  { id: "connect-agents", label: "Connect Claude Code and Codex to XenoNet", keywords: "si super intelligence agents claude code codex mcp hooks engine coordinate messages work together", run: () => connectPanel.open() },
+  { id: "connect-agents", label: "Connect your agents to XenoNet", keywords: "si super intelligence agents claude code codex grok build mcp hooks engine coordinate messages work together", run: () => connectPanel.open() },
   // The kill switch for messages between sessions and actors, and every wake (core/delivery/policy.js).
   { id: "pause-messages", label: "Pause or resume messages between sessions", keywords: "si agents stop kill switch halt wake live delivery actors abuse", run: () => toggleDelivery() },
   { id: "actors", label: "Actors", keywords: "si agents hermes grok bot muse programs allow deny requests register tokens observers you show me on the map add remove", run: () => openActors() },
