@@ -9,6 +9,7 @@
 // Git's paths and the clones' folders are Unix's here; the engine's own
 // paths are tested on every platform in its unit tests.
 #![cfg(unix)]
+#![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
