@@ -340,6 +340,40 @@ async fn a_full_queue_gives_a_gap_and_a_removed_host_is_refused() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_time_comes_only_signed_by_the_gateway_and_frames_only_within_the_week() {
+    let (_a, b, c) = network("signed-time", 48114, Caps::default(), [0.0; 3]).await;
+    let laptop = b.svc.node().shared().clone();
+    // A refusal's time, unsigned, or signed by another key, or over another
+    // request's nonce, isn't taken.
+    assert!(laptop.clock_answer(&json!({ "code": "clock", "now": now_ms() + 3600e3 }), "bm9uY2Vub25jZQ").is_err());
+    let other = xenonet_net::keys::HostKey::generate().unwrap();
+    let net = laptop.network().unwrap();
+    let draft = xenonet_net::frame::Draft { network: &net.id, id: xenonet_net::codec::frame_id().unwrap(), kind: "ping", from: &net.gateway.host, to: "laptop", at: now_ms() as i64 };
+    let forged = xenonet_net::frame::gateway_frame(&draft, &other, &json!({ "now": now_ms() + 3600e3, "nonce": "bm9uY2Vub25jZQ" }));
+    let v = json!({ "code": "clock", "frame": forged.line().trim_end() });
+    assert!(laptop.clock_answer(&v, "bm9uY2Vub25jZQ").unwrap_err().contains("didn't check"));
+    // A time more than a day off isn't signed with: the link says why.
+    laptop.learn_offset(now_ms() + 2.0 * 24.0 * 3600e3);
+    let st = b.state().await;
+    assert!(st["gateway"]["reason"].as_str().unwrap_or("").contains("more than a day off"), "{st}");
+    assert!(laptop.gateway_now() - now_ms() < 60e3, "the offset stays as it was");
+    // A host frame dated ten minutes ahead, or past the week frame ids are
+    // kept, is dropped; one dated now is taken.
+    let desk = c.svc.node().shared().clone();
+    let desk_keys = *desk.key().unwrap().public();
+    let key = laptop.key().unwrap();
+    let frame = |at: f64| {
+        let d = xenonet_net::frame::Draft { network: &net.id, id: xenonet_net::codec::frame_id().unwrap(), kind: "message", from: "laptop", to: "desk", at: at as i64 };
+        xenonet_net::frame::host_frame(&d, &key, &desk_keys, &json!({ "schema": "network/message/v1", "body": format!("at {at}") }), None).unwrap()
+    };
+    let now = now_ms();
+    for at in [now + 10.0 * 60e3, now - 8.0 * 24.0 * 3600e3, now] {
+        desk.frame(&frame(at));
+    }
+    assert_eq!(c.sink.texts("message"), [format!("at {now}")]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_clock_five_minutes_off_still_links() {
     let (a, b, c) = network("clock", 48117, Caps::default(), [0.0, 300e3, -300e3]).await;
     for h in [&b, &c] {

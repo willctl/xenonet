@@ -179,8 +179,9 @@ pub enum Refusal {
     Other(String),
 }
 
-/// What a refusal says.
-pub fn refusal(n: &Shared, reply: &NetReply) -> Refusal {
+/// What a refusal of the request made with `nonce` says. A time is taken
+/// only in a frame the pinned gateway signed over that nonce.
+pub fn refusal(n: &Shared, reply: &NetReply, nonce: &str) -> Refusal {
     if reply.status == 410 {
         if let NetBody::Full(b) = &reply.body {
             let line = String::from_utf8_lossy(b);
@@ -194,9 +195,10 @@ pub fn refusal(n: &Shared, reply: &NetReply) -> Refusal {
     }
     let v = reply.body_json();
     if reply.status == 401 && v.get("code").and_then(Value::as_str) == Some("clock") {
-        if let Some(now) = v.get("now").and_then(Value::as_f64) {
-            return Refusal::Clock(now);
-        }
+        return match n.clock_answer(&v, nonce) {
+            Ok(now) => Refusal::Clock(now),
+            Err(why) => Refusal::Other(why),
+        };
     }
     let error = v.get("error").and_then(Value::as_str).map_or_else(|| format!("the gateway answered {}", reply.status), str::to_string);
     Refusal::Other(error)
@@ -259,7 +261,7 @@ async fn down(n: Arc<Shared>, t: Transport) {
                     continue;
                 }
             },
-            Ok(reply) => match refusal(&n, &reply) {
+            Ok(reply) => match refusal(&n, &reply, &nonce) {
                 Refusal::Clock(now) => {
                     n.learn_offset(now);
                     clock_tries += 1;
@@ -387,7 +389,7 @@ async fn up(n: Arc<Shared>, t: Transport) {
                 break;
             }
             let Some(batch) = n.next_batch() else { break };
-            let Ok((req, _)) = n.signed_request("POST", "/net/v1/frames", batch.body.clone().into_bytes()) else { break };
+            let Ok((req, nonce)) = n.signed_request("POST", "/net/v1/frames", batch.body.clone().into_bytes()) else { break };
             match t.request(req, Some(Duration::from_millis(POST_MS))).await {
                 Ok(reply) if reply.status == 200 => {
                     attempt = 0;
@@ -397,7 +399,7 @@ async fn up(n: Arc<Shared>, t: Transport) {
                         tokio::time::sleep(Duration::from_millis(ms.min(60_000))).await;
                     }
                 }
-                Ok(reply) => match refusal(&n, &reply) {
+                Ok(reply) => match refusal(&n, &reply, &nonce) {
                     Refusal::Clock(now) => n.learn_offset(now),
                     Refusal::Removed => return,
                     Refusal::Other(why) => {
@@ -422,12 +424,12 @@ async fn up(n: Arc<Shared>, t: Transport) {
 pub async fn call(n: &Arc<Shared>, t: &Transport, method: &str, target: &str, body: Value) -> R<Value> {
     let body = if body.is_null() { Vec::new() } else { body.to_string().into_bytes() };
     for _ in 0..3 {
-        let (req, _) = n.signed_request(method, target, body.clone())?;
+        let (req, nonce) = n.signed_request(method, target, body.clone())?;
         let reply = t.request(req, Some(Duration::from_millis(POST_MS))).await.map_err(|why| NetError::new(502, "unreachable", format!("the gateway didn't answer: {why}")))?;
         if (200..300).contains(&reply.status) {
             return Ok(reply.body_json());
         }
-        match refusal(n, &reply) {
+        match refusal(n, &reply, &nonce) {
             Refusal::Clock(now) => n.learn_offset(now),
             Refusal::Removed => return Err(NetError::new(410, "removed", "this host was removed from the network")),
             Refusal::Other(why) => {

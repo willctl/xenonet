@@ -306,11 +306,15 @@ impl Gateway {
         let Some(member) = view.member(&signed.host) else {
             return Err(NetReply::json(401, &json!({ "error": "that host isn't in this network", "code": "unknown-host" })));
         };
-        if (signed.time as f64 - now).abs() > SKEW_MS {
-            return Err(NetReply::json(401, &json!({ "error": "the request's time is more than a minute off the gateway's", "code": "clock", "now": now as i64 })));
-        }
         if !signed.verify(&member.keys, &me.network, &req.method, &req.target, &req.body) {
             return Err(NetReply::json(401, &json!({ "error": "the request's signature doesn't check", "code": "bad-signature" })));
+        }
+        if (signed.time as f64 - now).abs() > SKEW_MS {
+            // The gateway's time, in a frame its key signs over this
+            // request's nonce: a host takes a time only from its own
+            // gateway, and only in answer to the request it made.
+            let f = Self::frame(&me, "ping", &signed.host, now as i64, &json!({ "now": now as i64, "nonce": signed.nonce })).map_err(|e| NetReply::error(&e))?;
+            return Err(NetReply::json(401, &json!({ "error": "the request's time is more than a minute off the gateway's", "code": "clock", "now": now as i64, "frame": f.line().trim_end() })));
         }
         let mut nonces = self.nonces.locked();
         nonces.retain(|_, at| now - *at < NONCE_MS);

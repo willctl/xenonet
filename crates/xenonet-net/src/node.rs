@@ -169,6 +169,12 @@ pub struct Shared {
 }
 
 const OPERATOR_ACTIONS: [&str; 4] = ["message", "ticket", "remove", "replace"];
+/// The most this host's clock may be set off its own by the gateway's.
+const MAX_OFFSET_MS: f64 = 24.0 * 3600e3;
+/// A host frame dated this far past now, by the gateway's clock, is
+/// dropped; one older than the frame ids kept (a week) is too, since its
+/// id could be forgotten and the frame taken again.
+const AHEAD_MS: f64 = 5.0 * 60e3;
 const OPERATOR_MS: f64 = 60e3;
 const BATCH_BYTES: u64 = 900 << 10;
 const BATCH_FRAMES: u64 = 500;
@@ -336,9 +342,33 @@ impl Shared {
         }
     }
 
-    /// The gateway's time, from a refusal: this host signs with it from now.
+    /// The gateway's time from its refusal of the request made with
+    /// `nonce`: only from a frame the pinned gateway's key signed, for this
+    /// host, over that nonce. Anything else is refused, so a gateway's
+    /// address taken over, or a LAN in the middle, can't move this host's
+    /// clock.
+    pub fn clock_answer(&self, v: &Value, nonce: &str) -> Result<f64, String> {
+        let net = self.network().ok_or("this machine left its network")?;
+        let keys = self.pinned_gateway(&net)?;
+        let f = v.get("frame").and_then(Value::as_str).and_then(|l| Frame::parse_line(l).ok()).ok_or("the gateway refused this host's time without a signed answer")?;
+        if f.kind != "ping" || f.from != net.gateway.host || f.to != net.host || !f.verify(&net.id, &keys) {
+            return Err("the gateway's answer about the time didn't check against its key".into());
+        }
+        let body = f.body_json().map_err(|e| e.message)?;
+        if body.get("nonce").and_then(Value::as_str) != Some(nonce) {
+            return Err("the gateway's answer about the time was for another request".into());
+        }
+        body.get("now").and_then(Value::as_f64).ok_or_else(|| "the gateway's answer about the time has no time".into())
+    }
+
+    /// The gateway's time, from a refusal: this host signs with it from now,
+    /// unless it's more than a day off this clock, which is refused.
     pub fn learn_offset(&self, gateway_now: f64) {
         let offset = gateway_now - self.now();
+        if offset.abs() > MAX_OFFSET_MS {
+            self.refused("the gateway's clock is more than a day off this one's: set this computer's clock, or check the gateway's");
+            return;
+        }
         {
             let mut s = self.status.locked();
             s.offset_ms = offset;
@@ -715,6 +745,12 @@ impl Shared {
         };
         if !f.verify(&net.id, &member.keys) {
             self.log("net.frame", &format!("a frame from {} whose signature didn't check was dropped", f.from));
+            return false;
+        }
+        let gw_now = self.gateway_now();
+        let at = f.at as f64;
+        if at > gw_now + AHEAD_MS || at < gw_now - crate::gwstore::WEEK_MS {
+            self.log("net.frame", &format!("a {} frame from {} dated outside the week the network keeps was dropped", f.kind, f.from));
             return false;
         }
         let now = self.now();
