@@ -197,6 +197,35 @@ test("version 5 adds remote connections beside the actors, and leaves every acto
   raw.close();
 });
 
+// XenoNet 0.3.0 took the first seven steps, as they are here (its
+// core/engine/store.js differs only by step 8), so its engine.sqlite is at
+// version 7. 0.4.0's service, in Rust, takes the same steps.
+test("0.3.0's engine.sqlite takes step 8, copied first, with its messages, claims and actors as they were, and 0.3.0 still opens it after a rollback", () => {
+  const file = tmp();
+  const db = new DatabaseSync(file);
+  migrateEngine(db, ENGINE_MIGRATIONS.slice(0, 7));
+  db.prepare("INSERT INTO messages (sender, target, body, created_at) VALUES (?, ?, ?, ?)").run("claude:aaaaaaaa-0001", "codex:bbbbbbbb-0002", "hello", T);
+  db.prepare("INSERT INTO deliveries (message_id, agent) VALUES (1, ?)").run("codex:bbbbbbbb-0002");
+  db.prepare("INSERT INTO claims (agent, pattern, note, created_at, expires_at) VALUES (?, ?, ?, ?, ?)").run("claude:aaaaaaaa-0001", "src/a.js", "mine", T, T + DAY);
+  db.prepare("INSERT INTO actors (slug, kind, name, via, capabilities, token_hash, token_at, created_at, allowed_at, gateway_hash, gateway_at) VALUES ('muse', 'agent', 'Muse', '[\"registered\"]', '[]', 'abc', ?, ?, ?, 'def', ?)").run(T, T, T, T);
+  db.close();
+
+  const store = new EngineStore(file);
+  assert.deepEqual(store.version, { from: 7, version: ENGINE_VERSION, newer: false });
+  assert.equal(path.basename(store.block.backupFile), "engine.v7.sqlite", "copied first");
+  assert.deepEqual(store.unseen("codex:bbbbbbbb-0002").map((m) => [m.body, m.host]), [["hello", null]], "made here, waiting to be read");
+  assert.deepEqual(store.claims(T).map((c) => [c.agent, c.pattern, c.note]), [["claude:aaaaaaaa-0001", "src/a.js", "mine"]]);
+  assert.deepEqual([store.actorToken("muse").token_hash, store.actorByGatewayToken("def")?.slug], ["abc", "muse"]);
+  store.close();
+
+  // An update rolled back to 0.3.0: its seven steps leave the newer shape
+  // alone, and what it reads is still there.
+  const raw = new DatabaseSync(file);
+  assert.deepEqual(migrateEngine(raw, ENGINE_MIGRATIONS.slice(0, 7)), { from: ENGINE_VERSION, version: ENGINE_VERSION, newer: true });
+  assert.deepEqual(raw.prepare("SELECT body FROM messages").all().map((r) => r.body), ["hello"]);
+  raw.close();
+});
+
 test("the remote reads' log keeps a week, and at most its cap", () => {
   const store = new EngineStore(tmp());
   for (let i = 0; i < 5; i++) store.addAudit({ at: T - 8 * DAY + i, kind: "access", operation: "status", result: "ok" });

@@ -1401,6 +1401,7 @@
     "test/scope.test.js",
     "test/script.test.js",
     "test/server.test.js",
+    "test/service-runtime.test.js",
     "test/signals.test.js",
     "test/space-presence.test.js",
     "test/spotify.test.js",

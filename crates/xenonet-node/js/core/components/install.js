@@ -25,6 +25,8 @@ export const writeLauncher = (entry, { source = fs.readFileSync(LAUNCHER_SOURCE,
 
 export const installLauncher = (env = process.env) => settle(native.compInstallLauncher(envOf(env), ctx()));
 
+export const hasBinary = (selected) => native.compHasBinary(selected, process.platform);
+
 export const checkRuntime = (staged) => settle(native.compCheckRuntime(staged, process.platform));
 
 export const installedRuntime = (env = process.env) => settle(native.compInstalledRuntime(envOf(env), ctx()));
@@ -33,6 +35,6 @@ const defaults = { connect: connectService, start: ensureService, check: checkRu
 
 export const recoverServiceUpdate = ({ env = process.env, operations } = {}) => drive(native.compRecover(envOf(env), ctx(), stopTimeout(operations)), lifecycleOps(defaults, operations, env));
 
-export const installBundle = (bundle, { env = process.env, command = true } = {}) => drive(native.compInstallBundle(String(bundle), envOf(env), !!command, ctx(), stopTimeout()), lifecycleOps(defaults, undefined, env));
+export const installBundle = (bundle, { env = process.env, command = true, operations } = {}) => drive(native.compInstallBundle(String(bundle), envOf(env), !!command, ctx(), stopTimeout(operations)), lifecycleOps(defaults, operations, env));
 
 export const activatePackage = (file, item, { env = process.env, operations } = {}) => drive(native.compActivate(String(file), item, envOf(env), ctx(), stopTimeout(operations)), lifecycleOps(defaults, operations, env));
