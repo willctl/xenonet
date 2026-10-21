@@ -154,6 +154,44 @@ test("the map's wiki takes its server's id and name, so beams to xenolith land o
   assert.equal(old.nodes.find((n) => n.kind === "wiki").id, "resource:agent-wiki", "Agent Wiki's map is as it was");
 });
 
+test("pages, logs and notes linked in from elsewhere are passed over, as Xenolith refuses them", { skip: process.platform === "win32" && "links need privileges on Windows" }, async () => {
+  const outside = tmp();
+  fs.writeFileSync(path.join(outside, "secret.md"), "---\ntitle: Not the wiki's\n---\n");
+  fs.mkdirSync(path.join(outside, "2026"));
+  fs.writeFileSync(path.join(outside, "2026", "2026-10-03.md"), "## 09:00 · codex · Elsewhere\n\npages: [[atlas]]\n");
+  const now = new Date(2026, 9, 3, 12).getTime();
+  const dir = wikiAt(tmp(), "# Xenolith protocol\n");
+  fs.writeFileSync(path.join(dir, "pages", "atlas.md"), "---\ntitle: Atlas\n---\n");
+  fs.symlinkSync(path.join(outside, "secret.md"), path.join(dir, "pages", "linked.md"));
+  fs.mkdirSync(path.join(dir, "inbox"));
+  fs.writeFileSync(path.join(dir, "inbox", "kept.md"), "# Kept\n");
+  fs.symlinkSync(path.join(outside, "secret.md"), path.join(dir, "inbox", "linked.md"));
+  fs.mkdirSync(path.join(dir, "log"));
+  fs.symlinkSync(path.join(outside, "2026"), path.join(dir, "log", "2026"));
+  const wiki = await readWiki(dir, [], { now });
+  assert.deepEqual(wiki.pages.map((p) => p.slug), ["atlas"]);
+  assert.deepEqual(wiki.inbox.map((n) => n.id), ["kept"]);
+  assert.deepEqual(wiki.log, [], "a year of the log linked in");
+  fs.rmSync(path.join(dir, "log", "2026"));
+  fs.mkdirSync(path.join(dir, "log", "2026"));
+  fs.symlinkSync(path.join(outside, "2026", "2026-10-03.md"), path.join(dir, "log", "2026", "2026-10-03.md"));
+  assert.deepEqual((await readWiki(dir, [], { now })).log, [], "a day of it");
+  fs.copyFileSync(path.join(outside, "2026", "2026-10-03.md"), path.join(dir, "log", "2026", "2026-10-02.md"));
+  assert.deepEqual((await readWiki(dir, [], { now })).log.map((e) => e.title), ["Elsewhere"], "a day that's the wiki's own");
+
+  // The pages folder linked in, and the wiki's own folder a link, which
+  // Xenolith allows.
+  const other = wikiAt(tmp());
+  fs.writeFileSync(path.join(other, "pages", "x.md"), "# X\n");
+  const linkedPages = wikiAt(tmp());
+  fs.rmSync(path.join(linkedPages, "pages"), { recursive: true });
+  fs.symlinkSync(path.join(other, "pages"), path.join(linkedPages, "pages"));
+  assert.deepEqual((await readWiki(linkedPages, [])).pages, []);
+  const root = path.join(tmp(), "wiki");
+  fs.symlinkSync(other, root);
+  assert.deepEqual((await readWiki(root, [])).pages.map((p) => p.slug), ["x"]);
+});
+
 test("context_* writes, and the wiki_* names before them, beam to the pages they name", () => {
   assert.equal(mcpServerOf("mcp__xenolith__context_log"), "xenolith");
   assert.equal(mcpServerOf("mcp__plugin_xenolith_xenolith__context_upsert_page"), "xenolith");

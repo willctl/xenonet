@@ -1244,6 +1244,7 @@
       "rust": "crates/xenonet-sources/src/wiki.rs",
       "differences": [
         "Rust reads the folder (std::fs, in Node's order), and a page that isn't UTF-8 is read as Node reads it, with U+FFFD for what isn't.",
+        "On Windows Rust passes over any reparse point below the folder, as Xenolith does, where Node's lstat sees only symbolic links and junctions.",
         "updated is read as Date.parse reads ISO 8601, a date and time without a zone as local time; V8's fallback for other formats (\"Oct 3 2026\") gives null here. A local time at a daylight saving change can come out an hour from V8's.",
         "A page's writes are copies of the log's entries, not the same objects.",
         "Arguments are read as JSON values: a project's getters, and values JSON can't hold, aren't seen. A text that isn't a string is made one with String() (parseFrontmatter still gives back what it was given as the body when there's no frontmatter, and slices what it was given when there is)."

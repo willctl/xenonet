@@ -65,6 +65,18 @@ export function parseLog(text, date) {
   return out;
 }
 
+// Xenolith refuses a link anywhere below the wiki's folder (confined_path in
+// xenolith/rust/crates/core/src/wiki.rs), so a page or log linked in from
+// elsewhere isn't the wiki's, and XenoNet passes it over too. The folder
+// itself may be a link.
+const linked = async (p) => (await fsp.lstat(p).catch(() => null))?.isSymbolicLink() ?? false;
+
+// A folder's names, none when it's a link or can't be read.
+const namesIn = async (dir) => ((await linked(dir)) ? [] : await fsp.readdir(dir).catch(() => []));
+
+// A file's text, null when it's a link or can't be read.
+const textOf = async (file) => ((await linked(file)) ? null : await fsp.readFile(file, "utf8").catch(() => null));
+
 // The shared context's folder (Xenolith's, or Agent Wiki's), read: its pages
 // (with the projects they mention, paths under `root`, the projects folder),
 // the last two days' log and the inbox. `server` is the MCP server that
@@ -72,8 +84,9 @@ export function parseLog(text, date) {
 export async function readWiki(dir, projects, { root = null, now = Date.now(), server = "agent-wiki" } = {}) {
   if (!dir) return null;
   const pages = [];
-  const files = await fsp.readdir(path.join(dir, "pages")).catch(() => []);
+  const files = await namesIn(path.join(dir, "pages"));
   for (const f of files.filter((f) => f.endsWith(".md"))) {
+    if (await linked(path.join(dir, "pages", f))) continue;
     const text = await fsp.readFile(path.join(dir, "pages", f), "utf8").catch(() => "");
     const { meta, body } = parseFrontmatter(text);
     const slug = f.slice(0, -3).toLowerCase();
@@ -93,11 +106,13 @@ export async function readWiki(dir, projects, { root = null, now = Date.now(), s
   const log = [];
   for (const offset of [1, 0]) {
     const date = dayKey(now - offset * 86400e3);
-    const text = await fsp.readFile(path.join(dir, "log", date.slice(0, 4), `${date}.md`), "utf8").catch(() => null);
+    const year = path.join(dir, "log", date.slice(0, 4));
+    const text = (await linked(path.join(dir, "log"))) || (await linked(year)) ? null : await textOf(path.join(year, `${date}.md`));
     if (text) log.push(...parseLog(text, date));
   }
   const inbox = [];
-  for (const f of (await fsp.readdir(path.join(dir, "inbox")).catch(() => [])).filter((f) => f.endsWith(".md"))) {
+  for (const f of (await namesIn(path.join(dir, "inbox"))).filter((f) => f.endsWith(".md"))) {
+    if (await linked(path.join(dir, "inbox", f))) continue;
     const text = await fsp.readFile(path.join(dir, "inbox", f), "utf8").catch(() => "");
     const { meta, body } = parseFrontmatter(text);
     inbox.push({ id: f.slice(0, -3), title: meta.title || body.split(/\r?\n/).find((l) => l.trim())?.replace(/^#+\s*/, "") || f, app: meta.app || null });

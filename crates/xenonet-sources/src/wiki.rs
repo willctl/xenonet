@@ -435,8 +435,31 @@ pub fn parse_log(text: &str, date: Option<&Value>) -> Result<Vec<LogEntry>, Type
 
 // ---------- the folder ----------
 
-// A folder's names in Node's order, or none when it can't be read.
+/// Whether a path is a link. Xenolith refuses a link anywhere below the
+/// wiki's folder (confined_path in xenolith/rust/crates/core/src/wiki.rs),
+/// so a page or log linked in from elsewhere isn't the wiki's, and XenoNet
+/// passes it over too. On Windows that's any reparse point, as Xenolith
+/// has it. The folder itself may be a link.
+fn linked(p: &str) -> bool {
+    std::fs::symlink_metadata(p).is_ok_and(|m| {
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            m.file_attributes() & 0x400 != 0
+        }
+        #[cfg(not(windows))]
+        {
+            m.file_type().is_symlink()
+        }
+    })
+}
+
+// A folder's names in Node's order, or none when it's a link or can't be
+// read.
 fn names(dir: &str) -> Vec<String> {
+    if linked(dir) {
+        return Vec::new();
+    }
     paths::read_dir_sorted(std::path::Path::new(dir)).map(|es| es.into_iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default()
 }
 
@@ -469,6 +492,9 @@ pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now:
     let mut pages: Vec<Page> = Vec::new();
     for f in names(&pages_dir).into_iter().filter(|f| f.ends_with(".md")) {
         let file = paths::join(&pages_dir, &f);
+        if linked(&file) {
+            continue;
+        }
         let text = read_text(&file).unwrap_or_default();
         let (meta, body) = parse_frontmatter(&text);
         let slug = f[..f.len() - 3].to_lowercase();
@@ -493,7 +519,11 @@ pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now:
     let mut log: Vec<LogEntry> = Vec::new();
     for offset in [1.0, 0.0] {
         let date = day_key(now - offset * 86_400e3);
-        let file = paths::join_all(&[dir, "log", &jsstr::slice(&date, 0, Some(4)), &format!("{date}.md")]);
+        let year = paths::join_all(&[dir, "log", &jsstr::slice(&date, 0, Some(4))]);
+        let file = paths::join(&year, &format!("{date}.md"));
+        if linked(&paths::join(dir, "log")) || linked(&year) || linked(&file) {
+            continue;
+        }
         if let Some(text) = read_text(&file).filter(|t| !t.is_empty()) {
             log.extend(parse_log(&text, Some(&Value::String(date.clone())))?);
         }
@@ -501,6 +531,9 @@ pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now:
     let inbox_dir = paths::join(dir, "inbox");
     let mut inbox = Vec::new();
     for f in names(&inbox_dir).into_iter().filter(|f| f.ends_with(".md")) {
+        if linked(&paths::join(&inbox_dir, &f)) {
+            continue;
+        }
         let text = read_text(&paths::join(&inbox_dir, &f)).unwrap_or_default();
         let (meta, body) = parse_frontmatter(&text);
         let first = split_lines(&body).into_iter().find(|l| !js_trim(l).is_empty()).map(|l| {
@@ -561,6 +594,27 @@ mod tests {
         assert_eq!(parse_frontmatter("---\n---\n").1, "---\n---\n", "no lines between");
         assert_eq!(parse_frontmatter("---\n\n---").1, "");
         assert_eq!(parse_frontmatter("no front").0.len(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn links_below_the_folder_are_passed_over() {
+        let base = std::env::temp_dir().join(format!("xenonet-wiki-links-rs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (wiki, outside) = (base.join("wiki"), base.join("outside"));
+        std::fs::create_dir_all(wiki.join("pages")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(wiki.join("pages/atlas.md"), "# Atlas\n").unwrap();
+        std::fs::write(outside.join("secret.md"), "# Secret\n").unwrap();
+        std::os::unix::fs::symlink(outside.join("secret.md"), wiki.join("pages/linked.md")).unwrap();
+        std::os::unix::fs::symlink(&outside, wiki.join("inbox")).unwrap();
+        let read = read_wiki(wiki.to_str().unwrap(), Some(&json!([])), None, 0.0, Out::Null).unwrap();
+        let Out::Obj(fields) = read else { panic!("an object") };
+        let get = |k: &str| fields.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone()).unwrap();
+        let Out::Arr(pages) = get("pages") else { panic!("a list") };
+        assert_eq!(pages.len(), 1, "the linked page isn't the wiki's");
+        assert_eq!(get("inbox"), Out::Arr(vec![]), "nor a linked inbox");
+        std::fs::remove_dir_all(base).unwrap();
     }
 
     #[test]

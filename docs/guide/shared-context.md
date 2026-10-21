@@ -32,4 +32,7 @@ edit: one that starts as Xenolith's shows as Xenolith, and any other as
 Agent Wiki.
 
 XenoNet only reads the folder. Writing goes through Xenolith's own server,
-under its access rules, so XenoNet never changes your wiki.
+under its access rules, so XenoNet never changes your wiki. Like Xenolith,
+it leaves out any page, log or note that's a link, and any folder of them
+that is: a link below the wiki's folder isn't part of the wiki. The wiki's
+folder itself can be a link.
