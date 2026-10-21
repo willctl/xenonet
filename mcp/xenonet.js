@@ -355,6 +355,26 @@ function buildServer(actor = null) {
     ({ text }, ctx) => call("focus", ctx, { text }),
   );
   server.registerTool(
+    "handoff",
+    {
+      title: "Hand off work",
+      description: "Leaves work for another session to pick up where you left off, on this machine or another one in your XenoNet network: the goal, what's done, what's next, the files, and the branch and commit. It goes as a message to the sessions at work in clones of this repo now (or to the session you name in to), and the next session that starts in one is offered it. The first session to accept it gets it, and one no one takes lapses after a week. With accept, takes one you were offered. With nothing else, lists the handoffs open to you and the ones you made.",
+      inputSchema: z.object({
+        accept: z.string().optional().describe("A handoff's id (hof_…), to take it."),
+        to: z.string().optional().describe('Who it\'s for: "repo", the default, for any session in a clone of this repo, or a session\'s id from peers.'),
+        host: z.string().optional().describe('With to "repo": only clones on this machine of your XenoNet network.'),
+        goal: z.string().optional(),
+        done: z.string().optional().describe("What's done."),
+        next: z.string().optional().describe("What's next."),
+        files: z.array(z.string()).max(200).optional(),
+        branch: z.string().optional().describe("The branch to pick up on; yours when left out."),
+        commit: z.string().optional().describe("The commit to start from, by its hash."),
+      }),
+      annotations: write,
+    },
+    ({ accept, to, host, goal, done, next, files, branch, commit }, ctx) => call("handoff", ctx, { accept, to, host, goal, done, next, files, branch, commit }),
+  );
+  server.registerTool(
     "doctor",
     {
       title: "Check XenoNet's setup",
