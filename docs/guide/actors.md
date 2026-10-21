@@ -145,6 +145,7 @@ Each A2A agent is an actor with its own token and scopes. To connect one:
 What an A2A agent can do:
 
 - **Message a session.** Each message is a task. The agent names the session in the message's metadata as `target`: its id (`claude:…`, `codex:…`), or `repo:<name>` for the sessions in that repo. A message with no target goes to the agent's default target, which you set under its name in the panel once it has called. As for any actor, it reaches only what its scope allows, and without a grant it reaches nothing (see [scopes](live-delivery.md#what-actors-may-see-scopes)).
+- **Reach your other machines.** In a [network](network.md), a session on another machine is named `@laptop:claude:…`, and a grant such as `machine:laptop` lets the agent reach it. That session's reply completes the task, as here.
 - **Get the reply as the task's result.** A task is working once its message is in the session's inbox, and completed when the session replies. The reply is the task's status message and its artifact. A session that writes to the agent without saying which message it answers is answering the agent's oldest open task with it.
 - **Go on in a thread.** A2A's context is one XenoNet thread: the next message in it answers the last one, and goes to whoever answered. Like any thread, it stops six replies deep.
 - **Follow its tasks**, with `GetTask`, `ListTasks`, `SubscribeToTask` and `SendStreamingMessage`, whose updates come as server-sent events. `SendMessage` waits up to 25 seconds for the reply, then answers with the task as it stands.

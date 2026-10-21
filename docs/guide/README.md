@@ -12,7 +12,8 @@ XenoNet is the network for SI (super intelligence) on your machine. It has a bac
 - [OpenCode sessions messaging each other](opencode-messaging.md) has a demo of OpenCode sessions messaging each other by title and by selector, with its measured times, and says how to set it up in your own projects.
 - [Actors](actors.md) covers you at the console, always-on agents and your own programs, which XenoNet shows on a layer of their own.
 - [Remote actors](cloud-assistants.md) covers pairing an agent in the cloud, such as an OpenAI dot, so it can read session statuses here without changing anything, and stopping it.
-- [Other machines](other-machines.md) covers the prototype that shows other machines' XenoNets beside your own.
+- [A network across your machines](network.md) covers joining the machines you use, so their sessions see and message each other and you can act from any of them: starting a network, adding and removing machines, the gateway, and what crosses between machines.
+- [Other machines over SSH](other-machines.md) covers the prototype that shows other machines' XenoNets beside your own, read-only, without a network.
 - [Shared context](shared-context.md) covers Xenolith, the wiki every session shares, and how it shows on the map.
 - [Themes](themes.md) lists the themes that come with XenoNet, and says how to choose one or make your own.
 - [The xenonet command](cli.md) lists what the `xenonet` command does in a terminal.
