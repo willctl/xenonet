@@ -1111,7 +1111,7 @@ impl State for MapState {
             return Ok(json!(xenonet_app::demo::NARRATION));
         }
         let text = if kind == "day" { digest::summary_text(&self.day(), "Today so far") } else { digest::summary_text(&self.digest(since)?, "While the user was away") };
-        crate::narrate::ask_codex(&self.cfg.codex_binary(), &digest::narrate_prompt(&text), None).await.map(Value::String).map_err(err)
+        crate::narrate::ask_codex(&self.cfg.codex_binary(), &digest::narrate_prompt(&text), None, &self.cfg.codex_home).await.map(Value::String).map_err(err)
     }
     async fn project_detection(&self) -> R<Value> {
         self.detection().await
@@ -1161,7 +1161,7 @@ impl State for MapState {
                 Err(e) => return Err(status(if e.status == Some(409) { 409 } else { 502 }, format!("The decision model couldn't sort the folders: {}", e.message))),
             }
         } else {
-            match crate::narrate::ask_codex(&self.cfg.codex_binary(), &classify::picks_prompt(&outline), Some(classify::picks_schema()))
+            match crate::narrate::ask_codex(&self.cfg.codex_binary(), &classify::picks_prompt(&outline), Some(classify::picks_schema()), &self.cfg.codex_home)
                 .await
                 .and_then(|text| classify::parse_picks(&text, &outline))
             {

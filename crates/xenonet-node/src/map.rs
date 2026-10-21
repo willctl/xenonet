@@ -200,6 +200,11 @@ pub fn codex_exec_args(dir: String, out: String, schema_file: Option<String>) ->
     digest::codex_exec_args(&dir, &out, schema_file.as_deref())
 }
 
+#[napi(js_name = "codexRunHome")]
+pub fn codex_run_home(dir: String, user_home: String) -> Result<String> {
+    digest::codex_run_home(&dir, &user_home).map_err(|e| Error::new(Status::GenericFailure, e.to_string()))
+}
+
 // ---------- classify.js ----------
 
 #[napi(js_name = "picksSchema")]

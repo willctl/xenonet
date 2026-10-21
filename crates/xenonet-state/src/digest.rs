@@ -344,17 +344,89 @@ pub fn narrate_prompt(text: &str) -> String {
     format!("Write a short status note for the person running these Claude Code and Codex sessions. In 3 to 6 sentences, say what the sessions finished, what needs their attention first, and anything that looks stuck or risky. Refer to sessions by their titles. Write plainly: short sentences, active voice, everyday words, no em dashes. No headings, bullet points or preamble. Do not run any commands.\n\nActivity data:\n{text}")
 }
 
+/// What XenoNet's own `codex exec` runs leave out, as Xenolith's do: the
+/// tools a narration or a sort has no use for, and everything a Codex home
+/// brings in (plugins, apps, hooks, XenoNet's own among them, memories and
+/// skills). Each goes as `-c features.<name>=false`, which a Codex that
+/// doesn't know the name passes over, where `--disable` would refuse it.
+const FEATURES_OFF: [&str; 16] = [
+    "plugins",
+    "apps",
+    "hooks",
+    "memories",
+    "multi_agent",
+    "goals",
+    "shell_tool",
+    "unified_exec",
+    "view_image",
+    "image_generation",
+    "skill_search",
+    "tool_suggest",
+    "browser_use",
+    "computer_use",
+    "in_app_browser",
+    "sleep_tool",
+];
+
 /// The arguments of one `codex exec` turn: ephemeral, read-only, in its own
 /// folder, its last message written to `out`, in a schema's shape when
-/// there's one.
+/// there's one. It runs in a Codex home of its own (codex_run_home), and
+/// reads no config.toml, rules, AGENTS.md or skills, with no shell, web
+/// search or plugins; sign-in stays in auth.json, never the keychain, so
+/// a token refreshed during the run lands in the file it links to.
 pub fn codex_exec_args(dir: &str, out: &str, schema_file: Option<&str>) -> Vec<String> {
-    let mut args: Vec<String> =
-        ["exec", "--ephemeral", "--skip-git-repo-check", "-s", "read-only", "--color", "never", "-C", dir, "-o", out].iter().map(ToString::to_string).collect();
+    let mut args: Vec<String> = ["exec", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", "-s", "read-only", "--color", "never", "-C", dir]
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    let settings = [
+        "web_search=\"disabled\"",
+        "project_doc_max_bytes=0",
+        "history.persistence=\"none\"",
+        "skills.include_instructions=false",
+        "skills.bundled.enabled=false",
+        "cli_auth_credentials_store=\"file\"",
+    ];
+    for kv in settings.iter().map(ToString::to_string).chain(FEATURES_OFF.iter().map(|f| format!("features.{f}=false"))) {
+        args.extend(["-c".to_string(), kv]);
+    }
+    args.extend(["-o".to_string(), out.to_string()]);
     if let Some(f) = schema_file {
         args.extend(["--output-schema".to_string(), f.to_string()]);
     }
     args.push("-".into());
     args
+}
+
+/// The Codex home of one of XenoNet's own `codex exec` runs, `home` in the
+/// run's folder, so the run loads none of the plugins, hooks, rules, skills
+/// or AGENTS.md in yours (`user_home`, your CODEX_HOME). Only your sign-in
+/// is shared: your auth.json is linked there, never copied, so a token
+/// Codex refreshes during the run is written to yours and yours stays
+/// signed in. A link that can't be made (a Windows account that may not
+/// make one, another volume) leaves the run signed out, which it says.
+pub fn codex_run_home(dir: &str, user_home: &str) -> std::io::Result<String> {
+    let home = std::path::Path::new(dir).join("home");
+    std::fs::create_dir_all(&home)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700))?;
+    }
+    let auth = std::path::Path::new(user_home).join("auth.json");
+    if auth.is_file() {
+        let to = home.join("auth.json");
+        #[cfg(unix)]
+        let linked = std::os::unix::fs::symlink(&auth, &to);
+        #[cfg(windows)]
+        let linked = std::os::windows::fs::symlink_file(&auth, &to);
+        #[cfg(not(any(unix, windows)))]
+        let linked: std::io::Result<()> = Err(std::io::Error::other("no links here"));
+        if linked.is_err() {
+            let _ = std::fs::hard_link(&auth, &to);
+        }
+    }
+    Ok(home.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]
@@ -382,5 +454,60 @@ mod tests {
         );
         assert!(brief.contains("Folder: /p\n\nOriginal goal: Go\n\nFiles it worked on:\n- /p/a\n- /p/b"));
         assert_eq!(long_date(f64::NAN), "Invalid Date");
+    }
+
+    #[test]
+    fn a_codex_run_is_isolated() {
+        let args = codex_exec_args("/t/run", "/t/run/last.txt", Some("/t/run/schema.json"));
+        let after = |flag: &str| args.iter().position(|a| a == flag).map(|i| args[i + 1].as_str());
+        assert_eq!(
+            (after("-C"), after("-o"), after("--output-schema"), args.last().map(String::as_str)),
+            (Some("/t/run"), Some("/t/run/last.txt"), Some("/t/run/schema.json"), Some("-"))
+        );
+        for flag in ["--ephemeral", "--ignore-user-config", "--ignore-rules"] {
+            assert!(args.iter().any(|a| a == flag), "{flag}");
+        }
+        let set: Vec<&str> = args.windows(2).filter(|w| w[0] == "-c").map(|w| w[1].as_str()).collect();
+        for kv in [
+            "features.plugins=false",
+            "features.hooks=false",
+            "features.shell_tool=false",
+            "features.unified_exec=false",
+            "web_search=\"disabled\"",
+            "cli_auth_credentials_store=\"file\"",
+        ] {
+            assert!(set.contains(&kv), "{kv}");
+        }
+        assert!(!args.iter().any(|a| a == "--disable"), "a feature this Codex doesn't know would fail the run");
+        assert!(!codex_exec_args("/t", "/t/o", None).iter().any(|a| a == "--output-schema"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_codex_runs_home_links_your_sign_in_and_nothing_else() {
+        let dir = std::env::temp_dir().join(format!("xenonet-run-home-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let yours = dir.join("yours");
+        std::fs::create_dir_all(&yours).unwrap();
+        std::fs::write(yours.join("auth.json"), "{}").unwrap();
+        std::fs::write(yours.join("hooks.json"), "{}").unwrap();
+        std::fs::write(yours.join("AGENTS.md"), "Always answer in French.").unwrap();
+        let run = dir.join("run");
+        std::fs::create_dir_all(&run).unwrap();
+        let home = codex_run_home(&run.to_string_lossy(), &yours.to_string_lossy()).unwrap();
+        let mut names: Vec<String> = std::fs::read_dir(&home).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        assert_eq!(names, ["auth.json"]);
+        let auth = std::path::Path::new(&home).join("auth.json");
+        assert!(std::fs::symlink_metadata(&auth).unwrap().file_type().is_symlink(), "linked, never copied");
+        assert_eq!(std::fs::canonicalize(&auth).unwrap(), std::fs::canonicalize(yours.join("auth.json")).unwrap());
+        // Someone signed out of Codex: the run's home has no sign-in.
+        let other = dir.join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        let bare = codex_run_home(&other.to_string_lossy(), &dir.join("nobody").to_string_lossy()).unwrap();
+        assert_eq!(std::fs::read_dir(&bare).unwrap().count(), 0);
+        std::fs::remove_dir_all(&run).unwrap();
+        assert!(yours.join("auth.json").is_file(), "taking the run's folder away leaves yours");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

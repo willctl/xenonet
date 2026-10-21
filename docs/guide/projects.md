@@ -41,7 +41,7 @@ For folders with no repo and no sessions, such as a folder of examples, the rule
 - how many sessions ran there
 - XenoNet's own call on it
 
-A repo goes as just its path. Codex gets no other file names, nothing from inside a file, and no transcripts. XenoNet runs `codex exec` only when you press Send.
+A repo goes as just its path. Codex gets no other file names, nothing from inside a file, and no transcripts. XenoNet runs `codex exec` only when you press Send. It runs with your sign-in, in a Codex home of its own, without your plugins, hooks or instructions, and without a shell or web search.
 
 Codex's picks can make a folder a project or a group, but they never hide anything, and your rules win over them. XenoNet keeps the picks with a fingerprint of the folders they were based on. It tells you when those folders have changed since, and it never asks Codex again by itself.
 

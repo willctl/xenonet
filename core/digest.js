@@ -106,18 +106,75 @@ export function narrate(codexBin, text, opts) {
   return askCodex(codexBin, prompt, opts);
 }
 
+// What XenoNet's own `codex exec` runs leave out, as Xenolith's do: the
+// tools a narration or a sort has no use for, and everything a Codex home
+// brings in (plugins, apps, hooks, XenoNet's own among them, memories and
+// skills). Each goes as `-c features.<name>=false`, which a Codex that
+// doesn't know the name passes over, where `--disable` would refuse it.
+const FEATURES_OFF = ["plugins", "apps", "hooks", "memories", "multi_agent", "goals", "shell_tool", "unified_exec", "view_image", "image_generation", "skill_search", "tool_suggest", "browser_use", "computer_use", "in_app_browser", "sleep_tool"];
+
+// The arguments of one `codex exec` turn: ephemeral, read-only, in its own
+// folder, its last message written to `out`, in a schema's shape when
+// there's one. It runs in a Codex home of its own (runHome), and reads no
+// config.toml, rules, AGENTS.md or skills, with no shell, web search or
+// plugins; sign-in stays in auth.json, never the keychain, so a token
+// refreshed during the run lands in the file it links to.
+function codexExecArgs(dir, out, schemaFile = null) {
+  const settings = ['web_search="disabled"', "project_doc_max_bytes=0", 'history.persistence="none"', "skills.include_instructions=false", "skills.bundled.enabled=false", 'cli_auth_credentials_store="file"', ...FEATURES_OFF.map((f) => `features.${f}=false`)];
+  const args = ["exec", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", "-s", "read-only", "--color", "never", "-C", dir, ...settings.flatMap((kv) => ["-c", kv]), "-o", out];
+  if (schemaFile) args.push("--output-schema", schemaFile);
+  return [...args, "-"];
+}
+
+// The Codex home of one of XenoNet's own runs, `home` in the run's folder,
+// so the run loads none of the plugins, hooks, rules, skills or AGENTS.md
+// in yours (`codexHome`, your CODEX_HOME). Only your sign-in is shared:
+// your auth.json is linked there, never copied, so a token Codex refreshes
+// during the run is written to yours and yours stays signed in. A link that
+// can't be made (a Windows account that may not make one, another volume)
+// leaves the run signed out, which it says.
+function runHome(dir, codexHome) {
+  const home = path.join(dir, "home");
+  fs.mkdirSync(home, { recursive: true, mode: 0o700 });
+  const auth = path.join(codexHome, "auth.json");
+  let isFile = false;
+  try {
+    isFile = fs.statSync(auth).isFile();
+  } catch {}
+  if (isFile) {
+    try {
+      fs.symlinkSync(auth, path.join(home, "auth.json"), "file");
+    } catch {
+      try {
+        fs.linkSync(auth, path.join(home, "auth.json"));
+      } catch {}
+    }
+  }
+  return home;
+}
+
+const yourCodexHome = () => path.resolve(process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex"));
+
 // One `codex exec` turn on `prompt`, resolving to its last message. With a
 // JSON Schema in `schema`, Codex answers in that shape (--output-schema).
-export function askCodex(codexBin, prompt, { schema = null, timeoutMs = 120000 } = {}) {
+// `codexHome` is your Codex's home, whose sign-in the run uses.
+export function askCodex(codexBin, prompt, { schema = null, timeoutMs = 120000, codexHome = yourCodexHome() } = {}) {
   return new Promise((resolve, reject) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-codex-"));
     const out = path.join(dir, "last.txt");
-    const args = ["exec", "--ephemeral", "--skip-git-repo-check", "-s", "read-only", "--color", "never", "-C", dir, "-o", out];
+    let schemaFile = null;
     if (schema) {
-      fs.writeFileSync(path.join(dir, "schema.json"), JSON.stringify(schema));
-      args.push("--output-schema", path.join(dir, "schema.json"));
+      schemaFile = path.join(dir, "schema.json");
+      fs.writeFileSync(schemaFile, JSON.stringify(schema));
     }
-    const child = spawn(codexBin, [...args, "-"], { windowsHide: true });
+    let home;
+    try {
+      home = runHome(dir, codexHome);
+    } catch (err) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return reject(err);
+    }
+    const child = spawn(codexBin, codexExecArgs(dir, out, schemaFile), { windowsHide: true, env: { ...process.env, CODEX_HOME: home } });
     const timer = setTimeout(() => child.kill(), timeoutMs);
     let stderr = "";
     child.stderr.on("data", (d) => (stderr += d).length > 4000 && (stderr = stderr.slice(-4000)));

@@ -482,7 +482,7 @@
     "core/digest.js": {
       "rust": "crates/xenonet-state/src/digest.rs",
       "differences": [
-        "askCodex still runs codex exec from the twin (a child process); Rust gives its arguments and narrate's prompt.",
+        "askCodex still runs codex exec from the twin (a child process); Rust gives its arguments, makes the run's own Codex home (codexRunHome) and gives narrate's prompt.",
         "dayLog's date is English as en-US writes it (\"Saturday, October 3\") whatever the system's locale, where Node used the system's.",
         "summarize writes since and until as null when they aren't numbers, where JS gave them back as they came."
       ]
