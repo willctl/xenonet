@@ -1,4 +1,4 @@
-The Claude Code and Codex sessions at work in the last two hours: whether
+The {apps sessions} sessions at work in the last two hours: whether
 each is working, where (project, branch), what it says it's doing, and the
 files it's editing or has claimed. Connected sessions (xenonet connect) can
 see and message each other. The actors at work (xenonet actors) follow,

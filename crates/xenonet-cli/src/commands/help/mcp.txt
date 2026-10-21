@@ -1,5 +1,5 @@
 Runs the xenonet MCP server on stdio: the engine's tools (whoami, peers,
-who_has, send, inbox, claim, release, focus) for Claude Code and Codex. They
+who_has, send, inbox, claim, release, focus) for {apps connect}. They
 start it themselves once you connect them (xenonet connect).
 
 An actor you allowed in XenoNet can start it too, with its token in

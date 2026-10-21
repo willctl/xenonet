@@ -31,9 +31,9 @@ const VERSION: &str = env!("XENONET_VERSION");
 
 fn help() {
     let shown: Vec<_> = COMMANDS.iter().filter(|c| !c.hidden).collect();
-    let usage = |c: &commands::Command| format!("{} {}", c.name, c.args.unwrap_or("")).trim().to_string();
+    let usage = |c: &commands::Command| format!("{} {}", c.name, c.args().unwrap_or_default()).trim().to_string();
     let w = shown.iter().map(|c| usage(c).chars().count()).max().unwrap_or(0);
-    let list: Vec<String> = shown.iter().map(|cmd| format!("  {:<width$}{}", usage(cmd), c::dim(cmd.about), width = w + 2)).collect();
+    let list: Vec<String> = shown.iter().map(|cmd| format!("  {:<width$}{}", usage(cmd), c::dim(cmd.about()), width = w + 2)).collect();
     print(format!(
         "{} {}
 
@@ -69,7 +69,7 @@ fn help() {
 fn run(name: &str, args: &[String], flags: &Flags) -> Done {
     if flags.on("help") {
         let Some(cmd) = find(name) else { return Err(Fail::error(format!("no command \"{name}\". xenonet --help lists them."))) };
-        print(format!("{}{}\n\n{}", c::bold(format!("xenonet {name}")), cmd.args.map_or(String::new(), |a| format!(" {a}")), commands::help(name)));
+        print(format!("{}{}\n\n{}", c::bold(format!("xenonet {name}")), cmd.args().map_or(String::new(), |a| format!(" {a}")), commands::help(name)));
         return Ok(0);
     }
     commands::run(name, args, flags)

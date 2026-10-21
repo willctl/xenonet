@@ -1,3 +1,3 @@
-Passes a Claude Code, Codex or Grok Build hook event (JSON on stdin) to XenoNet and
+Passes a {apps connect or} hook event (JSON on stdin) to XenoNet and
 prints XenoNet's answer for the session. Their settings run it, so you don't
 need to.
