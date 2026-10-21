@@ -94,7 +94,7 @@ impl Mail {
     }
 
     /// A message arrived for `id`: every wait on it ends.
-    fn wake(&self, id: &str) {
+    pub fn wake(&self, id: &str) {
         let list = self.waiters.locked().get(id).cloned().unwrap_or_default();
         for w in list {
             w.wake();
@@ -139,6 +139,10 @@ pub struct Repos {
     cache: Mutex<Vec<(String, f64, Arg)>>,
     running: Mutex<usize>,
     room: Condvar,
+    /// Each folder's repo key across the network (its remote), kept as
+    /// long as its repo; asked only while this machine is in a network or
+    /// for a handoff.
+    remotes: Mutex<Vec<(String, f64, Arg)>>,
 }
 
 const REPO_TTL_MS: f64 = 60e3;
@@ -163,6 +167,30 @@ impl Repos {
             Ok(stdout) => xenonet_engine::engine::parse_repo(&stdout).unwrap_or(Arg::Null),
             Err(_) => Arg::Null,
         }
+    }
+
+    /// A folder's repo key across the network: its repo's remote (origin,
+    /// else the first), normalized; null outside git or with no remote.
+    pub fn remote_key(&self, cwd: &Arg) -> Arg {
+        if !cwd.truthy() {
+            return Arg::Null;
+        }
+        let cwd = text(cwd);
+        let now = now_ms();
+        if let Some((_, _, v)) = self.remotes.locked().iter().find(|(k, at, _)| *k == cwd && now - at < REPO_TTL_MS) {
+            return v.clone();
+        }
+        let args: Vec<String> = ["-C", &cwd, "config", "--get-regexp", r"^remote\..*\.url$"].iter().map(ToString::to_string).collect();
+        let v = match crate::exec::run(&crate::exec::Spec::new("git", &args, 3000)) {
+            Ok(out) => xenonet_engine::network::first_remote(&out).and_then(|u| xenonet_engine::network::repo_key_of(&u)).map_or(Arg::Null, Arg::Text),
+            Err(_) => Arg::Null,
+        };
+        let mut c = self.remotes.locked();
+        c.retain(|(k, at, _)| *k != cwd && now - at < REPO_TTL_MS);
+        c.push((cwd, now, v.clone()));
+        let over = c.len().saturating_sub(REPOS_KEPT);
+        c.drain(..over);
+        v
     }
 
     pub fn of(&self, cwd: &Arg) -> Arg {
@@ -274,12 +302,29 @@ pub fn told(w: &World, name: &str, payload: &Arg) {
     match name {
         "message" => {
             w.emit(From::Engine, "message", json(payload));
-            let m = payload.clone();
+            // A message from another machine to a session that holds them
+            // waits until the session asks.
+            if payload.field("held").truthy() {
+                return;
+            }
+            // Agents on other hosts get it there, through the network.
+            let to = list(payload.field("to"));
+            let mut m = payload.clone();
+            if to.iter().any(xenonet_engine::network::is_remote) {
+                if let Arg::Obj(f) = &mut m {
+                    f.retain(|(k, _)| k != "to");
+                    f.push(("to".into(), Arg::List(to.iter().filter(|r| !xenonet_engine::network::is_remote(r)).cloned().collect())));
+                }
+            }
             // Who is listening now, before the route below runs.
-            let listening: Vec<String> = list(payload.field("to")).iter().map(text).filter(|id| w.mail.listening_has(id)).collect();
-            w.spawn_blocking(move |w| delivery::route(w, &m, &listening));
+            let listening: Vec<String> = list(m.field("to")).iter().map(text).filter(|id| w.mail.listening_has(id)).collect();
+            let here = list(m.field("to"));
+            w.spawn_blocking(move |w| {
+                delivery::route(w, &m, &listening);
+                crate::network::delivered(w, &m);
+            });
             if let Some(wakes) = &w.wakes {
-                for r in list(payload.field("to")) {
+                for r in here {
                     wakes.arrived(w, &r);
                 }
             }
@@ -288,6 +333,7 @@ pub fn told(w: &World, name: &str, payload: &Arg) {
             let agent = payload.field("agent");
             w.mail.seen(&text(&agent));
             delivery::seen(w, &agent, &list(payload.field("ids")));
+            crate::network::seen(w, &agent, &list(payload.field("ids")));
         }
         "contact" if payload.field("via").as_str() == Some("hook") => {
             delivery::contact(w, &payload.field("agent"));
@@ -310,6 +356,7 @@ impl Calls for EngineCalls<'_> {
             ("engine.delivery", m) => delivery::router_call(w, m, &args),
             ("engine.policy", m) => self.policy(m, &args),
             ("engine.repos", "of") => Ok(w.repos.of(&x(0))),
+            ("engine.net", m) => crate::network::call(w, self, m, &args),
             ("engine.listening", "set") => {
                 w.mail.set_listening(&text(&x(0)), crate::js::num(&x(1)));
                 Ok(Arg::Undef)
@@ -386,7 +433,7 @@ impl Calls for EngineCalls<'_> {
                     "null"
                 }
             }
-            "engine.store" | "engine.policy" | "engine.delivery" | "engine.repos" | "engine.listening" => "object",
+            "engine.store" | "engine.policy" | "engine.delivery" | "engine.repos" | "engine.listening" | "engine.net" => "object",
             p => match p.strip_prefix("engine.delivery.") {
                 Some(m) => delivery::router_kind(m),
                 None => match p.strip_prefix("engine.store.") {
@@ -514,6 +561,11 @@ impl Engine for EngineDriver {
         let out = self.run(Some(signal), move |w, c| w.engine.listen(c, &me, &ms)).await;
         watching.abort();
         out.map(some)
+    }
+    async fn handoff(&self, me: &str, args: Value, extra: Option<Value>) -> R<Value> {
+        let me = Arg::text(me);
+        let envelope = extra.as_ref().and_then(|e| e.get("envelope")).cloned().unwrap_or(Value::Null);
+        self.run(None, move |w, c| crate::network::handoff(w, c, &me, &args, &envelope)).await
     }
     fn mark_unseen(&self, me: &str, ids: &Value) -> R<()> {
         crate::store::call(&self.0.store, "markUnseen", &[Arg::text(me), crate::js::arg(ids)]).map(|_| ()).map_err(|t| CoreError::new(t.message))

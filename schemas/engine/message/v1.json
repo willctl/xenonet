@@ -63,6 +63,20 @@
               },
               "seen": {
                 "type": "boolean"
+              },
+              "host": {
+                "description": "For an agent on another host: its host",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "receipt": {
+                "description": "For an agent on another host: what its host last said of it (stored, held, delivered, seen or refused); null before it said",
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -226,14 +240,15 @@
                             "token",
                             "window",
                             "grant",
-                            "gateway"
+                            "gateway",
+                            "host"
                           ]
                         },
                         {
                           "type": "string"
                         }
                       ],
-                      "description": "How it proved who it is"
+                      "description": "How it proved who it is; host: another host of the network signed the frame that brought it"
                     },
                     "process": {
                       "anyOf": [
@@ -300,7 +315,50 @@
                   "description": "The program it came from, with the home folder as ~, when XenoNet saw it"
                 },
                 "transport": {
+                  "type": "string",
+                  "description": "this machine, tunnel, gateway, or network: from another host of a XenoNet network"
+                },
+                "host": {
+                  "description": "For transport network: the host it came from",
                   "type": "string"
+                },
+                "original": {
+                  "description": "For transport network: how the host it came from checked the sender; a weak check stays weak",
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string"
+                    },
+                    "method": {
+                      "type": "string"
+                    },
+                    "strength": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "strong",
+                            "weak"
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "method",
+                    "strength"
+                  ],
+                  "additionalProperties": {}
+                },
+                "hops": {
+                  "description": "For transport network: the messages before it in its thread, across hosts",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
                 },
                 "line": {
                   "type": "string",
@@ -439,6 +497,20 @@
         },
         "envelope": {
           "description": "How XenoNet knew who sent it, as message/envelope/v1 JSON (core/engine/attest.js); null before it kept that",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "host": {
+          "description": "The host of a XenoNet network it came from; null for one made on this machine",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mid": {
+          "description": "Its id across the network (its envelope's mid), for one that went to or came from another host",
           "type": [
             "string",
             "null"

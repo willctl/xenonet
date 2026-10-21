@@ -10,9 +10,10 @@
 //!
 //! Registered actors call the same operations as `actor:<slug>`, with their
 //! token, checked as their own routes are, and held to what you allowed
-//! them: sending needs message-agents (60 messages an hour, 6 of them to a
-//! repo or to all), claiming needs edit-repos. An actor's focus is its
-//! status, an event on the feed, so each counts against its events.
+//! them: sending and handing off need message-agents (60 messages an
+//! hour, 6 of them to a repo or to all), claiming needs edit-repos. An
+//! actor's focus is its status, an event on the feed, so each counts
+//! against its events.
 
 use crate::actor_caller::{rates, retry_after, ActorCaller};
 use crate::borrowed::{attest, is_agent_id, parse_selector, platform, Sender};
@@ -49,12 +50,12 @@ fn scope_of(s: &Value) -> String {
     }
 }
 
-const OPS: [&str; 9] = ["whoami", "peers", "who-has", "send", "inbox", "claim", "release", "focus", "channel"];
+const OPS: [&str; 10] = ["whoami", "peers", "who-has", "send", "inbox", "claim", "release", "focus", "channel", "handoff"];
 
 /// The capability each operation needs from an actor.
 fn needs(op: &str) -> Option<&'static str> {
     match op {
-        "send" => Some("message-agents"),
+        "send" | "handoff" => Some("message-agents"),
         "claim" => Some("edit-repos"),
         _ => None,
     }
@@ -97,6 +98,20 @@ impl EngineRoutes<'_> {
                 e.release(me, paths).await
             }
             "focus" => e.set_focus(me, get(b, "text")).await,
+            "handoff" => {
+                let keys = [
+                    ("accept", "accept"),
+                    ("to", "to"),
+                    ("host", "host"),
+                    ("goal", "goal"),
+                    ("done", "done"),
+                    ("next", "next"),
+                    ("files", "files"),
+                    ("branch", "branch"),
+                    ("commit", "commit"),
+                ];
+                e.handoff(me, pick(b, &keys), extra).await
+            }
             // A Claude Code session's channel waiting for messages.
             "channel" => {
                 let Some(channels) = self.channels.as_ref().filter(|_| me.starts_with("claude:")) else {
@@ -135,7 +150,7 @@ impl EngineRoutes<'_> {
                 return fail(403, "not-allowed", format!("{name} needs the {need} capability, which this actor wasn't allowed"), &[], &json!({}));
             }
         }
-        if name == "send" {
+        if name == "send" || name == "handoff" {
             let wide = matches!(body.get("to").and_then(Value::as_str), Some("repo" | "project" | "all"));
             let mut wait = if wide { caller.take(&format!("a:{slug}|wide"), rates::WIDE, 1.0) } else { 0.0 };
             if wait == 0.0 {
@@ -158,7 +173,7 @@ impl EngineRoutes<'_> {
                 );
             }
         }
-        let extra = (name == "send").then(|| {
+        let extra = (name == "send" || name == "handoff").then(|| {
             let info = self.actors.as_ref().and_then(|a| a.info(&id));
             let name = info.as_ref().and_then(|i| i.get("name")).and_then(Value::as_str).map_or_else(|| slug.clone(), str::to_string);
             let product = info.as_ref().and_then(|i| i.get("product")).and_then(|p| p.get("id")).and_then(Value::as_str).map(str::to_string);
@@ -254,7 +269,7 @@ impl EngineRoutes<'_> {
         let pid = verdict.get("root").and_then(|r| r.get("pid")).filter(|p| !p.is_null()).cloned().unwrap_or_else(|| xenonet_base::json::number(js_number(body.get("pid"))));
         let cwd = body.get("cwd").filter(|c| c.is_string()).cloned().unwrap_or(Value::Null);
         self.engine.touch(&me, json!({ "app": me.split(':').next().unwrap_or(""), "cwd": cwd, "via": "mcp", "pid": pid }))?;
-        let extra = if name == "send" {
+        let extra = if name == "send" || name == "handoff" {
             let title = self.engine.view(&me).await.ok().flatten().and_then(|v| v.get("title").cloned()).and_then(|t| t.as_str().map(str::to_string));
             Some(json!({ "envelope": attest(Sender { id: &me, kind: "agent", name: title, product: None }, "session", &verdict, self.home, self.now, platform()) }))
         } else {
