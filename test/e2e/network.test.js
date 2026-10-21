@@ -58,9 +58,10 @@ async function clickAt(at, what) {
   return s.input({ click: at });
 }
 const network = () => s.driver("network", "read");
-// The state the page reads, checked against network/state/v1.
+// The state the page reads, as the window reads it (the route is the
+// owner's), checked against network/state/v1.
 async function served() {
-  const raw = await s.api("/api/net/state");
+  const raw = await s.driver("network", "served");
   NetworkState.parse(raw);
   return raw;
 }

@@ -570,5 +570,8 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       return isOpen();
     },
     driverState,
+    // GET /api/net/state as this window reads it, with its key: what the
+    // service serves, before the page reads it leniently.
+    served: () => getJson("/api/net/state"),
   };
 }

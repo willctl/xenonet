@@ -478,7 +478,8 @@ export function createDriver(app) {
     // the panel shows the join line, whether it shows masked (never the
     // ticket). "open" shows the panel, "start" and "join" its forms, "add"
     // Add a machine with { host, window } filled in, and "close" closes it;
-    // "refresh" reads it again. Making the line, starting, joining,
+    // "refresh" reads it again, and "served" gives GET /api/net/state as
+    // the window reads it. Making the line, starting, joining,
     // removing, replacing, approving and the setting are yours: clicks where the
     // answer's `at` points, which only the demo and test instances let the
     // control channel make.
@@ -487,12 +488,15 @@ export function createDriver(app) {
       if (!n) throw new Error("This page has no Network panel.");
       if (action === "read") return n.driverState();
       if (action === "refresh") return (await n.refresh(), n.driverState());
+      // The state as the service serves it to this window, which is the
+      // owner's: the window's key goes with it.
+      if (action === "served") return n.served();
       let st;
       if (action === "open") st = await act(() => n.open(), opts);
       else if (action === "start" || action === "join") st = await act(() => n.open(action), opts);
       else if (action === "add") st = await act(() => n.addMachine({ host: arg?.host ?? "", window: !!arg?.window }), opts);
       else if (action === "close") st = await act(() => n.close(), opts);
-      else throw new Error("Use read, refresh, open, start, join, add or close.");
+      else throw new Error("Use read, refresh, served, open, start, join, add or close.");
       return { ...st, network: n.driverState() };
     },
     // The box that messages a session as you (one of this machine's, or
