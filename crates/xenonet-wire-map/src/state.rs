@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use tokio::sync::watch;
-use xenonet_base::apps::tailed_app;
+use xenonet_base::apps::{tailed_or_text, untailed};
 use xenonet_base::paths::path_key;
 use xenonet_base::text::{js_string, truthy};
 use xenonet_service::cores::{CoreError, Runs, State, R};
@@ -336,13 +336,11 @@ impl MapState {
     async fn gather_sessions(&self, app: &str) -> Result<Value, String> {
         match &self.readers {
             Readers::Demo(d) => d.sessions(app).map(Value::Array),
-            Readers::Real { claude } => {
-                if tailed_app(app, "claude") == "codex" {
-                    self.codex.threads().await.map(Value::Array)
-                } else {
-                    claude.sessions().await.map(Value::Array)
-                }
-            }
+            Readers::Real { claude } => match app {
+                "codex" => self.codex.threads().await.map(Value::Array),
+                "claude" => claude.sessions().await.map(Value::Array),
+                _ => Err(format!("XenoNet doesn't list {app}'s sessions")),
+            },
         }
     }
 
@@ -806,15 +804,17 @@ impl MapState {
         let raw = s(node, "rawId").unwrap_or_default().to_string();
         match &self.readers {
             Readers::Demo(d) => d.transcript(&raw),
-            Readers::Real { claude } => {
-                if tailed_app(s(node, "app").unwrap_or_default(), "claude") == "codex" {
+            // A session of an app XenoNet doesn't tail isn't read as Claude
+            // Code's.
+            Readers::Real { claude } => match tailed_or_text(s(node, "app"), None) {
+                Some("codex") => {
                     let id = s(node, "id").unwrap_or_default().to_string();
                     let rollout = self.stats.files(&id).into_iter().next().map(|(f, _)| f);
                     self.codex.read_thread(&raw, cursor, limit, rollout).await
-                } else {
-                    claude.read(&raw, cursor, limit).await
                 }
-            }
+                Some(_) => claude.read(&raw, cursor, limit).await,
+                None => Err(untailed(s(node, "app").unwrap_or_default())),
+            },
         }
     }
 
@@ -1078,8 +1078,11 @@ impl State for MapState {
         if notes.is_null() {
             notes = json!({ "prompts": [], "messages": [], "files": [], "edits": [] });
         }
-        if decide::handoff_needs_transcript(&notes) {
-            let limit = if tailed_app(s(&n, "app").unwrap_or_default(), "claude") == "codex" { 60.0 } else { 80.0 };
+        // A session of an app XenoNet doesn't read the transcripts of is
+        // handed off with what the tailer saw of it.
+        let app = if matches!(self.readers, Readers::Demo(_)) { s(&n, "app") } else { tailed_or_text(s(&n, "app"), None) };
+        if let Some(app) = app.filter(|_| decide::handoff_needs_transcript(&notes)) {
+            let limit = if app == "codex" { 60.0 } else { 80.0 };
             let page = self.transcript(&n, None, limit).await.map_err(err)?;
             notes = decide::handoff_notes(&notes, Some(&page));
         }
@@ -1248,6 +1251,10 @@ impl State for MapState {
         self.stats.stats(id).await.map_err(err)
     }
     async fn read_transcript(&self, node: &Value, cursor: Option<&str>, limit: f64) -> R<Value> {
+        // A session of an app XenoNet doesn't tail is refused, a 400.
+        if matches!(self.readers, Readers::Real { .. }) && tailed_or_text(s(node, "app"), None).is_none() {
+            return Err(status(400, untailed(s(node, "app").unwrap_or_default())));
+        }
         self.transcript(node, cursor, limit).await.map_err(err)
     }
     async fn rename_session(&self, node: Value, title: Value) -> R<Value> {
@@ -1272,7 +1279,8 @@ impl State for MapState {
                 }
             }
             Readers::Real { claude } => {
-                if tailed_app(s(&n, "app").unwrap_or_default(), "claude") == "codex" {
+                // renamable takes Claude Code's sessions and Codex's alone.
+                if s(&n, "app") == Some("codex") {
                     self.codex.rename(s(&n, "rawId").unwrap_or_default(), &name).await.map_err(err)?;
                     saved.push("Codex");
                 } else {

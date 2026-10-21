@@ -335,8 +335,10 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             return Ok(r);
         }
         let body = req.json(4096).await?;
-        // Codex, unless you ask for Claude Code.
-        let app = xenonet_base::apps::tailed_app(body.get("app").and_then(Value::as_str).unwrap_or_default(), "codex");
+        // Codex, unless you ask for Claude Code; another app is refused.
+        let Some(app) = xenonet_base::apps::tailed_or(body.get("app"), Some("codex")) else {
+            return Ok(Reply::error(400, xenonet_base::apps::app_refusal("app", body.get("app").unwrap_or(&Value::Null))));
+        };
         let model = body.get("model").and_then(Value::as_str).filter(|s| model_ok(s)).map(str::to_string);
         let b = cores.diagnostics.bundle().await?;
         let dir = cores.diagnostics.write_look(&b)?;
@@ -420,8 +422,10 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     }
     if route == "/api/handoff" {
         if m == "GET" {
-            // Claude Code, unless you ask for Codex.
-            let target = xenonet_base::apps::tailed_app(req.param("target").unwrap_or_default(), "claude");
+            // Claude Code, unless you ask for Codex; another app is refused.
+            let Some(target) = xenonet_base::apps::tailed_or_text(req.param("target"), Some("claude")) else {
+                return Ok(Reply::error(400, xenonet_base::apps::app_refusal("target", &Value::String(req.param("target").unwrap_or_default().to_string()))));
+            };
             let node = req.param("nodeId").map(str::to_string);
             return Ok(match cores.state.handoff(node.as_deref(), target).await {
                 Ok(v) => {
@@ -589,7 +593,9 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             return Ok(match cores.state.read_transcript(&node, cursor.as_deref(), limit).await {
                 Ok(page) => Reply::json(200, page),
                 Err(e) if e.is_pending() => pending_reply(&e),
-                Err(e) => Reply::error(502, e.message),
+                // A session of an app XenoNet doesn't read the transcripts
+                // of is a 400.
+                Err(e) => Reply::error(e.status.unwrap_or(502), e.message),
             });
         }
     }

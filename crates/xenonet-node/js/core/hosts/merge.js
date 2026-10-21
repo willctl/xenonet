@@ -121,5 +121,6 @@ export function mergeSummary(local, hosts) {
 }
 
 export const qualifyEvent = (name, data, host) => native.hostsQualifyEvent(String(name), data, host, clean, activity);
+export const eventNote = (name, data, host) => native.hostsEventNote(String(name), data, host) ?? null;
 
 export const qualifyEngine = (engine, host) => native.hostsQualifyEngine(engine, host, clean, activity);

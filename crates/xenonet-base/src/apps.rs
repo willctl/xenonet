@@ -123,11 +123,42 @@ pub fn with(capability: &str) -> impl Iterator<Item = &'static App> + '_ {
 }
 
 /// The tailed app (one with `lines`: Claude Code or Codex) `app` names, or
-/// `fallback` for any other. The places that pick between Claude Code and
-/// Codex read an app that's neither as one of the two, and `fallback` says
-/// which, as each always has.
+/// `fallback` for any other. The live tailer and the normalizers still read
+/// an app that's neither as one of the two, and `fallback` says which.
 pub fn tailed_app(app: &str, fallback: &'static str) -> &'static str {
     with("lines").find(|a| a.id == app).map_or(fallback, |a| a.id.as_str())
+}
+
+/// core/apps.js's tailedOr: the tailed app `app` names; `fallback` when it
+/// names none (nothing, null or ""); or None for any other app, which a
+/// command, a route, another host or a reader of transcripts refuses rather
+/// than read it as one of the two.
+pub fn tailed_or(app: Option<&Value>, fallback: Option<&'static str>) -> Option<&'static str> {
+    match app {
+        None | Some(Value::Null) => fallback,
+        Some(Value::String(s)) => tailed_or_text(Some(s), fallback),
+        Some(_) => None,
+    }
+}
+
+/// tailed_or for an app given as text, or not given.
+pub fn tailed_or_text(app: Option<&str>, fallback: Option<&'static str>) -> Option<&'static str> {
+    match app {
+        None | Some("") => fallback,
+        Some(s) => with("lines").find(|a| a.id == s).map(|a| a.id.as_str()),
+    }
+}
+
+/// Why a command or a route refused `app` where `what` takes a tailed app:
+/// `--app takes claude or codex, not "gemini-cli"`.
+pub fn app_refusal(what: &str, app: &Value) -> String {
+    format!("{what} takes {}, not {}", with("lines").map(|a| a.id.as_str()).collect::<Vec<_>>().join(" or "), crate::json::stringify(app, 0))
+}
+
+/// What a reader of transcripts says of an app XenoNet doesn't tail.
+pub fn untailed(id: &str) -> String {
+    let name = app(id).map_or_else(|| crate::json::stringify(&Value::String(id.to_string()), 0), |a| a.name.clone());
+    format!("XenoNet doesn't read {name}'s transcripts")
 }
 
 /// An app's hook events, with their matchers; none for an app XenoNet
@@ -171,6 +202,31 @@ mod tests {
         assert_eq!((edit_tools("claude"), edit_tools("nope")), (&[][..], &[][..]));
         let observed = app("amp").unwrap();
         assert_eq!((observed.numbat.as_slice(), observed.has.is_empty()), (["amp".to_string()].as_slice(), true));
+    }
+
+    #[test]
+    fn an_app_xenonet_doesnt_tail_is_refused_where_one_is_asked_for() {
+        use serde_json::json;
+        for (given, fallback, read) in [
+            (None, Some("codex"), Some("codex")),
+            (Some(json!(null)), Some("codex"), Some("codex")),
+            (Some(json!("")), Some("claude"), Some("claude")),
+            (Some(json!("claude")), Some("codex"), Some("claude")),
+            (Some(json!("codex")), None, Some("codex")),
+            (Some(json!("gemini-cli")), Some("codex"), None),
+            (Some(json!("Codex")), Some("codex"), None),
+            (Some(json!("toString")), Some("codex"), None),
+            (Some(json!(5)), Some("codex"), None),
+            (Some(json!({})), Some("codex"), None),
+            (None, None, None),
+        ] {
+            assert_eq!(tailed_or(given.as_ref(), fallback), read, "{given:?}");
+        }
+        assert_eq!((tailed_or_text(None, Some("codex")), tailed_or_text(Some("opencode"), Some("codex"))), (Some("codex"), None));
+        assert_eq!(app_refusal("--app", &json!("gemini-cli")), r#"--app takes claude or codex, not "gemini-cli""#);
+        assert_eq!(app_refusal("app", &json!(5)), "app takes claude or codex, not 5");
+        assert_eq!(untailed("opencode"), "XenoNet doesn't read OpenCode's transcripts");
+        assert_eq!(untailed("nobody"), r#"XenoNet doesn't read "nobody"'s transcripts"#);
     }
 
     #[test]

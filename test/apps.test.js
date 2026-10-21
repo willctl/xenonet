@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { APPS, APP, TAILED, appsWith, tailedApp } from "../core/apps.js";
+import { APPS, APP, TAILED, appsWith, tailedApp, tailedOr, appRefusal, untailed } from "../core/apps.js";
 import { SESSION_APPS, appOfSession } from "../core/schema/ids.js";
 import { check, explain } from "../core/schema/index.js";
 import { CAPABILITIES } from "../core/schema/app.js";
@@ -81,7 +81,29 @@ test("what the code reads from the registry", async () => {
   assert.deepEqual(["claude", "codex", "opencode"].map((app, i) => live.session(`${app}:x${i}`, app).context.window), [200000, 258400, 200000], "a session's context window, until a line says");
 });
 
-test("the fallbacks: an app that's neither Claude Code nor Codex reads as one of the two, as it always has", () => {
+test("where an app is asked for, one XenoNet doesn't tail is refused, and none given is the default", () => {
+  for (const [given, fallback, read] of [
+    [undefined, "codex", "codex"],
+    [null, "codex", "codex"],
+    ["", "claude", "claude"],
+    ["claude", "codex", "claude"],
+    ["codex", null, "codex"],
+    ["gemini-cli", "codex", null],
+    ["Codex", "codex", null],
+    ["toString", "codex", null],
+    ["__proto__", "codex", null],
+    [5, "codex", null],
+    [{}, "codex", null],
+    [undefined, null, null],
+  ]) assert.equal(tailedOr(given, fallback), read, String(given));
+  for (const a of APPS) assert.equal(tailedOr(a.id, "codex"), TAILED.includes(a.id) ? a.id : null, a.id);
+  assert.equal(appRefusal("--app", "gemini-cli"), '--app takes claude or codex, not "gemini-cli"');
+  assert.equal(appRefusal("app", 5), "app takes claude or codex, not 5");
+  assert.equal(untailed("opencode"), "XenoNet doesn't read OpenCode's transcripts");
+  assert.equal(untailed("nobody"), 'XenoNet doesn\'t read "nobody"\'s transcripts');
+});
+
+test("the fallbacks the live tailer and the normalizers keep: an app that's neither Claude Code nor Codex reads as one of the two", () => {
   const inputs = ["claude", "codex", ...APPS.map((a) => a.id), "Codex", "", "toString", "__proto__", undefined, null, 1, {}];
   for (const x of inputs) {
     assert.equal(tailedApp(x, "claude"), x === "codex" ? "codex" : "claude", String(x));

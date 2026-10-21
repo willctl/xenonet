@@ -5,14 +5,18 @@
 //! answer within 4 seconds, it prints nothing and the agent carries on: it
 //! always exits 0. XENONET_PORT (or --port) says which XenoNet, and
 //! --via=plugin marks the event as the copy XenoNet's plugin for Claude
-//! Code sends, which XenoNet ignores while connect's own hook is there.
+//! Code sends, which XenoNet ignores while connect's own hook is there. An
+//! app XenoNet doesn't tail is refused, quietly: the event goes nowhere, a
+//! line in XenoNet's log says why, and the agent carries on.
 
 use crate::args::Flags;
 use crate::out::Done;
+use crate::sys;
 use std::io::{Read, Write};
 use std::time::Duration;
 use xenonet_base::http;
 use xenonet_base::json::Value;
+use xenonet_base::log::{log_dir, Log, MAX_BYTES};
 use xenonet_base::text::js_number;
 
 pub const HELP: &str = include_str!("help/hook.txt");
@@ -35,11 +39,16 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
     Ok(hook(args.first().map(String::as_str), port_flag.as_deref(), plugin))
 }
 
-pub fn hook(app: Option<&str>, port_flag: Option<&str>, plugin: bool) -> i32 {
-    // Any app but Claude Code is read as Codex.
-    let app = xenonet_base::apps::tailed_app(app.unwrap_or_default(), "codex");
+pub fn hook(given: Option<&str>, port_flag: Option<&str>, plugin: bool) -> i32 {
+    // Codex when no app is named; another app is refused.
+    let app = xenonet_base::apps::tailed_or_text(given, Some("codex"));
     let mut input = Vec::new();
     let _ = std::io::stdin().read_to_end(&mut input);
+    let Some(app) = app else {
+        let why = xenonet_base::apps::app_refusal("xenonet hook", &Value::String(given.unwrap_or_default().to_string()));
+        Log::new(Some(&log_dir(&sys::state_dir(false))), "cli", None, None, &sys::home(), MAX_BYTES).write("warn", "cli.hook", Some(&why), None, None, None, crate::out::now());
+        return 0;
+    };
     // As text, the way the agent wrote it; nothing at all is an empty event.
     let text = String::from_utf8_lossy(&input).into_owned();
     let body = if text.is_empty() { "{}".to_string() } else { text };

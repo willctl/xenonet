@@ -489,6 +489,8 @@ impl HostHub {
                         let info = Self::info_of(rt);
                         if let Some(q) = merge::qualify_event(&ename, &edata, &info, &mut MergeSchemas(&self.parts.schemas)) {
                             self.emit(&ename, q);
+                        } else if let Some(note) = merge::event_note(&ename, &edata, &info) {
+                            self.parts.emitter.log("info", "hosts.unknown-app", &note);
                         }
                     }
                     _ => {}
