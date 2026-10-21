@@ -5,9 +5,10 @@
 //! through here.
 //!
 //! Everything it waits on is asked of whoever runs its tasks (task.rs):
-//! `fetch` (to the instance's server), `alive` and `kill` (the machine's
-//! processes), `command` and `spawn` (starting XenoNet Dev), `exited`, and
-//! `env`. Tests stand in for the machine that way, as they did for the JS.
+//! `fetch` (to the instance's server), `alive`, `kill` and `processes` (the
+//! machine's processes, the last as parse_processes reads ps, or null
+//! where it can't list them), `command` and `spawn` (starting XenoNet
+//! Dev), `exited`, and `env`. Tests stand in for the machine that way, as they did for the JS.
 
 use crate::fsx;
 use crate::instances::{instance, INSTANCES};
@@ -90,6 +91,60 @@ pub async fn lock_holder(io: &Io, dir: &str) -> Result<Value, Failure> {
     let socket = NATIVE.join(&[dir, "SingletonSocket"]);
     let socket = fsx::realpath(&socket).unwrap_or(socket);
     Ok(if connects(&socket) { xenonet_base::json::number(pid) } else { Value::Null })
+}
+
+/// A process of the machine's: its pid, its parent's, and when it started,
+/// which tells it from a later one given the same pid.
+#[derive(Clone, Debug, PartialEq)]
+struct Proc {
+    pid: f64,
+    ppid: f64,
+    start: Value,
+}
+
+/// The machine's processes from `ps -A -o pid=,ppid=,lstart=`, each as
+/// { pid, ppid, start }.
+pub fn parse_processes(text: &str) -> Value {
+    let number = |s: &str| Some(s).filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())).and_then(|s| s.parse::<u64>().ok());
+    let row = |line: &str| -> Option<Value> {
+        let (pid, rest) = line.trim_start().split_once(char::is_whitespace)?;
+        let (ppid, start) = rest.trim_start().split_once(char::is_whitespace)?;
+        let start = start.trim();
+        (!start.is_empty()).then(|| json!({ "pid": number(pid), "ppid": number(ppid), "start": start })).filter(|r| !r["pid"].is_null() && !r["ppid"].is_null())
+    };
+    Value::Array(text.split('\n').filter_map(row).collect())
+}
+
+fn procs_of(v: &Value) -> Option<Vec<Proc>> {
+    let list = v.as_array()?;
+    Some(list.iter().filter_map(|p| Some(Proc { pid: p.get("pid")?.as_f64()?, ppid: p.get("ppid")?.as_f64()?, start: p.get("start").cloned().unwrap_or(Value::Null) })).collect())
+}
+
+/// `pid`'s descendants in a process table: its children, theirs, and so
+/// on, in the table's order a generation at a time.
+fn descendants(table: &[Proc], pid: f64) -> Vec<Proc> {
+    let mut out: Vec<Proc> = Vec::new();
+    let mut next = vec![pid];
+    let mut i = 0;
+    while i < next.len() {
+        let parent = next[i];
+        for p in table.iter().filter(|p| p.ppid == parent) {
+            if p.pid == pid || out.iter().any(|o| o.pid == p.pid) {
+                continue;
+            }
+            out.push(p.clone());
+            next.push(p.pid);
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Whether a hard stop of an instance takes its whole process tree: a test
+/// instance's only, and never on the ports of the installed XenoNet or of
+/// XenoNet Dev's demo and dev instances (47840 to 47842), which are yours.
+pub fn owns_tree(id: &str, port: &Value) -> bool {
+    id == "test" && !(47840.0..=47842.0).contains(&xenonet_base::text::js_number(Some(port)))
 }
 
 /// One instance of XenoNet Dev, and how to reach it.
@@ -419,17 +474,70 @@ impl Instance {
         Ok(())
     }
 
+    // The machine's processes, or None where it can't list them.
+    async fn processes(&self, io: &Io) -> Result<Option<Vec<Proc>>, Failure> {
+        let v = io.ask(json!({ "op": "processes" })).await.map_err(|_| Failure::Rethrow)?;
+        Ok(procs_of(&v))
+    }
+
+    // A test instance's process tree, but the app itself: its helpers (such
+    // as Chromium's GPU and network processes) and the service it started,
+    // with what they started. None for any other instance, or where the
+    // machine can't list its processes.
+    async fn tree_of(&self, io: &Io, pid: Option<f64>) -> Result<Option<Vec<Proc>>, Failure> {
+        let Some(pid) = pid.filter(|_| owns_tree(&self.id, &self.port)) else { return Ok(None) };
+        Ok(self.processes(io).await?.map(|t| descendants(&t, pid)))
+    }
+
+    // The pids of a tree taken earlier that are still there, each the same
+    // process (started when it was), with the app's descendants now while
+    // it's there.
+    async fn left_of(&self, io: &Io, pid: f64, before: &[Proc]) -> Result<Vec<f64>, Failure> {
+        let table = self.processes(io).await?.unwrap_or_default();
+        let mut all = before.to_vec();
+        if self.alive(io, pid).await? {
+            all.extend(descendants(&table, pid));
+        }
+        let mut left: Vec<f64> = Vec::new();
+        for p in all {
+            if p.pid != pid && !left.contains(&p.pid) && table.iter().any(|q| q.pid == p.pid && q.start == p.start) {
+                left.push(p.pid);
+            }
+        }
+        Ok(left)
+    }
+
+    // Kills each of `pids`, and whether all have gone within 5 seconds.
+    async fn killed(&self, io: &Io, pids: &[f64]) -> Result<bool, Failure> {
+        for p in pids {
+            self.kill(io, *p, "SIGKILL").await?;
+        }
+        let until = now_ms() + 5000.0;
+        for p in pids {
+            if !self.gone(io, *p, (until - now_ms()).max(0.0)).await? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     /// Quits the instance, and returns once its process has exited and its
     /// server has let go of the port. A process still there `timeout` ms
-    /// after its server went is stuck on its way out and is killed.
+    /// after its server went is stuck on its way out and is killed. For a
+    /// test instance, that takes its whole tree, as it stood before it was
+    /// told to quit and as it stands then: killed alone, the app would
+    /// leave its GPU and network processes and its service running
+    /// (`ended`).
     pub async fn quit(&self, io: &Io, timeout: f64) -> Result<Value, Failure> {
         let running = self.ping(io).await?;
         if running.is_null() {
             return Ok(json!({ "quit": false, "running": false }));
         }
         let pid = raw(Some(&running), "pid").and_then(Value::as_f64).filter(|p| p.fract() == 0.0);
+        let tree = self.tree_of(io, pid).await?;
         let _ = self.call(io, &json!({ "op": "quit" }), 0.0).await;
         let until = now_ms() + timeout;
+        let pids = |l: &[f64]| Value::Array(l.iter().map(|p| xenonet_base::json::number(*p)).collect());
         loop {
             let state = self.probe(io).await;
             let alive = match pid {
@@ -443,16 +551,30 @@ impl Instance {
                 if state == "up" {
                     return Err(Failure::msg(format!("{} didn't quit in {}s", self.name, number_string(timeout / 1000.0))));
                 }
+                let left = match &tree {
+                    Some(t) => self.left_of(io, pid.unwrap_or(f64::NAN), t).await?,
+                    None => Vec::new(),
+                };
                 if !alive {
+                    // The app has gone, and what still holds the port may be
+                    // the service it started, stuck on its way out.
+                    if !left.is_empty() && self.killed(io, &left).await? && self.probe(io).await == "down" {
+                        return Ok(json!({ "quit": true, "ended": pids(&left) }));
+                    }
                     return Err(Failure::msg(format!("{} quit, but something on port {} still doesn't answer", self.name, self.port_text())));
                 }
                 let pid = pid.unwrap_or(f64::NAN);
-                self.kill(io, pid, "SIGKILL").await?;
-                if self.gone(io, pid, 5000.0).await? {
-                    return Ok(json!({ "quit": true, "killed": xenonet_base::json::number(pid) }));
+                let all: Vec<f64> = std::iter::once(pid).chain(left.iter().copied()).collect();
+                if self.killed(io, &all).await? {
+                    let mut out = json!({ "quit": true, "killed": xenonet_base::json::number(pid) });
+                    if !left.is_empty() {
+                        out["ended"] = pids(&left);
+                    }
+                    return Ok(out);
                 }
+                let others = if left.is_empty() { String::new() } else { format!(" or one of {}", left.iter().map(|p| number_string(*p)).collect::<Vec<_>>().join(", ")) };
                 return Err(Failure::msg(format!(
-                    "{} didn't quit in {}s, and process {} is still there after kill -9",
+                    "{} didn't quit in {}s, and process {}{others} is still there after kill -9",
                     self.name,
                     number_string(timeout / 1000.0),
                     number_string(pid)
@@ -570,5 +692,61 @@ mod tests {
         let out = run_with(t, |_| Err(json!({ "message": "fetch failed", "causeCode": "ECONNREFUSED" })));
         assert_eq!(out, Err(Failure::msg("XenoNet Dev (demo) isn't running (nothing on port 5999); launch it first")));
         assert_eq!(Instance::new("prod", &opts()).unwrap_err(), "no instance \"prod\"; there's dev, demo, test, film, installed, showcase");
+    }
+
+    #[test]
+    fn whose_process_trees_a_hard_stop_takes() {
+        assert!(owns_tree("test", &json!(48011)) && owns_tree("test", &json!("47843")));
+        for port in [47840, 47841, 47842] {
+            assert!(!owns_tree("test", &json!(port)), "{port} is yours");
+        }
+        assert!(!owns_tree("dev", &json!(48011)) && !owns_tree("demo", &json!(48011)) && !owns_tree("film", &json!(48011)));
+
+        let ps = "  501     1 Mon Oct 19 09:00:00 2026\n  600   501 Mon Oct 19 09:00:01 2026\n  601   501 Mon Oct 19 09:00:01 2026\n  700   600 Mon Oct 19 09:00:02 2026\n  800     1 Mon Oct 19 09:00:03 2026\nnot a row\n   9  x Mon\n";
+        let table = procs_of(&parse_processes(ps)).unwrap();
+        assert_eq!(table.len(), 5);
+        assert_eq!(table[1], Proc { pid: 600.0, ppid: 501.0, start: json!("Mon Oct 19 09:00:01 2026") });
+        let tree: Vec<f64> = descendants(&table, 501.0).iter().map(|p| p.pid).collect();
+        assert_eq!(tree, [600.0, 601.0, 700.0], "children first, then theirs; never another's");
+        assert_eq!(descendants(&table, 800.0), []);
+        assert_eq!(procs_of(&Value::Null), None);
+    }
+
+    // A test instance stuck on its way out, on a made-up machine: the app
+    // (501) with a helper (600) and the service it started (601), which
+    // runs a shell (700); 800 is another app's.
+    #[test]
+    fn a_test_instances_hard_stop_takes_its_tree() {
+        use std::cell::RefCell;
+        let i = Instance::new("test", &opts()).unwrap();
+        let t = Task::new(move |io| async move { i.quit(&io, 0.0).await });
+        let table = RefCell::new(vec![(501u64, 1u64), (600, 501), (601, 501), (700, 601), (800, 1)]);
+        let killed = RefCell::new(Vec::new());
+        // Its server answers until it's told to quit, then is gone; the app
+        // stays.
+        let quitting = RefCell::new(false);
+        let out = run_with(t, |q| {
+            let pid = q["pid"].as_f64().unwrap_or(0.0) as u64;
+            match q["op"].as_str().unwrap_or("") {
+                "fetch" if q["url"].as_str().unwrap_or("").ends_with("/api/dev/control") => {
+                    *quitting.borrow_mut() |= q["body"].as_str().unwrap_or("").contains("\"quit\"");
+                    Ok(json!({ "ok": true, "status": 200, "body": { "instance": "test", "pid": 501 } }))
+                }
+                "fetch" if !*quitting.borrow() => Ok(json!({ "ok": true, "status": 200 })),
+                "fetch" => Err(json!({ "message": "fetch failed", "causeCode": "ECONNREFUSED" })),
+                "processes" => Ok(Value::Array(table.borrow().iter().map(|(p, pp)| json!({ "pid": p, "ppid": pp, "start": format!("at {p}") })).collect())),
+                "alive" => Ok(json!(table.borrow().iter().any(|(p, _)| *p == pid))),
+                "kill" => {
+                    killed.borrow_mut().push((pid, q["signal"].as_str().unwrap_or("").to_string()));
+                    table.borrow_mut().retain(|(p, _)| *p != pid);
+                    Ok(Value::Null)
+                }
+                _ => Ok(Value::Null),
+            }
+        });
+        assert_eq!(out, Ok(json!({ "quit": true, "killed": 501, "ended": [600, 601, 700] })));
+        assert_eq!(killed.borrow().iter().map(|(p, _)| *p).collect::<Vec<_>>(), [501, 600, 601, 700]);
+        assert!(killed.borrow().iter().all(|(_, s)| s == "SIGKILL"));
+        assert_eq!(*table.borrow(), [(800, 1)], "another app's process is left alone");
     }
 }

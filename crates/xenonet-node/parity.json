@@ -400,7 +400,7 @@
     "core/control.js": {
       "rust": "crates/xenonet-app/src/control.rs, on the task bridge in crates/xenonet-app/src/task.rs",
       "differences": [
-        "Each method is a Rust task (async Rust whose awaits the twin answers): fetch to the instance's server, the system's alive, kill, command and spawn, and the environment are still done by JS, with the system given.",
+        "Each method is a Rust task (async Rust whose awaits the twin answers): fetch to the instance's server, the system's alive, kill, processes, command and spawn, and the environment are still done by JS, with the system given. The twin's own processes runs ps and has Rust read its rows (appParseProcesses).",
         "lockHolder reads the lock's link and connects to its socket from Rust, synchronously (a Unix socket answers at once or not at all); JS gave the connection a second.",
         "electronCommand still finds npm's Electron with Node's module resolution; whether XenoNet Dev.app is this checkout's is the Rust's.",
         "A port given as null is taken as not given; JS used null."

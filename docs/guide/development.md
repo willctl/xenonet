@@ -205,7 +205,7 @@ A demo or test copy can get stuck, holding the instance's lock without answering
 
 `launch:restart`, or `restart` on the tool, quits a running copy first. It also ends a stuck copy of any instance, `dev` included.
 
-`quit` returns once XenoNet Dev has exited.
+`quit` returns once XenoNet Dev has exited. A copy still there 20 seconds after its server went is killed. For the `test` instance, that takes its whole process tree: the app, its GPU and network processes, and the service it started, with what they started. Left behind, these keep running, and the GPU process can keep a core busy. The answer lists them as `ended`. The tree is read with `ps`, so this is on macOS and Linux. Other instances, and anything on the ports 47840 to 47842, never get this: there `quit` kills the app's process alone, as before.
 
 ### How the control channel works
 
