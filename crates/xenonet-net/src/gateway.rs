@@ -351,6 +351,9 @@ impl Gateway {
         let host = signed.host.clone();
         let asked = req.query("after").and_then(|a| a.parse::<u64>().ok()).unwrap_or(0);
         let after = if req.query("epoch").as_deref() == Some(self.epoch.as_str()) { asked } else { 0 };
+        // Never past what was given out: a host that says it has more would
+        // wait for frames that never come.
+        let after = after.min(self.store.locked().last_seq(&host)?);
         if after > 0 {
             self.store.locked().ack(&host, after)?;
         }
@@ -418,6 +421,13 @@ impl Gateway {
                 if full {
                     continue;
                 }
+                // A host removed while its stream was open has had its
+                // `removed` frame: the stream ends.
+                let Some(n) = node.upgrade() else { break };
+                if n.roster().view_ref().is_none_or(|v| v.member(&host).is_none()) {
+                    break;
+                }
+                drop(n);
                 tokio::select! {
                     () = &mut notified => {}
                     () = tokio::time::sleep_until(next_ping) => {
@@ -634,7 +644,16 @@ impl Gateway {
         let body = json!({ "entries": [entry.to_json()] });
         let mut to: Vec<String> = view.members.keys().filter(|h| **h != me.host).cloned().collect();
         if entry.op == Op::Remove {
-            self.store.locked().forget_host(&entry.host.id)?;
+            // What waited for the removed host goes, and it's told, signed,
+            // on its stream if it has one open.
+            let gone = &entry.host.id;
+            let store = self.store.locked();
+            store.forget_host(gone)?;
+            let by: Vec<&str> = entry.signers.iter().map(|s| s.host.as_str()).collect();
+            let f = Self::frame(&me, "removed", gone, now as i64, &json!({ "network": me.network, "host": gone, "by": by, "at": entry.at, "n": entry.n }))?;
+            store.enqueue(Item { host: gone, id: &f.id, kind: "removed", sender: "", line: f.line().trim_end() }, now as i64, &caps)?;
+            drop(store);
+            self.wake(gone);
         }
         to.sort();
         for host in to {

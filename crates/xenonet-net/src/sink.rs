@@ -3,9 +3,11 @@
 //! then, and in a service without the engine, a `LogSink` writes each call
 //! to the log, so nothing that arrives is lost silently.
 
-use std::sync::{Arc, RwLock};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant};
 use xenonet_base::network::{Incoming, Sink};
-use xenonet_base::sync::ReadWrite;
+use xenonet_base::sync::{Locked, ReadWrite};
 
 pub type LogFn = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
@@ -44,13 +46,29 @@ impl Sink for SinkSlot {
     }
 }
 
-/// A sink that only logs: what each call was, never a body's text.
+/// A sink that only logs: what each call was, never a body's text, and
+/// what arrives at most once a minute for each kind and host.
 pub struct LogSink {
-    pub log: LogFn,
+    log: LogFn,
+    said: Mutex<HashMap<String, Instant>>,
+}
+
+impl LogSink {
+    pub fn new(log: LogFn) -> LogSink {
+        LogSink { log, said: Mutex::new(HashMap::new()) }
+    }
 }
 
 impl Sink for LogSink {
     fn receive(&self, incoming: Incoming) {
+        let k = format!("{}|{}", incoming.kind.as_str(), incoming.from);
+        {
+            let mut said = self.said.locked();
+            if said.get(&k).is_some_and(|t| t.elapsed() < Duration::from_secs(60)) {
+                return;
+            }
+            said.insert(k, Instant::now());
+        }
         (self.log)("net.receive", &format!("a {} frame from {}, with no engine to take it", incoming.kind.as_str(), incoming.from));
     }
     fn linked(&self, up: bool) {
