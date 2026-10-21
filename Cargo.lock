@@ -2419,6 +2419,7 @@ dependencies = [
  "hyper-util",
  "portable-pty",
  "reqwest",
+ "rusqlite",
  "rustls",
  "serde_json",
  "tokio",
