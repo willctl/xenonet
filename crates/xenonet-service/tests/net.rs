@@ -4,7 +4,7 @@
 // hosts on other machines would. Their /api/net routes are called as the
 // window calls them, and a test Sink stands in for the engine.
 //
-// Each test has its own ports among 48113-48119 (48112 is one nothing
+// Each test has its own ports among 48113-48120 (48112 is one nothing
 // answers on), never 47840-47842. NET_TEST_LOG=1 prints what each host logs.
 
 #![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
@@ -333,6 +333,10 @@ async fn a_full_queue_gives_a_gap_and_a_removed_host_is_refused() {
     // The founder can't be removed, from anywhere.
     let (s, v) = b.call("POST", "/api/net/remove", json!({ "host": "studio" }), true).await;
     assert_eq!(s, 403, "{v}");
+    // studio founded the network, so it leaves only with --force.
+    let (s, v) = a.call("POST", "/api/net/leave", json!({}), true).await;
+    assert_eq!((s, v["code"].clone()), (409, json!("needed")), "{v}");
+    assert!(v["error"].as_str().unwrap().contains("--force"), "{v}");
     // desk leaves: it forgets the network, its files with it (its store
     // closed first, as Windows deletes no file that's open).
     let (s, v) = c.call("POST", "/api/net/leave", json!({}), true).await;
@@ -496,6 +500,11 @@ async fn the_gateway_moves_by_hand_and_a_host_that_missed_it_follows() {
     assert_eq!(st["gateway"]["keyId"], c.state().await["self"]["keyId"]);
     b.send("studio", Kind::Message, "followed");
     until("laptop's message at studio", 10, || a.sink.texts("message").contains(&"followed".to_string())).await;
+    // desk is the gateway now, so it leaves only with --force, or once
+    // the gateway has moved on.
+    let (s, v) = c.call("POST", "/api/net/leave", json!({}), true).await;
+    assert_eq!(s, 409, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("Move the gateway first, or leave with --force"), "{v}");
 }
 
 /// One HTTP/1.1 request by hand: its status.
@@ -604,4 +613,34 @@ async fn the_lan_door_checks_its_host_and_bad_tickets_get_404() {
     // A ticket from a terminal is macOS's alone, and the person's there.
     let r = api(&ctx, Req::fake("POST", "/api/net/ticket", &[], Some("{\"host\":\"x1\"}"))).await.unwrap();
     assert_eq!(r.status, 403);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_founder_alone_leaves_only_with_force_and_its_lan_door_closes() {
+    // As `xenonet net leave` does it from the person's terminal
+    // (crates/xenonet-cli/tests/net.rs, which only gets this far where
+    // it isn't run from under an agent).
+    let port = 48120;
+    let a = Host::new("alone", "studio", 0.0, Caps::default()).await;
+    let (s, v) = a.call("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{port}") }), true).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!((v["self"]["founder"].clone(), v["self"]["gateway"].clone()), (json!(true), json!(true)));
+    let host = format!("127.0.0.1:{port}");
+    let door = move || raw(port, "GET", "/net/v1/roster", &[("Host", host.as_str())], "");
+    let unsigned = door.clone();
+    assert_eq!(tokio::task::spawn_blocking(unsigned).await.unwrap(), 401, "the LAN door is open");
+    // Alone, the founder's leaving ends the network: --force, or nothing.
+    let (s, v) = a.call("POST", "/api/net/leave", json!({}), true).await;
+    assert_eq!((s, v["code"].clone()), (409, json!("needed")), "{v}");
+    let why = v["error"].as_str().unwrap();
+    assert!(why.contains("--force") && why.contains("the network ends"), "{why}");
+    assert_eq!(a.state().await["network"]["name"], "home", "still in it");
+    assert_eq!(tokio::task::spawn_blocking(door).await.unwrap(), 401, "the LAN door is still open");
+    let (s, v) = a.call("POST", "/api/net/leave", json!({ "force": true }), true).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!((v["left"].clone(), v["removed"].clone()), (json!("home"), json!(false)));
+    assert_eq!(a.state().await["network"], Value::Null);
+    let files = a.dir.join("state").join("network");
+    assert!(["network.json", "host.key", "net.sqlite", "gateway.sqlite"].iter().all(|f| !files.join(f).exists()), "{}", files.display());
+    until("the LAN door closed", 10, || std::net::TcpStream::connect(("127.0.0.1", port)).is_err()).await;
 }
