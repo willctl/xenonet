@@ -35,6 +35,7 @@ const xenonet = {
     resource: "#ff7ad9",
     claude: "#ff9d5c",
     codex: "#5fe1ff",
+    grok: "#c6ff3a",
     lineage: "#ffd76a",
     collab: "#ff5fd2",
     collision: "#ff3b6b",
@@ -155,6 +156,7 @@ const THEMES = {
       resource: "#ffd27a",
       claude: "#ffd27a",
       codex: "#6dff8a",
+      grok: "#e45cff",
       lineage: "#ffe08a",
       collab: "#ff9a5a",
       collision: "#ff4a3a",
@@ -226,6 +228,7 @@ const THEMES = {
       resource: "#ff8ac0",
       claude: "#ff7a3a",
       codex: "#5aa8ff",
+      grok: "#c25cff",
       lineage: "#ffd76a",
       collab: "#ff7aa0",
       collision: "#ff3a3a",
@@ -294,6 +297,7 @@ const THEMES = {
       resource: "#ff6ad0",
       claude: "#ff9a2a",
       codex: "#9cff4a",
+      grok: "#3dffb0",
       lineage: "#ffd23a",
       collab: "#ff4fd8",
       collision: "#ff1a4a",
@@ -364,6 +368,7 @@ const THEMES = {
       resource: "#ff6aa8",
       claude: "#ff6a2a",
       codex: "#7fd4ff",
+      grok: "#5cff5c",
       lineage: "#ffd166",
       collab: "#ff5fc0",
       collision: "#ff2aa0",
@@ -449,6 +454,7 @@ const THEMES = {
       resource: "#e8a8ff",
       claude: "#ffb59a",
       codex: "#8affd6",
+      grok: "#9dff7a",
       lineage: "#efe6bf",
       collab: "#ff9ad8",
       collision: "#ff4f6f",
@@ -532,6 +538,7 @@ const THEMES = {
       resource: "#ff9a6a",
       claude: "#ff7ab6",
       codex: "#9cff6a",
+      grok: "#c733ff",
       lineage: "#f2d06a",
       collab: "#e07aff",
       collision: "#ff3a6a",
@@ -617,6 +624,7 @@ const THEMES = {
       // Okabe and Ito's colors, which stay apart for color-blind eyes.
       claude: "#e69f00",
       codex: "#56b4e9",
+      grok: "#c84dff",
       lineage: "#dddddd",
       collab: "#0072b2",
       collision: "#cc79a7",
@@ -868,7 +876,7 @@ export function colorDistance(a, b) {
 // theme. Built-in themes pick five that need no swapping.
 const RINGS = xenonet.identities;
 const RING_SPARES = ["#c3f584", "#f5a3ff", "#9fd0ff", "#ffc29e", "#d6c2ff", "#a8ffd1", "#ffe0f0", "#e2f5a8", "#ffffff"];
-const MEANINGFUL = ["project", "satellite", "claude", "codex", "gold", "pressure", "attention", "danger", "collision", "stuck", "lineage"];
+const MEANINGFUL = ["project", "satellite", "claude", "codex", "grok", "gold", "pressure", "attention", "danger", "collision", "stuck", "lineage"];
 const CLEAR_OF_MEANING = 20, CLEAR_OF_RINGS = 15;
 export function ringColors(theme) {
   const meaning = MEANINGFUL.map((k) => theme.colors?.[k]).filter(isHex).map(sixDigits);

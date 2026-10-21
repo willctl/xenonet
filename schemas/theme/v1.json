@@ -112,6 +112,11 @@
           "pattern": "^#[0-9a-fA-F]{6}$",
           "description": "A color, #rrggbb"
         },
+        "grok": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
         "lineage": {
           "type": "string",
           "pattern": "^#[0-9a-fA-F]{6}$",

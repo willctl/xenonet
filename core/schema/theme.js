@@ -26,7 +26,7 @@ export const Theme = define(
 
     colors: colors([
       "bg", "surface", "surfaceLow", "text", "muted", "dim", "bright", "accent",
-      "core", "project", "satellite", "native", "zone", "resource", "claude", "codex",
+      "core", "project", "satellite", "native", "zone", "resource", "claude", "codex", "grok",
       "lineage", "collab", "collision", "sync", "message", "wiki", "attention", "review",
       "stuck", "pressure", "danger", "gold", "archived", "label",
       "actor", "human",
