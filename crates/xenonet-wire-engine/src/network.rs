@@ -52,6 +52,9 @@ const MAX_HOPS: f64 = 6.0;
 pub struct NetState {
     out: Mutex<Out>,
     ticker: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Held while a body from another host is taken, one at a time, so a
+    /// repeat that arrives beside its first copy is still seen as one.
+    taking: Mutex<()>,
 }
 
 #[derive(Default)]
@@ -210,6 +213,7 @@ pub fn receive(w: &World, incoming: Incoming) {
         return;
     }
     let Incoming { from, kind, body, from_window_host, .. } = incoming;
+    let _one = w.net.taking.locked();
     let done = match kind {
         Kind::Presence => presence_in(w, &from, &body),
         Kind::Claims => claims_in(w, &from, &body),
