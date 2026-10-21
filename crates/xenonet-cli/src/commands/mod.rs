@@ -25,6 +25,7 @@ pub mod live;
 pub mod logs;
 pub mod mcp;
 pub mod messages;
+pub mod net;
 pub mod refusals;
 pub mod relay;
 pub mod root;
@@ -74,6 +75,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("spend", "About what today's work would cost at API prices, by app and by actor", None),
     cmd("messages", "What sessions and actors said to each other today", None),
     cmd("root", "The projects folder XenoNet reads, or read another", Some("[folder]")),
+    cmd("net", "One network across your machines: create or join one, add a machine, see the hosts", Some("[create|join|status|hosts|add-machine|remove|leave|set|gateway]")),
     cmd("hosts", "Other machines' XenoNets on this map, over SSH (a prototype, with XENONET_HOSTS=1)", Some("[self|add|remove|test]")),
     cmd("search", "Search every Claude Code and Codex transcript", Some("<words>")),
     cmd("theme", "The console's look and sound: list, switch, or make your own", Some("[id]")),
@@ -124,6 +126,7 @@ pub fn help(name: &str) -> &'static str {
         "logs" => logs::HELP,
         "mcp" => mcp::HELP,
         "messages" => messages::HELP,
+        "net" => net::HELP,
         "refusals" => refusals::HELP,
         "relay" => relay::HELP,
         "root" => root::HELP,
@@ -165,6 +168,7 @@ pub fn run(name: &str, args: &[String], flags: &Flags) -> Done {
         "logs" => logs::run(args, flags),
         "mcp" => mcp::run(args, flags),
         "messages" => messages::run(args, flags),
+        "net" => net::run(args, flags),
         "refusals" => refusals::run(args, flags),
         "relay" => relay::run(args, flags),
         "root" => root::run(args, flags),

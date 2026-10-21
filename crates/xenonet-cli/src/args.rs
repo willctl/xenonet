@@ -61,6 +61,8 @@ const TAKES_VALUE: &[&str] = &[
     "host",
     // xenonet actor listen
     "exec",
+    // xenonet net
+    "lan",
 ];
 const REPEATS: &[&str] = &["add", "remove", "paths"];
 
