@@ -7,7 +7,7 @@ use crate::js::{encode, num, on, str, t};
 use crate::out::{ago, c, json, now, print, table, Done, Fail, Layout};
 use crate::reach::need;
 use serde_json::Value;
-use xenonet_base::paths::{normalize_posix, path_style, PathStyle};
+use xenonet_base::nodepath::style_of;
 
 pub const HELP: &str = include_str!("help/who.txt");
 
@@ -21,45 +21,9 @@ fn how_words(how: &str) -> String {
 }
 
 /// pathStyle(p).resolve(p): a path in its own syntax made whole. A Windows
-/// path read on another system keeps its drive and is only tidied.
+/// path read on another system keeps its drive.
 pub fn resolve_in_style(p: &str) -> String {
-    match path_style(p) {
-        PathStyle::Posix if !cfg!(windows) => crate::sys::resolve(p),
-        PathStyle::Posix => {
-            let n = normalize_posix(p);
-            if n.len() > 1 {
-                n.trim_end_matches('/').to_string()
-            } else {
-                n
-            }
-        }
-        PathStyle::Windows if !cfg!(windows) => win32_normalize(p),
-        _ => crate::sys::resolve(p),
-    }
-}
-
-// path.win32.normalize, for a path with a drive or a share: backslashes,
-// "." and ".." worked out, no slash at the end.
-fn win32_normalize(p: &str) -> String {
-    let s = p.replace('/', "\\");
-    let (root, rest) = if s.len() >= 2 && s.as_bytes()[1] == b':' {
-        (format!("{}\\", &s[..2]), s[2..].to_string())
-    } else if let Some(r) = s.strip_prefix("\\\\") {
-        ("\\\\".to_string(), r.to_string())
-    } else {
-        (String::new(), s.clone())
-    };
-    let mut parts: Vec<&str> = Vec::new();
-    for part in rest.split('\\') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            x => parts.push(x),
-        }
-    }
-    format!("{root}{}", parts.join("\\"))
+    style_of(p).resolve(&[p])
 }
 
 pub fn run(args: &[String], flags: &Flags) -> Done {

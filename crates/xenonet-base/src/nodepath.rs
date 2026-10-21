@@ -1071,6 +1071,12 @@ mod tests {
         assert_eq!(Posix.relative("/a/b/c", "/a/d"), "../../d");
         assert_eq!(Posix.relative("/a/b", "/a/b/c/d"), "c/d");
         assert_eq!(Posix.relative("/a", "/a"), "");
+        assert_eq!(Posix.relative("/p/x", "/q"), "../../q");
+        assert_eq!(Posix.relative("/", "/q"), "q");
+        assert_eq!(Posix.resolve_from(&["/p/a", "../b"], "/x"), "/p/b");
+        assert_eq!(Posix.resolve_from(&["/w/atlas/../atlas/src/"], "/x"), "/w/atlas/src");
+        assert_eq!(Posix.dirname("/a//b"), "/a/");
+        assert_eq!(Posix.dirname(""), ".");
         assert!(Posix.is_absolute("/x") && !Posix.is_absolute("x"));
     }
 
@@ -1149,6 +1155,7 @@ mod tests {
             assert_eq!(Win32.resolve_from(&["C:\\base", p], "/cwd"), *r, "resolve {p}");
         }
         assert_eq!(Win32.resolve_from(&["C:/w/atlas/"], "/cwd"), "C:\\w\\atlas");
+        assert_eq!(Win32.resolve_from(&["C:\\w\\x\\..\\y\\"], "/cwd"), "C:\\w\\y");
         assert_eq!(Win32.basename("C:\\", None), "");
         assert!(Win32.is_absolute("/w") && !Win32.is_absolute("C:"));
     }

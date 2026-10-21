@@ -1234,12 +1234,12 @@ pub fn repo_config_file(dir: &str) -> Option<String> {
     if std::fs::metadata(&git_dir).ok()?.is_file() {
         let text = String::from_utf8_lossy(&std::fs::read(&git_dir).ok()?).into_owned();
         let to = jsre::rest_after(&text, "gitdir:")?;
-        git_dir = jsre::resolve_from(dir, js_trim(&to));
+        git_dir = xenonet_base::nodepath::resolve(&[dir, js_trim(&to)]);
     }
     let common_file = paths::join(&git_dir, "commondir");
     let common = if std::path::Path::new(&common_file).exists() { Some(js_trim(&String::from_utf8_lossy(&std::fs::read(&common_file).ok()?)).to_string()) } else { None };
     let base = match common.filter(|c| !c.is_empty()) {
-        Some(c) => jsre::resolve_from(&git_dir, &c),
+        Some(c) => xenonet_base::nodepath::resolve(&[git_dir.as_str(), c.as_str()]),
         None => git_dir,
     };
     Some(paths::join(&base, "config"))

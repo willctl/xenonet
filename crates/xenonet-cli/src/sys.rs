@@ -55,9 +55,7 @@ pub fn resolve(p: &str) -> String {
 
 /// path.basename(p).
 pub fn base_name(p: &str) -> String {
-    let trimmed = p.trim_end_matches(|c| c == '/' || (cfg!(windows) && c == '\\'));
-    let cut = trimmed.rfind(|c| c == '/' || (cfg!(windows) && c == '\\')).map_or(trimmed, |i| &trimmed[i + 1..]);
-    cut.to_string()
+    xenonet_base::nodepath::basename(p)
 }
 
 /// path.join(a, b).

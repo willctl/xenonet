@@ -11,10 +11,11 @@
 
 pub(crate) mod jsre;
 
-use jsre::{basename, dirname, line_starts_with, read_text, relative, resolve_from};
+use jsre::{line_starts_with, read_text};
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use xenonet_base::nodepath::{self, NATIVE};
 use xenonet_base::{ids, json as js_json, jsstr, paths, text};
 use xenonet_sources::lines::{prop, TypeError};
 
@@ -218,12 +219,12 @@ pub fn git_info(dir: &str) -> Option<GitInfo> {
     if st.is_file() {
         // A worktree or submodule: `.git` is a file pointing at the git dir.
         let to = jsre::rest_after(&read_text(&git_dir, 4096).unwrap_or_default(), "gitdir:")?;
-        git_dir = resolve_from(dir, text::js_trim(&to));
+        git_dir = nodepath::resolve(&[dir, text::js_trim(&to)]);
     }
     // A linked worktree's git dir names the main repo's .git in commondir.
     let common = read_text(&paths::join(&git_dir, "commondir"), 4096).map(|c| text::js_trim(&c).to_string());
     let common = common.filter(|c| !c.is_empty());
-    let common_dir = common.as_ref().map_or_else(|| git_dir.clone(), |c| resolve_from(&git_dir, c));
+    let common_dir = common.as_ref().map_or_else(|| git_dir.clone(), |c| nodepath::resolve(&[git_dir.as_str(), c.as_str()]));
     let head = read_text(&paths::join(&git_dir, "HEAD"), 4096).unwrap_or_default();
     let branch = match jsre::rest_after_both(&head, "ref:", "refs/heads/") {
         Some(b) => Some(text::js_trim(&b).to_string()),
@@ -233,7 +234,7 @@ pub fn git_info(dir: &str) -> Option<GitInfo> {
     Some(GitInfo {
         branch,
         origin: jsre::origin_url(&cfg),
-        worktree_of: common.as_ref().filter(|_| basename(&common_dir) == ".git").map(|_| dirname(&common_dir)),
+        worktree_of: common.as_ref().filter(|_| nodepath::basename(&common_dir) == ".git").map(|_| nodepath::dirname(&common_dir)),
         submodule_of: if common.is_none() { superproject(&git_dir) } else { None },
     })
 }
@@ -443,7 +444,7 @@ impl Scan {
         }
         let facts = Facts::of(dir, ents);
         // A workspace inside another one is one of its packages.
-        let in_workspace = matches!(self.walked.get(&dirname(dir)), Some(Some((_, true))));
+        let in_workspace = matches!(self.walked.get(&nodepath::dirname(dir)), Some(Some((_, true))));
         let why = if self.rule_is(&key, "project") {
             Some("rule")
         } else if self.rule_is(&key, "group") {
@@ -598,7 +599,7 @@ impl Scan {
             let inside = repo.clone().or_else(|| self.nearest(key, true, &|f| f.why == Some("workspace")));
             let (mut d, mut k) = (dir.clone(), key.clone());
             while len16(&k) > rl && Some(&k) != repo.as_ref() {
-                let next = |d: &str, k: &str| (dirname(d), parent_key(k));
+                let next = |d: &str, k: &str| (nodepath::dirname(d), parent_key(k));
                 if self.rule_is(&k, "group") || Some(&k) == inside.as_ref() {
                     (d, k) = next(&d, &k);
                     continue;
@@ -682,7 +683,7 @@ impl Scan {
                 if group { Value::String((if self.rule_is(key, "group") { "rule" } else { "contains" }).into()) } else { f.why.map_or(Value::Null, |w| Value::String(w.into())) };
             let parent = self.nearest(key, false, &|x| kept.contains(&x.key));
             let mut p = Map::new();
-            p.insert("name".into(), Value::String(basename(&f.path)));
+            p.insert("name".into(), Value::String(nodepath::basename(&f.path)));
             p.insert("path".into(), Value::String(f.path.clone()));
             p.insert("key".into(), Value::String(key.clone()));
             p.insert("rel".into(), Value::String(rel_of(&self.root, &f.path)));
@@ -774,7 +775,7 @@ fn spelled(dir: &str, key: &str) -> Option<String> {
         if paths::path_key(&d).as_deref() == Some(key) {
             return Some(d);
         }
-        let up = dirname(&d);
+        let up = nodepath::dirname(&d);
         if up == d {
             return None;
         }
@@ -784,7 +785,7 @@ fn spelled(dir: &str, key: &str) -> Option<String> {
 
 // path.relative(root, p).split(path.sep).join("/").
 fn rel_of(root: &str, p: &str) -> String {
-    relative(root, p)
+    NATIVE.relative(root, p).replace(NATIVE.sep(), "/")
 }
 
 // `xs.slice(0, end)`'s end, as JS reads it from a value.

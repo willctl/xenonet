@@ -20,10 +20,10 @@ use crate::cores::{ok, reason, Actors, Channels, Connect, CoreError, Engine, Ver
 use crate::ctx::{fail, pending_reply};
 use crate::http::{Reply, Req};
 use serde_json::{json, Value};
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use xenonet_actors::tokens::token_in_url;
+use xenonet_base::nodepath::NATIVE;
 use xenonet_base::text::{js_number, truthy};
 use xenonet_engine::delivery::selector::parse_selector;
 use xenonet_engine::engine::is_agent_id;
@@ -211,7 +211,7 @@ impl EngineRoutes<'_> {
         }
         if req.method == "GET" && route == "/api/engine/who" {
             let file = req.param("path").unwrap_or("").to_string();
-            if !is_absolute(&file) {
+            if !NATIVE.is_absolute(&file) {
                 return Ok(Reply::error(400, "give the file's absolute path"));
             }
             return Ok(Reply::json(200, self.engine.who_has(None, &file).await?));
@@ -271,17 +271,5 @@ fn js_string_or_empty(v: &Value) -> String {
     match v {
         Value::Null => String::new(),
         v => xenonet_base::text::js_string(v),
-    }
-}
-
-/// path.isAbsolute, as Node has it on this platform.
-fn is_absolute(p: &str) -> bool {
-    if cfg!(windows) {
-        p.starts_with('/')
-            || p.starts_with('\\')
-            || Path::new(p).is_absolute()
-            || (p.len() >= 2 && p.as_bytes()[1] == b':' && (p.len() == 2 || matches!(p.as_bytes()[2], b'/' | b'\\')))
-    } else {
-        p.starts_with('/')
     }
 }

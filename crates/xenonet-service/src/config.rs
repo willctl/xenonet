@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 use xenonet_base::dirs::app_dir;
 use xenonet_base::json::Value;
+use xenonet_base::nodepath;
 use xenonet_base::text::js_number;
 
 #[derive(Clone, Debug)]
@@ -79,16 +80,6 @@ fn platform() -> &'static str {
     crate::borrowed::platform()
 }
 
-/// path.resolve of a folder that may be relative.
-fn resolve(p: &str) -> String {
-    let path = Path::new(p);
-    if path.is_absolute() {
-        p.to_string()
-    } else {
-        std::env::current_dir().map_or_else(|_| p.to_string(), |d| d.join(path).to_string_lossy().into_owned())
-    }
-}
-
 /// Where XenoNet's own files are: XENONET_ROOT, or the folder above the
 /// binary's that holds package.json (bin/xenonet in a package,
 /// `target/<profile>/xenonet` in a checkout), or else here. Never the
@@ -152,10 +143,10 @@ impl Config {
                 None
             }
         });
-        let state_dir = resolve(&set("XENONET_STATE_DIR").or_else(|| dev_dir("state")).unwrap_or_else(|| dir_of("state", "XenoNet")));
-        let cache_dir = resolve(&set("XENONET_CACHE_DIR").or_else(|| dev_dir("cache")).unwrap_or_else(|| dir_of("cache", "XenoNet")));
+        let state_dir = nodepath::resolve(&[&set("XENONET_STATE_DIR").or_else(|| dev_dir("state")).unwrap_or_else(|| dir_of("state", "XenoNet"))]);
+        let cache_dir = nodepath::resolve(&[&set("XENONET_CACHE_DIR").or_else(|| dev_dir("cache")).unwrap_or_else(|| dir_of("cache", "XenoNet"))]);
         let runtime_dir = set("XENONET_RUNTIME_DIR").unwrap_or_else(|| Path::new(&dir_of("state", "XenoNet")).join("runtime").to_string_lossy().into_owned());
-        let projects_dir = resolve(&set("XENONET_PROJECTS_DIR").unwrap_or_else(|| Path::new(&home).join("Projects").to_string_lossy().into_owned()));
+        let projects_dir = nodepath::resolve(&[&set("XENONET_PROJECTS_DIR").unwrap_or_else(|| Path::new(&home).join("Projects").to_string_lossy().into_owned())]);
         let gateway_port =
             set("XENONET_GATEWAY_PORT").map(|p| js_number(Some(&Value::String(p)))).filter(|n| *n != 0.0 && n.fract() == 0.0 && (1.0..=65535.0).contains(n)).map(|n| n as u16);
         Config {
