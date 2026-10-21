@@ -426,6 +426,23 @@ impl EngineStore {
     pub fn net_claims(&self, now: f64) -> Result<Vec<Row>> {
         self.all("SELECT * FROM net_claims WHERE until IS NULL OR until >= ? ORDER BY host, repo_key, path", &[n(now)])
     }
+    /// Other hosts' live claims in clones of one repo.
+    pub fn net_claims_in(&self, repo_key: &str, now: f64) -> Result<Vec<Row>> {
+        self.all("SELECT * FROM net_claims WHERE repo_key = ? AND (until IS NULL OR until >= ?) ORDER BY host, path", &[Arg::text(repo_key), n(now)])
+    }
+    /// How many claims a host has here.
+    pub fn net_claim_count(&self, host: &str) -> Result<f64> {
+        Ok(self.get("SELECT COUNT(*) AS n FROM net_claims WHERE host = ?", &[Arg::text(host)])?.and_then(|r| r.num("n")).unwrap_or(0.0))
+    }
+    /// Whether a host's claim is here already.
+    pub fn has_net_claim(&self, host: &str, repo_key: &str, path: &str, agent: &str, kind: &str) -> Result<bool> {
+        Ok(self
+            .get(
+                "SELECT 1 AS one FROM net_claims WHERE host = ? AND repo_key = ? AND path = ? AND agent = ? AND kind = ?",
+                &[Arg::text(host), Arg::text(repo_key), Arg::text(path), Arg::text(agent), Arg::text(kind)],
+            )?
+            .is_some())
+    }
     /// A host's whole set of claims, in place of what it had.
     pub fn clear_net_claims(&self, host: &str) -> Result<()> {
         self.run("DELETE FROM net_claims WHERE host = ?", &[Arg::text(host)])?;
@@ -533,6 +550,10 @@ impl EngineStore {
         self.get("SELECT * FROM handoffs WHERE id = ?", &[Arg::text(id)])
     }
     /// The handoffs no one has taken that haven't lapsed.
+    /// How many handoffs made on `host` are open here.
+    pub fn open_handoffs_from(&self, host: &str, now: f64) -> Result<f64> {
+        Ok(self.get("SELECT COUNT(*) AS n FROM handoffs WHERE host = ? AND state = 'open' AND expires_at > ?", &[Arg::text(host), n(now)])?.and_then(|r| r.num("n")).unwrap_or(0.0))
+    }
     pub fn open_handoffs(&self, now: f64) -> Result<Vec<Row>> {
         self.all("SELECT * FROM handoffs WHERE state = 'open' AND expires_at > ? ORDER BY created_at", &[n(now)])
     }

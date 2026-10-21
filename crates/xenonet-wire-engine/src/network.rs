@@ -45,6 +45,9 @@ const HANDOFF_MS: f64 = 7.0 * 24.0 * 3600e3;
 const EDIT_HOLD_MS: f64 = 30.0 * 60e3;
 /// Messages in one thread, across hosts.
 const MAX_HOPS: f64 = 6.0;
+/// What another host may keep here: its claims, and handoffs open.
+const MAX_CLAIMS: f64 = 5000.0;
+const MAX_HANDOFFS: f64 = 100.0;
 
 /// What this host last told the others: its presence (each agent as sent)
 /// and its claims, and the timer that tells them again.
@@ -806,13 +809,24 @@ fn claims_in(w: &World, from: &str, b: &Value) -> Result<()> {
             store(w, |s| s.drop_net_claim(from, &k, &p, &a))?;
         }
     }
+    // As the schema has them: what's past its limits is cut, and a host
+    // keeps at most 5000 claims here.
+    let mut count = store(w, |st| st.net_claim_count(from))?;
     for cl in b.get("claims").and_then(Value::as_array).into_iter().flatten() {
         let (Some(k), Some(p), Some(a), Some(kind)) = (s(cl, "repoKey"), s(cl, "path"), s(cl, "agent"), s(cl, "kind")) else { continue };
-        if !own_id(&a) || !matches!(kind.as_str(), "claim" | "edit") {
+        if !own_id(&a) || !matches!(kind.as_str(), "claim" | "edit") || a.chars().count() > 200 {
             continue;
         }
-        let branch = s(cl, "branch");
+        let (k, p) = (clip(&k, 300), clip(&p, 1000));
+        let branch = s(cl, "branch").map(|x| clip(&x, 200));
+        if count >= MAX_CLAIMS && !store(w, |st| st.has_net_claim(from, &k, &p, &a, &kind))? {
+            continue;
+        }
         store(w, |st| st.put_net_claim(from, &k, &p, &a, branch.as_deref(), &kind, n(cl, "until"), at))?;
+        count = store(w, |st| st.net_claim_count(from))?;
+    }
+    if count >= MAX_CLAIMS {
+        w.log("warn", "net.claims", &format!("{from} has {MAX_CLAIMS} claims here, the most a host keeps: the rest were left out"));
     }
     Ok(())
 }
@@ -824,12 +838,12 @@ fn claim_hits(w: &World, c: &mut EngineCalls<'_>, me: &Arg, files: &[Arg]) -> Re
     let (Some(top), Some(key)) = (view.field("top").as_str().map(str::to_string), w.repos.remote_key(&view.field("cwd")).as_str().map(str::to_string)) else {
         return Ok(Arg::List(vec![]));
     };
-    let rows = store(w, |s| s.net_claims(now_ms()))?;
+    let rows = store(w, |s| s.net_claims_in(&key, now_ms()))?;
     let mut out = Vec::new();
     for f in files {
         let file = text(f);
         let Some(rel) = inside(&top, &file) else { continue };
-        for r in rows.iter().filter(|r| r.text("repo_key") == Some(key.as_str())) {
+        for r in &rows {
             let path = r.text("path").unwrap_or("");
             if !xenonet_engine::engine::matches(&Arg::text(path), &Arg::text(rel.clone())) {
                 continue;
@@ -1188,25 +1202,32 @@ fn handoff_in(w: &World, from: &str, b: &Value) -> Result<()> {
     match op.as_str() {
         "offer" => {
             let maker = s(b, "from").unwrap_or_default();
-            if !own_id(&maker) {
+            if !own_id(&maker) || maker.chars().count() > 200 {
                 return Err(Thrown::new("a handoff whose maker isn't one of its host's agents"));
             }
+            if store(w, |st| st.open_handoffs_from(from, now))? >= MAX_HANDOFFS {
+                return Err(Thrown::new(format!("{from} has {MAX_HANDOFFS} handoffs open here, the most a host keeps")));
+            }
+            // As the schema has them: what's past its limits is cut.
+            let field = |k: &str, max: usize| s(b, k).map(|t| clip(&t, max));
+            let files: Vec<Value> = b.get("files").and_then(Value::as_array).map(|f| f.iter().filter_map(Value::as_str).take(200).map(|p| json!(clip(p, 1000))).collect()).unwrap_or_default();
+            let commit = s(b, "commit").filter(|c| (7..=64).contains(&c.len()) && c.bytes().all(|x| x.is_ascii_hexdigit()));
             let to = b.get("to").cloned().unwrap_or(Value::Null);
-            let to_agent = s(&to, "agent").map(|a| here(&a));
+            let to_agent = s(&to, "agent").filter(|a| a.chars().count() <= 200).map(|a| here(&a));
             let row = obj(vec![
                 ("id", Arg::text(id.clone())),
                 ("host", Arg::text(from)),
                 ("maker", Arg::text(maker)),
                 ("to_agent", Arg::opt_text(to_agent.as_deref())),
-                ("to_repo", Arg::opt_text(s(&to, "repoKey").as_deref())),
+                ("to_repo", Arg::opt_text(s(&to, "repoKey").map(|k| clip(&k, 300)).as_deref())),
                 ("to_scope", Arg::Null),
-                ("to_host", Arg::opt_text(s(&to, "host").as_deref())),
-                ("goal", Arg::opt_text(s(b, "goal").as_deref())),
-                ("done", Arg::opt_text(s(b, "done").as_deref())),
-                ("next", Arg::opt_text(s(b, "next").as_deref())),
-                ("files", Arg::text(b.get("files").cloned().unwrap_or_else(|| json!([])).to_string())),
-                ("branch", Arg::opt_text(s(b, "branch").as_deref())),
-                ("commit_sha", Arg::opt_text(s(b, "commit").as_deref())),
+                ("to_host", Arg::opt_text(s(&to, "host").filter(|h| xenonet_base::ids::is_host_id(h)).as_deref())),
+                ("goal", Arg::opt_text(field("goal", 2000).as_deref())),
+                ("done", Arg::opt_text(field("done", 8000).as_deref())),
+                ("next", Arg::opt_text(field("next", 8000).as_deref())),
+                ("files", Arg::text(Value::Array(files).to_string())),
+                ("branch", Arg::opt_text(field("branch", 200).as_deref())),
+                ("commit_sha", Arg::opt_text(commit.as_deref())),
                 ("created_at", Arg::Num(now)),
                 ("expires_at", Arg::Num(now + HANDOFF_MS)),
             ]);

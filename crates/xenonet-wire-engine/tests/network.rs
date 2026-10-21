@@ -552,3 +552,34 @@ async fn you_reach_a_session_on_another_machine_from_your_console() {
     }
     assert_eq!(n.e("laptop").inbox(B, Duration::ZERO).await.unwrap(), json!([]));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn another_host_keeps_only_so_much_here_and_as_the_schema_has_it() {
+    let n = net3("limits");
+    n.link_up().await;
+    // Claims: cut to the schema's lengths, and 5000 a host at most.
+    let long = "x".repeat(2000);
+    let mut claims: Vec<Value> = (0..5001).map(|i| json!({ "repoKey": "github.com/acme/atlas", "path": format!("src/f{i}.ts"), "agent": A, "branch": "main", "kind": "claim", "until": null })).collect();
+    claims.push(json!({ "repoKey": long, "path": long, "agent": A, "branch": long, "kind": "edit", "until": null }));
+    let body = json!({ "schema": "network/claims/v1", "full": true, "claims": claims, "released": [] });
+    n.on("laptop", move |w| network::receive(w, Incoming { from: "studio".into(), kind: Kind::Claims, body, at: now(), from_window_host: true })).await;
+    let count = n.w("laptop").store.with(|s| s.net_claim_count("studio").unwrap());
+    assert_eq!(count, 5000.0);
+    let body = json!({ "schema": "network/claims/v1", "full": true, "claims": [{ "repoKey": long, "path": long, "agent": A, "branch": long, "kind": "edit", "until": null }], "released": [] });
+    n.on("laptop", move |w| network::receive(w, Incoming { from: "studio".into(), kind: Kind::Claims, body, at: now(), from_window_host: true })).await;
+    let rows = n.w("laptop").store.with(|s| s.net_claims(0.0).unwrap());
+    let r = rows.iter().find(|r| r.text("host") == Some("studio")).unwrap();
+    assert_eq!((r.text("repo_key").unwrap().len(), r.text("path").unwrap().len(), r.text("branch").unwrap().len()), (300, 1000, 200));
+    // Handoffs: cut likewise, and 100 open from a host at most.
+    for i in 0..101 {
+        let body = json!({ "schema": "network/handoff/v1", "id": format!("hof_00000000-0000-4000-8000-{i:012}"), "op": "offer", "from": A, "to": { "agent": null, "repoKey": "github.com/acme/atlas", "host": null },
+            "goal": "g".repeat(3000), "done": "d".repeat(9000), "next": null, "files": (0..300).map(|f| format!("src/{f}.ts")).collect::<Vec<_>>(), "branch": "main", "commit": "not-hex!", "by": null, "at": now() });
+        n.on("laptop", move |w| network::receive(w, Incoming { from: "studio".into(), kind: Kind::Handoff, body, at: now(), from_window_host: true })).await;
+    }
+    let open = n.w("laptop").store.with(|s| s.open_handoffs_from("studio", now()).unwrap());
+    assert_eq!(open, 100.0);
+    let h = n.w("laptop").store.with(|s| s.handoff("hof_00000000-0000-4000-8000-000000000000").unwrap().unwrap());
+    let files: Vec<Value> = serde_json::from_str(h.text("files").unwrap()).unwrap();
+    assert_eq!((h.text("goal").unwrap().len(), h.text("done").unwrap().len(), files.len(), h.text("commit_sha")), (2000, 8000, 200, None));
+}
+
