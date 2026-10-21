@@ -596,7 +596,14 @@ fn message_in(w: &World, from: &str, b: &Value, window_host: bool) -> Result<()>
             return Ok(());
         }
     }
-    let hops = n(b, "hops").unwrap_or(0.0);
+    // A reply names the message it answers by its mid.
+    let reply_to = match s(b, "replyTo") {
+        Some(r) => store(w, |s| s.message_by_mid(&r, None))?.or(store(w, |s| s.message_by_mid(&r, Some(from)))?).and_then(|m| m.num("id")),
+        None => None,
+    };
+    // How deep the thread is: as the sender says, or as this host's own
+    // store has it, whichever is deeper, so no sender can reset the count.
+    let hops = n(b, "hops").unwrap_or(0.0).max(local_depth(w, reply_to));
     if hops >= MAX_HOPS {
         receipt(w, from, &mid, &target, "refused", Some("this thread has gone back and forth too many times; XenoNet stops agent-to-agent threads at 6 messages"));
         return Ok(());
@@ -613,11 +620,6 @@ fn message_in(w: &World, from: &str, b: &Value, window_host: bool) -> Result<()>
     let auth = b.get("auth").cloned().unwrap_or(Value::Null);
     let env =
         envelope(from, &mid, now_ms(), &sender_id, &kind, name.as_deref(), &s(&auth, "method").unwrap_or_else(|| "?".into()), &s(&auth, "strength").unwrap_or_default(), hops);
-    // A reply names the message it answers by its mid.
-    let reply_to = match s(b, "replyTo") {
-        Some(r) => store(w, |s| s.message_by_mid(&r, None))?.or(store(w, |s| s.message_by_mid(&r, Some(from)))?).and_then(|m| m.num("id")),
-        None => None,
-    };
     let now = now_ms();
     let id = match &had {
         Some(m) => {
@@ -666,6 +668,22 @@ fn message_in(w: &World, from: &str, b: &Value, window_host: bool) -> Result<()>
     }
     told(w, "message", &event);
     Ok(())
+}
+
+/// The messages a reply chains back through in this host's store, the one
+/// it answers included: how deep its thread is here.
+fn local_depth(w: &World, reply_to: Option<f64>) -> f64 {
+    let mut depth = 0.0;
+    let mut next = reply_to;
+    while let Some(id) = next {
+        if depth >= 50.0 {
+            break;
+        }
+        let Ok(Some(m)) = store(w, |s| s.message(Arg::Num(id))) else { break };
+        depth += 1.0;
+        next = m.num("reply_to");
+    }
+    depth
 }
 
 fn push(a: &mut Arg, k: &str, v: Arg) {

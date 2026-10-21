@@ -583,3 +583,36 @@ async fn another_host_keeps_only_so_much_here_and_as_the_schema_has_it() {
     assert_eq!((h.text("goal").unwrap().len(), h.text("done").unwrap().len(), files.len(), h.text("commit_sha")), (2000, 8000, 200, None));
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn the_hop_limit_counts_the_thread_as_stored_here_whatever_the_sender_says() {
+    let n = net3("deep");
+    n.link_up().await;
+    // A thread six deep in laptop's own store, its last from studio.
+    let mid = "msg_00000000-0000-4000-8000-0000000000d6";
+    n.on("laptop", move |w| {
+        w.store.with(|s| {
+            let mut prev = xenonet_engine::sql::Arg::Null;
+            let mut last = 0.0;
+            for i in 0..6 {
+                let m = xenonet_engine::sql::Arg::Obj(vec![
+                    ("sender".into(), xenonet_engine::sql::Arg::text(if i % 2 == 0 { B } else { "@studio:claude:aaaaaaaa-0001" })),
+                    ("target".into(), xenonet_engine::sql::Arg::text(if i % 2 == 0 { "@studio:claude:aaaaaaaa-0001" } else { B })),
+                    ("scope".into(), xenonet_engine::sql::Arg::Null),
+                    ("body".into(), xenonet_engine::sql::Arg::text(format!("turn {i}"))),
+                    ("replyTo".into(), prev.clone()),
+                    ("recipients".into(), xenonet_engine::sql::Arg::List(vec![])),
+                    ("envelope".into(), xenonet_engine::sql::Arg::Null),
+                ]);
+                last = s.send(&m, xenonet_engine::sql::Arg::Num(now())).unwrap();
+                prev = xenonet_engine::sql::Arg::Num(last);
+            }
+            s.set_message_net(last, Some("studio"), mid).unwrap();
+        });
+    })
+    .await;
+    // studio says it's the first hop; laptop knows better.
+    let body = json!({ "schema": "network/message/v1", "mid": "msg_00000000-0000-4000-8000-0000000000d7", "sender": A, "senderKind": "agent", "auth": { "method": "session", "strength": "strong" }, "target": B, "body": "and again", "replyTo": mid, "scope": "direct", "kind": "message", "hops": 0, "at": now() });
+    n.on("laptop", move |w| network::receive(w, Incoming { from: "studio".into(), kind: Kind::Message, body, at: now(), from_window_host: true })).await;
+    let r = n.sent("laptop", Kind::Receipt).pop().unwrap();
+    assert_eq!((r["state"].clone(), r["mid"].clone()), (json!("refused"), json!("msg_00000000-0000-4000-8000-0000000000d7")));
+}
