@@ -432,6 +432,8 @@ impl Shared {
                 None => waiting.push(e),
             }
         }
+        let extra = waiting.len().saturating_sub(crate::gateway::MAX_PROPOSALS);
+        waiting.drain(..extra);
     }
 
     /// What waits for approval and could still be taken.

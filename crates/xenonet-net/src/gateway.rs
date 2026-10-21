@@ -47,6 +47,8 @@ const MESSAGES_A_MINUTE: f64 = 60.0;
 const BATCH_ROWS: u64 = 500;
 /// A host that long-polls counts as linked this long after its last poll.
 const POLLED_MS: f64 = 40e3;
+/// Entries waiting for approval, at most.
+pub const MAX_PROPOSALS: usize = 16;
 
 /// A request at the gateway: its method, target (path and query), headers
 /// with lowercase names, and body.
@@ -665,6 +667,9 @@ impl Gateway {
             let mut waiting = self.proposals.locked();
             waiting.retain(|(p, _)| p.signing_bytes() != entry.signing_bytes());
             waiting.push((entry.clone(), now));
+            // A few at a time: the oldest go first.
+            let extra = waiting.len().saturating_sub(MAX_PROPOSALS);
+            waiting.drain(..extra);
         }
         let me = Self::me(n)?;
         n.note_proposals(vec![entry.clone()]);
