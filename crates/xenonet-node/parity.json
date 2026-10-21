@@ -773,7 +773,7 @@
     "core/native/cursor.js": {
       "rust": "crates/xenonet-sources/src/native/cursor.rs",
       "differences": [
-        "vendor.js's check stays JS, called back for the first 32 records; the reader is got when the first record is checked, where JS got it as it began to parse (records or none). What the check throws is the block's problem, as in JS. A test's own `files` (statSync, openSync, readSync, closeSync) is read through.",
+        "vendor.js's check stays JS, called back for the first 32 records; the reader is got, called back too, as a changed file is parsed, as JS got it. What getting it or the check throws is the block's problem, as in JS. A test's own `files` (statSync, openSync, readSync, closeSync) is read through.",
         "Records, times and paths as in copilot-cli's entry; an `at` that isn't a string is read as String() writes it, ISO only.",
         "`runs` as in copilot-cli's entry; `seen` and `fileState` are read only."
       ]

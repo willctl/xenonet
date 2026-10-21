@@ -8,7 +8,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { GeminiCliSessions, readChat, geminiRoot } from "../core/native/gemini-cli.js";
+import { GeminiCliSessions, readChat, geminiRoot, SOURCE } from "../core/native/gemini-cli.js";
+import { reader } from "../core/vendor.js";
 import { NumbatSessions } from "../core/numbat.js";
 import { observedSessions } from "../core/reported-runs.js";
 import { Engine } from "../core/engine/engine.js";
@@ -83,6 +84,22 @@ test("the older one-object layout reads too, and what isn't a chat record is pas
   assert.deepEqual(c.edits.map((e) => e.path), ["/a/b"]);
   assert.equal(readChat("not json"), null);
   assert.equal(readChat(lines({ id: "m" })), null);
+});
+
+test("a chat whose vendor check throws is passed over, and isn't the reader's problem", (t) => {
+  const w = setup();
+  const r = reader(SOURCE);
+  t.mock.method(r, "check", () => {
+    throw new Error("a broken schema");
+  });
+  try {
+    const g = new GeminiCliSessions({ root: w.root }).read(NOW);
+    assert.deepEqual(g.sessions(), [], "each chat's metadata is checked, so each is passed over");
+    assert.equal(g.status().state, "ok");
+    assert.ok(!["degraded", "failed"].includes(g.health().state), g.health().state);
+  } finally {
+    w.done();
+  }
 });
 
 test("a missing folder is said, not an error", () => {

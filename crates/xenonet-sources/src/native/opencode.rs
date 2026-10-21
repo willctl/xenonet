@@ -7,7 +7,7 @@
 
 use super::files::Files;
 use super::node_path;
-use super::{edit_file, edits_out, js_max, js_min, push_edit, str_of, titled, Checked, Edits, NativeReader, Out, Threw, Vendor, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX};
+use super::{edit_file, edits_out, js_max, js_min, push_edit, str_of, titled, Checked, Edits, NativeReader, Out, Threw, Vendor, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX, VENDOR_FAILED};
 use crate::session::{RunSession, Via};
 use serde_json::{json, Map, Value};
 use xenonet_base::json;
@@ -407,7 +407,7 @@ impl NativeReader for OpenCode {
         let mut open = || Sqlite::open(at).map(|db| Box::new(db) as Box<dyn Db>);
         match read_db(exists, &mut open, vendor, now - DAY_MS, now - EDIT_KEEP_MS) {
             Ok(got) => self.take(&got, now),
-            Err(Threw) => Err("the vendor check failed".into()),
+            Err(Threw) => Err(VENDOR_FAILED.into()),
         }
     }
 

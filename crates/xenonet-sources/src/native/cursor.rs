@@ -7,6 +7,7 @@ use super::files::Files;
 use super::node_path;
 use super::{
     by_num, edits_out, fits_id, js_max, js_min, older, prune_edits, push_edit, str_of, titled, Check, Checked, Edits, NativeReader, Out, Threw, Vendor, DAY_MS, SESSIONS_MAX,
+    VENDOR_FAILED,
 };
 use crate::session::{RunSession, Via};
 use serde_json::Value;
@@ -97,6 +98,13 @@ impl Cursor {
     /// went stale. Threw when the vendor check did: the runs stay as they
     /// were, and the stamp is taken.
     pub fn read(&mut self, file: Option<&str>, now: f64, files: &mut dyn Files, check: &mut Check<'_>) -> Result<(), Threw> {
+        self.read_with(file, now, files, &mut Only(check))
+    }
+
+    /// As `read`, the records checked by `vendor`, whose reader is got
+    /// before a changed file is parsed, as cursor.js's #parse gets it.
+    /// Threw when getting it did too.
+    pub fn read_with(&mut self, file: Option<&str>, now: f64, files: &mut dyn Files, vendor: &mut dyn Vendor) -> Result<(), Threw> {
         let got = match file {
             Some(f) => tail(f, files),
             None => Err(FsError { code: Some("ERR_INVALID_ARG_TYPE".into()), message: "no file".into() }),
@@ -113,7 +121,8 @@ impl Cursor {
         let stamp = format!("{}:{}", number_string(size), number_string(mtime_ms));
         if self.seen.as_deref() != Some(stamp.as_str()) {
             self.seen = Some(stamp);
-            self.parse(&lines, now, check)?;
+            vendor.ready()?;
+            self.parse(&lines, now, &mut |rec, version| vendor.check(rec, version))?;
         } else {
             self.prune(now);
         }
@@ -193,11 +202,24 @@ impl Cursor {
     }
 }
 
+/// A check alone, as a vendor reader that's always there to get.
+struct Only<'a, 'b>(&'a mut Check<'b>);
+
+impl Vendor for Only<'_, '_> {
+    fn missing(&mut self, _: &str, _: Option<&str>) -> Result<(), Threw> {
+        Ok(())
+    }
+    fn check(&mut self, record: &Value, version: Option<&str>) -> Result<Checked, Threw> {
+        (self.0)(record, version)
+    }
+}
+
 impl NativeReader for Cursor {
-    /// Reads the hook's file at `at`. A vendor check that threw is
-    /// reported.
+    /// Reads the hook's file at `at`. A vendor reader that couldn't be got,
+    /// or a check that threw, is reported, as cursor.js's read reports
+    /// both.
     fn read(&mut self, at: &str, now: f64, files: &mut dyn Files, vendor: &mut dyn Vendor) -> Result<(), String> {
-        Cursor::read(self, Some(at), now, files, &mut |rec, version| vendor.check(rec, version)).map_err(|Threw| "the vendor check failed".to_string())
+        self.read_with(Some(at), now, files, vendor).map_err(|Threw| VENDOR_FAILED.to_string())
     }
 
     fn source_state(&self) -> &'static str {
