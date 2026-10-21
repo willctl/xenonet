@@ -448,13 +448,15 @@ async fn the_lan_door_checks_its_host_and_bad_tickets_get_404() {
             raw(port, "GET", "/net/v1/roster", &[("Host", "evil.example")], ""),
             raw(port, "GET", "/net/v1/roster", &[("Host", h), ("Origin", "http://evil.example")], ""),
             raw(port, "POST", "/mcp", &[("Host", h)], "{}"),
+            raw(port, "POST", "/a2a", &[("Host", h)], "{}"),
+            raw(port, "GET", "/.well-known/agent-card.json", &[("Host", h)], ""),
             raw(port, "GET", "/net/v1/roster", &[("Host", h)], ""),
             raw(port, "POST", "/net/v1/join", &[("Host", h)], join),
         ]
     })
     .join()
     .unwrap();
-    assert_eq!(ok, [421, 403, 404, 401, 404], "a wrong host, a web page, /mcp on a LAN, unsigned, a bad ticket");
+    assert_eq!(ok, [421, 403, 404, 404, 404, 401, 404], "a wrong host, a web page, /mcp, /a2a and the card on a LAN, unsigned, a bad ticket");
     // A real ticket works only until 20 bad ones shut the route for an hour.
     let (_, t) = a.call("POST", "/api/net/ticket", json!({ "host": "laptop" }), true).await;
     let ticket = t["ticket"].as_str().unwrap().to_string();

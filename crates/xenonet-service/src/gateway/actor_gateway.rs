@@ -154,6 +154,9 @@ struct Inner {
     /// The network's node, whose gateway routes the front door serves
     /// while this host is the network's gateway.
     net: std::sync::OnceLock<Arc<xenonet_net::node::Node>>,
+    /// A2A agents' side, whose card and JSON-RPC the front door serves
+    /// while the owner has it on.
+    a2a: std::sync::OnceLock<Arc<crate::a2a::A2a>>,
 }
 
 #[derive(Clone)]
@@ -189,6 +192,7 @@ impl ActorGateway {
                 server: Mutex::new(None),
                 now,
                 net: std::sync::OnceLock::new(),
+                a2a: std::sync::OnceLock::new(),
             }),
         }
     }
@@ -204,6 +208,15 @@ impl ActorGateway {
 
     pub fn net(&self) -> Option<Arc<xenonet_net::node::Node>> {
         self.inner.net.get().cloned()
+    }
+
+    /// A2A's side, for the front door's `/a2a` and Agent Card.
+    pub fn set_a2a(&self, a2a: Arc<crate::a2a::A2a>) {
+        let _ = self.inner.a2a.set(a2a);
+    }
+
+    pub fn a2a(&self) -> Option<Arc<crate::a2a::A2a>> {
+        self.inner.a2a.get().cloned()
     }
 
     /// The public host the owner named, or None.
@@ -271,43 +284,84 @@ impl ActorGateway {
         })
     }
 
-    /// The bearer token of a request the front door sends somewhere other
-    /// than `/mcp` (A2A): the door's checks in the same order (the host,
-    /// no web pages, unknown tokens held off), then the token. The actor it
-    /// authenticated, or the answer that refuses it.
-    pub fn door_auth(&self, headers: &[(String, String)]) -> Result<Value, Reply> {
-        let t = (self.inner.now)();
-        let header = |k: &str| headers.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
-        let host = header("host").unwrap_or("").to_lowercase();
+    /// Whether `Host` names this gateway: the public host the owner named,
+    /// or this machine on the gateway's port.
+    fn host_ok(&self, host: &str) -> bool {
         let port = self.inner.port;
-        let public = self.inner.host.locked().clone();
-        if public.as_deref() != Some(host.as_str()) && host != format!("127.0.0.1:{port}") && host != format!("localhost:{port}") {
-            return Err(Self::reply(421, json!({ "error": "this gateway doesn't answer for that host" }), &[]));
+        self.inner.host.locked().as_deref() == Some(host) || host == format!("127.0.0.1:{port}") || host == format!("localhost:{port}")
+    }
+
+    /// The front door's first checks for a path beside `/mcp` (A2A's), as
+    /// `/mcp` makes them: the host, then no web pages. The answer that
+    /// refuses the request, or None.
+    pub fn door_host(&self, headers: &[(String, String)]) -> Option<Reply> {
+        let header = |k: &str| headers.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+        if !self.host_ok(&header("host").unwrap_or("").to_lowercase()) {
+            return Some(Self::reply(421, json!({ "error": "this gateway doesn't answer for that host" }), &[]));
         }
         if header("origin").is_some() {
-            return Err(Self::reply(403, json!({ "error": "the gateway takes no requests from web pages" }), &[]));
+            return Some(Self::reply(403, json!({ "error": "the gateway takes no requests from web pages" }), &[]));
         }
+        None
+    }
+
+    /// The rest of `/mcp`'s checks before its token, for a request that
+    /// will carry one: no token in the URL, and unknown tokens held off.
+    pub fn door_open(&self, headers: &[(String, String)], target: &str) -> Option<Reply> {
+        if let Some(r) = self.door_host(headers) {
+            return Some(r);
+        }
+        let (path, query) = parse_target(target);
+        if token_in_url(query.iter().map(|(k, v)| (k.as_str(), v.as_str())), &path) {
+            return Some(Self::reply(400, json!({ "error": "a token goes in the Authorization header, never in the URL" }), &[]));
+        }
+        let t = (self.inner.now)();
         let blocked = *self.inner.blocked_until.locked();
         if blocked > t {
             let (k, v) = retry_after(blocked - t);
-            return Err(Self::reply(429, json!({ "error": "too many tokens XenoNet doesn't know; wait a minute" }), &[(&k, &v)]));
+            return Some(Self::reply(429, json!({ "error": "too many tokens XenoNet doesn't know; wait a minute" }), &[(&k, &v)]));
         }
-        let token = header("authorization").and_then(bearer_of).map(str::to_string);
+        None
+    }
+
+    /// A request's gateway token, as `/mcp` takes it: the actor it
+    /// authenticated, or 401 or 403 with WWW-Authenticate. Unknown tokens
+    /// count toward holding the door shut for a minute.
+    pub fn door_token(&self, headers: &[(String, String)]) -> Result<Value, Reply> {
+        let t = (self.inner.now)();
+        let token = headers.iter().find(|(n, _)| n == "authorization").map(|(_, v)| v.as_str()).and_then(bearer_of).map(str::to_string);
         let auth = match &token {
             Some(tok) => self.inner.cores.registration.authenticate_gateway(tok),
             None => json!({ "ok": false, "status": 401, "code": "no-token", "error": "the gateway takes a gateway token, as Authorization: Bearer <token>" }),
         };
-        if auth["ok"] != json!(true) {
-            self.inner.stats.locked().refused += 1;
-            let code = auth["code"].as_str().unwrap_or("bad-token").to_string();
-            (self.inner.hooks.on_refused)(auth["actor"].as_str(), &code, auth["reason"].as_str(), t);
-            if code != "no-token" && self.inner.buckets.locked().take("bad-tokens", BAD_TOKENS, 1.0, t) != 0.0 {
-                *self.inner.blocked_until.locked() = t + BLOCK_MS;
-            }
-            let status = auth["status"].as_u64().unwrap_or(401) as u16;
-            return Err(Self::reply(status, json!({ "error": auth["error"], "code": code }), &[("www-authenticate", "Bearer realm=\"xenonet-gateway\"")]));
+        if auth["ok"] == json!(true) {
+            return Ok(auth);
         }
-        Ok(auth)
+        self.inner.stats.locked().refused += 1;
+        let code = auth["code"].as_str().unwrap_or("bad-token").to_string();
+        (self.inner.hooks.on_refused)(auth["actor"].as_str(), &code, auth["reason"].as_str(), t);
+        if code != "no-token" && self.inner.buckets.locked().take("bad-tokens", BAD_TOKENS, 1.0, t) != 0.0 {
+            *self.inner.blocked_until.locked() = t + BLOCK_MS;
+        }
+        let realm = if code == "no-token" { "Bearer realm=\"xenonet-gateway\"".to_string() } else { "Bearer realm=\"xenonet-gateway\", error=\"invalid_token\"".to_string() };
+        let status = auth["status"].as_u64().unwrap_or(401) as u16;
+        Err(Self::reply(status, json!({ "error": auth["error"], "code": code }), &[("www-authenticate", &realm)]))
+    }
+
+    /// A call an actor's token let in: counted, and the window told, with
+    /// the host it named when that's the public one.
+    pub fn door_called(&self, auth: &Value, host: &str) {
+        let t = (self.inner.now)();
+        {
+            let mut s = self.inner.stats.locked();
+            s.calls += 1;
+            s.last_at = Some(t);
+            s.last_actor = auth["id"].as_str().map(str::to_string);
+        }
+        let public = self.inner.host.locked().clone();
+        let id = auth["id"].as_str().unwrap_or("");
+        let slug = auth["slug"].as_str().unwrap_or("");
+        (self.inner.hooks.on_call)(id, slug, public.as_deref().filter(|p| *p == host), t);
     }
 
     pub(crate) async fn serve_hyper(&self, req: hyper::Request<hyper::body::Incoming>) -> hyper::Response<crate::serve::OutBody> {
@@ -377,34 +431,14 @@ impl ActorGateway {
             let (k, v) = retry_after(blocked - t);
             return Self::reply(429, json!({ "error": "too many tokens XenoNet doesn't know; wait a minute" }), &[(&k, &v)]);
         }
-        let token = header("authorization").and_then(bearer_of).map(str::to_string);
-        let auth = match &token {
-            Some(tok) => self.inner.cores.registration.authenticate_gateway(tok),
-            None => json!({ "ok": false, "status": 401, "code": "no-token", "error": "the gateway takes a gateway token, as Authorization: Bearer <token>" }),
+        let auth = match self.door_token(&req.headers) {
+            Ok(a) => a,
+            Err(refused) => return refused,
         };
-        if auth["ok"] != json!(true) {
-            self.inner.stats.locked().refused += 1;
-            let code = auth["code"].as_str().unwrap_or("bad-token").to_string();
-            (self.inner.hooks.on_refused)(auth["actor"].as_str(), &code, auth["reason"].as_str(), t);
-            if code != "no-token" && self.inner.buckets.locked().take("bad-tokens", BAD_TOKENS, 1.0, t) != 0.0 {
-                *self.inner.blocked_until.locked() = t + BLOCK_MS;
-            }
-            let realm = if code == "no-token" { "Bearer realm=\"xenonet-gateway\"".to_string() } else { "Bearer realm=\"xenonet-gateway\", error=\"invalid_token\"".to_string() };
-            let status = auth["status"].as_u64().unwrap_or(401) as u16;
-            return Self::reply(status, json!({ "error": auth["error"], "code": code }), &[("www-authenticate", &realm)]);
-        }
         if too_big {
             return Self::reply(413, json!({ "error": "that body is over 64 KiB" }), &[]);
         }
-        {
-            let mut s = self.inner.stats.locked();
-            s.calls += 1;
-            s.last_at = Some(t);
-            s.last_actor = auth["id"].as_str().map(str::to_string);
-        }
-        let id = auth["id"].as_str().unwrap_or("").to_string();
-        let slug = auth["slug"].as_str().unwrap_or("").to_string();
-        (self.inner.hooks.on_call)(&id, &slug, public.as_deref().filter(|p| *p == host), t);
+        self.door_called(&auth, &host);
         self.mcp(&req, &auth).await
     }
 

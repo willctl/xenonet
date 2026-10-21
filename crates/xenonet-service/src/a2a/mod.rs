@@ -298,6 +298,12 @@ impl A2a {
         })
     }
 
+    /// How long a stream lasts before it ends itself: the front door keeps
+    /// its connection that long and a little more.
+    pub fn stream_limit(&self) -> Duration {
+        self.limits.stream
+    }
+
     /// The Agent Card at `public_address`, or None while A2A is off (the
     /// front door answers 404 then).
     pub fn card(&self, public_address: &str) -> Option<Value> {

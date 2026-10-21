@@ -363,6 +363,10 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
                         a.forget(&format!("actor:{slug}"));
                     }
                 }));
+                // The gateway's front door answers /a2a and the card with it.
+                if let Some(g) = ctx.gateway.get() {
+                    g.gateway().set_a2a(a.clone());
+                }
                 let _ = ctx.a2a.set(a);
             }
             Err(e) => ctx.log("warn", "a2a.error", &e, None, None),
