@@ -352,6 +352,7 @@ impl Machine {
         let cores = &self.parts.cores;
         let value = match f.as_str() {
             "exists" => json!(!a(0).is_empty() && std::fs::metadata(a(0)).is_ok()),
+            "readText" => std::fs::read_to_string(a(0)).map_or(Value::Null, Value::String),
             "readdir" => {
                 let dir = a(0);
                 match xenonet_base::paths::read_dir_sorted(std::path::Path::new(&dir)) {
@@ -496,6 +497,7 @@ async fn facts(parts: &Parts, by_hand: bool) -> Value {
         "byHand": by_hand,
         "stateLoad": state_load,
         "projectsDirSet": fx::env_set("XENONET_PROJECTS_DIR").is_some(),
+        "grokKeySet": fx::env_set("XAI_API_KEY").is_some(),
         "actors": if c.actors.is_some() { "on" } else { "off" },
     })
 }

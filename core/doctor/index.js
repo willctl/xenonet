@@ -1,6 +1,6 @@
 // XenoNet's doctor: whether what XenoNet needs is in place, and how to fix it
-// when it isn't. Sign-ins for Claude Code and Codex, the folders XenoNet
-// reads, the apps and tools it talks to, its own server, whether your
+// when it isn't. Sign-ins for Claude Code, Codex and Grok Build, the folders
+// XenoNet reads, the apps and tools it talks to, its own server, whether your
 // agents are connected to it, and actors: tokens left in repos or expired,
 // what the observers read, and the process check they rely on.
 //
@@ -56,6 +56,14 @@ export function machine(overrides = {}) {
     node: process.versions.node,
     electron: process.versions.electron ?? null,
     exists: (p) => fs.existsSync(p),
+    // A small settings file's text, or null when there's none.
+    readText: (p) => {
+      try {
+        return fs.readFileSync(p, "utf8");
+      } catch {
+        return null;
+      }
+    },
     readdir: (p) => fs.promises.readdir(p),
     access: (p, mode) => fs.promises.access(p, mode),
     statfs: (p) => fs.promises.statfs(p),
@@ -139,6 +147,19 @@ const unreadable = (tool) => `${tool} answered in a way XenoNet doesn't read; up
 const privacyFix = (ctx, what) =>
   ctx.platform === "darwin" ? `Let XenoNet read ${what}: System Settings › Privacy & Security › Files and Folders (or Full Disk Access), then restart XenoNet.` : `Check the permissions on ${what}.`;
 
+// Grok Build's folder (GROK_HOME's, or ~/.grok), a path in it, and its
+// command: grok on PATH, or where its installer puts it, which a shell's
+// PATH may not have yet.
+const grokHome = (ctx) => ctx.paths?.grokHome ?? pathStyle(ctx.home).join(ctx.home, ".grok");
+const inGrok = (ctx, ...parts) => pathStyle(grokHome(ctx)).join(grokHome(ctx), ...parts);
+function grokBin(ctx) {
+  const own = inGrok(ctx, "bin", ctx.platform === "win32" ? "grok.exe" : "grok");
+  return ctx.which("grok") ?? (ctx.exists(own) ? own : null);
+}
+// The files where an organization can let Grok Build run only the hooks it
+// sets (allow_managed_hooks_only).
+const grokPolicies = (ctx) => ["/etc/grok/requirements.toml", "/etc/grok/managed_config.toml", inGrok(ctx, "requirements.toml"), inGrok(ctx, "managed_config.toml")];
+
 // The sources of the map that xenonet.sources reports as failed: Agent Wiki
 // and identities are extras, so theirs go without a word.
 const OPTIONAL_SOURCES = new Set(["wiki", "identities"]);
@@ -165,7 +186,7 @@ export const CHECKS = [
       const bad = failedSources(ctx.health);
       const counts = Object.fromEntries(ctx.health.sources.filter((s) => s.ok).map((s) => [s.name, s.count]));
       if (bad.length) return fail(bad.map((s) => `${s.name}: ${s.error ?? "failed"}`).join("; "), "Run xenonet doctor again after fixing the checks below; if it stays, xenonet logs --errors says more.");
-      const parts = [counts.projects != null && plural(counts.projects, "project"), counts.claude != null && plural(counts.claude, "Claude session"), counts.codex != null && plural(counts.codex, "Codex thread")].filter(Boolean);
+      const parts = [counts.projects != null && plural(counts.projects, "project"), counts.claude != null && plural(counts.claude, "Claude session"), counts.codex != null && plural(counts.codex, "Codex thread"), counts.grok ? plural(counts.grok, "Grok Build session") : null].filter(Boolean);
       return ok(`reading ${parts.join(", ")}`);
     },
   },
@@ -357,6 +378,61 @@ export const CHECKS = [
     },
   },
 
+  // ---------- Grok Build ----------
+  {
+    id: "grok.cli",
+    group: "Grok Build",
+    title: "Grok Build is installed",
+    async run(ctx) {
+      const bin = grokBin(ctx);
+      if (!bin) return info("not installed; XenoNet shows Grok Build's sessions once it is", "To use Grok Build, install it (x.ai/cli), then run grok login.");
+      const v = await ctx.run(bin, ["--version"], 4000);
+      const version = (v.stdout.match(/\d+\.\d+\.\d+[\w.-]*/) ?? [])[0];
+      return ok(`${version ? `version ${version}, ` : ""}${tilde(bin, ctx.home)}`);
+    },
+  },
+  {
+    id: "grok.auth",
+    group: "Grok Build",
+    title: "Grok Build is signed in",
+    async run(ctx) {
+      if (!grokBin(ctx)) return skip("Grok Build isn't installed");
+      // Whether its sign-in is there, never what's in it: auth.json holds
+      // the tokens.
+      if (ctx.exists(inGrok(ctx, "auth.json"))) return ok("signed in");
+      if (ctx.env?.XAI_API_KEY) return ok("with an API key (XAI_API_KEY)");
+      return info("not signed in yet", "Run grok login.");
+    },
+  },
+  {
+    id: "grok.sessions",
+    group: "Grok Build",
+    title: "XenoNet can read Grok Build's sessions",
+    async run(ctx) {
+      const dir = inGrok(ctx, "sessions");
+      const f = await folder(ctx, dir);
+      if (f.state === "missing") return info(`no ${tilde(dir, ctx.home)} yet: no Grok Build sessions on this machine`);
+      if (f.state === "denied") return fail(`can't read ${tilde(dir, ctx.home)} (${f.code})`, privacyFix(ctx, tilde(dir, ctx.home)));
+      return ok(`${plural(f.count, "folder")} of sessions in ${tilde(dir, ctx.home)}`);
+    },
+  },
+  {
+    id: "grok.hooks",
+    group: "Grok Build",
+    title: "Grok Build runs XenoNet's hooks",
+    async run(ctx) {
+      const a = ctx.connect?.apps.find((x) => x.app === "grok");
+      if (!a) return skip("needs XenoNet running");
+      if (a.changes.find((c) => c.id === "hooks")?.state !== "present") return skip("XenoNet's hooks aren't in Grok Build's settings");
+      for (const file of grokPolicies(ctx)) {
+        if (/^\s*(allow_managed_hooks_only|allowManagedHooksOnly)\s*=\s*true\b/m.test(ctx.readText?.(file) ?? "")) return warn(`Grok Build runs only the hooks your organization sets (${tilde(file, ctx.home)}), so XenoNet's don't run`, "Ask whoever manages Grok Build here to allow them. XenoNet's tools still work without them.");
+      }
+      // Hooks you turned off in Grok's /hooks.
+      if (/xenonet/i.test(ctx.readText?.(inGrok(ctx, "disabled-hooks")) ?? "")) return warn("XenoNet's hooks are turned off in Grok Build", "Run /hooks in Grok Build, select XenoNet's hooks and press Space to turn them on.");
+      return ok(`in ${tilde(inGrok(ctx, "hooks"), ctx.home)}, which Grok Build runs without asking`);
+    },
+  },
+
   // ---------- this machine ----------
   {
     id: "system.projects",
@@ -441,15 +517,20 @@ export const CHECKS = [
   },
 
   // ---------- agents ----------
-  ...["claude", "codex"].map((app) => ({
+  ...[
+    ["claude", "Claude Code"],
+    ["codex", "Codex"],
+    ["grok", "Grok Build"],
+  ].map(([app, name]) => ({
     id: `agents.${app}`,
     group: "Sessions",
-    title: `${app === "claude" ? "Claude Code" : "Codex"} sessions are connected to XenoNet`,
+    title: `${name} sessions are connected to XenoNet`,
     async run(ctx) {
       const a = ctx.connect?.apps.find((x) => x.app === app);
       if (!a) return skip("needs XenoNet running");
       const states = a.changes.map((c) => c.state);
-      if (states.every((s) => s === "missing")) return info("not connected, so these sessions can't see or message each other through XenoNet", "Connect them from XenoNet's palette (Connect Claude Code and Codex to XenoNet), or run xenonet connect.");
+      if (a.installed === false && states.every((s) => s === "missing")) return skip(`${name} isn't installed`);
+      if (states.every((s) => s === "missing")) return info("not connected, so these sessions can't see or message each other through XenoNet", "Connect them from XenoNet's palette (Connect your agents to XenoNet), or run xenonet connect.");
       // XenoNet's plugin for Claude Code carries what connect would add;
       // connect's own entries beside it are to come out.
       if (states.includes("remove")) {
