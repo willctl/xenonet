@@ -72,8 +72,9 @@
 // refusals.
 //
 // The apps checked are those whose processes XenoNet tells apart (the
-// registry's `processes`, by core/processes.js): Claude Code, Codex and
-// OpenCode. A request in another app's session's name isn't checked.
+// registry's `processes`, by core/processes.js): Claude Code, Codex, Grok
+// Build and OpenCode. A request in another app's session's name isn't
+// checked.
 import { agentApps } from "../processes.js";
 
 const AGENTS = Object.fromEntries(agentApps().map((a) => [a.id, a]));

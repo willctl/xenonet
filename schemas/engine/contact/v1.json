@@ -8,13 +8,14 @@
   "properties": {
     "agent": {
       "type": "string",
-      "description": "An agent: claude:<session id> or codex:<thread id>, or an actor, actor:<slug>"
+      "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>"
     },
     "app": {
       "type": "string",
       "enum": [
         "claude",
         "codex",
+        "grok",
         "actor"
       ]
     },

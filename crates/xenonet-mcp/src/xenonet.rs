@@ -146,12 +146,22 @@ fn codex_session(env: Env<'_>, meta: &Value) -> Option<String> {
     thread.filter(|t| truthy(Some(t))).map(|t| js_string(&t))
 }
 
+// Grok Build starts a session's MCP servers with its id in
+// GROK_SESSION_ID.
+fn grok_session(env: Env<'_>, _: &Value) -> Option<String> {
+    env("GROK_SESSION_ID").filter(|s| !s.is_empty())
+}
+fn grok_started(env: Env<'_>) -> bool {
+    grok_session(env, &Value::Null).is_some()
+}
+
 /// How an app's sessions say they're calling, by its id, for the apps
 /// XenoNet has a way for.
 pub fn calling(app: &str) -> Option<Calling> {
     match app {
         "claude" => Some(Calling { session: claude_session, started: claude_started }),
         "codex" => Some(Calling { session: codex_session, started: |_| false }),
+        "grok" => Some(Calling { session: grok_session, started: grok_started }),
         _ => None,
     }
 }
@@ -706,7 +716,7 @@ mod tests {
     #[test]
     fn the_calling_session_is_the_first_apps_that_says_one_is() {
         let apps = calling_apps();
-        assert_eq!(apps.iter().map(|(a, _)| *a).collect::<Vec<_>>(), ["claude", "codex"]);
+        assert_eq!(apps.iter().map(|(a, _)| *a).collect::<Vec<_>>(), ["claude", "codex", "grok"]);
         let ask = |vars: &[(&str, &str)], meta: Value| {
             let vars: HashMap<String, String> = vars.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect();
             calling_session(&|k| vars.get(k).cloned(), &meta, apps)
@@ -721,6 +731,9 @@ mod tests {
         assert_eq!(ask(&[], json!({ "threadId": 7 })), Some("codex:7".into()));
         assert!((apps[0].1.started)(&|k| (k == "CLAUDE_CODE_SESSION_ID").then(|| "abc".to_string())));
         assert!(!(apps[1].1.started)(&|k| (k == "CODEX_THREAD_ID").then(|| "w".to_string())), "Codex's thread doesn't keep an actor from this server");
+        assert_eq!(ask(&[("GROK_SESSION_ID", "019a3b5c-0000-7000-8000-00000000000a")], json!({})), Some("grok:019a3b5c-0000-7000-8000-00000000000a".into()));
+        assert_eq!(ask(&[("GROK_SESSION_ID", "")], json!({})), None);
+        assert!((apps[2].1.started)(&|k| (k == "GROK_SESSION_ID").then(|| "g".to_string())), "a server Grok started for a session serves no actor");
         // A made-up app's own way, in a registry of its own.
         let wren = Calling { session: |env, _| env("WREN_SESSION"), started: |env| env("WREN_SESSION").is_some() };
         let mine = [("wren", wren), apps[1]];

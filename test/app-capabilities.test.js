@@ -82,9 +82,9 @@ test("connect: the registry connects Claude Code, Codex and Grok Build, through 
   assert.deepEqual(Object.keys(FORMATS), ["claude-settings", "codex-hooks", "grok-hooks"]);
 });
 
-test("processes: the apps whose processes XenoNet tells apart, and so the apps verify checks, are exactly Claude Code, Codex and OpenCode", () => {
-  assert.deepEqual(agentApps().map((a) => [a.id, a.name]), [["claude", "Claude Code"], ["codex", "Codex"], ["opencode", "OpenCode"]]);
-  assert.deepEqual(Object.keys(PROCESSES), ["claude", "codex", "opencode"]);
+test("processes: the apps whose processes XenoNet tells apart, and so the apps verify checks, are exactly Claude Code, Codex, Grok Build and OpenCode", () => {
+  assert.deepEqual(agentApps().map((a) => [a.id, a.name]), [["claude", "Claude Code"], ["codex", "Codex"], ["grok", "Grok Build"], ["opencode", "OpenCode"]]);
+  assert.deepEqual(Object.keys(PROCESSES), ["claude", "codex", "grok", "opencode"]);
   assert.deepEqual(agentApps().filter((a) => a.pinsByHook).map((a) => a.id), ["claude"], "only Claude Code's hooks pin a session");
   assert.deepEqual(agentApps().filter((a) => a.anyProcess).map((a) => a.id), ["opencode"], "only OpenCode's sessions are any of its processes'");
   for (const [program, args, agent] of [
@@ -93,6 +93,12 @@ test("processes: the apps whose processes XenoNet tells apart, and so the apps v
     ["C:\\Users\\me\\.local\\bin\\claude", "", "claude"],
     ["/path/codex-aarch64-apple-darwin", "", "codex"],
     ["/usr/local/bin/opencode", "", "opencode"],
+    ["/Users/me/.grok/downloads/grok-macos-aarch64", "", "grok"],
+    ["/Users/me/.grok/bin/agent", "", "grok"],
+    ["/usr/local/bin/grok", "", "grok"],
+    ["C:\\Users\\me\\.grok\\bin\\grok.exe", "", "grok"],
+    ["/usr/local/bin/agent", "", null],
+    ["/usr/local/bin/grokker", "", null],
     ["C:\\tools\\opencode.exe", "", "opencode"],
     ["/usr/local/bin/node", "node /x/@anthropic-ai/claude-code/cli.js", "claude"],
     ["/usr/local/bin/bun", "bun /x/@openai/codex/bin/codex.js", "codex"],
@@ -146,8 +152,8 @@ test("processes: verify checks a session's app by its processes, and passes an a
 });
 
 // crates/xenonet-mcp/src/xenonet.rs has the same cases.
-test("caller: the calling session is the first app's that says one is, Claude Code's then Codex's", () => {
-  assert.deepEqual(callingApps().map(([app]) => app), ["claude", "codex"]);
+test("caller: the calling session is the first app's that says one is, Claude Code's, then Codex's, then Grok Build's", () => {
+  assert.deepEqual(callingApps().map(([app]) => app), ["claude", "codex", "grok"]);
   const ask = (env, meta = {}) => callingSession({ env, meta })?.id ?? null;
   assert.equal(ask({}), null);
   assert.equal(ask({ CLAUDE_CODE_SESSION_ID: "abc", CODEX_THREAD_ID: "t" }, { threadId: "u" }), "claude:abc");
@@ -160,6 +166,9 @@ test("caller: the calling session is the first app's that says one is, Claude Co
   assert.deepEqual(callingSession({ env: { CLAUDE_CODE_SESSION_ID: "abc" } }), { id: "claude:abc", app: "claude" });
   assert.equal(CALLERS.claude.started({ CLAUDE_CODE_SESSION_ID: "abc" }), true);
   assert.equal(CALLERS.codex.started, undefined, "Codex's thread doesn't keep an actor from this server");
+  assert.equal(ask({ GROK_SESSION_ID: "019a3b5c-0000-7000-8000-00000000000a" }), "grok:019a3b5c-0000-7000-8000-00000000000a");
+  assert.equal(ask({ GROK_SESSION_ID: "" }), null);
+  assert.equal(CALLERS.grok.started({ GROK_SESSION_ID: "g" }), true, "a server Grok started for a session serves no actor");
   // A made-up app's own way, in a registry of its own.
   const registry = [{ id: "wren", name: "Wren", numbat: ["wren"], has: ["caller"] }, { id: "codex", name: "Codex", numbat: ["codex"], has: ["caller"] }, { id: "lark", name: "Lark", numbat: ["lark"] }];
   const apps = callingApps(registry, { ...CALLERS, wren: { session: (env) => env.WREN_SESSION }, lark: { session: () => "never" } });

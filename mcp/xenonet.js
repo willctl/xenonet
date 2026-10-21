@@ -62,6 +62,9 @@ export const CALLERS = {
   claude: { session: (env) => env.CLAUDE_CODE_SESSION_ID, started: (env) => !!env.CLAUDE_CODE_SESSION_ID },
   // Codex puts the thread's id in each call's _meta, or in CODEX_THREAD_ID.
   codex: { session: (env, meta) => meta.threadId ?? meta["x-codex-turn-metadata"]?.thread_id ?? env.CODEX_THREAD_ID },
+  // Grok Build starts a session's MCP servers with its id in
+  // GROK_SESSION_ID.
+  grok: { session: (env) => env.GROK_SESSION_ID, started: (env) => !!env.GROK_SESSION_ID },
 };
 
 // The apps whose sessions say they're calling, in the registry's order,
