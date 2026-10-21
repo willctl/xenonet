@@ -4,7 +4,8 @@
 // session listing (again after the file grew, from what the first listing
 // kept) and its messages, whole and a page at a time (the Agent SDK's, in
 // Rust), every line through its app's lenient normalizer, a Codex
-// rollout's pages, and a session's stats; and the tailer, which reads a
+// rollout's pages, the Zstandard decoder of archived rollouts, and a
+// session's stats; and the tailer, which reads a
 // transcript in pieces that can end anywhere and must find the same lines
 // as one read of it. The first byte picks Claude Code or Codex and where
 // the tailer's pieces end; a NUL splits the transcript from its
@@ -98,6 +99,9 @@ fuzz_target!(|data: &[u8]| {
                 }
             }
             let _ = client.rollout_page(&file, Some("rollout:3"), 1.0);
+            // The same bytes as an archived rollout's (.jsonl.zst): the
+            // decoder says what's wrong with them rather than panic.
+            let _ = xenonet_wire_map::archive::unzstd(transcript, 1 << 24);
         }
         // The file grows by a line, and is listed again from what the
         // first listing kept.
