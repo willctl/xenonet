@@ -5,6 +5,7 @@
 use serde_json::{json, Map, Value};
 use std::collections::hash_map::Entry;
 use std::fmt::Write as _;
+use std::path::Path;
 use xenonet_base::json::{number, number_string};
 use xenonet_base::jsstr;
 use xenonet_base::text::{js_number, js_string, truthy};
@@ -406,30 +407,85 @@ pub fn codex_exec_args(dir: &str, out: &str, schema_file: Option<&str>) -> Vec<S
 /// or AGENTS.md in yours (`user_home`, your CODEX_HOME). Only your sign-in
 /// is shared: your auth.json is linked there, never copied, so a token
 /// Codex refreshes during the run is written to yours and yours stays
-/// signed in. A link that can't be made (a Windows account that may not
-/// make one, another volume) leaves the run signed out, which it says.
+/// signed in. When it can't be linked either way (LINK_ORDER), the run
+/// would be signed out, so there's no run: the error says it couldn't
+/// reach your sign-in, and why.
 pub fn codex_run_home(dir: &str, user_home: &str) -> std::io::Result<String> {
-    let home = std::path::Path::new(dir).join("home");
+    let home = Path::new(dir).join("home");
     std::fs::create_dir_all(&home)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700))?;
     }
-    let auth = std::path::Path::new(user_home).join("auth.json");
+    let auth = Path::new(user_home).join("auth.json");
     if auth.is_file() {
-        let to = home.join("auth.json");
-        #[cfg(unix)]
-        let linked = std::os::unix::fs::symlink(&auth, &to);
-        #[cfg(windows)]
-        let linked = std::os::windows::fs::symlink_file(&auth, &to);
-        #[cfg(not(any(unix, windows)))]
-        let linked: std::io::Result<()> = Err(std::io::Error::other("no links here"));
-        if linked.is_err() {
-            let _ = std::fs::hard_link(&auth, &to);
-        }
+        link_sign_in(&auth, &home.join("auth.json"), &LINK_ORDER, &mut make_link)?;
     }
     Ok(home.to_string_lossy().into_owned())
+}
+
+/// A way to put your auth.json in a run's home that shares the one file,
+/// so what Codex writes to it reaches yours. A copy wouldn't, and is never
+/// made.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Link {
+    Symbolic,
+    Hard,
+}
+
+impl Link {
+    fn name(self) -> &'static str {
+        match self {
+            Link::Symbolic => "a symbolic link",
+            Link::Hard => "a hard link",
+        }
+    }
+}
+
+/// The links a run's home tries, in order. On Windows an account may make
+/// a symbolic link only with Developer Mode or a privilege, while a hard
+/// link needs only the same volume, and the temporary folder is usually on
+/// the profile's: there a hard link comes first. Elsewhere a symbolic link
+/// always can be made, and says where it points.
+pub const fn link_order(windows: bool) -> [Link; 2] {
+    if windows {
+        [Link::Hard, Link::Symbolic]
+    } else {
+        [Link::Symbolic, Link::Hard]
+    }
+}
+
+/// This system's order.
+pub const LINK_ORDER: [Link; 2] = link_order(cfg!(windows));
+
+fn make_link(how: Link, from: &Path, to: &Path) -> std::io::Result<()> {
+    match how {
+        Link::Hard => std::fs::hard_link(from, to),
+        #[cfg(unix)]
+        Link::Symbolic => std::os::unix::fs::symlink(from, to),
+        #[cfg(windows)]
+        Link::Symbolic => std::os::windows::fs::symlink_file(from, to),
+        #[cfg(not(any(unix, windows)))]
+        Link::Symbolic => Err(std::io::Error::other("this system makes no symbolic links")),
+    }
+}
+
+/// Links your sign-in (`auth`) to `to` each way in `order`, through `link`,
+/// until one works. When none does, the error says plainly that the run
+/// couldn't reach your sign-in, what to change, and why each link failed.
+pub fn link_sign_in(auth: &Path, to: &Path, order: &[Link], link: &mut dyn FnMut(Link, &Path, &Path) -> std::io::Result<()>) -> std::io::Result<()> {
+    let mut why = Vec::new();
+    for &how in order {
+        match link(how, auth, to) {
+            Ok(()) => return Ok(()),
+            Err(e) => why.push(format!("{}: {e}", how.name())),
+        }
+    }
+    Err(std::io::Error::other(format!(
+        "XenoNet's codex exec couldn't reach your Codex sign-in, so it didn't run. It shares your auth.json through a link in its own folder and never copies it, and no link could be made ({}). A hard link needs your Codex home and the temporary folder on the same drive; a symbolic link on Windows needs Developer Mode.",
+        why.join("; ")
+    )))
 }
 
 #[cfg(test)]
@@ -501,7 +557,7 @@ mod tests {
         let mut names: Vec<String> = std::fs::read_dir(&home).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         names.sort();
         assert_eq!(names, ["auth.json"]);
-        let auth = std::path::Path::new(&home).join("auth.json");
+        let auth = Path::new(&home).join("auth.json");
         assert!(std::fs::symlink_metadata(&auth).unwrap().file_type().is_symlink(), "linked, never copied");
         assert_eq!(std::fs::canonicalize(&auth).unwrap(), std::fs::canonicalize(yours.join("auth.json")).unwrap());
         // Someone signed out of Codex: the run's home has no sign-in.
@@ -511,6 +567,83 @@ mod tests {
         assert_eq!(std::fs::read_dir(&bare).unwrap().count(), 0);
         std::fs::remove_dir_all(&run).unwrap();
         assert!(yours.join("auth.json").is_file(), "taking the run's folder away leaves yours");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // On every system, Windows's hard link included: what Codex writes to
+    // the run's auth.json is written to yours.
+    #[test]
+    fn a_codex_runs_sign_in_is_yours_not_a_copy() {
+        let dir = std::env::temp_dir().join(format!("xenonet-run-shared-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let yours = dir.join("yours");
+        std::fs::create_dir_all(&yours).unwrap();
+        std::fs::write(yours.join("auth.json"), "{\"tokens\":\"old\"}").unwrap();
+        let run = dir.join("run");
+        std::fs::create_dir_all(&run).unwrap();
+        let home = codex_run_home(&run.to_string_lossy(), &yours.to_string_lossy()).unwrap();
+        std::fs::write(Path::new(&home).join("auth.json"), "{\"tokens\":\"refreshed\"}").unwrap();
+        assert_eq!(std::fs::read_to_string(yours.join("auth.json")).unwrap(), "{\"tokens\":\"refreshed\"}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_hard_link_comes_first_on_windows_and_the_other_link_after() {
+        assert_eq!(link_order(true), [Link::Hard, Link::Symbolic]);
+        assert_eq!(link_order(false), [Link::Symbolic, Link::Hard]);
+        assert_eq!(LINK_ORDER, link_order(cfg!(windows)));
+        let (auth, to) = (Path::new("yours/auth.json"), Path::new("run/home/auth.json"));
+        for windows in [true, false] {
+            let order = link_order(windows);
+            // The first link fails, as a symbolic one does without Developer
+            // Mode, or a hard one across volumes: the other is tried.
+            let mut tried = Vec::new();
+            let mut first_fails = |how: Link, from: &Path, at: &Path| {
+                assert_eq!((from, at), (auth, to));
+                tried.push(how);
+                if tried.len() == 1 {
+                    Err(std::io::Error::other("refused"))
+                } else {
+                    Ok(())
+                }
+            };
+            assert!(link_sign_in(auth, to, &order, &mut first_fails).is_ok());
+            assert_eq!(tried, order);
+            // The first works: nothing else is tried.
+            let mut tried = Vec::new();
+            assert!(link_sign_in(auth, to, &order, &mut |how, _, _| {
+                tried.push(how);
+                Ok(())
+            })
+            .is_ok());
+            assert_eq!(tried, [order[0]]);
+        }
+    }
+
+    #[test]
+    fn when_no_link_can_be_made_the_run_says_it_couldnt_reach_your_sign_in() {
+        let dir = std::env::temp_dir().join(format!("xenonet-run-unlinked-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let auth = dir.join("auth.json");
+        std::fs::write(&auth, "{}").unwrap();
+        let to = dir.join("run-auth.json");
+        let mut tried = Vec::new();
+        let err = link_sign_in(&auth, &to, &link_order(true), &mut |how, _, _| {
+            tried.push(how);
+            Err(std::io::Error::other(match how {
+                Link::Hard => "not the same device",
+                Link::Symbolic => "a required privilege is not held",
+            }))
+        })
+        .unwrap_err()
+        .to_string();
+        assert_eq!(tried, [Link::Hard, Link::Symbolic]);
+        assert!(err.starts_with("XenoNet's codex exec couldn't reach your Codex sign-in, so it didn't run."), "{err}");
+        assert!(err.contains("(a hard link: not the same device; a symbolic link: a required privilege is not held)"), "{err}");
+        assert!(err.contains("never copies it") && err.contains("Developer Mode"), "{err}");
+        assert!(!err.contains(&dir.to_string_lossy().into_owned()), "no folder of yours in the error");
+        assert!(!to.exists(), "never copied");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
