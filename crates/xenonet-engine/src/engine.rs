@@ -1467,7 +1467,7 @@ impl Engine {
         let mut out = Vec::new();
         for m in &list_ {
             let sender = m.field("sender");
-            let from = if network::is_remote(&sender) { Self::remote_view(c, &sender)? } else { self.view(c, &sender)? };
+            let from = if network::is_remote(&sender) && self.networked() { Self::remote_view(c, &sender)? } else { self.view(c, &sender)? };
             let target = m.field("target");
             out.push(obj(vec![
                 ("id", m.field("id")),
