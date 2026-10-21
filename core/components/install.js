@@ -5,8 +5,8 @@ import { currentComponent, stagePackage, selectComponent, newer, withInstallLock
 import { runtimeDir, ensureService, connectService, binName, launcherBin } from "./runtime.js";
 import { installCommand } from "../command.js";
 
-// The node an earlier XenoNet copied into the launcher's folder, which the
-// entries it wrote run.
+// The node an earlier XenoNet put in its packages and copied into the
+// launcher's folder, which the entries it wrote run.
 const earlierNode = () => (process.platform === "win32" ? "node.exe" : "node");
 
 // The launcher never moves: hooks, MCP servers, the xenonet command and other
@@ -77,6 +77,15 @@ export function installLauncher(env = process.env) {
   const entry = path.join(dir, "cli", "xenonet.js");
   if (fs.existsSync(path.join(dir, earlierNode())) && fs.existsSync(entry)) writeLauncher(entry);
   return { bin: fs.existsSync(bin) ? bin : null, root: dir };
+}
+
+// Whether a selected Service or Tools has its xenonet binary. One from
+// before 0.4.0 has none: its package was a node and XenoNet's JS, which
+// this XenoNet replaces (installBundle, or an update) rather than runs,
+// except to bring back a service that couldn't be replaced
+// (installedRuntime).
+export function hasBinary(selected) {
+  return !!fs.statSync(path.join(selected.root, "bin", binName()), { throwIfNoEntry: false })?.isFile();
 }
 
 // The startup check of a staged component: its xenonet binary runs, without
@@ -165,33 +174,80 @@ export async function recoverServiceUpdate({ env = process.env, operations } = {
   return withInstallLock(env, () => recover(env, lifecycle(operations)));
 }
 
-export async function installBundle(bundle, { env = process.env, command = true } = {}) {
+// Installs a bundle's components that aren't installed yet, and replaces
+// any from before 0.4.0 (see hasBinary), with the launcher and, when asked,
+// the xenonet command; says how to start the service. A bundle never
+// silently restarts or upgrades a Service or Tools that has its binary.
+export async function installBundle(bundle, { env = process.env, command = true, operations } = {}) {
   return withInstallLock(env, async () => {
-    await recover(env, lifecycle());
+    const io = lifecycle(operations);
+    await recover(env, io);
     const manifest = JSON.parse(fs.readFileSync(path.join(bundle, "components.json"), "utf8"));
+    let earlier = null;
     for (const item of manifest.packages) {
       if (item.platform !== process.platform || item.arch !== process.arch) continue;
       const old = currentComponent(item.component, env);
-      // Bundle updates never silently restart or upgrade the service/tools.
-      if (old) continue;
+      if (old && hasBinary(old)) continue;
       const staged = await stagePackage(path.join(bundle, item.file), item, { env });
       checkRuntime(staged);
-      selectComponent(item.component, staged, env);
+      // A service from before 0.4.0 may be running: it's switched as an
+      // update switches it, once the Tools and the launcher it names are
+      // in place.
+      if (old && item.component === "service") earlier = { old, staged };
+      else selectComponent(item.component, staged, env);
     }
     const launcher = installLauncher(env);
     if (command && launcher?.bin) installCommand({ bin: launcher.bin, env });
+    if (earlier) await switchService(env, io, earlier.old, earlier.staged);
     return installedRuntime(env);
   });
 }
 
 // How to start the selected service: its xenonet binary, with `serve`, and
 // the env it runs with (the runtime folder, and the launcher's binary when
-// there is one).
+// there is one). A Service from before 0.4.0 runs its node and server, as
+// that XenoNet ran it, told of the node launcher its entries run, so an
+// update that couldn't replace it can bring it back as it was.
 export function installedRuntime(env = process.env) {
   const service = currentComponent("service", env);
   if (!service) throw new Error("XenoNet Service is not installed. Use the bundle installer.");
   const launcher = installLauncher(env);
-  return { root: service.root, exec: path.join(service.root, "bin", binName()), args: ["serve"], env: { ...env, XENONET_RUNTIME_DIR: runtimeDir(env), ...(launcher?.bin ? { XENONET_LAUNCHER_BIN: launcher.bin } : {}) } };
+  const runEnv = { ...env, XENONET_RUNTIME_DIR: runtimeDir(env), ...(launcher?.bin ? { XENONET_LAUNCHER_BIN: launcher.bin } : {}) };
+  if (hasBinary(service)) return { root: service.root, exec: path.join(service.root, "bin", binName()), args: ["serve"], env: runEnv };
+  const dir = path.join(runtimeDir(env), "launcher");
+  const node = path.join(dir, earlierNode());
+  const nodeLauncher = fs.existsSync(node) && fs.existsSync(path.join(dir, "cli", "xenonet.js")) ? { XENONET_LAUNCHER_EXEC: node, XENONET_LAUNCHER_ROOT: dir } : {};
+  return { root: service.root, exec: path.join(service.root, earlierNode()), args: [path.join(service.root, "server", "index.js")], env: { ...runEnv, ...nodeLauncher } };
+}
+
+// Switches the selected service from `old` (or none) to `staged`, as an
+// update does: never while a terminal is open in the running service, which
+// leaves the new version staged; with a record of the switch until the new
+// version answers; and back to the old one when it doesn't.
+async function switchService(env, io, old, staged) {
+  const state = await running(env, io);
+  if (state?.terminals.some((t) => !t.exited)) return { component: "service", version: staged.version, status: "staged", detail: "Close running terminals, then update the service." };
+  writeJournal(env, old, staged);
+  try {
+    if (state) await stopService(env, io);
+    selectComponent("service", staged, env);
+    await startVersion(staged.version, env, io);
+    clearJournal(env);
+  }
+  catch (err) {
+    try {
+      // Do not finalize the new version when its startup check just failed.
+      const live = await running(env, io);
+      if (live && live.version !== old?.version) await stopService(env, io);
+      restoreSelection(old, env);
+      if (old) await startVersion(old.version, env, io);
+      clearJournal(env);
+    } catch (rollback) {
+      throw new Error(`The service update failed: ${err.message} Recovery is pending: ${rollback.message}`);
+    }
+    throw new Error(`The service update failed. ${old ? "The previous version was restored. " : ""}${err.message}`);
+  }
+  return { component: "service", version: staged.version, status: "updated" };
 }
 
 export async function activatePackage(file, item, { env = process.env, operations } = {}) {
@@ -207,28 +263,6 @@ export async function activatePackage(file, item, { env = process.env, operation
       installLauncher(env);
       return { component: "tools", version: staged.version, status: "updated", detail: "New commands use this version. Connected MCP processes keep running." };
     }
-    const state = await running(env, io);
-    if (state?.terminals.some((t) => !t.exited)) return { component: "service", version: staged.version, status: "staged", detail: "Close running terminals, then update the service." };
-    writeJournal(env, old, staged);
-    try {
-      if (state) await stopService(env, io);
-      selectComponent("service", staged, env);
-      await startVersion(staged.version, env, io);
-      clearJournal(env);
-    }
-    catch (err) {
-      try {
-        // Do not finalize the new version when its startup check just failed.
-        const live = await running(env, io);
-        if (live && live.version !== old?.version) await stopService(env, io);
-        restoreSelection(old, env);
-        if (old) await startVersion(old.version, env, io);
-        clearJournal(env);
-      } catch (rollback) {
-        throw new Error(`The service update failed: ${err.message} Recovery is pending: ${rollback.message}`);
-      }
-      throw new Error(`The service update failed. ${old ? "The previous version was restored. " : ""}${err.message}`);
-    }
-    return { component: "service", version: staged.version, status: "updated" };
+    return switchService(env, io, old, staged);
   });
 }

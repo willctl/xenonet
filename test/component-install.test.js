@@ -1,19 +1,20 @@
 // Installing XenoNet's components (core/components/install.js) beyond the
 // service switch component-activation.test.js covers: a bundle installs
-// what's missing and never upgrades what's there, a runtime that fails its
-// startup check is never selected, a Tools update leaves the service
-// alone, recovery stops only an unexpected service and never one with open
-// terminals, and a launcher that can't be replaced now is left for next
-// time. Packages are made up; their xenonet binary is a shell script that
-// answers the startup check, so the bundle tests run where a script can
-// stand in for a program.
+// what's missing, replaces a Service or Tools from before 0.4.0 and never
+// upgrades what else is there, a runtime that fails its startup check is
+// never selected, a Tools update leaves the service alone, recovery stops
+// only an unexpected service and never one with open terminals, and a
+// launcher that can't be replaced now is left for next time. Packages are
+// made up; their xenonet binary is a shell script that answers the startup
+// check, so the bundle tests run where a script can stand in for a
+// program.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as tar from "tar";
-import { activatePackage, checkRuntime, installBundle, installedRuntime, installLauncher, recoverServiceUpdate, writeLauncher, launcherVersion, LAUNCHER_SOURCE } from "../core/components/install.js";
+import { activatePackage, checkRuntime, hasBinary, installBundle, installedRuntime, installLauncher, recoverServiceUpdate, writeLauncher, launcherVersion, LAUNCHER_SOURCE } from "../core/components/install.js";
 import { currentComponent, digest, selectComponent, stagePackage } from "../core/components/packages.js";
 
 const EXE = process.platform === "win32" ? "xenonet.exe" : "xenonet";
@@ -146,10 +147,12 @@ test("the startup check runs the staged binary itself, without ELECTRON_RUN_AS_N
   assert.throws(() => checkRuntime({ root, version: "1.4.2" }), /runtime did not pass its startup check/, "no binary at all");
 });
 
-// A service that answers status and stop, for activatePackage and
-// recoverServiceUpdate: `state` is what status says, null when it's down.
-function service(env, state) {
-  const s = { state, stops: 0, starts: [] };
+// A service that answers status and stop, for activatePackage,
+// installBundle and recoverServiceUpdate: `state` is what status says, null
+// when it's down; `failing`, a version that doesn't start. Each start's
+// runtime is kept.
+function service(env, state, { failing = null } = {}) {
+  const s = { state, stops: 0, starts: [], runtimes: [] };
   s.operations = {
     check() {},
     now: () => 0,
@@ -167,9 +170,11 @@ function service(env, state) {
         },
       };
     },
-    async start() {
+    async start(runtime) {
       const version = currentComponent("service", env).version;
       s.starts.push(version);
+      s.runtimes.push(runtime);
+      if (version === failing) throw new Error("XenoNet Service exited (1). See its service log.");
       s.state = { version, terminals: [] };
     },
   };
@@ -274,4 +279,101 @@ test("the launcher's xenonet is a copy of the Tools' binary, made again only whe
   await activatePackage(next.file, next.item, { env, operations: service(env, { version: "1.0.0" }).operations });
   assert.equal(fs.readFileSync(bin, "utf8"), "binary 1.1.0");
   assert.ok(!fs.readdirSync(path.dirname(bin)).some((f) => f.endsWith(".tmp")));
+});
+
+// An install as XenoNet 0.3.0 left it (git show v0.3.0:core/components/
+// packages.js and install.js): each component a node and XenoNet's JS, with
+// no xenonet binary, in <version>-<sha16> beside its current.json, and the
+// launcher's own node and cli/xenonet.js, which the hooks and MCP servers
+// 0.3.0 wrote run.
+function earlierInstall(env, { components = ["service", "tools"], version = "0.3.0" } = {}) {
+  const selected = {};
+  for (const component of components) {
+    const sha256 = digest(`XenoNet ${component} ${version}`);
+    const root = path.join(env.XENONET_RUNTIME_DIR, "components", component, `${version}-${sha256.slice(0, 16)}`);
+    for (const folder of ["server", "cli", "core"]) fs.mkdirSync(path.join(root, folder), { recursive: true });
+    fs.writeFileSync(path.join(root, "component.json"), JSON.stringify({ format: 1, component, version, platform: process.platform, arch: process.arch, node: "24.19.0", api: { min: 1, max: 1 }, consoleApi: { min: 1, max: 1 }, dataSchema: 1 }));
+    fs.writeFileSync(path.join(root, NODE), `${version}'s node`, { mode: 0o755 });
+    fs.writeFileSync(path.join(root, "server", "index.js"), `// ${version}'s service\n`);
+    fs.writeFileSync(path.join(root, "cli", "xenonet.js"), `// ${version}'s command\n`);
+    selectComponent(component, { version, sha256 }, env);
+    selected[component] = currentComponent(component, env);
+  }
+  const launcher = path.join(env.XENONET_RUNTIME_DIR, "launcher");
+  fs.mkdirSync(path.join(launcher, "cli"), { recursive: true });
+  fs.writeFileSync(path.join(launcher, NODE), `${version}'s node`, { mode: 0o755 });
+  fs.writeFileSync(path.join(launcher, "cli", "xenonet.js"), "// xenonet-launcher 2 (protocol 1)\n");
+  return selected;
+}
+
+test("a bundle replaces a Service and Tools from before 0.4.0, which have no binary, starts the new service and keeps the old files", posixOnly, async (t) => {
+  const { dir, env } = workspace(t);
+  const earlier = earlierInstall(env);
+  assert.deepEqual([hasBinary(earlier.service), hasBinary(earlier.tools)], [false, false]);
+  const svc = service(env, null);
+  const runtime = await installBundle(await bundle(dir, "bundle-1", [["service", "0.4.0"], ["tools", "0.4.0"]]), { env, command: false, operations: svc.operations });
+  const [now, tools] = [currentComponent("service", env), currentComponent("tools", env)];
+  assert.deepEqual([now.version, tools.version, hasBinary(now), hasBinary(tools)], ["0.4.0", "0.4.0", true, true]);
+  assert.deepEqual([svc.starts, svc.state.version], [["0.4.0"], "0.4.0"], "started, and checked it answers as 0.4.0");
+  const launcher = path.join(env.XENONET_RUNTIME_DIR, "launcher");
+  assert.equal(svc.runtimes[0].env.XENONET_LAUNCHER_BIN, path.join(launcher, EXE), "after the Tools, so it names their launcher");
+  assert.deepEqual([runtime.exec, runtime.args], [path.join(now.root, BIN), ["serve"]]);
+  assert.equal(fs.readFileSync(path.join(launcher, EXE), "utf8"), fakeBin("0.4.0"));
+  assert.ok(launcherVersion(fs.readFileSync(path.join(launcher, "cli", "xenonet.js"), "utf8")) >= 3, "the node launcher 0.3.0's entries run now runs the binary");
+  assert.equal(fs.readFileSync(path.join(launcher, NODE), "utf8"), "0.3.0's node");
+  for (const c of ["service", "tools"]) assert.equal(fs.readFileSync(path.join(earlier[c].root, NODE), "utf8"), "0.3.0's node", `0.3.0's ${c} kept, for what still runs it`);
+  assert.equal(fs.existsSync(path.join(env.XENONET_RUNTIME_DIR, "service-update.json")), false);
+});
+
+test("a 0.3.0 service still running is stopped for the bundle's, unless a terminal is open in it, when it runs on until the next try", posixOnly, async (t) => {
+  const { dir, env } = workspace(t);
+  const earlier = earlierInstall(env);
+  const svc = service(env, { version: "0.3.0", terminals: [{ id: 1, exited: false }] });
+  const b = await bundle(dir, "bundle-1", [["service", "0.4.0"], ["tools", "0.4.0"]]);
+  const runtime = await installBundle(b, { env, command: false, operations: svc.operations });
+  assert.deepEqual([currentComponent("service", env).version, currentComponent("tools", env).version], ["0.3.0", "0.4.0"], "the Tools switch; the service waits");
+  assert.deepEqual([svc.stops, svc.starts, svc.state.version], [0, [], "0.3.0"], "its terminal untouched");
+  // Meanwhile the 0.3.0 service runs as 0.3.0 ran it, told of the node
+  // launcher, so what it writes for hooks and MCP servers stays put.
+  const launcher = path.join(env.XENONET_RUNTIME_DIR, "launcher");
+  assert.deepEqual([runtime.exec, runtime.args], [path.join(earlier.service.root, NODE), [path.join(earlier.service.root, "server", "index.js")]]);
+  assert.deepEqual([runtime.env.XENONET_LAUNCHER_EXEC, runtime.env.XENONET_LAUNCHER_ROOT, runtime.env.XENONET_LAUNCHER_BIN], [path.join(launcher, NODE), launcher, path.join(launcher, EXE)]);
+
+  svc.state.terminals[0].exited = true;
+  await installBundle(b, { env, command: false, operations: svc.operations });
+  assert.deepEqual([svc.stops, svc.starts, svc.state.version, currentComponent("service", env).version], [1, ["0.4.0"], "0.4.0", "0.4.0"]);
+});
+
+test("a bundle's service that doesn't start brings back the one from before 0.4.0, run with its node", posixOnly, async (t) => {
+  const { dir, env } = workspace(t);
+  const earlier = earlierInstall(env);
+  const svc = service(env, { version: "0.3.0", terminals: [] }, { failing: "0.4.0" });
+  await assert.rejects(installBundle(await bundle(dir, "bundle-1", [["service", "0.4.0"], ["tools", "0.4.0"]]), { env, command: false, operations: svc.operations }), /previous version was restored\. XenoNet Service exited/);
+  assert.equal(currentComponent("service", env).version, "0.3.0");
+  assert.deepEqual([svc.stops, svc.starts, svc.state.version], [1, ["0.4.0", "0.3.0"], "0.3.0"]);
+  assert.deepEqual([svc.runtimes[1].exec, svc.runtimes[1].args], [path.join(earlier.service.root, NODE), [path.join(earlier.service.root, "server", "index.js")]]);
+  assert.equal(fs.existsSync(path.join(env.XENONET_RUNTIME_DIR, "service-update.json")), false);
+});
+
+test("a bundle replaces only the component from before 0.4.0, never one with its binary", posixOnly, async (t) => {
+  const { dir, env } = workspace(t);
+  earlierInstall(env, { components: ["tools"] });
+  const svc = await pack(dir, "service", "0.4.0");
+  selectComponent("service", await stagePackage(svc.file, svc.item, { env }), env);
+  const running = service(env, { version: "0.4.0", terminals: [] });
+  await installBundle(await bundle(dir, "bundle-1", [["service", "0.5.0"], ["tools", "0.5.0"]]), { env, command: false, operations: running.operations });
+  assert.deepEqual([currentComponent("service", env).version, currentComponent("tools", env).version], ["0.4.0", "0.5.0"]);
+  assert.deepEqual([running.stops, running.starts], [0, []]);
+});
+
+test("an update from the release replaces a Service and Tools from before 0.4.0, as it does any older one", posixOnly, async (t) => {
+  const { dir, env } = workspace(t);
+  earlierInstall(env);
+  const svc = service(env, { version: "0.3.0", terminals: [] });
+  const tools = await pack(dir, "tools", "0.4.0");
+  assert.equal((await activatePackage(tools.file, tools.item, { env, operations: svc.operations })).status, "updated");
+  const next = await pack(dir, "service", "0.4.0");
+  assert.equal((await activatePackage(next.file, next.item, { env, operations: svc.operations })).status, "updated");
+  assert.deepEqual([svc.stops, svc.starts, svc.state.version], [1, ["0.4.0"], "0.4.0"]);
+  assert.equal(svc.runtimes[0].env.XENONET_LAUNCHER_BIN, path.join(env.XENONET_RUNTIME_DIR, "launcher", EXE));
 });
