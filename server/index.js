@@ -464,7 +464,7 @@ const tokenScan = actors ? createTokenScan({ repos: () => [...state.index.values
 // show in the console and, from the desktop app, as a notification. The demo
 // checks only itself, never your machine, and stays quiet.
 const doctor = createDoctorService({
-  only: config.demo ? ["xenonet.server", "xenonet.sources", "xenonet.blocks", "contracts.drift", "claude.transcripts", "codex.sessions", "system.projects", "system.runtime", "hosts"] : null,
+  only: config.demo ? ["xenonet.server", "xenonet.sources", "xenonet.blocks", "contracts.drift", "claude.transcripts", "codex.sessions", "grok.sessions", "system.projects", "system.runtime", "hosts"] : null,
   file: config.demo ? null : path.join(config.stateDir, "doctor.json"),
   context: async ({ byHand = false } = {}) =>
     doctorContext({

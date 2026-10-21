@@ -32,8 +32,18 @@ const EVERY_MS: u64 = 30 * 60 * 1000;
 const FIRST_AFTER_MS: u64 = 60 * 1000;
 
 /// The checks the demo runs: itself, never your machine.
-pub const DEMO_ONLY: [&str; 9] =
-    ["xenonet.server", "xenonet.sources", "xenonet.blocks", "contracts.drift", "claude.transcripts", "codex.sessions", "system.projects", "system.runtime", "hosts"];
+pub const DEMO_ONLY: [&str; 10] = [
+    "xenonet.server",
+    "xenonet.sources",
+    "xenonet.blocks",
+    "contracts.drift",
+    "claude.transcripts",
+    "codex.sessions",
+    "grok.sessions",
+    "system.projects",
+    "system.runtime",
+    "hosts",
+];
 
 const STATE_SCHEMAS: [&str; 2] = [include_str!("../../../schemas/state/v1.json"), include_str!("../../../schemas/state/v2.json")];
 const STATE_VERSION: f64 = 2.0;

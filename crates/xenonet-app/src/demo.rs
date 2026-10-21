@@ -1,14 +1,15 @@
 //! core/demo.js: demo mode, a made-up workspace that runs through
 //! XenoNet's real pipeline. It writes projects (real git repos), Claude
-//! Code transcripts, Codex rollouts and a small wiki into a temp folder,
-//! lists the sessions the way the adapters would, and keeps appending
-//! transcript lines so the map stays busy. Your real projects and sessions
-//! are never read while it runs.
+//! Code transcripts, Codex rollouts, Grok Build sessions and a small wiki
+//! into a temp folder, lists the sessions the way the adapters would, and
+//! keeps appending transcript lines so the map stays busy. Your real
+//! projects and sessions are never read while it runs.
 //!
 //! What other parts of XenoNet own is asked through `Around`: whether git
 //! can run, the ids identities.js gives accounts, and the local clock.
 
 use crate::fsx;
+use crate::jstext::encode_uri_component;
 use crate::nodepath::NATIVE;
 use crate::spotify::b64url;
 use serde_json::{json, Map, Value};
@@ -178,12 +179,15 @@ pub fn repo_steps() -> Vec<Vec<String>> {
 
 const MODEL_CLAUDE: &str = "claude-sonnet-4-5";
 const MODEL_CODEX: &str = "gpt-5-codex";
+const MODEL_GROK: &str = "grok-build";
+/// The context window Grok Build reports in its usage updates.
+const GROK_WINDOW: u32 = 256_000;
 
 fn model(app: &str) -> &'static str {
-    if app == "claude" {
-        MODEL_CLAUDE
-    } else {
-        MODEL_CODEX
+    match app {
+        "claude" => MODEL_CLAUDE,
+        "grok" => MODEL_GROK,
+        _ => MODEL_CODEX,
     }
 }
 
@@ -218,6 +222,14 @@ fn sessions(today: &str) -> Vec<Value> {
         json!({ "app": "codex", "project": "pathfinder", "title": "Benchmark solver variants", "ago": 60, "parent": 4, "subagent": true, "turns": [{ "prompt": "Benchmark the cached solver against the old one.", "steps": [["run", "cargo bench", true]], "reply": "The cached solver is 10.5 times faster on 500 stops." }] }),
         json!({ "app": "codex", "project": "labs/geofence", "title": "Draw delivery zones from postcodes", "ago": 35, "turns": [{ "prompt": "Turn the postcode list into delivery zones.", "steps": [["read", "src/zones.ts"], ["edit", "src/zones.ts", "zones = []", "zones = loadPostcodes()"], ["run", "npm test", true]], "reply": "Zones now load from the postcode list. Each one is the convex hull of its postcodes." }] }),
         json!({ "app": "claude", "project": "labs", "title": "Sort out which experiments to keep", "ago": 240, "turns": [{ "prompt": "Which of these experiments are worth keeping?", "steps": [["read", "ideas.md"]], "reply": "Keep geofence and route-sim. Snippets is turning into a tool of its own." }] }),
+        // Grok Build's, after the rest so the others keep their ids: one at
+        // work in atlas-web, the subagent it runs to check contrast, and an
+        // older one in pathfinder.
+        json!({ "app": "grok", "project": "atlas-web", "title": "Add dark mode to the storefront", "branch": "feat/dark-mode", "live": true, "turns": [
+            { "prompt": "Add a dark mode to the storefront. Follow the system setting, with a toggle in the header.", "steps": [["read", "app/layout.tsx"], ["edit", "app/theme.css", ":root {", ":root, [data-theme=dark] {"], ["run", "npm run build", true]], "reply": "Dark mode follows the system setting, and the header has a toggle that remembers your choice. Every page passes the contrast check." }
+        ] }),
+        json!({ "app": "grok", "project": "atlas-web", "title": "Check contrast on every page", "ago": 3, "parent": 14, "subagent": true, "turns": [{ "prompt": "Check contrast on every page in dark mode.", "steps": [["run", "npm run test:contrast", true]], "reply": "All 23 pages pass. The sale badge was closest, at 4.6 to 1." }] }),
+        json!({ "app": "grok", "project": "pathfinder", "title": "Map the depot loading rules", "ago": 75, "turns": [{ "prompt": "Write down the depot's loading rules as constraints the solver can use.", "steps": [["read", "src/solver.rs"], ["mcp", "agent-wiki", "wiki_log", { "pages": ["pathfinder"] }]], "reply": "The loading rules are on the pathfinder wiki page as seven constraints. Two need data the depot doesn't send yet." }] }),
     ]
 }
 
@@ -292,6 +304,9 @@ struct Writer {
     id: String,
     cwd: String,
     file: String,
+    // A Grok Build session's folder, and when its summary says it started.
+    dir: String,
+    started: Option<f64>,
     ctx: f64,
     tokens: f64,
     turn: usize,
@@ -305,15 +320,21 @@ impl Writer {
         let id = id_of(i);
         let cwd = cwd_of(s, &world.home);
         let now = around.now();
+        let mut dir = String::new();
         let file = if app == "claude" {
             NATIVE.join(&[&world.claude_root, &format!("demo-{}", NATIVE.basename(&cwd, None)), &format!("{id}.jsonl")])
+        } else if app == "grok" {
+            // As Grok Build keeps a session: a folder of its own, in its
+            // working folder's group, with its summary and its updates.
+            dir = NATIVE.join(&[&world.grok_home, "sessions", &encode_uri_component(&cwd), &id]);
+            NATIVE.join(&[&dir, "updates.jsonl"])
         } else {
             let [y, m, d, _, _] = around.local(now);
             let day = NATIVE.join(&[&world.codex_home, "sessions", &y.to_string(), &format!("{m:02}"), &format!("{d:02}")]);
             NATIVE.join(&[&day, &format!("rollout-{}-{id}.jsonl", iso(now)[..19].replace(':', "-"))])
         };
         fsx::mkdir_p(&NATIVE.dirname(&file), None)?;
-        Ok(Writer { s: s.clone(), app, id, cwd, file, ctx: 18000.0 + i as f64 * 2100.0, tokens: 0.0, turn: 0, step: -1, entries: Vec::new() })
+        Ok(Writer { s: s.clone(), app, id, cwd, file, dir, started: None, ctx: 18000.0 + i as f64 * 2100.0, tokens: 0.0, turn: 0, step: -1, entries: Vec::new() })
     }
 
     fn write(&self, objs: &[Value]) {
@@ -385,6 +406,9 @@ impl Writer {
         if self.app == "claude" {
             return self.write(&[json!({ "type": "user", "timestamp": iso(ts), "message": { "role": "user", "content": text } })]);
         }
+        if self.app == "grok" {
+            return self.grok(ts, json!({ "sessionUpdate": "user_message_chunk", "content": { "type": "text", "text": text } }));
+        }
         self.write(&[
             json!({ "type": "turn_context", "timestamp": iso(ts), "payload": { "model": MODEL_CODEX } }),
             json!({ "type": "event_msg", "timestamp": iso(ts), "payload": { "type": "task_started", "model_context_window": 258400 } }),
@@ -399,6 +423,12 @@ impl Writer {
             let id = format!("msg_{}", a.uuid());
             let usage = self.usage(a);
             return self.write(&[json!({ "type": "assistant", "timestamp": iso(ts), "message": { "id": id, "model": MODEL_CLAUDE, "stop_reason": "end_turn", "usage": usage, "content": [{ "type": "text", "text": text }] } })]);
+        }
+        if self.app == "grok" {
+            self.grok(ts, json!({ "sessionUpdate": "agent_message_chunk", "content": { "type": "text", "text": text } }));
+            self.usage(a);
+            self.grok(ts, json!({ "sessionUpdate": "usage_update", "used": n(self.ctx), "size": GROK_WINDOW }));
+            return self.grok_summary(ts);
         }
         self.codex_tokens(ts, a);
         self.write(&[json!({ "type": "event_msg", "timestamp": iso(ts), "payload": { "type": "task_complete", "last_agent_message": text, "duration_ms": 95000 } })]);
@@ -433,6 +463,9 @@ impl Writer {
         );
         if self.app == "claude" {
             return self.claude_act(&kind, &a_s, b.as_ref(), c.as_ref(), file.as_deref(), ts, around);
+        }
+        if self.app == "grok" {
+            return self.grok_act(&kind, (&a_s, &b_s), b.as_ref(), c.as_ref(), file.as_deref(), ts, around);
         }
         match kind.as_str() {
             "read" => self.codex_tokens(ts, around),
@@ -476,6 +509,78 @@ impl Writer {
         }
         let ok = kind != "run" || b != Some(&Value::Bool(false));
         self.write(&[json!({ "type": "user", "timestamp": iso(ts + 4000.0), "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": call_id, "is_error": !ok, "content": if ok { "ok" } else { "1 failed" } }] } })]);
+    }
+
+    // ----- Grok Build: session updates in their envelope, and a summary -----
+
+    fn grok(&self, ts: f64, update: Value) {
+        self.write(&[json!({ "timestamp": n((ts / 1000.0).floor()), "method": "session/update", "params": { "sessionId": self.id, "update": update } })]);
+    }
+
+    /// A tool call as Grok Build writes it, named as it names its own tools
+    /// (an MCP tool by its title), and how it went. Its scripts read, edit,
+    /// run and call MCP tools. `names` are the step's first two arguments
+    /// as text.
+    #[expect(clippy::too_many_arguments, reason = "a script step's kind and arguments, as next took them apart, with its file, time and around")]
+    fn grok_act(&mut self, kind: &str, names: (&str, &str), b: Option<&Value>, c: Option<&Value>, file: Option<&str>, ts: f64, around: &mut dyn Around) {
+        let (a, b_s) = names;
+        let own = |name: &str, k: &str| json!({ "x.ai/tool": { "version": 1, "name": name, "kind": k } });
+        let or_null = |v: Option<&Value>| v.cloned().unwrap_or(Value::Null);
+        let (title, call_kind, raw, locations, meta) = match kind {
+            "read" => (format!("Read {a}"), "read", json!({ "target_file": file }), Some(json!([{ "path": file }])), Some(own("read_file", "read"))),
+            "edit" => (
+                format!("Edit {a}"),
+                "edit",
+                json!({ "file_path": file, "old_string": or_null(b), "new_string": or_null(c) }),
+                Some(json!([{ "path": file }])),
+                Some(own("search_replace", "edit")),
+            ),
+            "run" => (a.to_string(), "execute", json!({ "command": a }), None, Some(own("run_terminal_cmd", "execute"))),
+            "mcp" => (format!("{a}__{b_s}"), "other", c.filter(|x| !x.is_null()).cloned().unwrap_or_else(|| json!({})), None, None),
+            _ => return,
+        };
+        let id = format!("call_{}", &around.uuid()[..8]);
+        let mut call = Map::new();
+        call.insert("sessionUpdate".into(), json!("tool_call"));
+        call.insert("toolCallId".into(), json!(id));
+        call.insert("status".into(), json!("pending"));
+        call.insert("title".into(), json!(title));
+        call.insert("kind".into(), json!(call_kind));
+        call.insert("rawInput".into(), raw);
+        if let Some(l) = locations {
+            call.insert("locations".into(), l);
+        }
+        if let Some(m) = meta {
+            call.insert("_meta".into(), m);
+        }
+        self.grok(ts, Value::Object(call));
+        let ok = kind != "run" || b != Some(&Value::Bool(false));
+        let content = if kind == "edit" {
+            json!([{ "type": "diff", "path": file, "oldText": or_null(b), "newText": or_null(c) }])
+        } else {
+            json!([{ "type": "content", "content": { "type": "text", "text": if ok { "ok" } else { "1 failed" } } }])
+        };
+        self.grok(ts + 3000.0, json!({ "sessionUpdate": "tool_call_update", "toolCallId": id, "status": if ok { "completed" } else { "failed" }, "content": content }));
+    }
+
+    /// Its summary beside the updates, written when the session starts and
+    /// after each turn. A subagent's names the session that runs it.
+    fn grok_summary(&mut self, ts: f64) {
+        let started = *self.started.get_or_insert(ts);
+        let mut summary = Map::new();
+        summary.insert("info".into(), json!({ "id": self.id, "cwd": self.cwd }));
+        summary.insert("session_summary".into(), json!(""));
+        summary.insert("generated_title".into(), self.s.get("title").cloned().unwrap_or(Value::Null));
+        summary.insert("title_is_manual".into(), json!(false));
+        summary.insert("created_at".into(), json!(iso(started)));
+        summary.insert("updated_at".into(), json!(iso(ts)));
+        summary.insert("current_model_id".into(), json!(MODEL_GROK));
+        summary.insert("head_branch".into(), self.s.get("branch").cloned().unwrap_or(Value::Null));
+        if let Some(p) = self.s.get("parent").and_then(Value::as_u64) {
+            summary.insert("parent_session_id".into(), json!(id_of(p as usize)));
+            summary.insert("session_kind".into(), json!(if flag(&self.s, "subagent") { "subagent" } else { "fork" }));
+        }
+        let _ = fsx::write_file(&NATIVE.join(&[&self.dir, "summary.json"]), format!("{}\n", stringify(&Value::Object(summary), 2)).as_bytes(), None);
     }
 
     fn subagent(&self, task: &str, ts: f64, around: &mut dyn Around) {
@@ -640,6 +745,9 @@ impl Demo {
             let per: usize = w.turns().iter().map(|t| t.get("steps").and_then(Value::as_array).map_or(0, Vec::len) + 2).sum();
             let steps = per * if live { 2 } else { 1 };
             let mut ts = end - steps as f64 * 50e3;
+            if w.app == "grok" {
+                w.grok_summary(ts);
+            }
             for _ in 0..steps {
                 if !w.next(ts, around) && !flag(&s, "stuck") {
                     break;
@@ -786,7 +894,8 @@ impl Demo {
                 "model": model(app),
                 "branch": s.get("branch").cloned().unwrap_or(Value::Null),
                 "status": null,
-                "source": if subagent { json!("subAgent") } else { Value::Null },
+                // A subagent's session says it's one as its app does.
+                "source": if subagent { json!(if app == "grok" { "subagent" } else { "subAgent" }) } else { Value::Null },
                 "nativeProjectId": if flag(s, "native") { json!("demo-atlas") } else { Value::Null },
                 "parentId": parent,
                 "parentKind": parent.as_ref().map(|_| if subagent { "subagent" } else { "spawn" }),
@@ -915,7 +1024,20 @@ mod tests {
         assert_eq!(claude[0]["claudeAccount"]["account"], CLAUDE_WORK.0);
         let t = demo.transcript(&id_of(0)).unwrap();
         assert!(t["total"].as_u64().unwrap() > 0);
-        assert_eq!(demo.live_count(), 4);
+        assert_eq!(demo.live_count(), 5);
+        // Grok Build's, in its folders, the subagent's under the session
+        // that runs it.
+        let grok = demo.sessions_of("grok").unwrap();
+        assert_eq!(
+            grok.iter().map(|s| s["title"].as_str().unwrap()).collect::<Vec<_>>(),
+            ["Add dark mode to the storefront", "Check contrast on every page", "Map the depot loading rules"]
+        );
+        assert_eq!((grok[1]["source"].as_str(), grok[1]["parentId"].as_str()), (Some("subagent"), Some(format!("grok:{}", id_of(14)).as_str())));
+        let folder = std::path::Path::new(w["grokHome"].as_str().unwrap()).join("sessions").join(encode_uri_component(grok[1]["cwd"].as_str().unwrap())).join(id_of(15));
+        let summary: Value = serde_json::from_str(&std::fs::read_to_string(folder.join("summary.json")).unwrap()).unwrap();
+        assert_eq!((summary["parent_session_id"].as_str(), summary["session_kind"].as_str()), (Some(id_of(14).as_str()), Some("subagent")));
+        let first: Value = serde_json::from_str(std::fs::read_to_string(folder.join("updates.jsonl")).unwrap().lines().next().unwrap()).unwrap();
+        assert_eq!(first["params"]["update"]["sessionUpdate"], "user_message_chunk");
         assert!(demo.transcript("nope").is_err());
         assert_eq!(demo_picks(&json!([{ "path": "labs/snippets", "xenonet": "folder" }]))[0]["as"], "project");
         std::fs::remove_dir_all(&tmp).unwrap();
