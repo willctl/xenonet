@@ -810,6 +810,11 @@ pub fn app_user_data_dir(name: String, platform: String, appdata: Option<String>
     control::user_data_dir(&name, &platform, appdata.as_deref(), xdg_config_home.as_deref(), &home)
 }
 
+#[napi(js_name = "appParseProcesses")]
+pub fn app_parse_processes(text: String) -> Json {
+    Json(control::parse_processes(&text))
+}
+
 #[napi(js_name = "appElectronCommand")]
 pub fn app_electron_command(root: String, home: String, platform: String, software_rendering: bool) -> Json {
     let (command, args) = control::electron_command(&root, &home, &platform, software_rendering);

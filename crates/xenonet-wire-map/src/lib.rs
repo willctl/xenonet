@@ -6,6 +6,7 @@
 // A core's failure is the service's CoreError, as its traits return it.
 #![expect(clippy::result_large_err, reason = "the cores' traits return the service's CoreError")]
 
+pub mod archive;
 pub mod blocks;
 pub mod claude;
 pub mod codex;

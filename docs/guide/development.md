@@ -146,7 +146,7 @@ fuzz/run.sh lines 1800      # one target for 30 minutes
 | --- | --- |
 | `json` | JSON as XenoNet parses and writes it |
 | `lines`, `telemetry` | Claude Code transcripts and Codex rollouts, line by line, into the live map |
-| `transcript_files` | Transcript files on disk: the session listing, the lenient normalizers, rollout pages, stats |
+| `transcript_files` | Transcript files on disk: the session listing, the lenient normalizers, rollout pages, archived rollouts' Zstandard, stats |
 | `schema`, `jsregex` | Records checked against the vendor schemas and XenoNet's own, and the schemas' patterns |
 | `native`, `sources`, `wiki` | The other apps' files (Gemini CLI, Copilot CLI, OpenCode, Cursor, numbat), Codex's app-server, git's output, plan usage, the shared context |
 | `base` | Strings, times, paths, git remotes and model names |
@@ -205,7 +205,7 @@ A demo or test copy can get stuck, holding the instance's lock without answering
 
 `launch:restart`, or `restart` on the tool, quits a running copy first. It also ends a stuck copy of any instance, `dev` included.
 
-`quit` returns once XenoNet Dev has exited.
+`quit` returns once XenoNet Dev has exited. A copy still there 20 seconds after its server went is killed. For the `test` instance, that takes its whole process tree: the app, its GPU and network processes, and the service it started, with what they started. Left behind, these keep running, and the GPU process can keep a core busy. The answer lists them as `ended`. The tree is read with `ps`, so this is on macOS and Linux. Other instances, and anything on the ports 47840 to 47842, never get this: there `quit` kills the app's process alone, as before.
 
 ### How the control channel works
 

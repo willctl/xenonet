@@ -400,7 +400,7 @@
     "core/control.js": {
       "rust": "crates/xenonet-app/src/control.rs, on the task bridge in crates/xenonet-app/src/task.rs",
       "differences": [
-        "Each method is a Rust task (async Rust whose awaits the twin answers): fetch to the instance's server, the system's alive, kill, command and spawn, and the environment are still done by JS, with the system given.",
+        "Each method is a Rust task (async Rust whose awaits the twin answers): fetch to the instance's server, the system's alive, kill, processes, command and spawn, and the environment are still done by JS, with the system given. The twin's own processes runs ps and has Rust read its rows (appParseProcesses).",
         "lockHolder reads the lock's link and connects to its socket from Rust, synchronously (a Unix socket answers at once or not at all); JS gave the connection a second.",
         "electronCommand still finds npm's Electron with Node's module resolution; whether XenoNet Dev.app is this checkout's is the Rust's.",
         "A port given as null is taken as not given; JS used null."
@@ -482,7 +482,7 @@
     "core/digest.js": {
       "rust": "crates/xenonet-state/src/digest.rs",
       "differences": [
-        "askCodex still runs codex exec from the twin (a child process); Rust gives its arguments and narrate's prompt.",
+        "askCodex still runs codex exec from the twin (a child process); Rust gives its arguments, makes the run's own Codex home (codexRunHome) and gives narrate's prompt.",
         "dayLog's date is English as en-US writes it (\"Saturday, October 3\") whatever the system's locale, where Node used the system's.",
         "summarize writes since and until as null when they aren't numbers, where JS gave them back as they came."
       ]
@@ -715,7 +715,7 @@
         "A view reads a copy of its record, made when it's built: a change to `raw` after that isn't seen (no reader changes one).",
         "Lines are parsed as in core/blocks/normalizer.js's entry.",
         "Through the twin, reading a transcript takes about 8 times as long as the JS (20,000 lines, 15 MB: 340 ms against 40 ms), since each record crosses between JS and Rust several times while vendor.js's checks are still JS. Don't put this twin in the module's place before the readers are Rust end to end.",
-        "readLines still reads the file, and unpacks a .zst archive, in JS: the Rust reader needs a zstd decoder first."
+        "readLines still reads the file, and unpacks a .zst archive, in JS. The binary's readers unpack one in Rust (crates/xenonet-wire-map/src/archive.rs), every frame of it, where Node's zlib.zstdDecompressSync stops after the first; Codex writes one."
       ]
     },
     "core/live.js": {

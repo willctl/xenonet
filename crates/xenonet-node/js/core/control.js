@@ -3,7 +3,7 @@
 // its control channel and quits it. Each method is a Rust task; what it
 // waits on (the instance's server, the machine's processes, starting
 // XenoNet Dev) is done here, through the `system` given.
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -29,7 +29,9 @@ const text = (v) => (v == null ? null : String(v));
 export const userDataDir = (name, { platform = process.platform, env = process.env, home = os.homedir() } = {}) => native.appUserDataDir(String(name), String(platform), text(env.APPDATA), text(env.XDG_CONFIG_HOME), String(home));
 
 // What launch and quit ask of the system, which tests stand in for: whether
-// a process is still there, a signal to one, and starting XenoNet Dev.
+// a process is still there, a signal to one, the machine's processes (as
+// Rust reads ps, or null where ps can't list them), and starting XenoNet
+// Dev.
 const system = {
   alive(pid) {
     try {
@@ -43,6 +45,12 @@ const system = {
     try {
       process.kill(pid, signal);
     } catch {}
+  },
+  processes() {
+    if (process.platform === "win32") return null;
+    return new Promise((resolve) =>
+      execFile("ps", ["-A", "-o", "pid=,ppid=,lstart="], { env: { ...process.env, LC_ALL: "C", TZ: "UTC" }, timeout: 5000, maxBuffer: 16 << 20 }, (err, stdout) => resolve(err ? null : native.appParseProcesses(stdout))),
+    );
   },
   spawn,
   command: electronCommand,
@@ -62,6 +70,8 @@ function machine(sys) {
         return sys.alive(q.pid);
       case "kill":
         return sys.kill(q.pid, q.signal);
+      case "processes":
+        return (await sys.processes?.()) ?? null;
       case "env":
         return { ...process.env };
       case "command":

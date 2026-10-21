@@ -448,7 +448,7 @@
      "status": "idle",
      "tokens": {
       "processed": 15000,
-      "output": 1200
+      "output": 900
      },
      "tokensToday": 12000,
      "tpm": 0,
@@ -4089,7 +4089,7 @@
     "status": "thinking",
     "tokens": {
      "processed": 15000,
-     "output": 1200
+     "output": 900
     },
     "tokensToday": 15000,
     "tpm": 3000,
