@@ -147,7 +147,8 @@ impl Config {
         let cache_dir = resolve(&set("XENONET_CACHE_DIR").or_else(|| dev_dir("cache")).unwrap_or_else(|| dir_of("cache", "XenoNet")));
         let runtime_dir = set("XENONET_RUNTIME_DIR").unwrap_or_else(|| Path::new(&dir_of("state", "XenoNet")).join("runtime").to_string_lossy().into_owned());
         let projects_dir = resolve(&set("XENONET_PROJECTS_DIR").unwrap_or_else(|| Path::new(&home).join("Projects").to_string_lossy().into_owned()));
-        let gateway_port = set("XENONET_GATEWAY_PORT").map(|p| js_number(Some(&Value::String(p)))).filter(|n| *n != 0.0 && n.fract() == 0.0 && (1.0..=65535.0).contains(n)).map(|n| n as u16);
+        let gateway_port =
+            set("XENONET_GATEWAY_PORT").map(|p| js_number(Some(&Value::String(p)))).filter(|n| *n != 0.0 && n.fract() == 0.0 && (1.0..=65535.0).contains(n)).map(|n| n as u16);
         Config {
             demo,
             dev,

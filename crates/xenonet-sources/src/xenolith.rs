@@ -25,7 +25,7 @@ struct Product {
     xdg: &'static str,
     folder: &'static str,
     legacy: &'static str,
-    /// It makes the folder <ENV>_DIR names when it starts, so XenoNet takes
+    /// It makes the folder `<ENV>_DIR` names when it starts, so XenoNet takes
     /// that folder before it's there.
     makes_dir: bool,
 }
@@ -125,7 +125,7 @@ fn same_dir(a: &str, b: &str) -> bool {
 }
 
 /// Which server a wiki folder belongs to (one XENONET_WIKI_DIR names,
-/// say): the product whose own lookup names that folder (its <ENV>_DIR,
+/// say): the product whose own lookup names that folder (its `<ENV>_DIR`,
 /// its config's wikiDir or its folder in home), so a wiki that moved keeps
 /// its server. Only for a folder neither names does the protocol it was
 /// seeded with decide, since people edit it: Xenolith's says "# Xenolith
@@ -163,7 +163,7 @@ pub fn context_name(server: Option<&str>) -> &'static str {
 /// Xenolith's spaces (xenolith/rust/crates/core/src/spaces.rs): one wiki
 /// each, for a project, an identity, an actor or a machine. The wiki's own
 /// folder is this machine's, machine:local; every other is laid out the
-/// same way in spaces/<kind>/<name>/ under it.
+/// same way in `spaces/<kind>/<name>/` under it.
 pub const SPACE_KINDS: [&str; 4] = ["project", "identity", "actor", "machine"];
 
 /// The space a context_* call works in.

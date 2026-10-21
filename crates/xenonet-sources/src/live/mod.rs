@@ -367,7 +367,7 @@ pub fn tool_key(name: &str, input: Option<&Value>) -> String {
 
 /// The pages a write to the shared context names, for the map to beam to.
 /// A write to another space than this machine's (its `space`, such as
-/// project:atlas) names that space's pages, as <space>/<slug>, the end of
+/// project:atlas) names that space's pages, as `<space>/<slug>`, the end of
 /// their ids on the map; one to a space Xenolith refuses wrote nothing.
 pub fn wiki_pages_of(server: Option<&str>, input: Option<&Value>) -> Option<Vec<String>> {
     use crate::xenolith::{space_of, Space};

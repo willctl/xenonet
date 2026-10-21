@@ -296,7 +296,9 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
             let id = id_of(space.as_deref(), &slug_of(p));
             let writes: Vec<Value> = items(get(p, "writes")).iter().rev().take(6).rev().cloned().collect();
             let f = |k: &str| get(p, k).cloned().unwrap_or(Value::Null);
-            let mut node = obj(json!({ "id": id, "kind": "page", "name": f("title"), "slug": f("slug"), "type": f("type"), "summary": f("summary"), "tags": f("tags"), "updated": f("updated"), "updatedBy": f("updatedBy"), "path": f("path"), "writes": writes, "lastActivity": f("updated") }));
+            let mut node = obj(
+                json!({ "id": id, "kind": "page", "name": f("title"), "slug": f("slug"), "type": f("type"), "summary": f("summary"), "tags": f("tags"), "updated": f("updated"), "updatedBy": f("updatedBy"), "path": f("path"), "writes": writes, "lastActivity": f("updated") }),
+            );
             // Its aliases and space only when it has them, so a page
             // without stays as it was.
             if let Some(aliases) = get(p, "aliases").filter(|a| !items(Some(a)).is_empty()) {

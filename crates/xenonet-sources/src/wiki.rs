@@ -578,7 +578,7 @@ fn is_dir(p: &str) -> bool {
 
 /// The spaces besides this machine's own, as Xenolith lists them (list in
 /// xenolith/rust/crates/core/src/spaces.rs): each a wiki laid out as the
-/// folder is, in spaces/<kind>/<name>/, by kind and then name. A folder
+/// folder is, in `spaces/<kind>/<name>/`, by kind and then name. A folder
 /// that isn't a space's name, or is a link, isn't one.
 fn spaces_in(dir: &str) -> Vec<SpaceDir> {
     use crate::xenolith::{space_of, Space, SPACE_KINDS};
@@ -592,7 +592,8 @@ fn spaces_in(dir: &str) -> Vec<SpaceDir> {
         if !is_dir(&kind_dir) {
             continue;
         }
-        let names: Vec<String> = std::fs::read_dir(&kind_dir).map(|es| es.filter_map(Result::ok).map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
+        let names: Vec<String> =
+            std::fs::read_dir(&kind_dir).map(|es| es.filter_map(Result::ok).map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
         for name in names {
             let id = format!("{kind}:{name}");
             let space_dir = paths::join(&kind_dir, &name);
