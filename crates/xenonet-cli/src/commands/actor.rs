@@ -461,7 +461,7 @@ pub fn target_of(spec: &str, fallback: Option<&str>) -> Value {
         Some(i) => (&spec[..i], Some(&spec[i + 1..])),
         None => (spec, fallback),
     };
-    let id = ["project:", "zone:", "native:", "claude:", "codex:"].iter().any(|p| node.starts_with(p));
+    let id = ["project:", "zone:", "native:", "claude:", "codex:", "grok:"].iter().any(|p| node.starts_with(p));
     let mut out = Map::new();
     if id {
         out.insert("id".into(), json!(node));
@@ -984,6 +984,7 @@ mod tests {
         assert_eq!(node_words("actor:wren"), "actor:wren");
         assert_eq!(target_of("claude:x=spawned", Some("works-on")), json!({ "id": "claude:x", "relation": "spawned" }));
         assert_eq!(target_of("project:/a", None), json!({ "id": "project:/a" }));
+        assert_eq!(target_of("grok:g=works-on", None), json!({ "id": "grok:g", "relation": "works-on" }));
         assert_eq!(target_of("=x", None)["path"], json!(sys::resolve("=x")));
     }
 

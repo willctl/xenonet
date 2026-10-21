@@ -287,7 +287,7 @@ async function event([kind], flags) {
 function targetOf(spec, fallback) {
   const i = spec.lastIndexOf("=");
   const [node, relation] = i > 0 ? [spec.slice(0, i), spec.slice(i + 1)] : [spec, fallback];
-  const where = /^(project|zone|native|claude|codex):/.test(node) ? { id: node } : { path: path.resolve(node) };
+  const where = /^(project|zone|native|claude|codex|grok):/.test(node) ? { id: node } : { path: path.resolve(node) };
   return relation === undefined ? where : { ...where, relation };
 }
 

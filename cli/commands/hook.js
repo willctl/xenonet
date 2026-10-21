@@ -1,4 +1,4 @@
-// xenonet hook <app>: what Claude Code's and Codex's hooks run (XenoNet adds
+// xenonet hook <app>: what Claude Code's, Codex's and Grok Build's hooks run (XenoNet adds
 // them when you connect your agents; see core/engine/connect.js). It passes
 // the event on to the running XenoNet and prints what XenoNet wants the agent to
 // hear, in the hook output format both read. If XenoNet isn't running, it
@@ -9,7 +9,7 @@ import { tailedOr, appRefusal } from "../../core/apps.js";
 import { createLog, logDir } from "../../core/log.js";
 import { appDir } from "../../core/dirs.js";
 
-export const help = `Passes a Claude Code or Codex hook event (JSON on stdin) to XenoNet and
+export const help = `Passes a Claude Code, Codex or Grok Build hook event (JSON on stdin) to XenoNet and
 prints XenoNet's answer for the session. Their settings run it, so you don't
 need to.`;
 

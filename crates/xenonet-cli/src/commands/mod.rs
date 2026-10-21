@@ -86,7 +86,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("uninstall", "Take the xenonet command off your PATH", None),
     cmd("completion", "Tab completion for zsh or bash", Some("<zsh|bash>")),
     Command { name: "mcp", about: "Run the xenonet MCP server (Claude Code and Codex start it)", args: None, hidden: true },
-    Command { name: "hook", about: "Pass a Claude Code or Codex hook to XenoNet (their settings run it)", args: Some("<claude|codex>"), hidden: true },
+    Command { name: "hook", about: "Pass a Claude Code, Codex or Grok Build hook to XenoNet (their settings run it)", args: Some("<claude|codex|grok>"), hidden: true },
     Command { name: "relay", about: "Stream this XenoNet's map to a console on another machine (consoles run it over SSH)", args: None, hidden: true },
 ];
 
