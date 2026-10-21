@@ -66,7 +66,7 @@ export const APPS = [
     roots: { env: "GROK_HOME", default: "~/.grok" },
     context: 256000,
     team: "5Y6N3AJ54S",
-    has: ["lines"],
+    has: ["lines", "sessions"],
   },
   {
     id: "gemini-cli",

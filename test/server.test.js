@@ -138,13 +138,13 @@ test("only this machine's own pages get in, and health says which XenoNet it is"
   assert.ok(data.sources.some((s) => s.name === "projects" && s.ok));
   // And how each of its parts is doing (core/blocks).
   const names = data.blocks.map((b) => b.name);
-  for (const name of ["state", "engine", "transcripts", "claude-lines", "codex-lines", "claude-sessions", "codex-threads", "codex-projects", "codex-app-server", "identities", "git-status", "claude-desktop-usage", "projects"]) assert.ok(names.includes(name), name);
+  for (const name of ["state", "engine", "transcripts", "claude-lines", "codex-lines", "grok-lines", "claude-sessions", "codex-threads", "codex-projects", "codex-app-server", "grok-sessions", "identities", "git-status", "claude-desktop-usage", "projects"]) assert.ok(names.includes(name), name);
   assert.equal(new Set(names).size, names.length);
   for (const b of data.blocks) assert.deepEqual(Object.keys(b).filter((k) => k !== "source").sort(), ["counters", "kind", "lastError", "lastOk", "name", "since", "state"], b.name);
   // The ones that read for a source of the map say which, so the doctor
   // reports a source that fails once.
   const sourced = Object.fromEntries(data.blocks.filter((b) => b.source).map((b) => [b.name, b.source]));
-  assert.deepEqual(sourced, { "claude-sessions": "claude", "codex-threads": "codex", "codex-projects": "codex-projects", "codex-app-server": "codex", transcripts: "live", identities: "identities", projects: "projects" });
+  assert.deepEqual(sourced, { "claude-sessions": "claude", "codex-threads": "codex", "codex-projects": "codex-projects", "codex-app-server": "codex", "grok-sessions": "grok", transcripts: "live", identities: "identities", projects: "projects" });
   assert.ok(Object.values(sourced).every((name) => data.sources.some((s) => s.name === name)), "each one a source the map has");
   assert.ok(data.blocks.every((b) => ["idle", "running"].includes(b.state)), JSON.stringify(data.blocks.filter((b) => !["idle", "running"].includes(b.state))));
   assert.equal((await get("/api/nothing-here")).status, 404);

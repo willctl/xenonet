@@ -103,6 +103,7 @@ pub struct MapState {
     claude_sessions: Arc<Gather>,
     codex_threads: Arc<Gather>,
     codex_projects: Arc<Gather>,
+    grok_sessions: Arc<Gather>,
     pub runs: Mutex<ReportedRuns>,
     /// The native readers and numbat's, when they're on.
     observed: Vec<Arc<crate::observed::Observed>>,
@@ -175,7 +176,8 @@ impl MapState {
             )
         });
         let gatherer = |name: &str| Arc::new(Gather::new(name, Options { fallback: json!([]), ..Default::default() }));
-        let (claude_sessions, codex_threads, codex_projects) = (gatherer("claude-sessions"), gatherer("codex-threads"), gatherer("codex-projects"));
+        let (claude_sessions, codex_threads, codex_projects, grok_sessions) =
+            (gatherer("claude-sessions"), gatherer("codex-threads"), gatherer("codex-projects"), gatherer("grok-sessions"));
         // The projects folder you chose, if you did (workspace.js), as
         // state.json has it: the store itself is read at the first refresh,
         // with the rest of what it saves then.
@@ -200,6 +202,7 @@ impl MapState {
             claude_sessions,
             codex_threads,
             codex_projects,
+            grok_sessions,
             runs: Mutex::new(ReportedRuns::new()),
             observed: crate::observed::Observed::all(&cfg, &vendor),
             inner: Mutex::new(Inner { map: Map_ { sources: json!([]), ..Default::default() }, memory: Memory::new(), projects_dir, demo_titles: Vec::new(), repo_pass_for: None }),
@@ -222,6 +225,7 @@ impl MapState {
         let _ = b.add(state.codex_threads.clone(), Some("codex"));
         let _ = b.add(state.codex_projects.clone(), Some("codex-projects"));
         let _ = b.add(codex, Some("codex"));
+        let _ = b.add(state.grok_sessions.clone(), Some("grok"));
         let _ = b.add(live.block(), Some("live"));
         for l in vendor.blocks() {
             let _ = b.add(l, None);
@@ -343,13 +347,19 @@ impl MapState {
     async fn gather_sessions(&self, app: &str) -> Result<Value, String> {
         match &self.readers {
             Readers::Demo(d) => d.sessions(app).map(Value::Array),
-            Readers::Real { claude } => {
-                if tailed_app(app, "claude") == "codex" {
-                    self.codex.threads().await.map(Value::Array)
-                } else {
-                    claude.sessions().await.map(Value::Array)
+            Readers::Real { claude } => match tailed_app(app, "claude") {
+                "codex" => self.codex.threads().await.map(Value::Array),
+                "grok" => {
+                    let (home, vendor) = (self.cfg.grok_home.clone(), self.vendor.clone());
+                    Ok(Value::Array(
+                        crate::util::blocking(move || {
+                            xenonet_sources::grok::list_sessions(&home, &mut |raw| vendor.sample("spacexai/grok-build/session-summary", raw, None, None, 16))
+                        })
+                        .await,
+                    ))
                 }
-            }
+                _ => claude.sessions().await.map(Value::Array),
+            },
         }
     }
 
@@ -374,14 +384,16 @@ impl MapState {
     async fn refresh_now(&self) -> Result<Value, String> {
         // The projects folder as this refresh found it, for all of it.
         let root = self.projects_dir();
-        let (codex, native, claude) = tokio::join!(
+        let (codex, native, claude, grok) = tokio::join!(
             self.codex_threads.run(false, None, || self.gather_sessions("codex")),
             self.codex_projects.run(false, None, || self.gather_native()),
             self.claude_sessions.run(false, None, || self.gather_sessions("claude")),
+            self.grok_sessions.run(false, None, || self.gather_sessions("grok")),
         );
         let (codex, codex_st) = gathered("codex", &self.codex_threads, codex);
         let (native, native_st) = gathered("codex-projects", &self.codex_projects, native);
         let (claude, claude_st) = gathered("claude", &self.claude_sessions, claude);
+        let (grok, grok_st) = gathered("grok", &self.grok_sessions, grok);
         // Keep the previous sessions for a source that failed this round, so
         // a transient error doesn't make half the graph vanish.
         let prev: Vec<Value> = self.all_nodes().into_iter().filter(|n| s(n, "kind") == Some("session")).collect();
@@ -391,7 +403,8 @@ impl MapState {
         let observed = self.observed_sessions();
         let titles: HashMap<String, Value> = lock(&self.inner).demo_titles.iter().cloned().collect();
         let ok = |st: &Value| st.get("ok") == Some(&Value::Bool(true));
-        let sessions = decide::merge_sessions(&prev, (ok(&codex_st), items(Some(&codex))), (ok(&claude_st), items(Some(&claude))), &observed, &titles);
+        let lists = [("codex", ok(&codex_st), items(Some(&codex))), ("claude", ok(&claude_st), items(Some(&claude))), ("grok", ok(&grok_st), items(Some(&grok)))];
+        let sessions = decide::merge_sessions(&prev, &lists, &observed, &titles);
         // Where sessions ran is evidence of where the projects are, so the
         // scan comes after the session lists.
         let session_dirs = decide::session_dirs(&sessions);
@@ -502,7 +515,7 @@ impl MapState {
         }
         let live = lock(&self.live.status).clone();
         let search = self.search.status_json();
-        let mut sources = vec![projects_st, codex_st, native_st, claude_st];
+        let mut sources = vec![projects_st, codex_st, native_st, claude_st, grok_st];
         sources.extend(self.observed.iter().map(|o| o.status()));
         sources.push(json!({ "name": "live", "ok": live.watching, "count": live.files }));
         let mut wiki_st = json!({ "name": "wiki", "ok": wiki.is_some(), "count": wiki.as_ref().map_or(0, |w| items(w.get("pages")).len()) });
@@ -813,15 +826,24 @@ impl MapState {
         let raw = s(node, "rawId").unwrap_or_default().to_string();
         match &self.readers {
             Readers::Demo(d) => d.transcript(&raw),
-            Readers::Real { claude } => {
-                if tailed_app(s(node, "app").unwrap_or_default(), "claude") == "codex" {
+            Readers::Real { claude } => match tailed_app(s(node, "app").unwrap_or_default(), "claude") {
+                "codex" => {
                     let id = s(node, "id").unwrap_or_default().to_string();
                     let rollout = self.stats.files(&id).into_iter().next().map(|(f, _)| f);
                     self.codex.read_thread(&raw, cursor, limit, rollout).await
-                } else {
-                    claude.read(&raw, cursor, limit).await
                 }
-            }
+                "grok" => {
+                    let (home, vendor, cursor) = (self.cfg.grok_home.clone(), self.vendor.clone(), cursor.map(str::to_string));
+                    crate::util::blocking(move || {
+                        let dir = xenonet_sources::grok::folder(&home, &raw).ok_or("XenoNet can't find this Grok Build session's folder")?;
+                        let lines = crate::stats::read_lines(&vendor, &dir.join("updates.jsonl").to_string_lossy(), crate::vendor::Tailed::Grok).map_err(|e| e.to_string())?;
+                        let lines: Vec<_> = lines.into_iter().map(xenonet_sources::lines::GrokLine::new).collect();
+                        Ok(xenonet_sources::grok::page(xenonet_sources::grok::entries(&lines), cursor.as_deref(), limit as usize))
+                    })
+                    .await
+                }
+                _ => claude.read(&raw, cursor, limit).await,
+            },
         }
     }
 

@@ -369,14 +369,27 @@ pub fn visible_resource(server: String, hidden: Json) -> bool {
     state::visible_resource(&server, &js_set(&hidden.0))
 }
 
+/// `lists`: [[app, ok, sessions]], each app's listing in the order they
+/// go in.
 #[napi(js_name = "mergeSessions")]
-pub fn merge_sessions(prev: Json, codex_ok: bool, codex: Json, claude_ok: bool, claude: Json, observed: Json, demo_titles: Json) -> Json {
+pub fn merge_sessions(prev: Json, lists: Json, observed: Json, demo_titles: Json) -> Json {
     let list = |v: &Json| v.0.as_array().cloned().unwrap_or_default();
     let titles: std::collections::HashMap<String, Value> = demo_titles
         .0
         .as_array()
         .map_or_else(Default::default, |a| a.iter().filter_map(|p| Some((p.get(0)?.as_str()?.to_string(), p.get(1).cloned().unwrap_or(Value::Null)))).collect());
-    Json(Value::Array(state::merge_sessions(&list(&prev), (codex_ok, &list(&codex)), (claude_ok, &list(&claude)), &list(&observed), &titles)))
+    let lists: Vec<(String, bool, Vec<Value>)> = list(&lists)
+        .iter()
+        .map(|l| {
+            (
+                l.get(0).and_then(Value::as_str).unwrap_or_default().to_string(),
+                l.get(1) == Some(&Value::Bool(true)),
+                l.get(2).and_then(Value::as_array).cloned().unwrap_or_default(),
+            )
+        })
+        .collect();
+    let apps: Vec<(&str, bool, &[Value])> = lists.iter().map(|(app, ok, s)| (app.as_str(), *ok, s.as_slice())).collect();
+    Json(Value::Array(state::merge_sessions(&list(&prev), &apps, &list(&observed), &titles)))
 }
 
 #[napi(js_name = "sessionDirs")]

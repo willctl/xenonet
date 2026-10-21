@@ -8,6 +8,7 @@ pub mod claude;
 pub mod claude_usage;
 pub mod codex;
 pub mod git;
+pub mod grok;
 pub mod line_events;
 pub mod lines;
 pub mod live;
