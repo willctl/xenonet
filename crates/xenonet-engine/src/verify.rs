@@ -38,9 +38,22 @@ use xenonet_base::sync::Locked;
 /// The apps whose sessions XenoNet checks, by their id in a session's name:
 /// those whose processes it tells apart (the registry's `processes`, by
 /// `processes`): Claude Code, Codex and OpenCode. A request in another
-/// app's session's name isn't checked.
+/// app's session's name is refused, wherever XenoNet runs: no check could
+/// ever pass it, so it can't call as a session. Actors call with their
+/// tokens, and the runs an actor reports come through the gateway, so
+/// neither meets this rule.
 fn app_name(app: &str) -> Option<&'static str> {
     crate::processes::agent(app).map(|a| a.name.as_str())
+}
+
+/// Why a request in `agent`'s name, a session of `app`, which XenoNet
+/// doesn't check, is refused.
+fn uncheckable(agent: &str, app: &str) -> String {
+    let why = match xenonet_base::apps::app(app) {
+        Some(a) => format!("XenoNet can't tell {}'s processes apart, so it can't check that the request comes from that session", a.name),
+        None => format!("XenoNet doesn't know an app called \"{app}\""),
+    };
+    format!("requests in {agent}'s name are refused: {why}")
 }
 
 /// An app's own rules, for one XenoNet checks.
@@ -309,7 +322,10 @@ impl Verifier {
     pub fn check(&self, c: &mut dyn Calls, agent: &Arg, hook: bool) -> Result<Arg> {
         let name = js_text(agent);
         let app = name.split(':').next().unwrap_or("").to_string();
-        if app_lookup(&app).is_none() || !Self::supported(c)? {
+        if app_name(&app).is_none() {
+            return self.refuse(c, agent.clone(), &uncheckable(&name, &app));
+        }
+        if !Self::supported(c)? {
             return Ok(self.pass());
         }
         let (pid, chain) = Self::see(c, false);
@@ -790,13 +806,25 @@ mod tests {
         ]);
         let v = verifier(Arg::Null);
         let a = Arg::text("claude:a");
-        // Where XenoNet can't look, or the name isn't an app's it checks.
+        // Where XenoNet can't look, a checked app's session passes.
         t.supported = false;
         assert_eq!(said(&v.check(&mut t, &a, false)), passed());
+        // A session of an app XenoNet doesn't check is refused, there too:
+        // no check could ever pass it.
+        let cursor = "requests in cursor:a's name are refused: XenoNet can't tell Cursor's processes apart, so it can't check that the request comes from that session";
+        assert_eq!(said(&v.check(&mut t, &Arg::text("cursor:a"), false)), refused(cursor));
         t.supported = true;
-        assert_eq!(said(&v.check(&mut t, &Arg::text("cursor:a"), false)), passed());
+        assert_eq!(said(&v.check(&mut t, &Arg::text("cursor:a"), false)), refused(cursor));
+        assert_eq!(
+            said(&v.check(t.from(30.0), &Arg::text("gemini-cli:a"), true)),
+            refused(&cursor.replace("cursor", "gemini-cli").replace("Cursor", "Gemini CLI")),
+            "a hook's too"
+        );
+        assert_eq!(said(&v.check(&mut t, &Arg::text("nobody:a"), false)), refused("requests in nobody:a's name are refused: XenoNet doesn't know an app called \"nobody\""));
+        assert_eq!(said(&v.check(&mut t, &Arg::text("toString:a"), false)), refused("requests in toString:a's name are refused: XenoNet doesn't know an app called \"toString\""));
+        t.peer = Arg::Null;
         assert_eq!(said(&v.check(&mut t, &a, false)), passed(), "no peer to look at");
-        assert_eq!(v.counts().unchecked, 3.0);
+        assert_eq!((v.counts().unchecked, v.counts().refused), (2.0, 5.0));
         // A process that's gone, or isn't the app's.
         let gone = "requests in claude:a's name have to come from a Claude Code process, and this one had gone before XenoNet could look";
         assert_eq!(said(&v.check(t.from(99.0), &a, false)), refused(gone));
