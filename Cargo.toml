@@ -91,6 +91,18 @@ xenonet-wire-app = { path = "crates/xenonet-wire-app" }
 # and the system's own certificates, and the system's proxy.
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "system-proxy"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+# One network across machines (docs/design/network.md): a host's keys, its
+# signed and sealed frames, the roster, the gateway's routes and the link.
+xenonet-net = { path = "crates/xenonet-net" }
+# The network's Ed25519 signatures, HKDF-SHA256, ChaCha20-Poly1305, HMAC
+# and SHA-256: ring, which rustls already builds on.
+ring = "0.17"
+# X25519 with a key kept on disk, which ring's agreement can't load (it's
+# ephemeral only): pure Rust, no C.
+x25519-dalek = { version = "3", default-features = false, features = ["static_secrets", "zeroize"] }
+# base64url for the network's keys, signatures and sealed bodies (in the
+# lock already through reqwest).
+base64 = "0.23"
 
 [profile.release]
 lto = "thin"
