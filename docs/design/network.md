@@ -605,6 +605,19 @@ twins, are unchanged.
    only from a gateway that proves a roster key and shows a newer
    `gateway` entry.
 
+As built:
+
+- An entry signed by too few (a host that isn't the founder taking the
+  gateway) waits at the gateway as a proposal for ten minutes. Window
+  hosts see it in their state, and `xenonet net approve <host>` (`POST
+  /api/net/approve`) adds their signature.
+- The old gateway keeps its streams for 30 s after the move, so the hosts
+  on them hear of it, and takes no new frames: they wait in their senders'
+  outboxes for the new gateway.
+- Its queues aren't passed on. The new gateway's queues are a new epoch,
+  which every host takes as a `gap`, so senders send again what has no
+  receipt.
+
 Moving the actors' rows (hashed tokens, scopes) with the gateway is a
 later step. Until then their apps are told to reconnect, as an address
 change already handles. Automatic failover to a standby is left out: it's

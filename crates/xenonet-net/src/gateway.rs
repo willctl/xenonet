@@ -167,6 +167,8 @@ pub struct Gateway {
     bad: Mutex<BadTickets>,
     rates: Mutex<HashMap<String, (Bucket, Bucket)>>,
     stopped: Notify,
+    /// Entries signed by too few, waiting for approval, and when they came.
+    proposals: Mutex<Vec<(Entry, f64)>>,
 }
 
 /// What the gateway knows of itself, from its host's node.
@@ -190,6 +192,7 @@ impl Gateway {
             bad: Mutex::new(BadTickets::default()),
             rates: Mutex::new(HashMap::new()),
             stopped: Notify::new(),
+            proposals: Mutex::new(Vec::new()),
         }))
     }
 
@@ -252,6 +255,13 @@ impl Gateway {
             return NetReply::json(403, &json!({ "error": "the network's routes take no requests from web pages" }));
         }
         let Some(n) = self.node.upgrade() else { return NetReply::not_found() };
+        // A gateway that was moved keeps its streams a while, so the hosts
+        // on them hear of the move, but takes nothing new: frames wait in
+        // their senders' outboxes for the new gateway.
+        if req.method == "POST" && !n.is_gateway() {
+            let to = n.roster().view().gateway;
+            return NetReply::json(409, &json!({ "error": format!("the network's gateway moved to {to}"), "code": "moved" }));
+        }
         let answer = match (req.method.as_str(), req.path()) {
             ("POST", "/net/v1/join") => self.join(&n, &req),
             ("GET", "/net/v1/link") => self.link(&n, &req).await,
@@ -622,12 +632,51 @@ impl Gateway {
             Err(reply) => return Ok(reply),
         };
         let body: Value = serde_json::from_slice(&req.body).map_err(|_| NetError::bad("the entry isn't JSON"))?;
-        let entry = Entry::parse(body.get("entry").unwrap_or(&Value::Null))?;
+        let mut entry = Entry::parse(body.get("entry").unwrap_or(&Value::Null))?;
         if !entry.signers.iter().any(|s| s.host == signed.host) {
             return Err(NetError::new(403, "roster-refused", "a host sends entries it signed"));
         }
-        let offered = self.append(n, entry)?;
-        Ok(NetReply::json(200, &json!({ "ok": true, "duplicate": offered == Offered::Duplicate, "n": n.roster().len() })))
+        let now = Self::now(n);
+        // The same entry waiting for approval: their signatures add up.
+        {
+            let mut waiting = self.proposals.locked();
+            waiting.retain(|(p, at)| now - at < ticket::TICKET_MS && p.n == n.roster().len());
+            if let Some((p, _)) = waiting.iter().find(|(p, _)| p.signing_bytes() == entry.signing_bytes()) {
+                entry.merge_signers(p);
+            }
+        }
+        match self.append(n, entry.clone()) {
+            Ok(offered) => {
+                self.proposals.locked().retain(|(p, _)| p.signing_bytes() != entry.signing_bytes());
+                Ok(NetReply::json(200, &json!({ "ok": true, "duplicate": offered == Offered::Duplicate, "n": n.roster().len() })))
+            }
+            Err(e) if e.code == "needs-approval" && body.get("propose") == Some(&Value::Bool(true)) => {
+                self.propose(n, entry, now)?;
+                Ok(NetReply::json(202, &json!({ "ok": true, "proposed": true, "needs": e.message })))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Keeps an entry signed by too few, for ten minutes, and asks the
+    /// window hosts that haven't signed it to approve it.
+    pub fn propose(&self, n: &Shared, entry: Entry, now: f64) -> R<()> {
+        {
+            let mut waiting = self.proposals.locked();
+            waiting.retain(|(p, _)| p.signing_bytes() != entry.signing_bytes());
+            waiting.push((entry.clone(), now));
+        }
+        let me = Self::me(n)?;
+        n.note_proposals(vec![entry.clone()]);
+        let view = n.roster().view();
+        let caps = n.caps();
+        let body = json!({ "proposals": [entry.to_json()] });
+        for host in view.members.keys().filter(|h| **h != me.host && view.is_window(h) && !entry.signers.iter().any(|s| s.host == **h)) {
+            let f = Self::frame(&me, "roster", host, now as i64, &body)?;
+            self.store.locked().enqueue(Item { host, id: &f.id, kind: "roster", sender: "", line: f.line().trim_end() }, now as i64, &caps)?;
+            self.wake(host);
+        }
+        Ok(())
     }
 
     /// Adds an entry to the network's roster, here first, then passes it on

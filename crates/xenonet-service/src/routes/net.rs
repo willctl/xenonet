@@ -9,6 +9,8 @@
 //! - `GET state`: `network/state/v1`.
 //! - `POST create`, `POST join`, `POST leave`: on this machine only.
 //! - `POST ticket`, `POST remove`, `POST replace`.
+//! - `POST approve`: signs an entry that waits for the founder or a second
+//!   window host (a move of the gateway, say).
 //! - `POST gateway/take`, `POST gateway/set`: moving the gateway by hand.
 //! - `PUT settings`: titles only, and a LAN-only gateway's address.
 
@@ -57,8 +59,10 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Option<Answer> {
 }
 
 async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Reply {
-    let known =
-        matches!((method, rest), ("GET", "state") | ("POST", "create" | "join" | "leave" | "ticket" | "remove" | "replace" | "gateway/take" | "gateway/set") | ("PUT", "settings"));
+    let known = matches!(
+        (method, rest),
+        ("GET", "state") | ("POST", "create" | "join" | "leave" | "ticket" | "remove" | "replace" | "approve" | "gateway/take" | "gateway/set") | ("PUT", "settings")
+    );
     if !known {
         return Reply::error(404, "not found");
     }
@@ -101,7 +105,9 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
         "remove" => node.remove(&text("host")).await,
         "replace" => node.replace(&text("host")).await,
         "settings" => settings(&svc, &body).await,
-        _ => Err(NetError::new(501, "later", "moving the gateway by hand comes later: for now the founder's machine stays the gateway")),
+        "approve" => node.approve(body.get("op").and_then(Value::as_str).unwrap_or("gateway"), &text("host")).await,
+        "gateway/take" => take(ctx, &svc, &body).await,
+        _ => node.set_gateway(&text("address")).await,
     };
     match result {
         Ok(v) => Reply::json(200, v),
@@ -130,6 +136,24 @@ async fn create(ctx: &Ctx, svc: &NetService, body: &Value) -> R<Value> {
         svc.unlisten();
     }
     made
+}
+
+/// **Make this the network's gateway**: at the LAN address given, which it
+/// listens on first, or at the actor gateway's tunnel.
+async fn take(ctx: &Ctx, svc: &NetService, body: &Value) -> R<Value> {
+    let lan = match body.get("lan").and_then(Value::as_str).filter(|l| !l.trim().is_empty()) {
+        Some(l) => Some(parse_lan(l)?),
+        None => None,
+    };
+    if let Some(addr) = lan {
+        svc.listen(addr).await?;
+    }
+    let lan_text = lan.map(|a| a.to_string());
+    let took = svc.node().take_gateway(public_host(ctx).as_deref(), lan_text.as_deref()).await;
+    if took.is_err() && lan.is_some() && !svc.node().shared().is_gateway() {
+        svc.unlisten();
+    }
+    took
 }
 
 async fn settings(svc: &NetService, body: &Value) -> R<Value> {

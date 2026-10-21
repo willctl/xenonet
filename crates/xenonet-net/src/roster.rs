@@ -26,6 +26,10 @@
 //! gateway. One offered where the chain already has an identical entry at
 //! its index is dropped quietly (two window hosts approving the same thing
 //! at once); a different one there is a fork, and refused.
+//!
+//! An entry signed rightly but by too few is refused as `needs-approval`:
+//! the gateway may keep it as a proposal, for the founder or a second
+//! window host to sign too.
 
 use crate::codec::{b64, hash_b64, is_network_id, unb64};
 use crate::keys::{HostKey, PublicKeys};
@@ -132,6 +136,16 @@ impl Entry {
         hash_b64(self.to_json().to_string().as_bytes())
     }
 
+    /// Takes another copy's signatures too: the same entry, approved by more
+    /// hosts. At most four.
+    pub fn merge_signers(&mut self, other: &Entry) {
+        for s in &other.signers {
+            if self.signers.len() < MAX_SIGNERS && !self.signers.iter().any(|x| x.host == s.host) {
+                self.signers.push(s.clone());
+            }
+        }
+    }
+
     /// Adds `host`'s signature.
     pub fn sign_by(&mut self, host: &str, key: &HostKey) {
         let sig = key.sign(&self.signing_bytes());
@@ -236,6 +250,12 @@ fn refused(message: impl Into<String>) -> NetError {
     NetError::new(403, "roster-refused", message)
 }
 
+/// Signed rightly, but by too few: the entry may wait for the founder or a
+/// second window host to sign it too.
+pub fn needs_approval() -> NetError {
+    NetError::new(403, "needs-approval", "that needs the founder, or two window hosts")
+}
+
 /// Whether `e` may follow `view` (None before entry 0): its signers, and
 /// the rules for its op.
 fn check(view: Option<&View>, prev: &str, n: u64, e: &Entry) -> R<()> {
@@ -281,7 +301,6 @@ fn check(view: Option<&View>, prev: &str, n: u64, e: &Entry) -> R<()> {
     let any_window = founder || windows >= 1;
     let current = view.member(&e.host.id);
     let same_keys = |m: &Member| m.keys == e.host.keys;
-    let needs_strong = "that needs the founder, or two window hosts";
     match e.op {
         Op::Found => Err(refused("a network has one founder")),
         Op::Add => {
@@ -295,7 +314,7 @@ fn check(view: Option<&View>, prev: &str, n: u64, e: &Entry) -> R<()> {
                 return Err(NetError::bad("only a gateway entry names a gateway"));
             }
             match (e.host.window, strong, any_window) {
-                (true, false, _) => Err(refused(needs_strong)),
+                (true, false, _) => Err(needs_approval()),
                 (false, _, false) => Err(refused("adding a host needs a window host")),
                 _ => Ok(()),
             }
@@ -312,7 +331,7 @@ fn check(view: Option<&View>, prev: &str, n: u64, e: &Entry) -> R<()> {
                 return Ok(());
             }
             match (view.is_window(&m.id), strong, any_window) {
-                (true, false, _) => Err(refused(needs_strong)),
+                (true, false, _) => Err(needs_approval()),
                 (false, _, false) => Err(refused("removing a host needs a window host")),
                 _ => Ok(()),
             }
@@ -328,7 +347,7 @@ fn check(view: Option<&View>, prev: &str, n: u64, e: &Entry) -> R<()> {
             if strong {
                 Ok(())
             } else {
-                Err(refused(needs_strong))
+                Err(needs_approval())
             }
         }
         Op::Gateway => {
@@ -342,7 +361,7 @@ fn check(view: Option<&View>, prev: &str, n: u64, e: &Entry) -> R<()> {
             if strong {
                 Ok(())
             } else {
-                Err(refused(needs_strong))
+                Err(needs_approval())
             }
         }
     }
@@ -600,8 +619,8 @@ mod tests {
                 r.clone().offer(e)
             };
             let one = if e.host.id == "desk" { "nook" } else { "desk" };
-            assert_eq!(with(&[one]).unwrap_err().code, "roster-refused", "{what}: one window host");
-            assert_eq!(with(&[one, "laptop"]).unwrap_err().code, "roster-refused", "{what}: an ordinary host doesn't count");
+            assert_eq!(with(&[one]).unwrap_err().code, "needs-approval", "{what}: one window host");
+            assert_eq!(with(&[one, "laptop"]).unwrap_err().code, "needs-approval", "{what}: an ordinary host doesn't count");
             assert_eq!(with(&["studio"]).unwrap(), Offered::Appended, "{what}: the founder");
             assert_eq!(with(&["desk", "nook"]).unwrap(), Offered::Appended, "{what}: two window hosts");
         }
@@ -613,6 +632,23 @@ mod tests {
         let mut stale = r.draft(Op::Gateway, h.r("nook", true), Some(GatewayAt { address: "x.example".into(), version: 1 }), 5);
         stale.sign_by("studio", &h.keys["studio"]);
         assert_eq!(r.offer(stale).unwrap_err().code, "stale");
+    }
+
+    #[test]
+    fn two_window_hosts_approving_apart_make_one_entry_that_counts() {
+        let h = hosts();
+        let mut r = network(&h);
+        let desk = h.entry(&r, Op::Gateway, h.r("desk", true), &["desk"]);
+        assert_eq!(r.clone().offer(desk.clone()).unwrap_err().code, "needs-approval");
+        let mut nook = desk.clone();
+        nook.signers.clear();
+        nook.sign_by("nook", &h.keys["nook"]);
+        let mut both = desk.clone();
+        both.merge_signers(&nook);
+        both.merge_signers(&desk);
+        assert_eq!(both.signers.len(), 2);
+        assert_eq!(r.offer(both).unwrap(), Offered::Appended);
+        assert_eq!(r.view().gateway, "desk");
     }
 
     #[test]

@@ -4,7 +4,8 @@
 // hosts on other machines would. Their /api/net routes are called as the
 // window calls them, and a test Sink stands in for the engine.
 //
-// Ports 48113-48119, one a test, never 47840-47842.
+// Each test has its own ports among 48113-48119 (48112 is one nothing
+// answers on), never 47840-47842. NET_TEST_LOG=1 prints what each host logs.
 
 #![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
 
@@ -83,11 +84,21 @@ struct Host {
 }
 
 fn timing() -> Timing {
-    Timing { ping_ms: 400, stream_ms: 12_000, idle_ms: 2500, poll_ms: 3000, backoff_min_ms: 150.0, backoff_max_ms: 800.0 }
+    Timing { ping_ms: 400, stream_ms: 12_000, idle_ms: 2500, poll_ms: 3000, backoff_min_ms: 150.0, backoff_max_ms: 800.0, handover_ms: 1000 }
 }
 
 fn options(dir: &std::path::Path, shift: f64, caps: Caps) -> Options {
-    let mut o = Options::new(dir.join("state").join("network"), "0.0.0-test", "linux", Arc::new(|_: &str, _: &str| {}));
+    let who = dir.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+    let mut o = Options::new(
+        dir.join("state").join("network"),
+        "0.0.0-test",
+        "linux",
+        Arc::new(move |code: &str, words: &str| {
+            if std::env::var("NET_TEST_LOG").is_ok() {
+                eprintln!("[{who}] {code}: {words}");
+            }
+        }),
+    );
     o.clock = Arc::new(move || now_ms() + shift);
     o.timing = timing();
     o.caps = caps;
@@ -343,6 +354,58 @@ async fn a_clock_five_minutes_off_still_links() {
     assert_eq!(a_checks["network.address"]["status"], "info");
     assert!(a_checks["network.address"]["detail"].as_str().unwrap().contains("this computer alone"));
     assert_eq!(a_checks["network.link"]["detail"], "this machine is the network's gateway");
+}
+
+async fn until_state(h: &Host, what: &str, ok: impl Fn(&Value) -> bool) -> Value {
+    for _ in 0..300 {
+        let s = h.state().await;
+        if ok(&s) {
+            return s;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let s = h.state().await;
+    assert!(ok(&s), "waited for {what}: {s}");
+    s
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_gateway_moves_by_hand_and_a_host_that_missed_it_follows() {
+    let (a, b, c) = network("move", 48116, Caps::default(), [0.0; 3]).await;
+    // laptop is away while the gateway moves.
+    b.svc.stop();
+    // desk asks to take it over, at its own LAN address: desk isn't the
+    // founder, so it waits for approval, and the founder gives it.
+    let (s, v) = c.call("POST", "/api/net/gateway/take", json!({ "lan": "127.0.0.1:48118" }), true).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["proposed"], true, "{v}");
+    let st = until_state(&a, "the proposal at studio", |s| s["proposals"].as_array().is_some_and(|p| !p.is_empty())).await;
+    assert_eq!((st["proposals"][0]["op"].clone(), st["proposals"][0]["host"].clone()), (json!("gateway"), json!("desk")));
+    assert_eq!(st["proposals"][0]["signers"], json!(["desk"]));
+    let (s, v) = a.call("POST", "/api/net/approve", json!({ "host": "desk" }), true).await;
+    assert_eq!(s, 200, "{v}");
+    // desk is the gateway now, studio links to it, and frames go through it.
+    until_state(&c, "desk as the gateway", |s| s["self"]["gateway"] == true && s["gateway"]["link"] == "live").await;
+    until_state(&a, "studio linked to desk", |s| s["self"]["gateway"] == false && s["gateway"]["address"] == "127.0.0.1:48118" && s["gateway"]["link"] == "live").await;
+    // Sent at once, while studio still answers the hosts it had: it waits in
+    // studio's outbox for the new gateway.
+    a.send("desk", Kind::Message, "through the new gateway");
+    until("the message at desk", 10, || c.sink.texts("message") == ["through the new gateway"]).await;
+    c.send("studio", Kind::Message, "and back");
+    until("the answer at studio", 10, || a.sink.texts("message") == ["and back"]).await;
+    // laptop comes back to studio's address, where nothing answers now,
+    // and follows the gateway by hand.
+    let b = b.restart().await;
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    assert_ne!(b.state().await["gateway"]["link"], "live");
+    let (s, v) = b.call("POST", "/api/net/gateway/set", json!({ "address": "127.0.0.1:48112" }), true).await;
+    assert_ne!(s, 200, "a wrong address isn't followed: {v}");
+    let (s, v) = b.call("POST", "/api/net/gateway/set", json!({ "address": "127.0.0.1:48118" }), true).await;
+    assert_eq!(s, 200, "{v}");
+    let st = until_state(&b, "laptop linked to desk", |s| s["gateway"]["link"] == "live" && s["gateway"]["address"] == "127.0.0.1:48118").await;
+    assert_eq!(st["gateway"]["keyId"], c.state().await["self"]["keyId"]);
+    b.send("studio", Kind::Message, "followed");
+    until("laptop's message at studio", 10, || a.sink.texts("message").contains(&"followed".to_string())).await;
 }
 
 /// One HTTP/1.1 request by hand: its status.

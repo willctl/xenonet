@@ -129,6 +129,23 @@ impl Transport {
     }
 }
 
+/// The first line of an answer, whole or streamed, within `wait`.
+pub async fn first_line(body: NetBody, wait: Duration) -> Option<String> {
+    let mut lines = Lines::default();
+    match body {
+        NetBody::Full(b) => String::from_utf8_lossy(&b).lines().next().map(str::to_string),
+        NetBody::Stream(mut rx) => {
+            let end = tokio::time::Instant::now() + wait;
+            loop {
+                let chunk = tokio::time::timeout_at(end, rx.recv()).await.ok()??;
+                if let Some(line) = lines.push(&chunk).ok()?.into_iter().next() {
+                    return Some(line);
+                }
+            }
+        }
+    }
+}
+
 /// Splits a stream into lines.
 #[derive(Default)]
 struct Lines {

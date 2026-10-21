@@ -63,6 +63,7 @@ const TAKES_VALUE: &[&str] = &[
     "exec",
     // xenonet net
     "lan",
+    "op",
 ];
 const REPEATS: &[&str] = &["add", "remove", "paths"];
 

@@ -42,11 +42,14 @@ pub struct Timing {
     pub poll_ms: u64,
     pub backoff_min_ms: f64,
     pub backoff_max_ms: f64,
+    /// How long a gateway that was moved keeps answering, so the hosts
+    /// linked to it hear of the move first.
+    pub handover_ms: u64,
 }
 
 impl Default for Timing {
     fn default() -> Self {
-        Timing { ping_ms: 15_000, stream_ms: 600_000, idle_ms: 45_000, poll_ms: 25_000, backoff_min_ms: 2000.0, backoff_max_ms: 60_000.0 }
+        Timing { ping_ms: 15_000, stream_ms: 600_000, idle_ms: 45_000, poll_ms: 25_000, backoff_min_ms: 2000.0, backoff_max_ms: 60_000.0, handover_ms: 30_000 }
     }
 }
 
@@ -143,6 +146,10 @@ pub struct Shared {
     gateway: RwLock<Option<Arc<Gateway>>>,
     operator_nonces: Mutex<HashMap<String, f64>>,
     link_written: Mutex<f64>,
+    /// Entries signed by too few, waiting for this host or another to approve.
+    proposals: Mutex<Vec<Entry>>,
+    /// The gateway moved: the service starts the link again, toward it.
+    relink: Notify,
 }
 
 const OPERATOR_ACTIONS: [&str; 4] = ["message", "ticket", "remove", "replace"];
@@ -387,19 +394,50 @@ impl Shared {
         Ok(offered)
     }
 
-    /// A `gateway` entry moved the gateway: the pin follows it.
+    /// A `gateway` entry moved the gateway: the pin follows it, and the
+    /// service starts the link again (this host's gateway with it, when
+    /// it's this host that took over, or stopped, when it's this host that
+    /// gave it up).
     fn follow_gateway(&self, e: &Entry) {
-        let mut net = self.net.writing();
-        if let Some(n) = net.as_mut() {
-            n.gateway = Pin {
-                host: e.host.id.clone(),
-                key_id: e.host.keys.key_id(),
-                sign: e.host.keys.sign_b64(),
-                seal: e.host.keys.seal_b64(),
-                address: e.gateway.as_ref().map(|g| g.address.clone()),
-            };
-            let _ = self.dir.write_network(n);
+        {
+            let mut net = self.net.writing();
+            if let Some(n) = net.as_mut() {
+                n.gateway = Pin {
+                    host: e.host.id.clone(),
+                    key_id: e.host.keys.key_id(),
+                    sign: e.host.keys.sign_b64(),
+                    seal: e.host.keys.seal_b64(),
+                    address: e.gateway.as_ref().map(|g| g.address.clone()),
+                };
+                let _ = self.dir.write_network(n);
+            }
         }
+        self.log("net.gateway", &format!("the network's gateway is now {}", e.host.id));
+        self.relink.notify_one();
+    }
+
+    /// Wakes when the gateway moved, or this host followed it by hand.
+    pub fn relinked(&self) -> tokio::sync::futures::Notified<'_> {
+        self.relink.notified()
+    }
+
+    /// Entries waiting for approval, as the gateway passed them on.
+    pub fn note_proposals(&self, entries: Vec<Entry>) {
+        let len = self.roster().len();
+        let mut waiting = self.proposals.locked();
+        waiting.retain(|p| p.n == len);
+        for e in entries.into_iter().filter(|e| e.n == len) {
+            match waiting.iter_mut().find(|p| p.signing_bytes() == e.signing_bytes()) {
+                Some(p) => p.merge_signers(&e),
+                None => waiting.push(e),
+            }
+        }
+    }
+
+    /// What waits for approval and could still be taken.
+    pub fn proposals(&self) -> Vec<Entry> {
+        let len = self.roster().len();
+        self.proposals.locked().iter().filter(|p| p.n == len).cloned().collect()
     }
 
     fn set_removed(&self, info: Value) {
@@ -539,6 +577,10 @@ impl Shared {
                         Err(e) if e.code == "roster-gap" => fetch = true,
                         Err(e) => self.log("net.roster", &format!("a roster entry was refused: {}", e.message)),
                     }
+                }
+                let proposed: Vec<Entry> = body.get("proposals").and_then(Value::as_array).into_iter().flatten().filter_map(|e| Entry::parse(e).ok()).collect();
+                if !proposed.is_empty() {
+                    self.note_proposals(proposed);
                 }
                 fetch
             }
@@ -781,6 +823,8 @@ impl Node {
             gateway: RwLock::new(None),
             operator_nonces: Mutex::new(HashMap::new()),
             link_written: Mutex::new(0.0),
+            proposals: Mutex::new(Vec::new()),
+            relink: Notify::new(),
         });
         Ok(Arc::new(Node { shared, tasks: Mutex::new(Vec::new()) }))
     }
@@ -1230,7 +1274,152 @@ impl Node {
         if let Some(lan) = net.lan {
             out["lan"] = json!(lan);
         }
+        let proposals: Vec<Value> = n
+            .proposals()
+            .iter()
+            .map(|p| {
+                json!({
+                    "op": p.op.as_str(),
+                    "host": p.host.id,
+                    "window": p.host.window,
+                    "gateway": p.gateway.as_ref().map(|g| g.address.clone()),
+                    "signers": p.signers.iter().map(|s| s.host.clone()).collect::<Vec<_>>(),
+                    "at": p.at,
+                })
+            })
+            .collect();
+        out["proposals"] = Value::Array(proposals);
         out
+    }
+
+    // ---------- moving the gateway, by hand ----------
+
+    /// `xenonet net gateway take`: makes this host the network's gateway, at
+    /// `address` (its LAN address, `lan`, or its tunnel's host name). The
+    /// founder's own signature is enough; anyone else's waits for the
+    /// founder or a second window host to approve it. A gateway that's gone
+    /// for good isn't asked: the move is this host's, and the others follow
+    /// with `gateway set`.
+    pub async fn take_gateway(&self, address: Option<&str>, lan: Option<&str>) -> R<Value> {
+        let n = &self.shared;
+        let (net, key) = self.me()?;
+        let view = n.roster().view();
+        if view.gateway == net.host {
+            return Err(NetError::new(409, "already", "this machine is the network's gateway already"));
+        }
+        let Some(address) = lan.or(address).map(str::to_string) else {
+            return Err(NetError::new(409, "no-address", "give this machine an address first: a LAN address (--lan <ip:port>), or a tunnel (xenonet gateway on --tunnel <kind>)"));
+        };
+        let m = view.member(&net.host).cloned().ok_or_else(|| NetError::new(410, "removed", "this machine isn't in the network"))?;
+        let mut e = n.roster().draft(
+            Op::Gateway,
+            HostRef { id: m.id.clone(), keys: m.keys, window: m.window },
+            Some(crate::roster::GatewayAt { address, version: view.gateway_version + 1 }),
+            n.gateway_now() as i64,
+        );
+        e.sign_by(&net.host, &key);
+        {
+            let mut guard = n.net.writing();
+            if let Some(f) = guard.as_mut() {
+                f.lan = lan.map(str::to_string);
+                n.dir.write_network(f)?;
+            }
+        }
+        let verdict = n.roster().would_take(&e);
+        match verdict {
+            Ok(()) => {}
+            Err(err) if err.code == "needs-approval" => {
+                let t = self.transport()?;
+                link::call(n, &t, "POST", "/net/v1/roster", json!({ "entry": e.to_json(), "propose": true })).await?;
+                n.note_proposals(vec![e]);
+                n.log("net.gateway", "this machine asked to become the network's gateway; the founder or another window host approves it");
+                let mut out = self.state();
+                out["proposed"] = json!(true);
+                return Ok(out);
+            }
+            Err(err) => return Err(err),
+        }
+        match self.submit(e.clone()).await {
+            Ok(_) => {}
+            // The old gateway is gone: the move is this host's alone.
+            Err(err) if matches!(err.code, "unreachable" | "refused") && err.status != 403 => {
+                n.log("net.gateway", &format!("the old gateway didn't take the move ({}): the other hosts follow with xenonet net gateway set", err.message));
+                n.append(e)?;
+            }
+            Err(err) => return Err(err),
+        }
+        Ok(self.state())
+    }
+
+    /// Approves an entry waiting for approval: this host signs it too.
+    pub async fn approve(&self, op: &str, host: &str) -> R<Value> {
+        let n = &self.shared;
+        let (net, key) = self.me()?;
+        if !n.roster().view().is_window(&net.host) {
+            return Err(NetError::new(403, "not-window", "approving is a window host's"));
+        }
+        let Some(mut e) = n.proposals().into_iter().find(|p| p.op.as_str() == op && p.host.id == host) else {
+            return Err(NetError::new(404, "nothing", format!("nothing waits for approval about {host}")));
+        };
+        e.sign_by(&net.host, &key);
+        self.submit(e).await?;
+        n.log("net.approve", &format!("this machine approved {op} for {host}"));
+        Ok(self.state())
+    }
+
+    /// `xenonet net gateway set <address>`: follows the gateway to a new
+    /// address, for a host that missed the move. Taken only from a gateway
+    /// whose roster extends this one's with a newer `gateway` entry (or the
+    /// same gateway at a new address), and that proves that gateway's key
+    /// over this host's nonce.
+    pub async fn set_gateway(&self, address: &str) -> R<Value> {
+        let n = &self.shared;
+        let (net, _) = self.me()?;
+        let address = address.trim().trim_end_matches('/');
+        if address.is_empty() || address.len() > 300 {
+            return Err(NetError::bad("say the gateway's address"));
+        }
+        let t = link::http(address)?;
+        let had = n.roster().view();
+        let v = link::call(n, &t, "GET", &format!("/net/v1/roster?from={}", n.roster().len()), Value::Null).await?;
+        let mut r = n.roster().clone();
+        let mut new = Vec::new();
+        for e in v.get("entries").and_then(Value::as_array).into_iter().flatten() {
+            let e = Entry::parse(e)?;
+            if r.offer(e.clone())? == Offered::Appended {
+                new.push(e);
+            }
+        }
+        let view = r.view();
+        let moved = view.gateway_version > had.gateway_version;
+        if !moved && view.gateway != net.gateway.host {
+            return Err(NetError::new(409, "no-move", "that gateway shows no newer gateway entry"));
+        }
+        let gw = view.gateway_member().cloned().ok_or_else(|| NetError::new(409, "no-move", "the roster's gateway isn't in the network"))?;
+        // The gateway proves its key over our nonce, in a long-poll's hello.
+        let (req, nonce) = n.signed_request("GET", "/net/v1/link?after=0&wait=1", Vec::new())?;
+        let reply =
+            t.request(req, Some(Duration::from_secs(30))).await.map_err(|why| NetError::new(502, "unreachable", format!("the gateway at {address} didn't answer: {why}")))?;
+        let status = reply.status;
+        let first = link::first_line(reply.body, Duration::from_secs(30)).await.unwrap_or_default();
+        let hello = Frame::parse_line(&first).ok().filter(|f| f.kind == "hello" && f.from == gw.id && f.verify(&net.id, &gw.keys));
+        let proved = hello.and_then(|f| f.body_json().ok()).is_some_and(|b| b.get("nonce").and_then(Value::as_str) == Some(nonce.as_str()));
+        if status != 200 || !proved {
+            return Err(NetError::new(502, "bad-answer", format!("the gateway at {address} didn't prove the key the roster has for {}", gw.id)));
+        }
+        for e in new {
+            n.append(e)?;
+        }
+        {
+            let mut guard = n.net.writing();
+            if let Some(f) = guard.as_mut() {
+                f.gateway = Pin { host: gw.id.clone(), key_id: gw.keys.key_id(), sign: gw.keys.sign_b64(), seal: gw.keys.seal_b64(), address: Some(address.to_string()) };
+                n.dir.write_network(f)?;
+            }
+        }
+        n.relink.notify_one();
+        n.log("net.gateway", &format!("this machine follows the gateway {} at {address}", gw.id));
+        Ok(self.state())
     }
 }
 

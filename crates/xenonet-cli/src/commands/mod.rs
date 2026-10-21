@@ -75,7 +75,11 @@ pub const COMMANDS: &[Command] = &[
     cmd("spend", "About what today's work would cost at API prices, by app and by actor", None),
     cmd("messages", "What sessions and actors said to each other today", None),
     cmd("root", "The projects folder XenoNet reads, or read another", Some("[folder]")),
-    cmd("net", "One network across your machines: create or join one, add a machine, see the hosts", Some("[create|join|status|hosts|add-machine|remove|leave|set|gateway]")),
+    cmd(
+        "net",
+        "One network across your machines: create or join one, add a machine, see the hosts",
+        Some("[create|join|status|hosts|add-machine|remove|leave|set|approve|gateway]"),
+    ),
     cmd("hosts", "Other machines' XenoNets on this map, over SSH (a prototype, with XENONET_HOSTS=1)", Some("[self|add|remove|test]")),
     cmd("search", "Search every Claude Code and Codex transcript", Some("<words>")),
     cmd("theme", "The console's look and sound: list, switch, or make your own", Some("[id]")),

@@ -61,6 +61,10 @@ fn show_status(st: &Value) {
     for q in list(st, "queues").iter().filter(|q| num(q, "frames") > 0.0) {
         print(format!("  {}  {} waiting for {}", c::dim("queue   "), num(q, "frames"), t(q, "host")));
     }
+    for p in list(st, "proposals") {
+        let by: Vec<&str> = list(p, "signers").iter().filter_map(Value::as_str).collect();
+        print(c::yellow(format!("  ! {} {} waits for approval (signed by {}): xenonet net approve {}", t(p, "op"), t(p, "host"), by.join(", "), t(p, "host"))));
+    }
     let mismatch: Vec<String> = list(st, "rosterMismatch").iter().filter_map(Value::as_str).map(str::to_string).collect();
     if !mismatch.is_empty() {
         print(c::yellow(format!("  ! {} shows another roster than this machine's", mismatch.join(", "))));
@@ -201,14 +205,30 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             let st = call(&s, "PUT", "/api/net/settings", Some(&Value::Object(body)))?;
             out(&st, &show_status)
         }
+        "approve" => {
+            let host = arg(args, 1, "which machine the waiting entry is about")?;
+            let op = flags.text("op").unwrap_or_else(|| "gateway".into());
+            out(&call(&s, "POST", "/api/net/approve", Some(&json!({ "host": host, "op": op })))?, &show_status)
+        }
         "gateway" => match args.get(1).map(String::as_str) {
-            Some("take") => out(&call(&s, "POST", "/api/net/gateway/take", Some(&json!({})))?, &show_status),
+            Some("take") => {
+                let mut body = Map::new();
+                if let Some(lan) = flags.text("lan") {
+                    body.insert("lan".into(), json!(lan));
+                }
+                let st = call(&s, "POST", "/api/net/gateway/take", Some(&Value::Object(body)))?;
+                if on(&st, "proposed") && !flags.on("json") {
+                    print(format!("{} asked: the founder or another window host approves it with xenonet net approve {}", c::green("✓"), t(&st["self"], "id")));
+                    return Ok(0);
+                }
+                out(&st, &show_status)
+            }
             Some("set") => {
                 let address = arg(args, 2, "the gateway's new address")?;
                 out(&call(&s, "POST", "/api/net/gateway/set", Some(&json!({ "address": address })))?, &show_status)
             }
             _ => Err(Fail::new("xenonet net gateway take, or xenonet net gateway set <address>", 2)),
         },
-        w => Err(Fail::new(format!("xenonet net doesn't know {w}: create, join, status, hosts, add-machine, remove, replace, leave, set or gateway"), 2)),
+        w => Err(Fail::new(format!("xenonet net doesn't know {w}: create, join, status, hosts, add-machine, remove, replace, leave, set, approve or gateway"), 2)),
     }
 }

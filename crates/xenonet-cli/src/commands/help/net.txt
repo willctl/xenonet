@@ -32,7 +32,14 @@ on and can't read them.
   xenonet net set [--titles-only | --no-titles-only] [--lan <ip:port>]
                                    what this machine shares with the network,
                                    and a LAN-only gateway's address
-  xenonet net gateway take         makes this machine the network's gateway
+  xenonet net gateway take [--lan <ip:port>]
+                                   makes this machine the network's gateway,
+                                   at that LAN address or through the actor
+                                   gateway's tunnel. On the founder's machine
+                                   it's done; elsewhere it waits for the
+                                   founder or another window host to approve
+  xenonet net approve <id>         approves what waits for approval about a
+                                   machine, such as its move to gateway
   xenonet net gateway set <address>
                                    follows the gateway to a new address, when
                                    this machine missed the move
