@@ -870,11 +870,15 @@ fn shown(r: &Row, me_host: Option<&str>) -> Value {
 /// The handoffs open to a session: to it, or to its repo (here, or across
 /// clones of the same remote), never its own.
 fn offers(w: &World, me: &Arg) -> Result<Vec<Value>> {
+    let rows = store(w, |s| s.open_handoffs(now_ms()))?;
+    // Most starts find none, and then ask git nothing.
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
     let id = text(&me.field("id"));
     let me_host = net(w).me().map(|m| m.host);
     let key = w.repos.remote_key(&me.field("cwd"));
     let scope = me.field("repo").or(if me.field("projectKind").as_str() == Some("project") { me.field("projectId") } else { Arg::Null });
-    let rows = store(w, |s| s.open_handoffs(now_ms()))?;
     let mut out = Vec::new();
     for r in &rows {
         let host = r.text("host");
@@ -902,6 +906,10 @@ fn offers(w: &World, me: &Arg) -> Result<Vec<Value>> {
 
 /// The handoff tool: offered, taken, or the ones open to `me`.
 pub fn handoff(w: &World, c: &mut EngineCalls<'_>, me: &Arg, a: &Value, envelope: &Value) -> std::result::Result<Value, Fail> {
+    // Off a network nothing ticks, so the ones that lapsed go here.
+    if net(w).me().is_none() {
+        lapse(w);
+    }
     if let Some(id) = s(a, "accept") {
         return accept(w, c, me, &id, envelope);
     }
