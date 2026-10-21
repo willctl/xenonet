@@ -206,7 +206,8 @@ impl Door {
         let Some(gateway) = self.node().and_then(|n| n.gateway()) else { return not_found() };
         let target = req.uri().path_and_query().map_or_else(|| req.uri().path().to_string(), |p| p.as_str().to_string());
         let path = target.split('?').next().unwrap_or("").to_string();
-        let relay = target.split_once('?').is_some_and(|(_, q)| q.split('&').any(|p| p == "relay=1"));
+        // Read as the gateway's route reads it, so the two can't differ.
+        let relay = NetRequest { target: target.clone(), ..NetRequest::default() }.query("relay").as_deref() == Some("1");
         let limit = match path.as_str() {
             "/net/v1/frames" if relay => RELAY_LIMIT,
             "/net/v1/frames" => UP_LIMIT,

@@ -72,9 +72,13 @@ impl NetRequest {
         self.target.split('?').next().unwrap_or("")
     }
 
+    /// A query parameter's value; None when it's missing, or given more
+    /// than once, so the front door and the routes read it alike.
     pub fn query(&self, name: &str) -> Option<String> {
         let q = self.target.split_once('?')?.1;
-        q.split('&').filter_map(|p| p.split_once('=')).find(|(k, _)| *k == name).map(|(_, v)| v.to_string())
+        let mut found = q.split('&').filter_map(|p| p.split_once('=')).filter(|(k, _)| *k == name);
+        let first = found.next()?;
+        found.next().is_none().then(|| first.1.to_string())
     }
 }
 
@@ -533,6 +537,11 @@ impl Gateway {
                 refuse("bad-kind", "relay frames go in a relay batch of their own");
                 continue;
             }
+            // A frame but a relay one is small: presence, a message, a claim.
+            if !relay_ok && v.to_string().len() > SMALL_LIMIT {
+                refuse("too-big", "a frame is at most 64 KiB, but a relay frame");
+                continue;
+            }
             if f.to == host || view.member(&f.to).is_none() {
                 refuse("no-host", "that host isn't in the network");
                 continue;
@@ -954,5 +963,8 @@ mod tests {
         assert_eq!(r.path(), "/net/v1/link");
         assert_eq!(r.query("after").as_deref(), Some("12"));
         assert_eq!(r.query("nope"), None);
+        // Given twice, it's neither: the front door and the routes read alike.
+        let twice = NetRequest { method: "POST".into(), target: "/net/v1/frames?relay=0&relay=1".into(), ..Default::default() };
+        assert_eq!(twice.query("relay"), None);
     }
 }

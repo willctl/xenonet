@@ -341,7 +341,7 @@ async fn a_full_queue_gives_a_gap_and_a_removed_host_is_refused() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_time_comes_only_signed_by_the_gateway_and_frames_only_within_the_week() {
-    let (_a, b, c) = network("signed-time", 48114, Caps::default(), [0.0; 3]).await;
+    let (a, b, c) = network("signed-time", 48114, Caps::default(), [0.0; 3]).await;
     let laptop = b.svc.node().shared().clone();
     // A refusal's time, unsigned, or signed by another key, or over another
     // request's nonce, isn't taken.
@@ -371,6 +371,13 @@ async fn a_time_comes_only_signed_by_the_gateway_and_frames_only_within_the_week
         desk.frame(&frame(at));
     }
     assert_eq!(c.sink.texts("message"), [format!("at {now}")]);
+    // An up batch's frames are 64 KiB at most each, but relay frames.
+    let d = xenonet_net::frame::Draft { network: &net.id, id: xenonet_net::codec::frame_id().unwrap(), kind: "message", from: "laptop", to: "desk", at: laptop.gateway_now() as i64 };
+    let big = xenonet_net::frame::host_frame(&d, &key, &desk_keys, &json!({ "body": "x".repeat(70 << 10) }), None).unwrap();
+    let batch = format!("{{\"frames\":[{}],\"ack\":null}}", big.line().trim_end());
+    let (req, _) = laptop.signed_request("POST", "/net/v1/frames", batch.into_bytes()).unwrap();
+    let answer = a.svc.node().gateway().unwrap().handle(req).await.body_json();
+    assert_eq!(answer["refused"][0]["code"], "too-big", "{answer}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
