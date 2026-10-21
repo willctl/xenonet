@@ -112,10 +112,17 @@ async function running(env, io) {
   if (!client) return null;
   try { return await client.request("status"); } finally { client.close(); }
 }
+// The service answers `stop` and shuts down a moment later, so on a busy
+// machine its answer can be lost with the connection. A stop sent and then
+// cut off may have worked: whether the service has gone decides, as it does
+// for one that answered. An answer that says no is a failure.
+const dropped = (err) => /^XenoNet disconnected/.test(err?.message ?? "");
 async function stopService(env, io) {
   const client = await io.connect({ env }).catch(() => null);
   if (!client) return;
-  try { await client.request("stop"); } finally { client.close(); }
+  try { await client.request("stop"); }
+  catch (err) { if (!dropped(err)) throw err; }
+  finally { client.close(); }
   const deadline = io.now() + io.stopTimeout;
   while (await running(env, io)) {
     if (io.now() >= deadline) throw new Error("The running service did not stop. Its selected version was left unchanged.");

@@ -140,7 +140,7 @@
      ],
      "mcp": [
       {
-       "server": "agent-wiki",
+       "server": "xenolith",
        "ts": 1791028590000
       }
      ],
@@ -448,7 +448,7 @@
      "status": "idle",
      "tokens": {
       "processed": 15000,
-      "output": 1200
+      "output": 900
      },
      "tokensToday": 12000,
      "tpm": 0,
@@ -845,6 +845,149 @@
      "lastTurnEndAt": 1791026650000,
      "interruptedAt": null,
      "lastEventAt": 1791026650000
+    },
+    {
+     "id": "grok:0190d3e0-0000-7000-8000-000000000015",
+     "app": "grok",
+     "status": "idle",
+     "tokens": {
+      "processed": 0,
+      "output": 0
+     },
+     "tokensToday": 0,
+     "tpm": 0,
+     "context": {
+      "used": 54740,
+      "window": 256000
+     },
+     "forecast": {
+      "pct": 0.213828125,
+      "growthPerTurn": null,
+      "turnsLeft": null
+     },
+     "model": null,
+     "turnStartedAt": null,
+     "lastTool": {
+      "name": "run_terminal_cmd",
+      "category": "other",
+      "detail": "npm run build",
+      "ts": 1791028640000
+     },
+     "toolCounts": {
+      "other": 6
+     },
+     "subagents": [],
+     "files": [
+      {
+       "path": "<world>/home/Projects/atlas-web/app/theme.css",
+       "ts": 1791028590000
+      },
+      {
+       "path": "<world>/home/Projects/atlas-web/app/layout.tsx",
+       "ts": 1791028540000
+      }
+     ],
+     "mcp": [],
+     "needsYou": {
+      "kind": "review",
+      "text": "Dark mode follows the system setting, and the header has a toggle that remembers your choice. Every page passes the contrast check.",
+      "since": 1791028690000
+     },
+     "stuck": null,
+     "lastMessage": "Dark mode follows the system setting, and the header has a toggle that remembers your choice. Every page passes the contrast check.",
+     "lastTurnEndAt": 1791028690000,
+     "interruptedAt": null,
+     "lastEventAt": 1791028690000
+    },
+    {
+     "id": "grok:0190d3e0-0000-7000-8000-000000000016",
+     "app": "grok",
+     "status": "idle",
+     "tokens": {
+      "processed": 0,
+      "output": 0
+     },
+     "tokensToday": 0,
+     "tpm": 0,
+     "context": {
+      "used": 52469,
+      "window": 256000
+     },
+     "forecast": {
+      "pct": 0.20495703125,
+      "growthPerTurn": null,
+      "turnsLeft": null
+     },
+     "model": null,
+     "turnStartedAt": null,
+     "lastTool": {
+      "name": "run_terminal_cmd",
+      "category": "other",
+      "detail": "npm run test:contrast",
+      "ts": 1791028520000
+     },
+     "toolCounts": {
+      "other": 1
+     },
+     "subagents": [],
+     "files": [],
+     "mcp": [],
+     "needsYou": {
+      "kind": "review",
+      "text": "All 23 pages pass. The sale badge was closest, at 4.6 to 1.",
+      "since": 1791028570000
+     },
+     "stuck": null,
+     "lastMessage": "All 23 pages pass. The sale badge was closest, at 4.6 to 1.",
+     "lastTurnEndAt": 1791028570000,
+     "interruptedAt": null,
+     "lastEventAt": 1791028570000
+    },
+    {
+     "id": "grok:0190d3e0-0000-7000-8000-000000000017",
+     "app": "grok",
+     "status": "idle",
+     "tokens": {
+      "processed": 0,
+      "output": 0
+     },
+     "tokensToday": 0,
+     "tpm": 0,
+     "context": {
+      "used": 55732,
+      "window": 256000
+     },
+     "forecast": {
+      "pct": 0.217703125,
+      "growthPerTurn": null,
+      "turnsLeft": null
+     },
+     "model": null,
+     "turnStartedAt": null,
+     "lastTool": {
+      "name": "mcp__xenolith__context_log",
+      "category": "mcp",
+      "detail": "",
+      "ts": 1791024200000
+     },
+     "toolCounts": {
+      "other": 1,
+      "mcp": 1
+     },
+     "subagents": [],
+     "files": [],
+     "mcp": [
+      {
+       "server": "xenolith",
+       "ts": 1791024200000
+      }
+     ],
+     "needsYou": null,
+     "stuck": null,
+     "lastMessage": "The loading rules are on the pathfinder wiki page as seven constraints. Two need data the depot doesn't send yet.",
+     "lastTurnEndAt": 1791024250000,
+     "interruptedAt": null,
+     "lastEventAt": 1791024250000
     }
    ],
    "series": {
@@ -1451,6 +1594,308 @@
      0,
      0,
      0
+    ],
+    "grok": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
     ]
    },
    "tpm": 0,
@@ -1509,7 +1954,8 @@
     "today": 1.336055875,
     "byApp": {
      "claude": 1.003642,
-     "codex": 0.332413875
+     "codex": 0.332413875,
+     "grok": 0
     },
     "perHour": 0,
     "unpriced": [
@@ -1542,14 +1988,18 @@
    ],
    "resources": [
     {
-     "server": "agent-wiki",
+     "server": "xenolith",
      "ts": 1791028590000
+    },
+    {
+     "server": "agent-wiki",
+     "ts": 1791027360000
     }
    ],
    "status": {
     "watching": false,
-    "files": 22,
-    "lines": 219,
+    "files": 25,
+    "lines": 249,
     "errors": 0
    }
   },
@@ -1709,6 +2159,49 @@
     "kind": "turn-end",
     "duration": 95000,
     "ts": 1791020350000
+   },
+   {
+    "sessionId": "grok:0190d3e0-0000-7000-8000-000000000017",
+    "app": "grok",
+    "kind": "prompt",
+    "detail": "Write down the depot's loading rules as constraints the solver can use.",
+    "ts": 1791024100000
+   },
+   {
+    "sessionId": "grok:0190d3e0-0000-7000-8000-000000000017",
+    "app": "grok",
+    "kind": "tool",
+    "tool": "read_file",
+    "category": "other",
+    "detail": "~/Projects/pathfinder/src/solver.rs",
+    "files": [
+     "<world>/home/Projects/pathfinder/src/solver.rs"
+    ],
+    "server": null,
+    "agentId": null,
+    "ts": 1791024150000
+   },
+   {
+    "sessionId": "grok:0190d3e0-0000-7000-8000-000000000017",
+    "app": "grok",
+    "kind": "tool",
+    "tool": "mcp__xenolith__context_log",
+    "category": "mcp",
+    "detail": "",
+    "files": [],
+    "server": "xenolith",
+    "agentId": null,
+    "pages": [
+     "pathfinder"
+    ],
+    "ts": 1791024200000
+   },
+   {
+    "sessionId": "grok:0190d3e0-0000-7000-8000-000000000017",
+    "app": "grok",
+    "kind": "message",
+    "detail": "The loading rules are on the pathfinder wiki page as seven constraints.…",
+    "ts": 1791024250000
    },
    {
     "sessionId": "codex:0190d3e0-0000-7000-8000-000000000012",
@@ -2178,11 +2671,11 @@
     "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
     "app": "claude",
     "kind": "tool",
-    "tool": "mcp__agent-wiki__wiki_log",
+    "tool": "mcp__xenolith__context_log",
     "category": "mcp",
     "detail": "",
     "files": [],
-    "server": "agent-wiki",
+    "server": "xenolith",
     "agentId": null,
     "pages": [
      "atlas-api",
@@ -2357,6 +2850,13 @@
     "ts": 1791028240000
    },
    {
+    "sessionId": "grok:0190d3e0-0000-7000-8000-000000000015",
+    "app": "grok",
+    "kind": "prompt",
+    "detail": "Add a dark mode to the storefront. Follow the system setting, with a toggle in the header.",
+    "ts": 1791028240000
+   },
+   {
     "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
     "app": "claude",
     "kind": "tool",
@@ -2399,6 +2899,20 @@
     "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
     "app": "codex",
     "kind": "tool-error",
+    "ts": 1791028290000
+   },
+   {
+    "sessionId": "grok:0190d3e0-0000-7000-8000-000000000015",
+    "app": "grok",
+    "kind": "tool",
+    "tool": "read_file",
+    "category": "other",
+    "detail": "~/Projects/atlas-web/app/layout.tsx",
+    "files": [
+     "<world>/home/Projects/atlas-web/app/layout.tsx"
+    ],
+    "server": null,
+    "agentId": null,
     "ts": 1791028290000
    },
    {
@@ -2458,6 +2972,20 @@
     "ts": 1791028340000
    },
    {
+    "sessionId": "grok:0190d3e0-0000-7000-8000-000000000015",
+    "app": "grok",
+    "kind": "tool",
+    "tool": "search_replace",
+    "category": "other",
+    "detail": "~/Projects/atlas-web/app/theme.css",
+    "files": [
+     "<world>/home/Projects/atlas-web/app/theme.css"
+    ],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028340000
+   },
+   {
     "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
     "app": "claude",
     "kind": "tool",
@@ -2512,6 +3040,18 @@
     "ts": 1791028390000
    },
    {
+    "sessionId": "grok:0190d3e0-0000-7000-8000-000000000015",
+    "app": "grok",
+    "kind": "tool",
+    "tool": "run_terminal_cmd",
+    "category": "other",
+    "detail": "npm run build",
+    "files": [],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028390000
+   },
+   {
     "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
     "app": "claude",
     "kind": "tool",
@@ -2562,6 +3102,20 @@
     "app": "codex",
     "kind": "tool-error",
     "ts": 1791028440000
+   },
+   {
+    "sessionId": "grok:0190d3e0-0000-7000-8000-000000000015",
+    "app": "grok",
+    "kind": "message",
+    "detail": "Dark mode follows the system setting, and the header has a toggle that …",
+    "ts": 1791028440000
+   },
+   {
+    "sessionId": "grok:0190d3e0-0000-7000-8000-000000000016",
+    "app": "grok",
+    "kind": "prompt",
+    "detail": "Check contrast on every page in dark mode.",
+    "ts": 1791028470000
    },
    {
     "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
@@ -2642,6 +3196,13 @@
     "ts": 1791028490000
    },
    {
+    "sessionId": "grok:0190d3e0-0000-7000-8000-000000000015",
+    "app": "grok",
+    "kind": "prompt",
+    "detail": "Add a dark mode to the storefront. Follow the system setting, with a toggle in the header.",
+    "ts": 1791028490000
+   },
+   {
     "sessionId": "claude:0190d3e0-0000-7000-8000-000000000005",
     "app": "claude",
     "kind": "tool",
@@ -2652,6 +3213,18 @@
     "server": null,
     "agentId": "9c981375",
     "ts": 1791028492000
+   },
+   {
+    "sessionId": "grok:0190d3e0-0000-7000-8000-000000000016",
+    "app": "grok",
+    "kind": "tool",
+    "tool": "run_terminal_cmd",
+    "category": "other",
+    "detail": "npm run test:contrast",
+    "files": [],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028520000
    },
    {
     "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
@@ -2706,14 +3279,35 @@
     "ts": 1791028540000
    },
    {
+    "sessionId": "grok:0190d3e0-0000-7000-8000-000000000015",
+    "app": "grok",
+    "kind": "tool",
+    "tool": "read_file",
+    "category": "other",
+    "detail": "~/Projects/atlas-web/app/layout.tsx",
+    "files": [
+     "<world>/home/Projects/atlas-web/app/layout.tsx"
+    ],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028540000
+   },
+   {
+    "sessionId": "grok:0190d3e0-0000-7000-8000-000000000016",
+    "app": "grok",
+    "kind": "message",
+    "detail": "All 23 pages pass. The sale badge was closest, at 4.6 to 1.",
+    "ts": 1791028570000
+   },
+   {
     "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
     "app": "claude",
     "kind": "tool",
-    "tool": "mcp__agent-wiki__wiki_log",
+    "tool": "mcp__xenolith__context_log",
     "category": "mcp",
     "detail": "",
     "files": [],
-    "server": "agent-wiki",
+    "server": "xenolith",
     "agentId": null,
     "pages": [
      "atlas-api",
@@ -2775,6 +3369,20 @@
     "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
     "app": "codex",
     "kind": "tool-error",
+    "ts": 1791028590000
+   },
+   {
+    "sessionId": "grok:0190d3e0-0000-7000-8000-000000000015",
+    "app": "grok",
+    "kind": "tool",
+    "tool": "search_replace",
+    "category": "other",
+    "detail": "~/Projects/atlas-web/app/theme.css",
+    "files": [
+     "<world>/home/Projects/atlas-web/app/theme.css"
+    ],
+    "server": null,
+    "agentId": null,
     "ts": 1791028590000
    },
    {
@@ -2849,6 +3457,18 @@
     "ts": 1791028640000
    },
    {
+    "sessionId": "grok:0190d3e0-0000-7000-8000-000000000015",
+    "app": "grok",
+    "kind": "tool",
+    "tool": "run_terminal_cmd",
+    "category": "other",
+    "detail": "npm run build",
+    "files": [],
+    "server": null,
+    "agentId": null,
+    "ts": 1791028640000
+   },
+   {
     "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
     "app": "claude",
     "kind": "message",
@@ -2898,6 +3518,13 @@
     "sessionId": "codex:0190d3e0-0000-7000-8000-000000000004",
     "app": "codex",
     "kind": "tool-error",
+    "ts": 1791028690000
+   },
+   {
+    "sessionId": "grok:0190d3e0-0000-7000-8000-000000000015",
+    "app": "grok",
+    "kind": "message",
+    "detail": "Dark mode follows the system setting, and the header has a toggle that …",
     "ts": 1791028690000
    },
    {
@@ -3477,6 +4104,100 @@
      "window": 258400
     },
     "needsYou": null
+   },
+   "grok:0190d3e0-0000-7000-8000-000000000015": {
+    "firstPrompt": {
+     "text": "Add a dark mode to the storefront. Follow the system setting, with a toggle in the header.",
+     "ts": 1791028240000
+    },
+    "prompts": [
+     {
+      "text": "Add a dark mode to the storefront. Follow the system setting, with a toggle in the header.",
+      "ts": 1791028240000
+     },
+     {
+      "text": "Add a dark mode to the storefront. Follow the system setting, with a toggle in the header.",
+      "ts": 1791028490000
+     }
+    ],
+    "messages": [
+     {
+      "text": "Dark mode follows the system setting, and the header has a toggle that remembers your choice. Every page passes the contrast check.",
+      "ts": 1791028440000
+     },
+     {
+      "text": "Dark mode follows the system setting, and the header has a toggle that remembers your choice. Every page passes the contrast check.",
+      "ts": 1791028690000
+     }
+    ],
+    "files": [
+     "<world>/home/Projects/atlas-web/app/layout.tsx",
+     "<world>/home/Projects/atlas-web/app/theme.css"
+    ],
+    "edits": [],
+    "context": {
+     "used": 54740,
+     "window": 256000
+    },
+    "needsYou": {
+     "kind": "review",
+     "text": "Dark mode follows the system setting, and the header has a toggle that remembers your choice. Every page passes the contrast check.",
+     "since": 1791028690000
+    }
+   },
+   "grok:0190d3e0-0000-7000-8000-000000000016": {
+    "firstPrompt": {
+     "text": "Check contrast on every page in dark mode.",
+     "ts": 1791028470000
+    },
+    "prompts": [
+     {
+      "text": "Check contrast on every page in dark mode.",
+      "ts": 1791028470000
+     }
+    ],
+    "messages": [
+     {
+      "text": "All 23 pages pass. The sale badge was closest, at 4.6 to 1.",
+      "ts": 1791028570000
+     }
+    ],
+    "files": [],
+    "edits": [],
+    "context": {
+     "used": 52469,
+     "window": 256000
+    },
+    "needsYou": {
+     "kind": "review",
+     "text": "All 23 pages pass. The sale badge was closest, at 4.6 to 1.",
+     "since": 1791028570000
+    }
+   },
+   "grok:0190d3e0-0000-7000-8000-000000000017": {
+    "firstPrompt": {
+     "text": "Write down the depot's loading rules as constraints the solver can use.",
+     "ts": 1791024100000
+    },
+    "prompts": [
+     {
+      "text": "Write down the depot's loading rules as constraints the solver can use.",
+      "ts": 1791024100000
+     }
+    ],
+    "messages": [
+     {
+      "text": "The loading rules are on the pathfinder wiki page as seven constraints. Two need data the depot doesn't send yet.",
+      "ts": 1791024250000
+     }
+    ],
+    "files": [],
+    "edits": [],
+    "context": {
+     "used": 55732,
+     "window": 256000
+    },
+    "needsYou": null
    }
   },
   "collisions": [
@@ -3781,7 +4502,7 @@
     ],
     "mcp": [
      {
-      "server": "agent-wiki",
+      "server": "xenolith",
       "ts": 1791028590000
      }
     ],
@@ -4089,7 +4810,7 @@
     "status": "thinking",
     "tokens": {
      "processed": 15000,
-     "output": 1200
+     "output": 900
     },
     "tokensToday": 15000,
     "tpm": 3000,
@@ -4482,6 +5203,149 @@
     "lastTurnEndAt": 1791026650000,
     "interruptedAt": null,
     "lastEventAt": 1791026650000
+   },
+   {
+    "id": "grok:0190d3e0-0000-7000-8000-000000000015",
+    "app": "grok",
+    "status": "idle",
+    "tokens": {
+     "processed": 0,
+     "output": 0
+    },
+    "tokensToday": 0,
+    "tpm": 0,
+    "context": {
+     "used": 54740,
+     "window": 256000
+    },
+    "forecast": {
+     "pct": 0.213828125,
+     "growthPerTurn": null,
+     "turnsLeft": null
+    },
+    "model": null,
+    "turnStartedAt": null,
+    "lastTool": {
+     "name": "run_terminal_cmd",
+     "category": "other",
+     "detail": "npm run build",
+     "ts": 1791028640000
+    },
+    "toolCounts": {
+     "other": 6
+    },
+    "subagents": [],
+    "files": [
+     {
+      "path": "<world>/home/Projects/atlas-web/app/theme.css",
+      "ts": 1791028590000
+     },
+     {
+      "path": "<world>/home/Projects/atlas-web/app/layout.tsx",
+      "ts": 1791028540000
+     }
+    ],
+    "mcp": [],
+    "needsYou": {
+     "kind": "review",
+     "text": "Dark mode follows the system setting, and the header has a toggle that remembers your choice. Every page passes the contrast check.",
+     "since": 1791028690000
+    },
+    "stuck": null,
+    "lastMessage": "Dark mode follows the system setting, and the header has a toggle that remembers your choice. Every page passes the contrast check.",
+    "lastTurnEndAt": 1791028690000,
+    "interruptedAt": null,
+    "lastEventAt": 1791028690000
+   },
+   {
+    "id": "grok:0190d3e0-0000-7000-8000-000000000016",
+    "app": "grok",
+    "status": "idle",
+    "tokens": {
+     "processed": 0,
+     "output": 0
+    },
+    "tokensToday": 0,
+    "tpm": 0,
+    "context": {
+     "used": 52469,
+     "window": 256000
+    },
+    "forecast": {
+     "pct": 0.20495703125,
+     "growthPerTurn": null,
+     "turnsLeft": null
+    },
+    "model": null,
+    "turnStartedAt": null,
+    "lastTool": {
+     "name": "run_terminal_cmd",
+     "category": "other",
+     "detail": "npm run test:contrast",
+     "ts": 1791028520000
+    },
+    "toolCounts": {
+     "other": 1
+    },
+    "subagents": [],
+    "files": [],
+    "mcp": [],
+    "needsYou": {
+     "kind": "review",
+     "text": "All 23 pages pass. The sale badge was closest, at 4.6 to 1.",
+     "since": 1791028570000
+    },
+    "stuck": null,
+    "lastMessage": "All 23 pages pass. The sale badge was closest, at 4.6 to 1.",
+    "lastTurnEndAt": 1791028570000,
+    "interruptedAt": null,
+    "lastEventAt": 1791028570000
+   },
+   {
+    "id": "grok:0190d3e0-0000-7000-8000-000000000017",
+    "app": "grok",
+    "status": "idle",
+    "tokens": {
+     "processed": 0,
+     "output": 0
+    },
+    "tokensToday": 0,
+    "tpm": 0,
+    "context": {
+     "used": 55732,
+     "window": 256000
+    },
+    "forecast": {
+     "pct": 0.217703125,
+     "growthPerTurn": null,
+     "turnsLeft": null
+    },
+    "model": null,
+    "turnStartedAt": null,
+    "lastTool": {
+     "name": "mcp__xenolith__context_log",
+     "category": "mcp",
+     "detail": "",
+     "ts": 1791024200000
+    },
+    "toolCounts": {
+     "other": 1,
+     "mcp": 1
+    },
+    "subagents": [],
+    "files": [],
+    "mcp": [
+     {
+      "server": "xenolith",
+      "ts": 1791024200000
+     }
+    ],
+    "needsYou": null,
+    "stuck": null,
+    "lastMessage": "The loading rules are on the pathfinder wiki page as seven constraints. Two need data the depot doesn't send yet.",
+    "lastTurnEndAt": 1791024250000,
+    "interruptedAt": null,
+    "lastEventAt": 1791024250000
    },
    {
     "id": "claude:0190d3e0-0000-7000-8000-0000000000e4",
@@ -5121,6 +5985,308 @@
     0,
     0,
     0
+   ],
+   "grok": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
    ]
   },
   "tpm": 108500,
@@ -5175,7 +6341,8 @@
    "today": 1.374095875,
    "byApp": {
     "claude": 1.041682,
-    "codex": 0.332413875
+    "codex": 0.332413875,
+    "grok": 0
    },
    "perHour": 3.7111468425562038,
    "unpriced": [
@@ -5208,14 +6375,18 @@
   ],
   "resources": [
    {
-    "server": "agent-wiki",
+    "server": "xenolith",
     "ts": 1791028590000
+   },
+   {
+    "server": "agent-wiki",
+    "ts": 1791027360000
    }
   ],
   "status": {
    "watching": false,
-   "files": 22,
-   "lines": 219,
+   "files": 25,
+   "lines": 249,
    "errors": 0
   }
  }

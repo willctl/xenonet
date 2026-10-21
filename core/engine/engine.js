@@ -28,6 +28,7 @@ import { pathStyle } from "../paths.js";
 import { patchPaths } from "../patch.js";
 import { YOU, parseActorId, SESSION_LOCAL } from "../schema/ids.js";
 import { productOf } from "../actors/products.js";
+import { APP } from "../apps.js";
 import { quoted } from "./attest.js";
 import { limiter } from "../projects.js";
 
@@ -690,8 +691,12 @@ export class Engine extends EventEmitter {
       return files.length ? say(await this.#warn(me, files, sub)) : null;
     }
     if (sub) return null;
+    // An app that passes over what an event answers (Grok Build's
+    // SessionStart and UserPromptSubmit) hears nothing then: its messages
+    // wait for an event it hears.
+    if (APP[app]?.connect?.unheard?.includes(event)) return null;
     if (event === "SessionStart") return say([await this.briefing(me), this.#mail(await this.#take(me))].filter(Boolean).join("\n\n"));
-    if (event === "UserPromptSubmit" || event === "PostToolUse") return say(this.#mail(await this.#take(me)));
+    if (event === "UserPromptSubmit" || event === "PostToolUse" || event === "PostToolUseFailure") return say(this.#mail(await this.#take(me)));
     if (event === "Stop") {
       if (input.stop_hook_active) return null;
       const text = this.#mail(await this.#take(me));

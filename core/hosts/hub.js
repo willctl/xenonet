@@ -13,7 +13,7 @@ import { systemClock } from "../blocks/clock.js";
 import { tilde } from "../paths.js";
 import { hostEntry } from "./config.js";
 import { HostLink } from "./link.js";
-import { mergeGraph, mergeLive, mergeSummary, qualifyEvent, qualifyEngine, cleanOnce, DEFAULT_WINDOWS } from "./merge.js";
+import { mergeGraph, mergeLive, mergeSummary, qualifyEvent, qualifyEngine, eventNote, cleanOnce, DEFAULT_WINDOWS } from "./merge.js";
 import { readCache, writeCache, removeCache } from "./cache.js";
 
 const GRAPH_EVERY_MS = 1000;
@@ -28,7 +28,8 @@ const fail = (message, status) => Object.assign(new Error(message), { status });
 // live state, layout, identities (your names and hidden ones), SSH aliases,
 // and a way to forget layout positions under a prefix. `demo`: a demo
 // XenoNet shows demo hosts only, so nothing real reaches its screenshots.
-export function createHub({ hosts, cacheDir, root, home = null, demo = false, windows = DEFAULT_WINDOWS, local, clock = systemClock, linkOptions = {} }) {
+// `log`: the service's (core/log.js), for what's left out of a host's events.
+export function createHub({ hosts, cacheDir, root, home = null, demo = false, windows = DEFAULT_WINDOWS, local, clock = systemClock, linkOptions = {}, log = null }) {
   const hub = new EventEmitter();
   const runtimes = new Map();
   const timers = { graph: null, live: null };
@@ -167,7 +168,9 @@ export function createHub({ hosts, cacheDir, root, home = null, demo = false, wi
         return hub.emit("hosts", forPage());
       }
       const q = qualifyEvent(name, data, infoOf(rt));
-      if (q) hub.emit(name, q);
+      if (q) return hub.emit(name, q);
+      const note = eventNote(name, data, infoOf(rt));
+      if (note) log?.info("hosts.unknown-app", note);
     });
     runtimes.set(entry.id, rt);
     link.start();

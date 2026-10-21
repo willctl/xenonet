@@ -1,8 +1,10 @@
 // XenoNet's doctor: whether what XenoNet needs is in place, and how to fix it
-// when it isn't. Sign-ins for Claude Code and Codex, the folders XenoNet
-// reads, the apps and tools it talks to, its own server, whether your
-// agents are connected to it, and actors: tokens left in repos or expired,
-// what the observers read, and the process check they rely on.
+// when it isn't. Sign-ins for Claude Code, Codex and Grok Build, the folders
+// XenoNet reads, the apps and tools it talks to, its own server, whether your
+// agents are connected to it, actors: tokens left in repos or expired, what
+// the observers read, and the process check they rely on; and the service
+// started at login (ctx.login(), the supervisor's own review of it, which
+// only the Rust machines answer).
 //
 // The xenonet command runs it (xenonet doctor). The server runs it every half
 // hour and reports new problems in the console and as a notification
@@ -56,6 +58,14 @@ export function machine(overrides = {}) {
     node: process.versions.node,
     electron: process.versions.electron ?? null,
     exists: (p) => fs.existsSync(p),
+    // A small settings file's text, or null when there's none.
+    readText: (p) => {
+      try {
+        return fs.readFileSync(p, "utf8");
+      } catch {
+        return null;
+      }
+    },
     readdir: (p) => fs.promises.readdir(p),
     access: (p, mode) => fs.promises.access(p, mode),
     statfs: (p) => fs.promises.statfs(p),
@@ -139,7 +149,20 @@ const unreadable = (tool) => `${tool} answered in a way XenoNet doesn't read; up
 const privacyFix = (ctx, what) =>
   ctx.platform === "darwin" ? `Let XenoNet read ${what}: System Settings › Privacy & Security › Files and Folders (or Full Disk Access), then restart XenoNet.` : `Check the permissions on ${what}.`;
 
-// The sources of the map that xenonet.sources reports as failed: Agent Wiki
+// Grok Build's folder (GROK_HOME's, or ~/.grok), a path in it, and its
+// command: grok on PATH, or where its installer puts it, which a shell's
+// PATH may not have yet.
+const grokHome = (ctx) => ctx.paths?.grokHome ?? pathStyle(ctx.home).join(ctx.home, ".grok");
+const inGrok = (ctx, ...parts) => pathStyle(grokHome(ctx)).join(grokHome(ctx), ...parts);
+function grokBin(ctx) {
+  const own = inGrok(ctx, "bin", ctx.platform === "win32" ? "grok.exe" : "grok");
+  return ctx.which("grok") ?? (ctx.exists(own) ? own : null);
+}
+// The files where an organization can let Grok Build run only the hooks it
+// sets (allow_managed_hooks_only).
+const grokPolicies = (ctx) => ["/etc/grok/requirements.toml", "/etc/grok/managed_config.toml", inGrok(ctx, "requirements.toml"), inGrok(ctx, "managed_config.toml")];
+
+// The sources of the map that xenonet.sources reports as failed: Xenolith
 // and identities are extras, so theirs go without a word.
 const OPTIONAL_SOURCES = new Set(["wiki", "identities"]);
 const failedSources = (health) => (health?.sources ?? []).filter((s) => !s.ok && !OPTIONAL_SOURCES.has(s.name));
@@ -165,7 +188,7 @@ export const CHECKS = [
       const bad = failedSources(ctx.health);
       const counts = Object.fromEntries(ctx.health.sources.filter((s) => s.ok).map((s) => [s.name, s.count]));
       if (bad.length) return fail(bad.map((s) => `${s.name}: ${s.error ?? "failed"}`).join("; "), "Run xenonet doctor again after fixing the checks below; if it stays, xenonet logs --errors says more.");
-      const parts = [counts.projects != null && plural(counts.projects, "project"), counts.claude != null && plural(counts.claude, "Claude session"), counts.codex != null && plural(counts.codex, "Codex thread")].filter(Boolean);
+      const parts = [counts.projects != null && plural(counts.projects, "project"), counts.claude != null && plural(counts.claude, "Claude session"), counts.codex != null && plural(counts.codex, "Codex thread"), counts.grok ? plural(counts.grok, "Grok Build session") : null].filter(Boolean);
       return ok(`reading ${parts.join(", ")}`);
     },
   },
@@ -357,6 +380,61 @@ export const CHECKS = [
     },
   },
 
+  // ---------- Grok Build ----------
+  {
+    id: "grok.cli",
+    group: "Grok Build",
+    title: "Grok Build is installed",
+    async run(ctx) {
+      const bin = grokBin(ctx);
+      if (!bin) return info("not installed; XenoNet shows Grok Build's sessions once it is", "To use Grok Build, install it (x.ai/cli), then run grok login.");
+      const v = await ctx.run(bin, ["--version"], 4000);
+      const version = (v.stdout.match(/\d+\.\d+\.\d+[\w.-]*/) ?? [])[0];
+      return ok(`${version ? `version ${version}, ` : ""}${tilde(bin, ctx.home)}`);
+    },
+  },
+  {
+    id: "grok.auth",
+    group: "Grok Build",
+    title: "Grok Build is signed in",
+    async run(ctx) {
+      if (!grokBin(ctx)) return skip("Grok Build isn't installed");
+      // Whether its sign-in is there, never what's in it: auth.json holds
+      // the tokens.
+      if (ctx.exists(inGrok(ctx, "auth.json"))) return ok("signed in");
+      if (ctx.env?.XAI_API_KEY) return ok("with an API key (XAI_API_KEY)");
+      return info("not signed in yet", "Run grok login.");
+    },
+  },
+  {
+    id: "grok.sessions",
+    group: "Grok Build",
+    title: "XenoNet can read Grok Build's sessions",
+    async run(ctx) {
+      const dir = inGrok(ctx, "sessions");
+      const f = await folder(ctx, dir);
+      if (f.state === "missing") return info(`no ${tilde(dir, ctx.home)} yet: no Grok Build sessions on this machine`);
+      if (f.state === "denied") return fail(`can't read ${tilde(dir, ctx.home)} (${f.code})`, privacyFix(ctx, tilde(dir, ctx.home)));
+      return ok(`${plural(f.count, "folder")} of sessions in ${tilde(dir, ctx.home)}`);
+    },
+  },
+  {
+    id: "grok.hooks",
+    group: "Grok Build",
+    title: "Grok Build runs XenoNet's hooks",
+    async run(ctx) {
+      const a = ctx.connect?.apps.find((x) => x.app === "grok");
+      if (!a) return skip("needs XenoNet running");
+      if (a.changes.find((c) => c.id === "hooks")?.state !== "present") return skip("XenoNet's hooks aren't in Grok Build's settings");
+      for (const file of grokPolicies(ctx)) {
+        if (/^\s*(allow_managed_hooks_only|allowManagedHooksOnly)\s*=\s*true\b/m.test(ctx.readText?.(file) ?? "")) return warn(`Grok Build runs only the hooks your organization sets (${tilde(file, ctx.home)}), so XenoNet's don't run`, "Ask whoever manages Grok Build here to allow them. XenoNet's tools still work without them.");
+      }
+      // Hooks you turned off in Grok's /hooks.
+      if (/xenonet/i.test(ctx.readText?.(inGrok(ctx, "disabled-hooks")) ?? "")) return warn("XenoNet's hooks are turned off in Grok Build", "Run /hooks in Grok Build, select XenoNet's hooks and press Space to turn them on.");
+      return ok(`in ${tilde(inGrok(ctx, "hooks"), ctx.home)}, which Grok Build runs without asking`);
+    },
+  },
+
   // ---------- this machine ----------
   {
     id: "system.projects",
@@ -441,15 +519,20 @@ export const CHECKS = [
   },
 
   // ---------- agents ----------
-  ...["claude", "codex"].map((app) => ({
+  ...[
+    ["claude", "Claude Code"],
+    ["codex", "Codex"],
+    ["grok", "Grok Build"],
+  ].map(([app, name]) => ({
     id: `agents.${app}`,
     group: "Sessions",
-    title: `${app === "claude" ? "Claude Code" : "Codex"} sessions are connected to XenoNet`,
+    title: `${name} sessions are connected to XenoNet`,
     async run(ctx) {
       const a = ctx.connect?.apps.find((x) => x.app === app);
       if (!a) return skip("needs XenoNet running");
       const states = a.changes.map((c) => c.state);
-      if (states.every((s) => s === "missing")) return info("not connected, so these sessions can't see or message each other through XenoNet", "Connect them from XenoNet's palette (Connect Claude Code and Codex to XenoNet), or run xenonet connect.");
+      if (a.installed === false && states.every((s) => s === "missing")) return skip(`${name} isn't installed`);
+      if (states.every((s) => s === "missing")) return info("not connected, so these sessions can't see or message each other through XenoNet", "Connect them from XenoNet's palette (Connect your agents to XenoNet), or run xenonet connect.");
       // XenoNet's plugin for Claude Code carries what connect would add;
       // connect's own entries beside it are to come out.
       if (states.includes("remove")) {
@@ -618,7 +701,91 @@ export const CHECKS = [
       return ok(said);
     },
   },
+
+  // ---------- the service started at login (docs/design/always-on.md) ----------
+  {
+    id: "service.login",
+    group: "Background service",
+    title: "The service starts at login",
+    async run(ctx) {
+      const { l, why } = await registration(ctx);
+      if (why !== NOT_REGISTERED && !l) return skip(why);
+      if (!l) return info("off: Desktop starts the service when it opens, and it runs until you log out", "To keep sessions coordinating while Desktop is closed, turn on Background service in XenoNet's palette, or run xenonet service install.");
+      const other = ctx.self && l.port != null && String(l.port) !== String(ctx.self.port) ? `, for the service on port ${l.port}` : "";
+      return ok(`on, through ${l.supervisor}: ${tilde(l.file, ctx.home)}${other}`);
+    },
+  },
+  {
+    id: "service.file",
+    group: "Background service",
+    title: "The service's registration is current",
+    async run(ctx) {
+      const { l, why } = await registration(ctx);
+      if (!l) return skip(why);
+      const file = tilde(l.file, ctx.home);
+      if (l.programFound === false) return fail(`${file} runs ${tilde(l.program ?? "", ctx.home)}, which isn't there`, "Run xenonet service install again, which points it at XenoNet's launcher.");
+      if (l.current === false) return warn(`${file} isn't what xenonet service install writes now, so the service may not start the way this XenoNet expects`, "Run xenonet service install again, which writes it afresh and reloads it. That restarts the service, so close its terminals first.");
+      if (l.current !== true) return info(`XenoNet couldn't tell whether ${file} is current: ${l.expected ?? "it couldn't work out what install writes here"}`);
+      return ok(`${file} is what xenonet service install writes`);
+    },
+  },
+  {
+    id: "service.loaded",
+    group: "Background service",
+    title: "The system has the service loaded",
+    async run(ctx) {
+      const { l, why } = await registration(ctx);
+      if (!l) return skip(why);
+      const by = l.supervisor;
+      if (l.error) return warn(`XenoNet couldn't ask ${by} about it: ${l.error}`, LOOK[by]);
+      if (l.state === "disabled") return warn("it's turned off in Task Scheduler, so it doesn't start when you sign in", "Turn XenoNet Service on in Task Scheduler, or run xenonet service install, which turns it on again.");
+      if (!l.loaded) return warn(`${by} doesn't have it, so it doesn't start at login`, UNLOADED[by] ?? "Run xenonet service install again.");
+      const exited = l.lastExit && !["0", "(never exited)"].includes(String(l.lastExit)) ? ` (it last exited with ${l.lastExit})` : "";
+      if (l.state === "failed") return warn(`${by} gave up on it after it kept stopping${exited}`, "xenonet logs --errors says why it stopped. Then xenonet service start starts it again.");
+      if (l.pid) return ok(`${by} has it, running as process ${l.pid}`);
+      return info(`${by} has it, but it isn't running now${exited}`, "xenonet service start starts it. If it didn't stop on purpose, xenonet logs --errors says why.");
+    },
+  },
+  {
+    id: "service.boot",
+    group: "Background service",
+    title: "The service starts at boot",
+    async run(ctx) {
+      if (ctx.platform !== "linux") return skip("for Linux, where lingering starts a user's services at boot");
+      const { l, why } = await registration(ctx);
+      if (!l) return skip(why);
+      const user = l.user || "$USER";
+      if (l.linger === true) return ok("lingering is on, so it starts at boot and keeps running after you log out");
+      if (l.linger !== false) return info("XenoNet couldn't ask loginctl whether lingering is on", `loginctl show-user ${user} --property=Linger says.`);
+      if (l.graphical === false) return warn("lingering is off, and you have no graphical session here, as on a host reached over SSH, so the service runs only while you're logged in", `Run loginctl enable-linger ${user} once, which starts it at boot and keeps it running. It may need an administrator: sudo loginctl enable-linger ${user}.`);
+      return info("lingering is off: it starts when you log in, and stops when you log out", `To start it at boot instead, before anyone logs in, as a host needs, run loginctl enable-linger ${user} once. It may need an administrator.`);
+    },
+  },
 ];
+
+// The registration the service.* checks read (ctx.login(), as
+// xenonet-components' supervisor review sees it), or why there's none to
+// read.
+const NOT_REGISTERED = "the service doesn't start at login";
+async function registration(ctx) {
+  const l = await ctx.login?.();
+  if (!l) return { l: null, why: "XenoNet can't look at how its service starts from here" };
+  if (!l.supported) return { l: null, why: "this system has no supervisor XenoNet registers with" };
+  if (!l.registered) return { l: null, why: NOT_REGISTERED };
+  return { l, why: null };
+}
+
+// Where each supervisor says more, and what loads the service again.
+const LOOK = {
+  launchd: "launchctl print gui/$(id -u)/dev.xenonet.service says more.",
+  systemd: "systemctl --user status xenonet says more.",
+  "Task Scheduler": 'schtasks /query /tn "XenoNet Service" /v /fo list says more.',
+};
+const UNLOADED = {
+  launchd: "If you turned it off in System Settings › General › Login Items & Extensions, turn it on there. Otherwise run xenonet service install again, which loads it.",
+  systemd: "Run xenonet service install again, which enables it, or systemctl --user enable --now xenonet.service.",
+  "Task Scheduler": "Run xenonet service install again, which creates the task again.",
+};
 
 // ---------- hosts ----------
 

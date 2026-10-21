@@ -63,7 +63,8 @@ export function createTray({ baseUrl, showWindow, sendCommand, select, themes = 
   function queueItem(n) {
     if (n.kind === "requests") return { label: `${n.title} ${waitsWords(n)}`, click: openQueue };
     if (n.kind === "actor") return { label: `Actor · ${named(n, 40)} ${waitsWords(n)}`.slice(0, 64), click: () => (showWindow(), select(n.id)) };
-    return { label: `${n.app === "codex" ? "Codex" : "Claude"} · ${named(n, 48)}`, click: () => (n.host ? (showWindow(), select(n.id)) : post("/api/open", { nodeId: n.id, action: "open-app" })) };
+    // A Grok Build session has no app to open in yet: XenoNet shows it.
+    return { label: `${{ codex: "Codex", grok: "Grok Build" }[n.app] ?? "Claude"} · ${named(n, 48)}`, click: () => (n.host || n.app === "grok" ? (showWindow(), select(n.id)) : post("/api/open", { nodeId: n.id, action: "open-app" })) };
   }
 
   function menu(s) {

@@ -73,11 +73,11 @@ Yours, from your own terminal:
 
 const DOTS = { working: c.green("●"), idle: c.dim("○"), away: c.yellow("◐"), offline: c.dim("·"), unknown: c.dim("?") };
 const dot = (presence) => DOTS[presence] ?? DOTS.unknown;
-const APPS = { claude: "a Claude Code session", codex: "a Codex session" };
+const APPS = { claude: "a Claude Code session", codex: "a Codex session", grok: "a Grok Build session" };
 // A node of the map as a person reads it: a place by its folder's name, a
 // session by its app.
 const nodeWords = (id) => {
-  const m = /^(project|zone|native|claude|codex):(.*)$/.exec(String(id));
+  const m = /^(project|zone|native|claude|codex|grok):(.*)$/.exec(String(id));
   if (!m) return String(id);
   if (APPS[m[1]]) return APPS[m[1]];
   return m[1] === "native" ? "a project" : path.basename(m[2]) || m[2];
@@ -287,7 +287,7 @@ async function event([kind], flags) {
 function targetOf(spec, fallback) {
   const i = spec.lastIndexOf("=");
   const [node, relation] = i > 0 ? [spec.slice(0, i), spec.slice(i + 1)] : [spec, fallback];
-  const where = /^(project|zone|native|claude|codex):/.test(node) ? { id: node } : { path: path.resolve(node) };
+  const where = /^(project|zone|native|claude|codex|grok):/.test(node) ? { id: node } : { path: path.resolve(node) };
   return relation === undefined ? where : { ...where, relation };
 }
 

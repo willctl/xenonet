@@ -197,8 +197,8 @@ impl JsTranscripts {
     }
     /// [{ file, agentId }].
     #[napi]
-    pub fn files(&mut self, session_id: String, claude_root: Option<String>, codex_roots: Vec<String>, now: f64) -> OutJs {
-        let files = self.t.files(&session_id, claude_root.as_deref(), &codex_roots, now);
+    pub fn files(&mut self, session_id: String, claude_root: Option<String>, codex_roots: Vec<String>, grok_root: Option<String>, now: f64) -> OutJs {
+        let files = self.t.files(&session_id, claude_root.as_deref(), &codex_roots, grok_root.as_deref(), now);
         OutJs(Out::Arr(files.into_iter().map(|(file, agent)| Out::obj(vec![("file", Out::Str(file)), ("agentId", agent.map_or(Out::Null, Out::Str))])).collect()))
     }
     #[napi]
@@ -332,8 +332,8 @@ pub struct JsSearch {
 #[napi]
 impl JsSearch {
     #[napi(constructor)]
-    pub fn new(db_file: Option<String>, claude_root: Option<String>, codex_roots: Vec<Option<String>>) -> Self {
-        JsSearch { s: Search::new(db_file.as_deref(), claude_root.as_deref(), &codex_roots) }
+    pub fn new(db_file: Option<String>, claude_root: Option<String>, codex_roots: Vec<Option<String>>, grok_root: Option<String>) -> Self {
+        JsSearch { s: Search::new(db_file.as_deref(), claude_root.as_deref(), &codex_roots, grok_root.as_deref()) }
     }
     /// [{ dir, app }]: the folders that are there.
     #[napi(getter)]

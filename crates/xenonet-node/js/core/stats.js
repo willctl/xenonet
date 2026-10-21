@@ -14,13 +14,15 @@ const strings = (list) => [...list].map(String);
 
 // Where sessions' transcripts are. Codex rollouts are found by their thread
 // id, from a listing of the rollout folders made once and again when an id
-// isn't in it (at most every 10 seconds).
+// isn't in it (at most every 10 seconds). A Grok Build session's updates
+// are in its own folder, under the one for its working directory.
 export class Transcripts {
   #core = new native.TranscriptsCore();
 
-  constructor({ claudeRoot, codexRoots = [] }) {
+  constructor({ claudeRoot, codexRoots = [], grokRoot = null }) {
     this.claudeRoot = claudeRoot;
     this.codexRoots = codexRoots;
+    this.grokRoot = grokRoot;
   }
 
   // The rollouts listed so far, by thread id.
@@ -32,7 +34,7 @@ export class Transcripts {
   }
 
   async files(sessionId) {
-    return this.#core.files(String(sessionId), this.claudeRoot == null ? null : String(this.claudeRoot), strings(this.codexRoots), Date.now());
+    return this.#core.files(String(sessionId), this.claudeRoot == null ? null : String(this.claudeRoot), strings(this.codexRoots), this.grokRoot == null ? null : String(this.grokRoot), Date.now());
   }
 
   async list() {

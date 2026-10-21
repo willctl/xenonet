@@ -174,7 +174,7 @@ export const LiveActivity = define(
         files: z.array(z.string()),
         server: nstr.describe("The MCP server, for an MCP tool"),
         agentId: nstr.optional().describe("The subagent that called it"),
-        pages: z.array(z.string()).max(6).optional().describe("The Agent Wiki pages a wiki write names"),
+        pages: z.array(z.string()).max(6).optional().describe("The wiki pages a write to the shared context names: a slug, or <space>/<slug> for a page of another Xenolith space than this machine's"),
       },
       "A tool call",
     ),

@@ -191,10 +191,10 @@ impl JsLiveCore {
     /// A line the tailer read (`raw`, as its normalizer gave it): its
     /// refusal, and what it says.
     #[napi]
-    pub fn line(&mut self, env: Env, codex: bool, session_id: String, agent_id: MaybeJson, file: MaybeJson, raw: MaybeJson, live: bool, now: f64) -> Result<Jv> {
+    pub fn line(&mut self, env: Env, app: String, session_id: String, agent_id: MaybeJson, file: MaybeJson, raw: MaybeJson, live: bool, now: f64) -> Result<Jv> {
         let f = Where { session_id, agent_id: or_null(agent_id), file: or_null(file) };
         let mut out = Vec::new();
-        let r = self.t.line(codex, &f, or_null(raw), live, now, &mut out);
+        let r = self.t.line(&app, &f, or_null(raw), live, now, &mut out);
         emits(&env, out, r.err())
     }
 
@@ -217,6 +217,11 @@ impl JsLiveCore {
         let mut out = Vec::new();
         self.t.note_activity(i, fields, live, now, &mut out);
         emits(env, out, None)
+    }
+
+    #[napi]
+    pub fn settle(&mut self, now: f64) {
+        self.t.settle(now);
     }
 
     #[napi(js_name = "noteHook")]

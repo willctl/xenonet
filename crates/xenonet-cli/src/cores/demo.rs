@@ -71,5 +71,6 @@ pub fn create_world() -> Result<Config, Fail> {
         home_dir: w.home.clone(),
         claude_projects_dir: w.claude_root.clone(),
         codex_home: w.codex_home.clone(),
+        grok_home: w.grok_home.clone(),
     })
 }

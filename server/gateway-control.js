@@ -32,6 +32,21 @@ const SEEN_SAVE_MS = 3600e3;
 // window says so first.
 export const EXPIRING_MS = 7 * 24 * 3600e3;
 
+// The gateway's port when nothing names one: 1010 above the service's, so
+// 48850 for an installed XenoNet on 47840. That's clear of every instance's
+// port (47840 to 47845), their pages' (1000 above theirs) and Xenolith's
+// (47850 for its HTTP server, 47859 for its preview), and below the ports
+// macOS and Windows hand out for outgoing connections.
+export const GATEWAY_OFFSET = 1010;
+export const gatewayPortOf = (port) => (port + GATEWAY_OFFSET <= 65535 ? port + GATEWAY_OFFSET : port - GATEWAY_OFFSET);
+
+// The default before that: 10 above the service's (47850, Xenolith's port,
+// for an installed XenoNet). A gateway set up then keeps it.
+export const OLD_GATEWAY_OFFSET = 10;
+export const oldGatewayPortOf = (port) => (port + OLD_GATEWAY_OFFSET <= 65535 ? port + OLD_GATEWAY_OFFSET : gatewayPortOf(port));
+
+const validPort = (p) => (Number.isInteger(p) && p >= 1 && p <= 65535 ? p : null);
+
 const bad = (message) => {
   throw Object.assign(new Error(message), { status: 400, code: "bad-request" });
 };
@@ -43,22 +58,36 @@ const parse = (s, fallback) => {
   }
 };
 
-// `probe`: "local" checks the loop on this computer alone, without the
-// internet (XENONET_GATEWAY_PROBE=local, for tests). `dir`: the state folder,
-// for the pid of a tunnel XenoNet runs. The rest stand in for tests.
-export function createGatewayControl({ engine, registration, actors, runs = null, onRun = () => {}, store, port, version, dir = null, probe = null, log = () => {}, now = Date.now, tunnelOptions = {}, reachCheck = checkReach, setTimer = setTimeout, clearTimer = clearTimeout, every = setInterval, stopEvery = clearInterval }) {
-  // { on, host, tunnel: { kind, name, host } }: host is the address in use,
-  // the one the owner gave or the one the tunnel got; tunnel.host is the
-  // one the owner gave, for the kinds that ask. A setting from before
-  // tunnels were picked here, a host alone, is the owner's own tunnel.
+// `port`: the gateway's port when one is named (XENONET_GATEWAY_PORT);
+// otherwise it's the one its saved setting has, the old default for one set
+// up before ports were saved, else the default for `servicePort`. `probe`: "local" checks the loop on this computer alone,
+// without the internet (XENONET_GATEWAY_PROBE=local, for tests). `dir`: the
+// state folder, for the pid of a tunnel XenoNet runs. The rest stand in for
+// tests.
+export function createGatewayControl({ engine, registration, actors, runs = null, onRun = () => {}, store, port = null, servicePort = 47840, version, dir = null, probe = null, log = () => {}, now = Date.now, tunnelOptions = {}, reachCheck = checkReach, setTimer = setTimeout, clearTimer = clearTimeout, every = setInterval, stopEvery = clearInterval }) {
+  // { on, host, tunnel: { kind, name, host }, port }: host is the address in
+  // use, the one the owner gave or the one the tunnel got; tunnel.host is
+  // the one the owner gave, for the kinds that ask; port is the one the
+  // gateway had when it was set up. A setting from before tunnels were
+  // picked here, a host alone, is the owner's own tunnel.
   const saved = () => {
     const s = parse(store.meta(KEY), {});
     const host = normalHost(s.host);
     const kind = KINDS[s.tunnel?.kind] ? s.tunnel.kind : host ? "own" : null;
     const tunnel = kind ? { kind, name: TUNNEL_NAME.test(s.tunnel?.name ?? "") ? s.tunnel.name : null, host: normalHost(s.tunnel?.host) ?? (kind === "own" ? host : null) } : null;
-    return { on: s.on === true, host, tunnel };
+    return { on: s.on === true, host, tunnel, port: validPort(s.port) };
   };
-  const save = (s) => store.setMeta(KEY, JSON.stringify(s));
+  // A gateway once set up keeps its port, so the tunnels and apps pointed at
+  // it keep working when the default moves or XenoNet's own port does. One
+  // set up before ports were saved (on, with a tunnel or a public host) was
+  // on the old default: it keeps that, saved now so it stays put. Only one
+  // never set up takes the default.
+  const before = saved();
+  const setUp = before.on || !!before.tunnel || !!before.host;
+  const keepOld = port == null && !before.port && setUp;
+  port ??= before.port ?? (setUp ? oldGatewayPortOf(servicePort) : gatewayPortOf(servicePort));
+  const save = (s) => store.setMeta(KEY, JSON.stringify({ ...s, port }));
+  if (keepOld) save(before);
 
   // Each actor's last call through the gateway: { host, at } by slug.
   const seen = new Map(Object.entries(parse(store.meta(SEEN), {})));

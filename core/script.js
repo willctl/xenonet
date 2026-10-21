@@ -67,6 +67,7 @@ export const STEPS = `  launch[:inactive|front|hidden]  start it unless it's run
   environment:<id>                choose nebula, aurora, trench or vault independently of the theme
   environments                    the environments and the one in use
   environmentPicker               preview environment cards; keepEnvironment or revertEnvironment
+  plainPanels:on|off              panels drawn solid, without the glass blur (less GPU), or as glass
   mcp:<node-id>                    open a shared system's MCP details; mcpTab and mcpSearch browse it
   previewTheme:<name>             show a theme in this window alone; keepTheme
                                   or revertTheme after

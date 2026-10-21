@@ -6,7 +6,7 @@
 //! stay as they were.
 
 use crate::util::{blocking, lock, now_ms, wiki_out};
-use crate::vendor::Vendor;
+use crate::vendor::{Tailed, Vendor};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -14,18 +14,15 @@ use xenonet_schema::vendor::Sampling;
 use xenonet_state::stats::{self, File, Kept, Transcripts};
 
 /// A whole transcript's records, through its app's normalizer (lines.js's
-/// readLines): a last line without a newline too.
-#[expect(clippy::case_sensitive_file_extension_comparisons, reason = "as the JS's endsWith, which tells .zst from .ZST")]
-pub fn read_lines(vendor: &Vendor, file: &str, codex: bool) -> std::io::Result<Vec<Value>> {
-    if file.ends_with(".zst") {
-        return Err(std::io::Error::other("XenoNet can't read a compressed archive here yet"));
-    }
-    let data = std::fs::read(file)?;
+/// readLines): a last line without a newline too, and a compressed
+/// archive (.jsonl.zst) decompressed.
+pub fn read_lines(vendor: &Vendor, file: &str, app: Tailed) -> std::io::Result<Vec<Value>> {
+    let data = crate::archive::read(file)?;
     let t = xenonet_sources::lines::take(&data);
     let mut sampling = Sampling::default();
-    let mut out: Vec<Value> = t.lines.iter().filter_map(|l| vendor.line(codex, l, &mut sampling)).collect();
+    let mut out: Vec<Value> = t.lines.iter().filter_map(|l| vendor.line(app, l, &mut sampling)).collect();
     if let Some(last) = t.last {
-        if let Some(r) = vendor.record(codex, last, &mut sampling) {
+        if let Some(r) = vendor.record(app, last, &mut sampling) {
             out.push(r);
         }
     }
@@ -35,21 +32,30 @@ pub fn read_lines(vendor: &Vendor, file: &str, codex: bool) -> std::io::Result<V
 pub struct Stats {
     claude_root: String,
     codex_roots: Vec<String>,
+    grok_root: String,
     vendor: Arc<Vendor>,
     transcripts: Mutex<Transcripts>,
     kept: Mutex<(Kept, HashMap<String, Value>)>,
 }
 
 impl Stats {
-    pub fn new(claude_root: &str, codex_roots: &[String], vendor: Arc<Vendor>) -> Arc<Stats> {
-        Arc::new(Stats { claude_root: claude_root.into(), codex_roots: codex_roots.to_vec(), vendor, transcripts: Mutex::default(), kept: Mutex::default() })
+    pub fn new(claude_root: &str, codex_roots: &[String], grok_root: &str, vendor: Arc<Vendor>) -> Arc<Stats> {
+        Arc::new(Stats {
+            claude_root: claude_root.into(),
+            codex_roots: codex_roots.to_vec(),
+            grok_root: grok_root.into(),
+            vendor,
+            transcripts: Mutex::default(),
+            kept: Mutex::default(),
+        })
     }
 
     /// A session's files (its own, then its subagents'), each with the
     /// subagent it's from.
     pub fn files(&self, session_id: &str) -> Vec<(String, Option<String>)> {
         let root = Some(self.claude_root.as_str()).filter(|r| !r.is_empty());
-        lock(&self.transcripts).files(session_id, root, &self.codex_roots, now_ms())
+        let grok = Some(self.grok_root.as_str()).filter(|r| !r.is_empty());
+        lock(&self.transcripts).files(session_id, root, &self.codex_roots, grok, now_ms())
     }
 
     fn stats_now(&self, session_id: &str) -> Result<Option<Value>, String> {
@@ -64,11 +70,12 @@ impl Stats {
                 return Ok(k.1.get(session_id).cloned());
             }
         }
-        // Any app but Codex is read as Claude Code.
-        let codex = xenonet_base::apps::tailed_app(session_id.split(':').next().unwrap_or_default(), "claude") == "codex";
+        // An app XenoNet doesn't tail is refused, not read as Claude Code.
+        let app = session_id.split(':').next().unwrap_or_default();
+        let Some(app) = xenonet_base::apps::tailed_or_text(Some(app), None).map(Tailed::of) else { return Err(xenonet_base::apps::untailed(app)) };
         let read: Vec<File> = files
             .iter()
-            .map(|(f, agent)| File { agent: Some(agent.clone().map_or(Value::Null, Value::String)), lines: read_lines(&self.vendor, f, codex).unwrap_or_default() })
+            .map(|(f, agent)| File { agent: Some(agent.clone().map_or(Value::Null, Value::String)), lines: read_lines(&self.vendor, f, app).unwrap_or_default() })
             .collect();
         let out = stats::session_stats(session_id, read).map_err(|e| e.0)?;
         let value = wiki_out(&out).unwrap_or(Value::Null);
@@ -109,11 +116,33 @@ mod tests {
         let text: String = lines.iter().map(|l| xenonet_base::json::stringify(l, 0) + "\n").collect();
         std::fs::write(p.join(format!("{id}.jsonl")), text).expect("a transcript");
         let vendor = Vendor::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas"), Arc::new(Mutex::new(DriftLog::default())));
-        let s = Stats::new(&dir.to_string_lossy(), &[], vendor);
+        let s = Stats::new(&dir.to_string_lossy(), &[], "", vendor);
         let st = s.stats(&format!("claude:{id}")).await.expect("stats").expect("its transcript");
         assert_eq!(st["id"], format!("claude:{id}"));
         assert!(st["totals"]["calls"].as_f64() > Some(0.0), "{st}");
         assert_eq!(s.stats("claude:0190d3e0-0000-7000-8000-00000000000f").await.expect("stats"), None);
+        std::fs::remove_dir_all(&dir).expect("cleaned up");
+    }
+
+    #[tokio::test]
+    async fn an_archived_rollouts_stats() {
+        let dir = std::env::temp_dir().join(format!("xenonet-wire-stats-zst-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let day = dir.join("archived_sessions");
+        std::fs::create_dir_all(&day).expect("a folder");
+        let id = "0190d3e0-0000-7000-8000-000000000006";
+        let lines = [
+            json!({ "type": "turn_context", "timestamp": "2026-10-05T13:00:00Z", "payload": { "model": "gpt-5" } }),
+            json!({ "type": "event_msg", "timestamp": "2026-10-05T13:00:01Z", "payload": { "type": "user_message", "message": "Tidy CI" } }),
+            json!({ "type": "event_msg", "timestamp": "2026-10-05T13:00:05Z", "payload": { "type": "token_count", "info": { "total_token_usage": { "total_tokens": 1200 }, "last_token_usage": { "input_tokens": 1000, "output_tokens": 200, "total_tokens": 1200 } } } }),
+        ];
+        let text: String = lines.iter().map(|l| xenonet_base::json::stringify(l, 0) + "\n").collect();
+        let packed = ruzstd::encoding::compress_to_vec(text.as_bytes(), ruzstd::encoding::CompressionLevel::Fastest);
+        std::fs::write(day.join(format!("rollout-2026-10-05T13-00-00-{id}.jsonl.zst")), packed).expect("an archive");
+        let vendor = Vendor::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas"), Arc::new(Mutex::new(DriftLog::default())));
+        let s = Stats::new("", &[day.to_string_lossy().into_owned()], "", vendor);
+        let st = s.stats(&format!("codex:{id}")).await.expect("stats").expect("its archive");
+        assert_eq!(st["totals"]["calls"], 1, "{st}");
         std::fs::remove_dir_all(&dir).expect("cleaned up");
     }
 }

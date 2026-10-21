@@ -106,13 +106,29 @@ pub fn find_context_dir(env: Json, home: String, platform: String) -> Jv {
 }
 
 #[napi(js_name = "contextServerOf")]
-pub fn context_server_of(dir: String) -> &'static str {
-    xenolith::context_server_of(&dir)
+pub fn context_server_of(dir: String, env: Json, home: String, platform: String) -> &'static str {
+    xenolith::context_server_of(&dir, &xenolith::env_of(&env.0), &home, &platform)
 }
 
 #[napi(js_name = "contextName")]
 pub fn context_name(server: Option<String>) -> &'static str {
     xenolith::context_name(server.as_deref())
+}
+
+#[napi(js_name = "contextSpaceKinds")]
+pub fn context_space_kinds() -> Vec<&'static str> {
+    xenolith::SPACE_KINDS.to_vec()
+}
+
+/// { space, refused }: the space a context_* call works in (null for this
+/// machine's own), and whether Xenolith refuses it.
+#[napi(js_name = "contextSpaceOf")]
+pub fn context_space_of(v: MaybeJson) -> Json {
+    Json(match xenolith::space_of(v.0.as_ref()) {
+        xenolith::Space::Local => serde_json::json!({ "space": null, "refused": false }),
+        xenolith::Space::Other(id) => serde_json::json!({ "space": id, "refused": false }),
+        xenolith::Space::Refused => serde_json::json!({ "space": null, "refused": true }),
+    })
 }
 
 // ---------- refusals/ ----------

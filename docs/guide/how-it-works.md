@@ -1,6 +1,6 @@
 # How it works
 
-XenoNet reads Claude Code's and Codex's files. It acts only when you ask it to open a session, hand one off, start a terminal or rename a session. Renaming is the one time it writes to the apps' session files, and connecting Claude Code and Codex is the one time it changes their settings.
+XenoNet reads Claude Code's, Codex's and Grok Build's files. It acts only when you ask it to open a session, hand one off, start a terminal or rename a session. Renaming is the one time it writes to the apps' session files, and connecting your agents is the one time it changes their settings.
 
 ## Where the data comes from
 
@@ -9,6 +9,7 @@ XenoNet reads Claude Code's and Codex's files. It acts only when you ask it to o
 | Projects and repo status | A scan of `~/Projects`, described in [Finding projects](projects.md), and `git status --porcelain -b` every 20 seconds | Yours |
 | Codex sessions and transcripts | `codex app-server` JSON-RPC, started from the ChatGPT desktop app's bundled binary or the Codex CLI | Official API, labelled experimental |
 | Claude Code sessions and transcripts | The Agent SDK's `listSessions` and `getSessionMessages` | Official API |
+| Grok Build sessions and transcripts | Each session's folder under `~/.grok/sessions`, or `GROK_HOME`'s: its `summary.json` and its `updates.jsonl` of ACP session updates. See [Grok Build in XenoNet](../design/grok-build.md). | `summary.json` is in Grok's guide; the rest is undocumented, best effort |
 | Live activity, tokens, context, subagents and edits | The end of each app's transcript files, read as they grow | Internal format, best effort |
 | Codex rate limits | `token_count` events in Codex rollouts | Undocumented, optional |
 | Claude plan usage | Anthropic's `/api/oauth/usage`, the endpoint Claude Code's `/usage` reads. XenoNet asks every 5 minutes, with Claude Code's sign-in. It reads the sign-in from the "Claude Code-credentials" keychain item on macOS, or else from `~/.claude/.credentials.json`. Claude desktop's `plan-usage-history.json` fills in when it's newer. | Undocumented, optional |
@@ -20,7 +21,7 @@ XenoNet reads Claude Code's and Codex's files. It acts only when you ask it to o
 | Estimated costs | Anthropic's and OpenAI's published API prices, by the date each took effect, in `core/pricing.js`, checked 2026-10-03. These are standard tier prices. Batch and data residency aren't counted. A session's stats and Token use's estimate for today use them, and so does [what each actor's work costs](actors.md#what-each-actors-work-costs). | Updated by hand. A model released later shows "no price" until it's added. |
 | OpenRouter spending | OpenRouter's `GET /api/v1/key`, with the key you gave XenoNet for [decision models](decisions.md), at most once a minute while a window is open | Official API, optional |
 | This computer's load | Node's `os` module for the CPU and memory. For the GPU: NVIDIA's `nvidia-smi`, left running in its loop mode; on a Mac, `ioreg`'s IOAccelerator statistics; on Linux, the amdgpu driver's files in `/sys`; on Windows without `nvidia-smi`, Windows' GPU counters through PowerShell. Read every two seconds only while the panel shows and the window can be seen; the GPU reader stops a minute after. | Local only |
-| Summaries, and Codex's picks of projects | `codex exec --ephemeral -s read-only`, only when you press the button | Official CLI, leaves no session behind |
+| Summaries, and Codex's picks of projects | `codex exec --ephemeral -s read-only`, only when you press the button. It runs in a Codex home of its own, which links your `auth.json` and nothing else, so your plugins, hooks, MCP servers and `AGENTS.md` stay out of it. Its shell and web search are off. | Official CLI, leaves no session behind |
 | Renaming a session | Claude Code: the Agent SDK's `renameSession`, which adds a custom title to the transcript, as Claude desktop does when you rename there. Claude desktop: the title in its own record of the session, which it reads when it starts. Codex: `thread/name/set` on `codex app-server`, which saves the name in Codex's index, state database and rollout. | Claude Code and Codex: official APIs. Claude desktop: undocumented, and it shows the new name the next time it starts. |
 | Open in app and handoff | `codex://threads/<id>`, `codex://threads/new?prompt=&path=`, `claude://code/continue?session=`, `claude://code/new?folder=&q=` and `claude://code/needs-input` | Codex's links are its own. Claude's come from its app bundle and are undocumented. |
 

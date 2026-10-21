@@ -9,6 +9,7 @@ import * as workspace from "./workspace.js";
 import { codexThreadsGatherer, codexProjectsGatherer, codexClient, readCodexThread, renameCodexThread } from "./codex.js";
 import { findCodexBinary } from "./dirs.js";
 import { claudeSessionsGatherer, readClaudeSession, renameClaudeSession } from "./claude.js";
+import { grokSessionsGatherer, readGrokSession } from "./grok.js";
 import { cleanTitle, renamable } from "./rename.js";
 import { buildGraph } from "./graph.js";
 import { actionsFor } from "./open.js";
@@ -23,11 +24,11 @@ import { summarize, dayLog, summaryText, handoffBrief, narrate } from "./digest.
 import { constellationOf, labelsOf, posterSalt } from "./redact.js";
 import * as store from "./store.js";
 import { Blocks } from "./blocks/lifecycle.js";
-import { claudeLines, codexLines } from "./lines.js";
+import { claudeLines, codexLines, grokLines } from "./lines.js";
 import { NumbatSessions } from "./numbat.js";
 import { nativeReaders } from "./native/index.js";
 import { ReportedRuns, observedSessions } from "./reported-runs.js";
-import { tailedApp } from "./apps.js";
+import { tailedOr, untailed } from "./apps.js";
 import { demoSessions, demoNativeProjects, demoTranscript, demoNarration, demoPicks, startDriver, clientsReady } from "./demo.js";
 
 const LIVE_THROTTLE_MS = 500;
@@ -109,6 +110,7 @@ export class XenoNetState extends EventEmitter {
     this.codexThreads = this.blocks.add(codexThreadsGatherer({ gather: config.demo ? async () => demoSessions("codex") : undefined }), { source: "codex" });
     this.codexProjects = this.blocks.add(codexProjectsGatherer({ gather: config.demo ? async () => demoNativeProjects() : undefined }), { source: "codex-projects" });
     this.blocks.add(codexClient, { source: "codex" });
+    this.grokSessions = this.blocks.add(grokSessionsGatherer({ gather: config.demo ? async () => demoSessions("grok") : undefined }), { source: "grok" });
     // Runs XenoNet observes without a reader of its own: numbat's records,
     // when XENONET_NUMBAT_FILE names them (core/numbat.js), and runs actors
     // report through the gateway (core/reported-runs.js). Never in the demo.
@@ -125,6 +127,7 @@ export class XenoNetState extends EventEmitter {
     this.live = new LiveTelemetry({
       claudeRoot: config.claudeProjectsDir,
       codexRoot: path.join(config.codexHome, "sessions"),
+      grokRoot: path.join(config.grokHome, "sessions"),
       claudeDesktopDir: config.claudeDesktopDir,
       claudeUsage: config.claudeUsage ? () => fetchClaudeUsage() : null,
       home: config.homeDir,
@@ -132,20 +135,23 @@ export class XenoNetState extends EventEmitter {
     this.blocks.add(this.live.tailer, { source: "live" });
     this.blocks.add(claudeLines);
     this.blocks.add(codexLines);
+    this.blocks.add(grokLines);
     for (const reading of [this.live.usage.anthropic, this.live.usage.desktop]) if (reading) this.blocks.add(reading);
     if (this.identities) this.blocks.add(this.identities, { source: "identities" });
     this.blocks.add(this.repos);
     // The projects scan's walk, for the map's scans (see scanProjects).
     this.projectsScanner = this.blocks.add(projectsScanner(), { source: "projects" });
     const codexRoots = [path.join(config.codexHome, "sessions"), path.join(config.codexHome, "archived_sessions")];
+    const grokRoot = path.join(config.grokHome, "sessions");
     this.search = new TranscriptSearch({
       dbFile: path.join(config.cacheDir, "search.sqlite"),
       claudeRoot: config.claudeProjectsDir,
       codexRoots,
+      grokRoot,
     });
     // Where sessions' transcripts are, for a session's models, tokens,
     // costs and timing (see stats.js), and a Codex thread's rollout.
-    this.transcripts = new Transcripts({ claudeRoot: config.claudeProjectsDir, codexRoots });
+    this.transcripts = new Transcripts({ claudeRoot: config.claudeProjectsDir, codexRoots, grokRoot });
     this.sessionStats = createStats({ transcripts: this.transcripts });
   }
 
@@ -166,16 +172,17 @@ export class XenoNetState extends EventEmitter {
     // The projects folder as this refresh found it, for all of it, should
     // another be chosen meanwhile (see setRoot).
     const root = config.projectsDir;
-    const [codex, native, claude] = await Promise.all([
+    const [codex, native, claude, grok] = await Promise.all([
       gathered("codex", this.codexThreads),
       gathered("codex-projects", this.codexProjects),
       gathered("claude", this.claudeSessions),
+      gathered("grok", this.grokSessions),
     ]);
     // Keep the previous sessions for a source that failed this round, so a
     // transient error doesn't make half the graph vanish.
     const prev = this.graph?.nodes.filter((n) => n.kind === "session") ?? [];
     const keep = (status, app, fresh) => (status.ok ? fresh : prev.filter((n) => n.app === app));
-    const sessions = [...keep(codex.status, "codex", codex.value), ...keep(claude.status, "claude", claude.value)];
+    const sessions = [...keep(codex.status, "codex", codex.value), ...keep(claude.status, "claude", claude.value), ...keep(grok.status, "grok", grok.value)];
     // Observed runs, unless XenoNet reads the same run itself.
     this.numbat?.read();
     for (const n of this.nativeReaders) n.reader.read();
@@ -233,10 +240,11 @@ export class XenoNetState extends EventEmitter {
       codex.status,
       native.status,
       claude.status,
+      grok.status,
       ...this.nativeReaders.map((n) => readerStatus(n.source, n.reader, n.what)),
       ...(this.numbat ? [readerStatus("numbat", this.numbat, "numbat's file")] : []),
       { name: "live", ok: this.live.status.watching, count: this.live.status.files },
-      { name: "wiki", ok: !!wiki, count: wiki?.pages.length ?? 0, error: wiki ? undefined : "Agent Wiki folder not found" },
+      { name: "wiki", ok: !!wiki, count: wiki?.pages.length ?? 0, error: wiki ? undefined : "Xenolith folder not found" },
       { name: "search", ok: !this.search.status.errors, count: this.search.status.docs, ms: this.search.status.ms },
       ...(this.identities ? [identities.status] : []),
     ];
@@ -482,7 +490,8 @@ export class XenoNetState extends EventEmitter {
     const saved = [];
     let note = null;
     if (config.demo) this.demoTitles.set(node.id, name);
-    else if (tailedApp(node.app, "claude") === "codex") {
+    // renamable takes Claude Code's sessions and Codex's alone.
+    else if (node.app === "codex") {
       await renameCodexThread(node.rawId, name);
       saved.push("Codex");
     } else {
@@ -700,8 +709,11 @@ export class XenoNetState extends EventEmitter {
     const node = this.index.get(nodeId);
     if (!node || node.kind !== "session") throw new Error("unknown session");
     let notes = this.live.sessionNotes(nodeId) ?? { prompts: [], messages: [], files: [], edits: [] };
-    if (!notes.firstPrompt || !notes.messages.length) {
-      const page = await this.readTranscript(node, { limit: tailedApp(node.app, "claude") === "codex" ? 60 : 80 });
+    // A session of an app XenoNet doesn't read the transcripts of is
+    // handed off with what the tailer saw of it.
+    const app = config.demo ? node.app : tailedOr(node.app, null);
+    if (app && (!notes.firstPrompt || !notes.messages.length)) {
+      const page = await this.readTranscript(node, { limit: app === "codex" ? 60 : 80 });
       const users = page.entries.filter((e) => e.role === "user" && e.text);
       const agents = page.entries.filter((e) => e.role === "assistant" && e.text);
       notes = {
@@ -715,11 +727,15 @@ export class XenoNetState extends EventEmitter {
   }
 
   // A session's transcript, a page at a time. A Codex thread whose items
-  // the app-server can't list is read from its rollout (see codex.js). Any
-  // session but a Codex thread is read as Claude Code's.
+  // the app-server can't list is read from its rollout (see codex.js). A
+  // session of an app XenoNet doesn't tail is refused (a 400), not read as
+  // Claude Code's.
   readTranscript(node, opts) {
     if (config.demo) return demoTranscript(node.rawId);
-    if (tailedApp(node.app, "claude") === "codex") return readCodexThread(node.rawId, { ...opts, rollout: async () => (await this.transcripts.files(node.id))[0]?.file ?? null });
+    const app = tailedOr(node.app, null);
+    if (!app) throw Object.assign(new Error(untailed(node.app)), { status: 400 });
+    if (app === "grok") return readGrokSession(node.rawId, opts);
+    if (app === "codex") return readCodexThread(node.rawId, { ...opts, rollout: async () => (await this.transcripts.files(node.id))[0]?.file ?? null });
     return readClaudeSession(node.rawId, opts);
   }
 

@@ -17,9 +17,10 @@ export const SOURCE = "anomaly/opencode/db";
 export const EDIT_TOOLS = [...APP.opencode.editTools];
 export const PATCH_TOOLS = ["apply_patch", "patch"];
 
-// OpenCode's ids (ses_…) as XenoNet's session ids take them.
+// OpenCode's ids (ses_…) as XenoNet's session ids take them, and back.
 export const localId = (id) => native.opencodeLocalId(String(id));
 export const sessionIdOf = (id) => native.opencodeSessionIdOf(String(id));
+export const openCodeId = (id) => native.openCodeId(id);
 
 // The files an apply_patch text names, from its headers only.
 export const patchFiles = (text) => native.opencodePatchFiles(text);

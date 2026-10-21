@@ -9,20 +9,22 @@
 // at it with you. That session never files anything; sending an issue stays
 // yours.
 import { escapeHtml as h, timeAgo } from "./format.js";
-import { tailedApp } from "../core/apps.js";
+import { askedOr } from "../core/apps.js";
 
 const MARK = { ok: "✓", info: "·", warn: "!", fail: "✗", skip: "–" };
 const LEVEL_MARK = { error: "✗", warn: "!", info: "·" };
 const ASK_KEY = "xenonet.diagnose.ask";
 
-// The app and model you last asked with, in this window only.
+// The app and model you last asked with, in this window only. A choice of
+// an app XenoNet can't ask is let go, not read as Codex.
 function lastAsk() {
   try {
     const v = JSON.parse(localStorage.getItem(ASK_KEY) ?? "null");
-    return { app: tailedApp(v?.app, "codex"), model: typeof v?.model === "string" ? v.model : "" };
-  } catch {
-    return { app: "codex", model: "" };
-  }
+    const app = askedOr(v?.app, "codex");
+    if (app) return { app, model: typeof v?.model === "string" ? v.model : "" };
+    localStorage.removeItem(ASK_KEY);
+  } catch {}
+  return { app: "codex", model: "" };
 }
 
 // `terminal(dir, command)` runs a command in a new terminal tab in a

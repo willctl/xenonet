@@ -330,6 +330,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
                 });
             }),
             port: config.gateway_port,
+            service_port: config.port,
             version: version.clone(),
             dir: (!config.demo).then(|| config.state_dir.clone()),
             home: config.home.clone(),

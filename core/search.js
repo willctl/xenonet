@@ -1,4 +1,4 @@
-// Full-text search across both apps' transcripts, in a local SQLite FTS5 index
+// Full-text search across the apps' transcripts, in a local SQLite FTS5 index
 // (search.sqlite in the cache dir; see config.js). Indexing is incremental:
 // appended lines are read from the last offset, and Codex's compressed
 // .jsonl.zst archives are decompressed once.
@@ -15,7 +15,7 @@ import { DatabaseSync } from "node:sqlite";
 import { listFiles } from "./paths.js";
 import { CodexLine } from "./lines.js";
 import { mapperOf, fail } from "./events.js";
-import { tailedApp } from "./apps.js";
+import { tailedOr, untailed } from "./apps.js";
 
 const UUID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(\.zst)?$/i;
 const MAX_TEXT = 6000;
@@ -94,7 +94,9 @@ function reaches(e) {
 // has it. `userEvents`: a Codex rollout with no completed user messages at
 // all, whose prompts are its user_message events.
 export function docsFromLine(line, app, { userEvents = false } = {}) {
-  const mapper = mapperOf(app, "codex");
+  // An app XenoNet doesn't tail is refused, not read as Codex.
+  const mapper = mapperOf(app, null);
+  if (!mapper) throw new Error(untailed(app));
   const o = line instanceof mapper.Line ? line : new mapper.Line(line);
   // A record that isn't an object fails where search read it first.
   void (o instanceof CodexLine ? o.payload : o.type);
@@ -141,11 +143,12 @@ export function ftsQuery(q) {
 }
 
 export class TranscriptSearch {
-  constructor({ dbFile, claudeRoot, codexRoots }) {
+  constructor({ dbFile, claudeRoot, codexRoots, grokRoot = null }) {
     this.dbFile = dbFile;
     this.roots = [
       ...(claudeRoot ? [{ dir: claudeRoot, app: "claude" }] : []),
       ...(codexRoots ?? []).map((dir) => ({ dir, app: "codex" })),
+      ...(grokRoot ? [{ dir: grokRoot, app: "grok" }] : []),
     ].filter((r) => fs.existsSync(r.dir));
     this.status = { files: 0, docs: 0, indexing: false, lastIndexAt: 0, ms: 0 };
   }
@@ -194,10 +197,18 @@ export class TranscriptSearch {
     }
   }
 
+  // The session a transcript is of; none for an app XenoNet doesn't tail.
   sessionOf(file, app) {
     const norm = file.replace(/\\/g, "/");
-    // Any app but Claude Code is read as Codex.
-    if (tailedApp(app, "codex") === "claude") {
+    const tailed = tailedOr(app, null);
+    if (!tailed) return null;
+    // A Grok Build session's updates are in its folder, which is named for
+    // it; its other files aren't read.
+    if (tailed === "grok") {
+      const m = /\/([^/]+)\/updates\.jsonl$/.exec(norm);
+      return m ? `grok:${m[1]}` : null;
+    }
+    if (tailed === "claude") {
       const sub = /\/([0-9a-f-]{36})\/subagents\/[^/]+\.jsonl$/i.exec(norm);
       if (sub) return `claude:${sub[1]}`;
     } else if (!/rollout-/.test(norm)) return null;
@@ -210,7 +221,9 @@ export class TranscriptSearch {
   indexText(file, app, sessionId, text, { userEvents = false } = {}) {
     let n = 0;
     const seen = new Set();
-    const mapper = mapperOf(app, "codex");
+    // Nothing of an app XenoNet doesn't tail is indexed.
+    const mapper = mapperOf(app, null);
+    if (!mapper) return 0;
     const state = mapper.file({ items: !userEvents });
     const where = { file };
     for (const line of text.split("\n")) {

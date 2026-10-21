@@ -182,6 +182,15 @@ pub fn fs_call(method: &str, args: &[Arg]) -> Result<Arg, Thrown> {
             std::fs::rename(&from, &to).map_err(|e| of(e, "rename", &format!("{from}' -> '{to}")))?;
             Ok(Arg::Undef)
         }
+        "rmSync" => {
+            let file = p(0);
+            match std::fs::remove_file(&file) {
+                Ok(()) => {}
+                Err(e) if args.get(1).is_some_and(|o| o.field("force").truthy()) && e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(of(e, "rm", &file)),
+            }
+            Ok(Arg::Undef)
+        }
         "readdirSync" => {
             let dir = p(0);
             let names = xenonet_base::paths::read_dir_sorted(std::path::Path::new(&dir)).map_err(|e| of(e, "scandir", &dir))?;

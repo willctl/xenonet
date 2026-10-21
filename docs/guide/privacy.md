@@ -49,7 +49,7 @@ As a result, a file that an emptied filter keeps different in the repo can count
 ## Sessions and actors
 
 - Messages between sessions, their claims and what each says it's doing stay on this computer, in `engine.sqlite` in the state folder, for a week.
-- XenoNet changes Claude Code's and Codex's settings only when you confirm in `Connect Claude Code and Codex to XenoNet`. It shows each change first, and adds only its own entries. The first time, it keeps a copy of each settings file, named `<file>.before-xenonet`. `Disconnect` takes it all out again.
+- XenoNet changes Claude Code's, Codex's and Grok Build's settings only when you confirm in `Connect your agents to XenoNet`. It shows each change first, and adds only its own entries. In Grok Build's `config.toml` it adds its own tables and leaves every other line as it was. The first time, it keeps a copy of each settings file, named `<file>.before-xenonet`. `Disconnect` takes it all out again.
 - XenoNet marks a message from another session as that session's, never as yours, and the message can't approve anything.
 - Actors stay on this computer too, in the same `engine.sqlite`. Their events stay for a week. Yours stay for a day, and only XenoNet's window sees them.
 - With A2A on, what [A2A agents](actors.md#agents-that-speak-a2a) send and the replies they get stay on this computer, in `a2a.sqlite` in the state folder, which only you can read, for a week after each task ends.
@@ -64,9 +64,10 @@ On macOS, one session can't pass for another. Any program here can reach the ser
 - A request in a Claude Code session's name has to come from that session's process, or from under it, such as from its MCP server, its hooks or its shell. A request in a Codex thread's name has to come from that thread's process, or from under it.
 - Claude Code's hooks come from Claude Code itself. So when that process is signed by Anthropic, its hooks settle which process holds a session. A program merely named `claude` doesn't count.
 - XenoNet refuses a request whose process it can't see, such as one from a program that sends it and exits at once.
-- XenoNet refuses to connect Claude Code and Codex when the request comes from under any session.
+- XenoNet refuses a request in the name of a session of an app whose processes it can't tell apart, such as a Gemini CLI or Cursor session, on every system. Those sessions show on the map, but nothing can call XenoNet in their name. Claude Code, Codex, Grok Build and OpenCode are the apps it checks.
+- XenoNet refuses to connect your agents when the request comes from under any session.
 - XenoNet also refuses changes to your standing settings from under a session or an [actor product](actors.md). These settings are the projects folder, your rules for it, asking Codex about it and Codex's picks, identities' names, hidden flags and pins, and the theme. You change them from XenoNet's window or your own terminal.
 
 This check can't tell apart threads of one Codex process. It also can't place a session that no running process has been seen to hold yet, so that session goes to whoever names it first.
 
-On Windows and Linux, XenoNet doesn't check requests yet.
+On Windows and Linux, XenoNet doesn't check which process sent a request yet.

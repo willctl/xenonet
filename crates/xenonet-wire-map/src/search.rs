@@ -1,15 +1,14 @@
-//! core/search.js's runtime: full-text search across both apps'
+//! core/search.js's runtime: full-text search across the apps'
 //! transcripts, in search.sqlite's FTS5 index (xenonet-state's search.rs,
 //! its own connection to the file). Indexing is incremental: what was
 //! added to a file is read from where the last read ended, each line
 //! through its app's normalizer on its way in. The reads and the index's
-//! writes run off the runtime's threads, one index at a time.
-//!
-//! Codex's compressed archives (.jsonl.zst) are passed over: the binary
-//! has no zstd yet, and the JS's index keeps them.
+//! writes run off the runtime's threads, one index at a time. Codex's
+//! compressed archives (.jsonl.zst) are read whole, decompressed, each
+//! time they change.
 
 use crate::util::{blocking, lock, now_ms, num, wiki_out};
-use crate::vendor::Vendor;
+use crate::vendor::{Tailed, Vendor};
 use serde_json::{json, Value};
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::{Arc, Mutex};
@@ -47,12 +46,9 @@ fn read_from(file: &str, offset: f64, size: f64) -> std::io::Result<String> {
     Ok(text_of(buf))
 }
 
-#[expect(clippy::case_sensitive_file_extension_comparisons, reason = "as the JS's endsWith, which tells .zst from .ZST")]
+// A transcript's text: a compressed archive's decompressed.
 fn read_whole(file: &str) -> std::io::Result<String> {
-    if file.ends_with(".zst") {
-        return Err(std::io::Error::other("XenoNet can't read a compressed archive here yet"));
-    }
-    Ok(text_of(std::fs::read(file)?))
+    Ok(text_of(crate::archive::read(file)?))
 }
 
 fn message(e: xenonet_state::search::Error) -> String {
@@ -63,10 +59,10 @@ fn message(e: xenonet_state::search::Error) -> String {
 }
 
 impl TranscriptSearch {
-    pub fn new(db_file: &str, claude_root: &str, codex_roots: &[String], vendor: Arc<Vendor>) -> Arc<TranscriptSearch> {
+    pub fn new(db_file: &str, claude_root: &str, codex_roots: &[String], grok_root: &str, vendor: Arc<Vendor>) -> Arc<TranscriptSearch> {
         let codex: Vec<Option<String>> = codex_roots.iter().map(|d| Some(d.clone())).collect();
         Arc::new(TranscriptSearch {
-            core: Mutex::new(Search::new(Some(db_file), Some(claude_root).filter(|r| !r.is_empty()), &codex)),
+            core: Mutex::new(Search::new(Some(db_file), Some(claude_root).filter(|r| !r.is_empty()), &codex, Some(grok_root).filter(|r| !r.is_empty()))),
             status: Mutex::new(Status::default()),
             vendor,
             one: tokio::sync::Mutex::new(()),
@@ -83,8 +79,8 @@ impl TranscriptSearch {
 
     // Indexes a file's new lines; how many documents went in.
     fn index_file(&self, file: &str, app: &str) -> Result<f64, String> {
-        // Any app but Codex is read as Claude Code, as linesOf reads it.
-        let codex = xenonet_base::apps::tailed_app(app, "claude") == "codex";
+        // Nothing of an app XenoNet doesn't tail is indexed.
+        let Some(tailed) = xenonet_base::apps::tailed_or_text(Some(app), None).map(Tailed::of) else { return Ok(0.0) };
         let core = lock(&self.core);
         let Some(mut plan): Option<Plan> = core.plan(file, app).map_err(message)? else { return Ok(0.0) };
         let text = if plan.whole { read_whole(file) } else { read_from(file, plan.offset, plan.size) }.map_err(|e| e.to_string())?;
@@ -107,7 +103,7 @@ impl TranscriptSearch {
         let mut run = Search::run(file, app, &plan.session_id, user_events);
         let mut sampling = Sampling::default();
         for l in &lines {
-            let Some(raw) = self.vendor.line(codex, l, &mut sampling) else { continue };
+            let Some(raw) = self.vendor.line(tailed, l, &mut sampling) else { continue };
             if let Err(e) = core.add(&mut run, raw) {
                 let _ = core.rollback();
                 return Err(message(e));
@@ -117,7 +113,6 @@ impl TranscriptSearch {
         Ok(run.n)
     }
 
-    #[expect(clippy::case_sensitive_file_extension_comparisons, reason = "as the JS's endsWith, which tells .zst from .ZST")]
     fn index_now(&self) {
         let t0 = now_ms();
         let roots = {
@@ -134,9 +129,6 @@ impl TranscriptSearch {
         lock(&self.status).indexing = true;
         for r in &roots {
             for f in xenonet_state::search::list_transcripts(&r.dir) {
-                if f.ends_with(".zst") {
-                    continue;
-                }
                 match self.index_file(&f, &r.app) {
                     Ok(n) => lock(&self.status).docs += n,
                     Err(_) => {
@@ -206,12 +198,23 @@ mod tests {
         let id = "0190d3e0-0000-7000-8000-000000000001";
         let line = json!({ "type": "user", "timestamp": "2026-10-17T10:00:00.000Z", "message": { "role": "user", "content": "Add partial refunds to the orders API" } });
         std::fs::write(claude.join(format!("{id}.jsonl")), format!("{}\n", xenonet_base::json::stringify(&line, 0))).expect("a transcript");
+        // An archived Codex rollout, compressed.
+        let archived = dir.join("codex").join("2026").join("10").join("05");
+        std::fs::create_dir_all(&archived).expect("a folder");
+        let thread = "0190d3e0-0000-7000-8000-000000000006";
+        let said = json!({ "type": "event_msg", "timestamp": "2026-10-05T13:00:00Z", "payload": { "type": "user_message", "message": "Archive the nightly reports" } });
+        let packed = ruzstd::encoding::compress_to_vec(format!("{}\n", xenonet_base::json::stringify(&said, 0)).as_bytes(), ruzstd::encoding::CompressionLevel::Fastest);
+        std::fs::write(archived.join(format!("rollout-2026-10-05T13-00-00-{thread}.jsonl.zst")), packed).expect("an archive");
         let vendor = Vendor::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas"), Arc::new(Mutex::new(DriftLog::default())));
-        let s = TranscriptSearch::new(&dir.join("search.sqlite").to_string_lossy(), &dir.join("claude").to_string_lossy(), &[], vendor);
+        let codex = [dir.join("codex").to_string_lossy().into_owned()];
+        let s = TranscriptSearch::new(&dir.join("search.sqlite").to_string_lossy(), &dir.join("claude").to_string_lossy(), &codex, "", vendor);
         s.index().await;
-        assert!(s.status_json()["docs"].as_f64() >= Some(1.0), "{}", s.status_json());
+        assert!(s.status_json()["docs"].as_f64() >= Some(2.0), "{}", s.status_json());
+        assert_eq!(s.status_json().get("errors"), None, "{}", s.status_json());
         let hits = s.search("partial refunds", 30.0).await.expect("a search");
         assert_eq!(hits[0]["sessionId"], format!("claude:{id}"));
+        let hits = s.search("nightly reports", 30.0).await.expect("a search");
+        assert_eq!(hits[0]["sessionId"], format!("codex:{thread}"), "the archive is indexed");
         s.close();
         std::fs::remove_dir_all(&dir).expect("cleaned up");
     }

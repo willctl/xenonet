@@ -1657,6 +1657,8 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
       for (let i = 0; i < n; i++) setTimeout(() => packet({ from: node, to: up, color: nodeColor(node), size: 2 + Math.log10(1 + ev.n) * 0.3, duration: 1.2 }), i * 70);
     },
 
+    // Whether a node shows, through the filters.
+    shown: (id) => !visible || visible.has(id),
     setVisible(set) {
       visible = set;
       graph.nodeVisibility((n) => !visible || visible.has(n.id));

@@ -279,6 +279,16 @@ async fn now(io: &Io) -> Result<f64, Failure> {
     Ok(xenonet_base::text::js_number(Some(&n)))
 }
 
+// The service answers `stop` and shuts down a moment later, so on a busy
+// machine its answer can be lost with the connection: the rpc's
+// "XenoNet disconnected; the action was not retried.".
+fn dropped(e: &Value) -> bool {
+    e.get("message").and_then(Value::as_str).is_some_and(|m| m.starts_with("XenoNet disconnected"))
+}
+
+// Stops the running service and waits until it has gone. A stop sent and
+// then cut off may have worked: whether the service has gone decides, as it
+// does for one that answered. An answer that says no is a failure.
 async fn stop_service(io: &Io, env: &Env, life: &Life) -> Result<(), Failure> {
     let Ok(client) = io.ask(json!({ "op": "connect", "env": env })).await else { return Ok(()) };
     if !truthy(client.get("client")) {
@@ -286,7 +296,7 @@ async fn stop_service(io: &Io, env: &Env, life: &Life) -> Result<(), Failure> {
     }
     let r = io.ask(json!({ "op": "request", "client": client["client"], "method": "stop" })).await;
     let closed = io.ask(json!({ "op": "close", "client": client["client"] })).await;
-    if closed.is_err() || r.is_err() {
+    if closed.is_err() || r.as_ref().is_err_and(|e| !dropped(e)) {
         return Err(Failure::Rethrow);
     }
     let deadline = now(io).await? + life.stop_timeout;
