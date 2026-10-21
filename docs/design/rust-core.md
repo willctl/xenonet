@@ -109,7 +109,7 @@ crates, `rusqlite`, `sha2`, `getrandom` and (in the MCP crate) `rmcp` and
 | `hyper`, `hyper-util` | The HTTP API and the actor gateway. XenoNet's own router on top, because the order in which `server/index.js` checks the Host, the origin, the version header and then each route is part of the contract, and a framework's router would reorder it. |
 | `rmcp` | The MCP servers, stdio and Streamable HTTP. |
 | `sha2`, `hmac`, `getrandom` | Tokens and their hashes, the assistant's page cursors and attention ids. |
-| `zstd`, `flate2` | Codex's archived rollouts (`.jsonl.zst`) and the refusals' gzip context. |
+| `ruzstd`, `flate2` | Codex's archived rollouts (`.jsonl.zst`), with a decoder in Rust alone so no build needs a C compiler for it, and the refusals' gzip context. |
 | `notify` | The recursive folder watches the tailer and the themes folder use. |
 | `regex` | Where the JS uses a regular expression without lookaround. Lookarounds are written out by hand. |
 
@@ -575,8 +575,6 @@ Each step leaves `npm test` passing on JS, and adds to `parity.json`.
   new crate: the tailer every 250 ms, a sweep for new and woken
   transcripts every 2 seconds, the wiki's and themes' folders every
   second or half second.
-- Codex's compressed archives (`.jsonl.zst`), which the binary's search,
-  stats and rollout pages skip, since reading them needs a zstd crate.
 - Whether a release ships Rust subsystems inside the JS service (twins in
   place) before the binary replaces the service.
 

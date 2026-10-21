@@ -715,7 +715,7 @@
         "A view reads a copy of its record, made when it's built: a change to `raw` after that isn't seen (no reader changes one).",
         "Lines are parsed as in core/blocks/normalizer.js's entry.",
         "Through the twin, reading a transcript takes about 8 times as long as the JS (20,000 lines, 15 MB: 340 ms against 40 ms), since each record crosses between JS and Rust several times while vendor.js's checks are still JS. Don't put this twin in the module's place before the readers are Rust end to end.",
-        "readLines still reads the file, and unpacks a .zst archive, in JS: the Rust reader needs a zstd decoder first."
+        "readLines still reads the file, and unpacks a .zst archive, in JS. The binary's readers unpack one in Rust (crates/xenonet-wire-map/src/archive.rs), every frame of it, where Node's zlib.zstdDecompressSync stops after the first; Codex writes one."
       ]
     },
     "core/live.js": {
