@@ -203,7 +203,9 @@ fn date_parse(s: &str) -> Option<f64> {
     (utc.abs() <= 8.64e15).then_some(utc)
 }
 
-/// The pages a text links to as `[[slug]]`, each once, in lowercase.
+/// The pages a text links to, as `[[slug]]` or `[[slug|text]]` (Xenolith's
+/// links_in, xenolith/rust/crates/core/src/activity.rs), each once, in
+/// lowercase.
 pub fn wiki_links(text: &str) -> Vec<String> {
     let b = text.as_bytes();
     let mut out: Vec<String> = Vec::new();
@@ -214,8 +216,16 @@ pub fn wiki_links(text: &str) -> Vec<String> {
             while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'-') {
                 j += 1;
             }
+            let slug_end = j;
+            // (?:\|[^\]]*)?: the text after a bar, up to the first "]".
+            if b.get(j) == Some(&b'|') {
+                j += 1;
+                while j < b.len() && b[j] != b']' {
+                    j += 1;
+                }
+            }
             if b[j..].starts_with(b"]]") {
-                let slug = text[i + 2..j].to_ascii_lowercase();
+                let slug = text[i + 2..slug_end].to_ascii_lowercase();
                 if !out.contains(&slug) {
                     out.push(slug);
                 }
@@ -226,6 +236,74 @@ pub fn wiki_links(text: &str) -> Vec<String> {
         i += 1;
     }
     out
+}
+
+fn is_line_start(text: &str, i: usize) -> bool {
+    i == 0 || text[..i].chars().next_back().is_some_and(is_line_terminator)
+}
+
+/// A page's first "# " heading, its title when the frontmatter gives none
+/// (page_from_text in xenolith/rust/crates/core/src/wiki.rs), as
+/// `/^#\s+(.+)$/m` finds it: a "#" that starts a line, white space (line
+/// breaks too), then the rest of that line. Empty when there's none.
+fn first_heading(body: &str) -> String {
+    for (i, _) in body.match_indices('#').filter(|(i, _)| is_line_start(body, *i)) {
+        let rest = &body[i + 1..];
+        let after = rest.trim_start_matches(is_js_space);
+        if after.len() == rest.len() {
+            continue;
+        }
+        // White space to the very end leaves a match of white space alone,
+        // which comes to nothing once trimmed.
+        let line = after.split(is_line_terminator).next().unwrap_or("");
+        return js_trim(line).to_string();
+    }
+    String::new()
+}
+
+/// Each run of white space with a line break in it made one space, as
+/// Xenolith's one_line does (`s.replace(/\s*[\r\n]\s*/g, " ")`).
+fn one_line(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut run = String::new();
+    let flush = |run: &mut String, out: &mut String| {
+        if run.contains(['\r', '\n']) {
+            out.push(' ');
+        } else {
+            out.push_str(run);
+        }
+        run.clear();
+    };
+    for c in s.chars() {
+        if is_js_space(c) {
+            run.push(c);
+        } else {
+            flush(&mut run, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut run, &mut out);
+    out
+}
+
+/// Other names a page goes by, as Xenolith reads its aliases (norm_tags in
+/// xenolith/rust/crates/core/src/wiki.rs): a list, or words split at
+/// commas, each on one line, lowercase, without a leading #, once.
+fn aliases_of(v: Option<&Value>) -> Result<Vec<String>, TypeError> {
+    let list: Vec<String> = match v {
+        Some(Value::Array(a)) => a.iter().map(|x| to_str(Some(x))).collect::<Result<_, _>>()?,
+        v if truthy(v) => to_str(v)?.split(',').map(String::from).collect(),
+        _ => Vec::new(),
+    };
+    let mut out: Vec<String> = Vec::new();
+    for a in list {
+        let one = one_line(&a);
+        let name = js_trim(js_trim(&one).trim_start_matches('#')).to_lowercase();
+        if !name.is_empty() && !out.contains(&name) {
+            out.push(name);
+        }
+    }
+    Ok(out)
 }
 
 // ---------- projects ----------
@@ -499,15 +577,24 @@ pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now:
         let (meta, body) = parse_frontmatter(&text);
         let slug = f[..f.len() - 3].to_lowercase();
         let tags = meta.get("tags");
+        // The title, then the first heading, then the slug; the type in
+        // lowercase: as Xenolith reads a page. (In the order JS reads them,
+        // so a value that can't be made text fails as it did there.)
+        let heading = first_heading(&body);
+        let title = or(meta.get("title"), Out::Str(if heading.is_empty() { slug.clone() } else { heading }));
+        let kind = to_str_or_empty(meta.get("type"))?;
+        let kind = if kind.is_empty() { "topic".to_string() } else { kind.to_lowercase() };
+        let aliases = aliases_of(meta.get("aliases"))?;
         let updated = date_parse(&to_str(meta.get("updated"))?).filter(|t| *t != 0.0);
         let links: Vec<String> = wiki_links(&body).into_iter().filter(|l| *l != slug).collect();
         let projects = mentioned_projects(&body, tags, projects, root)?;
         let fields = vec![
             ("slug", Out::Str(slug.clone())),
-            ("title", or(meta.get("title"), Out::Str(slug.clone()))),
-            ("type", or(meta.get("type"), Out::Str("topic".into()))),
+            ("title", title),
+            ("type", Out::Str(kind)),
             ("summary", or(meta.get("summary"), Out::Str(String::new()))),
             ("tags", if matches!(tags, Some(Value::Array(_))) { Out::of(tags) } else { Out::Arr(vec![]) }),
+            ("aliases", Out::strs(&aliases)),
             ("updated", updated.map_or(Out::Null, Out::Num)),
             ("updatedBy", or(meta.get("updated_by"), Out::Null)),
             ("links", Out::strs(&links)),
@@ -620,6 +707,21 @@ mod tests {
     #[test]
     fn links_once_in_lowercase() {
         assert_eq!(wiki_links("[[A-b]] [[[c]] [[a-B]] [[-x]] [[d e]] [[Ü]] [[f]"), ["a-b", "c"]);
+        assert_eq!(wiki_links("[[atlas|The Atlas, ü]] [[x|a]b]] [[y|z] [[db|]]"), ["atlas", "db"], "with the text after a bar");
+    }
+
+    #[test]
+    fn pages_as_xenolith_reads_them() {
+        assert_eq!(first_heading("text\n#tag\n#  Title  \n# Later"), "Title");
+        assert_eq!(first_heading("#\n\nNext line"), "Next line", "white space includes line breaks, as in JS");
+        assert_eq!(first_heading("x\r#\tCR\rmore"), "CR", "any line terminator starts a line");
+        assert_eq!(first_heading("#   "), "");
+        assert_eq!(first_heading("no # heading"), "");
+        assert_eq!(aliases_of(Some(&json!(["Atlas API", "#Orders", "atlas api", null]))).unwrap(), ["atlas api", "orders", "null"]);
+        assert_eq!(aliases_of(Some(&json!("Postgres, #pg ,\u{2028}"))).unwrap(), ["postgres", "pg"]);
+        assert_eq!(aliases_of(Some(&json!(["a \n\t b"]))).unwrap(), ["a b"], "on one line");
+        assert!(aliases_of(Some(&json!([{ "toString": 1 }]))).is_err());
+        assert_eq!(aliases_of(None).unwrap(), Vec::<String>::new());
     }
 
     #[test]

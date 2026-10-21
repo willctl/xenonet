@@ -8,7 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { contextName, contextServerOf, findContextDir, isContextServer } from "../core/xenolith.js";
-import { readWiki } from "../core/wiki.js";
+import { parseLog, readWiki, wikiLinks } from "../core/wiki.js";
 import { buildGraph } from "../core/graph.js";
 import { GRAPH_NODES } from "../core/schema/graph.js";
 import { LiveTelemetry, mcpServerOf } from "../core/live.js";
@@ -152,6 +152,28 @@ test("the map's wiki takes its server's id and name, so beams to xenolith land o
   assert.equal(GRAPH_NODES.wiki.safeParse({ ...root, actions: [], id: "resource:github" }).success, false, "only the context servers' ids");
   const old = buildGraph({ projectsDir: "/p", projects: [], sessions: [], wiki: await readWiki(wikiAt(tmp()), []), layout: {}, windows: { activeWindowMs: 1, recentWindowMs: 1 } });
   assert.equal(old.nodes.find((n) => n.kind === "wiki").id, "resource:agent-wiki", "Agent Wiki's map is as it was");
+});
+
+test("pages read as Xenolith reads them: [[slug|text]] links, titles from headings, types in lowercase, aliases", async () => {
+  assert.deepEqual(wikiLinks("See [[atlas|the Atlas API]], [[DB]] and [[db|again]]; not [[x|a]b]] or [[y|z]."), ["atlas", "db"]);
+  assert.deepEqual(parseLog("## 13:27 · codex · Filed\n\npages: [[atlas|Atlas]], [[refunds]]\n", "2026-10-02")[0].pages, ["atlas", "refunds"]);
+  const dir = wikiAt(tmp(), "# Xenolith protocol\n");
+  const page = (slug, text) => fs.writeFileSync(path.join(dir, "pages", `${slug}.md`), text);
+  page("atlas", '---\ntitle: Atlas\ntype: Project\naliases: ["Atlas API", "#Orders", "atlas api"]\n---\n# Not the title\n\nSee [[db|the database]].');
+  page("db", "---\ntype: HowTo\naliases: Postgres, #pg ,\n---\n\n#\tThe database \n\nText.");
+  page("bare", "No heading here.\n#hashtag\n");
+  const wiki = await readWiki(dir, []);
+  const by = Object.fromEntries(wiki.pages.map((p) => [p.slug, p]));
+  assert.deepEqual([by.atlas.title, by.atlas.type, by.atlas.aliases, by.atlas.links], ["Atlas", "project", ["atlas api", "orders"], ["db"]]);
+  assert.deepEqual([by.db.title, by.db.type, by.db.aliases], ["The database", "howto", ["postgres", "pg"]]);
+  assert.deepEqual([by.bare.title, by.bare.type, by.bare.aliases], ["bare", "topic", []], "no heading: the slug");
+  const g = buildGraph({ projectsDir: "/p", projects: [], sessions: [], wiki, layout: {}, windows: { activeWindowMs: 1, recentWindowMs: 1 } });
+  const node = (id) => g.nodes.find((n) => n.id === id);
+  assert.deepEqual(node("wiki:atlas").aliases, ["atlas api", "orders"]);
+  assert.equal("aliases" in node("wiki:bare"), false, "left out when there are none");
+  assert.ok(g.relations.some((r) => r.kind === "wikilink" && r.a === "wiki:atlas" && r.b === "wiki:db"));
+  const parsed = GRAPH_NODES.page.safeParse({ ...node("wiki:atlas"), actions: [] });
+  assert.equal(parsed.success, true, JSON.stringify(parsed.error?.issues));
 });
 
 test("pages, logs and notes linked in from elsewhere are passed over, as Xenolith refuses them", { skip: process.platform === "win32" && "links need privileges on Windows" }, async () => {

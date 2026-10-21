@@ -503,7 +503,8 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
         row("about", node.summary ? h(node.summary) : null, "wrap") +
         row("updated", node.updated ? `${timeAgo(node.updated)} <span class="dim">by ${h(node.updatedBy ?? "?")}</span>` : "—") +
         row("recent writes", node.writes?.length ? node.writes.slice().reverse().map((w) => `<span class="dim">${new Date(w.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · ${h(w.app)}</span> ${h(w.title)}`).join("<br>") : null, "wrap") +
-        row("tags", node.tags?.length ? node.tags.map((t) => `<span class="tag">${h(t)}</span>`).join(" ") : null);
+        row("tags", node.tags?.length ? node.tags.map((t) => `<span class="tag">${h(t)}</span>`).join(" ") : null) +
+        row("also called", node.aliases?.length ? node.aliases.map((a) => h(a)).join(", ") : null, "wrap");
     } else if (node.kind === "resource") {
       const users = live ? live.sessions.filter((s) => (s.host ?? null) === (node.host ?? null) && s.mcp.some((m) => m.server === node.name)) : [];
       grid =

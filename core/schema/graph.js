@@ -152,6 +152,7 @@ const PageNode = obj({
   updatedBy: front.nullable(),
   path: z.string(),
   writes: z.array(obj({ ts: ms, app: z.string(), title: z.string(), pages: z.array(z.string()) })).max(6),
+  aliases: z.array(z.string()).optional().describe("Other names it goes by, from its aliases, in lowercase; left out when it has none"),
   ...placed,
   ...rolled,
   ...remote,

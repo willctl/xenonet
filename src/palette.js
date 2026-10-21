@@ -60,7 +60,7 @@ export function createPalette({ sfx, nodes, commands, actions, onSearchResults }
       ? []
       : nodes()
           .filter((n) => n.kind !== "core")
-          .map((n) => ({ ...nodeItem(n), score: fuzzy(query, `${n.title ?? n.name} ${n.cwd ?? n.rel ?? ""} ${n.branch ?? ""}`) + (n.kind === "session" ? Math.max(0, 8 - (Date.now() - (n.updatedAt ?? 0)) / 3600e3) : 0) }))
+          .map((n) => ({ ...nodeItem(n), score: fuzzy(query, `${n.title ?? n.name} ${n.cwd ?? n.rel ?? ""} ${n.branch ?? ""} ${n.aliases?.join(" ") ?? ""}`) +(n.kind === "session" ? Math.max(0, 8 - (Date.now() - (n.updatedAt ?? 0)) / 3600e3) : 0) }))
           .filter((n) => n.score > 0);
     let out = query ? [...ns, ...cmds].sort((a, b) => b.score - a.score) : [...cmds.slice(0, 6), ...ns.sort((a, b) => (b.node.updatedAt ?? 0) - (a.node.updatedAt ?? 0))];
     out = out.slice(0, 40);

@@ -136,7 +136,8 @@ export function buildGraph({ projectsDir, homeDir = null, projects, sessions, na
     const seen = new Set();
     for (const p of wiki.pages) {
       const id = `wiki:${p.slug}`;
-      nodes.set(id, { id, kind: "page", name: p.title, slug: p.slug, type: p.type, summary: p.summary, tags: p.tags, updated: p.updated, updatedBy: p.updatedBy, path: p.path, writes: p.writes.slice(-6), lastActivity: p.updated });
+      // Its aliases only when it has some, so a page without stays as it was.
+      nodes.set(id, { id, kind: "page", name: p.title, slug: p.slug, type: p.type, summary: p.summary, tags: p.tags, updated: p.updated, updatedBy: p.updatedBy, path: p.path, writes: p.writes.slice(-6), lastActivity: p.updated, ...(Array.isArray(p.aliases) && p.aliases.length ? { aliases: p.aliases } : {}) });
       link(root, id, "page");
       for (const l of p.links) {
         const k = [p.slug, l].sort().join("|");

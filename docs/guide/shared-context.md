@@ -15,6 +15,11 @@ mentions. Sessions' calls to the `xenolith` MCP server beam to the wiki, and
 a `context_log` or `context_upsert_page` that names pages beams to those
 pages.
 
+It reads pages as Xenolith does. A link is `[[slug]]` or `[[slug|text]]`. A
+page without a `title` takes its first `# ` heading, and without one its file
+name. Its `type` is read in lowercase. Its `aliases` show in its panel, and
+the palette finds the page by them.
+
 XenoNet finds the folder the way Xenolith does: `XENOLITH_DIR`, even before
 Xenolith has made that folder, then `wikiDir` in Xenolith's `config.json`,
 then `~/Xenolith`. That `config.json` is in `XENOLITH_CONFIG_DIR` when it's

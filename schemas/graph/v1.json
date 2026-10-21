@@ -1126,6 +1126,13 @@
                   "additionalProperties": {}
                 }
               },
+              "aliases": {
+                "description": "Other names it goes by, from its aliases, in lowercase; left out when it has none",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
               "fx": {
                 "type": [
                   "number",

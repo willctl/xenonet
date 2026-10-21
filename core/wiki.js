@@ -23,7 +23,22 @@ export function parseFrontmatter(text) {
   return { meta, body: text.slice(m[0].length) };
 }
 
-export const wikiLinks = (text) => [...new Set([...String(text).matchAll(/\[\[([a-z0-9][a-z0-9-]*)\]\]/gi)].map((m) => m[1].toLowerCase()))];
+// The pages a text links to, as [[slug]] or [[slug|text]] (Xenolith's
+// links_in, xenolith/rust/crates/core/src/activity.rs), each once, in
+// lowercase.
+export const wikiLinks = (text) => [...new Set([...String(text).matchAll(/\[\[([a-z0-9][a-z0-9-]*)(?:\|[^\]]*)?\]\]/gi)].map((m) => m[1].toLowerCase()))];
+
+// A page's first "# " heading, its title when the frontmatter gives none
+// (page_from_text in xenolith/rust/crates/core/src/wiki.rs).
+const firstHeading = (body) => /^#\s+(.+)$/m.exec(body)?.[1].trim() ?? "";
+
+// Other names a page goes by, as Xenolith reads its aliases (norm_tags in
+// xenolith/rust/crates/core/src/wiki.rs): a list, or words split at
+// commas, each on one line, lowercase, without a leading #, once.
+function aliasesOf(v) {
+  const list = Array.isArray(v) ? v.map(String) : v ? String(v).split(",") : [];
+  return [...new Set(list.map((a) => a.replace(/\s*[\r\n]\s*/g, " ").trim().replace(/^#+/, "").trim().toLowerCase()).filter(Boolean))];
+}
 
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -90,12 +105,15 @@ export async function readWiki(dir, projects, { root = null, now = Date.now(), s
     const text = await fsp.readFile(path.join(dir, "pages", f), "utf8").catch(() => "");
     const { meta, body } = parseFrontmatter(text);
     const slug = f.slice(0, -3).toLowerCase();
+    // The title, then the first heading, then the slug; the type in
+    // lowercase: as Xenolith reads a page.
     pages.push({
       slug,
-      title: meta.title || slug,
-      type: meta.type || "topic",
+      title: meta.title || firstHeading(body) || slug,
+      type: (String(meta.type ?? "") || "topic").toLowerCase(),
       summary: meta.summary || "",
       tags: Array.isArray(meta.tags) ? meta.tags : [],
+      aliases: aliasesOf(meta.aliases),
       updated: Date.parse(meta.updated) || null,
       updatedBy: meta.updated_by || null,
       links: wikiLinks(body).filter((l) => l !== slug),

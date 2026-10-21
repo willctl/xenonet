@@ -287,10 +287,13 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
             let id = format!("wiki:{slug}");
             let writes: Vec<Value> = items(get(p, "writes")).iter().rev().take(6).rev().cloned().collect();
             let f = |k: &str| get(p, k).cloned().unwrap_or(Value::Null);
-            g.set(
-                &id,
-                obj(json!({ "id": id, "kind": "page", "name": f("title"), "slug": f("slug"), "type": f("type"), "summary": f("summary"), "tags": f("tags"), "updated": f("updated"), "updatedBy": f("updatedBy"), "path": f("path"), "writes": writes, "lastActivity": f("updated") })),
-            );
+            let mut node = obj(json!({ "id": id, "kind": "page", "name": f("title"), "slug": f("slug"), "type": f("type"), "summary": f("summary"), "tags": f("tags"), "updated": f("updated"), "updatedBy": f("updatedBy"), "path": f("path"), "writes": writes, "lastActivity": f("updated") }));
+            // Its aliases only when it has some, so a page without stays as
+            // it was.
+            if let Some(aliases) = get(p, "aliases").filter(|a| !items(Some(a)).is_empty()) {
+                node.insert("aliases".into(), aliases.clone());
+            }
+            g.set(&id, node);
             g.link(&root, &id, "page");
             for l in items(get(p, "links")) {
                 let l = js_string(l);
