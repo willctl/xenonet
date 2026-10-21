@@ -28,6 +28,8 @@
   --claude-rgb: 255 157 92;
   --codex: #5fe1ff;
   --codex-rgb: 95 225 255;
+  --grok: #c6ff3a;
+  --grok-rgb: 198 255 58;
   --violet: #b18cff;
   --violet-rgb: 177 140 255;
   --gold: #ffd76a;
@@ -844,6 +846,7 @@ kbd {
 }
 .sw.claude { background: var(--claude); color: var(--claude); }
 .sw.codex { background: var(--codex); color: var(--codex); }
+.sw.grok { background: var(--grok); color: var(--grok); }
 .sw.archived { background: var(--archived); color: var(--archived); }
 .sw.zone { background: var(--zone); color: var(--zone); border-radius: 2px; }
 .sw.background { background: transparent; border: 1.5px dashed var(--muted); color: transparent; box-shadow: none; }
@@ -1178,6 +1181,12 @@ li.pulse .feed-time { color: var(--gold); }
   background: rgb(var(--codex-rgb) / 0.12);
 }
 .act.primary.codex:hover { background: rgb(var(--codex-rgb) / 0.26); }
+.act.primary.grok {
+  border-color: var(--grok);
+  color: color-mix(in srgb, var(--grok) 35%, var(--bright));
+  background: rgb(var(--grok-rgb) / 0.12);
+}
+.act.primary.grok:hover { background: rgb(var(--grok-rgb) / 0.26); }
 
 /* ---------- bottom ---------- */
 
@@ -1255,6 +1264,7 @@ li.pulse .feed-time { color: var(--gold); }
 .glyph.group { border: 1.5px solid var(--project); opacity: 0.75; box-shadow: inset 0 0 0 2.5px rgb(var(--project-rgb) / 0.18); }
 .glyph.claude { border-radius: 50%; background: var(--claude); box-shadow: 0 0 8px var(--claude); }
 .glyph.codex { border-radius: 50%; background: var(--codex); box-shadow: 0 0 8px var(--codex); }
+.glyph.grok { border-radius: 50%; background: var(--grok); box-shadow: 0 0 8px var(--grok); }
 .glyph.lineage { height: 2px; width: 14px; background: var(--lineage); box-shadow: 0 0 6px var(--lineage); }
 .hints {
   font-family: var(--mono);
@@ -2806,6 +2816,7 @@ ol.d-list li .sw { margin-top: 4px; }
 }
 .pal-icon.claude { color: var(--claude); }
 .pal-icon.codex { color: var(--codex); }
+.pal-icon.grok { color: var(--grok); }
 .pal-icon.project { color: var(--cyan); }
 .pal-icon.page, .pal-icon.wiki { color: var(--violet); }
 .pal-item.command .pal-icon { color: var(--gold); }

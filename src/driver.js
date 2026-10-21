@@ -97,6 +97,9 @@ export function createDriver(app) {
       selection: selected ? brief(nodeOf(selected)) : null,
       gathered: scene.gathering(),
       identities: { filter: app.identities?.selected ?? [], masked: !!app.identities?.masked },
+      // The toggles under Filters: each app's sessions, archived ones, and
+      // the folders outside the projects folder.
+      filters: app.hud?.filters ? { ...app.hud.filters } : null,
       overlays: { palette: palette.isOpen, modal: modals.isOpen, needsYou: !!app.needsYou?.isOpen, preview: preview.isOpen, rename: !!app.hud?.renaming, terminal: !!app.terminal()?.isOpen, wallpaper: app.wallpaper(), replay: replay.active, film: app.film && app.film.state !== "idle" ? app.film.state : false, export: !!app.exportPanel?.isOpen, switcher: !!app.themes?.switcher.isOpen, gallery: !!app.themes?.gallery.isOpen },
       alerts: alerts.items.map(alertBrief),
       counts: {
@@ -104,6 +107,8 @@ export function createDriver(app) {
         drawn: scene.nodes().length,
         projects: count(["project", "native", "zone"]),
         sessions: count(["session"]),
+        // Sessions by app, on the map and drawn now, through the filters.
+        apps: Object.fromEntries(["claude", "codex", "grok"].map((a) => [a, { sessions: graph?.nodes.filter((n) => n.kind === "session" && n.app === a).length ?? 0, drawn: scene.nodes().filter((n) => n.kind === "session" && n.app === a && scene.shown(n.id)).length }])),
         working: live?.sessions.filter((s) => s.status !== "idle").length ?? 0,
         actors: scene.actors().length,
         beams: scene.actorLayer.beams().length,
@@ -539,6 +544,9 @@ export function createDriver(app) {
     filterIdentities: (keys = [], opts) => act(() => app.identities.setSelected(Array.isArray(keys) ? keys : [keys]), opts),
     // Hides identities ("GitHub A", "Claude B"…) or shows them.
     maskIdentities: (on = true, opts) => act(() => app.identities.setMasked(!!on), opts),
+    // The toggles under Filters, on or off by name ({ grok: false }), as a
+    // click on each would set them.
+    filters: (set = {}, opts) => act(() => Object.entries(set ?? {}).forEach(([name, on]) => app.hud.setFilter(name, on)), opts),
 
     // The projects folder XenoNet reads (core/workspace.js): its path, where
     // that comes from (source: env for XENONET_PROJECTS_DIR, chosen or

@@ -128,11 +128,16 @@ export function createTelemetry({ onSelect, onDecisionKey = null }) {
       ctx.stroke();
     }
     if (!snap) return;
-    if (smoothedFor !== snap) (smoothedFor = snap), (smoothed = { claude: smooth(snap.series.claude), codex: smooth(snap.series.codex) });
+    // Grok Build's line only while it has tokens to show, and its legend
+    // with it; a snapshot from before it (another machine's) has none.
+    if (smoothedFor !== snap) (smoothedFor = snap), (smoothed = { claude: smooth(snap.series.claude), codex: smooth(snap.series.codex), grok: smooth(snap.series.grok ?? []) });
     const series = smoothed;
-    const max = Math.max(2000, ...series.claude, ...series.codex);
+    const grok = series.grok.some((v) => v > 0);
+    const legend = document.querySelector("[data-scope-grok]");
+    if (legend) legend.hidden = !grok;
+    const max = Math.max(2000, ...series.claude, ...series.codex, ...series.grok);
     const scale = (v) => H - 4 - (Math.log10(1 + v) / Math.log10(1 + max)) * (H - 10);
-    for (const app of ["codex", "claude"]) {
+    for (const app of grok ? ["grok", "codex", "claude"] : ["codex", "claude"]) {
       const data = series[app];
       const color = COLORS[app];
       ctx.beginPath();

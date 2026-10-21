@@ -14,7 +14,7 @@ import { RELATION_WORDS, VIA_WORDS, PRESENCE_WORDS, CAPABILITY_WORDS, TRANSPORT_
 import { productWhat, productMade } from "./actor-words.js";
 
 const KIND_GLYPH = { presence: "◌", status: "✎", spawned: "▶", edited: "✎", ran: "›_", messaged: "✉", said: "✉", finished: "■", failed: "✕" };
-const NODE_WORDS = { project: "a project", native: "a Codex project", zone: "a folder", claude: "a Claude Code session", codex: "a Codex session" };
+const NODE_WORDS = { project: "a project", native: "a Codex project", zone: "a folder", claude: "a Claude Code session", codex: "a Codex session", grok: "a Grok Build session" };
 
 const presenceOf = (s) => (PRESENCE_WORDS[s.presence] ? s.presence : "unknown");
 const row = (k, v, cls = "") => (v == null || v === "" ? "" : `<div class="kv ${cls}"><span class="k">${h(k)}</span><span class="v">${v}</span></div>`);

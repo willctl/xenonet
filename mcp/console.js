@@ -314,6 +314,25 @@ function buildServer() {
   );
 
   tool(
+    "filters",
+    {
+      title: "Filters",
+      description: "The toggles under Filters: claude, codex and grok show or hide each app's sessions (Claude Code, Codex, Grok Build), archived shows or hides archived ones, and external the folders outside the projects folder. `set` turns some on or off, as a click on each toggle does ({ grok: false } hides Grok Build's sessions). Returns the toggles and how many sessions of each app the map has and draws, once the view has settled.",
+      inputSchema: z.object({
+        set: z.object({ claude: z.boolean().optional(), codex: z.boolean().optional(), grok: z.boolean().optional(), archived: z.boolean().optional(), external: z.boolean().optional() }).optional().describe("Toggles by name, on (true) or off (false)."),
+        settle: settleArg,
+        instance: instanceArg,
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ set, settle, instance }) => {
+      const s = target(instance);
+      const state = set ? await s.driver("filters", set, { settle }) : await s.driver("state");
+      return reply({ filters: state.filters, apps: state.counts?.apps, ...(set ? { state } : {}) });
+    },
+  );
+
+  tool(
     "identities",
     {
       title: "Identities",

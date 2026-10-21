@@ -302,7 +302,11 @@ fn last_text(list: Option<&Value>) -> Option<&Value> {
 
 /// A brief for carrying a session's work on in another one.
 pub fn handoff_brief(node: &Value, notes: &Value, target: Option<&str>) -> String {
-    let from = if get(node, "app").and_then(Value::as_str) == Some("codex") { "a Codex session" } else { "a Claude Code session" };
+    let from = match get(node, "app").and_then(Value::as_str) {
+        Some("codex") => "a Codex session",
+        Some("grok") => "a Grok Build session",
+        _ => "a Claude Code session",
+    };
     let goal = get(notes, "firstPrompt").and_then(|p| get(p, "text"));
     let latest = last_text(get(notes, "prompts"));
     let last = last_text(get(notes, "messages"));

@@ -173,6 +173,8 @@ test("digest summarizes per session; handoff brief carries goal, state and files
     target: "claude",
   });
   for (const part of ["a Codex session","Build local Ledger", "branch feature/seed", "Original goal: Set up Ledger locally", "Most recent request: now seed data", "Seeded 40 rows", "- C:/Projects/ledger/seed.mjs", "waiting on this question"]) assert.ok(brief.includes(part), part);
+  // Each app's session by its name.
+  for (const [app, name] of [["claude", "a Claude Code session"], ["grok", "a Grok Build session"]]) assert.match(handoffBrief({ node: { app, title: "x" }, notes: {}, target: "codex" }), new RegExp(`from ${name} titled`));
 });
 
 test("palette fuzzy match ranks substrings and word starts first", async () => {

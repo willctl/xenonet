@@ -64,13 +64,13 @@ export function createPalette({ sfx, nodes, commands, actions, onSearchResults }
           .filter((n) => n.score > 0);
     let out = query ? [...ns, ...cmds].sort((a, b) => b.score - a.score) : [...cmds.slice(0, 6), ...ns.sort((a, b) => (b.node.updatedAt ?? 0) - (a.node.updatedAt ?? 0))];
     out = out.slice(0, 40);
-    if (query && !cmdOnly) out.push({ type: "search", label: `Search transcripts for "${query}"`, sub: "full text in Claude Code and Codex", icon: "⌕", q: query });
+    if (query && !cmdOnly) out.push({ type: "search", label: `Search transcripts for "${query}"`, sub: "full text in Claude Code, Codex and Grok Build", icon: "⌕", q: query });
     return out;
   }
 
   async function searchTranscripts(q) {
     const seq = ++searchSeq;
-    if (!q) return [{ type: "hint", label: "Type words to search every Claude Code and Codex transcript", icon: "⌕" }];
+    if (!q) return [{ type: "hint", label: "Type words to search every Claude Code, Codex and Grok Build transcript", icon: "⌕" }];
     list.innerHTML = `<li class="pal-hint">Searching…</li>`;
     const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`).then((r) => r.json()).catch(() => ({ results: [] }));
     if (seq !== searchSeq) return null;

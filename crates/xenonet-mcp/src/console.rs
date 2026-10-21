@@ -306,6 +306,28 @@ fn defs(installed: bool) -> Vec<Def> {
             read(),
         ),
         def(
+            "filters",
+            "Filters",
+            "The toggles under Filters: claude, codex and grok show or hide each app's sessions (Claude Code, Codex, Grok Build), archived shows or hides archived ones, and external the folders outside the projects folder. `set` turns some on or off, as a click on each toggle does ({ grok: false } hides Grok Build's sessions). Returns the toggles and how many sessions of each app the map has and draws, once the view has settled.",
+            object(vec![
+                (
+                    "set",
+                    object(vec![
+                        ("claude", boolean().optional()),
+                        ("codex", boolean().optional()),
+                        ("grok", boolean().optional()),
+                        ("archived", boolean().optional()),
+                        ("external", boolean().optional()),
+                    ])
+                    .optional()
+                    .describe("Toggles by name, on (true) or off (false)."),
+                ),
+                ("settle", settle_arg()),
+                ("instance", inst()),
+            ]),
+            write(),
+        ),
+        def(
             "identities",
             "Identities",
             "The identities sessions ran as and projects belong to (Claude and ChatGPT accounts, GitHub accounts, git identities), as the chips under Filters show them, each with a key. `only` shows just those identities' sessions and projects ([] shows everything again); `masked` hides them as \"GitHub A\", \"Claude B\"… for screenshots, or shows them. Returns the chips, and the state once the view has settled when something changed.",
@@ -676,6 +698,22 @@ impl Console {
                 one(self.driver(&s, "poster", vec![Value::Object(o)]).await?)
             }
             "labels" => one(self.driver(&s, "labels", vec![]).await?),
+            "filters" => {
+                let set = a.get("set").filter(|v| truthy(Some(v)));
+                let state = match set {
+                    Some(set) => self.driver(&s, "filters", vec![set.clone(), settle(a)]).await?,
+                    None => self.driver(&s, "state", vec![]).await?,
+                };
+                let mut out = Map::new();
+                out.insert("filters".into(), state.get("filters").cloned().unwrap_or(Value::Null));
+                if let Some(apps) = state.get("counts").and_then(|c| c.get("apps")) {
+                    out.insert("apps".into(), apps.clone());
+                }
+                if set.is_some() {
+                    out.insert("state".into(), state);
+                }
+                one(Value::Object(out))
+            }
             "identities" => {
                 let mut state = Value::Null;
                 if let Some(masked) = a.get("masked") {
@@ -934,6 +972,7 @@ mod tests {
                 "command",
                 "poster",
                 "labels",
+                "filters",
                 "identities",
                 "hosts",
                 "root",
@@ -951,6 +990,6 @@ mod tests {
             ]
         );
         let installed: Vec<&str> = defs(true).iter().map(|d| d.name).collect();
-        assert!(!installed.contains(&"eval") && !installed.contains(&"simulate") && installed.len() == 30);
+        assert!(!installed.contains(&"eval") && !installed.contains(&"simulate") && installed.len() == 31);
     }
 }
