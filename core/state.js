@@ -25,10 +25,7 @@ import * as store from "./store.js";
 import { Blocks } from "./blocks/lifecycle.js";
 import { claudeLines, codexLines } from "./lines.js";
 import { NumbatSessions } from "./numbat.js";
-import { OpenCodeSessions, opencodeDbPath } from "./native/opencode.js";
-import { GeminiCliSessions, geminiRoot } from "./native/gemini-cli.js";
-import { CopilotCliSessions, copilotRoot } from "./native/copilot-cli.js";
-import { CursorSessions, cursorEventsFile } from "./native/cursor.js";
+import { nativeReaders } from "./native/index.js";
 import { ReportedRuns, observedSessions } from "./reported-runs.js";
 import { tailedApp } from "./apps.js";
 import { demoSessions, demoNativeProjects, demoTranscript, demoNarration, demoPicks, startDriver, clientsReady } from "./demo.js";
@@ -57,6 +54,13 @@ async function settle(name, fn) {
 
 const visibleResource = (server) => !config.hiddenResources.has(server) && !server.startsWith("ccd_");
 
+// A reader's line in the map's sources (core/native/reader.js): how many
+// runs it has, and what's wrong with what it reads when it couldn't.
+function readerStatus(name, reader, what) {
+  const { state, sessions } = reader.status();
+  return { name, ok: state === "ok", count: sessions, ...(state === "ok" ? {} : { error: `${what} is ${state}` }) };
+}
+
 // Background runs (codex exec, subagents) never wait for you.
 const automated = (n) => n.source === "exec" || String(n.source ?? "").startsWith("subAgent") || n.originator === "codex_exec" || n.parentKind === "subagent";
 
@@ -76,7 +80,9 @@ function serial(fn) {
 }
 
 export class XenoNetState extends EventEmitter {
-  constructor() {
+  // `native`: a test's own app registry and native readers' table
+  // ({ apps, table }, as core/native/index.js takes them).
+  constructor({ native } = {}) {
     super();
     // The projects folder you chose, if you did (see workspace.js).
     workspace.applyRoot();
@@ -108,15 +114,14 @@ export class XenoNetState extends EventEmitter {
     // report through the gateway (core/reported-runs.js). Never in the demo.
     this.numbat = config.numbatFile && !config.demo ? this.blocks.add(new NumbatSessions({ file: config.numbatFile }), { source: "numbat" }) : null;
     this.reportedRuns = new ReportedRuns();
-    // Experimental native readers (core/native): sessions read from a
-    // harness's own records, when XENONET_READERS names it.
-    this.opencode = config.readers?.has("opencode") ? this.blocks.add(new OpenCodeSessions({ file: opencodeDbPath({ home: config.homeDir }) }), { source: "opencode" }) : null;
-    this.geminiCli = config.readers?.has("gemini-cli") ? this.blocks.add(new GeminiCliSessions({ root: geminiRoot({ home: config.homeDir }) }), { source: "gemini-cli" }) : null;
-    this.copilotCli = config.readers?.has("copilot") ? this.blocks.add(new CopilotCliSessions({ root: copilotRoot({ home: config.homeDir }) }), { source: "copilot" }) : null;
-    this.cursor = config.readers?.has("cursor") ? this.blocks.add(new CursorSessions({ file: cursorEventsFile({ stateDir: config.stateDir }) }), { source: "cursor" }) : null;
+    // Experimental native readers (core/native): sessions read from an
+    // app's own records, for each app the registry gives one that
+    // XENONET_READERS names. Each is { app, source, what, reader }.
+    this.nativeReaders = nativeReaders(config, native);
+    for (const n of this.nativeReaders) this.blocks.add(n.reader, { source: n.source });
     // Sessions from outside XenoNet's Claude Code and Codex readers. The
     // native readers come first, so a run they read wins over numbat's.
-    this.observed = observedSessions([this.opencode, this.geminiCli, this.copilotCli, this.cursor, this.numbat, this.reportedRuns]);
+    this.observed = observedSessions([...this.nativeReaders.map((n) => n.reader), this.numbat, this.reportedRuns]);
     this.live = new LiveTelemetry({
       claudeRoot: config.claudeProjectsDir,
       codexRoot: path.join(config.codexHome, "sessions"),
@@ -173,10 +178,7 @@ export class XenoNetState extends EventEmitter {
     const sessions = [...keep(codex.status, "codex", codex.value), ...keep(claude.status, "claude", claude.value)];
     // Observed runs, unless XenoNet reads the same run itself.
     this.numbat?.read();
-    this.opencode?.read();
-    this.geminiCli?.read();
-    this.copilotCli?.read();
-    this.cursor?.read();
+    for (const n of this.nativeReaders) n.reader.read();
     const read = new Set(sessions.map((x) => x.id));
     for (const o of this.observed.sessions()) if (!read.has(o.id)) sessions.push(o);
     for (const s of sessions) if (this.demoTitles.has(s.id)) s.title = this.demoTitles.get(s.id);
@@ -231,11 +233,8 @@ export class XenoNetState extends EventEmitter {
       codex.status,
       native.status,
       claude.status,
-      ...(this.opencode ? [{ name: "opencode", ok: this.opencode.fileState === "ok", count: this.opencode.runs.size, ...(this.opencode.fileState === "ok" ? {} : { error: `OpenCode's database is ${this.opencode.fileState}` }) }] : []),
-      ...(this.geminiCli ? [{ name: "gemini-cli", ok: this.geminiCli.rootState === "ok", count: this.geminiCli.runs.size, ...(this.geminiCli.rootState === "ok" ? {} : { error: `Gemini CLI's folder is ${this.geminiCli.rootState}` }) }] : []),
-      ...(this.copilotCli ? [{ name: "copilot", ok: this.copilotCli.rootState === "ok", count: this.copilotCli.runs.size, ...(this.copilotCli.rootState === "ok" ? {} : { error: `Copilot CLI's folder is ${this.copilotCli.rootState}` }) }] : []),
-      ...(this.cursor ? [{ name: "cursor", ok: this.cursor.fileState === "ok", count: this.cursor.runs.size, ...(this.cursor.fileState === "ok" ? {} : { error: `the Cursor hook's file is ${this.cursor.fileState}` }) }] : []),
-      ...(this.numbat ? [{ name: "numbat", ok: this.numbat.fileState === "ok", count: this.numbat.runs.size, ...(this.numbat.fileState === "ok" ? {} : { error: `numbat's file is ${this.numbat.fileState}` }) }] : []),
+      ...this.nativeReaders.map((n) => readerStatus(n.source, n.reader, n.what)),
+      ...(this.numbat ? [readerStatus("numbat", this.numbat, "numbat's file")] : []),
       { name: "live", ok: this.live.status.watching, count: this.live.status.files },
       { name: "wiki", ok: !!wiki, count: wiki?.pages.length ?? 0, error: wiki ? undefined : "Agent Wiki folder not found" },
       { name: "search", ok: !this.search.status.errors, count: this.search.status.docs, ms: this.search.status.ms },

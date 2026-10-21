@@ -29,17 +29,14 @@
 // counts twice.
 import crypto from "node:crypto";
 import fs from "node:fs";
-import { Block } from "./blocks/lifecycle.js";
 import { pathStyle } from "./paths.js";
 import { SESSION_APPS } from "./schema/ids.js";
+import { NativeReader, DAY_MS, capRuns, pruneRuns, pushEdit, runSession, titled } from "./native/reader.js";
 
 export const SCHEMA_VERSIONS = new Set(["0.2.0", "0.3.0", "0.4.0", "0.5.0"]);
 // Apps XenoNet reads itself, and numbat's names that aren't a run's app.
 export const LEFT_OUT = new Set(["claude-code", "codex", "hermes", "grok", "unknown"]);
 const EDITS = new Set(["file.write", "file.delete"]);
-const EDIT_KEEP_MS = 30 * 60e3;
-const DAY_MS = 24 * 3600e3;
-const SESSIONS_MAX = 500;
 const START_BACK = 1 << 20; // a first read takes at most the last MiB
 const READ_MAX = 4 << 20; // and each read at most 4 MiB
 const LINE_MAX = 1 << 20;
@@ -91,10 +88,12 @@ export function readRecord(line) {
   };
 }
 
-export class NumbatSessions extends Block {
+// numbat's runs keep the native readers' contract (core/native/reader.js),
+// observed: XenoNet inferred their edits.
+export class NumbatSessions extends NativeReader {
   // `file`: the NDJSON file numbat writes. `files`: fs, for the tests.
   constructor({ file, files = fs, clock } = {}) {
-    super({ name: "numbat-sessions", kind: "gatherer", ...(clock ? { clock } : {}) });
+    super({ name: "numbat-sessions", observed: true, clock });
     this.file = file;
     this.files = files;
     this.offset = null;
@@ -148,7 +147,8 @@ export class NumbatSessions extends Block {
         if (r.ok) this.#take(r.event, now);
         else this.skipped++;
       }
-      this.#prune(now);
+      pruneRuns(this.runs, now);
+      capRuns(this.runs);
       this.ok(now);
     } catch (err) {
       this.problem(err, now);
@@ -173,53 +173,13 @@ export class NumbatSessions extends Block {
     if (e.parent && e.parent !== e.session) run.parentId = sessionIdOf(e.app, e.parent);
     if (e.type === "session.end") run.endedAt = when;
     else if (run.endedAt != null && when > run.endedAt) run.endedAt = null;
-    if (e.file) {
-      const list = run.edits.get(e.file) ?? [];
-      list.push({ ts: when, path: e.file });
-      if (list.length > 8) list.shift();
-      run.edits.set(e.file, list);
-    }
+    if (e.file) pushEdit(run.edits, e.file, when);
   }
 
-  #prune(now) {
-    for (const [id, r] of this.runs) {
-      if (now - r.updatedAt > DAY_MS) this.runs.delete(id);
-      else for (const [p, list] of r.edits) if (now - list[list.length - 1].ts > EDIT_KEEP_MS) r.edits.delete(p);
-    }
-    if (this.runs.size > SESSIONS_MAX) for (const id of [...this.runs.values()].sort((a, b) => a.updatedAt - b.updatedAt).slice(0, this.runs.size - SESSIONS_MAX).map((r) => r.id)) this.runs.delete(id);
-  }
-
-  // The runs as session/v1, for the map.
-  sessions() {
-    return [...this.runs.values()].map((r) => ({
-      id: r.id,
-      app: r.app,
-      rawId: r.rawId,
-      title: `${SESSION_APPS[r.app]}${r.cwd ? ` in ${pathStyle(r.cwd).basename(r.cwd)}` : ""}`,
-      preview: null,
-      cwd: r.cwd,
-      createdAt: r.createdAt,
-      updatedAt: r.updatedAt,
-      archived: false,
-      model: r.model,
-      branch: r.branch,
-      parentId: r.parentId,
-      parentKind: r.parentId ? "subagent" : null,
-      observed: "numbat",
-    }));
-  }
-
-  // What the engine reads of a run, in the shape of a live session's:
-  // when it was last at work, its edits, and that it has no turn XenoNet
-  // can see.
-  live(id) {
-    const r = this.runs.get(id);
-    if (!r) return null;
-    return { lastEventAt: r.updatedAt, endedAt: r.endedAt, edits: r.edits, observed: true, status: () => "idle", needsYou: () => null };
-  }
-
-  ids() {
-    return [...this.runs.keys()];
+  // A run as a session/v1 for the map, named for its app and where it ran,
+  // observed through numbat.
+  session(r) {
+    return runSession(r, { app: r.app, title: titled(SESSION_APPS[r.app], r.cwd), model: r.model, branch: r.branch, parentId: r.parentId, via: { observed: "numbat" } });
   }
 
   // What the doctor shows: the file it reads, and whether it could.

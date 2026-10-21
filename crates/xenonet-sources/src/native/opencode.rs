@@ -5,8 +5,9 @@
 //! edits out: a part's other fields never leave the database, apart from
 //! apply_patch's text, whose file headers are kept and the rest dropped.
 
+use super::files::Files;
 use super::node_path;
-use super::{edit_file, edits_out, js_max, js_min, push_edit, str_of, titled, Checked, Edits, Out, Threw, EDIT_KEEP_MS, SESSIONS_MAX};
+use super::{edit_file, edits_out, js_max, js_min, push_edit, str_of, titled, Checked, Edits, NativeReader, Out, Threw, Vendor, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX};
 use crate::session::{RunSession, Via};
 use serde_json::{json, Map, Value};
 use xenonet_base::json;
@@ -75,15 +76,6 @@ pub trait Db {
     fn all(&mut self, sql: &str, param: Option<f64>) -> Result<Vec<Value>, String>;
     fn get(&mut self, sql: &str) -> Result<Option<Value>, String>;
     fn close(&mut self);
-}
-
-/// The vendor reader the database's rows are checked by (vendor.js's, in
-/// the twin).
-pub trait Vendor {
-    /// The reader is got: Threw when getting it threw, which readDb throws on.
-    fn ready(&mut self) -> Result<(), Threw>;
-    fn missing(&mut self, path: &str, version: Option<&str>) -> Result<(), Threw>;
-    fn check(&mut self, record: &Value, version: Option<&str>) -> Result<Checked, Threw>;
 }
 
 /// OpenCode's database opened read only, through rusqlite, with its values
@@ -401,8 +393,31 @@ impl OpenCode {
         self.runs = runs;
         Ok(())
     }
+}
 
-    pub fn sessions(&self) -> Vec<Out> {
+impl NativeReader for OpenCode {
+    /// Reads the database at `at` (on the disk, read only; `files` says
+    /// whether it's there): its sessions of the last day and their edits of
+    /// the last half hour. A vendor reader that couldn't be got is reported;
+    /// a check that threw leaves the database unreadable, as readDb has it.
+    fn read(&mut self, at: &str, now: f64, files: &mut dyn Files, vendor: &mut dyn Vendor) -> Result<(), String> {
+        let exists = files.exists(at);
+        let mut open = || Sqlite::open(at).map(|db| Box::new(db) as Box<dyn Db>);
+        match read_db(exists, &mut open, vendor, now - DAY_MS, now - EDIT_KEEP_MS) {
+            Ok(got) => self.take(&got, now),
+            Err(Threw) => Err("the vendor check failed".into()),
+        }
+    }
+
+    fn source_state(&self) -> &'static str {
+        self.file_state
+    }
+
+    fn ids(&self) -> Vec<String> {
+        self.runs.keys().map(str::to_string).collect()
+    }
+
+    fn sessions(&self) -> Vec<Out> {
         self.runs
             .iter()
             .map(|(_, r)| {
@@ -425,7 +440,7 @@ impl OpenCode {
             .collect()
     }
 
-    pub fn runs_out(&self) -> Vec<Out> {
+    fn runs_out(&self) -> Vec<Out> {
         self.runs
             .iter()
             .map(|(_, r)| {

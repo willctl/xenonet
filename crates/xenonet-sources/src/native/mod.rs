@@ -1,9 +1,11 @@
 //! core/native/: the experimental readers of other harnesses' own records.
 //! Each harness's run is a session on the map with its edits, read from the
 //! harness's own files (or, for numbat and the gateway, from what reports
-//! them). What the readers share is here: the files they read (`files`),
-//! Node's path rules (`node_path`), a run's edits, and the answers as JS
-//! values (`Out`).
+//! them). What the readers share is here (core/native/reader.js): what the
+//! map asks of each (`NativeReader`), the files they read (`files`), the
+//! vendor checks of their records (`Vendor`), Node's path rules
+//! (`node_path`), a run's edits, what each made of a file (`FileCache`), and
+//! the answers as JS values (`Out`).
 
 pub mod copilot_cli;
 pub mod cursor;
@@ -12,12 +14,17 @@ pub mod gemini_cli;
 pub(crate) mod node_path;
 pub mod opencode;
 
+use files::Files;
 use serde_json::Value;
+use std::collections::{HashMap, HashSet};
 use xenonet_base::ordered::OrderedMap;
 use xenonet_base::paths::path_style;
 
-pub(crate) const DAY_MS: f64 = 24.0 * 3600e3;
-pub(crate) const EDIT_KEEP_MS: f64 = 30.0 * 60e3;
+// A run stays on the map for a day after it was last at work, its edits
+// count for half an hour, and a reader keeps its newest runs up to
+// SESSIONS_MAX.
+pub const DAY_MS: f64 = 24.0 * 3600e3;
+pub const EDIT_KEEP_MS: f64 = 30.0 * 60e3;
 pub(crate) const SESSIONS_MAX: usize = 500;
 // The edits a file keeps, the newest last.
 const EDITS_PER_FILE: usize = 8;
@@ -43,6 +50,75 @@ pub type Check<'a> = dyn FnMut(&Value, Option<&str>) -> Result<Checked, Threw> +
 /// A check that takes every record as it is.
 pub fn no_check(_: &Value, _: Option<&str>) -> Result<Checked, Threw> {
     Ok(Checked::Same)
+}
+
+/// The vendor reader a native reader's records are checked by: vendor.js's
+/// reader for the reader's source (the twin's, called back), or the map's.
+pub trait Vendor {
+    /// The reader is got: Threw when getting it threw. OpenCode's twin gets
+    /// it once the database has opened, and readDb throws on it.
+    fn ready(&mut self) -> Result<(), Threw> {
+        Ok(())
+    }
+    /// A table or column the reader needs is missing.
+    fn missing(&mut self, path: &str, version: Option<&str>) -> Result<(), Threw>;
+    /// A record checked against its vendor's schema, with the vendor's
+    /// version when known.
+    fn check(&mut self, record: &Value, version: Option<&str>) -> Result<Checked, Threw>;
+}
+
+/// What the map asks of a native reader, and of numbat's
+/// (core/native/reader.js's contract): read what's new, say how what it
+/// reads was found, and give its runs, by id, as session/v1, and as the
+/// block's `runs` holds them. wire-map's observed.rs makes the engine's
+/// view of a run and the reader's line in the map's sources from these.
+pub trait NativeReader: Send {
+    /// Reads what's new in the file or folder at `at`, as of `now`, through
+    /// `files`, the records it samples checked by `vendor`. Err with the
+    /// problem its block reports; each reader keeps its own rule for which
+    /// failures it reports.
+    fn read(&mut self, at: &str, now: f64, files: &mut dyn Files, vendor: &mut dyn Vendor) -> Result<(), String>;
+    /// How its file or folder read: ok, missing, unreadable (or denied), or
+    /// unread before its first read.
+    fn source_state(&self) -> &'static str;
+    /// Its runs' ids, in order.
+    fn ids(&self) -> Vec<String>;
+    /// Its runs as session/v1.
+    fn sessions(&self) -> Vec<Out>;
+    /// Its runs as the block's `runs` Map holds them, edits as pairs.
+    fn runs_out(&self) -> Vec<Out>;
+}
+
+/// What a reader made of each file it read, kept until the file changes:
+/// by the mtime and size it was read at.
+pub(crate) struct FileCache<T>(HashMap<String, (f64, f64, T)>);
+
+impl<T> Default for FileCache<T> {
+    fn default() -> Self {
+        FileCache(HashMap::new())
+    }
+}
+
+impl<T> FileCache<T> {
+    /// What `read` gives for the file, read again only when its mtime or
+    /// size changed since.
+    pub(crate) fn get(&mut self, file: &str, mtime_ms: f64, size: f64, read: impl FnOnce() -> T) -> &T {
+        use std::collections::hash_map::Entry;
+        match self.0.entry(file.to_string()) {
+            Entry::Occupied(mut e) => {
+                if !(e.get().0 == mtime_ms && e.get().1 == size) {
+                    *e.get_mut() = (mtime_ms, size, read());
+                }
+                &e.into_mut().2
+            }
+            Entry::Vacant(e) => &e.insert((mtime_ms, size, read())).2,
+        }
+    }
+
+    /// Forgets every file but these.
+    pub(crate) fn keep(&mut self, files: &HashSet<String>) {
+        self.0.retain(|k, _| files.contains(k));
+    }
 }
 
 /// Math.min of two: NaN when either is, and -0 below 0.

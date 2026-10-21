@@ -5,11 +5,11 @@
 // (through `files` when a test gives its own) and keeps the runs; the
 // vendor check stays vendor.js's, called back from Rust.
 import fs from "node:fs";
-import { Block } from "../blocks/lifecycle.js";
+import { NativeReader } from "../../../../../core/native/reader.js";
 import { reader } from "../vendor.js";
 import { native } from "../../index.js";
 import { APP } from "../../../../../core/apps.js";
-import { FAILED, guarded, ioOf, liveOf, mapOfRuns, pathArg } from "../../native-readers.js";
+import { FAILED, guarded, ioOf, mapOfRuns, pathArg } from "../../native-readers.js";
 
 export const SOURCE = "github/copilot-cli/session-event";
 // Copilot CLI's built-in file tools; str_replace_editor's view isn't an edit.
@@ -32,12 +32,12 @@ export function readEvents(text, { check = (r) => r } = {}) {
 
 export const copilotRoot = ({ home }) => native.copilotRoot(pathArg(home));
 
-export class CopilotCliSessions extends Block {
+export class CopilotCliSessions extends NativeReader {
   #core = new native.CopilotCliCore();
   #runs = null;
 
   constructor({ root, files = fs, clock } = {}) {
-    super({ name: "copilot-sessions", kind: "gatherer", ...(clock ? { clock } : {}) });
+    super({ name: "copilot-sessions", clock });
     this.root = root;
     this.files = files;
   }
@@ -65,10 +65,6 @@ export class CopilotCliSessions extends Block {
 
   sessions() {
     return this.#core.sessions();
-  }
-
-  live(id) {
-    return liveOf(this.runs.get(id), false);
   }
 
   ids() {
