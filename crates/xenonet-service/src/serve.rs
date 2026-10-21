@@ -378,7 +378,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
     {
         let c = ctx.clone();
         let log: xenonet_net::sink::LogFn = Arc::new(move |code: &str, words: &str| c.log("info", code, words, None, None));
-        match crate::gateway::network::NetService::open(crate::gateway::network::NetService::options(&config.state_dir, &version, log)) {
+        match crate::gateway::network::NetService::open(crate::gateway::network::NetService::options(&config.state_dir, &config.home, &version, log)) {
             Ok(svc) => {
                 if let Some(g) = ctx.gateway.get() {
                     g.gateway().set_net(svc.node().clone());

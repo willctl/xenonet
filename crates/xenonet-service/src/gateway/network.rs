@@ -76,9 +76,12 @@ impl NetService {
         }
     }
 
-    /// The service's own options: its state folder, version and platform.
-    pub fn options(state_dir: &str, version: &str, log: LogFn) -> Options {
-        Options::new(Path::new(state_dir).join("network"), version, crate::borrowed::platform(), log)
+    /// The service's own options: its state folder, version and platform,
+    /// and whether Desktop is installed here, which a join request says.
+    pub fn options(state_dir: &str, home: &str, version: &str, log: LogFn) -> Options {
+        let mut o = Options::new(Path::new(state_dir).join("network"), version, crate::borrowed::platform(), log);
+        o.desktop = desktop_installed(home);
+        o
     }
 
     pub fn node(&self) -> &Arc<Node> {
@@ -144,6 +147,31 @@ impl Drop for NetService {
     }
 }
 
+/// Where XenoNet's Desktop is when it's installed here: the app its
+/// installer puts in /Applications (or ~/Applications) on macOS, and in the
+/// per-user or all-users Programs folder on Windows. There's no Desktop
+/// for Linux.
+fn desktop_places(home: &str) -> Vec<std::path::PathBuf> {
+    if cfg!(target_os = "macos") {
+        return vec!["/Applications/XenoNet.app".into(), Path::new(home).join("Applications").join("XenoNet.app")];
+    }
+    let mut out = Vec::new();
+    if cfg!(windows) {
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            out.push(Path::new(&local).join("Programs").join("XenoNet").join("XenoNet.exe"));
+        }
+        if let Some(all) = std::env::var_os("ProgramFiles") {
+            out.push(Path::new(&all).join("XenoNet").join("XenoNet.exe"));
+        }
+    }
+    out
+}
+
+/// Whether Desktop is installed on this machine.
+pub fn desktop_installed(home: &str) -> bool {
+    desktop_places(home).iter().any(|p| p.exists())
+}
+
 /// A LAN address as the person gives it: an IP address this machine has
 /// and a port, never 0.0.0.0.
 pub fn parse_lan(text: &str) -> R<SocketAddr> {
@@ -157,6 +185,17 @@ pub fn parse_lan(text: &str) -> R<SocketAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn desktop_is_looked_for_where_its_installer_puts_it() {
+        let home = std::env::temp_dir().join(format!("xenonet-desktop-test-{}", std::process::id()));
+        let places = desktop_places(&home.to_string_lossy());
+        assert!(places.contains(&std::path::PathBuf::from("/Applications/XenoNet.app")));
+        std::fs::create_dir_all(home.join("Applications").join("XenoNet.app")).unwrap();
+        assert!(desktop_installed(&home.to_string_lossy()), "in ~/Applications");
+        let _ = std::fs::remove_dir_all(&home);
+    }
 
     #[test]
     fn lan_addresses_are_this_machines() {
