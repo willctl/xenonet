@@ -64,13 +64,6 @@ fn opt_str(v: Option<String>) -> Value {
     v.map_or(Value::Null, Value::String)
 }
 
-// A text split as split(/\r?\n/) splits it.
-fn split_lines(s: &str) -> Vec<&str> {
-    let parts: Vec<&str> = s.split('\n').collect();
-    let last = parts.len() - 1;
-    parts.into_iter().enumerate().map(|(i, l)| if i < last { l.strip_suffix('\r').unwrap_or(l) } else { l }).collect()
-}
-
 // raw.length - raw.trimStart().length
 fn indent_of(raw: &str) -> usize {
     jsstr::len(raw) - jsstr::len(js_trim_start(raw))
@@ -199,7 +192,7 @@ pub fn parse_gh_hosts(text: &str) -> Vec<Value> {
     let mut hosts: Vec<Host> = Vec::new();
     let mut users_at: i64 = -1;
     let mut user_at: i64 = -1;
-    for raw in split_lines(text) {
+    for raw in xenonet_sources::git::split_lines(text) {
         let t = js_trim(raw);
         if t.is_empty() || t.starts_with('#') {
             continue;
@@ -288,7 +281,7 @@ pub fn gh_hosts_shape(text: &str) -> Value {
     }
     let mut nodes = vec![Node::Obj(Vec::new())];
     let mut stack = vec![Frame { indent: -1, parent: None, key: String::new(), obj: Some(0) }];
-    for raw in split_lines(text) {
+    for raw in xenonet_sources::git::split_lines(text) {
         let line = js_trim(raw);
         if line.is_empty() || line.starts_with('#') {
             continue;
@@ -342,7 +335,7 @@ pub fn gh_hosts_shape(text: &str) -> Value {
 pub fn parse_ssh_aliases(text: &str) -> Vec<(String, String)> {
     let mut aliases: Vec<(String, String)> = Vec::new();
     let mut names: Vec<String> = Vec::new();
-    for raw in split_lines(text) {
+    for raw in xenonet_sources::git::split_lines(text) {
         let Some(m) = SSH_LINE.captures(raw) else { continue };
         let key = m[1].to_lowercase();
         let value = &m[2];
@@ -425,7 +418,7 @@ pub fn parse_remote(url: &str, aliases: &[(String, String)]) -> Option<Remote> {
 pub fn parse_git_config(out: &str) -> Value {
     let (mut name, mut email) = (Value::Null, Value::Null);
     let (mut helpers, mut usernames) = (Vec::new(), Vec::new());
-    for line in split_lines(out) {
+    for line in xenonet_sources::git::split_lines(out) {
         if line.is_empty() {
             continue;
         }

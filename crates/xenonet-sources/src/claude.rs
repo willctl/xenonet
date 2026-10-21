@@ -63,7 +63,9 @@ pub fn desktop_files(root: &str) -> Vec<DesktopFile> {
     out
 }
 
-fn is_uuid(s: &str) -> bool {
+/// /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i: a
+/// session's id.
+pub fn is_uuid(s: &str) -> bool {
     let b = s.as_bytes();
     b.len() == 36 && b.iter().enumerate().all(|(i, c)| if matches!(i, 8 | 13 | 18 | 23) { *c == b'-' } else { c.is_ascii_hexdigit() })
 }

@@ -86,18 +86,6 @@ fn truthy(v: Option<&Value>) -> bool {
     xenonet_base::text::truthy(v)
 }
 
-/// `text.split(/\r?\n/)`.
-fn split_lines(text: &str) -> Vec<&str> {
-    let mut out: Vec<&str> = text.split('\n').collect();
-    let n = out.len();
-    for (i, part) in out.iter_mut().enumerate() {
-        if i + 1 < n {
-            *part = part.strip_suffix('\r').unwrap_or(part);
-        }
-    }
-    out
-}
-
 // ---------- frontmatter ----------
 
 // /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/: where the block's lines start and
@@ -162,7 +150,7 @@ fn key_value(line: &str) -> Option<(&str, &str)> {
 pub fn frontmatter_at(text: &str) -> (Map<String, Value>, Option<usize>) {
     let mut meta = Map::new();
     let Some((start, end, after)) = frontmatter(text) else { return (meta, None) };
-    for line in split_lines(&text[start..end]) {
+    for line in crate::git::split_lines(&text[start..end]) {
         let Some((key, raw)) = key_value(line) else { continue };
         let v = js_trim(raw);
         let value = if v.starts_with('[') {
@@ -478,7 +466,7 @@ fn date_parts(date: Option<&Value>) -> Result<[f64; 3], TypeError> {
 pub fn parse_log(text: &str, date: Option<&Value>) -> Result<Vec<LogEntry>, TypeError> {
     let mut out: Vec<LogEntry> = Vec::new();
     let mut cur: Option<usize> = None;
-    for line in split_lines(text) {
+    for line in crate::git::split_lines(text) {
         let h = HEADING.captures(line);
         let b = BULLET.captures(line);
         let bullet = b.is_some();
@@ -699,7 +687,7 @@ pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now:
         }
         let text = read_text(&paths::join(&inbox_dir, &f)).unwrap_or_default();
         let (meta, body) = parse_frontmatter(&text);
-        let first = split_lines(&body).into_iter().find(|l| !js_trim(l).is_empty()).map(|l| {
+        let first = crate::git::split_lines(&body).into_iter().find(|l| !js_trim(l).is_empty()).map(|l| {
             let rest = l.trim_start_matches('#');
             if rest.len() < l.len() {
                 rest.trim_start_matches(is_js_space).to_string()
