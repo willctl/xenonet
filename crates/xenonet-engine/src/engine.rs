@@ -1334,6 +1334,21 @@ impl Engine {
             }
             return Ok(one);
         }
+        // Another host's session or actor, by its qualified id, on a host in
+        // the network: as that host's presence shows it, or a stand-in for
+        // one presence doesn't list, such as an actor there, which a reply
+        // goes back to by reply_to.
+        if network::is_remote(to) && self.networked() {
+            let local = Arg::text(network::local_of(&to_text));
+            let known = network::host_of(&to_text).is_some_and(|h| self.net.get().hosts().iter().any(|x| x.id == h));
+            if known && (is_agent_id(&local) || is_actor_agent(&local)) {
+                let one = Self::remote_view(c, to)?;
+                if !self.visible_to(c, me, &one)? {
+                    return err(format!("no session or actor you can reach is {to_text}"));
+                }
+                return Ok(one);
+            }
+        }
         let mut all = Vec::new();
         for a in self.agents(c, 7.0 * 24.0 * 3600e3)? {
             if !same(&a.field("id"), me) && self.visible_to(c, me, &a)? {
