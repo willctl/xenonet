@@ -329,7 +329,20 @@ async fn a_clock_five_minutes_off_still_links() {
     until("the message", 10, || c.sink.texts("message") == ["ten minutes apart"]).await;
     let at = c.sink.got.lock().unwrap()[0].2.clone();
     assert_eq!(at["body"], "ten minutes apart");
-    drop(a);
+    // The doctor reads it from the files: the skew, the link, the address.
+    let checks = |h: &Host| -> std::collections::HashMap<String, Value> {
+        xenonet_net::doctor::checks(&h.dir.join("state").join("network"), now_ms() + h.shift).into_iter().map(|(id, _, v)| (id.to_string(), v)).collect()
+    };
+    let b_checks = checks(&b);
+    assert_eq!(b_checks["network.clock"]["status"], "warn", "{:?}", b_checks["network.clock"]);
+    assert!(b_checks["network.clock"]["detail"].as_str().unwrap().contains("5 min"), "{:?}", b_checks["network.clock"]);
+    assert_eq!(b_checks["network.link"]["status"], "ok");
+    assert_eq!(b_checks["network.key"]["status"], "ok");
+    assert_eq!(b_checks["network.files"]["status"], "ok", "{:?}", b_checks["network.files"]);
+    let a_checks = checks(&a);
+    assert_eq!(a_checks["network.address"]["status"], "info");
+    assert!(a_checks["network.address"]["detail"].as_str().unwrap().contains("this computer alone"));
+    assert_eq!(a_checks["network.link"]["detail"], "this machine is the network's gateway");
 }
 
 /// One HTTP/1.1 request by hand: its status.

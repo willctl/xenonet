@@ -23,6 +23,8 @@ xenonet-components.workspace = true
 xenonet-doctor.workspace = true
 xenonet-hosts.workspace = true
 xenonet-integrations.workspace = true
+# The doctor's network checks, read from the network's files.
+xenonet-net.workspace = true
 # Refusals, OpenRouter's spend and Xenolith's folder are the sources'.
 xenonet-sources.workspace = true
 # The doctor's process self-test (core/procs.js), and its checks of

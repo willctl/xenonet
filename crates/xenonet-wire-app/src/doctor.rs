@@ -536,6 +536,12 @@ pub async fn run_doctor(parts: Arc<Parts>, only: Option<&[String]>, by_hand: boo
             all.push(("hosts.keys.own".into(), "Hosts".into(), "Each host has a key of its own".into(), Some(json!({ "keyed": keyed }))));
         }
     }
+    // The network across machines, from its files, when this machine is in
+    // one: each verdict is ready, as a host's view is.
+    let network = std::path::Path::new(&parts.config.state_dir).join("network");
+    for (id, title, verdict) in xenonet_net::doctor::checks(&network, now_ms()) {
+        all.push((id.into(), "Network".into(), title.into(), Some(json!({ "network": verdict }))));
+    }
     let picked: Vec<_> = all.into_iter().filter(|(id, ..)| only.is_none_or(|o| run::kept(id, o))).collect();
     let facts = facts(&parts, by_hand).await;
     let m = Arc::new(Machine { paths: parts.paths.clone(), parts: parts.clone() });
@@ -546,6 +552,7 @@ pub async fn run_doctor(parts: Arc<Parts>, only: Option<&[String]>, by_hand: boo
             let check = async {
                 match (&host, id.as_str()) {
                     (Some(k), "hosts.keys.own") => xenonet_hosts::doctor::key_check(k["keyed"].as_array().map_or(&[][..], Vec::as_slice)),
+                    (Some(k), id) if id.starts_with("network.") => k["network"].clone(),
                     (Some(h), _) => run::host_check(h, now_ms()),
                     (None, _) => one(id.clone(), facts, m).await,
                 }

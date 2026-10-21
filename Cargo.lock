@@ -2548,6 +2548,7 @@ dependencies = [
  "xenonet-engine",
  "xenonet-hosts",
  "xenonet-integrations",
+ "xenonet-net",
  "xenonet-schema",
  "xenonet-service",
  "xenonet-sources",
