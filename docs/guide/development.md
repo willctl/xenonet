@@ -221,6 +221,7 @@ Requests reach it as `POST /api/dev/control` on the instance's server, which rel
 - `actor-spawn`, `actor-edit`, `actor-message`, `actor-online` and `actor-offline` have an actor act on a node, so you can see it react and beam there. `a` is the actor, by default the first one that isn't you, and `b` is the node.
 - In the demo and test instances, whose data is made up, `actor-request` has a made-up program ask to be an actor, so its card shows. `actor-needs-you` has an actor wait on you with a made-up question, until `clear`. `actor-tunnel` gives an actor a made-up connection through a tunnel, drawn as an open gate between it and the map, `actor-tunnel-down` shuts the gate, and `actor-read` sends a read through it.
 - With `XENONET_HOSTS=1`, `host-add` shows another XenoNet on this machine as a host, with `a` as its id and `b` as its port. `host-offline`, `host-online` and `host-skew` change how a host stands. For `host-skew`, `b` is how many milliseconds the host's clock is off.
+- The `net-…` kinds make up a [network across machines](../design/network.md), with other machines and their agents, for the Network panel, the attention strip and the message box. `net-none` is this machine on its own. `net-founder` has this machine start the network and be its gateway, with two more machines, one of them offline. `net-member` has this machine join one whose gateway is another. `net-gateway-down` has the gateway not answer, with what's for other machines waiting in the outbox. `net-ticket` has a ticket waiting, `net-mismatch` a machine that sees another list of the network's machines, and `net-remote-waiting` an agent on another machine waiting on you. For `net-founder` and `net-remote-waiting`, `a` is the machine you're at. While one runs, the made-up network answers the network's routes from the window, so Add a machine shows a line, and a message to one of its agents goes into its outbox while its machine is away. `clear` ends it. The `network` tool, and the driver's `network` and `messageAs`, read and drive the panel and the message box.
 
 ### Other ways in
 
@@ -293,6 +294,7 @@ The console page imports only the core modules that have no Node in them, such a
 | `export-panel.js`, `poster.js`, `poster-draw.js`, `mark.js` | The export panel, and posters of the day: the preview, the sizes, what an export reveals, and the mark |
 | `connect.js` | The panel for connecting Claude Code and Codex |
 | `background.js` | The Background service panel, and Desktop's offer of it during setup |
+| `network.js`, `network-model.js` | The Network panel (Network settings, Add a machine) for a network across machines, and the words for it, which the attention strip shares |
 | `doctor.js` | The panel for XenoNet's doctor |
 | `stats.js` | The panel for a session's stats |
 | `film.js`, `film-cards.js` | Films of the day, and their cards |
