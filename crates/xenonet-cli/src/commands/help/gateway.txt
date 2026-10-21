@@ -4,10 +4,10 @@ MCP. It listens on this machine alone. A tunnel you pick puts it on the
 internet, and XenoNet keeps that tunnel running and checks that the address
 works.
 
-  xenonet gateway                    whether it's on, its tunnel, its address
+  xenonet gateway                  whether it's on, its tunnel, its address
                                    and whether that reaches it, and each
                                    app's connection
-  xenonet gateway tunnels            the tunnels XenoNet can use, and which of
+  xenonet gateway tunnels          the tunnels XenoNet can use, and which of
                                    them this computer has
   xenonet gateway on [--tunnel <kind>] [--host <name>] [--name <tunnel>]
                                    turns it on, through the tunnel named:
@@ -20,14 +20,14 @@ works.
                                      ngrok             ngrok (--host: your
                                                        ngrok domain)
                                      own               one you run (--host)
-  xenonet gateway off                turns it off, with the tunnel XenoNet runs
-  xenonet gateway check              checks now that the address reaches it
-  xenonet gateway repair             sets the tunnel up again, and checks
-  xenonet gateway address <slug>     what to tell an app whose address is old
-  xenonet gateway token <slug>       asks for a new gateway token for an actor.
+  xenonet gateway off              turns it off, with the tunnel XenoNet runs
+  xenonet gateway check            checks now that the address reaches it
+  xenonet gateway repair           sets the tunnel up again, and checks
+  xenonet gateway address <slug>   what to tell an app whose address is old
+  xenonet gateway token <slug>     asks for a new gateway token for an actor.
                                    It makes none and prints none: the ask
                                    waits as a card in XenoNet's window
-  xenonet gateway revoke <slug>      takes an actor's gateway token away
+  xenonet gateway revoke <slug>    takes an actor's gateway token away
 
 An actor's gateway token is made in XenoNet's window: Allow on the card an
 ask leaves, or Actors, then Connect… on the actor. There it's masked until

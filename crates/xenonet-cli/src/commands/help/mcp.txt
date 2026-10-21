@@ -6,10 +6,10 @@ An actor you allowed in XenoNet can start it too, with its token in
 XENONET_ACTOR_TOKEN_FILE: it then gets actor_heartbeat, actor_events and
 actor_targets as well, and calls the engine as itself.
 
-  xenonet mcp console                 the console operator's tools
+  xenonet mcp console               the console operator's tools
   xenonet mcp assistant --grant <id> [--port <n>]
                                     the six read-only tools for a remote
                                     actor you paired in XenoNet's window; a
                                     tunnel client runs it
-  xenonet mcp assistant --fixture     the same tools over made-up data, with
+  xenonet mcp assistant --fixture   the same tools over made-up data, with
                                     no XenoNet and no grant
