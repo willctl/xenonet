@@ -336,11 +336,21 @@ of it from step 5. Where it departs from the plan above, and why:
   their port (`launchctl kickstart`, `systemctl --user start`) instead of
   starting one beside it. XenoNet Dev starts and stops its own, as before.
 
-Not built yet from step 1: the doctor's checks of the registration and of
-lingering, and the JS core's `ensureService` asking the supervisor (an
-update installed from Desktop's Updates panel still starts the new service
-itself, and the supervisor's copy takes over at the next login). The tray
-waits on steps 2 and 3.
+- **The doctor's checks.** Four checks under Background service
+  (`service.*`, in `crates/xenonet-doctor/src/login.rs` and
+  `core/doctor/index.js`) read the registration as the components crate's
+  `supervisor::review` sees it: whether it's there; whether its file is
+  what `install` would write now, worked out from the file's own settings
+  so the doctor's environment doesn't matter, and whether the program it
+  runs is there; whether the supervisor has it loaded and running; and on
+  Linux, lingering. Lingering is wanted where the account has no graphical
+  session (loginctl's `Display` is empty), as on a host reached over SSH,
+  so only there is its absence a warning.
+
+Not built yet from step 1: the JS core's `ensureService` asking the
+supervisor (an update installed from Desktop's Updates panel still starts
+the new service itself, and the supervisor's copy takes over at the next
+login). The tray waits on steps 2 and 3.
 
 ## What step 6 built
 

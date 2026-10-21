@@ -1,8 +1,10 @@
 // XenoNet's doctor: whether what XenoNet needs is in place, and how to fix it
 // when it isn't. Sign-ins for Claude Code and Codex, the folders XenoNet
 // reads, the apps and tools it talks to, its own server, whether your
-// agents are connected to it, and actors: tokens left in repos or expired,
-// what the observers read, and the process check they rely on.
+// agents are connected to it, actors: tokens left in repos or expired,
+// what the observers read, and the process check they rely on; and the
+// service started at login (ctx.login(), the supervisor's own review of it,
+// which only the Rust machines answer).
 //
 // The xenonet command runs it (xenonet doctor). The server runs it every half
 // hour and reports new problems in the console and as a notification
@@ -618,7 +620,91 @@ export const CHECKS = [
       return ok(said);
     },
   },
+
+  // ---------- the service started at login (docs/design/always-on.md) ----------
+  {
+    id: "service.login",
+    group: "Background service",
+    title: "The service starts at login",
+    async run(ctx) {
+      const { l, why } = await registration(ctx);
+      if (why !== NOT_REGISTERED && !l) return skip(why);
+      if (!l) return info("off: Desktop starts the service when it opens, and it runs until you log out", "To keep sessions coordinating while Desktop is closed, turn on Background service in XenoNet's palette, or run xenonet service install.");
+      const other = ctx.self && l.port != null && String(l.port) !== String(ctx.self.port) ? `, for the service on port ${l.port}` : "";
+      return ok(`on, through ${l.supervisor}: ${tilde(l.file, ctx.home)}${other}`);
+    },
+  },
+  {
+    id: "service.file",
+    group: "Background service",
+    title: "The service's registration is current",
+    async run(ctx) {
+      const { l, why } = await registration(ctx);
+      if (!l) return skip(why);
+      const file = tilde(l.file, ctx.home);
+      if (l.programFound === false) return fail(`${file} runs ${tilde(l.program ?? "", ctx.home)}, which isn't there`, "Run xenonet service install again, which points it at XenoNet's launcher.");
+      if (l.current === false) return warn(`${file} isn't what xenonet service install writes now, so the service may not start the way this XenoNet expects`, "Run xenonet service install again, which writes it afresh and reloads it. That restarts the service, so close its terminals first.");
+      if (l.current !== true) return info(`XenoNet couldn't tell whether ${file} is current: ${l.expected ?? "it couldn't work out what install writes here"}`);
+      return ok(`${file} is what xenonet service install writes`);
+    },
+  },
+  {
+    id: "service.loaded",
+    group: "Background service",
+    title: "The system has the service loaded",
+    async run(ctx) {
+      const { l, why } = await registration(ctx);
+      if (!l) return skip(why);
+      const by = l.supervisor;
+      if (l.error) return warn(`XenoNet couldn't ask ${by} about it: ${l.error}`, LOOK[by]);
+      if (l.state === "disabled") return warn("it's turned off in Task Scheduler, so it doesn't start when you sign in", "Turn XenoNet Service on in Task Scheduler, or run xenonet service install, which turns it on again.");
+      if (!l.loaded) return warn(`${by} doesn't have it, so it doesn't start at login`, UNLOADED[by] ?? "Run xenonet service install again.");
+      const exited = l.lastExit && !["0", "(never exited)"].includes(String(l.lastExit)) ? ` (it last exited with ${l.lastExit})` : "";
+      if (l.state === "failed") return warn(`${by} gave up on it after it kept stopping${exited}`, "xenonet logs --errors says why it stopped. Then xenonet service start starts it again.");
+      if (l.pid) return ok(`${by} has it, running as process ${l.pid}`);
+      return info(`${by} has it, but it isn't running now${exited}`, "xenonet service start starts it. If it didn't stop on purpose, xenonet logs --errors says why.");
+    },
+  },
+  {
+    id: "service.boot",
+    group: "Background service",
+    title: "The service starts at boot",
+    async run(ctx) {
+      if (ctx.platform !== "linux") return skip("for Linux, where lingering starts a user's services at boot");
+      const { l, why } = await registration(ctx);
+      if (!l) return skip(why);
+      const user = l.user || "$USER";
+      if (l.linger === true) return ok("lingering is on, so it starts at boot and keeps running after you log out");
+      if (l.linger !== false) return info("XenoNet couldn't ask loginctl whether lingering is on", `loginctl show-user ${user} --property=Linger says.`);
+      if (l.graphical === false) return warn("lingering is off, and you have no graphical session here, as on a host reached over SSH, so the service runs only while you're logged in", `Run loginctl enable-linger ${user} once, which starts it at boot and keeps it running. It may need an administrator: sudo loginctl enable-linger ${user}.`);
+      return info("lingering is off: it starts when you log in, and stops when you log out", `To start it at boot instead, before anyone logs in, as a host needs, run loginctl enable-linger ${user} once. It may need an administrator.`);
+    },
+  },
 ];
+
+// The registration the service.* checks read (ctx.login(), as
+// xenonet-components' supervisor review sees it), or why there's none to
+// read.
+const NOT_REGISTERED = "the service doesn't start at login";
+async function registration(ctx) {
+  const l = await ctx.login?.();
+  if (!l) return { l: null, why: "XenoNet can't look at how its service starts from here" };
+  if (!l.supported) return { l: null, why: "this system has no supervisor XenoNet registers with" };
+  if (!l.registered) return { l: null, why: NOT_REGISTERED };
+  return { l, why: null };
+}
+
+// Where each supervisor says more, and what loads the service again.
+const LOOK = {
+  launchd: "launchctl print gui/$(id -u)/dev.xenonet.service says more.",
+  systemd: "systemctl --user status xenonet says more.",
+  "Task Scheduler": 'schtasks /query /tn "XenoNet Service" /v /fo list says more.',
+};
+const UNLOADED = {
+  launchd: "If you turned it off in System Settings › General › Login Items & Extensions, turn it on there. Otherwise run xenonet service install again, which loads it.",
+  systemd: "Run xenonet service install again, which enables it, or systemctl --user enable --now xenonet.service.",
+  "Task Scheduler": "Run xenonet service install again, which creates the task again.",
+};
 
 // ---------- hosts ----------
 

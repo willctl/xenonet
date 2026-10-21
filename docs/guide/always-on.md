@@ -72,4 +72,11 @@ On macOS and Linux, `xenonet service run` adds your login shell's `PATH`, as Des
 - `supervised`: whether that service is the one launchd, systemd or Task Scheduler started.
 - `login`: whether it starts at login. `registered` means the launch agent, unit or task definition is there, `loaded` means launchd, systemd or Task Scheduler has it, and `state`, `pid` and `lastExit` say how it's running. On Linux, `linger` says whether it starts at boot.
 
+`xenonet doctor --only service`, and the doctor in the palette, check it under **Background service**:
+
+- whether it starts at login;
+- whether the launch agent, unit or task is what `xenonet service install` writes now, and the program it runs is there (if not, run `xenonet service install` again);
+- whether launchd, systemd or Task Scheduler has it loaded, and if it's running;
+- on Linux, whether lingering starts it at boot. That's a warning only where you have no graphical session, as on a host you reach over SSH, where the service would otherwise run only while you're logged in.
+
 The supervisors have their own views: `launchctl print gui/$(id -u)/dev.xenonet.service` on a Mac, `systemctl --user status xenonet` on Linux, and `schtasks /query /tn "XenoNet Service" /v /fo list` on Windows.

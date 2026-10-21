@@ -179,22 +179,33 @@ pub fn account() -> String {
     }
 }
 
-/// Where this machine keeps the registration, or None where there's no
-/// supervisor XenoNet registers with. XENONET_SUPERVISOR_DIR and
-/// XENONET_SUPERVISOR_BIN put it in another folder and ask another
-/// launchctl, systemctl or schtasks, for tests.
-pub fn here() -> Option<Place> {
-    let var = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
-    let platform = if cfg!(windows) {
+fn var(k: &str) -> Option<String> {
+    std::env::var(k).ok().filter(|v| !v.is_empty())
+}
+
+// process.platform, and os.homedir().
+fn platform_here() -> &'static str {
+    if cfg!(windows) {
         "win32"
     } else if cfg!(target_os = "macos") {
         "darwin"
     } else {
         "linux"
-    };
+    }
+}
+
+fn home_here() -> String {
+    var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap_or_default()
+}
+
+/// Where this machine keeps the registration, or None where there's no
+/// supervisor XenoNet registers with. XENONET_SUPERVISOR_DIR and
+/// XENONET_SUPERVISOR_BIN put it in another folder and ask another
+/// launchctl, systemctl or schtasks, for tests.
+pub fn here() -> Option<Place> {
     Place::of(&Where {
-        platform: platform.into(),
-        home: var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap_or_default(),
+        platform: platform_here().into(),
+        home: home_here(),
         xdg_config: var("XDG_CONFIG_HOME"),
         uid: account(),
         user: var("USER").or_else(|| var("LOGNAME")).or_else(|| var("USERNAME")).unwrap_or_default(),
@@ -967,6 +978,18 @@ pub fn review(place: Option<&Place>, m: &Machine, base: &Env, files: &dyn Files,
     out["program"] = json!(program);
     out["programFound"] = json!(program.as_deref().map(&is_file));
     out
+}
+
+/// `review` of this machine's registration, as the doctor's `ctx.login()`
+/// answers: its place, files and programs, with LOCALAPPDATA, which
+/// install takes from the environment but doesn't keep.
+pub fn review_here() -> Value {
+    let m = Machine { platform: platform_here().into(), arch: String::new(), home: home_here() };
+    let mut base = Env::new();
+    if let Some(v) = var("LOCALAPPDATA") {
+        base.insert("LOCALAPPDATA".into(), json!(v));
+    }
+    review(here().as_ref(), &m, &base, &Disk, &mut System, |p| std::path::Path::new(p).is_file())
 }
 
 fn failed(what: &str, ran: &Ran) -> String {
