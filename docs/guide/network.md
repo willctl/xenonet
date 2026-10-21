@@ -29,10 +29,10 @@ This machine is now the founder and the gateway. The other machines reach the ga
 - **An address on your LAN or tailnet**, which this machine has:
 
   ```bash
-  xenonet net create --name home --host studio --lan 192.168.1.5:47850
+  xenonet net create --name home --host studio --lan 192.168.1.5:48850
   ```
 
-  or later, `xenonet net set --lan 192.168.1.5:47850`. XenoNet listens there over plain HTTP, never on `0.0.0.0`, and answers only the network's routes there. The frames are signed and sealed, so the LAN sees which machine talks to which, never what they say. An actor's token never crosses it, since `/mcp` and `/a2a` aren't served on that address.
+  or later, `xenonet net set --lan 192.168.1.5:48850`. XenoNet listens there over plain HTTP, never on `0.0.0.0`, and answers only the network's routes there. The frames are signed and sealed, so the LAN sees which machine talks to which, never what they say. An actor's token never crosses it, since `/mcp` and `/a2a` aren't served on that address.
 
 ## Adding a machine
 
@@ -96,13 +96,13 @@ At the gateway, what waits for a machine that's away is kept the same way. When 
 On the machine that takes over, give it an address first (a LAN address, or a tunnel), then:
 
 ```bash
-xenonet net gateway take --lan 192.168.1.7:47850
+xenonet net gateway take --lan 192.168.1.7:48850
 ```
 
 On the founder's machine that's done. On any other, it waits for the founder or a second window host to approve it, in the Network panel or with `xenonet net approve <id>`. The old gateway tells the machines linked to it, and they follow. A machine that was away during the move, or one whose old gateway is gone for good, follows by hand:
 
 ```bash
-xenonet net gateway set 192.168.1.7:47850
+xenonet net gateway set 192.168.1.7:48850
 ```
 
 It follows only a gateway that proves the key the roster gives it. Actors' tokens and scopes stay on the machine that made them, and don't move with the gateway yet.
