@@ -8,6 +8,8 @@ Open **Check for XenoNet updates** in the command palette or **Updates...** in t
 
 The bundle installs Desktop, Service and Tools on first launch. They update separately after that. If a service update finds running terminals, close them and run the update again. Tools updates apply to new commands and MCP processes. [Components and updates](components.md) covers headless installs and the compatibility checks.
 
+From 0.3.0, update Desktop, with the bundle or the Desktop-only update. When it starts, it replaces 0.3.0's Service and Tools. `xenonet update` from 0.3.0 can't install them. [Upgrading from 0.3.0](components.md#upgrading-from-030) has the details.
+
 Unsigned Mac builds show that a new release is available and link to its download. Replace XenoNet in Applications to update it. Your settings stay in place.
 
 ## Windows

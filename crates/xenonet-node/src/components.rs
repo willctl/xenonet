@@ -206,6 +206,11 @@ pub fn comp_install_launcher(env: Json, ctx: Json) -> Jv {
     settled(install::install_launcher(&env_of(env), &ctx_of(&ctx)).map(|v| Jv::Json(v.unwrap_or(Value::Null))))
 }
 
+#[napi(js_name = "compHasBinary")]
+pub fn comp_has_binary(selected: Json, platform: String) -> bool {
+    install::has_binary(&selected.0, &platform)
+}
+
 #[napi(js_name = "compCheckRuntime")]
 pub fn comp_check_runtime(staged: Json, platform: String) -> Jv {
     settled(install::check_runtime(&staged.0, &platform).map(|()| Jv::Undef))
