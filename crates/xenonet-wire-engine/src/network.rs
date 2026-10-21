@@ -62,6 +62,8 @@ struct Out {
     counter: f64,
     agents: BTreeMap<String, Value>,
     you: bool,
+    /// The roster head the last presence carried.
+    roster: String,
     claims: BTreeMap<String, Value>,
 }
 
@@ -292,6 +294,9 @@ pub fn presence(w: &World, full: bool) -> Option<Value> {
         }
     };
     let you = you_here(w);
+    // The roster's head as this host has it: hosts that see different
+    // rosters notice it from each other's presence, so a new head is news.
+    let roster = net(w).roster_head().unwrap_or_default();
     let body = {
         let mut out = w.net.out.locked();
         let (agents, removed): (Vec<Value>, Vec<Value>) = if full {
@@ -301,15 +306,14 @@ pub fn presence(w: &World, full: bool) -> Option<Value> {
             let gone = out.agents.keys().filter(|k| !now.contains_key(*k)).take(1000).map(|k| json!(k)).collect::<Vec<_>>();
             (changed, gone)
         };
-        if !full && agents.is_empty() && removed.is_empty() && you == out.you {
+        if !full && agents.is_empty() && removed.is_empty() && you == out.you && roster == out.roster {
             return None;
         }
         out.counter = (out.counter + 1.0).max(now_ms().round());
         out.agents = now;
         out.you = you;
-        // The roster head isn't the engine's to know: the seam gives no
-        // way to read it, so the link fills it in or leaves it empty.
-        json!({ "schema": "network/presence/v1", "counter": out.counter, "full": full, "agents": agents, "removed": removed, "you": you, "roster": "" })
+        out.roster.clone_from(&roster);
+        json!({ "schema": "network/presence/v1", "counter": out.counter, "full": full, "agents": agents, "removed": removed, "you": you, "roster": roster })
     };
     send(w, To::All, Kind::Presence, body.clone());
     Some(body)

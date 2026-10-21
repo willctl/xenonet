@@ -700,7 +700,8 @@ impl Shared {
             }
         }
         p.you = body.get("you").and_then(Value::as_bool).unwrap_or(false);
-        p.roster = body.get("roster").and_then(Value::as_str).map(str::to_string);
+        // An empty head says nothing about the sender's roster: no mismatch.
+        p.roster = body.get("roster").and_then(Value::as_str).filter(|r| !r.is_empty()).map(str::to_string);
         true
     }
 
@@ -743,6 +744,11 @@ impl Shared {
 impl Net for Shared {
     fn me(&self) -> Option<Me> {
         self.network().map(|n| Me { network: n.id, name: n.name, host: n.host })
+    }
+
+    fn roster_head(&self) -> Option<String> {
+        self.network()?;
+        self.roster().head()
     }
 
     fn hosts(&self) -> Vec<Host> {

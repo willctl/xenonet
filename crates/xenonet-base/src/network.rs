@@ -115,6 +115,11 @@ pub trait Net: Send + Sync {
     /// Queues a body. It refuses only when this machine isn't in a network
     /// or the host isn't in the roster; delivery is the link's to retry.
     fn send(&self, out: Outgoing) -> Result<(), String>;
+    /// The hash of this machine's roster head, which presence carries so
+    /// two hosts that see different rosters notice (section 3).
+    fn roster_head(&self) -> Option<String> {
+        None
+    }
 }
 
 /// What the network calls in the engine.
@@ -146,6 +151,9 @@ impl Net for NoNet {
     fn send(&self, _out: Outgoing) -> Result<(), String> {
         Err("this machine isn't in a XenoNet network".into())
     }
+    fn roster_head(&self) -> Option<String> {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -169,6 +177,7 @@ mod tests {
         let net = NoNet;
         assert!(net.me().is_none());
         assert_eq!(net.hosts().len(), 0);
+        assert_eq!(net.roster_head(), None);
         let out = Outgoing { to: To::All, kind: Kind::Presence, body: Value::Null };
         assert!(net.send(out).is_err());
     }
