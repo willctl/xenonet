@@ -24,8 +24,8 @@ with a `space` beams to that space's pages, never to a page of the same name
 in this machine's wiki. The unfiled count is this machine's inbox.
 
 It reads pages as Xenolith does. A link is `[[slug]]` or `[[slug|text]]`. A
-page without a `title` takes its first `# ` heading, and without one its file
-name. Its `type` is read in lowercase. Its `aliases` show in its panel, and
+page without a `title` takes its first top-level heading, and without one its
+file name. Its `type` is read in lowercase. Its `aliases` show in its panel, and
 the palette finds the page by them.
 
 XenoNet finds the folder the way Xenolith does: `XENOLITH_DIR`, even before
@@ -34,8 +34,9 @@ then `~/Xenolith`. That `config.json` is in `XENOLITH_CONFIG_DIR` when it's
 set, else in `XENOLITH_HOME`, else in `~/Library/Application Support/Xenolith`
 on macOS, `%APPDATA%\Xenolith` on Windows and `~/.config/xenolith` on Linux.
 Until Xenolith's installer moves it there, the older `~/.xenolith/config.json`
-counts. Without Xenolith it looks for Agent Wiki, which Xenolith came from,
-the same way. `XENONET_WIKI_DIR` overrides both.
+counts, unless `XENOLITH_HOME` or `XENOLITH_CONFIG_DIR` is set. Without
+Xenolith it looks for Agent Wiki, which Xenolith came from, the same way.
+`XENONET_WIKI_DIR` overrides both.
 
 The wiki belongs to the server whose lookup found it, so a wiki you moved
 keeps its server and the beams to it. For a folder `XENONET_WIKI_DIR` names,
