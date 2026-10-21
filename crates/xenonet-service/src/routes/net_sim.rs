@@ -763,6 +763,11 @@ mod tests {
         assert_eq!(get(ctx.clone()).await.status, 503);
         assert!(simulate(&ctx, "net-founder", None).is_some());
         assert_eq!(get(ctx.clone()).await.body_json()["network"]["name"], "home");
+        // Simulated or not, the state is the owner's: no window key and no
+        // person, no state.
+        let mut bare = Req::fake("GET", "/api/net/state", &[], None);
+        assert!(route(&ctx, &mut bare).await.unwrap().is_none());
+        assert_eq!(crate::routes::net::route(&ctx, &mut bare).await.unwrap().unwrap().status, 403);
         assert!(simulated_net_state(&ctx).is_some());
         // The engine's state and its list have the other hosts' agents.
         for path in ["/api/engine/state", "/api/engine/agents"] {
