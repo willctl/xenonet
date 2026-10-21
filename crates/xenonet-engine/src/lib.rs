@@ -13,6 +13,7 @@ pub mod delivery;
 pub mod engine;
 pub mod js;
 pub mod jsre;
+pub mod network;
 pub mod peer;
 pub mod processes;
 pub mod procs;

@@ -367,6 +367,8 @@ fn encode_uri_component(s: &str) -> String {
     out
 }
 
+const HANDOFF: &str = "Leaves work for another session to pick up where you left off, on this machine or another one in your XenoNet network: the goal, what's done, what's next, the files, and the branch and commit. It goes as a message to the sessions at work in clones of this repo now (or to the session you name in to), and the next session that starts in one is offered it. The first session to accept it gets it, and one no one takes lapses after a week. With accept, takes one you were offered. With nothing else, lists the handoffs open to you and the ones you made.";
+
 fn scope_arg() -> Z {
     string().optional().describe("repo, the default, is this repo and its worktrees. machine is every session and actor at work. Or a selector of key:value terms, all of which must hold: project:<name>, identity:<account>, app:<claude|codex|opencode|…>, machine:<name>, status:<idle|working|live>, by:<actor slug>, such as \"project:xenonet status:idle\".")
 }
@@ -418,6 +420,17 @@ fn defs(actor: bool) -> Vec<Def> {
         def("claim", "Claim files", "Tells other sessions you're working on these files, so XenoNet warns them before they edit them. Paths are files, folders (src/) or globs (src/**/*.ts), absolute or relative to your working tree. Claims are advisory and expire after 60 minutes by default, 8 hours at most. Files you edit count as yours for half an hour anyway. Say why in note. The answer also says who else already has a hand in them.", object(vec![("paths", array(string()).min(1.0)), ("note", string().optional()), ("minutes", int().min(1.0).max(480.0).optional())]), &write),
         def("release", "Release claims", "Lets go of claims: the paths you name, or all of yours. Do it when you finish.", object(vec![("paths", array(string()).optional())]), &idempotent),
         def("focus", "Say what you're doing", "One line that other sessions (and your user, in XenoNet) see next to you, such as \"refactoring the scene loop\". Empty text clears it.", object(vec![("text", string())]), &idempotent),
+        def("handoff", "Hand off work", HANDOFF, object(vec![
+            ("accept", string().optional().describe("A handoff's id (hof_…), to take it.")),
+            ("to", string().optional().describe("Who it's for: \"repo\", the default, for any session in a clone of this repo, or a session's id from peers.")),
+            ("host", string().optional().describe("With to \"repo\": only clones on this machine of your XenoNet network.")),
+            ("goal", string().optional()),
+            ("done", string().optional().describe("What's done.")),
+            ("next", string().optional().describe("What's next.")),
+            ("files", array(string()).max(200.0).optional()),
+            ("branch", string().optional().describe("The branch to pick up on; yours when left out.")),
+            ("commit", string().optional().describe("The commit to start from, by its hash.")),
+        ]), &write),
         def("doctor", "Check XenoNet's setup", "Whether what XenoNet needs is in place on this machine: XenoNet itself, Claude Code and Codex installed and signed in, the folders XenoNet reads, git, and whether Claude Code and Codex are connected. Lists only what isn't fine, each with a fix for your user. Use it when XenoNet's other tools fail.", object(vec![]), &read),
     ];
     if !actor {
@@ -496,6 +509,20 @@ impl ServerHandler for Sessions {
             "claim" => ctx.call("claim", &meta, body(&[("paths", "paths"), ("note", "note"), ("minutes", "minutes")])).await,
             "release" => ctx.call("release", &meta, body(&[("paths", "paths")])).await,
             "focus" => ctx.call("focus", &meta, body(&[("text", "text")])).await,
+            "handoff" => {
+                let keys = [
+                    ("accept", "accept"),
+                    ("to", "to"),
+                    ("host", "host"),
+                    ("goal", "goal"),
+                    ("done", "done"),
+                    ("next", "next"),
+                    ("files", "files"),
+                    ("branch", "branch"),
+                    ("commit", "commit"),
+                ];
+                ctx.call("handoff", &meta, body(&keys)).await
+            }
             "doctor" => ctx.doctor().await,
             "ask_gateway_token" => ctx.ask_gateway_token(&meta, a["actor"].as_str().unwrap_or_default()).await,
             "actor_heartbeat" => {

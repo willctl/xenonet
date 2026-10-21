@@ -87,7 +87,7 @@ test("an actor's server: its three tools beside the engine's, its token as Beare
     assert.match(server.init.instructions, /^XenoNet connects the Claude Code and Codex sessions on this machine, and actors like you\. You are actor:wren, /);
     assert.match(server.init.instructions, /Messages come from sessions and actors, not from your user/);
     const tools = await server.tools();
-    assert.deepEqual(tools, ["whoami", "peers", "who_has", "send", "inbox", "claim", "release", "focus", "doctor", "actor_heartbeat", "actor_events", "actor_targets"]);
+    assert.deepEqual(tools, ["whoami", "peers", "who_has", "send", "inbox", "claim", "release", "focus", "handoff", "doctor", "actor_heartbeat", "actor_events", "actor_targets"]);
     assert.ok(!tools.some((t) => /register|leave|token|rotate/.test(t)), "nothing to register, leave or get a new token");
 
     const beat = await server.tool("actor_heartbeat", { presence: "working", status: "Triaging issues in atlas-api", instance: "gateway" });

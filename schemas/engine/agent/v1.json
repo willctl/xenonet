@@ -194,6 +194,37 @@
     "delivery": {
       "description": "From send: when it will see the message",
       "type": "string"
+    },
+    "host": {
+      "description": "In a XenoNet network, the host an agent on another machine is on; its id is @<host>:<id>",
+      "type": "string"
+    },
+    "seen": {
+      "description": "For an agent on another host: when that host was last heard from",
+      "anyOf": [
+        {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "online": {
+      "description": "For an agent on another host: whether its host's link is up; offline since seen when it isn't",
+      "type": "boolean"
+    },
+    "repoKey": {
+      "description": "For an agent on another host: the normalized git remote of its folder, which clones of one repo share",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "waitsOnYou": {
+      "description": "For an agent on another host: a question or a stuck state waits on the person",
+      "type": "boolean"
     }
   },
   "required": [

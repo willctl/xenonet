@@ -66,6 +66,11 @@ export const EngineAgent = define(
     reachable: z.boolean().optional().describe("In touch directly lately, so messages reach it"),
     overlap: z.array(z.string()).optional().describe("From peers: files you've both edited lately"),
     delivery: z.string().optional().describe("From send: when it will see the message"),
+    host: z.string().optional().describe("In a XenoNet network, the host an agent on another machine is on; its id is @<host>:<id>"),
+    seen: ms.nullable().optional().describe("For an agent on another host: when that host was last heard from"),
+    online: z.boolean().optional().describe("For an agent on another host: whether its host's link is up; offline since seen when it isn't"),
+    repoKey: nstr.optional().describe("For an agent on another host: the normalized git remote of its folder, which clones of one repo share"),
+    waitsOnYou: z.boolean().optional().describe("For an agent on another host: a question or a stuck state waits on the person"),
   }),
   {
     title: "An agent",
@@ -84,12 +89,15 @@ export const MessageEnvelope = obj({
   at: ms,
   sender: obj({ id: z.string(), kind: openEnum(["agent", "actor", "you"]), name: nstr, product: nstr }),
   auth: obj({
-    method: openEnum(["session", "token", "window", "grant", "gateway"]).describe("How it proved who it is"),
+    method: openEnum(["session", "token", "window", "grant", "gateway", "host"]).describe("How it proved who it is; host: another host of the network signed the frame that brought it"),
     process: openEnum(["signed", "checked", "unchecked", "n/a"]).describe("What XenoNet saw of the program that sent it"),
     strength: openEnum(["strong", "partial", "weak"]),
   }),
   client: obj({ exe: z.string(), name: z.string() }).nullable().describe("The program it came from, with the home folder as ~, when XenoNet saw it"),
-  transport: z.string(),
+  transport: z.string().describe("this machine, tunnel, gateway, or network: from another host of a XenoNet network"),
+  host: z.string().optional().describe("For transport network: the host it came from"),
+  original: obj({ kind: z.string(), method: z.string(), strength: openEnum(["strong", "weak"]) }).optional().describe("For transport network: how the host it came from checked the sender; a weak check stays weak"),
+  hops: count.optional().describe("For transport network: the messages before it in its thread, across hosts"),
   line: z.string().describe("The same in a sentence: verified: …"),
 });
 
@@ -104,7 +112,14 @@ export const EngineMessage = define(
       text: z.string(),
       at: ms,
       how: openEnum(["session", "token", "window", "grant", "gateway"]).nullable().optional().describe("How XenoNet knows who sent it (its envelope's method); null for one sent before XenoNet kept that"),
-      to: z.array(obj({ id: AgentRef, seen: z.boolean() })),
+      to: z.array(
+        obj({
+          id: AgentRef,
+          seen: z.boolean(),
+          host: nstr.optional().describe("For an agent on another host: its host"),
+          receipt: nstr.optional().describe("For an agent on another host: what its host last said of it (stored, held, delivered, seen or refused); null before it said"),
+        }),
+      ),
     }).describe("In the console's snapshot, GET /api/engine/state"),
     obj({
       id: count,
@@ -134,6 +149,8 @@ export const EngineMessage = define(
       reply_to: count.nullable(),
       created_at: ms,
       envelope: nstr.optional().describe("How XenoNet knew who sent it, as message/envelope/v1 JSON (core/engine/attest.js); null before it kept that"),
+      host: nstr.optional().describe("The host of a XenoNet network it came from; null for one made on this machine"),
+      mid: nstr.optional().describe("Its id across the network (its envelope's mid), for one that went to or came from another host"),
     }).describe("As engine.sqlite keeps it"),
   ]),
   {

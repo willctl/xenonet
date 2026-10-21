@@ -15,6 +15,7 @@ pub mod exec;
 pub mod fsx;
 pub mod js;
 pub mod map;
+pub mod network;
 pub mod observers;
 pub mod procs;
 pub mod registration;
@@ -64,9 +65,11 @@ fn demo_folders(cores: &Cores, config: &mut Config) {
 /// Puts this area's cores in place of the pending ones, as server/index.js
 /// makes them: the engine's store, the process checks, the engine and
 /// delivery, and with actors on, the actors, their registration, wakes,
-/// reports and observers (never in the demo).
-pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
-    let Some(w) = world(cores, config, env) else { return };
+/// reports and observers (never in the demo). The world it made, for the
+/// network's link to plug into (`network::plug`), or None when
+/// engine.sqlite couldn't be opened.
+pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) -> Option<Arc<World>> {
+    let w = world(cores, config, env)?;
     cores.engine_store = Arc::new(store::Store(w.store.clone()));
     cores.verify = w.checks.clone();
     cores.engine = Arc::new(engine::EngineDriver(w.clone()));
@@ -85,6 +88,7 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
         cores.registration = None;
         cores.wakes = None;
     }
+    Some(w)
 }
 
 /// The area's parts, made as server/index.js's top level makes them, on
@@ -163,6 +167,7 @@ pub fn world(cores: &Cores, config: &mut Config, env: &WireEnv) -> Option<Arc<Wo
         wakes,
         observers: OnceLock::new(),
         me: OnceLock::new(),
+        net: network::NetState::default(),
     });
     let _ = w.me.set(Arc::downgrade(&w));
     if w.actors.is_some() && !config.demo {

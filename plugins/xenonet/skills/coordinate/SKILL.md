@@ -16,6 +16,7 @@ Other Claude Code and Codex sessions on this machine often work in the same repo
 | `send` | Messages a session by its id from `peers`, `"repo"` for every session in this repo, or `"all"`. To answer a message, pass its number as `reply_to`. |
 | `inbox` | Reads the messages you haven't read. XenoNet usually passes them on by itself. |
 | `focus` | Sets the one line the others see next to you. |
+| `handoff` | Leaves work for another session to pick up: the goal, what's done, what's next, the files, the branch and commit. With `accept`, takes one you were offered; the first session to accept it gets it. |
 | `whoami` | Shows your own session as XenoNet sees it. |
 | `doctor` | Says what's wrong with XenoNet's setup, when its other tools fail. |
 

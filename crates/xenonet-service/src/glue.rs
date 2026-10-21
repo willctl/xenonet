@@ -67,6 +67,9 @@ pub fn event(ctx: &Arc<Ctx>, from: From, name: &str, data: Value) {
                 a.said(&data);
             }
         }
+        // What another host said of a message sent there: stored, held,
+        // delivered, seen or refused.
+        (From::Engine, "receipt") => ctx.broadcast("message-receipt", &data),
         (From::Delivery, "delivery") => ctx.broadcast("delivery", &data),
         (From::Delivery, "error") => eprintln!("[xenonet] delivery: {}", xenonet_base::text::js_string(&data["message"])),
         // A message for an actor nothing can wake: a notification for you.

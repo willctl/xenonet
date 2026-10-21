@@ -978,19 +978,27 @@ async fn bodies_that_arent_json_or_are_too_big_are_the_clients_error() {
 }
 
 #[tokio::test]
-async fn the_windows_message_to_an_actor_needs_its_key_and_an_actor() {
+async fn the_windows_message_needs_its_key_and_a_session_or_an_actor() {
     let (ctx, f) = service(false);
     let r = go(&ctx, "POST", "/api/actors/you/message", &[], Some(json!({ "to": "actor:muse", "text": "hi" }))).await;
     assert_eq!((r.status, r.body_json()["code"].clone()), (403, json!("yours")));
     let key = ctx.window_key.reveal().to_string();
     let r = go(&ctx, "POST", "/api/actors/you/message", &[("x-xenonet-window", &key), ("authorization", "Bearer x")], Some(json!({ "to": "actor:muse" }))).await;
     assert_eq!(r.status, 403, "never with a token");
-    let r = go(&ctx, "POST", "/api/actors/you/message", &[("x-xenonet-window", &key)], Some(json!({ "to": ME, "text": "hi" }))).await;
-    assert_eq!((r.status, r.body_json()["code"].clone()), (400, json!("bad-request")), "sessions get messages from sessions");
+    for to in ["repo", "all", "@nohost", "actor:you", "@laptop:nothing"] {
+        let r = go(&ctx, "POST", "/api/actors/you/message", &[("x-xenonet-window", &key)], Some(json!({ "to": to, "text": "hi" }))).await;
+        assert_eq!((r.status, r.body_json()["code"].clone()), (400, json!("bad-request")), "one session or actor, by its id: {to}");
+    }
     let r = go(&ctx, "POST", "/api/actors/you/message", &[("x-xenonet-window", &key)], Some(json!({ "to": "actor:muse", "text": "hi" }))).await;
     assert_eq!(r.status, 200);
     assert_eq!(f.was("send")[0][0], json!("actor:you"));
     assert_eq!(f.was("send")[0][2], json!({ "method": "window", "process": "n/a", "strength": "strong" }));
+    // A session here, or one on another machine of the network, as you.
+    for to in [ME.to_string(), format!("@laptop:{ME}")] {
+        let r = go(&ctx, "POST", "/api/actors/you/message", &[("x-xenonet-window", &key)], Some(json!({ "to": to, "text": "hi" }))).await;
+        assert_eq!(r.status, 200, "{to}");
+    }
+    assert_eq!(f.was("send").len(), 3);
 }
 
 #[tokio::test]
