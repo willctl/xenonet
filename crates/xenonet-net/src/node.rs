@@ -322,6 +322,20 @@ impl Shared {
         self.log("net.link", "the gateway's stream went quiet twice: asking it a request at a time");
     }
 
+    /// The pinned gateway's keys, while the roster still holds that host
+    /// with them. A gateway's host removed from the roster, or one whose
+    /// keys changed, isn't this network's gateway any more, whatever it
+    /// signs.
+    pub fn pinned_gateway(&self, net: &NetFile) -> Result<PublicKeys, String> {
+        let keys = PublicKeys::from_b64(&net.gateway.sign, &net.gateway.seal).ok_or("the pinned gateway key isn't readable")?;
+        let held = self.roster().view_ref().and_then(|v| v.member(&net.gateway.host).map(|m| m.keys == keys));
+        match held {
+            Some(true) => Ok(keys),
+            Some(false) => Err(format!("the gateway, {}, has other keys in the roster than the ones this host pinned", net.gateway.host)),
+            None => Err(format!("the gateway, {}, isn't in the network's roster any more", net.gateway.host)),
+        }
+    }
+
     /// The gateway's time, from a refusal: this host signs with it from now.
     pub fn learn_offset(&self, gateway_now: f64) {
         let offset = gateway_now - self.now();
@@ -472,7 +486,7 @@ impl Shared {
     /// The gateway's `removed` answer, checked against the pinned key.
     pub fn removed_frame(&self, f: &Frame) -> bool {
         let Some(net) = self.network() else { return false };
-        let Some(keys) = PublicKeys::from_b64(&net.gateway.sign, &net.gateway.seal) else { return false };
+        let Ok(keys) = self.pinned_gateway(&net) else { return false };
         if f.kind != "removed" || f.from != net.gateway.host || f.to != net.host || !f.verify(&net.id, &keys) {
             return false;
         }
@@ -495,7 +509,7 @@ impl Shared {
     /// nonce. Ok(true) when its roster is ahead of ours.
     pub fn hello(&self, f: &Frame, nonce: &str) -> Result<bool, String> {
         let net = self.network().ok_or("this machine left its network")?;
-        let keys = PublicKeys::from_b64(&net.gateway.sign, &net.gateway.seal).ok_or("the pinned gateway key isn't readable")?;
+        let keys = self.pinned_gateway(&net)?;
         if f.kind != "hello" || f.from != net.gateway.host || !f.verify(&net.id, &keys) {
             return Err("the gateway didn't prove the key this host pinned".into());
         }
@@ -560,7 +574,13 @@ impl Shared {
     }
 
     fn gateway_frame(&self, net: &NetFile, f: &Frame) -> bool {
-        let Some(keys) = PublicKeys::from_b64(&net.gateway.sign, &net.gateway.seal) else { return false };
+        let keys = match self.pinned_gateway(net) {
+            Ok(k) => k,
+            Err(why) => {
+                self.refused(&why);
+                return false;
+            }
+        };
         if f.from != net.gateway.host || !f.verify(&net.id, &keys) {
             self.log("net.frame", &format!("a {} frame that the gateway's key didn't sign was dropped", f.kind));
             return false;

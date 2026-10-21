@@ -220,6 +220,8 @@ enum Read {
         quiet: bool,
     },
     NoHello(String),
+    /// The pinned gateway isn't the roster's any more: refused, and said so.
+    NotOurs,
 }
 
 async fn down(n: Arc<Shared>, t: Transport) {
@@ -251,6 +253,11 @@ async fn down(n: Arc<Shared>, t: Transport) {
                     None
                 }
                 Read::NoHello(why) => Some(why),
+                Read::NotOurs => {
+                    tokio::time::sleep(backoff(attempt, n.timing().backoff_min_ms, n.timing().backoff_max_ms)).await;
+                    attempt += 1;
+                    continue;
+                }
             },
             Ok(reply) => match refusal(&n, &reply) {
                 Refusal::Clock(now) => {
@@ -304,6 +311,12 @@ async fn read(n: &Arc<Shared>, t: &Transport, body: NetBody, nonce: &str) -> Rea
         for line in got {
             let Ok(f) = Frame::parse_line(&line) else { continue };
             if !hello {
+                if let Some(net) = n.network() {
+                    if let Err(why) = n.pinned_gateway(&net) {
+                        n.refused(&why);
+                        return Read::NotOurs;
+                    }
+                }
                 match n.hello(&f, nonce) {
                     Ok(behind) => {
                         hello = true;

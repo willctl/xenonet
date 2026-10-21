@@ -330,6 +330,11 @@ fn check(view: Option<&View>, prev: &str, n: u64, e: &Entry) -> R<()> {
             if m.id == view.founder {
                 return Err(refused("the founder can't be removed: a network whose founder is lost is made again"));
             }
+            // Removed, the gateway's host would be cut off from a network
+            // still pinned to it; and every host would lose its gateway.
+            if m.id == view.gateway {
+                return Err(refused(format!("{} is the network's gateway: move the gateway first", m.id)));
+            }
             if e.gateway.is_some() {
                 return Err(NetError::bad("only a gateway entry names a gateway"));
             }
@@ -677,6 +682,26 @@ mod tests {
         e.sign_by("desk", &h.keys["desk"]);
         e.signers[0].host = "studio".into();
         assert!(r.offer(e).is_err(), "a signature checks against its signer's key");
+    }
+
+    #[test]
+    fn the_gateways_host_is_removed_only_once_the_gateway_moved() {
+        let h = hosts();
+        let mut r = network(&h);
+        let e = h.entry(&r, Op::Gateway, h.r("desk", true), &["studio"]);
+        r.offer(e).unwrap();
+        assert_eq!(r.view().gateway, "desk");
+        // Not by the founder, nor by itself leaving.
+        for signers in [&["studio"][..], &["desk"], &["studio", "nook"]] {
+            let e = h.entry(&r, Op::Remove, h.r("desk", true), signers);
+            let err = r.clone().offer(e).unwrap_err();
+            assert!(err.message.contains("move the gateway first"), "{signers:?}: {}", err.message);
+        }
+        // Moved back, it may go.
+        let e = h.entry(&r, Op::Gateway, h.r("studio", true), &["studio"]);
+        r.offer(e).unwrap();
+        let e = h.entry(&r, Op::Remove, h.r("desk", true), &["studio"]);
+        assert_eq!(r.offer(e).unwrap(), Offered::Appended);
     }
 
     #[test]

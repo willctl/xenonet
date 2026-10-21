@@ -401,6 +401,10 @@ async fn the_gateway_moves_by_hand_and_a_host_that_missed_it_follows() {
     // desk is the gateway now, studio links to it, and frames go through it.
     until_state(&c, "desk as the gateway", |s| s["self"]["gateway"] == true && s["gateway"]["link"] == "live").await;
     until_state(&a, "studio linked to desk", |s| s["self"]["gateway"] == false && s["gateway"]["address"] == "127.0.0.1:48118" && s["gateway"]["link"] == "live").await;
+    // The gateway's host can't be removed while it holds the gateway.
+    let (s, v) = a.call("POST", "/api/net/remove", json!({ "host": "desk" }), true).await;
+    assert_eq!(s, 403, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("move the gateway first"), "{v}");
     // Sent at once, while studio still answers the hosts it had: it waits in
     // studio's outbox for the new gateway.
     a.send("desk", Kind::Message, "through the new gateway");
