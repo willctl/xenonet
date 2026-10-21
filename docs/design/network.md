@@ -58,6 +58,24 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
 - Tickets from any window host (section 4), moving the gateway by hand
   (section 9), approvals by entry id, and the Network panel with what
   waits for approval.
+- Detail (section 7): each agent in presence carries the text of what
+  waits on the person, its last message (280 characters) and its stuck
+  reasons, from the live state, with home folders as `~` by the relay's
+  scrubber. Titles only leaves them out. A receiver keeps only the fields
+  the schema declares, and the detail reaches the console's engine state,
+  never `peers` or an agent's view. The strip and the Network panel show
+  the question's text and the stuck reason.
+- Other hosts on the map, from presence (section 7): the page makes each
+  one a constellation as the SSH prototype draws one (a project per repo
+  key or folder, sessions with their state and waits, ids qualified
+  `@<host>:…`), merged into the map before it's drawn
+  (`src/network-map.js`), with the hosts layout's cap on what's drawn.
+- The chime (section 8): presence carries `youAt`, when the person last
+  worked at a host's console (input in the last two minutes, to the half
+  minute, by the gateway's clock), and every host's row in the state has
+  it. Every waiting item, local or remote, plays its chime and
+  notification only on the host with the newest `youAt`, or on all of them
+  once that's five minutes old.
 - A2A behind the front door (section 12).
 - `crates/xenonet-service/tests/net_engine.rs` runs three services with the
   real engine on each: joining with tickets from the gateway's host and from
@@ -109,18 +127,13 @@ Settled while building, beyond the sections below:
 Not built yet:
 
 - **The map's `relay` frames through the gateway** (section 7). Hosts drop
-  relay frames, and a console shows other hosts from presence: in the
-  Network panel and the attention strip, not as constellations on the map.
-- **Detail** (section 7): presence carries no question's text, last
-  message or stuck reason, so the titles-only setting is kept but has
-  nothing to hold back.
+  relay frames, so another host's constellation has what its presence
+  says: no wiki, transcripts or stats, and no bridges between clones.
 - **`operator` frames** (section 8) are checked when they arrive, but
   nothing sends one: the person messages a session on another host as a
   `message` frame from `actor:you`, which a host takes only from a window
   host's frame with a strong check; adding and removing machines are
   roster entries the window host signs itself.
-- **The chime everywhere after five minutes away** (section 8): it plays
-  only where you are.
 - **Moving actors' tokens and scopes with the gateway** (section 9).
 
 ## Words
