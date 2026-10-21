@@ -638,7 +638,7 @@ async fn a_founder_alone_leaves_only_with_force_and_its_lan_door_closes() {
     assert_eq!(tokio::task::spawn_blocking(door).await.unwrap(), 401, "the LAN door is still open");
     let (s, v) = a.call("POST", "/api/net/leave", json!({ "force": true }), true).await;
     assert_eq!(s, 200, "{v}");
-    assert_eq!((v["left"].clone(), v["removed"].clone()), (json!("home"), json!(false)));
+    assert_eq!((v["left"].clone(), v["removed"].clone(), v["founder"].clone()), (json!("home"), json!(false), json!(true)), "the founder never asks to be removed");
     assert_eq!(a.state().await["network"], Value::Null);
     let files = a.dir.join("state").join("network");
     assert!(["network.json", "host.key", "net.sqlite", "gateway.sqlite"].iter().all(|f| !files.join(f).exists()), "{}", files.display());

@@ -215,7 +215,15 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         "leave" => {
             let r = call(&s, "POST", "/api/net/leave", Some(&json!({ "force": flags.on("force") })))?;
             out(&r, &|r| {
-                let asked = if on(r, "removed") { "" } else { " (the gateway didn't hear it ask: a window host can remove it)" };
+                // The founder never asks to be removed: its key is the root, so the
+                // network has no founder after it.
+                let asked = if on(r, "founder") {
+                    " (it founded the network, which has no founder now)"
+                } else if on(r, "removed") {
+                    ""
+                } else {
+                    " (the gateway didn't hear it ask: a window host can remove it)"
+                };
                 print(format!("{} left {}{asked}; this XenoNet carries on alone", c::green("✓"), t(r, "left")));
             })
         }

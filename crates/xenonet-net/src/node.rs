@@ -1254,7 +1254,7 @@ impl Node {
         *n.status.locked() = Status::default();
         n.peers.locked().clear();
         n.log("net.leave", &format!("this machine left the network {}", net.name));
-        Ok(json!({ "left": net.name, "removed": asked }))
+        Ok(json!({ "left": net.name, "removed": asked, "founder": founder }))
     }
 
     /// An entry this host signed, to the gateway: here when it's the
