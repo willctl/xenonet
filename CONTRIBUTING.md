@@ -4,7 +4,7 @@ Issues and pull requests are welcome. This page says how to run XenoNet from a c
 
 ## Running from source
 
-You need [Node.js](https://nodejs.org) 22.13 or later (CI uses 24) and git.
+You need [Node.js](https://nodejs.org) 22.13 or later (CI uses 24), git and [Rust](https://rustup.rs) through rustup. `npm run app` builds the `xenonet` binary first, with the Rust version the checkout pins.
 
 ```bash
 git clone https://github.com/willctl/xenonet
@@ -25,9 +25,9 @@ npm run test:e2e    # end-to-end tests on a hidden XenoNet Dev, about five minut
 npm run build       # the production page, which --prod and the installers use
 ```
 
-Run `npm test` after every change. Run `npm run test:e2e` too when a change touches the page, Desktop or the control channel. It needs a GPU, since software rendering doesn't settle the map's tests reliably, and a failing test saves a screenshot of what it saw to `.xenonet/`. There is no linter: the tests are the check, and the code's style is the code around it, with plain comments that say why, no new dependency without a reason, and paths under the home folder shown as `~`.
+Run `npm test` after every change. Run `npm run test:e2e` too when a change touches the page, Desktop or the control channel. Run it on a machine with a GPU. In software rendering it takes much longer, and `XENONET_SOFTWARE_RENDERING=1` stretches its time limits to match, as CI does on Linux ([Development](docs/guide/development.md#linux-and-wsl2-checks)). A failing test saves a screenshot of what it saw to `.xenonet/`. For the JS there is no linter: the tests are the check, and the code's style is the code around it, with plain comments that say why, no new dependency without a reason, and paths under the home folder shown as `~`. A change under `crates/` also takes `cargo test --workspace` and `npm run lint:rust`, which runs rustfmt, clippy, the docs build, cargo deny and cargo shear.
 
-The Checks workflow runs `npm test` and `npm run build` on Windows, macOS and Linux, and the updater's desktop tests on Windows. Hosted runners skip the Desktop restart test, so run it before a release; [Releases](docs/guide/releases.md) says how.
+The Checks workflow runs `npm test`, `npm run build`, the Rust tests and the binary's tests on Windows, macOS and Linux, the Rust lint, the updater's desktop tests on Windows, and the whole end-to-end suite on Linux in software rendering. Hosted runners skip the Desktop restart test, so run it before a release; [Releases](docs/guide/releases.md) says how.
 
 ## Sending a change
 

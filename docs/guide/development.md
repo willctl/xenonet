@@ -230,13 +230,13 @@ Requests reach it as `POST /api/dev/control` on the instance's server, which rel
 
 ## Layout
 
-XenoNet is one core with several ways in: the console, the desktop app, the HTTP API, the `xenonet` command and the MCP servers. The core holds the logic. Each of the others is a thin layer over it, which imports from `core/` and from no other layer. The one exception is `xenonet mcp`, which starts the MCP server in `mcp/`.
+XenoNet is one core with several ways in: the console, the desktop app, the HTTP API, the `xenonet` command and the MCP servers. The service, the command, the hooks and the MCP servers that XenoNet runs are the `xenonet` binary, built from `crates/`. `core/`, `server/`, `cli/` and `mcp/` are the same in JS: the contract the Rust is tested against, and the modules Desktop and the page import. The core holds the logic. Each of the others is a thin layer over it, which imports from `core/` and from no other layer. The one exception is `xenonet mcp`, which starts the MCP server in `mcp/`.
 
 The console page imports only the core modules that have no Node in them, such as `themes.js`, `units.js`, `needs-you.js` and `apps.js`. The `xenonet` command and the MCP servers reach a running XenoNet through its HTTP API, with `core/client.js`. They reach XenoNet Dev through its control channel, with `core/control.js`.
 
 ### `core/`
 
-`core/` is XenoNet itself, in Node.
+`core/` is XenoNet's core in JS, which the Rust in `crates/` follows module by module.
 
 | Files | What they cover |
 | --- | --- |
@@ -356,4 +356,4 @@ The console page imports only the core modules that have no Node in them, such a
 
 ### `crates/`
 
-`crates/` is the Rust core that XenoNet is moving to, a crate per layer ([Rust core](../design/rust-core.md)). While the port runs, `xenonet-node` puts the Rust behind the JS modules. Each ported module has a twin in `crates/xenonet-node/js/core/`, with the module's exports, backed by Rust. `npm run rust:build` builds the addon. `npm run test:rust` runs the test files listed in `crates/xenonet-node/parity.json` with every twin loaded in place of its module, and `npm run test:rust -- --all` tries every test file that way. `npm test` still runs the JS.
+`crates/` is the Rust core, a crate per layer ([Rust core](../design/rust-core.md)), and builds the `xenonet` binary that XenoNet runs. `xenonet-node` puts the Rust behind the JS modules, so the JS tests check it too. Each ported module has a twin in `crates/xenonet-node/js/core/`, with the module's exports, backed by Rust. `npm run rust:build` builds the addon. `npm run test:rust` runs the test files listed in `crates/xenonet-node/parity.json` with every twin loaded in place of its module, and `npm run test:rust -- --all` tries every test file that way. `npm test` still runs the JS.

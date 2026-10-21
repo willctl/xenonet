@@ -125,7 +125,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
     // Add a machine from a terminal is macOS's alone: refused here before
     // anything is asked.
     if what == "add-machine" && !cfg!(target_os = "macos") {
-        return Err(Fail::new("Add a machine is XenoNet's window's on this system: Settings, then Network, then Add a machine", 1));
+        return Err(Fail::new("Add a machine is XenoNet's window's on this system: choose Add a machine in the palette", 1));
     }
     let s = need(flags)?;
     let out = |v: &Value, show: &dyn Fn(&Value)| {

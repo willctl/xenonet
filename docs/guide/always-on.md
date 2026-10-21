@@ -24,7 +24,7 @@ Turning it off stops the copy that started at login, and Desktop starts its own 
 - `xenonet service stop` stops it until you next log in. launchd doesn't restart a clean stop.
 - Its output goes to the service's log in the runtime folder, `service-47840.log`, as it does when Desktop starts it. `xenonet logs` lists its errors.
 
-macOS lists it in System Settings › General › Login Items & Extensions. Turning it off there keeps it from starting at login. A launch agent starts at login, not at boot: a Mac that should serve as a host before anyone logs in needs automatic login.
+macOS lists it in System Settings › General › Login Items & Extensions. Turning it off there keeps it from starting at login. A launch agent starts at login, not at boot: a Mac that should be in a network, or serve as an SSH host, before anyone logs in needs automatic login.
 
 ### Linux
 
@@ -35,7 +35,7 @@ macOS lists it in System Settings › General › Login Items & Extensions. Turn
 - `xenonet service stop` stops it until you next log in, or until `systemctl --user start xenonet`.
 - Its output is appended to the service's log in the runtime folder, `service-47840.log`.
 
-To start it at boot, before anyone logs in, which a host needs, run `loginctl enable-linger $USER` once. That may need an administrator, so XenoNet prints the command rather than running it.
+To start it at boot, before anyone logs in, which a machine others reach needs, run `loginctl enable-linger $USER` once. That may need an administrator, so XenoNet prints the command rather than running it.
 
 ### Windows
 
@@ -46,7 +46,7 @@ To start it at boot, before anyone logs in, which a host needs, run `loginctl en
 - `xenonet service stop` stops it until you next sign in.
 - Its output is appended to the service's log in the runtime folder, `service-47840.log`.
 
-Task Scheduler shows it in its library as XenoNet Service. Disabling it there keeps it from starting at sign-in, and XenoNet leaves it off until you run `xenonet service install` again. A scheduled task that runs as you runs only while you're signed in, so a Windows computer serves as a host only while someone is signed in to it.
+Task Scheduler shows it in its library as XenoNet Service. Disabling it there keeps it from starting at sign-in, and XenoNet leaves it off until you run `xenonet service install` again. A scheduled task that runs as you runs only while you're signed in, so a Windows computer is in a network only while someone is signed in to it.
 
 Start at sign-in, in the tray menu and the installer, is a separate setting: it opens Desktop when you sign in. Uninstalling Desktop turns the scheduled task off too.
 

@@ -18,9 +18,11 @@ Unsigned Mac builds show that a new release is available and link to its downloa
 
 The wizard asks who to install for, where, and whether to add a desktop shortcut and start XenoNet at sign-in. Both are on for a fresh install. If XenoNet is running, Setup closes it first. Reinstalling keeps your shortcut and sign-in choices.
 
+The first time XenoNet opens, it also offers to start its service at sign-in, so sessions keep coordinating while the window is closed. Background service in the palette or the tray changes that later. See [Keeping the service running](always-on.md).
+
 Setup also adds `%LOCALAPPDATA%\XenoNet\bin` to your user Path, so the [xenonet command](cli.md) works in a new terminal once XenoNet has started. Uninstalling with your data removed takes it out again.
 
-To uninstall Desktop, use Installed apps, or `Uninstall XenoNet.exe` in the install folder. It keeps Service, Tools and your data by default. Choosing to remove data also stops the service and removes the installed components.
+To uninstall Desktop, use Installed apps, or `Uninstall XenoNet.exe` in the install folder. It keeps Service, Tools and your data by default, and stops the service starting at sign-in if you'd turned that on. Choosing to remove data also stops the service and removes the installed components.
 
 The installer isn't code-signed yet, so SmartScreen may ask you to confirm the first time. Choose More info, then Run anyway.
 
