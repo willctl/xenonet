@@ -93,10 +93,10 @@ test("A2A is off until the window turns it on; the card's address comes with the
   assert.equal(card, "https://xenonet.example.com/.well-known/agent-card.json");
   // Connect… on an actor of your own, as an A2A agent: its token, masked,
   // and the card's address.
-  const wren = await fromWindow(`return await call("POST", "/api/actors", { schema: "actor/registration/v1", name: "Wren", capabilities: ["message-agents"], heartbeatMs: 60000 });`);
-  assert.equal(wren.status, 201);
-  assert.equal(await until(() => click('[data-ac-gateway="actor:wren"]')), true);
-  assert.equal(await until(() => click('[data-ac-gateway-make="actor:wren"][data-ac-kind="a2a"]')), true);
+  const plover = await fromWindow(`return await call("POST", "/api/actors", { schema: "actor/registration/v1", name: "Plover", capabilities: ["message-agents"], heartbeatMs: 60000 });`);
+  assert.equal(plover.status, 201);
+  assert.equal(await until(() => click('[data-ac-gateway="actor:plover"]')), true);
+  assert.equal(await until(() => click('[data-ac-gateway-make="actor:plover"][data-ac-kind="a2a"]')), true);
   assert.match((await until(() => text("[data-ac-token-text]"))) ?? "", /^xenonet_gateway_•+$/);
   assert.equal(await s.eval(`return /xenonet_gateway_[0-9a-f]{64}/.test(document.documentElement.outerHTML)`), false);
   assert.match((await text(".ac-steps")) ?? "", /Agent Card URL[\s\S]*https:\/\/xenonet\.example\.com\/\.well-known\/agent-card\.json[\s\S]*Authorization: Bearer <token>/);
@@ -105,6 +105,6 @@ test("A2A is off until the window turns it on; the card's address comes with the
   // Off again; the gateway too.
   assert.equal((await fromWindow(`return await call("POST", "/api/a2a", { on: false });`)).body.on, false);
   await fromWindow(`return await call("POST", "/api/actors/gateway", { on: false, tunnel: null });`);
-  await fromWindow(`return await call("DELETE", "/api/actors/wren");`);
+  await fromWindow(`return await call("DELETE", "/api/actors/plover");`);
   assert.equal((await s.driver("state")).errors, 0, JSON.stringify(await s.driver("errors")));
 }));
