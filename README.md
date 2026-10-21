@@ -207,13 +207,24 @@ input schemas, context resources and templates, and recent session usage.
 XenoNet labels missing metadata and never shows the credentials in a
 server's configuration.
 
-### Shows other machines, as a prototype
+### Joins your machines into one network
+
+A XenoNet network joins the machines you use. The sessions on each see the
+sessions on the others in `peers`, message them, and are warned when one is
+changing the same file in its clone. What waits on you on any machine shows
+in every console. One machine is the gateway, and the others link out to it,
+so no machine opens a port. Frames between machines are signed and sealed:
+the gateway passes them on and can't read them. **Add a machine** shows one
+line to run on the new machine, which works once, for ten minutes.
+[A network across your machines](docs/guide/network.md) shows how.
+
+### Shows other machines over SSH, as a prototype
 
 Start XenoNet with `XENONET_HOSTS=1` and it can show other machines' XenoNets
-beside its own, read only. Each machine runs its own XenoNet, and your
-console reads it over SSH. XenoNet does not expose a service to your local network. A machine sends
-titles, states and counts, and a transcript crosses only when you open it.
-[Other machines](docs/guide/other-machines.md) shows how to set one up.
+beside its own, read only, without a network. Each machine runs its own
+XenoNet, and your console reads it over SSH. A machine sends titles, states
+and counts, and a transcript crosses only when you open it.
+[Other machines over SSH](docs/guide/other-machines.md) shows how to set one up.
 
 ## Privacy
 

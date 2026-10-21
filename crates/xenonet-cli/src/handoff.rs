@@ -47,6 +47,13 @@ fn step(text: &str, copy: Option<&str>) -> Value {
 pub fn handoff(product: Option<&str>, url: &str, token: Option<&str>) -> Value {
     let host = host_of(url);
     match (product, token) {
+        // An agent that speaks A2A: `url` is XenoNet's Agent Card.
+        (Some("a2a"), Some(_)) => json!({
+            "app": "A2A agent",
+            "steps": [step("Give the agent XenoNet's Agent Card URL.", Some("url")), step("Have it send the token in the header Authorization: Bearer <token>.", Some("token"))],
+            "message": null,
+        }),
+        (Some("a2a"), None) => json!({ "app": "A2A agent", "steps": [step("Give the agent XenoNet's new Agent Card URL. Its token still works.", Some("url"))], "message": null }),
         (Some("grok-bot"), Some(token)) => json!({
             "app": "Grok Bot",
             "steps": [step("Paste this into a new Grok Bot chat.", Some("message")), step("Once it's added, delete that chat: the token stays in it.", None), step("For answers within seconds, give XenoNet a way to wake it.", Some("wake"))],
@@ -92,5 +99,14 @@ mod tests {
         assert_eq!(h["app"], "Muse");
         assert!(h["message"].as_str().unwrap().contains("Change your \"XenoNet\" connector's host to xenonet-demo.ngrok-free.app and keep its key"));
         assert_eq!(handoff(None, "https://x.example/mcp", None)["steps"][0]["copy"], "url");
+    }
+
+    #[test]
+    fn an_a2a_agent_gets_the_card_and_the_bearer() {
+        let h = handoff(Some("a2a"), "https://x.example/.well-known/agent-card.json", Some("t"));
+        assert_eq!(h["app"], "A2A agent");
+        assert_eq!(h["steps"][0]["copy"], "url");
+        assert_eq!(h["steps"][1]["copy"], "token");
+        assert_eq!(h["message"], Value::Null, "the token never goes in a message to paste");
     }
 }

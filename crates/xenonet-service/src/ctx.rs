@@ -30,6 +30,8 @@ pub struct Ctx {
     pub components: Mutex<Option<Arc<Components>>>,
     /// The actor gateway's switch, made once the service is (it logs to it).
     pub gateway: std::sync::OnceLock<Arc<GatewayControl>>,
+    /// A2A agents' side of the gateway (a2a/), made with it.
+    pub a2a: std::sync::OnceLock<Arc<crate::a2a::A2a>>,
     pub endpoint: Mutex<Option<Arc<crate::assistant_endpoint::Endpoint>>>,
     pub themes_dir: String,
     pub music: Mutex<Music>,
@@ -38,6 +40,9 @@ pub struct Ctx {
     pub refusal_notes: Mutex<RefusalNotes>,
     /// XenoNet Dev reading another XenoNet (XENONET_UPSTREAM).
     pub upstream: Option<crate::upstream::Upstream>,
+    /// The network across machines (gateway/network.rs), made once the
+    /// service is: its node, link and LAN listener.
+    pub net: std::sync::OnceLock<Arc<crate::gateway::network::NetService>>,
 }
 
 /// What Spotify's poll keeps between looks (server/index.js's `music`).
@@ -85,12 +90,14 @@ impl Ctx {
             caller,
             components: Mutex::new(None),
             gateway: std::sync::OnceLock::new(),
+            a2a: std::sync::OnceLock::new(),
             endpoint: Mutex::new(None),
             themes_dir,
             music: Mutex::new(Music::default()),
             you_reports: Mutex::new(Bucket::new(YOU_REPORTS, now_ms())),
             refusal_notes: Mutex::new(RefusalNotes::default()),
             upstream: None,
+            net: std::sync::OnceLock::new(),
         }
     }
 

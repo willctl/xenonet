@@ -1,0 +1,124 @@
+{
+  "about": "Known answers for one network across machines (docs/design/network.md, section 3): written by crates/xenonet-net/tests/known_answers.rs. Secrets here are test values, never a real host's.",
+  "network": "net_00112233445566778899aabbccddeeff",
+  "hosts": [
+    {
+      "id": "studio",
+      "signSeed": "QQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+      "sealSecret": "QgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+      "sign": "2ph1Vn1J487bzyOp-aVkJbT1x4duQcNNE4BQbyABlN8",
+      "seal": "UPCLiZB5wBQeYNSSuVGopVd6UxmMsQ72G1AIpmtt_FE",
+      "keyId": "xnk1_nbfuzqjnx7kwkmuanszkrlbq5pstmg7e"
+    },
+    {
+      "id": "laptop",
+      "signSeed": "QwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
+      "sealSecret": "RAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ",
+      "sign": "5otm9r4x51L-4YEuxduoCAOQlmJUnCKkel1aqX0_Uyk",
+      "seal": "OBjoHjQEaAQZYxFn9ejjSjiIDwgR4o1z0hhQrghwQh8",
+      "keyId": "xnk1_7u27fms2purut6skexnyjpeanykqq2s7"
+    }
+  ],
+  "frame": {
+    "ephemeralSecret": "SQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+    "body": {
+      "schema": "network/message/v1",
+      "mid": "msg_00000000-0000-4000-8000-000000000001",
+      "body": "hello from studio"
+    },
+    "sealingHead": "xenonet-net/1\nnet_00112233445566778899aabbccddeeff\nfrm_00000000-0000-4000-8000-0000000000aa\nmessage\nstudio\nlaptop\n1792512345678\n1",
+    "head": "xenonet-net/1\nnet_00112233445566778899aabbccddeeff\nfrm_00000000-0000-4000-8000-0000000000aa\nmessage\nstudio\nlaptop\n1792512345678\n1\nMRXcGdDLxeoh8JcF8SZSzy-W3T0QGU7KD_FhF5T0T-M",
+    "frame": {
+      "v": 1,
+      "id": "frm_00000000-0000-4000-8000-0000000000aa",
+      "kind": "message",
+      "from": "studio",
+      "to": "laptop",
+      "at": 1792512345678,
+      "sealed": true,
+      "body": "ONGtHtN_RYgcXi9LoskF9gCg5BNwLk0r63UuXzirk0uWXV-sdRPNkPca038H7ZtvrOeF7EY1nvEVT0jAFklaRD8FwAuWCmV-TTQD3GrSHcgHdezOvgj3SuZK82E5sjY5TTbu7DZRfGtkIw2ws2ZwKpf8oa4maBH1wlpkhrqfbTcC8xz2AkZNhtPJgfSdvr5kk2M50oKXaPBKg7c",
+      "sig": "Pc1W7JMZTCnRAL8ja_RlKxyZKsyXSa_59-BITrOw51ud8qWHh3iyMELT2GR8TX15FFCBuv4o-XPNbtZKbV6JAg"
+    }
+  },
+  "gatewayFrame": {
+    "head": "xenonet-net/1\nnet_00112233445566778899aabbccddeeff\nfrm_00000000-0000-4000-8000-0000000000bb\nping\nstudio\nlaptop\n1792512345678\n0\nShaixQzN0GbHLiAAAb0xCBtasFCpC2QHu4nzYXwknBQ",
+    "frame": {
+      "v": 1,
+      "id": "frm_00000000-0000-4000-8000-0000000000bb",
+      "kind": "ping",
+      "from": "studio",
+      "to": "laptop",
+      "at": 1792512345678,
+      "sealed": false,
+      "body": "eyJub3ciOjE3OTI1MTIzNDU2NzgsImxpbmtlZCI6WyJsYXB0b3AiLCJzdHVkaW8iXX0",
+      "sig": "9BVOwe_XXSeT3_Z9uPOzT7tzgovkYRyrAtN4AyFQxkTj1zGOSTyw9RwdY5oIED2yvbl7V4NEmtcAnYk7er7bDQ"
+    }
+  },
+  "ticket": {
+    "code": "KX7Q49MZT2",
+    "display": "KX7Q-49MZ-T2",
+    "hash": "m5VW2ALYPf1lyDLGxluig_BMwipjqH1CVSixXyIv76g",
+    "nonce": "bm9uY2Utb2YtdGhlLWpvaW4",
+    "joinerKeyId": "xnk1_7u27fms2purut6skexnyjpeanykqq2s7",
+    "joinProof": "jME60y_MlmGAz8l2dxX2KTDidmLQ0Neuk7f5KIjet4k",
+    "gatewayKeyId": "xnk1_nbfuzqjnx7kwkmuanszkrlbq5pstmg7e",
+    "gatewayProof": "n1jdnsK-0YMSq61tp-7ixZLkOWLqHGTBws4JAHo06Ds"
+  },
+  "request": {
+    "method": "POST",
+    "target": "/net/v1/frames",
+    "body": "{\"frames\":[]}",
+    "signingString": "xenonet-req/1\nnet_00112233445566778899aabbccddeeff\nPOST\n/net/v1/frames\n1792512345000\ncmVxdWVzdC1ub25jZQ\nlaptop\nKsCnTIQhhoUZMYTnsYlj5f8rFKxCFG2LcCgufW4jEQ8",
+    "headers": {
+      "x-xenonet-net-host": "laptop",
+      "x-xenonet-net-time": "1792512345000",
+      "x-xenonet-net-nonce": "cmVxdWVzdC1ub25jZQ",
+      "x-xenonet-net-sig": "CGWsh_YnphgPCKpJw0C4B5-a7uY8iDWcHUubjjh8On2vKUPNnkYiZ5YoU1QNhCOkSy3ONpPMNL87EH7S3QOxAw"
+    }
+  },
+  "roster": [
+    {
+      "n": 0,
+      "prev": "",
+      "network": "net_00112233445566778899aabbccddeeff",
+      "op": "found",
+      "host": {
+        "id": "studio",
+        "sign": "2ph1Vn1J487bzyOp-aVkJbT1x4duQcNNE4BQbyABlN8",
+        "seal": "UPCLiZB5wBQeYNSSuVGopVd6UxmMsQ72G1AIpmtt_FE",
+        "keyId": "xnk1_nbfuzqjnx7kwkmuanszkrlbq5pstmg7e",
+        "window": true
+      },
+      "gateway": null,
+      "at": 1792512000000,
+      "signers": [
+        {
+          "host": "studio",
+          "sig": "Cw0xOpHzaz3ojlXJR2sVyFe3gO7Hbj5Cdo0HFy72CkL1agucjJvMd9k7DeUN4IVMHGjHfIJw3yasgRZsoeCnAQ"
+        }
+      ]
+    },
+    {
+      "n": 1,
+      "prev": "IqXFVtiJTbTBfCFyv_KZkkpu0bZD1KZc2jEdUhkkWMU",
+      "network": "net_00112233445566778899aabbccddeeff",
+      "op": "add",
+      "host": {
+        "id": "laptop",
+        "sign": "5otm9r4x51L-4YEuxduoCAOQlmJUnCKkel1aqX0_Uyk",
+        "seal": "OBjoHjQEaAQZYxFn9ejjSjiIDwgR4o1z0hhQrghwQh8",
+        "keyId": "xnk1_7u27fms2purut6skexnyjpeanykqq2s7",
+        "window": false
+      },
+      "gateway": null,
+      "at": 1792512100000,
+      "signers": [
+        {
+          "host": "studio",
+          "sig": "bVAyWLMV9-xxVs8RXDQtvaALvwUkIvCWLjpbHp2ohzfPn8RZhl261Y8xLVHLK64xP7-Q4Y1plKAmh1efDPr9Aw"
+        }
+      ]
+    }
+  ],
+  "rosterHead": "MvYlpaEsIXaXz5V29x8xolCf5uCXVox8cikDE35E61Q"
+}

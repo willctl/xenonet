@@ -54,6 +54,9 @@ pub struct World {
     pub observers: OnceLock<crate::observers::Observers>,
     /// The world itself, for the timers and tasks it starts.
     pub me: OnceLock<std::sync::Weak<World>>,
+    /// What this machine last told the network of itself (its presence
+    /// and claims), and the timer that tells it again.
+    pub net: crate::network::NetState,
 }
 
 impl World {

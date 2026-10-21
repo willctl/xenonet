@@ -12,11 +12,13 @@ pub mod environments;
 pub mod hosts;
 pub mod integrations;
 pub mod mcp;
+pub mod net;
+pub mod net_sim;
 pub mod refusals;
 pub mod themes;
 pub mod workspace;
 
-use crate::borrowed::{attest, is_actor_agent, platform, Sender};
+use crate::borrowed::{attest, is_actor_agent, is_agent_id, platform, Sender};
 use crate::cores::settings::{MAX_BRIEF, NEEDS_INPUT_URL};
 use crate::cores::{ok, CoreError, Kind};
 use crate::ctx::{pending_reply, Answer, Ctx};
@@ -60,9 +62,16 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     }
     let cores = &ctx.cores;
 
-    // You, writing to an actor from XenoNet's own window: only with the
-    // window's key, never with a token, and only to an actor that reads
-    // its inbox.
+    // XenoNet Dev's simulated network answers first while one runs
+    // (net_sim.rs); GET /api/net/state is the core's route, below, which
+    // asks for the simulated state first.
+    if let Some(r) = net_sim::route(ctx, req).await? {
+        return Ok(r);
+    }
+
+    // You, writing from XenoNet's own window to an actor that reads its
+    // inbox, or to a session, here or on another machine of your network
+    // (`@<host>:<id>`): only with the window's key, never with a token.
     if m == "POST" && route == "/api/actors/you/message" {
         if !ctx.window_only(req) {
             return Ok(Reply::coded(403, "yours", "this is for XenoNet's own window"));
@@ -73,8 +82,10 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         }
         let body = req.json(16 << 10).await.unwrap_or(Value::Null);
         let to = body.get("to").and_then(Value::as_str).unwrap_or("").to_string();
-        if !is_actor_agent(&to) {
-            return Ok(Reply::coded(400, "bad-request", "write to an actor here (actor:<slug>); sessions get messages from other sessions and actors"));
+        // Another host's session or actor, by its qualified id.
+        let remote = xenonet_base::ids::parse_qualified(&to).is_some_and(|(h, local)| h.is_some() && (is_agent_id(Some(local)) || is_actor_agent(local)));
+        if !(is_actor_agent(&to) || is_agent_id(Some(&to)) || remote) {
+            return Ok(Reply::coded(400, "bad-request", "write to a session or an actor by its id (claude:<session id>, actor:<slug>, or @<host>:<id> on another machine)"));
         }
         let envelope = attest(Sender { id: YOU, kind: "you", name: Some("you".into()), product: None }, "window", &Value::Null, &ctx.config.home, ctx.now(), platform());
         return Ok(match cores.engine.send(YOU, json!({ "to": to, "text": body.get("text") }), Some(json!({ "envelope": envelope }))).await {
@@ -100,6 +111,12 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         let r = delivery::DeliveryRoutes { policy: cores.policy.clone(), router: cores.router.clone(), engine: cores.engine.clone(), verify: cores.verify.clone() };
         return Ok(r.route(req).await);
     }
+    // A2A's switch and the agents that called, for the Actors panel: the
+    // owner's (a2a/routes.rs). Not under /api/actors/, where it would be a
+    // slug.
+    if route == "/api/a2a" {
+        return Ok(if m == "GET" || m == "POST" { crate::a2a::routes::route(ctx, req).await } else { Reply::error(404, "not found") });
+    }
     if route == "/api/actors" || route.starts_with("/api/actors/") {
         let taken = std::mem::replace(req, Req::fake("GET", "/", &[], None));
         return actors::ActorRoutes { ctx }.route(taken).await;
@@ -107,6 +124,12 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     if route == "/api/assistant" || route.starts_with("/api/assistant/") {
         let taken = std::mem::replace(req, Req::fake("GET", "/", &[], None));
         return assistant::AssistantRoutes { ctx }.route(taken).await;
+    }
+    // The network across machines: Rust-only, with no JS twin.
+    if route.starts_with("/api/net/") {
+        if let Some(a) = net::route(ctx, req).await {
+            return a;
+        }
     }
     if let Some(r) = (hosts::HostRoutes { hosts: cores.hosts.clone(), hub: cores.hub.clone(), verify: cores.verify.clone(), home: &ctx.config.home }).route(req).await {
         return Ok(r);
@@ -1134,6 +1157,10 @@ fn simulate(ctx: &Arc<Ctx>, kind: &Value, body: &Value) -> Result<Option<Value>,
             None => Ok(None),
         };
     }
+    // A made-up network across machines; a is the host you're at.
+    if kind_s.starts_with("net-") {
+        return Ok(net_sim::simulate(ctx, &kind_s, a.as_deref()));
+    }
     if kind_s == "doctor" {
         // The doctor finding a problem, reported as a real run would be; the
         // next real run (or clear) puts back what's true.
@@ -1153,10 +1180,12 @@ fn simulate(ctx: &Arc<Ctx>, kind: &Value, body: &Value) -> Result<Option<Value>,
         tokio::spawn(async move {
             let _ = c.cores.doctor.check(true, false).await;
         });
-        // An actor waiting on you stops waiting too.
+        // An actor waiting on you stops waiting too, and a made-up network
+        // goes.
         if let Some(x) = &cores.actors {
             let _ = x.simulate("clear", None, None);
         }
+        net_sim::clear(ctx);
     }
     let Some(done) = cores.state.simulate(&kind_s, a, b)? else { return Ok(None) };
     ctx.events.broadcast("live", &cores.state.live_snapshot()?, Local::Same);
