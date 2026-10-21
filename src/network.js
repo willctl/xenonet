@@ -28,7 +28,7 @@
 import { escapeHtml as h } from "./format.js";
 import { hostOfId } from "./hosts.js";
 import { keepSecret, forgetSecrets, secretHtml, secretClick, hideOnBlur, secretValue } from "./secret.js";
-import { stateOf, inNetwork, clock, linkWords, skewWords, hostLine, hostTags, outboxWords, ticketWords, remoteAgents, remoteWaits, hostIdProblem, joinOf, joinFields, KIND_WORDS } from "./network-model.js";
+import { stateOf, inNetwork, clock, linkWords, skewWords, hostLine, hostTags, outboxWords, ticketWords, remoteAgents, remoteWaits, hostIdProblem, joinOf, joinFields, KIND_WORDS, TICKET_MS } from "./network-model.js";
 
 const EVERY_IN = 10e3;
 const EVERY_OUT = 60e3;
@@ -364,7 +364,19 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     body().querySelector("[data-net-join-ticket]").value = "";
     if (!address || !ticket) return failed({ status: 400, error: "Give the address and the ticket from the line Add a machine showed." });
     return busyWith(async () => {
-      const r = await calls.call("POST", "/api/net/join", { address, ticket });
+      let r = await calls.call("POST", "/api/net/join", { address, ticket });
+      // A ticket made on a machine that isn't the gateway waits for that
+      // machine to sign this one in, or for a second approval: say why, and
+      // ask again until the ticket lapses.
+      const until = Date.now() + TICKET_MS;
+      let said = false;
+      while (r.ok && r.data?.waiting && Date.now() < until) {
+        if (!said) toast(r.data.message ?? "The join waits for the machine that made the ticket.");
+        said = true;
+        await new Promise((done) => setTimeout(done, 3000));
+        r = await calls.call("POST", "/api/net/join", { address, ticket });
+      }
+      if (r.ok && r.data?.waiting) return failed({ status: 409, error: r.data.message ?? "The ticket lapsed while the join waited." });
       if (!r.ok) return failed(r, "xenonet net join <address> <ticket>");
       sfx("success");
       await refresh();

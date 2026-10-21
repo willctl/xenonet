@@ -113,6 +113,10 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
     };
     match result {
         Ok(v) => Reply::json(200, v),
+        // The ticket's maker hasn't signed this machine in yet, or a second
+        // window host hasn't approved it: the join is taken, and waits.
+        // The window and the CLI say why and ask again.
+        Err(e) if e.code == "waiting" => Reply::json(202, json!({ "waiting": true, "message": e.message })),
         Err(e) => refused(&e),
     }
 }

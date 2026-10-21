@@ -333,7 +333,7 @@ async fn join(h: &Host, address: &str, code: &str) {
     let end = std::time::Instant::now() + Duration::from_secs(20);
     loop {
         let (s, v) = h.window("POST", "/api/net/join", json!({ "address": address, "ticket": code })).await;
-        if s == 409 && v["code"] == "waiting" && std::time::Instant::now() < end {
+        if s == 202 && v["waiting"] == true && std::time::Instant::now() < end {
             continue;
         }
         assert_eq!(s, 200, "{} joins: {v}", h.name);
@@ -591,8 +591,8 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     b.svc.stop();
     let e = Host::open("den", root.join("den"), vec![], None).await;
     let (s, v) = e.window("POST", "/api/net/join", json!({ "address": address, "ticket": code })).await;
-    assert_eq!((s, v["code"].clone()), (409, json!("waiting")), "{v}");
-    assert!(v["error"].as_str().unwrap().contains("laptop made this ticket and signs den in, and it's offline"), "{v}");
+    assert_eq!((s, v["waiting"].clone()), (202, json!(true)), "{v}");
+    assert!(v["message"].as_str().unwrap().contains("laptop made this ticket and signs den in, and it's offline"), "{v}");
     b.svc.start().await.unwrap();
     let st = until_value("den's add waiting for approval at studio", 20, || async {
         let st = a.state().await;
@@ -601,8 +601,8 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     .await;
     assert_eq!((st["proposals"][0]["op"].clone(), st["proposals"][0]["host"].clone(), st["proposals"][0]["signers"].clone()), (json!("add"), json!("den"), json!(["laptop"])));
     let (s, v) = e.window("POST", "/api/net/join", json!({ "address": address, "ticket": code })).await;
-    assert_eq!((s, v["code"].clone()), (409, json!("waiting")), "{v}");
-    assert!(v["error"].as_str().unwrap().contains("needs the founder or a second window host"), "{v}");
+    assert_eq!((s, v["waiting"].clone()), (202, json!(true)), "{v}");
+    assert!(v["message"].as_str().unwrap().contains("needs the founder or a second window host"), "{v}");
     let (s, v) = a.window("POST", "/api/net/approve", json!({ "id": st["proposals"][0]["id"] })).await;
     assert_eq!(s, 200, "{v}");
     join(&e, &address, &code).await;

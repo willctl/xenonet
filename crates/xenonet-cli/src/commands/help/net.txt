@@ -14,7 +14,9 @@ on and can't read them.
   xenonet net join <address> <ticket>
                                    joins the network, with the line Add a
                                    machine showed: it works once, for ten
-                                   minutes
+                                   minutes. A ticket made on a machine that
+                                   isn't the gateway waits for that machine
+                                   to sign this one in
   xenonet net status [--json]      the network, this machine, the gateway and
                                    the link, and what waits to be sent
   xenonet net hosts [--json]       the machines in the network

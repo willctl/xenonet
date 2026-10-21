@@ -168,7 +168,25 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         "join" => {
             let address = arg(args, 1, "the gateway's address and the ticket, as Add a machine showed them")?;
             let ticket = arg(args, 2, "the ticket, as Add a machine showed it")?;
-            let st = call(&s, "POST", "/api/net/join", Some(&json!({ "address": address, "ticket": ticket })))?;
+            // While the ticket's maker hasn't signed this machine in, or a
+            // second window host hasn't approved it, the join waits: it says
+            // why once, and asks again until the ticket lapses.
+            let started = std::time::Instant::now();
+            let mut said = false;
+            let st = loop {
+                let st = call(&s, "POST", "/api/net/join", Some(&json!({ "address": address, "ticket": ticket })))?;
+                if !on(&st, "waiting") {
+                    break st;
+                }
+                if started.elapsed() > std::time::Duration::from_secs(11 * 60) {
+                    return Err(Fail::new(t(&st, "message"), 1));
+                }
+                if !said && !flags.on("json") {
+                    print(c::yellow(t(&st, "message")));
+                    said = true;
+                }
+                std::thread::sleep(std::time::Duration::from_secs(3));
+            };
             out(&st, &|st| {
                 print(format!("{} joined {} as {}", c::green("✓"), c::bold(t(&st["network"], "name")), t(&st["self"], "id")));
                 print(format!("  {}  {}", c::dim("gateway key"), t(&st["gateway"], "keyId")));
