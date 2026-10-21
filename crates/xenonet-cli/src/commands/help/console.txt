@@ -31,7 +31,8 @@ Steps:
                                   host, the first if left out) and host-skew[,host[,ms]];
                                   and a made-up network across machines: net-none,
                                   net-founder, net-member, net-gateway-down, net-ticket,
-                                  net-mismatch, net-remote-waiting (a: the machine you're at)
+                                  net-mismatch, net-remote-waiting (a: the machine you're at;
+                                  b: titles-only, the others share titles only)
                                   and net-approval (a window host waiting for approval)
   actors                          the actors beside the map: presence, status, beams; and the
                                   programs waiting for an Allow

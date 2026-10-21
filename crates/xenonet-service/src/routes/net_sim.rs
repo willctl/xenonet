@@ -92,9 +92,11 @@ pub fn simulated_remote_agents(ctx: &Ctx) -> Option<Vec<Value>> {
 
 /// Puts the network into one of KINDS: what it made, or None for a kind
 /// that isn't one. `you_at` is the host the person is at (this one by
-/// default), for net-founder and net-remote-waiting.
-pub fn simulate(ctx: &Ctx, kind: &str, you_at: Option<&str>) -> Option<Value> {
-    let (state, agents) = made_up(kind, you_at, ctx.now())?;
+/// default), for net-founder and net-remote-waiting; `variant`
+/// "titles-only" has the other machines share titles only, so their
+/// agents carry no question's text, last message or stuck reason.
+pub fn simulate(ctx: &Ctx, kind: &str, you_at: Option<&str>, variant: Option<&str>) -> Option<Value> {
+    let (state, agents) = made_up_with(kind, you_at, variant == Some("titles-only"), ctx.now())?;
     let out = json!({
         "ok": true,
         "kind": kind,
@@ -214,55 +216,100 @@ pub fn key_id(host: &str) -> String {
     out
 }
 
-// A host's agents, as another host's presence would list them.
+// A host's agents, as another host's presence would list them, with what
+// the console's state adds: each in a clone of a repo (its key) or in a
+// folder that isn't one, and what it said last.
 fn agents_of(host: &str, now: f64, seen: f64) -> Vec<Value> {
-    let agent = |local: &str, app: &str, title: &str, status: &str, project: &str, branch: &str, focus: Option<&str>, ago: f64| {
+    struct A<'a> {
+        local: &'a str,
+        app: &'a str,
+        title: &'a str,
+        status: &'a str,
+        project: &'a str,
+        repo: bool,
+        branch: Option<&'a str>,
+        focus: Option<&'a str>,
+        said: Option<&'a str>,
+        ago: f64,
+    }
+    let agent = |a: A<'_>| {
+        let cwd = if a.repo { format!("~/src/{}", a.project) } else { format!("~/jobs/{}", a.project) };
         json!({
-            "id": format!("@{host}:{local}"),
+            "id": format!("@{host}:{}", a.local),
             "host": host,
             "machine": host,
-            "app": app,
-            "title": title,
-            "status": status,
-            "project": project,
-            "branch": branch,
-            "cwd": format!("~/src/{project}"),
-            "top": format!("~/src/{project}"),
-            "focus": focus,
-            "lastActive": now - ago,
+            "app": a.app,
+            "title": a.title,
+            "status": a.status,
+            "project": a.project,
+            "branch": a.branch,
+            "cwd": cwd,
+            "top": if a.repo { json!(cwd) } else { Value::Null },
+            "repoKey": if a.repo { json!(format!("github.com/acme/{}", a.project)) } else { Value::Null },
+            "focus": a.focus,
+            "lastActive": now - a.ago,
             "seen": seen,
             "waitsOnYou": false,
             "needsYou": null,
+            "question": null,
+            "lastMessage": a.said,
+            "stuck": null,
             "editing": [],
             "claims": [],
             "reachable": true,
         })
     };
     match host {
-        "studio" => vec![agent(
-            "claude:3b9e1d44-5a0c-4f6e-8d21-7c4b9a0e1f52",
-            "claude",
-            "Write the release notes",
-            "working",
-            "atlas-api",
-            "release/2.4",
-            Some("Listing what changed since 2.3"),
-            15e3,
-        )],
+        "studio" => vec![agent(A {
+            local: "claude:3b9e1d44-5a0c-4f6e-8d21-7c4b9a0e1f52",
+            app: "claude",
+            title: "Write the release notes",
+            status: "working",
+            project: "atlas-api",
+            repo: true,
+            branch: Some("release/2.4"),
+            focus: Some("Listing what changed since 2.3"),
+            said: Some("The notes for 2.4 are drafted. The migration section is next."),
+            ago: 15e3,
+        })],
         "laptop" => vec![
-            agent(
-                "claude:6f1c2b9e-0d4a-4c1e-9b7a-3e5d2a1f0c11",
-                "claude",
-                "Fix the login redirect",
-                "working",
-                "atlas-web",
-                "fix/login",
-                Some("Moving the redirect after the session check"),
-                20e3,
-            ),
-            agent("codex:019a7c55-1e2f-7a3b-8c4d-5e6f7a8b9c0d", "codex", "Tidy the billing tests", "idle", "ledger", "main", None, 12.0 * MINUTE),
+            agent(A {
+                local: "claude:6f1c2b9e-0d4a-4c1e-9b7a-3e5d2a1f0c11",
+                app: "claude",
+                title: "Fix the login redirect",
+                status: "working",
+                project: "atlas-web",
+                repo: true,
+                branch: Some("fix/login"),
+                focus: Some("Moving the redirect after the session check"),
+                said: Some("The redirect now waits for the session check."),
+                ago: 20e3,
+            }),
+            agent(A {
+                local: "codex:019a7c55-1e2f-7a3b-8c4d-5e6f7a8b9c0d",
+                app: "codex",
+                title: "Tidy the billing tests",
+                status: "idle",
+                project: "ledger",
+                repo: true,
+                branch: Some("main"),
+                focus: None,
+                said: Some("Merged the two invoice fixtures."),
+                ago: 12.0 * MINUTE,
+            }),
         ],
-        "rack" => vec![agent("claude:8d0f6a21-7b3c-4e9d-a1f2-5c6e7d8b9a03", "claude", "Nightly import of the price lists", "idle", "importer", "main", None, 2.0 * 3600e3)],
+        "rack" => vec![agent(A {
+            local: "claude:8d0f6a21-7b3c-4e9d-a1f2-5c6e7d8b9a03",
+            app: "claude",
+            title: "Nightly import of the price lists",
+            status: "idle",
+            project: "importer",
+            repo: false,
+            branch: None,
+            focus: None,
+            said: None,
+            ago: 2.0 * 3600e3,
+        })],
         _ => vec![],
     }
 }
@@ -285,6 +332,11 @@ fn host_row(m: &Machine, online: bool, seen: Option<f64>, agents: usize, you: bo
 
 /// The state and the other hosts' agents for `kind`, at `now`.
 fn made_up(kind: &str, you_at: Option<&str>, now: f64) -> Option<(Value, Vec<Value>)> {
+    made_up_with(kind, you_at, false, now)
+}
+
+/// The same, with the other machines sharing titles only when `titles_only`.
+fn made_up_with(kind: &str, you_at: Option<&str>, titles_only: bool, now: f64) -> Option<(Value, Vec<Value>)> {
     if kind == "net-none" {
         let mut s = alone();
         s["simulated"] = json!(true);
@@ -316,7 +368,17 @@ fn made_up(kind: &str, you_at: Option<&str>, now: f64) -> Option<(Value, Vec<Val
         if m.id != me.id {
             agents.extend(theirs);
         }
-        hosts.push(host_row(m, online, Some(seen), if m.id == me.id { 0 } else { count }, m.id == you));
+        let mut row = host_row(m, online, Some(seen), if m.id == me.id { 0 } else { count }, m.id == you);
+        // Where you last worked: a moment ago where you are, and a while
+        // ago at the other window hosts, so what waits sounds only there.
+        row["youAt"] = if m.id == you {
+            json!(now - 20e3)
+        } else if m.window {
+            json!(now - 40.0 * MINUTE)
+        } else {
+            Value::Null
+        };
+        hosts.push(row);
     }
     let gateway = json!({
         "address": ADDRESS,
@@ -346,20 +408,37 @@ fn made_up(kind: &str, you_at: Option<&str>, now: f64) -> Option<(Value, Vec<Val
         // laptop, a window host but not the founder, signed den in as a
         // window host: that waits for the founder or a second window host.
         "net-approval" => state["proposals"] = json!([{ "id": PROPOSAL_ID, "op": "add", "host": "den", "window": true, "gateway": null, "signers": ["laptop"], "at": now - 40e3 }]),
-        "net-remote-waiting" => {
+        // laptop's session waits on you with a question; at net-founder its
+        // other one seems stuck too.
+        "net-remote-waiting" | "net-founder" => {
             if let Some(a) = agents.iter_mut().find(|a| a["host"] == "laptop" && a["app"] == "claude") {
                 a["status"] = json!("waiting");
                 a["waitsOnYou"] = json!(true);
                 a["needsYou"] = json!("question");
-                a["question"] = json!("Should the redirect keep the old query string, or drop it?");
+                a["question"] = json!("Should the redirect in <LoginForm> keep the old query string, or drop it?");
                 a["since"] = json!(now - 90e3);
                 a["focus"] = Value::Null;
+            }
+            if kind == "net-founder" {
+                if let Some(a) = agents.iter_mut().find(|a| a["host"] == "laptop" && a["app"] == "codex") {
+                    a["status"] = json!("working");
+                    a["lastActive"] = json!(now - 40e3);
+                    a["stuck"] = json!(["ran cargo test 3 times in a row"]);
+                }
             }
             if let Some(h) = state["hosts"].as_array_mut().and_then(|l| l.iter_mut().find(|h| h["id"] == "laptop")) {
                 h["waitsOnYou"] = json!(1);
             }
         }
         _ => {}
+    }
+    // The other machines share titles only: their agents carry no detail.
+    if titles_only {
+        for a in &mut agents {
+            for k in ["question", "lastMessage", "stuck"] {
+                a[k] = Value::Null;
+            }
+        }
     }
     Some((state, agents))
 }
@@ -660,6 +739,16 @@ mod tests {
         assert_eq!(waiting.len(), 1);
         assert!(waiting[0]["id"].as_str().unwrap().starts_with("@laptop:claude:") && waiting[0]["question"].is_string());
         assert_eq!((row(&w, "laptop")["waitsOnYou"].clone(), row(&w, "laptop")["you"].clone(), row(&w, "studio")["you"].clone()), (json!(1), json!(true), json!(false)));
+        assert!(row(&w, "laptop")["youAt"].as_f64().unwrap() > row(&w, "studio")["youAt"].as_f64().unwrap(), "you worked at laptop last");
+        // Repo keys for the map's projects, and a folder that isn't a repo.
+        assert!(agents.iter().any(|a| a["repoKey"] == "github.com/acme/atlas-web") && agents.iter().any(|a| a["host"] == "rack" && a["repoKey"].is_null()));
+        // net-founder has a question and a stuck session on laptop; with
+        // titles only, neither's text.
+        let (_, agents) = made_up("net-founder", None, now).unwrap();
+        assert!(agents.iter().any(|a| a["question"].is_string()) && agents.iter().any(|a| a["stuck"].is_array()));
+        let (_, agents) = made_up_with("net-founder", None, true, now).unwrap();
+        assert!(agents.iter().all(|a| a["question"].is_null() && a["lastMessage"].is_null() && a["stuck"].is_null()));
+        assert!(agents.iter().any(|a| a["waitsOnYou"] == true), "it still waits");
         assert_eq!(made_up("net-none", None, now).unwrap().0["network"], Value::Null);
         let (a, _) = made_up("net-approval", None, now).unwrap();
         assert_eq!((a["proposals"][0]["host"].clone(), a["proposals"][0]["signers"].clone()), (json!("den"), json!(["laptop"])));
@@ -762,7 +851,7 @@ mod tests {
         };
         // Nothing simulated: the core's route, here with no network to read.
         assert_eq!(get(ctx.clone()).await.status, 503);
-        assert!(simulate(&ctx, "net-founder", None).is_some());
+        assert!(simulate(&ctx, "net-founder", None, None).is_some());
         assert_eq!(get(ctx.clone()).await.body_json()["network"]["name"], "home");
         // Simulated or not, the state is the owner's: no window key and no
         // person, no state.
@@ -787,7 +876,7 @@ mod tests {
     #[tokio::test]
     async fn writes_and_messages_are_the_windows_and_a_message_to_a_host_thats_away_waits() {
         let ctx = dev_ctx();
-        simulate(&ctx, "net-gateway-down", None).unwrap();
+        simulate(&ctx, "net-gateway-down", None, None).unwrap();
         let key = ctx.window_key.reveal().to_string();
         let with_key = [("x-xenonet-window", key.as_str())];
         let ticket = |headers: &[(&str, &str)]| Req::fake("POST", "/api/net/ticket", headers, Some(r#"{"host":"desk"}"#));

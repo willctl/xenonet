@@ -5,11 +5,13 @@
 // needs a second machine. The Network panel on a machine on its own and in
 // a network, a machine that's offline and where you are, Add a machine and
 // its join line shown once and masked, another machine's agent waiting on
-// you in the attention strip and where that sounds, a gateway that's down,
-// and the message box that writes to a session as you, from the panel and
-// from a session's own panel. Each state the page reads is the schema's
-// (network/state/v1). No page errors. The window stays hidden;
-// XENONET_E2E_SHOW=inactive shows it to watch.
+// you in the attention strip with its question's text, one that seems
+// stuck with why, a machine that shares titles only, where what waits
+// sounds (here or on another machine: only where you are), a gateway
+// that's down, and the message box that writes to a session as you, from
+// the panel and from a session's own panel. Each state the page reads is
+// the schema's (network/state/v1). No page errors. The window stays
+// hidden; XENONET_E2E_SHOW=inactive shows it to watch.
 //
 //   npm run test:e2e
 import { test, before, after } from "node:test";
@@ -192,13 +194,80 @@ test("net-remote-waiting: another machine's agent waiting on you shows in the st
   const at = await s.eval(`return (() => { const r = document.querySelector('#alerts [data-al-remote]').getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`);
   await clickAt(at, "the card");
   assert.ok(await until(async () => (await network()).open), "it opens the Network panel");
-  assert.match((await network()).text, /waits on you Should the redirect keep the old query string/i);
+  assert.match((await network()).text, /waits on you Should the redirect in <LoginForm> keep the old query string/i);
   await s.driver("network", "close");
 
   // You're at laptop: it sounds there, not here.
   await simulate("net-remote-waiting", { a: "laptop" }, (n) => n.hosts.find((x) => x.id === "laptop")?.you);
   const quiet = await until(async () => (await s.driver("state")).alerts.find((a) => a.kind === "remote-need" && a.chime === false));
   assert.ok(quiet, "no chime here while you're at laptop");
+}));
+
+test("net-founder: another machine's question and stuck reason in the strip and the Network panel, escaped, and none of it with titles only", { timeout: limit(60000) }, shoot("network-detail", async () => {
+  await simulate("net-founder", {}, (n) => n.waits.length > 0 && n.stuck.length > 0);
+  const alerts = await until(async () => {
+    const got = (await s.driver("state")).alerts;
+    return got.some((a) => a.kind === "remote-need") && got.some((a) => a.kind === "remote-stuck") ? got : null;
+  });
+  assert.ok(alerts, "a card for the question and one for the stuck session");
+  const need = alerts.find((a) => a.kind === "remote-need");
+  const stuck = alerts.find((a) => a.kind === "remote-stuck");
+  assert.deepEqual([need.host, need.text], ["laptop", "Should the redirect in <LoginForm> keep the old query string, or drop it?"]);
+  assert.deepEqual([stuck.host, stuck.text], ["laptop", "ran cargo test 3 times in a row"]);
+  const strip = await s.eval(`return document.querySelector('#alerts')?.textContent.replace(/\\s+/g, " ").trim() ?? ""`);
+  assert.match(strip, /redirect in <LoginForm> keep the old query string/);
+  // Escaped as transcripts are: its text is text, never markup.
+  assert.match(await s.eval(`return document.querySelector('#alerts [data-al-remote]').innerHTML`), /in &lt;LoginForm&gt; keep/);
+  assert.match(strip, /Tidy the billing tests may be stuck\s*on laptop\s*ran cargo test 3 times in a row/);
+  const { network: n } = await s.driver("network", "open");
+  assert.match(n.text, /waits on you Should the redirect in <LoginForm> keep the old query string/i);
+  assert.match(n.text, /may be stuck ran cargo test 3 times in a row/i);
+  const laptop = n.hosts.find((x) => x.id === "laptop");
+  assert.ok(laptop.remote.some((a) => a.lastMessage === "The redirect now waits for the session check."), "what it said last");
+  await s.screenshot({ name: "e2e-network-detail", inline: false });
+  await s.driver("network", "close");
+
+  // laptop shares titles only: the wait still shows, its text doesn't.
+  await simulate("net-founder", { b: "titles-only" }, (n) => n.waits.length > 0 && n.stuck.length === 0);
+  const card = await until(async () => (await s.driver("state")).alerts.find((a) => a.kind === "remote-need" && !/query string/.test(a.text)));
+  assert.ok(card, "the card stays");
+  assert.equal(card.text, "The question shows in laptop's console.");
+  const st = await s.driver("state");
+  assert.ok(!st.alerts.some((a) => a.kind === "remote-stuck"), "no stuck reason crosses");
+  // Once the stuck card has folded away, none of laptop's detail is in the strip.
+  const quietStrip = await until(async () => {
+    const text = await s.eval(`return document.querySelector('#alerts')?.textContent ?? ""`);
+    return /query string|cargo test/.test(text) ? null : { text };
+  });
+  assert.ok(quietStrip, "none of laptop's detail on the page");
+  const { network: m } = await s.driver("network", "open");
+  assert.ok(!/query string|cargo test|session check/.test(m.text), m.text);
+  assert.match(m.text, /The question shows in laptop's console\./);
+  await s.driver("network", "close");
+}));
+
+test("what waits here sounds only where you are too, and everywhere is the rule's: one rule for this machine's waits and the others'", { timeout: limit(60000) }, shoot("network-chime", async () => {
+  // A session here waits on you, and you're at laptop: neither it nor
+  // laptop's sounds here.
+  await s.simulate("needs-you");
+  await simulate("net-remote-waiting", { a: "laptop" }, (n) => n.hosts.find((x) => x.id === "laptop")?.you);
+  const away = await until(async () => {
+    const got = (await s.driver("state")).alerts;
+    const here = got.find((a) => a.kind === "need");
+    return here && here.chime === false && got.some((a) => a.kind === "remote-need" && a.chime === false) ? got : null;
+  });
+  assert.ok(away, "no chime here, local or remote, while you're at laptop");
+  // You're back here: both sound here.
+  await simulate("net-remote-waiting", {}, (n) => n.hosts.find((x) => x.id === "studio")?.you);
+  const back = await until(async () => {
+    const got = (await s.driver("state")).alerts;
+    return got.find((a) => a.kind === "need")?.chime === true && got.some((a) => a.kind === "remote-need" && a.chime === true) ? got : null;
+  });
+  assert.ok(back, "both chime here while you're here");
+  // On its own again, a machine always chimes.
+  await simulate("net-none", {}, (n) => !n.inNetwork);
+  assert.ok(await until(async () => (await s.driver("state")).alerts.find((a) => a.kind === "need")?.chime === true));
+  await s.simulate("clear");
 }));
 
 test("net-approval: a window host another one signed in waits for an approval here, and Approve adds it", { timeout: limit(60000) }, shoot("network-approval", async () => {

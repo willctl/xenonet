@@ -1157,9 +1157,10 @@ fn simulate(ctx: &Arc<Ctx>, kind: &Value, body: &Value) -> Result<Option<Value>,
             None => Ok(None),
         };
     }
-    // A made-up network across machines; a is the host you're at.
+    // A made-up network across machines; a is the host you're at, and b
+    // "titles-only" has the others share titles only.
     if kind_s.starts_with("net-") {
-        return Ok(net_sim::simulate(ctx, &kind_s, a.as_deref()));
+        return Ok(net_sim::simulate(ctx, &kind_s, a.as_deref(), b.as_deref()));
     }
     if kind_s == "doctor" {
         // The doctor finding a problem, reported as a real run would be; the

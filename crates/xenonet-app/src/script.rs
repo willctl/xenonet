@@ -39,7 +39,8 @@ pub const STEPS: &str = r#"  launch[:inactive|front|hidden]  start it unless it'
                                   host, the first if left out) and host-skew[,host[,ms]];
                                   and a made-up network across machines: net-none,
                                   net-founder, net-member, net-gateway-down, net-ticket,
-                                  net-mismatch and net-remote-waiting (a: the machine you're at)
+                                  net-mismatch and net-remote-waiting (a: the machine you're at;
+                                  b: titles-only, the others share titles only)
   actors                          the actors beside the map: presence, status, beams; and the
                                   programs waiting for an Allow
   feed[:<n>]                      the activity feed's last lines, sessions' and actors'
