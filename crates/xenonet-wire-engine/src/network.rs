@@ -65,6 +65,8 @@ struct Out {
     /// The roster head the last presence carried.
     roster: String,
     claims: BTreeMap<String, Value>,
+    /// The roster head when the claims last went: a new one sends them all.
+    claims_roster: String,
 }
 
 impl Drop for NetState {
@@ -295,10 +297,12 @@ pub fn presence(w: &World, full: bool) -> Option<Value> {
     };
     let you = you_here(w);
     // The roster's head as this host has it: hosts that see different
-    // rosters notice it from each other's presence, so a new head is news.
+    // rosters notice it from each other's presence. A new head may be a
+    // host that joined and has heard nothing yet, so the set goes in full.
     let roster = net(w).roster_head().unwrap_or_default();
     let body = {
         let mut out = w.net.out.locked();
+        let full = full || roster != out.roster;
         let (agents, removed): (Vec<Value>, Vec<Value>) = if full {
             (now.values().take(1000).cloned().collect(), vec![])
         } else {
@@ -763,8 +767,11 @@ pub fn claims(w: &World, full: bool) -> Option<Value> {
             return None;
         }
     };
+    // A host that joined since the last claims has none of them yet.
+    let roster = net(w).roster_head().unwrap_or_default();
     let body = {
         let mut out = w.net.out.locked();
+        let full = full || roster != out.claims_roster;
         let (put, released): (Vec<Value>, Vec<Value>) = if full {
             (now.values().take(5000).cloned().collect(), vec![])
         } else {
@@ -782,6 +789,7 @@ pub fn claims(w: &World, full: bool) -> Option<Value> {
             return None;
         }
         out.claims = now;
+        out.claims_roster = roster;
         json!({ "schema": "network/claims/v1", "full": full, "claims": put, "released": released })
     };
     send(w, To::All, Kind::Claims, body.clone());
