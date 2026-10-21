@@ -555,17 +555,62 @@ fn or(v: Option<&Value>, fallback: Out) -> Out {
     }
 }
 
-/// The shared context's folder, read: its pages (with the projects they
-/// mention, paths under `root`, the projects folder), the last two days'
-/// log, as of `now`, and the inbox. `server` is the MCP server that owns
-/// it.
-#[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the JS's endsWith is case-sensitive, and so is this")]
-pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now: f64, server: Out) -> Result<Out, TypeError> {
-    struct Page {
-        slug: String,
-        fields: Vec<(String, Out)>,
-        writes: Vec<Out>,
+/// A page as read, with the writes its space's log names it in.
+struct Page {
+    slug: String,
+    fields: Vec<(String, Out)>,
+    writes: Vec<Out>,
+}
+
+/// A space of the wiki: its id (None for this machine's own, the wiki's
+/// folder), kind, name and folder.
+struct SpaceDir {
+    id: Option<String>,
+    kind: String,
+    name: String,
+    dir: String,
+}
+
+// A folder that's really there: not a link to one.
+fn is_dir(p: &str) -> bool {
+    std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir())
+}
+
+/// The spaces besides this machine's own, as Xenolith lists them (list in
+/// xenolith/rust/crates/core/src/spaces.rs): each a wiki laid out as the
+/// folder is, in spaces/<kind>/<name>/, by kind and then name. A folder
+/// that isn't a space's name, or is a link, isn't one.
+fn spaces_in(dir: &str) -> Vec<SpaceDir> {
+    use crate::xenolith::{space_of, Space, SPACE_KINDS};
+    let base = paths::join(dir, "spaces");
+    if !is_dir(&base) {
+        return Vec::new();
     }
+    let mut out = Vec::new();
+    for kind in SPACE_KINDS {
+        let kind_dir = paths::join(&base, kind);
+        if !is_dir(&kind_dir) {
+            continue;
+        }
+        let names: Vec<String> = std::fs::read_dir(&kind_dir).map(|es| es.filter_map(Result::ok).map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
+        for name in names {
+            let id = format!("{kind}:{name}");
+            let space_dir = paths::join(&kind_dir, &name);
+            if space_of(Some(&Value::String(id.clone()))) == Space::Other(id.clone()) && is_dir(&space_dir) {
+                out.push(SpaceDir { id: Some(id), kind: kind.to_string(), name, dir: space_dir });
+            }
+        }
+    }
+    out.sort_by(|a, b| a.kind.cmp(&b.kind).then_with(|| a.name.cmp(&b.name)));
+    out
+}
+
+/// One space's pages and the last two days of its log, as of `now`, each
+/// page with the writes the log names it in. A project's space is that
+/// project's context, so its pages are tied to the projects of its name.
+#[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the JS's endsWith is case-sensitive, and so is this")]
+fn read_space(space: &SpaceDir, projects: Option<&Value>, root: Option<&Value>, now: f64) -> Result<(Vec<Page>, Vec<LogEntry>), TypeError> {
+    let dir = space.dir.as_str();
     let pages_dir = paths::join(dir, "pages");
     let mut pages: Vec<Page> = Vec::new();
     for f in names(&pages_dir).into_iter().filter(|f| f.ends_with(".md")) {
@@ -587,7 +632,18 @@ pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now:
         let aliases = aliases_of(meta.get("aliases"))?;
         let updated = date_parse(&to_str(meta.get("updated"))?).filter(|t| *t != 0.0);
         let links: Vec<String> = wiki_links(&body).into_iter().filter(|l| *l != slug).collect();
-        let projects = mentioned_projects(&body, tags, projects, root)?;
+        let mut named = mentioned_projects(&body, tags, projects, root)?;
+        if space.kind == "project" && space.id.is_some() {
+            for p in items(projects, "filter")? {
+                if lower(prop(Some(p), "name")?, "p.name")? == space.name {
+                    let key = prop(Some(p), "key")?.cloned();
+                    if !named.contains(&key) {
+                        named.push(key);
+                    }
+                }
+            }
+        }
+        let projects = named;
         let fields = vec![
             ("slug", Out::Str(slug.clone())),
             ("title", title),
@@ -600,6 +656,7 @@ pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now:
             ("links", Out::strs(&links)),
             ("projects", Out::Arr(projects.into_iter().map(|k| Out::of(k.as_ref())).collect())),
             ("path", Out::Str(file)),
+            ("space", space.id.clone().map_or(Out::Null, Out::Str)),
         ];
         pages.push(Page { slug, fields: fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect(), writes: Vec::new() });
     }
@@ -614,6 +671,31 @@ pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now:
         if let Some(text) = read_text(&file).filter(|t| !t.is_empty()) {
             log.extend(parse_log(&text, Some(&Value::String(date.clone())))?);
         }
+    }
+    // A slug two files share is the later file's.
+    for e in &log {
+        for slug in &e.pages {
+            if let Some(p) = pages.iter_mut().rev().find(|p| p.slug == *slug) {
+                p.writes.push(e.out());
+            }
+        }
+    }
+    Ok((pages, log))
+}
+
+/// The shared context's folder, read: the pages of this machine's space
+/// and of every other space in it (with the projects they mention, paths
+/// under `root`, the projects folder), the last two days of their logs, as
+/// of `now`, and the inbox. `server` is the MCP server that owns it.
+#[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the JS's endsWith is case-sensitive, and so is this")]
+pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now: f64, server: Out) -> Result<Out, TypeError> {
+    let local = SpaceDir { id: None, kind: "machine".into(), name: "local".into(), dir: dir.to_string() };
+    let mut pages: Vec<Page> = Vec::new();
+    let mut log: Vec<LogEntry> = Vec::new();
+    for space in std::iter::once(local).chain(spaces_in(dir)) {
+        let (p, l) = read_space(&space, projects, root, now)?;
+        pages.extend(p);
+        log.extend(l);
     }
     let inbox_dir = paths::join(dir, "inbox");
     let mut inbox = Vec::new();
@@ -633,14 +715,6 @@ pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now:
         });
         let title = if truthy(meta.get("title")) { Out::of(meta.get("title")) } else { Out::Str(first.filter(|t| !t.is_empty()).unwrap_or_else(|| f.clone())) };
         inbox.push(Out::obj(vec![("id", Out::Str(f[..f.len() - 3].to_string())), ("title", title), ("app", or(meta.get("app"), Out::Null))]));
-    }
-    // A slug two files share is the later file's.
-    for e in &log {
-        for slug in &e.pages {
-            if let Some(p) = pages.iter_mut().rev().find(|p| p.slug == *slug) {
-                p.writes.push(e.out());
-            }
-        }
     }
     xenonet_base::sort::sort_by(&mut log, |a, b| (a.ts - b.ts).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
     let pages = pages

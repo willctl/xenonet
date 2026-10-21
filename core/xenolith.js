@@ -115,3 +115,24 @@ export function contextServerOf(dir, options) {
 }
 
 export const contextName = (server) => (server === "xenolith" ? "Xenolith" : "Agent Wiki");
+
+// Xenolith's spaces (xenolith/rust/crates/core/src/spaces.rs): one wiki
+// each, for a project, an identity, an actor or a machine. The wiki's own
+// folder is this machine's, machine:local; every other is laid out the same
+// way in spaces/<kind>/<name>/ under it.
+export const SPACE_KINDS = ["project", "identity", "actor", "machine"];
+const SPACE_NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
+// The space a context_* call works in, from its `space` as Xenolith's
+// server reads it: null for this machine's own (and when none is given),
+// the space's id (project:atlas) for another, and undefined for one
+// Xenolith refuses, so that the call wrote nothing.
+export function spaceOf(v) {
+  if (typeof v !== "string" || !v.trim()) return null;
+  const t = v.trim().toLowerCase();
+  const at = t.indexOf(":");
+  if (at < 0) return undefined;
+  const [kind, name] = [t.slice(0, at), t.slice(at + 1)];
+  if (!SPACE_KINDS.includes(kind) || !SPACE_NAME.test(name) || name.includes("..")) return undefined;
+  return kind === "machine" && name === "local" ? null : `${kind}:${name}`;
+}

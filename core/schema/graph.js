@@ -153,6 +153,7 @@ const PageNode = obj({
   path: z.string(),
   writes: z.array(obj({ ts: ms, app: z.string(), title: z.string(), pages: z.array(z.string()) })).max(6),
   aliases: z.array(z.string()).optional().describe("Other names it goes by, from its aliases, in lowercase; left out when it has none"),
+  space: z.string().optional().describe("The Xenolith space it's in, such as project:atlas, when that isn't this machine's own; its id is then wiki:<space>/<slug>"),
   ...placed,
   ...rolled,
   ...remote,

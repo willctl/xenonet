@@ -4,6 +4,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { dayKey } from "./live.js";
+import { SPACE_KINDS, spaceOf } from "./xenolith.js";
 
 export function parseFrontmatter(text) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
@@ -92,12 +93,30 @@ const namesIn = async (dir) => ((await linked(dir)) ? [] : await fsp.readdir(dir
 // A file's text, null when it's a link or can't be read.
 const textOf = async (file) => ((await linked(file)) ? null : await fsp.readFile(file, "utf8").catch(() => null));
 
-// The shared context's folder (Xenolith's, or Agent Wiki's), read: its pages
-// (with the projects they mention, paths under `root`, the projects folder),
-// the last two days' log and the inbox. `server` is the MCP server that
-// owns it. Null without a folder.
-export async function readWiki(dir, projects, { root = null, now = Date.now(), server = "agent-wiki" } = {}) {
-  if (!dir) return null;
+const isDir = async (p) => (await fsp.lstat(p).catch(() => null))?.isDirectory() ?? false;
+
+// The spaces besides this machine's own, as Xenolith lists them (list in
+// xenolith/rust/crates/core/src/spaces.rs): each a wiki laid out as the
+// folder is, in spaces/<kind>/<name>/, by kind and then name. A folder
+// that isn't a space's name, or is a link, isn't one.
+async function spacesIn(dir) {
+  const base = path.join(dir, "spaces");
+  if (!(await isDir(base))) return [];
+  const out = [];
+  for (const kind of SPACE_KINDS) {
+    if (!(await isDir(path.join(base, kind)))) continue;
+    for (const name of await fsp.readdir(path.join(base, kind)).catch(() => [])) {
+      if (spaceOf(`${kind}:${name}`) === `${kind}:${name}` && (await isDir(path.join(base, kind, name)))) out.push({ id: `${kind}:${name}`, kind, name, dir: path.join(base, kind, name) });
+    }
+  }
+  return out.sort((a, b) => (a.kind !== b.kind ? (a.kind < b.kind ? -1 : 1) : a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+
+// One space's pages and the last two days of its log, each page with the
+// writes the log names it in. `space` is null for this machine's own, the
+// wiki's folder. A project's space is that project's context, so its pages
+// are tied to the projects of its name.
+async function readSpace({ id: space, kind, name, dir }, projects, { root, now }) {
   const pages = [];
   const files = await namesIn(path.join(dir, "pages"));
   for (const f of files.filter((f) => f.endsWith(".md"))) {
@@ -107,7 +126,7 @@ export async function readWiki(dir, projects, { root = null, now = Date.now(), s
     const slug = f.slice(0, -3).toLowerCase();
     // The title, then the first heading, then the slug; the type in
     // lowercase: as Xenolith reads a page.
-    pages.push({
+    const page = {
       slug,
       title: meta.title || firstHeading(body) || slug,
       type: (String(meta.type ?? "") || "topic").toLowerCase(),
@@ -119,7 +138,10 @@ export async function readWiki(dir, projects, { root = null, now = Date.now(), s
       links: wikiLinks(body).filter((l) => l !== slug),
       projects: mentionedProjects(body, meta.tags, projects, root),
       path: path.join(dir, "pages", f),
-    });
+      space,
+    };
+    if (kind === "project") for (const p of projects.filter((p) => p.name.toLowerCase() === name)) if (!page.projects.includes(p.key)) page.projects.push(p.key);
+    pages.push(page);
   }
   const log = [];
   for (const offset of [1, 0]) {
@@ -128,6 +150,25 @@ export async function readWiki(dir, projects, { root = null, now = Date.now(), s
     const text = (await linked(path.join(dir, "log"))) || (await linked(year)) ? null : await textOf(path.join(year, `${date}.md`));
     if (text) log.push(...parseLog(text, date));
   }
+  const bySlug = new Map(pages.map((p) => [p.slug, Object.assign(p, { writes: [] })]));
+  for (const e of log) for (const slug of e.pages) bySlug.get(slug)?.writes.push(e);
+  return { pages, log };
+}
+
+// The shared context's folder (Xenolith's, or Agent Wiki's), read: the pages
+// of this machine's space and of every other space in it (with the projects
+// they mention, paths under `root`, the projects folder), the last two days
+// of their logs, and the inbox. `server` is the MCP server that owns it.
+// Null without a folder.
+export async function readWiki(dir, projects, { root = null, now = Date.now(), server = "agent-wiki" } = {}) {
+  if (!dir) return null;
+  const pages = [];
+  const log = [];
+  for (const space of [{ id: null, kind: "machine", name: "local", dir }, ...(await spacesIn(dir))]) {
+    const read = await readSpace(space, projects, { root, now });
+    pages.push(...read.pages);
+    log.push(...read.log);
+  }
   const inbox = [];
   for (const f of (await namesIn(path.join(dir, "inbox"))).filter((f) => f.endsWith(".md"))) {
     if (await linked(path.join(dir, "inbox", f))) continue;
@@ -135,7 +176,5 @@ export async function readWiki(dir, projects, { root = null, now = Date.now(), s
     const { meta, body } = parseFrontmatter(text);
     inbox.push({ id: f.slice(0, -3), title: meta.title || body.split(/\r?\n/).find((l) => l.trim())?.replace(/^#+\s*/, "") || f, app: meta.app || null });
   }
-  const bySlug = new Map(pages.map((p) => [p.slug, Object.assign(p, { writes: [] })]));
-  for (const e of log) for (const slug of e.pages) bySlug.get(slug)?.writes.push(e);
   return { dir, server, pages, inbox, log: log.sort((a, b) => a.ts - b.ts) };
 }

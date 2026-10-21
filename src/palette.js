@@ -42,7 +42,7 @@ export function createPalette({ sfx, nodes, commands, actions, onSearchResults }
 
   function nodeItem(n) {
     const label = n.title ?? n.name;
-    const sub = n.kind === "session" ? `${APP_LABEL[n.app]} · ${timeAgo(n.updatedAt)}${n.cwd ? ` · ${n.cwd.split(/[\\/]/).pop()}` : ""}` : n.kind === "page" ? `wiki page · ${n.type}` : n.kind === "project" ? `${n.group ? "group of projects" : "project"}${n.rel?.includes("/") ? ` · ${n.rel}` : ""}${n.repo?.dirty ? ` · Δ${n.repo.dirty} uncommitted` : ""}` : n.kind === "host" ? `another machine · ${n.state}` : n.kind;
+    const sub = n.kind === "session" ? `${APP_LABEL[n.app]} · ${timeAgo(n.updatedAt)}${n.cwd ? ` · ${n.cwd.split(/[\\/]/).pop()}` : ""}` : n.kind === "page" ? `wiki page · ${n.type}${n.space ? ` · ${n.space}` : ""}` : n.kind === "project" ? `${n.group ? "group of projects" : "project"}${n.rel?.includes("/") ? ` · ${n.rel}` : ""}${n.repo?.dirty ? ` · Δ${n.repo.dirty} uncommitted` : ""}` : n.kind === "host" ? `another machine · ${n.state}` : n.kind;
     // Another machine's (with XENONET_HOSTS=1) says which.
     const where = n.host && n.kind !== "host" ? `on ${n.host} · ` : "";
     return { type: "node", node: n, label, sub: where + sub, icon: n.group ? "▣" : KIND_ICON[n.kind] ?? "•", cls: n.app ?? n.kind };

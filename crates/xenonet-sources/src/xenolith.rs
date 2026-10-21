@@ -160,6 +160,48 @@ pub fn context_name(server: Option<&str>) -> &'static str {
     }
 }
 
+/// Xenolith's spaces (xenolith/rust/crates/core/src/spaces.rs): one wiki
+/// each, for a project, an identity, an actor or a machine. The wiki's own
+/// folder is this machine's, machine:local; every other is laid out the
+/// same way in spaces/<kind>/<name>/ under it.
+pub const SPACE_KINDS: [&str; 4] = ["project", "identity", "actor", "machine"];
+
+/// The space a context_* call works in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Space {
+    /// This machine's own, the wiki's folder (also when none is given).
+    Local,
+    /// Another, by its id (project:atlas).
+    Other(String),
+    /// One Xenolith refuses, so that the call wrote nothing.
+    Refused,
+}
+
+// /^[a-z0-9][a-z0-9._-]{0,63}$/, and no "..".
+fn space_name(name: &str) -> bool {
+    let b = name.as_bytes();
+    b.first().is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && b.len() <= 64
+        && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'.' | b'_' | b'-'))
+        && !name.contains("..")
+}
+
+/// The space a context_* call works in, from its `space` as Xenolith's
+/// server reads it (SpaceId::parse).
+pub fn space_of(v: Option<&Value>) -> Space {
+    let Some(text) = v.and_then(Value::as_str).filter(|s| !xenonet_base::text::js_trim(s).is_empty()) else { return Space::Local };
+    let t = xenonet_base::text::js_trim(text).to_lowercase();
+    let Some((kind, name)) = t.split_once(':') else { return Space::Refused };
+    if !SPACE_KINDS.contains(&kind) || !space_name(name) {
+        return Space::Refused;
+    }
+    if kind == "machine" && name == "local" {
+        Space::Local
+    } else {
+        Space::Other(format!("{kind}:{name}"))
+    }
+}
+
 /// The environment from a JS object of strings.
 pub fn env_of(v: &Value) -> Env {
     v.as_object().map(|m| m.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect()).unwrap_or_default()

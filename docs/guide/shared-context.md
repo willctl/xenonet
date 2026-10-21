@@ -15,6 +15,14 @@ mentions. Sessions' calls to the `xenolith` MCP server beam to the wiki, and
 a `context_log` or `context_upsert_page` that names pages beams to those
 pages.
 
+Xenolith keeps a wiki for each space, such as a project, an identity, an
+actor or another machine, in `spaces/<kind>/<name>/` under the wiki's folder.
+Each is laid out as the wiki is. XenoNet shows every space's pages in the
+constellation, with the space in a page's panel, and ties a project space's
+pages to the project of that name. A `context_log` or `context_upsert_page`
+with a `space` beams to that space's pages, never to a page of the same name
+in this machine's wiki. The unfiled count is this machine's inbox.
+
 It reads pages as Xenolith does. A link is `[[slug]]` or `[[slug|text]]`. A
 page without a `title` takes its first `# ` heading, and without one its file
 name. Its `type` is read in lowercase. Its `aliases` show in its panel, and

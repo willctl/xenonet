@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { contextName, contextServerOf, findContextDir, isContextServer } from "../core/xenolith.js";
+import { contextName, contextServerOf, findContextDir, isContextServer, SPACE_KINDS, spaceOf } from "../core/xenolith.js";
 import { parseLog, readWiki, wikiLinks } from "../core/wiki.js";
 import { buildGraph } from "../core/graph.js";
 import { GRAPH_NODES } from "../core/schema/graph.js";
@@ -212,6 +212,61 @@ test("pages, logs and notes linked in from elsewhere are passed over, as Xenolit
   const root = path.join(tmp(), "wiki");
   fs.symlinkSync(other, root);
   assert.deepEqual((await readWiki(root, [])).pages.map((p) => p.slug), ["x"]);
+});
+
+test("Xenolith's spaces show as their own pages, tied to a project's space's project", async () => {
+  const now = new Date(2026, 9, 3, 12).getTime();
+  const dir = wikiAt(tmp(), "# Xenolith protocol\n");
+  const write = (rel, text) => {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+    fs.writeFileSync(path.join(dir, rel), text);
+  };
+  write("pages/refunds.md", "---\ntitle: Refunds here\n---\n");
+  write("spaces/project/atlas/pages/refunds.md", "---\ntitle: Atlas refunds\n---\nSee [[guide|the guide]] and [[elsewhere]].");
+  write("spaces/project/atlas/pages/guide.md", "# Atlas guide\n");
+  write("spaces/project/atlas/log/2026/2026-10-03.md", "## 09:00 · codex · Filed the refund rules\n\npages: [[refunds]]\n");
+  write("spaces/identity/adal/pages/prefs.md", "# Preferences\n");
+  // Not spaces: a name Xenolith wouldn't make, this machine's own, a kind
+  // it doesn't have.
+  write("spaces/project/Atlas-Old/pages/x.md", "# X\n");
+  write("spaces/machine/local/pages/x.md", "# X\n");
+  write("spaces/notes/x/pages/x.md", "# X\n");
+  if (process.platform !== "win32") {
+    write("outside/pages/x.md", "# X\n");
+    fs.symlinkSync(path.join(dir, "outside"), path.join(dir, "spaces", "project", "linked"));
+  }
+  const projects = [{ name: "Atlas", key: "/p/atlas", rel: "atlas" }, { name: "ledger", key: "/p/ledger", rel: "ledger" }];
+  const wiki = await readWiki(dir, projects, { now });
+  assert.deepEqual(wiki.pages.map((p) => [p.space, p.slug]), [[null, "refunds"], ["identity:adal", "prefs"], ["project:atlas", "guide"], ["project:atlas", "refunds"]], "this machine's, then by kind and name");
+  const by = (space, slug) => wiki.pages.find((p) => p.space === space && p.slug === slug);
+  assert.deepEqual(by("project:atlas", "refunds").writes.map((w) => w.title), ["Filed the refund rules"]);
+  assert.deepEqual(by(null, "refunds").writes, [], "a write in a space isn't the same-named page's here");
+  assert.deepEqual(by("project:atlas", "guide").projects, ["/p/atlas"], "a project's space is its context");
+  assert.deepEqual(by("identity:adal", "prefs").projects, []);
+  assert.equal(wiki.log.length, 1);
+
+  const g = buildGraph({ projectsDir: "/p", projects: projects.map((p) => ({ ...p, path: p.key })), sessions: [], wiki, layout: {}, windows: { activeWindowMs: 1, recentWindowMs: 1 } });
+  const page = g.nodes.find((n) => n.id === "wiki:project:atlas/refunds");
+  assert.deepEqual([page.name, page.slug, page.space], ["Atlas refunds", "refunds", "project:atlas"]);
+  assert.equal("space" in g.nodes.find((n) => n.id === "wiki:refunds"), false, "this machine's pages are as they were");
+  assert.ok(g.relations.some((r) => r.kind === "wikilink" && r.a === "wiki:project:atlas/refunds" && r.b === "wiki:project:atlas/guide"), "links stay in their space");
+  assert.ok(g.relations.some((r) => r.kind === "mentions" && r.a === "wiki:project:atlas/guide" && r.b === "project:/p/atlas"));
+  assert.ok(g.links.some((l) => l.kind === "page" && l.source === "resource:agent-wiki" && l.target === "wiki:identity:adal/prefs"), "a space's pages hang from the wiki");
+  const parsed = GRAPH_NODES.page.safeParse({ ...page, actions: [] });
+  assert.equal(parsed.success, true, JSON.stringify(parsed.error?.issues));
+});
+
+test("a write to a space beams to that space's pages, and one Xenolith refuses to none", () => {
+  const live = new LiveTelemetry({ claudeRoot: "/nowhere", codexRoot: "/nowhere", claudeDesktopDir: null });
+  const of = (space) => live.wikiPagesOf("xenolith", { title: "x", pages: ["refunds"], space });
+  assert.deepEqual(of("project:atlas"), ["project:atlas/refunds"]);
+  assert.deepEqual(of(" Project:Atlas "), ["project:atlas/refunds"], "as Xenolith reads it");
+  assert.deepEqual(of("machine:local"), ["refunds"], "this machine's own");
+  assert.deepEqual([of(undefined), of(""), of(5)], [["refunds"], ["refunds"], ["refunds"]], "none given: this machine's");
+  for (const bad of ["atlas", "team:atlas", "project:../x", "project:a b", "project:.x", "project:a..b"]) assert.equal(of(bad), null, bad);
+  assert.deepEqual(live.wikiPagesOf("xenolith", { slug: "guide", space: "identity:adal" }), ["identity:adal/guide"]);
+  assert.deepEqual([spaceOf("ACTOR:hermes"), spaceOf("machine:local"), spaceOf(null), spaceOf("project:")], ["actor:hermes", null, null, undefined]);
+  assert.deepEqual(SPACE_KINDS, ["project", "identity", "actor", "machine"]);
 });
 
 test("context_* writes, and the wiki_* names before them, beam to the pages they name", () => {

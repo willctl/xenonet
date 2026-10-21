@@ -280,29 +280,41 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
             obj(json!({ "id": root, "kind": "wiki", "name": xenonet_sources::xenolith::context_name(Some(&server)), "server": server, "path": get(w, "dir").cloned().unwrap_or(Value::Null), "pageCount": pages.len(), "inbox": get(w, "inbox").cloned().unwrap_or(Value::Null), "lastActivity": last_log })),
         );
         g.link("core", &root, "wiki");
-        let slugs: HashSet<String> = pages.iter().map(|p| get(p, "slug").map(js_string).unwrap_or_default()).collect();
+        // A page of another space than this machine's (Xenolith's spaces)
+        // is wiki:<space>/<slug>, and its [[links]] are to pages of its own
+        // space.
+        let space_of = |p: &Value| get(p, "space").filter(|v| truthy(Some(v))).map(js_string);
+        let id_of = |space: Option<&str>, slug: &str| match space {
+            Some(s) => format!("wiki:{s}/{slug}"),
+            None => format!("wiki:{slug}"),
+        };
+        let slug_of = |p: &Value| get(p, "slug").map_or_else(|| "undefined".into(), js_string);
+        let ids: HashSet<String> = pages.iter().map(|p| id_of(space_of(p).as_deref(), &slug_of(p))).collect();
         let mut seen: HashSet<String> = HashSet::new();
         for p in pages {
-            let slug = get(p, "slug").map_or_else(|| "undefined".into(), js_string);
-            let id = format!("wiki:{slug}");
+            let space = space_of(p);
+            let id = id_of(space.as_deref(), &slug_of(p));
             let writes: Vec<Value> = items(get(p, "writes")).iter().rev().take(6).rev().cloned().collect();
             let f = |k: &str| get(p, k).cloned().unwrap_or(Value::Null);
             let mut node = obj(json!({ "id": id, "kind": "page", "name": f("title"), "slug": f("slug"), "type": f("type"), "summary": f("summary"), "tags": f("tags"), "updated": f("updated"), "updatedBy": f("updatedBy"), "path": f("path"), "writes": writes, "lastActivity": f("updated") }));
-            // Its aliases only when it has some, so a page without stays as
-            // it was.
+            // Its aliases and space only when it has them, so a page
+            // without stays as it was.
             if let Some(aliases) = get(p, "aliases").filter(|a| !items(Some(a)).is_empty()) {
                 node.insert("aliases".into(), aliases.clone());
+            }
+            if let Some(s) = &space {
+                node.insert("space".into(), json!(s));
             }
             g.set(&id, node);
             g.link(&root, &id, "page");
             for l in items(get(p, "links")) {
-                let l = js_string(l);
-                let mut pair = [slug.clone(), l.clone()];
+                let to = id_of(space.as_deref(), &js_string(l));
+                let mut pair = [id.clone(), to.clone()];
                 pair.sort_by(|a, b| xenonet_base::jsstr::cmp_units(a, b));
                 let k = pair.join("|");
-                if slugs.contains(&l) && !seen.contains(&k) {
+                if ids.contains(&to) && !seen.contains(&k) {
                     seen.insert(k);
-                    relations.push(json!({ "a": id, "b": format!("wiki:{l}"), "kind": "wikilink" }));
+                    relations.push(json!({ "a": id, "b": to, "kind": "wikilink" }));
                 }
             }
             for key in items(get(p, "projects")) {

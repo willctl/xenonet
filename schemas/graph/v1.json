@@ -1133,6 +1133,10 @@
                   "type": "string"
                 }
               },
+              "space": {
+                "description": "The Xenolith space it's in, such as project:atlas, when that isn't this machine's own; its id is then wiki:<space>/<slug>",
+                "type": "string"
+              },
               "fx": {
                 "type": [
                   "number",

@@ -16,3 +16,10 @@ export function contextServerOf(dir, { env = process.env, home = os.homedir(), p
 }
 
 export const contextName = (server) => native.contextName(typeof server === "string" ? server : null);
+
+export const SPACE_KINDS = native.contextSpaceKinds();
+
+export function spaceOf(v) {
+  const { space, refused } = native.contextSpaceOf(v);
+  return refused ? undefined : space;
+}
