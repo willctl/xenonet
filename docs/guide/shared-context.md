@@ -15,13 +15,15 @@ mentions. Sessions' calls to the `xenolith` MCP server beam to the wiki, and
 a `context_log` or `context_upsert_page` that names pages beams to those
 pages.
 
-XenoNet finds the folder the way Xenolith does: `XENOLITH_DIR`, then
-`wikiDir` in Xenolith's `config.json` (in `~/Library/Application Support/Xenolith`
-on macOS, `%APPDATA%\Xenolith` on Windows, `~/.config/xenolith` on Linux),
-then `~/Xenolith`. Without Xenolith it looks for Agent Wiki, which Xenolith
-came from, the same way. `XENONET_WIKI_DIR` overrides both. A folder whose
-`PROTOCOL.md` is Xenolith's shows as Xenolith; any other shows as Agent Wiki,
-as before.
+XenoNet finds the folder the way Xenolith does: `XENOLITH_DIR`, even before
+Xenolith has made that folder, then `wikiDir` in Xenolith's `config.json`,
+then `~/Xenolith`. That `config.json` is in `XENOLITH_CONFIG_DIR` when it's
+set, else in `XENOLITH_HOME`, else in `~/Library/Application Support/Xenolith`
+on macOS, `%APPDATA%\Xenolith` on Windows and `~/.config/xenolith` on Linux.
+Until Xenolith's installer moves it there, the older `~/.xenolith/config.json`
+counts. Without Xenolith it looks for Agent Wiki, which Xenolith came from,
+the same way. `XENONET_WIKI_DIR` overrides both. A folder whose `PROTOCOL.md`
+is Xenolith's shows as Xenolith; any other shows as Agent Wiki, as before.
 
 XenoNet only reads the folder. Writing goes through Xenolith's own server,
 under its access rules, so XenoNet never changes your wiki.

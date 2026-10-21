@@ -24,12 +24,15 @@ struct Product {
     mac: &'static str,
     xdg: &'static str,
     folder: &'static str,
-    legacy: Option<&'static str>,
+    legacy: &'static str,
+    /// It makes the folder <ENV>_DIR names when it starts, so XenoNet takes
+    /// that folder before it's there.
+    makes_dir: bool,
 }
 
 const PRODUCTS: [Product; 2] = [
-    Product { server: "xenolith", env: "XENOLITH", windows: "Xenolith", mac: "Xenolith", xdg: "xenolith", folder: "Xenolith", legacy: None },
-    Product { server: "agent-wiki", env: "AGENT_WIKI", windows: "AgentWiki", mac: "Agent Wiki", xdg: "agent-wiki", folder: "AgentWiki", legacy: Some(".agent-wiki") },
+    Product { server: "xenolith", env: "XENOLITH", windows: "Xenolith", mac: "Xenolith", xdg: "xenolith", folder: "Xenolith", legacy: ".xenolith", makes_dir: true },
+    Product { server: "agent-wiki", env: "AGENT_WIKI", windows: "AgentWiki", mac: "Agent Wiki", xdg: "agent-wiki", folder: "AgentWiki", legacy: ".agent-wiki", makes_dir: false },
 ];
 
 fn var<'a>(env: &'a Env, name: &str) -> Option<&'a str> {
@@ -41,14 +44,15 @@ fn is_absolute(p: &str) -> bool {
 }
 
 // A product's config folder, as its programs find it
-// (xenolith/rust/crates/core/src/paths.rs): <ENV>_HOME (or
-// <ENV>_CONFIG_DIR) first, then the platform's own place.
+// (xenolith/rust/crates/core/src/paths.rs): <ENV>_CONFIG_DIR, then
+// <ENV>_HOME (portable mode, everything in one folder), then the
+// platform's own place.
 fn config_dir(p: &Product, env: &Env, home: &str, platform: &str) -> String {
-    if let Some(portable) = var(env, &format!("{}_HOME", p.env)) {
-        return paths::resolve(portable);
-    }
     if let Some(dir) = var(env, &format!("{}_CONFIG_DIR", p.env)) {
         return paths::resolve(dir);
+    }
+    if let Some(portable) = var(env, &format!("{}_HOME", p.env)) {
+        return paths::resolve(portable);
     }
     if platform == "win32" {
         let appdata = var(env, "APPDATA").map_or_else(|| paths::join_all(&[home, "AppData", "Roaming"]), String::from);
@@ -68,25 +72,39 @@ fn exists(p: &str) -> bool {
     Path::new(p).exists()
 }
 
-// The wikiDir a config file names, when that folder is there.
-fn wiki_dir_in(file: &str) -> Option<String> {
+// The config.json a product reads (Xenolith's config_path in
+// xenolith/rust/crates/core/src/wiki.rs): the one in its config folder,
+// or, until its installer has moved it there, the one in its old folder in
+// home. Never the old one in portable mode or with <ENV>_CONFIG_DIR set.
+fn config_file(p: &Product, env: &Env, home: &str, platform: &str) -> String {
+    let file = paths::join(&config_dir(p, env, home, platform), "config.json");
+    if var(env, &format!("{}_HOME", p.env)).is_none() && !env.contains_key(&format!("{}_CONFIG_DIR", p.env)) && !exists(&file) {
+        let legacy = paths::join_all(&[home, p.legacy, "config.json"]);
+        if exists(&legacy) {
+            return legacy;
+        }
+    }
+    file
+}
+
+// The wikiDir a config file names, there or not.
+fn named_in(file: &str) -> Option<String> {
     let text = String::from_utf8_lossy(&std::fs::read(file).ok()?).into_owned();
     let v = xenonet_base::json::parse(text.strip_prefix('\u{feff}').unwrap_or(&text)).ok()?;
     let dir = v.get("wikiDir")?.as_str()?;
-    (!xenonet_base::text::js_trim(dir).is_empty() && exists(dir)).then(|| dir.to_string())
+    (!xenonet_base::text::js_trim(dir).is_empty()).then(|| dir.to_string())
 }
 
 /// The shared context's folder and the server that owns it: Xenolith's
 /// (XENOLITH_DIR, its config.json's wikiDir, ~/Xenolith), else Agent
-/// Wiki's the same way (and its pre-1.3 ~/.agent-wiki/config.json).
+/// Wiki's the same way. Each product's old config in home (~/.xenolith,
+/// ~/.agent-wiki) counts while its new one isn't there.
 pub fn find_context_dir(env: &Env, home: &str, platform: &str) -> Option<(String, &'static str)> {
     for p in &PRODUCTS {
-        if let Some(dir) = var(env, &format!("{}_DIR", p.env)).filter(|d| exists(d)) {
+        if let Some(dir) = var(env, &format!("{}_DIR", p.env)).filter(|d| p.makes_dir || exists(d)) {
             return Some((paths::resolve(dir), p.server));
         }
-        let config = paths::join(&config_dir(p, env, home, platform), "config.json");
-        let found = wiki_dir_in(&config).or_else(|| p.legacy.and_then(|l| wiki_dir_in(&paths::join_all(&[home, l, "config.json"]))));
-        if let Some(dir) = found {
+        if let Some(dir) = named_in(&config_file(p, env, home, platform)).filter(|d| exists(d)) {
             return Some((dir, p.server));
         }
         let fallback = paths::join(home, p.folder);

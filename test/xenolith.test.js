@@ -73,6 +73,41 @@ test("the shared context is Xenolith's where Xenolith is, else Agent Wiki's", ()
   assert.deepEqual(findContextDir({ env: {}, home: old, platform: "darwin" }), { dir: path.join(old, "kept"), server: "agent-wiki" }, "the pre-1.3 config");
 });
 
+test("Xenolith's config is found where Xenolith's own programs look", () => {
+  const home = tmp();
+  const find = (env = {}) => findContextDir({ env, home, platform: "linux" });
+  const config = (dir, wikiDir) => {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ wikiDir }));
+  };
+
+  // XENOLITH_DIR counts before Xenolith has made the folder.
+  const later = path.join(home, "not-yet");
+  assert.deepEqual(find({ XENOLITH_DIR: later }), { dir: later, server: "xenolith" });
+  assert.equal(fs.existsSync(later), false, "XenoNet only reads");
+  assert.equal(findContextDir({ env: { AGENT_WIKI_DIR: later }, home, platform: "linux" }), null, "Agent Wiki's must be there");
+
+  // The config from before the platform's folder, ~/.xenolith/config.json,
+  // until one is in the platform's folder.
+  const legacyWiki = wikiAt(path.join(home, "legacy"));
+  config(path.join(home, ".xenolith"), legacyWiki);
+  assert.deepEqual(find(), { dir: legacyWiki, server: "xenolith" });
+  const portable = tmp();
+  assert.equal(find({ XENOLITH_HOME: portable }), null, "never in portable mode");
+  assert.equal(find({ XENOLITH_CONFIG_DIR: "" }), null, "nor with XENOLITH_CONFIG_DIR set at all");
+  const newWiki = wikiAt(path.join(home, "new"));
+  config(path.join(home, ".config", "xenolith"), newWiki);
+  assert.deepEqual(find(), { dir: newWiki, server: "xenolith" });
+
+  // XENOLITH_CONFIG_DIR wins over XENOLITH_HOME, as a folder of its own
+  // does over portable mode.
+  const cfgWiki = wikiAt(path.join(home, "cfg-wiki"));
+  config(path.join(home, "cfg"), cfgWiki);
+  config(portable, legacyWiki);
+  assert.equal(find({ XENOLITH_HOME: portable })?.dir, legacyWiki);
+  assert.equal(find({ XENOLITH_HOME: portable, XENOLITH_CONFIG_DIR: path.join(home, "cfg") })?.dir, cfgWiki);
+});
+
 test("a wiki folder belongs to the server its protocol names", () => {
   assert.equal(contextServerOf(wikiAt(tmp(), "# Xenolith protocol\n\nThis folder is...")), "xenolith");
   assert.equal(contextServerOf(wikiAt(tmp(), "# Agent Wiki protocol\n")), "agent-wiki");
