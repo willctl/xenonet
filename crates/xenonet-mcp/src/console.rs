@@ -47,7 +47,7 @@ pub trait Control: Send + Sync + 'static {
 }
 
 const KINDS: [&str; 10] = ["project", "session", "native", "zone", "resource", "wiki", "page", "core", "actor", "host"];
-const SIMULATIONS: [&str; 21] = [
+const SIMULATIONS: [&str; 28] = [
     "needs-you",
     "collision",
     "stuck",
@@ -69,6 +69,13 @@ const SIMULATIONS: [&str; 21] = [
     "host-offline",
     "host-online",
     "host-skew",
+    "net-none",
+    "net-founder",
+    "net-member",
+    "net-gateway-down",
+    "net-ticket",
+    "net-mismatch",
+    "net-remote-waiting",
 ];
 
 fn instance_arg(installed: bool) -> Z {
@@ -329,6 +336,21 @@ fn defs(installed: bool) -> Vec<Def> {
             write(),
         ),
         def(
+            "network",
+            "The network",
+            "This machine's network across machines, as Network settings in the palette shows it: whether it's in one, its name and this machine; the gateway (address, kind, link, since when, why it's down, clock skew); each machine (online or since when, its agents and what waits on you, founder, gateway, window, and where you're at), with its agents under it; the tickets waiting, the outbox, a roster mismatch and the titles-only setting. `open` shows the panel, `start` and `join` its forms, and `add` opens Add a machine with the new machine's id (host) and whether you'll use a XenoNet window on it (window) filled in. `message` opens the box that messages a session as you (to: its id, or @<host>:<id> for another machine's) with text in it. Making the join line, starting or joining a network, removing or replacing a machine, the setting and Send are the person's: clicks in the window, at the answer's at and message.sendAt, which only the demo and test instances let this console make. The join line shows once, masked: join.masked says whether it is, never the ticket. In XenoNet Dev, simulate net-… makes up a network to look at. Returns the network, and the state once the view has settled when something opened.",
+            object(vec![
+                ("action", enumeration(&["read", "open", "start", "join", "add", "message", "close"]).optional().describe("read (the default) says how the network stands without opening anything.")),
+                ("host", string().optional().describe("For add: the new machine's id.")),
+                ("window", boolean().optional().describe("For add: whether you'll use a XenoNet window on it.")),
+                ("to", string().optional().describe("For message: a session's id, @<host>:<id> for another machine's, or an actor's.")),
+                ("text", string().optional().describe("For message: what goes in the box.")),
+                ("settle", settle_arg()),
+                ("instance", inst()),
+            ]),
+            write(),
+        ),
+        def(
             "root",
             "The projects folder",
             "The projects folder XenoNet reads (its root) and where that comes from: XENONET_PROJECTS_DIR, a folder chosen in the console, or the default ~/Projects, with its last scan. `check` says what XenoNet would find in another folder (how many projects and groups, or why it can't use it) without switching. `path` switches to a folder, as Change the projects folder… in the palette does: XenoNet checks it, rescans and returns once the map shows it; null goes back to the default. The layout, your rules and Codex's picks stay with each folder, so switching back brings them back. The demo has a second made-up folder, ~/Clients.",
@@ -343,10 +365,10 @@ fn defs(installed: bool) -> Vec<Def> {
         def(
             "simulate",
             "Simulate a session state, an actor acting, or another machine",
-            "Puts sessions into states that are otherwise rare, so you can check how they look. The kinds are needs-you (a question waiting), collision (two sessions editing the same file, which needs a and b), stuck (a failing loop), wiki-write, turn-end, doctor (the doctor finding a problem), and clear, which undoes them all. Without session ids it picks the most recently active sessions. The actor-… kinds have an actor act instead, as an event it reports would. They are actor-spawn (it starts a session), actor-edit (it edits files in a project), actor-message (it messages a session), actor-online and actor-offline. The actor reacts, and a beam runs to what it touched. actor-request makes up a program asking to be an actor (named a, Heron by default), which waits for an Allow in the window. Its card shows in the attention strip, and actors lists it under requests. actor-needs-you has an actor (a, the first by default) wait on you with a made-up question. Its card shows in the attention strip, and its glow beats in the attention color until clear. actor-tunnel gives an actor (a) a made-up remote connection through a tunnel with an adapter connected, so the map draws its gate open between it and what it reads. actor-tunnel-down does the same with no adapter connected, so the gate is shut. actor-read sends a read through it, of node b or what it acts on, with light down the conduit and out to what it read. clear takes the tunnel away. Only the demo and test instances, whose data is made up, answer actor-request, actor-needs-you and the tunnel kinds, and actor-request's token stays out of this answer. With XENONET_HOSTS=1, it covers other machines too. host-add shows another XenoNet on this machine as a host (a is the new host's id, b that XenoNet's port). host-offline and host-online take a host's id as a. host-skew sets a host's clock b ms off, three minutes if b is left out. Everything stays in memory, apart from actor-request. Returns what was used and the page's state after the update arrives.",
+            "Puts sessions into states that are otherwise rare, so you can check how they look. The kinds are needs-you (a question waiting), collision (two sessions editing the same file, which needs a and b), stuck (a failing loop), wiki-write, turn-end, doctor (the doctor finding a problem), and clear, which undoes them all. Without session ids it picks the most recently active sessions. The actor-… kinds have an actor act instead, as an event it reports would. They are actor-spawn (it starts a session), actor-edit (it edits files in a project), actor-message (it messages a session), actor-online and actor-offline. The actor reacts, and a beam runs to what it touched. actor-request makes up a program asking to be an actor (named a, Heron by default), which waits for an Allow in the window. Its card shows in the attention strip, and actors lists it under requests. actor-needs-you has an actor (a, the first by default) wait on you with a made-up question. Its card shows in the attention strip, and its glow beats in the attention color until clear. actor-tunnel gives an actor (a) a made-up remote connection through a tunnel with an adapter connected, so the map draws its gate open between it and what it reads. actor-tunnel-down does the same with no adapter connected, so the gate is shut. actor-read sends a read through it, of node b or what it acts on, with light down the conduit and out to what it read. clear takes the tunnel away. Only the demo and test instances, whose data is made up, answer actor-request, actor-needs-you and the tunnel kinds, and actor-request's token stays out of this answer. With XENONET_HOSTS=1, it covers other machines too. host-add shows another XenoNet on this machine as a host (a is the new host's id, b that XenoNet's port). host-offline and host-online take a host's id as a. host-skew sets a host's clock b ms off, three minutes if b is left out. The net-… kinds make up a network across machines, with other machines' agents, for the Network panel (network), the attention strip and the message box: net-none (this machine on its own), net-founder (this machine started it and is its gateway; two more machines, one offline), net-member (this machine joined; the gateway is another), net-gateway-down (the gateway hasn't answered for 25 minutes, and what's for other machines waits in the outbox), net-ticket (a ticket waits), net-mismatch (a machine sees another list of the network's machines) and net-remote-waiting (an agent on another machine waits on you). For net-founder and net-remote-waiting, a is the machine you're at, this one by default: a wait sounds only there. clear ends it. Everything stays in memory, apart from actor-request. Returns what was used and the page's state after the update arrives.",
             object(vec![
                 ("kind", enumeration(&SIMULATIONS)),
-                ("a", string().optional().describe("A session id (find with kind session); for the actor-… kinds, an actor id (actors lists them, and the first one that isn't you is the default); for actor-request, the name it asks with; for host-…, a host's id.")),
+                ("a", string().optional().describe("A session id (find with kind session); for the actor-… kinds, an actor id (actors lists them, and the first one that isn't you is the default); for actor-request, the name it asks with; for host-…, a host's id; for net-founder and net-remote-waiting, the machine you're at.")),
                 ("b", string().optional().describe("The second session, for collision; for the actor-… kinds, the node it acts on (a session for actor-spawn and actor-message, a project for actor-edit; the session busy most lately when left out); for host-add, the port of the XenoNet to show; for host-skew, milliseconds.")),
                 ("instance", inst()),
             ]),
@@ -703,6 +725,11 @@ impl Console {
                 }
                 one(Value::Object(out))
             }
+            "network" => match a.get("action").and_then(Value::as_str).unwrap_or("read") {
+                "message" => one(self.driver(&s, "messageAs", vec![arg(a, "to"), arg(a, "text"), settle(a)]).await?),
+                "add" => one(self.driver(&s, "network", vec![json!("add"), Value::Object(tools::pick(a, &[("host", "host"), ("window", "window")])), settle(a)]).await?),
+                action => one(self.driver(&s, "network", vec![json!(action), Value::Null, settle(a)]).await?),
+            },
             "root" => {
                 if let Some(check) = a.get("check") {
                     return one(json!({ "check": self.driver(&s, "checkRoot", vec![check.clone()]).await? }));
@@ -936,6 +963,7 @@ mod tests {
                 "labels",
                 "identities",
                 "hosts",
+                "network",
                 "root",
                 "simulate",
                 "actors",
@@ -951,6 +979,6 @@ mod tests {
             ]
         );
         let installed: Vec<&str> = defs(true).iter().map(|d| d.name).collect();
-        assert!(!installed.contains(&"eval") && !installed.contains(&"simulate") && installed.len() == 30);
+        assert!(!installed.contains(&"eval") && !installed.contains(&"simulate") && installed.len() == 31);
     }
 }

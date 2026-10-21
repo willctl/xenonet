@@ -84,6 +84,9 @@ export function createDriver(app) {
     if (it.kind === "request") return { kind: "request", request: it.id, actor: it.request.actor, name: it.request.name, ...(it.request.gateway ? { gatewayToken: true } : {}) };
     if (it.kind === "requests") return { kind: "requests", count: it.count };
     if (it.kind === "actor-need") return { kind: "actor-need", actor: it.id, waits: it.sub, text: it.text };
+    // Another machine's agent waiting on you, in a network: which machine,
+    // and whether it sounds here (only where you are).
+    if (it.kind === "remote-need") return { kind: "remote-need", agent: it.id, host: it.host, waits: it.sub, text: it.text, chime: !!it.chime, ...(it.stale ? { stale: true } : {}) };
     return { kind: it.kind, session: it.id, text: it.text };
   }
 
@@ -97,7 +100,7 @@ export function createDriver(app) {
       selection: selected ? brief(nodeOf(selected)) : null,
       gathered: scene.gathering(),
       identities: { filter: app.identities?.selected ?? [], masked: !!app.identities?.masked },
-      overlays: { palette: palette.isOpen, modal: modals.isOpen, needsYou: !!app.needsYou?.isOpen, preview: preview.isOpen, rename: !!app.hud?.renaming, terminal: !!app.terminal()?.isOpen, wallpaper: app.wallpaper(), replay: replay.active, film: app.film && app.film.state !== "idle" ? app.film.state : false, export: !!app.exportPanel?.isOpen, switcher: !!app.themes?.switcher.isOpen, gallery: !!app.themes?.gallery.isOpen },
+      overlays: { palette: palette.isOpen, modal: modals.isOpen, needsYou: !!app.needsYou?.isOpen, network: !!app.network?.isOpen, preview: preview.isOpen, rename: !!app.hud?.renaming, terminal: !!app.terminal()?.isOpen, wallpaper: app.wallpaper(), replay: replay.active, film: app.film && app.film.state !== "idle" ? app.film.state : false, export: !!app.exportPanel?.isOpen, switcher: !!app.themes?.switcher.isOpen, gallery: !!app.themes?.gallery.isOpen },
       alerts: alerts.items.map(alertBrief),
       counts: {
         nodes: graph?.nodes.length ?? 0,
@@ -459,6 +462,43 @@ export function createDriver(app) {
       }
       throw new Error(`background takes status, offer or dismiss, not ${action}`);
     },
+    // The network across machines (network.js): Network settings and Add
+    // a machine. "read" (the default) says how it stands without opening
+    // anything: whether this machine is in a network, the gateway and its
+    // link, each machine with its agents, what waits on you, the tickets,
+    // the outbox, a roster mismatch and the titles-only setting, and, while
+    // the panel shows the join line, whether it shows masked (never the
+    // ticket). "open" shows the panel, "start" and "join" its forms, "add"
+    // Add a machine with { host, window } filled in, and "close" closes it;
+    // "refresh" reads it again. Making the line, starting, joining,
+    // removing, replacing and the setting are yours: clicks where the
+    // answer's `at` points, which only the demo and test instances let the
+    // control channel make.
+    async network(action = "read", arg = null, opts) {
+      const n = app.network;
+      if (!n) throw new Error("This page has no Network panel.");
+      if (action === "read") return n.driverState();
+      if (action === "refresh") return (await n.refresh(), n.driverState());
+      let st;
+      if (action === "open") st = await act(() => n.open(), opts);
+      else if (action === "start" || action === "join") st = await act(() => n.open(action), opts);
+      else if (action === "add") st = await act(() => n.addMachine({ host: arg?.host ?? "", window: !!arg?.window }), opts);
+      else if (action === "close") st = await act(() => n.close(), opts);
+      else throw new Error("Use read, refresh, open, start, join, add or close.");
+      return { ...st, network: n.driverState() };
+    },
+    // The box that messages a session as you (one of this machine's, or
+    // @<host>:<id> on another in the network) or an actor, opened with
+    // `text` in it. Send is yours: a click at the answer's message.sendAt,
+    // which only the demo and test instances let the control channel make.
+    // message() reads how the box and the last message stand, never their
+    // words.
+    async messageAs(to, text = "", opts) {
+      if (typeof to !== "string" || !to) throw new Error("say who to message: a session's id, or @<host>:<id> for another machine's");
+      const st = await act(() => app.messageTo(to, { text: String(text ?? "") }), opts);
+      return { ...st, message: app.message() };
+    },
+    message: () => app.message?.() ?? null,
     commands: () => app.commands.map(({ id, label, key }) => ({ id, label, ...(key ? { key } : {}) })),
     async refusals(action = "open", value, opts) {
       const st = await act(() => app.refusals.action(action, value), opts);

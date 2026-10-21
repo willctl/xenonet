@@ -12,6 +12,7 @@ pub mod environments;
 pub mod hosts;
 pub mod integrations;
 pub mod mcp;
+pub mod net_sim;
 pub mod refusals;
 pub mod themes;
 pub mod workspace;
@@ -59,6 +60,12 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         }
     }
     let cores = &ctx.cores;
+
+    // XenoNet Dev's simulated network answers first while it runs; and,
+    // until the core's routes are here, GET /api/net/state (net_sim.rs).
+    if let Some(r) = net_sim::route(ctx, req).await? {
+        return Ok(r);
+    }
 
     // You, writing from XenoNet's own window to an actor that reads its
     // inbox, or to a session, here or on another machine of your network
@@ -1081,6 +1088,10 @@ fn simulate(ctx: &Arc<Ctx>, kind: &Value, body: &Value) -> Result<Option<Value>,
             None => Ok(None),
         };
     }
+    // A made-up network across machines; a is the host you're at.
+    if kind_s.starts_with("net-") {
+        return Ok(net_sim::simulate(ctx, &kind_s, a.as_deref()));
+    }
     if kind_s == "doctor" {
         // The doctor finding a problem, reported as a real run would be; the
         // next real run (or clear) puts back what's true.
@@ -1100,10 +1111,12 @@ fn simulate(ctx: &Arc<Ctx>, kind: &Value, body: &Value) -> Result<Option<Value>,
         tokio::spawn(async move {
             let _ = c.cores.doctor.check(true, false).await;
         });
-        // An actor waiting on you stops waiting too.
+        // An actor waiting on you stops waiting too, and a made-up network
+        // goes.
         if let Some(x) = &cores.actors {
             let _ = x.simulate("clear", None, None);
         }
+        net_sim::clear(ctx);
     }
     let Some(done) = cores.state.simulate(&kind_s, a, b)? else { return Ok(None) };
     ctx.events.broadcast("live", &cores.state.live_snapshot()?, Local::Same);

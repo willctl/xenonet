@@ -1,0 +1,263 @@
+// End to end: the network across machines in the console (src/network.js),
+// on a real XenoNet Dev, the test instance with the demo's made-up data. The
+// net-… simulations make up a network, with other machines and their
+// agents (crates/xenonet-service/src/routes/net_sim.rs), since a real one
+// needs a second machine. The Network panel on a machine on its own and in
+// a network, a machine that's offline and where you are, Add a machine and
+// its join line shown once and masked, another machine's agent waiting on
+// you in the attention strip and where that sounds, a gateway that's down,
+// and the message box that writes to a session as you, from the panel and
+// from a session's own panel. Each state the page reads is the schema's
+// (network/state/v1). No page errors. The window stays hidden;
+// XENONET_E2E_SHOW=inactive shows it to watch.
+//
+//   npm run test:e2e
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import net from "node:net";
+import os from "node:os";
+import path from "node:path";
+import { xenonet } from "../../core/control.js";
+import { NetworkState } from "../../core/schema/network.js";
+import { limit } from "../harness/software.js";
+
+const port = await new Promise((resolve) => {
+  const probe = net.createServer().listen(0, "127.0.0.1", () => {
+    const { port } = probe.address();
+    probe.close(() => resolve(port));
+  });
+});
+const s = xenonet("test", { port });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const shoot = (name, body) => async () => {
+  try {
+    await body();
+  } catch (err) {
+    const shot = await s.screenshot({ name: `e2e-${name}`, inline: false }).catch(() => null);
+    if (shot) err.message += `\n(screenshot: ${shot.file})`;
+    throw err;
+  }
+};
+
+// Polls `fn` until it gives something truthy, and gives that (or the last
+// falsy answer when time's up).
+async function until(fn, ms = 8000) {
+  const end = Date.now() + ms;
+  let got;
+  while (!(got = await fn()) && Date.now() < end) await sleep(150);
+  return got;
+}
+// A real click where the driver says something is, once the view has
+// settled: what's yours (data-yours) takes one, which the control channel
+// makes only in the demo and test instances.
+async function clickAt(at, what) {
+  assert.ok(at, `${what} is on the page`);
+  await s.driver("settled");
+  return s.input({ click: at });
+}
+const network = () => s.driver("network", "read");
+// The state the page reads, checked against network/state/v1.
+async function served() {
+  const raw = await s.api("/api/net/state");
+  NetworkState.parse(raw);
+  return raw;
+}
+// A simulation, and the page once it has heard of it.
+async function simulate(kind, args = {}, want = () => true) {
+  const done = await s.simulate(kind, args);
+  assert.equal(done.ok, true, JSON.stringify(done));
+  const n = await until(async () => {
+    const got = await network();
+    return got.simulated && want(got) ? got : null;
+  });
+  assert.ok(n, `the page heard of ${kind}`);
+  return n;
+}
+let cursor = 0;
+
+before(async () => {
+  await xenonet("test").quit();
+  await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
+  cursor = (await s.logs({ limit: 1 })).cursor ?? 0;
+}, { timeout: limit(180000) });
+
+after(async () => {
+  if (process.env.XENONET_E2E_KEEP === "1") return;
+  await s.simulate("clear").catch(() => {});
+  await s.quit().catch(() => {});
+  fs.rmSync(path.join(fs.realpathSync.native(os.tmpdir()), `xenonet-demo-${port}`), { recursive: true, force: true, maxRetries: 10 });
+});
+
+test("a machine on its own: Network settings offers Start and Join, and nothing else of a network shows", { timeout: limit(60000) }, shoot("network-alone", async () => {
+  const raw = await served();
+  assert.deepEqual([raw.network, raw.self, raw.hosts], [null, null, []]);
+  const st = await s.driver("state");
+  assert.ok(!st.alerts.some((a) => a.kind === "remote-need"));
+  const commands = await s.driver("commands");
+  assert.ok(commands.some((c) => c.id === "network") && commands.some((c) => c.id === "add-machine"), "Network settings and Add a machine are in the palette");
+
+  const opened = await s.driver("command", "network");
+  assert.equal(opened.overlays.network, true);
+  const n = await network();
+  assert.deepEqual([n.open, n.view, n.inNetwork, n.hosts], [true, "main", false, []]);
+  assert.match(n.text, /This machine is on its own\..*Start a network.*Join one/);
+  await s.driver("network", "start");
+  assert.match((await network()).text, /Start a network here.*xenonet net create --name <name> --host <id>/);
+  await s.driver("network", "join");
+  assert.match((await network()).text, /xenonet net join <address> <ticket>.*works once, for ten minutes/);
+  // Add a machine starts with a network.
+  await s.driver("network", "close");
+  const add = await s.driver("command", "add-machine");
+  assert.equal(add.overlays.network, true);
+  const start = await until(async () => ((await network()).view === "start" ? network() : null));
+  assert.match(start.text, /adding one starts with a network here/);
+  await s.driver("network", "close");
+
+  // net-none says the same, simulated.
+  const none = await simulate("net-none");
+  assert.deepEqual([none.inNetwork, none.network], [false, null]);
+  await served();
+}));
+
+test("net-founder: this machine, where you are, the gateway and the other machines, one offline, with their agents", { timeout: limit(60000) }, shoot("network-founder", async () => {
+  await simulate("net-founder", {}, (n) => n.inNetwork);
+  const raw = await served();
+  assert.equal(raw.self.id, "studio");
+  const { network: n } = await s.driver("network", "open");
+  assert.deepEqual([n.network, n.self, n.gateway.link, n.gateway.words, n.gateway.address], ["home", "studio", "live", "Linked", "gw.example.net"]);
+  const byId = Object.fromEntries(n.hosts.map((x) => [x.id, x]));
+  assert.deepEqual(Object.keys(byId).sort(), ["laptop", "rack", "studio"]);
+  assert.deepEqual([byId.studio.here, byId.studio.you, byId.studio.founder, byId.studio.gateway], [true, true, true, true], "you're here, at the founder and gateway");
+  assert.deepEqual([byId.laptop.online, byId.laptop.you, byId.laptop.remote.length], [true, false, 2]);
+  assert.equal(byId.rack.online, false);
+  assert.match(byId.rack.row, /^offline since .+ · 1 agent when last seen$/, "the offline one says since when");
+  assert.match(n.text, /studio\s*this machine\s*you're here\s*founder\s*gateway\s*window/i);
+  // Its other machines' agents, each with Message; the founder has no Remove.
+  assert.equal(await s.eval(`return document.querySelectorAll("#modal [data-net-message]").length`), 3);
+  assert.equal(await s.eval(`return !!document.querySelector('#modal [data-net-host="studio"] [data-net-remove]')`), false);
+  assert.equal(await s.eval(`return !!document.querySelector('#modal [data-net-host="rack"] [data-net-remove]')`), true);
+  await s.screenshot({ name: "e2e-network-founder", inline: false });
+}));
+
+test("Add a machine shows the join line once, masked until Show, and a taken id gets Replace", { timeout: limit(60000) }, shoot("network-add", async () => {
+  await simulate("net-founder", {}, (n) => n.inNetwork);
+  // A machine that's there already.
+  let st = await s.driver("network", "add", { host: "laptop", window: false });
+  await clickAt(st.network.at.make, "Make the join line");
+  const taken = await until(async () => (await network()).error);
+  assert.match(taken, /There's a machine called laptop .*Replace/);
+
+  st = await s.driver("network", "add", { host: "desk", window: true });
+  assert.equal(st.network.view, "add");
+  await clickAt(st.network.at.make, "Make the join line");
+  const line = await until(async () => (await network()).join);
+  assert.ok(line, "the join line shows");
+  assert.deepEqual([line.host, line.window, line.shown, line.masked, line.joined], ["desk", true, false, true, false], "masked until Show");
+  assert.ok(line.expires > Date.now() + 9 * 60e3 && line.expires <= Date.now() + 10 * 60e3, "for ten minutes");
+  const shownText = (await network()).text;
+  assert.match(shownText, /xenonet net join gw\.example\.net •{12}/);
+  assert.match(shownText, /It works once, until .+: ten minutes\./);
+  // Waiting now, and the ticket itself is in no answer.
+  const raw = await served();
+  assert.deepEqual(raw.tickets.map((t) => [t.host, t.window]), [["desk", true]]);
+  assert.ok(!/[A-Z2-7]{4}-[A-Z2-7]{4}-[A-Z2-7]{2}/.test(JSON.stringify(raw)), "the state has no ticket");
+
+  // Show shows it, for a while; a screenshot holds the page still, which
+  // masks it again.
+  await clickAt((await network()).at.show, "Show");
+  const shown = await until(async () => ((await network()).join.shown ? network() : null));
+  assert.equal(shown.join.masked, false, "Show shows it");
+  assert.ok(!/[A-Z2-7]{4}-[A-Z2-7]{4}-[A-Z2-7]{2}/.test(JSON.stringify(shown)), "the driver never says the ticket");
+  const held = await s.eval(`return (async () => { await window.__xenonet.driver.still(true); const t = document.querySelector('#modal [data-secret="net-join"] .secret-text').innerText; await window.__xenonet.driver.still(false); return t; })()`);
+  assert.match(held, /•{12}/, "held still for a screenshot, it's masked");
+  await s.screenshot({ name: "e2e-network-join-line", inline: false });
+  await s.driver("network", "close");
+  assert.equal((await network()).join, null, "it goes with the panel");
+}));
+
+test("net-remote-waiting: another machine's agent waiting on you shows in the strip with its machine, and sounds only where you are", { timeout: limit(60000) }, shoot("network-remote-waiting", async () => {
+  await simulate("net-remote-waiting", {}, (n) => n.waits.length > 0);
+  const card = await until(async () => (await s.driver("state")).alerts.find((a) => a.kind === "remote-need"));
+  assert.ok(card, "a card in the strip");
+  assert.deepEqual([card.host, card.waits, card.chime], ["laptop", "is waiting for you", true]);
+  assert.match(card.agent, /^@laptop:claude:/);
+  assert.match(card.text, /query string/);
+  const html = await s.eval(`return document.querySelector('#alerts [data-al-remote]')?.textContent.replace(/\\s+/g, " ").trim() ?? null`);
+  assert.match(html, /Fix the login redirect is waiting for you\s*on laptop/);
+  await s.screenshot({ name: "e2e-network-strip", inline: false });
+  // A click on it opens the Network panel at its machine.
+  const at = await s.eval(`return (() => { const r = document.querySelector('#alerts [data-al-remote]').getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`);
+  await clickAt(at, "the card");
+  assert.ok(await until(async () => (await network()).open), "it opens the Network panel");
+  assert.match((await network()).text, /waits on you Should the redirect keep the old query string/i);
+  await s.driver("network", "close");
+
+  // You're at laptop: it sounds there, not here.
+  await simulate("net-remote-waiting", { a: "laptop" }, (n) => n.hosts.find((x) => x.id === "laptop")?.you);
+  const quiet = await until(async () => (await s.driver("state")).alerts.find((a) => a.kind === "remote-need" && a.chime === false));
+  assert.ok(quiet, "no chime here while you're at laptop");
+}));
+
+test("net-gateway-down says so: since when, why, and what waits in the outbox", { timeout: limit(60000) }, shoot("network-gateway-down", async () => {
+  await simulate("net-gateway-down", {}, (n) => n.gateway?.link === "offline");
+  await served();
+  const { network: n } = await s.driver("network", "open");
+  assert.deepEqual([n.self, n.gateway.words, n.gateway.reason, n.outbox.frames], ["laptop", "Can't reach the gateway", "timed out", 3]);
+  assert.match(n.text, /Can't reach the gateway\s*gw\.example\.net.*No answer since .+: timed out\. This machine keeps working/);
+  assert.match(n.text, /3 items wait in the outbox/);
+  assert.equal(n.hosts.find((x) => x.id === "studio").online, false, "the other machines are away with it");
+  await s.screenshot({ name: "e2e-network-gateway-down", inline: false });
+  await s.driver("network", "close");
+}));
+
+test("the message box writes to a session as you, from the Network panel and from a session's own panel", { timeout: limit(90000) }, shoot("network-message", async () => {
+  // Another machine's session, through a gateway that's down: it waits.
+  const down = await simulate("net-gateway-down", {}, (n) => n.gateway?.link === "offline");
+  const to = down.hosts.find((x) => x.id === "studio").remote[0].id;
+  let st = await s.driver("messageAs", to, "Hold the release until the tests pass.");
+  assert.deepEqual([st.message.open, st.message.to, st.message.name], [true, to, "Write the release notes"]);
+  assert.match(await s.eval(`return document.querySelector("#modal .m-sub").textContent`), /A session on studio\. It gets it as from you, at laptop's console/);
+  await clickAt(st.message.sendAt, "Send");
+  let last = await until(async () => (await s.driver("message")).last);
+  assert.deepEqual([last.to, last.ok, last.state], [to, true, "queued"]);
+  assert.ok(await until(async () => (await network()).outbox.frames === 4), "into the outbox");
+
+  // One on a machine that's there.
+  const waiting = await simulate("net-remote-waiting", {}, (n) => n.waits.length > 0);
+  st = await s.driver("messageAs", waiting.waits[0].agent, "Keep the query string, please.");
+  await clickAt(st.message.sendAt, "Send");
+  last = await until(async () => ((await s.driver("message")).last?.to === waiting.waits[0].agent ? (await s.driver("message")).last : null));
+  assert.deepEqual([last.ok, last.state], [true, "stored"]);
+  assert.equal((await s.driver("state")).overlays.modal, false, "the box closes once it's sent");
+
+  // A session of this machine's has Message in its own panel.
+  const found = await s.driver("find", { kind: "session", limit: 1 });
+  const id = found.nodes[0].id;
+  await s.driver("select", id);
+  const button = await s.eval(`return (() => { const b = document.querySelector('#inspector [data-action="message"]'); const r = b?.getBoundingClientRect(); return r?.width ? { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), label: b.textContent.trim() } : null; })()`);
+  assert.equal(button?.label, "✉ Message");
+  await clickAt(button, "Message");
+  const box = await until(async () => ((await s.driver("message")).open ? s.driver("message") : null));
+  assert.equal(box?.to, id, "the box is to that session");
+  assert.match(await s.eval(`return document.querySelector("#modal .m-sub").textContent`), /A session on this machine\. It gets it as from you, at studio's console/);
+  await s.input({ text: "Look at the failing test first." });
+  await clickAt(box.sendAt, "Send");
+  // It goes to POST /api/actors/you/message, which says how it went.
+  last = await until(async () => ((await s.driver("message")).last?.to === id ? (await s.driver("message")).last : null));
+  assert.ok(last && last.status > 0, `the route answered: ${JSON.stringify(last)}`);
+  // Refused (until the engine takes messages to sessions from you), it stays
+  // open, saying why; closed either way.
+  if ((await s.driver("message")).open) await clickAt(await s.eval(`return (() => { const r = document.querySelector("#modal [data-mclose]").getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`), "Close");
+  await s.driver("select", null);
+}));
+
+test("clear ends the made-up network, and no page errors along the way", { timeout: limit(30000) }, async () => {
+  await s.simulate("clear");
+  assert.ok(await until(async () => !(await network()).inNetwork && !(await network()).simulated), "on its own again");
+  assert.ok(!(await s.driver("state")).alerts.some((a) => a.kind === "remote-need"), "the strip's card goes");
+  const { entries } = await s.logs({ since: cursor, level: "error", source: "page" });
+  assert.deepEqual(entries.map((e) => e.text), []);
+  assert.deepEqual(await s.driver("errors"), []);
+});
