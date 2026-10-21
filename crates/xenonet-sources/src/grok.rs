@@ -1,6 +1,6 @@
 //! core/grok.js: Grok Build's sessions, from its folders. Grok Build keeps
-//! each session in a folder of its own, ~/.grok/sessions/<encoded
-//! cwd>/<session id>/ (GROK_HOME moves ~/.grok): summary.json is its index
+//! each session in a folder of its own,
+//! `~/.grok/sessions/<encoded cwd>/<session id>/` (GROK_HOME moves ~/.grok): summary.json is its index
 //! entry, and updates.jsonl its conversation, which the line readers read.
 //! A subagent's session is one like any other, whose summary names its
 //! parent. Reading summary.json leniently (vendor.js's readers) is the

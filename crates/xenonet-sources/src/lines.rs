@@ -270,8 +270,8 @@ impl CodexLine {
     }
 }
 
-/// A line of a Grok Build session's updates.jsonl (~/.grok/sessions/<encoded
-/// cwd>/<session id>/updates.jsonl): a session update, in the envelope Grok
+/// A line of a Grok Build session's updates.jsonl
+/// (`~/.grok/sessions/<encoded cwd>/<session id>/updates.jsonl`): a session update, in the envelope Grok
 /// writes ({ timestamp, method, params: { sessionId, update } }), or the
 /// params alone, as older lines are. An update's kind is its sessionUpdate.
 ///
@@ -377,7 +377,7 @@ impl GrokLine {
     }
     /// A tool call's name: the one Grok gives its own tools (_meta's
     /// x.ai/tool), or an MCP tool's, which Grok calls by its title
-    /// (<server>__<tool>), as XenoNet names them (mcp__<server>__<tool>);
+    /// (`<server>__<tool>`), as XenoNet names them (`mcp__<server>__<tool>`);
     /// else the call's kind, as ACP has it.
     pub fn tool_name(&self) -> String {
         let u = Some(self.update());

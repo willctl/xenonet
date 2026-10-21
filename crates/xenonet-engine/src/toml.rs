@@ -3,8 +3,8 @@
 //! `grok mcp add` rewrites the whole file and drops its comments, so
 //! XenoNet edits the text itself (connect.rs's GrokHooks).
 //!
-//! XenoNet's server is two tables, [mcp_servers.<name>] and
-//! [mcp_servers.<name>.env], each line of them a string or a list of
+//! XenoNet's server is two tables, `[mcp_servers.<name>]` and
+//! `[mcp_servers.<name>.env]`, each line of them a string or a list of
 //! strings, written as JSON writes them (which TOML reads the same). It
 //! finds its tables by their headers, takes out the lines from each header
 //! to the next, and writes its own at the end. A server of that name
