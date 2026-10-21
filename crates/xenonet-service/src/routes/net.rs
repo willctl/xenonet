@@ -47,7 +47,7 @@ async fn ticket_check(ctx: &Ctx, req: &Req) -> Option<String> {
         return ctx.from_window(req).await;
     }
     if !cfg!(target_os = "macos") {
-        return Some("Add a machine is XenoNet's window's: Settings, then Network, then Add a machine".into());
+        return Some("Add a machine is XenoNet's window's: choose Add a machine in the palette".into());
     }
     ctx.from_you(req).await
 }
