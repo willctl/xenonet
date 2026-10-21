@@ -257,7 +257,10 @@ Build already write.
   - When you ask Codex which folders are projects, it gets an outline of
     the folder names in your projects folder, after XenoNet has shown you
     all of it.
-  - When you add another machine, XenoNet connects to it over SSH.
+  - When you join a network, this machine keeps one outbound link to the
+    network's gateway and sends what
+    [A network across your machines](docs/guide/network.md#what-crosses-and-what-doesnt)
+    lists. When you add an SSH host, XenoNet connects to it over SSH.
   - With an OpenRouter key, XenoNet asks OpenRouter what the key has spent,
     at most once a minute while a window is open.
   - When you pair a remote actor, it reads the statuses and counts of
@@ -268,7 +271,8 @@ Build already write.
   your user name. `Hide or show identities` in the palette masks your
   accounts as "GitHub A" or "Claude B" for screen sharing.
 - On macOS, XenoNet checks which process sent each coordination request.
-  Only you can allow actors, connect your agents, and trust hosts.
+  Only you can allow actors, connect your agents, trust hosts, and start,
+  join or leave a network.
 
 [Privacy and security](docs/guide/privacy.md) has the full list.
 
@@ -389,11 +393,11 @@ data. `xenonet drift` shows it, and the doctor warns about new drift.
 
 ## Where it's going
 
-Today XenoNet watches one machine, with other machines as a first prototype.
-Here is what's planned:
+Today XenoNet joins the machines you use into one network, through a
+gateway. Here is what's planned:
 
-- Many machines. Each machine runs XenoNet, the machines you trust connect
-  peer to peer, and one console shows them all.
+- Peer to peer. Machines that trust each other link directly, with no
+  machine as the gateway.
 - Intents. You say what you want across any number of projects, such as
   "move every service to Node 24". XenoNet hands the work to sessions
   and tracks it until it's done.
