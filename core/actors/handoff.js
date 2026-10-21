@@ -14,10 +14,15 @@ const hostOf = (url) => {
 
 // { app, steps: [{ text, copy }], message }: copy is "message", "token",
 // "url", "wake" (a way to set up its wake) or null. `token` is null for a
-// new address alone.
+// new address alone. For an agent that speaks A2A (product "a2a"), `url` is
+// XenoNet's Agent Card, and the token goes as A2A's bearer.
 export function handoff(product, { url, token = null }) {
   const host = hostOf(url);
   const step = (text, copy = null) => ({ text, copy });
+  if (product === "a2a")
+    return token
+      ? { app: "A2A agent", steps: [step("Give the agent XenoNet's Agent Card URL.", "url"), step("Have it send the token in the header Authorization: Bearer <token>.", "token")], message: null }
+      : { app: "A2A agent", steps: [step("Give the agent XenoNet's new Agent Card URL. Its token still works.", "url")], message: null };
   if (product === "grok-bot")
     return token
       ? {
