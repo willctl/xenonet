@@ -16,7 +16,7 @@ pub mod refusals;
 pub mod themes;
 pub mod workspace;
 
-use crate::borrowed::{attest, is_actor_agent, platform, Sender};
+use crate::borrowed::{attest, platform, Sender};
 use crate::cores::settings::{MAX_BRIEF, NEEDS_INPUT_URL};
 use crate::cores::{ok, CoreError, Kind};
 use crate::ctx::{pending_reply, Answer, Ctx};
@@ -30,6 +30,8 @@ use xenonet_base::ids::YOU;
 use xenonet_base::log::{log_dir, read_logs, summarize, LEVELS};
 use xenonet_base::sync::Locked;
 use xenonet_base::text::{js_number, js_string, truthy};
+use xenonet_engine::engine::is_actor_agent;
+use xenonet_engine::sql::Arg;
 
 pub const SERVICE_API: (u32, u32) = (1, 1);
 pub const CONSOLE_API: (u32, u32) = (1, 1);
@@ -73,7 +75,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         }
         let body = req.json(16 << 10).await.unwrap_or(Value::Null);
         let to = body.get("to").and_then(Value::as_str).unwrap_or("").to_string();
-        if !is_actor_agent(&to) {
+        if !is_actor_agent(&Arg::text(to.as_str())) {
             return Ok(Reply::coded(400, "bad-request", "write to an actor here (actor:<slug>); sessions get messages from other sessions and actors"));
         }
         let envelope = attest(Sender { id: YOU, kind: "you", name: Some("you".into()), product: None }, "window", &Value::Null, &ctx.config.home, ctx.now(), platform());

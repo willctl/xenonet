@@ -15,7 +15,7 @@
 //! status, an event on the feed, so each counts against its events.
 
 use crate::actor_caller::{rates, retry_after, ActorCaller};
-use crate::borrowed::{attest, is_agent_id, parse_selector, platform, Sender};
+use crate::borrowed::{attest, platform, Sender};
 use crate::cores::{ok, reason, Actors, Channels, Connect, CoreError, Engine, Verify};
 use crate::ctx::{fail, pending_reply};
 use crate::http::{Reply, Req};
@@ -25,6 +25,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use xenonet_actors::tokens::token_in_url;
 use xenonet_base::text::{js_number, truthy};
+use xenonet_engine::delivery::selector::parse_selector;
+use xenonet_engine::engine::is_agent_id;
+use xenonet_engine::sql::Arg;
 
 const ACTOR_BODY: usize = 16 << 10;
 
@@ -44,7 +47,7 @@ pub struct EngineRoutes<'a> {
 fn scope_of(s: &Value) -> String {
     match s.as_str() {
         Some("machine") => "machine".into(),
-        Some(t) if parse_selector(t).is_some() => t.to_string(),
+        Some(t) if parse_selector(&Arg::text(t)).is_some() => t.to_string(),
         _ => "repo".into(),
     }
 }
@@ -241,7 +244,7 @@ impl EngineRoutes<'_> {
         if req.header("authorization").is_some() {
             return Ok(if name == "channel" { Reply::error(404, "not found") } else { self.as_actor(req, &name).await });
         }
-        let Some(me) = req.header("x-xenonet-agent").filter(|m| is_agent_id(Some(m))).map(str::to_string) else {
+        let Some(me) = req.header("x-xenonet-agent").filter(|m| is_agent_id(&Arg::text(*m))).map(str::to_string) else {
             return Ok(Reply::error(400, "say which session is calling, in x-xenonet-agent (claude:<session id> or codex:<thread id>)"));
         };
         let verdict = self.verify.check(req.peer, &me, false).await;

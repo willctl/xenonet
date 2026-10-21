@@ -32,6 +32,8 @@ serde_json.workspace = true
 tokio.workspace = true
 xenonet-actors.workspace = true
 xenonet-base.workspace = true
+# The engine's ids, selectors and envelopes, which the routes check with.
+xenonet-engine.workspace = true
 xenonet-schema.workspace = true
 
 [dev-dependencies]

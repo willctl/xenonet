@@ -1,24 +1,13 @@
-//! A message's envelope, from the binary's copy of attest (the service's
-//! borrowed.rs, which its routes and the actor gateway use) and from the
-//! engine's (core/engine/attest.js's twin): for every way a sender can
-//! prove who it is and every verdict on its process, both say the same,
-//! and how strong it is follows the one table.
+//! A message's envelope, as the service's routes and the actor gateway
+//! make it (borrowed::attest, which hands their plain values to the
+//! engine's) and as the engine makes it (core/engine/attest.js's twin):
+//! for every way a sender can prove who it is and every verdict on its
+//! process, both say the same, and how strong it is follows the one table.
 
-use serde_json::{json, Value};
+use serde_json::json;
 use xenonet_engine::attest::attest;
 use xenonet_engine::sql::Arg;
 use xenonet_service::borrowed::{self, Sender};
-
-fn arg(v: &Value) -> Arg {
-    match v {
-        Value::Null => Arg::Null,
-        Value::Bool(b) => Arg::Bool(*b),
-        Value::Number(n) => Arg::num(n.as_f64().unwrap_or(f64::NAN)),
-        Value::String(s) => Arg::text(s.clone()),
-        Value::Array(a) => Arg::List(a.iter().map(arg).collect()),
-        Value::Object(o) => Arg::Obj(o.iter().map(|(k, v)| (k.clone(), arg(v))).collect()),
-    }
-}
 
 /// What XenoNet saw of the process, and how strong each way of proving
 /// who sent it is with that.
@@ -58,7 +47,7 @@ fn every_way_of_proving_who_sent_it_is_as_strong_in_the_binary_as_in_the_engine(
                     let from_bin =
                         borrowed::attest(Sender { id, kind, name: name.map(String::from), product: product.map(String::from) }, method, verdict, "/home/nova", 5.0, platform);
                     let sender = json!({ "id": id, "kind": kind, "name": name, "product": product });
-                    let from_engine = attest(&arg(&sender), &Arg::text(method), &arg(verdict), &Arg::text("/home/nova"), &Arg::num(5.0), platform).unwrap().to_json();
+                    let from_engine = attest(&Arg::from(&sender), &Arg::text(method), &Arg::from(verdict), &Arg::text("/home/nova"), &Arg::num(5.0), platform).unwrap().to_json();
                     let at = format!("{kind} {method} {seen} {verdict} {platform}");
                     for k in ["schema", "at", "sender", "auth", "client", "transport", "line"] {
                         assert_eq!(from_bin[k], from_engine[k], "{k}: {at}");
