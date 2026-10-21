@@ -151,10 +151,12 @@ async fn the_card_and_a2a_through_the_front_door_in_mcps_order() {
     };
     let rpc = [("A2A-Version", "1.0"), ("Content-Type", "application/json"), ("Authorization", bearer.as_str())];
 
-    // Off: neither is there, whoever asks, and a token isn't even read.
+    // Off: the card isn't there; /a2a takes a token first, so only its
+    // holder learns that A2A is off.
     assert_eq!(call(port, "GET", "/.well-known/agent-card.json".into(), h(&[]), String::new()).await.0, 404);
+    assert_eq!(call(port, "POST", "/a2a".into(), h(&[("Authorization", "Bearer xenonet_gateway_nope")]), "{}".into()).await.0, 401);
+    assert_eq!(call(port, "POST", "/a2a".into(), h(&[]), "{}".into()).await.0, 401);
     assert_eq!(call(port, "POST", "/a2a".into(), h(&rpc), send(1, "claude:x")).await.0, 404);
-    assert_eq!(call(port, "POST", "/a2a".into(), h(&[("Authorization", "Bearer xenonet_gateway_nope")]), "{}".into()).await.0, 404);
     assert!(calls.lock().unwrap().is_empty());
 
     a2a.set_enabled(true).unwrap();
@@ -210,6 +212,18 @@ async fn the_card_and_a2a_through_the_front_door_in_mcps_order() {
     let (s, hd, body) = call(port, "POST", "/a2a".into(), h(&rpc), stream).await;
     assert_eq!((s, header(&hd, "content-type").map(|c| c.starts_with("text/event-stream"))), (200, Some(true)), "{body}");
     assert!(body.contains("TASK_STATE_COMPLETED"), "{body}");
+
+    // Unknown tokens hold the door shut to their source alone: twenty from
+    // one address the tunnel forwarded for, and that one waits a minute.
+    let from = |ip: &str| h(&[("Authorization", "Bearer xenonet_gateway_nope"), ("X-Forwarded-For", ip)]);
+    for _ in 0..21 {
+        assert_eq!(call(port, "POST", "/a2a".into(), from("198.51.100.4"), "{}".into()).await.0, 401);
+    }
+    assert_eq!(call(port, "POST", "/a2a".into(), from("198.51.100.4"), "{}".into()).await.0, 429);
+    assert_eq!(call(port, "POST", "/a2a".into(), from("198.51.100.5"), "{}".into()).await.0, 401, "another source isn't held off");
+    // A client's own X-Forwarded-For in front of the tunnel's is no way out.
+    assert_eq!(call(port, "POST", "/a2a".into(), from("203.0.113.1, 198.51.100.4"), "{}".into()).await.0, 429);
+    assert_eq!(call(port, "POST", "/a2a".into(), h(&rpc), send(8, "claude:x")).await.0, 200, "nor is this machine");
 
     // Turned off again: as if there were no /a2a.
     a2a.set_enabled(false).unwrap();

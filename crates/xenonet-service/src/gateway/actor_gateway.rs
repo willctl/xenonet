@@ -48,6 +48,10 @@ const INBOX_WAIT_MAX: f64 = 25.0;
 /// that waits, and no longer. A network link's stream is the exception.
 pub const CONNECTION_SECS: u64 = (INBOX_WAIT_MAX as u64) + 15 + 60;
 const BAD_TOKENS: Rate = Rate { rate: 20.0 / 60.0, burst: 20.0 };
+/// Unknown tokens from everywhere that hold the door shut for everyone.
+const BAD_TOKENS_ALL: Rate = Rate { rate: 200.0 / 60.0, burst: 200.0 };
+/// The key for everyone in `blocked_until`.
+const EVERYONE: &str = "*";
 const BLOCK_MS: f64 = 60e3;
 const MESSAGES: Rate = Rate { rate: 60.0 / 3600.0, burst: 60.0 };
 const WIDE: Rate = Rate { rate: 6.0 / 3600.0, burst: 6.0 };
@@ -146,7 +150,9 @@ struct Inner {
     version: String,
     host: Mutex<Option<String>>,
     probes: Mutex<HashMap<String, f64>>,
-    blocked_until: Mutex<f64>,
+    /// Until when unknown tokens hold the door shut: to a source (as
+    /// `source_of` says), or to everyone.
+    blocked_until: Mutex<HashMap<String, f64>>,
     buckets: Mutex<Buckets>,
     stats: Mutex<Stats>,
     server: Mutex<Option<tokio::task::JoinHandle<()>>>,
@@ -186,7 +192,7 @@ impl ActorGateway {
                 version: version.to_string(),
                 host: Mutex::new(normal_host(host)),
                 probes: Mutex::new(HashMap::new()),
-                blocked_until: Mutex::new(0.0),
+                blocked_until: Mutex::new(HashMap::new()),
                 buckets: Mutex::new(Buckets::default()),
                 stats: Mutex::new(Stats::default()),
                 server: Mutex::new(None),
@@ -305,6 +311,25 @@ impl ActorGateway {
         None
     }
 
+    /// Where a request came from, for holding unknown tokens off: the
+    /// address a tunnel says it forwarded for (Cloudflare's own header, or
+    /// the last X-Forwarded-For entry, which the tunnel added), since the
+    /// gateway's peer is always the tunnel's client on this machine.
+    pub fn source_of(headers: &[(String, String)]) -> String {
+        let header = |k: &str| headers.iter().find(|(n, _)| n == k).map(|(_, v)| v.trim().to_string());
+        header("cf-connecting-ip")
+            .or_else(|| header("x-forwarded-for").and_then(|f| f.rsplit(',').next().map(|x| x.trim().to_string())))
+            .filter(|f| !f.is_empty() && f.len() <= 64)
+            .unwrap_or_else(|| "local".into())
+    }
+
+    /// Until when the door is shut to `source`, while it is.
+    fn blocked(&self, source: &str, t: f64) -> Option<f64> {
+        let b = self.inner.blocked_until.locked();
+        let until = b.get(source).copied().unwrap_or(0.0).max(b.get(EVERYONE).copied().unwrap_or(0.0));
+        (until > t).then_some(until)
+    }
+
     /// The rest of `/mcp`'s checks before its token, for a request that
     /// will carry one: no token in the URL, and unknown tokens held off.
     pub fn door_open(&self, headers: &[(String, String)], target: &str) -> Option<Reply> {
@@ -316,9 +341,8 @@ impl ActorGateway {
             return Some(Self::reply(400, json!({ "error": "a token goes in the Authorization header, never in the URL" }), &[]));
         }
         let t = (self.inner.now)();
-        let blocked = *self.inner.blocked_until.locked();
-        if blocked > t {
-            let (k, v) = retry_after(blocked - t);
+        if let Some(until) = self.blocked(&Self::source_of(headers), t) {
+            let (k, v) = retry_after(until - t);
             return Some(Self::reply(429, json!({ "error": "too many tokens XenoNet doesn't know; wait a minute" }), &[(&k, &v)]));
         }
         None
@@ -326,7 +350,8 @@ impl ActorGateway {
 
     /// A request's gateway token, as `/mcp` takes it: the actor it
     /// authenticated, or 401 or 403 with WWW-Authenticate. Unknown tokens
-    /// count toward holding the door shut for a minute.
+    /// count toward holding the door shut for a minute: 20 from a source to
+    /// that source, 200 from everywhere to everyone.
     pub fn door_token(&self, headers: &[(String, String)]) -> Result<Value, Reply> {
         let t = (self.inner.now)();
         let token = headers.iter().find(|(n, _)| n == "authorization").map(|(_, v)| v.as_str()).and_then(bearer_of).map(str::to_string);
@@ -340,8 +365,20 @@ impl ActorGateway {
         self.inner.stats.locked().refused += 1;
         let code = auth["code"].as_str().unwrap_or("bad-token").to_string();
         (self.inner.hooks.on_refused)(auth["actor"].as_str(), &code, auth["reason"].as_str(), t);
-        if code != "no-token" && self.inner.buckets.locked().take("bad-tokens", BAD_TOKENS, 1.0, t) != 0.0 {
-            *self.inner.blocked_until.locked() = t + BLOCK_MS;
+        if code != "no-token" {
+            let source = Self::source_of(headers);
+            let mut buckets = self.inner.buckets.locked();
+            let one = buckets.take(&format!("bad-tokens|{source}"), BAD_TOKENS, 1.0, t) != 0.0;
+            let all = buckets.take("bad-tokens|*", BAD_TOKENS_ALL, 1.0, t) != 0.0;
+            drop(buckets);
+            let mut blocked = self.inner.blocked_until.locked();
+            blocked.retain(|_, until| *until > t);
+            if one {
+                blocked.insert(source, t + BLOCK_MS);
+            }
+            if all {
+                blocked.insert(EVERYONE.into(), t + BLOCK_MS);
+            }
         }
         let realm = if code == "no-token" { "Bearer realm=\"xenonet-gateway\"".to_string() } else { "Bearer realm=\"xenonet-gateway\", error=\"invalid_token\"".to_string() };
         let status = auth["status"].as_u64().unwrap_or(401) as u16;
@@ -426,9 +463,8 @@ impl ActorGateway {
         if token_in_url(query.iter().map(|(k, v)| (k.as_str(), v.as_str())), &path) {
             return Self::reply(400, json!({ "error": "a token goes in the Authorization header, never in the URL" }), &[]);
         }
-        let blocked = *self.inner.blocked_until.locked();
-        if blocked > t {
-            let (k, v) = retry_after(blocked - t);
+        if let Some(until) = self.blocked(&Self::source_of(&req.headers), t) {
+            let (k, v) = retry_after(until - t);
             return Self::reply(429, json!({ "error": "too many tokens XenoNet doesn't know; wait a minute" }), &[(&k, &v)]);
         }
         let auth = match self.door_token(&req.headers) {

@@ -197,12 +197,10 @@ impl Door {
     /// LAN; behind a tunnel, whose client is this machine, the address the
     /// tunnel forwarded for, which only the tunnel door believes.
     fn source(&self, headers: &[(String, String)], peer: Option<SocketAddr>) -> Option<String> {
-        let header = |k: &str| headers.iter().find(|(n, _)| n == k).map(|(_, v)| v.trim().to_string());
-        let forwarded = match self.kind {
-            DoorKind::Tunnel { .. } => header("cf-connecting-ip").or_else(|| header("x-forwarded-for").and_then(|f| f.split(',').next().map(|x| x.trim().to_string()))).filter(|f| !f.is_empty() && f.len() <= 64),
-            DoorKind::Lan(_) => None,
-        };
-        forwarded.or_else(|| peer.map(|p| p.ip().to_string()))
+        match self.kind {
+            DoorKind::Tunnel { .. } => Some(ActorGateway::source_of(headers)),
+            DoorKind::Lan(_) => peer.map(|p| p.ip().to_string()),
+        }
     }
 
     async fn network(&self, req: hyper::Request<Incoming>, keep: &Keep, peer: Option<SocketAddr>) -> hyper::Response<OutBody> {
@@ -265,22 +263,23 @@ pub fn agent_card(actor: &ActorGateway, req: &hyper::Request<Incoming>) -> Reply
 }
 
 /// A2A's JSON-RPC at `/a2a`, in this order: `/mcp`'s checks (the host, no
-/// web pages, no token in the URL, unknown tokens held off); a 404 while
-/// A2A is off; the gateway token, refused as `/mcp` refuses one; at most
-/// 64 KiB, counted as it comes; the call counted for the window; then
-/// A2A's handler, as the actor the token is for. A streamed answer keeps
-/// its connection until the stream has had its time.
+/// web pages, no token in the URL, unknown tokens held off); the gateway
+/// token, refused as `/mcp` refuses one; a 404 while A2A is off, so only a
+/// token's holder learns whether it's on; at most 64 KiB, counted as it
+/// comes; the call counted for the window; then A2A's handler, as the
+/// actor the token is for. A streamed answer keeps its connection until
+/// the stream has had its time.
 async fn a2a(actor: &ActorGateway, req: hyper::Request<Incoming>, keep: &Keep) -> Reply {
     let headers = node_headers(req.headers());
     let target = req.uri().path_and_query().map_or_else(|| req.uri().path().to_string(), |p| p.as_str().to_string());
     if let Some(refused) = actor.door_open(&headers, &target) {
         return refused;
     }
-    let Some(a2a) = actor.a2a().filter(|a| a.enabled()) else { return reply(404, &json!({ "error": "not found" }), &[]) };
     let auth = match actor.door_token(&headers) {
         Ok(a) => a,
         Err(refused) => return refused,
     };
+    let Some(a2a) = actor.a2a().filter(|a| a.enabled()) else { return reply(404, &json!({ "error": "not found" }), &[]) };
     let method = req.method().as_str().to_string();
     let Some(body) = read_body(req.into_body(), crate::a2a::BODY_MAX).await else {
         return reply(413, &json!({ "error": "that body is over 64 KiB" }), &[]);
