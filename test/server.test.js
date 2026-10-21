@@ -178,7 +178,10 @@ test("the map, its live state, history, summary and digests", async () => {
   // What a poster or film gets: star names, never the projects' own, and
   // no hours; the names only when asked for.
   const stars = (await get("/api/constellation")).data;
-  assert.ok(stars.stars.length > 0 && stars.stars.every((s) => /^[A-Z][a-z]+( \d+)?$/.test(s.name) && !("project" in s)));
+  // Just after midnight the day has nothing in it yet, so its constellation
+  // may have no stars; a day with projects has them.
+  assert.ok(log.topProjects.length === 0 || stars.stars.length > 0);
+  assert.ok(stars.stars.every((s) => /^[A-Z][a-z]+( \d+)?$/.test(s.name) && !("project" in s)));
   assert.ok(!log.topProjects.some((p) => stars.stars.some((s) => s.name === p.name)));
   assert.ok(!("hours" in stars) && !("busiestHour" in stars) && !("sessions" in stars));
   // The demo's history may still be loading, and its live sessions keep
