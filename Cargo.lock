@@ -2498,6 +2498,7 @@ dependencies = [
  "tokio",
  "xenonet-actors",
  "xenonet-base",
+ "xenonet-net",
  "xenonet-schema",
 ]
 

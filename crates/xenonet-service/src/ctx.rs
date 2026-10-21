@@ -38,6 +38,9 @@ pub struct Ctx {
     pub refusal_notes: Mutex<RefusalNotes>,
     /// XenoNet Dev reading another XenoNet (XENONET_UPSTREAM).
     pub upstream: Option<crate::upstream::Upstream>,
+    /// The network across machines (gateway/network.rs), made once the
+    /// service is: its node, link and LAN listener.
+    pub net: std::sync::OnceLock<Arc<crate::gateway::network::NetService>>,
 }
 
 /// What Spotify's poll keeps between looks (server/index.js's `music`).
@@ -91,6 +94,7 @@ impl Ctx {
             you_reports: Mutex::new(Bucket::new(YOU_REPORTS, now_ms())),
             refusal_notes: Mutex::new(RefusalNotes::default()),
             upstream: None,
+            net: std::sync::OnceLock::new(),
         }
     }
 
