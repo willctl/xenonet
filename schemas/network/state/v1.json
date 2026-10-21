@@ -220,6 +220,10 @@
                 "type": "null"
               }
             ]
+          },
+          "self": {
+            "description": "This machine's own row",
+            "type": "boolean"
           }
         },
         "required": [
@@ -319,6 +323,151 @@
       "description": "Hosts whose presence shows another roster head"
     },
     "titlesOnly": {
+      "type": "boolean"
+    },
+    "queues": {
+      "description": "On the gateway's host: what waits at the gateway for each host",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,31}$",
+            "description": "The host's id in the network, picked by the person: never the machine's own name"
+          },
+          "frames": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "host",
+          "frames",
+          "bytes"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "epoch": {
+      "description": "On the gateway's host: its queues' epoch, which hosts resume within",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]*$"
+    },
+    "proposals": {
+      "description": "Roster entries signed by too few, waiting for the founder or a second window host to approve them",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "found",
+              "add",
+              "remove",
+              "window",
+              "gateway"
+            ]
+          },
+          "host": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,31}$",
+            "description": "The host's id in the network, picked by the person: never the machine's own name"
+          },
+          "window": {
+            "type": "boolean"
+          },
+          "gateway": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 300
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For op gateway: the address it moves to"
+          },
+          "signers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,31}$",
+              "description": "The host's id in the network, picked by the person: never the machine's own name"
+            },
+            "description": "The hosts that signed it so far"
+          },
+          "at": {
+            "type": "number",
+            "description": "Epoch milliseconds"
+          }
+        },
+        "required": [
+          "op",
+          "host",
+          "window",
+          "gateway",
+          "signers",
+          "at"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "removed": {
+      "description": "This machine was removed from the network",
+      "type": "object",
+      "properties": {
+        "network": {
+          "type": "string",
+          "pattern": "^net_[0-9a-f]{32}$"
+        },
+        "host": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,31}$",
+          "description": "The host's id in the network, picked by the person: never the machine's own name"
+        },
+        "by": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,31}$",
+            "description": "The host's id in the network, picked by the person: never the machine's own name"
+          },
+          "description": "The hosts that signed the removal"
+        },
+        "at": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "n": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "The removal's place in the roster"
+        }
+      },
+      "required": [
+        "by",
+        "at",
+        "n"
+      ],
+      "additionalProperties": {}
+    },
+    "lan": {
+      "description": "The LAN address this machine's gateway listens on, when it's a LAN-only gateway",
+      "type": "string",
+      "maxLength": 300
+    },
+    "simulated": {
+      "description": "XenoNet Dev's made-up network (simulate net-…)",
       "type": "boolean"
     }
   },

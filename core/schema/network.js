@@ -224,6 +224,7 @@ export const NetworkState = define(
         waitsOnYou: count,
         you: z.boolean(),
         platform: z.string().max(32).nullable(),
+        self: z.boolean().optional().describe("This machine's own row"),
       }),
     ),
     tickets: z.array(obj({ host: HostId, window: z.boolean(), expires: ms })).describe("Tickets that wait; the ticket itself is shown once, where it was made"),
@@ -231,6 +232,32 @@ export const NetworkState = define(
     rosterHead: B64.nullable(),
     rosterMismatch: z.array(HostId).describe("Hosts whose presence shows another roster head"),
     titlesOnly: z.boolean(),
+    queues: z.array(obj({ host: HostId, frames: count, bytes: count })).optional().describe("On the gateway's host: what waits at the gateway for each host"),
+    epoch: B64.optional().describe("On the gateway's host: its queues' epoch, which hosts resume within"),
+    proposals: z
+      .array(
+        obj({
+          op: z.enum(ROSTER_OPS),
+          host: HostId,
+          window: z.boolean(),
+          gateway: z.string().max(300).nullable().describe("For op gateway: the address it moves to"),
+          signers: z.array(HostId).describe("The hosts that signed it so far"),
+          at: ms,
+        }),
+      )
+      .optional()
+      .describe("Roster entries signed by too few, waiting for the founder or a second window host to approve them"),
+    removed: obj({
+      network: z.string().regex(NETWORK_ID).optional(),
+      host: HostId.optional(),
+      by: z.array(HostId).describe("The hosts that signed the removal"),
+      at: ms,
+      n: count.describe("The removal's place in the roster"),
+    })
+      .optional()
+      .describe("This machine was removed from the network"),
+    lan: z.string().max(300).optional().describe("The LAN address this machine's gateway listens on, when it's a LAN-only gateway"),
+    simulated: z.boolean().optional().describe("XenoNet Dev's made-up network (simulate net-…)"),
   }),
   { title: "The network, as a host sees it", description: "GET /api/net/state: the network this machine is in, its gateway and link, the other hosts, and what waits." },
 );
