@@ -2,7 +2,10 @@
 
 A design for how XenoNet maps each app's data to its own: one registry of
 the apps it knows, one stream of events read from their transcripts, and
-shared types. Proposed, for review; nothing here is built yet.
+shared types. Built: steps 1 to 5 left what XenoNet shows unchanged, and
+the owner decided each of step 6's changes to output, which are done too
+([The order of work](#the-order-of-work)). "What's there now", and each
+section's "Today", describe the code before step 1.
 
 **In short:**
 
@@ -373,13 +376,13 @@ Each step is its own PR. Steps 1 to 5 leave output unchanged:
    `state.js`'s reader list from the registry.
 5. **Connect, delivery, processes, caller and open** behind their
    capabilities.
-6. **Changes to output, each for the owner to decide**, with its golden
+6. **Changes to output, each decided by the owner**, with its golden
    files:
-   - Codex's live token count, which adds `reasoning_output_tokens` to
-     `output_tokens`. XenoNet's pricing takes reasoning to be part of
-     output (`core/pricing.js`), but `blocks.md` records live keeping
-     both as its own way, so this is a decision to revisit, not a bug fix
-     on its own say.
+   - Codex's live token count, which added `reasoning_output_tokens` to
+     `output_tokens`. Decided and done on 2026-10-21: live counts
+     `output_tokens` alone, as pricing does (`core/pricing.js`), since
+     OpenAI counts reasoning inside it. `blocks.md`'s Codex "Tokens" row
+     says so.
    - `*** Move to:` in live. Decided and done on 2026-10-21: live counts
      the names a patch moves files to, as the engine and the native
      readers do, so a moved file shows as activity and as a file two

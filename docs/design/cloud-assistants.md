@@ -1,6 +1,6 @@
 # Remote actors: read-only participation
 
-Status: built for review, on `feat/remote-actors`, from the proposed
+Status: built, and experimental, from the proposed
 specification of 7 October 2026 ("XenoNet remote actor integration
 development specification"). Fixture, local-client and synthetic-data
 checks pass on Windows. The real tunnel and dot checks (G0b to G0f, T7,

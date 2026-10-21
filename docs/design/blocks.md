@@ -297,9 +297,10 @@ Each move kept its module's API, one commit each, with the golden tests
 | state.json (`core/store.js`, `statefile.js`) | JsonStore | `state` |
 | engine.sqlite (`core/engine/store.js`) | SqliteStore | `engine` |
 | The transcript tailer (`core/live.js`) | Tailer, with a Scanner per root | `transcripts` |
-| Transcript lines (`core/lines.js`, for live, stats and search) | Normalizer per app | `claude-lines`, `codex-lines` |
+| Transcript lines (`core/lines.js`, for live, stats and search) | Normalizer per app | `claude-lines`, `codex-lines`, `grok-lines` |
 | Claude Code's sessions (`core/claude.js`) | Gatherer | `claude-sessions` |
 | Codex's threads and desktop projects (`core/codex.js`) | Gatherers | `codex-threads`, `codex-projects` |
+| Grok Build's sessions (`core/grok.js`) | Gatherer | `grok-sessions` |
 | The Codex app-server client (`core/codex.js`) | Block | `codex-app-server` |
 | Identities' sources (`core/identities.js`) | A block with a Gatherer per account file and per repo | `identities` |
 | Claude plan usage (`core/claude-usage.js`, read by live.js) | Gatherers | `claude-usage`, `claude-desktop-usage` |
