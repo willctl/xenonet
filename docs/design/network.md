@@ -1,10 +1,11 @@
 # One network across machines
 
-Status: design, 2026-10-21, revised the same night after a review. It
-replaces the pull-over-SSH plan in `hosts.md` as the main way to use
-XenoNet on several machines. It keeps that plan's relay frames, ids, merge
-and privacy rules, which were built and tested, and keeps SSH as a second
-way to look at a machine.
+Status: built, 2026-10-21, apart from what "As built" below lists as
+not built. It replaces the pull-over-SSH plan in `hosts.md` as the main
+way to use XenoNet on several machines. It keeps that plan's relay frames,
+ids, merge and privacy rules, which were built and tested, and keeps SSH as
+a second way to look at a machine. The guide is
+[docs/guide/network.md](../guide/network.md).
 
 **In short:**
 
@@ -37,6 +38,90 @@ way to look at a machine.
 - **A2A**, the cross-vendor agent-to-agent standard (1.0, March 2026,
   Linux Foundation), lets agent frameworks reach the network's sessions
   through the gateway, as actors. MCP stays how sessions talk to XenoNet.
+
+## As built
+
+Built, each with its tests (`crates/xenonet-net`, the service's front door
+and `/api/net`, `crates/xenonet-wire-engine/src/network.rs`, the console's
+Network panel, A2A in `crates/xenonet-service/src/a2a`):
+
+- The seam, keys, signing and sealing, frames, the roster chain, tickets,
+  the gateway's routes, queues, epochs, `hello` and `gap`, the link with its
+  outbox, backoff, clock offset and long-poll, `xenonet net`, `/api/net/*`
+  and the doctor's checks.
+- The engine across hosts: presence and `peers`, `@host:` targets and
+  `machine:` selectors, receipts, replies, repo broadcasts across clones,
+  claims across clones, the bypass hold, the framing, `whoami`, the
+  envelope's `network` transport and handoffs. The service plugs the
+  engine into the link when it starts; a network created or joined later
+  reaches it through the same plug.
+- Tickets from any window host (section 4), moving the gateway by hand
+  (section 9), approvals by entry id, and the Network panel with what
+  waits for approval.
+- A2A behind the front door (section 12).
+- `crates/xenonet-service/tests/net_engine.rs` runs three services with the
+  real engine on each: joining with tickets from the gateway's host and from
+  another window host, presence, messages with receipts and replies, repo
+  broadcasts, a claim's warning in another clone, a handoff taken once, the
+  person messaging from a window host and refused from another, an A2A task
+  completed by a session on another host, the gateway restarted with
+  messages waiting, and a host removed.
+
+Settled while building, beyond the sections below:
+
+- **A ticket made off the gateway's host.** The maker sends the gateway the
+  ticket's hash and terms in a signed request, and keeps the ticket in
+  memory for its ten minutes. At the join, the gateway asks the maker over
+  its link (a `roster` frame with `asks`) to sign the `add` entry, and the
+  join waits about 20 s, then answers 409 `waiting` with why; the new
+  machine asks again until the ticket lapses. The maker signs only when the
+  join request proves the ticket twice: the hash-keyed proof the gateway
+  checks, and a second proof keyed by the ticket itself, which the gateway
+  can't make, so it can't have a maker sign keys of its choosing.
+- **The join route.** Bad tickets are counted per source: the peer on a
+  LAN, the address the tunnel forwarded for behind one (Cloudflare's header,
+  or the last `X-Forwarded-For` entry). 20 in an hour shut the route to
+  that source for an hour, and 200 from everywhere shut it for everyone,
+  which the state (`joinClosedUntil`) and the doctor show. A join request
+  carries its ticket's 12-bit tag, and five wrong proofs aimed at a ticket
+  retire it.
+- **Time.** A request is checked by its signature before its time. A time
+  more than 60 s off is answered with the gateway's time in a frame its key
+  signs over the request's nonce, and a host takes no offset over a day. A
+  host frame dated more than five minutes ahead, or older than the week
+  frame ids are kept, is dropped.
+- **The gateway's own host.** It can't be removed while it holds the
+  gateway: move the gateway first. A host takes the gateway's frames only
+  while the roster still holds the pinned gateway with the pinned keys.
+- **What a host keeps for another.** At most 5000 claims and 100 open
+  handoffs, cut to the schemas' limits. A thread's depth is the deeper of
+  what the sender says and what the receiver's own store shows. The
+  gateway remembers frame ids only for the kinds it queues, and a host
+  holds two down streams at most.
+- **Presence** carries the roster's head (`Net::roster_head`), and a new
+  head sends presence and claims in full, which is how a host that just
+  joined hears of everyone.
+- **A2A's door** checks the token before the switch, so only a token's
+  holder learns that A2A is off. Unknown tokens hold the door shut to their
+  source, at `/mcp` and `/a2a` alike. A streamed answer keeps its
+  connection until the stream has had its time.
+
+Not built yet:
+
+- **The map's `relay` frames through the gateway** (section 7). Hosts drop
+  relay frames, and a console shows other hosts from presence: in the
+  Network panel and the attention strip, not as constellations on the map.
+- **Detail** (section 7): presence carries no question's text, last
+  message or stuck reason, so the titles-only setting is kept but has
+  nothing to hold back.
+- **`operator` frames** (section 8) are checked when they arrive, but
+  nothing sends one: the person messages a session on another host as a
+  `message` frame from `actor:you`, which a host takes only from a window
+  host's frame with a strong check; adding and removing machines are
+  roster entries the window host signs itself.
+- **The chime everywhere after five minutes away** (section 8): it plays
+  only where you are.
+- **Moving actors' tokens and scopes with the gateway** (section 9).
 
 ## Words
 
@@ -191,8 +276,9 @@ use.
 - the body's SHA-256.
 
 The gateway keeps nonces for 2 minutes and refuses a repeat. A time more
-than 60 s off is refused with the gateway's own time, and the host signs
-again with that offset and keeps it (the hosts link already keeps one).
+than 60 s off is refused with the gateway's own time, signed by its key
+over the request's nonce, and the host signs again with that offset and
+keeps it (the hosts link already keeps one), unless it's more than a day.
 So a laptop that slept with a drifting clock links up anyway, and the
 doctor shows the skew.
 
@@ -283,6 +369,7 @@ What each `op` needs:
 | `add` a window host, `window` on, `remove` a window host, `gateway` | the founder, or two different window hosts |
 | `remove` a host that isn't a window host | any window host |
 | `remove` the founder | nobody: a network whose founder is lost is made again |
+| `remove` the gateway's host | nobody, until the gateway moves |
 | `remove` itself (leaving), any host but the founder | that host |
 
 **How hosts use it:**
@@ -362,8 +449,9 @@ Rules:
   where the person is looking. From a terminal,
   `xenonet net add-machine <id>` makes one on macOS only, where process
   checks can tell the person from an agent.
-- At most 5 tickets wait at once. 20 bad tickets in an hour shut the join
-  route for an hour.
+- At most 5 tickets wait at once. 20 bad tickets in an hour from one
+  source shut the join route to it for an hour; 200 from everywhere shut it
+  for everyone ("As built" has the detail).
 - **A host id that's taken** is refused. If it's the same id with new keys
   (a reinstalled machine), the console offers **Replace**, which removes
   the old entry and adds the new one under the same rules.
@@ -608,9 +696,11 @@ twins, are unchanged.
 As built:
 
 - An entry signed by too few (a host that isn't the founder taking the
-  gateway) waits at the gateway as a proposal for ten minutes. Window
-  hosts see it in their state, and `xenonet net approve <host>` (`POST
-  /api/net/approve`) adds their signature.
+  gateway, or a window host added by one) waits at the gateway as a
+  proposal for ten minutes. Window hosts see it in their state and the
+  Network panel, with its id, and Approve, `xenonet net approve <host>`
+  or `POST /api/net/approve { id }` adds their signature to exactly that
+  entry.
 - The old gateway keeps its streams for 30 s after the move, so the hosts
   on them hear of it, and takes no new frames: they wait in their senders'
   outboxes for the new gateway.
@@ -854,7 +944,9 @@ xenonet net gateway take | set <address>
 
 Tonight, in this order, each with its tests: unit tests, three services
 on loopback for the network (ports and state folders of their own, away
-from 47840–47842), `test:bin`, and e2e for the page.
+from 47840–47842), `test:bin`, and e2e for the page. Steps 1 to 3 are
+built, and from step 4 moving the gateway and the guide; the map's
+`relay` frames aren't ("As built").
 
 1. **The seam and the wire:**
    - `xenonet_base::network` (the trait and body types);
