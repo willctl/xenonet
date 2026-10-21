@@ -1204,9 +1204,15 @@ impl Node {
                 asked = self.submit(e).await.is_ok();
             }
         }
+        // The stores close before their files go: Windows won't delete a
+        // file that's open, and the gateway's streams may not have ended yet.
+        let gateway = n.gateway();
         self.stop();
-        n.dir.forget()?;
+        if let Some(g) = gateway {
+            g.close();
+        }
         *n.store.locked() = None;
+        n.dir.forget()?;
         *n.key.writing() = None;
         *n.roster.writing() = Roster::new();
         *n.net.writing() = None;

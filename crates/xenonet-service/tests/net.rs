@@ -333,10 +333,13 @@ async fn a_full_queue_gives_a_gap_and_a_removed_host_is_refused() {
     // The founder can't be removed, from anywhere.
     let (s, v) = b.call("POST", "/api/net/remove", json!({ "host": "studio" }), true).await;
     assert_eq!(s, 403, "{v}");
-    // desk leaves: it forgets the network.
+    // desk leaves: it forgets the network, its files with it (its store
+    // closed first, as Windows deletes no file that's open).
     let (s, v) = c.call("POST", "/api/net/leave", json!({}), true).await;
     assert_eq!(s, 200, "{v}");
     assert_eq!(c.state().await["network"], Value::Null);
+    let files = c.dir.join("state").join("network");
+    assert!(["network.json", "host.key", "net.sqlite"].iter().all(|f| !files.join(f).exists()), "{}", files.display());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
