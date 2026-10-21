@@ -243,7 +243,7 @@ test("the gateway's switch and tunnel are yours, from the window or your termina
   assert.deepEqual(await muse().then((a) => [a.token, a.refused?.reason]), [false, "removed"]);
   // Off closes the port, and is kept across a restart, with the tunnel.
   assert.equal((await go("POST", "/api/actors/gateway", { body: { on: false } })).body.listening, false);
-  assert.deepEqual(JSON.parse(store.meta("gateway")), { on: false, host: "xenonet.example.com", tunnel: { kind: "own", name: null, host: "xenonet.example.com" } });
+  assert.deepEqual(JSON.parse(store.meta("gateway")), { on: false, host: "xenonet.example.com", tunnel: { kind: "own", name: null, host: "xenonet.example.com" }, port });
 });
 
 test("XenoNet's own check: a word it made is answered once with 204, and nothing else gets that answer", async () => {
@@ -355,4 +355,34 @@ test("with its port taken, by another XenoNet's gateway say, it says so and leav
   await ticks[0]();
   const back = await control.status();
   assert.deepEqual([back.listening, back.problem === `port ${port} is in use by another program`], [true, false]);
+});
+
+test("its port: 1010 above XenoNet's, clear of Xenolith's, and kept once the gateway is set up", async () => {
+  const { createGatewayControl, gatewayPortOf } = await import("../server/gateway-control.js");
+  const { INSTANCES } = await import("../core/instances.js");
+  // Clear of every instance, its page (1000 above it) and Xenolith's HTTP
+  // server and preview.
+  const taken = new Set([...Object.values(INSTANCES).flatMap((i) => [i.port, i.port + 1000]), 47850, 47859]);
+  for (const i of Object.values(INSTANCES)) assert.equal(taken.has(gatewayPortOf(i.port)), false, `${i.name}: ${gatewayPortOf(i.port)}`);
+  assert.equal(gatewayPortOf(47840), 48850);
+  assert.equal(gatewayPortOf(65000), 63990, "one that wouldn't fit goes below");
+
+  const store = new EngineStore(":memory:");
+  const now = () => Date.now();
+  const state = { graph: {}, index: new Map(), live: { sessions: new Map() }, homeOf: () => null };
+  const actors = new Actors({ store, now, map: mapOf(state) });
+  const engine = new Engine({ state, store, actors, now, repos: { of: async () => null } });
+  const registration = createRegistration({ actors, now });
+  const make = (opts) => createGatewayControl({ engine, registration, actors, store, version: "test", tunnelOptions: { env: { PATH: "" }, exists: () => false }, every: () => null, stopEvery: () => {}, ...opts });
+  assert.equal(make({ servicePort: 47841 }).gateway.port, 48851, "nothing set up: the default");
+  // A setting from before ports were kept moves to the default too.
+  store.setMeta("gateway", JSON.stringify({ on: false, host: "xenonet.example.com" }));
+  const first = make({ servicePort: 47841 });
+  assert.equal(first.gateway.port, 48851);
+  await first.set({ tunnel: { kind: "own", host: "xenonet.example.com" } });
+  assert.equal(JSON.parse(store.meta("gateway")).port, 48851, "set up: its port is kept");
+  assert.equal(make({ servicePort: 47900 }).gateway.port, 48851, "XenoNet's own port moved, the gateway's didn't");
+  assert.equal(make({ servicePort: 47900, port: 50123 }).gateway.port, 50123, "XENONET_GATEWAY_PORT wins");
+  store.setMeta("gateway", JSON.stringify({ on: false, port: 70000 }));
+  assert.equal(make({ servicePort: 47841 }).gateway.port, 48851, "not a port");
 });

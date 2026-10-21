@@ -70,16 +70,14 @@ fn free_port() -> u16 {
     TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
 }
 
-#[tokio::test]
-async fn on_with_a_tunnel_of_your_own_checked_here_kept_and_off() {
-    let store = Arc::new(Store::default());
+fn control(store: &Arc<Store>, port: Option<u16>, service_port: u16) -> Arc<GatewayControl> {
     let s = Arc::new(Stand);
-    let port = free_port();
-    let c = GatewayControl::new(ControlParts {
+    GatewayControl::new(ControlParts {
         cores: GatewayCores { engine: s.clone(), registration: s.clone(), actors: s.clone(), reports: s, runs: None },
         store: store.clone(),
         on_run: Arc::new(|_, _| {}),
         port,
+        service_port,
         version: "test".into(),
         dir: None,
         home: "/home/nova".into(),
@@ -88,7 +86,32 @@ async fn on_with_a_tunnel_of_your_own_checked_here_kept_and_off() {
         tunnel_host: Arc::new(NoTools),
         network: Arc::new(SystemNetwork),
         now: Arc::new(|| 5000.0),
-    });
+    })
+}
+
+#[tokio::test]
+async fn its_port_is_1010_above_xenonets_and_kept_once_set_up() {
+    let store = Arc::new(Store::default());
+    assert_eq!(control(&store, None, 47841).gateway().port(), 48851, "nothing set up: the default");
+    // A setting from before ports were kept moves to the default too.
+    store.0.lock().unwrap().insert("gateway".into(), json!({ "on": false, "host": "xenonet.example.com" }).to_string());
+    let first = control(&store, None, 47841);
+    assert_eq!(first.gateway().port(), 48851);
+    first.set(None, Some(json!({ "kind": "own", "host": "xenonet.example.com" })), false, false).await.unwrap();
+    let kept: Value = serde_json::from_str(&store.0.lock().unwrap()["gateway"]).unwrap();
+    assert_eq!(kept["port"], json!(48851), "set up: its port is kept");
+    assert_eq!(control(&store, None, 47900).gateway().port(), 48851, "XenoNet's own port moved, the gateway's didn't");
+    assert_eq!(control(&store, Some(50123), 47900).gateway().port(), 50123, "XENONET_GATEWAY_PORT wins");
+    store.0.lock().unwrap().insert("gateway".into(), json!({ "on": false, "port": 70000 }).to_string());
+    assert_eq!(control(&store, None, 47841).gateway().port(), 48851, "not a port");
+    first.stop();
+}
+
+#[tokio::test]
+async fn on_with_a_tunnel_of_your_own_checked_here_kept_and_off() {
+    let store = Arc::new(Store::default());
+    let port = free_port();
+    let c = control(&store, Some(port), 47840);
     c.init().await;
     let off = c.status().await.unwrap();
     assert_eq!((off["on"].clone(), off["listening"].clone(), off["tunnel"]["kind"].clone()), (json!(false), json!(false), Value::Null));
@@ -113,7 +136,7 @@ async fn on_with_a_tunnel_of_your_own_checked_here_kept_and_off() {
     assert_eq!(on["actors"][0]["id"], json!("actor:muse"));
     assert_eq!(on["actors"][0]["expiresAt"], json!(1000u64 + 30 * 24 * 3600 * 1000), "its gateway token lapses unused 30 days on");
     let kept: Value = serde_json::from_str(&store.0.lock().unwrap()["gateway"]).unwrap();
-    assert_eq!(kept, json!({ "on": true, "host": "mac.example.ts.net", "tunnel": { "kind": "own", "name": null, "host": "mac.example.ts.net" } }));
+    assert_eq!(kept, json!({ "on": true, "host": "mac.example.ts.net", "tunnel": { "kind": "own", "name": null, "host": "mac.example.ts.net" }, "port": port }));
     assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_ok(), "its port is open");
 
     let off = c.set(Some(false), None, false, false).await.unwrap();

@@ -676,9 +676,9 @@ mod tests {
         Job {
             program: "/Users/will/Library/Application Support/XenoNet/runtime/launcher/xenonet".into(),
             args: vec!["service".into(), "run".into()],
-            env: vec![("XENONET_PORT".into(), "47850".into())],
+            env: vec![("XENONET_PORT".into(), "47860".into())],
             dir: "/Users/will".into(),
-            log: "/Users/will/Library/Application Support/XenoNet/runtime/service-47850.log".into(),
+            log: "/Users/will/Library/Application Support/XenoNet/runtime/service-47860.log".into(),
         }
     }
 
@@ -706,14 +706,14 @@ mod tests {
         for part in [
             "\t<key>Label</key>\n\t<string>dev.xenonet.service</string>\n",
             "\t<key>ProgramArguments</key>\n\t<array>\n\t\t<string>/Users/will/Library/Application Support/XenoNet/runtime/launcher/xenonet</string>\n\t\t<string>service</string>\n\t\t<string>run</string>\n\t</array>\n",
-            "\t<key>EnvironmentVariables</key>\n\t<dict>\n\t\t<key>XENONET_PORT</key>\n\t\t<string>47850</string>\n\t</dict>\n",
+            "\t<key>EnvironmentVariables</key>\n\t<dict>\n\t\t<key>XENONET_PORT</key>\n\t\t<string>47860</string>\n\t</dict>\n",
             "\t<key>WorkingDirectory</key>\n\t<string>/Users/will</string>\n",
             "\t<key>RunAtLoad</key>\n\t<true/>\n",
             "\t<key>KeepAlive</key>\n\t<dict>\n\t\t<key>SuccessfulExit</key>\n\t\t<false/>\n\t</dict>\n",
             "\t<key>ThrottleInterval</key>\n\t<integer>10</integer>\n",
             "\t<key>ProcessType</key>\n\t<string>Interactive</string>\n",
-            "\t<key>StandardOutPath</key>\n\t<string>/Users/will/Library/Application Support/XenoNet/runtime/service-47850.log</string>\n",
-            "\t<key>StandardErrorPath</key>\n\t<string>/Users/will/Library/Application Support/XenoNet/runtime/service-47850.log</string>\n",
+            "\t<key>StandardOutPath</key>\n\t<string>/Users/will/Library/Application Support/XenoNet/runtime/service-47860.log</string>\n",
+            "\t<key>StandardErrorPath</key>\n\t<string>/Users/will/Library/Application Support/XenoNet/runtime/service-47860.log</string>\n",
         ] {
             assert!(p.contains(part), "missing {part:?} in\n{p}");
         }
@@ -729,13 +729,13 @@ mod tests {
         let u = unit(&Job {
             program: "/home/will/.local/state/xenonet/runtime/launcher/xenonet".into(),
             dir: "/home/will".into(),
-            log: "/home/will/.local/state/xenonet/runtime/service-47850.log".into(),
+            log: "/home/will/.local/state/xenonet/runtime/service-47860.log".into(),
             ..job()
         })
         .unwrap();
         assert_eq!(
             u,
-            "# XenoNet's service, written by xenonet service install. xenonet service\n# uninstall removes it.\n[Unit]\nDescription=XenoNet service\nStartLimitIntervalSec=300\nStartLimitBurst=10\n\n[Service]\nType=simple\nExecStart=/home/will/.local/state/xenonet/runtime/launcher/xenonet service run\nWorkingDirectory=/home/will\nEnvironment=\"XENONET_PORT=47850\"\nRestart=on-failure\nRestartSec=5\nStandardOutput=append:/home/will/.local/state/xenonet/runtime/service-47850.log\nStandardError=append:/home/will/.local/state/xenonet/runtime/service-47850.log\n\n[Install]\nWantedBy=default.target\n"
+            "# XenoNet's service, written by xenonet service install. xenonet service\n# uninstall removes it.\n[Unit]\nDescription=XenoNet service\nStartLimitIntervalSec=300\nStartLimitBurst=10\n\n[Service]\nType=simple\nExecStart=/home/will/.local/state/xenonet/runtime/launcher/xenonet service run\nWorkingDirectory=/home/will\nEnvironment=\"XENONET_PORT=47860\"\nRestart=on-failure\nRestartSec=5\nStandardOutput=append:/home/will/.local/state/xenonet/runtime/service-47860.log\nStandardError=append:/home/will/.local/state/xenonet/runtime/service-47860.log\n\n[Install]\nWantedBy=default.target\n"
         );
         // Spaces, quotes, % and $ reach the program as they are.
         let u = unit(&Job { program: "/opt/My Apps/x\"n%$".into(), env: vec![("XDG_STATE_HOME".into(), "/s p/100%".into())], ..job() }).unwrap();
@@ -746,17 +746,17 @@ mod tests {
 
     #[test]
     fn a_registration_says_its_port() {
-        assert_eq!(port_of(&plist(&job())), "47850");
-        assert_eq!(port_of(&unit(&job()).unwrap()), "47850");
+        assert_eq!(port_of(&plist(&job())), "47860");
+        assert_eq!(port_of(&unit(&job()).unwrap()), "47860");
         assert_eq!(port_of(&plist(&Job { env: vec![], ..job() })), "47840");
         assert_eq!(port_of(&unit(&Job { env: vec![("XENONET_STATE_DIR".into(), "/s".into())], ..job() }).unwrap()), "47840");
     }
 
     #[test]
     fn kept_settings_are_xenonets_own() {
-        let env: HashMap<&str, &str> = [("XENONET_PORT", "47850"), ("XENONET_DEMO", "1"), ("XDG_STATE_HOME", "/s"), ("XENONET_STATE_DIR", ""), ("PATH", "/bin")].into();
+        let env: HashMap<&str, &str> = [("XENONET_PORT", "47860"), ("XENONET_DEMO", "1"), ("XDG_STATE_HOME", "/s"), ("XENONET_STATE_DIR", ""), ("PATH", "/bin")].into();
         let kept = kept_env(|k| env.get(k).map(|v| (*v).to_string()));
-        assert_eq!(kept, vec![("XENONET_PORT".to_string(), "47850".to_string()), ("XDG_STATE_HOME".to_string(), "/s".to_string())]);
+        assert_eq!(kept, vec![("XENONET_PORT".to_string(), "47860".to_string()), ("XDG_STATE_HOME".to_string(), "/s".to_string())]);
     }
 
     #[test]

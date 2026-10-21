@@ -254,7 +254,7 @@ service with no Rust to use until all of it was ported.
 - The page's event stream, `GET /api/events`: `retry: 3000`, a ping every
   25 seconds, and the same event names and data. And an actor's
   `/api/actors/me/stream`.
-- The actor gateway on its own port (the API's plus 10) while it's on,
+- The actor gateway on its own port (the API's plus 1010) while it's on,
   with its own checks in their order, MCP over Streamable HTTP without
   sessions, and its six tools. Its tunnels are child processes, as now.
 - The assistant endpoint and the component service, local sockets with

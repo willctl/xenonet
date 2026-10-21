@@ -41,7 +41,8 @@ fn bad(message: &str) -> CoreError {
     CoreError::of(Kind::Error, 400, "bad-request", message)
 }
 
-/// { on, host, tunnel: { kind, name, host } } as saved.
+/// { on, host, tunnel: { kind, name, host }, port } as saved: port is the
+/// one the gateway had when it was set up.
 #[derive(Clone, Debug, Default)]
 struct Saved {
     on: bool,
@@ -50,9 +51,15 @@ struct Saved {
 }
 
 impl Saved {
-    fn to_json(&self) -> Value {
-        json!({ "on": self.on, "host": self.host, "tunnel": self.tunnel.as_ref().map(|(k, n, h)| json!({ "kind": k, "name": n, "host": h })) })
+    fn to_json(&self, port: u16) -> Value {
+        json!({ "on": self.on, "host": self.host, "tunnel": self.tunnel.as_ref().map(|(k, n, h)| json!({ "kind": k, "name": n, "host": h })), "port": port })
     }
+}
+
+// The port a saved setting has, when it's a port.
+fn saved_port(store: &dyn EngineStore) -> Option<u16> {
+    let s = store.meta(KEY).ok().flatten().and_then(|t| json::parse(&t).ok())?;
+    s.get("port").and_then(Value::as_f64).filter(|p| p.fract() == 0.0 && (1.0..=65535.0).contains(p)).map(|p| p as u16)
 }
 
 pub struct ControlParts {
@@ -61,7 +68,11 @@ pub struct ControlParts {
     /// After a run an actor reported: the map refreshed, and the actor's
     /// beam to it.
     pub on_run: Arc<dyn Fn(&str, &str) + Send + Sync>,
-    pub port: u16,
+    /// The gateway's port when one is named (XENONET_GATEWAY_PORT);
+    /// otherwise it's the one its saved setting has, else the default for
+    /// `service_port`.
+    pub port: Option<u16>,
+    pub service_port: u16,
     pub version: String,
     pub dir: Option<String>,
     pub home: String,
@@ -95,10 +106,13 @@ pub struct GatewayControl {
 impl GatewayControl {
     pub fn new(parts: ControlParts) -> Arc<GatewayControl> {
         let seen = parts.store.meta(SEEN).ok().flatten().and_then(|s| json::parse(&s).ok()).and_then(|v| v.as_object().cloned()).unwrap_or_default();
+        // A gateway once set up keeps its port, so the tunnels pointed at it
+        // keep working when the default moves or XenoNet's own port does.
+        let port = parts.port.or_else(|| saved_port(parts.store.as_ref())).unwrap_or_else(|| crate::config::gateway_port_of(parts.service_port));
         let me = Arc::new(GatewayControl {
             store: parts.store.clone(),
             actors: parts.cores.actors.clone(),
-            port: parts.port,
+            port,
             probe_local: parts.probe_local,
             log: parts.log.clone(),
             network: parts.network.clone(),
@@ -132,7 +146,7 @@ impl GatewayControl {
             log: Arc::new(move |code, detail| log(code, detail)),
         };
         let host = me.saved().host;
-        let _ = me.gateway.set(ActorGateway::with_clock(parts.cores, hooks, parts.port, host.as_deref(), &parts.version, parts.now.clone()));
+        let _ = me.gateway.set(ActorGateway::with_clock(parts.cores, hooks, port, host.as_deref(), &parts.version, parts.now.clone()));
         let tlog = parts.log.clone();
         let w4 = weak.clone();
         let thooks = TunnelHooks {
@@ -149,7 +163,7 @@ impl GatewayControl {
             on_change: Arc::new(|| {}),
             log: Arc::new(move |code, detail| tlog(code, detail)),
         };
-        let _ = me.tunnel.set(Tunnel::new(parts.port, parts.dir.as_deref(), &parts.home, parts.tunnel_host, thooks));
+        let _ = me.tunnel.set(Tunnel::new(port, parts.dir.as_deref(), &parts.home, parts.tunnel_host, thooks));
         let _ = weak;
         me
     }
@@ -177,7 +191,7 @@ impl GatewayControl {
     }
 
     fn save(&self, s: &Saved) -> R<()> {
-        self.store.set_meta(KEY, &json::stringify(&s.to_json(), 0))
+        self.store.set_meta(KEY, &json::stringify(&s.to_json(self.port), 0))
     }
 
     fn called(&self, slug: &str, id: &str, host: Option<&str>, at: f64) {
