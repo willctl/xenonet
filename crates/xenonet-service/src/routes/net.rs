@@ -22,10 +22,11 @@ use std::sync::Arc;
 use xenonet_net::{NetError, R};
 
 /// The network's state as a development instance's `simulate` set it, or
-/// None. The console's `simulate` fills this in, so its network states show
-/// without real machines; `GET state` answers it first when there's one.
-pub fn simulated_net_state(_ctx: &Ctx) -> Option<Value> {
-    None
+/// None (net_sim.rs). The console's `simulate` fills this in, so its
+/// network states show without real machines; `GET state` answers it first
+/// when there's one.
+pub fn simulated_net_state(ctx: &Ctx) -> Option<Value> {
+    super::net_sim::simulated_net_state(ctx)
 }
 
 fn refused(e: &NetError) -> Reply {
@@ -72,7 +73,7 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
     }
     if rest == "state" {
         if let Some(s) = simulated_net_state(ctx) {
-            return Reply::json(200, s);
+            return Reply::json(200, super::net_sim::with_own_agents(ctx, s).await);
         }
     }
     let Some(svc) = ctx.net.get().cloned() else { return Reply::coded(503, "no-network", "the network isn't available in this XenoNet") };

@@ -5,10 +5,10 @@
 //! can be checked without a second machine. It lives in memory, for the
 //! service that made it, and `clear` ends it.
 //!
-//! While a simulation runs, this answers for it:
+//! While a simulation runs, and only then, this answers for it:
 //!
-//! - GET /api/net/state, with the simulated state (`simulated_net_state`,
-//!   the hook the core's route asks first);
+//! - GET /api/net/state, through the core's route (routes/net.rs), which
+//!   asks `simulated_net_state` first;
 //! - the network's writes from the window (ticket, replace, remove,
 //!   settings, create, join, leave), on the simulated state;
 //! - GET /api/engine/state and GET /api/engine/agents, with the simulated
@@ -16,10 +16,7 @@
 //! - POST /api/actors/you/message to a simulated host's agent, which goes
 //!   into the simulated outbox while its host is away.
 //!
-//! MERGE NOTE: until the core's routes are in this branch, `route` also
-//! answers GET /api/net/state when nothing is simulated, with "not in a
-//! network" (`alone`). That fallback folds into the core's GET
-//! /api/net/state, which asks `simulated_net_state` first.
+//! With nothing simulated, every one of these is the real route's.
 
 use crate::borrowed::random_uuid;
 use crate::cores::{ok, reason, CoreError};
@@ -119,19 +116,11 @@ pub fn clear(ctx: &Ctx) -> bool {
     had
 }
 
-/// What a simulation answers, and GET /api/net/state until the core's
-/// route is here (see the merge note above). None: not one of these.
+/// What a simulation answers while one runs in a development instance.
+/// None: nothing is simulated, or this isn't one of its routes, and the
+/// real route answers.
 pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreError> {
     let (m, p) = (req.method.clone(), req.path.clone());
-    // MERGE NOTE: the core's GET /api/net/state takes this over, asking
-    // simulated_net_state first.
-    if m == "GET" && p == "/api/net/state" {
-        let state = match simulated_net_state(ctx) {
-            Some(s) => with_own_agents(ctx, s).await,
-            None => alone(),
-        };
-        return Ok(Some(Reply::json(200, state)));
-    }
     if !ctx.config.dev || simulated_net_state(ctx).is_none() {
         return Ok(None);
     }
@@ -177,9 +166,9 @@ fn fail(status: u16, code: &str, error: impl Into<String>) -> Reply {
     Reply::coded(status, code, error)
 }
 
-// This machine's own agents, counted on its own row, as the core counts
-// them.
-async fn with_own_agents(ctx: &Ctx, mut state: Value) -> Value {
+/// A simulated state with this machine's own agents counted on its own
+/// row, as the core counts them.
+pub async fn with_own_agents(ctx: &Ctx, mut state: Value) -> Value {
     let own = ctx
         .cores
         .engine
@@ -486,7 +475,7 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
                 return fail(404, "not-found", format!("There's no machine called {host} in the network."));
             };
             let mut out = ticket_for(sim, &host, window, now);
-            out["replaces"] = json!(host);
+            out["replaced"] = json!(host);
             Reply::json(200, out)
         }
         "/api/net/remove" => {
@@ -689,7 +678,7 @@ mod tests {
         assert_eq!(apply(&mut s, "/api/net/remove", &json!({ "host": "rack" }), now).status, 200);
         assert!(!has_host(&s.state, "rack") && !s.agents.iter().any(|a| a["host"] == "rack"));
         let r = apply(&mut s, "/api/net/replace", &json!({ "host": "laptop" }), now).body_json();
-        assert_eq!((r["replaces"].clone(), r["window"].clone()), (json!("laptop"), json!(true)));
+        assert_eq!((r["replaced"].clone(), r["window"].clone()), (json!("laptop"), json!(true)));
         assert_eq!(apply(&mut s, "/api/net/settings", &json!({ "titlesOnly": true }), now).body_json()["titlesOnly"], true);
         assert_eq!(apply(&mut s, "/api/net/create", &json!({ "name": "x", "host": "desk" }), now).status, 409);
         assert_eq!(apply(&mut s, "/api/net/leave", &json!({}), now).body_json()["network"], Value::Null);
@@ -725,12 +714,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_state_route_answers_alone_until_a_simulation_and_after_clear() {
+    async fn the_state_route_answers_the_simulation_until_clear_and_the_real_state_after() {
         let ctx = dev_ctx();
-        let get = |ctx: Arc<Ctx>| async move { route(&ctx, &mut Req::fake("GET", "/api/net/state", &[], None)).await.unwrap().unwrap().body_json() };
-        assert_eq!(get(ctx.clone()).await, alone());
+        let key = ctx.window_key.reveal().to_string();
+        let get = |ctx: Arc<Ctx>| {
+            let key = key.clone();
+            async move {
+                let mut req = Req::fake("GET", "/api/net/state", &[("x-xenonet-window", key.as_str())], None);
+                assert!(route(&ctx, &mut req).await.unwrap().is_none(), "never this one's");
+                crate::routes::net::route(&ctx, &mut req).await.unwrap().unwrap()
+            }
+        };
+        // Nothing simulated: the core's route, here with no network to read.
+        assert_eq!(get(ctx.clone()).await.status, 503);
         assert!(simulate(&ctx, "net-founder", None).is_some());
-        assert_eq!(get(ctx.clone()).await["network"]["name"], "home");
+        assert_eq!(get(ctx.clone()).await.body_json()["network"]["name"], "home");
         assert!(simulated_net_state(&ctx).is_some());
         // The engine's state and its list have the other hosts' agents.
         for path in ["/api/engine/state", "/api/engine/agents"] {
@@ -741,7 +739,7 @@ mod tests {
         // Another service's simulation is its own.
         assert!(simulated_net_state(&dev_ctx()).is_none());
         assert!(clear(&ctx) && !clear(&ctx));
-        assert_eq!(get(ctx.clone()).await, alone());
+        assert_eq!(get(ctx.clone()).await.status, 503);
         // Nothing simulated: the rest is the real routes'.
         assert!(route(&ctx, &mut Req::fake("POST", "/api/net/ticket", &[], Some("{}"))).await.unwrap().is_none());
     }

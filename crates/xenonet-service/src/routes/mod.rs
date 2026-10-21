@@ -62,8 +62,9 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     }
     let cores = &ctx.cores;
 
-    // XenoNet Dev's simulated network answers first while it runs; and,
-    // until the core's routes are here, GET /api/net/state (net_sim.rs).
+    // XenoNet Dev's simulated network answers first while one runs
+    // (net_sim.rs); GET /api/net/state is the core's route, below, which
+    // asks for the simulated state first.
     if let Some(r) = net_sim::route(ctx, req).await? {
         return Ok(r);
     }
