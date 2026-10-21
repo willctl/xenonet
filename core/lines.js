@@ -229,13 +229,14 @@ function take(data, lines, where, out) {
   return NOTHING;
 }
 
-// A whole transcript's lines, through its app's normalizer, for a reader
-// that reads the file at once (stats, and an archived rollout shown as a
-// thread): a compressed archive (.jsonl.zst) too.
-export async function readLines(file, app) {
+// A whole transcript's lines, through its app's normalizer (or `lines`,
+// the one its mapper names: core/events.js), for a reader that reads the
+// file at once (stats, and an archived rollout shown as a thread): a
+// compressed archive (.jsonl.zst) too.
+export async function readLines(file, app, lines = linesOf(app)) {
   const buf = await fsp.readFile(file);
   const out = [];
-  take(file.endsWith(".zst") ? zlib.zstdDecompressSync(buf) : buf, linesOf(app), { file }, out);
+  take(file.endsWith(".zst") ? zlib.zstdDecompressSync(buf) : buf, lines, { file }, out);
   return out;
 }
 

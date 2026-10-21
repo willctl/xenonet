@@ -13,6 +13,12 @@ export const claudeSignal = (raw) => native.refusalClaudeSignal(raw);
 
 export const codexSignal = (raw) => native.refusalCodexSignal(raw);
 
+// How the transcripts' mapper (core/events.js) reads a line's refusal: the
+// same signal.
+export const claudeRefusal = claudeSignal;
+
+export const codexRefusal = codexSignal;
+
 // What makes two sightings of a refusal the same one: the request's id
 // when there is one, else where it was written.
 export const keyOf = (sig, sessionId) => native.refusalKeyOf(sig, sessionId);

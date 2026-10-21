@@ -27,8 +27,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::LazyLock;
 use std::time::Duration;
-use xenonet_base::text::{js_number, js_trim};
+use xenonet_base::text::{js_number, js_trim, truthy};
 use xenonet_base::{fs as xfs, json, jsstr};
+use xenonet_sources::line_events::{self, Broken, Field, Kind, LineEvent, LineFile};
 use xenonet_sources::lines::{prop, ClaudeLine, CodexLine, Js, TypeError};
 use xenonet_sources::wiki::{to_str_or_empty, Out};
 
@@ -78,8 +79,6 @@ fn nn(v: Js<'_>) -> Js<'_> {
     v.filter(|x| !x.is_null())
 }
 
-static EMPTY: LazyLock<Value> = LazyLock::new(|| Value::Object(serde_json::Map::default()));
-
 /// A searchable record: whose words (user, assistant or subagent), what
 /// they said, and when.
 #[derive(Clone, Debug, PartialEq)]
@@ -127,66 +126,97 @@ fn doc(role: &'static str, text: String, ts: f64) -> Vec<Doc> {
     }
 }
 
-/// One searchable record per human or agent message, from a line's record.
-/// `user_events`: a Codex rollout with no completed user messages at all,
-/// whose prompts are its user_message events.
-pub fn docs_from_line(raw: Value, app: &str, user_events: bool) -> Result<Vec<Doc>, TypeError> {
-    // Any app but Claude Code is read as Codex.
-    if xenonet_base::apps::tailed_app(app, "codex") == "claude" {
-        let o = ClaudeLine { raw };
-        let kind = o.kind()?;
-        if is_str(kind, "user") && !xenonet_base::text::truthy(o.meta()?) {
-            // Tool results, a compacted summary and an interruption aren't
-            // anyone's message (see lines.rs).
-            if o.has_results()? || xenonet_base::text::truthy(o.compact_summary()?) || o.interruption()? {
-                return Ok(Vec::new());
+// Whether search reads the field a line broke at: a user line only as far
+// as its first tool result, and not a meta one; its text unless it's a
+// compacted summary; and neither the refusal, a usage nor the type stats
+// reads a Codex call by.
+fn reaches(b: &Broken<'_>, origin: &str) -> bool {
+    match b.at {
+        Field::Content => !truthy(b.meta) && !b.after_result,
+        Field::Text => origin == "user" && !truthy(b.meta) && !b.results && !truthy(b.compact_summary),
+        Field::Line | Field::Blocks => true,
+        Field::Refusal | Field::Usage | Field::Type => false,
+    }
+}
+
+/// One searchable record per human or agent message, from a line's events
+/// (line_events.rs), each joined with newlines. Tool results, a compacted
+/// summary and an interruption aren't anyone's message.
+pub fn docs_of(events: &[LineEvent<'_>]) -> Result<Vec<Doc>, TypeError> {
+    for e in events {
+        match &e.kind {
+            // A line with tool results is passed over whole.
+            Kind::Result { .. } => return Ok(Vec::new()),
+            Kind::Prompt(p) => {
+                // A Codex rollout's user_message events are its prompts while
+                // it has no completed user message (those are read as items,
+                // below).
+                if &*e.origin == "event_msg:user_message" {
+                    return Ok(doc("user", p.text.clone(), e.t));
+                }
+                // Claude Code's: not a meta line.
+                let Some(c) = &p.claude else { continue };
+                if truthy(c.meta) || truthy(c.compact_summary) || c.interruption {
+                    return Ok(Vec::new());
+                }
+                let role = if truthy(c.sidechain) { "subagent" } else { "user" };
+                return Ok(doc(role, text_of(p.parts)?, e.t));
             }
-            let role = if xenonet_base::text::truthy(o.sidechain()?) { "subagent" } else { "user" };
-            return Ok(doc(role, text_of(o.content()?)?, o.ts()?));
-        }
-        if is_str(kind, "assistant") {
-            let Value::Array(blocks) = o.blocks()? else { return Err(TypeError("o.blocks.filter is not a function".into())) };
-            let mut texts = Vec::new();
-            for b in blocks {
-                if is_str(prop(Some(b), "type")?, "text") {
-                    texts.push(prop(Some(b), "text")?);
+            Kind::Said { parts, sidechain } => match &*e.origin {
+                "event_msg:agent_message" => return Ok(doc("assistant", to_str_or_empty(*parts)?, e.t)),
+                "response_item:message" => return Ok(doc("assistant", text_of(*parts)?, e.t)),
+                "assistant" => {
+                    let Some(Value::Array(blocks)) = parts else { return Err(TypeError("o.blocks.filter is not a function".into())) };
+                    let mut texts = Vec::new();
+                    for b in blocks {
+                        if is_str(prop(Some(b), "type")?, "text") {
+                            texts.push(prop(Some(b), "text")?);
+                        }
+                    }
+                    let t = join(&texts, "\n")?;
+                    if js_trim(&t).is_empty() {
+                        return Ok(Vec::new());
+                    }
+                    let role = if truthy(*sidechain) { "subagent" } else { "assistant" };
+                    return Ok(doc(role, t, e.t));
+                }
+                _ => {}
+            },
+            // What you said in Codex is a rollout's completed user messages,
+            // whatever else may say it again.
+            Kind::Item(it) => {
+                let t = field(it, "type");
+                if is_str(t, "UserMessage") || is_str(t, "AgentMessage") {
+                    let role = if is_str(t, "UserMessage") { "user" } else { "assistant" };
+                    return Ok(doc(role, text_of(field(it, "content"))?, e.t));
                 }
             }
-            let t = join(&texts, "\n")?;
-            if js_trim(&t).is_empty() {
-                return Ok(Vec::new());
-            }
-            let role = if xenonet_base::text::truthy(o.sidechain()?) { "subagent" } else { "assistant" };
-            return Ok(doc(role, t, o.ts()?));
+            Kind::Broken(b) if reaches(b, &e.origin) => return Err(b.error()),
+            _ => {}
         }
-        return Ok(Vec::new());
-    }
-    let o = CodexLine { raw };
-    let p = Some(o.payload()?);
-    let kind = o.kind()?;
-    // What you said is a rollout's completed user messages (see lines.rs),
-    // not the user_message events and user response items that may say it
-    // again; in a rollout with none, it's its user_message events.
-    if is_str(kind, "event_msg") && is_str(prop(p, "type")?, "item_completed") {
-        let it = Some(nn(prop(p, "item")?).unwrap_or(&EMPTY));
-        let t = prop(it, "type")?;
-        if is_str(t, "UserMessage") || is_str(t, "AgentMessage") {
-            let role = if is_str(t, "UserMessage") { "user" } else { "assistant" };
-            return Ok(doc(role, text_of(prop(it, "content")?)?, o.ts()?));
-        }
-    }
-    if user_events {
-        if let Some(said) = o.user_event()? {
-            return Ok(doc("user", said, o.ts()?));
-        }
-    }
-    if is_str(kind, "event_msg") && is_str(prop(p, "type")?, "agent_message") {
-        return Ok(doc("assistant", to_str_or_empty(prop(p, "message")?)?, o.ts()?));
-    }
-    if is_str(kind, "response_item") && is_str(prop(p, "type")?, "message") && is_str(prop(p, "role")?, "assistant") {
-        return Ok(doc("assistant", text_of(prop(p, "content")?)?, o.ts()?));
     }
     Ok(Vec::new())
+}
+
+fn field<'a>(v: &'a Value, k: &str) -> Js<'a> {
+    v.as_object().and_then(|m| m.get(k))
+}
+
+/// One searchable record per human or agent message, from a line's record.
+/// `user_events`: a Codex rollout with no completed user messages at all,
+/// whose prompts are its user_message events. An app that isn't Claude
+/// Code reads as Codex.
+pub fn docs_from_line(raw: Value, app: &str, user_events: bool) -> Result<Vec<Doc>, TypeError> {
+    let file = LineFile { items: !user_events, ..LineFile::default() };
+    // A record that isn't an object fails where search read it first.
+    if xenonet_base::apps::tailed_app(app, "codex") == "claude" {
+        let o = ClaudeLine { raw };
+        o.kind()?;
+        return docs_of(&line_events::claude(&o, &file));
+    }
+    let o = CodexLine { raw };
+    o.payload()?;
+    docs_of(&line_events::codex(&o, &file))
 }
 
 /// Whether a rollout's text has a completed user message: only the lines

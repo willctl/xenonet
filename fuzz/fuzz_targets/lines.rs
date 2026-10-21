@@ -2,10 +2,12 @@
 
 // A transcript's bytes as a read hands them over (a read can end anywhere,
 // inside a line or a character), then every line through the views Claude
-// Code's and Codex's readers take of it.
+// Code's and Codex's readers take of it, and through each app's mapper to
+// its events.
 
 use libfuzzer_sys::fuzz_target;
 use xenonet_base::json;
+use xenonet_sources::line_events::{self, LineFile};
 use xenonet_sources::lines::{self, ClaudeLine, CodexLine};
 
 fn view(raw: serde_json::Value) {
@@ -16,7 +18,14 @@ fn view(raw: serde_json::Value) {
     if let Ok(k) = c.kind() {
         let _ = lines::claude_kind_of(k);
     }
+    let _ = line_events::claude(&c, &LineFile::default());
     let x = CodexLine { raw };
+    for file in [LineFile::default(), LineFile { items: true, ..LineFile::default() }, LineFile { follow: true, ..LineFile::default() }] {
+        let _ = line_events::codex(&x, &file);
+    }
+    if let Ok(p) = x.payload() {
+        let _ = line_events::codex_item(p, 0.0, &LineFile { follow: true, ..LineFile::default() });
+    }
     let _ = (x.kind(), x.ts(), x.payload(), x.user_message(), x.user_event());
     if let (Ok(k), Ok(p)) = (x.kind(), x.payload()) {
         let pt = lines::opt_prop(Some(p), "type");

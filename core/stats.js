@@ -16,8 +16,8 @@ import path from "node:path";
 import { categorize, mcpServerOf, clip } from "./live.js";
 import { costParts, plainModel, priorityTier, PRICES_CHECKED } from "./pricing.js";
 import { listFiles } from "./paths.js";
-import { readLines, isCodexPrompt, hasUserMessages } from "./lines.js";
-import { tailedApp } from "./apps.js";
+import { readLines, hasUserMessages } from "./lines.js";
+import { mapperOf, fail, usageOf } from "./events.js";
 
 const UUID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
 const CONTEXT_POINTS = 400;
@@ -71,129 +71,123 @@ export class Transcripts {
 // ---------- reading them ----------
 
 // Calls, prompts, turn ends and tool calls, in the order they happened,
-// from Claude Code's main file and its subagents' files.
-function claudeEvents(files) {
+// from a session's files (Claude Code's main file and its subagents'), as
+// stats counts each line's events (events.js).
+function sessionEvents(files, mapper) {
   const events = [];
+  // The message ids counted, in every file; and what Codex says apart from
+  // its calls: the model, effort, tier and provider, and the total so far.
   const seen = new Set();
+  const set = { model: "unknown", effort: null, priority: false, total: 0, provider: null };
   for (const { lines, agentId } of files) {
-    for (const o of lines) {
-      // A line that doesn't say when is left out.
-      const t = o.ts;
-      if (!Number.isFinite(t)) continue;
-      const type = o.type;
-      if (type === "assistant") {
-        // Each of a message's lines repeats its usage: counted once.
-        const id = o.messageId;
-        const u = id && !seen.has(id) ? o.usage : null;
-        if (u) {
-          seen.add(id);
-          events.push({
-            kind: "call",
-            t,
-            agentId,
-            model: o.model ?? "unknown",
-            effort: o.effort,
-            tokens: { input: u.input, cacheRead: u.cacheRead, cacheWrite5m: u.cacheWrite5m, cacheWrite1h: u.cacheWrite1h, output: u.output },
-            fast: u.fast,
-          });
-        }
-        for (const b of o.blocks) {
-          if (b.type !== "tool_use") continue;
-          events.push({ kind: "tool", t, id: b.id, name: b.name, agentId });
-          if (!agentId && /^(Agent|Task)$/.test(b.name) && b.input?.description) events.push({ kind: "spawn", t, text: b.input.description });
-        }
-        if (o.endTurn && !agentId) events.push({ kind: "end", t });
-      } else if (type === "user") {
-        const results = o.results;
-        if (results) {
-          for (const r of results) events.push({ kind: "result", t, id: r.id, error: r.error });
-          continue;
-        }
-        // A subagent's first prompt is its task.
-        if (agentId) {
-          const task = o.text;
-          if (task.trim()) events.push({ kind: "task", t, agentId, text: task });
-          continue;
-        }
-        if (o.meta || o.sidechain) continue;
-        // A compacted context carries on the turn it interrupted.
-        if (o.compactSummary) {
-          events.push({ kind: "compact", t });
-          continue;
-        }
-        if (o.interruption) continue;
-        const text = promptText(o.text);
-        if (text) events.push({ kind: "prompt", t, text });
-      }
-    }
+    // A rollout's prompts are its completed user messages, or in one with
+    // none at all, its user_message events (see lines.js).
+    const file = mapper.file({ agentId, items: hasUserMessages(lines) });
+    for (const o of lines) lineEvents(mapper.events(o, file), seen, set, events);
   }
-  return events.sort((a, b) => a.t - b.t);
+  return mapper.sorted ? events.sort((a, b) => a.t - b.t) : events;
 }
 
-// What someone typed: a slash command as /name and its arguments; nothing
-// for Claude Code's own notes (command output and the like).
-function promptText(text) {
-  const t = text.trim();
-  const command = /^<command-name>\/?([^<]+)<\/command-name>/.exec(t);
-  if (command) return `/${command[1]} ${/<command-args>([\s\S]*?)<\/command-args>/.exec(t)?.[1] ?? ""}`.trim();
-  return t && !t.startsWith("<") ? t : null;
-}
-
-
-function codexEvents(lines) {
-  const events = [];
-  // Its prompts are its completed user messages, or in a rollout with none
-  // at all, its user_message events (see lines.js).
-  const items = hasUserMessages(lines);
-  let model = "unknown", effort = null, priority = false, total = 0, provider = null;
-  for (const o of lines) {
-    // A line that doesn't say when is left out.
-    const t = o.ts;
-    if (!Number.isFinite(t)) continue;
-    const p = o.payload;
-    const type = o.type;
-    if (type === "session_meta") provider = p.model_provider ?? null;
-    if (type === "turn_context") {
-      model = p.model ?? model;
-      effort = p.effort ?? effort;
-      // Older rollouts say the tier with each turn; newer ones say it in
-      // the thread's settings (below), and their turns don't say it.
-      if (p.service_tier !== undefined) priority = priorityTier(p.service_tier);
-    } else if (type === "event_msg") {
-      const said = items ? o.userMessage : o.userEvent;
-      if (said != null) {
-        if (isCodexPrompt(said)) events.push({ kind: "prompt", t, text: said });
-      } else if (p.type === "thread_settings_applied") {
+// A line's events as stats counts them, onto `events`.
+function lineEvents(evs, seen, set, events) {
+  for (const e of evs) {
+    // A line that doesn't say when is left out (one that can't say is
+    // broken).
+    const t = e.t;
+    if (!Number.isFinite(t) && !(e.kind === "broken" && e.at === "line")) return;
+    const agentId = e.agentId;
+    switch (e.kind) {
+      case "settings":
+        if (e.origin === "session_meta") set.provider = e.provider ?? null;
+        else if (e.origin === "turn_context") {
+          set.model = e.model ?? set.model;
+          set.effort = e.effort ?? set.effort;
+          // Older rollouts say the tier with each turn; newer ones say it in
+          // the thread's settings, and their turns don't say it.
+          if (e.tier !== undefined) set.priority = priorityTier(e.tier);
+        }
         // All of the thread's settings, before the turn they apply to: a
         // tier not said is the default one.
-        priority = priorityTier(p.thread_settings?.service_tier);
-      } else if (p.type === "task_complete") events.push({ kind: "end", t });
-      else if (p.type === "token_count" && p.info) {
-        const now = p.info.total_token_usage?.total_tokens ?? 0;
-        // The same call is reported more than once; count it when the total moves.
-        if (now <= total) continue;
-        total = now;
-        const u = p.info.last_token_usage ?? {};
-        const input = u.input_tokens ?? Math.max(0, (u.total_tokens ?? 0) - (u.output_tokens ?? 0));
-        const cached = u.cached_input_tokens ?? 0, write = u.cache_write_input_tokens ?? 0;
-        events.push({
-          kind: "call",
-          t,
-          agentId: null,
-          model: provider && provider !== "openai" ? `${provider}/${model}` : model,
-          effort,
-          tokens: { input: Math.max(0, input - cached - write), cacheRead: cached, cacheWrite5m: write, cacheWrite1h: 0, output: u.output_tokens ?? 0 },
-          priority,
-          window: p.info.model_context_window ?? null,
-        });
+        else if (e.origin === "event_msg:thread_settings_applied") set.priority = priorityTier(e.tier);
+        break;
+      case "call": {
+        if ("total" in e) {
+          // Codex reports a call more than once; it's counted when the total
+          // moves.
+          const now = e.total?.total_tokens ?? 0;
+          if (now <= set.total) break;
+          set.total = now;
+          const u = usageOf(evs, e);
+          events.push({ kind: "call", t, agentId, model: set.provider && set.provider !== "openai" ? `${set.provider}/${set.model}` : set.model, effort: set.effort, tokens: tokensOf(u), priority: set.priority, window: e.window ?? null });
+          break;
+        }
+        // Each of a message's lines repeats its usage: counted once.
+        const id = e.messageId;
+        const u = id && !seen.has(id) ? usageOf(evs, e) : null;
+        if (!u) break;
+        seen.add(id);
+        events.push({ kind: "call", t, agentId, model: e.model ?? "unknown", effort: e.effort, tokens: tokensOf(u), fast: u.fast });
+        break;
       }
-    } else if (type === "response_item" && /^(function_call|custom_tool_call|local_shell_call)$/.test(p.type)) {
-      events.push({ kind: "tool", t, id: p.call_id ?? p.id, name: p.name ?? p.type, agentId: null });
-    } else if (type === "response_item" && /^(function_call_output|custom_tool_call_output|local_shell_call_output)$/.test(p.type)) {
-      events.push({ kind: "result", t, id: p.call_id ?? p.id, error: null });
+      case "tool":
+        // A Codex call (a response item, with its type) is named by its
+        // type when it has no name: a local_shell_call is a shell call.
+        if (e.call !== undefined) {
+          events.push({ kind: "tool", t, id: e.id, name: e.name ?? e.call, agentId });
+          break;
+        }
+        // The Agent call that starts a subagent names it.
+        events.push({ kind: "tool", t, id: e.id, name: e.name, agentId });
+        if (!agentId && /^(Agent|Task)$/.test(e.name) && e.input?.description) events.push({ kind: "spawn", t, text: e.input.description });
+        break;
+      case "result":
+        events.push({ kind: "result", t, id: e.id, error: e.error ?? null });
+        break;
+      case "turnEnd":
+        // A subagent's end isn't the turn's; an interruption or a refusal
+        // isn't counted.
+        if ((e.reason === "end_turn" || e.reason === "task_complete") && !agentId) events.push({ kind: "end", t });
+        break;
+      // A compacted context carries on the turn it interrupted.
+      case "compact":
+        if (!agentId && !e.meta && !e.sidechain) events.push({ kind: "compact", t });
+        break;
+      case "prompt": {
+        // A subagent's first prompt is its task.
+        if (agentId) {
+          if (e.text.trim()) events.push({ kind: "task", t, agentId, text: e.text });
+          break;
+        }
+        if (e.meta || e.sidechain || e.compactSummary || e.interruption) break;
+        const text = "command" in e ? promptText(e) : e.text;
+        if (text) events.push({ kind: "prompt", t, text });
+        break;
+      }
+      case "broken":
+        if (reaches(e)) fail(e);
+        break;
     }
   }
-  return events;
+}
+
+// Whether stats reads the field a line broke at: every one but the
+// refusal, a usage it reads when it counts the call (usageOf), and a
+// user line's text, which it reads for a subagent's task and for a prompt.
+function reaches(e) {
+  if (e.at === "refusal" || e.at === "usage") return false;
+  if (e.at === "text") return !e.results && (!!e.agentId || (!e.meta && !e.sidechain && !e.compactSummary));
+  return true;
+}
+
+const tokensOf = (u) => ({ input: u.input, cacheRead: u.cacheRead, cacheWrite5m: u.cacheWrite5m, cacheWrite1h: u.cacheWrite1h, output: u.output });
+
+// What someone typed in Claude Code: a slash command as /name and its
+// arguments; nothing for Claude Code's own notes (command output and the
+// like).
+function promptText({ text, command }) {
+  if (command) return `/${command.name} ${command.args}`.trim();
+  const t = text.trim();
+  return t && !t.startsWith("<") ? t : null;
 }
 
 // ---------- adding it up ----------
@@ -356,9 +350,9 @@ export function createStats({ transcripts }) {
     const hit = cache.get(sessionId);
     if (hit?.key === key) return hit.stats;
     const app = sessionId.split(":")[0];
-    const read = await Promise.all(files.map(async (f) => ({ ...f, lines: await readLines(f.file, app).catch(() => []) })));
-    // Any app but Codex is read as Claude Code, as linesOf reads it.
-    const events = tailedApp(app, "claude") === "codex" ? codexEvents(read[0].lines) : claudeEvents(read);
+    const mapper = mapperOf(app);
+    const read = await Promise.all(files.map(async (f) => ({ ...f, lines: await readLines(f.file, app, mapper.lines).catch(() => []) })));
+    const events = sessionEvents(read, mapper);
     const stats = { id: sessionId, ...summarize(events, { app }) };
     cache.set(sessionId, { key, stats });
     if (cache.size > 40) cache.delete(cache.keys().next().value);

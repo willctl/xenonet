@@ -15,8 +15,8 @@ import { createHash } from "node:crypto";
 import { tilde, baseName } from "./paths.js";
 import { Tailer } from "./blocks/tailer.js";
 import { claudeUsageGatherer, desktopUsageGatherer } from "./claude-usage.js";
-import { ClaudeLine, CodexLine, linesOf, isCodexPrompt } from "./lines.js";
-import { claudeSignal, codexSignal } from "./refusals/detect.js";
+import { ClaudeLine, CodexLine, linesOf } from "./lines.js";
+import { claude, codex, brokenAt, fail, usageOf, userText } from "./events.js";
 import { costParts, plainModel, priorityTier, PRICES_CHECKED } from "./pricing.js";
 import { isContextServer } from "./xenolith.js";
 import { APP, tailedApp } from "./apps.js";
@@ -532,25 +532,38 @@ export class LiveTelemetry extends EventEmitter {
     return this.tailer.track(file, opts);
   }
 
-  // A line the tailer read, through its app's normalizer (lines.js):
-  // lines that aren't JSON are skipped, and one that breaks the normalizer
-  // or a handler is counted as an error, so the lines after it are read.
+  // A line the tailer read, through its app's normalizer (lines.js), as
+  // its events (events.js): lines that aren't JSON are skipped, and one
+  // that breaks the normalizer or a handler is counted as an error, so the
+  // lines after it are read.
   #line(line, f, prime) {
     try {
       const rec = linesOf(f.app).line(line, f);
       if (!rec) return;
       this.status.lines++;
       // Any app but Codex is read as Claude Code, as linesOf reads it.
-      const codex = tailedApp(f.app, "claude") === "codex";
-      // A provider's refusal, as its line marks it (core/refusals): kept
-      // whether read as history or live, told to you only when live.
-      const sig = codex ? codexSignal(rec.raw) : claudeSignal(rec.raw);
-      if (sig) this.emit("refusal", { signal: sig, sessionId: f.sessionId, app: f.app, agentId: f.agentId ?? null, file: f.file ?? null, cwd: typeof rec.raw?.cwd === "string" ? rec.raw.cwd : null, model: this.sessions.get(f.sessionId)?.model ?? null, live: !prime });
-      if (codex) this.applyCodex(f, rec, !prime);
-      else this.applyClaude(f, rec, !prime);
+      const codexApp = tailedApp(f.app, "claude") === "codex";
+      const file = codexApp ? this.#codexFile(this.sessions.get(f.sessionId)) : claude.file({ agentId: f.agentId });
+      const events = (codexApp ? codex : claude).events(rec, file);
+      // A provider's refusal, as its line marks it (core/refusals), read
+      // first: kept whether read as history or live, told to you only when
+      // live.
+      for (const e of events) {
+        if (e.kind === "broken" && e.at === "refusal") fail(e);
+        if (e.kind === "refusal") this.emit("refusal", { signal: e.signal, sessionId: f.sessionId, app: f.app, agentId: f.agentId ?? null, file: f.file ?? null, cwd: typeof rec.raw?.cwd === "string" ? rec.raw.cwd : null, model: this.sessions.get(f.sessionId)?.model ?? null, live: !prime });
+      }
+      if (codexApp) this.#codex(f, rec, events, !prime);
+      else this.#claude(f, rec, events, !prime);
     } catch {
       this.status.errors++;
     }
+  }
+
+  // What the mapper is told of a Codex session's rollout: whether its
+  // prompts are its completed user messages yet, which the tailer finds
+  // out as the lines come (see lines.js).
+  #codexFile(s) {
+    return codex.file({ items: s?.codexItems ?? false, follow: true });
   }
 
   trimHistory() {
@@ -627,6 +640,11 @@ export class LiveTelemetry extends EventEmitter {
   // transcript has it.
   applyClaude(f, line, live) {
     const o = line instanceof ClaudeLine ? line : new ClaudeLine(line);
+    this.#claude(f, o, claude.events(o, claude.file({ agentId: f.agentId })), live);
+  }
+
+  // A Claude Code line's events (events.js).
+  #claude(f, o, events, live) {
     const s = this.session(f.sessionId, "claude");
     // A line that doesn't say when it was written (see lines.js) was
     // written when it's read.
@@ -641,7 +659,10 @@ export class LiveTelemetry extends EventEmitter {
       }
       sub.lastAt = Math.max(sub.lastAt, ts);
     }
-    this.applyClaudeLine(s, sub, agentId, o, ts, live);
+    // What the line is: a reply, or what you (or a tool) said.
+    const type = events.find((e) => e.kind !== "refusal" && !(e.kind === "broken" && e.at === "refusal"))?.origin;
+    if (type === "assistant") this.#claudeAssistant(s, sub, agentId, events, ts, live);
+    else if (type === "user") this.#claudeUser(s, sub, agentId, events, ts, live);
     // Announce a subagent once its first line has given it a label.
     if (sub && !sub.announced) {
       sub.announced = true;
@@ -649,20 +670,15 @@ export class LiveTelemetry extends EventEmitter {
     }
   }
 
-  applyClaudeLine(s, sub, agentId, o, ts, live) {
-    const type = o.type;
-    if (type === "assistant") this.#claudeAssistant(s, sub, agentId, o, ts, live);
-    else if (type === "user") this.#claudeUser(s, sub, agentId, o, ts, live);
-  }
-
   // A reply: its tokens and context fill, its tool calls and text, and the
   // end of a turn (or of a subagent's work).
-  #claudeAssistant(s, sub, agentId, o, ts, live) {
-    const model = o.model;
+  #claudeAssistant(s, sub, agentId, events, ts, live) {
+    const call = events.find((e) => e.kind === "call");
+    const model = call.model;
     if (model && !agentId) s.model = model;
     // Each of a message's lines repeats its usage: counted once.
-    const id = o.messageId;
-    const u = id && !s.seenMessages.has(id) ? o.usage : null;
+    const id = call.messageId;
+    const u = id && !s.seenMessages.has(id) ? usageOf(events, call) : null;
     if (u) {
       s.seenMessages.add(id);
       if (s.seenMessages.size > 400) s.seenMessages.delete(s.seenMessages.values().next().value);
@@ -676,7 +692,11 @@ export class LiveTelemetry extends EventEmitter {
       }
       if (live) this.emit("tokens", { sessionId: s.id, app: "claude", n: ctx + u.output, ts });
     }
-    for (const b of o.blocks) {
+    // Its blocks in order: what it said, and its tool calls. Ones that
+    // aren't a list (or a string's characters) can't be read.
+    const blocks = events.find((e) => e.kind === "said").parts;
+    if (typeof blocks !== "string" && !Array.isArray(blocks)) fail(brokenAt(events, "blocks"));
+    for (const b of blocks) {
       if (b.type === "tool_use") this.#claudeToolUse(s, sub, agentId, b, ts, live);
       else if (b.type === "text" && b.text?.trim() && !agentId) {
         s.addMessage(b.text, ts);
@@ -685,9 +705,9 @@ export class LiveTelemetry extends EventEmitter {
     }
     // A refusal ends the turn too: the provider said no, and nothing more
     // comes until you write again.
-    const refused = o.raw?.message?.stop_reason === "refusal";
-    if (!o.endTurn && !refused) return;
-    if (refused && !agentId) this.activity(s, { kind: "refusal", detail: clip(o.raw.message.stop_details?.explanation ?? o.raw.message.stop_details?.category ?? "the provider refused", 160), ts }, live);
+    const end = events.find((e) => e.kind === "turnEnd");
+    if (!end) return;
+    if (end.reason === "refusal" && !agentId) this.activity(s, { kind: "refusal", detail: clip(end.details?.explanation ?? end.details?.category ?? "the provider refused", 160), ts }, live);
     if (sub) {
       sub.done = true;
       this.activity(s, { kind: "subagent-stop", agentId, label: sub.label, ts }, live);
@@ -723,9 +743,11 @@ export class LiveTelemetry extends EventEmitter {
 
   // Tool results, a prompt (in a subagent's file, its task), or your
   // interruption.
-  #claudeUser(s, sub, agentId, o, ts, live) {
-    const results = o.results;
-    if (results) {
+  #claudeUser(s, sub, agentId, events, ts, live) {
+    const unread = brokenAt(events, "content");
+    if (unread) fail(unread);
+    const results = events.filter((e) => e.kind === "result");
+    if (results.length) {
       for (const r of results) {
         const tool = s.inflight.get(r.id)?.tool;
         s.inflight.delete(r.id);
@@ -734,24 +756,31 @@ export class LiveTelemetry extends EventEmitter {
       }
       s.lastEventAt = Math.max(s.lastEventAt, ts);
     }
-    if (o.meta || !!o.sidechain !== !!agentId) return;
+    // The line's flags, from what it holds besides its results: its
+    // prompt, your interruption, or the text that couldn't be read.
+    const prompt = events.find((e) => e.kind === "prompt");
+    const end = events.find((e) => e.kind === "turnEnd");
+    const text = brokenAt(events, "text");
+    const line = prompt ?? end ?? text;
+    if (!line || line.meta || !!line.sidechain !== !!agentId) return;
+    if (text) fail(text);
     // A compacted summary and an interruption aren't prompts (see lines.js);
     // an interruption ends the turn you stopped.
-    if (o.interruption) return void (agentId || this.#interrupted(s, ts, live));
-    if (results || o.compactSummary) return;
-    const text = o.text;
-    if (!text.trim() || text.startsWith("<")) return;
+    if (end) return void (agentId || this.#interrupted(s, ts, live));
+    if (results.length || prompt.compactSummary) return;
+    const said = prompt.text;
+    if (!said.trim() || said.startsWith("<")) return;
     if (sub) {
       // A subagent's first prompt is its task; the Agent tool's description is a better label.
       if (sub.label === "subagent") {
         const pl = this.pendingLabel;
-        sub.label = pl && pl.session === s.id && Math.abs(ts - pl.ts) < 60000 ? pl.label : clip(text, 40);
+        sub.label = pl && pl.session === s.id && Math.abs(ts - pl.ts) < 60000 ? pl.label : clip(said, 40);
       }
       return;
     }
     s.turn = { active: true, startedAt: ts };
-    s.addPrompt(text, ts);
-    this.activity(s, { kind: "prompt", detail: clip(text, 90), ts }, live);
+    s.addPrompt(said, ts);
+    this.activity(s, { kind: "prompt", detail: clip(said, 90), ts }, live);
   }
 
   // You stopped the turn under way (in Claude Code, Esc or a tool use you
@@ -770,111 +799,128 @@ export class LiveTelemetry extends EventEmitter {
   // has it.
   applyCodex(f, line, live) {
     const o = line instanceof CodexLine ? line : new CodexLine(line);
+    return this.#codex(f, o, codex.events(o, this.#codexFile(this.session(f.sessionId, "codex"))), live);
+  }
+
+  // A Codex line's events (events.js).
+  #codex(f, o, events, live) {
     const s = this.session(f.sessionId, "codex");
     // A line that doesn't say when it was written (see lines.js) was
     // written when it's read.
     const ts = o.ts || Date.now();
-    const p = o.payload;
-    const type = o.type;
-    if (type === "event_msg") {
-      switch (p.type) {
-        case "task_started":
+    return this.#codexEvents(s, events, ts, live);
+  }
+
+  #codexEvents(s, events, ts, live) {
+    // What a web search or an image item noted, as codexItem gave it back.
+    let noted;
+    for (const e of events) {
+      switch (e.kind) {
+        case "turnStart":
           s.resetStall();
           s.turnMarks++;
           s.turn = { active: true, startedAt: ts };
-          if (p.model_context_window) s.context.window = p.model_context_window;
+          if (e.window) s.context.window = e.window;
           this.activity(s, { kind: "turn-start", ts }, live);
-          return;
-        case "task_complete": {
-          if (p.last_agent_message) s.addMessage(p.last_agent_message, ts);
-          s.endTurn(ts);
-          this.activity(s, { kind: "turn-end", duration: p.duration_ms ?? null, ts }, live);
-          const need = s.needsYou(Date.now());
-          if (need && need.kind === "question") this.activity(s, { kind: "needs-you", detail: clip(need.text, 120), ts }, live);
-          return;
-        }
-        case "token_count": {
-          const info = p.info;
-          if (info?.total_token_usage) {
-            const total = info.total_token_usage.total_tokens ?? 0;
-            const delta = total - s.tokens.processed;
-            if (delta > 0) {
-              s.addTokens(delta, ts, live);
-              // The call's own tokens, as stats.js reads them: cached input
-              // and cache writes are part of input_tokens.
-              const last = info.last_token_usage ?? {};
-              const input = last.input_tokens ?? Math.max(0, (last.total_tokens ?? 0) - (last.output_tokens ?? 0));
-              const cached = last.cached_input_tokens ?? 0;
-              const write = last.cache_write_input_tokens ?? 0;
-              const model = s.model ?? "unknown";
-              s.addCall(s.provider && s.provider !== "openai" ? `${s.provider}/${model}` : model, { input: Math.max(0, input - cached - write), cacheRead: cached, cacheWrite5m: write, cacheWrite1h: 0, output: last.output_tokens ?? 0 }, ts, { priority: s.priority });
-              if (live) this.emit("tokens", { sessionId: s.id, app: "codex", n: delta, ts });
-            }
-            s.tokens.output = (info.total_token_usage.output_tokens ?? 0) + (info.total_token_usage.reasoning_output_tokens ?? 0);
+          break;
+        // What it said last, with the turn's end (a completed message is
+        // read with its item).
+        case "said":
+          if (e.origin === "event_msg:task_complete") s.addMessage(e.parts, ts);
+          break;
+        case "turnEnd":
+          if (e.reason === "task_complete") {
+            s.endTurn(ts);
+            this.activity(s, { kind: "turn-end", duration: e.duration ?? null, ts }, live);
+            const need = s.needsYou(Date.now());
+            if (need && need.kind === "question") this.activity(s, { kind: "needs-you", detail: clip(need.text, 120), ts }, live);
           }
-          if (info?.last_token_usage) s.context.used = info.last_token_usage.total_tokens ?? s.context.used;
-          if (info?.model_context_window) s.context.window = info.model_context_window;
-          if (p.rate_limits) this.noteCodexLimits(p.rate_limits, ts);
+          // You stopped the turn (Esc, or Ctrl-C): Codex writes no
+          // task_complete for it.
+          else if (e.reason === "interrupted") this.#interrupted(s, ts, live);
+          // A policy refusal: the turn ends with it.
+          else if (e.reason === "refusal") {
+            const sig = e.signal;
+            this.activity(s, { kind: "refusal", detail: clip(sig.explanation ?? sig.text ?? sig.category, 160), ts }, live);
+            if (s.turn.active) s.endTurn(ts);
+          }
+          break;
+        case "call": {
+          // The growth of the total is what's new (output and reasoning
+          // output kept).
+          if (!e.total) break;
+          const total = e.total.total_tokens ?? 0;
+          const delta = total - s.tokens.processed;
+          if (delta > 0) {
+            s.addTokens(delta, ts, live);
+            // The call's own tokens, as stats.js reads them: cached input
+            // and cache writes are part of input_tokens.
+            const last = e.last ?? {};
+            const input = last.input_tokens ?? Math.max(0, (last.total_tokens ?? 0) - (last.output_tokens ?? 0));
+            const cached = last.cached_input_tokens ?? 0;
+            const write = last.cache_write_input_tokens ?? 0;
+            const model = s.model ?? "unknown";
+            s.addCall(s.provider && s.provider !== "openai" ? `${s.provider}/${model}` : model, { input: Math.max(0, input - cached - write), cacheRead: cached, cacheWrite5m: write, cacheWrite1h: 0, output: last.output_tokens ?? 0 }, ts, { priority: s.priority });
+            if (live) this.emit("tokens", { sessionId: s.id, app: "codex", n: delta, ts });
+          }
+          s.tokens.output = (e.total.output_tokens ?? 0) + (e.total.reasoning_output_tokens ?? 0);
+          break;
+        }
+        // The context from the last call.
+        case "context":
+          s.context.used = e.used ?? s.context.used;
+          if (e.window) s.context.window = e.window;
           s.lastEventAt = Math.max(s.lastEventAt, ts);
-          return;
-        }
-        case "item_completed":
-          return this.codexItem(s, p.item ?? {}, ts, live);
-        case "user_message":
-          return this.#codexUserEvent(s, o.userEvent, ts, live);
-        // You stopped the turn (Esc, or Ctrl-C): Codex writes no
-        // task_complete for it. A turn the next one replaced, or a review
-        // ending, isn't you stopping it; older rollouts give no reason.
-        case "turn_aborted":
-          if (p.reason && p.reason !== "interrupted") return;
-          return this.#interrupted(s, ts, live);
-        // A policy refusal: the turn ends with it.
-        case "error": {
-          const sig = codexSignal(o.raw);
-          if (!sig || sig.kind !== "refusal") return;
-          this.activity(s, { kind: "refusal", detail: clip(sig.explanation ?? sig.text ?? sig.category, 160), ts }, live);
-          if (s.turn.active) s.endTurn(ts);
-          return;
-        }
-        // All of the thread's settings: a tier not said is the default.
-        case "thread_settings_applied":
-          s.priority = priorityTier(p.thread_settings?.service_tier);
-          return;
-        default:
-          return;
+          break;
+        case "limits":
+          this.noteCodexLimits(e.rateLimits, ts);
+          break;
+        case "item":
+          noted = this.#codexItem(s, e.item, events, ts, live);
+          break;
+        // A user_message event: a prompt while the rollout has no completed
+        // user message (`codex exec` writes none, nor did Codex before
+        // 0.130), passed by once it has (the mapper says which). The live
+        // tailer can't know a line still to come, so in a rollout whose
+        // first completed user message comes turns later (an old one picked
+        // up again), it keeps those turns' prompts, which stats and search,
+        // reading the whole file, leave out. A completed one is read with
+        // its item.
+        case "prompt":
+          if (e.origin !== "event_msg:user_message") break;
+          s.addPrompt(e.text, ts);
+          s.eventPrompt = { prompt: s.prompts[s.prompts.length - 1], marks: s.turnMarks };
+          this.activity(s, { kind: "prompt", detail: clip(e.text, 90), ts }, live);
+          break;
+        case "settings":
+          if (e.origin === "turn_context" && e.model) s.model = e.model;
+          // What prices its calls (stats.js reads them the same way): the
+          // provider, and the tier, said with a turn in older rollouts and
+          // in the thread's settings in newer ones, where a tier not said
+          // is the default.
+          if (e.origin === "session_meta") s.provider = e.provider ?? s.provider;
+          if (e.tier !== undefined) s.priority = priorityTier(e.tier);
+          break;
+        // A call (a response item, whose type live reads as written) starts
+        // a tool in flight, and its output, a shell call's too, ends it,
+        // matched as stats match them: by call_id, else id.
+        case "tool":
+          if (typeof e.call !== "string") break;
+          s.inflight.set(e.id, { name: e.name, ts });
+          s.lastEventAt = Math.max(s.lastEventAt, ts);
+          if (e.name === "apply_patch") this.noteTool(s, { name: "apply_patch", detail: "", files: patchFiles(e.input), ts }, live);
+          break;
+        case "result":
+          if (typeof e.call !== "string") break;
+          s.inflight.delete(e.id);
+          s.lastEventAt = Math.max(s.lastEventAt, ts);
+          break;
+        case "broken":
+          if (e.at === "line") fail(e);
+          break;
       }
     }
-    if (type === "turn_context" && p.model) s.model = p.model;
-    // What prices its calls (stats.js reads them the same way): the
-    // provider, and the tier, said with a turn in older rollouts and in the
-    // thread's settings in newer ones.
-    if (type === "session_meta") s.provider = p.model_provider ?? s.provider;
-    if (type === "turn_context" && p.service_tier !== undefined) s.priority = priorityTier(p.service_tier);
-    if (type === "response_item") {
-      if (p.type === "function_call" || p.type === "custom_tool_call" || p.type === "local_shell_call") {
-        s.inflight.set(p.call_id ?? p.id, { name: p.name, ts });
-        s.lastEventAt = Math.max(s.lastEventAt, ts);
-        if (p.name === "apply_patch") this.noteTool(s, { name: "apply_patch", detail: "", files: patchFiles(p.input ?? p.arguments), ts }, live);
-      } else if (p.type === "function_call_output" || p.type === "custom_tool_call_output" || p.type === "local_shell_call_output") {
-        // Its output ends a call, a shell call's too, matched as stats
-        // match them: by call_id, else id.
-        s.inflight.delete(p.call_id ?? p.id);
-        s.lastEventAt = Math.max(s.lastEventAt, ts);
-      }
-    }
-  }
-
-  // A user_message event: a prompt while the rollout has no completed user
-  // message (`codex exec` writes none, nor did Codex before 0.130), passed
-  // by once it has. The live tailer can't know a line still to come, so
-  // in a rollout whose first completed user message comes turns later
-  // (an old one picked up again), it keeps those turns' prompts, which
-  // stats and search, reading the whole file, leave out.
-  #codexUserEvent(s, text, ts, live) {
-    if (s.codexItems || !isCodexPrompt(text)) return;
-    s.addPrompt(text, ts);
-    s.eventPrompt = { prompt: s.prompts[s.prompts.length - 1], marks: s.turnMarks };
-    this.activity(s, { kind: "prompt", detail: clip(text, 90), ts }, live);
+    return noted;
   }
 
   // Codex's rate limits in XenoNet's own shape (live/snapshot's limits.codex):
@@ -894,10 +940,20 @@ export class LiveTelemetry extends EventEmitter {
     if (this.limitSamples.codex.length > 2000) this.limitSamples.codex.shift();
   }
 
+  // A completed item of a Codex rollout, as its events say it.
   codexItem(s, it, ts, live) {
+    return this.#codexEvents(s, codex.item(it, { t: ts }, this.#codexFile(s)), ts, live);
+  }
+
+  #codexItem(s, it, events, ts, live) {
     switch (it.type) {
       case "UserMessage": {
-        const text = (it.content ?? []).map((c) => c?.text ?? "").join(" ");
+        // What it says, as live reads it: one that can't be read fails here.
+        const unread = brokenAt(events, "text");
+        if (unread) {
+          userText(it);
+          fail(unread);
+        }
         // The rollout's first: from here on its prompts are these. Codex
         // may have written it as a user_message event just before, in the
         // same turn, which was taken for this prompt.
@@ -906,10 +962,12 @@ export class LiveTelemetry extends EventEmitter {
         s.eventPrompt = null;
         if (event && event.prompt === s.prompts[s.prompts.length - 1] && event.marks === s.turnMarks) return;
         // A blank one (an image alone), or one that starts with "<", isn't
-        // a prompt, as in stats and search.
-        if (!isCodexPrompt(text)) return;
-        s.addPrompt(text, ts);
-        this.activity(s, { kind: "prompt", detail: clip(text, 90), ts }, live);
+        // a prompt, as in stats and search: the mapper makes no prompt of
+        // it.
+        const prompt = events.find((e) => e.kind === "prompt");
+        if (!prompt) return;
+        s.addPrompt(prompt.text, ts);
+        this.activity(s, { kind: "prompt", detail: clip(prompt.text, 90), ts }, live);
         return;
       }
       case "AgentMessage": {
@@ -928,6 +986,7 @@ export class LiveTelemetry extends EventEmitter {
         if (!ok) this.activity(s, { kind: "tool-error", ts }, live);
         return;
       }
+
       case "McpToolCall": {
         const ok = it.status === "completed" && !it.error;
         s.noteToolResult(ok, ts);

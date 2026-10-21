@@ -151,12 +151,12 @@ function take(data, lines, where, out) {
   return t.rest;
 }
 
-// A whole transcript's lines, through its app's normalizer, a compressed
-// archive (.jsonl.zst) too.
-export async function readLines(file, app) {
+// A whole transcript's lines, through its app's normalizer (or `lines`), a
+// compressed archive (.jsonl.zst) too.
+export async function readLines(file, app, lines = linesOf(app)) {
   const buf = await fsp.readFile(file);
   const out = [];
-  take(file.endsWith(".zst") ? zlib.zstdDecompressSync(buf) : buf, linesOf(app), { file }, out);
+  take(file.endsWith(".zst") ? zlib.zstdDecompressSync(buf) : buf, lines, { file }, out);
   return out;
 }
 
