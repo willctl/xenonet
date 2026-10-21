@@ -6,7 +6,7 @@
 //! xenonet-sources' codex.rs.
 
 use crate::blocks::{health_of, Block};
-use crate::util::{codex_obj, lock, now_ms, num};
+use crate::util::{lock, now_ms, num, record_json};
 use crate::vendor::Vendor;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
@@ -140,7 +140,7 @@ impl CodexClient {
                             let Some(tx) = lock(&p).remove(&id) else { continue };
                             let _ = tx.send(match error {
                                 Some(e) => Err(Failed { message: e.0, rpc: Some(e.1) }),
-                                None => Ok(crate::util::codex_f(&result).unwrap_or(Value::Null)),
+                                None => Ok(crate::util::field_json(&result).unwrap_or(Value::Null)),
                             });
                         }
                         Message::Other => {}
@@ -266,7 +266,7 @@ impl CodexClient {
                     .map_err(|e| e.message)?;
                 let page = self.answered("thread/list", res);
                 for t in crate::util::items(page.get("data")) {
-                    sessions.push(codex_obj(&codex::thread_to_session(Some(t), archived).map_err(|e| e.0)?));
+                    sessions.push(record_json(&codex::thread_to_session(Some(t), archived).map_err(|e| e.0)?));
                 }
                 cursor = page.get("nextCursor").cloned().filter(|c| !c.is_null()).unwrap_or(Value::Null);
                 if !xenonet_base::text::truthy(Some(&cursor)) {
@@ -314,7 +314,7 @@ impl CodexClient {
             }
         };
         let page = self.answered("thread/items/list", res);
-        let entries: Vec<Value> = codex::normalize_items(page.get("data")).map_err(|e| e.0)?.iter().map(codex_obj).collect();
+        let entries: Vec<Value> = codex::normalize_items(page.get("data")).map_err(|e| e.0)?.iter().map(record_json).collect();
         Ok(json!({ "entries": entries, "cursor": page.get("nextCursor").cloned().unwrap_or(Value::Null) }))
     }
 
@@ -358,7 +358,7 @@ impl CodexClient {
         let cursor = cursor.map(|c| Value::String(c.into()));
         let all = r.entries.list();
         let (a, b, next) = codex::rollout_page(all.len(), cursor.as_ref(), limit);
-        Ok(json!({ "entries": all[a..b].iter().map(codex_obj).collect::<Vec<_>>(), "cursor": next, "total": all.len() }))
+        Ok(json!({ "entries": all[a..b].iter().map(record_json).collect::<Vec<_>>(), "cursor": next, "total": all.len() }))
     }
 
     pub fn stop(&self) {
@@ -428,7 +428,7 @@ pub fn native_projects(codex_home: &str, vendor: &Vendor) -> Vec<Value> {
     };
     let checked = vendor.check("openai/codex/state-db", rows, Some(&codex::STATE_DB.to_string()), None);
     match codex::native_projects(checked.as_ref()) {
-        Ok(list) => list.iter().map(codex_obj).collect(),
+        Ok(list) => list.iter().map(record_json).collect(),
         Err(_) => Vec::new(),
     }
 }

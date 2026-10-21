@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use xenonet_service::config::Config;
 use xenonet_service::cores::{Actors, Cores, Engine, Registration, Reports, State, Wakes, R};
-use xenonet_service::wire::{Emitter, WireEnv};
+use xenonet_service::wire::{Emitter, VendorReaders, WireEnv};
 use xenonet_wire_engine::world::World;
 
 /// A map with nothing on it yet, and the blocks the drivers list in it.
@@ -60,7 +60,7 @@ fn world(name: &str, demo: bool) -> (Arc<World>, Arc<Empty>, std::path::PathBuf)
     let empty = Arc::new(Empty::default());
     let mut cores = Cores::pending(true, false, false);
     cores.state = empty.clone();
-    let env = WireEnv { version: "0.0.0".into(), emitter: Emitter::new(), drift: Arc::default() };
+    let env = WireEnv { version: "0.0.0".into(), emitter: Emitter::new(), drift: Arc::default(), readers: VendorReaders::default() };
     let w = xenonet_wire_engine::world(&cores, &mut config, &env).expect("the area's parts");
     (w, empty, dir)
 }

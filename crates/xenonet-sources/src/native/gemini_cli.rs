@@ -6,16 +6,27 @@
 
 use super::files::Files;
 use super::node_path;
-use super::{by_num, edit_file, edits_out, fits_id, js_max, js_min, ms_of, push_edit, str_of, titled, Check, Checked, Edits, Out, Threw, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX};
+use super::{
+    by_num, edit_file, edits_out, fits_id, js_max, js_min, ms_of, push_edit, str_of, titled, Check, Checked, Edits, FileCache, NativeReader, Out, Threw, Vendor, DAY_MS,
+    EDIT_KEEP_MS, SESSIONS_MAX,
+};
+use crate::session::{RunSession, Via};
 use serde_json::{Map, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use xenonet_base::json;
 use xenonet_base::ordered::OrderedMap;
 use xenonet_base::paths::PathStyle;
 use xenonet_base::text::{is_blank, js_trim, js_trim_start, truthy};
 
 pub const SOURCE: &str = "google/gemini-cli/chat-record";
-pub const EDIT_TOOLS: [&str; 2] = ["write_file", "replace"];
+/// The tools whose calls are edits, as the app registry has them.
+pub fn edit_tools() -> &'static [String] {
+    xenonet_base::apps::edit_tools("gemini-cli")
+}
+
+fn is_edit(tool: &str) -> bool {
+    edit_tools().iter().any(|t| t == tool)
+}
 const FAILED: [&str; 2] = ["error", "cancelled"];
 const FILE_MAX: f64 = (16u64 << 20) as f64;
 const CHECKS_PER_FILE: usize = 12;
@@ -124,7 +135,7 @@ pub fn read_chat(text: &str, check: &mut dyn FnMut(&Value) -> Result<Checked, Th
     for (_, m) in messages.iter() {
         let Some(Value::Array(calls)) = field(m, "toolCalls") else { continue };
         for c in calls {
-            if !truthy(Some(c)) || !str_of(field(c, "name")).is_some_and(|n| EDIT_TOOLS.contains(&n)) || str_of(field(c, "status")).is_some_and(|s| FAILED.contains(&s)) {
+            if !truthy(Some(c)) || !str_of(field(c, "name")).is_some_and(is_edit) || str_of(field(c, "status")).is_some_and(|s| FAILED.contains(&s)) {
                 continue;
             }
             if let Some(file) = str_of(field(c, "args").and_then(|a| field(a, "file_path"))).filter(|f| !f.is_empty()) {
@@ -162,12 +173,6 @@ pub struct Run {
     pub edits: Edits,
 }
 
-struct Cached {
-    mtime_ms: f64,
-    size: f64,
-    chat: Option<Chat>,
-}
-
 struct Found {
     file: String,
     parent: Option<String>,
@@ -184,13 +189,14 @@ fn chat_file(name: &str) -> bool {
 /// The GeminiCliSessions block's reading.
 pub struct GeminiCli {
     pub runs: OrderedMap<Run>,
-    cache: HashMap<String, Cached>,
+    // Each chat file's chat.
+    cache: FileCache<Option<Chat>>,
     pub root_state: &'static str,
 }
 
 impl Default for GeminiCli {
     fn default() -> Self {
-        GeminiCli { runs: OrderedMap::new(), cache: HashMap::new(), root_state: "unread" }
+        GeminiCli { runs: OrderedMap::new(), cache: FileCache::default(), root_state: "unread" }
     }
 }
 
@@ -249,12 +255,8 @@ impl GeminiCli {
         let mut seen = HashSet::new();
         for f in found {
             seen.insert(f.file.clone());
-            let fresh = self.cache.get(&f.file).is_some_and(|h| h.mtime_ms == f.mtime_ms && h.size == f.size);
-            if !fresh {
-                let chat = files.read_text(&f.file).ok().and_then(|text| read_chat(&text, &mut |rec| check(rec, None)).ok().flatten());
-                self.cache.insert(f.file.clone(), Cached { mtime_ms: f.mtime_ms, size: f.size, chat });
-            }
-            let Some(c) = self.cache.get(&f.file).and_then(|h| h.chat.as_ref()) else { continue };
+            let chat = self.cache.get(&f.file, f.mtime_ms, f.size, || files.read_text(&f.file).ok().and_then(|text| read_chat(&text, &mut |rec| check(rec, None)).ok().flatten()));
+            let Some(c) = chat else { continue };
             let Some(id) = session_id_of(&c.id) else { continue };
             let updated = js_max(c.updated_at.unwrap_or(0.0), 0.0);
             let mut run = Run {
@@ -281,35 +283,51 @@ impl GeminiCli {
                 runs.insert(&id, run);
             }
         }
-        self.cache.retain(|k, _| seen.contains(k));
+        self.cache.keep(&seen);
         self.runs = runs;
     }
+}
 
-    pub fn sessions(&self) -> Vec<Out> {
+impl NativeReader for GeminiCli {
+    /// Reads the chat files under the folder at `at`. A file whose vendor
+    /// check threw is passed over, and no failure is reported.
+    fn read(&mut self, at: &str, now: f64, files: &mut dyn Files, vendor: &mut dyn Vendor) -> Result<(), String> {
+        GeminiCli::read(self, Some(at), now, files, &mut |rec, version| vendor.check(rec, version));
+        Ok(())
+    }
+
+    fn source_state(&self) -> &'static str {
+        self.root_state
+    }
+
+    fn ids(&self) -> Vec<String> {
+        self.runs.keys().map(str::to_string).collect()
+    }
+
+    fn sessions(&self) -> Vec<Out> {
         self.runs
             .iter()
             .map(|(_, r)| {
-                Out::Obj(vec![
-                    ("id", Out::str(&r.id)),
-                    ("app", Out::str("gemini-cli")),
-                    ("rawId", Out::str(&r.raw_id)),
-                    ("title", Out::str(&r.summary.clone().unwrap_or_else(|| titled("Gemini CLI", r.cwd.as_deref())))),
-                    ("preview", Out::null()),
-                    ("cwd", Out::opt_str(r.cwd.as_deref())),
-                    ("createdAt", Out::Num(r.created_at)),
-                    ("updatedAt", Out::Num(r.updated_at)),
-                    ("archived", Out::bool(false)),
-                    ("model", Out::null()),
-                    ("branch", Out::null()),
-                    ("parentId", Out::opt_str(r.parent_id.as_deref())),
-                    ("parentKind", if r.parent_id.is_some() { Out::str("subagent") } else { Out::null() }),
-                    ("reader", Out::str("experimental")),
-                ])
+                RunSession {
+                    id: &r.id,
+                    app: "gemini-cli",
+                    raw_id: &r.raw_id,
+                    title: r.summary.clone().unwrap_or_else(|| titled("Gemini CLI", r.cwd.as_deref())),
+                    cwd: r.cwd.as_deref(),
+                    created_at: Out::Num(r.created_at),
+                    updated_at: Out::Num(r.updated_at),
+                    archived: false,
+                    model: None,
+                    branch: None,
+                    subagent_of: r.parent_id.as_deref(),
+                    via: Via::Reader,
+                }
+                .record()
             })
             .collect()
     }
 
-    pub fn runs_out(&self) -> Vec<Out> {
+    fn runs_out(&self) -> Vec<Out> {
         self.runs
             .iter()
             .map(|(_, r)| {

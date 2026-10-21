@@ -1,12 +1,14 @@
 //! What the binary's drivers for the cores are given (crates/xenonet-wire-*):
-//! the service's settings, its version, and the way their events and log
-//! lines reach the service, which exists only once the cores do.
+//! the service's settings, its version, the drift log and vendor readers
+//! they share, and the way their events and log lines reach the service,
+//! which exists only once the cores do.
 
 use crate::ctx::Ctx;
 use crate::glue::{self, From};
 use serde_json::Value;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use xenonet_schema::drift::DriftLog;
+use xenonet_schema::vendor::Readers;
 
 /// Where a core's events go: server/index.js's handlers (glue.rs), once the
 /// service is up. An event before that has no page to reach and is let go.
@@ -42,6 +44,21 @@ impl Emitter {
     }
 }
 
+/// The lenient readers of the vendors' sources, one for each source
+/// (core/vendor.js's one `readers` Map). The map's driver makes them, over
+/// XenoNet's schemas folder, and the actors' observers check what they read
+/// through the same ones, so the drift report counts what each has read.
+#[derive(Clone, Default)]
+pub struct VendorReaders(Arc<OnceLock<Arc<Readers>>>);
+
+impl VendorReaders {
+    /// The readers, made with `make` by whichever driver asks first (the
+    /// map's, in the service; another driver's when it runs without one).
+    pub fn get_or_make(&self, make: impl FnOnce() -> Readers) -> Arc<Readers> {
+        self.0.get_or_init(|| Arc::new(make())).clone()
+    }
+}
+
 /// What every driver is given beside the cores and the settings.
 #[derive(Clone)]
 pub struct WireEnv {
@@ -52,4 +69,6 @@ pub struct WireEnv {
     /// A driver that knows the cache folder first opens it there
     /// (`cache_dir/drift.json`); the service opens it otherwise.
     pub drift: Arc<Mutex<DriftLog>>,
+    /// The vendor readers, which record in `drift`.
+    pub readers: VendorReaders,
 }

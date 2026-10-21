@@ -225,7 +225,8 @@ impl Live {
         if !t.tailer.files.contains(file) {
             let Some(kind) = lock(&self.telemetry).classify(file) else { return Ok(()) };
             let entry = Entry {
-                codex: kind.get("app").and_then(Value::as_str) == Some("codex"),
+                // Any app but Codex is read as Claude Code.
+                codex: xenonet_base::apps::tailed_app(kind.get("app").and_then(Value::as_str).unwrap_or_default(), "claude") == "codex",
                 session_id: kind.get("sessionId").and_then(Value::as_str).unwrap_or_default().to_string(),
                 agent_id: kind.get("agentId").cloned().unwrap_or(Value::Null),
                 sampling: Sampling::default(),

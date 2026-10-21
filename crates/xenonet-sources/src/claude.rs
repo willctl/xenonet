@@ -8,8 +8,10 @@
 //! of what it and the desktop's files say (vendor.js's readers), stay with
 //! the caller.
 
-use crate::codex::{excerpt, excerpt_json, js_max0, nn, slice_index, tpl, Obj, F};
+use crate::codex::{excerpt, excerpt_json, js_max0, nn, slice_index, tpl};
 use crate::lines::{opt_prop, prop, Js, TypeError};
+use crate::record::{Obj, F};
+use crate::session::{ClaudeSession, Parent, ParentKind};
 use serde_json::{Map, Value};
 use std::path::Path;
 use xenonet_base::text::{js_number, js_string, truthy};
@@ -173,30 +175,31 @@ pub fn sessions(listed: &[Value], desktop: &[Value]) -> Result<Vec<Obj>, TypeErr
             }
         };
         let created = nn(get("createdAt")?).or(nn(dp("createdAt")));
-        out.push(vec![
-            ("id", F::s(format!("claude:{}", tpl(sid)))),
-            ("app", F::s("claude")),
-            ("rawId", F::of(sid)),
-            ("desktopId", F::or_null(dp("sessionId"))),
-            ("inDesktop", F::V(Value::Bool(d.is_some()))),
-            ("title", F::V(title)),
-            ("preview", F::or_null(first)),
-            ("cwd", F::V(cwd)),
-            ("worktree", F::or_null(dp("worktreePath"))),
-            ("createdAt", F::or_null(created)),
-            ("updatedAt", updated),
-            ("archived", F::V(Value::Bool(truthy(dp("isArchived"))))),
-            ("starred", F::V(Value::Bool(truthy(dp("isStarred"))))),
-            ("model", F::or_null(dp("model"))),
-            ("effort", F::or_null(dp("effort"))),
-            ("permissionMode", F::or_null(dp("permissionMode"))),
-            ("branch", F::or_null(nn(dp("branch")).or(nn(get("gitBranch")?)))),
-            ("tag", F::or_null(get("tag")?)),
-            ("sizeBytes", F::or_null(get("fileSize")?)),
-            ("parentId", parent_cli.map_or(F::null(), |p| F::s(format!("claude:{}", js_string(p))))),
-            ("parentKind", if parent_cli.is_some() { F::s("spawn") } else { F::null() }),
-            ("claudeAccount", F::or_null(dp("account"))),
-        ]);
+        let or_null = |v: Js<'_>| nn(v).cloned().unwrap_or(Value::Null);
+        out.push(
+            ClaudeSession {
+                raw_id: sid.cloned(),
+                desktop_id: or_null(dp("sessionId")),
+                in_desktop: d.is_some(),
+                title,
+                preview: or_null(first),
+                cwd,
+                worktree: or_null(dp("worktreePath")),
+                created_at: or_null(created),
+                updated_at: updated,
+                archived: truthy(dp("isArchived")),
+                starred: truthy(dp("isStarred")),
+                model: or_null(dp("model")),
+                effort: or_null(dp("effort")),
+                permission_mode: or_null(dp("permissionMode")),
+                branch: or_null(nn(dp("branch")).or(nn(get("gitBranch")?))),
+                tag: or_null(get("tag")?),
+                size_bytes: or_null(get("fileSize")?),
+                parent: parent_cli.map(|p| Parent { id: format!("claude:{}", js_string(p)), kind: ParentKind::Spawn }),
+                claude_account: or_null(dp("account")),
+            }
+            .record(),
+        );
     }
     Ok(out)
 }

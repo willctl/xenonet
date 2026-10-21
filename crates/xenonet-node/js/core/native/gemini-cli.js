@@ -5,13 +5,14 @@
 // folders and the records (through `files` when a test gives its own) and
 // keeps the runs; the vendor check stays vendor.js's, called back from Rust.
 import fs from "node:fs";
-import { Block } from "../blocks/lifecycle.js";
+import { NativeReader } from "../../../../../core/native/reader.js";
 import { reader } from "../vendor.js";
 import { native } from "../../index.js";
-import { FAILED, guarded, ioOf, liveOf, mapOfRuns, pathArg } from "../../native-readers.js";
+import { APP } from "../../../../../core/apps.js";
+import { FAILED, guarded, ioOf, mapOfRuns, pathArg } from "../../native-readers.js";
 
 export const SOURCE = "google/gemini-cli/chat-record";
-export const EDIT_TOOLS = new Set(["write_file", "replace"]);
+export const EDIT_TOOLS = new Set(APP["gemini-cli"].editTools);
 
 export const sessionIdOf = (id) => native.geminiSessionIdOf(String(id)) ?? null;
 
@@ -31,12 +32,12 @@ export const geminiRoot = ({ env = process.env, home }) => {
   return native.geminiRoot(own ? pathArg(own) : null, own ? "" : pathArg(home));
 };
 
-export class GeminiCliSessions extends Block {
+export class GeminiCliSessions extends NativeReader {
   #core = new native.GeminiCliCore();
   #runs = null;
 
   constructor({ root, files = fs, clock } = {}) {
-    super({ name: "gemini-cli-sessions", kind: "gatherer", ...(clock ? { clock } : {}) });
+    super({ name: "gemini-cli-sessions", clock });
     this.root = root;
     this.files = files;
   }
@@ -64,10 +65,6 @@ export class GeminiCliSessions extends Block {
 
   sessions() {
     return this.#core.sessions();
-  }
-
-  live(id) {
-    return liveOf(this.runs.get(id), false);
   }
 
   ids() {

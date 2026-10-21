@@ -8,6 +8,7 @@ import { createInterface } from "node:readline/promises";
 import { c, print, json, Fail } from "../lib/out.js";
 import { need, get, post, nameOf, candidates } from "../../core/client.js";
 import { createConnect } from "../../core/engine/connect.js";
+import { appsWith } from "../../core/apps.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -28,10 +29,13 @@ left to it, and connecting takes out connect's own entries there.
                                    settings and run through its own launcher, and
                                    only that XenoNet's are changed`;
 
+// The apps connect goes through, as the app registry has them.
+const CONNECTED = appsWith("connect").map((a) => a.id);
+
 // How each change shows: its mark, color and what happens to it.
 const LOOK = { present: ["✓", "green", "already in place"], missing: ["+", "yellow", "to add"], different: ["~", "yellow", "to update"], remove: ["-", "red", "to take out"] };
 
-export function render(preview, { apps = ["claude", "codex"] } = {}) {
+export function render(preview, { apps = CONNECTED } = {}) {
   for (const a of preview.apps.filter((x) => apps.includes(x.app))) {
     print(c.bold(a.name));
     for (const ch of a.changes) {
@@ -78,9 +82,9 @@ async function here(apps, flags) {
 }
 
 export async function run(names, flags) {
-  const apps = names.length ? names.map((n) => (n === "claude-code" ? "claude" : n)) : ["claude", "codex"];
-  const bad = apps.filter((a) => a !== "claude" && a !== "codex");
-  if (bad.length) throw new Fail(`connect works with claude and codex, not ${bad.join(", ")}`, 2);
+  const apps = names.length ? names.map((n) => (n === "claude-code" ? "claude" : n)) : CONNECTED;
+  const bad = apps.filter((a) => !CONNECTED.includes(a));
+  if (bad.length) throw new Fail(`connect works with ${CONNECTED.join(" and ")}, not ${bad.join(", ")}`, 2);
   if (flags.here) return here(apps, flags);
   const s = await need(flags);
   const preview = await get(s, "/api/engine/connect");

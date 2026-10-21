@@ -5,9 +5,9 @@
 // the file (through `files` when a test gives its own), reads the records
 // and keeps the runs; this keeps the block's API.
 import fs from "node:fs";
-import { Block } from "./blocks/lifecycle.js";
+import { NativeReader } from "../../../../core/native/reader.js";
 import { native } from "../index.js";
-import { ioOf, liveOf, mapOfRuns } from "../native-readers.js";
+import { ioOf, mapOfRuns } from "../native-readers.js";
 
 export const SCHEMA_VERSIONS = new Set(["0.2.0", "0.3.0", "0.4.0", "0.5.0"]);
 // Apps XenoNet reads itself, and numbat's names that aren't a run's app.
@@ -22,13 +22,13 @@ export const sessionIdOf = (app, sid) => native.numbatSessionIdOf(String(app), S
 // why } for a line it passes over.
 export const readRecord = (line) => native.numbatReadRecord(String(line));
 
-export class NumbatSessions extends Block {
+export class NumbatSessions extends NativeReader {
   #core = new native.NumbatCore();
   #runs = null;
 
   // `file`: the NDJSON file numbat writes. `files`: fs, for the tests.
   constructor({ file, files = fs, clock } = {}) {
-    super({ name: "numbat-sessions", kind: "gatherer", ...(clock ? { clock } : {}) });
+    super({ name: "numbat-sessions", observed: true, clock });
     this.file = file;
     this.files = files;
   }
@@ -72,11 +72,6 @@ export class NumbatSessions extends Block {
   // The runs as session/v1, for the map.
   sessions() {
     return this.#core.sessions();
-  }
-
-  // What the engine reads of a run, in the shape of a live session's.
-  live(id) {
-    return liveOf(this.runs.get(id), true);
   }
 
   ids() {

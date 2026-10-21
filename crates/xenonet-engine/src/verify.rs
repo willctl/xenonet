@@ -35,14 +35,17 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use xenonet_base::sync::Locked;
 
-/// The apps whose sessions XenoNet checks, by their id in a session's name.
+/// The apps whose sessions XenoNet checks, by their id in a session's name:
+/// those whose processes it tells apart (the registry's `processes`, by
+/// `processes`): Claude Code, Codex and OpenCode. A request in another
+/// app's session's name isn't checked.
 fn app_name(app: &str) -> Option<&'static str> {
-    match app {
-        "claude" => Some("Claude Code"),
-        "codex" => Some("Codex"),
-        "opencode" => Some("OpenCode"),
-        _ => None,
-    }
+    crate::processes::agent(app).map(|a| a.name.as_str())
+}
+
+/// An app's own rules, for one XenoNet checks.
+fn rules(app: &str) -> Option<crate::processes::Rules> {
+    crate::processes::agent(app).map(|a| a.rules)
 }
 
 /// `APP[app]`, as JS reads a property of an object literal: its own, or
@@ -52,7 +55,8 @@ fn app_lookup(app: &str) -> Option<String> {
 }
 
 fn a_app(app: &str) -> String {
-    format!("{} {}", if app == "opencode" { "an" } else { "a" }, app_lookup(app).unwrap_or_else(|| "undefined".into()))
+    let an = app_name(app).is_some_and(|n| n.starts_with(['A', 'E', 'I', 'O', 'U', 'a', 'e', 'i', 'o', 'u']));
+    format!("{} {}", if an { "an" } else { "a" }, app_lookup(app).unwrap_or_else(|| "undefined".into()))
 }
 
 fn product_name(product: &str) -> Option<&'static str> {
@@ -328,7 +332,7 @@ impl Verifier {
             obj(f)
         };
         // Any OpenCode may have the session open.
-        if app == "opencode" {
+        if rules(&app).is_some_and(|r| r.any_process) {
             return Ok(ok(&root, false));
         }
         let is_root = |p: &Arg| same(&p.field("pid"), &root.field("pid")) && same(&p.field("start"), &root.field("start"));
@@ -344,7 +348,7 @@ impl Verifier {
         }
         // Claude Code itself, in one of its HTTP hooks: this process holds
         // the session.
-        if hook && app == "claude" && same(&chain[0].field("pid"), &holder.field("pid")) && c.call("procs", "signed", vec![holder.clone()])?.truthy() {
+        if hook && rules(&app).is_some_and(|r| r.pins_by_hook) && same(&chain[0].field("pid"), &holder.field("pid")) && c.call("procs", "signed", vec![holder.clone()])?.truthy() {
             let t = Self::now(c)?;
             self.store.with(|s| s.pin(agent.clone(), &root, Arg::Bool(true), Arg::num(t)))?;
             self.store.with(|s| s.drop_guesses(agent.clone()))?;

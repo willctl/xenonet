@@ -13,6 +13,7 @@ import { appDir } from "../../core/dirs.js";
 import { onPath } from "../../core/paths.js";
 import { logDir, readLogs } from "../../core/log.js";
 import { makeBundle, bundleMarkdown, writeLook, askCommand } from "../../core/diagnostics.js";
+import { tailedApp } from "../../core/apps.js";
 
 export const help = `A summary of XenoNet's state that's safe to share: its versions, the doctor's
 findings that aren't ok, its errors from the last day by code, where its
@@ -64,7 +65,8 @@ export async function run(_args, flags) {
     }
     return process.stdout.write(text);
   }
-  const app = (flags.app || process.env.XENONET_DIAGNOSE_APP || "codex") === "claude" ? "claude" : "codex";
+  // Codex, unless you ask for Claude Code.
+  const app = tailedApp(flags.app || process.env.XENONET_DIAGNOSE_APP || "codex", "codex");
   const model = flags.model || process.env.XENONET_DIAGNOSE_MODEL || null;
   const bin = onPath(app);
   if (!bin) throw new Error(`${app === "claude" ? "Claude Code" : "Codex"} isn't on your PATH; install it, or use --app ${app === "claude" ? "codex" : "claude"}.`);

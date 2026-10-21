@@ -5,7 +5,10 @@
 
 use super::files::Files;
 use super::node_path;
-use super::{by_num, edits_out, fits_id, js_max, js_min, older, prune_edits, push_edit, str_of, titled, Check, Checked, Edits, Out, Threw, DAY_MS, SESSIONS_MAX};
+use super::{
+    by_num, edits_out, fits_id, js_max, js_min, older, prune_edits, push_edit, str_of, titled, Check, Checked, Edits, NativeReader, Out, Threw, Vendor, DAY_MS, SESSIONS_MAX,
+};
+use crate::session::{RunSession, Via};
 use serde_json::Value;
 use xenonet_base::fs::FsError;
 use xenonet_base::json::{self, number_string};
@@ -188,32 +191,47 @@ impl Cursor {
             prune_edits(&mut r.edits, now);
         }
     }
+}
 
-    pub fn sessions(&self) -> Vec<Out> {
+impl NativeReader for Cursor {
+    /// Reads the hook's file at `at`. A vendor check that threw is
+    /// reported.
+    fn read(&mut self, at: &str, now: f64, files: &mut dyn Files, vendor: &mut dyn Vendor) -> Result<(), String> {
+        Cursor::read(self, Some(at), now, files, &mut |rec, version| vendor.check(rec, version)).map_err(|Threw| "the vendor check failed".to_string())
+    }
+
+    fn source_state(&self) -> &'static str {
+        self.file_state
+    }
+
+    fn ids(&self) -> Vec<String> {
+        self.runs.keys().map(str::to_string).collect()
+    }
+
+    fn sessions(&self) -> Vec<Out> {
         self.runs
             .iter()
             .map(|(_, r)| {
-                Out::Obj(vec![
-                    ("id", Out::str(&r.id)),
-                    ("app", Out::str("cursor")),
-                    ("rawId", Out::str(&r.raw_id)),
-                    ("title", Out::str(&titled("Cursor", r.cwd.as_deref()))),
-                    ("preview", Out::null()),
-                    ("cwd", Out::opt_str(r.cwd.as_deref())),
-                    ("createdAt", Out::Num(r.created_at)),
-                    ("updatedAt", Out::Num(r.updated_at)),
-                    ("archived", Out::bool(false)),
-                    ("model", Out::null()),
-                    ("branch", Out::null()),
-                    ("parentId", Out::null()),
-                    ("parentKind", Out::null()),
-                    ("reader", Out::str("experimental")),
-                ])
+                RunSession {
+                    id: &r.id,
+                    app: "cursor",
+                    raw_id: &r.raw_id,
+                    title: titled("Cursor", r.cwd.as_deref()),
+                    cwd: r.cwd.as_deref(),
+                    created_at: Out::Num(r.created_at),
+                    updated_at: Out::Num(r.updated_at),
+                    archived: false,
+                    model: None,
+                    branch: None,
+                    subagent_of: None,
+                    via: Via::Reader,
+                }
+                .record()
             })
             .collect()
     }
 
-    pub fn runs_out(&self) -> Vec<Out> {
+    fn runs_out(&self) -> Vec<Out> {
         self.runs
             .iter()
             .map(|(_, r)| {

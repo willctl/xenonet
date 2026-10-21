@@ -39,6 +39,103 @@ fn desktop_at(node: &Value) -> bool {
     has(node, "desktopId") && desktop_id().is_match(&as_text(node.get("desktopId")))
 }
 
+/// What opens a session or project in an app (its `open` capability).
+#[derive(Clone, Copy)]
+struct Opener {
+    /// The label of the action that opens a session in the app, when it
+    /// offers one.
+    action: fn(&Value) -> Option<&'static str>,
+    /// The URL that opens a session in the app, if any.
+    url: fn(&Value) -> Option<String>,
+    /// The action that starts a session in a project's folder, if any.
+    new_session: Option<NewSession>,
+    /// A new session, filled in with a handoff brief: the folder, if any,
+    /// and the brief.
+    handoff: fn(Option<&str>, &str) -> String,
+}
+
+/// An action that starts a session in a project's folder: its id, its
+/// label and its URL for a folder.
+#[derive(Clone, Copy)]
+struct NewSession {
+    id: &'static str,
+    label: &'static str,
+    url: fn(&str) -> String,
+}
+
+// Claude desktop opens its own Code sessions by their id, and imports
+// Claude Code's by theirs.
+fn claude_action(node: &Value) -> Option<&'static str> {
+    if desktop_at(node) {
+        Some("Open in Claude desktop")
+    } else if !has(node, "desktopId") && uuid_at(node, "rawId") {
+        Some("Import into Claude desktop")
+    } else {
+        None
+    }
+}
+fn claude_url(node: &Value) -> Option<String> {
+    if desktop_at(node) {
+        Some(format!("claude://code/continue?session={}", encode_uri_component(&as_text(node.get("desktopId")))))
+    } else if uuid_at(node, "rawId") {
+        Some(format!("claude://resume?session={}", as_text(node.get("rawId"))))
+    } else {
+        None
+    }
+}
+fn claude_new(folder: &str) -> String {
+    format!("claude://code/new?folder={}", encode_uri_component(folder))
+}
+fn claude_handoff(folder: Option<&str>, text: &str) -> String {
+    let mut pairs = Vec::new();
+    if let Some(f) = folder {
+        pairs.push(("folder", f));
+    }
+    pairs.push(("q", text));
+    format!("claude://code/new?{}", search_params(&pairs))
+}
+
+// The ChatGPT app opens Codex's threads.
+fn codex_action(node: &Value) -> Option<&'static str> {
+    uuid_at(node, "rawId").then_some("Open in ChatGPT · Codex")
+}
+fn codex_url(node: &Value) -> Option<String> {
+    uuid_at(node, "rawId").then(|| format!("codex://threads/{}", as_text(node.get("rawId"))))
+}
+fn codex_handoff(folder: Option<&str>, text: &str) -> String {
+    let mut pairs = vec![("prompt", text)];
+    if let Some(f) = folder {
+        pairs.push(("path", f));
+    }
+    format!("codex://threads/new?{}", search_params(&pairs))
+}
+
+/// What opens a session or project in an app, by its id, for the apps
+/// XenoNet has one for.
+fn opener_of(app: &str) -> Option<Opener> {
+    match app {
+        "claude" => Some(Opener {
+            action: claude_action,
+            url: claude_url,
+            new_session: Some(NewSession { id: "new-claude", label: "New Claude Code session here", url: claude_new }),
+            handoff: claude_handoff,
+        }),
+        "codex" => Some(Opener { action: codex_action, url: codex_url, new_session: None, handoff: codex_handoff }),
+        _ => None,
+    }
+}
+
+/// The apps the registry gives `open`, each with its opener, in its order.
+fn openers() -> &'static [(&'static str, Opener)] {
+    static O: OnceLock<Vec<(&'static str, Opener)>> = OnceLock::new();
+    O.get_or_init(|| xenonet_base::apps::with("open").filter_map(|a| Some((a.id.as_str(), opener_of(&a.id)?))).collect())
+}
+
+/// An app's opener, by the id a node or a request names.
+fn opener(app: Option<&str>) -> Option<Opener> {
+    openers().iter().find(|(id, _)| Some(*id) == app).map(|(_, o)| *o)
+}
+
 fn act(id: &str, label: &str, client: bool) -> Value {
     if client {
         json!({ "id": id, "label": label, "client": true })
@@ -61,14 +158,8 @@ pub fn actions_for(node: Option<&Value>) -> Vec<Value> {
         return acts;
     }
     if session {
-        if is(node, "app", "codex") && uuid_at(node, "rawId") {
-            acts.push(act("open-app", "Open in ChatGPT · Codex", false));
-        }
-        if is(node, "app", "claude") && desktop_at(node) {
-            acts.push(act("open-app", "Open in Claude desktop", false));
-        }
-        if is(node, "app", "claude") && !has(node, "desktopId") && uuid_at(node, "rawId") {
-            acts.push(act("open-app", "Import into Claude desktop", false));
+        if let Some(label) = opener(node.get("app").and_then(Value::as_str)).and_then(|o| (o.action)(node)) {
+            acts.push(act("open-app", label, false));
         }
         acts.push(act("preview", "Preview transcript", true));
         acts.push(act("stats", "Stats", true));
@@ -86,7 +177,9 @@ pub fn actions_for(node: Option<&Value>) -> Vec<Value> {
     if is(node, "kind", "project") {
         acts.push(act("open-folder", "Open folder", false));
         acts.push(act("open-vscode", "Open in VS Code", false));
-        acts.push(act("new-claude", "New Claude Code session here", false));
+        for n in openers().iter().filter_map(|(_, o)| o.new_session) {
+            acts.push(act(n.id, n.label, false));
+        }
     }
     if is(node, "kind", "zone") && has(node, "path") {
         acts.push(act("open-folder", "Open folder", false));
@@ -109,18 +202,7 @@ pub fn url_for(node: &Value, action: &str) -> Option<Value> {
     let folder_text = || folder.as_ref().filter(|f| truthy(Some(f))).map(js_string);
     let null = Some(Value::Null);
     match action {
-        "open-app" => {
-            if is(node, "app", "codex") && uuid_at(node, "rawId") {
-                return Some(Value::String(format!("codex://threads/{}", as_text(node.get("rawId")))));
-            }
-            if is(node, "app", "claude") && desktop_at(node) {
-                return Some(Value::String(format!("claude://code/continue?session={}", encode_uri_component(&as_text(node.get("desktopId"))))));
-            }
-            if is(node, "app", "claude") && uuid_at(node, "rawId") {
-                return Some(Value::String(format!("claude://resume?session={}", as_text(node.get("rawId")))));
-            }
-            null
-        }
+        "open-app" => Some(opener(node.get("app").and_then(Value::as_str)).and_then(|o| (o.url)(node)).map_or(Value::Null, Value::String)),
         "open-folder" => Some(folder.filter(|f| !f.is_null()).unwrap_or(Value::Null)),
         "open-file" => {
             if is(node, "kind", "page") {
@@ -130,8 +212,11 @@ pub fn url_for(node: &Value, action: &str) -> Option<Value> {
             }
         }
         "open-vscode" => Some(folder_text().map_or(Value::Null, |f| Value::String(vscode_url(&f)))),
-        "new-claude" => Some(folder_text().map_or(Value::Null, |f| Value::String(format!("claude://code/new?folder={}", encode_uri_component(&f))))),
-        _ => null,
+        // An app's new session in the folder.
+        other => match openers().iter().filter_map(|(_, o)| o.new_session).find(|n| n.id == other) {
+            Some(n) => Some(folder_text().map_or(Value::Null, |f| Value::String((n.url)(&f)))),
+            None => null,
+        },
     }
 }
 
@@ -159,24 +244,7 @@ pub const MAX_BRIEF: usize = 6000;
 pub fn handoff_url(target: &str, folder: Option<&str>, brief: &str) -> Option<String> {
     let text = slice16(brief, MAX_BRIEF);
     let folder = folder.filter(|f| !f.is_empty());
-    match target {
-        "claude" => {
-            let mut pairs = Vec::new();
-            if let Some(f) = folder {
-                pairs.push(("folder", f));
-            }
-            pairs.push(("q", text.as_str()));
-            Some(format!("claude://code/new?{}", search_params(&pairs)))
-        }
-        "codex" => {
-            let mut pairs = vec![("prompt", text.as_str())];
-            if let Some(f) = folder {
-                pairs.push(("path", f));
-            }
-            Some(format!("codex://threads/new?{}", search_params(&pairs)))
-        }
-        _ => None,
-    }
+    opener(Some(target)).map(|o| (o.handoff)(folder, &text))
 }
 
 /// Claude desktop's list of Code sessions waiting for you.

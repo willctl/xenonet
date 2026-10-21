@@ -64,7 +64,8 @@ impl Stats {
                 return Ok(k.1.get(session_id).cloned());
             }
         }
-        let codex = session_id.split(':').next() == Some("codex");
+        // Any app but Codex is read as Claude Code.
+        let codex = xenonet_base::apps::tailed_app(session_id.split(':').next().unwrap_or_default(), "claude") == "codex";
         let read: Vec<File> = files
             .iter()
             .map(|(f, agent)| File { agent: Some(agent.clone().map_or(Value::Null, Value::String)), lines: read_lines(&self.vendor, f, codex).unwrap_or_default() })

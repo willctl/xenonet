@@ -114,6 +114,61 @@ pub fn channel_enabled(env: &dyn Fn(&str) -> Option<String>, cmdline: &dyn Fn(f6
     Regex::new(&format!(r"--(dangerously-load-development-channels|channels)(=|\s)(?s:.)*server:{}(\s|$)", regex::escape(name))).expect("a pattern").is_match(&args)
 }
 
+/// A variable of this server's environment, by name.
+pub type Env<'a> = &'a dyn Fn(&str) -> Option<String>;
+
+/// How an app's sessions say they're calling (its `caller` capability).
+#[derive(Clone, Copy)]
+pub struct Calling {
+    /// The calling session's id, from this server's environment and the
+    /// request's _meta, or None.
+    pub session: fn(Env<'_>, &Value) -> Option<String>,
+    /// Whether the app started this server for one of its sessions, which
+    /// then serves no actor.
+    pub started: fn(Env<'_>) -> bool,
+}
+
+// Claude Code gives its MCP servers the session's id in
+// CLAUDE_CODE_SESSION_ID.
+fn claude_session(env: Env<'_>, _: &Value) -> Option<String> {
+    env("CLAUDE_CODE_SESSION_ID").filter(|s| !s.is_empty())
+}
+fn claude_started(env: Env<'_>) -> bool {
+    claude_session(env, &Value::Null).is_some()
+}
+
+// Codex puts the thread's id in each call's _meta (threadId, or
+// x-codex-turn-metadata's thread_id), or in CODEX_THREAD_ID.
+fn codex_session(env: Env<'_>, meta: &Value) -> Option<String> {
+    let present = |v: Option<&Value>| v.filter(|v| !v.is_null()).cloned();
+    let codex_turn = meta.get("x-codex-turn-metadata").and_then(|m| m.as_object()).and_then(|m| m.get("thread_id"));
+    let thread = present(meta.get("threadId")).or_else(|| present(codex_turn)).or_else(|| env("CODEX_THREAD_ID").map(Value::String));
+    thread.filter(|t| truthy(Some(t))).map(|t| js_string(&t))
+}
+
+/// How an app's sessions say they're calling, by its id, for the apps
+/// XenoNet has a way for.
+pub fn calling(app: &str) -> Option<Calling> {
+    match app {
+        "claude" => Some(Calling { session: claude_session, started: claude_started }),
+        "codex" => Some(Calling { session: codex_session, started: |_| false }),
+        _ => None,
+    }
+}
+
+/// The apps whose sessions say they're calling, in the registry's order:
+/// those with `caller` that have a way.
+pub fn calling_apps() -> &'static [(&'static str, Calling)] {
+    static A: std::sync::OnceLock<Vec<(&'static str, Calling)>> = std::sync::OnceLock::new();
+    A.get_or_init(|| xenonet_base::apps::with("caller").filter_map(|a| Some((a.id.as_str(), calling(&a.id)?))).collect())
+}
+
+/// The session calling, as `<app>:<its id>`, from the first of these apps
+/// that says one is.
+pub fn calling_session(env: Env<'_>, meta: &Value, apps: &[(&str, Calling)]) -> Option<String> {
+    apps.iter().find_map(|(app, c)| (c.session)(env, meta).map(|id| format!("{app}:{id}")))
+}
+
 /// Who's calling.
 #[derive(Clone, Debug, PartialEq)]
 enum Caller {
@@ -131,7 +186,6 @@ struct Token {
 
 struct Context {
     port: f64,
-    session: Option<String>,
     actor: bool,
     token: Mutex<Token>,
 }
@@ -175,17 +229,11 @@ impl Context {
         }
     }
 
-    // Who's calling: Claude Code's session, then Codex's thread, then the
-    // actor whose token this server has.
+    // Who's calling: Claude Code's session, then Codex's thread
+    // (calling_session), then the actor whose token this server has.
     fn caller(&self, meta: &Value) -> Option<Caller> {
-        if let Some(s) = &self.session {
-            return Some(Caller::Agent(format!("claude:{s}")));
-        }
-        let present = |v: Option<&Value>| v.filter(|v| !v.is_null()).cloned();
-        let codex_turn = meta.get("x-codex-turn-metadata").and_then(|m| m.as_object()).and_then(|m| m.get("thread_id"));
-        let thread = present(meta.get("threadId")).or_else(|| present(codex_turn)).or_else(|| process::var("CODEX_THREAD_ID").map(Value::String));
-        if let Some(t) = thread.filter(|t| truthy(Some(t))) {
-            return Some(Caller::Agent(format!("codex:{}", js_string(&t))));
+        if let Some(id) = calling_session(&process::var, meta, calling_apps()) {
+            return Some(Caller::Agent(id));
         }
         self.actor.then_some(Caller::Actor)
     }
@@ -535,9 +583,12 @@ where
 /// mcp` runs it.
 pub async fn serve() {
     let port = port();
+    // The session a Claude Code channel listens for.
     let session = process::set("CLAUDE_CODE_SESSION_ID");
-    let actor = session.is_none() && (process::set("XENONET_ACTOR_TOKEN_FILE").is_some() || process::set("XENONET_ACTOR_TOKEN").is_some());
-    let ctx = Arc::new(Context { port, session: session.clone(), actor, token: Mutex::new(Token::default()) });
+    // An actor, unless an app started this server for one of its sessions.
+    let started = calling_apps().iter().any(|(_, c)| (c.started)(&process::var));
+    let actor = !started && (process::set("XENONET_ACTOR_TOKEN_FILE").is_some() || process::set("XENONET_ACTOR_TOKEN").is_some());
+    let ctx = Arc::new(Context { port, actor, token: Mutex::new(Token::default()) });
     // For an actor, who it is first (briefly: XenoNet may not be running),
     // so its instructions can name it.
     let mut instructions = INSTRUCTIONS.to_string();
@@ -649,5 +700,31 @@ mod tests {
         assert_eq!(encode_uri_component("muse/x y~é"), "muse%2Fx%20y~%C3%A9");
         let text = format!("{{\"token\": \"xenonet_gateway_{}\"}}", "ef".repeat(32));
         assert_eq!(Regex::new(TOKEN_GREP).unwrap().replace_all(&text, "[token withheld]"), "{\"token\": \"[token withheld]\"}");
+    }
+
+    // test/app-capabilities.test.js's cases of callingSession.
+    #[test]
+    fn the_calling_session_is_the_first_apps_that_says_one_is() {
+        let apps = calling_apps();
+        assert_eq!(apps.iter().map(|(a, _)| *a).collect::<Vec<_>>(), ["claude", "codex"]);
+        let ask = |vars: &[(&str, &str)], meta: Value| {
+            let vars: HashMap<String, String> = vars.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect();
+            calling_session(&|k| vars.get(k).cloned(), &meta, apps)
+        };
+        assert_eq!(ask(&[], json!({})), None);
+        assert_eq!(ask(&[("CLAUDE_CODE_SESSION_ID", "abc"), ("CODEX_THREAD_ID", "t")], json!({ "threadId": "u" })), Some("claude:abc".into()));
+        assert_eq!(ask(&[("CLAUDE_CODE_SESSION_ID", "")], json!({ "threadId": "u" })), Some("codex:u".into()), "an empty session id is none");
+        assert_eq!(ask(&[("CODEX_THREAD_ID", "w")], json!({ "x-codex-turn-metadata": { "thread_id": "v" } })), Some("codex:v".into()));
+        assert_eq!(ask(&[], json!({ "threadId": null, "x-codex-turn-metadata": { "thread_id": "v" } })), Some("codex:v".into()));
+        assert_eq!(ask(&[("CODEX_THREAD_ID", "w")], json!({})), Some("codex:w".into()));
+        assert_eq!(ask(&[("CODEX_THREAD_ID", "w")], json!({ "threadId": "" })), None, "an empty thread id is none, and the variable isn't asked");
+        assert_eq!(ask(&[], json!({ "threadId": 7 })), Some("codex:7".into()));
+        assert!((apps[0].1.started)(&|k| (k == "CLAUDE_CODE_SESSION_ID").then(|| "abc".to_string())));
+        assert!(!(apps[1].1.started)(&|k| (k == "CODEX_THREAD_ID").then(|| "w".to_string())), "Codex's thread doesn't keep an actor from this server");
+        // A made-up app's own way, in a registry of its own.
+        let wren = Calling { session: |env, _| env("WREN_SESSION"), started: |env| env("WREN_SESSION").is_some() };
+        let mine = [("wren", wren), apps[1]];
+        assert_eq!(calling_session(&|k| (k == "WREN_SESSION").then(|| "s1".to_string()), &json!({ "threadId": "u" }), &mine), Some("wren:s1".into()));
+        assert_eq!(calling_session(&|_| None, &json!({ "threadId": "u" }), &mine), Some("codex:u".into()));
     }
 }

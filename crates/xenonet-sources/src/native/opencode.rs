@@ -5,17 +5,23 @@
 //! edits out: a part's other fields never leave the database, apart from
 //! apply_patch's text, whose file headers are kept and the rest dropped.
 
+use super::files::Files;
 use super::node_path;
-use super::{edit_file, edits_out, js_max, js_min, patch_headers, push_edit, str_of, titled, Checked, Edits, Out, Threw, EDIT_KEEP_MS, SESSIONS_MAX};
+use super::{edit_file, edits_out, js_max, js_min, push_edit, str_of, titled, Checked, Edits, NativeReader, Out, Threw, Vendor, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX};
+use crate::session::{RunSession, Via};
 use serde_json::{json, Map, Value};
 use xenonet_base::json;
 use xenonet_base::ordered::OrderedMap;
+use xenonet_base::patch;
 use xenonet_base::paths::path_style;
 use xenonet_base::text::{js_number, js_string, truthy};
 use xenonet_schema::drift::clean_version;
 
 pub const SOURCE: &str = "anomaly/opencode/db";
-pub const EDIT_TOOLS: [&str; 3] = ["edit", "write", "multiedit"];
+/// The tools whose calls are edits, as the app registry has them.
+pub fn edit_tools() -> &'static [String] {
+    xenonet_base::apps::edit_tools("opencode")
+}
 pub const PATCH_TOOLS: [&str; 2] = ["apply_patch", "patch"];
 const SESSION_COLUMNS: [&str; 8] = ["id", "parent_id", "directory", "title", "version", "time_created", "time_updated", "time_archived"];
 const NEEDED_SESSION: [&str; 4] = ["id", "directory", "time_created", "time_updated"];
@@ -31,10 +37,11 @@ pub fn session_id_of(id: &str) -> String {
     format!("opencode:{}", local_id(id))
 }
 
-/// The files an apply_patch text names, from its headers only.
+/// The files an apply_patch text names, from its headers only: those it
+/// adds, updates, deletes and moves to, less a header with no path.
 pub fn patch_files(text: Option<&Value>) -> Vec<String> {
     match text {
-        Some(Value::String(s)) => patch_headers(s).into_iter().filter(|p| !p.is_empty()).collect(),
+        Some(Value::String(s)) => patch::paths(s, true).into_iter().filter(|p| !p.is_empty()).collect(),
         _ => Vec::new(),
     }
 }
@@ -46,7 +53,7 @@ fn quoted(names: &[&str]) -> String {
 /// The edit tools' files since a time, newest first, so a busy day can't
 /// crowd out the edits that matter: the last ones.
 pub fn edits_sql() -> String {
-    let all: Vec<&str> = EDIT_TOOLS.iter().chain(PATCH_TOOLS.iter()).copied().collect();
+    let all: Vec<&str> = edit_tools().iter().map(String::as_str).chain(PATCH_TOOLS.iter().copied()).collect();
     format!(
         "
   SELECT session_id, time_created,
@@ -69,15 +76,6 @@ pub trait Db {
     fn all(&mut self, sql: &str, param: Option<f64>) -> Result<Vec<Value>, String>;
     fn get(&mut self, sql: &str) -> Result<Option<Value>, String>;
     fn close(&mut self);
-}
-
-/// The vendor reader the database's rows are checked by (vendor.js's, in
-/// the twin).
-pub trait Vendor {
-    /// The reader is got: Threw when getting it threw, which readDb throws on.
-    fn ready(&mut self) -> Result<(), Threw>;
-    fn missing(&mut self, path: &str, version: Option<&str>) -> Result<(), Threw>;
-    fn check(&mut self, record: &Value, version: Option<&str>) -> Result<Checked, Threw>;
 }
 
 /// OpenCode's database opened read only, through rusqlite, with its values
@@ -395,32 +393,54 @@ impl OpenCode {
         self.runs = runs;
         Ok(())
     }
+}
 
-    pub fn sessions(&self) -> Vec<Out> {
+impl NativeReader for OpenCode {
+    /// Reads the database at `at` (on the disk, read only; `files` says
+    /// whether it's there): its sessions of the last day and their edits of
+    /// the last half hour. A vendor reader that couldn't be got is reported;
+    /// a check that threw leaves the database unreadable, as readDb has it.
+    fn read(&mut self, at: &str, now: f64, files: &mut dyn Files, vendor: &mut dyn Vendor) -> Result<(), String> {
+        let exists = files.exists(at);
+        let mut open = || Sqlite::open(at).map(|db| Box::new(db) as Box<dyn Db>);
+        match read_db(exists, &mut open, vendor, now - DAY_MS, now - EDIT_KEEP_MS) {
+            Ok(got) => self.take(&got, now),
+            Err(Threw) => Err("the vendor check failed".into()),
+        }
+    }
+
+    fn source_state(&self) -> &'static str {
+        self.file_state
+    }
+
+    fn ids(&self) -> Vec<String> {
+        self.runs.keys().map(str::to_string).collect()
+    }
+
+    fn sessions(&self) -> Vec<Out> {
         self.runs
             .iter()
             .map(|(_, r)| {
-                Out::Obj(vec![
-                    ("id", Out::str(&r.id)),
-                    ("app", Out::str("opencode")),
-                    ("rawId", Out::str(&r.raw_id)),
-                    ("title", Out::str(&r.title.clone().unwrap_or_else(|| titled("OpenCode", r.cwd.as_deref())))),
-                    ("preview", Out::null()),
-                    ("cwd", Out::opt_str(r.cwd.as_deref())),
-                    ("createdAt", r.created_at.out()),
-                    ("updatedAt", r.updated_at.out()),
-                    ("archived", Out::bool(r.archived)),
-                    ("model", Out::null()),
-                    ("branch", Out::null()),
-                    ("parentId", Out::opt_str(r.parent_id.as_deref())),
-                    ("parentKind", if r.parent_id.is_some() { Out::str("subagent") } else { Out::null() }),
-                    ("reader", Out::str("experimental")),
-                ])
+                RunSession {
+                    id: &r.id,
+                    app: "opencode",
+                    raw_id: &r.raw_id,
+                    title: r.title.clone().unwrap_or_else(|| titled("OpenCode", r.cwd.as_deref())),
+                    cwd: r.cwd.as_deref(),
+                    created_at: r.created_at.out(),
+                    updated_at: r.updated_at.out(),
+                    archived: r.archived,
+                    model: None,
+                    branch: None,
+                    subagent_of: r.parent_id.as_deref(),
+                    via: Via::Reader,
+                }
+                .record()
             })
             .collect()
     }
 
-    pub fn runs_out(&self) -> Vec<Out> {
+    fn runs_out(&self) -> Vec<Out> {
         self.runs
             .iter()
             .map(|(_, r)| {

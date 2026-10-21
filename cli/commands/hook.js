@@ -5,12 +5,15 @@
 // prints nothing and the agent carries on. XENONET_PORT says which XenoNet,
 // and --via=plugin marks the event as the copy XenoNet's plugin for Claude
 // Code sends, which XenoNet ignores while connect's own hook is there.
+import { tailedApp } from "../../core/apps.js";
+
 export const help = `Passes a Claude Code or Codex hook event (JSON on stdin) to XenoNet and
 prints XenoNet's answer for the session. Their settings run it, so you don't
 need to.`;
 
 export async function run([app], flags) {
-  app = app === "claude" ? "claude" : "codex";
+  // Any app but Claude Code is read as Codex.
+  app = tailedApp(app, "codex");
   const port = Number(flags.port) || Number(process.env.XENONET_PORT) || 47840;
   let input = "";
   process.stdin.setEncoding("utf8");

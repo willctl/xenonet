@@ -70,8 +70,17 @@
 // agents' tools keep working should netstat ever answer in a way XenoNet
 // doesn't read (the doctor's self-test says so). `state.unseen` counts the
 // refusals.
-const APP = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode" };
-const aApp = (app) => `${app === "opencode" ? "an" : "a"} ${APP[app]}`;
+//
+// The apps checked are those whose processes XenoNet tells apart (the
+// registry's `processes`, by core/processes.js): Claude Code, Codex and
+// OpenCode. A request in another app's session's name isn't checked.
+import { agentApps } from "../processes.js";
+
+const AGENTS = Object.fromEntries(agentApps().map((a) => [a.id, a]));
+const APP = Object.fromEntries(Object.values(AGENTS).map((a) => [a.id, a.name]));
+const aApp = (app) => `${/^[AEIOU]/i.test(Object.hasOwn(APP, app) ? APP[app] : "") ? "an" : "a"} ${APP[app]}`;
+// An app's own rules, or none.
+const rules = (app) => (Object.hasOwn(AGENTS, app) ? AGENTS[app] : {});
 const PRODUCT = { "hermes-agent": "Hermes Agent", "grok-bot": "Grok Bot", muse: "Muse", dots: "the ChatGPT app" };
 // The products whose apps their makers sign, by the maker's name (their
 // teams are in core/procs.js): their actors register and report only from
@@ -170,7 +179,7 @@ export function createVerifier({ procs, store, home = null, now = () => Date.now
     if (!holder) return refuse(agent, `requests in ${agent}'s name have to come from ${aApp(app)} process, and this one doesn't`);
     const root = { pid: holder.pid, start: holder.start };
     // Any OpenCode may have the session open (see 1 above).
-    if (app === "opencode") return { ok: true, checked: true, root };
+    if (rules(app).anyProcess) return { ok: true, checked: true, root };
     const same = (p) => p.pid === root.pid && p.start === root.start;
     // The pins of processes still running; the others go.
     const held = [];
@@ -180,7 +189,7 @@ export function createVerifier({ procs, store, home = null, now = () => Date.now
     }
 
     // Claude Code itself, in one of its HTTP hooks: this process holds the session.
-    if (hook && app === "claude" && chain[0].pid === holder.pid && (await procs.signed(holder))) {
+    if (hook && rules(app).pinsByHook && chain[0].pid === holder.pid && (await procs.signed(holder))) {
       store.pin(agent, root, true, now());
       store.dropGuesses(agent);
       return { ok: true, checked: true, root, sure: true };

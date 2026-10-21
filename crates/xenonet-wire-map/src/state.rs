@@ -29,6 +29,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use tokio::sync::watch;
+use xenonet_base::apps::tailed_app;
 use xenonet_base::paths::path_key;
 use xenonet_base::text::{js_string, truthy};
 use xenonet_service::cores::{CoreError, Runs, State, R};
@@ -336,7 +337,7 @@ impl MapState {
         match &self.readers {
             Readers::Demo(d) => d.sessions(app).map(Value::Array),
             Readers::Real { claude } => {
-                if app == "codex" {
+                if tailed_app(app, "claude") == "codex" {
                     self.codex.threads().await.map(Value::Array)
                 } else {
                     claude.sessions().await.map(Value::Array)
@@ -806,7 +807,7 @@ impl MapState {
         match &self.readers {
             Readers::Demo(d) => d.transcript(&raw),
             Readers::Real { claude } => {
-                if s(node, "app") == Some("codex") {
+                if tailed_app(s(node, "app").unwrap_or_default(), "claude") == "codex" {
                     let id = s(node, "id").unwrap_or_default().to_string();
                     let rollout = self.stats.files(&id).into_iter().next().map(|(f, _)| f);
                     self.codex.read_thread(&raw, cursor, limit, rollout).await
@@ -1078,7 +1079,7 @@ impl State for MapState {
             notes = json!({ "prompts": [], "messages": [], "files": [], "edits": [] });
         }
         if decide::handoff_needs_transcript(&notes) {
-            let limit = if s(&n, "app") == Some("codex") { 60.0 } else { 80.0 };
+            let limit = if tailed_app(s(&n, "app").unwrap_or_default(), "claude") == "codex" { 60.0 } else { 80.0 };
             let page = self.transcript(&n, None, limit).await.map_err(err)?;
             notes = decide::handoff_notes(&notes, Some(&page));
         }
@@ -1271,7 +1272,7 @@ impl State for MapState {
                 }
             }
             Readers::Real { claude } => {
-                if s(&n, "app") == Some("codex") {
+                if tailed_app(s(&n, "app").unwrap_or_default(), "claude") == "codex" {
                     self.codex.rename(s(&n, "rawId").unwrap_or_default(), &name).await.map_err(err)?;
                     saved.push("Codex");
                 } else {

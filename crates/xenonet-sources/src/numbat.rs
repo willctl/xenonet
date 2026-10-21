@@ -11,11 +11,12 @@
 
 use crate::native::files::Files;
 use crate::native::node_path;
-use crate::native::{by_num, edits_out, fits_id, js_max, js_min, older, prune_edits, push_edit, titled, Edits, Out, DAY_MS, SESSIONS_MAX};
+use crate::native::{by_num, edits_out, fits_id, js_max, js_min, older, prune_edits, push_edit, titled, Edits, NativeReader, Out, Vendor, DAY_MS, SESSIONS_MAX};
+use crate::session::{RunSession, Via};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use xenonet_base::fs::FsError;
-use xenonet_base::ids::{is_session_app, SESSION_APPS};
+use xenonet_base::ids::{is_session_app, session_apps};
 use xenonet_base::json::{self, number_string};
 use xenonet_base::jsstr;
 use xenonet_base::ordered::OrderedMap;
@@ -277,34 +278,52 @@ impl Numbat {
             }
         }
     }
+}
+
+/// numbat's runs keep the native readers' contract, observed: XenoNet
+/// inferred their edits.
+impl NativeReader for Numbat {
+    /// Reads what's new in the file at `at`. Its records aren't vendor data
+    /// (numbat's schema versions are checked as they're read), so `vendor`
+    /// isn't asked.
+    fn read(&mut self, at: &str, now: f64, files: &mut dyn Files, _: &mut dyn Vendor) -> Result<(), String> {
+        Numbat::read(self, Some(at), now, files)
+    }
+
+    fn source_state(&self) -> &'static str {
+        self.file_state
+    }
+
+    fn ids(&self) -> Vec<String> {
+        self.runs.keys().map(str::to_string).collect()
+    }
 
     /// The runs as session/v1, for the map.
-    pub fn sessions(&self) -> Vec<Out> {
+    fn sessions(&self) -> Vec<Out> {
         self.runs
             .iter()
             .map(|(_, r)| {
-                let name = SESSION_APPS.iter().find(|(a, _)| *a == r.app).map_or("", |(_, n)| *n);
-                Out::Obj(vec![
-                    ("id", Out::str(&r.id)),
-                    ("app", Out::str(&r.app)),
-                    ("rawId", Out::str(&r.raw_id)),
-                    ("title", Out::str(&titled(name, r.cwd.as_deref()))),
-                    ("preview", Out::null()),
-                    ("cwd", Out::opt_str(r.cwd.as_deref())),
-                    ("createdAt", Out::Num(r.created_at)),
-                    ("updatedAt", Out::Num(r.updated_at)),
-                    ("archived", Out::bool(false)),
-                    ("model", Out::opt_str(r.model.as_deref())),
-                    ("branch", Out::opt_str(r.branch.as_deref())),
-                    ("parentId", Out::opt_str(r.parent_id.as_deref())),
-                    ("parentKind", if r.parent_id.is_some() { Out::str("subagent") } else { Out::null() }),
-                    ("observed", Out::str("numbat")),
-                ])
+                let name = session_apps().iter().find(|(a, _)| *a == r.app).map_or("", |(_, n)| *n);
+                RunSession {
+                    id: &r.id,
+                    app: &r.app,
+                    raw_id: &r.raw_id,
+                    title: titled(name, r.cwd.as_deref()),
+                    cwd: r.cwd.as_deref(),
+                    created_at: Out::Num(r.created_at),
+                    updated_at: Out::Num(r.updated_at),
+                    archived: false,
+                    model: r.model.as_deref(),
+                    branch: r.branch.as_deref(),
+                    subagent_of: r.parent_id.as_deref(),
+                    via: Via::Numbat,
+                }
+                .record()
             })
             .collect()
     }
 
-    pub fn runs_out(&self) -> Vec<Out> {
+    fn runs_out(&self) -> Vec<Out> {
         self.runs
             .iter()
             .map(|(_, r)| {

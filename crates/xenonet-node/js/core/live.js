@@ -17,6 +17,7 @@ import { native } from "../index.js";
 import { Tailer } from "./blocks/tailer.js";
 import { claudeUsageGatherer, desktopUsageGatherer } from "./claude-usage.js";
 import { ClaudeLine, CodexLine, linesOf } from "./lines.js";
+import { tailedApp } from "../../../../core/apps.js";
 
 const PRIME_WINDOW_MS = 24 * 3600e3;
 const SWEEP_MS = 2000;
@@ -477,7 +478,8 @@ export class LiveTelemetry extends EventEmitter {
       if (!rec) return;
       this.status.lines++;
       const id = String(f.sessionId);
-      const res = this.#core.line(f.app === "codex", id, f.agentId ?? null, f.file ?? null, rec.raw, !prime, Date.now());
+      // Any app but Codex is read as Claude Code, as linesOf reads it.
+      const res = this.#core.line(tailedApp(f.app, "claude") === "codex", id, f.agentId ?? null, f.file ?? null, rec.raw, !prime, Date.now());
       if (this.#run(res, id) != null) this.status.errors++;
     } catch {
       this.status.errors++;

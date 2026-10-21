@@ -58,6 +58,7 @@ import { driftRoutes } from "./routes/drift.js";
 import { createConnections, fingerprintOf } from "../core/actors/connections.js";
 import { createRemotePresence } from "../core/actors/remote-presence.js";
 import { assistantDir } from "../core/assistant/credentials.js";
+import { tailedApp } from "../core/apps.js";
 import { stateSource } from "../core/assistant/source.js";
 import { createAudit } from "../core/assistant/audit.js";
 import { createAssistantService } from "../core/assistant/service.js";
@@ -873,7 +874,8 @@ async function api(req, res, url) {
       if (config.demo) return send(res, 409, { error: "this is the demo: ask about the XenoNet with your own sessions", code: "demo" });
       if (!(await yours(req, res))) return;
       const body = await readJson(req, 4096);
-      const app = body?.app === "claude" ? "claude" : "codex";
+      // Codex, unless you ask for Claude Code.
+      const app = tailedApp(body?.app, "codex");
       const model = typeof body?.model === "string" && /^[A-Za-z0-9._:\/-]{1,80}$/.test(body.model) ? body.model : null;
       const dir = writeLook(config.stateDir, await bundle(), { sources: [root] });
       const cmd = askCommand({ app, model, dir, sources: [root] });
@@ -919,7 +921,8 @@ async function api(req, res, url) {
 
   if (route === "/api/handoff") {
     if (req.method === "GET") {
-      const target = url.searchParams.get("target") === "codex" ? "codex" : "claude";
+      // Claude Code, unless you ask for Codex.
+      const target = tailedApp(url.searchParams.get("target"), "claude");
       try {
         return send(res, 200, { target, ...(await state.handoff(url.searchParams.get("nodeId"), target)) });
       } catch (err) {

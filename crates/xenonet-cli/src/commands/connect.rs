@@ -114,11 +114,17 @@ fn here(apps: &[&str], flags: &Flags) -> Done {
     Ok(0)
 }
 
+/// The apps connect goes through, as the app registry has them.
+pub fn connected() -> Vec<&'static str> {
+    xenonet_base::apps::with("connect").map(|a| a.id.as_str()).collect()
+}
+
 pub fn run(words: &[String], flags: &Flags) -> Done {
-    let apps: Vec<&str> = if words.is_empty() { vec!["claude", "codex"] } else { words.iter().map(|n| if n == "claude-code" { "claude" } else { n.as_str() }).collect() };
-    let bad: Vec<&str> = apps.iter().copied().filter(|a| *a != "claude" && *a != "codex").collect();
+    let all = connected();
+    let apps: Vec<&str> = if words.is_empty() { all.clone() } else { words.iter().map(|n| if n == "claude-code" { "claude" } else { n.as_str() }).collect() };
+    let bad: Vec<&str> = apps.iter().copied().filter(|a| !all.contains(a)).collect();
     if !bad.is_empty() {
-        return Err(Fail::new(format!("connect works with claude and codex, not {}", bad.join(", ")), 2));
+        return Err(Fail::new(format!("connect works with {}, not {}", all.join(" and "), bad.join(", ")), 2));
     }
     if flags.on("here") {
         return here(&apps, flags);

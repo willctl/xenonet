@@ -8,6 +8,8 @@
 //! - actors, `actor:<slug>` (the person at the console is actor:you), and
 //!   projects merged across hosts by their git remote, `repo:<remote>`.
 
+use std::sync::OnceLock;
+
 pub const SCHEMA_BASE: &str = "https://xenonet.dev/schemas";
 
 // The regular expressions the JS exports, for its twin.
@@ -123,43 +125,20 @@ pub enum QualifyError {
 // ---------- sessions ----------
 
 /// The apps XenoNet knows sessions of, and what each is called, in the
-/// order core/schema/ids.js lists them.
-pub const SESSION_APPS: &[(&str, &str)] = &[
-    ("claude", "Claude Code"),
-    ("codex", "Codex"),
-    ("gemini-cli", "Gemini CLI"),
-    ("cursor", "Cursor"),
-    ("copilot", "GitHub Copilot CLI"),
-    ("vscode", "VS Code agent mode"),
-    ("opencode", "OpenCode"),
-    ("openclaw", "OpenClaw"),
-    ("antigravity", "Antigravity"),
-    ("factory", "Factory Droid"),
-    ("devin-cli", "Devin CLI"),
-    ("kimi-code", "Kimi Code"),
-    ("pi", "Pi"),
-    ("qwen-code", "Qwen Code"),
-    ("cline", "Cline"),
-    ("amp", "Amp"),
-    ("auggie", "Auggie"),
-    ("kiro", "Kiro"),
-    ("goose", "Goose"),
-    ("kilo", "Kilo Code"),
-    ("openhands", "OpenHands"),
-    ("crush", "Crush"),
-    ("junie", "Junie"),
-    ("windsurf", "Windsurf"),
-    ("cowork", "Claude Cowork"),
-];
+/// order core/schema/ids.js lists them: the app registry's (`apps`).
+pub fn session_apps() -> &'static [(&'static str, &'static str)] {
+    static A: OnceLock<Vec<(&'static str, &'static str)>> = OnceLock::new();
+    A.get_or_init(|| crate::apps::apps().iter().map(|a| (a.id.as_str(), a.name.as_str())).collect())
+}
 
 pub fn is_session_app(app: &str) -> bool {
-    SESSION_APPS.iter().any(|(a, _)| *a == app)
+    session_apps().iter().any(|(a, _)| *a == app)
 }
 
 /// The app a session id begins with, when it's one XenoNet knows.
 pub fn app_of_session(id: &str) -> Option<&'static str> {
     let (app, _) = id.split_once(':')?;
-    SESSION_APPS.iter().find(|(a, _)| *a == app).map(|(a, _)| *a)
+    session_apps().iter().find(|(a, _)| *a == app).map(|(a, _)| *a)
 }
 
 /// A session's id, unqualified: the app, then the run's own id (a letter or
@@ -173,7 +152,7 @@ pub fn is_session_id(id: &str) -> bool {
 /// The alternation of the apps, longest first, as the JS's SESSION_LOCAL
 /// and SESSION_PREFIX are made from it.
 pub fn session_app_alternation() -> String {
-    let mut apps: Vec<&str> = SESSION_APPS.iter().map(|(a, _)| *a).collect();
+    let mut apps: Vec<&str> = session_apps().iter().map(|(a, _)| *a).collect();
     apps.sort_by_key(|a| std::cmp::Reverse(a.len()));
     apps.join("|")
 }

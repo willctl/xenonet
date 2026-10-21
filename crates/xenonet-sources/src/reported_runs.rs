@@ -6,10 +6,11 @@
 //! ended, and with the actor's gateway token.
 
 use crate::native::{older, Out};
+use crate::session::{RunSession, Via};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{HashSet, VecDeque};
-use xenonet_base::ids::{is_session_app, SESSION_APPS};
+use xenonet_base::ids::{is_session_app, session_apps};
 use xenonet_base::jsstr;
 use xenonet_base::ordered::OrderedMap;
 use xenonet_base::text::js_trim;
@@ -38,7 +39,7 @@ pub fn refusal(run: Option<&str>, app: &str, presence: Option<&str>) -> Option<S
         return Some("run is 1 to 64 letters, digits, dots, dashes or underscores".into());
     }
     if !is_session_app(app) {
-        let apps: Vec<&str> = SESSION_APPS.iter().map(|(a, _)| *a).collect();
+        let apps: Vec<&str> = session_apps().iter().map(|(a, _)| *a).collect();
         return Some(format!("app is the harness that runs, one of {}", apps.join(", ")));
     }
     if !presence.is_some_and(|p| ["working", "idle", "ended"].contains(&p)) {
@@ -144,24 +145,22 @@ impl ReportedRuns {
         self.runs
             .iter()
             .map(|(_, r)| {
-                let name = SESSION_APPS.iter().find(|(a, _)| *a == r.app).map_or("", |(_, n)| *n);
-                Out::Obj(vec![
-                    ("id", Out::str(&r.id)),
-                    ("app", Out::str(&r.app)),
-                    ("rawId", Out::str(&r.run)),
-                    ("title", Out::str(&r.title.clone().unwrap_or_else(|| format!("{name}, {}", r.run)))),
-                    ("preview", Out::null()),
-                    ("cwd", Out::null()),
-                    ("createdAt", Out::Num(r.created_at)),
-                    ("updatedAt", Out::Num(r.updated_at)),
-                    ("archived", Out::bool(false)),
-                    ("model", Out::null()),
-                    ("branch", Out::null()),
-                    ("parentId", Out::null()),
-                    ("parentKind", Out::null()),
-                    ("observed", Out::str("gateway")),
-                    ("reportedBy", Out::str(&r.actor)),
-                ])
+                let name = session_apps().iter().find(|(a, _)| *a == r.app).map_or("", |(_, n)| *n);
+                RunSession {
+                    id: &r.id,
+                    app: &r.app,
+                    raw_id: &r.run,
+                    title: r.title.clone().unwrap_or_else(|| format!("{name}, {}", r.run)),
+                    cwd: None,
+                    created_at: Out::Num(r.created_at),
+                    updated_at: Out::Num(r.updated_at),
+                    archived: false,
+                    model: None,
+                    branch: None,
+                    subagent_of: None,
+                    via: Via::Gateway { actor: &r.actor },
+                }
+                .record()
             })
             .collect()
     }

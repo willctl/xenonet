@@ -27,6 +27,7 @@ const CONTRACT = [
   "actor/connection/v1", "assistant/result/v1", "assistant/error/v1",
   "drift/record/v1",
   "host/list/v1", "host/hello/v1",
+  "app/v1",
 ];
 
 test("every internal schema the contracts list is defined", () => {

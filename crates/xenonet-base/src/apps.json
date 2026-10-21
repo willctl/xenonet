@@ -1,0 +1,316 @@
+[
+ {
+  "id": "claude",
+  "name": "Claude Code",
+  "numbat": [
+   "claude-code"
+  ],
+  "products": [
+   "anthropic/claude-code",
+   "anthropic/claude-desktop",
+   "anthropic/agent-sdk",
+   "anthropic/oauth"
+  ],
+  "roots": {
+   "env": "CLAUDE_CONFIG_DIR",
+   "default": "~/.claude",
+   "elsewhere": {
+    ".claude.json": "~"
+   }
+  },
+  "context": 200000,
+  "identity": "claude",
+  "limits": "claude",
+  "team": "Q6L2SF6YDW",
+  "connect": {
+   "format": "claude-settings",
+   "events": [
+    [
+     "SessionStart"
+    ],
+    [
+     "UserPromptSubmit"
+    ],
+    [
+     "PreToolUse",
+     "Edit|Write|MultiEdit|NotebookEdit"
+    ],
+    [
+     "PostToolUse"
+    ],
+    [
+     "Stop"
+    ],
+    [
+     "SessionEnd"
+    ],
+    [
+     "Notification"
+    ]
+   ]
+  },
+  "has": [
+   "lines",
+   "sessions",
+   "connect",
+   "delivery",
+   "processes",
+   "caller",
+   "open"
+  ]
+ },
+ {
+  "id": "codex",
+  "name": "Codex",
+  "numbat": [
+   "codex"
+  ],
+  "products": [
+   "openai/codex"
+  ],
+  "roots": {
+   "env": "CODEX_HOME",
+   "default": "~/.codex"
+  },
+  "context": 258400,
+  "identity": "chatgpt",
+  "limits": "codex",
+  "team": "2DC432GLL2",
+  "connect": {
+   "format": "codex-hooks",
+   "events": [
+    [
+     "SessionStart"
+    ],
+    [
+     "UserPromptSubmit"
+    ],
+    [
+     "PreToolUse",
+     "apply_patch|Edit|Write"
+    ],
+    [
+     "PostToolUse"
+    ],
+    [
+     "Stop"
+    ],
+    [
+     "SessionEnd"
+    ]
+   ]
+  },
+  "has": [
+   "lines",
+   "sessions",
+   "connect",
+   "delivery",
+   "processes",
+   "caller",
+   "open"
+  ]
+ },
+ {
+  "id": "gemini-cli",
+  "name": "Gemini CLI",
+  "numbat": [
+   "gemini-cli"
+  ],
+  "products": [
+   "google/gemini-cli"
+  ],
+  "editTools": [
+   "write_file",
+   "replace"
+  ],
+  "has": [
+   "native"
+  ]
+ },
+ {
+  "id": "cursor",
+  "name": "Cursor",
+  "numbat": [
+   "cursor"
+  ],
+  "products": [
+   "anysphere/cursor"
+  ],
+  "has": [
+   "native"
+  ]
+ },
+ {
+  "id": "copilot",
+  "name": "GitHub Copilot CLI",
+  "numbat": [
+   "copilot"
+  ],
+  "products": [
+   "github/copilot-cli"
+  ],
+  "editTools": [
+   "str_replace_editor",
+   "edit",
+   "create",
+   "write",
+   "apply_patch"
+  ],
+  "has": [
+   "native"
+  ]
+ },
+ {
+  "id": "vscode",
+  "name": "VS Code agent mode",
+  "numbat": [
+   "vscode"
+  ]
+ },
+ {
+  "id": "opencode",
+  "name": "OpenCode",
+  "numbat": [
+   "opencode"
+  ],
+  "products": [
+   "anomaly/opencode"
+  ],
+  "editTools": [
+   "edit",
+   "write",
+   "multiedit"
+  ],
+  "has": [
+   "native",
+   "delivery",
+   "processes"
+  ]
+ },
+ {
+  "id": "openclaw",
+  "name": "OpenClaw",
+  "numbat": [
+   "openclaw"
+  ]
+ },
+ {
+  "id": "antigravity",
+  "name": "Antigravity",
+  "numbat": [
+   "antigravity"
+  ]
+ },
+ {
+  "id": "factory",
+  "name": "Factory Droid",
+  "numbat": [
+   "factory"
+  ]
+ },
+ {
+  "id": "devin-cli",
+  "name": "Devin CLI",
+  "numbat": [
+   "devin-cli"
+  ]
+ },
+ {
+  "id": "kimi-code",
+  "name": "Kimi Code",
+  "numbat": [
+   "kimi-code"
+  ]
+ },
+ {
+  "id": "pi",
+  "name": "Pi",
+  "numbat": [
+   "pi"
+  ]
+ },
+ {
+  "id": "qwen-code",
+  "name": "Qwen Code",
+  "numbat": [
+   "qwen-code"
+  ]
+ },
+ {
+  "id": "cline",
+  "name": "Cline",
+  "numbat": [
+   "cline"
+  ]
+ },
+ {
+  "id": "amp",
+  "name": "Amp",
+  "numbat": [
+   "amp"
+  ]
+ },
+ {
+  "id": "auggie",
+  "name": "Auggie",
+  "numbat": [
+   "auggie"
+  ]
+ },
+ {
+  "id": "kiro",
+  "name": "Kiro",
+  "numbat": [
+   "kiro"
+  ]
+ },
+ {
+  "id": "goose",
+  "name": "Goose",
+  "numbat": [
+   "goose"
+  ]
+ },
+ {
+  "id": "kilo",
+  "name": "Kilo Code",
+  "numbat": [
+   "kilo"
+  ]
+ },
+ {
+  "id": "openhands",
+  "name": "OpenHands",
+  "numbat": [
+   "openhands"
+  ]
+ },
+ {
+  "id": "crush",
+  "name": "Crush",
+  "numbat": [
+   "crush"
+  ]
+ },
+ {
+  "id": "junie",
+  "name": "Junie",
+  "numbat": [
+   "junie"
+  ]
+ },
+ {
+  "id": "windsurf",
+  "name": "Windsurf",
+  "numbat": [
+   "windsurf"
+  ]
+ },
+ {
+  "id": "cowork",
+  "name": "Claude Cowork",
+  "numbat": [
+   "cowork"
+  ]
+ }
+]

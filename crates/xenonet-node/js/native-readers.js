@@ -69,7 +69,3 @@ export const pathArg = (v, fn = path.join) => (typeof v === "string" ? v : (fn(v
 // A reader's runs, from Rust, as the Map the JS kept: id → run, its edits
 // a Map of file → [{ ts, path }].
 export const mapOfRuns = (list) => new Map(list.map((r) => [r.id, { ...r, edits: new Map(r.edits) }]));
-
-// What the engine reads of a run, in the shape of a live session's: when
-// it was last at work, its edits, and that it has no turn XenoNet can see.
-export const liveOf = (r, observed) => (r ? { lastEventAt: r.updatedAt, endedAt: r.endedAt ?? null, edits: r.edits, observed, status: () => "idle", needsYou: () => null } : null);

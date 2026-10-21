@@ -1,15 +1,16 @@
 #![no_main]
 
 // xenonet-base's helpers over text another program wrote: JS's string
-// functions, times, paths (XenoNet's and Node's, for both platforms), ids
-// and git remotes, model names and prices, the log's scrubbing, and the
-// numbers the page shows. The first byte picks a group; NULs split the
-// rest into arguments.
+// functions, apply_patch texts, times, paths (XenoNet's and Node's, for both
+// platforms), ids and git remotes, model names and prices, the log's
+// scrubbing, and the numbers the page shows. The first byte picks a group;
+// NULs split the rest into arguments.
 
 use libfuzzer_sys::fuzz_target;
 use serde_json::Value;
 use xenonet_base::nodepath::Style;
-use xenonet_base::{ids, jsstr, log, paths, pricing, text, time, units};
+use xenonet_base::usage::{Speed, TokenUsage};
+use xenonet_base::{ids, jsstr, log, patch, paths, pricing, text, time, units};
 
 fn num(s: &str) -> f64 {
     text::js_number(Some(&Value::String(s.to_string())))
@@ -35,7 +36,7 @@ fuzz_target!(|data: &[u8]| {
             let _ = (jsstr::len(a), jsstr::head(a, n), jsstr::last(a, n), jsstr::slice(a, start, Some(end)), jsstr::slice(a, start, None));
             let _ = (jsstr::substring(a, start, Some(end)), jsstr::pad_start(a, n, c), jsstr::cmp_units(a, b), jsstr::collapse_space(a));
             let _ = (jsstr::is_array_index(a), jsstr::locale_compare(a, b), jsstr::locale_compare_num(a, b), jsstr::hex(a.as_bytes()));
-            let _ = (text::js_trim(a), text::js_trim_start(a), text::is_blank(a), num(a));
+            let _ = (text::js_trim(a), text::js_trim_start(a), text::is_blank(a), num(a), patch::headers(a));
             if let Some(Value::Object(m)) = xenonet_fuzz::json(a.as_bytes()) {
                 let _ = jsstr::js_key_order(m);
             }
@@ -79,9 +80,10 @@ fuzz_target!(|data: &[u8]| {
         }
         5 => {
             let at = Some(1_791_230_000_000.0);
-            let u = pricing::Tokens { input: Some(num(b)), output: Some(num(c)), cache_read: Some(1000.0), cache_write5m: None, cache_write1h: Some(5.0) };
+            let speed = Speed { fast: pick & 8 != 0, priority: pick & 16 != 0 };
+            let u = TokenUsage { input: Some(num(b)), output: Some(num(c)), cache_read: Some(1000.0), cache_write_5m: None, cache_write_1h: Some(5.0), speed };
             let _ = (pricing::plain_model(a), pricing::price_of(a, at), pricing::priority_tier(b));
-            let _ = (pricing::cost_parts(a, at, &u, pick & 8 != 0, pick & 16 != 0), pricing::cost_of(a, at, &u, false, false));
+            let _ = (pricing::cost_parts(a, at, &u), pricing::cost_of(a, at, &TokenUsage { speed: Speed::STANDARD, ..u }));
         }
         6 => {
             let _ = (log::scrub(a, b), log::unsafe_text(a, b), log::js_slice(a, small(b)));

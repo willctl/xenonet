@@ -6,6 +6,7 @@ use crate::js::{Jv, MaybeJson};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde_json::Value;
+use xenonet_base::usage::Figure;
 use xenonet_sources::lines::{self, ClaudeLine, CodexLine, TypeError, Usage};
 
 // What JS would throw, thrown as JS throws it: a TypeError.
@@ -18,15 +19,24 @@ fn maybe(v: Option<&Value>) -> Jv {
     v.cloned().into()
 }
 
+// A figure as the line wrote it, or the number worked out.
+fn figure(f: Figure) -> Jv {
+    match f {
+        Figure::Written(v) => v.into(),
+        Figure::Worked(n) => Jv::Num(n),
+    }
+}
+
 fn usage(u: Usage) -> Jv {
+    let t = u.tokens;
     Jv::Obj(vec![
-        ("input", Jv::Json(u.input)),
-        ("cacheRead", Jv::Json(u.cache_read)),
+        ("input", figure(t.input)),
+        ("cacheRead", figure(t.cache_read)),
         ("cacheWrite", Jv::Json(u.cache_write)),
-        ("cacheWrite5m", u.cache_write5m.map_or_else(Jv::Num, Jv::Json)),
-        ("cacheWrite1h", Jv::Json(u.cache_write1h)),
-        ("output", Jv::Json(u.output)),
-        ("fast", Jv::Bool(u.fast)),
+        ("cacheWrite5m", figure(t.cache_write_5m)),
+        ("cacheWrite1h", figure(t.cache_write_1h)),
+        ("output", figure(t.output)),
+        ("fast", Jv::Bool(t.speed.fast)),
     ])
 }
 

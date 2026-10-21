@@ -1,5 +1,6 @@
 // core/schema/index.js with the twins of its registry and check: every
 // schema XenoNet has, registered, and looked up and checked in Rust.
+import "./app.js";
 import "./session.js";
 import "./project.js";
 import "./identity.js";

@@ -11,25 +11,17 @@
 // Schema: core/schema/vendor/google/gemini-cli.js.
 import fs from "node:fs";
 import path from "node:path";
-import { Block } from "../blocks/lifecycle.js";
-import { pathStyle } from "../paths.js";
 import { reader } from "../vendor.js";
+import { APP } from "../apps.js";
+import { NativeReader, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX, FileCache, editFile, fitsId, ms, pushEdit, runSession, titled } from "./reader.js";
 
 export const SOURCE = "google/gemini-cli/chat-record";
-export const EDIT_TOOLS = new Set(["write_file", "replace"]);
+export const EDIT_TOOLS = new Set(APP["gemini-cli"].editTools);
 const FAILED = new Set(["error", "cancelled"]);
-const DAY_MS = 24 * 3600e3;
-const EDIT_KEEP_MS = 30 * 60e3;
-const SESSIONS_MAX = 500;
 const FILE_MAX = 16 << 20;
 const CHECKS_PER_FILE = 12;
-const ID = /^[0-9A-Za-z][0-9A-Za-z-]{6,127}$/;
 
-export const sessionIdOf = (id) => (ID.test(id) ? `gemini-cli:${id}` : null);
-const ms = (v) => {
-  const t = typeof v === "string" ? Date.parse(v) : NaN;
-  return Number.isFinite(t) ? t : null;
-};
+export const sessionIdOf = (id) => (fitsId(id) ? `gemini-cli:${id}` : null);
 
 // One chat record file as XenoNet reads it: { meta, messages, edits }, the
 // messages in order after rewinds; or null when it isn't one.
@@ -94,13 +86,13 @@ export function readChat(text, { check = () => {} } = {}) {
 // The Gemini CLI's home: GEMINI_CLI_HOME, else your home.
 export const geminiRoot = ({ env = process.env, home }) => path.join(env.GEMINI_CLI_HOME || home, ".gemini", "tmp");
 
-export class GeminiCliSessions extends Block {
+export class GeminiCliSessions extends NativeReader {
   constructor({ root, files = fs, clock } = {}) {
-    super({ name: "gemini-cli-sessions", kind: "gatherer", ...(clock ? { clock } : {}) });
+    super({ name: "gemini-cli-sessions", clock });
     this.root = root;
     this.files = files;
     this.runs = new Map();
-    this.cache = new Map(); // file → { mtimeMs, size, chat }
+    this.cache = new FileCache(); // each chat file's chat
     this.rootState = "unread";
   }
 
@@ -151,16 +143,13 @@ export class GeminiCliSessions extends Block {
       const seen = new Set();
       for (const f of this.#files(now)) {
         seen.add(f.file);
-        let hit = this.cache.get(f.file);
-        if (!hit || hit.mtimeMs !== f.mtimeMs || hit.size !== f.size) {
-          let chat = null;
+        const c = this.cache.get(f, () => {
           try {
-            chat = readChat(this.files.readFileSync(f.file, "utf8"), { check: (rec) => r.check(rec, { version: null }) });
-          } catch {}
-          hit = { mtimeMs: f.mtimeMs, size: f.size, chat };
-          this.cache.set(f.file, hit);
-        }
-        const c = hit.chat;
+            return readChat(this.files.readFileSync(f.file, "utf8"), { check: (rec) => r.check(rec, { version: null }) });
+          } catch {
+            return null;
+          }
+        });
         const id = c && sessionIdOf(c.id);
         if (!id) continue;
         const parentId = f.parent ? sessionIdOf(f.parent) : null;
@@ -168,18 +157,13 @@ export class GeminiCliSessions extends Block {
         for (const e of c.edits) {
           const at = Math.min(e.at ?? run.updatedAt, now);
           if (now - at > EDIT_KEEP_MS) continue;
-          const ps = pathStyle(run.cwd ?? e.path);
-          const file = ps.isAbsolute(e.path) ? ps.resolve(e.path) : run.cwd ? ps.resolve(run.cwd, e.path) : null;
-          if (!file) continue;
-          const list = run.edits.get(file) ?? [];
-          list.push({ ts: at, path: file });
-          if (list.length > 8) list.shift();
-          run.edits.set(file, list);
+          const file = editFile(run.cwd, e.path);
+          if (file) pushEdit(run.edits, file, at);
         }
         const had = runs.get(id);
         if (!had || had.updatedAt < run.updatedAt) runs.set(id, run);
       }
-      for (const k of this.cache.keys()) if (!seen.has(k)) this.cache.delete(k);
+      this.cache.keep(seen);
       this.runs = runs;
       this.ok(now);
     } catch (err) {
@@ -188,33 +172,10 @@ export class GeminiCliSessions extends Block {
     return this;
   }
 
-  sessions() {
-    return [...this.runs.values()].map((r) => ({
-      id: r.id,
-      app: "gemini-cli",
-      rawId: r.rawId,
-      title: r.summary ?? `Gemini CLI${r.cwd ? ` in ${pathStyle(r.cwd).basename(r.cwd)}` : ""}`,
-      preview: null,
-      cwd: r.cwd,
-      createdAt: r.createdAt,
-      updatedAt: r.updatedAt,
-      archived: false,
-      model: null,
-      branch: null,
-      parentId: r.parentId,
-      parentKind: r.parentId ? "subagent" : null,
-      reader: "experimental",
-    }));
-  }
-
-  live(id) {
-    const r = this.runs.get(id);
-    if (!r) return null;
-    return { lastEventAt: r.updatedAt, endedAt: null, edits: r.edits, observed: false, status: () => "idle", needsYou: () => null };
-  }
-
-  ids() {
-    return [...this.runs.keys()];
+  // A run as a session: its chat's summary for a title, and a subagent's
+  // under the session that started it.
+  session(r) {
+    return runSession(r, { app: "gemini-cli", title: r.summary ?? titled("Gemini CLI", r.cwd), parentId: r.parentId });
   }
 
   status() {

@@ -18,6 +18,7 @@ import fsp from "node:fs/promises";
 import zlib from "node:zlib";
 import { Normalizer } from "./blocks/normalizer.js";
 import { transcriptHooks } from "./vendor.js";
+import { tailedApp } from "./apps.js";
 
 // When a line was written, from its ISO 8601 timestamp: NaN when it says
 // none, or something that isn't a time. A number isn't one (Date.parse
@@ -195,8 +196,10 @@ const codexHooks = {
 export const claudeLines = new Normalizer({ name: "claude-lines", source: "anthropic/claude-code/transcript-line", normalize: (raw) => new ClaudeLine(raw) }).use(transcriptHooks("anthropic/claude-code/transcript-line", claudeHooks));
 export const codexLines = new Normalizer({ name: "codex-lines", source: "openai/codex/rollout-line", normalize: (raw) => new CodexLine(raw) }).use(transcriptHooks("openai/codex/rollout-line", codexHooks));
 
-// The normalizer for an app's transcripts.
-export const linesOf = (app) => (app === "codex" ? codexLines : claudeLines);
+// The normalizer for an app's transcripts: any app but Codex's are read as
+// Claude Code's.
+const NORMALIZERS = { claude: claudeLines, codex: codexLines };
+export const linesOf = (app) => NORMALIZERS[tailedApp(app, "claude")];
 
 const NOTHING = Buffer.alloc(0);
 
@@ -226,13 +229,14 @@ function take(data, lines, where, out) {
   return NOTHING;
 }
 
-// A whole transcript's lines, through its app's normalizer, for a reader
-// that reads the file at once (stats, and an archived rollout shown as a
-// thread): a compressed archive (.jsonl.zst) too.
-export async function readLines(file, app) {
+// A whole transcript's lines, through its app's normalizer (or `lines`,
+// the one its mapper names: core/events.js), for a reader that reads the
+// file at once (stats, and an archived rollout shown as a thread): a
+// compressed archive (.jsonl.zst) too.
+export async function readLines(file, app, lines = linesOf(app)) {
   const buf = await fsp.readFile(file);
   const out = [];
-  take(file.endsWith(".zst") ? zlib.zstdDecompressSync(buf) : buf, linesOf(app), { file }, out);
+  take(file.endsWith(".zst") ? zlib.zstdDecompressSync(buf) : buf, lines, { file }, out);
   return out;
 }
 

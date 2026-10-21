@@ -6,19 +6,25 @@
 use super::files::Files;
 use super::node_path;
 use super::{
-    by_num, edit_file, edits_out, fits_id, js_max, js_min, ms_of, patch_headers, push_edit, str_of, titled, Check, Checked, Edits, Out, Threw, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX,
+    by_num, edit_file, edits_out, fits_id, js_max, js_min, ms_of, push_edit, str_of, titled, Check, Checked, Edits, FileCache, NativeReader, Out, Threw, Vendor, DAY_MS,
+    EDIT_KEEP_MS, SESSIONS_MAX,
 };
+use crate::session::{RunSession, Via};
 use serde_json::{Map, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use xenonet_base::json::{self, number_string};
 use xenonet_base::jsstr::is_array_index;
 use xenonet_base::ordered::OrderedMap;
+use xenonet_base::patch;
 use xenonet_base::paths::PathStyle;
 use xenonet_base::text::{is_blank, truthy};
 
 pub const SOURCE: &str = "github/copilot-cli/session-event";
-/// Copilot CLI's built-in file tools; str_replace_editor's view isn't an edit.
-pub const EDIT_TOOLS: [&str; 5] = ["str_replace_editor", "edit", "create", "write", "apply_patch"];
+/// Copilot CLI's built-in file tools, as the app registry has them;
+/// str_replace_editor's view isn't an edit.
+pub fn edit_tools() -> &'static [String] {
+    xenonet_base::apps::edit_tools("copilot")
+}
 const FILE_MAX: f64 = (32u64 << 20) as f64;
 const CHECKS_PER_FILE: usize = 16;
 
@@ -47,9 +53,9 @@ fn js_values(m: &Map<String, Value>) -> Vec<&Value> {
 
 /// The files a tool call names, if it's an edit.
 pub fn edited_by(tool: Option<&Value>, args: Option<&Value>) -> Vec<String> {
-    let Some(tool) = str_of(tool).filter(|t| EDIT_TOOLS.contains(t)) else { return Vec::new() };
+    let Some(tool) = str_of(tool).filter(|t| edit_tools().iter().any(|e| e == t)) else { return Vec::new() };
     let args = match args {
-        Some(Value::String(s)) => return if tool == "apply_patch" { patch_headers(s) } else { Vec::new() },
+        Some(Value::String(s)) => return if tool == "apply_patch" { patch::paths(s, true) } else { Vec::new() },
         Some(a @ (Value::Object(_) | Value::Array(_))) => a,
         _ => return Vec::new(),
     };
@@ -65,7 +71,7 @@ pub fn edited_by(tool: Option<&Value>, args: Option<&Value>) -> Vec<String> {
         };
         for v in values {
             if let Value::String(s) = v {
-                out.extend(patch_headers(s));
+                out.extend(patch::paths(s, true));
             }
         }
     }
@@ -188,12 +194,6 @@ pub struct Run {
     pub edits: Edits,
 }
 
-struct Cached {
-    mtime_ms: f64,
-    size: f64,
-    log: Option<Log>,
-}
-
 struct Found {
     file: String,
     mtime_ms: f64,
@@ -204,13 +204,13 @@ struct Found {
 /// (until they change), and whether it could read the folder.
 pub struct CopilotCli {
     pub runs: OrderedMap<Run>,
-    cache: HashMap<String, Cached>,
+    cache: FileCache<Option<Log>>,
     pub root_state: &'static str,
 }
 
 impl Default for CopilotCli {
     fn default() -> Self {
-        CopilotCli { runs: OrderedMap::new(), cache: HashMap::new(), root_state: "unread" }
+        CopilotCli { runs: OrderedMap::new(), cache: FileCache::default(), root_state: "unread" }
     }
 }
 
@@ -262,9 +262,8 @@ impl CopilotCli {
         let mut seen = HashSet::new();
         for f in found {
             seen.insert(f.file.clone());
-            let fresh = self.cache.get(&f.file).is_some_and(|h| h.mtime_ms == f.mtime_ms && h.size == f.size);
-            if !fresh {
-                let log = files.read_text(&f.file).ok().and_then(|text| {
+            let log = self.cache.get(&f.file, f.mtime_ms, f.size, || {
+                files.read_text(&f.file).ok().and_then(|text| {
                     let mut version: Option<String> = None;
                     let mut checking = |rec: &Value| {
                         if field(rec, "type").and_then(Value::as_str) == Some("session.start") {
@@ -275,10 +274,9 @@ impl CopilotCli {
                         check(rec, version.as_deref())
                     };
                     read_events(&text, &mut checking).ok().flatten()
-                });
-                self.cache.insert(f.file.clone(), Cached { mtime_ms: f.mtime_ms, size: f.size, log });
-            }
-            let Some(l) = self.cache.get(&f.file).and_then(|h| h.log.as_ref()) else { continue };
+                })
+            });
+            let Some(l) = log else { continue };
             let Some(id) = session_id_of(&l.id) else { continue };
             let mut run = Run {
                 id: id.clone(),
@@ -303,36 +301,51 @@ impl CopilotCli {
             }
             runs.insert(&id, run);
         }
-        self.cache.retain(|k, _| seen.contains(k));
+        self.cache.keep(&seen);
         self.runs = runs;
     }
+}
 
-    pub fn sessions(&self) -> Vec<Out> {
+impl NativeReader for CopilotCli {
+    /// Reads the event logs in the folder at `at`. A log whose vendor check
+    /// threw is passed over, and no failure is reported.
+    fn read(&mut self, at: &str, now: f64, files: &mut dyn Files, vendor: &mut dyn Vendor) -> Result<(), String> {
+        CopilotCli::read(self, Some(at), now, files, &mut |rec, version| vendor.check(rec, version));
+        Ok(())
+    }
+
+    fn source_state(&self) -> &'static str {
+        self.root_state
+    }
+
+    fn ids(&self) -> Vec<String> {
+        self.runs.keys().map(str::to_string).collect()
+    }
+
+    fn sessions(&self) -> Vec<Out> {
         self.runs
             .iter()
             .map(|(_, r)| {
-                Out::Obj(vec![
-                    ("id", Out::str(&r.id)),
-                    ("app", Out::str("copilot")),
-                    ("rawId", Out::str(&r.raw_id)),
-                    ("title", Out::str(&r.title.clone().unwrap_or_else(|| titled("Copilot CLI", r.cwd.as_deref())))),
-                    ("preview", Out::null()),
-                    ("cwd", Out::opt_str(r.cwd.as_deref())),
-                    ("createdAt", Out::Num(r.created_at)),
-                    ("updatedAt", Out::Num(r.updated_at)),
-                    ("archived", Out::bool(false)),
-                    ("model", Out::null()),
-                    ("branch", Out::opt_str(r.branch.as_deref())),
-                    ("parentId", Out::null()),
-                    ("parentKind", Out::null()),
-                    ("reader", Out::str("experimental")),
-                ])
+                RunSession {
+                    id: &r.id,
+                    app: "copilot",
+                    raw_id: &r.raw_id,
+                    title: r.title.clone().unwrap_or_else(|| titled("Copilot CLI", r.cwd.as_deref())),
+                    cwd: r.cwd.as_deref(),
+                    created_at: Out::Num(r.created_at),
+                    updated_at: Out::Num(r.updated_at),
+                    archived: false,
+                    model: None,
+                    branch: r.branch.as_deref(),
+                    subagent_of: None,
+                    via: Via::Reader,
+                }
+                .record()
             })
             .collect()
     }
 
-    /// The runs as the block's `runs` Map holds them, edits as pairs.
-    pub fn runs_out(&self) -> Vec<Out> {
+    fn runs_out(&self) -> Vec<Out> {
         self.runs
             .iter()
             .map(|(_, r)| {

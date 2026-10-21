@@ -18,8 +18,8 @@ use super::{
     categorize, claude_edits, clip, clip_value, codex_edits, command_text, day_key, file_key, files_of, looks_like_question, mcp_server_of, median, patch_files, slope, string_of,
     tail, tool_detail, tool_key, wiki_pages_of,
 };
-use crate::lines::{is_codex_prompt, opt_prop, prop, ClaudeLine, CodexLine, TypeError};
-use crate::refusals::detect::{claude_signal, codex_signal};
+use crate::line_events::{self, broken_at, usage_of, user_text, End, Field, Kind, LineEvent, LineFile};
+use crate::lines::{opt_prop, prop, ClaudeLine, CodexLine, TypeError};
 use serde_json::{Map, Value};
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -27,7 +27,8 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use xenonet_base::json::{number, number_string};
 use xenonet_base::ordered::OrderedMap;
 use xenonet_base::text::{join, js_number, js_string, js_trim, truthy};
-use xenonet_base::{jsstr, paths, pricing};
+use xenonet_base::usage::{Speed, TokenUsage};
+use xenonet_base::{apps, jsstr, paths, pricing};
 
 pub const PRIME_WINDOW_MS: f64 = 24.0 * 3600e3;
 const RATE_WINDOW_S: f64 = 300.0;
@@ -308,9 +309,7 @@ struct ToolRec {
 /// A call's tokens and how it ran, for its price.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Call {
-    pub tokens: pricing::Tokens,
-    pub fast: bool,
-    pub priority: bool,
+    pub tokens: TokenUsage,
 }
 
 /// A tool call, as noteTool takes it. `agent` is None where JS passed no
@@ -390,7 +389,9 @@ impl Session {
             provider: Value::Null,
             priority: false,
             context_used: number(0.0),
-            context_window: number(if app == "codex" { 258400.0 } else { 200000.0 }),
+            // The app's context window until a line says otherwise; any app
+            // but Codex has Claude Code's.
+            context_window: number(apps::app(apps::tailed_app(app, "claude")).and_then(|a| a.context).unwrap_or_default()),
             turn_contexts: Vec::new(),
             model: Value::Null,
             turn_active: false,
@@ -459,7 +460,7 @@ impl Session {
             }
         }
         let name = string_of(Some(model));
-        let parts = pricing::cost_parts(&name, Some(ts), &call.tokens, call.fast, call.priority);
+        let parts = pricing::cost_parts(&name, Some(ts), &call.tokens);
         let d = &mut self.spend.get_mut(&tag).expect("added above when missing, and the newest stays").1;
         match parts {
             None => {
@@ -476,10 +477,8 @@ impl Session {
                 }
             }
             Some(c) => {
-                let t = call.tokens;
-                let z = |v: Option<f64>| v.unwrap_or(0.0);
                 d.cost += c.total;
-                d.tokens += z(t.input) + z(t.cache_read) + z(t.cache_write5m) + z(t.cache_write1h) + z(t.output);
+                d.tokens += call.tokens.total();
             }
         }
     }
@@ -912,16 +911,33 @@ impl Telemetry {
 
     // ----- a line -----
 
-    /// A line the tailer read, through its app's normalizer: its refusal
-    /// (kept whether read as history or live, told to you only when live)
-    /// and what it says. What it emitted before an error is in `out`.
+    /// A line the tailer read, through its app's normalizer, as its events
+    /// (line_events.rs): its refusal (kept whether read as history or live,
+    /// told to you only when live) and what it says. What it emitted before
+    /// an error is in `out`.
     pub fn line(&mut self, codex: bool, f: &Where, raw: Value, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
-        let sig = if codex { codex_signal(Some(&raw)) } else { claude_signal(Some(&raw)) };
-        if let Some(signal) = sig {
+        if codex {
+            let o = CodexLine { raw };
+            let file = self.codex_file(self.find(&f.session_id));
+            let events = line_events::codex(&o, &file);
+            self.refusal(true, f, &o.raw, &events, live, out);
+            self.codex_line(f, &o, &events, live, now, out)
+        } else {
+            let o = ClaudeLine { raw };
+            let events = line_events::claude(&o, &LineFile::new(Some(f.agent_id.clone())));
+            self.refusal(false, f, &o.raw, &events, live, out);
+            self.claude_line(f, &o, &events, live, now, out)
+        }
+    }
+
+    // A provider's refusal, as its line marks it, read first.
+    fn refusal(&self, codex: bool, f: &Where, raw: &Value, events: &[LineEvent<'_>], live: bool, out: &mut Vec<Emit>) {
+        for e in events {
+            let Kind::Refusal(signal) = &e.kind else { continue };
             let model = self.find(&f.session_id).map_or(Value::Null, |i| self.sessions[i].model.clone());
-            let cwd = opt_prop(Some(&raw), "cwd").filter(|c| c.is_string()).cloned().unwrap_or(Value::Null);
+            let cwd = opt_prop(Some(raw), "cwd").filter(|c| c.is_string()).cloned().unwrap_or(Value::Null);
             out.push(Emit::Refusal(obj(vec![
-                ("signal", signal),
+                ("signal", signal.clone()),
                 ("sessionId", Value::String(f.session_id.clone())),
                 ("app", if codex { "codex" } else { "claude" }.into()),
                 ("agentId", f.agent_id.clone()),
@@ -931,11 +947,13 @@ impl Telemetry {
                 ("live", Value::Bool(live)),
             ])));
         }
-        if codex {
-            self.apply_codex(f, raw, live, now, out)
-        } else {
-            self.apply_claude(f, raw, live, now, out)
-        }
+    }
+
+    /// What the mapper is told of a Codex session's rollout: whether its
+    /// prompts are its completed user messages yet, which the tailer finds
+    /// out as the lines come.
+    fn codex_file(&self, i: Option<usize>) -> LineFile {
+        LineFile { items: i.is_some_and(|i| self.sessions[i].codex_items), follow: true, ..LineFile::default() }
     }
 
     fn activity(&mut self, i: usize, ev: Fields, live: bool, now: f64, out: &mut Vec<Emit>) {
@@ -1098,6 +1116,12 @@ impl Telemetry {
     /// A Claude Code transcript's line, as the transcript has it.
     pub fn apply_claude(&mut self, f: &Where, raw: Value, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
         let o = ClaudeLine { raw };
+        let events = line_events::claude(&o, &LineFile::new(Some(f.agent_id.clone())));
+        self.claude_line(f, &o, &events, live, now, out)
+    }
+
+    // A Claude Code line's events.
+    fn claude_line(&mut self, f: &Where, o: &ClaudeLine, events: &[LineEvent<'_>], live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
         let i = self.session(&f.session_id, "claude");
         // A line that doesn't say when it was written was written when it's
         // read.
@@ -1130,7 +1154,13 @@ impl Telemetry {
             a.insert("lastAt".into(), number(last));
             sub = Some(tag);
         }
-        self.claude_line(i, sub.as_deref(), &agent, &o, ts, live, now, out)?;
+        // What the line is: a reply, or what you (or a tool) said.
+        let kind = events.iter().find(|e| !matches!(e.kind, Kind::Refusal(_))).map(|e| &*e.origin);
+        if kind == Some("assistant") {
+            self.claude_assistant(i, sub.as_deref(), &agent, events, ts, live, now, out)?;
+        } else if kind == Some("user") {
+            self.claude_user(i, sub.as_deref(), &agent, events, ts, live, now, out)?;
+        }
         // Announce a subagent once its first line has given it a label.
         if let Some(tag) = sub {
             let a = &mut self.sessions[i].subagents.get_mut(&tag).expect("a subagent is added when the first line that names it is read").1;
@@ -1143,59 +1173,49 @@ impl Telemetry {
         Ok(())
     }
 
-    #[expect(clippy::too_many_arguments, reason = "a line and what claude_lines worked out about it (session, subagent, time), handed down as the JS's closures saw them")]
-    fn claude_line(&mut self, i: usize, sub: Option<&str>, agent: &Value, o: &ClaudeLine, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
-        let kind = o.kind()?;
-        if is_str(kind, "assistant") {
-            self.claude_assistant(i, sub, agent, o, ts, live, now, out)
-        } else if is_str(kind, "user") {
-            self.claude_user(i, sub, agent, o, ts, live, now, out)
-        } else {
-            Ok(())
-        }
-    }
-
     // A reply: its tokens and context fill, its tool calls and text, and
     // the end of a turn (or of a subagent's work).
-    #[expect(clippy::too_many_arguments, reason = "a line and what claude_lines worked out about it (session, subagent, time), handed down as the JS's closures saw them")]
-    fn claude_assistant(&mut self, i: usize, sub: Option<&str>, agent: &Value, o: &ClaudeLine, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
+    #[expect(clippy::too_many_arguments, reason = "a line's events and what claude_line worked out about it (session, subagent, time), handed down as the JS's closures saw them")]
+    fn claude_assistant(
+        &mut self,
+        i: usize,
+        sub: Option<&str>,
+        agent: &Value,
+        events: &[LineEvent<'_>],
+        ts: f64,
+        live: bool,
+        now: f64,
+        out: &mut Vec<Emit>,
+    ) -> Result<(), TypeError> {
         let has_agent = truthy(Some(agent));
-        let model = o.model()?.cloned();
+        let Some(c) = events.iter().find_map(|e| match &e.kind {
+            Kind::Call(c) => Some(c),
+            _ => None,
+        }) else {
+            return Ok(());
+        };
+        let model = c.model.cloned();
         if !has_agent {
             if let Some(m) = model.as_ref().filter(|m| truthy(Some(m))) {
                 self.sessions[i].model = m.clone();
             }
         }
         // Each of a message's lines repeats its usage: counted once.
-        let id = o.message_id()?.cloned();
+        let id = c.message_id.cloned();
         let seen = truthy(id.as_ref()) && self.sessions[i].seen_messages.contains(&key_tag(id.as_ref()));
-        let u = if truthy(id.as_ref()) && !seen { o.usage()? } else { None };
+        let u = if truthy(id.as_ref()) && !seen { usage_of(events, c)? } else { None };
         if let Some(u) = u {
             let s = &mut self.sessions[i];
             kset(&mut s.seen_messages, id.as_ref(), ());
             if s.seen_messages.len() > 400 {
                 drop_first(&mut s.seen_messages);
             }
-            let num = |v: &Value| js_number(Some(v));
-            let ctx = num(&u.input) + num(&u.cache_read) + num(&u.cache_write);
-            let output = num(&u.output);
+            let t = &u.tokens;
+            let ctx = t.input.number() + t.cache_read.number() + js_number(Some(&u.cache_write));
+            let output = t.output.number();
             s.tokens_output += output;
             s.add_tokens(ctx + output, ts, live);
-            let price = |v: &Value| if v.is_null() { None } else { Some(num(v)) };
-            let call = Call {
-                tokens: pricing::Tokens {
-                    input: price(&u.input),
-                    cache_read: price(&u.cache_read),
-                    cache_write5m: match &u.cache_write5m {
-                        Ok(v) => price(v),
-                        Err(x) => Some(*x),
-                    },
-                    cache_write1h: price(&u.cache_write1h),
-                    output: price(&u.output),
-                },
-                fast: u.fast,
-                priority: false,
-            };
+            let call = Call { tokens: u.tokens.map(|f| f.priced()) };
             let call_model = nn(model.as_ref()).cloned().or_else(|| nn(Some(&s.model)).cloned()).unwrap_or_else(|| "unknown".into());
             s.add_call(&call_model, &call, ts);
             if !has_agent {
@@ -1209,11 +1229,15 @@ impl Telemetry {
                 out.push(Emit::Tokens(obj(vec![("sessionId", Value::String(s.id.clone())), ("app", "claude".into()), ("n", number(ctx + output)), ("ts", number(ts))])));
             }
         }
-        let blocks = o.blocks()?.clone();
-        let list: &[Value] = match &blocks {
-            Value::Array(a) => a,
+        // Its blocks in order: what it said, and its tool calls.
+        let blocks = events.iter().find_map(|e| match &e.kind {
+            Kind::Said { parts, .. } => *parts,
+            _ => None,
+        });
+        let list: &[Value] = match blocks {
+            Some(Value::Array(a)) => a,
             // A string's characters have no type.
-            Value::String(_) => &[],
+            Some(Value::String(_)) => &[],
             _ => return Err(TypeError("o.blocks is not iterable".into())),
         };
         for b in list {
@@ -1235,14 +1259,14 @@ impl Telemetry {
         }
         // A refusal ends the turn too: the provider said no, and nothing more
         // comes until you write again.
-        let message = opt_prop(Some(&o.raw), "message");
-        let refused = is_str(opt_prop(message, "stop_reason"), "refusal");
-        if !o.end_turn()? && !refused {
+        let Some(end) = events.iter().find_map(|e| match &e.kind {
+            Kind::TurnEnd(end @ (End::EndTurn | End::Refusal { .. })) => Some(end),
+            _ => None,
+        }) else {
             return Ok(());
-        }
-        if refused && !has_agent {
-            let details = opt_prop(message, "stop_details");
-            let why = nn(opt_prop(details, "explanation")).or(nn(opt_prop(details, "category"))).cloned().unwrap_or_else(|| "the provider refused".into());
+        };
+        if let (End::Refusal { details }, false) = (end, has_agent) {
+            let why = nn(opt_prop(*details, "explanation")).or(nn(opt_prop(*details, "category"))).cloned().unwrap_or_else(|| "the provider refused".into());
             self.activity(i, ev(vec![("kind", sv("refusal")), ("detail", Some(Value::String(clip_value(Some(&why), 160)))), ("ts", nv(ts))]), live, now, out);
         }
         if let Some(tag) = sub {
@@ -1343,41 +1367,67 @@ impl Telemetry {
 
     // Tool results, a prompt (in a subagent's file, its task), or your
     // interruption.
-    #[expect(clippy::too_many_arguments, reason = "a line and what claude_lines worked out about it (session, subagent, time), handed down as the JS's closures saw them")]
-    fn claude_user(&mut self, i: usize, sub: Option<&str>, agent: &Value, o: &ClaudeLine, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
+    #[expect(clippy::too_many_arguments, reason = "a line's events and what claude_line worked out about it (session, subagent, time), handed down as the JS's closures saw them")]
+    fn claude_user(&mut self, i: usize, sub: Option<&str>, agent: &Value, events: &[LineEvent<'_>], ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
         let has_agent = truthy(Some(agent));
-        let results = o.results()?;
-        if let Some(rs) = &results {
-            for r in rs {
+        if let Some(b) = broken_at(events, Field::Content) {
+            return Err(b.error());
+        }
+        let results: Vec<(Option<&Value>, bool)> = events
+            .iter()
+            .filter_map(|e| match &e.kind {
+                Kind::Result { id, error, .. } => Some((*id, error.unwrap_or(false))),
+                _ => None,
+            })
+            .collect();
+        if !results.is_empty() {
+            for (id, error) in &results {
                 let s = &mut self.sessions[i];
-                let tag = key_tag(r.id.as_ref());
+                let tag = key_tag(*id);
                 let tool = s.inflight.remove(&tag).and_then(|(_, e)| e.tool).flatten();
                 if !has_agent {
-                    s.note_tool_result(!r.error, ts, tool.as_ref());
+                    s.note_tool_result(!error, ts, tool.as_ref());
                 }
-                if r.error {
+                if *error {
                     self.activity(i, ev(vec![("kind", sv("tool-error")), ("ts", nv(ts)), ("agentId", Some(agent.clone()))]), live, now, out);
                 }
             }
             let s = &mut self.sessions[i];
             s.last_event_at = js_max(s.last_event_at, ts);
         }
-        if truthy(o.meta()?) || truthy(o.sidechain()?) != has_agent {
+        // The line's flags, from what it holds besides its results: its
+        // prompt, your interruption, or the text that couldn't be read.
+        let prompt = events.iter().find_map(|e| match &e.kind {
+            Kind::Prompt(p) => Some(p),
+            _ => None,
+        });
+        let interrupted = events.iter().find_map(|e| match &e.kind {
+            Kind::TurnEnd(End::Interrupted { gate }) => Some(*gate),
+            _ => None,
+        });
+        let unread = broken_at(events, Field::Text);
+        let gate = prompt.and_then(|p| p.claude.as_ref().map(|c| (c.meta, c.sidechain))).or(interrupted.flatten()).or(unread.map(|b| (b.meta, b.sidechain)));
+        let Some((meta, sidechain)) = gate else { return Ok(()) };
+        if truthy(meta) || truthy(sidechain) != has_agent {
             return Ok(());
+        }
+        if let Some(b) = unread {
+            return Err(b.error());
         }
         // A compacted summary and an interruption aren't prompts; an
         // interruption ends the turn you stopped.
-        if o.interruption()? {
+        if interrupted.is_some() {
             if !has_agent {
                 self.interrupted(i, ts, live, now, out);
             }
             return Ok(());
         }
-        if results.is_some() || truthy(o.compact_summary()?) {
+        let Some(p) = prompt else { return Ok(()) };
+        if !results.is_empty() || p.claude.as_ref().is_some_and(|c| truthy(c.compact_summary)) {
             return Ok(());
         }
-        let text = o.text()?;
-        if js_trim(&text).is_empty() || text.starts_with('<') {
+        let text = &p.text;
+        if js_trim(text).is_empty() || text.starts_with('<') {
             return Ok(());
         }
         if let Some(tag) = sub {
@@ -1389,7 +1439,7 @@ impl Telemetry {
             if is_str(a.get("label"), "subagent") {
                 let label = match pending {
                     Some((session, label, at)) if session == id && (ts - at).abs() < 60000.0 => label,
-                    _ => Value::String(clip(&text, 40)),
+                    _ => Value::String(clip(text, 40)),
                 };
                 a.insert("label".into(), label);
             }
@@ -1398,8 +1448,8 @@ impl Telemetry {
         let s = &mut self.sessions[i];
         s.turn_active = true;
         s.turn_started_at = Some(ts);
-        s.add_prompt(&text, ts);
-        self.activity(i, ev(vec![("kind", sv("prompt")), ("detail", Some(Value::String(clip(&text, 90)))), ("ts", nv(ts))]), live, now, out);
+        s.add_prompt(text, ts);
+        self.activity(i, ev(vec![("kind", sv("prompt")), ("detail", Some(Value::String(clip(text, 90)))), ("ts", nv(ts))]), live, now, out);
         Ok(())
     }
 
@@ -1420,58 +1470,46 @@ impl Telemetry {
     pub fn apply_codex(&mut self, f: &Where, raw: Value, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
         let o = CodexLine { raw };
         let i = self.session(&f.session_id, "codex");
+        let events = line_events::codex(&o, &self.codex_file(Some(i)));
+        self.codex_line(f, &o, &events, live, now, out)
+    }
+
+    // A Codex line's events.
+    fn codex_line(&mut self, f: &Where, o: &CodexLine, events: &[LineEvent<'_>], live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
+        let i = self.session(&f.session_id, "codex");
         let t = o.ts()?;
         let ts = if t != 0.0 && !t.is_nan() { t } else { now };
-        let p = o.payload()?.clone();
-        let kind = o.kind()?.cloned();
-        let pp = Some(&p);
-        let get = |k: &str| opt_prop(pp, k);
-        if is_str(kind.as_ref(), "event_msg") {
-            match get("type").and_then(Value::as_str) {
-                Some("task_started") => {
+        self.codex_events(i, events, ts, live, now, out)
+    }
+
+    fn codex_events(&mut self, i: usize, events: &[LineEvent<'_>], ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
+        for e in events {
+            match &e.kind {
+                Kind::TurnStart { window } => {
                     let s = &mut self.sessions[i];
                     s.reset_stall();
                     s.turn_marks += 1.0;
                     s.turn_active = true;
                     s.turn_started_at = Some(ts);
-                    if let Some(w) = get("model_context_window").filter(|w| truthy(Some(w))) {
+                    if let Some(w) = window.filter(|w| truthy(Some(w))) {
                         s.context_window = w.clone();
                     }
                     self.activity(i, ev(vec![("kind", sv("turn-start")), ("ts", nv(ts))]), live, now, out);
                 }
-                Some("task_complete") => {
-                    let said = get("last_agent_message");
-                    if truthy(said) {
-                        self.sessions[i].add_message(said, ts)?;
-                    }
+                // What it said last, with the turn's end (a completed
+                // message is read with its item).
+                Kind::Said { parts, .. } if &*e.origin == "event_msg:task_complete" => self.sessions[i].add_message(*parts, ts)?,
+                Kind::TurnEnd(End::TaskComplete { duration }) => {
                     self.sessions[i].end_turn(ts, false);
-                    let duration = nn(get("duration_ms")).cloned().unwrap_or(Value::Null);
+                    let duration = nn(*duration).cloned().unwrap_or(Value::Null);
                     self.activity(i, ev(vec![("kind", sv("turn-end")), ("duration", Some(duration)), ("ts", nv(ts))]), live, now, out);
                     self.ask_if_question(i, ts, live, now, out);
                 }
-                Some("token_count") => self.codex_tokens(i, &p, ts, live, out),
-                Some("item_completed") => {
-                    let it = nn(get("item")).cloned().unwrap_or_else(|| Value::Object(Map::new()));
-                    self.codex_item(i, &it, ts, live, now, out)?;
-                }
-                Some("user_message") => {
-                    let text = o.user_event()?;
-                    self.codex_user_event(i, text, ts, live, now, out);
-                }
                 // You stopped the turn (Esc, or Ctrl-C): Codex writes no
-                // task_complete for it. A turn the next one replaced, or a
-                // review ending, isn't you stopping it; older rollouts give
-                // no reason.
-                Some("turn_aborted") => {
-                    let reason = get("reason");
-                    if !truthy(reason) || is_str(reason, "interrupted") {
-                        self.interrupted(i, ts, live, now, out);
-                    }
-                }
+                // task_complete for it.
+                Kind::TurnEnd(End::Interrupted { .. }) => self.interrupted(i, ts, live, now, out),
                 // A policy refusal: the turn ends with it.
-                Some("error") => {
-                    let sig = codex_signal(Some(&o.raw));
-                    let Some(sig) = sig.filter(|g| is_str(g.get("kind"), "refusal")) else { return Ok(()) };
+                Kind::TurnEnd(End::Refused(sig)) => {
                     let g = |k: &str| nn(sig.get(k));
                     let why = g("explanation").or(g("text")).or(sig.get("category")).cloned();
                     self.activity(i, ev(vec![("kind", sv("refusal")), ("detail", Some(Value::String(clip_value(why.as_ref(), 160)))), ("ts", nv(ts))]), live, now, out);
@@ -1479,63 +1517,80 @@ impl Telemetry {
                         self.sessions[i].end_turn(ts, false);
                     }
                 }
-                // All of the thread's settings: a tier not said is the
-                // default.
-                Some("thread_settings_applied") => {
-                    let tier = opt_prop(get("thread_settings"), "service_tier");
-                    self.sessions[i].priority = pricing::priority_tier(&string_of(tier));
+                Kind::Call(c) => {
+                    if let Some(total) = c.total {
+                        self.codex_tokens(i, total, c.last, ts, live, out);
+                    }
                 }
-                _ => {}
-            }
-            return Ok(());
-        }
-        let s = &mut self.sessions[i];
-        if is_str(kind.as_ref(), "turn_context") {
-            if let Some(m) = get("model").filter(|m| truthy(Some(m))) {
-                s.model = m.clone();
-            }
-        }
-        // What prices its calls: the provider, and the tier, said with a
-        // turn in older rollouts and in the thread's settings in newer ones.
-        if is_str(kind.as_ref(), "session_meta") {
-            if let Some(v) = nn(get("model_provider")) {
-                s.provider = v.clone();
-            }
-        }
-        if is_str(kind.as_ref(), "turn_context") && get("service_tier").is_some() {
-            s.priority = pricing::priority_tier(&string_of(get("service_tier")));
-        }
-        if is_str(kind.as_ref(), "response_item") {
-            let call_id = nn(get("call_id")).or(get("id")).cloned();
-            match get("type").and_then(Value::as_str) {
-                Some("function_call" | "custom_tool_call" | "local_shell_call") => {
+                // The context from the last call.
+                Kind::Context { used, window } => {
+                    let s = &mut self.sessions[i];
+                    if let Some(v) = nn(*used) {
+                        s.context_used = v.clone();
+                    }
+                    if let Some(w) = window.filter(|w| truthy(Some(w))) {
+                        s.context_window = w.clone();
+                    }
+                    s.last_event_at = js_max(s.last_event_at, ts);
+                }
+                Kind::Limits(rl) => self.note_codex_limits(rl, ts),
+                Kind::Item(it) => self.codex_item_of(i, it, events, ts, live, now, out)?,
+                // A completed user message is read with its item.
+                Kind::Prompt(p) if &*e.origin == "event_msg:user_message" => self.codex_user_event(i, &p.text, ts, live, now, out),
+                Kind::Settings { model, tier, provider, .. } => {
+                    let s = &mut self.sessions[i];
+                    if &*e.origin == "turn_context" {
+                        if let Some(m) = model.filter(|m| truthy(Some(m))) {
+                            s.model = m.clone();
+                        }
+                    }
+                    // What prices its calls: the provider, and the tier, said
+                    // with a turn in older rollouts and in the thread's
+                    // settings in newer ones, where a tier not said is the
+                    // default.
+                    if &*e.origin == "session_meta" {
+                        if let Some(v) = nn(*provider) {
+                            s.provider = v.clone();
+                        }
+                    }
+                    if let Some(tier) = tier {
+                        s.priority = pricing::priority_tier(&string_of(*tier));
+                    }
+                }
+                // A call (a response item, whose type live reads as written)
+                // starts a tool in flight.
+                Kind::Tool { id, name, input, call } if call.is_some_and(Value::is_string) => {
+                    let s = &mut self.sessions[i];
                     let mut fields = Map::new();
-                    if let Some(n) = get("name") {
-                        fields.insert("name".into(), n.clone());
+                    if let Some(n) = name {
+                        fields.insert("name".into(), (*n).clone());
                     }
                     fields.insert("ts".into(), number(ts));
-                    kset(&mut s.inflight, call_id.as_ref(), Inflight { fields, tool: None });
+                    kset(&mut s.inflight, *id, Inflight { fields, tool: None });
                     s.last_event_at = js_max(s.last_event_at, ts);
-                    if is_str(get("name"), "apply_patch") {
-                        let files = patch_files(nn(get("input")).or(get("arguments")));
+                    if is_str(*name, "apply_patch") {
+                        let files = patch_files(*input);
                         self.note_tool(i, ToolCall { name: sv("apply_patch"), files, ts, ..ToolCall::default() }, live, now, out);
                     }
                 }
                 // Its output ends a call, a shell call's too, matched as
                 // stats match them: by call_id, else id.
-                Some("function_call_output" | "custom_tool_call_output" | "local_shell_call_output") => {
-                    s.inflight.remove(&key_tag(call_id.as_ref()));
+                Kind::Result { id, call, .. } if call.is_some_and(Value::is_string) => {
+                    let s = &mut self.sessions[i];
+                    s.inflight.remove(&key_tag(*id));
                     s.last_event_at = js_max(s.last_event_at, ts);
                 }
+                Kind::Broken(b) if b.at == Field::Line => return Err(b.error()),
                 _ => {}
             }
         }
         Ok(())
     }
 
-    fn codex_tokens(&mut self, i: usize, p: &Value, ts: f64, live: bool, out: &mut Vec<Emit>) {
-        let info = opt_prop(Some(p), "info");
-        let total_usage = opt_prop(info, "total_token_usage");
+    // A call's tokens: the growth of the total is what's new (output and
+    // reasoning output kept), and the call's own tokens, as stats read
+    // them, from the last one's.
+    fn codex_tokens(&mut self, i: usize, total_usage: Option<&Value>, last: Option<&Value>, ts: f64, live: bool, out: &mut Vec<Emit>) {
         let s = &mut self.sessions[i];
         if truthy(total_usage) {
             let total = or0(opt_prop(total_usage, "total_tokens"));
@@ -1545,7 +1600,7 @@ impl Telemetry {
                 // The call's own tokens, as stats read them: cached input
                 // and cache writes are part of input_tokens.
                 let empty = Value::Object(Map::new());
-                let last = Some(nn(opt_prop(info, "last_token_usage")).unwrap_or(&empty));
+                let last = Some(nn(last).unwrap_or(&empty));
                 let input = match nn(opt_prop(last, "input_tokens")) {
                     Some(v) => js_number(Some(v)),
                     None => js_max(0.0, or0(opt_prop(last, "total_tokens")) - or0(opt_prop(last, "output_tokens"))),
@@ -1559,15 +1614,14 @@ impl Telemetry {
                     model
                 };
                 let call = Call {
-                    tokens: pricing::Tokens {
+                    tokens: TokenUsage {
                         input: Some(js_max(0.0, input - cached - write)),
                         cache_read: Some(cached),
-                        cache_write5m: Some(write),
-                        cache_write1h: Some(0.0),
+                        cache_write_5m: Some(write),
+                        cache_write_1h: Some(0.0),
                         output: Some(or0(opt_prop(last, "output_tokens"))),
+                        speed: Speed { fast: false, priority: s.priority },
                     },
-                    fast: false,
-                    priority: s.priority,
                 };
                 s.add_call(&call_model, &call, ts);
                 if live {
@@ -1576,36 +1630,16 @@ impl Telemetry {
             }
             s.tokens_output = or0(opt_prop(total_usage, "output_tokens")) + or0(opt_prop(total_usage, "reasoning_output_tokens"));
         }
-        let last = opt_prop(info, "last_token_usage");
-        if truthy(last) {
-            if let Some(v) = nn(opt_prop(last, "total_tokens")) {
-                s.context_used = v.clone();
-            }
-        }
-        if let Some(w) = opt_prop(info, "model_context_window").filter(|w| truthy(Some(w))) {
-            s.context_window = w.clone();
-        }
-        let rl = opt_prop(Some(p), "rate_limits").cloned();
-        if let Some(rl) = rl.as_ref().filter(|rl| truthy(Some(rl))) {
-            self.note_codex_limits(rl, ts);
-        }
-        let s = &mut self.sessions[i];
-        s.last_event_at = js_max(s.last_event_at, ts);
     }
 
     // A user_message event: a prompt while the rollout has no completed
     // user message (`codex exec` writes none, nor did Codex before 0.130),
-    // passed by once it has.
-    fn codex_user_event(&mut self, i: usize, text: Option<String>, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) {
+    // passed by once it has (the mapper says which).
+    fn codex_user_event(&mut self, i: usize, text: &str, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) {
         let s = &mut self.sessions[i];
-        let text = text.map(Value::String);
-        if s.codex_items || !is_codex_prompt(text.as_ref()) {
-            return;
-        }
-        let text = string_of(text.as_ref());
-        s.add_prompt(&text, ts);
+        s.add_prompt(text, ts);
         s.event_prompt = Some((s.prompts.last().expect("add_prompt just added one").clone(), s.turn_marks));
-        self.activity(i, ev(vec![("kind", sv("prompt")), ("detail", Some(Value::String(clip(&text, 90)))), ("ts", nv(ts))]), live, now, out);
+        self.activity(i, ev(vec![("kind", sv("prompt")), ("detail", Some(Value::String(clip(text, 90)))), ("ts", nv(ts))]), live, now, out);
     }
 
     /// Codex's rate limits in XenoNet's own shape (the snapshot's
@@ -1637,27 +1671,24 @@ impl Telemetry {
         }
     }
 
-    /// A completed item of a Codex rollout.
+    /// A completed item of a Codex rollout, as its events say it.
     pub fn codex_item(&mut self, i: usize, it: &Value, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
+        let events = line_events::codex_item(it, ts, &self.codex_file(Some(i)));
+        self.codex_events(i, &events, ts, live, now, out)
+    }
+
+    #[expect(clippy::too_many_arguments, reason = "an item, its line's events and what codex_line worked out about it (session, time), handed down as the JS's closures saw them")]
+    fn codex_item_of(&mut self, i: usize, it: &Value, events: &[LineEvent<'_>], ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
         let item = Some(it);
         let get = |k: &str| opt_prop(item, k);
-        let words = |strict: bool| -> Result<String, TypeError> {
-            let content = nn(get("content"));
-            let list: &[Value] = match content {
-                None => &[],
-                Some(Value::Array(a)) => a,
-                Some(_) => return Err(TypeError("(it.content ?? []).map is not a function".into())),
-            };
-            let mut parts = Vec::new();
-            for c in list {
-                // UserMessage reads c?.text, AgentMessage c.text.
-                parts.push(if strict { prop(Some(c), "text")? } else { opt_prop(Some(c), "text") });
-            }
-            Ok(join(parts.into_iter(), " "))
-        };
         match get("type").and_then(Value::as_str) {
             Some("UserMessage") => {
-                let text = words(false)?;
+                // What it says, as live reads it: one that can't be read
+                // fails here.
+                if let Some(b) = broken_at(events, Field::Text) {
+                    user_text(it)?;
+                    return Err(b.error());
+                }
                 // The rollout's first: from here on its prompts are these.
                 // Codex may have written it as a user_message event just
                 // before, in the same turn, which was taken for this prompt.
@@ -1671,15 +1702,29 @@ impl Telemetry {
                     }
                 }
                 // A blank one (an image alone), or one that starts with "<",
-                // isn't a prompt, as in stats and search.
-                if !is_codex_prompt(Some(&Value::String(text.clone()))) {
+                // isn't a prompt, as in stats and search: the mapper makes no
+                // prompt of it.
+                let Some(text) = events.iter().find_map(|e| match &e.kind {
+                    Kind::Prompt(p) => Some(&p.text),
+                    _ => None,
+                }) else {
                     return Ok(());
-                }
-                s.add_prompt(&text, ts);
-                self.activity(i, ev(vec![("kind", sv("prompt")), ("detail", Some(Value::String(clip(&text, 90)))), ("ts", nv(ts))]), live, now, out);
+                };
+                s.add_prompt(text, ts);
+                self.activity(i, ev(vec![("kind", sv("prompt")), ("detail", Some(Value::String(clip(text, 90)))), ("ts", nv(ts))]), live, now, out);
             }
             Some("AgentMessage") => {
-                let text = words(true)?;
+                let content = nn(get("content"));
+                let list: &[Value] = match content {
+                    None => &[],
+                    Some(Value::Array(a)) => a,
+                    Some(_) => return Err(TypeError("(it.content ?? []).map is not a function".into())),
+                };
+                let mut parts = Vec::new();
+                for c in list {
+                    parts.push(prop(Some(c), "text")?);
+                }
+                let text = join(parts.into_iter(), " ");
                 if !js_trim(&text).is_empty() {
                     self.sessions[i].add_message(Some(&Value::String(text.clone())), ts)?;
                     self.activity(i, ev(vec![("kind", sv("message")), ("detail", Some(Value::String(clip(&text, 72)))), ("ts", nv(ts))]), live, now, out);

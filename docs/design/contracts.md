@@ -24,8 +24,8 @@ orchestrator's OK and a note to every lane it touches.
   `actor/gateway-ask`,
   `actor/report`, `actor/me`,
   `actor/events`, `actor/console`, `actor/requests`, `actor/tokens`,
-  `drift/record`, `drift/log`, and for hosts `host/list` and
-  `host/hello`.
+  `drift/record`, `drift/log`, for hosts `host/list` and
+  `host/hello`, and `app`, an entry of the app registry (`core/apps.js`).
 - Vendor schemas, at `vendor/<vendor>/<product>/<source>`:
 
 | Path | What |

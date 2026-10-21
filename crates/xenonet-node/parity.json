@@ -534,7 +534,8 @@
     "core/engine/connect.js": {
       "rust": "crates/xenonet-engine/src/connect.rs",
       "differences": [
-        "The files, the CLIs and core/instances.js's table are the twin's, called as the JS called them."
+        "The files, the CLIs and core/instances.js's table are the twin's, called as the JS called them.",
+        "A registry or config formats a test gives (registry, formats) are JS code, so createConnect with either is the JS's."
       ]
     },
     "core/engine/engine.js": {
@@ -827,6 +828,12 @@
         "The key (the credential store), the request (fetch) and the reading kept for a minute stay in the twin; Rust says what OpenRouter's answer means and how long it stands."
       ]
     },
+    "core/patch.js": {
+      "rust": "crates/xenonet-base/src/patch.rs",
+      "differences": [
+        "A lone surrogate in the text reaches the Rust with U+FFFD in its place."
+      ]
+    },
     "core/paths.js": {
       "rust": "crates/xenonet-base/src/paths.rs",
       "differences": [
@@ -917,6 +924,12 @@
       "rust": "crates/xenonet-schema/src/check.rs",
       "differences": [
         "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
+    "core/schema/app.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Its constants (the capabilities) stay its own too; the registry it describes reaches the Rust as crates/xenonet-base/src/apps.json."
       ]
     },
     "core/schema/assistant.js": {
@@ -1264,6 +1277,8 @@
     "test/actor-wake.test.js",
     "test/actors-layer.test.js",
     "test/actors.test.js",
+    "test/app-capabilities.test.js",
+    "test/apps.test.js",
     "test/assistant-connections.test.js",
     "test/assistant-endpoint.test.js",
     "test/assistant-routes.test.js",
@@ -1349,6 +1364,7 @@
     "test/mcp-actor.test.js",
     "test/mcp-info.test.js",
     "test/muse-observer.test.js",
+    "test/native-readers.test.js",
     "test/needs-you.test.js",
     "test/numbat.test.js",
     "test/observer.test.js",
@@ -1356,6 +1372,7 @@
     "test/open.test.js",
     "test/opencode.test.js",
     "test/page-markup.test.js",
+    "test/patch.test.js",
     "test/platform.test.js",
     "test/poster.test.js",
     "test/private-file.test.js",

@@ -10,6 +10,8 @@
 
 use crate::lines::{opt_prop, prop, CodexLine, Js, TypeError};
 use crate::live::command_text;
+use crate::record::{Obj, F};
+use crate::session::{CodexSession, Parent, ParentKind};
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{Map, Value};
@@ -23,41 +25,6 @@ pub const SOURCE_KINDS: [&str; 9] = ["cli", "vscode", "exec", "appServer", "subA
 pub const STATE_DB: u32 = 5;
 
 pub const REQUEST_TIMEOUT_MS: f64 = 20000.0;
-
-/// A field of an object made for JS: missing (undefined), a number JSON
-/// can't hold (NaN), a JSON value, or a list of such.
-#[derive(Clone, Debug, PartialEq)]
-pub enum F {
-    Undef,
-    Num(f64),
-    V(Value),
-    Arr(Vec<F>),
-}
-
-impl F {
-    pub fn of(v: Js<'_>) -> F {
-        v.map_or(F::Undef, |x| F::V(x.clone()))
-    }
-    pub fn s(v: impl Into<String>) -> F {
-        F::V(Value::String(v.into()))
-    }
-    pub fn null() -> F {
-        F::V(Value::Null)
-    }
-    /// `v ?? null`
-    pub fn or_null(v: Js<'_>) -> F {
-        F::V(nn(v).cloned().unwrap_or(Value::Null))
-    }
-    pub fn as_value(&self) -> Option<&Value> {
-        match self {
-            F::V(v) => Some(v),
-            _ => None,
-        }
-    }
-}
-
-/// An object made for JS, its fields in order.
-pub type Obj = Vec<(&'static str, F)>;
 
 pub(crate) fn nn(v: Js<'_>) -> Js<'_> {
     v.filter(|x| !x.is_null())
@@ -184,12 +151,12 @@ pub fn thread_to_session(t: Js<'_>, archived: bool) -> Result<Obj, TypeError> {
         _ => F::null(),
     };
     let forked = get("forkedFromId")?;
-    let (parent_id, parent_kind) = if truthy(forked) {
-        (F::s(format!("codex:{}", tpl(forked))), F::s("fork"))
+    let parent = if truthy(forked) {
+        Some(Parent { id: format!("codex:{}", tpl(forked)), kind: ParentKind::Fork })
     } else if truthy(Some(&parent_thread)) {
-        (F::s(format!("codex:{}", js_string(&parent_thread))), F::s("subagent"))
+        Some(Parent { id: format!("codex:{}", js_string(&parent_thread)), kind: ParentKind::Subagent })
     } else {
-        (F::null(), F::null())
+        None
     };
     let nick = match nn(get("agentNickname")?) {
         Some(n) => n.clone(),
@@ -198,31 +165,30 @@ pub fn thread_to_session(t: Js<'_>, archived: bool) -> Result<Obj, TypeError> {
     let background =
         source.and_then(Value::as_str) == Some("exec") || get("originator")?.and_then(Value::as_str) == Some("codex_exec") || (!kind.is_null() && kind.as_str() != Some("spawned"));
     let recency = nn(get("recencyAt")?).or(get("updatedAt")?);
-    Ok(vec![
-        ("id", F::s(format!("codex:{}", tpl(get("id")?)))),
-        ("app", F::s("codex")),
-        ("rawId", F::of(get("id")?)),
-        ("title", F::V(title)),
-        ("preview", F::or_null(preview)),
-        ("cwd", F::or_null(get("cwd")?)),
-        ("createdAt", to_ms(get("createdAt")?)),
-        ("updatedAt", to_ms(recency)),
-        ("archived", F::V(Value::Bool(archived))),
-        ("status", F::V(status)),
-        ("model", F::or_null(get("model")?)),
-        ("provider", F::or_null(get("modelProvider")?)),
-        ("effort", F::or_null(get("reasoningEffort")?)),
-        ("branch", F::or_null(opt_prop(git, "branch"))),
-        ("origin", F::V(origin)),
-        ("source", source_f),
-        ("originator", F::or_null(get("originator")?)),
-        ("nativeProjectId", F::or_null(get("projectId")?)),
-        ("parentId", parent_id),
-        ("parentKind", parent_kind),
-        ("agentNickname", F::V(nick)),
-        ("agentKind", F::V(kind)),
-        ("background", F::V(Value::Bool(background))),
-    ])
+    let or_null = |v: Js<'_>| nn(v).cloned().unwrap_or(Value::Null);
+    Ok(CodexSession {
+        raw_id: get("id")?.cloned(),
+        title,
+        preview: or_null(preview),
+        cwd: or_null(get("cwd")?),
+        created_at: to_ms(get("createdAt")?),
+        updated_at: to_ms(recency),
+        archived,
+        status,
+        model: or_null(get("model")?),
+        provider: or_null(get("modelProvider")?),
+        effort: or_null(get("reasoningEffort")?),
+        branch: or_null(opt_prop(git, "branch")),
+        origin,
+        source: source_f,
+        originator: or_null(get("originator")?),
+        native_project_id: or_null(get("projectId")?),
+        parent,
+        agent_nickname: nick,
+        agent_kind: kind,
+        background,
+    }
+    .record())
 }
 
 // ---------- a thread's items ----------

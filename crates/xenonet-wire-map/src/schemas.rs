@@ -131,6 +131,8 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
     use xenonet_schema::drift::DriftLog;
+    use xenonet_schema::vendor::Readers;
+    use xenonet_service::wire::VendorReaders;
 
     fn checkout() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas")
@@ -151,6 +153,23 @@ mod tests {
         let r = Drift { vendor }.report(DriftLog::default().view(), false, "", 5.0).unwrap();
         assert_eq!(r["sources"].as_array().unwrap().len(), vendor_sources(&checkout()).len());
         assert_eq!((r["new"].as_u64(), r["changes"].as_u64(), r["all"].as_bool()), (Some(0), Some(0), Some(false)));
+    }
+
+    // The actors' observers check Hermes's files through the service's
+    // readers, the ones the map's readers use, so the report counts them.
+    #[test]
+    fn the_report_counts_what_the_observers_read() {
+        let slot = VendorReaders::default();
+        let log = Arc::new(Mutex::new(DriftLog::default()));
+        let vendor = Vendor::with_readers(slot.get_or_make(|| Readers::new(checkout(), log.clone())));
+        // Wired after the map, the observers get its readers.
+        let observers = slot.get_or_make(|| Readers::new(PathBuf::from("elsewhere"), Arc::default()));
+        assert_eq!(observers.dir(), checkout());
+        let stamp = "nous/hermes-agent/install-stamp";
+        observers.check(stamp, &json!({ "version": "0.4.0" }), Some("0.4.0"), None, 5.0);
+        let r = Drift { vendor }.report(log.lock().unwrap().view(), true, "", 5.0).unwrap();
+        let hermes = r["sources"].as_array().unwrap().iter().find(|s| s["source"] == stamp).unwrap();
+        assert_eq!((hermes["read"]["records"].as_u64(), &hermes["read"]["versions"]), (Some(1), &json!(["0.4.0"])));
     }
 
     // The service's GET /api/drift takes the log's view and asks for the

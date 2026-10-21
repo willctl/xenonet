@@ -23,8 +23,10 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::LazyLock;
 use xenonet_base::text::{js_number, js_trim, truthy};
+use xenonet_base::usage::{Figure, Speed, TokenUsage};
 use xenonet_base::{fs as xfs, json, jsstr, paths, pricing};
-use xenonet_sources::lines::{has_user_messages, is_codex_prompt, opt_prop, prop, ClaudeLine, CodexLine, Js, TypeError};
+use xenonet_sources::line_events::{self as le, command_of, usage_of, Broken, Command, End, Field, LineEvent, LineFile};
+use xenonet_sources::lines::{has_user_messages, opt_prop, prop, ClaudeLine, CodexLine, Js, TypeError};
 use xenonet_sources::live::{categorize, clip, mcp_server_of};
 use xenonet_sources::wiki::{to_str, to_str_or_empty, Out};
 
@@ -275,40 +277,23 @@ pub enum Kind {
     Other,
 }
 
-/// A call's token figure: as the record wrote it, or worked out.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Tok {
-    V(Option<Value>),
-    N(f64),
+/// A call's token figure as stats adds and prices it.
+trait Tok {
+    fn prim(&self) -> Result<Prim, TypeError>;
+    fn for_price(&self) -> Result<Option<f64>, TypeError>;
 }
 
-impl Default for Tok {
-    fn default() -> Self {
-        Tok::V(None)
-    }
-}
-
-impl Tok {
-    fn of(v: Js<'_>) -> Tok {
-        Tok::V(v.cloned())
-    }
-    // `v ?? 0`.
-    fn or0(v: Js<'_>) -> Tok {
-        match v {
-            None | Some(Value::Null) => Tok::N(0.0),
-            v => Tok::V(v.cloned()),
-        }
-    }
+impl Tok for Figure {
     fn prim(&self) -> Result<Prim, TypeError> {
         match self {
-            Tok::V(v) => Prim::of(v.as_ref()),
-            Tok::N(n) => Ok(Prim::Num(*n)),
+            Figure::Written(v) => Prim::of(v.as_ref()),
+            Figure::Worked(n) => Ok(Prim::Num(*n)),
         }
     }
     // As the pricing twin reads a figure: nothing for null, else Number(v).
-    fn number(&self) -> Result<Option<f64>, TypeError> {
+    fn for_price(&self) -> Result<Option<f64>, TypeError> {
         match self {
-            Tok::V(None | Some(Value::Null)) => Ok(None),
+            Figure::Written(None | Some(Value::Null)) => Ok(None),
             t => Ok(Some(t.prim()?.num())),
         }
     }
@@ -323,10 +308,9 @@ pub struct Event {
     pub agent: Val,
     pub model: Val,
     pub effort: Val,
-    /// input, cacheRead, cacheWrite5m, cacheWrite1h, output.
-    pub tokens: [Tok; 5],
-    pub fast: Option<Value>,
-    pub priority: Option<Value>,
+    /// A call's tokens, each figure as the line wrote it or worked out, and
+    /// its speed (a JS event's fast and priority, as truthy).
+    pub tokens: TokenUsage<Figure>,
     pub window: Option<Value>,
     pub id: Val,
     pub name: Val,
@@ -342,9 +326,7 @@ impl Event {
             agent: Val::default(),
             model: Val::default(),
             effort: Val::default(),
-            tokens: Default::default(),
-            fast: None,
-            priority: None,
+            tokens: TokenUsage::default(),
             window: None,
             id: Val::default(),
             name: Val::default(),
@@ -374,11 +356,16 @@ impl Event {
         ev.model = ids.val(prop(e, "model")?);
         ev.effort = ids.val(prop(e, "effort")?);
         let k = prop(e, "tokens")?;
-        for (i, name) in ["input", "cacheRead", "cacheWrite5m", "cacheWrite1h", "output"].iter().enumerate() {
-            ev.tokens[i] = Tok::of(opt_prop(k, name));
-        }
-        ev.fast = prop(e, "fast")?.cloned();
-        ev.priority = prop(e, "priority")?.cloned();
+        let figure = |name: &str| Figure::of(opt_prop(k, name));
+        let speed = Speed { fast: truthy(prop(e, "fast")?), priority: truthy(prop(e, "priority")?) };
+        ev.tokens = TokenUsage {
+            input: figure("input"),
+            cache_read: figure("cacheRead"),
+            cache_write_5m: figure("cacheWrite5m"),
+            cache_write_1h: figure("cacheWrite1h"),
+            output: figure("output"),
+            speed,
+        };
         ev.window = prop(e, "window")?.cloned();
         ev.id = ids.val(prop(e, "id")?);
         ev.name = ids.val(prop(e, "name")?);
@@ -409,144 +396,19 @@ pub struct File {
     pub lines: Vec<Value>,
 }
 
-static COMMAND: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\A<command-name>").expect("a fixed pattern"));
-
-/// What someone typed: a slash command as /name and its arguments; nothing
-/// for Claude Code's own notes (command output and the like).
+/// What someone typed in Claude Code: a slash command as /name and its
+/// arguments; nothing for Claude Code's own notes (command output and the
+/// like).
 pub fn prompt_text(text: &str) -> Option<String> {
+    prompt_form(text, command_of(text).as_ref())
+}
+
+fn prompt_form(text: &str, command: Option<&Command>) -> Option<String> {
+    if let Some(c) = command {
+        return Some(js_trim(&format!("/{} {}", c.name, c.args.as_deref().unwrap_or(""))).to_string());
+    }
     let t = js_trim(text);
-    if let Some(m) = COMMAND.find(t) {
-        // \/?([^<]+)<\/command-name>, with the slash taken first when that
-        // leaves a name.
-        let rest = &t[m.end()..];
-        let name_at = |from: usize| -> Option<&str> {
-            let run = rest[from..].find('<').map_or(rest.len(), |i| from + i);
-            (run > from && rest[run..].starts_with("</command-name>")).then(|| &rest[from..run])
-        };
-        let name = if rest.starts_with('/') { name_at(1).or_else(|| name_at(0)) } else { name_at(0) };
-        if let Some(name) = name {
-            let args = t.find("<command-args>").and_then(|i| {
-                let from = i + "<command-args>".len();
-                t[from..].find("</command-args>").map(|j| &t[from..from + j])
-            });
-            return Some(js_trim(&format!("/{name} {}", args.unwrap_or(""))).to_string());
-        }
-    }
     (!t.is_empty() && !t.starts_with('<')).then(|| t.to_string())
-}
-
-// `for (const b of v)`: an array's items, nothing from a string's
-// characters (none has a type), and the TypeError JS throws for the rest.
-fn blocks_of(v: &Value) -> Result<&[Value], TypeError> {
-    match v {
-        Value::Array(a) => Ok(a),
-        Value::String(_) => Ok(&[]),
-        _ => Err(TypeError("o.blocks is not iterable".into())),
-    }
-}
-
-/// Calls, prompts, turn ends and tool calls, in the order they happened,
-/// from Claude Code's main file and its subagents' files.
-pub fn claude_events(files: Vec<File>, ids: &mut EventIds) -> Result<Vec<Event>, TypeError> {
-    let ids = &mut ids.0;
-    let mut events = Vec::new();
-    let mut seen: HashSet<Key> = HashSet::new();
-    for f in files {
-        let agent = ids.val(f.agent.as_ref());
-        let sub = truthy(f.agent.as_ref());
-        for raw in f.lines {
-            let o = ClaudeLine { raw };
-            // A line that doesn't say when is left out.
-            let t = o.ts()?;
-            if !t.is_finite() {
-                continue;
-            }
-            let kind = o.kind()?;
-            if is_str(kind, "assistant") {
-                // Each of a message's lines repeats its usage: counted once.
-                let id = ids.val(o.message_id()?);
-                let usage = if truthy(id.js()) && !seen.contains(&id.key()) { o.usage()? } else { None };
-                if let Some(u) = usage {
-                    seen.insert(id.key());
-                    let mut e = Event::new(Kind::Call, t);
-                    e.agent = agent.clone();
-                    e.model = ids.val(Some(nn(o.model()?).unwrap_or(&Value::String("unknown".into()))));
-                    e.effort = ids.val(o.effort()?);
-                    e.tokens = [
-                        Tok::of(Some(&u.input)),
-                        Tok::of(Some(&u.cache_read)),
-                        u.cache_write5m.map_or_else(Tok::N, |v| Tok::V(Some(v))),
-                        Tok::of(Some(&u.cache_write1h)),
-                        Tok::of(Some(&u.output)),
-                    ];
-                    e.fast = Some(Value::Bool(u.fast));
-                    events.push(e);
-                }
-                for b in blocks_of(o.blocks()?)? {
-                    let b = Some(b);
-                    if !is_str(prop(b, "type")?, "tool_use") {
-                        continue;
-                    }
-                    let name = prop(b, "name")?;
-                    let mut e = Event::new(Kind::Tool, t);
-                    e.id = ids.val(prop(b, "id")?);
-                    e.name = ids.val(name);
-                    e.agent = agent.clone();
-                    events.push(e);
-                    if !sub && matches!(to_str(name)?.as_str(), "Agent" | "Task") {
-                        let description = opt_prop(prop(b, "input")?, "description");
-                        if truthy(description) {
-                            let mut e = Event::new(Kind::Spawn, t);
-                            e.text = description.cloned();
-                            events.push(e);
-                        }
-                    }
-                }
-                if o.end_turn()? && !sub {
-                    events.push(Event::new(Kind::End, t));
-                }
-            } else if is_str(kind, "user") {
-                if let Some(results) = o.results()? {
-                    for r in results {
-                        let mut e = Event::new(Kind::Result, t);
-                        e.id = ids.val(r.id.as_ref());
-                        e.error = Some(Value::Bool(r.error));
-                        events.push(e);
-                    }
-                    continue;
-                }
-                // A subagent's first prompt is its task.
-                if sub {
-                    let task = o.text()?;
-                    if !js_trim(&task).is_empty() {
-                        let mut e = Event::new(Kind::Task, t);
-                        e.agent = agent.clone();
-                        e.text = Some(Value::String(task));
-                        events.push(e);
-                    }
-                    continue;
-                }
-                if truthy(o.meta()?) || truthy(o.sidechain()?) {
-                    continue;
-                }
-                // A compacted context carries on the turn it interrupted.
-                if truthy(o.compact_summary()?) {
-                    events.push(Event::new(Kind::Compact, t));
-                    continue;
-                }
-                if o.interruption()? {
-                    continue;
-                }
-                if let Some(text) = prompt_text(&o.text()?) {
-                    let mut e = Event::new(Kind::Prompt, t);
-                    e.text = Some(Value::String(text));
-                    events.push(e);
-                }
-            }
-        }
-    }
-    xenonet_base::sort::sort_by(&mut events, |a, b| order(a.t - b.t));
-    Ok(events)
 }
 
 // /^(priority|fast)$/i.test(tier ?? "").
@@ -554,120 +416,198 @@ fn priority_tier(tier: Js<'_>) -> Result<bool, TypeError> {
     Ok(pricing::priority_tier(&to_str_or_empty(tier)?))
 }
 
-fn type_is(v: Js<'_>, names: &[&str]) -> Result<bool, TypeError> {
-    let s = to_str(v)?;
-    Ok(names.contains(&s.as_str()))
+/// What Codex says apart from its calls: the model, effort, tier and
+/// provider, and the total so far.
+struct Rollout {
+    model: Val,
+    effort: Val,
+    priority: bool,
+    total: Prim,
+    provider: Value,
 }
 
-static EMPTY: LazyLock<Value> = LazyLock::new(|| Value::Object(serde_json::Map::default()));
-
-/// A Codex rollout's calls, prompts, turn ends and tool calls.
-pub fn codex_events(lines: Vec<Value>, ids: &mut EventIds) -> Result<Vec<Event>, TypeError> {
+/// Calls, prompts, turn ends and tool calls, in the order they happened,
+/// from a session's files (Claude Code's main file and its subagents', a
+/// Codex rollout), as stats counts each line's events (line_events.rs).
+/// `codex` picks the app's mapper: an app that isn't Codex reads as
+/// Claude Code, whose events are put in time order.
+pub fn session_events(codex: bool, files: Vec<File>, ids: &mut EventIds) -> Result<Vec<Event>, TypeError> {
     let ids = &mut ids.0;
-    let lines: Vec<CodexLine> = lines.into_iter().map(|raw| CodexLine { raw }).collect();
     let mut events = Vec::new();
-    // Its prompts are its completed user messages, or in a rollout with none
-    // at all, its user_message events (see lines.rs).
-    let items = has_user_messages(&lines)?;
-    let mut model = ids.val(Some(&Value::String("unknown".into())));
-    let mut effort = ids.val(Some(&Value::Null));
-    let mut priority = false;
-    let mut total = Prim::Num(0.0);
-    let mut provider: Value = Value::Null;
-    for o in &lines {
-        // A line that doesn't say when is left out.
-        let t = o.ts()?;
-        if !t.is_finite() {
-            continue;
-        }
-        let p = Some(o.payload()?);
-        let kind = o.kind()?;
-        if is_str(kind, "session_meta") {
-            provider = nn(prop(p, "model_provider")?).cloned().unwrap_or(Value::Null);
-        }
-        if is_str(kind, "turn_context") {
-            if let Some(m) = nn(prop(p, "model")?) {
-                model = ids.val(Some(m));
+    let mut seen: HashSet<Key> = HashSet::new();
+    let mut said =
+        Rollout { model: ids.val(Some(&Value::String("unknown".into()))), effort: ids.val(Some(&Value::Null)), priority: false, total: Prim::Num(0.0), provider: Value::Null };
+    for f in files {
+        let agent = ids.val(f.agent.as_ref());
+        if codex {
+            let lines: Vec<CodexLine> = f.lines.into_iter().map(|raw| CodexLine { raw }).collect();
+            // A rollout's prompts are its completed user messages, or in one
+            // with none at all, its user_message events (see lines.rs).
+            let file = LineFile { items: has_user_messages(&lines)?, ..LineFile::new(f.agent) };
+            for o in &lines {
+                line_events(&le::codex(o, &file), &agent, &mut seen, &mut said, ids, &mut events)?;
             }
-            if let Some(e) = nn(prop(p, "effort")?) {
-                effort = ids.val(Some(e));
+        } else {
+            let file = LineFile::new(f.agent);
+            for raw in f.lines {
+                let o = ClaudeLine { raw };
+                line_events(&le::claude(&o, &file), &agent, &mut seen, &mut said, ids, &mut events)?;
             }
-            // Older rollouts say the tier with each turn; newer ones say it in
-            // the thread's settings (below), and their turns don't say it.
-            let tier = prop(p, "service_tier")?;
-            if tier.is_some() {
-                priority = priority_tier(tier)?;
-            }
-        } else if is_str(kind, "event_msg") {
-            let said = if items { o.user_message()? } else { o.user_event()? };
-            if let Some(said) = said {
-                let said = Value::String(said);
-                if is_codex_prompt(Some(&said)) {
-                    let mut e = Event::new(Kind::Prompt, t);
-                    e.text = Some(said);
-                    events.push(e);
-                }
-                continue;
-            }
-            let pt = prop(p, "type")?;
-            if is_str(pt, "thread_settings_applied") {
-                // All of the thread's settings, before the turn they apply to:
-                // a tier not said is the default one.
-                priority = priority_tier(opt_prop(prop(p, "thread_settings")?, "service_tier"))?;
-            } else if is_str(pt, "task_complete") {
-                events.push(Event::new(Kind::End, t));
-            } else if is_str(pt, "token_count") && truthy(prop(p, "info")?) {
-                let info = prop(p, "info")?;
-                let now = Prim::of(Some(nn(opt_prop(prop(info, "total_token_usage")?, "total_tokens")).unwrap_or(&Value::from(0))))?;
-                // The same call is reported more than once; count it when the total moves.
-                if at_most(&now, &total) {
-                    continue;
-                }
-                total = now;
-                let u = Some(nn(prop(info, "last_token_usage")?).unwrap_or(&EMPTY));
-                let input = match nn(prop(u, "input_tokens")?) {
-                    Some(v) => Tok::of(Some(v)),
-                    None => Tok::N(max0(Tok::or0(prop(u, "total_tokens")?).prim()?.num() - Tok::or0(prop(u, "output_tokens")?).prim()?.num())),
-                };
-                let cached = Tok::or0(prop(u, "cached_input_tokens")?);
-                let write = Tok::or0(prop(u, "cache_write_input_tokens")?);
-                let fresh = max0(input.prim()?.num() - cached.prim()?.num() - write.prim()?.num());
-                let mut e = Event::new(Kind::Call, t);
-                e.agent = ids.val(Some(&Value::Null));
-                e.model = if truthy(Some(&provider)) && provider.as_str() != Some("openai") {
-                    ids.val(Some(&Value::String(format!("{}/{}", to_str(Some(&provider))?, to_str(model.js())?))))
-                } else {
-                    model.clone()
-                };
-                e.effort = effort.clone();
-                e.tokens = [Tok::N(fresh), cached, write, Tok::N(0.0), Tok::or0(prop(u, "output_tokens")?)];
-                e.priority = Some(Value::Bool(priority));
-                e.window = Some(nn(prop(info, "model_context_window")?).cloned().unwrap_or(Value::Null));
-                events.push(e);
-            }
-        } else if is_str(kind, "response_item") && type_is(prop(p, "type")?, &["function_call", "custom_tool_call", "local_shell_call"])? {
-            let mut e = Event::new(Kind::Tool, t);
-            e.id = ids.val(match nn(prop(p, "call_id")?) {
-                Some(v) => Some(v),
-                None => prop(p, "id")?,
-            });
-            e.name = ids.val(match nn(prop(p, "name")?) {
-                Some(v) => Some(v),
-                None => prop(p, "type")?,
-            });
-            e.agent = ids.val(Some(&Value::Null));
-            events.push(e);
-        } else if is_str(kind, "response_item") && type_is(prop(p, "type")?, &["function_call_output", "custom_tool_call_output", "local_shell_call_output"])? {
-            let mut e = Event::new(Kind::Result, t);
-            e.id = ids.val(match nn(prop(p, "call_id")?) {
-                Some(v) => Some(v),
-                None => prop(p, "id")?,
-            });
-            e.error = Some(Value::Null);
-            events.push(e);
         }
     }
+    if !codex {
+        xenonet_base::sort::sort_by(&mut events, |a, b| order(a.t - b.t));
+    }
     Ok(events)
+}
+
+// Whether stats reads the field a line broke at: every one but the
+// refusal, a usage it reads when it counts the call (usage_of), and a user
+// line's text, which it reads for a subagent's task and for a prompt.
+fn reaches(b: &Broken<'_>, sub: bool) -> bool {
+    match b.at {
+        Field::Refusal | Field::Usage => false,
+        Field::Text => !b.results && (sub || (!truthy(b.meta) && !truthy(b.sidechain) && !truthy(b.compact_summary))),
+        _ => true,
+    }
+}
+
+// A line's events as stats counts them, onto `events`.
+fn line_events(evs: &[LineEvent<'_>], agent: &Val, seen: &mut HashSet<Key>, said: &mut Rollout, ids: &mut Ids, events: &mut Vec<Event>) -> Result<(), TypeError> {
+    for e in evs {
+        // A line that doesn't say when is left out (one that can't say is
+        // broken).
+        let t = e.t;
+        if !t.is_finite() && !matches!(&e.kind, le::Kind::Broken(b) if b.at == Field::Line) {
+            return Ok(());
+        }
+        let sub = truthy(Some(&e.agent));
+        match &e.kind {
+            le::Kind::Settings { model, effort, tier, provider } => match &*e.origin {
+                "session_meta" => said.provider = nn(*provider).cloned().unwrap_or(Value::Null),
+                "turn_context" => {
+                    if let Some(m) = nn(*model) {
+                        said.model = ids.val(Some(m));
+                    }
+                    if let Some(x) = nn(*effort) {
+                        said.effort = ids.val(Some(x));
+                    }
+                    // Older rollouts say the tier with each turn; newer ones
+                    // say it in the thread's settings, and their turns don't
+                    // say it.
+                    if let Some(tier) = tier {
+                        said.priority = priority_tier(*tier)?;
+                    }
+                }
+                // All of the thread's settings, before the turn they apply
+                // to: a tier not said is the default one.
+                "event_msg:thread_settings_applied" => said.priority = priority_tier(tier.flatten())?,
+                _ => {}
+            },
+            le::Kind::Call(c) => {
+                if let Some(total) = c.total {
+                    // Codex reports a call more than once; it's counted when
+                    // the total moves.
+                    let now = Prim::of(Some(nn(opt_prop(total, "total_tokens")).unwrap_or(&Value::from(0))))?;
+                    if at_most(&now, &said.total) {
+                        continue;
+                    }
+                    said.total = now;
+                    let Some(u) = usage_of(evs, c)? else { continue };
+                    let provider = &said.provider;
+                    let mut ev = Event::new(Kind::Call, t);
+                    ev.agent = ids.val(Some(&Value::Null));
+                    ev.model = if truthy(Some(provider)) && provider.as_str() != Some("openai") {
+                        ids.val(Some(&Value::String(format!("{}/{}", to_str(Some(provider))?, to_str(said.model.js())?))))
+                    } else {
+                        said.model.clone()
+                    };
+                    ev.effort = said.effort.clone();
+                    ev.tokens = TokenUsage { speed: Speed { fast: false, priority: said.priority }, ..u.tokens };
+                    ev.window = Some(nn(c.window).cloned().unwrap_or(Value::Null));
+                    events.push(ev);
+                    continue;
+                }
+                // Each of a message's lines repeats its usage: counted once.
+                let id = ids.val(c.message_id);
+                let usage = if truthy(id.js()) && !seen.contains(&id.key()) { usage_of(evs, c)? } else { None };
+                if let Some(u) = usage {
+                    seen.insert(id.key());
+                    let mut ev = Event::new(Kind::Call, t);
+                    ev.agent = agent.clone();
+                    ev.model = ids.val(Some(nn(c.model).unwrap_or(&Value::String("unknown".into()))));
+                    ev.effort = ids.val(c.effort);
+                    ev.tokens = u.tokens;
+                    events.push(ev);
+                }
+            }
+            le::Kind::Tool { id, name, input, call } => {
+                let mut ev = Event::new(Kind::Tool, t);
+                ev.id = ids.val(*id);
+                // A Codex call (a response item, with its type) is named by
+                // its type when it has no name: a local_shell_call is a shell
+                // call.
+                if call.is_some() {
+                    ev.name = ids.val(nn(*name).or(*call));
+                    ev.agent = ids.val(Some(&Value::Null));
+                    events.push(ev);
+                    continue;
+                }
+                ev.name = ids.val(*name);
+                ev.agent = agent.clone();
+                events.push(ev);
+                // The Agent call that starts a subagent names it.
+                if !sub && matches!(to_str(*name)?.as_str(), "Agent" | "Task") {
+                    let description = opt_prop(*input, "description");
+                    if truthy(description) {
+                        let mut ev = Event::new(Kind::Spawn, t);
+                        ev.text = description.cloned();
+                        events.push(ev);
+                    }
+                }
+            }
+            le::Kind::Result { id, error, .. } => {
+                let mut ev = Event::new(Kind::Result, t);
+                ev.id = ids.val(*id);
+                ev.error = Some(error.map_or(Value::Null, Value::Bool));
+                events.push(ev);
+            }
+            // A subagent's end isn't the turn's; an interruption or a
+            // refusal isn't counted.
+            le::Kind::TurnEnd(End::EndTurn | End::TaskComplete { .. }) if !sub => events.push(Event::new(Kind::End, t)),
+            // A compacted context carries on the turn it interrupted.
+            le::Kind::Compact { meta, sidechain } if !sub && !truthy(*meta) && !truthy(*sidechain) => events.push(Event::new(Kind::Compact, t)),
+            le::Kind::Prompt(p) => {
+                let Some(c) = &p.claude else {
+                    let mut ev = Event::new(Kind::Prompt, t);
+                    ev.text = Some(Value::String(p.text.clone()));
+                    events.push(ev);
+                    continue;
+                };
+                // A subagent's first prompt is its task.
+                if sub {
+                    if !js_trim(&p.text).is_empty() {
+                        let mut ev = Event::new(Kind::Task, t);
+                        ev.agent = agent.clone();
+                        ev.text = Some(Value::String(p.text.clone()));
+                        events.push(ev);
+                    }
+                    continue;
+                }
+                if truthy(c.meta) || truthy(c.sidechain) || truthy(c.compact_summary) || c.interruption {
+                    continue;
+                }
+                if let Some(text) = prompt_form(&p.text, c.command.as_ref()) {
+                    let mut ev = Event::new(Kind::Prompt, t);
+                    ev.text = Some(Value::String(text));
+                    events.push(ev);
+                }
+            }
+            le::Kind::Broken(b) if reaches(b, sub) => return Err(b.error()),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 // ---------- adding it up ----------
@@ -791,12 +731,11 @@ pub fn summarize(events: &[Event], app: Js<'_>) -> Result<Out, TypeError> {
                 // A call after the turn ended (a subagent finishing, a hook)
                 // still counts towards it.
                 turn.end = max(turn.end, e.t);
-                let k = &e.tokens;
                 let model = to_str_or_empty(e.model.js())?;
-                let figures =
-                    pricing::Tokens { input: k[0].number()?, cache_read: k[1].number()?, cache_write5m: k[2].number()?, cache_write1h: k[3].number()?, output: k[4].number()? };
-                let parts = pricing::cost_parts(&model, Some(e.t), &figures, truthy(e.fast.as_ref()), truthy(e.priority.as_ref()));
-                let [input, cache_read, write5m, write1h, output] = [k[0].prim()?, k[1].prim()?, k[2].prim()?, k[3].prim()?, k[4].prim()?];
+                let figures = e.tokens.as_ref().try_map(Tok::for_price)?;
+                let parts = pricing::cost_parts(&model, Some(e.t), &figures);
+                let k = e.tokens.as_ref().try_map(Tok::prim)?;
+                let [input, cache_read, write5m, write1h, output] = [k.input, k.cache_read, k.cache_write_5m, k.cache_write_1h, k.output];
                 let tokens = [input.clone(), cache_read.clone(), write5m.add(&write1h), output.clone()];
                 let sum = tokens.iter().fold(Prim::Num(0.0), |a, x| a.add(x));
                 let paid = parts.map_or(0.0, |c| c.total);
@@ -1181,7 +1120,8 @@ impl Kept {
 pub fn session_stats(session_id: &str, files: Vec<File>) -> Result<Out, TypeError> {
     let app = session_id.split(':').next().unwrap_or_default();
     let mut ids = EventIds::default();
-    let events = if app == "codex" { codex_events(files.into_iter().next().map(|f| f.lines).unwrap_or_default(), &mut ids)? } else { claude_events(files, &mut ids)? };
+    // Any app but Codex is read as Claude Code.
+    let events = session_events(xenonet_base::apps::tailed_app(app, "claude") == "codex", files, &mut ids)?;
     let Out::Obj(mut fields) = summarize(&events, Some(&Value::String(app.to_string())))? else { unreachable!() };
     fields.insert(0, ("id".into(), Out::Str(session_id.to_string())));
     Ok(Out::Obj(fields))

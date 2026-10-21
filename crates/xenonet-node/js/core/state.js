@@ -33,11 +33,9 @@ import * as store from "./store.js";
 import { Blocks } from "./blocks/lifecycle.js";
 import { claudeLines, codexLines } from "./lines.js";
 import { NumbatSessions } from "./numbat.js";
-import { OpenCodeSessions, opencodeDbPath } from "./native/opencode.js";
-import { GeminiCliSessions, geminiRoot } from "./native/gemini-cli.js";
-import { CopilotCliSessions, copilotRoot } from "./native/copilot-cli.js";
-import { CursorSessions, cursorEventsFile } from "./native/cursor.js";
+import { nativeReaders } from "../../../../core/native/index.js";
 import { ReportedRuns, observedSessions } from "./reported-runs.js";
+import { tailedApp } from "../../../../core/apps.js";
 import { demoSessions, demoNativeProjects, demoTranscript, demoNarration, demoPicks, startDriver, clientsReady } from "../../../../core/demo.js";
 // The addon as `rust`: #refresh has a `native` of its own, Codex's projects.
 import { native as rust } from "../index.js";
@@ -64,6 +62,13 @@ async function settle(name, fn) {
 
 const visibleResource = (server) => rust.visibleResource(String(server), [...config.hiddenResources]);
 
+// A reader's line in the map's sources (core/native/reader.js), as Rust
+// words it.
+function readerStatus(name, reader, what) {
+  const { state, sessions } = reader.status();
+  return rust.readerStatus(name, String(state), sessions, what);
+}
+
 // Runs `fn` one call at a time. A call while one runs waits for it, and the
 // calls that wait together share the next run, which sees things as they
 // are when it starts.
@@ -80,7 +85,9 @@ function serial(fn) {
 }
 
 export class XenoNetState extends EventEmitter {
-  constructor() {
+  // `native`: a test's own app registry and native readers' table
+  // ({ apps, table }, as core/native/index.js takes them).
+  constructor({ native } = {}) {
     super();
     // The projects folder you chose, if you did (see workspace.js).
     workspace.applyRoot();
@@ -112,15 +119,14 @@ export class XenoNetState extends EventEmitter {
     // report through the gateway (core/reported-runs.js). Never in the demo.
     this.numbat = config.numbatFile && !config.demo ? this.blocks.add(new NumbatSessions({ file: config.numbatFile }), { source: "numbat" }) : null;
     this.reportedRuns = new ReportedRuns();
-    // Experimental native readers (core/native): sessions read from a
-    // harness's own records, when XENONET_READERS names it.
-    this.opencode = config.readers?.has("opencode") ? this.blocks.add(new OpenCodeSessions({ file: opencodeDbPath({ home: config.homeDir }) }), { source: "opencode" }) : null;
-    this.geminiCli = config.readers?.has("gemini-cli") ? this.blocks.add(new GeminiCliSessions({ root: geminiRoot({ home: config.homeDir }) }), { source: "gemini-cli" }) : null;
-    this.copilotCli = config.readers?.has("copilot") ? this.blocks.add(new CopilotCliSessions({ root: copilotRoot({ home: config.homeDir }) }), { source: "copilot" }) : null;
-    this.cursor = config.readers?.has("cursor") ? this.blocks.add(new CursorSessions({ file: cursorEventsFile({ stateDir: config.stateDir }) }), { source: "cursor" }) : null;
+    // Experimental native readers (core/native): sessions read from an
+    // app's own records, for each app the registry gives one that
+    // XENONET_READERS names. Each is { app, source, what, reader }.
+    this.nativeReaders = nativeReaders(config, native);
+    for (const n of this.nativeReaders) this.blocks.add(n.reader, { source: n.source });
     // Sessions from outside XenoNet's Claude Code and Codex readers. The
     // native readers come first, so a run they read wins over numbat's.
-    this.observed = observedSessions([this.opencode, this.geminiCli, this.copilotCli, this.cursor, this.numbat, this.reportedRuns]);
+    this.observed = observedSessions([...this.nativeReaders.map((n) => n.reader), this.numbat, this.reportedRuns]);
     this.live = new LiveTelemetry({
       claudeRoot: config.claudeProjectsDir,
       codexRoot: path.join(config.codexHome, "sessions"),
@@ -175,10 +181,7 @@ export class XenoNetState extends EventEmitter {
     const prev = this.graph?.nodes.filter((n) => n.kind === "session") ?? [];
     // Observed runs, unless XenoNet reads the same run itself.
     this.numbat?.read();
-    this.opencode?.read();
-    this.geminiCli?.read();
-    this.copilotCli?.read();
-    this.cursor?.read();
+    for (const n of this.nativeReaders) n.reader.read();
     const sessions = rust.mergeSessions(prev, codex.status.ok, codex.value, claude.status.ok, claude.value, this.observed.sessions(), [...this.demoTitles]);
     // Where sessions ran is evidence of where the projects are (see
     // scanProjects), so the scan comes after the session lists.
@@ -228,11 +231,8 @@ export class XenoNetState extends EventEmitter {
       codex.status,
       native.status,
       claude.status,
-      ...(this.opencode ? [rust.readerStatus("opencode", String(this.opencode.fileState), this.opencode.runs.size, "OpenCode's database")] : []),
-      ...(this.geminiCli ? [rust.readerStatus("gemini-cli", String(this.geminiCli.rootState), this.geminiCli.runs.size, "Gemini CLI's folder")] : []),
-      ...(this.copilotCli ? [rust.readerStatus("copilot", String(this.copilotCli.rootState), this.copilotCli.runs.size, "Copilot CLI's folder")] : []),
-      ...(this.cursor ? [rust.readerStatus("cursor", String(this.cursor.fileState), this.cursor.runs.size, "the Cursor hook's file")] : []),
-      ...(this.numbat ? [rust.readerStatus("numbat", String(this.numbat.fileState), this.numbat.runs.size, "numbat's file")] : []),
+      ...this.nativeReaders.map((n) => readerStatus(n.source, n.reader, n.what)),
+      ...(this.numbat ? [readerStatus("numbat", this.numbat, "numbat's file")] : []),
       { name: "live", ok: this.live.status.watching, count: this.live.status.files },
       { name: "wiki", ok: !!wiki, count: wiki?.pages.length ?? 0, error: wiki ? undefined : "Agent Wiki folder not found" },
       { name: "search", ok: !this.search.status.errors, count: this.search.status.docs, ms: this.search.status.ms },
@@ -424,7 +424,7 @@ export class XenoNetState extends EventEmitter {
     const saved = [];
     let note = null;
     if (config.demo) this.demoTitles.set(node.id, name);
-    else if (node.app === "codex") {
+    else if (tailedApp(node.app, "claude") === "codex") {
       await renameCodexThread(node.rawId, name);
       saved.push("Codex");
     } else {
@@ -623,7 +623,7 @@ export class XenoNetState extends EventEmitter {
     const node = this.index.get(nodeId);
     if (!node || node.kind !== "session") throw new Error("unknown session");
     let notes = this.live.sessionNotes(nodeId) ?? { prompts: [], messages: [], files: [], edits: [] };
-    if (rust.handoffNeedsTranscript(notes)) notes = rust.handoffNotes(notes, await this.readTranscript(node, { limit: node.app === "codex" ? 60 : 80 }));
+    if (rust.handoffNeedsTranscript(notes)) notes = rust.handoffNotes(notes, await this.readTranscript(node, { limit: tailedApp(node.app, "claude") === "codex" ? 60 : 80 }));
     return { brief: handoffBrief({ node, notes, target }), folder: node.worktree || node.cwd || null };
   }
 
@@ -631,7 +631,7 @@ export class XenoNetState extends EventEmitter {
   // the app-server can't list is read from its rollout (see codex.js).
   readTranscript(node, opts) {
     if (config.demo) return demoTranscript(node.rawId);
-    if (node.app === "codex") return readCodexThread(node.rawId, { ...opts, rollout: async () => (await this.transcripts.files(node.id))[0]?.file ?? null });
+    if (tailedApp(node.app, "claude") === "codex") return readCodexThread(node.rawId, { ...opts, rollout: async () => (await this.transcripts.files(node.id))[0]?.file ?? null });
     return readClaudeSession(node.rawId, opts);
   }
 
