@@ -101,6 +101,9 @@ function xenonet(args, { cwd = root, input = "", env = {} } = {}) {
     let stdout = "", stderr = "";
     proc.stdout.on("data", (d) => (stdout += d));
     proc.stderr.on("data", (d) => (stderr += d));
+    // A command that's done before it reads its input (one refused at
+    // once) closes the pipe first, which isn't the test's to fail on.
+    proc.stdin.on("error", () => {});
     proc.stdin.end(input);
     proc.on("exit", (code) => resolve({ code, stdout, stderr }));
   });
