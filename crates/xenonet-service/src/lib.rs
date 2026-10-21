@@ -18,7 +18,6 @@ pub mod component;
 pub mod config;
 pub mod cores;
 pub mod ctx;
-pub mod environments;
 pub mod events;
 pub mod gateway;
 pub mod glue;
