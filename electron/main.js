@@ -10,8 +10,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerServicePty } from "./service-pty.js";
 import { connectService, ensureService, launcherBin, runtimeDir, xenonetBin } from "../core/components/runtime.js";
-import { currentComponent } from "../core/components/packages.js";
-import { installBundle, installedRuntime, recoverServiceUpdate } from "../core/components/install.js";
+import { installedRuntime, recoverServiceUpdate } from "../core/components/install.js";
 import { componentUpdates, updateComponent } from "../core/components/updates.js";
 import { desktopClient } from "./service-client.js";
 import { desktopServer, pageHeaders } from "./desktop-server.js";
@@ -22,7 +21,7 @@ import { launchedAtLogin } from "./login.js";
 import { createBackground } from "./background.js";
 import { loadShellEnv } from "./shellenv.js";
 import { prefs } from "./prefs.js";
-import { rustBinary, missingBinary } from "./service-runtime.js";
+import { serviceCommand, missingBinary, readyComponents, earlierNotice } from "./service-runtime.js";
 import { installMenu, offerMove, askAboutLogin, uninstall } from "./mac.js";
 import { themeMenuOf } from "./theme-menu.js";
 import { instanceFrom } from "../core/instances.js";
@@ -271,38 +270,40 @@ const serviceAtLogin = createBackground({
   afterStop: () => ensureService(serviceStart),
 });
 
+// A Service or Tools from before 0.4.0 still in use after the update from
+// 0.3.0 (readyComponents): the log says so, and so does a notification,
+// with what to do.
+function tellEarlier(ready) {
+  const notice = earlierNotice(ready);
+  if (!notice) return;
+  desktopLog.warn("desktop.components-earlier", `the ${ready.earlier.join(" and ")} from before 0.4.0 still run${ready.problems.length ? `: ${ready.problems[0]}` : ", waiting for open terminals to close"}`, { fix: notice.body });
+  if (offscreen) return;
+  const note = new Notification({ title: notice.title, body: notice.body });
+  note.on("click", () => showWindow());
+  note.show();
+}
+
 // Starts the service, or finds it running, and connects to it. The service
 // is the xenonet binary (service-runtime.js): the installed Service's in a
-// packaged XenoNet, the checkout's own build in XenoNet Dev.
+// packaged XenoNet, the checkout's own build in XenoNet Dev; for a while
+// after an update from 0.3.0, the node service that XenoNet had.
 async function startServer() {
   const env = serverEnv();
   env.XENONET_RUNTIME_DIR = process.env.XENONET_RUNTIME_DIR || runtimeDir();
-  let serviceRoot = process.env.XENONET_SERVICE_ROOT || root;
+  let installed = null;
   if (app.isPackaged) {
     const bundle = path.join(process.resourcesPath, "components");
-    if (fs.existsSync(path.join(bundle, "components.json"))) await installBundle(bundle, { env, command: !packagedTest });
-    if (!currentComponent("service", env) || !currentComponent("tools", env)) {
-      if (packagedTest) throw new Error("The test bundle is missing its components.");
-      const available = await componentUpdates({ env });
-      for (const component of ["tools", "service"]) {
-        if (currentComponent(component, env)) continue;
-        const item = available.find((p) => p.component === component);
-        if (!item) throw new Error("Install the XenoNet bundle to add its background service and tools.");
-        await updateComponent(item, { env });
-      }
-    }
+    const ready = await readyComponents({ env, bundle: fs.existsSync(path.join(bundle, "components.json")) ? bundle : null, test: packagedTest });
+    tellEarlier(ready);
     await recoverServiceUpdate({ env });
-    const installed = installedRuntime(env);
-    serviceRoot = installed.root;
+    installed = installedRuntime(env);
     Object.assign(env, installed.env);
   }
-  serviceBin = rustBinary({ root: fromSource ? root : null, serviceRoot });
-  if (!serviceBin) throw new Error(missingBinary({ fromSource }));
+  const command = serviceCommand({ root: fromSource ? root : null, serviceRoot: process.env.XENONET_SERVICE_ROOT || root, installed, dev });
+  if (!command) throw new Error(missingBinary({ fromSource }));
+  serviceBin = command.exec;
   serviceEnv = env;
-  // From a checkout, the service has the dev instances' routes
-  // (/api/dev/simulate and capture) unless --prod is passed, as the JS
-  // server it replaces had.
-  serviceStart = { root: serviceRoot, exec: serviceBin, args: ["serve", ...(dev ? ["--dev"] : [])], env };
+  serviceStart = { ...command, env };
   // One registered to start at login is started by launchd or systemd, not
   // beside it; if that fails, Desktop starts its own, as before.
   let how = null;
