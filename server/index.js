@@ -1145,7 +1145,10 @@ async function api(req, res, url) {
   if (req.method === "POST" && route === "/api/hook/grok") {
     const raw = await readJson(req).catch(() => ({}));
     const body = { ...raw };
-    for (const [ours, theirs] of [["session_id", "sessionId"], ["tool_name", "toolName"], ["tool_input", "toolInput"], ["stop_hook_active", "stopHookActive"]]) if (body[ours] === undefined && raw?.[theirs] !== undefined) body[ours] = raw[theirs];
+    // Grok's keys are camelCase. An event inside a subagent's own run names
+    // its subagentType, which the engine reads as a subagent's agent_id: it
+    // hears edit warnings, never its session's messages.
+    for (const [ours, theirs] of [["session_id", "sessionId"], ["tool_name", "toolName"], ["tool_input", "toolInput"], ["stop_hook_active", "stopHookActive"], ["agent_id", "subagentType"]]) if (body[ours] === undefined && raw?.[theirs] !== undefined) body[ours] = raw[theirs];
     if (typeof body.session_id === "string" && /^[0-9a-f-]{36}$/i.test(body.session_id)) {
       const id = `grok:${body.session_id}`;
       const ok = await verify.check(req.socket, id, { hook: true });

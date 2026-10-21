@@ -681,7 +681,12 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             Value::Object(o) => o.clone(),
             _ => serde_json::Map::new(),
         };
-        for (ours, theirs) in [("session_id", "sessionId"), ("tool_name", "toolName"), ("tool_input", "toolInput"), ("stop_hook_active", "stopHookActive")] {
+        // Grok's keys are camelCase. An event inside a subagent's own run
+        // names its subagentType, which the engine reads as a subagent's
+        // agent_id: it hears edit warnings, never its session's messages.
+        for (ours, theirs) in
+            [("session_id", "sessionId"), ("tool_name", "toolName"), ("tool_input", "toolInput"), ("stop_hook_active", "stopHookActive"), ("agent_id", "subagentType")]
+        {
             if !body.contains_key(ours) {
                 if let Some(v) = raw.get(theirs) {
                     body.insert(ours.into(), v.clone());
