@@ -7,7 +7,10 @@ import * as tar from "tar";
 import { activatePackage, recoverServiceUpdate } from "../core/components/install.js";
 import { digest, stagePackage, selectComponent, currentComponent } from "../core/components/packages.js";
 
-async function fixture(t, { terminals = [], stopWorks = true, failNew = false, wrongVersion = false } = {}) {
+// `stopAnswer`: what the service's answer to `stop` does: "answered", lost
+// with its connection ("dropped", as on a busy machine where the service
+// shuts down before its answer gets out), or a refusal ("refused").
+async function fixture(t, { terminals = [], stopWorks = true, failNew = false, wrongVersion = false, stopAnswer = "answered" } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-activation-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const env = { XENONET_RUNTIME_DIR: path.join(dir, "runtime") };
@@ -40,7 +43,9 @@ async function fixture(t, { terminals = [], stopWorks = true, failNew = false, w
         if (method === "status") return state;
         assert.equal(method, "stop");
         stops++;
+        if (stopAnswer === "refused") throw new Error("XenoNet has running terminals. Close them first, or use --force.");
         if (stopWorks) state = null;
+        if (stopAnswer === "dropped") throw new Error("XenoNet disconnected; the action was not retried.");
         return { stopping: true };
       } };
     },
@@ -76,6 +81,33 @@ test("service startup failure restores and starts the previous version", async (
 test("a service that refuses to stop cannot masquerade as a successful update", async (t) => {
   const f = await fixture(t, { stopWorks: false });
   await assert.rejects(activatePackage(f.file, f.item, f), /did not stop/);
+  assert.equal(currentComponent("service", f.env).version, "1.0.0");
+  assert.equal(f.state.version, "1.0.0");
+  assert.ok(!f.starts.includes("1.1.0"));
+});
+
+test("a stop whose answer is lost with the connection still updates, once the old service has gone", async (t) => {
+  const f = await fixture(t, { stopAnswer: "dropped" });
+  assert.equal((await activatePackage(f.file, f.item, f)).status, "updated");
+  assert.equal(f.stops, 1);
+  assert.deepEqual(f.starts, ["1.1.0"], "no rollback to the old version");
+  assert.equal(currentComponent("service", f.env).version, "1.1.0");
+  assert.equal(f.state.version, "1.1.0");
+  assert.equal(fs.existsSync(f.journal), false);
+});
+
+test("a lost answer to stop from a service that stays up is a failed stop, and nothing is switched", async (t) => {
+  const f = await fixture(t, { stopAnswer: "dropped", stopWorks: false });
+  await assert.rejects(activatePackage(f.file, f.item, f), /did not stop/);
+  assert.equal(currentComponent("service", f.env).version, "1.0.0");
+  assert.equal(f.state.version, "1.0.0");
+  assert.ok(!f.starts.includes("1.1.0"));
+  assert.equal(fs.existsSync(f.journal), false);
+});
+
+test("a service that refuses to stop fails the update with its reason", async (t) => {
+  const f = await fixture(t, { stopAnswer: "refused" });
+  await assert.rejects(activatePackage(f.file, f.item, f), /previous version was restored\. XenoNet has running terminals/);
   assert.equal(currentComponent("service", f.env).version, "1.0.0");
   assert.equal(f.state.version, "1.0.0");
   assert.ok(!f.starts.includes("1.1.0"));
