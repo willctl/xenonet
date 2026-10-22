@@ -17,7 +17,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use xenonet_base::network::{Host, Incoming, Kind, Me, Net, Outgoing, To};
+use xenonet_base::network::{Host, Incoming, Kind, Me, Net, Outgoing, Sink, To};
 use xenonet_service::config::Config;
 use xenonet_service::cores::{Cores, Engine, State, R};
 use xenonet_service::wire::{Emitter, VendorReaders, WireEnv};
@@ -701,4 +701,27 @@ async fn presence_says_when_you_last_worked_at_this_console() {
     n.link_up().await;
     let sent = n.sent("studio", Kind::Presence).pop().unwrap();
     assert_eq!((sent["you"].clone(), sent["youAt"].clone()), (json!(false), Value::Null), "with actors off, XenoNet doesn't know");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn messages_from_one_host_reach_a_session_in_the_order_they_came() {
+    let n = net3("order");
+    n.link_up().await;
+    // The link hands the sink each body as it arrives, without waiting:
+    // the sink keeps their order however busy the engine is.
+    let sink = network::EngineSink::new(n.w("laptop"));
+    for i in 0..20u32 {
+        let body = json!({ "schema": "network/message/v1", "mid": format!("msg_00000000-0000-4000-8000-{i:012}"), "sender": A, "senderKind": "agent", "auth": { "method": "session", "strength": "strong" }, "target": B, "body": format!("m{i}"), "replyTo": null, "scope": "direct", "kind": "message", "hops": 0, "at": now() });
+        sink.receive(Incoming { from: "studio".into(), kind: Kind::Message, body, at: now(), from_window_host: true });
+    }
+    let mut heard: Vec<String> = Vec::new();
+    let end = std::time::Instant::now() + Duration::from_secs(20);
+    while heard.len() < 20 {
+        assert!(std::time::Instant::now() < end, "waited 20 s for all twenty: {heard:?}");
+        let got = n.e("laptop").inbox(B, Duration::ZERO).await.unwrap();
+        heard.extend(got.as_array().unwrap().iter().map(|m| m["text"].as_str().unwrap().to_string()));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let want: Vec<String> = (0..20).map(|i| format!("m{i}")).collect();
+    assert_eq!(heard, want);
 }

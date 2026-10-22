@@ -117,20 +117,52 @@ pub fn plug(w: &Arc<World>, net: Arc<dyn Net>) -> Arc<EngineSink> {
     EngineSink::new(w)
 }
 
-/// What the network calls in the engine. Each call runs on a blocking
-/// thread, since the engine reads git and its database.
+/// A call from the link, for the sink's own thread.
+type Job = Box<dyn FnOnce(&World) + Send + 'static>;
+
+/// What the network calls in the engine. The calls run one at a time, in
+/// the order the link made them, on a thread of the sink's own: the engine
+/// reads git and its database, and two messages from one host must reach
+/// its sessions in the order they were sent, which separate blocking
+/// threads don't keep.
 pub struct EngineSink {
     w: Weak<World>,
+    jobs: Option<Mutex<std::sync::mpsc::Sender<Job>>>,
 }
 
 impl EngineSink {
     pub fn new(w: &Arc<World>) -> Arc<EngineSink> {
-        Arc::new(EngineSink { w: Arc::downgrade(w) })
+        let weak = Arc::downgrade(w);
+        let (tx, rx) = std::sync::mpsc::channel::<Job>();
+        let worker = weak.clone();
+        // The thread ends when the sink, and so the sender, goes.
+        let spawned = std::thread::Builder::new().name("xenonet-net-sink".into()).spawn(move || {
+            while let Ok(job) = rx.recv() {
+                if let Some(w) = worker.upgrade() {
+                    job(&w);
+                }
+            }
+        });
+        let jobs = match spawned {
+            Ok(_) => Some(Mutex::new(tx)),
+            Err(e) => {
+                w.log("warn", "net.sink", &format!("the network's own thread didn't start ({e}); what arrives runs on the shared ones"));
+                None
+            }
+        };
+        Arc::new(EngineSink { w: weak, jobs })
     }
 
     fn run(&self, f: impl FnOnce(&World) + Send + 'static) {
+        let mut job: Job = Box::new(f);
+        if let Some(jobs) = &self.jobs {
+            match jobs.locked().send(job) {
+                Ok(()) => return,
+                Err(e) => job = e.0,
+            }
+        }
         if let Some(w) = self.w.upgrade() {
-            w.spawn_blocking(f);
+            w.spawn_blocking(move |w| job(w));
         }
     }
 }
