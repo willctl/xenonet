@@ -1,7 +1,7 @@
 {
   "name": "xenonet",
   "displayName": "XenoNet",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Connects Claude Code sessions to XenoNet, so they can see each other, message each other and claim files. Install XenoNet first, since the plugin runs the xenonet command from your PATH.",
   "author": {
     "name": "willctl",
