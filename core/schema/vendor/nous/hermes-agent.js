@@ -53,8 +53,8 @@ export const StateDb = vendor(
   {
     title: "Hermes Agent's session database",
     description:
-      "The metadata XenoNet reads from ~/.hermes/state.db (and each profile's), opened read only for a moment, with named columns. The version is the database's own schema_version: 31 now, and the older layouts before it, read by the columns PRAGMA table_info lists.",
-    versions: "<=31",
+      "The metadata XenoNet reads from ~/.hermes/state.db (and each profile's), opened read only for a moment, with named columns. The version is the database's own schema_version: through 32, read by the columns PRAGMA table_info lists. Version 32 records additive structures introduced under 31; the metadata columns read here are unchanged.",
+    versions: "<=32",
   },
 );
 

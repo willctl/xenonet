@@ -1,7 +1,7 @@
 // A made-up Hermes Agent install for the observer's tests and the
 // benchmark: a root folder laid out as Hermes lays out ~/.hermes, its files
 // written as Hermes writes them, and a session database in its current
-// layout (schema 31) or an older one. The content columns are filled too,
+// layout (schemas 31 and 32) or an older one. The content columns are filled too,
 // with made-up text, so tests can check none of it is read. Nothing here
 // comes from anyone's real install.
 import fs from "node:fs";
@@ -103,7 +103,7 @@ const OLD = `
 // A session database at `file`, in the current layout or the old one, in
 // WAL mode as Hermes keeps it. Its helpers take times in epoch
 // milliseconds and write them as Hermes does, in seconds.
-export function stateDb(file, { layout = "current", version = layout === "current" ? 31 : 12 } = {}) {
+export function stateDb(file, { layout = "current", version = layout === "current" ? 32 : 12 } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec("PRAGMA journal_mode = WAL");

@@ -124,8 +124,8 @@ test("background processes and scheduled jobs, never their commands, names or pr
 // A database in the current layout: a TUI session at work in atlas, with a
 // command, an edit (a relative path, an absolute one, one that isn't
 // text), a broken tool_calls, an archived generation, and an old session.
-function busyDb(file) {
-  const db = stateDb(file);
+function busyDb(file, version) {
+  const db = stateDb(file, { version });
   db.session({ id: "s-old", source: "cli", cwd: "/Users/ada/ledger", startedAt: T - 3 * 3600e3, endedAt: T - 2 * 3600e3, endReason: "cli_close" });
   db.message({ session: "s-old", role: "tool", tool: "terminal", at: T - 2 * 3600e3 });
   db.session({ id: "s1", source: "tui", cwd: "/Users/ada/atlas", repo: "/Users/ada/atlas", startedAt: T - 5 * MIN, activityAt: T - 10e3, activity: "executing tool: terminal" });
@@ -140,13 +140,13 @@ function busyDb(file) {
   return db;
 }
 
-test("the session database: what's new since the last read, by named columns, and paths taken out by SQLite", () => {
+for (const version of [31, 32]) test(`the session database, schema ${version}: incremental metadata and paths taken out by SQLite`, () => {
   const root = makeRoot(path.join(tmp(), ".hermes"));
   const file = path.join(root, "state.db");
-  const db = busyDb(file);
+  const db = busyDb(file, version);
   const first = readStateDb(file, { sinceMs: T - 10 * MIN });
   assert.equal(first.state, "ok");
-  assert.equal(first.version, "31");
+  assert.equal(first.version, String(version));
   assert.deepEqual(first.messages.map((m) => [m.session_id, m.role, m.tool_name]), [["s1", "user", null], ["s1", "assistant", null], ["s1", "tool", "write_file"], ["s1", "tool", "terminal"], ["s1", "assistant", null], ["s1", "assistant", null]], "the last ten minutes only, and not the archived generation");
   assert.deepEqual(first.toolPaths.map((t) => [t.tool, t.path]), [["write_file", "src/app.ts"], ["patch", "/Users/ada/atlas/README.md"], ["write_file", null]]);
   assert.deepEqual(first.sessions.map((s) => [s.id, s.source, s.cwd, s.git_repo_root, s.last_activity_description]), [["s1", "tui", "/Users/ada/atlas", "/Users/ada/atlas", "executing tool: terminal"]]);
@@ -162,6 +162,19 @@ test("the session database: what's new since the last read, by named columns, an
   assert.deepEqual(next.messages.map((m) => m.tool_name), ["terminal"]);
   assert.deepEqual(next.sessions.map((s) => [s.id, s.ended_at, s.end_reason]), [["s1", (T + 6000) / 1000, "tui_close"]]);
   db.close();
+});
+
+test("the session database: versions beyond 32 still report drift", () => {
+  const file = path.join(tmp(), "future.db");
+  const db = stateDb(file, { version: 33 });
+  db.session({ id: "s1", source: "tui", cwd: "/Users/ada/atlas", startedAt: T - MIN });
+  db.close();
+  const r = readStateDb(file, { sinceMs: T - 10 * MIN });
+  assert.equal(r.state, "ok");
+  assert.equal(r.version, "33");
+  assert.deepEqual(r.sessions.map((s) => s.id), ["s1"]);
+  assert.deepEqual(kinds("state-db"), [["new-version", null]]);
+  assert.ok(!JSON.stringify(r).includes(SECRET));
 });
 
 test("the session database: a call in tool_calls that isn't an object is passed over, and the read goes on", () => {
