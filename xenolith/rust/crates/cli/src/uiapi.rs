@@ -440,7 +440,7 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
             if action == "undo" { held::undo(wiki_dir, batch, index as usize) } else { held::decide(wiki_dir, batch, index as usize, action, by) }
         } else {
             let slug = body["slug"].as_str().unwrap_or("");
-            if action == "ask" { held::undo_request(wiki_dir, batch, slug) } else { held::revert(wiki_dir, batch, slug) }
+            if action == "ask" { held::undo_request(wiki_dir, batch, slug, by) } else { held::revert(wiki_dir, batch, slug) }
         };
         // Each decision goes in the audit chain with who made it, whatever came of it.
         let outcome = match &r {
@@ -471,6 +471,46 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
             Err(held::Error::Conflict(m)) => json_reply(409, &json!({ "error": m, "conflict": true })),
             Err(held::Error::Wiki(wiki::Error::Wiki(m))) => json_reply(409, &json!({ "error": m })),
             Err(held::Error::Wiki(e)) => json_reply(500, &json!({ "error": e.to_string() })),
+        };
+    }
+    if path == "/api/note" && method == "POST" {
+        // A note from the person (the owner key): the only notes besides an undo request whose
+        // source may be "user", which the curator's holds and forget requests trust.
+        let Some(body) = read_body(req).ok().and_then(|b| serde_json::from_str::<Value>(&b).ok()) else {
+            return json_reply(400, &json!({ "error": "Send JSON: {\"title\": \"...\", \"body\": \"...\"?, \"pages\": [\"<slug>\"]?, \"space\": \"<id>\"?}" }));
+        };
+        let dir = match held_dir(wiki_dir, body["space"].as_str()) {
+            Ok(d) => d,
+            Err(r) => return r,
+        };
+        let note = inbox::NoteInput {
+            kind: "log".into(),
+            source: "user".into(),
+            app: if by == "cli" { "cli" } else { "window" }.into(),
+            title: body["title"].as_str().unwrap_or("").into(),
+            body: body["body"].as_str().unwrap_or("").into(),
+            pages: body.get("pages").cloned().unwrap_or(Value::Null),
+            ..Default::default()
+        };
+        return match inbox::submit_note(&dir, &note, if by == "cli" { "cli" } else { "ui" }, "", &inbox::By::Owner(by)) {
+            Ok(r) => {
+                entry.result = Some("note queued".into());
+                audit::best_effort(
+                    &AppPaths::current(),
+                    "write",
+                    by,
+                    vec![
+                        ("space", body["space"].as_str().filter(|s| !s.trim().is_empty()).map(|s| json!(take_chars(s, 80))).unwrap_or(Value::Null)),
+                        ("note", json!(r.id)),
+                        ("duplicate", if r.duplicate { json!(true) } else { Value::Null }),
+                        ("content", json!(audit::content_hash(&format!("{}\n{}", note.title, note.body)))),
+                        ("transport", json!("window")),
+                    ],
+                );
+                json_reply(201, &json!({ "note": r.id, "duplicate": r.duplicate }))
+            }
+            Err(wiki::Error::Wiki(m)) => json_reply(400, &json!({ "error": m })),
+            Err(e) => json_reply(500, &json!({ "error": e.to_string() })),
         };
     }
     if (path == "/api/ask" || path == "/api/ask/cancel") && method == "POST" {
@@ -619,7 +659,7 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
                         &json!({
                             "id": id, "rel": rel, "status": status, "filed": rel.starts_with(".curator/"),
                             "app": meta.str("app"), "title": meta.str("title"), "submitted": meta.str("submitted"), "kind": meta.str("kind"),
-                            "source": meta.str("source"), "body": body.trim(),
+                            "source": inbox::trusted_source(&meta.str("source"), &meta.str("by")), "by": meta.str("by"), "body": body.trim(),
                         }),
                     )
                 }

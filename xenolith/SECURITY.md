@@ -22,7 +22,7 @@ The curator and Ask send selected content to the configured model through its CL
 
 Notes and saved change records are untrusted input. Paths from those records must remain inside the wiki. Links and Windows reparse points below the configured wiki root are refused by the audited storage paths. The configured root itself may be a link. These checks do not defend against a process with write access racing filesystem changes, or against hard links created by the owner.
 
-Automatic approval applies flagged curator changes. Choose manual approval when changes should wait for review. Source labels come from the caller and are not authenticated proof of authorship.
+Automatic approval applies flagged curator changes. Choose manual approval when changes should wait for review. The server stamps each note with who sent it (`by`: the MCP client on this machine, or a token's subject), and only the owner's own notes, made with the owner key, may have the source `user` that holds and forget requests trust. A process that can write the wiki folder directly can still forge a note file; the folder's permissions are that boundary.
 
 ## Development and publication
 

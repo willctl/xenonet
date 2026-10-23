@@ -137,6 +137,15 @@ and text) only once per day. Since v1.4 they also take an optional `source`:
 - `external`: a web page, an email, a document or another tool's output.
 - `agent`: the app's own conclusion. This is the default.
 
+The server stamps each note with who sent it, as `by`: `local:<MCP client>`
+for a process on this machine, or a token's subject (`actor:hermes`,
+`machine:laptop`). The caller's `source` never says who it is. From an app,
+`user` is recorded as `agent`. Only your own notes carry `user`: those you
+leave with `xenolith note "<title>" [--body <text>] [--page <slug>]`
+(`by: cli`) or through the window with the [owner key](#the-owner-key)
+(`by: owner`), such as Revert's request to undo a change. A note file that
+claims `user` without that stamp counts as `agent`.
+
 Read results turn remote images into plain links, so no app fetches a URL from
 the wiki without someone clicking it. `writeMode: "direct"` in `config.json`
 restores the v1.1 behavior: immediate deterministic page and log writes, and no
@@ -345,7 +354,9 @@ as XenoNet's gateway or a tunnel of your own. The token is kept in
 
 The curator takes entries at `/sync/v1/spaces/<kind>/<name>/entries`: a note
 needs append, a replaced page needs write. Each entry is taken once, however
-often it is sent. A page replaced on the other machine carries the version it
+often it is sent, and is stamped as the pushing token's subject's
+(`by: machine:laptop`), so a `user` source from the other machine counts as
+`agent` here. A page replaced on the other machine carries the version it
 was written against. When the curator's page has changed since, the push gets
 **409** and the write becomes a **proposal**: a change that waits for your OK
 even when approvals are automatic, listed by `xenolith held --space <space>`
@@ -397,9 +408,10 @@ unit runs it. It never reads Codex's credential files.
   silently.
 - **Trust gate.** Code, not only the prompt, flags a page change in two cases:
   - any note behind it is `external`;
-  - its notes are not all from `user`, and it changes a `preference` page, adds
-    an instruction-like line ("Always ...", "from now on", "ignore ..."), or adds
-    a link to anything but this machine.
+  - its notes are not all yours (`user`, stamped by the server, not claimed by
+    an app), and it changes a `preference` page, adds an instruction-like line
+    ("Always ...", "from now on", "ignore ..."), or adds a link to anything but
+    this machine.
 
   Flagged changes go to `.curator/held/<batch>.json`. The **Approvals** setting
   at the top of the window's Inbox decides what happens next:
@@ -470,10 +482,11 @@ unit runs it. It never reads Codex's credential files.
   audit records, held changes, Ask, the log, the inbox and the request logs.
   Then it redacts every copy and leaves a tombstone in `.curator/forgotten/` that
   records how much it redacted, never the text. `xenolith forget "<text>"
-  [--yes]` does the same from a terminal. When you ask an app to make the wiki
-  forget something (a note from `user`), the curator records a forget request
-  instead of copying the text anywhere, and the Inbox asks for your OK. Forget
-  does not rewrite a git history of the wiki.
+  [--yes]` does the same from a terminal. When your own note asks the wiki to
+  forget something (`xenolith note "FORGET ..."`, a note with source `user`),
+  the curator records a forget request instead of copying the text anywhere,
+  and the Inbox asks for your OK. An app's request to forget is not recorded,
+  even when it says you asked. Forget does not rewrite a git history of the wiki.
 - **Nudge before stopping (opt-in).** The plugin also registers a Stop hook
   (`xenolith hook stop`, for Claude Code and Codex). With `"hooks": {"nudge":
   true}` in `config.json`, the hook asks the model to log what is worth keeping

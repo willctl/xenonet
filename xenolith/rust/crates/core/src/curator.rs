@@ -967,7 +967,8 @@ fn prepare_plan(wiki_dir: &Path, plan: &Value, ctx: &Ctx, batch_id: &str) -> Res
         if reasons.is_empty() {
             writes.push(w);
         } else {
-            let notes = w.note_ids.iter().filter_map(|id| ctx.notes.iter().find(|n| &n.id == id)).map(|n| json!({ "id": n.id, "app": n.app, "title": n.title, "source": n.source })).collect();
+            let notes =
+                w.note_ids.iter().filter_map(|id| ctx.notes.iter().find(|n| &n.id == id)).map(|n| json!({ "id": n.id, "app": n.app, "title": n.title, "source": n.source, "by": n.by })).collect();
             held.push(HeldOp { write: w, reasons, op: op.clone(), notes, kind: String::new() });
         }
     }

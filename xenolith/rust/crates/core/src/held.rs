@@ -632,9 +632,9 @@ pub fn revert(wiki_dir: &Path, batch: &str, slug: &str) -> Result<Value, Error> 
     out
 }
 
-/// When a change cannot be restored as a whole: a note from the person asking the curator to undo it
-/// on the current page, with what the change did.
-pub fn undo_request(wiki_dir: &Path, batch: &str, slug: &str) -> Result<Value, Error> {
+/// When a change cannot be restored as a whole: a note from the person (`by`: "owner" or "cli", who
+/// showed the owner key) asking the curator to undo it on the current page, with what the change did.
+pub fn undo_request(wiki_dir: &Path, batch: &str, slug: &str, by: &str) -> Result<Value, Error> {
     check_batch(batch)?;
     if !SLUG_RE.is_match(slug) {
         return Err(Error::NotFound("no such page".into()));
@@ -652,7 +652,7 @@ pub fn undo_request(wiki_dir: &Path, batch: &str, slug: &str) -> Result<Value, E
     }
     let note =
         inbox::NoteInput { kind: "log".into(), source: "user".into(), app: "window".into(), title: format!("Undo the curator's change to {slug}"), body, pages: json!([slug]), ..Default::default() };
-    let r = inbox::submit_note(wiki_dir, &note, "ui", "xenolith window")?;
+    let r = inbox::submit_note(wiki_dir, &note, "ui", "xenolith window", &inbox::By::Owner(by))?;
     Ok(json!({ "note": r.id }))
 }
 
@@ -798,7 +798,7 @@ mod tests {
             let rec = json!({ "batch": batch, "changes": [{ "slug": "p", "action": "patched", "baseHash": hash_text(private, 16), "newHash": hash_text(&base, 16), "history": rel }] });
             fs::write(audit.join("fixture.json"), rec.to_string()).unwrap();
             assert!(revert(&w, batch, "p").is_err(), "revert accepted {rel}");
-            assert!(undo_request(&w, batch, "p").is_err(), "undo request accepted {rel}");
+            assert!(undo_request(&w, batch, "p", "owner").is_err(), "undo request accepted {rel}");
             assert_eq!(fs::read_to_string(w.join("pages/p.md")).unwrap(), base);
             assert!(inbox::list_notes(&w).unwrap().is_empty());
         }
@@ -842,7 +842,7 @@ mod tests {
         )
         .unwrap();
         assert!(revert(&w, batch, "p").is_err());
-        assert!(undo_request(&w, batch, "p").is_err());
+        assert!(undo_request(&w, batch, "p", "owner").is_err());
         assert_eq!(fs::read_to_string(w.join("pages/p.md")).unwrap(), base);
         assert!(inbox::list_notes(&w).unwrap().is_empty());
         fs::remove_file(outside).unwrap();
@@ -961,9 +961,9 @@ mod tests {
 
         fs::write(w.join("pages/p.md"), after.replace("v2", "v2 and a human edit")).unwrap();
         assert!(matches!(revert(&w, batch, "p"), Err(Error::Conflict(_))), "edited since: refuse");
-        let asked = undo_request(&w, batch, "p").unwrap();
+        let asked = undo_request(&w, batch, "p", "owner").unwrap();
         let note = fs::read_to_string(w.join("inbox").join(format!("{}.md", asked["note"].as_str().unwrap()))).unwrap();
-        assert!(note.contains("source: user") && note.contains("Undo the curator's change to [[p]]") && note.contains("v1"), "{note}");
+        assert!(note.contains("source: user") && note.contains("by: owner") && note.contains("Undo the curator's change to [[p]]") && note.contains("v1"), "{note}");
 
         fs::write(w.join("pages/p.md"), &after).unwrap();
         revert(&w, batch, "p").unwrap();
