@@ -788,14 +788,15 @@ folder in your home. On Windows:
 
 | Path | What |
 | --- | --- |
-| `%APPDATA%\Xenolith\config.json` | `wikiDir`, `version`, `httpPort`, `writeMode`, `curator`, `logs` |
+| `%APPDATA%\Xenolith\config.json` | `wikiDir`, `version`, `httpPort`, `writeMode`, `curator`, `logs`, `publicUrl` |
+| `%APPDATA%\Xenolith\access.json`, `sync.json`, `peers\` | who may use which space, tokens' hashes, sync peers and their tokens (yours alone) |
 | `%LOCALAPPDATA%\Xenolith\runtime\` | `xenolith.exe` and `ui/` (the Xenolith window) |
 | `%LOCALAPPDATA%\Xenolith\service\` | the service's ini |
 | `%LOCALAPPDATA%\Xenolith\tray\` | `xenolith-tray.exe`, its ini, its logon-task definition, icons and the window's data folder (`webview\`) |
 | Task Scheduler `\XenolithTray`, `HKCU\...\CurrentVersion\Run\XenolithTray` | start the tray at sign-in |
 | `%LOCALAPPDATA%\Xenolith\curator\codex-home\` | the curator's own Codex home and sign-in (Local, not Roaming: it stays on this PC) |
 | `%LOCALAPPDATA%\Xenolith\logs\` | `service.log`, `curator.log`, `tray.log`, `requests-*.jsonl`, `http-sessions.json` |
-| `%LOCALAPPDATA%\Xenolith\state\` | `install-state.json` (what the installer created, for uninstall) |
+| `%LOCALAPPDATA%\Xenolith\state\` | `install-state.json` (what the installer created, for uninstall), `audit\chain.jsonl`, `runtime\owner.key` (the [owner key](#the-owner-key), new at each service start) |
 | `%LOCALAPPDATA%\Xenolith\marketplace\` | local marketplace (Claude and Codex formats) and the rendered plugin |
 | `%LOCALAPPDATA%\Xenolith\paste-into-app-settings.md` | the pointer text, for app personal-instruction settings |
 | `~/Xenolith/` | the wiki (a folder of your documents, not app data) |
