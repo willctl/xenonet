@@ -52,7 +52,7 @@ jobs:
         shell: bash
         run: |
           rustup toolchain install
-          if [ "${{ matrix.platform }}" = mac ]; then rustup target add aarch64-apple-darwin x86_64-apple-darwin; fi
+          if [ "${{ matrix.platform }}" = mac ]; then rustup target add aarch64-apple-darwin x86_64-apple-darwin; rustup component add llvm-tools; fi
       - run: npm run release:build
         env:
           XENONET_SIGN: ${{ vars[matrix.sign] }}
