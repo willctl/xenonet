@@ -113,7 +113,7 @@ fn platform_secret(target: &str) -> Option<String> {
         let bytes = std::slice::from_raw_parts(c.CredentialBlob, c.CredentialBlobSize as usize);
         // Generic credentials written by most tools hold UTF-16LE text; fall back to UTF-8.
         let text = if bytes.len() % 2 == 0 && bytes.len() >= 2 && bytes[1] == 0 {
-            String::from_utf16(&bytes.as_chunks::<2>().0.iter().map(|p| u16::from_le_bytes(*p)).collect::<Vec<_>>()).ok()
+            String::from_utf16(&bytes.chunks_exact(2).map(|p| u16::from_le_bytes([p[0], p[1]])).collect::<Vec<_>>()).ok()
         } else {
             String::from_utf8(bytes.to_vec()).ok()
         };
