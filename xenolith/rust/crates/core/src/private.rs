@@ -23,13 +23,23 @@ pub fn write(file: &Path, text: &str, readers: &[String]) -> std::io::Result<()>
         f.write_all(text.as_bytes())?;
         f.sync_all()?;
         drop(f);
-        fs::rename(&tmp, file)
+        let mut i = 0u64;
+        loop {
+            match fs::rename(&tmp, file) {
+                Err(e) if i < 20 && crate::wiki::retryable(&e) => {
+                    std::thread::sleep(std::time::Duration::from_millis(20 + i * 20));
+                    i += 1;
+                }
+                r => return r,
+            }
+        }
     })();
     if r.is_err() {
         let _ = fs::remove_file(&tmp);
     }
     r?;
     crate::wiki::fsync_dir(dir);
+    crate::readcache::forget(file);
     Ok(())
 }
 

@@ -6,6 +6,10 @@
 //!
 //! The chain shows tampering; it can't prevent it: whoever can write the file can rewrite the
 //! whole chain. Keep a copy of the last hash elsewhere to pin it.
+//!
+//! Each line is on disk before append returns (the file synced, and its folder when the file is
+//! new). A line that can't be written is never silent: best_effort counts it for this process,
+//! and /status and `xenolith status` say so (health).
 
 use crate::paths::AppPaths;
 use crate::text::{local_iso, now, sha256_hex};
@@ -14,6 +18,12 @@ use serde_json::{Map, Value, json};
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// Lines this process could not write, and the last reason (health()).
+static FAILURES: AtomicUsize = AtomicUsize::new(0);
+static LAST_FAILURE: Mutex<Option<String>> = Mutex::new(None);
 
 pub const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
@@ -90,9 +100,14 @@ pub fn append_to(file: &Path, kind: &str, who: &str, fields: Vec<(&str, Value)>)
     o.insert("hash".into(), json!(hash));
     let line = Value::Object(o);
     let r = (|| -> std::io::Result<()> {
+        let new = !file.exists();
         let mut f = fs::OpenOptions::new().create(true).append(true).open(file)?;
         f.write_all(format!("{line}\n").as_bytes())?;
-        f.sync_data()
+        f.sync_data()?;
+        if new {
+            wiki::fsync_dir(dir);
+        }
+        Ok(())
     })();
     guard.release();
     r?;
@@ -153,10 +168,38 @@ pub fn content_hash(text: &str) -> String {
 }
 
 /// For a refusal line: the folder may be gone or unwritable, and a refusal must still be answered.
+/// A line that isn't written is counted, and /status says so.
 pub fn best_effort(paths: &AppPaths, kind: &str, who: &str, fields: Vec<(&str, Value)>) {
     if let Err(e) = append(paths, kind, who, fields) {
-        eprintln!("[xenolith] audit log not written: {}", wiki::Error::to_string(&e));
+        let why = wiki::Error::to_string(&e);
+        eprintln!("[xenolith] audit log not written: {why}");
+        FAILURES.fetch_add(1, Ordering::SeqCst);
+        *LAST_FAILURE.lock().unwrap_or_else(|e| e.into_inner()) = Some(format!("{} {why}", local_iso(&now())));
     }
+}
+
+/// Whether a line could be added now: the folder exists or can be made, and the file opens for
+/// appending (nothing is written).
+pub fn writable(paths: &AppPaths) -> std::result::Result<(), String> {
+    let file = chain_file(paths);
+    fs::create_dir_all(file.parent().unwrap_or(Path::new(".")))
+        .and_then(|_| fs::OpenOptions::new().create(true).append(true).open(&file))
+        .map(|_| ())
+        .map_err(|e| format!("{}: {e}", wiki::disp(&file)))
+}
+
+/// The chain's health for /status: lines this process failed to write, the last reason, and
+/// whether a line could be written now. `problem` is what to tell the person, if anything.
+pub fn health(paths: &AppPaths) -> (Value, Option<String>) {
+    let failures = FAILURES.load(Ordering::SeqCst);
+    let last = LAST_FAILURE.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let now = writable(paths);
+    let problem = match (&now, failures) {
+        (Err(e), _) => Some(format!("the audit chain can't be written: {e}")),
+        (Ok(()), 0) => None,
+        (Ok(()), n) => Some(format!("{n} audit line(s) were not written (last: {})", last.clone().unwrap_or_default())),
+    };
+    (json!({ "ok": problem.is_none(), "failures": failures, "lastError": last, "writable": now.is_ok() }), problem)
 }
 
 #[cfg(test)]
@@ -210,6 +253,27 @@ mod tests {
         append_to(&f, "write", "you", vec![]).unwrap();
         assert_eq!(verify(&f).unwrap().broken.unwrap().0, 5, "a torn line stays visible");
         fs::remove_dir_all(f.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_line_that_cant_be_written_is_counted_and_reported() {
+        let home = std::env::temp_dir().join(format!("xenolith-audit-health-{}", random_hex(8)));
+        let env = [("XENOLITH_HOME".to_string(), home.to_string_lossy().to_string())].into_iter().collect();
+        let paths = AppPaths::from_env(&env);
+        // (Other tests in this process may have counted failures of their own: only this chain's state.)
+        assert_eq!(health(&paths).0["writable"].as_bool(), Some(true));
+        best_effort(&paths, "write", "you", vec![]);
+        assert_eq!(verify(&chain_file(&paths)).unwrap().lines, 1);
+        // The chain's place is taken by a folder: nothing can be appended.
+        fs::remove_file(chain_file(&paths)).unwrap();
+        fs::create_dir_all(chain_file(&paths)).unwrap();
+        let before = FAILURES.load(Ordering::SeqCst);
+        best_effort(&paths, "refused", "you", vec![]);
+        assert!(FAILURES.load(Ordering::SeqCst) > before);
+        let (h, problem) = health(&paths);
+        assert_eq!(h["writable"].as_bool(), Some(false));
+        assert!(problem.unwrap().starts_with("the audit chain can't be written"));
+        fs::remove_dir_all(home).unwrap();
     }
 
     #[test]

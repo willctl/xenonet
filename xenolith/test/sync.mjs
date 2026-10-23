@@ -120,7 +120,10 @@ describe('sync between two machines', { skip, timeout: 120_000 }, () => {
     const status = ok(laptop, ['sync', 'status', '--json']).json();
     assert.deepEqual(status, { machine: 'laptop', peers: [{ name: 'studio', url: server.base, token: true }], follow: { 'project:atlas': 'studio' } });
     const tokenFile = path.join(laptop.home, 'peers', 'studio.token');
-    if (process.platform !== 'win32') assert.equal(fs.statSync(tokenFile).mode & 0o777, 0o600);
+    if (process.platform !== 'win32') {
+      assert.equal(fs.statSync(tokenFile).mode & 0o777, 0o600);
+      assert.equal(fs.statSync(path.join(laptop.home, 'sync.json')).mode & 0o777, 0o600, 'sync.json is yours alone too');
+    }
     assert.ok(!fs.readFileSync(path.join(laptop.home, 'sync.json'), 'utf8').includes(token), 'the token stays out of sync.json');
   });
 

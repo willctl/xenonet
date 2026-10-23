@@ -271,6 +271,72 @@ describe('tokens over HTTP', { skip, timeout: 60_000 }, () => {
     }
   });
 
+  test('20 bad tokens a minute from one source, then 429 for a minute; other sources and tokenless calls go on', async () => {
+    const E4 = makeEnv();
+    const s4 = await startHttp(E4.env);
+    try {
+      const bad = bearer(`xenolith_${'1'.repeat(64)}`);
+      for (let i = 0; i < 20; i++) {
+        assert.equal((await request(s4.port, { headers: bad, body: toolCall('context_search', { query: 'x' }) })).status, 401, `bad token ${i + 1}`);
+      }
+      const limited = await request(s4.port, { headers: bad, body: toolCall('context_search', { query: 'x' }) });
+      assert.equal(limited.status, 429);
+      assert.equal(limited.json.error, 'too_many_requests');
+      assert.ok(Number(limited.headers['retry-after']) > 50, limited.headers['retry-after']);
+      assert.equal((await request(s4.port, { method: 'GET', path: '/sync/v1/spaces/project/atlas/pages', headers: bad })).status, 429, 'sync too');
+      // Behind a proxy, the client it names is its own source.
+      assert.equal((await request(s4.port, { headers: { ...bad, Forwarded: 'for=192.0.2.9' }, body: toolCall('context_search', { query: 'x' }) })).status, 401);
+      assert.equal((await request(s4.port, { body: toolCall('context_search', { query: 'x' }) })).status, 200, 'this machine without a token is not a token guesser');
+      const chain = fs.readFileSync(path.join(E4.home, 'audit', 'chain.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+      assert.equal(chain.filter((l) => l.why === 'too many bad tokens').length, 1, 'the block is in the audit chain, once');
+    } finally {
+      s4.proc.kill();
+    }
+  });
+
+  test('the resource metadata a forwarded caller sees follows config.json\'s publicUrl', async () => {
+    const E5 = makeEnv();
+    fs.writeFileSync(path.join(E5.home, 'config.json'), JSON.stringify({ writeMode: 'curated', publicUrl: 'https://studio.example/xenolith/' }));
+    const s5 = await startHttp(E5.env);
+    try {
+      const via = { Forwarded: 'for=192.0.2.7;proto=https' };
+      const remote = await request(s5.port, { method: 'GET', path: '/.well-known/oauth-protected-resource/xenolith/mcp', headers: via });
+      assert.equal(remote.status, 200);
+      assert.equal(remote.json.resource, 'https://studio.example/xenolith/mcp');
+      const r = await request(s5.port, { headers: via, body: toolCall('context_search', { query: 'x' }) });
+      assert.equal(r.status, 401);
+      assert.match(r.headers['www-authenticate'], /resource_metadata="https:\/\/studio\.example\/\.well-known\/oauth-protected-resource\/xenolith\/mcp"$/);
+      const here = await request(s5.port, { method: 'GET', path: '/.well-known/oauth-protected-resource' });
+      assert.equal(here.json.resource, `http://127.0.0.1:${s5.port}/mcp`, 'this machine sees the address it used');
+    } finally {
+      s5.proc.kill();
+    }
+  });
+
+  test('an audit chain that cannot be written is never silent: /status and `xenolith status` say so', async () => {
+    const E6 = makeEnv();
+    fs.mkdirSync(path.join(E6.home, 'audit', 'chain.jsonl'), { recursive: true }); // a folder where the chain goes
+    const s6 = await startHttp(E6.env);
+    try {
+      await request(s6.port, { headers: bearer(`xenolith_${'2'.repeat(64)}`), body: toolCall('context_search', { query: 'x' }) });
+      const st = (await request(s6.port, { method: 'GET', path: '/status' })).json;
+      assert.equal(st.audit.ok, false);
+      assert.equal(st.audit.writable, false);
+      assert.ok(st.audit.failures >= 1);
+      assert.equal(st.health, 'degraded');
+      assert.ok(st.reasons.some((x) => /^the audit chain can't be written: /.test(x)), JSON.stringify(st.reasons));
+      const out = cli(E6.env, 'status', '--port', String(s6.port));
+      assert.equal(out.code, 1);
+      assert.match(out.out, /^Audit chain: ! /m);
+      assert.match(out.out, /^  ! the audit chain can't be written/m);
+      fs.rmSync(path.join(E6.home, 'audit', 'chain.jsonl'), { recursive: true });
+      const fine = cli(E6.env, 'status', '--port', String(s6.port), '--json');
+      assert.equal(JSON.parse(fine.out).audit.writable, true);
+    } finally {
+      s6.proc.kill();
+    }
+  });
+
   test('an unknown "local" value in access.json means none', async () => {
     const E3 = makeEnv({ access: { local: 'everything' } });
     const s3 = await startHttp(E3.env);
@@ -359,6 +425,7 @@ describe('XENOLITH_TOKEN for a stdio server, and the token commands', { skip, ti
     assert.equal(policy.tokens[0].label, 'Hermes on the server');
     assert.equal(policy.tokens[0].hash, undefined, 'access --json shows ids, not hashes');
     assert.ok(!fs.readFileSync(path.join(E.home, 'access.json'), 'utf8').includes(plain.out.trim()), 'only the hash is kept');
+    if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(E.home, 'access.json')).mode & 0o777, 0o600, 'readable by you alone');
     assert.match(cli(E.env, 'token', 'create', 'actor:hermes', '--scope', 'ctx:read nope').err, /"nope" is not a scope/);
     assert.equal(cli(E.env, 'token', 'revoke', 'tok_000000000000').code, 1, 'nothing to revoke');
   });

@@ -10,6 +10,9 @@ Xenolith is for a trusted local machine. The HTTP service binds to loopback and 
 - **A plain tunnel looks local.** A forwarder that adds none of those headers (`ssh -L`, socat, a TCP tunnel) is indistinguishable from a local process. If anyone reaches the port that way, run `xenolith access local none` and give each client its own token ([README](README.md#who-is-local)).
 - **Decisions need the owner key.** Approving a held change or a proposal, Undo, Revert, the approvals setting and Forget need the key the service writes to `runtime/owner.key` in its state folder at each start, readable by the owner alone. The tray opens the window with it; `xenolith held approve` reads it. The audit chain records each decision with who made it (`owner` or `cli`), and refused attempts. An approver never approves a change made from its own note.
 - **What the owner key guarantees, and no more:** a decision needs an explicit read of an owner-only file, which the audit chain records. A sandboxed agent that can't read the state folder can't approve. An agent running unsandboxed as the user can read the file, as it can every file of the user's.
+- **Guessing tokens is slow.** After 20 bad tokens in a minute from one source, requests with a token from it get 429 for a minute.
+- **Private files stay private on every OS.** `access.json`, `sync.json`, the peers' tokens and the owner key are created exclusively with owner-only permissions (mode 0600, or a protected Windows DACL that adds only SYSTEM and, where it must read them, the service account or the installing user), then renamed into place.
+- **The audit chain is synced to disk line by line.** A line that can't be written makes `/status` degraded and `xenolith status` exit 1.
 - The window's `X-Xenolith` header stops cross-site browser requests. It is not a password.
 
 Do not use this service to isolate mutually untrusted users.

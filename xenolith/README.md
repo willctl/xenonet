@@ -305,6 +305,18 @@ either one takes effect on connections already open.
   refused, and a token at `/status`, `/health`, `/ui` or `/api` gets a 403,
   since those belong to this machine. Without a token, a local request is this
   machine's own ([who is local](#who-is-local)), and a forwarded one gets a 401.
+
+  After 20 bad tokens in a minute from one source, every request with a token
+  from it gets a 429 for a minute, and the audit chain records the block. A
+  source is the connection's address and, behind a proxy, the client the proxy
+  last named (`Forwarded: for=`, `X-Forwarded-For`), so one caller guessing
+  through a gateway doesn't lock out the others.
+
+  Behind a proxy, set `"publicUrl"` in `config.json` (such as
+  `"https://studio.example/xenolith"`). Forwarded callers then see it in the
+  resource metadata and the `WWW-Authenticate` challenge, with the metadata at
+  `https://studio.example/.well-known/oauth-protected-resource/xenolith/mcp`
+  as RFC 9728 places it. This machine's own callers see the loopback address.
 - **Over stdio**, `XENOLITH_TOKEN` in the server's environment makes it work
   as the token's holder, for an actor started on this machine with its own
   token. A token Xenolith doesn't know stops the server from starting.
@@ -329,6 +341,15 @@ xenolith audit tail 20
 tampering but can't prevent it: whoever can write the file can rewrite all of
 it. Keep the last hash `verify` prints somewhere else to pin it. The curator's
 own record of each filed note stays in `.curator/audit/` inside each space.
+
+Each line is on disk before the call it records returns. A line that can't be
+written is never silent: the service counts it, `/status` reports "the audit
+chain can't be written" and turns degraded, and `xenolith status` says the same
+and exits 1:
+
+```bash
+xenolith status          # the service's health, and whether the chain holds and can be written
+```
 
 ### Sync between machines
 
@@ -360,7 +381,10 @@ A peer's URL is the base of its Xenolith service: `https://` anywhere, or
 `http://` only to this machine, since a token never crosses a network in the
 clear. Put the service behind something that forwards an address to it, such
 as XenoNet's gateway or a tunnel of your own. The token is kept in
-`peers/<name>.token` in the config folder, readable by you alone.
+`peers/<name>.token` in the config folder, readable by you alone from the
+moment it exists: mode 0600, or on Windows a protected ACL for you and SYSTEM.
+`sync.json` and `access.json` are written the same way, also readable by the
+Windows service, which checks tokens and curators with them.
 
 The curator takes entries at `/sync/v1/spaces/<kind>/<name>/entries`: a note
 needs append, a replaced page needs write. Each entry is taken once, however

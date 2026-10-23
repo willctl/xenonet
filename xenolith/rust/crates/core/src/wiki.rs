@@ -278,7 +278,8 @@ pub fn write_synced(file: &Path, content: &str, create_new: bool) -> std::io::Re
     f.sync_all()
 }
 
-fn retryable(e: &std::io::Error) -> bool {
+/// A rename Windows refused for a moment (a reader or an antivirus scan holds the file): try again.
+pub(crate) fn retryable(e: &std::io::Error) -> bool {
     e.kind() == std::io::ErrorKind::PermissionDenied || matches!(e.raw_os_error(), Some(5) | Some(32) | Some(33))
 }
 

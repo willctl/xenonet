@@ -14,13 +14,14 @@ use crate::httpd::{self, Request, Response};
 use crate::mcp::{self, Ctx, State, log, rpc_error};
 use crate::uiapi;
 use serde_json::{Map, Value, json};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 use xenolith_core::access::{self, Level, Principal};
+use xenolith_core::audit;
 use xenolith_core::inbox;
 use xenolith_core::lock::lock_info;
 use xenolith_core::owner::{self, OwnerKey};
@@ -115,6 +116,104 @@ pub struct App {
     inflight: AtomicUsize,
     /// This start's owner key, or why it could not be written (approvals then wait for a restart).
     owner: Result<OwnerKey, String>,
+    bad_tokens: BadTokens,
+}
+
+/// Bad tokens per source address: after BAD_TOKENS_PER_MINUTE in a minute, every request with a
+/// token from that source gets 429 for BAD_TOKEN_BLOCK. A source is the connection's address and,
+/// behind a proxy, the address the proxy last added (Forwarded for=, X-Forwarded-For), so one
+/// caller guessing tokens through a gateway doesn't lock out the gateway's other callers.
+pub const BAD_TOKENS_PER_MINUTE: u32 = 20;
+pub const BAD_TOKEN_BLOCK: Duration = Duration::from_secs(60);
+
+/// One source's minute: when it started, the bad tokens in it, and the block it earned.
+type Minute = (Instant, u32, Option<Instant>);
+
+#[derive(Default)]
+pub struct BadTokens {
+    map: Mutex<HashMap<String, Minute>>,
+}
+
+impl BadTokens {
+    /// How long a source must still wait, when it is blocked.
+    pub fn blocked(&self, source: &str, now: Instant) -> Option<Duration> {
+        let m = self.map.lock().unwrap_or_else(|e| e.into_inner());
+        m.get(source).and_then(|(_, _, until)| *until).filter(|u| *u > now).map(|u| u - now)
+    }
+
+    /// Counts a bad token from `source`; true when that starts a block.
+    pub fn failed(&self, source: &str, now: Instant) -> bool {
+        let mut m = self.map.lock().unwrap_or_else(|e| e.into_inner());
+        if m.len() > 10_000 {
+            m.retain(|_, (start, _, until)| now.duration_since(*start) < Duration::from_secs(60) || until.is_some_and(|u| u > now));
+        }
+        let e = m.entry(source.to_string()).or_insert((now, 0, None));
+        if now.duration_since(e.0) >= Duration::from_secs(60) {
+            *e = (now, 0, None);
+        }
+        e.1 += 1;
+        if e.1 >= BAD_TOKENS_PER_MINUTE && e.2.is_none_or(|u| u <= now) {
+            *e = (now, 0, Some(now + BAD_TOKEN_BLOCK));
+            return true;
+        }
+        false
+    }
+}
+
+/// Where a request comes from, for BadTokens: the peer, and the client a proxy last named.
+fn source_of(req: &Request) -> String {
+    let peer = req.peer.map(|p| p.ip().to_string()).unwrap_or_default();
+    // The last element is the one the nearest proxy added (read from the end); earlier ones are the
+    // client's own say.
+    let last = |h: &str, key: Option<&str>| {
+        req.header(h).and_then(|v| {
+            v.rsplit(',')
+                .filter_map(|el| {
+                    let el = el.trim();
+                    match key {
+                        Some(k) => {
+                            el.split(';').map(str::trim).find_map(|kv| kv.split_once('=').filter(|(n, _)| n.trim().eq_ignore_ascii_case(k)).map(|(_, v)| v.trim().trim_matches('"').to_string()))
+                        }
+                        None => Some(el.to_string()).filter(|e| !e.is_empty()),
+                    }
+                })
+                .next()
+        })
+    };
+    match last("forwarded", Some("for")).or_else(|| last("x-forwarded-for", None)) {
+        Some(client) => format!("{peer} for {}", clip_str(&client, 80)),
+        None => peer,
+    }
+}
+
+/// The resource this service is to a caller: its MCP endpoint and its RFC 9728 metadata. A local
+/// caller sees the loopback address it used; anyone else the configured public URL (config.json
+/// "publicUrl", such as https://studio.example/xenolith), when there is one.
+struct Resource {
+    base: String,
+}
+
+impl Resource {
+    fn mcp(&self) -> String {
+        format!("{}/mcp", self.base)
+    }
+    /// RFC 9728 3.1: /.well-known/oauth-protected-resource between the origin and the path.
+    fn metadata(&self) -> String {
+        let after = self.base.find("://").map_or(0, |i| i + 3);
+        let (origin, path) = self.base.split_at(self.base[after..].find('/').map_or(self.base.len(), |i| after + i));
+        format!("{origin}/.well-known/oauth-protected-resource{path}/mcp")
+    }
+    /// The metadata's path on this server, as a proxy that keeps the public path sends it.
+    fn metadata_path(&self) -> String {
+        let m = self.metadata();
+        let after = m.find("://").map_or(0, |i| i + 3);
+        m[after..].find('/').map(|i| m[after + i..].to_string()).unwrap_or_default()
+    }
+}
+
+/// config.json's "publicUrl": https:// (or http:// to this machine), no query or fragment.
+fn public_url(config: &Value) -> Option<String> {
+    config.get("publicUrl").and_then(Value::as_str).map(|u| u.trim().trim_end_matches('/').to_string()).filter(|u| xenolith_core::sync::valid_url(u))
 }
 
 /// Who is calling /status or the window's API: a local request (http.rs refuses any other).
@@ -196,6 +295,9 @@ pub fn status_report(app: &App, st: &State) -> Value {
     if let Some(p) = app.owner_problem() {
         reasons.push(format!("approvals need the owner key, which could not be written: {p}"));
     }
+    let (audit_health, audit_problem) = audit::health(&AppPaths::current());
+    s.insert("audit".into(), audit_health);
+    reasons.extend(audit_problem);
     let oldest = queue["oldestPendingAt"].as_str().and_then(parse_ms);
     let wait_min = oldest.map(|t| (now_ms() - t) as f64 / 60_000.0).unwrap_or(0.0);
     let pending = queue["pending"].as_i64().unwrap_or(0);
@@ -363,7 +465,7 @@ fn sdk_error(status: u16, code: i64, message: &str) -> Reply {
 /// /sync/v1/spaces/<kind>/<name>/pages[/<slug>] (GET, read) and /entries (POST, append or write
 /// per entry). A space the caller may not read is "not found", like one that doesn't exist; a
 /// space this machine only follows sends the caller to its curator (421).
-fn sync_route(app: &App, req: &Request, method: &str, path: &str, who: Principal, entry: &mut Entry) -> Reply {
+fn sync_route(app: &App, req: &Request, method: &str, path: &str, who: Principal, resource: &Resource, entry: &mut Entry) -> Reply {
     use xenolith_core::access::Level;
     use xenolith_core::spaces::{self, SpaceId};
     use xenolith_core::sync;
@@ -385,7 +487,7 @@ fn sync_route(app: &App, req: &Request, method: &str, path: &str, who: Principal
     let policy = access::load(&paths);
     let now = now_ms();
     let Some(who) = policy.current(&who, now) else {
-        return challenge(&format!("http://{}", req.header("host").unwrap_or_default()), Some("invalid_token"), None, "The token has been revoked or has expired.");
+        return challenge(resource, Some("invalid_token"), None, "The token has been revoked or has expired.");
     };
     if !policy.allows(&who, &space, Level::Read, now) || !spaces::exists(&root, &space) {
         xenolith_core::audit::best_effort(
@@ -455,7 +557,7 @@ pub fn protected_resource(base: &str) -> Value {
 
 /// A 401 (or 403 for insufficient_scope) with RFC 6750's WWW-Authenticate challenge, pointing at
 /// the resource metadata as MCP clients expect. Without credentials there is no error code.
-fn challenge(base: &str, error: Option<&str>, scope: Option<&str>, why: &str) -> Reply {
+fn challenge(resource: &Resource, error: Option<&str>, scope: Option<&str>, why: &str) -> Reply {
     let mut parts = vec![];
     if let Some(e) = error {
         parts.push(format!("error=\"{e}\""));
@@ -464,7 +566,7 @@ fn challenge(base: &str, error: Option<&str>, scope: Option<&str>, why: &str) ->
     if let Some(s) = scope {
         parts.push(format!("scope=\"{s}\""));
     }
-    parts.push(format!("resource_metadata=\"{base}/.well-known/oauth-protected-resource/mcp\""));
+    parts.push(format!("resource_metadata=\"{}\"", resource.metadata()));
     let status = if error == Some("insufficient_scope") { 403 } else { 401 };
     Reply::json(status, &json!({ "error": error.unwrap_or("unauthorized"), "error_description": why })).with("WWW-Authenticate", &format!("Bearer {}", parts.join(", ")))
 }
@@ -483,21 +585,23 @@ fn is_local(req: &Request) -> bool {
 
 /// Who a request to /mcp or /sync comes from, or the challenge to answer it with. Without a token
 /// it is this machine's own when `local` (see is_local), unless access.json says "local": "none".
-fn principal_of(base: &str, bearer: &Option<Option<String>>, local: bool, entry: &mut Entry) -> Result<Principal, Reply> {
+/// `also`: the address the request used, which a token issued for it may name.
+fn principal_of(resource: &Resource, also: &str, bearer: &Option<Option<String>>, local: bool, entry: &mut Entry) -> Result<Principal, Reply> {
     let policy = access::load(&AppPaths::current());
     let now = now_ms();
     match bearer {
         None if local && policy.local.is_some() => Ok(Principal::Local),
         None => {
             entry.result = Some("unauthorized".into());
-            Err(challenge(base, None, None, if local { "This server needs a token." } else { "This server needs a token: a forwarded request is never this machine's own." }))
+            Err(challenge(resource, None, None, if local { "This server needs a token." } else { "This server needs a token: a forwarded request is never this machine's own." }))
         }
         Some(None) => {
             entry.result = Some("unauthorized".into());
-            Err(challenge(base, Some("invalid_request"), None, "Send the token as Authorization: Bearer <token>."))
+            Err(challenge(resource, Some("invalid_request"), None, "Send the token as Authorization: Bearer <token>."))
         }
         Some(Some(t)) => {
-            let rec = policy.token(t).filter(|r| r.resource.as_deref().is_none_or(|res| same_resource(res, &format!("{base}/mcp"))));
+            // A token issued for one server works at no other: this one, by its public URL or the address used.
+            let rec = policy.token(t).filter(|r| r.resource.as_deref().is_none_or(|res| same_resource(res, &resource.mcp()) || same_resource(res, &format!("{also}/mcp"))));
             match rec.and_then(|_| policy.principal_for(t, now)) {
                 Some(p) => Ok(p),
                 None => {
@@ -509,11 +613,31 @@ fn principal_of(base: &str, bearer: &Option<Option<String>>, local: bool, entry:
                         "an unknown token",
                         vec![("why", json!("invalid token")), ("token", json!(&access::hash_token(t)[..12])), ("transport", json!("http"))],
                     );
-                    Err(challenge(base, Some("invalid_token"), None, "The token is unknown, expired, revoked, or for another server."))
+                    Err(challenge(resource, Some("invalid_token"), None, "The token is unknown, expired, revoked, or for another server."))
                 }
             }
         }
     }
+}
+
+/// principal_of, behind the bad-token limit: a source that sent BAD_TOKENS_PER_MINUTE bad tokens
+/// in a minute gets 429 for every request with a token for BAD_TOKEN_BLOCK.
+fn authenticate(app: &App, req: &Request, resource: &Resource, also: &str, bearer: &Option<Option<String>>, local: bool, entry: &mut Entry) -> Result<Principal, Reply> {
+    let Some(_) = bearer else { return principal_of(resource, also, bearer, local, entry) };
+    let source = source_of(req);
+    let now = Instant::now();
+    if let Some(wait) = app.bad_tokens.blocked(&source, now) {
+        entry.result = Some("rate-limited".into());
+        let secs = wait.as_secs().max(1);
+        return Err(
+            Reply::json(429, &json!({ "error": "too_many_requests", "error_description": format!("Too many bad tokens from here. Try again in {secs} s.") })).with("Retry-After", &secs.to_string())
+        );
+    }
+    let r = principal_of(resource, also, bearer, local, entry);
+    if r.is_err() && app.bad_tokens.failed(&source, now) {
+        audit::best_effort(&AppPaths::current(), "refused", "an unknown token", vec![("why", json!("too many bad tokens")), ("source", json!(clip_str(&source, 120))), ("transport", json!("http"))]);
+    }
+    r
 }
 
 fn handle(app: &App, req: &Request, entry: &mut Entry) -> Reply {
@@ -542,17 +666,21 @@ fn handle(app: &App, req: &Request, entry: &mut Entry) -> Reply {
     let path = percent_decode_path(&path);
     entry.path = path.clone();
     let method = req.method.as_str();
-    let base = format!("http://{host}");
+    let local = is_local(req);
+    let also = format!("http://{host}");
+    // Forwarded callers see the configured public URL in the resource metadata, when there is one.
+    let public = public_url(&app.state.read().unwrap().config).filter(|_| !local);
+    let resource = Resource { base: public.clone().unwrap_or_else(|| also.clone()) };
     // Tokens travel in the Authorization header only (RFC 6750 5.3): logs and histories keep URLs.
     if query.split('&').any(|kv| kv.split('=').next().is_some_and(|k| k.eq_ignore_ascii_case("access_token") || k.eq_ignore_ascii_case("token"))) || url.contains(access::TOKEN_PREFIX) {
         entry.result = Some("token-in-url".into());
         return Reply::json(400, &json!({ "error": "invalid_request", "error_description": "Send tokens in the Authorization header, never in a URL." }));
     }
-    if path == "/.well-known/oauth-protected-resource" || path == "/.well-known/oauth-protected-resource/mcp" {
+    if path == "/.well-known/oauth-protected-resource" || path == "/.well-known/oauth-protected-resource/mcp" || (public.is_some() && path == resource.metadata_path()) {
         if method != "GET" {
             return Reply::json(405, &json!({ "error": "Use GET" })).with("Allow", "GET");
         }
-        return Reply::json(200, &protected_resource(&base));
+        return Reply::json(200, &protected_resource(&resource.base));
     }
     // A token is for /mcp and sync: the window's API, /status and /health belong to this machine
     // and show its folders.
@@ -562,7 +690,6 @@ fn handle(app: &App, req: &Request, entry: &mut Entry) -> Reply {
         entry.result = Some("forbidden-token".into());
         return Reply::json(403, &json!({ "error": "Forbidden: tokens work at /mcp and /sync only" }));
     }
-    let local = is_local(req);
     if is_sync {
         if app.closing.load(Ordering::SeqCst) {
             return Reply::json(503, &json!({ "error": "xenolith is restarting; retry shortly." }));
@@ -570,13 +697,13 @@ fn handle(app: &App, req: &Request, entry: &mut Entry) -> Reply {
         // Sync is remote by nature: a token always, even from this machine.
         if bearer.is_none() {
             entry.result = Some("unauthorized".into());
-            return challenge(&base, None, None, "Sync needs a token, even from this machine.");
+            return challenge(&resource, None, None, "Sync needs a token, even from this machine.");
         }
-        let principal = match principal_of(&base, &bearer, local, entry) {
+        let principal = match authenticate(app, req, &resource, &also, &bearer, local, entry) {
             Ok(p) => p,
             Err(r) => return r,
         };
-        return sync_route(app, req, method, &path, principal, entry);
+        return sync_route(app, req, method, &path, principal, &resource, entry);
     }
     if path == "/health" {
         if method != "GET" {
@@ -622,7 +749,7 @@ fn handle(app: &App, req: &Request, entry: &mut Entry) -> Reply {
     if app.closing.load(Ordering::SeqCst) {
         return Reply::json(503, &rpc_error(Value::Null, -32000, "xenolith is restarting; retry shortly."));
     }
-    let principal = match principal_of(&base, &bearer, local, entry) {
+    let principal = match authenticate(app, req, &resource, &also, &bearer, local, entry) {
         Ok(p) => p,
         Err(r) => return r,
     };
@@ -693,7 +820,7 @@ fn handle(app: &App, req: &Request, entry: &mut Entry) -> Reply {
     // for the scope (MCP's step-up); the JSON-RPC answer still says what was refused.
     if let (Some(scope), 1) = (ctx.scope_needed.lock().unwrap().clone(), messages.len()) {
         entry.result = Some("insufficient-scope".into());
-        let mut r = challenge(&base, Some("insufficient_scope"), Some(&scope), "The token's scopes don't reach what this call needs.");
+        let mut r = challenge(&resource, Some("insufficient_scope"), Some(&scope), "The token's scopes don't reach what this call needs.");
         r.body = format!("{out}\n").into_bytes();
         return with_headers(r, reply_headers);
     }
@@ -779,6 +906,7 @@ pub fn serve(port: u16, stop: Arc<Waker>, watch_exe: bool, owner_sid: Option<Str
         closing: AtomicBool::new(false),
         inflight: AtomicUsize::new(0),
         owner,
+        bad_tokens: BadTokens::default(),
     });
     log(&format!("v{} listening on http://127.0.0.1:{actual}/mcp ({mode} writes); wiki at {wiki_shown}", xenolith_core::VERSION));
 
@@ -848,4 +976,44 @@ pub fn serve(port: u16, stop: Arc<Waker>, watch_exe: bool, owner_sid: Option<Str
     }
     let _ = acceptor.join();
     Ok(ended)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn twenty_bad_tokens_a_minute_then_a_minute_of_429() {
+        let b = BadTokens::default();
+        let t0 = Instant::now();
+        for i in 0..BAD_TOKENS_PER_MINUTE - 1 {
+            assert!(!b.failed("127.0.0.1", t0 + Duration::from_secs(u64::from(i))));
+            assert_eq!(b.blocked("127.0.0.1", t0), None);
+        }
+        assert!(b.failed("127.0.0.1", t0 + Duration::from_secs(30)), "the 20th in a minute starts a block");
+        let wait = b.blocked("127.0.0.1", t0 + Duration::from_secs(31)).unwrap();
+        assert!(wait <= BAD_TOKEN_BLOCK && wait > Duration::from_secs(55), "{wait:?}");
+        assert_eq!(b.blocked("127.0.0.1 for 192.0.2.7", t0 + Duration::from_secs(31)), None, "another source is not blocked");
+        assert_eq!(b.blocked("127.0.0.1", t0 + Duration::from_secs(91)), None, "a minute later it may try again");
+        // Bad tokens spread over more than a minute never add up to a block.
+        let slow = BadTokens::default();
+        for i in 0..60 {
+            assert!(!slow.failed("x", t0 + Duration::from_secs(i * 4)));
+        }
+    }
+
+    #[test]
+    fn the_resource_metadata_follows_the_public_url() {
+        let local = Resource { base: "http://127.0.0.1:47850".into() };
+        assert_eq!(local.mcp(), "http://127.0.0.1:47850/mcp");
+        assert_eq!(local.metadata(), "http://127.0.0.1:47850/.well-known/oauth-protected-resource/mcp");
+        let public = Resource { base: "https://studio.example/xenolith".into() };
+        assert_eq!(public.mcp(), "https://studio.example/xenolith/mcp");
+        assert_eq!(public.metadata(), "https://studio.example/.well-known/oauth-protected-resource/xenolith/mcp", "RFC 9728: between the origin and the path");
+        assert_eq!(public.metadata_path(), "/.well-known/oauth-protected-resource/xenolith/mcp");
+        assert_eq!(public_url(&json!({ "publicUrl": "https://studio.example/xenolith/" })).as_deref(), Some("https://studio.example/xenolith"));
+        for bad in [json!({ "publicUrl": "http://studio.example" }), json!({ "publicUrl": "https://x.example/?a=1" }), json!({ "publicUrl": 4 }), json!({})] {
+            assert_eq!(public_url(&bad), None, "{bad}");
+        }
+    }
 }

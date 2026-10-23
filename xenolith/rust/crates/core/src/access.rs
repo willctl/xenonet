@@ -406,10 +406,11 @@ impl Policy {
         Value::Object(o)
     }
 
+    /// Writes the policy for you alone (and, on Windows, the service, which checks tokens with it):
+    /// it holds token hashes and the grants.
     pub fn save(&self, file: &Path) -> Result<()> {
         let text = serde_json::to_string_pretty(&self.to_json()).unwrap_or_default();
-        wiki::atomic_write(file, &format!("{text}\n"), None, None)?;
-        restrict(file);
+        crate::private::write(file, &format!("{text}\n"), &crate::private::service_readers())?;
         Ok(())
     }
 
@@ -541,16 +542,6 @@ impl Policy {
         self.grants.retain(|g| g.expires_at + 86_400_000 > now);
         self.tokens.retain(|t| t.expires_at.is_none_or(|e| e + 86_400_000 > now));
     }
-}
-
-/// Owner-only, where the OS has that notion: the file holds token hashes and the grants.
-fn restrict(file: &Path) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o600));
-    }
-    let _ = file;
 }
 
 /// Changes the policy under a lock in the config folder, so two processes never lose each other's

@@ -82,9 +82,11 @@ impl Config {
         }
     }
 
+    /// Writes sync.json for you alone (and, on Windows, the service, which reads who curates what).
     pub fn save(&self, paths: &AppPaths) -> Result<()> {
         let v = json!({ "machine": self.machine, "peers": self.peers, "follow": self.follow });
-        wiki::atomic_write(&config_file(paths), &format!("{}\n", serde_json::to_string_pretty(&v).unwrap_or_default()), None, None)
+        crate::private::write(&config_file(paths), &format!("{}\n", serde_json::to_string_pretty(&v).unwrap_or_default()), &crate::private::service_readers())?;
+        Ok(())
     }
 
     /// The peer that curates a space, when this machine only follows it.
@@ -109,15 +111,9 @@ pub fn update<T>(paths: &AppPaths, f: impl FnOnce(&mut Config) -> Result<T>) -> 
     r
 }
 
-/// Keeps a peer's token, readable by you alone.
+/// Keeps a peer's token, readable by you alone from the moment it exists (on Windows too).
 pub fn save_token(paths: &AppPaths, peer: &str, token: &str) -> Result<()> {
-    let file = token_file(paths, peer);
-    wiki::atomic_write(&file, &format!("{}\n", token.trim()), None, None)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&file, fs::Permissions::from_mode(0o600))?;
-    }
+    crate::private::write(&token_file(paths, peer), &format!("{}\n", token.trim()), &[])?;
     Ok(())
 }
 
