@@ -164,7 +164,7 @@ fn plist_path(cfg: &Config) -> PathBuf {
 
 #[cfg(target_os = "macos")]
 fn label(cfg: &Config) -> String {
-    if cfg.task == "XenolithTray" { "dev.xenonet.xenolith.tray".into() } else { cfg.task.clone() }
+    if cfg.task == "XenolithTray" { "dev.xenolith.tray".into() } else { cfg.task.clone() }
 }
 
 #[cfg(target_os = "macos")]

@@ -1,5 +1,5 @@
 {
-  "name": "@xenonet/xenolith",
+  "name": "xenolith",
   "version": "1.8.0",
   "private": true,
   "description": "Shared context for every app and agent on a machine: a plain-Markdown wiki you own, served by one local MCP server.",

@@ -99,8 +99,11 @@ Claude Code connect to it. Otherwise each app starts its own stdio server.
   alone: `(A;;RPWPLC;;;<your SID>)`. It lets your account, and only yours, start
   and stop the service and query its status, so the tray can restart it. The service logs to
   `%LOCALAPPDATA%\Xenolith\logs\service.log`.
-- **macOS:** LaunchAgents `dev.xenonet.xenolith.server` and `dev.xenonet.xenolith.curator` in
-  `~/Library/LaunchAgents`, running as you.
+- **macOS:** LaunchAgents `dev.xenolith.server` and `dev.xenolith.curator` in
+  `~/Library/LaunchAgents`, running as you, and the tray's login item
+  `dev.xenolith.tray`. An install over one that used the earlier
+  `dev.xenonet.xenolith.*` labels stops and removes those first, the tray's
+  before any other, so two trays or two servers never run at once.
 - **Linux:** systemd user units `xenolith.service` and
   `xenolith-curator.service`, running as you (`loginctl enable-linger` keeps
   them up while you are signed out).

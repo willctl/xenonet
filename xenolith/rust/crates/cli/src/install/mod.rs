@@ -958,7 +958,7 @@ fn uninstall(o: &Opts) -> Result<(), InstallError> {
         }
         #[cfg(target_os = "macos")]
         {
-            let f = p.home.join("Library").join("LaunchAgents").join("dev.xenonet.xenolith.tray.plist");
+            let f = p.home.join("Library").join("LaunchAgents").join(format!("{}.plist", posix::TRAY_LABEL));
             if std::fs::remove_file(&f).is_ok() {
                 info("removed the login item (LaunchAgent)");
             }
