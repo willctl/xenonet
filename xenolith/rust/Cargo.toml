@@ -7,7 +7,7 @@ members = ["crates/core", "crates/cli", "crates/tray"]
 default-members = ["crates/core", "crates/cli"]
 
 [workspace.package]
-version = "1.8.0" # kept equal to package.json's version (scripts/build.mjs checks)
+version = "1.9.0" # kept equal to package.json's version (scripts/build.mjs checks)
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
