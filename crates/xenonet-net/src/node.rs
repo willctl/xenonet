@@ -1049,13 +1049,18 @@ impl Shared {
         self.write_link(false);
     }
 
-    /// A batch the gateway didn't take. A service's frame in it goes again
-    /// when `again` (the request is signed again with the gateway's time),
-    /// and else its caller hears why now rather than at its timeout.
+    /// A batch the gateway didn't take. With `again`, after the gateway
+    /// refused this host's time, a service's frame in it goes again in a
+    /// new request signed with the gateway's time, but only while its own
+    /// date, which can't change without sealing it again, is within a
+    /// minute of that time, so the host it's for takes it. Otherwise its
+    /// caller hears why now rather than at its timeout.
     pub fn batch_failed(&self, b: &Batch, why: &str, again: bool) {
         let Some(f) = &b.svc else { return };
-        if again {
+        if again && (f.at as f64 - self.gateway_now()).abs() <= 60e3 {
             self.svc_out.locked().push_front(f.clone());
+        } else if again {
+            self.svc.fail_frame(&f.id, &Answer::refused(503, "clock", "this machine's clock was off the gateway's, and the request was dated by it: try again"));
         } else {
             self.svc.fail_frame(&f.id, &Answer::refused(502, "unreachable", format!("the request didn't reach the network's gateway: {why}")));
         }

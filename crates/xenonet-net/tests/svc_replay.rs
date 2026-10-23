@@ -4,7 +4,9 @@
 // gateway could let it be, reaches studio's node. It's sent again three
 // minutes later, when a host that kept ids only two minutes from their
 // arrival would take it as new, and again after the gateway sets studio's
-// clock back. The service is called once.
+// clock back. The service is called once. And a svc frame from a batch
+// the gateway refused for this host's time goes again only while its own
+// date is right.
 
 #![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
 
@@ -16,7 +18,7 @@ use xenonet_net::codec::frame_id;
 use xenonet_net::files::{Dir, NetFile, Pin, KEY};
 use xenonet_net::frame::{host_frame, Draft};
 use xenonet_net::keys::HostKey;
-use xenonet_net::node::{Node, Options};
+use xenonet_net::node::{Batch, Node, Options};
 use xenonet_net::roster::{found, HostRef, Op, Roster};
 use xenonet_net::sink::{LogSink, SinkSlot};
 use xenonet_net::svc::{request_id, Request};
@@ -144,6 +146,34 @@ async fn a_svc_request_is_passed_on_once_however_it_comes_back() {
         assert!(std::time::Instant::now() < end, "a new request reached the service");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+    drop(node);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_svc_frame_dated_by_a_wrong_clock_isnt_sent_again() {
+    // The gateway refused this host's time, and it learned the right one:
+    // a svc frame from the refused batch goes again only while its own
+    // date, sealed in, is within a minute of that time.
+    let (dir, node, _clock, studio, laptop) = studio("clock");
+    let n = node.shared();
+    let now = T0 + 10 * MIN;
+    let answer = |at: i64| {
+        let d = Draft { network: NET, id: frame_id().unwrap(), kind: "svc", from: "studio", to: "laptop", at };
+        host_frame(&d, &studio, laptop.public(), &serde_json::json!({ "op": "answer" }), None).unwrap()
+    };
+    let batch = |f| Batch { ids: Vec::new(), body: String::new(), relay: true, svc: Some(f) };
+    let off = answer(now - 10 * MIN);
+    let mut w = n.services().wait("svq_00000000000000000000000000000001", "laptop", &off.id).unwrap();
+    n.batch_failed(&batch(off), "", true);
+    let a = w.answer.try_recv().unwrap();
+    assert_eq!((a.status, a.code.as_deref()), (503, Some("clock")));
+    assert!(n.next_batch().is_none(), "not sent again");
+    let right = answer(now - 20_000);
+    let id = right.id.clone();
+    n.batch_failed(&batch(right), "", true);
+    assert_eq!(n.next_batch().and_then(|b| b.svc).map(|f| f.id), Some(id), "sent again");
+    drop(w);
     drop(node);
     let _ = std::fs::remove_dir_all(dir);
 }
