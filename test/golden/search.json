@@ -24,7 +24,7 @@
    "app": "claude",
    "role": "user",
    "ts": 1791028040000,
-   "text": "Log the refund rules in the wiki."
+   "text": "Log the refund rules in the shared context."
   },
   {
    "session_id": "claude:0190d3e0-0000-7000-8000-000000000001",
@@ -311,7 +311,7 @@
    "app": "grok",
    "role": "assistant",
    "ts": 1791024250000,
-   "text": "The loading rules are on the pathfinder wiki page as seven constraints. Two need data the depot doesn't send yet."
+   "text": "The loading rules are on the pathfinder context page as seven constraints. Two need data the depot doesn't send yet."
   }
  ],
  "found": {
@@ -319,7 +319,7 @@
    {
     "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
     "app": "claude",
-    "score": -1.92561337303,
+    "score": -1.92701893871,
     "hits": 5,
     "snippets": [
      {
@@ -342,7 +342,7 @@
    {
     "sessionId": "codex:0190d3e0-0000-7000-8000-000000000006",
     "app": "codex",
-    "score": -1.56468584049,
+    "score": -1.56603589789,
     "hits": 1,
     "snippets": [
      {
@@ -355,7 +355,7 @@
    {
     "sessionId": "claude:0190d3e0-0000-7000-8000-000000000011",
     "app": "claude",
-    "score": -1.5030348772,
+    "score": -1.50467031145,
     "hits": 2,
     "snippets": [
      {
@@ -376,7 +376,7 @@
    {
     "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
     "app": "codex",
-    "score": -4.18987230831,
+    "score": -4.19249005634,
     "hits": 1,
     "snippets": [
      {
@@ -391,7 +391,7 @@
    {
     "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e3",
     "app": "codex",
-    "score": -3.52532201896,
+    "score": -3.52752456932,
     "hits": 2,
     "snippets": [
      {
@@ -411,7 +411,7 @@
    {
     "sessionId": "codex:0190d3e0-0000-7000-8000-0000000000e2",
     "app": "codex",
-    "score": -10.449166947,
+    "score": -10.4556953765,
     "hits": 1,
     "snippets": [
      {

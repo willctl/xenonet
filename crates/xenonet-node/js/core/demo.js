@@ -1,7 +1,7 @@
 // core/demo.js in Rust (crates/xenonet-app/src/demo.rs): demo mode, a
 // made-up workspace that runs through XenoNet's real pipeline: projects
 // (real git repos), Claude Code transcripts, Codex rollouts and a small
-// wiki in a temp folder, and live sessions that keep moving. Your real
+// shared context in a temp folder, and live sessions that keep moving. Your real
 // projects and sessions are never read while it runs. Whether git runs and
 // the ids of accounts come from the modules that own them.
 import crypto from "node:crypto";
