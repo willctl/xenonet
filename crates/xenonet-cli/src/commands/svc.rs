@@ -4,7 +4,7 @@
 //! off are the person's: the service refuses them from under an agent, as
 //! it does creating or joining a network. Other hosts' programs reach a
 //! published service through their own XenoNet, at
-//! /api/svc/<host>/<name>/<path>.
+//! `/api/svc/<host>/<name>/<path>`.
 
 use crate::args::Flags;
 use crate::js::{list, str, t};
