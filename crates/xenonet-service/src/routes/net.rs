@@ -184,9 +184,13 @@ fn publish(ctx: &Ctx, svc: &NetService, body: &Value) -> R<Value> {
     };
     let target = text("target");
     if let Ok(t) = xenonet_net::svc::Target::parse(&target) {
-        let gateway = ctx.config.gateway_port.unwrap_or_else(|| crate::config::gateway_port_of(ctx.config.port));
-        let lan = svc.lan().map(|a| a.port());
-        if t.port == ctx.config.port || t.port == gateway || lan == Some(t.port) {
+        // Its API, the actor gateway's port as it runs (one it saved, or
+        // the old default on an install set up before ports were saved)
+        // and the default it would take, and the network's LAN door.
+        let mut own = vec![ctx.config.port, ctx.config.gateway_port.unwrap_or_else(|| crate::config::gateway_port_of(ctx.config.port))];
+        own.extend(ctx.gateway.get().map(|g| g.gateway().port()));
+        own.extend(svc.lan().map(|a| a.port()));
+        if own.contains(&t.port) {
             return Err(NetError::bad(format!("port {} is XenoNet's own: publishing it would let other hosts act as this machine's owner", t.port)));
         }
     }

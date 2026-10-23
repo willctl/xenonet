@@ -28,11 +28,15 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use xenonet_base::log::Log;
 use xenonet_net::gwstore::Caps;
-use xenonet_net::node::{Options, Timing};
+use xenonet_net::node::{now_ms, Options, Timing};
 use xenonet_service::config::Config;
 use xenonet_service::cores::{self, Cores};
 use xenonet_service::ctx::Ctx;
+use xenonet_service::gateway::actor_gateway::GatewayCores;
+use xenonet_service::gateway::control::{ControlParts, GatewayControl};
 use xenonet_service::gateway::network::NetService;
+use xenonet_service::gateway::reach::SystemNetwork;
+use xenonet_service::gateway::tunnel::SystemHost;
 use xenonet_service::http::{Peer, Req};
 use xenonet_service::routes::api;
 
@@ -64,6 +68,27 @@ impl cores::Verify for Peers {
     async fn window(&self, peer: Peer) -> Value {
         self.person(peer).await
     }
+}
+
+/// An actor gateway on `port`, as one set up with a port of its own runs:
+/// not the default for XenoNet's `service_port`. Nothing listens.
+fn actor_gateway(port: u16, service_port: u16) -> Arc<GatewayControl> {
+    let p = Arc::new(cores::Pending);
+    GatewayControl::new(ControlParts {
+        cores: GatewayCores { engine: p.clone(), registration: p.clone(), actors: p.clone(), reports: p.clone(), runs: None },
+        store: p,
+        on_run: Arc::new(|_, _| {}),
+        port: Some(port),
+        service_port,
+        version: "0.0.0-test".into(),
+        dir: None,
+        home: "/home/nova".into(),
+        probe_local: true,
+        log: Arc::new(|_, _| {}),
+        tunnel_host: Arc::new(SystemHost),
+        network: Arc::new(SystemNetwork),
+        now: Arc::new(now_ms),
+    })
 }
 
 fn timing() -> Timing {
@@ -265,9 +290,13 @@ async fn a_program_on_one_host_reaches_a_service_another_host_published() {
     let (s, v) = a.window("POST", "/api/net/svc/publish", json!({ "name": "files", "target": target, "paths": ["/sync/v1/"] })).await;
     assert_eq!((s, v["code"].clone()), (403, json!("yours")), "{v}");
     a.peers.agent.store(false, Ordering::SeqCst);
-    // Never XenoNet's own API, nor a name, nor anything but loopback.
+    // Never XenoNet's own API or actor gateway, nor a name, nor anything
+    // but loopback. studio's actor gateway runs on a port it saved, not
+    // the default.
+    let _ = a.ctx.gateway.set(actor_gateway(47999, 47996));
     for (t, why) in [
         ("http://127.0.0.1:47996", "XenoNet's own"),
+        ("http://127.0.0.1:47999", "XenoNet's own"),
         ("http://localhost:4790", "looks no names up"),
         ("http://192.168.1.5:4790", "loopback"),
         ("https://127.0.0.1:4790", "plain http"),
