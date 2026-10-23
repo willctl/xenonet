@@ -388,6 +388,14 @@ function rolloutItem(it, ts, n) {
       return { ...base, role: "tool", title: `search: ${it.query || it.action?.query || ""}`, text: "" };
     case "ContextCompaction":
       return { ...base, role: "system", text: "context compacted" };
+    // The plan, as the app-server's plan item shows it.
+    case "Plan":
+      return { ...base, role: "assistant", title: "plan", text: it.text ?? "" };
+    // An extension's web search is a web search; its other kinds (an image
+    // made, a pause) show as any other item.
+    case "Extension":
+      if (it.kind === "web.search") return { ...base, role: "tool", title: `search: ${it.query || it.action?.query || ""}`, text: "" };
+    // falls through
     default:
       return { ...base, role: "system", title: it.type, text: excerpt(JSON.stringify(it, null, 2), 1500) };
   }

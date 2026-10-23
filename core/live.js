@@ -1069,6 +1069,11 @@ export class LiveTelemetry extends EventEmitter {
         this.noteTool(s, { name: "apply_patch", detail: files.map((f) => baseName(f)).join(", "), files, ok: it.status !== "failed", ts }, live);
         return;
       }
+      // An extension's web search is a web search; its other kinds (an
+      // image made, a pause) aren't read.
+      case "Extension":
+        if (it.kind !== "web.search") return;
+      // falls through
       case "WebSearch":
         // An empty query is no query: the action's says what was searched,
         // as a thread shown from its rollout reads it.
