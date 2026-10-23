@@ -18,8 +18,9 @@ its rules for working beside other agents.
 - `test/*.mjs`: the behaviour suites, run against the Rust programs. `eval/` and `scripts/eval.mjs`:
   the memory eval. `protocol/PROTOCOL.md`: what every connected app is told to do. `FORMAT.md`:
   the folder's format, for programs that read it (XenoNet among them).
-- `scripts/`: the window's build, the icons, the release payload (`package.mjs`), `install-local`,
-  `ui:preview`, the eval and the bench. `scripts/lib.mjs` and `scripts/paths.mjs` hold what the
+- `scripts/`: the window's build, the icons, the release payload and archives (`package.mjs`,
+  `archive.mjs`, `verify-archive.mjs`, `release-draft.mjs`), `install-local`, `ui:preview`, the
+  eval and the bench. `scripts/lib.mjs` and `scripts/paths.mjs` hold what the
   scripts and tests need of an installed Xenolith.
 
 ## Build and check
@@ -42,6 +43,27 @@ its rules for working beside other agents.
 - CI: `.github/workflows/xenolith.yml` runs rustfmt, clippy, the Rust tests and `npm test` on
   Linux, macOS and Windows whenever `xenolith/` changes. It needs nothing from XenoNet.
 
+## Releases
+
+A release is a tag `xenolith-v<version>` and four archives, built by
+`.github/workflows/xenolith-release.yml`. Each archive holds one folder, `xenolith-<version>-<target>/`
+(targets darwin-arm64, darwin-x64, linux-x64, win32-x64), that `xenolith install` installs from.
+
+1. Set the version in `package.json` and `rust/Cargo.toml`, then run `npm install` (the lock file)
+   and `cargo build` in `rust/` (Cargo.lock). Behaviour changes raise the minor version.
+2. Write `docs/releases/<version>.md`: what changed for a person, what they must do, and how to
+   install from the archive on each OS. Review it with XenoNet's unslop guidance.
+3. `node scripts/release-draft.mjs --check` checks the versions and the notes.
+   `node scripts/package.mjs --target <this machine> --verify` builds this machine's archive into
+   `dist/release` and installs it into a fake home (`scripts/verify-archive.mjs`).
+4. Push the tag (`git tag -a xenolith-v1.9.0 -m "Xenolith 1.9.0"`). The workflow runs the checks,
+   builds and verifies the archives, and makes a draft release "Xenolith <version>" with the
+   archives, `SHA256SUMS` and the notes. It never publishes. Run by hand, it uploads the archives
+   as workflow artifacts and makes no release.
+5. Download and try the archives, then publish the draft with **Set as the latest release**
+   unticked: XenoNet's updates read this repository's latest release. Never replace a published
+   release's files; ship a new version instead.
+
 ## Rules and what enforces them
 
 | Rule | Enforced by |
@@ -49,6 +71,8 @@ its rules for working beside other agents.
 | Public commits use the repository identity; private paths and data stay out of tracked files | `scripts/check-public.mjs`; see `SECURITY.md` |
 | Lint every OS target before pushing Rust code | `scripts/check-rust.sh` (local) |
 | `package.json` and `rust/Cargo.toml` carry the same version | `scripts/build.mjs` fails |
+| A release's tag, `package.json`, `package-lock.json` and `rust/Cargo.toml` name one version, and its notes exist | `scripts/release-draft.mjs --check`, first in the release workflow |
+| A release archive carries no path from the build machine | `checkNoLocalPaths` in `scripts/package.mjs`, after the remapped build |
 | A change to `protocol/PROTOCOL.md` records the old version's hash | `wiki::tests::an_edited_protocol_keeps_the_old_hash_for_upgrades` |
 | A change to a file `FORMAT.md` describes updates it, and raises `wiki::FORMAT_VERSION` when an older reader would misread the file | `wiki::tests::the_root_says_whose_it_is_and_its_format_and_a_space_does_not` (the marker); judgment |
 | Regexes match ASCII digits (`[0-9]`, never `\d`) | `wiki::tests::no_regex_in_the_crates_uses_unicode_digit_classes` |
