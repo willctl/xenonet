@@ -14,8 +14,10 @@
 //!   week is accepted again without being queued again, and each link may
 //!   send 600 frames and 60 messages a minute. The map's relay frames and
 //!   services' svc frames go in batches of their own (`?relay=1`), each
-//!   kind in a bucket of its own (120 relay and 600 svc frames a minute),
-//!   and aren't kept for a host that's away.
+//!   kind in a bucket of its own (120 relay and 600 svc frames a minute).
+//!   They're never written to the store: they're handed to the host's
+//!   link in memory, and dropped when it isn't linked, since a svc frame
+//!   may carry a service's own credential.
 //! - `GET roster?from=n`, and `POST roster`, an entry from a host, which
 //!   the roster's own rules decide.
 //!
@@ -156,7 +158,29 @@ struct Live {
     /// Its open streams, oldest first, each with what ends it.
     open: std::collections::VecDeque<(u64, Arc<Notify>)>,
     next: u64,
+    /// Relay and svc frames for it, in memory only, until its link reads
+    /// them: their lines, and when each came.
+    held: std::collections::VecDeque<(std::time::Instant, String)>,
+    held_bytes: usize,
 }
+
+impl Live {
+    fn linked(&self, now: f64) -> bool {
+        self.streams > 0 || now - self.polled < POLLED_MS
+    }
+
+    fn drop_held(&mut self) {
+        self.held.clear();
+        self.held_bytes = 0;
+    }
+}
+
+/// Relay and svc frames held in memory for one host's link, at most: room
+/// for two of the largest.
+const HELD_BYTES: usize = 32 << 20;
+/// How long a relay or svc frame waits in memory for a host's link: a host
+/// drops one older than this (node.rs, RELAY_MS) anyway.
+const HELD_FOR: Duration = Duration::from_secs(120);
 
 /// Down streams one host may hold open at once: a new one ends the oldest.
 const STREAMS_PER_HOST: usize = 2;
@@ -337,13 +361,49 @@ impl Gateway {
 
     /// Hosts with a link open now, this one among them.
     pub fn linked(&self, now: f64) -> Vec<String> {
-        let mut out: Vec<String> = self.live.locked().iter().filter(|(_, l)| l.streams > 0 || now - l.polled < POLLED_MS).map(|(h, _)| h.clone()).collect();
+        let mut out: Vec<String> = self.live.locked().iter().filter(|(_, l)| l.linked(now)).map(|(h, _)| h.clone()).collect();
         out.sort();
         out
     }
 
     fn is_linked(&self, host: &str, now: f64) -> bool {
-        self.live.locked().get(host).is_some_and(|l| l.streams > 0 || now - l.polled < POLLED_MS)
+        self.live.locked().get(host).is_some_and(|l| l.linked(now))
+    }
+
+    /// Hands a relay or svc frame's line to `host`'s link, in memory only,
+    /// never the store: a svc frame may carry a service's own credential.
+    /// false, and the frame dropped, when the host isn't linked.
+    fn hand_over(&self, host: &str, line: &str, now: f64) -> bool {
+        let mut live = self.live.locked();
+        let Some(l) = live.get_mut(host) else { return false };
+        if !l.linked(now) {
+            l.drop_held();
+            return false;
+        }
+        let line = format!("{line}\n");
+        // The oldest go first: what's past its time, then what doesn't fit.
+        while l.held.front().is_some_and(|(t, _)| t.elapsed() > HELD_FOR || l.held_bytes + line.len() > HELD_BYTES) {
+            if let Some((_, old)) = l.held.pop_front() {
+                l.held_bytes -= old.len();
+            }
+        }
+        l.held_bytes += line.len();
+        l.held.push_back((std::time::Instant::now(), line));
+        true
+    }
+
+    /// What waits in memory for `host`'s link, oldest first, less what's
+    /// past its time.
+    fn take_held(&self, host: &str) -> Vec<String> {
+        let mut live = self.live.locked();
+        let Some(l) = live.get_mut(host) else { return Vec::new() };
+        l.held_bytes = 0;
+        std::mem::take(&mut l.held).into_iter().filter(|(t, _)| t.elapsed() <= HELD_FOR).map(|(_, line)| line).collect()
+    }
+
+    /// How many relay and svc frames wait in memory for `host`'s link.
+    pub fn held(&self, host: &str) -> usize {
+        self.live.locked().get(host).map_or(0, |l| l.held.len())
     }
 
     fn notifier(&self, host: &str) -> Arc<Notify> {
@@ -510,8 +570,10 @@ impl Gateway {
                 tokio::pin!(notified);
                 notified.as_mut().enable();
                 let (batch, _) = self.backlog(&host, after)?;
-                if !batch.is_empty() {
+                let held = self.take_held(&host);
+                if !batch.is_empty() || !held.is_empty() {
                     lines.extend(batch);
+                    lines.extend(held);
                     break;
                 }
                 tokio::select! {
@@ -560,7 +622,7 @@ impl Gateway {
                 let Ok((batch, upto)) = me_gw.backlog(&host, last) else { break };
                 let full = batch.len() as u64 >= BATCH_ROWS;
                 let mut gone = false;
-                for line in batch {
+                for line in batch.into_iter().chain(me_gw.take_held(&host)) {
                     gone |= tx.send(Bytes::from(line)).is_err();
                 }
                 last = upto;
@@ -594,9 +656,14 @@ impl Gateway {
                     () = end.notified() => break,
                 }
             }
+            let now = node.upgrade().map_or(0.0, |n| Self::now(&n));
             if let Some(l) = me_gw.live.locked().get_mut(&host) {
                 l.streams = l.streams.saturating_sub(1);
                 l.open.retain(|(id, _)| *id != me_id);
+                // No link reads what's held for it any more: it goes.
+                if !l.linked(now) {
+                    l.drop_held();
+                }
             }
         });
         let mut headers = ndjson();
@@ -719,7 +786,11 @@ impl Gateway {
             if f.kind == "presence" {
                 store.set_presence(&host, &f.to, line, now as i64)?;
             }
-            if f.queued() || self.is_linked(&f.to, now) {
+            if f.in_relay_batch() {
+                if self.hand_over(&f.to, line, now) {
+                    woken.push(f.to.clone());
+                }
+            } else if f.queued() || self.is_linked(&f.to, now) {
                 let (_, dropped) = store.enqueue(Item { host: &f.to, id: &f.id, kind: &f.kind, sender: &host, line }, now as i64, &caps)?;
                 dropped_all.extend(dropped);
                 woken.push(f.to.clone());
