@@ -1481,6 +1481,13 @@ mod tests {
         assert!(inbox::list_notes(&dir).unwrap().is_empty());
         let text = fs::read_to_string(dead_dir(&dir).join(format!("{id}.md"))).unwrap();
         assert!(text.starts_with("<!-- refused by studio at ") && text.contains("can't write here. - -> -->\n---\n"), "{text}");
+        let (rel, read) = inbox::read_note(&dir, &id).unwrap();
+        assert_eq!(rel, format!(".curator/sync/dead/{id}.md"), "note:<id> still opens it");
+        assert!(read.starts_with("Refused for good by the space's curator"), "{read}");
+        let sent =
+            inbox::submit_note(&dir, &NoteInput { kind: "log".into(), app: "codex".into(), title: "z".into(), body: "w".into(), ..Default::default() }, "", "", &inbox::By::Local("t")).unwrap().id;
+        mark_sent(&dir, &sent, "studio", &json!({ "id": sent, "result": "accepted" })).unwrap();
+        assert!(inbox::read_note(&dir, &sent).unwrap().1.starts_with("Sent to the space's curator"));
         fs::remove_dir_all(d).unwrap();
     }
 }

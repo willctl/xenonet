@@ -64,19 +64,24 @@ fn read_json(file: &Path) -> Option<Value> {
     read_if_exists(file).ok().flatten().and_then(|t| serde_json::from_str(&t).ok())
 }
 
-/// Where a note id lives now: "inbox", "done" (filed here, or sent to the space's curator by sync,
-/// or refused by it) or None.
+/// Where a note id lives now: "inbox", "done" (filed here), "sent" (sent to the space's curator by
+/// sync), "dead" (refused for good by that curator) or None.
 pub fn note_location(wiki_dir: &Path, id: &str) -> Option<&'static str> {
+    note_file(wiki_dir, id).map(|(w, _)| w)
+}
+
+/// Where a note id lives now, and its file there.
+fn note_file(wiki_dir: &Path, id: &str) -> Option<(&'static str, PathBuf)> {
     let p = curator_paths(wiki_dir);
-    if crate::wiki::confined_path(wiki_dir, &p.inbox.join(format!("{id}.md"))).is_ok_and(|p| p.exists()) {
-        return Some("inbox");
-    }
     let file = format!("{id}.md");
-    let done = [p.done.join(month_dir(id)).join(&file), p.cur.join("sent").join(month_dir(id)).join(&file), p.cur.join("sync").join("dead").join(&file)];
-    if done.iter().any(|f| crate::wiki::confined_path(wiki_dir, f).is_ok_and(|p| p.exists())) {
-        return Some("done");
-    }
-    None
+    [
+        ("inbox", p.inbox.join(&file)),
+        ("done", p.done.join(month_dir(id)).join(&file)),
+        ("sent", p.cur.join("sent").join(month_dir(id)).join(&file)),
+        ("dead", p.cur.join("sync").join("dead").join(&file)),
+    ]
+    .into_iter()
+    .find_map(|(w, f)| crate::wiki::confined_path(wiki_dir, &f).ok().filter(|f| f.exists()).map(|f| (w, f)))
 }
 
 /// Where a note's content came from (M2): user (the person said it), observed (the app checked it),
@@ -251,7 +256,7 @@ pub fn submit_note(wiki_dir: &Path, input: &NoteInput, transport: &str, client: 
                 // Same note sent again. Wait briefly in case the first submit is still writing.
                 for _ in 0..20 {
                     if let Some(where_) = note_location(wiki_dir, &prev_id) {
-                        return Ok(Submitted { rel: format!("inbox/{prev_id}.md"), id: prev_id, duplicate: true, status: if where_ == "done" { "filed" } else { "pending" } });
+                        return Ok(Submitted { rel: format!("inbox/{prev_id}.md"), id: prev_id, duplicate: true, status: if where_ == "inbox" { "pending" } else { "filed" } });
                     }
                     std::thread::sleep(std::time::Duration::from_millis(100));
                 }
@@ -472,9 +477,12 @@ pub fn read_note(wiki_dir: &Path, id: &str) -> Result<(String, String)> {
     }
     let p = curator_paths(wiki_dir);
     let month = month_dir(id);
-    let (rel, file, status) = match note_location(wiki_dir, id) {
-        Some("inbox") => (format!("inbox/{id}.md"), p.inbox.join(format!("{id}.md")), "Pending: the curator has not filed this note yet.".to_string()),
-        Some(_) => {
+    let rel_month = month.to_string_lossy().replace('\\', "/");
+    let (rel, file, status) = match note_file(wiki_dir, id) {
+        Some(("inbox", f)) => (format!("inbox/{id}.md"), f, "Pending: the curator has not filed this note yet.".to_string()),
+        Some(("sent", f)) => (format!(".curator/sent/{rel_month}/{id}.md"), f, "Sent to the space's curator on another machine, which files it there.".to_string()),
+        Some(("dead", f)) => (format!(".curator/sync/dead/{id}.md"), f, "Refused for good by the space's curator on another machine; the first line says why.".to_string()),
+        Some((_, f)) => {
             let audit_file = crate::wiki::confined_path(wiki_dir, &p.audit.join(&month).join(format!("{id}.json")))?;
             let audit = read_json(&audit_file).unwrap_or(Value::Null);
             let mut s = format!("Filed by the curator{}", audit["at"].as_str().map(|at| format!(" at {at}")).unwrap_or_default());
@@ -489,8 +497,7 @@ pub fn read_note(wiki_dir: &Path, id: &str) -> Result<(String, String)> {
                 s.push_str(&format!("; pages changed: {}", pages.join(", ")));
             }
             s.push('.');
-            let rel_month = month.to_string_lossy().replace('\\', "/");
-            (format!(".curator/done/{rel_month}/{id}.md"), p.done.join(&month).join(format!("{id}.md")), s)
+            (format!(".curator/done/{rel_month}/{id}.md"), f, s)
         }
         None => return wiki_err(format!("No note {id}: it is not in the inbox or among the filed notes.")),
     };
