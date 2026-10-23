@@ -38,9 +38,9 @@ const text = open({ text: str.optional() });
 // updated (its diff, and where it moved).
 const change = closed({ type: str.optional(), unified_diff: str.optional(), content: str.optional() }, { known: ["move_path"] });
 
-// What a web search did: searched (its query, or queries), opened a page or
-// looked in one.
-const searchAction = closed({ query: str.optional() }, { known: ["type", "queries", "url", "pattern"] });
+// What a web search did: searched (its query, or queries, with a null
+// query), opened a page or looked in one.
+const searchAction = closed({ query: maybe(str) }, { known: ["type", "queries", "url", "pattern"] });
 
 // What a finished item says, as the live tailer reads it (event_msg's
 // item_completed), and a thread shown from its rollout.
@@ -54,6 +54,19 @@ const item = variants("type", [
   open({ type: z.literal("WebSearch"), id: str.optional(), query: str.optional(), action: searchAction.optional() }),
   open({ type: z.literal("ImageView"), id: str.optional(), path: str }),
   open({ type: z.literal("ContextCompaction"), id: str.optional() }),
+  // The plan, as older Codex wrote it; the app-server says it as plan.
+  open({ type: z.literal("Plan"), id: str.optional(), text: str }),
+  // An extension's item: a web search (web.search, with WebSearch's query
+  // and action), an image made (image_gen.generation) or a pause
+  // (clock.sleep).
+  open({
+    type: z.literal("Extension"),
+    id: str.optional(),
+    kind: str.describe("web.search, image_gen.generation or clock.sleep; XenoNet reads a web search as WebSearch"),
+    query: maybe(str),
+    action: searchAction.optional(),
+    status: maybe(str),
+  }),
   ...["CollabAgentToolCall", "SubAgentActivity"].map((type) =>
     open({
       type: z.literal(type),
@@ -89,8 +102,9 @@ const event = variants("type", [
     type: z.literal("turn_aborted"),
     reason: maybe(str).describe("interrupted (you stopped it), replaced (the next turn took its place) or review_ended; older rollouts leave it out"),
   }).describe("A turn that ended without finishing: one you stopped (interrupted, or no reason) ends there, and the live view says so"),
-  // Kinds XenoNet passes over; newer Codex writes the last.
-  ...skipped("type", "agent_reasoning", "mcp_tool_call_end"),
+  // Kinds XenoNet passes over; newer Codex writes the last two (a thread's
+  // goal, as /goal sets it).
+  ...skipped("type", "agent_reasoning", "mcp_tool_call_end", "thread_goal_updated"),
 ]);
 
 // A tool call and its output, as response_item lines have them. Every
@@ -127,8 +141,10 @@ export const RolloutLine = vendor(
     envelope("event_msg", event),
     envelope("response_item", response),
     envelope("compacted", open({})),
-    // Kinds of line newer Codex writes, which XenoNet passes over.
-    ...skipped("type", "world_state", "token_usage_record"),
+    // Kinds of line newer Codex writes, which XenoNet passes over: among
+    // them what sets off a turn between agents, and a realtime (voice)
+    // conversation's items.
+    ...skipped("type", "world_state", "token_usage_record", "inter_agent_communication_metadata", "realtime_item"),
   ]),
   {
     title: "A line of a Codex rollout",
