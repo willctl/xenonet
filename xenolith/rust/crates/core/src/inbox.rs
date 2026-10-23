@@ -64,13 +64,16 @@ fn read_json(file: &Path) -> Option<Value> {
     read_if_exists(file).ok().flatten().and_then(|t| serde_json::from_str(&t).ok())
 }
 
-/// Where a note id lives now: "inbox", "done" or None.
+/// Where a note id lives now: "inbox", "done" (filed here, or sent to the space's curator by sync,
+/// or refused by it) or None.
 pub fn note_location(wiki_dir: &Path, id: &str) -> Option<&'static str> {
     let p = curator_paths(wiki_dir);
     if crate::wiki::confined_path(wiki_dir, &p.inbox.join(format!("{id}.md"))).is_ok_and(|p| p.exists()) {
         return Some("inbox");
     }
-    if crate::wiki::confined_path(wiki_dir, &p.done.join(month_dir(id)).join(format!("{id}.md"))).is_ok_and(|p| p.exists()) {
+    let file = format!("{id}.md");
+    let done = [p.done.join(month_dir(id)).join(&file), p.cur.join("sent").join(month_dir(id)).join(&file), p.cur.join("sync").join("dead").join(&file)];
+    if done.iter().any(|f| crate::wiki::confined_path(wiki_dir, f).is_ok_and(|p| p.exists())) {
         return Some("done");
     }
     None
@@ -134,6 +137,16 @@ pub struct NoteInput {
     pub idempotency_key: Option<String>,
 }
 
+/// A page note's mode: "replace" (the whole page), "delete" (a page removed in a followed space's
+/// copy, which sync sends to the space's curator), or "append" (anything else).
+pub fn page_mode(m: &str) -> &'static str {
+    match m {
+        "replace" => "replace",
+        "delete" => "delete",
+        _ => "append",
+    }
+}
+
 #[derive(Default)]
 pub struct PageInput {
     pub slug: Option<String>,
@@ -176,9 +189,9 @@ pub fn submit_note(wiki_dir: &Path, input: &NoteInput, transport: &str, client: 
             "title": one_line(&p.and_then(|p| p.title.clone()).unwrap_or_else(|| title.clone())),
             "type": get(|p| p.kind.clone()).trim().to_lowercase(),
             "summary": one_line(&get(|p| p.summary.clone())),
-            "mode": if get(|p| p.mode.clone()) == "replace" { "replace" } else { "append" },
+            "mode": page_mode(&get(|p| p.mode.clone())),
         });
-        if let Some(b) = p.and_then(|p| p.base.clone()).filter(|b| is_base(b)).filter(|_| page["mode"] == "replace") {
+        if let Some(b) = p.and_then(|p| p.base.clone()).filter(|b| is_base(b)).filter(|_| page["mode"] != "append") {
             page["base"] = json!(b);
         }
         page
@@ -344,7 +357,7 @@ fn note_from_text(id: &str, text: &str, mtime: i64) -> Note {
     let page = (meta.str("kind") == "page").then(|| {
         let mut p = json!({
             "slug": meta.str("page_slug"), "title": meta.str("page_title"), "type": meta.str("page_type"),
-            "summary": meta.str("page_summary"), "mode": if meta.str("page_mode") == "replace" { "replace" } else { "append" },
+            "summary": meta.str("page_summary"), "mode": page_mode(&meta.str("page_mode")),
         });
         let base = meta.str("page_base");
         if is_base(&base) {

@@ -358,7 +358,8 @@ pages. A space you start is curated where you start it. Another machine can
 **follow** it: it keeps a copy, where its sessions read pages and leave notes
 as usual, and its own curator leaves that space alone. Once a minute (or on
 `xenolith sync`) it pushes the notes waiting there to the curator, as entries,
-and pulls the curator's pages back.
+and pulls the curator's pages, its removals and the last 7 days of its log
+back, so `context_start` on the copy shows recent activity.
 
 On the curator, grant the other machine and make it a token:
 
@@ -379,29 +380,66 @@ xenolith sync
 
 A peer's URL is the base of its Xenolith service: `https://` anywhere, or
 `http://` only to this machine, since a token never crosses a network in the
-clear. Put the service behind something that forwards an address to it, such
-as XenoNet's gateway or a tunnel of your own. The token is kept in
+clear. The base may carry a path (`https://box.example/xenolith`): the sync
+routes go under it, at `<base>/sync/v1/...`. Xenolith serves them at the root of
+its own port, so whatever forwards an address to it (a reverse proxy, a tunnel)
+must strip its own path prefix before passing a request on, and send it to
+`127.0.0.1:<port>` with that as its Host. The token is kept in
 `peers/<name>.token` in the config folder, readable by you alone from the
 moment it exists: mode 0600, or on Windows a protected ACL for you and SYSTEM.
 `sync.json` and `access.json` are written the same way, also readable by the
-Windows service, which checks tokens and curators with them.
+Windows service, which checks tokens and curators with them. One request to a
+peer may take 90 seconds; a peer behind a slow forwarder may need longer:
+`xenolith sync timeout <seconds>` (`timeoutSeconds` in `sync.json`).
 
-The curator takes entries at `/sync/v1/spaces/<kind>/<name>/entries`: a note
-needs append, a replaced page needs write. Each entry is taken once, however
-often it is sent, and is stamped as the pushing token's subject's
-(`by: machine:laptop`), so a `user` source from the other machine counts as
-`agent` here. A page replaced on the other machine carries the version it
-was written against. When the curator's page has changed since, the push gets
-**409** and the write becomes a **proposal**: a change that waits for your OK
-even when approvals are automatic, listed by `xenolith held --space <space>`
-and decided there with `xenolith held approve|deny <batch>:<index> --space
-<space>` (or through the window's API with `space` and the [owner
-key](#the-owner-key)). Approving it applies it only if the page hasn't changed again.
+**Who the curator is.** Each curated space has a random curator id, made the
+first time a follower asks (`.curator/sync/curator.json` in the space). A
+follower pins it in `sync.json` at its first pull. If the peer's address later
+answers as another curator (two machines curating one space, or the curator set
+up again), the follower refuses to push or pull and says so in `xenolith sync`,
+`xenolith sync status` and `/status`. When the new curator is the right one,
+`xenolith sync follow <space> <peer>` again accepts it.
+
+**What travels.** The curator takes entries at
+`/sync/v1/spaces/<kind>/<name>/entries`: a note needs append, a replaced or
+removed page needs write. Each entry is taken once, however often it is sent,
+and is stamped as the pushing token's subject's (`by: machine:laptop`), so a
+`user` source from the other machine counts as `agent` here. A page replaced on
+the other machine carries the version it was written against. When the
+curator's page has changed since, the push gets **409** and the write becomes a
+**proposal**: a change that waits for your OK even when approvals are
+automatic, listed by `xenolith held --space <space>` and decided there with
+`xenolith held approve|deny <batch>:<index> --space <space>` (or through the
+window's API with `space` and the [owner key](#the-owner-key)). Approving it
+applies it only if the page hasn't changed again.
+
+- **Edits in a copy.** A page changed in the follower's copy since the last
+  pull (by hand, or by a session writing directly) becomes an entry: a replace
+  against the version last pulled. The copy then shows the curator's page again
+  until the curator files the change; the edit stays in `.history/`.
+- **Removals.** A page removed in a copy is sent as a removal against the
+  version last pulled. The curator removes it too when that is still its
+  version (keeping it in `.history/`), and makes it a proposal otherwise; until
+  then the next pull brings the page back. A page removed on the curator, by
+  any means, is listed as removed for 30 days, and each follower removes its
+  copy, keeping it in `.history/`.
+- **Batches.** Entries go 100 at a time, one batch a pass. A backlog over 1,000
+  is pushed batch after batch until it is drained.
+- **Failures.** An entry the curator refuses for good, because the token may not
+  do it (403) or the entry is invalid (400), moves to the copy's
+  `.curator/sync/dead/` with the reason on its first line and is never sent
+  again. `xenolith sync status` and `/status` count them. A push that fails for
+  any other reason leaves its entries to the next pass, and the pull still
+  runs. Only a refused token (401, or 403 for the whole request) stops both. A
+  page that disappears between the list and its fetch is skipped.
+
 Nothing written on either machine is lost: each pushed note moves to
 `.curator/sent/` with what the curator said, and each pull keeps the page it
-replaces in `.history/`. A machine that only follows a space sends anyone who
-pushes to it on to the curator (421). Both machines record each sync in their
-audit chains.
+replaces or removes in `.history/`. Log lines written directly in a copy stay
+after the curator's when its log is pulled. A machine that only follows a
+space sends anyone who asks it for that space on to the curator (421, with the
+curator's URL when it is an `https://` one). Both machines record each sync in
+their audit chains.
 
 ## The curator
 

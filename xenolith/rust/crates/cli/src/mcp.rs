@@ -470,7 +470,8 @@ pub fn call_tool(st: &State, ctx: &Ctx, called: &str, args: &Value) -> Value {
                             title: opt_s(args, "title"),
                             kind: opt_s(args, "type"),
                             summary: opt_s(args, "summary"),
-                            mode: opt_s(args, "mode"),
+                            // A session appends or replaces; only sync removes a page.
+                            mode: opt_s(args, "mode").filter(|m| m == "replace"),
                         }),
                         idempotency_key: opt_s(args, "idempotency_key"),
                     };

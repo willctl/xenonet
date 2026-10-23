@@ -718,7 +718,7 @@ function CuratorBar({ status }) {
 
 const NOTE_STATUS = { pending: 'Waiting', retrying: 'Retrying', dead: 'Failed' };
 
-const ACTION_LABEL = { created: 'new page', patched: 'update', replaced: 'rewrite' };
+const ACTION_LABEL = { created: 'new page', patched: 'update', replaced: 'rewrite', removed: 'removal' };
 
 /** Ends a reason with exactly one full stop (a model's reason may bring its own). */
 const sentence = (s) => s.replace(/[.\s]+$/, '') + '.';
