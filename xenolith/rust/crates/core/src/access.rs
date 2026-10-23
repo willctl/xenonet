@@ -17,8 +17,11 @@
 //!   space is the lower of its own scopes and its subject's live grants there: a token can't
 //!   reach past what you granted, and a grant does nothing without a token that asks for it.
 //!
-//! You, and the sessions on this machine, have admin everywhere, as in XenoNet: stdio, and HTTP
-//! from this machine without a token. `"local": "none"` in access.json takes that away too.
+//! Local callers (stdio, and HTTP from a process on this machine without a token and without a
+//! proxy's Forwarded, X-Forwarded-* or Via header) have admin everywhere by default. Local is any
+//! process on this machine, not only the owner's own apps: tokens scope remote and other apps'
+//! access. `"local"` in access.json lowers that (read, append, write) or takes it away ("none");
+//! a value Xenolith doesn't know counts as "none".
 //! The policy is access.json in Xenolith's config folder, never in the wiki, whose files are
 //! data that sessions and models write.
 
@@ -306,10 +309,11 @@ impl Policy {
             Ok(v @ Value::Object(_)) => v,
             _ => return Policy { problem: Some(format!("{} is not a JSON object; tokens are refused until it is fixed", wiki::disp(file))), ..Policy::new() },
         };
-        let local = match v.get("local").and_then(Value::as_str) {
+        // Missing: admin, the default. Anything but a level ("none", a typo, null) is no access:
+        // a policy that can't be read right must not hand this machine's processes more.
+        let local = match v.get("local") {
             None => Some(Level::Admin),
-            Some("none") => None,
-            Some(l) => Level::parse(l).or(Some(Level::Admin)),
+            Some(l) => l.as_str().and_then(Level::parse),
         };
         let grants = v["grants"]
             .as_array()
@@ -697,6 +701,29 @@ mod tests {
         assert!(broken.problem.is_some());
         assert!(broken.principal_for(&secret, now).is_none(), "a policy that can't be read refuses every token");
         assert_eq!(broken.level(&Principal::Local, &SpaceId::local(), now), Some(Level::Admin), "you keep admin to fix it");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn an_unknown_local_value_means_none() {
+        let dir = std::env::temp_dir().join(format!("xenolith-access-local-{}", random_hex(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("access.json");
+        for (text, want) in [
+            (r#"{}"#, Some(Level::Admin)),
+            (r#"{"local":"read"}"#, Some(Level::Read)),
+            (r#"{"local":"Write"}"#, Some(Level::Write)),
+            (r#"{"local":"none"}"#, None),
+            (r#"{"local":"admn"}"#, None),
+            (r#"{"local":"everything"}"#, None),
+            (r#"{"local":null}"#, None),
+            (r#"{"local":4}"#, None),
+        ] {
+            std::fs::write(&file, text).unwrap();
+            let p = Policy::load(&file);
+            assert_eq!(p.local, want, "{text}");
+            assert!(p.problem.is_none(), "{text}");
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
 

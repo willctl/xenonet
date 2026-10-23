@@ -1,6 +1,13 @@
 //! `serve --http`: Streamable HTTP on 127.0.0.1 (stateless, JSON responses), /health, /status, the
-//! window (/ui, /api). Only this machine and never a web page: other Hosts and cross-origin requests
+//! window (/ui, /api) and sync (/sync/v1). Never a web page: other Hosts and cross-origin requests
 //! are refused (DNS rebinding). Same behavior as src/server.mjs + the MCP SDK's transport.
+//!
+//! Who a request is: a request is this machine's own (Local) only when it reaches the loopback
+//! listener directly, names a loopback Host and carries no Forwarded, X-Forwarded-* or Via header.
+//! Local is any process on this machine, not only the owner's own apps: tokens scope remote and
+//! other apps' access. /mcp takes Local or a bearer token; /sync/v1 always needs a token, since sync
+//! is remote by nature; /status, /ui and /api are Local only and never take a token; /health is
+//! open and says nothing private.
 
 use crate::httpd::{self, Request, Response};
 use crate::mcp::{self, Ctx, State, log, rpc_error};
@@ -413,16 +420,23 @@ fn same_resource(a: &str, b: &str) -> bool {
     a.replace("://localhost:", "://127.0.0.1:") == b.replace("://localhost:", "://127.0.0.1:")
 }
 
-/// Who a request to /mcp comes from, or the challenge to answer it with. Without a token it is
-/// this machine's own (the listener is loopback only), unless access.json says "local": "none".
-fn principal_of(base: &str, bearer: &Option<Option<String>>, entry: &mut Entry) -> Result<Principal, Reply> {
+/// Whether a request is this machine's own: it reached the loopback listener directly (the Host
+/// check has already run) and no proxy says it passed it on. A forwarder that adds none of those
+/// headers (a plain TCP tunnel) is indistinguishable from a local process: README, Security.
+fn is_local(req: &Request) -> bool {
+    !req.forwarded() && req.peer.is_none_or(|p| p.ip().is_loopback())
+}
+
+/// Who a request to /mcp or /sync comes from, or the challenge to answer it with. Without a token
+/// it is this machine's own when `local` (see is_local), unless access.json says "local": "none".
+fn principal_of(base: &str, bearer: &Option<Option<String>>, local: bool, entry: &mut Entry) -> Result<Principal, Reply> {
     let policy = access::load(&AppPaths::current());
     let now = now_ms();
     match bearer {
-        None if policy.local.is_some() => Ok(Principal::Local),
+        None if local && policy.local.is_some() => Ok(Principal::Local),
         None => {
             entry.result = Some("unauthorized".into());
-            Err(challenge(base, None, None, "This server needs a token."))
+            Err(challenge(base, None, None, if local { "This server needs a token." } else { "This server needs a token: a forwarded request is never this machine's own." }))
         }
         Some(None) => {
             entry.result = Some("unauthorized".into());
@@ -494,38 +508,52 @@ fn handle(app: &App, req: &Request, entry: &mut Entry) -> Reply {
         entry.result = Some("forbidden-token".into());
         return Reply::json(403, &json!({ "error": "Forbidden: tokens work at /mcp and /sync only" }));
     }
+    let local = is_local(req);
     if is_sync {
         if app.closing.load(Ordering::SeqCst) {
             return Reply::json(503, &json!({ "error": "xenolith is restarting; retry shortly." }));
         }
-        let principal = match principal_of(&base, &bearer, entry) {
+        // Sync is remote by nature: a token always, even from this machine.
+        if bearer.is_none() {
+            entry.result = Some("unauthorized".into());
+            return challenge(&base, None, None, "Sync needs a token, even from this machine.");
+        }
+        let principal = match principal_of(&base, &bearer, local, entry) {
             Ok(p) => p,
             Err(r) => return r,
         };
         return sync_route(app, req, method, &path, principal, entry);
     }
-    if path == "/health" || path == "/status" {
+    if path == "/health" {
         if method != "GET" {
             return Reply::json(405, &json!({ "error": "Use GET" })).with("Allow", "GET");
         }
+        // Open to anyone who reaches the port, so nothing private: no folders, no setup error text.
         let st = app.state();
-        if path == "/status" {
-            entry.quiet = true;
-            return Reply::json(200, &status_report(app, &st));
-        }
         let mut h = Map::new();
         h.insert("ok".into(), json!(st.setup_error.is_none()));
         h.insert("name".into(), json!("xenolith"));
         h.insert("version".into(), json!(xenolith_core::VERSION));
         h.insert("build".into(), json!(build_hash()));
-        h.insert("wikiDir".into(), st.wiki_dir.as_ref().map(|d| json!(wiki::disp(d))).unwrap_or(Value::Null));
         h.insert("pid".into(), json!(std::process::id()));
         h.insert("uptimeSec".into(), json!(((now_ms() - started_ms()) as f64 / 1000.0).round() as i64));
         h.insert("writeMode".into(), json!(if st.curated { "curated" } else { "direct" }));
-        if let Some(e) = &st.setup_error {
-            h.insert("error".into(), json!(e));
-        }
         return Reply::json(if st.setup_error.is_some() { 503 } else { 200 }, &Value::Object(h));
+    }
+    // /status, the window and its API show this machine's folders and decide its changes: its
+    // own processes only, never a forwarded request.
+    let own = path == "/status" || path == "/ui" || path.starts_with("/ui/") || path.starts_with("/api/");
+    if own && !local {
+        entry.result = Some("forbidden-forwarded".into());
+        return Reply::json(403, &json!({ "error": "Forbidden: this is for this machine's own processes; a forwarded request is never one of them" }));
+    }
+    if path == "/status" {
+        if method != "GET" {
+            return Reply::json(405, &json!({ "error": "Use GET" })).with("Allow", "GET");
+        }
+        let st = app.state();
+        entry.quiet = true;
+        return Reply::json(200, &status_report(app, &st));
     }
     if path == "/ui" || path.starts_with("/ui/") || path.starts_with("/api/") {
         let st = app.state();
@@ -540,7 +568,7 @@ fn handle(app: &App, req: &Request, entry: &mut Entry) -> Reply {
     if app.closing.load(Ordering::SeqCst) {
         return Reply::json(503, &rpc_error(Value::Null, -32000, "xenolith is restarting; retry shortly."));
     }
-    let principal = match principal_of(&base, &bearer, entry) {
+    let principal = match principal_of(&base, &bearer, local, entry) {
         Ok(p) => p,
         Err(r) => return r,
     };

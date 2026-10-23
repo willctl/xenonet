@@ -199,10 +199,14 @@ describe('sync between two machines', { skip, timeout: 120_000 }, () => {
     assert.equal(r.status, 200);
     assert.deepEqual([r.json.results[0].result, r.json.results[0].error], ['refused', "This token can't append here."]);
     assert.equal((await request(server.port, 'POST', '/sync/v1/spaces/project/atlas/entries', { headers: auth, body: { entries: [] } })).status, 400);
-    // The laptop only follows project:atlas: it sends a pusher to the curator.
+    // The laptop only follows project:atlas: it sends a pusher to the curator. Sync always takes a
+    // token, even from the same machine.
     const laptopServer = await startHttp(laptop.env);
     try {
-      const misdirected = await request(laptopServer.port, 'POST', '/sync/v1/spaces/project/atlas/entries', { body: { entries: [entry] } });
+      assert.equal((await request(laptopServer.port, 'POST', '/sync/v1/spaces/project/atlas/entries', { body: { entries: [entry] } })).status, 401);
+      ok(laptop, ['grant', 'machine:phone', 'ctx:append:project:atlas']);
+      const phone = ok(laptop, ['token', 'create', 'machine:phone', '--json']).json().token;
+      const misdirected = await request(laptopServer.port, 'POST', '/sync/v1/spaces/project/atlas/entries', { headers: { Authorization: `Bearer ${phone}` }, body: { entries: [entry] } });
       assert.equal(misdirected.status, 421);
       assert.deepEqual([misdirected.json.error, misdirected.json.curator], ['not_curator', 'studio']);
     } finally {

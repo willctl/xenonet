@@ -186,7 +186,8 @@ Access comes in four levels, each including the ones before it:
 | write | `context_upsert_page` with `mode: "replace"` |
 | admin | start a space |
 
-You and the sessions on this machine have admin in every space, as in XenoNet.
+Local callers have admin in every space: stdio servers, and HTTP requests that
+come straight from a process on this machine ([who is local](#who-is-local)).
 Anyone else gets nothing until you grant it:
 
 ```bash
@@ -205,8 +206,36 @@ covers every space, and a value may end in `*`. The keys are `project`,
 XenoNet grant). A subject is `actor:<slug>`, `client:<id>` or `machine:<name>`.
 A grant expires (after 30 days unless you say otherwise), `revoke` takes effect
 at once, and a grant that names one space exactly starts it. The policy is
-`access.json` in Xenolith's config folder, never in the wiki. `"local": "none"`
-there takes access away from this machine's sessions too.
+`access.json` in Xenolith's config folder, never in the wiki.
+
+### Who is local
+
+Local is any process on this machine, not only your own apps. A request is
+local when it reaches the service's loopback port directly, names `127.0.0.1`
+or `localhost` as its Host, and carries no `Forwarded`, `X-Forwarded-*` or `Via`
+header. Tokens scope remote access and other apps' access. They don't separate
+your own agents from each other.
+
+| Endpoint | Who |
+| --- | --- |
+| `/mcp` | a local request without a token, or a token |
+| `/sync/v1` | a token, always, even from this machine |
+| `/status`, `/ui`, `/api` | local requests only, never a token |
+| `/health` | anyone: name, version, build, pid and uptime, nothing private |
+
+A forwarder that adds none of those headers, such as `ssh -L`, socat or a plain
+TCP tunnel, looks local. If anyone reaches the port that way, take local access
+away and give each client its own token:
+
+```bash
+xenolith access local none
+xenolith grant client:laptop ctx:append:project:atlas
+xenolith token create client:laptop
+```
+
+`xenolith access local read` (or `append`, `write`, `admin`) gives some of it
+back. In `access.json` this is `"local"`; a value Xenolith doesn't know counts
+as `"none"`.
 
 ### Tokens
 
@@ -225,7 +254,7 @@ a token may do in a space is the lower of its own scopes and its subject's live
 grants there, so a token never reaches past what you granted, and revoking
 either one takes effect on connections already open.
 
-- **Over HTTP** a token travels as `Authorization: Bearer`, at `/mcp` only. The
+- **Over HTTP** a token travels as `Authorization: Bearer`, at `/mcp` and `/sync/v1` only. The
   service acts as an OAuth 2.1 resource server the way MCP's authorization spec
   describes: its metadata is at `/.well-known/oauth-protected-resource`, a
   missing or bad token gets a 401 with a `WWW-Authenticate` challenge, and a
@@ -233,8 +262,8 @@ either one takes effect on connections already open.
   the scope it needs. A call its scopes reach but its grants don't is refused
   with the same answer whether the space exists or not. A token in a URL is
   refused, and a token at `/status`, `/health`, `/ui` or `/api` gets a 403,
-  since those show this machine's folders. Without a token, the service treats
-  a request as this machine's own: don't expose its port.
+  since those belong to this machine. Without a token, a local request is this
+  machine's own ([who is local](#who-is-local)), and a forwarded one gets a 401.
 - **Over stdio**, `XENOLITH_TOKEN` in the server's environment makes it work
   as the token's holder, for an actor started on this machine with its own
   token. A token Xenolith doesn't know stops the server from starting.

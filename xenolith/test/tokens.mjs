@@ -194,9 +194,64 @@ describe('tokens over HTTP', { skip, timeout: 60_000 }, () => {
     const inUrl = await request(server.port, { path: `/mcp?access_token=${reader}`, body: toolCall('context_search', { query: 'x' }) });
     assert.equal(inUrl.status, 400);
     assert.equal(inUrl.json.error, 'invalid_request');
-    for (const p of ['/status', '/health', '/api/pages', '/ui/']) {
+    for (const p of ['/status', '/health', '/api/pages', '/api/held', '/ui/']) {
       const r = await request(server.port, { method: 'GET', path: p, headers: bearer(reader) });
       assert.equal(r.status, 403, p);
+    }
+    for (const p of ['/api/held', '/api/settings', '/api/forget']) {
+      const r = await request(server.port, { path: p, headers: { ...bearer(reader), 'X-Xenolith': 'ui' }, body: { approvals: 'auto' } });
+      assert.equal(r.status, 403, `POST ${p}: a token never decides anything in the window's API`);
+    }
+  });
+
+  test('a request a proxy forwarded is never this machine\'s own, whatever address it comes from', async () => {
+    const plain = await request(server.port, { body: toolCall('context_search', { query: 'home lab' }) });
+    assert.equal(plain.status, 200, 'loopback, no proxy headers: this machine');
+    for (const via of [{ Forwarded: 'for=192.0.2.7;proto=https' }, { 'X-Forwarded-For': '192.0.2.7' }, { 'X-Forwarded-Host': 'studio.example' }, { Via: '1.1 gateway' }]) {
+      const r = await request(server.port, { headers: via, body: toolCall('context_search', { query: 'home lab' }) });
+      assert.equal(r.status, 401, JSON.stringify(via));
+      assert.match(r.headers['www-authenticate'], /error_description="This server needs a token: a forwarded request is never this machine's own\."/);
+      assert.doesNotMatch(r.text, /home lab/);
+      for (const p of ['/status', '/api/pages', '/api/held', '/ui/']) {
+        assert.equal((await request(server.port, { method: 'GET', path: p, headers: via })).status, 403, `${p} ${JSON.stringify(via)}`);
+      }
+    }
+    // A token works through a proxy: it is what scopes remote access.
+    const viaToken = await request(server.port, { headers: { ...bearer(reader), Forwarded: 'for=192.0.2.7' }, body: toolCall('context_search', { space: 'project:atlas', query: 'postgres' }) });
+    assert.equal(viaToken.status, 200);
+    assert.match(textOf(viaToken), /Atlas runs on Postgres 17/);
+    // /health is open and says nothing private.
+    const h = await request(server.port, { method: 'GET', path: '/health', headers: { Forwarded: 'for=192.0.2.7' } });
+    assert.equal(h.status, 200);
+    assert.equal(h.json.ok, true);
+    assert.equal(h.json.wikiDir, undefined, 'no folder of this machine\'s');
+    assert.ok(!h.text.includes(E.wikiDir) && !h.text.includes(E.home), h.text);
+  });
+
+  test('sync always needs a token, even from this machine', async () => {
+    for (const [method, p] of [['GET', '/sync/v1/spaces/project/atlas/pages'], ['POST', '/sync/v1/spaces/project/atlas/entries']]) {
+      const r = await request(server.port, { method, path: p, body: method === 'POST' ? { entries: [] } : undefined });
+      assert.equal(r.status, 401, `${method} ${p}`);
+      assert.match(r.headers['www-authenticate'], /^Bearer error_description="Sync needs a token, even from this machine\.", resource_metadata="/);
+    }
+  });
+
+  test('an unknown "local" value in access.json means none', async () => {
+    const E3 = makeEnv({ access: { local: 'everything' } });
+    const s3 = await startHttp(E3.env);
+    try {
+      const r = await request(s3.port, { body: toolCall('context_search', { query: 'x' }) });
+      assert.equal(r.status, 401);
+      // `xenolith access local` sets it in one line, and the service reads it on the next request.
+      assert.deepEqual(JSON.parse(cli(E3.env, 'access', 'local', 'read', '--json').out), { local: 'read' });
+      assert.equal((await request(s3.port, { body: toolCall('context_search', { query: 'x' }) })).status, 200);
+      const write = await request(s3.port, { body: toolCall('context_log', { app: 'x', title: 'x' }) });
+      assert.match(textOf(write), /^Refused: /);
+      assert.equal(cli(E3.env, 'access', 'local', 'everything').code, 1);
+      assert.equal(cli(E3.env, 'access', 'local', 'none').code, 0);
+      assert.equal((await request(s3.port, { body: toolCall('context_search', { query: 'x' }) })).status, 401);
+    } finally {
+      s3.proc.kill();
     }
   });
 

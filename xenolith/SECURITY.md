@@ -1,6 +1,16 @@
 # Security
 
-Xenolith is for a trusted local machine. The HTTP service binds to loopback and rejects unrelated browser origins. It does not authenticate OS users. Any local process, including another account on the machine, can call its read and write APIs. The UI header prevents browser cross-site requests; it is not a password. Do not forward the port or use this service to isolate mutually untrusted users.
+Xenolith is for a trusted local machine. The HTTP service binds to loopback and rejects other Hosts and unrelated browser origins. It does not authenticate OS users.
+
+## Who Xenolith trusts
+
+- **Local is any process on this machine.** A request without a token is local when it reaches the loopback port directly, names a loopback Host and carries no `Forwarded`, `X-Forwarded-*` or `Via` header. Local callers get what `access.json` says for `"local"`, admin by default. That includes your agents, other apps, and other OS accounts on the machine.
+- **Tokens scope remote access and other apps' access.** They do not separate your own agents from each other: an agent that runs as you can read anything you can.
+- **Sync always needs a token**, even from this machine. `/status`, `/ui` and `/api` take local requests only and never a token. `/health` is open and says nothing private.
+- **A plain tunnel looks local.** A forwarder that adds none of those headers (`ssh -L`, socat, a TCP tunnel) is indistinguishable from a local process. If anyone reaches the port that way, run `xenolith access local none` and give each client its own token ([README](README.md#who-is-local)).
+- The window's `X-Xenolith` header stops cross-site browser requests. It is not a password.
+
+Do not use this service to isolate mutually untrusted users.
 
 ## Data and model access
 

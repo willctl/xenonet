@@ -7,6 +7,9 @@
 //!                                                      machine:<name>) a scope, for N days (30)
 //!   xenolith revoke <subject> [<scope>]               take its grants away: all, or one scope
 //!   xenolith access [--json]                          the policy: grants, tokens (never secrets), spaces
+//!   xenolith access local <read|append|write|admin|none>
+//!                                                      what this machine's own processes may do
+//!                                                      without a token (admin by default)
 //!   xenolith token create <subject> [--scope "<scopes>"] [--label <text>] [--days N]
 //!                                                      a token for the subject, shown once; its scopes
 //!                                                      default to what the subject is granted now
@@ -31,7 +34,7 @@ fn fail(msg: &str) -> ! {
 
 fn usage() -> ! {
     eprintln!(
-        "usage: xenolith spaces [add <space> [--identity <name>]] [--json] | xenolith grant <subject> <scope> [--days N] | xenolith revoke <subject> [<scope>] | xenolith access [--json] | xenolith token create <subject> [--scope \"<scopes>\"] [--label <text>] [--days N] | xenolith token revoke <tok_…|subject> | xenolith audit [verify | tail [N]] [--json]"
+        "usage: xenolith spaces [add <space> [--identity <name>]] [--json] | xenolith grant <subject> <scope> [--days N] | xenolith revoke <subject> [<scope>] | xenolith access [--json] | xenolith access local <read|append|write|admin|none> | xenolith token create <subject> [--scope \"<scopes>\"] [--label <text>] [--days N] | xenolith token revoke <tok_…|subject> | xenolith audit [verify | tail [N]] [--json]"
     );
     std::process::exit(2)
 }
@@ -251,6 +254,29 @@ pub fn run(cmd: &str, args: &[String]) -> ! {
             }
             std::process::exit(0)
         }
+        ("access", ["local", level]) => {
+            // What a process on this machine may do without a token. "none" when anyone reaches
+            // the port through a tunnel that looks local: give each client its own token instead.
+            let want = match level.to_ascii_lowercase().as_str() {
+                "none" => None,
+                l => Some(access::Level::parse(l).unwrap_or_else(|| fail(&format!("\"{level}\" is not a level: use read, append, write, admin or none")))),
+            };
+            access::update(&paths, |p| {
+                p.local = want;
+                Ok(())
+            })
+            .unwrap_or_else(|e| fail(&e.to_string()));
+            let shown = want.map_or("none", access::Level::as_str);
+            audit::best_effort(&paths, "local", "you", vec![("level", json!(shown))]);
+            if json_out {
+                println!("{}", json!({ "local": shown }));
+            } else if want.is_none() {
+                println!("This machine's processes now need a token too.");
+            } else {
+                println!("This machine's processes may now {shown} without a token.");
+            }
+            std::process::exit(0)
+        }
         ("access", []) => {
             let p = access::load(&paths);
             if json_out {
@@ -277,7 +303,7 @@ fn print_policy(p: &Policy, now: i64) {
     if let Some(problem) = &p.problem {
         println!("! {problem}");
     }
-    println!("You and the sessions on this machine: {}.", p.local.map_or("nothing (\"local\": \"none\")", |l| l.as_str()));
+    println!("Processes on this machine, without a token: {}.", p.local.map_or("nothing (\"local\": \"none\")", |l| l.as_str()));
     if p.grants.is_empty() {
         println!("No grants: no token can reach any space.");
     }

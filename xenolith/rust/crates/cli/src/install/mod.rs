@@ -649,7 +649,8 @@ fn service_step(p: &Places, wiki_dir: &Path, port: u16, _curated: bool) -> Resul
     let build = sha12(&p.agent);
     let h = sys::wait_for_health(port, |x| x["ok"] == true && x["version"] == xenolith_core::VERSION && x["build"] == build.as_str(), Duration::from_secs(45));
     match h {
-        Some(h) if h["build"] == build.as_str() && h["wikiDir"].as_str().map(PathBuf::from).as_deref() == Some(wiki_dir) => {
+        // /health says nothing private; the wiki folder the service uses is in /status.
+        Some(h) if h["build"] == build.as_str() && sys::get_json(port, "/status").is_some_and(|s| s["wikiDir"].as_str().map(PathBuf::from).as_deref() == Some(wiki_dir)) => {
             info(&format!("service running: v{} (build {}), pid {}, http://127.0.0.1:{port}/mcp", h["version"].as_str().unwrap_or("?"), h["build"].as_str().unwrap_or("?"), h["pid"]));
             remove_node_runtime(p);
             Ok("http")
@@ -1165,7 +1166,7 @@ mod service {
             }
             match super::sys::wait_for_health(port, |h| h["ok"] == true, Duration::from_secs(20)) {
                 Some(h) if h["ok"] == true => {
-                    log.say(&format!("healthy: xenolith v{}, pid {}, wiki {}", h["version"].as_str().unwrap_or("?"), h["pid"], h["wikiDir"].as_str().unwrap_or("?")));
+                    log.say(&format!("healthy: xenolith v{}, pid {}", h["version"].as_str().unwrap_or("?"), h["pid"]));
                     Ok(())
                 }
                 other => {
