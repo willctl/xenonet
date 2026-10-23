@@ -411,7 +411,8 @@ test("the message box writes to a session as you, from the Network panel and fro
   await clickAt(st.message.sendAt, "Send");
   last = await until(async () => ((await s.driver("message")).last?.to === waiting.waits[0].agent ? (await s.driver("message")).last : null));
   assert.deepEqual([last.ok, last.state], [true, "stored"]);
-  assert.equal((await s.driver("state")).overlays.modal, false, "the box closes once it's sent");
+  // The box closes once the answer is in, a moment after the driver sees it.
+  assert.ok(await until(async () => (await s.driver("state")).overlays.modal === false), "the box closes once it's sent");
 
   // A session of this machine's has Message in its own panel.
   const found = await s.driver("find", { kind: "session", limit: 1 });
