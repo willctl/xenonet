@@ -6,7 +6,9 @@
 //!
 //! Held changes live in .curator/held/<batch>.json until every change in the file is decided, then
 //! move to .curator/held/done/. Decisions run in the server, under the wiki write lock, and keep the
-//! previous page version in .history/ like every other write.
+//! previous page version in .history/ like every other write. A person's decision records who made
+//! it (`by`: "owner" for the window, "cli" for `xenolith held`, both shown the owner key, owner.rs),
+//! and an approver never approves a change made from a note it submitted itself.
 
 use crate::curator::{HeldOp, apply_edits, page_write};
 use crate::frontmatter;
@@ -27,6 +29,9 @@ pub struct Entry {
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decided_at: Option<String>,
+    /// Who decided: "owner" (the window) or "cli" (`xenolith held`); none for approvals "auto".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decided_by: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<String>,
     /// Approved without the person (approvals "auto").
@@ -127,6 +132,7 @@ pub fn record(wiki_dir: &Path, batch: &str, at: &str, held: &[HeldOp]) -> wiki::
                 held: h.clone(),
                 status: "pending".into(),
                 decided_at: None,
+                decided_by: None,
                 outcome: None,
                 auto: false,
                 applied_hash: None,
@@ -233,18 +239,23 @@ fn keep_history(wiki_dir: &Path, slug: &str, text: &str, suffix: &str) -> wiki::
 }
 
 /// Approves, rejects or sends back ("refile": the notes go back to the inbox, so the curator plans
-/// them again on the current pages) one held change.
-pub fn decide(wiki_dir: &Path, batch: &str, index: usize, action: &str) -> Result<Value, Error> {
+/// them again on the current pages) one held change, as `by` (who decided: "owner" or "cli").
+pub fn decide(wiki_dir: &Path, batch: &str, index: usize, action: &str, by: &str) -> Result<Value, Error> {
     check_batch(batch)?;
     if !["approve", "reject", "refile"].contains(&action) {
         return Err(Error::NotFound(format!("unknown action \"{}\"", take_chars(action, 20))));
     }
     let mut out: Result<Value, Error> = Err(Error::NotFound("no such change".into()));
     wiki::with_lock(wiki_dir, || {
-        out = decide_locked(wiki_dir, batch, index, action, false);
+        out = decide_locked(wiki_dir, batch, index, action, Some(by));
         Ok(())
     })?;
     out
+}
+
+/// Who submitted the notes behind a change, as their notes were stamped (inbox::submit_note).
+fn submitters(e: &Entry) -> Vec<&str> {
+    e.held.notes.iter().filter_map(|n| n["by"].as_str()).collect()
 }
 
 fn message(e: Error) -> String {
@@ -290,7 +301,7 @@ pub fn apply_auto_locked(wiki_dir: &Path, batch: &str) -> wiki::Result<Vec<Strin
     let mut applied = vec![];
     if misfits.is_empty() {
         for &i in &pending {
-            match decide_locked(wiki_dir, batch, i, "approve", true) {
+            match decide_locked(wiki_dir, batch, i, "approve", None) {
                 Ok(v) => applied.extend(v["slug"].as_str().map(String::from).filter(|_| v["changed"].as_bool() == Some(true))),
                 Err(Error::Wiki(e)) => return Err(e),
                 Err(e) => misfits.push((i, message(e))),
@@ -456,11 +467,18 @@ pub fn undo(wiki_dir: &Path, batch: &str, index: usize) -> Result<Value, Error> 
     out
 }
 
-fn decide_locked(wiki_dir: &Path, batch: &str, index: usize, action: &str, auto: bool) -> Result<Value, Error> {
+/// One decision under the lock: by a person (`by`), or by approvals "auto" (None).
+fn decide_locked(wiki_dir: &Path, batch: &str, index: usize, action: &str, by: Option<&str>) -> Result<Value, Error> {
+    let auto = by.is_none();
     let Some(mut f) = load(wiki_dir, batch) else { return Err(Error::NotFound(format!("no held changes for batch {batch}"))) };
     let Some(e) = f.changes.get(index).cloned() else { return Err(Error::NotFound("no such change".into())) };
     if e.status != "pending" {
         return Err(Error::Conflict(format!("This change was already {}.", e.status)));
+    }
+    // Whoever submitted a note behind a change can't also approve it: the approval must come from
+    // someone else.
+    if let Some(by) = by.filter(|b| action == "approve" && submitters(&e).contains(b)) {
+        return Err(Error::Conflict(format!("{by} submitted a note behind this change, so {by} can't approve it. Approve it another way, or reject it.")));
     }
     let w = &e.held.write;
     let title = one_line(&w.title);
@@ -517,6 +535,7 @@ fn decide_locked(wiki_dir: &Path, batch: &str, index: usize, action: &str, auto:
     };
     f.changes[index].status = status.into();
     f.changes[index].decided_at = Some(local_iso(&now()));
+    f.changes[index].decided_by = by.map(String::from);
     f.changes[index].outcome = Some(outcome.clone());
     f.changes[index].auto = auto;
     f.changes[index].applied_hash = applied_hash;
@@ -613,9 +632,9 @@ pub fn revert(wiki_dir: &Path, batch: &str, slug: &str) -> Result<Value, Error> 
     out
 }
 
-/// When a change cannot be restored as a whole: a note from the person asking the curator to undo it
-/// on the current page, with what the change did.
-pub fn undo_request(wiki_dir: &Path, batch: &str, slug: &str) -> Result<Value, Error> {
+/// When a change cannot be restored as a whole: a note from the person (`by`: "owner" or "cli", who
+/// showed the owner key) asking the curator to undo it on the current page, with what the change did.
+pub fn undo_request(wiki_dir: &Path, batch: &str, slug: &str, by: &str) -> Result<Value, Error> {
     check_batch(batch)?;
     if !SLUG_RE.is_match(slug) {
         return Err(Error::NotFound("no such page".into()));
@@ -633,7 +652,7 @@ pub fn undo_request(wiki_dir: &Path, batch: &str, slug: &str) -> Result<Value, E
     }
     let note =
         inbox::NoteInput { kind: "log".into(), source: "user".into(), app: "window".into(), title: format!("Undo the curator's change to {slug}"), body, pages: json!([slug]), ..Default::default() };
-    let r = inbox::submit_note(wiki_dir, &note, "ui", "xenolith window")?;
+    let r = inbox::submit_note(wiki_dir, &note, "ui", "xenolith window", &inbox::By::Owner(by))?;
     Ok(json!({ "note": r.id }))
 }
 
@@ -779,7 +798,7 @@ mod tests {
             let rec = json!({ "batch": batch, "changes": [{ "slug": "p", "action": "patched", "baseHash": hash_text(private, 16), "newHash": hash_text(&base, 16), "history": rel }] });
             fs::write(audit.join("fixture.json"), rec.to_string()).unwrap();
             assert!(revert(&w, batch, "p").is_err(), "revert accepted {rel}");
-            assert!(undo_request(&w, batch, "p").is_err(), "undo request accepted {rel}");
+            assert!(undo_request(&w, batch, "p", "owner").is_err(), "undo request accepted {rel}");
             assert_eq!(fs::read_to_string(w.join("pages/p.md")).unwrap(), base);
             assert!(inbox::list_notes(&w).unwrap().is_empty());
         }
@@ -823,7 +842,7 @@ mod tests {
         )
         .unwrap();
         assert!(revert(&w, batch, "p").is_err());
-        assert!(undo_request(&w, batch, "p").is_err());
+        assert!(undo_request(&w, batch, "p", "owner").is_err());
         assert_eq!(fs::read_to_string(w.join("pages/p.md")).unwrap(), base);
         assert!(inbox::list_notes(&w).unwrap().is_empty());
         fs::remove_file(outside).unwrap();
@@ -843,12 +862,12 @@ mod tests {
         fs::write(outside.join("p.md"), &base).unwrap();
         fs::rename(w.join("pages"), w.join("original-pages")).unwrap();
         std::os::unix::fs::symlink(&outside, w.join("pages")).unwrap();
-        assert!(decide(&w, batch, 0, "approve").is_err());
+        assert!(decide(&w, batch, 0, "approve", "owner").is_err());
         assert_eq!(fs::read_to_string(outside.join("p.md")).unwrap(), base);
         fs::remove_file(w.join("pages")).unwrap();
         fs::rename(w.join("original-pages"), w.join("pages")).unwrap();
         std::os::unix::fs::symlink(&outside, w.join(".history")).unwrap();
-        assert!(decide(&w, batch, 0, "approve").is_err());
+        assert!(decide(&w, batch, 0, "approve", "owner").is_err());
         assert_eq!(fs::read_to_string(w.join("pages/p.md")).unwrap(), base);
         assert!(!outside.join("pages").exists(), "no history directories created outside the wiki");
         let _ = fs::remove_dir_all(&w);
@@ -867,13 +886,13 @@ mod tests {
         assert_eq!(l[0]["slug"], "p");
         assert_eq!(l[0]["stale"], false);
         assert!(l[0]["diff"].as_array().unwrap().iter().any(|d| d[0] == "+" && d[1] == "Port 9443."));
-        let r = decide(&w, b1, 0, "approve").unwrap();
+        let r = decide(&w, b1, 0, "approve", "owner").unwrap();
         assert_eq!(r["status"], "approved");
         assert!(fs::read_to_string(w.join("pages/p.md")).unwrap().contains("Port 9443."));
         assert_eq!(pending_count(&w), 0);
         assert!(w.join(".curator/held/done").join(format!("{b1}.json")).exists(), "a decided file moves out of the way");
         assert!(fs::read_dir(w.join(".history/pages/p")).unwrap().count() == 1, "the previous version is kept");
-        assert!(matches!(decide(&w, b1, 0, "approve"), Err(Error::NotFound(_))));
+        assert!(matches!(decide(&w, b1, 0, "approve", "owner"), Err(Error::NotFound(_))));
 
         // A patch whose base moved on still applies when its edit does; a replace would not.
         let now_text = fs::read_to_string(w.join("pages/p.md")).unwrap();
@@ -881,13 +900,13 @@ mod tests {
         hold(&w, b2, &now_text, "Port 9443.", "Port 9443 (load balancer).");
         fs::write(w.join("pages/p.md"), now_text.replace("# P\n", "# P\n\nIntro added by hand.\n")).unwrap();
         assert_eq!(list(&w)[0]["stale"], true);
-        decide(&w, b2, 0, "approve").unwrap();
+        decide(&w, b2, 0, "approve", "owner").unwrap();
         let t = fs::read_to_string(w.join("pages/p.md")).unwrap();
         assert!(t.contains("Intro added by hand.") && t.contains("Port 9443 (load balancer)."), "{t}");
 
         let b3 = "2026-10-03_10-00-03-000-333333";
         hold(&w, b3, &t, "Port 9443 (load balancer).", "Port 1.");
-        assert_eq!(decide(&w, b3, 0, "reject").unwrap()["status"], "rejected");
+        assert_eq!(decide(&w, b3, 0, "reject", "owner").unwrap()["status"], "rejected");
         assert!(!fs::read_to_string(w.join("pages/p.md")).unwrap().contains("Port 1."));
 
         let b4 = "2026-10-03_10-00-04-000-444444";
@@ -895,12 +914,35 @@ mod tests {
         let done = w.join(".curator/done/2026/10");
         fs::create_dir_all(&done).unwrap();
         fs::write(done.join("2026-10-03_10-00-00-000-aaaaaa.md"), "---\nid: x\n---\n\nnote\n").unwrap();
-        assert!(matches!(decide(&w, b4, 0, "approve"), Err(Error::Conflict(_))), "an edit that no longer applies");
-        assert_eq!(decide(&w, b4, 0, "refile").unwrap()["status"], "refiled");
+        assert!(matches!(decide(&w, b4, 0, "approve", "owner"), Err(Error::Conflict(_))), "an edit that no longer applies");
+        assert_eq!(decide(&w, b4, 0, "refile", "owner").unwrap()["status"], "refiled");
         assert!(w.join("inbox/2026-10-03_10-00-00-000-aaaaaa.md").exists(), "the note is back in the inbox");
-        assert!(matches!(decide(&w, "../../etc", 0, "approve"), Err(Error::NotFound(m)) if m.starts_with("no batch")));
+        assert!(matches!(decide(&w, "../../etc", 0, "approve", "owner"), Err(Error::NotFound(m)) if m.starts_with("no batch")));
+        let file = w.join(".curator/held/done").join(format!("{b1}.json"));
+        let decided: File = serde_json::from_str(&fs::read_to_string(file).unwrap()).unwrap();
+        assert_eq!(decided.changes[0].decided_by.as_deref(), Some("owner"), "who decided is kept");
         let log = fs::read_to_string(w.join("log").join(&local_date(&now())[..4]).join(format!("{}.md", local_date(&now())))).unwrap();
         assert!(log.contains("Change approved: P [[p]]") && log.contains("Change rejected: P [[p]]") && log.contains("sent back to the curator"), "{log}");
+        let _ = fs::remove_dir_all(&w);
+    }
+
+    #[test]
+    fn an_approver_never_approves_a_change_from_its_own_note() {
+        let w = wiki("self-approval");
+        let base = page("P", "# P\n\nPort 8443.");
+        fs::write(w.join("pages/p.md"), &base).unwrap();
+        let batch = "2026-10-03_10-00-05-000-555555";
+        hold(&w, batch, &base, "Port 8443.", "Port 9443.");
+        // The note behind it was submitted from the terminal.
+        let mut f = load(&w, batch).unwrap();
+        f.changes[0].held.notes[0]["by"] = json!("cli");
+        write_json(&w, &held_file(&w, batch), &f).unwrap();
+        let refused = decide(&w, batch, 0, "approve", "cli");
+        assert!(matches!(&refused, Err(Error::Conflict(m)) if m.starts_with("cli submitted a note behind this change")), "{refused:?}");
+        assert!(!fs::read_to_string(w.join("pages/p.md")).unwrap().contains("9443"), "nothing applied");
+        assert_eq!(pending_count(&w), 1, "it still waits");
+        assert_eq!(decide(&w, batch, 0, "approve", "owner").unwrap()["status"], "approved", "someone else may");
+        assert!(fs::read_to_string(w.join("pages/p.md")).unwrap().contains("Port 9443."));
         let _ = fs::remove_dir_all(&w);
     }
 
@@ -919,9 +961,9 @@ mod tests {
 
         fs::write(w.join("pages/p.md"), after.replace("v2", "v2 and a human edit")).unwrap();
         assert!(matches!(revert(&w, batch, "p"), Err(Error::Conflict(_))), "edited since: refuse");
-        let asked = undo_request(&w, batch, "p").unwrap();
+        let asked = undo_request(&w, batch, "p", "owner").unwrap();
         let note = fs::read_to_string(w.join("inbox").join(format!("{}.md", asked["note"].as_str().unwrap()))).unwrap();
-        assert!(note.contains("source: user") && note.contains("Undo the curator's change to [[p]]") && note.contains("v1"), "{note}");
+        assert!(note.contains("source: user") && note.contains("by: owner") && note.contains("Undo the curator's change to [[p]]") && note.contains("v1"), "{note}");
 
         fs::write(w.join("pages/p.md"), &after).unwrap();
         revert(&w, batch, "p").unwrap();

@@ -605,16 +605,17 @@ fn service_step(p: &Places, wiki_dir: &Path, port: u16, _curated: bool) -> Resul
         .join("\n"),
     )?;
     std::fs::create_dir_all(&p.app.log_dir).map_err(|e| InstallError(e.to_string()))?;
+    std::fs::create_dir_all(&p.app.state_dir).map_err(|e| InstallError(e.to_string()))?;
     let mut svc = windows::service_state();
     if svc.is_some() {
-        // The service's account reads config.json and the programs, and writes its logs. These are your own
-        // folders, so granting it access needs no admin rights.
-        for (target, perm) in [(wiki_dir, "M"), (p.app.config_dir.as_path(), "RX"), (p.app.data_dir.as_path(), "RX"), (p.app.log_dir.as_path(), "M")] {
+        // The service's account reads config.json and the programs, and writes its logs and its state (the
+        // audit chain, the owner key). These are your own folders, so granting it access needs no admin rights.
+        for (target, perm) in service_grants(p, wiki_dir) {
             if let Err(InstallError(e)) = windows::grant(target, perm) {
                 warn(&e);
             }
         }
-        info("service account access: Modify on the wiki and logs, Read on config and program files");
+        info("service account access: Modify on the wiki, logs and state, Read on config and program files");
     }
     let bin = windows::service_bin();
     let registered_here = bin.as_ref().is_some_and(|b| b.to_string_lossy().to_lowercase() == p.agent.to_string_lossy().to_lowercase());
@@ -649,7 +650,8 @@ fn service_step(p: &Places, wiki_dir: &Path, port: u16, _curated: bool) -> Resul
     let build = sha12(&p.agent);
     let h = sys::wait_for_health(port, |x| x["ok"] == true && x["version"] == xenolith_core::VERSION && x["build"] == build.as_str(), Duration::from_secs(45));
     match h {
-        Some(h) if h["build"] == build.as_str() && h["wikiDir"].as_str().map(PathBuf::from).as_deref() == Some(wiki_dir) => {
+        // /health says nothing private; the wiki folder the service uses is in /status.
+        Some(h) if h["build"] == build.as_str() && sys::get_json(port, "/status").is_some_and(|s| s["wikiDir"].as_str().map(PathBuf::from).as_deref() == Some(wiki_dir)) => {
             info(&format!("service running: v{} (build {}), pid {}, http://127.0.0.1:{port}/mcp", h["version"].as_str().unwrap_or("?"), h["build"].as_str().unwrap_or("?"), h["pid"]));
             remove_node_runtime(p);
             Ok("http")
@@ -663,6 +665,13 @@ fn service_step(p: &Places, wiki_dir: &Path, port: u16, _curated: bool) -> Resul
             Ok("stdio")
         }
     }
+}
+
+/// The folders the service's account may use: Modify on the wiki, the logs and the state folder (the
+/// audit chain, the owner key), Read on the config and the programs.
+#[cfg(windows)]
+fn service_grants<'a>(p: &'a Places, wiki_dir: &'a Path) -> [(&'a Path, &'static str); 5] {
+    [(wiki_dir, "M"), (p.app.config_dir.as_path(), "RX"), (p.app.data_dir.as_path(), "RX"), (p.app.log_dir.as_path(), "M"), (p.app.state_dir.as_path(), "M")]
 }
 
 /// What the Node runtime installed and this one replaces: its bundles next to the programs and the C#
@@ -1100,7 +1109,7 @@ mod service {
 
     /// Registers the Xenolith service: `xenolith service` serving HTTP on 127.0.0.1, starting at boot,
     /// restarted on failure (and on upgrade), as the low-privilege virtual account NT SERVICE\Xenolith
-    /// with Modify on the wiki and logs and Read on Xenolith's settings and program folders. It also
+    /// with Modify on the wiki, logs and state and Read on Xenolith's settings and program folders. It also
     /// lets your account start and stop this one service (the tray's "Restart service").
     pub fn install(user_sid: Option<String>, log: Option<PathBuf>) -> Result<(), InstallError> {
         let log = Log(log);
@@ -1142,7 +1151,8 @@ mod service {
             log.say("start: automatic at boot; on failure or upgrade: restart after 2 s, 5 s, 30 s");
             std::fs::create_dir_all(&p.app.log_dir).map_err(|e| InstallError(e.to_string()))?;
             std::fs::create_dir_all(&p.app.config_dir).map_err(|e| InstallError(e.to_string()))?;
-            for (target, perm) in [(wiki_dir.as_path(), "M"), (p.app.config_dir.as_path(), "RX"), (p.app.data_dir.as_path(), "RX"), (p.app.log_dir.as_path(), "M")] {
+            std::fs::create_dir_all(&p.app.state_dir).map_err(|e| InstallError(e.to_string()))?;
+            for (target, perm) in super::service_grants(&p, &wiki_dir) {
                 log.say(&format!("granted {}", grant(target, perm)?));
             }
             let state = read_json(&p.state).ok().flatten().unwrap_or_default();
@@ -1165,7 +1175,7 @@ mod service {
             }
             match super::sys::wait_for_health(port, |h| h["ok"] == true, Duration::from_secs(20)) {
                 Some(h) if h["ok"] == true => {
-                    log.say(&format!("healthy: xenolith v{}, pid {}, wiki {}", h["version"].as_str().unwrap_or("?"), h["pid"], h["wikiDir"].as_str().unwrap_or("?")));
+                    log.say(&format!("healthy: xenolith v{}, pid {}", h["version"].as_str().unwrap_or("?"), h["pid"]));
                     Ok(())
                 }
                 other => {
@@ -1208,7 +1218,7 @@ mod service {
         }
         step("2", "Remove folder grants");
         let wiki = cfg.as_ref().and_then(|c| c["wikiDir"].as_str()).map(PathBuf::from);
-        for target in [wiki, Some(p.app.config_dir.clone()), Some(p.app.data_dir.clone()), Some(p.app.log_dir.clone())].into_iter().flatten().filter(|t| t.exists()) {
+        for target in [wiki, Some(p.app.config_dir.clone()), Some(p.app.data_dir.clone()), Some(p.app.log_dir.clone()), Some(p.app.state_dir.clone())].into_iter().flatten().filter(|t| t.exists()) {
             let r = ungrant(&target);
             if r.ok { info(&format!("removed {SERVICE_ACCOUNT} from {}", fwd(&target))) } else { warn(&format!("icacls {}: {}", fwd(&target), r.last_line())) }
         }

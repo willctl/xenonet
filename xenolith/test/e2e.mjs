@@ -340,13 +340,15 @@ for (const mode of ['stdio', 'http']) {
     });
 
     if (mode === 'http') {
-      test('HTTP: /health reports version and wiki; bad Host, Origin, method and path are refused', async () => {
+      test('HTTP: /health reports the version; bad Host, Origin, method and path are refused', async () => {
         const h = await rawRequest(httpServer.port);
         assert.equal(h.status, 200);
         const health = JSON.parse(h.body);
         assert.equal(health.ok, true);
         assert.equal(health.name, 'xenolith');
-        assert.equal(health.wikiDir, wikiDir.replace(/\\/g, '/'));
+        // The Rust service's /health is open to anything that reaches the port, so it names no folder.
+        if (IMPL === 'rust') assert.equal(health.wikiDir, undefined);
+        else assert.equal(health.wikiDir, wikiDir.replace(/\\/g, '/'));
         const init = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'x', version: '1' } } });
         const mcpHeaders = { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' };
         const rebinding = await rawRequest(httpServer.port, { method: 'POST', path: '/mcp', body: init, headers: { ...mcpHeaders, Host: `evil.example:${httpServer.port}` } });

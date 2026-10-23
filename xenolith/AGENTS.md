@@ -47,6 +47,12 @@ applies too: its commit conventions, and its rules for working beside other agen
 | Tools are defined once; the `source` enum is `inbox::SOURCES` | `mcp::tool_tests::one_tool_list_with_the_direct_texts_and_the_core_sources` |
 | Who may use which space lives in the config folder (access.json), never in the wiki; deny by default | `access::policy_file`, `access::tests` |
 | Grants, tokens, refusals and writes go in the audit chain, with hashes, never text | `audit::tests`, `test/audit.mjs` |
+| A request is local only straight from the loopback listener with no `Forwarded`, `X-Forwarded-*` or `Via`; sync always needs a token; `/status`, `/ui`, `/api` are local only | `http::is_local`, `test/tokens.mjs` |
+| Deciding held changes, Undo, Revert, the approvals setting, Forget and notes as the person need the owner key; the CLI goes through the service for them | `uiapi::handle`'s routing, `owner_client`, `test/curator.mjs`, `test/sync.mjs` |
+| A note's source is stamped from who sent it (`by`); only the owner's notes may be `user` | `inbox::By`, `inbox::trusted_source`, `inbox::tests` |
+| Reads return content only: `pages/`, `log/`, `inbox/` and the protocol's top-level files | `wiki::readable_rel`, `wiki::tests::reads_return_content_only` |
+| A token reaches `machine:local` only through a grant and scopes that name it exactly | `access::Scope::covers`, `access::tests` |
+| Files only the owner may read (access.json, sync.json, peer tokens, the owner key) are written with `private::write` | `private::tests`, the mode checks in `test/tokens.mjs` and `test/sync.mjs` |
 | Files in the wiki folder are untrusted input (held changes, journals, settings) | `held::parse_file`, `curator::journal_problem`, `settings::approvals_and_problem`, and their tests |
 | The approval mode is read once per batch, under the commit's lock | `Journal.auto`, `held::apply_auto_locked`; the auto-mode tests in `test/curator.mjs` |
 | The installer leaves an app's config alone while that app runs | Claude desktop: `install::desktop_running` and its sandbox test. Codex and Claude Code: judgment |

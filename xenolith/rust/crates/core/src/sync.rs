@@ -82,9 +82,11 @@ impl Config {
         }
     }
 
+    /// Writes sync.json for you alone (and, on Windows, the service, which reads who curates what).
     pub fn save(&self, paths: &AppPaths) -> Result<()> {
         let v = json!({ "machine": self.machine, "peers": self.peers, "follow": self.follow });
-        wiki::atomic_write(&config_file(paths), &format!("{}\n", serde_json::to_string_pretty(&v).unwrap_or_default()), None, None)
+        crate::private::write(&config_file(paths), &format!("{}\n", serde_json::to_string_pretty(&v).unwrap_or_default()), &crate::private::service_readers())?;
+        Ok(())
     }
 
     /// The peer that curates a space, when this machine only follows it.
@@ -109,15 +111,9 @@ pub fn update<T>(paths: &AppPaths, f: impl FnOnce(&mut Config) -> Result<T>) -> 
     r
 }
 
-/// Keeps a peer's token, readable by you alone.
+/// Keeps a peer's token, readable by you alone from the moment it exists (on Windows too).
 pub fn save_token(paths: &AppPaths, peer: &str, token: &str) -> Result<()> {
-    let file = token_file(paths, peer);
-    wiki::atomic_write(&file, &format!("{}\n", token.trim()), None, None)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&file, fs::Permissions::from_mode(0o600))?;
-    }
+    crate::private::write(&token_file(paths, peer), &format!("{}\n", token.trim()), &[])?;
     Ok(())
 }
 
@@ -150,7 +146,7 @@ pub fn page_base(dir: &Path, slug: &str) -> String {
 /// Records a page write that came in against an older version as a proposal: a held change of
 /// kind "sync" that replaces the page as it is now with what the other machine wrote. Approving it
 /// later applies it only if the page hasn't changed again.
-fn propose(dir: &Path, who: &str, id: &str, note: &Value, base: &str, current: &str) -> Result<(String, usize)> {
+fn propose(dir: &Path, who: &str, by: &str, id: &str, note: &Value, base: &str, current: &str) -> Result<(String, usize)> {
     let page = &note["page"];
     let slug = page["slug"].as_str().filter(|s| wiki::SLUG_RE.is_match(s)).map(String::from).unwrap_or_else(|| wiki::slugify(note["title"].as_str().unwrap_or("")));
     if !wiki::SLUG_RE.is_match(&slug) {
@@ -171,7 +167,14 @@ fn propose(dir: &Path, who: &str, id: &str, note: &Value, base: &str, current: &
     } else {
         format!("{who} wrote this against {what}, but the page is at {current} now.")
     };
-    let held = HeldOp { write, reasons: vec![reason], op, notes: vec![json!({ "id": id, "app": note["app"], "title": note["title"], "source": note["source"] })], kind: "sync".into() };
+    // The note behind it is the pushing token's subject's, whatever source it claims.
+    let held = HeldOp {
+        write,
+        reasons: vec![reason],
+        op,
+        notes: vec![json!({ "id": id, "app": note["app"], "title": note["title"], "source": inbox::trusted_source(note["source"].as_str().unwrap_or(""), ""), "by": by })],
+        kind: "sync".into(),
+    };
     wiki::with_lock(dir, || {
         crate::held::record(dir, &batch, &local_iso(&now()), std::slice::from_ref(&held))?;
         crate::held::log_line(dir, "curator", &format!("Proposal from {who} waiting for your OK: {} [[{slug}]] (written against an older version)", crate::text::one_line(&title)))
@@ -187,6 +190,10 @@ pub fn accept(dir: &Path, who: &Principal, entries: &[Value], can: &dyn Fn(Level
     let subject = match who {
         Principal::Local => "you".to_string(),
         Principal::Token { subject, .. } => subject.clone(),
+    };
+    let by = match who {
+        Principal::Local => inbox::By::Local("sync"),
+        Principal::Token { subject, .. } => inbox::By::Token(subject),
     };
     let mut out = vec![];
     let mut conflict = false;
@@ -210,7 +217,7 @@ pub fn accept(dir: &Path, who: &Principal, entries: &[Value], can: &dyn Fn(Level
             let slug = if slug.is_empty() { wiki::slugify(note["title"].as_str().unwrap_or("")) } else { slug.clone() };
             let current = page_base(dir, &slug);
             if current != base {
-                match propose(dir, &name, id, note, base, &current) {
+                match propose(dir, &name, &subject, id, note, base, &current) {
                     Ok((batch, index)) => {
                         conflict = true;
                         out.push(result(id, "conflict", vec![("current", json!(current)), ("proposal", json!({ "batch": batch, "index": index }))]));
@@ -240,7 +247,8 @@ pub fn accept(dir: &Path, who: &Principal, entries: &[Value], can: &dyn Fn(Level
             // The same entry sent twice is one note: keyed by who sent it and its id there.
             idempotency_key: Some(format!("sync:{subject}:{id}")),
         };
-        match inbox::submit_note(dir, &input, "sync", &format!("sync {subject}")) {
+        // Stamped as the pushing token's subject: its source can't be the curator's own user's.
+        match inbox::submit_note(dir, &input, "sync", &format!("sync {subject}"), &by) {
             Ok(r) => out.push(result(id, if r.duplicate { "duplicate" } else { "accepted" }, vec![("note", json!(r.id))])),
             Err(err) => out.push(result(id, "refused", vec![("error", json!(err.to_string()))])),
         }

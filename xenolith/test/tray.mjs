@@ -353,7 +353,7 @@ describe('tray app (Rust)', { skip: IMPL !== 'rust', timeout: 180_000 }, () => {
       ].join('\n'),
     );
   const selftest = () => {
-    const r = spawnSync(exe, ['--selftest', '--config', ini], { encoding: 'utf8', timeout: 20_000 });
+    const r = spawnSync(exe, ['--selftest', '--config', ini], { encoding: 'utf8', timeout: 20_000, env });
     assert.equal(r.status, 0, r.stderr);
     return r.stdout;
   };
@@ -398,6 +398,10 @@ describe('tray app (Rust)', { skip: IMPL !== 'rust', timeout: 180_000 }, () => {
     assert.match(out, /^tooltip=Xenolith \d+\.\d+\.\d+: OK · 0 queued$/m);
     assert.match(out, /^icons=3$/m);
     assert.match(out, new RegExp(`^ui=http://127\\.0\\.0\\.1:${port}/ui/$`, 'm'));
+    // The service's owner key, which the tray uses once /status shows the pid that wrote it.
+    const key = JSON.parse(fs.readFileSync(path.join(home, 'runtime', 'owner.key'), 'utf8'));
+    assert.equal(key.port, port);
+    assert.match(out, new RegExp(`^owner=ok \\(pid ${key.pid}\\)$`, 'm'));
     assert.match(out, /^window=webview \d+x\d+ /m, 'an embedded webview, not a browser window');
     assert.ok(out.includes(`data=${path.join(home, 'webview')}`), 'its own small data folder');
     assert.match(out.split('\n').find((l) => l.startsWith('item=')), /^item=Open Xenolith$/, 'the first menu item opens the window');

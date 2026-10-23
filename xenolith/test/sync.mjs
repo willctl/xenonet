@@ -120,7 +120,10 @@ describe('sync between two machines', { skip, timeout: 120_000 }, () => {
     const status = ok(laptop, ['sync', 'status', '--json']).json();
     assert.deepEqual(status, { machine: 'laptop', peers: [{ name: 'studio', url: server.base, token: true }], follow: { 'project:atlas': 'studio' } });
     const tokenFile = path.join(laptop.home, 'peers', 'studio.token');
-    if (process.platform !== 'win32') assert.equal(fs.statSync(tokenFile).mode & 0o777, 0o600);
+    if (process.platform !== 'win32') {
+      assert.equal(fs.statSync(tokenFile).mode & 0o777, 0o600);
+      assert.equal(fs.statSync(path.join(laptop.home, 'sync.json')).mode & 0o777, 0o600, 'sync.json is yours alone too');
+    }
     assert.ok(!fs.readFileSync(path.join(laptop.home, 'sync.json'), 'utf8').includes(token), 'the token stays out of sync.json');
   });
 
@@ -169,12 +172,18 @@ describe('sync between two machines', { skip, timeout: 120_000 }, () => {
     assert.equal(held[0].slug, 'db');
     assert.match(held[0].reasons[0], /^machine:laptop \(tok_[0-9a-f]{12}\) wrote this against version [0-9a-f]{16}, but the page is at [0-9a-f]{16} now\.$/);
     assert.match(ok(studio, ['held', '--space', 'project:atlas']).out, /proposal from another machine: Atlas database \[\[db\]\]/);
-    // The window's API sees it in its space; approving applies what the laptop wrote.
+    // The window's API sees it in its space. Approving needs the owner key: the window's header
+    // alone is refused, and `xenolith held approve` reads the key and asks the service.
     const api = await request(server.port, 'GET', '/api/held?space=project:atlas');
     assert.equal(api.json.changes.length, 1);
-    const done = await request(server.port, 'POST', '/api/held', { headers: { 'X-Xenolith': 'ui' }, body: { space: 'project:atlas', batch: held[0].batch, index: 0, action: 'approve' } });
-    assert.equal(done.status, 200, JSON.stringify(done.json));
+    const refused = await request(server.port, 'POST', '/api/held', { headers: { 'X-Xenolith': 'ui' }, body: { space: 'project:atlas', batch: held[0].batch, index: 0, action: 'approve' } });
+    assert.equal(refused.status, 403, JSON.stringify(refused.json));
+    assert.match(cli(studio, ['held', 'approve', `${held[0].batch}:0`]).err, /no held changes for batch/, 'a proposal waits in its own space');
+    const done = ok(studio, ['held', 'approve', `${held[0].batch}:0`, '--space', 'project:atlas', '--json']).json();
+    assert.equal(done.status, 'approved');
     assert.match(fs.readFileSync(path.join(studio.atlas, 'pages', 'db.md'), 'utf8'), /Postgres 17 on the laptop\./);
+    const decision = fs.readFileSync(path.join(studio.home, 'audit', 'chain.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((l) => l.kind === 'decision').pop();
+    assert.deepEqual([decision.who, decision.space, decision.action, decision.outcome], ['cli', 'project:atlas', 'approve', 'approved']);
     assert.equal(ok(laptop, ['sync', '--json']).json().spaces[0].pulled, 1, 'and the laptop pulls the approved page');
     assert.match(fs.readFileSync(path.join(laptop.atlas, 'pages', 'db.md'), 'utf8'), /Postgres 17 on the laptop\./);
     assert.ok(walk(path.join(laptop.atlas, '.history')).length >= 1, 'the laptop keeps what each pull replaced');
@@ -199,10 +208,14 @@ describe('sync between two machines', { skip, timeout: 120_000 }, () => {
     assert.equal(r.status, 200);
     assert.deepEqual([r.json.results[0].result, r.json.results[0].error], ['refused', "This token can't append here."]);
     assert.equal((await request(server.port, 'POST', '/sync/v1/spaces/project/atlas/entries', { headers: auth, body: { entries: [] } })).status, 400);
-    // The laptop only follows project:atlas: it sends a pusher to the curator.
+    // The laptop only follows project:atlas: it sends a pusher to the curator. Sync always takes a
+    // token, even from the same machine.
     const laptopServer = await startHttp(laptop.env);
     try {
-      const misdirected = await request(laptopServer.port, 'POST', '/sync/v1/spaces/project/atlas/entries', { body: { entries: [entry] } });
+      assert.equal((await request(laptopServer.port, 'POST', '/sync/v1/spaces/project/atlas/entries', { body: { entries: [entry] } })).status, 401);
+      ok(laptop, ['grant', 'machine:phone', 'ctx:append:project:atlas']);
+      const phone = ok(laptop, ['token', 'create', 'machine:phone', '--json']).json().token;
+      const misdirected = await request(laptopServer.port, 'POST', '/sync/v1/spaces/project/atlas/entries', { headers: { Authorization: `Bearer ${phone}` }, body: { entries: [entry] } });
       assert.equal(misdirected.status, 421);
       assert.deepEqual([misdirected.json.error, misdirected.json.curator], ['not_curator', 'studio']);
     } finally {

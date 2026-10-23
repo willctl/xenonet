@@ -4,7 +4,7 @@
 //! obsolete line folding, no Content-Length together with Transfer-Encoding, one Host.
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -20,6 +20,8 @@ const READ_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct Request {
     pub method: String,
     pub url: String,
+    /// The other end of the connection (the listener is loopback only, so a loopback address).
+    pub peer: Option<SocketAddr>,
     headers: Vec<(String, String)>,
     body: Result<Vec<u8>, u16>,
 }
@@ -33,6 +35,14 @@ impl Request {
     /// The body, or the status to answer with (413: too large).
     pub fn body(&self) -> Result<&[u8], u16> {
         self.body.as_deref().map_err(|s| *s)
+    }
+    /// Whether a proxy says it passed the request on (RFC 7239 Forwarded, the X-Forwarded-* family,
+    /// or Via): such a request came from somewhere else, whatever address it arrives from.
+    pub fn forwarded(&self) -> bool {
+        self.headers.iter().any(|(k, _)| {
+            let k = k.to_ascii_lowercase();
+            k == "forwarded" || k == "via" || k.starts_with("x-forwarded-")
+        })
     }
 }
 
@@ -85,12 +95,13 @@ enum Next {
 
 fn connection(stream: TcpStream, handler: &Handler) {
     let _ = stream.set_nodelay(true);
+    let peer = stream.peer_addr().ok();
     let _ = stream.set_write_timeout(Some(READ_TIMEOUT));
     let Ok(write_half) = stream.try_clone() else { return };
     let mut out = write_half;
     let mut reader = BufReader::with_capacity(8192, stream);
     loop {
-        match read_request(&mut reader, &mut out) {
+        match read_request(&mut reader, &mut out, peer) {
             Next::Closed => return,
             Next::Reject(status) => {
                 let _ = out.write_all(&encode(&Response { status, headers: vec![], body: vec![] }, false, false));
@@ -148,6 +159,7 @@ fn reason(status: u16) -> &'static str {
         408 => "Request Timeout",
         413 => "Payload Too Large",
         415 => "Unsupported Media Type",
+        429 => "Too Many Requests",
         431 => "Request Header Fields Too Large",
         500 => "Internal Server Error",
         501 => "Not Implemented",
@@ -179,7 +191,7 @@ fn is_token(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|c| c.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&c))
 }
 
-fn read_request(r: &mut BufReader<TcpStream>, out: &mut TcpStream) -> Next {
+fn read_request(r: &mut BufReader<TcpStream>, out: &mut TcpStream, peer: Option<SocketAddr>) -> Next {
     // Idle keep-alive connections close after a few seconds; a request, once started, gets longer.
     let _ = r.get_ref().set_read_timeout(Some(Duration::from_secs(KEEP_ALIVE_SECS)));
     match r.fill_buf() {
@@ -284,7 +296,7 @@ fn read_request(r: &mut BufReader<TcpStream>, out: &mut TcpStream) -> Next {
             Ok(b)
         }
     };
-    Next::Request(Request { method, url, headers, body }, keep)
+    Next::Request(Request { method, url, peer, headers, body }, keep)
 }
 
 fn read_chunked(r: &mut BufReader<TcpStream>) -> Result<Vec<u8>, u16> {

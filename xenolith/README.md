@@ -88,7 +88,8 @@ Claude Code connect to it. Otherwise each app starts its own stdio server.
 - **Windows:** the service `Xenolith` runs `xenolith service`, which hosts the
   HTTP server in that one process. It starts at boot and runs as the virtual
   account `NT SERVICE\Xenolith`. That account's only rights are Modify on the
-  wiki folder and the logs, and Read on `%APPDATA%\Xenolith` and
+  wiki folder, the logs and the state folder (the audit chain and the [owner
+  key](#the-owner-key)), and Read on `%APPDATA%\Xenolith` and
   `%LOCALAPPDATA%\Xenolith`. Registering the service takes one UAC prompt the
   first time, because the installer starts `xenolith install-service`
   elevated. `xenolith uninstall-service`, run elevated, removes it.
@@ -119,7 +120,7 @@ cannot reach them, even through DNS rebinding.
 | --- | --- |
 | `context_start` | protocol, page index, recent activity, pending notes, related pages |
 | `context_search` | BM25 search over sections: each page's intro and its `##` and `###` sections, each log entry, and each note, plus the page's `aliases`. Results cite the section that matched. Filters: `scope` (`all`, `pages`, `log`, `notes`), `since` and `until` dates, and `app`. `queries` takes up to 5 other wordings, searched together and fused by reciprocal rank. With hybrid search on, results also rank by meaning (see Search) |
-| `context_read` | a page, a log day, a note (`note:<id>`, pending or filed, with what the curator did with it), or any file in the wiki. `slug#section` (or `section`) returns one section with the page's header line |
+| `context_read` | a page, a log day, a note (`note:<id>`, pending or filed, with what the curator did with it), or a file under `pages/`, `log/` or `inbox/`, or `index.md`, `PROTOCOL.md` or `README.md`. Never `.curator/`, `.history/`, `.locks/` or `spaces/`. `slug#section` (or `section`) returns one section with the page's header line |
 | `context_log` | tell the wiki what happened. The server queues it as a note for the curator, with its `source` |
 | `context_upsert_page` | hand over content for one page (`append` or `replace`). The server queues it for the curator |
 
@@ -135,6 +136,15 @@ and text) only once per day. Since v1.4 they also take an optional `source`:
 - `observed`: the app checked it.
 - `external`: a web page, an email, a document or another tool's output.
 - `agent`: the app's own conclusion. This is the default.
+
+The server stamps each note with who sent it, as `by`: `local:<MCP client>`
+for a process on this machine, or a token's subject (`actor:hermes`,
+`machine:laptop`). The caller's `source` never says who it is. From an app,
+`user` is recorded as `agent`. Only your own notes carry `user`: those you
+leave with `xenolith note "<title>" [--body <text>] [--page <slug>]`
+(`by: cli`) or through the window with the [owner key](#the-owner-key)
+(`by: owner`), such as Revert's request to undo a change. A note file that
+claims `user` without that stamp counts as `agent`.
 
 Read results turn remote images into plain links, so no app fetches a URL from
 the wiki without someone clicking it. `writeMode: "direct"` in `config.json`
@@ -186,7 +196,8 @@ Access comes in four levels, each including the ones before it:
 | write | `context_upsert_page` with `mode: "replace"` |
 | admin | start a space |
 
-You and the sessions on this machine have admin in every space, as in XenoNet.
+Local callers have admin in every space: stdio servers, and HTTP requests that
+come straight from a process on this machine ([who is local](#who-is-local)).
 Anyone else gets nothing until you grant it:
 
 ```bash
@@ -204,9 +215,68 @@ covers every space, and a value may end in `*`. The keys are `project`,
 `machine` and `by` (an actor's own space, as `by:<slug>` names the actor in a
 XenoNet grant). A subject is `actor:<slug>`, `client:<id>` or `machine:<name>`.
 A grant expires (after 30 days unless you say otherwise), `revoke` takes effect
-at once, and a grant that names one space exactly starts it. The policy is
-`access.json` in Xenolith's config folder, never in the wiki. `"local": "none"`
-there takes access away from this machine's sessions too.
+at once, and a grant that names one space exactly starts it. A token reaches
+this machine's own space, `machine:local`, only when its grant and its scopes
+both name it exactly (`ctx:read:machine:local`): `all` and `machine:*` don't
+reach it, since it holds your own notes and the questions you ask in the
+window. The policy is `access.json` in Xenolith's config folder, never in the
+wiki.
+
+Reads return content only: pages, the log, notes not yet filed, and the
+top-level `index.md`, `PROTOCOL.md` and `README.md`. The curator's state
+(`.curator/`: held changes, journals, audit records, Ask), `.history/`,
+`.locks/` and other spaces' folders stay out of reach of every caller, whatever
+path it names or a link inside points to.
+
+### Who is local
+
+Local is any process on this machine, not only your own apps. A request is
+local when it reaches the service's loopback port directly, names `127.0.0.1`
+or `localhost` as its Host, and carries no `Forwarded`, `X-Forwarded-*` or `Via`
+header. Tokens scope remote access and other apps' access. They don't separate
+your own agents from each other.
+
+| Endpoint | Who |
+| --- | --- |
+| `/mcp` | a local request without a token, or a token |
+| `/sync/v1` | a token, always, even from this machine |
+| `/status`, `/ui`, `/api` | local requests only, never a token |
+| `/health` | anyone: name, version, build, pid and uptime, nothing private |
+
+A forwarder that adds none of those headers, such as `ssh -L`, socat or a plain
+TCP tunnel, looks local. If anyone reaches the port that way, take local access
+away and give each client its own token:
+
+```bash
+xenolith access local none
+xenolith grant client:laptop ctx:append:project:atlas
+xenolith token create client:laptop
+```
+
+`xenolith access local read` (or `append`, `write`, `admin`) gives some of it
+back. In `access.json` this is `"local"`; a value Xenolith doesn't know counts
+as `"none"`.
+
+### The owner key
+
+Approving a held change or a proposal, Undo, Revert, the Approvals setting and
+Forget are yours alone, so they need more than a local request: the owner key.
+Each time the service starts it writes a new random key to `runtime/owner.key`
+in Xenolith's state folder, readable by you alone (on Windows, by the user who
+installed the service). The tray reads it, checks that the service answering on
+its port has the pid the file names, and opens the window with the key in the
+URL fragment, which never reaches the server or its logs. The window sends it
+back in an `X-Xenolith-Owner` header. A process that sends only `X-Xenolith: ui`
+can read the window's API but not decide anything. `xenolith held approve`
+reads the key the same way and asks the service to decide.
+
+Every decision goes in the audit chain with who made it: `owner` for the
+window, `cli` for the terminal. Refused attempts go there too.
+
+What this guarantees: a decision needs an explicit read of a file only you can
+read, and the audit chain records it. A sandboxed agent that can't read
+Xenolith's state folder can't approve its own change. An agent running
+unsandboxed as you can read the file, as it can any of your files.
 
 ### Tokens
 
@@ -225,7 +295,7 @@ a token may do in a space is the lower of its own scopes and its subject's live
 grants there, so a token never reaches past what you granted, and revoking
 either one takes effect on connections already open.
 
-- **Over HTTP** a token travels as `Authorization: Bearer`, at `/mcp` only. The
+- **Over HTTP** a token travels as `Authorization: Bearer`, at `/mcp` and `/sync/v1` only. The
   service acts as an OAuth 2.1 resource server the way MCP's authorization spec
   describes: its metadata is at `/.well-known/oauth-protected-resource`, a
   missing or bad token gets a 401 with a `WWW-Authenticate` challenge, and a
@@ -233,8 +303,20 @@ either one takes effect on connections already open.
   the scope it needs. A call its scopes reach but its grants don't is refused
   with the same answer whether the space exists or not. A token in a URL is
   refused, and a token at `/status`, `/health`, `/ui` or `/api` gets a 403,
-  since those show this machine's folders. Without a token, the service treats
-  a request as this machine's own: don't expose its port.
+  since those belong to this machine. Without a token, a local request is this
+  machine's own ([who is local](#who-is-local)), and a forwarded one gets a 401.
+
+  After 20 bad tokens in a minute from one source, every request with a token
+  from it gets a 429 for a minute, and the audit chain records the block. A
+  source is the connection's address and, behind a proxy, the client the proxy
+  last named (`Forwarded: for=`, `X-Forwarded-For`), so one caller guessing
+  through a gateway doesn't lock out the others.
+
+  Behind a proxy, set `"publicUrl"` in `config.json` (such as
+  `"https://studio.example/xenolith"`). Forwarded callers then see it in the
+  resource metadata and the `WWW-Authenticate` challenge, with the metadata at
+  `https://studio.example/.well-known/oauth-protected-resource/xenolith/mcp`
+  as RFC 9728 places it. This machine's own callers see the loopback address.
 - **Over stdio**, `XENOLITH_TOKEN` in the server's environment makes it work
   as the token's holder, for an actor started on this machine with its own
   token. A token Xenolith doesn't know stops the server from starting.
@@ -259,6 +341,15 @@ xenolith audit tail 20
 tampering but can't prevent it: whoever can write the file can rewrite all of
 it. Keep the last hash `verify` prints somewhere else to pin it. The curator's
 own record of each filed note stays in `.curator/audit/` inside each space.
+
+Each line is on disk before the call it records returns. A line that can't be
+written is never silent: the service counts it, `/status` reports "the audit
+chain can't be written" and turns degraded, and `xenolith status` says the same
+and exits 1:
+
+```bash
+xenolith status          # the service's health, and whether the chain holds and can be written
+```
 
 ### Sync between machines
 
@@ -290,16 +381,22 @@ A peer's URL is the base of its Xenolith service: `https://` anywhere, or
 `http://` only to this machine, since a token never crosses a network in the
 clear. Put the service behind something that forwards an address to it, such
 as XenoNet's gateway or a tunnel of your own. The token is kept in
-`peers/<name>.token` in the config folder, readable by you alone.
+`peers/<name>.token` in the config folder, readable by you alone from the
+moment it exists: mode 0600, or on Windows a protected ACL for you and SYSTEM.
+`sync.json` and `access.json` are written the same way, also readable by the
+Windows service, which checks tokens and curators with them.
 
 The curator takes entries at `/sync/v1/spaces/<kind>/<name>/entries`: a note
 needs append, a replaced page needs write. Each entry is taken once, however
-often it is sent. A page replaced on the other machine carries the version it
+often it is sent, and is stamped as the pushing token's subject's
+(`by: machine:laptop`), so a `user` source from the other machine counts as
+`agent` here. A page replaced on the other machine carries the version it
 was written against. When the curator's page has changed since, the push gets
 **409** and the write becomes a **proposal**: a change that waits for your OK
 even when approvals are automatic, listed by `xenolith held --space <space>`
-and approved, rejected or sent back there (or through the window's API with
-`space`). Approving it applies it only if the page hasn't changed again.
+and decided there with `xenolith held approve|deny <batch>:<index> --space
+<space>` (or through the window's API with `space` and the [owner
+key](#the-owner-key)). Approving it applies it only if the page hasn't changed again.
 Nothing written on either machine is lost: each pushed note moves to
 `.curator/sent/` with what the curator said, and each pull keeps the page it
 replaces in `.history/`. A machine that only follows a space sends anyone who
@@ -345,9 +442,10 @@ unit runs it. It never reads Codex's credential files.
   silently.
 - **Trust gate.** Code, not only the prompt, flags a page change in two cases:
   - any note behind it is `external`;
-  - its notes are not all from `user`, and it changes a `preference` page, adds
-    an instruction-like line ("Always ...", "from now on", "ignore ..."), or adds
-    a link to anything but this machine.
+  - its notes are not all yours (`user`, stamped by the server, not claimed by
+    an app), and it changes a `preference` page, adds an instruction-like line
+    ("Always ...", "from now on", "ignore ..."), or adds a link to anything but
+    this machine.
 
   Flagged changes go to `.curator/held/<batch>.json`. The **Approvals** setting
   at the top of the window's Inbox decides what happens next:
@@ -366,7 +464,13 @@ unit runs it. It never reads Codex's credential files.
     reasons, its notes and a diff, and offers **Approve**, **Reject** and **Send
     back**. Send back returns its notes to the curator. `/status` reports "N
     change(s) need your OK", so the tray shows that something needs attention.
-    Switching back to Automatic applies everything that is waiting.
+    Switching back to Automatic applies everything that is waiting. Without a
+    tray, `xenolith held` lists what waits, each as `<batch>:<index>`, and
+    `xenolith held approve|deny|refile <batch>:<index>` decides one.
+
+  Deciding a change, Undo, Revert, the Approvals setting and Forget need the
+  [owner key](#the-owner-key). An approver never approves a change made from a
+  note it submitted itself.
 
   The setting is `approvals` (`auto` or `manual`) in
   `.curator/settings.json`, so it travels with the wiki. A file that cannot be
@@ -412,10 +516,11 @@ unit runs it. It never reads Codex's credential files.
   audit records, held changes, Ask, the log, the inbox and the request logs.
   Then it redacts every copy and leaves a tombstone in `.curator/forgotten/` that
   records how much it redacted, never the text. `xenolith forget "<text>"
-  [--yes]` does the same from a terminal. When you ask an app to make the wiki
-  forget something (a note from `user`), the curator records a forget request
-  instead of copying the text anywhere, and the Inbox asks for your OK. Forget
-  does not rewrite a git history of the wiki.
+  [--yes]` does the same from a terminal. When your own note asks the wiki to
+  forget something (`xenolith note "FORGET ..."`, a note with source `user`),
+  the curator records a forget request instead of copying the text anywhere,
+  and the Inbox asks for your OK. An app's request to forget is not recorded,
+  even when it says you asked. Forget does not rewrite a git history of the wiki.
 - **Nudge before stopping (opt-in).** The plugin also registers a Stop hook
   (`xenolith hook stop`, for Claude Code and Codex). With `"hooks": {"nudge":
   true}` in `config.json`, the hook asks the model to log what is worth keeping
@@ -586,7 +691,8 @@ light and dark taskbars.
 `npm run build`) that the service serves at `http://127.0.0.1:47850/ui/`. The
 tray shows it in its own small window: WebView2 on Windows, WKWebView on macOS
 and WebKitGTK on Linux, with its own data folder of a few MB. It opens above the
-tray. Links that leave `127.0.0.1` open in your browser. When you close the
+tray, with the [owner key](#the-owner-key), so it can approve changes. Opened
+anywhere else, such as in a browser, it can read but not decide. Links that leave `127.0.0.1` open in your browser. When you close the
 window, the tray hides it and frees it after five idle minutes, so the tray
 stays small: about 11 MB with the window closed, measured on Windows (run count
 not recorded). The window has a search box and five tabs:
@@ -613,12 +719,21 @@ not recorded). The window has a search box and five tabs:
 The window follows the system's light or dark theme. It reads a small JSON API
 on the same port: `/api/status`, `/api/pages`, `/api/page?slug=`,
 `/api/search?q=`, `/api/activity?days=`, `/api/log?date=`, `/api/inbox`,
-`/api/asks` and `/api/ask?id=&after=&thread=1`. The writes are
-`POST /api/curator {"paused": bool}`, `POST /api/ask {"question", "parent"?}`
-and `POST /api/ask/cancel {"id"}`. Each write needs the `X-Xenolith: ui`
-header, which another site's page cannot send. The API refuses the same Hosts
-and Origins as `/mcp`, and any request a browser marks as sent by another site
-(`Sec-Fetch-Site` other than `same-origin` or `none`). The window's pages get a strict CSP, and nothing in a
+`/api/held`, `/api/asks` and `/api/ask?id=&after=&thread=1`. The writes are
+`POST /api/curator {"paused": bool}`, `POST /api/ask {"question", "parent"?}`,
+`POST /api/ask/cancel {"id"}`, `/api/models`, `/api/settings`, `/api/held`,
+`/api/revert` and `/api/forget`. Each write needs the `X-Xenolith: ui` header,
+which another site's page cannot send.
+
+| Call | Needs |
+| --- | --- |
+| reads, Ask | `"local"` read or more, or the owner key |
+| pause the curator, models, cleanup schedule | `"local"` admin (the default), or the owner key |
+| decide, Undo, Revert, the Approvals setting, Forget | the owner key |
+
+The API takes local requests only ([who is local](#who-is-local)), refuses the
+same Hosts and Origins as `/mcp`, and any request a browser marks as sent by
+another site (`Sec-Fetch-Site` other than `same-origin` or `none`). The window's pages get a strict CSP, and nothing in a
 wiki page runs: raw HTML shows as text, and only `http`, `https` and `mailto`
 links work. To work on the window, run `npm run ui:preview`. It serves a
 snapshot copy of your wiki on port 47859 (`http://127.0.0.1:47859/ui/`) and does
@@ -645,7 +760,8 @@ itself, so the installer only reports where the icon is.
 
 For headless use, the tray takes these flags:
 
-- `--selftest` prints the state, the start-at-sign-in entries and the menu.
+- `--selftest` prints the state, the start-at-sign-in entries, whether it can
+  use the service's owner key, and the menu.
 - `--do <action>` runs one menu action: `open-ui`, `open-wiki`, `open-index`,
   `open-logs`, `pause`, `resume`, `copy-url`, `sign-in`, `retry-dead`,
   `file-raw`, `restart-service` or `repair-autostart`.
@@ -672,14 +788,15 @@ folder in your home. On Windows:
 
 | Path | What |
 | --- | --- |
-| `%APPDATA%\Xenolith\config.json` | `wikiDir`, `version`, `httpPort`, `writeMode`, `curator`, `logs` |
+| `%APPDATA%\Xenolith\config.json` | `wikiDir`, `version`, `httpPort`, `writeMode`, `curator`, `logs`, `publicUrl` |
+| `%APPDATA%\Xenolith\access.json`, `sync.json`, `peers\` | who may use which space, tokens' hashes, sync peers and their tokens (yours alone) |
 | `%LOCALAPPDATA%\Xenolith\runtime\` | `xenolith.exe` and `ui/` (the Xenolith window) |
 | `%LOCALAPPDATA%\Xenolith\service\` | the service's ini |
 | `%LOCALAPPDATA%\Xenolith\tray\` | `xenolith-tray.exe`, its ini, its logon-task definition, icons and the window's data folder (`webview\`) |
 | Task Scheduler `\XenolithTray`, `HKCU\...\CurrentVersion\Run\XenolithTray` | start the tray at sign-in |
 | `%LOCALAPPDATA%\Xenolith\curator\codex-home\` | the curator's own Codex home and sign-in (Local, not Roaming: it stays on this PC) |
 | `%LOCALAPPDATA%\Xenolith\logs\` | `service.log`, `curator.log`, `tray.log`, `requests-*.jsonl`, `http-sessions.json` |
-| `%LOCALAPPDATA%\Xenolith\state\` | `install-state.json` (what the installer created, for uninstall) |
+| `%LOCALAPPDATA%\Xenolith\state\` | `install-state.json` (what the installer created, for uninstall), `audit\chain.jsonl`, `runtime\owner.key` (the [owner key](#the-owner-key), new at each service start) |
 | `%LOCALAPPDATA%\Xenolith\marketplace\` | local marketplace (Claude and Codex formats) and the rendered plugin |
 | `%LOCALAPPDATA%\Xenolith\paste-into-app-settings.md` | the pointer text, for app personal-instruction settings |
 | `~/Xenolith/` | the wiki (a folder of your documents, not app data) |

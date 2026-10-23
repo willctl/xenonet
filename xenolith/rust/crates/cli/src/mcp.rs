@@ -344,6 +344,14 @@ fn opt_s(args: &Value, k: &str) -> Option<String> {
     args.get(k).and_then(Value::as_str).map(String::from)
 }
 
+/// Who a tool call's note is from, as the server knows it (the caller's `source` can't say "user").
+fn submitter<'a>(ctx: &'a Ctx) -> inbox::By<'a> {
+    match &ctx.principal {
+        Principal::Local => inbox::By::Local(&ctx.client),
+        Principal::Token { subject, .. } => inbox::By::Token(subject),
+    }
+}
+
 fn queued(r: &inbox::Submitted) -> String {
     if r.duplicate {
         format!("Already saved as note {} ({}); nothing new was queued.", r.id, r.status)
@@ -435,7 +443,7 @@ pub fn call_tool(st: &State, ctx: &Ctx, called: &str, args: &Value) -> Value {
                         page: None,
                         idempotency_key: opt_s(args, "idempotency_key"),
                     };
-                    return Ok(queued(&inbox::submit_note(dir, &note, ctx.transport, &ctx.client)?));
+                    return Ok(queued(&inbox::submit_note(dir, &note, ctx.transport, &ctx.client, &submitter(ctx))?));
                 }
                 let (rel, heading) = wiki::append_log(dir, &s(args, "app"), &s(args, "title"), &s(args, "body"), args.get("tags").unwrap_or(&Value::Null), args.get("pages").unwrap_or(&Value::Null))?;
                 Ok(format!("Logged to {rel}: {}", heading.trim_start_matches("## ")))
@@ -466,7 +474,7 @@ pub fn call_tool(st: &State, ctx: &Ctx, called: &str, args: &Value) -> Value {
                         }),
                         idempotency_key: opt_s(args, "idempotency_key"),
                     };
-                    return Ok(queued(&inbox::submit_note(dir, &note, ctx.transport, &ctx.client)?));
+                    return Ok(queued(&inbox::submit_note(dir, &note, ctx.transport, &ctx.client, &submitter(ctx))?));
                 }
                 let r = wiki::upsert_page(
                     dir,

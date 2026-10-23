@@ -105,7 +105,7 @@
  {
   "name": "context_read",
   "title": "Read a wiki page or log day",
-  "description": "Read one file from the shared wiki: a page slug (e.g. \"atlas\"), a log date (\"YYYY-MM-DD\"), or a path relative to the wiki folder (e.g. \"index.md\", \"PROTOCOL.md\", \"pages/atlas.md\"), or a note the apps sent (\"note:<id>\", as search results and log entries name them: the exact original, with what the curator did with it).",
+  "description": "Read one file from the shared wiki: a page slug (e.g. \"atlas\"), a log date (\"YYYY-MM-DD\"), or a path under pages/, log/ or inbox/, or index.md, PROTOCOL.md or README.md (e.g. \"index.md\", \"pages/atlas.md\"), or a note the apps sent (\"note:<id>\", as search results and log entries name them: the exact original, with what the curator did with it).",
   "inputSchema": {
    "$schema": "http://json-schema.org/draft-07/schema#",
    "type": "object",
@@ -172,7 +172,7 @@
      }
     },
     "source": {
-     "description": "Where this came from: \"user\" (the user said it), \"observed\" (you checked it: ran a command, read a file), \"external\" (a web page, email, document or another tool's output), \"agent\" (your own conclusion; the default). Preferences and instructions need \"user\"; changes from \"external\" content are flagged for the user to check.",
+     "description": "Where this came from: \"user\" (the user said it), \"observed\" (you checked it: ran a command, read a file), \"external\" (a web page, email, document or another tool's output), \"agent\" (your own conclusion; the default). Xenolith records which app sent each note: from an app, \"user\" counts as \"agent\", so a new preference or instruction may wait for the user's OK. Changes from \"external\" content are flagged for the user to check.",
      "type": "string",
      "enum": [
       "user",
@@ -262,7 +262,7 @@
      ]
     },
     "source": {
-     "description": "Where this came from: \"user\" (the user said it), \"observed\" (you checked it: ran a command, read a file), \"external\" (a web page, email, document or another tool's output), \"agent\" (your own conclusion; the default). Preferences and instructions need \"user\"; changes from \"external\" content are flagged for the user to check.",
+     "description": "Where this came from: \"user\" (the user said it), \"observed\" (you checked it: ran a command, read a file), \"external\" (a web page, email, document or another tool's output), \"agent\" (your own conclusion; the default). Xenolith records which app sent each note: from an app, \"user\" counts as \"agent\", so a new preference or instruction may wait for the user's OK. Changes from \"external\" content are flagged for the user to check.",
      "type": "string",
      "enum": [
       "user",

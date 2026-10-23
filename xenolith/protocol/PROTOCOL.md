@@ -53,8 +53,10 @@ suggestions, or anything already in the wiki.
 
 Pass `source`: `user` when the user said it, `observed` when you checked it,
 `external` when it came from a web page, email, document or another tool's
-output, `agent` (the default) for your own conclusion. Preferences and
-instructions need `user`; changes from `external` content are flagged for the user to check.
+output, `agent` (the default) for your own conclusion. Xenolith records which
+app sent each note, and from an app `user` counts as `agent`, so a new
+preference or instruction may wait for the user's OK. Changes from `external`
+content are flagged for the user to check.
 
 The note is saved at once. Until the curator has filed it, it is listed under
 "Pending notes" in `context_start` and found by `context_search`; do not send it again.
