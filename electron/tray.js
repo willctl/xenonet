@@ -5,7 +5,8 @@
 // (core/needs-you.js), in its order. It polls the server's /api/summary
 // every few seconds.
 // Notifications come from the page (alerts.js), so each alert gets exactly
-// one.
+// one. On a Mac, while XenoNet's own tray app runs (tray/macos), this one
+// steps aside: setHidden takes it out of the menu bar and puts it back.
 //   Windows: the app icon with a numbered badge.
 //   macOS:   a monochrome glyph that follows the menu bar's colors, turning
 //            amber when something needs you, with the count beside it. The
@@ -22,6 +23,8 @@ const isMac = process.platform === "darwin";
 // null; setThemes() gives a newer one.
 export function createTray({ baseUrl, showWindow, sendCommand, select, themes = null }) {
   let tray = null;
+  let started = false;
+  let hidden = false;
   let last = { working: -1, need: -1 };
   let lastMenu = "";
   let summary = null;
@@ -34,7 +37,7 @@ export function createTray({ baseUrl, showWindow, sendCommand, select, themes = 
   const named = (n, max) => `${n.host ? `${n.host} · ` : ""}${n.title}`.slice(0, max);
 
   async function setIcon(working, need) {
-    if (working === last.working && need === last.need) return;
+    if (!tray || (working === last.working && need === last.need)) return;
     last = { working, need };
     tray.setImage(await image(working, need));
     if (isMac) {
@@ -99,6 +102,7 @@ export function createTray({ baseUrl, showWindow, sendCommand, select, themes = 
   // Rebuilt only when something in it changed, so an open menu isn't swapped
   // out from under the pointer every poll.
   function refreshMenu() {
+    if (!tray) return;
     const key = JSON.stringify([summary ? queueOfSummary(summary).map((n) => [n.key, n.title, n.waits ?? null]) : null, summary?.stuck?.map((n) => [n.id, n.title]), opensAtLogin(), themeMenu]);
     if (key === lastMenu) return;
     lastMenu = key;
@@ -106,29 +110,49 @@ export function createTray({ baseUrl, showWindow, sendCommand, select, themes = 
   }
 
   async function poll() {
+    if (!tray) return;
     try {
       summary = await fetch(baseUrl + "/api/summary").then((r) => r.json());
     } catch {
       summary = null;
     }
     await setIcon(summary?.working ?? 0, summary ? countOf(queueOfSummary(summary)) : 0);
-    tray.setToolTip(tooltip(summary));
+    tray?.setToolTip(tooltip(summary));
     refreshMenu();
   }
 
-  async function start() {
-    tray = new Tray(await image(0, 0));
+  async function show() {
+    const made = new Tray(await image(0, 0));
+    // Hidden again while the image was drawn.
+    if (hidden || tray) return void made.destroy();
+    tray = made;
+    last = { working: -1, need: -1 };
+    lastMenu = "";
     tray.setToolTip(app.name);
-    onLoginChange(() => ((lastMenu = ""), refreshMenu()));
     // On macOS a click opens the menu, as menu bar items do.
     if (!isMac) tray.on("click", () => showWindow(true));
     await poll();
+  }
+
+  async function start() {
+    started = true;
+    onLoginChange(() => ((lastMenu = ""), refreshMenu()));
+    if (!hidden) await show();
     setInterval(poll, 3000);
     return tray;
   }
 
   return {
     start,
+    // XenoNet's tray app runs (true) or went (false).
+    setHidden(on) {
+      hidden = on;
+      if (on && tray) {
+        tray.destroy();
+        tray = null;
+        if (isMac) app.dock?.setBadge("");
+      } else if (!on && !tray && started) show();
+    },
     // The page's themes changed, or which is in use.
     setThemes(menu) {
       themeMenu = menu;

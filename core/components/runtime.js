@@ -34,7 +34,8 @@ export async function connectService({ env = process.env, role = "tools", handle
   const descriptor = JSON.parse(fs.readFileSync(descriptorFile(env), "utf8"));
   if (!Number.isInteger(descriptor.port) || descriptor.port < 1 || descriptor.port > 65535 || !/^[a-f0-9]{64}$/.test(descriptor.token)) throw new Error("Invalid XenoNet service connection file.");
   const socket = net.connect({ host: "127.0.0.1", port: descriptor.port });
-  const client = rpc(socket, handle, { incomingEvents: role === "desktop" ? ["notification"] : [] });
+  // A Desktop hears notifications, and the tray app coming and going.
+  const client = rpc(socket, handle, { incomingEvents: role === "desktop" ? ["notification", "tray"] : [] });
   try {
     client.info = await client.request("hello", { token: descriptor.token, role, api: SERVICE_API }, 5000);
     negotiate(SERVICE_API, client.info.api);
