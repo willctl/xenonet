@@ -18,6 +18,7 @@
 //! This has the shaping, the allowlist and the relay's decisions; the
 //! twin wires the streams, the HTTP calls and the timers.
 
+use crate::aliases::{AliasReader, Look};
 use crate::merge::repo_key;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -827,6 +828,125 @@ impl Outbox {
 
     pub fn ping_due(&self, now: f64) -> bool {
         now - self.last_write >= PING_MS
+    }
+}
+
+// ---------- the frames ----------
+
+/// How a home folder's SSH aliases are read: alias → host, in order
+/// (identities.js's parseSshAliases).
+pub type AliasParse = fn(&str) -> Vec<(String, String)>;
+
+/// The relay's frames from this XenoNet's map, live state, engine state
+/// and events, shaped to leave as the functions above shape them: other
+/// hosts' parts and old sessions left out, the home folder and folders
+/// named for a person as ~, and titles, states and counts only unless
+/// `detail`. `xenonet relay` runs one for its console over ssh, and the
+/// service one for each console that subscribes over the network; the
+/// reads and the event stream are theirs.
+pub struct Producer {
+    pub since_ms: f64,
+    pub detail: bool,
+    home: Option<String>,
+    scrub: Scrubber,
+    folders: String,
+    aliases: AliasReader,
+    parse: AliasParse,
+    alias_map: HashMap<String, String>,
+    dropped: HashSet<String>,
+}
+
+impl Producer {
+    pub fn new(home: Option<&str>, since_ms: f64, detail: bool, parse: AliasParse) -> Producer {
+        Producer {
+            since_ms,
+            detail,
+            home: home.map(str::to_string),
+            scrub: Scrubber::new(home, &[]),
+            folders: String::new(),
+            aliases: AliasReader::new(home),
+            parse,
+            alias_map: HashMap::new(),
+            dropped: HashSet::new(),
+        }
+    }
+
+    fn aliases(&mut self) -> &HashMap<String, String> {
+        match self.aliases.look() {
+            Look::Same => {}
+            Look::None => self.alias_map.clear(),
+            Look::Read(file) => self.alias_map = std::fs::read(file).map(|b| (self.parse)(&String::from_utf8_lossy(&b)).into_iter().collect()).unwrap_or_default(),
+        }
+        &self.alias_map
+    }
+
+    /// The map as it leaves; it also says which sessions the live state
+    /// and events leave out after it.
+    pub fn graph(&mut self, g: &Value, now: f64) -> Value {
+        let found = user_folders(g, self.home.as_deref());
+        if found.join("\n") != self.folders {
+            self.folders = found.join("\n");
+            self.scrub = Scrubber::new(self.home.as_deref(), &found);
+        }
+        let aliases = self.aliases().clone();
+        let scrub = &self.scrub;
+        let (graph, dropped) = shape_graph(g, Some(self.since_ms), now, &aliases, self.detail, &mut |v| scrub.walk(v));
+        self.dropped = dropped;
+        graph
+    }
+
+    pub fn live(&self, l: &Value) -> Value {
+        shape_live(l, &self.dropped, self.detail, &mut |v| self.scrub.walk(v))
+    }
+
+    pub fn engine(&self, e: &Value) -> Value {
+        shape_engine(e, self.detail, &mut |v| self.scrub.walk(v))
+    }
+
+    /// Anything else that leaves: a read's answer, with the home folder as ~.
+    pub fn walk(&self, v: &Value) -> Value {
+        self.scrub.walk(v)
+    }
+
+    /// The snapshot frame, from the map's, the live state's and the
+    /// engine's reads, each (status, body); Err when the map or the live
+    /// state couldn't be read.
+    pub fn snapshot(&mut self, reads: [(u16, Value); 3], now: f64) -> Result<Value, String> {
+        let [g, l, e] = reads;
+        if g.0 != 200 || l.0 != 200 {
+            return Err(format!("XenoNet answered {} for the map and {} for the live state", g.0, l.0));
+        }
+        let graph = self.graph(&g.1, now);
+        let live = self.live(&l.1);
+        let engine = if e.0 == 200 { self.engine(&e.1) } else { Value::Null };
+        Ok(json!({ "t": "snapshot", "at": xenonet_base::json::number(now), "graph": graph, "live": live, "engine": engine }))
+    }
+
+    /// One of this XenoNet's events as a frame, with what it replaces while
+    /// it waits (the map and the live state, each the newest only); None
+    /// for one that stays here.
+    pub fn event(&mut self, name: &str, data: &Value, now: f64) -> Option<(Value, Option<&'static str>)> {
+        match name {
+            "graph" => Some((json!({ "t": "event", "name": name, "data": self.graph(data, now) }), Some("graph"))),
+            "live" => Some((json!({ "t": "event", "name": name, "data": self.live(data) }), Some("live"))),
+            _ => {
+                let shaped = shape_event(name, data, &self.dropped, self.detail, &mut |v| self.scrub.walk(v))?;
+                Some((json!({ "t": "event", "name": name, "data": shaped }), None))
+            }
+        }
+    }
+
+    /// A read's answer as its `res` frame: shaped as its route is, when it
+    /// was read.
+    pub fn answer(&mut self, id: i64, shape: Shape, status: u16, body: &Value, now: f64) -> Value {
+        let shape = if status == 200 { shape } else { Shape::None };
+        let body = match shape {
+            Shape::Graph => self.graph(body, now),
+            Shape::Live => self.live(body),
+            Shape::Engine => self.engine(body),
+            Shape::None => self.walk(body),
+        };
+        json!({ "t": "res", "id": id, "status": status, "body": body })
     }
 }
 

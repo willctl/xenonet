@@ -14,16 +14,14 @@ use super::native::now;
 use crate::out::{eprint, Fail};
 use crate::sys;
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read as _, Write};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt};
 use tokio::sync::{mpsc, Notify};
-use xenonet_hosts::aliases::{AliasReader, Look};
 use xenonet_hosts::frames::{encode, parse_frame, LineSplitter, FROM_CONSOLE, MAX_FRAME, MAX_REQUEST, PROTOCOL};
-use xenonet_hosts::relay::{self as core, Outbox, Scrubber, Shape, EXIT_DONE, EXIT_NO_XENONET, EXIT_XENONET_GONE};
+use xenonet_hosts::relay::{self as core, Outbox, Producer, Shape, EXIT_DONE, EXIT_NO_XENONET, EXIT_XENONET_GONE};
 
 const VERSION: &str = env!("XENONET_VERSION");
 const GET_MS: f64 = core::GET_TIMEOUT_MS;
@@ -260,12 +258,8 @@ struct Relay {
     port: u16,
     since_ms: f64,
     detail: bool,
-    home: Option<String>,
-    scrub: Scrubber,
-    folders: String,
-    aliases: AliasReader,
-    alias_map: HashMap<String, String>,
-    dropped: HashSet<String>,
+    /// The shaping, once the XenoNet here said where its home folder is.
+    p: Producer,
     ready: bool,
     stopped: bool,
     code: i32,
@@ -333,38 +327,6 @@ impl Relay {
         self.stop(EXIT_XENONET_GONE, Some(json!({ "code": "xenonet-gone", "message": message })));
     }
 
-    fn aliases(&mut self) -> &HashMap<String, String> {
-        match self.aliases.look() {
-            Look::Same => {}
-            Look::None => self.alias_map.clear(),
-            Look::Read(file) => {
-                self.alias_map = std::fs::read(file).map(|b| xenonet_state::identities::parse_ssh_aliases(&String::from_utf8_lossy(&b)).into_iter().collect()).unwrap_or_default();
-            }
-        }
-        &self.alias_map
-    }
-
-    fn graph_of(&mut self, g: &Value) -> Value {
-        let found = core::user_folders(g, self.home.as_deref());
-        if found.join("\n") != self.folders {
-            self.folders = found.join("\n");
-            self.scrub = Scrubber::new(self.home.as_deref(), &found);
-        }
-        let aliases = self.aliases().clone();
-        let scrub = &self.scrub;
-        let (graph, dropped) = core::shape_graph(g, Some(self.since_ms), now(), &aliases, self.detail, &mut |v| scrub.walk(v));
-        self.dropped = dropped;
-        graph
-    }
-
-    fn live_of(&self, l: &Value) -> Value {
-        core::shape_live(l, &self.dropped, self.detail, &mut |v| self.scrub.walk(v))
-    }
-
-    fn engine_of(&self, e: &Value) -> Value {
-        core::shape_engine(e, self.detail, &mut |v| self.scrub.walk(v))
-    }
-
     /// A fresh snapshot: the map, the live state and the engine's, read
     /// side by side.
     fn snapshot(&self) {
@@ -375,14 +337,8 @@ impl Relay {
     }
 
     fn snapshot_frame(&mut self, r: Result<[(u16, Value); 3], String>) -> Result<(), String> {
-        let [g, l, e] = r?;
-        if g.0 != 200 || l.0 != 200 {
-            return Err(format!("XenoNet answered {} for the map and {} for the live state", g.0, l.0));
-        }
-        let graph = self.graph_of(&g.1);
-        let live = self.live_of(&l.1);
-        let engine = if e.0 == 200 { self.engine_of(&e.1) } else { Value::Null };
-        self.send(&json!({ "t": "snapshot", "at": xenonet_base::json::number(now()), "graph": graph, "live": live, "engine": engine }), None);
+        let frame = self.p.snapshot(r?, now())?;
+        self.send(&frame, None);
         self.ready = true;
         Ok(())
     }
@@ -391,21 +347,8 @@ impl Relay {
         if self.stopped || !self.ready {
             return;
         }
-        match name {
-            "graph" => {
-                let g = self.graph_of(data);
-                self.send(&json!({ "t": "event", "name": name, "data": g }), Some("graph"));
-            }
-            "live" => {
-                let l = self.live_of(data);
-                self.send(&json!({ "t": "event", "name": name, "data": l }), Some("live"));
-            }
-            _ => {
-                let shaped = core::shape_event(name, data, &self.dropped, self.detail, &mut |v| self.scrub.walk(v));
-                if let Some(d) = shaped {
-                    self.send(&json!({ "t": "event", "name": name, "data": d }), None);
-                }
-            }
+        if let Some((frame, coalesce)) = self.p.event(name, data, now()) {
+            self.send(&frame, coalesce);
         }
     }
 
@@ -444,14 +387,8 @@ impl Relay {
         self.inflight -= 1;
         match answer {
             Ok((status, body)) => {
-                let shape = if status == 200 { shape } else { Shape::None };
-                let body = match shape {
-                    Shape::Graph => self.graph_of(&body),
-                    Shape::Live => self.live_of(&body),
-                    Shape::Engine => self.engine_of(&body),
-                    Shape::None => self.scrub.walk(&body),
-                };
-                self.send(&json!({ "t": "res", "id": id, "status": status, "body": body }), None);
+                let frame = self.p.answer(id, shape, status, &body, now());
+                self.send(&frame, None);
             }
             Err(e) => self.send(&json!({ "t": "res", "id": id, "status": e.status.unwrap_or(502), "body": { "error": e.message } }), None),
         }
@@ -494,12 +431,7 @@ async fn relay(port: u16, since_ms: f64, detail: bool, start: bool, demo: bool) 
         port,
         since_ms,
         detail,
-        home: None,
-        scrub: Scrubber::new(None, &[]),
-        folders: String::new(),
-        aliases: AliasReader::new(None),
-        alias_map: HashMap::new(),
-        dropped: HashSet::new(),
+        p: Producer::new(None, since_ms, detail, xenonet_state::identities::parse_ssh_aliases),
         ready: false,
         stopped: false,
         code: EXIT_DONE,
@@ -563,9 +495,7 @@ async fn serve(r: &mut Relay, read: &mut mpsc::UnboundedReceiver<Read>, up: Opti
         r.stop(code, Some(bye));
         return r.code;
     }
-    r.home = me.1.get("home").and_then(Value::as_str).map(String::from);
-    r.scrub = Scrubber::new(r.home.as_deref(), &[]);
-    r.aliases = AliasReader::new(r.home.as_deref());
+    r.p = Producer::new(me.1.get("home").and_then(Value::as_str), r.since_ms, r.detail, xenonet_state::identities::parse_ssh_aliases);
     let hello = json!({
         "t": "hello", "schema": "host/hello/v1", "protocol": PROTOCOL, "version": VERSION,
         "host": { "id": me.1.get("id").cloned().unwrap_or(Value::Null), "key": me.1["key"] },
