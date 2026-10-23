@@ -222,56 +222,97 @@ test("a click on an actor selects it, over whatever glows behind it", { timeout:
 test("the pointer takes whatever is drawn in front: Wren before a node's body, and the body before Wren", { timeout: limit(120000) }, shoot("actors-front", async () => {
   await s.driver("still", true);
   try {
-    const wren = byId(await untilActors((l) => byId(l, "actor:wren")?.beams.length > 0), "actor:wren");
-    const node = wren.beams[0];
-    const title = (await s.driver("find", { query: node, limit: 1 })).nodes[0]?.title;
-    assert.ok(title, `${node} is on the map`);
-    // The camera on the line through Wren and the node it beams into, on
-    // one side and then the other, so one is drawn right in front of the
-    // other at the middle of the screen.
+    await untilActors((l) => byId(l, "actor:wren")?.beams.length > 0);
+    // The camera on the line through Wren and a node it beams into, `from`
+    // ("wren" or "node") the near one, so one is drawn right in front of
+    // the other at the middle of the screen. Wren's script gives it new
+    // work every ten seconds or so (crates/xenonet-actors/src/demo.rs), and
+    // it moves to it: it can hover right on a node it beams into, whose
+    // body then can't be in front of it, or beside another node that gets
+    // in the way. So each node it beams into is tried for a view in which
+    // the near one's body is in front of everything else on that line,
+    // with the bodies the pointer weighs (a node's 1.3 times its size, in
+    // scene.js, and an actor's 1.7 times, in actors.js) taken at their
+    // smallest for the near one and their largest for the rest. Gives the
+    // node, or null while no node gives such a view.
     const look = (from) =>
       s.eval(`return (() => {
-        const sc = window.__xenonet.scene, a = sc.actor("actor:wren").group.position, n = sc.getNode(${JSON.stringify(node)});
-        const [near, far] = ${JSON.stringify(from)} === "wren" ? [a, n] : [n, a];
-        const d = Math.hypot(near.x - far.x, near.y - far.y, near.z - far.z) || 1, k = 70 / d;
-        const eye = { x: near.x + (near.x - far.x) * k, y: near.y + (near.y - far.y) * k, z: near.z + (near.z - far.z) * k };
-        sc.graph.cameraPosition(eye, { x: far.x, y: far.y, z: far.z }, 0);
-        return true;
+        const sc = window.__xenonet.scene;
+        const body = (id, p, r, lo, hi) => ({ id, x: p.x, y: p.y, z: p.z, min: r * lo, max: r * hi });
+        const bodies = [
+          ...sc.nodes().filter((n) => n.__obs?.visible && Number.isFinite(n.x)).map((n) => body(n.id, n, (n.__obs.userData.radius ?? 2) * 1.3, 0.9, 1.5)),
+          ...sc.actors().filter((r) => r.group.visible).map((r) => body(r.id, r.group.position, r.size * 1.7 * r.scale, 0.85, 1.25)),
+        ];
+        const wren = bodies.find((b) => b.id === "actor:wren");
+        if (!wren) return null;
+        for (const id of sc.actorLayer.targetsOf("actor:wren")) {
+          const node = bodies.find((b) => b.id === id);
+          if (!node) continue;
+          const [near, far] = ${JSON.stringify(from)} === "wren" ? [wren, node] : [node, wren];
+          const d = Math.hypot(near.x - far.x, near.y - far.y, near.z - far.z);
+          if (d < 1) continue;
+          const u = { x: (near.x - far.x) / d, y: (near.y - far.y) / d, z: (near.z - far.z) / d };
+          const eye = { x: near.x + u.x * 70, y: near.y + u.y * 70, z: near.z + u.z * 70 };
+          // How far along the line of sight each body's front could come,
+          // for those the line passes through.
+          const inWay = bodies.some((b) => {
+            if (b === near) return false;
+            const r = { x: b.x - eye.x, y: b.y - eye.y, z: b.z - eye.z };
+            const t = -(r.x * u.x + r.y * u.y + r.z * u.z);
+            const side = Math.hypot(r.x + u.x * t, r.y + u.y * t, r.z + u.z * t);
+            return side < b.max && t + b.max > 0 && t - b.max < 70 - near.min + 1;
+          });
+          if (inWay) continue;
+          sc.graph.cameraPosition(eye, { x: far.x, y: far.y, z: far.z }, 0);
+          return id;
+        }
+        return null;
       })()`);
-    // What hovering shows and a click takes there. Wren's script gives it
-    // new work every ten seconds or so (crates/xenonet-actors/src/demo.rs),
-    // and it moves to it; drawn in software, a try takes seconds, long
-    // enough for that. So a try counts only if Wren and the node stayed
-    // where the look put them, and one in which either moved is made again.
-    const places = () => s.eval(`return (() => {
-      const sc = window.__xenonet.scene, n = sc.getNode(${JSON.stringify(node)});
-      return [...sc.actor("actor:wren").group.position.toArray(), n.x, n.y, n.z];
-    })()`);
+    // Where Wren, the node and the camera are. Drawn in software, a try
+    // takes seconds, long enough for Wren to move, or for a flight of the
+    // camera that was under way to take it from where the look put it. So
+    // a try counts only if Wren and the node stayed put until the click
+    // was taken, and the camera until it was made (a selection flies it
+    // after); one in which anything moved is made again.
+    const places = (node) =>
+      s.eval(`return (() => {
+        const sc = window.__xenonet.scene, n = sc.getNode(${JSON.stringify(node)});
+        return [...sc.actor("actor:wren").group.position.toArray(), n.x, n.y, n.z, ...sc.graph.camera().position.toArray()];
+      })()`);
+    const moved = (a, b, n = a.length) => a.slice(0, n).some((v, i) => Math.abs(v - b[i]) > 2);
+    // What hovering shows and a click takes there.
     const takes = async (from) => {
-      for (let tries = 0; tries < 12; tries++) {
-        await look(from);
-        const before = await places();
+      for (const end = Date.now() + limit(50000); Date.now() < end; ) {
+        const node = await look(from);
+        if (!node) {
+          await sleep(1000);
+          continue;
+        }
+        const before = await places(node);
         await sleep(250);
         const p = await s.driver("screenPos", node);
         await s.input({ move: p });
         const tip = await s.eval(`return document.querySelector("#tooltip").hidden ? "" : document.querySelector("#tooltip").textContent`);
+        const aimed = await places(node);
         await s.input({ click: p });
-        await sleep(300);
-        const picked = (await s.driver("state")).selection?.id ?? null;
-        const moved = (await places()).some((v, i) => Math.abs(v - before[i]) > 2);
+        // The page takes a click with the frame after it.
+        const picked = (await until(async () => (await s.driver("state")).selection, limit(3000)))?.id ?? null;
+        const after = await places(node);
         // Letting go waits for the camera the selection moved.
         await s.driver("select", null);
-        if (!moved) return { tip, picked };
+        if (!moved(before, aimed) && !moved(before, after, 6)) return { node, tip, picked };
       }
       return null;
     };
     let got = await takes("wren");
-    assert.ok(got, "a try with Wren and the node held where the look put them");
+    assert.ok(got, "a view with Wren in front of a node it beams into, held through a try");
     assert.equal(got.picked, "actor:wren", "Wren in front takes the click");
     assert.match(got.tip, /Wren/, "and hovering shows Wren");
     got = await takes("node");
-    assert.ok(got, "a try with Wren and the node held where the look put them");
-    assert.equal(got.picked, node, "the node's body in front takes it");
+    assert.ok(got, "a view with a node Wren beams into in front of it, held through a try");
+    const title = (await s.driver("find", { query: got.node, limit: 1 })).nodes[0]?.title;
+    assert.ok(title, `${got.node} is on the map`);
+    assert.equal(got.picked, got.node, "the node's body in front takes it");
     assert.ok(got.tip.includes(title) && !/Wren/.test(got.tip), `and hovering shows the node: ${got.tip}`);
   } finally {
     await s.driver("still", false);
