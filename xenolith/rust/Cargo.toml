@@ -34,3 +34,11 @@ opt-level = "s"
 lto = "fat"
 codegen-units = 1
 strip = true
+
+# What a release archive ships (scripts/package.mjs --target): the release build, with no debug info
+# and no symbol table, so nothing names the build machine's folders. Its own profile keeps those
+# programs apart from the local release build the suites run.
+[profile.dist]
+inherits = "release"
+debug = 0
+strip = "symbols"
