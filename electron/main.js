@@ -316,6 +316,8 @@ async function startServer() {
   how ??= await ensureService(serviceStart);
   serviceClient = await desktopClient({ env, handle: (method, body) => {
     if (method === "open") return openTarget(body?.target);
+    // The tray app's Open console: the window, at a session or an actor.
+    if (method === "show") return showAt(body?.select);
     if (method !== "console") throw new Error("Unsupported Desktop request.");
     return control.handle(body);
   } });
@@ -787,6 +789,13 @@ function notify({ key, id, command, title, subtitle, body, sound }) {
   if (isMac) app.dock?.bounce("informational");
   else if (win?.isVisible()) win.flashFrame(true);
 }
+// The window, at the session or actor `id` names when it names one.
+async function showAt(id) {
+  await showWindow();
+  if (typeof id === "string" && id && id.length <= 300) win?.webContents.send("app:select", id);
+  return null;
+}
+
 function withdrawNotes() {
   for (const n of notes.values()) n.close();
   notes.clear();
@@ -958,6 +967,12 @@ if (iconsArg >= 0) {
       });
       // Before it starts, so the page's themes reach it from now on.
       globalThis.__xenonetTray = tray;
+      // On a Mac, XenoNet's own tray app takes the menu bar while it runs.
+      if (isMac) {
+        tray.setHidden(serviceClient.info?.tray === true);
+        serviceClient.on("tray", (connected) => tray.setHidden(connected));
+        serviceClient.on("connected", (info) => tray.setHidden(info?.tray === true));
+      }
       await tray.start();
     }
     if (isMac && !startHidden && !offscreen) askAboutLogin(win);

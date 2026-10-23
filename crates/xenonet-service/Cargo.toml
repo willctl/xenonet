@@ -42,6 +42,9 @@ xenonet-engine.workspace = true
 # the link, and /api/net.
 xenonet-net.workspace = true
 xenonet-schema.workspace = true
+# The Needs you queue as the console has it (core/needs-you.js's twin), for
+# the tray's status (routes/tray.rs).
+xenonet-state.workspace = true
 
 [dev-dependencies]
 # Paused time, for the tunnel's waits between restarts.

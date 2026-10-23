@@ -26,6 +26,8 @@ Turning it off stops the copy that started at login, and Desktop starts its own 
 
 macOS lists it in System Settings › General › Login Items & Extensions. Turning it off there keeps it from starting at login. A launch agent starts at login, not at boot: a Mac that should be in a network, or serve as an SSH host, before anyone logs in needs automatic login.
 
+When XenoNet's tray is installed, `install` also sets it up (see [The tray on macOS](#the-tray-on-macos)): it copies `XenoNet Tray.app` to `~/Applications` and writes a second launch agent, `~/Library/LaunchAgents/dev.xenonet.tray.plist`. `uninstall` removes both.
+
 ### Linux
 
 `xenonet service install` writes a systemd user unit, `~/.config/systemd/user/xenonet.service` (or under `XDG_CONFIG_HOME`), and runs `systemctl --user enable --now xenonet.service`.
@@ -54,9 +56,25 @@ Start at sign-in, in the tray menu and the installer, is a separate setting: it 
 
 - When Desktop opens and no service answers, it asks launchd, systemd or Task Scheduler to start the registered one rather than starting a second copy. `xenonet service start` and `xenonet update service` do the same.
 - If you turn it on while Desktop's service is running, the new one waits for that one to stop. When the running service has no terminals open, it stops right away, and the new one takes over within a few seconds. Desktop reconnects and reloads its window. With terminals open, the running service keeps going until it stops, at the latest when you log out.
-- The menu bar icon, the tray and notifications come from Desktop. They show while Desktop runs.
+- On a Mac with the tray app running, the menu bar icon is the tray's, and Desktop hides its own. Without it, and on Linux and Windows, the menu bar icon, the tray and notifications come from Desktop and show while Desktop runs.
 - Uninstalling Desktop also turns this off, whether or not you remove your data.
 - XenoNet Dev, run from a checkout, starts and stops its own service and never registers one. Its Background service panel says so.
+
+## The tray on macOS
+
+XenoNet Tray is a small menu bar app that shows how XenoNet is doing while Desktop is closed. It has no Dock icon.
+
+- **How it starts.** The disk image installs it with the service and tools. `xenonet service install` copies it to `~/Applications/XenoNet Tray.app` and starts it at login. launchd starts it again if it crashes, but not after you quit it. A build of your own, with no tray component, skips it.
+- **The icon.** A ring with a dot while XenoNet runs, an amber disc and a count while something needs you, and a dimmed ring while the service isn't running.
+- **The menu.** What needs you, in the console's words ("Rate-limit the API asks", "Wren needs permission"); clicking one opens the console at it. Then Open console, the gateway's state, the network's link when this Mac is in one, and Quit the tray.
+- **Open console.** Desktop's window when Desktop is running. Otherwise Desktop itself, for the installed XenoNet on port 47840, or the console in your browser for any other port.
+- **Notifications.** One for each new thing that needs you, withdrawn once it stops waiting. Clicking one opens the console at it.
+
+The tray is signed ad hoc, as Desktop is. `install` takes the download's quarantine off the copy, so Gatekeeper doesn't stop it. macOS asks once whether it may post notifications.
+
+It only works from `/Applications` or `~/Applications`. The service gives the tray its key only when it can see that the program asking is `XenoNet Tray.app` there, and not something started by an agent. A copy elsewhere shows "XenoNet didn't take this tray" in its menu. The tray finds the service on the port in `XENONET_PORT` (or `--port`), 47840 by default, and in the runtime folder `XENONET_RUNTIME_DIR` names. Its launch agent keeps those two settings and `XDG_STATE_HOME` from when you ran `install`.
+
+Not in the menu yet: Quit XenoNet, turning the gateway off, Pause notifications and Start at login. There's no tray app for Windows or Linux yet; Desktop keeps its own there.
 
 ## The settings it keeps
 

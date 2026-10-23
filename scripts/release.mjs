@@ -36,7 +36,18 @@ export function pluginWithVersion(text, version) {
 
 const digest = (file, algorithm, encoding) => createHash(algorithm).update(fs.readFileSync(file)).digest(encoding);
 
-export function verifyArtifacts(dir, version, { components = false } = {}) {
+// The component packages each target's manifest (components-<target>.json)
+// holds: Service and Tools for each platform and CPU, and the macOS tray,
+// one universal package for both Mac CPUs (scripts/tray-build.mjs).
+export const COMPONENT_TARGETS = {
+  "win32-x64": ["service", "tools"],
+  "darwin-arm64": ["service", "tools"],
+  "darwin-x64": ["service", "tools"],
+  "linux-x64": ["service", "tools"],
+  "darwin-universal": ["tray"],
+};
+
+export function verifyArtifacts(dir, version, { components = false, versions = null } = {}) {
   const expected = [`XenoNet-Setup-${version}.exe`, `XenoNet-Setup-${version}.exe.blockmap`, ...["arm64", "x64"].flatMap((arch) => [`XenoNet-${version}-${arch}.dmg`, `XenoNet-${version}-${arch}.zip`, `XenoNet-${version}-${arch}.zip.blockmap`])];
   if (components) expected.push(`XenoNet-Desktop-Setup-${version}.exe`, `XenoNet-Desktop-Setup-${version}.exe.blockmap`);
   for (const name of expected) {
@@ -64,11 +75,11 @@ export function verifyArtifacts(dir, version, { components = false } = {}) {
   const componentAssets = [];
   if (components) {
     const packages = [];
-    const versions = JSON.parse(fs.readFileSync("components/versions.json", "utf8"));
-    for (const target of ["win32-x64", "darwin-arm64", "darwin-x64", "linux-x64"]) {
+    versions ??= JSON.parse(fs.readFileSync("components/versions.json", "utf8"));
+    for (const [target, wanted] of Object.entries(COMPONENT_TARGETS)) {
       const part = JSON.parse(fs.readFileSync(path.join(dir, `components-${target}.json`), "utf8"));
-      if (part.format !== 1 || part.packages.length !== 2) throw new Error(`Incomplete components for ${target}.`);
-      for (const component of ["service", "tools"]) {
+      if (part.format !== 1 || part.packages.length !== wanted.length) throw new Error(`Incomplete components for ${target}.`);
+      for (const component of wanted) {
         const item = part.packages.find((p) => p.component === component);
         const file = `XenoNet-${component}-${versions[component]}-${target}.tar.gz`;
         if (!item || item.file !== file || `${item.platform}-${item.arch}` !== target || item.version !== versions[component] || digest(path.join(dir, file), "sha256", "hex") !== item.sha256 || fs.statSync(path.join(dir, file)).size !== item.size) throw new Error(`Invalid component artifact: ${file}`);

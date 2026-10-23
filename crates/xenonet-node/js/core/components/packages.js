@@ -2,6 +2,7 @@
 // tar.rs): a component's package, checked against its release's hash and
 // size before it's unpacked, unpacked only when it holds nothing but files
 // and folders inside it, and never replacing a published version.
+import path from "node:path";
 import { native } from "../../index.js";
 import { settle } from "../../settle.js";
 import { drive } from "../../task.js";
@@ -9,6 +10,10 @@ import { envOf, machine } from "../../machine.js";
 import { lockOps } from "../../lifecycle.js";
 
 export const COMPONENTS = native.compConstants().components;
+export const TRAY = native.compConstants().tray;
+export const TRAY_APP = native.compConstants().trayApp;
+export const TRAY_EXE = path.join(...native.compConstants().trayExe);
+export const fitsHere = (value, { platform = process.platform, arch = process.arch } = {}) => native.compFitsHere(value ?? null, String(platform), String(arch));
 
 const bytes = (data) => (Buffer.isBuffer(data) ? data : ArrayBuffer.isView(data) ? Buffer.from(data.buffer, data.byteOffset, data.byteLength) : Buffer.from(String(data)));
 export const digest = (data) => native.compDigest(bytes(data));

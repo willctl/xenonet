@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { schemaIds, jsonSchemas, schemaFiles } from "../core/schema/index.js";
+import { schemaIds, jsonSchemas, schemaFiles, check } from "../core/schema/index.js";
 import { schemaUri } from "../core/schema/ids.js";
 import { schemaFilesState, writeSchemaFiles } from "../core/schema/files.js";
 
@@ -30,6 +30,7 @@ const CONTRACT = [
   "network/frame/v1", "network/presence/v1", "network/message/v1", "network/receipt/v1", "network/claims/v1",
   "network/handoff/v1", "network/operator/v1", "network/relay/v1", "network/roster-entry/v1", "network/state/v1",
   "app/v1",
+  "tray/status/v1", "tray/event/v1",
 ];
 
 test("every internal schema the contracts list is defined", () => {
@@ -93,4 +94,14 @@ test("writing the files: what's missing or changed, and none left over", () => {
 test("the app ships the schema files, which the lenient readers read at runtime", () => {
   const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.ok(pkg.build.files.includes("schemas/**"), "package.json build.files has schemas/**");
+});
+
+// The tray app decodes these in its own tests (tray/macos), and the
+// service's Rust checks them too, so all three read the same shapes.
+test("the tray's fixtures are what tray/status/v1 and tray/event/v1 say", () => {
+  for (const [id, file] of [["tray/status/v1", "status.json"], ["tray/event/v1", "event.json"]]) {
+    const data = JSON.parse(fs.readFileSync(new URL(`./fixtures/tray/${file}`, import.meta.url), "utf8"));
+    const r = check(id, data, { strict: true });
+    assert.ok(r.ok, `${file}: ${JSON.stringify(r)}`);
+  }
 });

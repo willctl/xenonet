@@ -1,0 +1,71 @@
+{
+  "schema": "tray/status/v1",
+  "running": true,
+  "version": "0.4.1",
+  "instance": "installed",
+  "url": "http://127.0.0.1:47840/",
+  "desktop": false,
+  "working": 3,
+  "needsYou": {
+    "count": 4,
+    "items": [
+      {
+        "key": "actor:actor:wren",
+        "kind": "actor",
+        "id": "actor:wren",
+        "title": "Wren",
+        "words": "needs permission",
+        "app": null,
+        "text": "May I push to main?",
+        "since": 1791230000000
+      },
+      {
+        "key": "session:claude:0190d3e0-0000-7000-8000-000000000001",
+        "kind": "question",
+        "id": "claude:0190d3e0-0000-7000-8000-000000000001",
+        "title": "Rate-limit the API",
+        "words": "asks",
+        "app": "claude",
+        "text": "Should the limit be per key or per account?",
+        "since": 1791230060000
+      },
+      {
+        "key": "session:@studio:codex:019a0000-0000-7000-8000-000000000002",
+        "kind": "permission",
+        "id": "@studio:codex:019a0000-0000-7000-8000-000000000002",
+        "title": "Move the docs",
+        "words": "needs permission",
+        "app": "codex",
+        "host": "studio",
+        "text": null,
+        "since": 1791230090000,
+        "stale": true
+      },
+      {
+        "key": "requests",
+        "kind": "requests",
+        "id": null,
+        "title": "2 programs",
+        "words": "ask to join XenoNet",
+        "app": null,
+        "text": null,
+        "since": null,
+        "count": 2
+      }
+    ]
+  },
+  "gateway": {
+    "on": true,
+    "state": "online",
+    "url": "https://xenonet.example.ts.net/mcp",
+    "problem": null
+  },
+  "network": {
+    "name": "home",
+    "host": "studio",
+    "link": "live",
+    "hosts": 2,
+    "online": 1
+  },
+  "at": 1791230100000
+}

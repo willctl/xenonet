@@ -16,6 +16,7 @@ pub mod net;
 pub mod net_sim;
 pub mod refusals;
 pub mod themes;
+pub mod tray;
 pub mod workspace;
 
 use crate::borrowed::{attest, platform, Sender};
@@ -69,6 +70,11 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     // asks for the simulated state first.
     if let Some(r) = net_sim::route(ctx, req).await? {
         return Ok(r);
+    }
+
+    // XenoNet's tray app, with its own key (routes/tray.rs).
+    if route.starts_with("/api/tray/") {
+        return tray::route(ctx, req).await;
     }
 
     // You, writing from XenoNet's own window to an actor that reads its
@@ -564,17 +570,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     // waiting on you and how many programs ask to be actors come with it, a
     // count, never who asked, since this route has no key.
     if m == "GET" && route == "/api/summary" {
-        let summary = cores.state.summary()?;
-        let mut out = match &cores.hub {
-            Some(h) => h.summary(summary),
-            None => summary,
-        };
-        if let Value::Object(waits) = waits_on_you(ctx)? {
-            for (k, v) in waits {
-                out[k] = v;
-            }
-        }
-        return Ok(Reply::json(200, out));
+        return Ok(Reply::json(200, summary(ctx)?));
     }
 
     if m == "GET" && route == "/api/events" {
@@ -900,6 +896,24 @@ pub fn current_theme(ctx: &Ctx) -> Result<Value, CoreError> {
 
 /// What waits on you apart from sessions: the actors waiting on you, and
 /// how many programs ask to be actors.
+/// What /api/summary answers: the map's summary, with live hosts' alerts
+/// when hosts are on, the actors waiting on you, and how many programs
+/// ask to be actors. The tray's status is built from it too.
+pub(crate) fn summary(ctx: &Ctx) -> Result<Value, CoreError> {
+    let cores = &ctx.cores;
+    let summary = cores.state.summary()?;
+    let mut out = match &cores.hub {
+        Some(h) => h.summary(summary),
+        None => summary,
+    };
+    if let Value::Object(waits) = waits_on_you(ctx)? {
+        for (k, v) in waits {
+            out[k] = v;
+        }
+    }
+    Ok(out)
+}
+
 fn waits_on_you(ctx: &Ctx) -> Result<Value, CoreError> {
     let list = match &ctx.cores.actors {
         Some(a) => a.list()?["actors"].as_array().cloned().unwrap_or_default(),

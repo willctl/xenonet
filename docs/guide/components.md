@@ -10,6 +10,8 @@ XenoNet has three installed parts:
 
 The bundle installer includes all three. Service and Tools also have separate downloads for Windows x64, macOS arm64 and x64, and Linux x64. Each is the `xenonet` binary for that system, in `bin/`. You do not need to install Node.
 
+On a Mac there's a fourth, the tray: XenoNet Tray.app, a menu bar app that shows whether XenoNet runs and what needs you while Desktop is closed. It's one download for both Mac CPUs, `XenoNet-tray-<version>-darwin-universal.tar.gz`, with a version of its own. The disk image installs it, and `xenonet service install` puts it in `~/Applications` and starts it at login. See [The tray on macOS](always-on.md#the-tray-on-macos).
+
 Closing or updating Desktop leaves the service, terminals and connected MCP processes running. Reopening Desktop restores terminal tabs and recent output. Terminal output stays in memory. A service restart ends its terminals. If terminals are running, XenoNet downloads the service update but leaves it uninstalled. Close the terminals and choose Update again to install it.
 
 ## Install without Desktop
@@ -54,6 +56,8 @@ xenonet update tools
 xenonet update service
 ```
 
+The tray isn't in the Updates panel or `xenonet update` yet. A newer disk image replaces it, and `xenonet service install` copies the new one to `~/Applications`.
+
 Downloads are checked against the release manifest's size and SHA-256 hash. Each component is installed into a new version directory. The selected version changes only after validation. Old versions are retained so running MCP processes can finish and a failed service startup can return to the previous version.
 
 Unsigned component archives rely on GitHub's HTTPS release channel and checksums; they do not have a separate publisher signature. Stable releases are the only automatic update channel. Desktop's existing Windows signing and macOS notarization requirements still apply.
@@ -86,4 +90,4 @@ The service owns persistent data. Current component packages declare data schema
 
 Component files live under XenoNet's state folder in `runtime/components`. The private service connection file is restricted to the current account. Desktop serves its own frontend and proxies API calls to the service; its assets never come from a different service release. It passes on only its own window's API calls. Other programs call the service directly, so the service can see which program sent each request.
 
-On macOS, the service treats the connected Desktop as XenoNet's own app, so the window can report what you do there. It hands the window key only to a Desktop it can see is an app's own executable, not an agent, the `xenonet` command or a script.
+On macOS, the service treats the connected Desktop as XenoNet's own app, so the window can report what you do there. It hands the window key only to a Desktop it can see is an app's own executable, not an agent, the `xenonet` command or a script. The tray gets a key of its own the same way, only when it's `XenoNet Tray.app` in `/Applications` or `~/Applications` with no agent above it, and each of its requests must come from you as well. Neither key is written to disk.

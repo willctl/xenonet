@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/tray/event/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A tray alert",
+  "description": "An alert on GET /api/tray/v1/events: an item of the Needs you queue that started or stopped waiting on you, for the tray's notifications.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "tray/event/v1"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "needs-you",
+        "resolved"
+      ],
+      "description": "needs-you: it started waiting on you; resolved: it stopped"
+    },
+    "item": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "The item's key in the Needs you queue (core/needs-you.js): session:<id>, actor:<id>, requests…"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "question",
+            "permission",
+            "actor",
+            "request",
+            "gateway",
+            "requests"
+          ]
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 300
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The session or actor it's about, which open-console selects; null for programs asking to be actors"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "words": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "What it waits for, after its title, as the console says it: asks, needs permission, asks to join XenoNet…"
+        },
+        "app": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 32
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The session's app (claude, codex, grok, opencode), or null"
+        },
+        "host": {
+          "description": "The machine it's on, when it isn't this one",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,31}$"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 500
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The question or what it asks, when XenoNet has it"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "number",
+              "description": "Epoch milliseconds"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stale": {
+          "description": "A wait on another machine that isn't live, which may be over",
+          "type": "boolean"
+        },
+        "count": {
+          "description": "For requests: how many programs ask",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "key",
+        "kind",
+        "id",
+        "title",
+        "words",
+        "app",
+        "text",
+        "since"
+      ],
+      "additionalProperties": {}
+    },
+    "at": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    }
+  },
+  "required": [
+    "schema",
+    "kind",
+    "item",
+    "at"
+  ],
+  "additionalProperties": {}
+}

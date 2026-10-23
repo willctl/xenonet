@@ -4,9 +4,10 @@ A design for running XenoNet's service all the time, with a small tray app
 of its own, and the console as a separate app that connects to it. It
 covers macOS first, then Linux and Windows. Step 1 of the build plan is
 built for macOS and Linux, and step 6 for Windows, off unless you turn it
-on (see "What step 1 built" and "What step 6 built" below, and the
-guide's [Keeping the service running](../guide/always-on.md)). The rest
-isn't built yet.
+on. Steps 2 and 3, the tray API and the macOS tray app, are built too
+(see "What step 1 built", "What steps 2 and 3 built" and "What step 6
+built" below, and the guide's [Keeping the service
+running](../guide/always-on.md)). Steps 4 and 5 aren't built yet.
 
 **In short:**
 
@@ -350,7 +351,87 @@ of it from step 5. Where it departs from the plan above, and why:
 Not built yet from step 1: the JS core's `ensureService` asking the
 supervisor (an update installed from Desktop's Updates panel still starts
 the new service itself, and the supervisor's copy takes over at the next
-login). The tray waits on steps 2 and 3.
+login).
+
+## What steps 2 and 3 built
+
+The tray API and the macOS tray app, XenoNet Tray (`tray/macos`). The
+contracts have the API's shapes and rules ([contracts.md](contracts.md),
+section 14). Where it departs from the plan above, and why:
+
+- **No token file.** The plan gave the tray a token in the state folder.
+  Anything running as you can read a file there, agents included, so
+  there isn't one. The tray reads `runtime/service-<port>.json` as the
+  Tools do, connects to the component socket as role `tray`, and the
+  hello's answer carries the tray's key, made new at each start of the
+  service, only when `verify.tray` passes: the process on the other end
+  is `XenoNet Tray.app/Contents/MacOS/<executable>` by its real path, in
+  `/Applications` or the home folder's `Applications`, with no agent or
+  actor product above it. A demo's home is its made-up world's, so a
+  demo's tray runs from that world's `Applications`. Where XenoNet can't
+  see processes the check refuses, never passes. The key is kept only in
+  the tray's memory.
+- **Key and yours, every time.** `GET /api/tray/v1/status`, the
+  `GET /api/tray/v1/events` stream and `POST /api/tray/v1/open-console`
+  need the key in `x-xenonet-tray`, never beside an `authorization`
+  header, and the request must be yours (`verify.person`) too. So the key
+  is no use from under an agent. Wrong or missing keys are refused before
+  the path is looked at.
+- **What it shows.** The status is built from what `/api/summary` and the
+  Needs you queue (`core/needs-you.js`, `crates/xenonet-state/src/needs_you.rs`)
+  already compute: each item's title and the words the console says after
+  it, the actor gateway's state in a word (off, starting, online,
+  problem) and this machine's link to its network. The stream sends the
+  status when it changes, looking every 2 seconds, and an alert when an
+  item starts or stops waiting.
+- **Hand-written types.** The plan generated the Swift types from the
+  schemas. They're written by hand in `tray/macos/Sources/TrayCore`, and
+  the shapes are held together by fixtures instead:
+  `test/fixtures/tray/` is checked against the schemas by the JS and Rust
+  tests and decoded by `swift test`.
+- **A component of its own.** The plan put the tray in the macOS Service
+  archive. A component's bytes must not change at a published version,
+  and Swift's output depends on the toolchain, so the tray is its own
+  component, `tray`, versioned on its own (`components/versions.json`). It
+  is one archive for both Mac CPUs (`lipo`), with the arch `universal`,
+  which XenoNet from before the tray passes by in `components.json`. The
+  build leaves out debug info (`-gnone`) and remaps the checkout's and
+  the home folder's paths; the archive fixes modes, times and order. Two
+  clean builds on one Mac give the same SHA-256. The linker's UUID stays:
+  `-no_uuid` would drop it, and dyld refuses to start an executable
+  without one. A new Swift toolchain on the release runner changes the
+  bytes, and the release check then asks for a new tray version, as it
+  would for any component.
+- **Installed by the bundle, put in place by `service install`.** The
+  disk image's bundle installs the tray component (a newer one replaces
+  it). `xenonet service install` on macOS copies its `XenoNet Tray.app`
+  to `~/Applications`, removes `com.apple.quarantine` from the copy, and
+  writes and loads `~/Library/LaunchAgents/dev.xenonet.tray.plist`
+  (`crates/xenonet-components/src/tray.rs`): started at login in your
+  graphical session, again after a crash, not after you quit it.
+  `uninstall` quits it and removes the agent and the app, and only an app
+  it set up. With no tray component (a build of your own) both skip it.
+  `SMAppService` waits for a signed bundle.
+- **Desktop steps aside.** The service tells a connected Desktop when a
+  tray comes and goes (a `tray` event, and `tray` in the hello's answer),
+  and Desktop on macOS hides its own tray while one is connected. One
+  tray at a time.
+- **Notifications.** The tray posts one per item that starts waiting, and
+  withdraws it when the item stops. macOS asks you once. Ad hoc signed and
+  run from a folder in a checkout, the tray got macOS's permission
+  request; run from a temporary folder, macOS refused it outright
+  ("Notifications are not allowed for this application").
+- **Checking it without the screen.** `XENONET_TRAY_SNAPSHOT=<folder>`
+  has the tray write its menu as text and its icon as a PNG whenever they
+  change, and take a file called `choose` as a click on the item it names.
+  It shows what `/api/summary` tells any program, and the key never goes
+  there.
+
+Not built yet: in the menu, Quit XenoNet, turning the gateway off, Pause
+notifications and Start at login (the gateway's state shows, read-only);
+updating the tray with `xenonet update` or Desktop's Updates panel (a
+newer bundle replaces it); and trays for Windows and Linux, where Desktop
+keeps its own.
 
 ## What step 6 built
 

@@ -1,0 +1,15 @@
+{
+  "schema": "tray/event/v1",
+  "kind": "needs-you",
+  "item": {
+    "key": "session:claude:0190d3e0-0000-7000-8000-000000000001",
+    "kind": "question",
+    "id": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "title": "Rate-limit the API",
+    "words": "asks",
+    "app": "claude",
+    "text": "Should the limit be per key or per account?",
+    "since": 1791230060000
+  },
+  "at": 1791230061000
+}

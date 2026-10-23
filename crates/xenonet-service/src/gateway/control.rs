@@ -497,20 +497,46 @@ impl GatewayControl {
         self.status().await
     }
 
-    pub async fn status(&self) -> R<Value> {
-        let s = self.saved();
-        let g = self.gateway().status();
-        let tv = self.tunnel().view();
-        let reach = self.reach.locked().clone();
-        let why = self
-            .problem
+    // What's wrong with the gateway, as the panel says it, or null.
+    fn problem_of(&self, s: &Saved, tv: &Value, reach: &Value) -> Value {
+        self.problem
             .locked()
             .clone()
             .map(Value::String)
             .or_else(|| (s.on && s.tunnel.is_none()).then(|| json!("pick how the gateway reaches the internet")))
             .or_else(|| (s.on && tv["state"] == "failed").then(|| tv["why"].clone()))
             .or_else(|| (s.on && reach["state"] == "failing").then(|| reach["why"].clone()))
-            .unwrap_or(Value::Null);
+            .unwrap_or(Value::Null)
+    }
+
+    /// How the gateway stands for the tray (routes/tray.rs), without the
+    /// tool lookups status() makes: whether it's on, a word for its state
+    /// (off, starting, online, problem), its public address and what's
+    /// wrong.
+    pub fn brief(&self) -> Value {
+        let s = self.saved();
+        let tv = self.tunnel().view();
+        let reach = self.reach.locked().clone();
+        let problem = self.problem_of(&s, &tv, &reach);
+        let g = self.gateway().status();
+        let state = if !s.on {
+            "off"
+        } else if !problem.is_null() {
+            "problem"
+        } else if g["listening"] == json!(true) && reach["state"] == "ok" {
+            "online"
+        } else {
+            "starting"
+        };
+        json!({ "on": s.on, "state": state, "url": if s.on { g["url"].clone() } else { Value::Null }, "problem": problem })
+    }
+
+    pub async fn status(&self) -> R<Value> {
+        let s = self.saved();
+        let g = self.gateway().status();
+        let tv = self.tunnel().view();
+        let reach = self.reach.locked().clone();
+        let why = self.problem_of(&s, &tv, &reach);
         let mut tunnel = tv.clone();
         match &s.tunnel {
             Some((k, name, given)) => {
