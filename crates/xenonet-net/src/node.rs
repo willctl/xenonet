@@ -167,8 +167,9 @@ pub struct Shared {
     volatile: Mutex<Vec<Frame>>,
     /// The map's frames waiting to go, in relay batches of their own.
     relay_out: Mutex<Vec<Frame>>,
-    /// The relay and svc frames that came lately, by id, and when.
-    relay_ids: Mutex<HashMap<String, f64>>,
+    /// The relay and svc frames that came lately, and the oldest time a
+    /// new one may have.
+    relay_ids: Mutex<Recent>,
     /// Services' requests and answers waiting to go, each in a relay batch
     /// of its own.
     svc_out: Mutex<VecDeque<Frame>>,
@@ -207,9 +208,53 @@ const BATCH_FRAMES: u64 = 500;
 pub const RELAY_BODY: usize = 8 << 20;
 /// A relay batch's frames, at most this many bytes of lines, past the first.
 const RELAY_BATCH_BYTES: usize = 12 << 20;
-/// How long a relay frame is the map's news, and its id remembered.
+/// How long a relay or svc frame is news: one older, by the gateway's
+/// clock, is dropped.
 const RELAY_MS: f64 = 120e3;
-const RELAY_IDS: usize = 4096;
+/// Relay and svc frame ids remembered at most.
+const RELAY_IDS: usize = 16384;
+
+/// The relay and svc frames that came lately, each id with its time, and
+/// the floor: the oldest time a new one may have. Each id is kept until
+/// the floor passes its time, so a frame is taken once however far ahead
+/// it was dated. The floor only rises, to now less RELAY_MS by the
+/// gateway's clock: the gateway sets this host's offset, and setting it
+/// back mustn't make a frame it already passed on fresh again.
+#[derive(Default)]
+struct Recent {
+    ids: HashMap<String, f64>,
+    floor: f64,
+}
+
+impl Recent {
+    /// Whether a frame with `id`, dated `at`, is new and fresh by the
+    /// gateway's clock `gw_now`; it's noted when it is.
+    fn take(&mut self, id: &str, at: f64, gw_now: f64) -> bool {
+        self.floor = self.floor.max(gw_now - RELAY_MS);
+        if at < self.floor || self.ids.contains_key(id) {
+            return false;
+        }
+        if self.ids.len() >= RELAY_IDS {
+            let floor = self.floor;
+            self.ids.retain(|_, t| *t >= floor);
+        }
+        if self.ids.len() >= RELAY_IDS {
+            // Still full of fresh ones: the older half go, and the floor
+            // rises past them, so one of them is refused rather than taken
+            // twice.
+            let mut times: Vec<f64> = self.ids.values().copied().collect();
+            let mid = times.len() / 2;
+            let cut = *times.select_nth_unstable_by(mid, f64::total_cmp).1;
+            self.ids.retain(|_, t| *t > cut);
+            self.floor = self.floor.max(cut + 1.0);
+            if at < self.floor {
+                return false;
+            }
+        }
+        self.ids.insert(id.to_string(), at);
+        true
+    }
+}
 
 fn not_in() -> NetError {
     NetError::new(409, "no-network", "this machine isn't in a XenoNet network")
@@ -802,9 +847,9 @@ impl Shared {
         }
         let now = self.now();
         // The map's frames and services' are live: one older than RELAY_MS
-        // is dropped, and their ids are kept in memory that long rather
+        // is dropped, and their ids are kept in memory until then rather
         // than for the week.
-        let seen = if f.in_relay_batch() { at < gw_now - RELAY_MS || self.relay_seen(&f.id, now) } else { self.with_store(|s| s.seen(&f.id, now as i64)).unwrap_or(true) };
+        let seen = if f.in_relay_batch() { !self.relay_ids.locked().take(&f.id, at, gw_now) } else { self.with_store(|s| s.seen(&f.id, now as i64)).unwrap_or(true) };
         if seen {
             return false;
         }
@@ -844,16 +889,6 @@ impl Shared {
         }
         self.sink.receive(Incoming { from: f.from.clone(), kind, body, at: at.min(now), from_window_host: window });
         false
-    }
-
-    /// Whether a relay frame's id came in the last RELAY_MS, and it's
-    /// noted if not.
-    fn relay_seen(&self, id: &str, now: f64) -> bool {
-        let mut ids = self.relay_ids.locked();
-        if ids.len() > RELAY_IDS {
-            ids.retain(|_, t| now - *t < RELAY_MS);
-        }
-        ids.insert(id.to_string(), now).is_some_and(|t| now - t < RELAY_MS)
     }
 
     /// Whether the person's action from another host may be acted on: its
@@ -1311,7 +1346,7 @@ impl Node {
             wake: Notify::new(),
             volatile: Mutex::new(Vec::new()),
             relay_out: Mutex::new(Vec::new()),
-            relay_ids: Mutex::new(HashMap::new()),
+            relay_ids: Mutex::new(Recent::default()),
             svc_out: Mutex::new(VecDeque::new()),
             svc: services,
             gateway: RwLock::new(None),
@@ -1967,5 +2002,53 @@ impl Drop for Node {
         for t in self.tasks.locked().drain(..) {
             t.abort();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const T: f64 = 1_792_512_345_678.0;
+    const MIN: f64 = 60e3;
+
+    #[test]
+    fn a_relay_or_svc_frame_dated_ahead_is_taken_once() {
+        let mut r = Recent::default();
+        // Dated four minutes ahead: taken, and refused for as long as its
+        // time is fresh, well past two minutes after it came.
+        assert!(r.take("a", T + 4.0 * MIN, T));
+        for later in [0.0, 2.5, 3.0, 5.9] {
+            assert!(!r.take("a", T + 4.0 * MIN, T + later * MIN), "{later} min later");
+        }
+        // Once its time is past, it's stale.
+        assert!(!r.take("a", T + 4.0 * MIN, T + 6.5 * MIN));
+        assert!(r.take("b", T + 6.0 * MIN, T + 6.5 * MIN), "a fresh one is taken");
+    }
+
+    #[test]
+    fn setting_the_clock_back_makes_nothing_fresh_again() {
+        let mut r = Recent::default();
+        assert!(r.take("a", T, T));
+        // Ten minutes on, "a" is stale, and its id may be let go.
+        assert!(r.take("b", T + 10.0 * MIN, T + 10.0 * MIN));
+        r.ids.remove("a");
+        // The gateway sets this host's clock back to when "a" came: still
+        // refused, as is anything else older than the floor.
+        assert!(!r.take("a", T, T));
+        assert!(!r.take("c", T + MIN, T));
+    }
+
+    #[test]
+    fn a_full_memory_raises_the_floor_rather_than_forget() {
+        let mut r = Recent::default();
+        for i in 0..RELAY_IDS {
+            assert!(r.take(&format!("f{i}"), T + i as f64, T));
+        }
+        // All fresh, and full: the older half go, and so does their time.
+        assert!(r.take("next", T + RELAY_IDS as f64, T));
+        assert!(r.ids.len() <= RELAY_IDS / 2 + 1, "{}", r.ids.len());
+        assert!(!r.take("f0", T, T), "an id it let go is refused, not taken again");
+        assert!(!r.take(&format!("f{}", RELAY_IDS - 1), T + (RELAY_IDS - 1) as f64, T), "and one it kept is seen");
     }
 }
