@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { currentComponent, stagePackage, selectComponent, newer, withInstallLock } from "./packages.js";
+import { currentComponent, stagePackage, selectComponent, newer, withInstallLock, fitsHere, TRAY } from "./packages.js";
 import { runtimeDir, ensureService, connectService, binName, launcherBin } from "./runtime.js";
 import { installCommand } from "../command.js";
 
@@ -177,7 +177,8 @@ export async function recoverServiceUpdate({ env = process.env, operations } = {
 // Installs a bundle's components that aren't installed yet, and replaces
 // any from before 0.4.0 (see hasBinary), with the launcher and, when asked,
 // the xenonet command; says how to start the service. A bundle never
-// silently restarts or upgrades a Service or Tools that has its binary.
+// silently restarts or upgrades a Service or Tools that has its binary. On
+// a Mac, a newer tray than the one installed replaces it.
 export async function installBundle(bundle, { env = process.env, command = true, operations } = {}) {
   return withInstallLock(env, async () => {
     const io = lifecycle(operations);
@@ -185,8 +186,15 @@ export async function installBundle(bundle, { env = process.env, command = true,
     const manifest = JSON.parse(fs.readFileSync(path.join(bundle, "components.json"), "utf8"));
     let earlier = null;
     for (const item of manifest.packages) {
-      if (item.platform !== process.platform || item.arch !== process.arch) continue;
+      if (!fitsHere(item)) continue;
       const old = currentComponent(item.component, env);
+      // The tray, on a Mac: installed when it's missing or this one is
+      // newer. Nothing runs it from here; xenonet service install puts it
+      // in Applications and starts it at login.
+      if (item.component === TRAY) {
+        if (!old || newer(item.version, old.version)) selectComponent(TRAY, await stagePackage(path.join(bundle, item.file), item, { env }), env);
+        continue;
+      }
       if (old && hasBinary(old)) continue;
       const staged = await stagePackage(path.join(bundle, item.file), item, { env });
       checkRuntime(staged);

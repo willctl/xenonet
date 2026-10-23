@@ -409,7 +409,7 @@ pub async fn recover_service_update(io: &Io, env: &Env, ctx: &Ctx, life: &Life) 
 /// any from before 0.4.0 (see has_binary), with the launcher and, when
 /// asked, the xenonet command; says how to start the service. A bundle
 /// never silently restarts or upgrades a Service or Tools that has its
-/// binary.
+/// binary. On a Mac, a newer tray than the one installed replaces it.
 pub async fn install_bundle(io: &Io, bundle: &str, env: &Env, command: bool, ctx: &Ctx, life: &Life) -> Result<Value, Failure> {
     let held = lock(io, env, &ctx.machine).await?;
     let r = install_bundle_locked(io, bundle, env, command, ctx, life).await;
@@ -425,11 +425,26 @@ async fn install_bundle_locked(io: &Io, bundle: &str, env: &Env, command: bool, 
     let Some(Value::Array(items)) = manifest.get("packages") else { return Err(Failure::type_error("manifest.packages is not iterable")) };
     let mut earlier = None;
     for item in items {
-        if item.get("platform").and_then(Value::as_str) != Some(m.platform.as_str()) || item.get("arch").and_then(Value::as_str) != Some(m.arch.as_str()) {
+        if !crate::packages::fits_here(item, &m.platform, &m.arch) {
             continue;
         }
         let component = item.get("component").map(js_string).unwrap_or_default();
         let old = current_component(&component, env, m)?;
+        // The tray, on a Mac: installed when it's missing or this one is
+        // newer. Nothing runs it from here; xenonet service install puts it
+        // in Applications and starts it at login.
+        if component == crate::packages::TRAY {
+            let wanted = match &old {
+                None => true,
+                Some(o) => newer(item.get("version"), o.get("version")).map_err(Failure::msg)?,
+            };
+            if wanted {
+                let file = NATIVE.join(&[bundle, &item.get("file").map(js_string).unwrap_or_default()]);
+                let staged = stage_package(io, &file, item, env, m).await?;
+                select_component(&component, &staged, env, m)?;
+            }
+            continue;
+        }
         if old.as_ref().is_some_and(|o| has_binary(o, &m.platform)) {
             continue;
         }

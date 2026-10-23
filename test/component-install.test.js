@@ -14,7 +14,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { activatePackage, checkRuntime, hasBinary, installBundle, installedRuntime, installLauncher, recoverServiceUpdate, writeLauncher, launcherVersion, LAUNCHER_SOURCE } from "../core/components/install.js";
-import { currentComponent, selectComponent, stagePackage } from "../core/components/packages.js";
+import { currentComponent, selectComponent, stagePackage, digest, TRAY, TRAY_EXE } from "../core/components/packages.js";
+import * as tar from "tar";
 import { EXE, BIN, NODE, posixOnly, fakeBin, pack, bundle, fakeService as service, earlierInstall } from "./harness/components.js";
 
 function workspace(t) {
@@ -75,6 +76,40 @@ test("a bundle never upgrades or restarts a service or Tools already installed",
   assert.deepEqual([currentComponent("service", env).version, currentComponent("tools", env).version], ["1.0.0", "1.0.0"]);
   assert.equal(runtime.root, before.root);
   assert.deepEqual(fs.readdirSync(path.join(env.XENONET_RUNTIME_DIR, "components", "service")).filter((f) => f.startsWith("2.0.0")), [], "the newer one isn't even unpacked");
+});
+
+// A bundle with the Mac's tray beside its Service and Tools, as the disk
+// image's is: the tray's package for both CPUs, holding `exe` as its
+// executable.
+async function withTray(dir, name, version, exe = "the tray") {
+  const out = await bundle(dir, name, [["service", "1.0.0"], ["tools", "1.0.0"]]);
+  const app = fs.mkdtempSync(path.join(dir, "tray-"));
+  const meta = { format: 1, component: TRAY, version, platform: "darwin", arch: "universal", dataSchema: 1, api: { min: 1, max: 1 } };
+  fs.mkdirSync(path.join(app, path.dirname(TRAY_EXE)), { recursive: true });
+  fs.writeFileSync(path.join(app, TRAY_EXE), exe, { mode: 0o755 });
+  fs.writeFileSync(path.join(app, "component.json"), JSON.stringify(meta));
+  const file = `XenoNet-tray-${version}-darwin-universal.tar.gz`;
+  await tar.c({ file: path.join(out, file), cwd: app, gzip: true }, fs.readdirSync(app));
+  const bytes = fs.readFileSync(path.join(out, file));
+  const manifest = JSON.parse(fs.readFileSync(path.join(out, "components.json"), "utf8"));
+  manifest.packages.push({ ...meta, file, size: bytes.length, sha256: digest(bytes) });
+  fs.writeFileSync(path.join(out, "components.json"), JSON.stringify(manifest));
+  return out;
+}
+
+test("on a Mac a bundle installs its tray as a component of its own, and only a newer one replaces it", posixOnly, async (t) => {
+  const { dir, env } = workspace(t);
+  await installBundle(await withTray(dir, "bundle-1", "0.4.1"), { env, command: false });
+  const mac = process.platform === "darwin";
+  assert.equal(currentComponent(TRAY, env)?.version ?? null, mac ? "0.4.1" : null, "a Mac's only");
+  assert.equal(currentComponent("service", env).version, "1.0.0");
+  if (!mac) return;
+  const first = currentComponent(TRAY, env);
+  assert.equal(fs.readFileSync(path.join(first.root, TRAY_EXE), "utf8"), "the tray");
+  await installBundle(await withTray(dir, "bundle-2", "0.4.1", "another build"), { env, command: false });
+  assert.equal(currentComponent(TRAY, env).sha256, first.sha256, "the same version is left as it is");
+  await installBundle(await withTray(dir, "bundle-3", "0.4.2", "a newer tray"), { env, command: false });
+  assert.equal(fs.readFileSync(path.join(currentComponent(TRAY, env).root, TRAY_EXE), "utf8"), "a newer tray");
 });
 
 test("a component whose runtime fails its startup check is never selected", posixOnly, async (t) => {
