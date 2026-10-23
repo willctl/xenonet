@@ -11,7 +11,7 @@ use crate::cores::{ok, reason, CoreError, Cores};
 use crate::events::Events;
 use crate::gateway::control::GatewayControl;
 use crate::http::{BodyError, Reply, Req};
-use crate::window_key::WindowKey;
+use crate::window_key::{TrayKey, WindowKey};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use xenonet_actors::limits::Bucket;
@@ -25,6 +25,8 @@ pub struct Ctx {
     pub cores: Cores,
     pub events: Arc<Events>,
     pub window_key: Arc<WindowKey>,
+    /// The tray app's key, for its routes (routes/tray.rs).
+    pub tray_key: Arc<TrayKey>,
     pub log: Mutex<Log>,
     pub drift: Arc<Mutex<DriftLog>>,
     pub caller: Option<ActorCaller>,
@@ -86,6 +88,7 @@ impl Ctx {
             cores,
             events: Arc::new(Events::new()),
             window_key: Arc::new(WindowKey::new()),
+            tray_key: Arc::new(TrayKey::new()),
             log: Mutex::new(log),
             drift: Arc::new(Mutex::new(DriftLog::default())),
             caller,

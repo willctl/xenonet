@@ -999,7 +999,8 @@ mod tests {
         assert_eq!(said(&v.tray(t.from(99.0), &apps)), refused("XenoNet couldn't see which program connected as its tray"));
         assert_eq!(v.counts().unseen, 1.0);
         // The real path decides: what ps names, argv[0], is the process's own to set.
-        t.chains[0][0] = obj(vec![("pid", Arg::num(120.0)), ("start", Arg::num(1200.0)), ("program", Arg::text(TRAY)), ("exe", Arg::Null), ("agent", Arg::Null), ("product", Arg::Null)]);
+        t.chains[0][0] =
+            obj(vec![("pid", Arg::num(120.0)), ("start", Arg::num(1200.0)), ("program", Arg::text(TRAY)), ("exe", Arg::Null), ("agent", Arg::Null), ("product", Arg::Null)]);
         assert_eq!(said(&v.tray(t.from(120.0), &apps)), refused(elsewhere), "an executable whose path couldn't be read");
         assert_eq!(said(&v.tray(t.from(121.0), &[])), refused(elsewhere), "no Applications folder named");
         // Where XenoNet can't look, nothing passes.

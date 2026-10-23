@@ -254,7 +254,8 @@ mod tests {
                 "netstat" => Ok(netstat.clone()),
                 "lsof" if c.args.iter().any(|a| a == "txt") => {
                     let asked: Vec<&str> = c.args.get(2).map(|l| l.split(',').collect()).unwrap_or_default();
-                    Ok(exes.iter().filter(|(pid, _)| asked.contains(&pid.as_str())).map(|(pid, exe)| format!("p{pid}\nftxt\nn{exe}\n")).collect::<String>())
+                    let lines: Vec<String> = exes.iter().filter(|(pid, _)| asked.contains(&pid.as_str())).map(|(pid, exe)| format!("p{pid}\nftxt\nn{exe}\n")).collect();
+                    Ok(lines.concat())
                 }
                 _ => Err(xenonet_engine::procs::Failure { message: format!("Command failed: {}", c.file), stdout: None }),
             }),
