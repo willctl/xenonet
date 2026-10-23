@@ -44,7 +44,7 @@ pub use actors::{Actors, Registration, Reports, Runs, Spend, Wakes};
 pub use assistant::{AssistantService, AssistantSource, Audit, Connections, Tunnels};
 pub use delivery::{Policy, Router};
 pub use engine::{Channels, Connect, Engine, EngineStore, Verify};
-pub use hosts::{HostsConfig, Hub};
+pub use hosts::{HostsConfig, HttpApi, Hub, HubNet, SelfApi};
 pub use services::{Decider, Diagnostics, Doctor, DriftReport, Integrations, McpInfo, OpenRouter, Refusals, Spotify, SystemStats, Terminals};
 pub use settings::{Command, Demo, Opener, Schemas, Store, Themes};
 pub use state::State;

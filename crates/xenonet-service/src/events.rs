@@ -69,6 +69,14 @@ impl Events {
         clients.len()
     }
 
+    /// How many consoles are reading: the pages, without the relays that
+    /// follow this machine's own view for another host.
+    pub fn pages(&self) -> usize {
+        let mut clients = self.clients.locked();
+        clients.retain(|c| !c.tx.is_closed());
+        clients.iter().filter(|c| !c.own_only).count()
+    }
+
     pub fn broadcast(&self, event: &str, data: &Value, local: Local<'_>) {
         let msg = frame(event, data);
         let own = match local {
@@ -111,8 +119,9 @@ mod tests {
         e.send("live", &json!(1));
         assert_eq!(page.recv().await.unwrap(), Bytes::from("event: hosts\ndata: []\n\n"));
         assert_eq!(relay.recv().await.unwrap(), Bytes::from("event: live\ndata: 1\n\n"));
+        assert_eq!((e.count(), e.pages()), (2, 1), "a relay isn't a console");
         drop(page);
         e.send("x", &json!(null));
-        assert_eq!(e.count(), 1);
+        assert_eq!((e.count(), e.pages()), (1, 0));
     }
 }
