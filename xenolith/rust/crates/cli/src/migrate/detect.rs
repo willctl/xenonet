@@ -715,8 +715,9 @@ pub fn plan(ctx: &Ctx, f: &Found) -> Vec<String> {
     if f.era == "node" {
         stop.push("the curator's Codex app-server daemon".into());
     }
+    let backed = tracked.iter().filter(|(p, _)| p.exists()).count();
     let mut out = vec![
-        format!("1. Write a journal and back up {} files with their SHA-256 to {}", tracked.iter().filter(|(p, _)| p.exists()).count(), fwd(&ctx.lay.work)),
+        format!("1. Write a journal and back up {backed} file{} with their SHA-256 to {}", if backed == 1 { "" } else { "s" }, fwd(&ctx.lay.work)),
         format!("2. Stop agent-wiki ({}), pause the curator, and wait until the wiki's locks are free", if stop.is_empty() { "nothing runs".to_string() } else { stop.join(", ") }),
         format!("3. Write Xenolith's config.json: the wiki stays where it is ({wiki}), with agent-wiki's settings carried over"),
         match f.codex_home.action.as_str() {

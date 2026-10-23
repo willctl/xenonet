@@ -1,0 +1,190 @@
+name: Xenolith release
+# Xenolith's release archives (xenolith/scripts/package.mjs), one per target, built after the same
+# checks as xenolith.yml. A tag xenolith-v<version> ends in a draft GitHub release "Xenolith
+# <version>" with the archives, SHA256SUMS and xenolith/docs/releases/<version>.md as its notes; it
+# never publishes, and the draft is not marked latest (XenoNet's updates read the latest release).
+# Run by hand, it uploads the archives as workflow artifacts and makes no release.
+on:
+  push:
+    tags: ["xenolith-v*"]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: xenolith-release-${{ github.ref }}
+  cancel-in-progress: false
+defaults:
+  run:
+    working-directory: xenolith
+jobs:
+  # package.json, package-lock.json and rust/Cargo.toml name one version, the tag is
+  # xenolith-v<that version>, and its release notes exist.
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - run: node scripts/release-draft.mjs --check
+
+  # The steps of xenolith.yml's checks job, kept in step with it: rustfmt, clippy, the Rust tests and
+  # the behaviour suites on Linux, Windows and macOS.
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: xenolith/package-lock.json
+      - name: Tray libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            xenolith/rust/target/
+          key: xenolith-${{ runner.os }}-cargo-${{ hashFiles('xenolith/rust/rust-toolchain.toml', 'xenolith/rust/Cargo.lock') }}
+          restore-keys: xenolith-${{ runner.os }}-cargo-
+      - name: Toolchain (rust-toolchain.toml)
+        working-directory: xenolith/rust
+        run: rustup toolchain install
+      - name: rustfmt
+        working-directory: xenolith/rust
+        run: cargo fmt --all --check
+      - name: clippy
+        working-directory: xenolith/rust
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Rust tests
+        working-directory: xenolith/rust
+        run: cargo test --workspace --locked --no-fail-fast
+      - name: Build the programs
+        working-directory: xenolith/rust
+        run: cargo build --workspace --locked
+      - run: npm ci
+      - name: Behaviour suites
+        run: npm test
+        env:
+          XENOLITH_IMPL: rust
+
+  # One archive per target, from a clean build with Cargo's dist profile. Both Mac CPUs build on
+  # one Mac; the x64 one can't be run there, so the other three are installed from their archive.
+  build:
+    needs: [version, checks]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            triple: aarch64-apple-darwin
+            os: macos-latest
+            verify: true
+          - target: darwin-x64
+            triple: x86_64-apple-darwin
+            os: macos-latest
+            verify: false
+          # A fixed Ubuntu, so the glibc the programs are linked against (2.39, the floor the
+          # release notes give) only moves when this line does.
+          - target: linux-x64
+            triple: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+            verify: true
+          - target: win32-x64
+            triple: x86_64-pc-windows-msvc
+            os: windows-latest
+            verify: true
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: xenolith/package-lock.json
+      - name: Tray libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev
+      - name: Toolchain and target
+        working-directory: xenolith/rust
+        run: |
+          rustup toolchain install
+          rustup target add ${{ matrix.triple }}
+      - run: npm ci
+      - name: Archive
+        run: node scripts/package.mjs --target ${{ matrix.target }}
+      # Unpack it with the system's tar, install from the unpacked folder into a fake home, ask the
+      # installed server with `xenolith status`, and uninstall (scripts/verify-archive.mjs).
+      - name: Install from the archive
+        if: matrix.verify
+        shell: bash
+        run: node scripts/verify-archive.mjs dist/release/xenolith-*-${{ matrix.target }}.*
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: xenolith-archive-${{ matrix.target }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            xenolith/dist/release/xenolith-*.tar.gz
+            xenolith/dist/release/xenolith-*.zip
+
+  # Every target's archive, SHA256SUMS over them, and a check that the set is complete.
+  assemble:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: xenolith-archive-*
+          merge-multiple: true
+          path: xenolith/dist/release
+      - run: node scripts/package.mjs --sums dist/release
+      - run: node scripts/release-draft.mjs --assets dist/release
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: xenolith-release
+          if-no-files-found: error
+          retention-days: 14
+          path: xenolith/dist/release/
+
+  draft:
+    needs: assemble
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: xenolith-release
+          path: xenolith/dist/release
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: node scripts/release-draft.mjs --dir dist/release
