@@ -149,9 +149,20 @@ pub struct Scope {
 }
 
 impl Scope {
+    /// Whether the scope reaches a space. This machine's own space (machine:local) holds the
+    /// owner's notes and the questions asked in the window: only a selector that names it exactly
+    /// reaches it, never "all", a wildcard or a selector about something else.
     pub fn covers(&self, space: &SpaceId, facts: &Facts) -> bool {
+        if space.is_local() && !names_local(&self.selector) {
+            return false;
+        }
         matches(&self.selector, space, facts)
     }
+}
+
+/// Whether a selector names this machine's own space exactly: machine:local, no wildcard.
+fn names_local(sel: &Selector) -> bool {
+    sel.terms.iter().any(|(k, v)| k == "machine" && v == "local")
 }
 
 /// `ctx:<level>` or `ctx:<level>:<selector>` ("+" or spaces between terms). None when it isn't one.
@@ -661,6 +672,25 @@ mod tests {
         p.local = None;
         assert_eq!(p.level(&Principal::Local, &atlas, now), None);
         assert!(p.grant("hermes", sc("ctx:read"), GRANT_MS, "you", now).is_err(), "subjects name their kind");
+    }
+
+    #[test]
+    fn a_token_reaches_this_machines_space_only_through_a_grant_that_names_it() {
+        let now = 1_000;
+        let local = SpaceId::local();
+        let reader = |scope: &str| Principal::Token { id: "tok_l".into(), subject: "client:phone".into(), scopes: vec![sc(scope)] };
+        for grant in ["ctx:read", "ctx:read:all", "ctx:read:machine:*", "ctx:read:machine:loc*", "ctx:admin"] {
+            let mut p = Policy::new();
+            p.grant("client:phone", sc(grant), GRANT_MS, "you", now).unwrap();
+            assert_eq!(p.level(&reader("ctx:read:machine:local"), &local, now), None, "{grant} does not name machine:local");
+            assert_eq!(p.level(&reader("ctx:read"), &sp("project:atlas"), now).is_some(), !grant.contains("machine"), "{grant} still reaches other spaces");
+        }
+        let mut p = Policy::new();
+        p.grant("client:phone", sc("ctx:read:machine:local"), GRANT_MS, "you", now).unwrap();
+        assert_eq!(p.level(&reader("ctx:read:machine:local"), &local, now), Some(Level::Read), "named exactly, by the grant and the token");
+        assert_eq!(p.level(&reader("ctx:read"), &local, now), None, "the token's own scopes must name it too");
+        assert_eq!(p.level(&reader("ctx:read:machine:local"), &sp("machine:studio"), now), None);
+        assert_eq!(p.level(&Principal::Local, &local, now), Some(Level::Admin), "this machine's own processes are not tokens");
     }
 
     #[test]

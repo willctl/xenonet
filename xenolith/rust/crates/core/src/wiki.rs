@@ -943,6 +943,29 @@ pub fn read_section(wiki_dir: &Path, target: &str, section: Option<&str>) -> Res
     Ok((format!("{rel}#{}", crate::search::anchor(want)), format!("{head}\n\n## {heading}\n\n{}", body.trim())))
 }
 
+/// The top-level files of a space that reads may open: what PROTOCOL.md and the README name.
+pub const READABLE_FILES: [&str; 3] = ["index.md", "PROTOCOL.md", "README.md"];
+/// The folders of a space that reads may open: its pages, its log and the notes not yet filed.
+pub const READABLE_DIRS: [&str; 3] = ["pages", "log", "inbox"];
+
+/// Whether a path inside a space (relative, "/"-separated) is content a read may return: a page, a
+/// log day, a pending note, or a top-level file the protocol names. Never .curator/ (held changes,
+/// journals, audit records, Ask), .history/, .locks/ or another space's spaces/ folder.
+pub fn readable_rel(rel: &str) -> bool {
+    let rel = rel.replace('\\', "/");
+    let rel = rel.trim_start_matches("./");
+    if rel.is_empty() || rel == "." {
+        return true;
+    }
+    let mut parts = rel.split('/').filter(|p| !p.is_empty());
+    let first = parts.next().unwrap_or("").to_lowercase();
+    let rest: Vec<&str> = parts.collect();
+    if rest.is_empty() && READABLE_FILES.iter().any(|f| f.eq_ignore_ascii_case(&first)) {
+        return true;
+    }
+    READABLE_DIRS.contains(&first.as_str()) && !rest.iter().any(|p| p.starts_with('.'))
+}
+
 fn read_whole(wiki_dir: &Path, target: &str) -> Result<(String, String)> {
     let mut t = target.trim().replace('\\', "/");
     t = t.strip_prefix("[[").unwrap_or(&t).to_string();
@@ -992,9 +1015,12 @@ fn read_whole(wiki_dir: &Path, target: &str) -> Result<(String, String)> {
         return wiki_err(format!("Refused: \"{target}\" resolves outside the wiki folder."));
     }
     // Other spaces live in the machine space's spaces/ folder: each is read as its own space, with
-    // its own access, never as files of this one (spaces.rs).
+    // its own access, never as files of this one (spaces.rs). And a read returns content only (the
+    // pages, the log, pending notes, the protocol's files), whatever path it names and wherever a
+    // link inside points: the curator's state, history and locks stay out of reach.
     let in_spaces = |base: &Path, p: &Path| p.strip_prefix(base).is_ok_and(|r| crate::spaces::is_spaces_path(&disp(r)));
-    if in_spaces(&root, &abs) || in_spaces(&real_root, &real) {
+    let content = |base: &Path, p: &Path| p.strip_prefix(base).is_ok_and(|r| readable_rel(&disp(r)));
+    if in_spaces(&root, &abs) || in_spaces(&real_root, &real) || !content(&root, &abs) || !content(&real_root, &real) {
         return wiki_err(format!("Not found: \"{target}\". Use context_search, or a page slug from the index (context_read(\"index.md\"))."));
     }
     let rel_out = abs.strip_prefix(&root).map(disp).unwrap_or_default();
@@ -1004,7 +1030,8 @@ fn read_whole(wiki_dir: &Path, target: &str) -> Result<(String, String)> {
             .flatten()
             .filter_map(|e| {
                 let n = e.file_name().to_string_lossy().to_string();
-                if n.starts_with('.') && rel_out != "." || rel_out == "." && n.eq_ignore_ascii_case(crate::spaces::SPACES_DIR) {
+                let rel = if rel_out == "." { n.clone() } else { format!("{rel_out}/{n}") };
+                if n.starts_with('.') || !readable_rel(&rel) {
                     return None;
                 }
                 Some(if e.path().is_dir() { format!("{n}/") } else { n })
@@ -1107,6 +1134,54 @@ mod tests {
         assert!(confined_path(&root, &root.join("pages/new.md")).is_ok());
         assert!(confined_path(&root, &root.join("../outside.md")).is_err());
         assert!(confined_path(&root, &root.with_extension("outside")).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reads_return_content_only() {
+        let root = std::env::temp_dir().join(format!("xenolith-readable-{}", random_hex(8)));
+        ensure_wiki(&root).unwrap();
+        fs::write(root.join("pages/atlas.md"), "---\ntitle: Atlas\n---\n\n# Atlas\n").unwrap();
+        fs::write(root.join("inbox/2026-10-03_10-00-00-000-aaaaaa.md"), "---\nid: x\ntitle: Pending\n---\n\nwaiting\n").unwrap();
+        for (dir, file) in [
+            (".curator/held", "2026-10-03_10-00-00-000-bbbbbb.json"),
+            (".curator/asks", "q.json"),
+            (".history/pages/atlas", "old.md"),
+            (".locks", "write.lock"),
+            ("spaces/project/x/pages", "p.md"),
+            ("notes", "private.md"),
+        ] {
+            fs::create_dir_all(root.join(dir)).unwrap();
+            fs::write(root.join(dir).join(file), "private").unwrap();
+        }
+        for ok in ["atlas", "pages/atlas.md", "index.md", "PROTOCOL.md", "README.md", "inbox/2026-10-03_10-00-00-000-aaaaaa.md", "pages", "log", "."] {
+            assert!(read_target(&root, ok).is_ok(), "{ok}");
+        }
+        for refused in [
+            ".curator/held/2026-10-03_10-00-00-000-bbbbbb.json",
+            ".curator/asks/q.json",
+            ".CURATOR/held/2026-10-03_10-00-00-000-bbbbbb.json",
+            "pages/../.curator/held/2026-10-03_10-00-00-000-bbbbbb.json",
+            ".history/pages/atlas/old.md",
+            ".locks/write.lock",
+            "spaces/project/x/pages/p.md",
+            "notes/private.md",
+            ".curator",
+            ".gitignore",
+        ] {
+            let e = read_target(&root, refused).unwrap_err().to_string();
+            assert!(e.starts_with("Not found") || e.starts_with("Refused"), "{refused}: {e}");
+        }
+        let (_, listing) = read_target(&root, ".").unwrap();
+        assert!(!listing.contains(".curator") && !listing.contains(".history") && !listing.contains("spaces") && !listing.contains("notes/"), "{listing}");
+        assert!(listing.contains("pages/") && listing.contains("index.md"), "{listing}");
+        #[cfg(unix)]
+        {
+            // A link inside pages/ that points at the curator's state reads as nothing.
+            std::os::unix::fs::symlink(root.join(".curator/held/2026-10-03_10-00-00-000-bbbbbb.json"), root.join("pages/held.md")).unwrap();
+            assert!(read_target(&root, "pages/held.md").is_err());
+            assert!(read_target(&root, "held").is_err());
+        }
         fs::remove_dir_all(root).unwrap();
     }
 

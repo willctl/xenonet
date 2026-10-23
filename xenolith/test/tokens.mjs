@@ -204,6 +204,41 @@ describe('tokens over HTTP', { skip, timeout: 60_000 }, () => {
     }
   });
 
+  test("a read token reads content only: never the curator's held changes, history or locks", async () => {
+    const atlas = path.join(E.wikiDir, 'spaces', 'project', 'atlas');
+    fs.mkdirSync(path.join(atlas, '.curator', 'held'), { recursive: true });
+    fs.writeFileSync(path.join(atlas, '.curator', 'held', '2026-10-03_10-00-00-000-bbbbbb.json'), '{"held":"a change waiting for the owner"}');
+    fs.mkdirSync(path.join(atlas, '.history', 'pages', 'db'), { recursive: true });
+    fs.writeFileSync(path.join(atlas, '.history', 'pages', 'db', 'old.md'), 'an older version');
+    const c = await httpClient(server.url, reader);
+    try {
+      for (const target of ['.curator/held/2026-10-03_10-00-00-000-bbbbbb.json', '.curator/held', '.history/pages/db/old.md', '.locks']) {
+        const r = await call(c, 'context_read', { space: 'project:atlas', target });
+        assert.equal(r.isError, true, target);
+        assert.match(r.text, /^Not found/, target);
+      }
+      const listing = await call(c, 'context_read', { space: 'project:atlas', target: '.' });
+      assert.doesNotMatch(listing.text, /\.curator|\.history|\.locks/);
+      assert.equal((await call(c, 'context_read', { space: 'project:atlas', target: 'index.md' })).isError, false);
+      // The window's page view (with its .history list) is this machine's own, never a token's.
+      assert.equal((await request(server.port, { method: 'GET', path: '/api/page?slug=db', headers: bearer(reader) })).status, 403);
+    } finally {
+      await c.close();
+    }
+  });
+
+  test('a token reads machine:local only when its grant and scopes name it exactly', async () => {
+    assert.equal(cli(E.env, 'grant', 'client:wide', 'ctx:read').code, 0);
+    assert.equal(cli(E.env, 'grant', 'client:wide', 'ctx:read:machine:*').code, 0);
+    const wide = JSON.parse(cli(E.env, 'token', 'create', 'client:wide', '--json').out).token;
+    assert.equal(cli(E.env, 'grant', 'client:mine', 'ctx:read:machine:local').code, 0);
+    const mine = JSON.parse(cli(E.env, 'token', 'create', 'client:mine', '--json').out).token;
+    const search = (token, space, query) => request(server.port, { headers: bearer(token), body: toolCall('context_search', { space, query }) }).then(textOf);
+    assert.equal(await search(wide, 'machine:local', 'home lab'), 'Refused: no space "machine:local" that you can read.', '"all" and machine:* do not reach it');
+    assert.match(await search(wide, 'project:atlas', 'postgres'), /Atlas runs on Postgres 17/, '"all" still reaches the other spaces');
+    assert.match(await search(mine, 'machine:local', 'home lab'), /This machine has a home lab/, 'a grant that names it');
+  });
+
   test('a request a proxy forwarded is never this machine\'s own, whatever address it comes from', async () => {
     const plain = await request(server.port, { body: toolCall('context_search', { query: 'home lab' }) });
     assert.equal(plain.status, 200, 'loopback, no proxy headers: this machine');

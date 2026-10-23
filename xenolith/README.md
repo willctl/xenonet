@@ -120,7 +120,7 @@ cannot reach them, even through DNS rebinding.
 | --- | --- |
 | `context_start` | protocol, page index, recent activity, pending notes, related pages |
 | `context_search` | BM25 search over sections: each page's intro and its `##` and `###` sections, each log entry, and each note, plus the page's `aliases`. Results cite the section that matched. Filters: `scope` (`all`, `pages`, `log`, `notes`), `since` and `until` dates, and `app`. `queries` takes up to 5 other wordings, searched together and fused by reciprocal rank. With hybrid search on, results also rank by meaning (see Search) |
-| `context_read` | a page, a log day, a note (`note:<id>`, pending or filed, with what the curator did with it), or any file in the wiki. `slug#section` (or `section`) returns one section with the page's header line |
+| `context_read` | a page, a log day, a note (`note:<id>`, pending or filed, with what the curator did with it), or a file under `pages/`, `log/` or `inbox/`, or `index.md`, `PROTOCOL.md` or `README.md`. Never `.curator/`, `.history/`, `.locks/` or `spaces/`. `slug#section` (or `section`) returns one section with the page's header line |
 | `context_log` | tell the wiki what happened. The server queues it as a note for the curator, with its `source` |
 | `context_upsert_page` | hand over content for one page (`append` or `replace`). The server queues it for the curator |
 
@@ -215,8 +215,18 @@ covers every space, and a value may end in `*`. The keys are `project`,
 `machine` and `by` (an actor's own space, as `by:<slug>` names the actor in a
 XenoNet grant). A subject is `actor:<slug>`, `client:<id>` or `machine:<name>`.
 A grant expires (after 30 days unless you say otherwise), `revoke` takes effect
-at once, and a grant that names one space exactly starts it. The policy is
-`access.json` in Xenolith's config folder, never in the wiki.
+at once, and a grant that names one space exactly starts it. A token reaches
+this machine's own space, `machine:local`, only when its grant and its scopes
+both name it exactly (`ctx:read:machine:local`): `all` and `machine:*` don't
+reach it, since it holds your own notes and the questions you ask in the
+window. The policy is `access.json` in Xenolith's config folder, never in the
+wiki.
+
+Reads return content only: pages, the log, notes not yet filed, and the
+top-level `index.md`, `PROTOCOL.md` and `README.md`. The curator's state
+(`.curator/`: held changes, journals, audit records, Ask), `.history/`,
+`.locks/` and other spaces' folders stay out of reach of every caller, whatever
+path it names or a link inside points to.
 
 ### Who is local
 
