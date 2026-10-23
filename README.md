@@ -221,7 +221,9 @@ every other machine's beside its own, and their transcripts open in that
 window. One machine is the gateway, and the others link out to it,
 so no machine opens a port. Frames between machines are signed and sealed:
 the gateway passes them on and can't read them. **Add a machine** shows one
-line to run on the new machine, which works once, for ten minutes.
+line to run on the new machine, which works once, for ten minutes. You can
+also publish a local service to the network, such as Xenolith's sync, and
+programs on the other machines reach it through their own XenoNet.
 [A network across your machines](docs/guide/network.md) shows how.
 
 ### Shows other machines over SSH, as a prototype
