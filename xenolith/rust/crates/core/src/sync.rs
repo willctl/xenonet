@@ -929,11 +929,12 @@ fn move_note(dir: &Path, id: &str, to: &Path, stamp: &str) -> Result<()> {
     // fsync is slow (a full flush on macOS).
     let tmp = to.with_file_name(format!("{id}.{}.tmp", random_hex(6)));
     fs::write(&tmp, content)?;
-    if let Err(e) = fs::rename(&tmp, &to) {
+    // On Windows a reader or an antivirus scan may hold either file for a moment.
+    if let Err(e) = wiki::retrying(|| fs::rename(&tmp, &to)) {
         let _ = fs::remove_file(&tmp);
         return Err(e.into());
     }
-    fs::remove_file(&from)?;
+    wiki::retrying(|| fs::remove_file(&from))?;
     inbox::clear_state(dir, id);
     Ok(())
 }

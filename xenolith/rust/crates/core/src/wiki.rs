@@ -283,6 +283,21 @@ pub(crate) fn retryable(e: &std::io::Error) -> bool {
     e.kind() == std::io::ErrorKind::PermissionDenied || matches!(e.raw_os_error(), Some(5) | Some(32) | Some(33))
 }
 
+/// Runs a rename or a removal, and again for up to about four seconds while it fails as
+/// `retryable` says.
+pub(crate) fn retrying<T>(mut op: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    let mut i = 0u64;
+    loop {
+        match op() {
+            Err(e) if i < 20 && retryable(&e) => {
+                std::thread::sleep(std::time::Duration::from_millis(20 + i * 20));
+                i += 1;
+            }
+            r => return r,
+        }
+    }
+}
+
 /// Temp file + fsync + rename, LF only: readers see the old or the new file, never a partial one.
 /// `expect_hash`: write only if the file still has that content hash (None = it must not exist).
 pub fn atomic_write(file: &Path, content: &str, tmp_dir: Option<&Path>, expect_hash: Option<Option<&str>>) -> Result<()> {
@@ -1267,6 +1282,23 @@ mod tests {
         assert!(!DATE_RE.is_match(date));
         assert!(!crate::inbox::is_note_id(&format!("{date}_10-00-00-000-abcdef")));
         assert!(DATE_RE.is_match("2026-10-06") && crate::inbox::is_note_id("2026-10-06_10-00-00-000-abcdef"));
+    }
+
+    #[test]
+    fn a_rename_windows_refuses_for_a_moment_is_tried_again() {
+        // What Windows says while another handle holds the file: a sharing violation (32).
+        let mut calls = 0;
+        let r = retrying(|| {
+            calls += 1;
+            if calls < 3 { Err(std::io::Error::from_raw_os_error(32)) } else { Ok(calls) }
+        });
+        assert_eq!(r.unwrap(), 3);
+        let mut calls = 0;
+        let r: std::io::Result<()> = retrying(|| {
+            calls += 1;
+            Err(std::io::ErrorKind::NotFound.into())
+        });
+        assert_eq!((r.unwrap_err().kind(), calls), (std::io::ErrorKind::NotFound, 1), "other errors are final");
     }
 
     #[test]
