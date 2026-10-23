@@ -875,6 +875,23 @@ impl EngineStore {
             .map(|r| json!({ "slug": r.get("slug").to_json(), "name": r.get("name").to_json() }))
             .collect())
     }
+    /// The hashes of the tokens that work now: each actor's own, its
+    /// gateway token, and those of the registrations still waiting. The
+    /// doctor holds the token-shaped strings it finds in repos to these,
+    /// so a made-up one in a test fixture isn't taken for a leak. Never
+    /// shown.
+    pub fn issued_token_hashes(&self) -> Result<Vec<String>> {
+        Ok(self
+            .all(
+                "SELECT token_hash AS hash FROM actors WHERE token_hash IS NOT NULL
+                 UNION SELECT gateway_hash FROM actors WHERE gateway_hash IS NOT NULL
+                 UNION SELECT token_hash FROM actor_requests WHERE decision IS NULL",
+                &[],
+            )?
+            .iter()
+            .filter_map(|r| r.text("hash").map(str::to_string))
+            .collect())
+    }
     /// A registration waiting for you.
     pub fn add_actor_request(&self, r: &Arg) -> Result<()> {
         self.run(
@@ -1162,6 +1179,30 @@ mod tests {
         s.drop_net_host("laptop").unwrap();
         assert!(s.net_presence("laptop").unwrap().is_none());
         assert_eq!(s.net_claims(1000.0).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn the_issued_tokens_are_the_ones_that_work_now() {
+        let s = EngineStore::open(":memory:", 1000.0).unwrap();
+        assert_eq!(s.issued_token_hashes().unwrap(), Vec::<String>::new());
+        for (slug, token, gateway) in [("muse", Some("h-muse"), Some("g-muse")), ("wren", Some("h-wren"), None), ("moth", None, None)] {
+            s.run(
+                "INSERT INTO actors (slug, kind, name, via, capabilities, created_at, token_hash, gateway_hash) VALUES (?, 'agent', ?, '[]', '[]', 1, ?, ?)",
+                &[Arg::text(slug), Arg::text(slug), token.map_or(Arg::Null, Arg::text), gateway.map_or(Arg::Null, Arg::text)],
+            )
+            .unwrap();
+        }
+        for (id, hash, decision) in [("r1", "h-waiting", None), ("r2", "h-denied", Some("deny")), ("r3", "h-wren", Some("allow"))] {
+            s.run(
+                "INSERT INTO actor_requests (id, slug, ask, token_hash, created_at, expires_at, decision) VALUES (?, 'heron', '{}', ?, 1, 2, ?)",
+                &[Arg::text(id), Arg::text(hash), decision.map_or(Arg::Null, Arg::text)],
+            )
+            .unwrap();
+        }
+        s.revoke_actor_token(&obj(&[("token_hash", "h-old".into()), ("actor", "actor:muse".into()), ("reason", "rotated".into()), ("at", n(5.0))])).unwrap();
+        let mut hashes = s.issued_token_hashes().unwrap();
+        hashes.sort();
+        assert_eq!(hashes, ["g-muse", "h-muse", "h-waiting", "h-wren"], "a revoked token, or a refused registration's, no longer works");
     }
 }
 
