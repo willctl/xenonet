@@ -172,7 +172,7 @@ pub fn actions_for(node: Option<&Value>) -> Vec<Value> {
         acts.push(act("open-file", "Open page", false));
     }
     if is(node, "kind", "wiki") && has(node, "path") {
-        acts.push(act("open-folder", "Open wiki folder", false));
+        acts.push(act("open-folder", "Open folder", false));
     }
     if is(node, "kind", "project") {
         acts.push(act("open-folder", "Open folder", false));

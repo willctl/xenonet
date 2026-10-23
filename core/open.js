@@ -58,7 +58,7 @@ export function actionsFor(node) {
     if (node.cwd) acts.push({ id: "open-folder", label: "Open folder" });
   }
   if (node.kind === "page" && node.path) acts.push({ id: "open-file", label: "Open page" });
-  if (node.kind === "wiki" && node.path) acts.push({ id: "open-folder", label: "Open wiki folder" });
+  if (node.kind === "wiki" && node.path) acts.push({ id: "open-folder", label: "Open folder" });
   if (node.kind === "project") {
     acts.push({ id: "open-folder", label: "Open folder" });
     acts.push({ id: "open-vscode", label: "Open in VS Code" });
