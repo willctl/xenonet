@@ -409,14 +409,7 @@ mod tests {
     fn plugin_renders_twice_with_no_placeholders() {
         let dir = std::env::temp_dir().join(format!("xenolith-plugin-{}", std::process::id()));
         let dest = dir.join("plugins").join("xenolith");
-        let map = vec![
-            ("__VERSION__", "9.9.9".to_string()),
-            ("__HOOK_COMMAND__", "xenolith hook".to_string()),
-            ("__POINTER__", "pointer".to_string()),
-            ("__PROTOCOL__", "protocol".to_string()),
-            ("__NODE__", "unused".to_string()),
-            ("__RUNTIME__", "unused".to_string()),
-        ];
+        let map = vec![("__VERSION__", "9.9.9".to_string()), ("__HOOK_COMMAND__", "xenolith hook".to_string()), ("__POINTER__", "pointer".to_string()), ("__PROTOCOL__", "protocol".to_string())];
         let server = json!({ "command": "C:/x/xenolith.exe", "args": ["serve"] });
         let a = render_plugin(&dest, &map, &server).unwrap();
         let h1 = tree_hash(&dest);

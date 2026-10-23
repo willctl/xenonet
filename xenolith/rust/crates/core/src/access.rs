@@ -1,18 +1,17 @@
-//! Who may do what in which space, in XenoNet's scope model (core/delivery/selector.js and
-//! policy.js there), and deny by default.
+//! Who may do what in which space, and deny by default.
 //!
 //! - Levels: read < append < write < admin. Read is context_start, context_search and
 //!   context_read; append is context_log, and context_upsert_page in append mode; write is
 //!   context_upsert_page in replace mode; admin creates spaces and manages the rest.
-//! - Selectors: XenoNet's grammar. key:value terms, all of which must hold, separated by spaces
+//! - Selectors: key:value terms, all of which must hold, separated by spaces
 //!   or "+"; "all" is the empty selector; a value may end in * for a prefix. For spaces the keys
 //!   are project, identity (an identity's space, and the projects that belong to it), machine and
-//!   by (an actor's own space, as by:<slug> names the actor itself in a XenoNet grant).
+//!   by (an actor's own space: by:<slug> names the actor itself).
 //! - Scopes: `ctx:<level>` or `ctx:<level>:<selector>`, written as OAuth scope strings, so terms
 //!   join with "+": `ctx:read:project:atlas+identity:adal`. A level includes the ones below it.
 //! - Grants: what you allow a subject (actor:<slug>, client:<id>, machine:<name>): a scope until
 //!   it expires. A subject can hold several.
-//! - Tokens: `xenolith_<64 hex digits>`, made the way XenoNet makes actor tokens; Xenolith keeps
+//! - Tokens: `xenolith_<64 hex digits>`, 256 random bits; Xenolith keeps
 //!   only the SHA-256. Each names its subject and the scopes it asks for. What a token may do in a
 //!   space is the lower of its own scopes and its subject's live grants there: a token can't
 //!   reach past what you granted, and a grant does nothing without a token that asks for it.
@@ -68,7 +67,7 @@ impl Level {
 
 // ---------------------------------------------------------------- selectors
 
-/// The selector keys that describe a space (XenoNet's app and status describe sessions only).
+/// The selector keys that describe a space.
 pub const KEYS: [&str; 4] = ["project", "identity", "machine", "by"];
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -82,7 +81,7 @@ impl Selector {
     }
 }
 
-/// XenoNet's parseSelector, with the space keys: None when the text is not a selector.
+/// A selector over the space keys: None when the text is not a selector.
 pub fn parse_selector(text: &str) -> Option<Selector> {
     let s = text.trim();
     if s.is_empty() {
@@ -103,7 +102,7 @@ pub fn parse_selector(text: &str) -> Option<Selector> {
     Some(Selector { terms })
 }
 
-/// "all", or the terms separated by spaces (XenoNet's formatSelector).
+/// "all", or the terms separated by spaces.
 pub fn format_selector(sel: &Selector) -> String {
     if sel.terms.is_empty() { "all".into() } else { sel.terms.iter().map(|(k, v)| format!("{k}:{v}")).collect::<Vec<_>>().join(" ") }
 }
@@ -134,7 +133,7 @@ pub fn matches(sel: &Selector, space: &SpaceId, facts: &Facts) -> bool {
     })
 }
 
-/// XenoNet's within: everything `inner` can select lies inside `outer` (every term of outer
+/// Whether everything `inner` can select lies inside `outer` (every term of outer
 /// appears in inner, or a prefix of it does).
 pub fn within(inner: &Selector, outer: &Selector) -> bool {
     outer.terms.iter().all(|(ok, ov)| inner.terms.iter().any(|(ik, iv)| ik == ok && (iv == ov || ov.strip_suffix('*').is_some_and(|p| iv.starts_with(p)))))
@@ -587,7 +586,7 @@ mod tests {
     }
 
     #[test]
-    fn selectors_follow_xenonet_grammar_with_space_keys() {
+    fn selectors_follow_their_grammar_with_space_keys() {
         assert_eq!(parse_selector("all"), Some(Selector::all()));
         let s = parse_selector("project:Atlas+identity:adal").unwrap();
         assert_eq!(format_selector(&s), "project:atlas identity:adal");

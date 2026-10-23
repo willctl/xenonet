@@ -1,4 +1,4 @@
-//! The window: the web app at /ui/ and the JSON API it reads, /api/* (src/ui-api.mjs). Only this
+//! The window: the web app at /ui/ and the JSON API it reads, /api/*. Only this
 //! machine's own processes reach it (http.rs). What a caller may do:
 //!
 //! - read (GET), and ask a question: what access.json gives local callers (read), or the owner key;

@@ -16,7 +16,7 @@ XenoNet reads Claude Code's, Codex's and Grok Build's files. It acts only when y
 | Codex desktop projects, and Claude desktop stars, archives and worktrees | `~/.codex/state_5.sqlite`, and Claude desktop's session files | Undocumented, optional |
 | Identities | `~/.claude.json`'s signed-in account, Claude desktop's session folders, Remote Control transcripts, the claims in `~/.codex/auth.json`'s ID token, gh's `hosts.yml`, and `git config` in each repo. See [Identities](identities.md). | Undocumented, optional |
 | Actors | Hermes Agent's state in `~/.hermes`, or in `HERMES_HOME`, for metadata only. The processes Grok Bot's app runs, and the app's version. Whether Muse's app runs, and its version. What the programs you allowed report. See [Actors](actors.md). | Undocumented, optional. Your programs report through XenoNet's own API. |
-| Shared context | Xenolith's wiki folder, found as Xenolith finds it, or the folder in `XENONET_WIKI_DIR`. See [Shared context](shared-context.md). | Yours |
+| Shared context | Xenolith's folder of pages, found as Xenolith finds it, or the folder in `XENONET_WIKI_DIR`. See [Shared context](shared-context.md). | Yours |
 | Search | A local SQLite full-text index in the cache folder. When a newer XenoNet reads transcripts differently, it indexes part of them again. | Rebuildable |
 | Estimated costs | Anthropic's and OpenAI's published API prices, by the date each took effect, in `core/pricing.js`, checked 2026-10-03. These are standard tier prices. Batch and data residency aren't counted. A session's stats and Token use's estimate for today use them, and so does [what each actor's work costs](actors.md#what-each-actors-work-costs). | Updated by hand. A model released later shows "no price" until it's added. |
 | OpenRouter spending | OpenRouter's `GET /api/v1/key`, with the key you gave XenoNet for [decision models](decisions.md), at most once a minute while a window is open | Official API, optional |
@@ -71,7 +71,7 @@ On Linux, these go in the XDG defaults, `~/.local/state` and `~/.cache`.
 | `XENONET_STATE_DIR` | `%LOCALAPPDATA%\XenoNet`, or `~/Library/Application Support/XenoNet` on macOS |
 | `XENONET_CACHE_DIR` | `%LOCALAPPDATA%\XenoNet\Cache`, or `~/Library/Caches/XenoNet` on macOS |
 | `XENONET_CAPTURES_DIR` | Posters go in `Pictures\XenoNet`, and clips in `Videos\XenoNet`. On macOS, clips go in `Movies/XenoNet`. |
-| `XENONET_WIKI_DIR` | XenoNet finds it from Xenolith's settings, or Agent Wiki's when Xenolith isn't installed ([Shared context](shared-context.md)). Otherwise there's none. Any folder with `pages/*.md` works, and it can also have `log/<year>/<date>.md` and `inbox/*.md`. |
+| `XENONET_WIKI_DIR` | The shared context's folder. XenoNet finds it from Xenolith's settings, or Agent Wiki's when Xenolith isn't installed ([Shared context](shared-context.md)). Otherwise there's none. Any folder with `pages/*.md` works, and it can also have `log/<year>/<date>.md` and `inbox/*.md`. |
 | `XENONET_POLL_MS` | `8000` |
 | `XENONET_CLAUDE_USAGE` | On. Set it to `off` to stop asking Anthropic for Claude plan usage. |
 | `XENONET_ACTIVE_MINUTES` | `60`, how recently a session must have run in a project for the map to light the project |

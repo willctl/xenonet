@@ -405,8 +405,6 @@ fn install(o: &Opts) -> Result<(), InstallError> {
         ("__HOOK_COMMAND__", hook.clone()),
         ("__POINTER__", POINTER.trim().to_string()),
         ("__PROTOCOL__", xenolith_core::wiki::DEFAULT_PROTOCOL.replace("\r\n", "\n").trim().to_string()),
-        ("__NODE__", String::new()),
-        ("__RUNTIME__", String::new()),
     ];
     let server = if transport == "http" { json!({ "type": "http", "url": mcp_url }) } else { json!({ "command": fwd(&p.agent), "args": ["serve"] }) };
     let rendered = render_plugin(&p.rendered, &map, &server)?;
@@ -971,7 +969,7 @@ fn uninstall(o: &Opts) -> Result<(), InstallError> {
         }
         #[cfg(target_os = "macos")]
         {
-            let f = p.home.join("Library").join("LaunchAgents").join("dev.xenonet.xenolith.tray.plist");
+            let f = p.home.join("Library").join("LaunchAgents").join(format!("{}.plist", posix::TRAY_LABEL));
             if std::fs::remove_file(&f).is_ok() {
                 info("removed the login item (LaunchAgent)");
             }

@@ -1,4 +1,4 @@
-//! Time and text helpers shared by every module (src/text.mjs).
+//! Time and text helpers shared by every module.
 
 use chrono::{DateTime, Datelike, Local, Timelike};
 use sha2::{Digest, Sha256};

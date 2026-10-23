@@ -282,6 +282,7 @@ pub fn tracked_files(lay: &Layout, wiki: Option<&Path>) -> Vec<(PathBuf, String)
     out.push((lay.xen.install_state(), "Xenolith install state".into()));
     if let Some(w) = wiki {
         out.push((w.join("PROTOCOL.md"), "the wiki's PROTOCOL.md".into()));
+        out.push((w.join("xenolith.json"), "the wiki's xenolith.json marker".into()));
     }
     match lay.os.as_str() {
         "macos" => {

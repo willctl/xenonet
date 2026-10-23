@@ -160,7 +160,7 @@ fuzz/run.sh lines 1800      # one target for 30 minutes
 | `lines`, `telemetry` | Claude Code transcripts and Codex rollouts, line by line, into the live map |
 | `transcript_files` | Transcript files on disk: the session listing, the lenient normalizers, rollout pages, archived rollouts' Zstandard, stats |
 | `schema`, `jsregex` | Records checked against the vendor schemas and XenoNet's own, and the schemas' patterns |
-| `native`, `sources`, `wiki` | The other apps' files (Gemini CLI, Copilot CLI, OpenCode, Cursor, numbat), Codex's app-server, git's output, plan usage, the shared context |
+| `native`, `sources`, `wiki` | The other apps' files (Gemini CLI, Copilot CLI, OpenCode, Cursor, numbat), Codex's app-server, git's output, plan usage, the shared context (`wiki`) |
 | `base` | Strings, times, paths, git remotes and model names |
 | `http`, `hooks` | The service's routes, hook payloads and the actor gateway |
 | `state`, `hosts`, `misc` | `state.json`, frames from other machines, component packages, tokens and the remote actors' requests |
@@ -234,7 +234,7 @@ Requests reach it as `POST /api/dev/control` on the instance's server, which rel
 
 `POST /api/dev/simulate {kind, a, b}`, which the `simulate` tool calls, puts sessions into rare states so you can check the visuals. It works on the dev server only.
 
-- `needs-you`, `collision`, `stuck`, `wiki-write`, `turn-end` and `doctor` put sessions into those states. `doctor` is a problem the doctor found. `clear` undoes them. Without session ids, XenoNet picks the most recently active sessions.
+- `needs-you`, `collision`, `stuck`, `wiki-write`, `turn-end` and `doctor` put sessions into those states. `wiki-write` is a session writing to the shared context, and `doctor` is a problem the doctor found. `clear` undoes them. Without session ids, XenoNet picks the most recently active sessions.
 - `actor-spawn`, `actor-edit`, `actor-message`, `actor-online` and `actor-offline` have an actor act on a node, so you can see it react and beam there. `a` is the actor, by default the first one that isn't you, and `b` is the node.
 - In the demo and test instances, whose data is made up, `actor-request` has a made-up program ask to be an actor, so its card shows. `actor-needs-you` has an actor wait on you with a made-up question, until `clear`. `actor-tunnel` gives an actor a made-up connection through a tunnel, drawn as an open gate between it and the map, `actor-tunnel-down` shuts the gate, and `actor-read` sends a read through it.
 - With `XENONET_HOSTS=1`, `host-add` shows another XenoNet on this machine as a host, with `a` as its id and `b` as its port. `host-offline`, `host-online` and `host-skew` change how a host stands. For `host-skew`, `b` is how many milliseconds the host's clock is off.
@@ -258,7 +258,7 @@ The console page imports only the core modules that have no Node in them, such a
 | Files | What they cover |
 | --- | --- |
 | `apps.js` | The app registry: the apps XenoNet knows sessions of, and what's fixed about each (its folder, hook events, signing team, edit tools and what XenoNet can do with it). The page uses it too, and `node scripts/apps.mjs` writes the Rust's copy, `crates/xenonet-base/src/apps.json` |
-| `claude.js`, `codex.js`, `grok.js`, `git.js`, `wiki.js`, `demo.js` | The sources XenoNet reads |
+| `claude.js`, `codex.js`, `grok.js`, `git.js`, `wiki.js`, `demo.js` | The sources XenoNet reads (`wiki.js` reads the shared context) |
 | `native/`, `numbat.js`, `reported-runs.js` | Runs of other apps: the experimental native readers, one for each app the registry gives `native` (the table in `native/index.js`, the contract each keeps in `native/reader.js`), numbat's records, and the runs actors report |
 | `lines.js` | Transcript lines, as all three of XenoNet's readers take them |
 | `vendor.js`, `drift.js`, `schema/` | The apps' data, read leniently against XenoNet's schemas, and the drift kept from it. The schemas themselves are in `schema/`. |

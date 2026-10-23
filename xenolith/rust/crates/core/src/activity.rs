@@ -1,4 +1,4 @@
-//! The activity log (log/YYYY/YYYY-MM-DD.md) as structured entries, for the window (src/activity.mjs).
+//! The activity log (log/YYYY/YYYY-MM-DD.md) as structured entries, for the window.
 
 use crate::text::to_lf;
 use regex::Regex;

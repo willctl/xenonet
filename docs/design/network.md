@@ -128,7 +128,8 @@ Not built yet:
 
 - **The map's `relay` frames through the gateway** (section 7). Hosts drop
   relay frames, so another host's constellation has what its presence
-  says: no wiki, transcripts or stats, and no bridges between clones.
+  says: no shared context, transcripts or stats, and no bridges between
+  clones.
 - **`operator` frames** (section 8) are checked when they arrive, but
   nothing sends one: the person messages a session on another host as a
   `message` frame from `actor:you`, which a host takes only from a window

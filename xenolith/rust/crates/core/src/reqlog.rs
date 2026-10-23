@@ -1,5 +1,5 @@
 //! The request log: one JSON line per HTTP request, tool call and curator run, appended to
-//! <log dir>/requests-YYYY-MM-DD.jsonl (src/reqlog.mjs). Each line is one append on a file opened for
+//! <log dir>/requests-YYYY-MM-DD.jsonl Each line is one append on a file opened for
 //! appending (FILE_APPEND_DATA on Windows, O_APPEND elsewhere), so lines from several processes
 //! never interleave. Every string is redacted by the secret guard first; lines stay under 4 KB.
 
@@ -219,4 +219,39 @@ pub fn sweep(dir: &Path, retention_days: i64) -> usize {
         }
     }
     removed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn writers_at_once_keep_every_line_whole_redact_secrets_and_old_files_go() {
+        let dir = std::env::temp_dir().join(format!("xenolith-reqlog-{}", random_hex(8)));
+        // Eight writers, each with its own file handle, as eight processes have.
+        std::thread::scope(|s| {
+            for p in 0..8 {
+                let dir = &dir;
+                s.spawn(move || {
+                    let log = RequestLog::new(dir, &format!("p{p}"), 30);
+                    for i in 0..400 {
+                        log.write(vec![("kind", Value::from("tool")), ("rid", Value::from(format!("p{p}-{i}"))), ("args", serde_json::json!({ "body": "x".repeat(p * 300) }))]);
+                    }
+                });
+            }
+        });
+        let text: String = fs::read_dir(&dir).unwrap().flatten().map(|e| fs::read_to_string(e.path()).unwrap()).collect();
+        let rids: std::collections::HashSet<String> = text.lines().map(|l| serde_json::from_str::<Value>(l).expect("a whole line")["rid"].as_str().unwrap().to_string()).collect();
+        assert_eq!((text.lines().count(), rids.len()), (3200, 3200));
+
+        let secret = ["AKIA", "IOSFODNN7EXAMPLE"].concat();
+        let log = RequestLog::new(&dir, "test", 30);
+        log.write(vec![("kind", Value::from("tool")), ("args", summarize_args(&serde_json::json!({ "title": "rotate", "body": format!("password: Hunter2Hunter2xyz and {secret}") })).unwrap())]);
+        let text: String = fs::read_dir(&dir).unwrap().flatten().map(|e| fs::read_to_string(e.path()).unwrap()).collect();
+        assert!(!text.contains("Hunter2Hunter2xyz") && !text.contains(&secret));
+        fs::write(dir.join("requests-2020-01-01.jsonl"), "{}\n").unwrap();
+        assert_eq!(sweep(&dir, 30), 1);
+        assert!(!dir.join("requests-2020-01-01.jsonl").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
 }

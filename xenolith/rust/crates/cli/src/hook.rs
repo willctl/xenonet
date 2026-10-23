@@ -1,4 +1,4 @@
-//! The SessionStart hook (src/session-start.mjs): prints the wiki's lead-in, page list and recent
+//! The SessionStart hook: prints the wiki's lead-in, page list and recent
 //! activity as {"hookSpecificOutput": ...}. A broken or unreachable wiki never blocks a session: the
 //! wiki is read on a worker thread, and after 5 s a fallback is printed and the process exits
 //! (exiting ends the thread even if it is stuck on a hung path). stdin is drained, never waited on.
@@ -11,7 +11,7 @@ use std::time::Duration;
 use xenolith_core::paths::process_env;
 use xenolith_core::wiki;
 
-const RULES: &str = "Xenolith is the user's shared long-term memory for every app and agent they use, reached through the xenolith tools. Call context_start once before your first substantive reply and follow the protocol it returns; search the wiki before asking for context the user may have given before, and tell it what happened (decisions, outcomes, preferences, facts, follow-ups) with context_log; plain notes are fine, a curator files them into pages (never secrets).";
+const RULES: &str = "Xenolith is the user's shared long-term memory for every app and agent they use, reached through the xenolith tools. Call context_start once before your first substantive reply and follow the protocol it returns; search the shared context before asking for context the user may have given before, and tell it what happened (decisions, outcomes, preferences, facts, follow-ups) with context_log; plain notes are fine, a curator files them into pages (never secrets).";
 const FALLBACK: &str = "Xenolith (the user's shared memory) is installed but could not be read just now; call context_start if the tools are available.";
 
 fn collect() -> Option<String> {
@@ -25,7 +25,7 @@ fn collect() -> Option<String> {
     let shown = &slugs[..slugs.len().min(80)];
     let more = if slugs.len() > shown.len() { format!(", ...and {} more", slugs.len() - shown.len()) } else { String::new() };
     let mut lines = vec![
-        format!("{RULES} Wiki folder: {}.", wiki::disp(&dir)),
+        format!("{RULES} Folder: {}.", wiki::disp(&dir)),
         String::new(),
         format!("Pages ({}): {}{more}", slugs.len(), if shown.is_empty() { "(none yet)".to_string() } else { shown.join(", ") }),
         String::new(),
@@ -35,7 +35,7 @@ fn collect() -> Option<String> {
     Some(lines.join("\n"))
 }
 
-const NUDGE: &str = "Before you stop: if this session produced anything durable (a decision and why, an outcome and where it lives, a preference the user stated, a fact about a project, person or system, a follow-up), tell the shared wiki with context_log now, with its source. Otherwise just stop. (Xenolith asks this once per session.)";
+const NUDGE: &str = "Before you stop: if this session produced anything durable (a decision and why, an outcome and where it lives, a preference the user stated, a fact about a project, person or system, a follow-up), tell the shared context with context_log now, with its source. Otherwise just stop. (Xenolith asks this once per session.)";
 
 /// The Stop hook (M7, opt-in with config.json "hooks": {"nudge": true}): once per session, when the
 /// transcript is long and has no context_log call, asks the model to log what is worth keeping before it

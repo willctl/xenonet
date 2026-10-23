@@ -1,27 +1,23 @@
 // Footprint and speed of what users run: the MCP server (stdio and HTTP) and the SessionStart hook,
-// the Node runtime against the Rust program, on the synthetic eval wiki.
+// on the synthetic eval wiki.
 //
-//   npm run bench                              Node and Rust, alternating (Node only if Rust is not built)
-//   XENOLITH_IMPL=node|rust npm run bench    one side only (or --impl node|rust|both)
+//   npm run bench
 //   options: --runs 5   --calls 400   --concurrency 8   --json
-//   XENOLITH_RUST_BIN                        the Rust program (default rust/target/release/xenolith)
+//   XENOLITH_RUST_BIN                        the program (default rust/target/release/xenolith)
 //
-// Method (docs/rust-plan.md reports its numbers):
-// - A run of a side measures everything once, on a fresh copy of the wiki and a fresh home. Runs
-//   alternate sides (Node, Rust, Node, Rust, ...) after one discarded warm-up run per side, so file
-//   caches, first-launch scans and drift do not favor one side. Each metric is the median and the
-//   min-max range across runs. With 5 runs per side, ranges that do not overlap are the most extreme
-//   rank-sum outcome (two-sided p about 0.008); overlapping ranges are no measurable difference.
+// Method (docs/rust-plan.md reports the numbers that compared it with the retired Node runtime):
+// - A run measures everything once, on a fresh copy of the wiki and a fresh home, after one
+//   discarded warm-up run, so file caches and first-launch scans do not count. Each metric is the
+//   median and the min-max range across runs. With 5 runs per side, ranges of two sides that do not
+//   overlap are the most extreme rank-sum outcome (two-sided p about 0.008).
 // - Every answer is checked, not just received: no JSON-RPC, HTTP or tool error, and the text each
 //   call must return (the search finds the page, the read returns the file, the note is saved, the
 //   hook lists the pages rather than its could-not-read fallback). Every context_log note is distinct,
 //   so each is a durable write rather than a duplicate the server skips, and after each run the notes
 //   must be in inbox/. Errors are counted per metric and listed; any error makes the bench exit 1.
-// - "process start" is the floor neither side can beat: `node -e 0`, or `xenolith --version`.
+// - "process start" is the floor: `xenolith --version`.
 // - Memory is the resident set (working set on Windows) once the server has answered the calls.
-// - Both sides are what ships: dist/runtime (npm run build) and a release build of the Rust program.
-//   The Rust program has features the Node runtime does not (section-level search, docs/roadmap.md),
-//   so this compares the two programs, not one algorithm in two languages.
+// - What runs is what ships: a release build of the program.
 
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -78,39 +74,20 @@ function rss(pid) {
   return kb * 1024;
 }
 
-function dirSize(p) {
-  const st = fs.statSync(p);
-  if (!st.isDirectory()) return st.size;
-  return fs.readdirSync(p).reduce((n, f) => n + dirSize(path.join(p, f)), 0);
-}
-
 // ------------------------------------------------------------------ the two sides
 
 const EXE = process.platform === 'win32' ? 'xenolith.exe' : 'xenolith';
 const BIN = process.env.XENOLITH_RUST_BIN || path.join(REPO, 'rust', 'target', 'release', EXE);
-const wanted = flag('impl') ?? process.env.XENOLITH_IMPL ?? 'both';
-if (!['node', 'rust', 'both'].includes(wanted)) fail(`--impl (or XENOLITH_IMPL) is node, rust or both, not ${wanted}`);
-let SIDES = wanted === 'both' ? ['node', 'rust'] : [wanted];
-if (SIDES.includes('rust') && !fs.existsSync(BIN)) {
+// One side now (the Node runtime is retired); the harness still takes a list of sides, so a future
+// build can be measured against this one.
+const SIDES = ['rust'];
+if (!fs.existsSync(BIN)) {
   const debug = fs.existsSync(path.join(REPO, 'rust', 'target', 'debug', EXE)) ? ' (a debug build is not what users run)' : '';
-  const msg = `the Rust program is not built: cargo build --release in rust/, or set XENOLITH_RUST_BIN${debug}`;
-  if (wanted === 'rust') fail(msg);
-  console.error(`bench: ${msg}; measuring Node only`);
-  SIDES = ['node'];
+  fail(`the program is not built: cargo build --release in rust/, or set XENOLITH_RUST_BIN${debug}`);
 }
-if (SIDES.includes('node') && !fs.existsSync(path.join(RUNTIME, 'server.mjs'))) fail('dist/runtime is missing: npm run build');
-const DEBUG_BUILD = SIDES.includes('rust') && /[\\/]debug[\\/]/.test(BIN);
+const DEBUG_BUILD = /[\\/]debug[\\/]/.test(BIN);
 
 const PROGRAMS = {
-  node: {
-    label: 'Node',
-    serve: (...a) => [process.execPath, [path.join(RUNTIME, 'server.mjs'), ...a]],
-    hook: [process.execPath, [path.join(RUNTIME, 'session-start.mjs')]],
-    start: [process.execPath, ['-e', '0']],
-    startCheck: (out) => (out === '' ? null : `node -e 0 printed ${out.slice(0, 80)}`),
-    installBytes: () => fs.statSync(process.execPath).size + dirSize(RUNTIME),
-    env: {},
-  },
   rust: {
     label: 'Rust',
     serve: (...a) => [BIN, ['serve', ...a]],

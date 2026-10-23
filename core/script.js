@@ -18,7 +18,8 @@ export const STEPS = `  launch[:inactive|front|hidden]  start it unless it's run
   deselect, back, next, prev, reset
   command:<id>                    a palette command; commands lists them
   stats:<id or words>             a session's stats panel
-  simulate:<kind>[,a[,b]]         needs-you, collision, stuck, wiki-write, turn-end, doctor, clear;
+  simulate:<kind>[,a[,b]]         needs-you, collision, stuck, wiki-write (a session writing to
+                                  the shared context), turn-end, doctor, clear;
                                   or an actor acting: actor-spawn, actor-edit, actor-message,
                                   actor-online, actor-offline (a: the actor, b: what it acts on);
                                   or actor-request[,name]: a made-up program asking to be an
