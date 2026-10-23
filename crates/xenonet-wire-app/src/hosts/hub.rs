@@ -42,9 +42,6 @@ use xenonet_service::cores::{CoreError, Hub, HubNet, State, Store, R};
 use xenonet_service::glue::From;
 use xenonet_service::wire::Emitter;
 
-/// How often the hub looks at the network's roster for hosts that came or
-/// went, and at its subscriptions for ones gone quiet.
-const ROSTER_MS: u64 = 3000;
 /// What the page sees on a network host drawn from its relay's snapshot,
 /// as `network`; one drawn from its presence has `true` there.
 const NET_DRAWN: &str = "relay";
@@ -282,7 +279,16 @@ impl HostHub {
         // XenoNet shows; a made-up one is made up here too.
         let demo_only = self.parts.demo && entry.get("transport").and_then(Value::as_str) != Some("network");
         let core = link::Link::new(entry, self.options(), now_ms(), demo_only, once, link::HELLO_MS, link::STALE_MS, (link::BACKOFF_MIN, link::BACKOFF_MAX), link::GET_MS);
-        LinkRt { core, children: HashMap::new(), lines: HashMap::new(), timers: HashMap::new(), gets: HashMap::new(), unstarted: HashSet::new(), transport: None, subs: HashMap::new() }
+        LinkRt {
+            core,
+            children: HashMap::new(),
+            lines: HashMap::new(),
+            timers: HashMap::new(),
+            gets: HashMap::new(),
+            unstarted: HashSet::new(),
+            transport: None,
+            subs: HashMap::new(),
+        }
     }
 
     // ---------- the links' effects ----------
@@ -1015,7 +1021,9 @@ impl HostHub {
             let st = self.st.locked();
             st.runtimes
                 .iter()
-                .filter(|(_, rt)| rt.network && !rt.link.subs.is_empty() && rt.link.core.state != "connecting" && rt.link.core.last_heard.is_none_or(|h| now - h > wire::LAPSE_MS))
+                .filter(|(_, rt)| {
+                    rt.network && !rt.link.subs.is_empty() && rt.link.core.state != "connecting" && rt.link.core.last_heard.is_none_or(|h| now - h > self.parts.relay.lapse_ms)
+                })
                 .map(|(k, _)| k.clone())
                 .collect()
         };
@@ -1113,9 +1121,10 @@ impl HostHub {
         }
         let mut tasks = self.tasks.locked();
         if tasks.is_empty() {
+            let (roster_ms, renew_ms) = (self.parts.relay.roster_ms, self.parts.relay.renew_ms as u64);
             let me = self.me.clone();
             tasks.push(tokio::spawn(async move {
-                let mut every = tokio::time::interval(Duration::from_millis(ROSTER_MS));
+                let mut every = tokio::time::interval(Duration::from_millis(roster_ms));
                 loop {
                     every.tick().await;
                     let Some(hub) = me.upgrade() else { return };
@@ -1124,7 +1133,7 @@ impl HostHub {
             }));
             let me = self.me.clone();
             tasks.push(tokio::spawn(async move {
-                let mut every = tokio::time::interval(Duration::from_millis(wire::RENEW_MS as u64));
+                let mut every = tokio::time::interval(Duration::from_millis(renew_ms));
                 every.tick().await;
                 loop {
                     every.tick().await;
@@ -1138,6 +1147,15 @@ impl HostHub {
     /// The relay serving this host's map, for the tests.
     pub fn relay_server(&self) -> Option<Arc<RelayServer>> {
         self.net.locked().as_ref().map(|n| n.server.clone())
+    }
+
+    /// Stops renewing its subscriptions and looking at the roster, as a
+    /// console that vanished without a word would: for the tests of a
+    /// subscription that lapses.
+    pub fn stop_renewing(&self) {
+        for t in self.tasks.locked().drain(..) {
+            t.abort();
+        }
     }
 
     /// XenoNet Dev's net-relay: a made-up network host, `id`, drawn from a
@@ -1155,7 +1173,8 @@ impl HostHub {
             self.hosts_changed(&mut st);
             return json!({ "ok": true, "kind": "net-relay", "id": id, "off": true });
         }
-        let Some(side) = self.net.locked().as_ref().map(|n| (n.plug.events.clone(), n.plug.api.clone(), n.plug.home.clone(), n.plug.version.clone(), n.plug.platform.clone())) else {
+        let Some(side) = self.net.locked().as_ref().map(|n| (n.plug.events.clone(), n.plug.api.clone(), n.plug.home.clone(), n.plug.version.clone(), n.plug.platform.clone()))
+        else {
             return json!({ "error": "the network isn't there in this XenoNet" });
         };
         let (events, api, home, version, platform) = side;
@@ -1705,7 +1724,8 @@ mod tests {
     async fn the_rosters_hosts_subscribe_only_while_a_console_is_open() {
         let (h, dir) = hub("roster");
         let core = HubCore(h.clone());
-        let net = Arc::new(Roster { hosts: Mutex::new(vec![xenonet_base::network::Host { id: "laptop".into(), window: true, online: true, seen: None }]), sent: Mutex::new(Vec::new()) });
+        let net =
+            Arc::new(Roster { hosts: Mutex::new(vec![xenonet_base::network::Host { id: "laptop".into(), window: true, online: true, seen: None }]), sent: Mutex::new(Vec::new()) });
         let sinks = Arc::new(xenonet_net::sink::SinkSlot::new(Arc::new(xenonet_net::sink::LogSink::new(Arc::new(|_: &str, _: &str| {})))));
         core.plug_net(HubNet {
             net: net.clone(),

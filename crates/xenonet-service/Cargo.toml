@@ -50,6 +50,9 @@ tokio = { workspace = true, features = ["test-util"] }
 # test (tests/net_engine.rs), as `xenonet serve` plugs it in; it depends on
 # this crate, which Cargo allows for dev-dependencies.
 xenonet-wire-engine.workspace = true
+# The binary's hub and relay on every host of the network's map test
+# (tests/net_map.rs), as `xenonet serve` builds them.
+xenonet-wire-app.workspace = true
 
 [lints]
 workspace = true

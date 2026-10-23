@@ -35,8 +35,8 @@ use xenonet_base::network::{Incoming, Kind, Net, Outgoing, RelaySink, To};
 use xenonet_hosts::frames::{encode, MAX_DEPTH, PROTOCOL};
 use xenonet_hosts::network::{self as wire, Op};
 use xenonet_hosts::relay::{self as core, Producer, Shape};
-use xenonet_service::cores::SelfApi;
 use xenonet_net::sink::LogFn;
+use xenonet_service::cores::SelfApi;
 use xenonet_service::events::Events;
 
 use crate::fx::{now_ms, Locked};
@@ -49,7 +49,8 @@ const BODY_BYTES: usize = (8 << 20) - (64 << 10);
 const WAITING_BYTES: usize = 4 << 20;
 const WAITING_FRAMES: usize = 800;
 
-/// The relay's timings: the design's, or shorter ones for tests.
+/// The relay's timings, on both sides: the design's, or shorter ones for
+/// tests.
 #[derive(Clone, Copy, Debug)]
 pub struct Timing {
     pub frame_ms: f64,
@@ -60,11 +61,25 @@ pub struct Timing {
     /// How often subscriptions are looked over: lapsed, offline, removed.
     pub watch_ms: u64,
     pub get_ms: f64,
+    /// How often a console renews its subscriptions, and looks at the
+    /// roster for hosts that came or went.
+    pub renew_ms: f64,
+    pub roster_ms: u64,
 }
 
 impl Default for Timing {
     fn default() -> Self {
-        Timing { frame_ms: wire::FRAME_MS, graph_ms: wire::GRAPH_MS, live_ms: wire::LIVE_MS, lapse_ms: wire::LAPSE_MS, ping_ms: core::PING_MS, watch_ms: 5000, get_ms: core::GET_TIMEOUT_MS }
+        Timing {
+            frame_ms: wire::FRAME_MS,
+            graph_ms: wire::GRAPH_MS,
+            live_ms: wire::LIVE_MS,
+            lapse_ms: wire::LAPSE_MS,
+            ping_ms: core::PING_MS,
+            watch_ms: 5000,
+            get_ms: core::GET_TIMEOUT_MS,
+            renew_ms: wire::RENEW_MS,
+            roster_ms: 3000,
+        }
     }
 }
 
@@ -439,7 +454,8 @@ impl Session {
         if route == "/api/collision" || route == "/api/mcp" {
             return Err("collisions and MCP servers' details from another machine in the network come later: open them on that machine".into());
         }
-        if self.titles_only && route.ends_with("/transcript") {
+        // Read now, not as the subscription began: titles only goes at once.
+        if self.net.titles_only() && route.ends_with("/transcript") {
             return Err("this machine shares titles only with the network: its transcripts stay on it".into());
         }
         Ok((shape, core::route_to_read(shape, &path)))
@@ -632,7 +648,10 @@ mod tests {
             self.read.locked().push(path.to_string());
             let route = path.split('?').next().unwrap_or("");
             Ok(match route {
-                "/api/graph" => (200, json!({ "nodes": [{ "id": "core", "kind": "core", "path": "/home/nova" }, { "id": "claude:abc", "kind": "session", "title": "Fix the login form", "cwd": "/home/nova/atlas", "updatedAt": now_ms() }], "links": [{ "source": "core", "target": "claude:abc", "kind": "session" }] })),
+                "/api/graph" => (
+                    200,
+                    json!({ "nodes": [{ "id": "core", "kind": "core", "path": "/home/nova" }, { "id": "claude:abc", "kind": "session", "title": "Fix the login form", "cwd": "/home/nova/atlas", "updatedAt": now_ms() }], "links": [{ "source": "core", "target": "claude:abc", "kind": "session" }] }),
+                ),
                 "/api/live" => (200, json!({ "sessions": [{ "id": "claude:abc", "lastMessage": "Done in /home/nova/atlas" }] })),
                 "/api/engine/state" => (200, json!({ "agents": [] })),
                 "/api/session/claude:abc/transcript" => (200, json!({ "entries": [{ "role": "user", "text": "in /home/nova/atlas" }] })),
@@ -645,15 +664,12 @@ mod tests {
     fn server(titles_only: bool) -> (Arc<RelayServer>, Arc<FakeNet>, Arc<FakeApi>, Arc<Events>) {
         let net = Arc::new(FakeNet {
             sent: Mutex::new(Vec::new()),
-            hosts: Mutex::new(vec![
-                Host { id: "studio".into(), window: true, online: true, seen: None },
-                Host { id: "desk".into(), window: false, online: true, seen: None },
-            ]),
+            hosts: Mutex::new(vec![Host { id: "studio".into(), window: true, online: true, seen: None }, Host { id: "desk".into(), window: false, online: true, seen: None }]),
             titles_only: Mutex::new(titles_only),
         });
         let api = Arc::new(FakeApi::default());
         let events = Arc::new(Events::new());
-        let timing = Timing { frame_ms: 20.0, graph_ms: 40.0, live_ms: 20.0, lapse_ms: 300.0, ping_ms: 200.0, watch_ms: 50, get_ms: 2000.0 };
+        let timing = Timing { frame_ms: 20.0, graph_ms: 40.0, live_ms: 20.0, lapse_ms: 300.0, ping_ms: 200.0, watch_ms: 50, get_ms: 2000.0, renew_ms: 100.0, roster_ms: 100 };
         let parts = Parts {
             net: net.clone(),
             events: events.clone(),
@@ -714,7 +730,14 @@ mod tests {
         assert_eq!(snap["graph"]["nodes"][0]["path"], "~", "the home folder as ~");
         assert_eq!(snap["live"]["sessions"][0]["lastMessage"], "Done in ~/atlas", "detail, inside a network");
         // A transcript and stats, as GET, and only what the allowlist has.
-        for (id, path) in [(1, "/api/session/claude:abc/transcript"), (2, "/api/session/claude:abc/stats"), (3, "/api/open"), (4, "/api/../etc/passwd"), (5, "/api/mcp?server=agent-wiki"), (6, "/api/collision?a=claude:abc&b=claude:def")] {
+        for (id, path) in [
+            (1, "/api/session/claude:abc/transcript"),
+            (2, "/api/session/claude:abc/stats"),
+            (3, "/api/open"),
+            (4, "/api/../etc/passwd"),
+            (5, "/api/mcp?server=agent-wiki"),
+            (6, "/api/collision?a=claude:abc&b=claude:def"),
+        ] {
             s.relay(ask("studio", true, &Op::Get { id, path: path.into() }));
         }
         until("six answers", || (1..=6).all(|id| res(&frames_to(&net, "studio"), id).is_some())).await;
@@ -726,12 +749,23 @@ mod tests {
         }
         assert!(res(&frames, 5).unwrap()["body"]["error"].as_str().unwrap().contains("come later"));
         let read = api.read.locked().clone();
-        assert!(read.iter().all(|p| ["/api/graph?hosts=0", "/api/live?hosts=0", "/api/engine/state", "/api/session/claude:abc/transcript", "/api/session/claude:abc/stats"].contains(&p.as_str())), "{read:?}");
+        assert!(
+            read.iter()
+                .all(|p| ["/api/graph?hosts=0", "/api/live?hosts=0", "/api/engine/state", "/api/session/claude:abc/transcript", "/api/session/claude:abc/stats"]
+                    .contains(&p.as_str())),
+            "{read:?}"
+        );
         // A POST, by its method or as an op, never reaches the API.
         let mut post = wire::ask(SUB, &Op::Get { id: 7, path: "/api/session/claude:abc/stats".into() });
         post["method"] = json!("POST");
         s.relay(Incoming { from: "studio".into(), kind: Kind::Relay, body: post, at: now_ms(), from_window_host: true });
-        s.relay(Incoming { from: "studio".into(), kind: Kind::Relay, body: json!({ "schema": wire::SCHEMA, "op": "post", "sub": SUB, "id": 8, "path": "/api/open" }), at: now_ms(), from_window_host: true });
+        s.relay(Incoming {
+            from: "studio".into(),
+            kind: Kind::Relay,
+            body: json!({ "schema": wire::SCHEMA, "op": "post", "sub": SUB, "id": 8, "path": "/api/open" }),
+            at: now_ms(),
+            from_window_host: true,
+        });
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(api.read.locked().len(), read.len(), "nothing more was read");
         // The clock, and this machine's events: the map coalesced, the rest
