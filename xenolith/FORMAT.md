@@ -35,8 +35,8 @@ The first of these that applies is the folder:
    - Windows: `%APPDATA%\Xenolith`
    - macOS: `$XDG_CONFIG_HOME/xenolith` when `XDG_CONFIG_HOME` is an absolute
      path, else `~/Library/Application Support/Xenolith`
-   - Linux and other Unix: `$XDG_CONFIG_HOME/xenolith`, else
-     `~/.config/xenolith`
+   - Linux and other Unix: `$XDG_CONFIG_HOME/xenolith` when `XDG_CONFIG_HOME`
+     is an absolute path, else `~/.config/xenolith`
 
 When neither `XENOLITH_HOME` nor `XENOLITH_CONFIG_DIR` is set and that
 `config.json` doesn't exist, an older install's `~/.xenolith/config.json` is
