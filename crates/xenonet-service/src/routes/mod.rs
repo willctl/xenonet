@@ -134,7 +134,8 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             return a;
         }
     }
-    if let Some(r) = (hosts::HostRoutes { hosts: cores.hosts.clone(), hub: cores.hub.clone(), verify: cores.verify.clone(), home: &ctx.config.home }).route(req).await {
+    let window = ctx.window_only(req);
+    if let Some(r) = (hosts::HostRoutes { hosts: cores.hosts.clone(), hub: cores.hub.clone(), verify: cores.verify.clone(), home: &ctx.config.home, window }).route(req).await {
         return Ok(r);
     }
 

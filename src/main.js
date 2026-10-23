@@ -142,7 +142,7 @@ const actorTokens = createActorTokens({ calls: windowCalls });
 // Remote actors' connections (remote-panel.js), read with the window's key,
 // for the Actors panel and, read-only, the driver.
 const remoteConnections = createRemoteConnections({ calls: windowCalls });
-const preview = createPreview({ onOpenApp: (node) => openInApp(node) });
+const preview = createPreview({ onOpenApp: (node) => openInApp(node), read: windowCalls.read });
 // A preview, wherever it's opened from, is reading the session.
 const showPreview = preview.open;
 preview.open = (node, ...rest) => (node?.kind === "session" && you.did("read", node.id), showPreview(node, ...rest));
@@ -254,7 +254,7 @@ identities.wire(document.getElementById("id-filters"));
 // host is on the map.
 const hostFilters = createHostFilters({ sfx, onFilter: () => hud.refreshFilters() });
 
-const modals = createModals({ sfx, toast: (m, b) => hud.toast(m, b), select, onPoster: () => exportPanel.open(), identities, onChangeRoot: () => rootPanel.open(), onHandoff: (node, target) => you.did("handed-off", node.id, { to: target }) });
+const modals = createModals({ sfx, toast: (m, b) => hud.toast(m, b), select, onPoster: () => exportPanel.open(), identities, onChangeRoot: () => rootPanel.open(), onHandoff: (node, target) => you.did("handed-off", node.id, { to: target }), read: windowCalls.read });
 const connectPanel = createConnectPanel({ modals, sfx, toast: (m, b) => hud.toast(m, b) });
 // XenoNet's doctor (core/doctor): its panel, and its problems in the strip.
 const doctorPanel = createDoctorPanel({
@@ -271,7 +271,7 @@ const doctorPanel = createDoctorPanel({
     : null,
 });
 // A session's models, tokens, costs and timing (core/stats.js).
-const statsPanel = createStatsPanel({ modals, sfx, toast: (m, b) => hud.toast(m, b) });
+const statsPanel = createStatsPanel({ modals, sfx, toast: (m, b) => hud.toast(m, b), read: windowCalls.read });
 const refusalsPanel = createRefusalsPanel({ modals });
 const integrationsPanel = createIntegrationsPanel({ modals, calls: windowCalls, savePatch: desktop?.savePatch });
 const openStats = (node) => (note("stats", node.id), you.did("read", node.id), statsPanel.open(node));
@@ -360,7 +360,7 @@ const terminalAt = (node = scene.getNode(selectedId)) => (you.did("terminal", no
 const rootPanel = createRootPanel({ modals, sfx, toast: (m, b) => hud.toast(m, b), desktop });
 
 const hud = createHud({
-  mcp: createMcpUi({ modals, toast: (m, b) => hud.toast(m, b) }),
+  mcp: createMcpUi({ modals, toast: (m, b) => hud.toast(m, b), read: windowCalls.read }),
   onSelect: select,
   onBack: back,
   onStep: step,

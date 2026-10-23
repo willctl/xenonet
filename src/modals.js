@@ -7,7 +7,9 @@ import { compact } from "./telemetry.js";
 
 const root = () => document.getElementById("modal");
 
-export function createModals({ sfx, toast, select, onPoster, identities = null, onChangeRoot = null, onHandoff = null }) {
+// read: GETs another machine's diffs with the window's key, as
+// windowCalls.read does.
+export function createModals({ sfx, toast, select, onPoster, identities = null, onChangeRoot = null, onHandoff = null, read = (url) => fetch(url) }) {
   let onClose = null;
   // A close hides and empties the modal once it has faded out. A panel
   // opened before then cancels that, or it would be emptied too.
@@ -81,7 +83,8 @@ export function createModals({ sfx, toast, select, onPoster, identities = null, 
 
   async function collision(a, b) {
     const panel = open(`${head("⚠ collision", "Two sessions edited the same file", "Loading the diffs…")}<div class="m-body"></div>`, { accent: colorVar("collision"), wide: true });
-    const data = await fetch(`/api/collision?${new URLSearchParams({ a, b })}`).then((r) => r.json());
+    const url = `/api/collision?${new URLSearchParams({ a, b })}`;
+    const data = await ([a, b].some((x) => String(x).startsWith("@")) ? read(url) : fetch(url)).then((r) => r.json());
     const side = (s, edits) => `
       <div class="col">
         <div class="col-head"><i class="sw ${h(s.id.split(":")[0])}"></i><a href="#" data-mgoto="${h(s.id)}">${h(s.title)}</a>${s.branch ? `<code class="branch">${h(s.branch)}</code>` : ""}</div>

@@ -1,6 +1,7 @@
 import { createMcpInfo, demoMcpInfo } from "../../core/mcp-info.js";
+import { WINDOW_ONLY } from "./hosts.js";
 
-export function mcpRoutes({ state, demo, send, hub = null, catalog = createMcpInfo() }) {
+export function mcpRoutes({ state, demo, send, hub = null, catalog = createMcpInfo(), windowOnly = () => false }) {
   return async (req, res, url) => {
     if (req.method !== "GET" || url.pathname !== "/api/mcp") return false;
     const server = url.searchParams.get("server");
@@ -8,6 +9,8 @@ export function mcpRoutes({ state, demo, send, hub = null, catalog = createMcpIn
     const host = url.searchParams.get("host");
     if (host) {
       if (!hub) { send(res, 404, { error: "that host isn't on this map" }); return true; }
+      // Another machine's reads are the window's alone.
+      if (!windowOnly(req)) { send(res, 403, WINDOW_ONLY); return true; }
       try { const r = await hub.get(host, `/api/mcp?${new URLSearchParams({ server })}`); send(res, r.status, r.body); }
       catch { send(res, 503, { error: "this host's MCP catalog is unavailable" }); }
       return true;

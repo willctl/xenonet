@@ -9,7 +9,9 @@ const row = (label, value) => `<div class="kv"><div class="k">${h(label)}</div><
 const annotations = (t) => [t.annotations?.readOnlyHint === true && "read only", t.annotations?.destructiveHint === true && "destructive", t.annotations?.idempotentHint === true && "idempotent", t.annotations?.openWorldHint === true && "external access"].filter(Boolean).map((x) => `<span class="tag">${x}</span>`).join(" ");
 const count = (info, key) => info.catalog ? info[key].length : "—";
 
-export function createMcpUi({ modals, toast }) {
+// read: GETs another machine's details (node.host) with the window's key,
+// as windowCalls.read does; this machine's go as any page's.
+export function createMcpUi({ modals, toast, read = (url) => fetch(url) }) {
   const cache = new Map();
   const pending = new Map();
   let view = null;
@@ -18,7 +20,7 @@ export function createMcpUi({ modals, toast }) {
   async function load(node, refresh = false) {
     const key = keyOf(node);
     if (!refresh && cache.has(key) && Date.now() - cache.get(key).checkedAt < 30000) return cache.get(key);
-    if (!pending.has(key)) pending.set(key, fetch(`/api/mcp?${new URLSearchParams({ server: serverOf(node), ...(node.host ? { host: node.host } : {}), ...(refresh ? { refresh: "1" } : {}) })}`).then(async (r) => {
+    if (!pending.has(key)) pending.set(key, (node.host ? read : fetch)(`/api/mcp?${new URLSearchParams({ server: serverOf(node), ...(node.host ? { host: node.host } : {}), ...(refresh ? { refresh: "1" } : {}) })}`).then(async (r) => {
       const info = await r.json();
       if (!r.ok) throw new Error(info.error ?? "MCP discovery unavailable");
       cache.set(key, info);

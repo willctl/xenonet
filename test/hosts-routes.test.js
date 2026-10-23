@@ -23,10 +23,13 @@ function routes({ person = { ok: true }, hub = true, answers = {} } = {}) {
     get: note("get", async (id, path) => answers[path] ?? { status: 200, body: { id: S, path } }),
   };
   const verify = { person: note("person", person) };
-  const route = hostRoutes({ hosts, hub: fake, verify, readJson: async (req) => req.body ?? {}, send: (res, status, body) => Object.assign(res, { status, body }), home: "/Users/nova" });
-  const go = async (method, path, body) => {
+  // The window's own requests carry its key (x-xenonet-window), which
+  // server/index.js checks; here, a header saying so.
+  const windowOnly = (req) => req.headers?.window === true;
+  const route = hostRoutes({ hosts, hub: fake, verify, readJson: async (req) => req.body ?? {}, send: (res, status, body) => Object.assign(res, { status, body }), home: "/Users/nova", windowOnly });
+  const go = async (method, path, body, window = true) => {
     const res = {};
-    const handled = await route({ method, body, socket: {} }, res, new URL(path, "http://127.0.0.1"));
+    const handled = await route({ method, body, socket: {}, headers: { window } }, res, new URL(path, "http://127.0.0.1"));
     return { handled, ...res };
   };
   return { go, calls, was: (name) => calls.filter((c) => c[0] === name).map((c) => c.slice(1)) };
@@ -80,6 +83,12 @@ test("adding and removing are yours; the rest of what's on the list", async () =
 test("a remote session's transcript and stats come through its relay, as plain reads with checked queries", async () => {
   const r = routes();
   const id = `@vm1:${S}`;
+  // Only the window reads another machine's: never an agent here.
+  for (const path of [`/api/session/${encodeURIComponent(id)}/transcript`, `/api/session/${encodeURIComponent(id)}/stats`, `/api/collision?a=${encodeURIComponent(id)}&b=${encodeURIComponent("@vm1:claude:2")}`]) {
+    const refused = await r.go("GET", path, undefined, false);
+    assert.deepEqual([refused.status, refused.body.code], [403, "window"], path);
+  }
+  assert.equal(r.was("get").length, 0, "nothing reached a relay");
   const t = await r.go("GET", `/api/session/${encodeURIComponent(id)}/transcript?limit=50&cursor=abc_1`);
   assert.equal(t.status, 200);
   assert.deepEqual(r.was("get")[0], ["vm1", `/api/session/${S}/transcript?limit=50&cursor=abc_1`]);

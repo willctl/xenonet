@@ -1,10 +1,12 @@
 //! Hosts over the API (server/routes/hosts.js; docs/design/hosts.md). Being
-//! a host needs no flag (GET and POST /api/hosts/self); showing other hosts
-//! is behind XENONET_HOSTS=1, without which the rest answer 404. A remote
+//! a host needs no flag (GET and POST /api/hosts/self); hosts over SSH are
+//! behind XENONET_HOSTS=1, without which /api/hosts answers 404. A remote
 //! session's transcript and stats, and a collision on one host, are read
-//! through its relay; every other route that takes an id refuses remote
-//! ones, since hosts are read-only. `route` is None when it isn't one of
-//! these.
+//! through its relay (over SSH or the network), and only by XenoNet's own
+//! window: with the window key, never an agent's or an actor's request,
+//! so a session here can't read another machine's transcripts. Every other
+//! route that takes an id refuses remote ones, since hosts are read-only.
+//! `route` is None when it isn't one of these.
 
 use crate::cores::{ok, reason, CoreError, HostsConfig, Hub, Verify};
 use crate::ctx::pending_reply;
@@ -16,11 +18,20 @@ use xenonet_base::ids::{is_host_id, parse_qualified};
 
 const OFF: &str = "hosts are off in this XenoNet: start it with XENONET_HOSTS=1 to show other machines' XenoNets (a prototype)";
 
+/// The refusal of another machine's transcript, stats or collision to
+/// anything but the window.
+pub fn window_only_reply() -> Reply {
+    Reply::send(403, &json!({ "error": "another machine's transcripts, stats and diffs open only in XenoNet's own window", "code": "window" }), &[])
+}
+
 pub struct HostRoutes<'a> {
     pub hosts: Arc<dyn HostsConfig>,
     pub hub: Option<Arc<dyn Hub>>,
     pub verify: Arc<dyn Verify>,
     pub home: &'a str,
+    /// Whether the request is the window's (`Ctx::window_only`): its key,
+    /// and no token.
+    pub window: bool,
 }
 
 // ^(?:claude|codex):[0-9A-Za-z][0-9A-Za-z._-]{0,127}$
@@ -116,6 +127,9 @@ impl HostRoutes<'_> {
                 if !raw.is_empty() && (what == "transcript" || what == "stats") && req.method == "GET" {
                     let Some(id) = decode_uri_component(raw) else { return Ok(None) };
                     let Some(hub) = self.hub.as_ref().filter(|_| id.starts_with('@')) else { return Ok(None) };
+                    if !self.window {
+                        return Ok(Some(window_only_reply()));
+                    }
                     let Some((host, local)) = remote_session(Some(&id)).filter(|(h, _)| hub.has(h)) else {
                         return Ok(Some(Reply::error(404, "XenoNet doesn't know that session")));
                     };
@@ -153,6 +167,9 @@ impl HostRoutes<'_> {
             if let Some(hub) = self.hub.as_ref() {
                 let (qa, qb) = (req.param("a").map(str::to_string), req.param("b").map(str::to_string));
                 if [&qa, &qb].iter().any(|x| x.as_deref().is_some_and(|s| s.starts_with('@'))) {
+                    if !self.window {
+                        return Ok(Some(window_only_reply()));
+                    }
                     let (a, b) = (remote_session(qa.as_deref()), remote_session(qb.as_deref()));
                     let (Some(a), Some(b)) = (a, b) else {
                         return Ok(Some(Reply::error(400, "collisions across machines come later: both sessions have to be on one host")));
@@ -181,7 +198,7 @@ impl HostRoutes<'_> {
         if p != "/api/hosts" && !p.starts_with("/api/hosts/") {
             return Ok(None);
         }
-        let Some(hub) = self.hub.as_ref() else { return Ok(Some(Reply::error(404, OFF))) };
+        let Some(hub) = self.hub.as_ref().filter(|h| h.ssh()) else { return Ok(Some(Reply::error(404, OFF))) };
         if p == "/api/hosts" {
             if req.method == "GET" {
                 return Ok(Some(Reply::json(200, json!({ "self": self.hosts.self_info()?, "sshConfig": self.hosts.ssh_config()?, "hosts": hub.list()? }))));
