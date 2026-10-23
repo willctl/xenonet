@@ -568,15 +568,22 @@ test("vendor data: what's changed or been added since you last looked, and how t
 });
 
 // The command the doctor's look for token files runs in a repo, as ctxWith
-// keys its answers.
-const grep = (repo) => `git --no-optional-locks -C ${repo} -c core.fsmonitor=false grep -l -I --untracked -E -e xenonet_(actor|gateway)_[0-9a-f]{64}`;
+// keys its answers, and what it answers: each file's name, a NUL and a
+// token found in it, built here so no file of XenoNet's holds one.
+const grep = (repo) => `git --no-optional-locks -C ${repo} -c core.fsmonitor=false grep -o -z -I --untracked -E -e xenonet_(actor|gateway)_[0-9a-f]{64}`;
+const grepFound = (...names) => names.map((n) => `${n}\0xenonet_actor_${"0a".repeat(32)}\n`).join("");
 
 test("actors: a token file in a repo is a warning that names it; a repo that doesn't answer in time leaves a note; without XenoNet, skipped", async () => {
   const check = async (answers, ctx = {}) => byId(await runDoctor(ctxWith({ answers, ctx }), { only: ["actors.repos"] }))["actors.repos"];
   assert.deepEqual([(await check({})).status, (await check({})).detail], ["ok", "none in 2 repos"]);
-  const found = await check({ [grep(`${HOME}/Projects/atlas`)]: { code: 0, stdout: ".xenonet-token\nconfig/wren.token\n", stderr: "" } });
+  // With no look of XenoNet's own, the doctor can't tell which tokens
+  // XenoNet issued, and says so.
+  const found = await check({ [grep(`${HOME}/Projects/atlas`)]: { code: 0, stdout: grepFound(".xenonet-token", "config/wren.token"), stderr: "" } });
   assert.equal(found.status, "warn");
-  assert.equal(found.detail.replace(/\\/g, "/"), "2 files in a repo hold an actor's token: ~/Projects/atlas/.xenonet-token, ~/Projects/atlas/config/wren.token");
+  assert.equal(
+    found.detail.replace(/\\/g, "/"),
+    "2 files in a repo hold what looks like an actor's token: ~/Projects/atlas/.xenonet-token, ~/Projects/atlas/config/wren.token; XenoNet couldn't check them against the tokens it issued",
+  );
   assert.match(found.fix, /New token in XenoNet's Actors panel/);
   const slow = await check({ [grep(`${HOME}/Projects/ledger`)]: { code: 1, stdout: "", stderr: "", timedOut: true } });
   assert.deepEqual([slow.status, slow.detail], ["info", "none in the 1 repo looked in; the other 1 didn't answer in time"]);
@@ -604,6 +611,15 @@ test("actors: the server's look for token files is kept for a day, taken afresh 
   assert.equal(found.detail, "1 file in a repo holds an actor's token: ~/Projects/atlas/.env (XenoNet looked 3 h ago, as it does once a day and whenever you run the doctor)");
   assert.match(found.fix, /a line of a \.env/);
   assert.match(found.fix, /New token in XenoNet's Actors panel/);
+  // A look made while XenoNet couldn't read its own tokens counted every
+  // token, and the warning says it couldn't check them.
+  const blind = await check(look({ at: old, repos: 2, checked: 2, files: [`${HOME}/Projects/atlas/.env`], unchecked: true }));
+  assert.equal(blind.status, "warn");
+  assert.equal(
+    blind.detail,
+    "1 file in a repo holds what looks like an actor's token: ~/Projects/atlas/.env (XenoNet looked 3 h ago, as it does once a day and whenever you run the doctor); XenoNet couldn't check it against the tokens it issued",
+  );
+  assert.equal(blind.fix, found.fix);
   const slow = await check(look({ at: Date.now() + 1, repos: 3, checked: 1, files: [] }));
   assert.deepEqual([slow.status, slow.detail], ["info", "none in the 1 repo looked in; the other 2 didn't answer in time"]);
   assert.equal((await check(look({ at: old, repos: 0, checked: 0, files: [] }))).detail, "no repos to look in (XenoNet looked 3 h ago, as it does once a day and whenever you run the doctor)");

@@ -2,10 +2,16 @@
 // asks the way Claude Code's /usage does, for Claude plan usage.
 import { vendor, open, closed, maybe, num, str } from "../common.js";
 
-const window = closed({
-  utilization: maybe(num).describe("Used, in percent"),
-  resets_at: maybe(str).describe("ISO 8601"),
-});
+// A window may also give a limit in dollars, what's used and left of it,
+// and why it's locked (null on the plans seen so far). XenoNet shows the
+// percent alone.
+const window = closed(
+  {
+    utilization: maybe(num).describe("Used, in percent"),
+    resets_at: maybe(str).describe("ISO 8601"),
+  },
+  { known: ["limit_dollars", "used_dollars", "remaining_dollars", "locked_reason"] },
+);
 
 export const Usage = vendor(
   "anthropic/oauth/usage",

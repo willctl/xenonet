@@ -270,6 +270,33 @@ test("a rollout without finished items, as codex exec writes them, shows what wa
   assert.deepEqual(page.entries.map((e) => e.text), ["Summarize the day", '{"cmd":"git log -3"}', JSON.stringify([{ type: "input_text", text: "3 commits" }], null, 2), "Three commits today."]);
 });
 
+test("a rollout's plan reads as the app-server's, and an extension's web search as a web search", async () => {
+  const file = path.join(root, "rollouts", "rollout-2026-10-05T15-00-00-019a0000-0000-7000-8000-0000000f1a77.jsonl");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const at = (s) => new Date(Date.parse("2026-10-05T15:00:00Z") + s * 1000).toISOString();
+  const done = (s, item) => ({ type: "event_msg", timestamp: at(s), payload: { type: "item_completed", thread_id: "f1", turn_id: "u1", completed_at_ms: Date.parse(at(s)), item } });
+  const lines = [
+    { type: "session_meta", timestamp: at(0), payload: { id: "f1", cwd: "/p/ledger", cli_version: "0.150.0" } },
+    done(1, { type: "Plan", id: "p1", text: "1. Read the Makefile\n2. Add -j8" }),
+    done(2, { type: "Extension", id: "x1", kind: "web.search", query: "", action: { type: "search", query: null, queries: ["make -j", "make jobs"] }, results: [] }),
+    done(3, { type: "Extension", id: "x2", kind: "web.search", query: "gnu make jobserver", action: { type: "search", query: "gnu make jobserver", queries: null } }),
+    done(4, { type: "Extension", id: "x3", kind: "image_gen.generation", status: "completed", revisedPrompt: "a ledger", savedPath: "/p/ledger/ledger.png", failure: null }),
+  ];
+  fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  const page = await readRolloutPage(file);
+  assert.deepEqual(
+    page.entries.map((e) => [e.id, e.role, e.title ?? null]),
+    [
+      ["p1", "assistant", "plan"],
+      ["x1", "tool", "search: "],
+      ["x2", "tool", "search: gnu make jobserver"],
+      ["x3", "system", "Extension"],
+    ],
+  );
+  assert.equal(page.entries[0].text, "1. Read the Makefile\n2. Add -j8");
+  assert.equal(JSON.parse(page.entries[3].text).kind, "image_gen.generation", "an image made shows as any other item");
+});
+
 test("a rollout that grows is read on from where its last read ended, not whole again", async () => {
   const { codexLines } = await import("../core/lines.js");
   const file = path.join(root, "rollouts", "rollout-2026-10-05T14-00-00-019a0000-0000-7000-8000-00000000abcd.jsonl");

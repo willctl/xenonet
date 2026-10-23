@@ -456,6 +456,17 @@ export class EngineStore {
   // One that reports only through the gateway has no token of its own, and
   // isn't listed while its gateway token stands.
   expiredActorTokens = () => this.db.prepare("SELECT slug, name FROM actors WHERE allowed_at IS NOT NULL AND token_hash IS NULL AND gateway_hash IS NULL ORDER BY allowed_at, rowid").all().map((r) => ({ slug: r.slug, name: r.name }));
+  // The hashes of the tokens that work now: each actor's own, its gateway
+  // token, and those of the registrations still waiting. The doctor holds
+  // the token-shaped strings it finds in repos to these, so a made-up one
+  // in a test fixture isn't taken for a leak. Never shown.
+  issuedTokenHashes = () =>
+    this.db
+      .prepare(
+        "SELECT token_hash AS hash FROM actors WHERE token_hash IS NOT NULL UNION SELECT gateway_hash FROM actors WHERE gateway_hash IS NOT NULL UNION SELECT token_hash FROM actor_requests WHERE decision IS NULL",
+      )
+      .all()
+      .map((r) => r.hash);
 
   // A registration waiting for you: what it asked (ask, JSON), its token's
   // hash, who asked (asker, JSON), and when it lapses.
