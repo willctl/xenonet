@@ -278,6 +278,8 @@ pub fn receive(w: &World, incoming: Incoming) {
         // The person's actions from another console are the network's
         // own (section 8); a message from them comes as a message.
         Kind::Operator => Ok(()),
+        // The map's frames go to the relay and the hub, never the engine.
+        Kind::Relay => Ok(()),
     };
     if let Err(e) = done {
         w.log("warn", "net.receive", &format!("a {} from {from} wasn't taken: {}", kind.as_str(), e.message));

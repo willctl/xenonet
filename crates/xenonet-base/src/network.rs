@@ -5,6 +5,10 @@
 //! sealing, the roster and the gateway live behind it, in xenonet-net, and
 //! the engine knows nothing of them.
 //!
+//! The map's relay bodies (section 7) cross the same seam but never reach
+//! the engine: they go to a `RelaySink`, the service's relay for a console
+//! on another host, and the hub that draws other hosts' maps here.
+//!
 //! When the service isn't in a network nothing is behind the seam, so
 //! every local path, and the JS twins, are unchanged.
 
@@ -19,10 +23,12 @@ pub enum Kind {
     Receipt,
     Handoff,
     Operator,
+    /// The map, between a console and the host it shows: never the engine's.
+    Relay,
 }
 
 impl Kind {
-    pub const ALL: [Self; 6] = [Self::Presence, Self::Claims, Self::Message, Self::Receipt, Self::Handoff, Self::Operator];
+    pub const ALL: [Self; 7] = [Self::Presence, Self::Claims, Self::Message, Self::Receipt, Self::Handoff, Self::Operator, Self::Relay];
 
     /// The frame kind on the wire, and the schema's folder.
     pub fn as_str(self) -> &'static str {
@@ -33,6 +39,7 @@ impl Kind {
             Self::Receipt => "receipt",
             Self::Handoff => "handoff",
             Self::Operator => "operator",
+            Self::Relay => "relay",
         }
     }
 
@@ -41,9 +48,10 @@ impl Kind {
     }
 
     /// Whether the gateway keeps it for a host that's away. Presence and
-    /// claims aren't kept: a full set goes when the host is back.
+    /// claims aren't kept: a full set goes when the host is back. Nor is
+    /// the map: a console asks for a fresh snapshot.
     pub fn queued(self) -> bool {
-        !matches!(self, Self::Presence | Self::Claims)
+        !matches!(self, Self::Presence | Self::Claims | Self::Relay)
     }
 }
 
@@ -126,6 +134,11 @@ pub trait Net: Send + Sync {
     fn titles_only(&self) -> bool {
         false
     }
+    /// Whether this host is a window host in the roster: only one is shown
+    /// other hosts' maps (section 7).
+    fn is_window_host(&self) -> bool {
+        false
+    }
 }
 
 /// What the network calls in the engine.
@@ -141,6 +154,22 @@ pub trait Sink: Send + Sync {
     /// The gateway lost frames for this host (a `gap`): the engine asks the
     /// others for a full presence and sends again what has no receipt.
     fn gap(&self);
+}
+
+/// Where the map's relay bodies go (section 7): the service's relay, for a
+/// console on another host that subscribed to this host's map, and the
+/// hub, for the maps this host's console subscribed to. Each takes the
+/// bodies meant for it and leaves the rest. They hear of the link and the
+/// roster as the engine does, so a subscription ends with its host.
+pub trait RelaySink: Send + Sync {
+    /// A relay body from another host.
+    fn relay(&self, incoming: Incoming);
+    /// A host was removed from the roster.
+    fn removed(&self, _host: &str) {}
+    /// The link to the gateway came up, or went down.
+    fn linked(&self, _up: bool) {}
+    /// The gateway lost frames for this host.
+    fn gap(&self) {}
 }
 
 /// No network: what the engine gets when the service isn't in one, and in
@@ -173,6 +202,7 @@ mod tests {
         }
         assert_eq!(Kind::parse("hello"), None);
         assert!(!Kind::Presence.queued());
+        assert!(!Kind::Relay.queued(), "the map isn't kept for a host that's away");
         assert!(!Kind::Claims.queued());
         assert!(Kind::Message.queued());
         assert!(Kind::Receipt.queued());

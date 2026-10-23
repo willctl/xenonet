@@ -4,7 +4,7 @@
 // hosts on other machines would. Their /api/net routes are called as the
 // window calls them, and a test Sink stands in for the engine.
 //
-// Each test has its own ports among 48113-48120 (48112 is one nothing
+// Each test has its own ports among 48113-48121 (48112 is one nothing
 // answers on), never 47840-47842. NET_TEST_LOG=1 prints what each host logs.
 
 #![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
@@ -643,4 +643,80 @@ async fn a_founder_alone_leaves_only_with_force_and_its_lan_door_closes() {
     let files = a.dir.join("state").join("network");
     assert!(["network.json", "host.key", "net.sqlite", "gateway.sqlite"].iter().all(|f| !files.join(f).exists()), "{}", files.display());
     until("the LAN door closed", 10, || std::net::TcpStream::connect(("127.0.0.1", port)).is_err()).await;
+}
+
+/// What a relay sink heard: each body's sender and whether it's a window
+/// host, and the roster's news.
+#[derive(Default)]
+struct Relays {
+    got: Mutex<Vec<(String, bool, Value)>>,
+    removed: Mutex<Vec<String>>,
+}
+
+impl xenonet_base::network::RelaySink for Relays {
+    fn relay(&self, i: Incoming) {
+        assert_eq!(i.kind, Kind::Relay);
+        self.got.lock().unwrap().push((i.from, i.from_window_host, i.body));
+    }
+    fn removed(&self, host: &str) {
+        self.removed.lock().unwrap().push(host.into());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_maps_relay_frames_cross_in_batches_and_a_bucket_of_their_own() {
+    let (a, b, c) = network("relay", 48121, Caps::default(), [0.0; 3]).await;
+    let heard = Arc::new(Relays::default());
+    b.svc.sinks().set_relay("hear", heard.clone());
+    // desk sends laptop the map: it reaches laptop's relay sink, never its
+    // engine, and so does the gateway's host's.
+    let relay = |h: &Host, to: &str, n: u64| {
+        h.svc.net().send(Outgoing { to: To::Host(to.into()), kind: Kind::Relay, body: json!({ "sub": "s1", "seq": n, "frames": [{ "t": "ping", "now": n }] }) })
+    };
+    relay(&c, "laptop", 1).unwrap();
+    relay(&a, "laptop", 2).unwrap();
+    until("both at laptop's relay", 10, || heard.got.lock().unwrap().len() == 2).await;
+    let mut got: Vec<(String, bool, u64)> = heard.got.lock().unwrap().iter().map(|(f, w, b)| (f.clone(), *w, b["seq"].as_u64().unwrap())).collect();
+    got.sort();
+    assert_eq!(got, [("desk".to_string(), false, 1), ("studio".to_string(), true, 2)], "with whether the sender is a window host");
+    assert!(b.sink.got.lock().unwrap().iter().all(|g| g.1 != "relay"), "never the engine's");
+    // A relay body is 8 MiB at most, before it's sealed.
+    let big = json!({ "sub": "s1", "seq": 3, "frames": [{ "t": "snapshot", "graph": "x".repeat(9 << 20) }] });
+    assert!(c.svc.net().send(Outgoing { to: To::Host("laptop".into()), kind: Kind::Relay, body: big }).unwrap_err().contains("8 MiB"));
+
+    // At the gateway: relay frames only in a relay batch, and nothing else
+    // in one.
+    let gw = a.svc.node().gateway().unwrap();
+    let desk = c.svc.node().shared();
+    let net = desk.network().unwrap();
+    let key = desk.key().unwrap();
+    let laptop_keys = desk.roster().view().member("laptop").unwrap().keys;
+    let frame = |kind: &'static str| {
+        let d = xenonet_net::frame::Draft { network: &net.id, id: xenonet_net::codec::frame_id().unwrap(), kind, from: "desk", to: "laptop", at: desk.gateway_now() as i64 };
+        xenonet_net::frame::host_frame(&d, &key, &laptop_keys, &json!({ "sub": "s1" }), None).unwrap()
+    };
+    let post = |frames: &[xenonet_net::frame::Frame], relay: bool| {
+        let lines: Vec<String> = frames.iter().map(|f| f.line().trim_end().to_string()).collect();
+        let batch = format!("{{\"frames\":[{}],\"ack\":null}}", lines.join(","));
+        desk.signed_request("POST", if relay { "/net/v1/frames?relay=1" } else { "/net/v1/frames" }, batch.into_bytes()).unwrap().0
+    };
+    let answer = gw.handle(post(&[frame("relay")], false)).await.body_json();
+    assert_eq!(answer["refused"][0]["code"], "bad-kind", "{answer}");
+    let answer = gw.handle(post(&[frame("message")], true)).await.body_json();
+    assert_eq!(answer["refused"][0]["code"], "bad-kind", "{answer}");
+    // 120 relay frames a minute, in a bucket of their own: the engine's
+    // frames still go once it's spent.
+    let many: Vec<_> = (0..130).map(|_| frame("relay")).collect();
+    let answer = gw.handle(post(&many, true)).await.body_json();
+    let accepted = answer["accepted"].as_array().unwrap().len();
+    let rated = answer["refused"].as_array().unwrap().iter().filter(|r| r["code"] == "rate").count();
+    assert!((110..=120).contains(&accepted) && accepted + rated == 130, "{accepted} taken, {rated} held back: {answer}");
+    assert!(answer["retryAfterMs"].as_f64().is_some_and(|ms| ms > 0.0), "{answer}");
+    let answer = gw.handle(post(&[frame("message")], false)).await.body_json();
+    assert_eq!(answer["accepted"].as_array().unwrap().len(), 1, "the engine's bucket is untouched: {answer}");
+
+    // A host removed: every relay sink hears of it.
+    let (s, v) = a.call("POST", "/api/net/remove", json!({ "host": "desk" }), true).await;
+    assert_eq!(s, 200, "{v}");
+    until("laptop's relay hears desk went", 10, || heard.removed.lock().unwrap().contains(&"desk".to_string())).await;
 }

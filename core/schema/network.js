@@ -175,6 +175,36 @@ export const NetworkOperator = define(
   { title: "An action for the person", description: "Something the person did in a console on one host, for another host to carry out." },
 );
 
+// The map between hosts (docs/design/network.md, section 7). A window
+// host's console subscribes to another host's map; that host answers with
+// the SSH relay's own frames (host/hello/v1, snapshot, event, res, time,
+// ping, bye), a list of them in each body, at most one body every half
+// second for each subscription.
+export const RELAY_OPS = ["open", "get", "time", "renew", "close"];
+const SubId = z.string().regex(/^sub_[0-9a-f]{32}$/).describe("The subscription, made at random by the subscribing host");
+
+export const NetworkRelay = define(
+  "network/relay",
+  1,
+  z.union([
+    obj({
+      schema: z.literal("network/relay/v1"),
+      op: z.enum(RELAY_OPS).describe("From the subscribing host. open: start, with a hello and a snapshot; get: one read from the relay's allowlist, as GET; time: the host's clock; renew: still watching (every 20 s; a subscription lapses after 60 s without one), with fresh for a new snapshot after a gap; close: stop"),
+      sub: SubId,
+      id: count.min(1).optional().describe("For get and time: the console's question, which the answer's res or time frame names"),
+      path: z.string().min(1).max(2048).optional().describe("For get: the path and query to read"),
+      fresh: z.boolean().optional().describe("For renew: send a fresh snapshot, since frames were lost"),
+    }),
+    obj({
+      schema: z.literal("network/relay/v1"),
+      sub: SubId,
+      seq: count.min(1).describe("1, 2, 3… within the subscription: a hole means frames were lost, and the console asks for a fresh snapshot"),
+      frames: z.array(obj({ t: z.string().min(1).max(16) })).max(1000).describe("The relay's frames, in order"),
+    }),
+  ]),
+  { title: "The map between hosts", description: "A console's subscription to another host's map, and that host's answers: the SSH relay's frames, sealed between the two hosts." },
+);
+
 export const ROSTER_OPS = ["found", "add", "remove", "window", "gateway"];
 
 export const NetworkRosterEntry = define(

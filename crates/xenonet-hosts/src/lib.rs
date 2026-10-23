@@ -17,4 +17,5 @@ pub mod frames;
 pub mod hub;
 pub mod link;
 pub mod merge;
+pub mod network;
 pub mod relay;
