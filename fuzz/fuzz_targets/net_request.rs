@@ -27,7 +27,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use xenonet_fuzz::net::{self, Choices, Kept, LAPTOP, SPARE, STUDIO};
 use xenonet_net::codec::b64;
-use xenonet_net::frame::{Frame, HOST_KINDS};
+use xenonet_net::frame::{Frame, HOST_KINDS, RELAY_BATCH_KINDS};
 use xenonet_net::gateway::{join_body, NetBody, NetReply, NetRequest};
 use xenonet_net::gwstore::TicketRow;
 use xenonet_net::link::{first_line, refusal, Refusal};
@@ -163,7 +163,7 @@ fn batch(signer: usize, c: &mut Choices<'_>) -> Batch {
     for _ in 0..=c.below(6) {
         let from = if c.rarely(32) { c.below(net::HOSTS.len()) } else { signer };
         let to = c.below(net::HOSTS.len());
-        let kind = if relay && c.bool() { "relay" } else { *c.pick(&HOST_KINDS) };
+        let kind = if relay && c.bool() { *c.pick(&RELAY_BATCH_KINDS) } else { *c.pick(&HOST_KINDS) };
         let key = if c.rarely(24) { c.below(net::HOSTS.len()) } else { from };
         let at = net::now() + i64::from(c.i16());
         let id = net::fresh_frame_id(c.u16());
@@ -181,7 +181,7 @@ fn batch(signer: usize, c: &mut Choices<'_>) -> Batch {
         let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
         let changed = Frame::parse(&v).map_or(true, |g| !net::same_frame(&f, &g));
         let member = |h: &str| net::roster().view().member(h).is_some();
-        let acceptable = !changed && key == from && from == signer && member(&f.to) && f.to != f.from && (kind == "relay") == relay;
+        let acceptable = !changed && key == from && from == signer && member(&f.to) && f.to != f.from && RELAY_BATCH_KINDS.contains(&kind) == relay;
         if acceptable {
             ok.push(f.id.clone());
         }
