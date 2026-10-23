@@ -148,14 +148,26 @@ pub fn install_launcher(env: &Env, ctx: &Ctx) -> Result<Option<Value>, Failure> 
 // it couldn't start, or was ended at the timeout).
 fn run_sync(file: &str, args: &[String], cwd: &str, timeout: Duration) -> (Option<i32>, String) {
     use std::io::Read;
-    let child = std::process::Command::new(file)
+    let mut command = std::process::Command::new(file);
+    command
         .args(args)
         .current_dir(cwd)
         .env_remove("ELECTRON_RUN_AS_NODE")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn();
+        .stderr(std::process::Stdio::null());
+    // A binary just unpacked can be busy for a moment on Linux: a fork on
+    // another thread holds it open for writing until that child execs.
+    let mut child = command.spawn();
+    for _ in 0..20 {
+        match &child {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                std::thread::sleep(Duration::from_millis(50));
+                child = command.spawn();
+            }
+            _ => break,
+        }
+    }
     let Ok(mut child) = child else { return (None, String::new()) };
     let mut out = child.stdout.take().expect("stdout is piped above");
     let reader = std::thread::spawn(move || {
