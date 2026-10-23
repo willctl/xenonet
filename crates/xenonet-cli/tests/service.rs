@@ -65,6 +65,8 @@ impl Fixture {
             .env("XENONET_SUPERVISOR_BIN", self_bin(&self.dir))
             .env("XENONET_SUPERVISOR_DIR", self.dir.join("agents"))
             .env("XENONET_RUNTIME_DIR", self.dir.join("runtime"))
+            // The tray's app, on a Mac, goes here, never in ~/Applications.
+            .env("XENONET_APPLICATIONS_DIR", self.dir.join("Applications"))
             // A port nothing listens on, so no service answers.
             .env("XENONET_PORT", "1")
             .env_remove("XENONET_LAUNCHER_BIN")
@@ -123,4 +125,49 @@ fn install_and_uninstall_register_with_the_supervisor_or_are_refused_from_under_
     let v: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v["status"], "removed");
     assert!(!f.file().exists());
+}
+
+// On a Mac, install puts the tray app the components have in Applications,
+// with its own launch agent, and uninstall takes both away. With no tray
+// installed (a binary run from target/, as here before the component is
+// laid down) it's skipped.
+#[cfg(target_os = "macos")]
+#[test]
+fn on_a_mac_the_tray_starts_at_login_beside_the_service_when_theres_one_installed() {
+    let f = Fixture::new("tray");
+    let tray_plist = f.dir.join("agents").join("dev.xenonet.tray.plist");
+    let app = f.dir.join("Applications").join("XenoNet Tray.app");
+    let (code, out, err) = f.run(&["service", "install", "--json"]);
+    if code != 0 {
+        assert!(err.contains("this is yours to do"), "{err}");
+        assert!(!tray_plist.exists() && !app.exists());
+        return;
+    }
+    let v: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["tray"]["status"], "absent", "no tray component: {out}");
+    assert!(!tray_plist.exists());
+    // The tray component, as a bundle installs it.
+    let sha = "0123456789abcdef".repeat(4);
+    let tray = f.dir.join("runtime").join("components").join("tray");
+    let macos = tray.join(format!("0.4.1-{}", &sha[..16])).join("XenoNet Tray.app").join("Contents").join("MacOS");
+    std::fs::create_dir_all(&macos).unwrap();
+    std::fs::write(macos.join("XenoNet Tray"), "the tray").unwrap();
+    std::fs::write(macos.parent().unwrap().join("Info.plist"), "<plist><dict><key>CFBundleIdentifier</key><string>dev.xenonet.tray</string></dict></plist>").unwrap();
+    std::fs::write(tray.join("current.json"), format!(r#"{{"version":"0.4.1","sha256":"{sha}"}}"#)).unwrap();
+    let (code, out, err) = f.run(&["service", "install", "--json"]);
+    assert_eq!(code, 0, "{err}");
+    let v: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["tray"]["status"], "installed", "{out}");
+    assert_eq!(std::fs::read_to_string(app.join("Contents").join("MacOS").join("XenoNet Tray")).unwrap(), "the tray");
+    let text = std::fs::read_to_string(&tray_plist).unwrap();
+    assert!(
+        text.contains("<string>dev.xenonet.tray</string>") && text.contains("XenoNet Tray.app/Contents/MacOS/XenoNet Tray") && text.contains("<key>XENONET_PORT</key>"),
+        "{text}"
+    );
+    assert!(f.calls().iter().any(|c| c.starts_with("bootstrap") && c.ends_with("dev.xenonet.tray.plist")), "{:?}", f.calls());
+    let (code, out, err) = f.run(&["service", "uninstall", "--json"]);
+    assert_eq!(code, 0, "{err}");
+    let v: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["tray"]["status"], "removed", "{out}");
+    assert!(!tray_plist.exists() && !app.exists());
 }

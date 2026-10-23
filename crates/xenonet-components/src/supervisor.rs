@@ -656,7 +656,7 @@ impl Ran {
     }
 
     // What a failure says: its error output, else its output, else its code.
-    fn said(&self) -> String {
+    pub fn said(&self) -> String {
         let t = if self.err.trim().is_empty() { self.out.trim() } else { self.err.trim() };
         if !t.is_empty() {
             return t.lines().next().unwrap_or(t).to_string();
