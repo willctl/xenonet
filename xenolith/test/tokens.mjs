@@ -248,8 +248,22 @@ describe('tokens over HTTP', { skip, timeout: 60_000 }, () => {
       const write = await request(s3.port, { body: toolCall('context_log', { app: 'x', title: 'x' }) });
       assert.match(textOf(write), /^Refused: /);
       assert.equal(cli(E3.env, 'access', 'local', 'everything').code, 1);
+      // The window's API follows it too: "read" reads, but pausing the curator needs admin or the owner key.
+      const owner = { 'X-Xenolith': 'ui', 'X-Xenolith-Owner': JSON.parse(fs.readFileSync(path.join(E3.home, 'runtime', 'owner.key'), 'utf8')).key };
+      assert.equal((await request(s3.port, { method: 'GET', path: '/api/pages' })).status, 200);
+      const pause = await request(s3.port, { path: '/api/curator', headers: { 'X-Xenolith': 'ui' }, body: { paused: true } });
+      assert.equal(pause.status, 403);
+      assert.match(pause.json.error, /needs admin access for this machine's processes \(access\.json says read\), or the owner key/);
+      assert.equal((await request(s3.port, { path: '/api/curator', headers: owner, body: { paused: false } })).status, 200);
       assert.equal(cli(E3.env, 'access', 'local', 'none').code, 0);
       assert.equal((await request(s3.port, { body: toolCall('context_search', { query: 'x' }) })).status, 401);
+      // "none": the window's API reads nothing without the key, and /status keeps the service's health only.
+      assert.equal((await request(s3.port, { method: 'GET', path: '/api/pages' })).status, 403);
+      assert.equal((await request(s3.port, { method: 'GET', path: '/api/pages', headers: owner })).status, 200);
+      const bare = await request(s3.port, { method: 'GET', path: '/status' });
+      assert.equal(bare.status, 200);
+      assert.ok(bare.json.pid > 0 && bare.json.recent === undefined && bare.json.lastWrite === undefined, bare.text);
+      assert.ok(Array.isArray((await request(s3.port, { method: 'GET', path: '/status', headers: owner })).json.recent), 'the owner sees all of it');
     } finally {
       s3.proc.kill();
     }

@@ -88,7 +88,8 @@ Claude Code connect to it. Otherwise each app starts its own stdio server.
 - **Windows:** the service `Xenolith` runs `xenolith service`, which hosts the
   HTTP server in that one process. It starts at boot and runs as the virtual
   account `NT SERVICE\Xenolith`. That account's only rights are Modify on the
-  wiki folder and the logs, and Read on `%APPDATA%\Xenolith` and
+  wiki folder, the logs and the state folder (the audit chain and the [owner
+  key](#the-owner-key)), and Read on `%APPDATA%\Xenolith` and
   `%LOCALAPPDATA%\Xenolith`. Registering the service takes one UAC prompt the
   first time, because the installer starts `xenolith install-service`
   elevated. `xenolith uninstall-service`, run elevated, removes it.
@@ -237,6 +238,27 @@ xenolith token create client:laptop
 back. In `access.json` this is `"local"`; a value Xenolith doesn't know counts
 as `"none"`.
 
+### The owner key
+
+Approving a held change or a proposal, Undo, Revert, the Approvals setting and
+Forget are yours alone, so they need more than a local request: the owner key.
+Each time the service starts it writes a new random key to `runtime/owner.key`
+in Xenolith's state folder, readable by you alone (on Windows, by the user who
+installed the service). The tray reads it, checks that the service answering on
+its port has the pid the file names, and opens the window with the key in the
+URL fragment, which never reaches the server or its logs. The window sends it
+back in an `X-Xenolith-Owner` header. A process that sends only `X-Xenolith: ui`
+can read the window's API but not decide anything. `xenolith held approve`
+reads the key the same way and asks the service to decide.
+
+Every decision goes in the audit chain with who made it: `owner` for the
+window, `cli` for the terminal. Refused attempts go there too.
+
+What this guarantees: a decision needs an explicit read of a file only you can
+read, and the audit chain records it. A sandboxed agent that can't read
+Xenolith's state folder can't approve its own change. An agent running
+unsandboxed as you can read the file, as it can any of your files.
+
 ### Tokens
 
 A grant does nothing until its subject holds a token. Tokens are
@@ -327,8 +349,9 @@ often it is sent. A page replaced on the other machine carries the version it
 was written against. When the curator's page has changed since, the push gets
 **409** and the write becomes a **proposal**: a change that waits for your OK
 even when approvals are automatic, listed by `xenolith held --space <space>`
-and approved, rejected or sent back there (or through the window's API with
-`space`). Approving it applies it only if the page hasn't changed again.
+and decided there with `xenolith held approve|deny <batch>:<index> --space
+<space>` (or through the window's API with `space` and the [owner
+key](#the-owner-key)). Approving it applies it only if the page hasn't changed again.
 Nothing written on either machine is lost: each pushed note moves to
 `.curator/sent/` with what the curator said, and each pull keeps the page it
 replaces in `.history/`. A machine that only follows a space sends anyone who
@@ -395,7 +418,13 @@ unit runs it. It never reads Codex's credential files.
     reasons, its notes and a diff, and offers **Approve**, **Reject** and **Send
     back**. Send back returns its notes to the curator. `/status` reports "N
     change(s) need your OK", so the tray shows that something needs attention.
-    Switching back to Automatic applies everything that is waiting.
+    Switching back to Automatic applies everything that is waiting. Without a
+    tray, `xenolith held` lists what waits, each as `<batch>:<index>`, and
+    `xenolith held approve|deny|refile <batch>:<index>` decides one.
+
+  Deciding a change, Undo, Revert, the Approvals setting and Forget need the
+  [owner key](#the-owner-key). An approver never approves a change made from a
+  note it submitted itself.
 
   The setting is `approvals` (`auto` or `manual`) in
   `.curator/settings.json`, so it travels with the wiki. A file that cannot be
@@ -615,7 +644,8 @@ light and dark taskbars.
 `npm run build`) that the service serves at `http://127.0.0.1:47850/ui/`. The
 tray shows it in its own small window: WebView2 on Windows, WKWebView on macOS
 and WebKitGTK on Linux, with its own data folder of a few MB. It opens above the
-tray. Links that leave `127.0.0.1` open in your browser. When you close the
+tray, with the [owner key](#the-owner-key), so it can approve changes. Opened
+anywhere else, such as in a browser, it can read but not decide. Links that leave `127.0.0.1` open in your browser. When you close the
 window, the tray hides it and frees it after five idle minutes, so the tray
 stays small: about 11 MB with the window closed, measured on Windows (run count
 not recorded). The window has a search box and five tabs:
@@ -642,12 +672,21 @@ not recorded). The window has a search box and five tabs:
 The window follows the system's light or dark theme. It reads a small JSON API
 on the same port: `/api/status`, `/api/pages`, `/api/page?slug=`,
 `/api/search?q=`, `/api/activity?days=`, `/api/log?date=`, `/api/inbox`,
-`/api/asks` and `/api/ask?id=&after=&thread=1`. The writes are
-`POST /api/curator {"paused": bool}`, `POST /api/ask {"question", "parent"?}`
-and `POST /api/ask/cancel {"id"}`. Each write needs the `X-Xenolith: ui`
-header, which another site's page cannot send. The API refuses the same Hosts
-and Origins as `/mcp`, and any request a browser marks as sent by another site
-(`Sec-Fetch-Site` other than `same-origin` or `none`). The window's pages get a strict CSP, and nothing in a
+`/api/held`, `/api/asks` and `/api/ask?id=&after=&thread=1`. The writes are
+`POST /api/curator {"paused": bool}`, `POST /api/ask {"question", "parent"?}`,
+`POST /api/ask/cancel {"id"}`, `/api/models`, `/api/settings`, `/api/held`,
+`/api/revert` and `/api/forget`. Each write needs the `X-Xenolith: ui` header,
+which another site's page cannot send.
+
+| Call | Needs |
+| --- | --- |
+| reads, Ask | `"local"` read or more, or the owner key |
+| pause the curator, models, cleanup schedule | `"local"` admin (the default), or the owner key |
+| decide, Undo, Revert, the Approvals setting, Forget | the owner key |
+
+The API takes local requests only ([who is local](#who-is-local)), refuses the
+same Hosts and Origins as `/mcp`, and any request a browser marks as sent by
+another site (`Sec-Fetch-Site` other than `same-origin` or `none`). The window's pages get a strict CSP, and nothing in a
 wiki page runs: raw HTML shows as text, and only `http`, `https` and `mailto`
 links work. To work on the window, run `npm run ui:preview`. It serves a
 snapshot copy of your wiki on port 47859 (`http://127.0.0.1:47859/ui/`) and does
@@ -674,7 +713,8 @@ itself, so the installer only reports where the icon is.
 
 For headless use, the tray takes these flags:
 
-- `--selftest` prints the state, the start-at-sign-in entries and the menu.
+- `--selftest` prints the state, the start-at-sign-in entries, whether it can
+  use the service's owner key, and the menu.
 - `--do <action>` runs one menu action: `open-ui`, `open-wiki`, `open-index`,
   `open-logs`, `pause`, `resume`, `copy-url`, `sign-in`, `retry-dead`,
   `file-raw`, `restart-service` or `repair-autostart`.

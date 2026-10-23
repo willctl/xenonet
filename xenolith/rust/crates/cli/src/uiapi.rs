@@ -1,13 +1,23 @@
-//! The window: the web app at /ui/ and the JSON API it reads, /api/* (src/ui-api.mjs). Read-only
-//! apart from pausing the curator, asking questions, deciding held changes and reverting a page
-//! change; those need the X-Xenolith header, which a page from another site cannot send.
+//! The window: the web app at /ui/ and the JSON API it reads, /api/* (src/ui-api.mjs). Only this
+//! machine's own processes reach it (http.rs). What a caller may do:
+//!
+//! - read (GET), and ask a question: what access.json gives local callers (read), or the owner key;
+//! - pause the curator, choose models, set the cleanup schedule: local admin, or the owner key;
+//! - decide held changes and proposals, revert or undo a change, change the approvals setting,
+//!   forget text, leave a note as the person: the owner key only (owner.rs), audited with who.
+//!
+//! Every POST also needs the X-Xenolith header ("ui", or "cli" from `xenolith`), which a page from
+//! another site cannot send.
 
-use crate::http::{App, Entry, Reply, read_body, status_report};
+use crate::http::{App, Caller, Entry, Reply, read_body, status_for};
 use crate::httpd::Request;
 use crate::mcp::State;
 use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};
+use xenolith_core::access::Level;
 use xenolith_core::activity::{links_in, parse_log_day};
+use xenolith_core::audit;
+use xenolith_core::paths::AppPaths;
 use xenolith_core::text::{collate_cmp, local_iso, strip_markers, take_chars};
 use xenolith_core::wiki::{self, DATE_RE, Page, SLUG_RE};
 use xenolith_core::{asks, held, inbox};
@@ -40,6 +50,44 @@ fn send(status: u16, body: Vec<u8>, kind: &str) -> Reply {
 
 fn json_reply(status: u16, v: &Value) -> Reply {
     send(status, format!("{v}\n").into_bytes(), "application/json")
+}
+
+/// The answer to a caller that lacks what an /api call needs. A refused decision goes in the
+/// audit chain, like a refused tool call.
+fn refuse(caller: Caller, need: Option<Level>, what: &str, hint: &str, entry: &mut Entry) -> Reply {
+    entry.result = Some("forbidden-owner".into());
+    let error = match need {
+        // The owner key alone.
+        None => format!("{what} needs the owner key: open the window from the Xenolith tray{hint}."),
+        Some(l) => format!(
+            "{what} needs {} access for this machine's processes (access.json says {}), or the owner key: open the window from the Xenolith tray.",
+            l.as_str(),
+            match caller {
+                Caller::Local(Some(have)) => have.as_str(),
+                _ => "none",
+            }
+        ),
+    };
+    audit::best_effort(
+        &AppPaths::current(),
+        "refused",
+        "a local process",
+        vec![("why", json!(if need.is_none() { "owner key" } else { "local access" })), ("call", json!(take_chars(&entry.path, 40))), ("transport", json!("window"))],
+    );
+    json_reply(403, &json!({ "error": error, "ownerKey": false }))
+}
+
+/// Who decided, for the audit chain and the held file: "owner" (the window) or "cli".
+fn decider(caller: Caller) -> &'static str {
+    match caller {
+        Caller::Owner(by) => by,
+        Caller::Local(_) => "a local process",
+    }
+}
+
+/// A POST from the window or from `xenolith`: the header a page from another site can't send.
+fn from_window(xh: Option<&str>) -> bool {
+    matches!(xh, Some("ui" | "cli"))
 }
 
 fn content_type(name: &str) -> &'static str {
@@ -225,21 +273,47 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
         return send(200, body, content_type(name)); // the server leaves the body out of a HEAD answer
     }
 
+    let caller = app.caller(req);
     if path == "/api/status" {
         entry.quiet = true;
-        return json_reply(200, &status_report(app, st));
+        return json_reply(200, &status_for(app, st, caller));
     }
     let Some(wiki_dir) = st.wiki_dir.as_ref().filter(|_| st.setup_error.is_none()) else {
         return json_reply(503, &json!({ "error": st.setup_error.clone().unwrap_or_else(|| "wiki not available".into()) }));
     };
     let xh = req.header("x-xenolith");
+    // Before anything else: a POST must come from the window (or `xenolith`), then from a caller
+    // allowed to make it.
+    if method == "POST" && path.starts_with("/api/") {
+        if !from_window(xh.as_deref()) {
+            return json_reply(403, &json!({ "error": "Forbidden: missing X-Xenolith header" }));
+        }
+        let settings_body = (path == "/api/settings").then(|| read_body(req).ok().and_then(|b| serde_json::from_str::<Value>(&b).ok()).unwrap_or(Value::Null));
+        let owner_only = match path {
+            "/api/held" | "/api/revert" => Some(("Deciding a change", ", or run `xenolith held` in a terminal")),
+            "/api/forget" => Some(("Forgetting", ", or run `xenolith forget` in a terminal")),
+            "/api/note" => Some(("A note from you", "")),
+            "/api/settings" if settings_body.as_ref().is_some_and(|b| b.get("approvals").is_some()) => Some(("Changing approvals", "")),
+            _ => None,
+        };
+        if let Some((what, hint)) = owner_only {
+            if !matches!(caller, Caller::Owner(_)) {
+                return refuse(caller, None, what, hint, entry);
+            }
+        } else {
+            let need = if matches!(path, "/api/ask" | "/api/ask/cancel") { Level::Read } else { Level::Admin };
+            if !caller.may(need) {
+                return refuse(caller, Some(need), "This", "", entry);
+            }
+        }
+    } else if path.starts_with("/api/") && !caller.may(Level::Read) {
+        return refuse(caller, Some(Level::Read), "Reading the context", "", entry);
+    }
+    let by = decider(caller);
 
     if path == "/api/curator" {
         if method != "POST" {
             return json_reply(405, &json!({ "error": "Use POST" }));
-        }
-        if xh.as_deref() != Some("ui") {
-            return json_reply(403, &json!({ "error": "Forbidden: missing X-Xenolith header" }));
         }
         let body: Option<Value> = read_body(req).ok().and_then(|b| serde_json::from_str(&b).ok());
         let Some(paused) = body.as_ref().and_then(|b| b.get("paused")).and_then(Value::as_bool) else {
@@ -252,9 +326,6 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
         return json_reply(200, &json!({ "paused": inbox::is_paused(wiki_dir) }));
     }
     if path == "/api/forget" && method == "POST" {
-        if xh.as_deref() != Some("ui") {
-            return json_reply(403, &json!({ "error": "Forbidden: missing X-Xenolith header" }));
-        }
         let body: Value = read_body(req).ok().and_then(|b| serde_json::from_str(&b).ok()).unwrap_or(Value::Null);
         let text = body["text"].as_str().unwrap_or("");
         let ignore_case = body["ignoreCase"].as_bool().unwrap_or(false);
@@ -264,10 +335,26 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
             // A request the curator recorded from a user's note.
             let approve = body["action"].as_str() == Some("approve");
             entry.result = Some(if approve { "forget request approved" } else { "forget request dismissed" }.into());
-            xenolith_core::forget::decide_request(wiki_dir, Some(&logs), batch, body["index"].as_u64().unwrap_or(u64::MAX) as usize, approve)
+            let index = body["index"].as_u64().unwrap_or(u64::MAX) as usize;
+            let r = xenolith_core::forget::decide_request(wiki_dir, Some(&logs), batch, index, approve);
+            audit::best_effort(
+                &AppPaths::current(),
+                "forget",
+                by,
+                vec![("batch", json!(take_chars(batch, 40))), ("index", json!(index)), ("action", json!(if approve { "approve" } else { "dismiss" })), ("ok", json!(r.is_ok()))],
+            );
+            r
         } else if body["apply"].as_bool() == Some(true) {
             entry.result = Some("forget applied".into());
-            xenolith_core::forget::redact(wiki_dir, Some(&logs), text, ignore_case, "window")
+            let r = xenolith_core::forget::redact(wiki_dir, Some(&logs), text, ignore_case, if by == "cli" { "cli" } else { "window" });
+            // What was forgotten stays out of the audit chain too: only its hash.
+            audit::best_effort(
+                &AppPaths::current(),
+                "forget",
+                by,
+                vec![("action", json!("apply")), ("text", json!(audit::content_hash(text))), ("matches", r.as_ref().ok().map(|v| v["matches"].clone()).unwrap_or(Value::Null))],
+            );
+            r
         } else {
             entry.result = Some("forget preview".into());
             xenolith_core::forget::find(wiki_dir, Some(&logs), text, ignore_case).map(|found| {
@@ -282,9 +369,6 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
         };
     }
     if path == "/api/settings" && method == "POST" {
-        if xh.as_deref() != Some("ui") {
-            return json_reply(403, &json!({ "error": "Forbidden: missing X-Xenolith header" }));
-        }
         let body: Value = read_body(req).ok().and_then(|b| serde_json::from_str(&b).ok()).unwrap_or(Value::Null);
         if let Some(schedule) = body["cleanupSchedule"].as_str() {
             return match xenolith_core::settings::set_cleanup_schedule(wiki_dir, schedule) {
@@ -315,12 +399,10 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
             xenolith_core::settings::Approvals::Manual => 0,
         };
         entry.result = Some(format!("approvals {}", set.as_str()));
+        audit::best_effort(&AppPaths::current(), "approvals", by, vec![("mode", json!(set.as_str())), ("applied", json!(applied))]);
         return json_reply(200, &json!({ "approvals": set.as_str(), "applied": applied }));
     }
     if path == "/api/models" && method == "POST" {
-        if xh.as_deref() != Some("ui") {
-            return json_reply(403, &json!({ "error": "Forbidden: missing X-Xenolith header" }));
-        }
         let body: Value = read_body(req).ok().and_then(|b| serde_json::from_str(&b).ok()).unwrap_or(Value::Null);
         let role = body["role"].as_str().unwrap_or_default();
         if !xenolith_core::settings::MODEL_ROLES.contains(&role) {
@@ -343,9 +425,6 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
         };
     }
     if (path == "/api/held" || path == "/api/revert") && method == "POST" {
-        if xh.as_deref() != Some("ui") {
-            return json_reply(403, &json!({ "error": "Forbidden: missing X-Xenolith header" }));
-        }
         let body: Value = read_body(req).ok().and_then(|b| serde_json::from_str(&b).ok()).unwrap_or(Value::Null);
         let batch = body["batch"].as_str().unwrap_or("");
         let action = body["action"].as_str().unwrap_or("");
@@ -358,11 +437,31 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
             let Some(index) = body["index"].as_u64() else {
                 return json_reply(400, &json!({ "error": "Send JSON: {\"batch\": \"<id>\", \"index\": n, \"action\": \"approve\"|\"reject\"|\"refile\"|\"undo\"}" }));
             };
-            if action == "undo" { held::undo(wiki_dir, batch, index as usize) } else { held::decide(wiki_dir, batch, index as usize, action) }
+            if action == "undo" { held::undo(wiki_dir, batch, index as usize) } else { held::decide(wiki_dir, batch, index as usize, action, by) }
         } else {
             let slug = body["slug"].as_str().unwrap_or("");
             if action == "ask" { held::undo_request(wiki_dir, batch, slug) } else { held::revert(wiki_dir, batch, slug) }
         };
+        // Each decision goes in the audit chain with who made it, whatever came of it.
+        let outcome = match &r {
+            Ok(v) => v["status"].as_str().unwrap_or("done").to_string(),
+            Err(held::Error::NotFound(_)) => "not found".into(),
+            Err(held::Error::Conflict(_)) => "refused".into(),
+            Err(held::Error::Wiki(_)) => "failed".into(),
+        };
+        audit::best_effort(
+            &AppPaths::current(),
+            "decision",
+            by,
+            vec![
+                ("space", body["space"].as_str().filter(|s| !s.trim().is_empty()).map(|s| json!(take_chars(s, 80))).unwrap_or(Value::Null)),
+                ("batch", json!(take_chars(batch, 40))),
+                ("index", body.get("index").cloned().unwrap_or(Value::Null)),
+                ("slug", body["slug"].as_str().map(|s| json!(take_chars(s, 80))).unwrap_or(Value::Null)),
+                ("action", json!(if path == "/api/revert" { (if action == "ask" { "ask-undo" } else { "revert" }).to_string() } else { take_chars(action, 20) })),
+                ("outcome", json!(outcome)),
+            ],
+        );
         return match r {
             Ok(v) => {
                 entry.result = Some(format!("{} {}", path.trim_start_matches("/api/"), v["status"].as_str().unwrap_or("done")));
@@ -375,9 +474,6 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
         };
     }
     if (path == "/api/ask" || path == "/api/ask/cancel") && method == "POST" {
-        if xh.as_deref() != Some("ui") {
-            return json_reply(403, &json!({ "error": "Forbidden: missing X-Xenolith header" }));
-        }
         let Some(body) = read_body(req).ok().and_then(|b| serde_json::from_str::<Value>(&b).ok()) else {
             let msg = if path == "/api/ask" { "Send JSON: {\"question\": \"...\", \"parent\": \"<id>\"?}" } else { "Send JSON: {\"id\": \"<id>\"}" };
             return json_reply(400, &json!({ "error": msg }));

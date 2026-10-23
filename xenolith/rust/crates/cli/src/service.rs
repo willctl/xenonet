@@ -91,7 +91,7 @@ fn host(settings: &Settings, stop: Arc<Waker>) -> i32 {
     if let Some(owner) = settings.owner.clone() {
         crate::keypipe::serve(settings.port, owner);
     }
-    let code = match http::serve(settings.port, stop, true) {
+    let code = match http::serve(settings.port, stop, true, settings.owner.clone()) {
         Ok(Ended::Stopped) => 0,
         Ok(Ended::Upgraded) => {
             note("a new build was installed; stopping so the service restarts on it");

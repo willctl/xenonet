@@ -14,7 +14,8 @@
 //!   xenolith forget "<text>" [--yes]   find every copy of a text in the wiki and logs; --yes redacts them
 //!   xenolith spaces | grant | revoke | access   spaces and who may use them (see access_cli.rs)
 //!   xenolith sync [...]                 copies of spaces another machine curates (see sync_cli.rs)
-//!   xenolith held [...]                 the changes waiting for your OK, in any space (see held_cli.rs)
+//!   xenolith held [...]                 the changes waiting for your OK, in any space; deciding one
+//!                                       uses the running service and its owner key (see held_cli.rs)
 //!   xenolith --version
 
 mod access_cli;
@@ -29,6 +30,7 @@ mod install;
 mod keypipe;
 mod mcp;
 mod models;
+mod owner_client;
 mod resources;
 mod service;
 mod stdio;

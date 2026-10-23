@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ago, api, appColor, dayLabel, duration } from './api.js';
+import { ago, api, appColor, dayLabel, duration, hasOwnerKey } from './api.js';
 import { createRenderer, highlight, plainText, snippetAround } from './markdown.js';
 import './app.css';
 
@@ -1137,6 +1137,11 @@ function HeldChanges({ refreshKey }) {
   };
   return (
     <>
+      {!hasOwnerKey() && (
+        <p className="muted small">
+          This window can show changes but not decide them. Open it from the Xenolith tray, or use <code>xenolith held</code> in a terminal.
+        </p>
+      )}
       <ApprovalsBar mode={mode} problem={approvalsProblem} busy={busy} onChange={setMode} />
       <CleanupSchedule refreshKey={refreshKey} />
       <NeedsOk mode={mode} changes={changes} forgets={forgets} busy={busy} onDecide={decide} onForget={forget} onApproveAll={approveAll} />

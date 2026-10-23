@@ -57,6 +57,11 @@ function askFirst(E) {
   fs.writeFileSync(path.join(E.wikiDir, '.curator', 'settings.json'), JSON.stringify({ approvals: 'manual' }));
 }
 
+/** The owner key the service wrote when it started (owner.rs): only the owner can read it. */
+const ownerKey = (E) => JSON.parse(fs.readFileSync(path.join(E.home, 'runtime', 'owner.key'), 'utf8')).key;
+/** What the window the tray opens sends: its header and the owner key. */
+const asOwner = (E) => ({ 'X-Xenolith': 'ui', 'X-Xenolith-Owner': ownerKey(E) });
+
 function startHttp(env) {
   return new Promise((resolve, reject) => {
     const proc = spawn(...srv(runtime, '--http', '--port', '0', '--parent-stdin'), { env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -702,7 +707,7 @@ describe('the trust gate (M2)', { skip: IMPL !== 'rust' && 'the Rust programs on
     askFirst(E);
     const server = await startHttp(E.env);
     const c = await connect('http', E.env, 'claude-code', server.url);
-    const UI = { 'X-Xenolith': 'ui' };
+    const UI = asOwner(E); // the window the tray opens: its header and the service's owner key
     try {
       const page = path.join(E.wikiDir, 'pages', 'harbor.md');
       await ok(c, 'context_log', { app: 'claude-code', source: 'user', title: 'Harbor runs on port 8443', body: 'Staging and production use port 8443.', pages: ['harbor'] });
@@ -729,11 +734,23 @@ describe('the trust gate (M2)', { skip: IMPL !== 'rust' && 'the Rust programs on
       assert.ok(ch.diff.some(([k, l]) => k === '+' && /Forum says Harbor moved/.test(l)), JSON.stringify(ch.diff));
 
       assert.equal((await postJson(server.port, '/api/held', { batch: ch.batch, index: 0, action: 'approve' })).status, 403, 'needs the window header');
+      // The window's header alone reads the window's API but decides nothing: approving needs the owner key.
+      const noKey = await postJson(server.port, '/api/held', { batch: ch.batch, index: 0, action: 'approve' }, { 'X-Xenolith': 'ui' });
+      assert.equal(noKey.status, 403);
+      assert.match(noKey.json.error, /^Deciding a change needs the owner key: open the window from the Xenolith tray, or run `xenolith held` in a terminal\.$/);
+      const wrongKey = await postJson(server.port, '/api/held', { batch: ch.batch, index: 0, action: 'approve' }, { 'X-Xenolith': 'ui', 'X-Xenolith-Owner': 'f'.repeat(64) });
+      assert.equal(wrongKey.status, 403, 'a key that is not this start\'s');
+      assert.equal(fs.readFileSync(page, 'utf8'), before, 'refused approvals change nothing');
       const r = await postJson(server.port, '/api/held', { batch: ch.batch, index: 0, action: 'approve' }, UI);
       assert.equal(r.status, 200, JSON.stringify(r.json));
       assert.match(fs.readFileSync(page, 'utf8'), /Forum says Harbor moved/);
       assert.equal((await getJson(server.port, '/api/status')).json.held, 0);
       assert.equal((await postJson(server.port, '/api/held', { batch: ch.batch, index: 0, action: 'approve' }, UI)).status, 404, 'decided once');
+      // The audit chain says who decided, and records the refusals.
+      const chain = fs.readFileSync(path.join(E.home, 'audit', 'chain.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+      const decided = chain.filter((l) => l.kind === 'decision');
+      assert.deepEqual(decided.map((l) => [l.who, l.action, l.outcome]).slice(0, 2), [['owner', 'approve', 'approved'], ['owner', 'approve', 'not found']]);
+      assert.ok(chain.some((l) => l.kind === 'refused' && l.why === 'owner key'), 'a refused decision is recorded');
 
       // A plain change from an app goes through; the window can revert it while nobody touched the page.
       await ok(c, 'context_log', { app: 'claude-code', title: 'Harbor batch size is 750', body: 'Raised from 500.', pages: ['harbor'] });
@@ -789,7 +806,7 @@ describe('the trust gate (M2)', { skip: IMPL !== 'rust' && 'the Rust programs on
       const again = await runCurator(E.env, ['--lint']).done;
       assert.equal(again.code, 0, again.stderr);
       assert.equal((await getJson(server.port, '/api/held')).json.changes.length, 1, 'nothing reviewed twice before it changes');
-      assert.equal((await postJson(server.port, '/api/held', { batch: ch.batch, index: 0, action: 'approve' }, { 'X-Xenolith': 'ui' })).status, 200);
+      assert.equal((await postJson(server.port, '/api/held', { batch: ch.batch, index: 0, action: 'approve' }, asOwner(E))).status, 200);
       assert.match(fs.readFileSync(page, 'utf8'), /The roof is tidied and fine\./);
     } finally {
       await c.close();
@@ -1002,7 +1019,7 @@ describe('the trust gate (M2)', { skip: IMPL !== 'rust' && 'the Rust programs on
     const E = makeEnv();
     const server = await startHttp(E.env);
     const c = await connect('http', E.env, 'claude-code', server.url);
-    const UI = { 'X-Xenolith': 'ui' };
+    const UI = asOwner(E); // the window the tray opens: its header and the service's owner key
     try {
       const page = path.join(E.wikiDir, 'pages', 'harbor.md');
       await ok(c, 'context_log', { app: 'claude-code', source: 'user', title: 'Harbor runs on port 8443', body: 'Staging and production use port 8443.', pages: ['harbor'] });
@@ -1042,6 +1059,7 @@ describe('the trust gate (M2)', { skip: IMPL !== 'rust' && 'the Rust programs on
 
       // "Ask me first": the next one waits; switching back to automatic applies it.
       assert.equal((await postJson(server.port, '/api/settings', { approvals: 'manual' })).status, 403, 'needs the window header');
+      assert.equal((await postJson(server.port, '/api/settings', { approvals: 'manual' }, { 'X-Xenolith': 'ui' })).status, 403, 'and the owner key');
       assert.equal((await getJson(server.port, '/api/settings')).json.approvals, 'auto', 'a refused request changes nothing');
       assert.equal((await postJson(server.port, '/api/settings', { approvals: 'sometimes' }, UI)).status, 400);
       assert.equal((await postJson(server.port, '/api/settings', { approvals: 'manual' }, UI)).json.approvals, 'manual');
@@ -1076,7 +1094,7 @@ describe('the trust gate (M2)', { skip: IMPL !== 'rust' && 'the Rust programs on
     const E = makeEnv();
     const server = await startHttp(E.env);
     const c = await connect('http', E.env, 'claude-code', server.url);
-    const UI = { 'X-Xenolith': 'ui' };
+    const UI = asOwner(E); // the window the tray opens: its header and the service's owner key
     try {
       const phone = '555-0142-7781';
       await ok(c, 'context_log', { app: 'claude-code', source: 'user', title: 'Dana phone', body: `Dana's old phone is ${phone}.`, pages: ['dana'] });
@@ -1101,6 +1119,7 @@ describe('the trust gate (M2)', { skip: IMPL !== 'rust' && 'the Rust programs on
       assert.ok(preview.json.found.length >= 3 && preview.json.found.some((f) => f.rel === 'pages/dana.md'), JSON.stringify(preview.json));
       assert.ok(preview.json.found.every((f) => !f.sample.includes(phone)), 'previews are masked');
       assert.equal((await postJson(server.port, '/api/forget', { text: phone })).status, 403);
+      assert.equal((await postJson(server.port, '/api/forget', { text: phone, apply: true }, { 'X-Xenolith': 'ui' })).status, 403, 'forgetting needs the owner key');
       assert.equal((await postJson(server.port, '/api/forget', { text: phone, apply: true })).status, 403, 'redacting needs the window header');
       assert.equal((await postJson(server.port, '/api/forget', { batch: forget[0].batch, index: forget[0].index, action: 'approve' })).status, 403);
       assert.ok(fs.readFileSync(path.join(E.wikiDir, 'pages', 'dana.md'), 'utf8').includes(phone), 'refused requests change nothing');

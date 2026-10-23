@@ -7,7 +7,8 @@
 //! Local is any process on this machine, not only the owner's own apps: tokens scope remote and
 //! other apps' access. /mcp takes Local or a bearer token; /sync/v1 always needs a token, since sync
 //! is remote by nature; /status, /ui and /api are Local only and never take a token; /health is
-//! open and says nothing private.
+//! open and says nothing private. Deciding anything in /api also needs the owner key (owner.rs),
+//! which this service makes when it starts.
 
 use crate::httpd::{self, Request, Response};
 use crate::mcp::{self, Ctx, State, log, rpc_error};
@@ -19,9 +20,10 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
-use xenolith_core::access::{self, Principal};
+use xenolith_core::access::{self, Level, Principal};
 use xenolith_core::inbox;
 use xenolith_core::lock::lock_info;
+use xenolith_core::owner::{self, OwnerKey};
 use xenolith_core::paths::AppPaths;
 use xenolith_core::reqlog::{RequestLog, clip_str, new_request_id};
 use xenolith_core::text::{from_ms, local_iso, now_ms, parse_ms, random_uuid, sha256_hex};
@@ -111,9 +113,45 @@ pub struct App {
     pub port: u16,
     closing: AtomicBool,
     inflight: AtomicUsize,
+    /// This start's owner key, or why it could not be written (approvals then wait for a restart).
+    owner: Result<OwnerKey, String>,
+}
+
+/// Who is calling /status or the window's API: a local request (http.rs refuses any other).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Caller {
+    /// It showed this start's owner key: the window the tray opened ("owner"), or `xenolith` in a
+    /// terminal ("cli", which says so in X-Xenolith).
+    Owner(&'static str),
+    /// A process on this machine without the key, with what access.json gives local callers.
+    Local(Option<Level>),
+}
+
+impl Caller {
+    pub fn may(self, need: Level) -> bool {
+        match self {
+            Caller::Owner(_) => true,
+            Caller::Local(l) => l.is_some_and(|l| l >= need),
+        }
+    }
 }
 
 impl App {
+    /// Who a local request is: the owner when it carries this start's owner key, else a local process.
+    pub fn caller(&self, req: &Request) -> Caller {
+        if let (Ok(real), Some(shown)) = (&self.owner, req.header(owner::HEADER)) {
+            if owner::matches(&real.key, shown.trim()) {
+                return Caller::Owner(if req.header("x-xenolith").as_deref() == Some("cli") { "cli" } else { "owner" });
+            }
+        }
+        Caller::Local(access::load(&AppPaths::current()).local)
+    }
+
+    /// Why decisions can't be made in the window this start, if the owner key could not be written.
+    pub fn owner_problem(&self) -> Option<&str> {
+        self.owner.as_ref().err().map(String::as_str)
+    }
+
     /// The state, retrying setup if it failed (e.g. folder permissions fixed since startup).
     pub fn state(&self) -> State {
         if self.state.read().unwrap().setup_error.is_some() {
@@ -155,6 +193,9 @@ pub fn status_report(app: &App, st: &State) -> Value {
     let running = heartbeat_age.is_some_and(|a| a < 180.0);
     let errors = app.counters.snapshot();
     let mut reasons: Vec<String> = vec![];
+    if let Some(p) = app.owner_problem() {
+        reasons.push(format!("approvals need the owner key, which could not be written: {p}"));
+    }
     let oldest = queue["oldestPendingAt"].as_str().and_then(parse_ms);
     let wait_min = oldest.map(|t| (now_ms() - t) as f64 / 60_000.0).unwrap_or(0.0);
     let pending = queue["pending"].as_i64().unwrap_or(0);
@@ -246,6 +287,19 @@ pub fn status_report(app: &App, st: &State) -> Value {
         .unwrap_or(Value::Null),
     );
     Value::Object(s)
+}
+
+/// /status for a caller that may not read the wiki ("local": "none" in access.json, no owner key):
+/// the service's health without what the wiki says.
+pub fn status_for(app: &App, st: &State, caller: Caller) -> Value {
+    let mut s = status_report(app, st);
+    if !caller.may(Level::Read) {
+        if let Some(o) = s.as_object_mut() {
+            o.remove("recent");
+            o.remove("lastWrite");
+        }
+    }
+    s
 }
 
 // ---------------------------------------------------------------- responses
@@ -553,7 +607,7 @@ fn handle(app: &App, req: &Request, entry: &mut Entry) -> Reply {
         }
         let st = app.state();
         entry.quiet = true;
-        return Reply::json(200, &status_report(app, &st));
+        return Reply::json(200, &status_for(app, &st, app.caller(req)));
     }
     if path == "/ui" || path.starts_with("/ui/") || path.starts_with("/api/") {
         let st = app.state();
@@ -665,6 +719,7 @@ pub fn read_body(req: &Request) -> Result<String, u16> {
 /// build of this program replaces it (the service manager then starts the new one).
 /// XENOLITH_PROCESS must already be set (main does it before any thread starts).
 pub fn run(port: u16, parent_stdin: bool, exit_on_upgrade: bool) -> ! {
+    // As the user (macOS, Linux, or `serve --http` by hand): the owner key is the user's alone.
     let stop = Waker::new();
     if parent_stdin {
         let stop = stop.clone();
@@ -675,7 +730,7 @@ pub fn run(port: u16, parent_stdin: bool, exit_on_upgrade: bool) -> ! {
             stop.stop();
         });
     }
-    match serve(port, stop, exit_on_upgrade) {
+    match serve(port, stop, exit_on_upgrade, None) {
         Ok(Ended::Stopped) => std::process::exit(0),
         Ok(Ended::Upgraded) => std::process::exit(UPGRADED_EXIT),
         Err(e) => {
@@ -700,8 +755,9 @@ fn exe_stamp(exe: &std::path::Path) -> Option<((u64, u64), u64, std::time::Syste
 }
 
 /// Serves on 127.0.0.1:`port` until `stop` (graceful: in-flight requests get up to 5 s), or until this
-/// program's file changes (`watch_exe`).
-pub fn serve(port: u16, stop: Arc<Waker>, watch_exe: bool) -> Result<Ended, String> {
+/// program's file changes (`watch_exe`). `owner_sid`: the Windows service's installing user (its
+/// ini's `owner`), who may read the owner key this service writes.
+pub fn serve(port: u16, stop: Arc<Waker>, watch_exe: bool, owner_sid: Option<String>) -> Result<Ended, String> {
     started_ms();
     let state = mcp::setup();
     let reqlog = mcp::open_request_log("service", &state.config);
@@ -709,6 +765,11 @@ pub fn serve(port: u16, stop: Arc<Waker>, watch_exe: bool) -> Result<Ended, Stri
     let actual = listener.local_addr().map(|a| a.port()).unwrap_or(port);
     let mode = if state.curated { "curated" } else { "direct" };
     let wiki_shown = state.wiki_dir.as_ref().map(|d| wiki::disp(d)).unwrap_or_else(|| "(unavailable)".into());
+    // A new owner key each start, for the tray and `xenolith held` (owner.rs).
+    let owner = owner::create(&AppPaths::current(), actual, &owner_sid.into_iter().collect::<Vec<_>>()).map_err(|e| e.to_string());
+    if let Err(e) = &owner {
+        log(&format!("the owner key could not be written ({e}); deciding held changes in the window waits for a restart"));
+    }
     let app = Arc::new(App {
         state: RwLock::new(state),
         reqlog,
@@ -717,6 +778,7 @@ pub fn serve(port: u16, stop: Arc<Waker>, watch_exe: bool) -> Result<Ended, Stri
         port: actual,
         closing: AtomicBool::new(false),
         inflight: AtomicUsize::new(0),
+        owner,
     });
     log(&format!("v{} listening on http://127.0.0.1:{actual}/mcp ({mode} writes); wiki at {wiki_shown}", xenolith_core::VERSION));
 
@@ -781,6 +843,9 @@ pub fn serve(port: u16, stop: Arc<Waker>, watch_exe: bool) -> Result<Ended, Stri
         std::thread::sleep(Duration::from_millis(25));
     }
     log(&format!("shutting down ({})", if matches!(ended, Ended::Upgraded) { "upgraded" } else { "stopped" }));
+    if let Ok(k) = &shared.owner {
+        owner::remove(&AppPaths::current(), k);
+    }
     let _ = acceptor.join();
     Ok(ended)
 }

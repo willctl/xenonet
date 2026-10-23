@@ -8,6 +8,8 @@ Xenolith is for a trusted local machine. The HTTP service binds to loopback and 
 - **Tokens scope remote access and other apps' access.** They do not separate your own agents from each other: an agent that runs as you can read anything you can.
 - **Sync always needs a token**, even from this machine. `/status`, `/ui` and `/api` take local requests only and never a token. `/health` is open and says nothing private.
 - **A plain tunnel looks local.** A forwarder that adds none of those headers (`ssh -L`, socat, a TCP tunnel) is indistinguishable from a local process. If anyone reaches the port that way, run `xenolith access local none` and give each client its own token ([README](README.md#who-is-local)).
+- **Decisions need the owner key.** Approving a held change or a proposal, Undo, Revert, the approvals setting and Forget need the key the service writes to `runtime/owner.key` in its state folder at each start, readable by the owner alone. The tray opens the window with it; `xenolith held approve` reads it. The audit chain records each decision with who made it (`owner` or `cli`), and refused attempts. An approver never approves a change made from its own note.
+- **What the owner key guarantees, and no more:** a decision needs an explicit read of an owner-only file, which the audit chain records. A sandboxed agent that can't read the state folder can't approve. An agent running unsandboxed as the user can read the file, as it can every file of the user's.
 - The window's `X-Xenolith` header stops cross-site browser requests. It is not a password.
 
 Do not use this service to isolate mutually untrusted users.
