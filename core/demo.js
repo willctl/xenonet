@@ -1,9 +1,9 @@
 // Demo mode: a made-up workspace that runs through XenoNet's real pipeline.
 // It writes projects (real git repos), Claude Code transcripts, Codex
-// rollouts, Grok Build sessions and a small wiki into a temp folder, lists
-// the sessions the way the adapters would, and keeps appending transcript
-// lines so the map stays busy. Your real projects and sessions are never
-// read while it runs.
+// rollouts, Grok Build sessions and a small shared context into a temp
+// folder, lists the sessions the way the adapters would, and keeps
+// appending transcript lines so the map stays busy. Your real projects and
+// sessions are never read while it runs.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -134,7 +134,7 @@ const SESSIONS = [
     app: "claude", project: "atlas-api", title: "Add partial refunds to the orders API", branch: "feat/partial-refunds", live: true, desktop: true,
     turns: [
       { prompt: "Add partial refunds to the orders API. Keep the existing full-refund path working.", steps: [["read", "src/orders/refunds.ts"], ["edit", "src/orders/routes.ts", "routes = []", "routes = [refundRoute]"], ["run", "npm test -- orders", true], ["edit", "src/orders/refunds.ts", "refund()", "refund(amount?: number)"]], reply: "Partial refunds work. `POST /orders/:id/refunds` takes an optional amount, and the full-refund path is unchanged. All 48 order tests pass." },
-      { prompt: "Log the refund rules in the wiki.", steps: [["mcp", "xenolith", "context_log", { pages: ["atlas-api", "refunds"] }], ["run", "npm run lint", true]], reply: "Logged the refund rules on the atlas-api and refunds pages." },
+      { prompt: "Log the refund rules in the shared context.", steps: [["mcp", "xenolith", "context_log", { pages: ["atlas-api", "refunds"] }], ["run", "npm run lint", true]], reply: "Logged the refund rules on the atlas-api and refunds pages." },
     ],
   },
   {
@@ -181,7 +181,7 @@ const SESSIONS = [
     turns: [{ prompt: "Add a dark mode to the storefront. Follow the system setting, with a toggle in the header.", steps: [["read", "app/layout.tsx"], ["edit", "app/theme.css", ":root {", ":root, [data-theme=dark] {"], ["run", "npm run build", true]], reply: "Dark mode follows the system setting, and the header has a toggle that remembers your choice. Every page passes the contrast check." }],
   },
   { app: "grok", project: "atlas-web", title: "Check contrast on every page", ago: 3, parent: 14, subagent: true, turns: [{ prompt: "Check contrast on every page in dark mode.", steps: [["run", "npm run test:contrast", true]], reply: "All 23 pages pass. The sale badge was closest, at 4.6 to 1." }] },
-  { app: "grok", project: "pathfinder", title: "Map the depot loading rules", ago: 75, turns: [{ prompt: "Write down the depot's loading rules as constraints the solver can use.", steps: [["read", "src/solver.rs"], ["mcp", "xenolith", "context_log", { pages: ["pathfinder"] }]], reply: "The loading rules are on the pathfinder wiki page as seven constraints. Two need data the depot doesn't send yet." }] },
+  { app: "grok", project: "pathfinder", title: "Map the depot loading rules", ago: 75, turns: [{ prompt: "Write down the depot's loading rules as constraints the solver can use.", steps: [["read", "src/solver.rs"], ["mcp", "xenolith", "context_log", { pages: ["pathfinder"] }]], reply: "The loading rules are on the pathfinder context page as seven constraints. Two need data the depot doesn't send yet." }] },
 ];
 
 // Stable IDs, so a saved layout survives a restart of the demo.

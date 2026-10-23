@@ -1,11 +1,14 @@
 // core/xenolith.js in Rust (crates/xenonet-sources/src/xenolith.rs): where
-// the shared context's wiki is (Xenolith's, else Agent Wiki's), and which
-// MCP server writes to it.
+// the shared context's folder is (Xenolith's, else Agent Wiki's), and
+// which MCP server writes to it.
 import os from "node:os";
 import { native } from "../index.js";
 
 export const CONTEXT_SERVERS = new Set(native.contextServers());
 export const isContextServer = (server) => CONTEXT_SERVERS.has(server);
+
+export const CONTEXT_TOOLS = new Set(native.contextTools());
+export const isContextCall = (server, tool, named = null) => native.contextIsCall(server, tool, named);
 
 export function findContextDir({ env = process.env, home = os.homedir(), platform = process.platform } = {}) {
   return native.findContextDir({ ...env }, String(home), String(platform));

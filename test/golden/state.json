@@ -1802,7 +1802,7 @@
     "actions": [
      {
       "id": "open-folder",
-      "label": "Open wiki folder"
+      "label": "Open folder"
      }
     ]
    },

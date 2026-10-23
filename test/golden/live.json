@@ -984,7 +984,7 @@
      ],
      "needsYou": null,
      "stuck": null,
-     "lastMessage": "The loading rules are on the pathfinder wiki page as seven constraints. Two need data the depot doesn't send yet.",
+     "lastMessage": "The loading rules are on the pathfinder context page as seven constraints. Two need data the depot doesn't send yet.",
      "lastTurnEndAt": 1791024250000,
      "interruptedAt": null,
      "lastEventAt": 1791024250000
@@ -2200,7 +2200,7 @@
     "sessionId": "grok:0190d3e0-0000-7000-8000-000000000017",
     "app": "grok",
     "kind": "message",
-    "detail": "The loading rules are on the pathfinder wiki page as seven constraints.…",
+    "detail": "The loading rules are on the pathfinder context page as seven constrain…",
     "ts": 1791024250000
    },
    {
@@ -2638,7 +2638,7 @@
     "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
     "app": "claude",
     "kind": "prompt",
-    "detail": "Log the refund rules in the wiki.",
+    "detail": "Log the refund rules in the shared context.",
     "ts": 1791028040000
    },
    {
@@ -3230,7 +3230,7 @@
     "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
     "app": "claude",
     "kind": "prompt",
-    "detail": "Log the refund rules in the wiki.",
+    "detail": "Log the refund rules in the shared context.",
     "ts": 1791028540000
    },
    {
@@ -3550,7 +3550,7 @@
     },
     "prompts": [
      {
-      "text": "Log the refund rules in the wiki.",
+      "text": "Log the refund rules in the shared context.",
       "ts": 1791028040000
      },
      {
@@ -3558,7 +3558,7 @@
       "ts": 1791028240000
      },
      {
-      "text": "Log the refund rules in the wiki.",
+      "text": "Log the refund rules in the shared context.",
       "ts": 1791028540000
      },
      {
@@ -4187,7 +4187,7 @@
     ],
     "messages": [
      {
-      "text": "The loading rules are on the pathfinder wiki page as seven constraints. Two need data the depot doesn't send yet.",
+      "text": "The loading rules are on the pathfinder context page as seven constraints. Two need data the depot doesn't send yet.",
       "ts": 1791024250000
      }
     ],
@@ -5342,7 +5342,7 @@
     ],
     "needsYou": null,
     "stuck": null,
-    "lastMessage": "The loading rules are on the pathfinder wiki page as seven constraints. Two need data the depot doesn't send yet.",
+    "lastMessage": "The loading rules are on the pathfinder context page as seven constraints. Two need data the depot doesn't send yet.",
     "lastTurnEndAt": 1791024250000,
     "interruptedAt": null,
     "lastEventAt": 1791024250000

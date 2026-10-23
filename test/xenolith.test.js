@@ -1,13 +1,13 @@
 // Xenolith on XenoNet's map: XenoNet finds the shared context's folder the
 // way Xenolith's own programs do (falling back to Agent Wiki's), names the
-// wiki after the server that owns it, and beams a session's context_* writes
-// to the pages they name.
+// shared context after the server that owns it, and beams a session's
+// context_* writes to the pages they name.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { contextName, contextServerOf, findContextDir, isContextServer, SPACE_KINDS, spaceOf } from "../core/xenolith.js";
+import { CONTEXT_TOOLS, contextName, contextServerOf, findContextDir, isContextCall, isContextServer, SPACE_KINDS, spaceOf } from "../core/xenolith.js";
 import { parseLog, readWiki, wikiLinks } from "../core/wiki.js";
 import { buildGraph } from "../core/graph.js";
 import { GRAPH_NODES } from "../core/schema/graph.js";
@@ -278,4 +278,37 @@ test("context_* writes, and the wiki_* names before them, beam to the pages they
   assert.deepEqual(live.wikiPagesOf("xenolith", { title: "x", slug: "atlas" }), ["atlas"]);
   assert.deepEqual(live.wikiPagesOf("agent-wiki", { pages: ["ledger"] }), ["ledger"]);
   assert.equal(live.wikiPagesOf("github", { pages: ["x"] }), null);
+});
+
+test("Xenolith's tools write to the shared context under the server the config names", () => {
+  assert.deepEqual([...CONTEXT_TOOLS], ["context_start", "context_search", "context_read", "context_log", "context_upsert_page"]);
+  for (const tool of CONTEXT_TOOLS) assert.ok(isContextCall("ctx", tool, "ctx"), tool);
+  assert.ok(isContextCall("xenolith", "write_page", null) && isContextCall("agent-wiki", "wiki_log", "ctx"), "the known names, whatever the tool");
+  assert.ok(!isContextCall("ctx", "context_log", null) && !isContextCall("ctx", "context_log", ""), "no server named");
+  assert.ok(!isContextCall("ctx", "write_page", "ctx") && !isContextCall("github", "context_log", "ctx"));
+
+  const live = new LiveTelemetry({ claudeRoot: "/nowhere", codexRoot: "/nowhere", claudeDesktopDir: null, contextServer: "ctx" });
+  assert.deepEqual(live.wikiPagesOf("ctx", { pages: ["refunds"] }, "context_log"), ["refunds"]);
+  assert.equal(live.wikiPagesOf("ctx", { pages: ["refunds"] }, "write_page"), null);
+  assert.equal(live.wikiPagesOf("ctx", { pages: ["refunds"] }), null);
+  assert.deepEqual(live.wikiPagesOf("xenolith", { pages: ["refunds"] }), ["refunds"]);
+  const unnamed = new LiveTelemetry({ claudeRoot: "/nowhere", codexRoot: "/nowhere", claudeDesktopDir: null });
+  assert.equal(unnamed.wikiPagesOf("ctx", { pages: ["refunds"] }, "context_log"), null);
+
+  // Through the transcripts: a Claude Code tool call, a plugin's server
+  // among them, and a Codex MCP call.
+  const at = new Date(Date.now() - 60e3).toISOString();
+  const claude = { sessionId: "claude:aaaaaaaa-0000-0000-0000-00000000000c" };
+  const use = (id, name, input) => ({ type: "tool_use", id, name, input });
+  live.applyClaude(claude, { type: "assistant", timestamp: at, message: { id: "msg_1", model: "claude-x", stop_reason: "tool_use", content: [use("tu1", "mcp__ctx__context_upsert_page", { slug: "atlas" }), use("tu2", "mcp__plugin_xenolith_ctx__context_log", { pages: ["refunds"], space: "project:atlas" }), use("tu3", "mcp__ctx__write_page", { slug: "other" })] } }, false);
+  const codex = { sessionId: "codex:bbbbbbbb-0000-0000-0000-00000000000c" };
+  live.applyCodex(codex, { type: "event_msg", timestamp: at, payload: { type: "task_started" } }, false);
+  live.applyCodex(codex, { type: "event_msg", timestamp: at, payload: { type: "item_completed", item: { type: "McpToolCall", server: "ctx", tool: "context_log", arguments: { pages: ["ledger"] }, status: "completed" } } }, false);
+  const pages = live.history.filter((e) => e.kind === "tool").map((e) => [e.tool, e.pages ?? null]);
+  assert.deepEqual(pages, [
+    ["mcp__ctx__context_upsert_page", ["atlas"]],
+    ["mcp__plugin_xenolith_ctx__context_log", ["project:atlas/refunds"]],
+    ["mcp__ctx__write_page", null],
+    ["mcp__ctx__context_log", ["ledger"]],
+  ]);
 });

@@ -71,7 +71,7 @@
           ]
         },
         "pages": {
-          "description": "The wiki pages a write to the shared context names: a slug, or <space>/<slug> for a page of another Xenolith space than this machine's",
+          "description": "The context pages a write to the shared context names: a slug, or <space>/<slug> for a page of another Xenolith space than this machine's",
           "maxItems": 6,
           "type": "array",
           "items": {

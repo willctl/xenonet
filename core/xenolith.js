@@ -1,6 +1,6 @@
 // Xenolith (xenolith/ in this repo), XenoNet's shared context: where its
-// wiki is, and which MCP server writes to it, so the map can show the wiki
-// as its own constellation and beam a session's writes to the pages they
+// folder is, and which MCP server writes to it, so the map can show it as
+// its own constellation and beam a session's writes to the pages they
 // name. XenoNet only reads the folder; Xenolith's own server does the
 // writing. Agent Wiki, which Xenolith came from, is found the same way when
 // Xenolith isn't there.
@@ -8,9 +8,19 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// The MCP servers whose calls write to the shared context.
+// The MCP servers whose calls write to the shared context, by the names
+// Xenolith and Agent Wiki install them under.
 export const CONTEXT_SERVERS = new Set(["xenolith", "agent-wiki"]);
 export const isContextServer = (server) => CONTEXT_SERVERS.has(server);
+
+// Xenolith's tools. Under the server the config names for the shared
+// context (wikiServer), a call to one of them goes to the shared context
+// whatever that server is called.
+export const CONTEXT_TOOLS = new Set(["context_start", "context_search", "context_read", "context_log", "context_upsert_page"]);
+
+// Whether an MCP call goes to the shared context: any call to a server of
+// a known name, or a call to one of Xenolith's tools under `named`.
+export const isContextCall = (server, tool, named = null) => isContextServer(server) || (typeof named === "string" && named !== "" && server === named && CONTEXT_TOOLS.has(tool));
 
 const abs = (v) => (v && path.isAbsolute(v) ? v : null);
 

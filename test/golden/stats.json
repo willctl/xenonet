@@ -66,7 +66,7 @@
     "n": 2,
     "start": 1791028040000,
     "end": 1791028190000,
-    "prompt": "Log the refund rules in the wiki.",
+    "prompt": "Log the refund rules in the shared context.",
     "tokens": 113950,
     "cost": 0.0674223,
     "byModel": {
@@ -98,7 +98,7 @@
     "n": 4,
     "start": 1791028540000,
     "end": 1791028690000,
-    "prompt": "Log the refund rules in the wiki.",
+    "prompt": "Log the refund rules in the shared context.",
     "tokens": 178782,
     "cost": 0.07794899999999999,
     "byModel": {
