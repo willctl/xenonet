@@ -65,6 +65,7 @@ its rules for working beside other agents.
 | The approval mode is read once per batch, under the commit's lock | `Journal.auto`, `held::apply_auto_locked`; the auto-mode tests in `test/curator.mjs` |
 | The installer leaves an app's config alone while that app runs | Claude desktop: `install::desktop_running` and its sandbox test. Codex and Claude Code: judgment |
 | Tests and verification never touch the installed service (port 47850) or the real shared context folder | The verify skill's isolated instance; judgment |
+| A Rust test that takes a lock deletes its folder with `lock::remove_test_dir`: on Windows a lock holder keeps a file open in that folder for its whole life | The Windows CI job |
 | Commit messages are Conventional Commits, one per logical change | Judgment; XenoNet's AGENTS.md |
 | Programs keep files in the platform's directories (XDG, AppData, Library), never a new `~/.something` | `xenolith_core::paths`; judgment |
 

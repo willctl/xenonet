@@ -1305,7 +1305,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(fs::metadata(token_file(&paths, "laptop")).unwrap().permissions().mode() & 0o777, 0o600);
         }
-        fs::remove_dir_all(d).unwrap();
+        crate::lock::remove_test_dir(&d);
     }
 
     #[test]
@@ -1350,7 +1350,7 @@ mod tests {
         assert_eq!((r[0]["result"].as_str(), r[0]["status"].as_u64()), (Some("refused"), Some(400)), "an invalid entry is refused for good");
         let empty = json!({ "id": inbox::new_note_id(&now()), "note": { "kind": "log", "app": "codex", "title": "", "body": "x" } });
         assert_eq!(accept(&dir, &who, &[empty], &all).0[0]["status"], 400, "a note the inbox refuses is invalid");
-        fs::remove_dir_all(d).unwrap();
+        crate::lock::remove_test_dir(&d);
     }
 
     #[test]
@@ -1401,7 +1401,7 @@ mod tests {
         assert_eq!(page_list(&dir).unwrap()["deleted"], json!(["kept", "old"]));
         assert_eq!(accept(&dir, &who, &[remove("Bad Slug", "0123456789abcdef")], &all).0[0]["status"], 400);
         assert_eq!(accept(&dir, &who, &[remove("kept", "none")], &all).0[0]["status"], 400, "a removal names the version it removed");
-        fs::remove_dir_all(d).unwrap();
+        crate::lock::remove_test_dir(&d);
     }
 
     #[test]
@@ -1418,7 +1418,7 @@ mod tests {
         m.deleted.insert("../x".into(), now_ms());
         write_json(&dir, &manifest_file(&dir), &serde_json::to_value(&m).unwrap()).unwrap();
         assert_eq!(page_list(&dir).unwrap()["deleted"], json!([]), "older than 30 days, or not a slug: forgotten");
-        fs::remove_dir_all(d).unwrap();
+        crate::lock::remove_test_dir(&d);
     }
 
     #[test]
@@ -1451,7 +1451,7 @@ mod tests {
         assert_eq!(entry["note"]["source"], "agent");
         queue_local_changes(&dir, &st, "machine:laptop");
         assert_eq!(inbox::list_notes(&dir).unwrap().len(), 3, "the same changes again are the same notes");
-        fs::remove_dir_all(d).unwrap();
+        crate::lock::remove_test_dir(&d);
     }
 
     #[test]
@@ -1466,7 +1466,7 @@ mod tests {
         let newer = format!("{theirs}- 10:00 · curator · Filed another\n");
         merge_log(&dir, "2026-10-22", &newer).unwrap();
         assert_eq!(fs::read_to_string(dir.join("log/2026/2026-10-22.md")).unwrap(), format!("{}\n\n- 09:30 · codex · Written here\n", newer.trim_end()));
-        fs::remove_dir_all(d).unwrap();
+        crate::lock::remove_test_dir(&d);
     }
 
     #[test]
@@ -1488,6 +1488,6 @@ mod tests {
             inbox::submit_note(&dir, &NoteInput { kind: "log".into(), app: "codex".into(), title: "z".into(), body: "w".into(), ..Default::default() }, "", "", &inbox::By::Local("t")).unwrap().id;
         mark_sent(&dir, &sent, "studio", &json!({ "id": sent, "result": "accepted" })).unwrap();
         assert!(inbox::read_note(&dir, &sent).unwrap().1.starts_with("Sent to the space's curator"));
-        fs::remove_dir_all(d).unwrap();
+        crate::lock::remove_test_dir(&d);
     }
 }

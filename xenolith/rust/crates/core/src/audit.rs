@@ -227,7 +227,7 @@ mod tests {
         let v = verify(&f).unwrap();
         assert_eq!(v, Verified { lines: 2, head: b["hash"].as_str().unwrap().into(), broken: None });
         assert!(!fs::read_to_string(&f).unwrap().contains("hello"), "text is kept only as a hash");
-        fs::remove_dir_all(f.parent().unwrap()).unwrap();
+        crate::lock::remove_test_dir(f.parent().unwrap());
     }
 
     #[test]
@@ -252,7 +252,7 @@ mod tests {
         fs::OpenOptions::new().append(true).open(&f).unwrap().write_all(b"{\"torn\":").unwrap();
         append_to(&f, "write", "you", vec![]).unwrap();
         assert_eq!(verify(&f).unwrap().broken.unwrap().0, 5, "a torn line stays visible");
-        fs::remove_dir_all(f.parent().unwrap()).unwrap();
+        crate::lock::remove_test_dir(f.parent().unwrap());
     }
 
     #[test]
@@ -273,7 +273,7 @@ mod tests {
         let (h, problem) = health(&paths);
         assert_eq!(h["writable"].as_bool(), Some(false));
         assert!(problem.unwrap().starts_with("the audit chain can't be written"));
-        fs::remove_dir_all(home).unwrap();
+        crate::lock::remove_test_dir(&home);
     }
 
     #[test]
@@ -295,6 +295,6 @@ mod tests {
         let v = verify(&f).unwrap();
         assert_eq!((v.lines, v.broken), (40, None));
         assert_eq!(tail(&f, 3).len(), 3);
-        fs::remove_dir_all(f.parent().unwrap()).unwrap();
+        crate::lock::remove_test_dir(f.parent().unwrap());
     }
 }
