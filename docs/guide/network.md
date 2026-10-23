@@ -91,6 +91,66 @@ What changes one machine's own setup stays on it: connecting its sessions, insta
 
 When the network's gateway runs the actor gateway with A2A on (see [Agents that speak A2A](actors.md#agents-that-speak-a2a)), an A2A agent reaches the whole network there. It's an actor on the gateway's machine, with its own token and scopes. A scope can name a machine: a grant of `machine:laptop` lets it reach the sessions on laptop, which it names as `@laptop:claude:…` in its message's `target`. The session's reply on laptop completes the agent's task.
 
+## Services through the network
+
+A machine can publish a local HTTP service to the network, and programs on the other machines reach it as if it ran on theirs. XenoNet carries each request and its answer between the two machines, sealed like every frame, and knows nothing of what the service is.
+
+On the machine that runs the service:
+
+```bash
+xenonet svc publish files http://127.0.0.1:8080 --paths /api/v1/
+```
+
+- The address is where the service listens on this machine: `127.0.0.1` or `[::1]` and a port, over plain http. XenoNet looks up no names, follows no redirects, uses no proxy, and refuses its own ports.
+- `--paths` says what's reachable, as path prefixes that start and end with `/`. Repeat it for each prefix. A request for any other path is refused before it reaches the service.
+- Every machine in the network may call it. `--hosts laptop`, repeated for each machine, narrows it to the machines named.
+- `xenonet svc list` shows what this machine publishes, and `xenonet svc unpublish files` takes one off. Publishing a name again replaces it. Leaving the network takes them all off.
+
+Publishing and taking a service off are yours to do: XenoNet refuses them from under an agent.
+
+On another machine in the network, a program calls its own XenoNet:
+
+```bash
+curl http://127.0.0.1:47840/api/svc/studio/files/api/v1/items
+```
+
+`/api/svc/<machine>/<name>` stands for the service's address, and the rest of the path is passed on: here the service on studio gets `GET /api/v1/items`. Any program on that machine may call it, with GET, HEAD, POST, PUT, PATCH, DELETE or OPTIONS. A web page can't: a request with an `Origin` header is refused.
+
+The service gets:
+
+- the method, the path, the query as it came, and the body. The path is checked against `--paths` once it's decoded, and one with `..`, `.`, `//`, `;` or `\` in it is refused;
+- four of the caller's headers: `Authorization`, `Content-Type`, `Accept` and `User-Agent`. `Authorization` passes untouched, so the service's own tokens work, and XenoNet never logs it;
+- `Host: 127.0.0.1:<port>`, and `Forwarded: by=xenonet;for=laptop`, which names the calling machine as its signature proved it. The caller's own `Forwarded`, `X-Forwarded-*` or `Via` never crosses, nor does any other header.
+
+Its answer goes back with its status, headers and body, without `Set-Cookie` and the headers that only concern one connection.
+
+A request's body is at most 1 MiB and an answer's 4 MiB, or the caller gets 413. Each machine may call each service 300 times a minute, then 429. A caller waits 90 seconds at most for the answer, then gets 504. When either machine isn't linked to the gateway, the caller gets 503 at once: a request is never kept for later, since it may carry the service's credential. XenoNet's own refusals have an `X-XenoNet-Refused` header with a code, such as `offline`, `not-published`, `not-allowed`, `path-refused` or `rate`, and a JSON body that says why, so a program can tell them from the service's own answers.
+
+**A published service with no sign-in of its own is open to every program on every machine allowed to call it.** Give it tokens of its own, or name the machines that may call it with `--hosts`.
+
+### Xenolith's sync between two machines
+
+[Xenolith](../../xenolith/README.md#sync-between-machines) syncs a space between machines over HTTP, with its own tokens. Through the network, laptop follows a space that studio curates, and neither machine opens a port for it.
+
+On studio, where Xenolith's service listens on its usual port, 47850:
+
+```bash
+xenolith grant machine:laptop ctx:write:project:atlas
+xenolith token create machine:laptop
+xenonet svc publish xenolith http://127.0.0.1:47850 --paths /sync/v1/
+```
+
+On laptop, with the token in `studio.token`:
+
+```bash
+xenolith sync name laptop
+xenolith sync peer add studio http://127.0.0.1:47840/api/svc/studio/xenolith < studio.token
+xenolith sync follow project:atlas studio
+xenolith sync
+```
+
+Xenolith on studio gets each request with laptop's token and a `Forwarded` header, so it treats it as remote, and what studio granted `machine:laptop` decides what laptop may do.
+
 ## When the gateway is down
 
 Each machine keeps working for its own sessions. Messages, receipts and handoffs for other machines wait in its outbox for up to a week, 10,000 frames or 50 MB, and go once the gateway is back, each delivered once. Other machines' sessions stay in `peers`, marked offline. The doctor says when the gateway last answered and why it didn't.
@@ -131,7 +191,8 @@ Crosses, signed and sealed:
 - claims and the files sessions are changing, as the repo's remote and the path inside the repo;
 - messages, their receipts and handoffs;
 - while a console is open on a window host, each other machine's map for it: its places and its sessions of the last 7 days (at most 5,000), with the home folder as `~`, and their live state, as the [SSH hosts prototype](other-machines.md) sends them with detail on. Only a window host is sent maps, and only while its console asks again every 20 seconds;
-- a session's transcript or stats, only when you open one in a window host's XenoNet window. Nothing keeps them.
+- a session's transcript or stats, only when you open one in a window host's XenoNet window. Nothing keeps them;
+- a request to a service a machine published, and its answer, when a program on another machine asks for it (see [Services through the network](#services-through-the-network)).
 
 Doesn't cross: file contents, any transcript you didn't open, and collisions' diffs and MCP servers' details, which you open on their own machine for now. With **Share with the network: titles only** on in a machine's Network panel, its sessions' detail stays on it too, and so do its transcripts: its map goes with titles, states and counts only, and its stats still open. The other consoles show that something waits there, and say the question is in that machine's console.
 

@@ -38,6 +38,8 @@ a second way to look at a machine. The guide is
 - **A2A**, the cross-vendor agent-to-agent standard (1.0, March 2026,
   Linux Foundation), lets agent frameworks reach the network's sessions
   through the gateway, as actors. MCP stays how sessions talk to XenoNet.
+- **A host can publish a local HTTP service** to the network, and programs
+  on the other hosts reach it through their own XenoNet (section 14).
 
 ## As built
 
@@ -122,6 +124,11 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
   notification only on the host with the newest `youAt`, or on all of them
   once that's five minutes old.
 - A2A behind the front door (section 12).
+- Services through the network (section 14): `xenonet svc`, its owner's
+  routes under `/api/net/svc`, the callers' `/api/svc/…` on each host's
+  own API, and `svc` frames (`network/svc/v1`,
+  `crates/xenonet-net/src/svc.rs`). A follower of Xenolith's on one host
+  syncs with its curator on another through them.
 - `crates/xenonet-service/tests/net_engine.rs` runs three services with the
   real engine on each: joining with tickets from the gateway's host and from
   another window host, presence, messages with receipts and replies, repo
@@ -136,6 +143,14 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
   shares titles only keeps its transcripts; a `gap` brings a fresh
   snapshot; and the relay stops once the subscription lapses. The
   `net_relay` fuzz target reads asks and answers on both sides.
+- `crates/xenonet-service/tests/net_svc.rs` runs three services and a
+  made-up HTTP service published on one host and reached from another: an
+  allowlisted path passes and others are refused, the service is sent the
+  caller's id in `Forwarded` and the caller's bearer untouched, the size
+  caps and `--hosts` hold, a slow service is a 504, and an offline host a
+  503 at once. With Xenolith built, a real follower pulls a page from a real
+  curator through `/api/svc/<host>/xenolith`. The `net_svc` fuzz target
+  reads paths, requests, answers, addresses and headers.
 
 Settled while building, beyond the sections below:
 
@@ -300,8 +315,9 @@ request to its handler by path before anything else is checked:
   Host and Origin.
 - The network routes have their own limits:
   - 1 MiB for an up batch;
-  - 16 MiB for a relay batch (`frames?relay=1`), whose frames are 12 MiB
-    at most each: a relay body of 8 MiB at most, sealed and in base64;
+  - 16 MiB for a relay batch (`frames?relay=1`), which carries the map's
+    relay frames or one service's `svc` frame, 12 MiB at most each: a
+    body of 8 MiB at most, sealed and in base64;
   - no time limit on the down stream, which ends itself (below).
 - The front door reads bodies as streams and counts as it reads.
 
@@ -413,7 +429,9 @@ xenonet-net/1
   time.
 - There's no forward secrecy for what waits in a queue. So frames that
   carry a secret are never queued, and expire in 60 s. Those are the
-  actor token answer and the ticket checks.
+  actor token answer and the ticket checks. Services' `svc` frames, which
+  may carry a service's own credential, are never queued either, and a
+  host drops one older than two minutes (section 14).
 
 **The roster** is a chain of entries. Each entry holds:
 
@@ -748,7 +766,7 @@ twins, are unchanged.
   `handoff`, `operator`, `roster` and `gateway` frames, in
   `<state>/network/gateway.sqlite`. It waits a week, up to 10,000 frames
   or 50 MB per host.
-- Presence, claims and relay frames for a host that's away are dropped:
+- Presence, claims, relay and svc frames for a host that's away are dropped:
   it gets a full set when it's back.
 - When a queue is full, the oldest frame goes. The gateway sends a `gap`
   to the host that lost it and a `gap` notice to each sender whose frame
@@ -822,9 +840,9 @@ left off", including on another machine.
   - While the making host is away, an accept waits, and the tool says so.
   - A handoff no one takes lapses after a week, and its maker is told.
 
-**Xenolith through the gateway** is a later step. The gateway would
-forward `/xenolith/sync/…` to the host the person names as the curator,
-sealed, for Xenolith's own tokens to check.
+**Xenolith through the network.** A follower on one host syncs with the
+curator on another through a service the curator's host publishes
+(section 14), and Xenolith's own tokens decide what it may do.
 
 **Claims, focus and presence** are shared as section 6 says. Nothing else
 is copied between hosts. What an agent shares is what it writes into a
@@ -879,7 +897,6 @@ message, a handoff or Xenolith. That keeps context selective, which the
   - **ACP, the Agent Client Protocol.** It's the common way to drive Claude
     Code, Codex, OpenCode, Grok Build, Cursor and Copilot CLI, and would let
     a console start or drive a session on another host.
-  - **Xenolith through the gateway** (section 11).
 - **Skipped:**
   - ANP: a draft with little use.
   - AG-UI: agent-to-UI; XenoNet's console is its own UI.
@@ -898,14 +915,108 @@ message, a handoff or Xenolith. That keeps context selective, which the
 | Prompt injection across machines | Messages are framed as information. Bypassed sessions hold them. Hop and fan-out caps, and per-link limits: 600 frames and 60 messages a minute, and the map's relay frames, 120 a minute, apart |
 | An agent reading other machines' transcripts | Another machine's transcript, stats and diffs are read only for the window: its key, and no token. A host serves its map only to a window host's console, and a host that shares titles only keeps its transcripts. The relay reads its own API as a local program, with no key, through its allowlist of GETs |
 | A weak "from you" | Operator frames say how they were checked; only window-key and macOS process checks count |
-| Replay | Frame ids for a week, and the map's relay frames for two minutes, with their seq within a subscription; request nonces for 2 minutes; times within 60 s |
+| Replay | Frame ids for a week, and the map's relay frames and services' svc frames for two minutes, relay frames with their seq within a subscription; request nonces for 2 minutes; times within 60 s |
 | Keys and tokens leaking | Private keys stay in an owner-only file. Tickets are kept hashed. Nothing secret is queued, and on a LAN-only gateway `/mcp` isn't served |
 | A2A misuse | A2A clients are actors: tokens, default-deny scopes, rate limits. No outbound calls in the first step |
+| A service published to the network | Nothing is published until the owner does it, from the window or their own terminal. Targets are loopback IPs over plain http, never XenoNet's own ports; no redirects, proxy or name lookups. Only the paths named, checked once decoded; roster hosts, or the ones named; 300 requests a minute for each caller; the caller in `Forwarded` from the frame's signature; four headers in and no cookies out. A service with no auth of its own is open to every program on every allowed host |
 
 Process checks still run on macOS only, so on a Linux or Windows host a
 local program can claim to be an agent there, as today. The network
 doesn't make that worse: a remote host's frames are signed by the host,
 never trusted as a particular process, and weak checks travel as weak.
+
+### 14. Services through the network
+
+A host's owner publishes a local HTTP service by name, and any program
+on another host in the network reaches it through its own XenoNet's
+local API. XenoNet knows nothing of what the service is: it carries the
+request and the answer, and checks them at both ends. The first use is
+Xenolith's sync, with a follower on one host and the curator on another.
+
+**Publishing** is the owner's, refused from under an agent as `net
+create` and `net join` are (`Ctx::from_you`), and off until they do it:
+
+```text
+xenonet svc publish <name> http://127.0.0.1:<port> --paths /sync/v1/ [--paths …] [--hosts <host>…]
+xenonet svc unpublish <name>
+xenonet svc list
+```
+
+- The name has a host id's shape.
+- The target is a loopback IP literal and a port (`127.0.0.1` or
+  `[::1]`), over plain http, with an optional path prefix. No names are
+  looked up, no redirects are followed, no proxy is used, and XenoNet's
+  own ports (its API, its actor gateway, its LAN door) are refused, since
+  publishing them would let other hosts act as this machine's owner.
+- `--paths` are prefixes that start and end with `/`. At least one is
+  required: nothing else of the service is reachable.
+- Any roster host may call; `--hosts` narrows that to the hosts named,
+  which must be in the roster.
+- What's published is kept in `<state>/network/services.json`, and goes
+  with the network when the host leaves.
+
+**Reaching it.** `<method> /api/svc/<host>/<name>/<rest>` on the caller's
+own local API, for any program on that machine. It's never under
+`/net/v1/`, which the front door hands to the gateway on its LAN and
+tunnel doors. The API's `Host` check applies, and a request with an
+`Origin`, or a browser's `Sec-Fetch-Site` other than `none`, is refused.
+XenoNet's API version header doesn't apply to it. `Authorization` is the
+service's own credential, never read as an actor's token.
+
+**Frames.** `svc` (`network/svc/v1`) has two bodies, keyed by a request
+id the caller makes (`svq_` and 32 hex digits):
+
+- `request`: the name, method, path (`rest` and its query), the caller's
+  `Authorization`, `Content-Type`, `Accept` and `User-Agent`, and the body
+  in base64url;
+- `answer`: the status, headers and body, and a `code` when XenoNet
+  answered rather than the service.
+
+They're sealed and signed like every host frame, so the gateway sees the
+head only. Each goes up alone in a relay batch (`frames?relay=1`), since
+other frames are held to 64 KiB, with a bucket of 600 a minute at the
+gateway apart from the engine's and the map's. They're live only: never
+queued for a host that's away, since a request may carry the service's
+bearer, and a host drops one older than two minutes and remembers their
+ids that long, as it does relay frames.
+
+**The caller's host:**
+
+- It answers 503 before sending when its own link is down, or when the
+  gateway's last ping didn't list the target host as linked: the gateway
+  takes a live frame for an unlinked host as accepted and drops it.
+- It waits for the answer by the request's id, 90 s at most (504). A host
+  on the long-poll fallback adds up to 25 s a hop.
+- What waits is answered 503 as soon as the target goes unlinked or this
+  host's link drops, and at once when the gateway refuses the frame (429
+  for its rate, 413, else 502) or the batch doesn't reach it.
+- It waits on 256 requests at most.
+
+**The publishing host** checks, in order: the name is published (404),
+the caller may call (403), its rate (300 a minute for each caller host
+and service, 429), the method (GET, HEAD, POST, PUT, PATCH, DELETE or
+OPTIONS, 405), the path (400 or 403), and the body (1 MiB, 413). The
+path's query is split off first and passed on as it came. The rest is
+percent-decoded strictly, refused with `..`, `.`, `//`, `;`, `\` or a
+control character in it, matched against the prefixes, and encoded again
+the one way, so the service is sent the path the allowlist matched.
+
+It rebuilds the request from the frame: the method, the target's prefix
+and the path, the body, and only the four headers above, then
+`Host: 127.0.0.1:<port>` and `Forwarded: by=xenonet;for=<caller>`, the
+caller being the frame's signature-checked sender. A `Forwarded`,
+`X-Forwarded-*` or `Via` from the caller never crosses. `Authorization`
+is never stripped or logged on either side. It forwards 32 requests at
+once at most (503), and waits 75 s on the service.
+
+**On the way back,** `Set-Cookie`, hop-by-hop headers and what
+`Connection` names are dropped, on both hosts. An answer over 4 MiB is a
+413. XenoNet's own refusals carry `X-XenoNet-Refused: <code>` and a JSON
+`{ error, code }`.
+
+**What it means.** A published service with no auth of its own becomes
+reachable by every process on every allowed host. The guide says so, as
+does `xenonet svc --help`.
 
 ## The wire
 
@@ -930,8 +1041,9 @@ never trusted as a particular process, and weak checks travel as weak.
 - **Gateway frames** are `hello`, `ping`, `gap`, `roster` and `removed`.
   They aren't sealed, and they're signed by the gateway's host key.
 - **Host frames** are `presence`, `claims`, `message`, `receipt`,
-  `handoff`, `relay` and `operator`. They're sealed and signed by the
-  sending host.
+  `handoff`, `relay`, `operator` and `svc`. They're sealed and signed by
+  the sending host. `relay` and `svc` frames go up in relay batches of
+  their own (`frames?relay=1`).
 - Their bodies are in `schemas/network/<kind>/v1.json`, and the engine's
   side of them in `xenonet_base::network`.
 
@@ -959,6 +1071,11 @@ address.
 | `POST remove`, `POST replace` | Remove or replace a host |
 | `POST gateway/take` | Make this host the gateway |
 | `PUT settings` | Titles only, the LAN address |
+| `GET svc`, `POST svc/publish`, `POST svc/unpublish` | The services this host publishes (section 14) |
+
+And for any program on the host, `/api/svc/<host>/<name>/<rest>`, with
+any method a service takes: another host's published service (section
+14).
 
 **Storage:**
 
@@ -972,6 +1089,7 @@ address.
   the gateway lets go is a `gap` to both hosts, and a new epoch is one
   too: the engine then sends again the messages with no `stored` receipt.
 - `<state>/network/link.json`: how the link last stood, for the doctor.
+- `<state>/network/services.json`: the services this host publishes.
 - `<state>/network/gateway.sqlite`, on the gateway only: tickets (hashed),
   queues, frame ids, the epoch, and the last presence of each host.
 - `engine.sqlite` gains:
@@ -991,6 +1109,9 @@ xenonet net add-machine <id> [--window]   (macOS terminal; the window elsewhere)
 xenonet net remove <host>
 xenonet net leave
 xenonet net gateway take | set <address>
+xenonet svc publish <name> http://127.0.0.1:<port> --paths <prefix>… [--hosts <host>…]
+xenonet svc unpublish <name>
+xenonet svc list
 ```
 
 **The doctor** checks:
@@ -1068,8 +1189,7 @@ built ("As built").
 
 Later: collisions' diffs and MCP servers' details over the network, A2A
 out, actor tokens and scopes from another machine, moving actors' rows
-with the gateway, Xenolith through the gateway, the Claude
-Code messaging bridge, ACP, MCP 2026-07-28, a direct path between hosts on
+with the gateway, the Claude Code messaging bridge, ACP, MCP 2026-07-28, a direct path between hosts on
 one LAN, and a recovery key for a lost founder.
 
 ## Open questions for the owner
