@@ -28,6 +28,9 @@ fn write(p: &Path, text: &str) {
     std::fs::write(p, text).unwrap();
 }
 
+/// Where the --sandbox stand-in records the commands it would run.
+const SYS_LOG: &str = ".migrate-sys.log";
+
 fn read(p: &Path) -> String {
     std::fs::read_to_string(p).unwrap_or_default()
 }
@@ -171,6 +174,10 @@ impl Home {
             for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
                 let p = e.path();
                 let rel = p.strip_prefix(base).unwrap().to_string_lossy().replace('\\', "/");
+                // The stand-in's record of what it would run, not a file the migration writes.
+                if rel == SYS_LOG {
+                    continue;
+                }
                 if e.file_type().unwrap().is_dir() {
                     out.insert(format!("{rel}/"), vec![]);
                     go(base, &p, out);
@@ -208,6 +215,9 @@ fn dry_run_run_again_and_rollback_in_a_sandbox() {
     assert_eq!(v["ready"], true);
     assert_eq!(v["plan"].as_array().unwrap().len(), 7);
     assert_eq!(h.snapshot(), before, "a dry run writes nothing");
+    // On Windows it asks sc, schtasks and reg what agent-wiki registered; it runs nothing else.
+    let asked = read(&h.sb.join(SYS_LOG));
+    assert!(asked.lines().all(|l| l.split(' ').nth(1).is_some_and(|a| ["query", "/query"].contains(&a))), "{asked}");
 
     let (code, text) = h.migrate(&["--run"]);
     assert_eq!(code, 0, "{text}");
@@ -223,7 +233,7 @@ fn dry_run_run_again_and_rollback_in_a_sandbox() {
     let desktop = read(&h.desktop());
     assert!(desktop.contains("\"xenolith\"") && !desktop.contains("agent-wiki") && desktop.contains("\r\n"), "{desktop}");
     assert!(read(&h.wiki().join("pages").join("dentist.md")).contains(NOTE), "the wiki is adopted in place");
-    let sys_log = read(&h.sb.join(".migrate-sys.log"));
+    let sys_log = read(&h.sb.join(SYS_LOG));
     if cfg!(target_os = "macos") {
         assert!(sys_log.contains("launchctl bootout") && !h.sb.join("Library/LaunchAgents/com.agentwiki.server.plist").exists(), "{sys_log}");
     }
