@@ -1,4 +1,4 @@
-//! Page and note frontmatter: the small YAML subset Xenolith writes and reads (src/wiki.mjs).
+//! Page and note frontmatter: the small YAML subset Xenolith writes and reads.
 
 use crate::text::to_lf;
 use regex::Regex;

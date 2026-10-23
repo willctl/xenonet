@@ -1,4 +1,4 @@
-//! Cross-process locks for the wiki folder (src/lock.mjs), compatible with the Node programs:
+//! Cross-process locks for the wiki folder, compatible with every earlier Xenolith release:
 //! `mkdir .locks/<name>.lock` is the mutex, `<name>.lock/owner` holds the owner as JSON, and on
 //! Windows every lock holder keeps `.locks/alive/<pid>-<start>.alive` open with share mode 0 for its
 //! whole life, so anyone can tell instantly whether an owner is alive. Elsewhere an owner is checked

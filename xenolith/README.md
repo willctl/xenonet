@@ -75,10 +75,6 @@ After installing, sign the curator in once: tray icon > **Curator** > **Sign in
 to ChatGPT for the curator...** (see [The curator](#the-curator)). Until then,
 notes wait in the inbox, where you can see them.
 
-The earlier Node runtime and C# tray are retired. The installer refuses `--node`
-and a missing Rust build. Legacy source remains for comparison tests and is not
-a supported installation target.
-
 ## The service
 
 The installer registers a per-machine service that serves Streamable HTTP on
@@ -878,26 +874,21 @@ ui/                    the Xenolith window (React): index.html, src/main.jsx, ap
 assets/icon/           icon sources (SVG)
 plugin/                plugin source; __PLACEHOLDERS__ are filled at install time
 scripts/               build (the window), icons, package, install-local, ui-preview, eval, bench
-src/, service/, tray/  the earlier Node runtime and C# service wrapper and tray (install-local --node)
 eval/synthetic/        the memory eval's synthetic wiki, questions and curator note streams
 eval/local/            your own real-wiki questions (gitignored)
 test/                  the suites: e2e (two real MCP clients, both transports), curator (fake model),
                        tray, installer, the window (ui), Ask (the fake model drives the real read-only
-                       server), migrate, portable (Linux/macOS differences), memory-eval, spaces,
-                       tokens, audit, resources, sync, opt-in live and stress tests
+                       server), portable (Linux/macOS differences), memory-eval, spaces, tokens,
+                       audit, resources, sync, opt-in live and stress tests
 ```
 
-The suites talk to the programs over MCP, `/api` and their files, so they are
-the contract for both implementations: `XENOLITH_IMPL=rust node --test ...`
-runs them against the Rust programs (`rust/target/release`, or
-`XENOLITH_RUST_BIN`). Spaces, access, tokens, the audit chain, resources and
-sync exist in the Rust programs only, so their suites skip under the Node
-runtime. `scripts/check-rust.sh` formats, lints (`cargo clippy -D warnings`)
-and tests the Rust programs; XenoNet's CI doesn't run Xenolith's suites yet.
-`npm run bench` measures the footprint and speed of the Node runtime against the
-Rust program. It alternates 5 runs per side, reports each metric's median and
-range, checks every answer, and exits 1 on any error. Use
-`XENOLITH_IMPL=node|rust` to measure one side. The memory eval is described in
+The suites talk to the programs over MCP, `/api` and their files: `npm test`
+runs them against the programs in `rust/target/release` (or
+`XENOLITH_RUST_BIN`). `scripts/check-rust.sh` formats, lints
+(`cargo clippy -D warnings`) and tests the Rust programs; XenoNet's CI doesn't
+run Xenolith's suites yet. `npm run bench` measures the program's footprint and
+speed: 5 runs, each metric's median and range, every answer checked, exit 1 on
+any error. The memory eval is described in
 [docs/memory-eval.md](docs/memory-eval.md).
 
 ## Design notes

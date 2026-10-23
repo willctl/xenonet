@@ -13,10 +13,11 @@ applies too: its commit conventions, and its rules for working beside other agen
   `crates/cli` (`xenolith`: MCP server, HTTP service, window API, installer), `crates/tray`
   (`xenolith-tray`).
 - `ui/`: the window (React), built by `npm run build` into `dist/runtime/ui`.
-- `src/`, `service/`, `tray/*.cs`, `scripts/install.mjs`: the earlier Node runtime and C# programs.
-  They are retired by R5 (`docs/rust-plan.md`). Do not add features there.
-- `test/*.mjs`: the behaviour suites for both implementations. `eval/` and `scripts/eval.mjs`:
+- `test/*.mjs`: the behaviour suites, run against the Rust programs. `eval/` and `scripts/eval.mjs`:
   the memory eval. `protocol/PROTOCOL.md`: what every connected app is told to do.
+- `scripts/`: the window's build, the icons, the release payload (`package.mjs`), `install-local`,
+  `ui:preview`, the eval and the bench. `scripts/lib.mjs` and `scripts/paths.mjs` hold what the
+  scripts and tests need of an installed Xenolith.
 
 ## Build and check
 
@@ -25,10 +26,9 @@ applies too: its commit conventions, and its rules for working beside other agen
 - `scripts/check-rust.sh` (Linux, WSL or macOS): rustfmt, clippy for this OS, Windows and macOS,
   and the Rust unit tests. Run it before pushing Rust changes. On Windows without cargo, run it in
   WSL.
-- `XENOLITH_IMPL=rust node --test test/<suite>.mjs`: the suites against the Rust programs in
-  `rust/target/release` (or `XENOLITH_RUST_BIN`). A plain `npm test` runs them against the Node
-  runtime and skips the Rust-only tests (the trust gate, held changes, forget, the Rust installer
-  and tray), so run both.
+- `npm test` (or `node --test test/<suite>.mjs`): the suites against the Rust programs in
+  `rust/target/release` (or `XENOLITH_RUST_BIN`). Build them first: `cargo build --release
+  --workspace` in `rust/` (the tray and installer suites need `xenolith-tray` too).
 - To see a change end to end, run an isolated instance: `npm run ui:preview` (a snapshot copy of
   your wiki on port 47859), or `xenolith serve --http --port 0` with `XENOLITH_HOME` and
   `XENOLITH_DIR` set to temp folders.

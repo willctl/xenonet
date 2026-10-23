@@ -1,4 +1,4 @@
-//! Ask, the window's side (src/ask.mjs): questions queued as files for the curator process, which
+//! Ask, the window's side: questions queued as files for the curator process, which
 //! answers them; the server queues, reads, lists and cancels.
 //!
 //!   .curator/asks/<id>/ask.json      the question (written here)

@@ -14,9 +14,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { IMPL, curatorCmd, rustBin, srv, srvT } from './impl.mjs';
+import { curatorCmd, rustBin, srv, srvT } from './impl.mjs';
 
-const skip = IMPL !== 'rust' && 'the Rust programs only';
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const runtime = path.join(repo, 'dist', 'runtime');
 const fakeCodex = path.join(repo, 'test', 'fixtures', 'fake-codex.mjs');
@@ -48,7 +47,7 @@ function ok(m, args, input) {
 
 function startHttp(env) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(...srv(runtime, '--http', '--port', '0', '--parent-stdin'), { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    const proc = spawn(...srv('--http', '--port', '0', '--parent-stdin'), { env, stdio: ['pipe', 'pipe', 'pipe'] });
     let err = '';
     proc.stderr.on('data', (d) => {
       err += d;
@@ -76,7 +75,7 @@ function request(port, method, p, { body, headers = {} } = {}) {
 
 async function session(m, fn) {
   const c = new Client({ name: 'sync-test', version: '1' });
-  await c.connect(new StdioClientTransport({ ...srvT(runtime), env: m.env, stderr: 'pipe' }));
+  await c.connect(new StdioClientTransport({ ...srvT(), env: m.env, stderr: 'pipe' }));
   try {
     return await fn(async (name, args) => {
       const r = await c.callTool({ name, arguments: args });
@@ -93,7 +92,7 @@ const md = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.en
 const page = (title, body) => `---\ntitle: ${title}\ntype: project\n---\n\n# ${title}\n\n${body}\n`;
 const walk = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)])) : []);
 
-describe('sync between two machines', { skip, timeout: 120_000 }, () => {
+describe('sync between two machines', { timeout: 120_000 }, () => {
   const studio = machine('studio');
   const laptop = machine('laptop');
   let server;
@@ -161,7 +160,7 @@ describe('sync between two machines', { skip, timeout: 120_000 }, () => {
 
   test("the laptop's curator leaves the followed space alone", async () => {
     await session(laptop, (call) => call('context_log', { app: 'codex', space: 'project:atlas', title: 'Waiting for the studio', body: 'x', pages: ['db'] }));
-    const run = spawnSync(...curatorCmd(runtime, '--once'), { env: laptop.env, encoding: 'utf8' });
+    const run = spawnSync(...curatorCmd('--once'), { env: laptop.env, encoding: 'utf8' });
     assert.equal(run.status, 0, run.stderr);
     assert.equal(md(path.join(laptop.atlas, 'inbox')).length, 1, 'still waiting to be pushed');
     assert.equal(ok(laptop, ['sync', '--json']).json().spaces[0].pushed, 1);
@@ -287,7 +286,7 @@ function forwarder(target, prefix) {
   );
 }
 
-describe('a curator and two followers', { skip, timeout: 600_000 }, () => {
+describe('a curator and two followers', { timeout: 600_000 }, () => {
   const hub = machine('hub');
   const alpha = machine('alpha'); // may write, through a forwarder under /hub
   const beta = machine('beta'); // may only append, straight to the hub

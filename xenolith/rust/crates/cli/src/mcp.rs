@@ -1,4 +1,4 @@
-//! The MCP side of the server (src/server.mjs): state, the five tools, JSON-RPC message handling.
+//! The MCP side of the server: state, the five tools, JSON-RPC message handling.
 //! The tools are defined once, in mcp/tools.json (curated writes, the default). With writes "direct"
 //! two of them do something else, so they read differently: mcp/tools-direct-text.json replaces
 //! only their title and description.

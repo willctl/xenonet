@@ -1,4 +1,4 @@
-//! The SessionStart hook (src/session-start.mjs): prints the wiki's lead-in, page list and recent
+//! The SessionStart hook: prints the wiki's lead-in, page list and recent
 //! activity as {"hookSpecificOutput": ...}. A broken or unreachable wiki never blocks a session: the
 //! wiki is read on a worker thread, and after 5 s a fallback is printed and the process exits
 //! (exiting ends the thread even if it is stuck on a hung path). stdin is drained, never waited on.

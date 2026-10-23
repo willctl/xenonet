@@ -1,6 +1,6 @@
 //! The wiki: config resolution, the skeleton, atomic writes, pages and the generated index, the
-//! daily log, full-text search, reads and context_start (src/wiki.mjs). Formats are byte-for-byte the
-//! Node runtime's, so both can work on one wiki.
+//! daily log, full-text search, reads and context_start. FORMAT.md documents the files, for other
+//! programs that read them.
 
 use crate::frontmatter::{self, Meta, Val};
 use crate::inbox;

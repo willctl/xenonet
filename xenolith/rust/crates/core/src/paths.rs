@@ -1,5 +1,5 @@
-//! Where Xenolith keeps its own files (not the wiki): the platform's standard locations
-//! (src/paths.mjs). XENOLITH_{CONFIG,DATA,STATE,LOG,CACHE}_DIR set one kind; XENOLITH_HOME puts
+//! Where Xenolith keeps its own files (not the wiki): the platform's standard locations.
+//! XENOLITH_{CONFIG,DATA,STATE,LOG,CACHE}_DIR set one kind; XENOLITH_HOME puts
 //! everything in one folder (portable mode, the old ~/.xenolith layout).
 
 use std::collections::HashMap;

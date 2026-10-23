@@ -1,4 +1,4 @@
-//! The curator: files queued notes (inbox/) into the wiki (src/curator.mjs).
+//! The curator: files queued notes (inbox/) into the wiki.
 //!
 //! It runs as the user, never as the service, because it uses the user's ChatGPT sign-in through the
 //! official Codex CLI (`codex exec`, see codex.rs), in its own CODEX_HOME. The model only returns a
@@ -705,7 +705,7 @@ pub struct JournalNote {
     pub hash: String,
 }
 
-/// The write-ahead journal (.curator/journal/<batch>.json), the same format curator.mjs writes.
+/// The write-ahead journal (.curator/journal/<batch>.json).
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Journal {

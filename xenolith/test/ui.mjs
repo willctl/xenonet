@@ -1,6 +1,6 @@
-// The tray window: the activity-log parser, the safe Markdown renderer, and the /ui + /api
-// endpoints of the BUNDLED server (static files with CSP, JSON API, the pause guard, and the same
-// Host/Origin refusals as /mcp), against a temp wiki.
+// The window: the safe Markdown renderer, and the /ui + /api endpoints of the server (static files
+// with CSP, JSON API, the pause guard, and the same Host/Origin refusals as /mcp), against a temp
+// wiki.
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -13,58 +13,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { parseLogDay } from '../src/activity.mjs';
 import { createRenderer, escapeHtml, highlight, plainText, snippetAround } from '../ui/src/markdown.js';
-import { IMPL, srv } from './impl.mjs';
+import { srv } from './impl.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const dist = path.join(repo, 'dist', 'runtime');
 if (!fs.existsSync(path.join(dist, 'ui', 'app.js'))) throw new Error('Run `npm run build` first.');
-
-describe('activity log parser', () => {
-  const DAY = [
-    '# 2026-10-02',
-    '',
-    '## 13:27 · codex · Atlas recovered after reboot',
-    '',
-    'tags: atlas, windows  ',
-    'pages: [[atlas]], [[example-workstation]]',
-    '',
-    'Started Docker. See [[docker-notes]] too.',
-    '',
-    'Second paragraph.',
-    '',
-    '- 13:53 · curator · Page updated: Xenolith [[xenolith]]',
-    '- 13:53 · curator · Page created: Orchard [[orchard]]',
-    '',
-    '<!-- curator batch 2026-10-02_13-50-36-712-9195bd -->',
-    '',
-    '## 14:30 · claude-code · Checked the tray',
-    '',
-    'pages: [[xenolith]]',
-    '',
-    'Checked it.',
-    'tags: not-a-tag-line-because-body-started',
-  ].join('\n');
-
-  test('full and compact entries, newest first, with tags, pages and body', () => {
-    const e = parseLogDay('2026-10-02', DAY);
-    assert.deepEqual(
-      e.map((x) => [x.time, x.app, x.compact]),
-      [['14:30', 'claude-code', false], ['13:53', 'curator', true], ['13:53', 'curator', true], ['13:27', 'codex', false]],
-    );
-    const codex = e[3];
-    assert.equal(codex.title, 'Atlas recovered after reboot');
-    assert.deepEqual(codex.tags, ['atlas', 'windows']);
-    assert.deepEqual(codex.pages, ['atlas', 'example-workstation', 'docker-notes'], 'pages line first, then links in the body');
-    assert.equal(codex.body, 'Started Docker. See [[docker-notes]] too.\n\nSecond paragraph.');
-    assert.deepEqual(e[1].pages, ['orchard']);
-    assert.equal(e[1].title, 'Page created: Orchard [[orchard]]');
-    assert.deepEqual(e[0].tags, [], 'a tags: line after the body started is body text');
-    assert.equal(e[0].body, 'Checked it.\ntags: not-a-tag-line-because-body-started');
-    assert.deepEqual(parseLogDay('2026-10-02', ''), []);
-  });
-});
 
 describe('markdown rendering', () => {
   const render = createRenderer({ known: (s) => s === 'atlas' });
@@ -130,11 +84,9 @@ describe('the /ui and /api endpoints', { timeout: 60_000 }, () => {
     const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     fs.mkdirSync(path.join(wikiDir, 'log', date.slice(0, 4)), { recursive: true });
     fs.writeFileSync(path.join(wikiDir, 'log', date.slice(0, 4), `${date}.md`), `# ${date}\n\n## 09:00 · codex · Did a thing\n\ntags: x\n\nBody about [[alpha]].\n`);
-    const runtime = path.join(tmp, 'runtime');
-    await fsp.cp(dist, runtime, { recursive: true });
     const env = { ...process.env, XENOLITH_DIR: wikiDir, XENOLITH_HOME: home };
     delete env.XENOLITH_WRITE_MODE;
-    server = spawn(...srv(runtime, '--http', '--port', '0', '--parent-stdin'), { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    server = spawn(...srv('--http', '--port', '0', '--parent-stdin'), { env, stdio: ['pipe', 'pipe', 'pipe'] });
     port = await new Promise((resolve, reject) => {
       let err = '';
       server.stderr.on('data', (c) => {
@@ -196,16 +148,14 @@ describe('the /ui and /api endpoints', { timeout: 60_000 }, () => {
     for (const Origin of ['null', 'http://127.0.0.1.evil.example', `https://localhost.evil.example:${port}`]) {
       assert.equal((await req('GET', '/api/pages', { headers: { Origin } })).status, 403, Origin);
     }
-    if (IMPL === 'rust') {
-      for (const Origin of [`http://127.0.0.1:${port + 1}`, `https://127.0.0.1:${port}`, `http://localhost:${port}`, 'http://127.0.0.1']) {
-        assert.equal((await req('GET', '/api/pages', { headers: { Origin } })).status, 403, `another local origin: ${Origin}`);
-        assert.equal((await req('POST', '/api/curator', { headers: { Origin, 'X-Xenolith': 'ui' }, body: { paused: true } })).status, 403, `mutation from ${Origin}`);
-      }
-      assert.equal((await req('GET', '/api/pages', { headers: { Host: `localhost:${port}`, Origin: `http://localhost:${port}` } })).status, 200);
-      // What a browser says another site's page sent (an <img> needs no CORS approval) is refused.
-      for (const site of ['cross-site', 'same-site']) assert.equal((await req('GET', '/api/held', { headers: { 'Sec-Fetch-Site': site } })).status, 403, site);
-      for (const site of ['same-origin', 'none']) assert.equal((await req('GET', '/api/pages', { headers: { 'Sec-Fetch-Site': site } })).status, 200, site);
+    for (const Origin of [`http://127.0.0.1:${port + 1}`, `https://127.0.0.1:${port}`, `http://localhost:${port}`, 'http://127.0.0.1']) {
+      assert.equal((await req('GET', '/api/pages', { headers: { Origin } })).status, 403, `another local origin: ${Origin}`);
+      assert.equal((await req('POST', '/api/curator', { headers: { Origin, 'X-Xenolith': 'ui' }, body: { paused: true } })).status, 403, `mutation from ${Origin}`);
     }
+    assert.equal((await req('GET', '/api/pages', { headers: { Host: `localhost:${port}`, Origin: `http://localhost:${port}` } })).status, 200);
+    // What a browser says another site's page sent (an <img> needs no CORS approval) is refused.
+    for (const site of ['cross-site', 'same-site']) assert.equal((await req('GET', '/api/held', { headers: { 'Sec-Fetch-Site': site } })).status, 403, site);
+    for (const site of ['same-origin', 'none']) assert.equal((await req('GET', '/api/pages', { headers: { 'Sec-Fetch-Site': site } })).status, 200, site);
   });
 
   test('pages, a page with links, backlinks and history, search, activity, a log day', async () => {

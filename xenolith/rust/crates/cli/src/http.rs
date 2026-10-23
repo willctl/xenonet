@@ -1,6 +1,6 @@
 //! `serve --http`: Streamable HTTP on 127.0.0.1 (stateless, JSON responses), /health, /status, the
 //! window (/ui, /api) and sync (/sync/v1). Never a web page: other Hosts and cross-origin requests
-//! are refused (DNS rebinding). Same behavior as src/server.mjs + the MCP SDK's transport.
+//! are refused (DNS rebinding).
 //!
 //! Who a request is: a request is this machine's own (Local) only when it reaches the loopback
 //! listener directly, names a loopback Host and carries no Forwarded, X-Forwarded-* or Via header.

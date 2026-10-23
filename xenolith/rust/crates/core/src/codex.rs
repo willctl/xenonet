@@ -1,5 +1,5 @@
 //! The isolated `codex exec` both model users share: the curator (an edit plan) and Ask (an answer
-//! found with the wiki's read-only tools), as src/codex.mjs. It runs as the user, in the curator's own
+//! found with the wiki's read-only tools). It runs as the user, in the curator's own
 //! CODEX_HOME, with the user's config, rules, plugins, hooks, apps, memories, shell and web search off,
 //! and returns the final message parsed as JSON (--output-schema). It never reads Codex's credential
 //! files.

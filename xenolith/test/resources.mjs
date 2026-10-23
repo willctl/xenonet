@@ -14,9 +14,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { IMPL, rustBin, srv, srvT } from './impl.mjs';
+import { rustBin, srv, srvT } from './impl.mjs';
 
-const skip = IMPL !== 'rust' && 'the Rust programs only';
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const runtime = path.join(repo, 'dist', 'runtime');
 const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'xenolith-resources-'));
@@ -33,7 +32,7 @@ const page = (title, summary, body) => `---\ntitle: ${title}\ntype: project\nsum
 
 async function stdioClient(env) {
   const c = new Client({ name: 'resources-test', version: '1' });
-  await c.connect(new StdioClientTransport({ ...srvT(runtime), env, stderr: 'pipe' }));
+  await c.connect(new StdioClientTransport({ ...srvT(), env, stderr: 'pipe' }));
   return c;
 }
 
@@ -47,7 +46,7 @@ async function waitFor(fn, ms, label) {
   }
 }
 
-describe('pages as resources, and the start prompt', { skip, timeout: 60_000 }, () => {
+describe('pages as resources, and the start prompt', { timeout: 60_000 }, () => {
   let E;
   let token; // read on project:atlas only
   before(() => {
@@ -148,7 +147,7 @@ describe('pages as resources, and the start prompt', { skip, timeout: 60_000 }, 
   });
 
   test('over stateless HTTP: resources and prompts, but no subscriptions', async () => {
-    const proc = spawn(...srv(runtime, '--http', '--port', '0', '--parent-stdin'), { env: E.env, stdio: ['pipe', 'pipe', 'pipe'] });
+    const proc = spawn(...srv('--http', '--port', '0', '--parent-stdin'), { env: E.env, stdio: ['pipe', 'pipe', 'pipe'] });
     const url = await new Promise((resolve, reject) => {
       let err = '';
       proc.stderr.on('data', (d) => {
@@ -172,7 +171,7 @@ describe('pages as resources, and the start prompt', { skip, timeout: 60_000 }, 
 
   test('the read-only server Ask uses offers tools only', async () => {
     const c = new Client({ name: 'codex-mcp-client', version: 'test' });
-    await c.connect(new StdioClientTransport({ ...srvT(runtime, '--read-only'), env: E.env, stderr: 'pipe' }));
+    await c.connect(new StdioClientTransport({ ...srvT('--read-only'), env: E.env, stderr: 'pipe' }));
     try {
       const caps = c.getServerCapabilities();
       assert.equal(caps.resources, undefined);

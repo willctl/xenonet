@@ -13,7 +13,6 @@ Xenolith stores notes durably, files them into Markdown pages, and lets connecte
 
 ## Remaining work
 
-- Retire the earlier Node and C# implementations after compatibility checks.
 - Add authenticated local transport before claiming isolation between OS accounts.
 - Review native UI dependencies and remove obsolete transitive packages as upstream support permits.
 - Expand synthetic retrieval and poisoning cases without adding private user data.

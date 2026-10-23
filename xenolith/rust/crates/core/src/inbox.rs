@@ -1,5 +1,5 @@
 //! The inbox: notes the apps send, accepted once fsync'd to inbox/<id>.md; the curator files them
-//! later (src/inbox.mjs): submit, list, queue statistics and the pause flag (the server's side); queue
+//! later: submit, list, queue statistics and the pause flag (the server's side); queue
 //! state, archiving and the curator's heartbeat (the curator's side).
 
 use crate::frontmatter::{self, Meta};
