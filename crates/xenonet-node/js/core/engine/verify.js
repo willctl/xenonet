@@ -13,6 +13,8 @@ export const actorRefusal = (chain, { product = null, pid = null, registering = 
 
 export const bundleOf = (program) => native.verifyBundleOf(program);
 
+export const TRAY_APP = native.verifyTrayApp();
+
 export function createVerifier({ procs, store, home = null, now = () => Date.now() }) {
   const core = new native.VerifierCore(store[STORE], home);
   // The parts a check reads: procs, the clock, and the process on the
@@ -28,6 +30,7 @@ export function createVerifier({ procs, store, home = null, now = () => Date.now
     person: (socket) => go(core.person(), socket),
     window: (socket) => go(core.window(), socket),
     desktop: (socket) => go(core.desktop(socket != null), socket),
+    tray: (socket, apps = []) => go(core.tray(apps), socket),
     actor: (socket, who = {}, { pid = null } = {}) => go(core.actor(who, pid), socket),
     register: (socket, { product = null, pid = null } = {}) => go(core.register(product, pid), socket),
     asker: (socket) => go(core.asker(), socket),

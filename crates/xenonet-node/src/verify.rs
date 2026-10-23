@@ -28,6 +28,12 @@ pub fn bundle_of(program: JsArg) -> String {
     verify::bundle_of(&program.0)
 }
 
+/// The tray app's bundle, as it's installed.
+#[napi(js_name = "verifyTrayApp")]
+pub fn tray_app() -> String {
+    verify::TRAY_APP.to_string()
+}
+
 #[napi]
 pub struct VerifierCore {
     inner: Arc<Verifier>,
@@ -72,6 +78,11 @@ impl VerifierCore {
     pub fn desktop(&self, connected: bool) -> Machine {
         let v = self.inner.clone();
         start(move |asker| v.desktop(&mut AskCalls(asker), connected))
+    }
+    #[napi]
+    pub fn tray(&self, apps: Vec<String>) -> Machine {
+        let v = self.inner.clone();
+        start(move |asker| v.tray(&mut AskCalls(asker), &apps))
     }
     #[napi]
     pub fn actor(&self, who: JsArg, pid: JsArg) -> Machine {
