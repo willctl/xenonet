@@ -1,6 +1,6 @@
 # One network across machines
 
-Status: built, 2026-10-21, apart from what "As built" below lists as
+Status: built, 2026-10-22, apart from what "As built" below lists as
 not built. It replaces the pull-over-SSH plan in `hosts.md` as the main
 way to use XenoNet on several machines. It keeps that plan's relay frames,
 ids, merge and privacy rules, which were built and tested, and keeps SSH as
@@ -65,11 +65,56 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
   the schema declares, and the detail reaches the console's engine state,
   never `peers` or an agent's view. The strip and the Network panel show
   the question's text and the stuck reason.
-- Other hosts on the map, from presence (section 7): the page makes each
-  one a constellation as the SSH prototype draws one (a project per repo
-  key or folder, sessions with their state and waits, ids qualified
-  `@<host>:…`), merged into the map before it's drawn
-  (`src/network-map.js`), with the hosts layout's cap on what's drawn.
+- Other hosts' maps through the gateway (section 7):
+  - Relay frames (`network/relay/v1`) carry the SSH relay's own frames
+    between two hosts, sealed as every host frame is. They go to relay
+    sinks beside the engine's sink (`RelaySink`, set by role on the
+    `SinkSlot`), never to the engine. They go up in relay batches of their
+    own (`frames?relay=1`), with a bucket of 120 a minute at the gateway
+    apart from the engine's 600, and aren't queued for a host that's
+    away. A relay body is at most 8 MiB before sealing, so a sealed,
+    base64 frame fits the gateway's 16 MiB relay batch.
+  - The subscribing host asks `{ op, sub, … }` (open, get, time, renew,
+    close); the host answers `{ sub, seq, frames }`, at most one body
+    every half second for each subscription (slower when several share
+    the link's bucket), the map at most once a second and the live state
+    every half second within it. `seq` counts within the subscription: a
+    hole, or a `gap`, makes the console ask for a fresh snapshot.
+  - The serving side is the service's relay
+    (`crates/xenonet-wire-app/src/hosts/relay.rs`), which runs
+    `xenonet_hosts::relay::Producer`, the SSH relay's shaping, in-process:
+    it follows this machine's own view of its events from the event
+    stream, and reads its own API as a 127.0.0.1 client with no window key
+    and no token, so the allowlist and the routes' checks both apply. It
+    serves only window hosts in the roster, one subscription each, renewed
+    every 20 s, and ends one that lapses after 60 s, whose host goes
+    offline, is removed or stops being a window host, or when this host's
+    own link drops.
+  - The subscribing side is the hub, now always built: hosts.json's hosts
+    over SSH with `XENONET_HOSTS=1`, and the roster's always, each a link
+    whose transport is the network (`link::Start::Network`,
+    `crates/xenonet-wire-app/src/hosts/transport.rs`). The link's states,
+    the merge, the declared-field cleaning and the caps are the SSH
+    links'. A window host's hub subscribes only while a console is open
+    there (Desktop's window shown, or a page reading the event stream). A
+    host in hosts.json and the roster is shown once, from hosts.json.
+  - The page draws a network host from its snapshot as it draws an SSH
+    host (`network: "relay"` on its nodes), dimmed and kept while it's
+    away. The hub keeps the last snapshot in the cache folder as it keeps
+    an SSH host's, under a key made from the network's id and the host's,
+    and forgets it when the host leaves the roster. A remote session's
+    transcript and stats open through the window; nothing remote opens,
+    dismisses or hands off here.
+- Other hosts on the map, from presence, until their first snapshot
+  (section 7): the page makes each one a constellation as the SSH
+  prototype draws one (a project per repo key or folder, sessions with
+  their state and waits, ids qualified `@<host>:…`), merged into the map
+  before it's drawn (`src/network-map.js`), with the hosts layout's cap on
+  what's drawn.
+- Another machine's transcript, stats, collision diffs and MCP server
+  details are read only by the window (`Ctx::window_only`: its key, and no
+  token), over SSH and the network alike, so an agent on one machine can't
+  read another's transcripts.
 - The chime (section 8): presence carries `youAt`, when the person last
   worked at a host's console (input in the last two minutes, to the half
   minute, by the gateway's clock), and every host's row in the state has
@@ -84,6 +129,13 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
   person messaging from a window host and refused from another, an A2A task
   completed by a session on another host, the gateway restarted with
   messages waiting, and a host removed.
+- `crates/xenonet-service/tests/net_map.rs` runs three services with the
+  binary's hub and relay: a window host's console sees another host's map
+  under `@<host>:` once it opens, and opens its transcript through the
+  window; an agent on the same machine is refused that read; a host that
+  shares titles only keeps its transcripts; a `gap` brings a fresh
+  snapshot; and the relay stops once the subscription lapses. The
+  `net_relay` fuzz target reads asks and answers on both sides.
 
 Settled while building, beyond the sections below:
 
@@ -126,9 +178,8 @@ Settled while building, beyond the sections below:
 
 Not built yet:
 
-- **The map's `relay` frames through the gateway** (section 7). Hosts drop
-  relay frames, so another host's constellation has what its presence
-  says: no wiki, transcripts or stats, and no bridges between clones.
+- **Collisions and MCP servers' details over the network** (section 7).
+  Both ends refuse them with why: they open on their own machine.
 - **`operator` frames** (section 8) are checked when they arrive, but
   nothing sends one: the person messages a session on another host as a
   `message` frame from `actor:you`, which a host takes only from a window
@@ -249,7 +300,8 @@ request to its handler by path before anything else is checked:
   Host and Origin.
 - The network routes have their own limits:
   - 1 MiB for an up batch;
-  - 16 MiB for a `relay` frame;
+  - 16 MiB for a relay batch (`frames?relay=1`), whose frames are 12 MiB
+    at most each: a relay body of 8 MiB at most, sealed and in base64;
   - no time limit on the down stream, which ends itself (below).
 - The front door reads bodies as streams and counts as it reads.
 
@@ -587,15 +639,19 @@ twins, are unchanged.
 
 ### 7. What crosses for the map
 
-- **Every console shows every host.** A console subscribes to another
-  host's map through the gateway.
-  - `relay` frames carry the existing relay protocol (`get`, `snapshot`,
-    `event`, `res`), sealed between the two hosts.
+- **Every console shows every host.** A window host's console subscribes
+  to another host's map through the gateway.
+  - `relay` frames carry the existing relay protocol (`hello`, `get`,
+    `snapshot`, `event`, `res`, `time`, `ping`, `bye`), sealed between the
+    two hosts (`network/relay/v1`).
   - The hub merges them as it merges SSH links, through a third link
-    transport, `network`, beside `ssh` and `local`. The hub's links are
-    spawned processes today, so the transport needs that seam.
-- **Subscriptions last only while a console is open,** so an idle
-  network carries presence and nothing else.
+    transport, `network`, beside `ssh` and `local`.
+- **Only a window host is shown other hosts' maps.** A host serves its map
+  only to a window host in its roster, one subscription for each.
+- **Subscriptions last only while a console is open,** and are renewed
+  every 20 s, so an idle network carries presence and nothing else, and a
+  vanished console doesn't leave a stream running: a host ends a
+  subscription that isn't renewed for 60 s.
 - **`XENONET_HOSTS` isn't needed for network hosts.** They show as soon as
   they're in the roster. SSH hosts stay behind the flag.
 - **Detail is on inside a network:** the text of a waiting question, the
@@ -604,13 +660,21 @@ twins, are unchanged.
     waits on you from any machine is the point.
   - Settings → Network → "Share with the network: titles only" turns it
     off for one host.
+- **A host that shares titles only** answers a `get` for a transcript, a
+  collision or an MCP server with 403. It serves stats and the three
+  shaped reads (the map, the live state and the engine's state) only, with
+  detail off.
+- **Another machine's transcripts and stats are the window's alone.** A
+  console's host reads them through the relay only for its own window (its
+  key, and no token), never for an agent, an actor or a browser tab there.
 - **The relay's privacy rules stay:**
   - home folders cross as `~`;
   - no transcripts are cached;
   - only declared fields cross;
-  - the 5,000-node and 16 MB caps apply.
-- **Until the map's frames land,** a console draws other hosts from
-  presence: their agents, states and what waits on you.
+  - the 5,000-node and 16 MB caps apply, and a relay body over the network
+    is at most 8 MiB.
+- **Until a host's first snapshot comes,** a console draws it from
+  presence: its agents, states and what waits on you.
 
 ### 8. The operator at any host
 
@@ -640,7 +704,8 @@ twins, are unchanged.
 - **What may be done from another machine:**
   - message any session or actor, as you;
   - add a machine and remove a host, by the rules in section 3;
-  - read a transcript or stats, as the relay already allows.
+  - read a transcript or stats through the relay, from the window only,
+    unless that host shares titles only (section 7).
 - **What stays on the machine itself:**
   - connecting or disconnecting its agents;
   - installing the always-on service;
@@ -830,9 +895,10 @@ message, a handoff or Xenolith. That keeps context selective, which the
 | A wrong or hijacked gateway address | The new host pins the gateway's key from an answer only a gateway that knew the ticket could make; after that, every link starts with a `hello` signed over the host's nonce |
 | The gateway is broken into | It sees heads only; it can't forge a host (signatures) or add or change a roster entry (the chain). It can drop or delay frames, which shows as a gap, an offline host or a roster mismatch in presence |
 | A window laptop is stolen | It can remove and add ordinary hosts. Moving the gateway, removing a window host and adding one need the founder or two window hosts. The founder removes the laptop; its frames are refused from then on |
-| Prompt injection across machines | Messages are framed as information. Bypassed sessions hold them. Hop and fan-out caps, and per-link limits: 600 frames and 60 messages a minute |
+| Prompt injection across machines | Messages are framed as information. Bypassed sessions hold them. Hop and fan-out caps, and per-link limits: 600 frames and 60 messages a minute, and the map's relay frames, 120 a minute, apart |
+| An agent reading other machines' transcripts | Another machine's transcript, stats and diffs are read only for the window: its key, and no token. A host serves its map only to a window host's console, and a host that shares titles only keeps its transcripts. The relay reads its own API as a local program, with no key, through its allowlist of GETs |
 | A weak "from you" | Operator frames say how they were checked; only window-key and macOS process checks count |
-| Replay | Frame ids for a week; request nonces for 2 minutes; times within 60 s |
+| Replay | Frame ids for a week, and the map's relay frames for two minutes, with their seq within a subscription; request nonces for 2 minutes; times within 60 s |
 | Keys and tokens leaking | Private keys stay in an owner-only file. Tickets are kept hashed. Nothing secret is queued, and on a LAN-only gateway `/mcp` isn't served |
 | A2A misuse | A2A clients are actors: tokens, default-deny scopes, rate limits. No outbound calls in the first step |
 
@@ -957,9 +1023,8 @@ xenonet net gateway take | set <address>
 
 Tonight, in this order, each with its tests: unit tests, three services
 on loopback for the network (ports and state folders of their own, away
-from 47840–47842), `test:bin`, and e2e for the page. Steps 1 to 3 are
-built, and from step 4 moving the gateway and the guide; the map's
-`relay` frames aren't ("As built").
+from 47840–47842), `test:bin`, and e2e for the page. Steps 1 to 4 are
+built ("As built").
 
 1. **The seam and the wire:**
    - `xenonet_base::network` (the trait and body types);
@@ -1001,8 +1066,9 @@ built, and from step 4 moving the gateway and the guide; the map's
    - moving the gateway;
    - the guide (`docs/guide/network.md`).
 
-Later: A2A out, actor tokens and scopes from another machine, moving
-actors' rows with the gateway, Xenolith through the gateway, the Claude
+Later: collisions' diffs and MCP servers' details over the network, A2A
+out, actor tokens and scopes from another machine, moving actors' rows
+with the gateway, Xenolith through the gateway, the Claude
 Code messaging bridge, ACP, MCP 2026-07-28, a direct path between hosts on
 one LAN, and a recovery key for a lost founder.
 

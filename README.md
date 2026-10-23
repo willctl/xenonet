@@ -216,7 +216,9 @@ server's configuration.
 A XenoNet network joins the machines you use. The sessions on each see the
 sessions on the others in `peers`, message them, and are warned when one is
 changing the same file in its clone. What waits on you on any machine shows
-in every console. One machine is the gateway, and the others link out to it,
+in every console. On a machine where you use a XenoNet window, the map shows
+every other machine's beside its own, and their transcripts open in that
+window. One machine is the gateway, and the others link out to it,
 so no machine opens a port. Frames between machines are signed and sealed:
 the gateway passes them on and can't read them. **Add a machine** shows one
 line to run on the new machine, which works once, for ten minutes.
@@ -227,7 +229,8 @@ line to run on the new machine, which works once, for ten minutes.
 Start XenoNet with `XENONET_HOSTS=1` and it can show other machines' XenoNets
 beside its own, read only, without a network. Each machine runs its own
 XenoNet, and your console reads it over SSH. A machine sends titles, states
-and counts, and a transcript crosses only when you open it.
+and counts, and a transcript crosses only when you open it in XenoNet's
+window.
 [Other machines over SSH](docs/guide/other-machines.md) shows how to set one up.
 
 ## Privacy
