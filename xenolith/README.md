@@ -32,6 +32,40 @@ the programs are built and checked.
 
 ## Install, upgrade, uninstall
 
+### From a release archive
+
+Releases are tagged `xenolith-v<version>`, such as `xenolith-v1.9.0`, on
+[XenoNet's releases page](https://github.com/willctl/xenonet/releases). Each
+has one archive per machine and a `SHA256SUMS` file:
+
+| Machine | Archive |
+| --- | --- |
+| Mac with Apple silicon | `xenolith-<version>-darwin-arm64.tar.gz` |
+| Mac with an Intel processor | `xenolith-<version>-darwin-x64.tar.gz` |
+| Linux x64 | `xenolith-<version>-linux-x64.tar.gz` |
+| Windows x64 | `xenolith-<version>-win32-x64.zip` |
+
+An archive holds one folder with `xenolith`, `xenolith-tray`, the window's
+files (`ui/`), the tray icons (`icons/`), this README, `LICENSE` and
+`SECURITY.md`. The plugin, the marketplaces and the protocol are built into
+`xenolith`. The machine needs no Rust, Node or checkout. Unpack it anywhere and
+run the installer from the unpacked folder:
+
+```bash
+tar -xzf xenolith-1.9.0-darwin-arm64.tar.gz
+cd xenolith-1.9.0-darwin-arm64
+./xenolith install
+```
+
+On Windows, in a normal terminal: `tar -xf xenolith-1.9.0-win32-x64.zip`,
+then `xenolith.exe install` in the unpacked folder. The installer copies the
+programs into Xenolith's own folders, so you can delete the download
+afterwards. Each release's notes, in [docs/releases/](docs/releases/), give the
+steps for each OS: checking `SHA256SUMS`, what macOS needs when a browser
+downloaded the archive, and the libraries the tray needs on Linux.
+
+### From source
+
 ```bash
 npm install
 npm run install-local
@@ -40,15 +74,18 @@ npm run uninstall-local
 
 `install-local` runs `npm run package`, which builds the payload into
 `dist/package`: the window, the icons and the Rust programs. It builds the
-programs with `cargo build --release` when cargo is installed, and otherwise
-uses the ones already in `rust/target/release`. Then it runs `xenolith install`
-from `dist/package`. A release ships that folder, and `xenolith install` in it
-installs the same way.
+programs with `cargo build --release --workspace` when cargo is installed, and
+otherwise uses the ones already in `rust/target/release`. Then it runs
+`xenolith install` from `dist/package`. A release archive holds the same
+payload, built as [AGENTS.md](AGENTS.md#releases) describes.
 
-The install is idempotent. Running it again upgrades in place and never touches
-what the shared context holds. Options pass through: `-- --wiki-dir <path>`, `-- --port N` and
-`-- --no-approve`. With `--no-approve`, Codex, ChatGPT and Claude Code ask before
-each Xenolith tool call.
+### Upgrades and options
+
+The install is idempotent. Running it again, or a later release's installer,
+upgrades in place and never touches what the shared context holds. The options
+are `--wiki-dir <path>`, `--port N` and `--no-approve` (after `--` with
+`npm run install-local`). With `--no-approve`, Codex, ChatGPT and Claude Code
+ask before each Xenolith tool call.
 
 By default the `xenolith` tools run without asking. The installer sets
 `default_tools_approval_mode = "approve"` in `~/.codex/config.toml`, and adds the
@@ -66,7 +103,7 @@ create under `AppData` into the app's private storage
 sign-in and the other apps never see it. The installer detects an app package
 and stops before changing anything.
 
-`uninstall-local` (`xenolith uninstall`) stops the tray and removes its
+`xenolith uninstall` (or `npm run uninstall-local`) stops the tray and removes its
 start-at-sign-in entries, the plugin and marketplaces, the Claude desktop entry,
 the instruction blocks and the approval settings. It leaves the shared context folder, the
 programs, `config.json` and the curator's Codex sign-in in place.
@@ -895,13 +932,15 @@ FORMAT.md              the folder's format (version 1), for programs that read i
 ui/                    the Xenolith window (React): index.html, src/main.jsx, app.css, markdown.js, api.js
 assets/icon/           icon sources (SVG)
 plugin/                plugin source; __PLACEHOLDERS__ are filled at install time
-scripts/               build (the window), icons, package, install-local, ui-preview, eval, bench
+scripts/               build (the window), icons, package (the payload and the release archives),
+                       verify-archive, release-draft, install-local, ui-preview, eval, bench
+docs/releases/         each release's notes, which its GitHub release shows
 eval/synthetic/        the memory eval's synthetic wiki, questions and curator note streams
 eval/local/            your own real-wiki questions (gitignored)
 test/                  the suites: e2e (two real MCP clients, both transports), curator (fake model),
                        tray, installer, the window (ui), Ask (the fake model drives the real read-only
                        server), portable (Linux/macOS differences), memory-eval, spaces, tokens,
-                       audit, resources, sync, opt-in live and stress tests
+                       audit, resources, sync, the archive writers, opt-in live and stress tests
 ```
 
 The suites talk to the programs over MCP, `/api` and their files: `npm test`
@@ -910,8 +949,8 @@ runs them against the programs in `rust/target/release` or `rust/target/debug`
 (`cargo clippy -D warnings`) and tests the Rust programs on the toolchain
 `rust/rust-toolchain.toml` pins. Xenolith's own CI
 (`.github/workflows/xenolith.yml`) runs all of it on Linux, macOS and Windows
-whenever `xenolith/` changes. Its own version tags and a release workflow can
-come later. `npm run bench` measures the program's footprint and
+whenever `xenolith/` changes, and `.github/workflows/xenolith-release.yml`
+builds the release archives from a `xenolith-v<version>` tag. `npm run bench` measures the program's footprint and
 speed: 5 runs, each metric's median and range, every answer checked, exit 1 on
 any error. The memory eval is described in
 [docs/memory-eval.md](docs/memory-eval.md).
