@@ -71,7 +71,7 @@ A message from another machine reaches a session framed as "Message from an agen
 
 ## You, at any machine
 
-Every console shows every machine. On the map, each other machine is a constellation of its own beside this one's. While a window host's console is open, it's drawn from that machine's own map: its projects, sessions and wiki pages, and bridges between clones of one repo on two machines. A machine that goes offline dims and keeps what it showed last. Until a machine's map arrives, the console draws it from what that machine says of its sessions: a project for each repo (or each folder that isn't a repo), and its sessions with their state.
+Every console shows every machine. On the map, each other machine is a constellation of its own beside this one's. While a window host's console is open, it's drawn from that machine's own map: its projects, sessions and context pages, and bridges between clones of one repo on two machines. A machine that goes offline dims and keeps what it showed last. Until a machine's map arrives, the console draws it from what that machine says of its sessions: a project for each repo (or each folder that isn't a repo), and its sessions with their state.
 
 Select one of another machine's sessions to see its state and what waits on you there, to open its transcript and stats, and to message it. Its transcript and stats open only in XenoNet's window, never in a browser tab or for a session or actor on this machine.
 

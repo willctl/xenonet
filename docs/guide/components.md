@@ -10,7 +10,7 @@ XenoNet has three installed parts:
 
 The bundle installer includes all three. Service and Tools also have separate downloads for Windows x64, macOS arm64 and x64, and Linux x64. Each is the `xenonet` binary for that system, in `bin/`. You do not need to install Node.
 
-On a Mac there's a fourth, the tray: XenoNet Tray.app, a menu bar app that shows whether XenoNet runs and what needs you while Desktop is closed. It's one download for both Mac CPUs, `XenoNet-tray-<version>-darwin-universal.tar.gz`, with a version of its own. The disk image installs it, and `xenonet service install` puts it in `~/Applications` and starts it at login. See [The tray on macOS](always-on.md#the-tray-on-macos).
+On a Mac there's a fourth, the tray: XenoNet Tray.app, a menu bar app that shows whether XenoNet runs and what needs you while Desktop is closed. It's one download for both Mac CPUs, `XenoNet-tray-<version>-darwin-universal.tar.gz`, with a version of its own. The disk image brings it into XenoNet's runtime folder, and `xenonet service install` puts it in `~/Applications` and starts it at login. With the background service already on, run `xenonet service install` again after updating the Tools to get a newer tray. See [The tray on macOS](always-on.md#the-tray-on-macos).
 
 Closing or updating Desktop leaves the service, terminals and connected MCP processes running. Reopening Desktop restores terminal tabs and recent output. Terminal output stays in memory. A service restart ends its terminals. If terminals are running, XenoNet downloads the service update but leaves it uninstalled. Close the terminals and choose Update again to install it.
 
