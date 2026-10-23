@@ -431,7 +431,7 @@ pub fn ensure_skeleton(wiki_dir: &Path) -> Result<()> {
 /// The bundled PROTOCOL.md of earlier releases (hash_text, 16 characters). A wiki whose copy is one of
 /// these never edited it, so an install may bring it up to date. The test below fails when
 /// protocol/PROTOCOL.md changes and says which hash to move here.
-const OLD_PROTOCOLS: [&str; 8] = ["18164903345112d0", "192abaacb1b60064", "09a27d24ebee04ca", "2323d98efcb27d61", "654998a3f71913a9", "958d048836748db0", "a7de848ecc7f2d3e", "434666d6a975c8f4"];
+pub const OLD_PROTOCOLS: [&str; 8] = ["18164903345112d0", "192abaacb1b60064", "09a27d24ebee04ca", "2323d98efcb27d61", "654998a3f71913a9", "958d048836748db0", "a7de848ecc7f2d3e", "434666d6a975c8f4"];
 /// The hash of this release's protocol/PROTOCOL.md (the test below pins it).
 #[cfg(test)]
 const CURRENT_PROTOCOL: &str = "b2ff51c4e6c5b87b";
