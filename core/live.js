@@ -19,7 +19,7 @@ import { claudeUsageGatherer, desktopUsageGatherer } from "./claude-usage.js";
 import { ClaudeLine, CodexLine, linesOf } from "./lines.js";
 import { claude, codex, mapperOf, brokenAt, fail, usageOf, userText } from "./events.js";
 import { costParts, plainModel, priorityTier, PRICES_CHECKED } from "./pricing.js";
-import { isContextServer, spaceOf } from "./xenolith.js";
+import { isContextCall, spaceOf } from "./xenolith.js";
 import { APP, TAILED, tailedApp } from "./apps.js";
 import { patchPaths } from "./patch.js";
 
@@ -54,6 +54,9 @@ export function mcpServerOf(toolName) {
   // Plugin servers are named plugin_<plugin>_<server>.
   return m[1].replace(/^plugin_[^_]+_/, "");
 }
+
+// The tool an MCP tool's name says it is, after its server's part.
+const mcpToolOf = (toolName) => /^mcp__(?:.+?)__([^_].*)$/.exec(toolName ?? "")?.[1] ?? null;
 
 export function categorize(name) {
   const n = String(name ?? "");
@@ -436,9 +439,12 @@ class LiveSession {
 // the tailer block's (core/blocks/tailer.js); this turns each line into
 // state and events.
 export class LiveTelemetry extends EventEmitter {
-  constructor({ claudeRoot, codexRoot, grokRoot = null, claudeDesktopDir, claudeUsage = null, home = null }) {
+  constructor({ claudeRoot, codexRoot, grokRoot = null, claudeDesktopDir, claudeUsage = null, home = null, contextServer = null }) {
     super();
     this.home = home;
+    // The MCP server the config names for the shared context (wikiServer):
+    // Xenolith's tools under it write there, whatever it's called.
+    this.contextServer = contextServer;
     // Watch canonical long paths: on Windows, libuv aborts the process when a
     // recursive watch root is an 8.3 short name (C:\Users\ABCDEF~1\...).
     this.roots = [
@@ -647,12 +653,13 @@ export class LiveTelemetry extends EventEmitter {
     return tool;
   }
 
-  // Wiki writes name the pages they touch; the UI beams to them. A write to
-  // another space than this machine's (its `space`, such as project:atlas)
-  // names that space's pages, as <space>/<slug>, the end of their ids on the
-  // map; one to a space Xenolith refuses wrote nothing.
-  wikiPagesOf(server, input) {
-    if (!isContextServer(server) || !input || typeof input !== "object") return null;
+  // Writes to the shared context name the pages they touch; the UI beams to
+  // them. A write to another space than this machine's (its `space`, such
+  // as project:atlas) names that space's pages, as <space>/<slug>, the end
+  // of their ids on the map; one to a space Xenolith refuses wrote nothing.
+  // `tool` is the call's tool, for a server known by the config's name only.
+  wikiPagesOf(server, input, tool = null) {
+    if (!isContextCall(server, tool, this.contextServer) || !input || typeof input !== "object") return null;
     const space = spaceOf(input.space);
     if (space === undefined) return null;
     const pages = [].concat(input.pages ?? [], input.slug ?? []).filter((p) => typeof p === "string");
@@ -793,7 +800,7 @@ export class LiveTelemetry extends EventEmitter {
     s.inflight.set(b.id, { name: b.name, ts });
     if (sub) sub.tools++;
     const server = mcpServerOf(b.name);
-    const pages = this.wikiPagesOf(server, b.input);
+    const pages = this.wikiPagesOf(server, b.input, mcpToolOf(b.name));
     const full = typeof b.input?.command === "string" ? b.input.command : b.input ?? {};
     const tool = this.noteTool(s, { name: b.name, detail: toolDetail(b.name, b.input, this.home), full, files: filesOf(b.input), ts, agentId, extra: pages ? { pages } : undefined }, live);
     s.inflight.get(b.id).tool = tool;
@@ -1057,7 +1064,7 @@ export class LiveTelemetry extends EventEmitter {
       case "McpToolCall": {
         const ok = it.status === "completed" && !it.error;
         s.noteToolResult(ok, ts);
-        const pages = this.wikiPagesOf(it.server, it.arguments);
+        const pages = this.wikiPagesOf(it.server, it.arguments, it.tool);
         this.noteTool(s, { name: `mcp__${it.server}__${it.tool}`, server: it.server, detail: `${it.server}.${it.tool}`, full: it.arguments ?? {}, ok, ts, extra: pages ? { pages } : undefined }, live);
         if (!ok) this.activity(s, { kind: "tool-error", ts }, live);
         return;

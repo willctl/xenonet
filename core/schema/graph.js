@@ -56,7 +56,7 @@ export const RepoStatus = obj({
   checkedAt: ms,
 });
 
-// Wiki pages take their fields from front matter as it's written: a
+// Context pages take their fields from front matter as it's written: a
 // value is text, or JSON when it starts with [ (so a list, or anything).
 const front = z.union([z.string(), z.array(z.unknown())]).describe("A front matter value: text, or a JSON list when it starts with [");
 
@@ -157,7 +157,7 @@ const PageNode = obj({
   ...placed,
   ...rolled,
   ...remote,
-}).describe("A page of the shared context's wiki");
+}).describe("A context page: a page of the shared context");
 
 const ResourceNode = obj({
   id: z.string().regex(hosted("resource:")),
@@ -216,10 +216,10 @@ export const Graph = define(
   obj({
     generatedAt: ms,
     nodes: z.array(z.union([SessionNode, ProjectNode, CoreNode, NativeNode, ZoneNode, WikiNode, PageNode, ResourceNode, HostNode])),
-    links: z.array(obj({ source: z.string(), target: z.string(), kind: z.enum(LINK_KINDS) })).describe("The tree, by node ids; lineage-cross ties a session to its parent in another place, and host ties another machine's node to this one's core"),
-    relations: z.array(obj({ a: z.string(), b: z.string(), kind: z.enum(["wikilink", "mentions", "same-repo"]) })).describe("Ties outside the tree: wiki pages that link, pages that mention a project, and checkouts of one repo on different machines"),
+    links: z.array(obj({ source: z.string(), target: z.string(), kind: z.enum(LINK_KINDS) })).describe("The tree, by node ids; lineage-cross ties a session to its parent in another place, host ties another machine's node to this one's core, wiki ties the shared context to the core, and page a context page to the shared context"),
+    relations: z.array(obj({ a: z.string(), b: z.string(), kind: z.enum(["wikilink", "mentions", "same-repo"]) })).describe("Ties outside the tree: context pages that link to each other (wikilink), pages that mention a project (mentions), and checkouts of one repo on different machines (same-repo)"),
     stats: obj({
-      wikiPages: count,
+      wikiPages: count.describe("Context pages on the map"),
       dirtyRepos: count,
       projects: count,
       groups: count,
@@ -237,7 +237,7 @@ export const Graph = define(
     sources: z
       .array(
         obj({
-          name: z.string().describe("projects, codex, codex-projects, claude, live, wiki, search, identities"),
+          name: z.string().describe("projects, codex, codex-projects, claude, live, wiki (the shared context), search, identities"),
           ok: z.boolean(),
           ms: z.number().nullable().optional(),
           count: z.number().nullable().optional(),

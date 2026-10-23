@@ -188,7 +188,7 @@ and each session carries the host it ran on.
   - Everything without a remote stays per machine, on small per-host nodes
     beside the merged repos: local-only repos, groups (a folder of repos is
     a folder on one disk), zones, scratch folders, Codex desktop projects,
-    the wiki and MCP resources.
+    the shared context and MCP resources.
 - **Data model.**
   - `repo:<remote>` nodes, each with a list of checkouts: host, path,
     branch, dirty count, ahead and behind, worktrees, git identity.
@@ -1006,7 +1006,7 @@ above, or settles what it left open:
   live · read-only"); the feed, the active sessions, the palette and the
   map's search mark remote ones with their host. A remote question's text
   stays on its host unless the link has `--detail`, so the strip says where
-  to read it. A remote session's MCP servers and wiki pages are looked up
+  to read it. A remote session's MCP servers and context pages are looked up
   on its own host.
 - **Machines.** A chip per machine under Filters (this one by the name it
   gave itself), with how it stands and its sessions on the map, shows only

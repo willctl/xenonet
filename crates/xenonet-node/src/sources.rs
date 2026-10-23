@@ -80,8 +80,9 @@ pub fn live_tool_key(name: String, input: MaybeJson) -> String {
 }
 
 #[napi(js_name = "liveWikiPagesOf")]
-pub fn live_wiki_pages_of(server: MaybeJson, input: MaybeJson) -> Option<Vec<String>> {
-    live::wiki_pages_of(server.0.as_ref().and_then(Value::as_str), input.0.as_ref())
+pub fn live_wiki_pages_of(server: MaybeJson, input: MaybeJson, tool: MaybeJson, named: MaybeJson) -> Option<Vec<String>> {
+    let [server, tool, named] = [&server, &tool, &named].map(|v| v.0.as_ref().and_then(Value::as_str));
+    live::wiki_pages_of(server, tool, named, input.0.as_ref())
 }
 
 #[napi(js_name = "liveFileKey")]
@@ -94,6 +95,17 @@ pub fn live_file_key(p: String) -> String {
 #[napi(js_name = "contextServers")]
 pub fn context_servers() -> Vec<&'static str> {
     xenolith::CONTEXT_SERVERS.to_vec()
+}
+
+#[napi(js_name = "contextTools")]
+pub fn context_tools() -> Vec<&'static str> {
+    xenolith::CONTEXT_TOOLS.to_vec()
+}
+
+#[napi(js_name = "contextIsCall")]
+pub fn context_is_call(server: MaybeJson, tool: MaybeJson, named: MaybeJson) -> bool {
+    let [server, tool, named] = [&server, &tool, &named].map(|v| v.0.as_ref().and_then(Value::as_str));
+    server.is_some_and(|s| xenolith::is_context_call(s, tool, named))
 }
 
 /// { dir, server }, or null.

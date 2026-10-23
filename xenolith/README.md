@@ -112,6 +112,76 @@ After installing, sign the curator in once: tray icon > **Curator** > **Sign in
 to ChatGPT for the curator...** (see [The curator](#the-curator)). Until then,
 notes wait in the inbox, where you can see them.
 
+## Moving from agent-wiki
+
+Xenolith reads agent-wiki's wiki folder as it is. One command moves an
+agent-wiki install (any version up to 1.8.0, including the Node-era ones and
+the pre-1.3 `~/.agent-wiki` layout) to Xenolith. Your wiki folder stays where it
+is, and Xenolith serves it as its shared context without copying it. Run the
+command from the release folder (or `dist/package`), like `xenolith install`.
+
+```bash
+xenolith migrate agent-wiki          # see what it found and what it would do; changes nothing
+xenolith migrate agent-wiki --run    # do it
+```
+
+The first command lists the install it found and its version, the wiki and what
+it holds (pages, log days, notes waiting, dead letters, filed notes, held
+changes, vectors), every registration agent-wiki made in your apps with its file
+and key, what runs, and anything that would stop the move. `--json` gives the
+same as data.
+
+`--run` does seven steps and records each one in a journal in Xenolith's state
+folder (`migrate-agent-wiki/`), with a copy and a SHA-256 of every file it will
+change:
+
+1. It writes the journal and the backups.
+2. It pauses the curator, stops agent-wiki's tray, services and curator, and
+   waits until the wiki's locks are free.
+3. It writes Xenolith's `config.json` with the wiki folder and agent-wiki's
+   settings (`writeMode`, `curator`, `ask`, `logs`, `hooks`, `search`).
+   agent-wiki's port is not carried over. With hybrid search on and no
+   credential named, it names agent-wiki's, so the stored key keeps working.
+4. It moves the curator's sign-in folder to Xenolith's, so the curator stays
+   signed in.
+5. It runs `xenolith install --wiki-dir <your wiki>`. On Windows the same UAC
+   prompt also removes the `AgentWiki` service and its folder permissions.
+6. It removes agent-wiki's registrations as its own uninstaller would: the
+   Claude Code plugin and its marketplace, the Codex plugin, the personal
+   marketplace entry, the Claude desktop server, the instruction blocks in
+   `CLAUDE.md` and `AGENTS.md`, the approval settings, and its LaunchAgents,
+   user units, logon task and Run value.
+7. It checks the result: the service and the tools answer on your wiki
+   (`context_start`, and `wiki_start` for sessions that still use the old
+   name), every page, log, note, held change and vector is still there, the
+   curator is signed in, and nothing of agent-wiki's is registered.
+
+It stops before changing anything if the wiki has a `spaces/` folder (Xenolith
+keeps other spaces there), if Xenolith already has a wiki with pages, if port
+47850 is taken, or if a file it must edit is not valid JSON or TOML. While
+Claude desktop runs, its entry waits; quit it and run
+`xenolith migrate agent-wiki --resume`. `--resume` also finishes a run that
+stopped partway.
+
+The report ends with what is left for you: restart Claude Code, Codex, Claude
+desktop and the ChatGPT app, and paste the new text it prints into Claude's and
+ChatGPT's personal instructions. If you edited `PROTOCOL.md`, it is kept;
+`--update-protocol` renames the old tool names in it (`wiki_start` becomes
+`context_start`) and keeps a copy in `.history/`.
+
+To go back, run `xenolith migrate agent-wiki --rollback`. It undoes the steps in
+reverse and starts agent-wiki again. It puts a file back only if it is still as
+the migration left it, and names any file you changed since, with where its
+copy is. On Windows, putting the `AgentWiki` service back needs a terminal
+opened with "Run as administrator", and the report gives the command.
+
+agent-wiki's programs stay until you finish. Once the restarts are done and no
+agent-wiki program runs, `xenolith migrate agent-wiki --finish` deletes its
+program, settings, state and log folders (its logs hold clipped tool arguments
+that Forget cannot reach), and `~/.agent-wiki`. It never deletes the wiki. Add
+`--move-wiki` to also move the wiki folder to `~/Xenolith` on the same disk.
+After `--finish` there is no rollback.
+
 ## The service
 
 The installer registers a per-machine service that serves Streamable HTTP on
@@ -870,7 +940,7 @@ folder in your home. On Windows:
 | Task Scheduler `\XenolithTray`, `HKCU\...\CurrentVersion\Run\XenolithTray` | start the tray at sign-in |
 | `%LOCALAPPDATA%\Xenolith\curator\codex-home\` | the curator's own Codex home and sign-in (Local, not Roaming: it stays on this PC) |
 | `%LOCALAPPDATA%\Xenolith\logs\` | `service.log`, `curator.log`, `tray.log`, `requests-*.jsonl`, `http-sessions.json` |
-| `%LOCALAPPDATA%\Xenolith\state\` | `install-state.json` (what the installer created, for uninstall), `audit\chain.jsonl`, `runtime\owner.key` (the [owner key](#the-owner-key), new at each service start) |
+| `%LOCALAPPDATA%\Xenolith\state\` | `install-state.json` (what the installer created, for uninstall), `audit\chain.jsonl`, `runtime\owner.key` (the [owner key](#the-owner-key), new at each service start), `migrate-agent-wiki\` (the journal, backups and log of a [move from agent-wiki](#moving-from-agent-wiki)) |
 | `%LOCALAPPDATA%\Xenolith\marketplace\` | local marketplace (Claude and Codex formats) and the rendered plugin |
 | `%LOCALAPPDATA%\Xenolith\paste-into-app-settings.md` | the pointer text, for app personal-instruction settings |
 | `~/Xenolith/` | the shared context (a folder of your documents, not app data) |
@@ -923,8 +993,9 @@ rust/crates/core/      xenolith-core: paths, pages and frontmatter, index, log, 
                        request log, secret guard, the curator, Codex runs, Ask's worker, spaces,
                        access, the audit chain, sync
 rust/crates/cli/       xenolith: serve (MCP over stdio and HTTP, /health, /status, /ui, /api, /sync),
-                       hook, curator, service (Windows), install and uninstall, spaces, grants,
-                       tokens, audit, sync and held changes
+                       hook, curator, service (Windows), install and uninstall, migrate agent-wiki
+                       (journal, rollback, finish; its fixture tests in src/migrate/tests.rs and
+                       tests/migrate_agent_wiki.rs), spaces, grants, tokens, audit, sync and held changes
 rust/crates/tray/      xenolith-tray: the tray or menu bar icon, its menu, and the window
 protocol/PROTOCOL.md   rules every session follows (seeded into a new folder; you own its copy)
 protocol/POINTER.md    short global-instruction block

@@ -183,10 +183,13 @@ pub fn release_alive() {
     ALIVE.lock().unwrap().clear();
 }
 
-/// A finished test releases only its own wiki, leaving parallel tests' liveness intact.
+/// Deletes a finished test's folder. Windows can't delete the alive file this process keeps open
+/// in each folder it took a lock in, so this closes the ones under `dir` first, and only those:
+/// parallel tests keep their liveness. Any test that takes a lock deletes its folder this way.
 #[cfg(test)]
-pub(crate) fn release_test_wiki(wiki_dir: &Path) {
-    ALIVE.lock().unwrap().remove(&wiki_dir.join(".locks"));
+pub(crate) fn remove_test_dir(dir: &Path) {
+    ALIVE.lock().unwrap().retain(|locks, _| !locks.starts_with(dir));
+    fs::remove_dir_all(dir).unwrap();
 }
 
 // ---------------------------------------------------------------- owners

@@ -152,6 +152,12 @@ impl Live {
         let _ = self.listener.set(l);
     }
 
+    /// The MCP server the config names for the shared context
+    /// (wikiServer), under which Xenolith's tools write there.
+    pub fn context_server(&self, server: Option<&str>) {
+        lock(&self.telemetry).context_server = server.map(String::from);
+    }
+
     fn tell(&self, events: Vec<Event>) {
         if events.is_empty() {
             return;
