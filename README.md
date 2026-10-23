@@ -457,3 +457,5 @@ how they can check their work. For a security problem, see
 ## License
 
 [MIT](LICENSE). XenoNet is a [willctl](https://willctl.com) project.
+
+The images and videos in `docs/` are © willctl and aren't covered by the MIT License.

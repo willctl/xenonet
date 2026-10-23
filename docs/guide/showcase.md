@@ -27,6 +27,14 @@ which Git ignores. FFmpeg needs the `libx264` encoder. The final video is
 AAC stereo audio captured from XenoNet's own music and sound effects. Captions
 also carry the explanation when the viewer has sound off.
 
+The video shows no clock time or date. The script sets the page's time zone
+to UTC and checks it. For the recording, the console's clock holds at
+`--:--:--`, and dates and times in the panels read as words such as "today",
+or a span in minutes. Only what the page shows changes, not XenoNet's data.
+The script watches the page's text all through the recording, and fails,
+naming what it saw, if a clock or a date showed. The video, poster and
+preview carry no metadata: no tags, encoder names or encoder settings.
+
 Start with a fresh showcase instance: quit it using the command above before
 recording again. The script turns on its sound and captures the app's final
 Web Audio mix after its compressor. It does not capture a microphone or other
