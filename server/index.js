@@ -461,7 +461,10 @@ if (hub) for (const event of ["graph", "live", "activity", "tokens", "pulse", "a
 // The doctor's look for actors' tokens left in the repos XenoNet knows, one
 // for the server's life: the half-hourly runs take the day's look, and a
 // run you ask for yourself looks again (the decision at merge point B).
-const tokenScan = actors ? createTokenScan({ repos: () => [...state.index.values()].filter((n) => n.kind === "project" && n.git && n.path).map((n) => n.path), run: machine().run }) : null;
+// Only the tokens XenoNet issued count, as the engine's store has them.
+const tokenScan = actors
+  ? createTokenScan({ repos: () => [...state.index.values()].filter((n) => n.kind === "project" && n.git && n.path).map((n) => n.path), run: machine().run, issued: () => engineStore.issuedTokenHashes() })
+  : null;
 
 // The doctor (see core/doctor): every half hour, and on request. New problems
 // show in the console and, from the desktop app, as a notification. The demo

@@ -763,6 +763,12 @@ calls carry `Authorization: Bearer`, never `x-xenonet-agent`.
     in what's tracked, what's untracked, and ignored files such as a
     `.env`, where tokens are most often left, outside dependency, build
     and cache folders (`findTokenFiles` in `core/actors/token-file.js`).
+    Only a token XenoNet issued counts: the SHA-256 of each one found is
+    held to the hashes `engine.sqlite` keeps of the tokens that work now
+    (actors' own, their gateway tokens, and waiting registrations'), so a
+    made-up token in a test fixture or a fuzz seed isn't a warning. When
+    the store can't be read, every token counts, and the warning says
+    XenoNet couldn't check them.
     The server looks once a day, with its half-hourly runs, and afresh
     whenever you run the doctor yourself; an agent's run gets the day's
     look.

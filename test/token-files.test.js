@@ -1,10 +1,10 @@
 // The doctor's look for actors' tokens left in repos (findTokenFiles and
 // createTokenScan in core/actors/token-file.js), against real git in
 // made-up repos: what's tracked, what's untracked, and what's ignored (a
-// .env) outside the folders of dependencies, by file name only, and a look
-// kept for a day unless you ask. And on a made-up Windows, a token file's
-// ACL, read and written. The made-up token is built here, so no file of
-// XenoNet's holds one.
+// .env) outside the folders of dependencies, only the tokens XenoNet
+// issued, and a look kept for a day unless you ask. And on a made-up
+// Windows, a token file's ACL, read and written. The made-up tokens are
+// built here, so no file of XenoNet's holds one.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -12,6 +12,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { findTokenFiles, createTokenScan, TOKEN_SCAN_MS, readTokenFile, writeTokenFile } from "../core/actors/token-file.js";
+import { hashToken } from "../core/actors/tokens.js";
 import { machine } from "../core/doctor/index.js";
 
 const dirs = [];
@@ -46,12 +47,13 @@ test("findTokenFiles: the files in repos that hold a token, tracked, untracked o
   write(path.join(clean, "README.md"), "nothing here\n");
   const plain = path.join(root, "plain");
   fs.mkdirSync(plain);
-  const found = await findTokenFiles([repo, clean, plain], { run: machine().run });
-  assert.deepEqual(found, {
-    checked: 2,
-    files: [".env", "config/wren.token", "ignored.token", "logs/kept.log", "scratch/xenonet_actor_….txt"].map((f) => path.join(repo, f)),
-  });
+  const found = await findTokenFiles([repo, clean, plain], { run: machine().run, issued: [hashToken(TOKEN)] });
+  const files = [".env", "config/wren.token", "ignored.token", "logs/kept.log", "scratch/xenonet_actor_….txt"].map((f) => path.join(repo, f));
+  assert.deepEqual(found, { checked: 2, files });
   assert.ok(!JSON.stringify(found).includes(TOKEN), "never a token, even in a name");
+  // Without XenoNet's own tokens to hold them to, every token counts, and
+  // the look says it couldn't check them.
+  assert.deepEqual(await findTokenFiles([repo, clean, plain], { run: machine().run }), { checked: 2, files, unchecked: true });
   // Nothing past the time it's given is started, and a repo's two looks
   // share its time.
   let t = 0;
@@ -63,13 +65,32 @@ test("findTokenFiles: the files in repos that hold a token, tracked, untracked o
   assert.equal(spent.checked, 0, "its first look took all of its time");
 });
 
+test("findTokenFiles: a made-up token in a test fixture or a fuzz seed isn't one XenoNet issued, so only the file with an issued one counts", async () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-token-issued-")));
+  dirs.push(root);
+  const repo = path.join(root, "xenonet");
+  fs.mkdirSync(repo, { recursive: true });
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  const madeUp = `xenonet_gateway_${"a".repeat(64)}`;
+  const issued = `xenonet_gateway_${"0123456789abcdef".repeat(4)}`;
+  write(path.join(repo, ".gitignore"), ".env\n");
+  write(path.join(repo, "tests", "fixtures", "gateway.json"), `{"token":"${madeUp}"}\n`);
+  write(path.join(repo, "fuzz", "seeds", "http", "gateway-0"), `Authorization: Bearer ${madeUp}\r\n`);
+  write(path.join(repo, ".env"), `MADE_UP=${madeUp}\nGATEWAY=${issued}\n`);
+  execFileSync("git", ["add", "tests", "fuzz"], { cwd: repo });
+  const look = (hashes) => findTokenFiles([repo], { run: machine().run, issued: hashes });
+  assert.deepEqual(await look(new Set([hashToken(issued), hashToken(TOKEN)])), { checked: 1, files: [path.join(repo, ".env")] });
+  assert.deepEqual(await look([]), { checked: 1, files: [] }, "none issued, none found");
+  assert.deepEqual((await findTokenFiles([repo], { run: machine().run })).files.length, 3, "without the hashes, the fixture and the seed count too");
+});
+
 test("createTokenScan: a look kept for a day, unless you run the doctor yourself; never two at once", async () => {
   let t = 0;
   let looks = 0;
   let repos = ["/Users/nova/Projects/atlas-api"];
   // A made-up git: each repo answered with nothing found.
   const run = async () => (looks++, { code: 1, stdout: "", timedOut: false });
-  const scan = createTokenScan({ repos: () => repos, run, now: () => t });
+  const scan = createTokenScan({ repos: () => repos, run, issued: () => [], now: () => t });
   assert.equal(scan.last(), null);
   const first = await scan.look();
   assert.deepEqual(first, { at: 0, repos: 1, checked: 1, files: [] });
@@ -83,6 +104,9 @@ test("createTokenScan: a look kept for a day, unless you run the doctor yourself
   const [a, b] = await Promise.all([scan.look(), scan.look({ fresh: true })]);
   assert.equal(a, b, "one look at a time");
   assert.equal(TOKEN_SCAN_MS, 24 * 3600e3);
+  // A store that can't be read leaves the look unchecked.
+  const blind = createTokenScan({ repos: () => repos, run, issued: () => { throw new Error("database is locked"); }, now: () => t });
+  assert.deepEqual(await blind.look(), { at: t, repos: 2, checked: 2, files: [], unchecked: true });
 });
 
 // A made-up Windows: whoami says the account's SID, and icacls answers with
