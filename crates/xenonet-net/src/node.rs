@@ -1162,22 +1162,21 @@ impl Shared {
             return Answer::refused(503, "offline", format!("{host} is offline: it isn't linked to the network's gateway"));
         }
         let (Ok(id), Ok(frame)) = (svc::request_id(), frame_id()) else { return Answer::refused(500, "internal", "no randomness for a request's id") };
-        let rx = match self.svc.wait(&id, host, &frame) {
-            Ok(rx) => rx,
+        // This host stops waiting when `wait` goes: with the answer, at
+        // the timeout, or when the program that asked goes away, which
+        // drops this call.
+        let mut wait = match self.svc.wait(&id, host, &frame) {
+            Ok(w) => w,
             Err(a) => return a,
         };
-        let req = svc::Request { id: id.clone(), name: name.to_string(), method: call.method, path: call.path, headers: svc::passed(&call.headers), body: call.body };
+        let req = svc::Request { id, name: name.to_string(), method: call.method, path: call.path, headers: svc::passed(&call.headers), body: call.body };
         if let Err(why) = self.send_svc(host, &req.to_json(), frame) {
-            self.svc.forget_request(&id);
             return Answer::refused(503, "offline", why);
         }
-        match tokio::time::timeout(Duration::from_millis(self.opts.svc_ms), rx).await {
+        match tokio::time::timeout(Duration::from_millis(self.opts.svc_ms), &mut wait.answer).await {
             Ok(Ok(a)) => a,
             Ok(Err(_)) => Answer::refused(502, "dropped", "the request was dropped before its answer came"),
-            Err(_) => {
-                self.svc.forget_request(&id);
-                Answer::refused(504, "timeout", format!("{host} didn't answer within {} s", self.opts.svc_ms / 1000))
-            }
+            Err(_) => Answer::refused(504, "timeout", format!("{host} didn't answer within {} s", self.opts.svc_ms / 1000)),
         }
     }
 

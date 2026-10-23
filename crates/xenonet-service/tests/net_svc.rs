@@ -373,6 +373,12 @@ async fn a_program_on_one_host_reaches_a_service_another_host_published() {
     assert_eq!((s, body.as_slice()), (200, b"anything".as_slice()));
     assert_eq!(header(&seen.lock().unwrap().last().unwrap().headers, "forwarded"), Some("by=xenonet;for=hub"));
 
+    // The program that asked goes away before the answer: laptop stops
+    // waiting on it then, rather than holding a place until its timeout.
+    let gone = tokio::time::timeout(Duration::from_millis(500), b.call("GET", "/api/svc/studio/files/sync/v1/slow", None, &[])).await;
+    assert!(gone.is_err(), "still waiting when its program went");
+    assert_eq!(b.svc.node().shared().services().waiting(), 0);
+
     // No answer in time: 504.
     let (s, h, _) = b.call("GET", "/api/svc/studio/files/sync/v1/slow", None, &[]).await;
     assert_eq!((s, header(&h, "x-xenonet-refused")), (504, Some("timeout")));

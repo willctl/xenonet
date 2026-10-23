@@ -36,7 +36,6 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock, RwLock};
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -56,10 +55,14 @@ pub const TIMEOUT_MS: u64 = 90_000;
 /// How long the publishing host waits on its target: under the caller's
 /// wait, so the caller hears why.
 const TARGET_MS: u64 = 75_000;
-/// Requests a host forwards to its targets at once, at most.
+/// Requests a host forwards to its services at once, at most, and from one
+/// caller host: no one host holds every slot.
 const IN_FLIGHT: usize = 32;
-/// Requests a host waits on at once, at most.
+const IN_FLIGHT_EACH: usize = 8;
+/// Requests a host waits on at once, at most, and from one host: one that
+/// never answers holds a quarter of them at most, for 90 s each.
 const WAITING: usize = 256;
+const WAITING_EACH: usize = 64;
 const MAX_SERVICES: usize = 32;
 const MAX_PATHS: usize = 16;
 const MAX_HOSTS: usize = 64;
@@ -590,19 +593,44 @@ pub struct Services {
     published: RwLock<Vec<Published>>,
     waiting: Mutex<HashMap<String, Waiting>>,
     limiter: Limiter,
-    in_flight: AtomicUsize,
+    /// Requests being forwarded, by caller host.
+    in_flight: Mutex<HashMap<String, usize>>,
     client: OnceLock<Result<reqwest::Client, String>>,
     /// When each refusal was last logged, so a busy caller can't fill the
     /// log.
     said: Mutex<HashMap<String, f64>>,
 }
 
-/// One request being forwarded, counted while it lasts.
-struct Flight<'a>(&'a AtomicUsize);
+/// One request being forwarded for a caller host, counted while it lasts.
+struct Flight<'a> {
+    services: &'a Services,
+    caller: String,
+}
 
 impl Drop for Flight<'_> {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::SeqCst);
+        let mut all = self.services.in_flight.locked();
+        if let Some(n) = all.get_mut(&self.caller) {
+            *n -= 1;
+            if *n == 0 {
+                all.remove(&self.caller);
+            }
+        }
+    }
+}
+
+/// A request this host waits on: it stops waiting when this goes, however
+/// the call ends. Its answer, its timeout, or the program that asked going
+/// away, which drops the call and this with it.
+pub struct Wait<'a> {
+    services: &'a Services,
+    id: String,
+    pub answer: oneshot::Receiver<Answer>,
+}
+
+impl Drop for Wait<'_> {
+    fn drop(&mut self) {
+        self.services.forget_request(&self.id);
     }
 }
 
@@ -614,7 +642,7 @@ impl Services {
             published: RwLock::new(Vec::new()),
             waiting: Mutex::new(HashMap::new()),
             limiter: Limiter::new(A_MINUTE),
-            in_flight: AtomicUsize::new(0),
+            in_flight: Mutex::new(HashMap::new()),
             client: OnceLock::new(),
             said: Mutex::new(HashMap::new()),
         };
@@ -679,15 +707,18 @@ impl Services {
     // ---------- the caller's side ----------
 
     /// Waits for the answer to request `id`, which goes to `host` in the
-    /// frame `frame`.
-    pub fn wait(&self, id: &str, host: &str, frame: &str) -> Result<oneshot::Receiver<Answer>, Answer> {
+    /// frame `frame`, until the `Wait` goes.
+    pub fn wait(&self, id: &str, host: &str, frame: &str) -> Result<Wait<'_>, Answer> {
         let mut waiting = self.waiting.locked();
         if waiting.len() >= WAITING {
             return Err(Answer::refused(503, "busy", format!("this machine waits on {WAITING} services' answers already")));
         }
+        if waiting.values().filter(|w| w.host == host).count() >= WAITING_EACH {
+            return Err(Answer::refused(503, "busy", format!("this machine waits on {WAITING_EACH} answers from {host} already")));
+        }
         let (tx, rx) = oneshot::channel();
         waiting.insert(id.to_string(), Waiting { host: host.to_string(), frame: frame.to_string(), tx });
-        Ok(rx)
+        Ok(Wait { services: self, id: id.to_string(), answer: rx })
     }
 
     /// Stops waiting on `id`.
@@ -806,12 +837,25 @@ impl Services {
             Ok(x) => x,
             Err(a) => return a,
         };
-        if self.in_flight.fetch_add(1, Ordering::SeqCst) >= IN_FLIGHT {
-            self.in_flight.fetch_sub(1, Ordering::SeqCst);
-            return Answer::refused(503, "busy", format!("this host passes {IN_FLIGHT} requests to its services at once, at most"));
-        }
-        let _flight = Flight(&self.in_flight);
+        let _flight = match self.fly(caller) {
+            Ok(f) => f,
+            Err(a) => return a,
+        };
         self.forward(&p, caller, &req, &n).await
+    }
+
+    /// A slot to forward a request from `caller` in, while there's one.
+    fn fly(&self, caller: &str) -> Result<Flight<'_>, Answer> {
+        let mut all = self.in_flight.locked();
+        if all.values().sum::<usize>() >= IN_FLIGHT {
+            return Err(Answer::refused(503, "busy", format!("this host passes {IN_FLIGHT} requests to its services at once, at most")));
+        }
+        let n = all.entry(caller.to_string()).or_insert(0);
+        if *n >= IN_FLIGHT_EACH {
+            return Err(Answer::refused(503, "busy", format!("this host passes {IN_FLIGHT_EACH} requests from {caller} to its services at once, at most")));
+        }
+        *n += 1;
+        Ok(Flight { services: self, caller: caller.to_string() })
     }
 
     async fn forward(&self, p: &Published, caller: &str, req: &Request, n: &Normal) -> Answer {
@@ -1097,17 +1141,48 @@ mod tests {
     #[test]
     fn a_caller_hears_only_from_the_host_it_asked() {
         let s = Services::open(std::env::temp_dir().join("xenonet-svc-none").join("services.json"));
-        let mut rx = s.wait("svq_00000000000000000000000000000001", "studio", "frm_1").unwrap();
+        let mut w = s.wait("svq_00000000000000000000000000000001", "studio", "frm_1").unwrap();
         assert!(!s.answered("desk", "svq_00000000000000000000000000000001", Answer::refused(200, "x", "x")), "another host can't answer it");
-        assert!(rx.try_recv().is_err());
+        assert!(w.answer.try_recv().is_err());
         assert!(s.answered("studio", "svq_00000000000000000000000000000001", Answer::refused(201, "x", "x")));
-        assert_eq!(rx.try_recv().unwrap().status, 201);
+        assert_eq!(w.answer.try_recv().unwrap().status, 201);
         let mut a = s.wait("svq_00000000000000000000000000000002", "studio", "frm_2").unwrap();
         let mut b = s.wait("svq_00000000000000000000000000000003", "desk", "frm_3").unwrap();
         s.fail_frame("frm_3", &Answer::refused(429, "rate", "x"));
-        assert_eq!(b.try_recv().unwrap().status, 429);
+        assert_eq!(b.answer.try_recv().unwrap().status, 429);
         s.fail_host("studio", &Answer::refused(503, "offline", "x"));
-        assert_eq!(a.try_recv().unwrap().status, 503);
+        assert_eq!(a.answer.try_recv().unwrap().status, 503);
         assert_eq!(s.waiting(), 0);
+    }
+
+    #[test]
+    fn a_wait_ends_when_its_call_goes() {
+        let s = Services::open(std::env::temp_dir().join("xenonet-svc-none").join("services.json"));
+        // The program that asked went away: its call, and the wait in it,
+        // are dropped before any answer.
+        let w = s.wait("svq_00000000000000000000000000000001", "studio", "frm_1").unwrap();
+        assert_eq!(s.waiting(), 1);
+        drop(w);
+        assert_eq!(s.waiting(), 0);
+        // One host that never answers holds a quarter of the waits at most.
+        let held: Vec<Wait<'_>> = (0..WAITING_EACH).map(|i| s.wait(&format!("svq_{i:032x}"), "studio", "frm_1").unwrap()).collect();
+        let refused = s.wait("svq_ffffffffffffffffffffffffffffffff", "studio", "frm_1").err().unwrap();
+        assert_eq!((refused.status, refused.code.as_deref()), (503, Some("busy")));
+        assert!(s.wait("svq_fffffffffffffffffffffffffffffffe", "desk", "frm_2").is_ok(), "another host still answers");
+        drop(held);
+        assert_eq!(s.waiting(), 0);
+    }
+
+    #[test]
+    fn no_one_caller_holds_every_forwarding_slot() {
+        let s = Services::open(std::env::temp_dir().join("xenonet-svc-none").join("services.json"));
+        let laptop: Vec<Flight<'_>> = (0..IN_FLIGHT_EACH).map(|_| s.fly("laptop").ok().unwrap()).collect();
+        assert_eq!(s.fly("laptop").err().map(|a| a.status), Some(503));
+        let others: Vec<Flight<'_>> = (0..IN_FLIGHT - IN_FLIGHT_EACH).map(|i| s.fly(&format!("host{}", i / IN_FLIGHT_EACH)).ok().unwrap()).collect();
+        assert_eq!(s.fly("desk").err().map(|a| a.status), Some(503), "and all of them hold {IN_FLIGHT} at most");
+        drop(laptop);
+        assert!(s.fly("laptop").is_ok(), "a slot comes back when its request ends");
+        drop(others);
+        assert!(s.in_flight.locked().is_empty());
     }
 }
