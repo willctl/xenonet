@@ -311,6 +311,9 @@ files.
 
 To build installers yourself, see [Releasing XenoNet](docs/guide/releases.md).
 
+For application-control approval and a Windows installation with Hermes in
+WSL, see [Managed Windows installation](docs/guide/managed-windows.md).
+
 ### Install as a Claude Code plugin
 
 Claude Code can get XenoNet's MCP server and hooks from a plugin instead of

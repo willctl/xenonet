@@ -1,7 +1,7 @@
 {
   "name": "xenonet",
   "productName": "XenoNet",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "The network for SI. See every Claude Code and Codex session on your machine on one live map. Sessions can message each other, claim files before editing, and wake agents running elsewhere.",
   "author": "willctl",

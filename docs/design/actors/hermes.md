@@ -228,6 +228,15 @@ layout. The current schema is version 31 ([session storage][docs-storage],
 The first time the new code opens this file, it migrates it. XenoNet has to
 read both layouts.
 
+Schema 32 also keeps the metadata columns XenoNet reads. Hermes commit
+`5b147ab036d6d19131bff8d20701b5001eab844a` declares it in
+`hermes_state_common.py`: it records the additive runtime/admission/worker
+structures introduced under 31, with no data migration in
+`hermes_state_schema.py`. The observer accepts versions through 32, still
+checks the available columns, and reports later versions as drift. Tests
+cover incremental reads, edit paths and content exclusion under both 31
+and 32.
+
 **The columns XenoNet needs:**
 
 | Table | Column | What XenoNet does with it |
@@ -627,7 +636,7 @@ An example, with made-up values:
 
 | Schema | Source | Key fields | Notes |
 |---|---|---|---|
-| `vendor/nous/hermes-agent/state-db` | `state.db`, per profile | `schema_version.version`; the `sessions`, `messages` and `gateway_heartbeats` columns in section 2 | It picks a layout by `schema_version` and `PRAGMA table_info`, not by the app's version, because this install tracks `main`. A missing column is drift (`missing-field`), and an unknown version is `new-version`. The first major covers v31 and the older layout seen here |
+| `vendor/nous/hermes-agent/state-db` | `state.db`, per profile | `schema_version.version`; the `sessions`, `messages` and `gateway_heartbeats` columns in section 2 | It picks a layout by `schema_version` and `PRAGMA table_info`, not by the app's version, because this install tracks `main`. A missing column is drift (`missing-field`), and an unknown version is `new-version`. The first major covers through v32 and the older layout seen here |
 | `vendor/nous/hermes-agent/gateway-state` | `gateway_state.json` and `gateway.pid` | `kind`, `pid`, `start_time`, `updated_at`, `gateway_state`, `exit_reason`, `active_agents`, `active_work`, `served_profiles`, `code_version`, and `platforms.<name>.state`, `needs_attention`, `updated_at` | `gateway_state` is a discriminator |
 | `vendor/nous/hermes-agent/spawn-ledger` | `spawn-ledger.json` | `pid`, `create_time`, `purpose`, `install`, `spawner_pid`, `spawner_create`, `registered_at`, `host`, `port`, `profile`, `isolated` | `purpose` is a discriminator. `argv` is skipped |
 | `vendor/nous/hermes-agent/processes` | `processes.json` | `pid`, `pid_scope`, `host_start_time`, `cwd`, `started_at`, `parent_session_id`, `task_id` | `command`, `watch_patterns` and `session_key` are skipped |
