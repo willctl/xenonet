@@ -357,7 +357,7 @@ impl Session {
         let mut events = self.events.subscribe(true);
         let (reads_tx, mut reads) = mpsc::unbounded_channel();
         self.frames.push(self.hello.clone());
-        self.flush(now_ms(), 1);
+        self.flush(now_ms());
         self.snapshot(&reads_tx);
         let mut tick = tokio::time::interval(Duration::from_millis(self.timing.frame_ms.max(10.0) as u64));
         loop {
@@ -444,21 +444,10 @@ impl Session {
         }
     }
 
-    /// A get's path against the relay's allowlist, then what this host
-    /// serves over the network: with titles only, no transcript, and
-    /// collisions and MCP servers' details not yet at all. The path read,
-    /// as the relay reads it.
+    /// A get's path, as this host serves it now: titles only is read at
+    /// each get, not as the subscription began, so it holds at once.
     fn allowed(&self, path: &str) -> Result<(Shape, String), String> {
-        let (shape, path) = core::allowed(Some(&json!(path)))?;
-        let route = path.split('?').next().unwrap_or("");
-        if route == "/api/collision" || route == "/api/mcp" {
-            return Err("collisions and MCP servers' details from another machine in the network come later: open them on that machine".into());
-        }
-        // Read now, not as the subscription began: titles only goes at once.
-        if self.net.titles_only() && route.ends_with("/transcript") {
-            return Err("this machine shares titles only with the network: its transcripts stay on it".into());
-        }
-        Ok((shape, core::route_to_read(shape, &path)))
+        net_allowed(path, self.net.titles_only())
     }
 
     fn read(&mut self, r: Read) {
@@ -507,12 +496,12 @@ impl Session {
         if now - self.last_sent < self.timing.frame_ms * subs as f64 {
             return;
         }
-        self.flush(now, subs);
+        self.flush(now);
     }
 
     /// What waits, in bodies of at most BODY_BYTES: the map and the live
     /// state when they're due, and a ping when it's been quiet.
-    fn flush(&mut self, now: f64, _subs: usize) {
+    fn flush(&mut self, now: f64) {
         if self.graph.is_some() && now - self.last_graph >= self.timing.graph_ms {
             if let Some(g) = self.graph.take() {
                 self.frames.push(g);
@@ -576,6 +565,21 @@ impl Session {
             (self.log)("net.relay", &format!("this machine's map didn't go to {}: {why}", self.host));
         }
     }
+}
+
+/// A get's path against the relay's allowlist, then what a host serves over
+/// the network: with titles only, no transcript, and collisions and MCP
+/// servers' details not yet at all. The path read, as the relay reads it.
+pub fn net_allowed(path: &str, titles_only: bool) -> Result<(Shape, String), String> {
+    let (shape, path) = core::allowed(Some(&json!(path)))?;
+    let route = path.split('?').next().unwrap_or("");
+    if route == "/api/collision" || route == "/api/mcp" {
+        return Err("collisions and MCP servers' details from another machine in the network come later: open them on that machine".into());
+    }
+    if titles_only && route.ends_with("/transcript") {
+        return Err("this machine shares titles only with the network: its transcripts stay on it".into());
+    }
+    Ok((shape, core::route_to_read(shape, &path)))
 }
 
 /// The events in one chunk of this machine's event stream: each block's

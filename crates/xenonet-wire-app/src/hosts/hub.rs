@@ -1149,6 +1149,14 @@ impl HostHub {
         self.net.locked().as_ref().map(|n| n.server.clone())
     }
 
+    /// A network host whose link goes by `transport`, started now: for the
+    /// tests and the fuzz target, which carry its frames themselves.
+    pub fn add_network(&self, id: &str, network: &str, transport: Arc<dyn Transport>) {
+        let mut st = self.st.locked();
+        let entry = json!({ "id": id, "transport": "network", "key": net_key(network, id) });
+        self.add_one(&mut st, entry, true, Some(transport), true);
+    }
+
     /// Stops renewing its subscriptions and looking at the roster, as a
     /// console that vanished without a word would: for the tests of a
     /// subscription that lapses.
