@@ -221,6 +221,7 @@ export class EngineStore {
   actorToken = (slug) => this.#c("actorToken", [slug]);
   staleActorTokens = (before) => this.#c("staleActorTokens", [before]);
   expiredActorTokens = () => this.#c("expiredActorTokens", []);
+  issuedTokenHashes = () => this.#c("issuedTokenHashes", []);
   addActorRequest(request) {
     this.#c("addActorRequest", [request]);
   }

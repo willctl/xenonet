@@ -68,9 +68,16 @@ export const TranscriptLine = vendor(
         { known: ["type", "role", "stop_sequence", "container", "context_management", "stop_details", "diagnostics", "input_transformations"] },
       ),
     }).describe("A reply, or a part of one"),
+    // A Remote Control session's link, which says no time or version.
+    open({
+      type: z.literal("bridge-session"),
+      ownerAccountUuid: str.describe("The Claude account the session runs as, which the identities read (core/identities.js)"),
+      ownerOrganizationUuid: str.describe("Its organization"),
+    }).describe("A Remote Control session's link, which names the account it runs as"),
     // Kinds XenoNet passes over: Claude Code's notes and summaries, and what
     // newer versions write about a session around them (its titles and
-    // mode, queued prompts, file history, links, costs and API requests).
+    // mode, queued prompts, file history, links, costs, API requests, its
+    // worktree and the artifacts it watches).
     ...skipped(
       "type",
       "system",
@@ -93,6 +100,9 @@ export const TranscriptLine = vendor(
       "api-request",
       "api-request-shape",
       "api-request-blob",
+      "worktree-state",
+      "artifact-comment-monitor",
+      "artifact-autoreact-ledger",
     ),
   ]),
   {

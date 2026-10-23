@@ -919,8 +919,14 @@ async fn repos(c: &Ctx<'_>) -> Result<Value, Failure> {
     if !files.is_empty() {
         let shown: Vec<String> = files.iter().take(3).map(|x| c.tilde(&js_string(x))).collect();
         let more = if files.len() > 3 { format!(" and {} more", files.len() - 3) } else { String::new() };
+        let one = files.len() == 1;
+        // Only a token XenoNet issued counts. When it couldn't read its own
+        // tokens, every token-shaped string did, a made-up one too.
+        let unchecked = truthy(found.get("unchecked"));
+        let what = if unchecked { "what looks like an actor's token" } else { "an actor's token" };
+        let note = if unchecked { format!("; XenoNet couldn't check {} against the tokens it issued", if one { "it" } else { "them" }) } else { String::new() };
         return Ok(warn(
-            format!("{} in a repo {} an actor's token: {}{more}{when}", plural(files.len() as f64, "file", None), if files.len() == 1 { "holds" } else { "hold" }, shown.join(", ")),
+            format!("{} in a repo {} {what}: {}{more}{when}{note}", plural(files.len() as f64, "file", None), if one { "holds" } else { "hold" }, shown.join(", ")),
             Some("Move each token out of the repo, whether it's in a file of its own or a line of a .env. Keep it in a file only you can read, outside any repo (for example ~/.config/<name>/xenonet.token, named in XENONET_ACTOR_TOKEN_FILE). Give its actor a new token with New token in XenoNet's Actors panel, since a session may have read it. If it was committed, the old token has leaked."),
         ));
     }
