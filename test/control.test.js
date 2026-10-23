@@ -62,9 +62,21 @@ test("launch: a window mode it doesn't know is refused before anything starts, n
   await assert.rejects(xenonet("demo", { port: 1 }).launch({ show: "restart:hidden" }), /a window shows inactive, front or hidden, not "restart:hidden"/);
 });
 
+// A random port in XenoNet's range can be taken on a shared runner, so try
+// another when it is.
+async function demoServerOnSomePort() {
+  for (let tries = 1; ; tries++) {
+    const port = 47900 + Math.floor(Math.random() * 90);
+    try {
+      return { port, proc: await demoServer(port) };
+    } catch (err) {
+      if (tries >= 5 || !/already in use/.test(err.message)) throw err;
+    }
+  }
+}
+
 test("server: the control route needs XenoNet Dev's window, JSON and the right host", async () => {
-  const port = 47900 + Math.floor(Math.random() * 90);
-  const proc = await demoServer(port);
+  const { port, proc } = await demoServerOnSomePort();
   try {
     const post = (headers, body = '{"op":"ping"}') => fetch(`http://127.0.0.1:${port}/api/dev/control`, { method: "POST", headers, body });
     // XENONET_CONTROL alone isn't enough: only a server inside the desktop app
