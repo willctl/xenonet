@@ -97,13 +97,13 @@ fuzz_target!(|data: &[u8]| {
             let _ = (live::tail(a, 40), live::day_key(NOW), live::file_key(a), live::looks_like_question(a));
             let _ = (live::tool_detail(input, Some("/home/nova")), live::command_text(input), live::files_of(input), live::patch_files(input));
             let _ = (live::diff_lines("+", input, 20), live::claude_edits(b, input), live::codex_edits(input), live::tool_key(b, input));
-            let _ = live::wiki_pages_of(Some(b), input);
+            let _ = (live::mcp_tool_of(b), live::wiki_pages_of(Some(b), Some(a), Some(b), input));
         }
         7 => {
             if let Some(v) = &va {
                 let _ = xenolith::env_of(v);
             }
-            let _ = (xenolith::is_context_server(a), xenolith::context_name(Some(a)));
+            let _ = (xenolith::is_context_server(a), xenolith::is_context_call(a, Some(b), Some(a)), xenolith::context_name(Some(a)));
             let records = values(a);
             let _ = query::query_refusals(&records, vb.as_ref().unwrap_or(&Value::Null));
             for r in &records {

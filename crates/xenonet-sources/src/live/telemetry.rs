@@ -15,8 +15,8 @@
 //! the record says), where JS's `+` would have joined strings.
 
 use super::{
-    categorize, claude_edits, clip, clip_value, codex_edits, command_text, day_key, file_key, files_of, looks_like_question, mcp_server_of, median, patch_files, slope, string_of,
-    tail, tool_detail, tool_key, wiki_pages_of,
+    categorize, claude_edits, clip, clip_value, codex_edits, command_text, day_key, file_key, files_of, looks_like_question, mcp_server_of, mcp_tool_of, median, patch_files,
+    slope, string_of, tail, tool_detail, tool_key, wiki_pages_of,
 };
 use crate::line_events::{self, broken_at, usage_of, user_text, End, Field, Kind, LineEvent, LineFile, Run};
 use crate::lines::{opt_prop, prop, ClaudeLine, CodexLine, GrokLine, TypeError};
@@ -838,6 +838,10 @@ pub struct Where {
 #[derive(Debug)]
 pub struct Telemetry {
     pub home: Option<String>,
+    /// The MCP server the config names for the shared context
+    /// (wikiServer): Xenolith's tools under it write there, whatever it's
+    /// called.
+    pub context_server: Option<String>,
     roots: Vec<(String, String)>,
     sessions: Vec<Session>,
     index: HashMap<String, usize>,
@@ -857,6 +861,7 @@ impl Telemetry {
     pub fn new(home: Option<String>, roots: Vec<(String, String)>) -> Self {
         Telemetry {
             home,
+            context_server: None,
             roots,
             sessions: Vec::new(),
             index: HashMap::new(),
@@ -1412,7 +1417,7 @@ impl Telemetry {
         }
         let name_s = string_of(name.as_ref());
         let server = mcp_server_of(&name_s);
-        let pages = wiki_pages_of(server.as_deref(), input.as_ref());
+        let pages = wiki_pages_of(server.as_deref(), mcp_tool_of(&name_s), self.context_server.as_deref(), input.as_ref());
         let full = match opt_prop(input.as_ref(), "command") {
             Some(c @ Value::String(_)) => c.clone(),
             _ => nn(input.as_ref()).cloned().unwrap_or_else(|| Value::Object(Map::new())),
@@ -1838,7 +1843,7 @@ impl Telemetry {
                 let ok = is_str(get("status"), "completed") && !truthy(get("error"));
                 self.sessions[i].note_tool_result(ok, ts, None);
                 let (server, tool) = (get("server"), get("tool"));
-                let pages = wiki_pages_of(server.and_then(Value::as_str), get("arguments"));
+                let pages = wiki_pages_of(server.and_then(Value::as_str), tool.and_then(Value::as_str), self.context_server.as_deref(), get("arguments"));
                 let call = ToolCall {
                     name: Some(Value::String(format!("mcp__{}__{}", tpl(server), tpl(tool)))),
                     server: server.cloned(),

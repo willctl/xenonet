@@ -1,17 +1,29 @@
-//! core/xenolith.js: where the shared context's wiki is (Xenolith's, else
-//! Agent Wiki's), and which MCP server writes to it. XenoNet only reads the
-//! folder.
+//! core/xenolith.js: where the shared context's folder is (Xenolith's,
+//! else Agent Wiki's), and which MCP server writes to it. XenoNet only
+//! reads the folder.
 
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::Path;
 use xenonet_base::paths;
 
-/// The MCP servers whose calls write to the shared context.
+/// The MCP servers whose calls write to the shared context, by the names
+/// Xenolith and Agent Wiki install them under.
 pub const CONTEXT_SERVERS: [&str; 2] = ["xenolith", "agent-wiki"];
 
 pub fn is_context_server(server: &str) -> bool {
     CONTEXT_SERVERS.contains(&server)
+}
+
+/// Xenolith's tools. Under the server the config names for the shared
+/// context (wikiServer), a call to one of them goes to the shared context
+/// whatever that server is called.
+pub const CONTEXT_TOOLS: [&str; 5] = ["context_start", "context_search", "context_read", "context_log", "context_upsert_page"];
+
+/// Whether an MCP call goes to the shared context: any call to a server of
+/// a known name, or a call to one of Xenolith's tools under `named`.
+pub fn is_context_call(server: &str, tool: Option<&str>, named: Option<&str>) -> bool {
+    is_context_server(server) || (named.is_some_and(|n| !n.is_empty() && n == server) && tool.is_some_and(|t| CONTEXT_TOOLS.contains(&t)))
 }
 
 /// The environment, as a test or the process gives it.
@@ -275,5 +287,19 @@ mod tests {
         let link = h.0.join("link");
         std::os::unix::fs::symlink(moved, &link).unwrap();
         assert_eq!(of(link.to_str().unwrap(), &[]), "xenolith", "a link to it");
+    }
+
+    #[test]
+    fn xenoliths_tools_count_under_the_server_the_config_names() {
+        assert!(is_context_call("xenolith", Some("anything"), None), "a known name, any tool");
+        assert!(is_context_call("agent-wiki", Some("wiki_log"), Some("ctx")));
+        for tool in CONTEXT_TOOLS {
+            assert!(is_context_call("ctx", Some(tool), Some("ctx")), "{tool}");
+        }
+        assert!(!is_context_call("ctx", Some("context_log"), None), "no name in the config");
+        assert!(!is_context_call("ctx", Some("context_log"), Some("")));
+        assert!(!is_context_call("ctx", Some("write_page"), Some("ctx")), "another of its tools");
+        assert!(!is_context_call("ctx", None, Some("ctx")));
+        assert!(!is_context_call("github", Some("context_log"), Some("ctx")), "another server");
     }
 }
