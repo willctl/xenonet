@@ -1,8 +1,8 @@
-//! Spaces: one wiki each, for a project, an identity, an actor or a machine. The configured wiki
-//! folder is this machine's own space (machine:local), so a wiki from before spaces is that space
-//! as it is. Every other space is a wiki of the same layout in `spaces/<kind>/<name>/` under it.
+//! Spaces: shared context kept apart, one folder each, for a project, an identity, an actor or a
+//! machine. The configured folder is this machine's own space (machine:local), so a folder from before
+//! spaces is that space as it is. Every other space has the same layout in `spaces/<kind>/<name>/` under it.
 //!
-//! Space ids read like XenoNet's selector terms: `project:xenonet`, `identity:adal`,
+//! Space ids read like selector terms (access.rs): `project:atlas`, `identity:adal`,
 //! `actor:hermes`, `machine:local`. Names are lowercase, so an id is one folder on every OS.
 //! Reads of the machine space never reach into `spaces/` (wiki::read_section refuses the path),
 //! so a grant on one space never shows another.
@@ -28,7 +28,7 @@ pub struct SpaceId {
 }
 
 impl SpaceId {
-    /// "project:xenonet" (any case) as a space id; an error says what a space id looks like.
+    /// "project:atlas" (any case) as a space id; an error says what a space id looks like.
     pub fn parse(text: &str) -> Result<SpaceId> {
         let t = text.trim().to_lowercase();
         let Some((kind, name)) = t.split_once(':') else {

@@ -4,7 +4,7 @@ Xenolith ships two Rust programs and a React window. The CLI provides MCP over s
 
 ## Storage
 
-Use platform directories from xenolith_core::paths. Windows uses AppData, macOS uses Library, and Linux uses XDG directories. The wiki itself is a user-selected Markdown folder. Do not put credentials in that folder.
+Use platform directories from xenolith_core::paths. Windows uses AppData, macOS uses Library, and Linux uses XDG directories. The shared context itself is a user-selected Markdown folder. Do not put credentials in that folder.
 
 ## Services and windows
 
@@ -14,4 +14,4 @@ HTTP binds to 127.0.0.1. This restricts network access, but does not authenticat
 
 ## Verification
 
-Run the Rust checks and behavior suites on all supported platforms. Use an isolated wiki, spare port and fake model for local verification. Native tray and webview behavior also needs a platform-specific check. A cross-compile alone does not prove native behavior.
+Run the Rust checks and behavior suites on all supported platforms. Use an isolated folder, spare port and fake model for local verification. Native tray and webview behavior also needs a platform-specific check. A cross-compile alone does not prove native behavior.

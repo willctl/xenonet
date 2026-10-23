@@ -10,12 +10,15 @@ Xenolith stores notes durably, files them into Markdown pages, and lets connecte
 - Provenance labels, held changes, approval controls and conditional undo.
 - Read-only Ask workers, scheduled page review and requested redaction.
 - Rust programs for the service, CLI, native tray, window and installer.
+- Spaces with grants and tokens, and sync between machines with one curator per space: pinned curator ids, removals, local edits as entries, dead letters.
+- A versioned folder format ([FORMAT.md](../FORMAT.md)) for programs that read the folder, and CI of its own on Linux, macOS and Windows.
 
 ## Remaining work
 
 - Add authenticated local transport before claiming isolation between OS accounts.
 - Review native UI dependencies and remove obsolete transitive packages as upstream support permits.
 - Expand synthetic retrieval and poisoning cases without adding private user data.
+- Xenolith's own version tags (`xenolith-v<version>`) and a release workflow.
 
 ## Sequence
 

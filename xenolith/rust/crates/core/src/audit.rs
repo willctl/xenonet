@@ -2,7 +2,7 @@
 //! Xenolith's state folder (audit/chain.jsonl). Each line carries the SHA-256 of the line before
 //! it (`prev`) and its own (`hash`, over `prev` and the line without `hash`), so a line changed,
 //! removed or put in between breaks the chain at that point, and `xenolith audit verify` says
-//! where. Like XenoNet's delivery audit it holds no text a session wrote, only its hash.
+//! where. It holds no text a session wrote, only its hash.
 //!
 //! The chain shows tampering; it can't prevent it: whoever can write the file can rewrite the
 //! whole chain. Keep a copy of the last hash elsewhere to pin it.

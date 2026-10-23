@@ -3,9 +3,9 @@
 Xenolith keeps shared context in one folder of plain files. This document is
 the contract for programs that read that folder without going through
 Xenolith's MCP server: a viewer, a search tool, a backup, a map of sessions.
-Xenolith's own server and curator are the only writers. Read the folder; to
-add to it, call the server (`context_log`, `context_upsert_page`) so notes are
-queued, checked for secrets and filed.
+Only Xenolith's own programs write it. To add to it, call the server
+(`context_log`, `context_upsert_page`), so notes are queued, checked for secrets
+and filed.
 
 The format has a version, in the marker below. Changes that only add (a new
 frontmatter key, a new file) keep the version. A change that would make a
