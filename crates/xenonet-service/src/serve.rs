@@ -418,6 +418,9 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
     };
     let port = listener.local_addr().map_or(config.port, |a| a.port());
     let (stop_tx, mut stop_rx) = mpsc::unbounded_channel::<()>();
+    // Desktop's window, as it last said: shown, hidden or closed.
+    let window: Arc<Mutex<Option<String>>> = Arc::default();
+    plug_hub(&ctx, port, &window);
 
     if config.standalone {
         // No app started this service, so the Desktop that connects is the
@@ -426,12 +429,17 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
         let person = ctx.clone();
         let you = ctx.clone();
         let stop = stop_tx.clone();
+        let shown = window.clone();
         let hooks = Hooks {
             version: version.clone(),
             window_key: ctx.window_key.clone(),
             window_state: Arc::new(move |v: &Value| {
                 if let Some(a) = &you.cores.actors {
                     a.you_window(v);
+                }
+                *shown.locked() = v.as_str().map(str::to_string);
+                if let Some(h) = &you.cores.hub {
+                    h.console(v.as_str(), you.events.pages());
                 }
             }),
             shutdown: Arc::new(move || {
@@ -571,6 +579,40 @@ async fn signal() {
     {
         let _ = tokio::signal::ctrl_c().await;
     }
+}
+
+/// The hub and the network, once both are there and the service listens:
+/// the hub hears the map's relay frames, and serves this host's own map to
+/// the window hosts that subscribe, reading this service's API on `port` as
+/// any local program reads it, with no key. Every two seconds it's told
+/// whether a console is open here, from Desktop's window as it last said
+/// and the pages reading the event stream.
+fn plug_hub(ctx: &Arc<Ctx>, port: u16, window: &Arc<Mutex<Option<String>>>) {
+    let Some(hub) = ctx.cores.hub.clone() else { return };
+    if let Some(svc) = ctx.net.get() {
+        hub.plug_net(crate::cores::HubNet {
+            net: svc.net(),
+            sinks: svc.sinks().clone(),
+            events: ctx.events.clone(),
+            api: Arc::new(crate::cores::HttpApi { port, timeout: Duration::from_secs(20), max_bytes: 16 << 20 }),
+            home: ctx.config.home.clone(),
+            version: ctx.version.clone(),
+            platform: crate::borrowed::platform().to_string(),
+            demo: ctx.config.demo,
+        });
+    }
+    let (c, w) = (Arc::downgrade(ctx), window.clone());
+    tokio::spawn(async move {
+        let mut every = tokio::time::interval(Duration::from_secs(2));
+        loop {
+            every.tick().await;
+            let Some(ctx) = c.upgrade() else { return };
+            let shown = w.locked().clone();
+            if let Some(h) = &ctx.cores.hub {
+                h.console(shown.as_deref(), ctx.events.pages());
+            }
+        }
+    });
 }
 
 fn shutdown(ctx: &Arc<Ctx>) {
