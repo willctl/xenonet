@@ -207,7 +207,7 @@ pub fn assert_no_secrets(fields: &[(&str, &str)]) -> Result<()> {
     for (name, value) in fields {
         if let Some(kind) = find_secret(value) {
             return wiki_err(format!(
-                "Refused: `{name}` looks like it contains {kind}. Never store secrets in the wiki. Record WHERE the secret lives instead (for example \"API key is in the 1Password vault 'Work'\"), then try again."
+                "Refused: `{name}` looks like it contains {kind}. Never store secrets in the shared context. Record WHERE the secret lives instead (for example \"API key is in the 1Password vault 'Work'\"), then try again."
             ));
         }
     }
@@ -226,7 +226,7 @@ pub fn confined_path(wiki_dir: &Path, path: &Path) -> Result<PathBuf> {
     let root = absolute(wiki_dir);
     let real_root = fs::canonicalize(&root)?;
     let abs = absolute(path);
-    let rel = abs.strip_prefix(&root).or_else(|_| abs.strip_prefix(&real_root)).map_err(|_| Error::Wiki("Refused a path outside the wiki folder.".into()))?;
+    let rel = abs.strip_prefix(&root).or_else(|_| abs.strip_prefix(&real_root)).map_err(|_| Error::Wiki("Refused a path outside the shared context folder.".into()))?;
     let mut checked = real_root;
     for part in rel.components() {
         if !matches!(part, Component::Normal(_)) {
@@ -243,7 +243,7 @@ pub fn confined_path(wiki_dir: &Path, path: &Path) -> Result<PathBuf> {
                 #[cfg(not(windows))]
                 let linked = m.file_type().is_symlink();
                 if linked {
-                    return wiki_err("Refused a link or reparse point inside the wiki folder.");
+                    return wiki_err("Refused a link or reparse point inside the shared context folder.");
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -341,7 +341,7 @@ pub fn write_if_missing(file: &Path, content: &str) -> Result<bool> {
 pub fn with_lock<T>(wiki_dir: &Path, f: impl FnOnce() -> Result<T>) -> Result<T> {
     let mut guard = match lock::acquire(wiki_dir, "write", &LockOpts::default()) {
         Ok(g) => g,
-        Err(AcquireError::Busy(b)) => return wiki_err(format!("The wiki is busy ({}). Try again shortly.", b.0)),
+        Err(AcquireError::Busy(b)) => return wiki_err(format!("The shared context is busy ({}). Try again shortly.", b.0)),
         Err(AcquireError::Io(e)) => return Err(e.into()),
     };
     let r = f();
@@ -416,10 +416,10 @@ pub fn ensure_skeleton(wiki_dir: &Path) -> Result<()> {
 /// The bundled PROTOCOL.md of earlier releases (hash_text, 16 characters). A wiki whose copy is one of
 /// these never edited it, so an install may bring it up to date. The test below fails when
 /// protocol/PROTOCOL.md changes and says which hash to move here.
-const OLD_PROTOCOLS: [&str; 7] = ["18164903345112d0", "192abaacb1b60064", "09a27d24ebee04ca", "2323d98efcb27d61", "654998a3f71913a9", "958d048836748db0", "a7de848ecc7f2d3e"];
+const OLD_PROTOCOLS: [&str; 8] = ["18164903345112d0", "192abaacb1b60064", "09a27d24ebee04ca", "2323d98efcb27d61", "654998a3f71913a9", "958d048836748db0", "a7de848ecc7f2d3e", "434666d6a975c8f4"];
 /// The hash of this release's protocol/PROTOCOL.md (the test below pins it).
 #[cfg(test)]
-const CURRENT_PROTOCOL: &str = "434666d6a975c8f4";
+const CURRENT_PROTOCOL: &str = "b2ff51c4e6c5b87b";
 
 /// Replaces an unedited PROTOCOL.md of an earlier release with this release's, keeping the old copy
 /// in .history/. An edited one is the user's and stays. Returns whether it replaced it.
@@ -1023,7 +1023,7 @@ fn read_whole(wiki_dir: &Path, target: &str) -> Result<(String, String)> {
     };
     let mut abs = normalize(&root.join(&rel));
     if !is_inside(&root, &abs) {
-        return wiki_err(format!("Refused: \"{target}\" is outside the wiki folder."));
+        return wiki_err(format!("Refused: \"{target}\" is outside the shared context folder."));
     }
     if !abs.exists() && !abs.to_string_lossy().to_lowercase().ends_with(".md") {
         let with_md = PathBuf::from(format!("{}.md", abs.display()));
@@ -1042,7 +1042,7 @@ fn read_whole(wiki_dir: &Path, target: &str) -> Result<(String, String)> {
     let real_root = canonical_root(&root)?;
     let real = fs::canonicalize(&abs)?;
     if !is_inside(&real_root, &real) {
-        return wiki_err(format!("Refused: \"{target}\" resolves outside the wiki folder."));
+        return wiki_err(format!("Refused: \"{target}\" resolves outside the shared context folder."));
     }
     // Other spaces live in the machine space's spaces/ folder: each is read as its own space, with
     // its own access, never as files of this one (spaces.rs). And a read returns content only (the
@@ -1086,7 +1086,7 @@ pub fn start_context(wiki_dir: &Path, app: &str, topic: &str) -> Result<String> 
     let mut out = vec![
         "# Xenolith: session start".to_string(),
         String::new(),
-        format!("Now: {} ({}). Wiki folder: {}. You are: {}.", local_iso(&now), now.format("%A"), disp(wiki_dir), normalize_app(app)),
+        format!("Now: {} ({}). Folder: {}. You are: {}.", local_iso(&now), now.format("%A"), disp(wiki_dir), normalize_app(app)),
         String::new(),
         "---".into(),
         String::new(),

@@ -136,7 +136,7 @@ describe('tokens over HTTP', { timeout: 60_000 }, () => {
       const start = await call(c, 'context_start', { app: 'phone' });
       assert.equal(start.isError, false, start.text);
       assert.match(start.text, /^Space: project:atlas\. No other space is open to you\.$/m, 'its only space is the default');
-      assert.doesNotMatch(start.text, /Wiki folder:/);
+      assert.doesNotMatch(start.text, /Folder:/);
       assert.match((await call(c, 'context_search', { space: 'project:atlas', query: 'postgres' })).text, /Atlas runs on Postgres 17/);
       for (const space of ['machine:local', 'project:nope', 'actor:hermes']) {
         const r = await call(c, 'context_search', { space, query: 'home lab' });

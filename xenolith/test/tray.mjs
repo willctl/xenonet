@@ -169,7 +169,7 @@ describe('tray app', { timeout: 180_000 }, () => {
     for (const item of [
       /^item=Xenolith \d+\.\d+\.\d+ · OK$/m,
       /^item=Up \d+ s · 0 note\(s\) queued$/m,
-      /^item=Open wiki folder$/m,
+      /^item=Open folder$/m,
       /^item=Open index\.md$/m,
       /^item=Open logs$/m,
       /^item=Recent activity > /m,

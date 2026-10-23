@@ -273,7 +273,7 @@ for (const mode of ['stdio', 'http']) {
       for (const bad of ['../../etc/passwd', '..\\..\\Windows\\win.ini', path.join(os.homedir(), '.ssh', 'config')]) {
         const r = await call(claude, 'context_read', { target: bad });
         assert.equal(r.isError, true, bad);
-        assert.match(r.text, /outside the wiki/, bad);
+        assert.match(r.text, /outside the shared context folder/, bad);
       }
       const missing = await call(claude, 'context_read', { target: '1999-01-01' });
       assert.equal(missing.isError, true);
