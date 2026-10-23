@@ -883,10 +883,13 @@ test/                  the suites: e2e (two real MCP clients, both transports), 
 ```
 
 The suites talk to the programs over MCP, `/api` and their files: `npm test`
-runs them against the programs in `rust/target/release` (or
-`XENOLITH_RUST_BIN`). `scripts/check-rust.sh` formats, lints
-(`cargo clippy -D warnings`) and tests the Rust programs; XenoNet's CI doesn't
-run Xenolith's suites yet. `npm run bench` measures the program's footprint and
+runs them against the programs in `rust/target/release` or `rust/target/debug`
+(or `XENOLITH_RUST_BIN`). `scripts/check-rust.sh` formats, lints
+(`cargo clippy -D warnings`) and tests the Rust programs on the toolchain
+`rust/rust-toolchain.toml` pins. Xenolith's own CI
+(`.github/workflows/xenolith.yml`) runs all of it on Linux, macOS and Windows
+whenever `xenolith/` changes. Its own version tags and a release workflow can
+come later. `npm run bench` measures the program's footprint and
 speed: 5 runs, each metric's median and range, every answer checked, exit 1 on
 any error. The memory eval is described in
 [docs/memory-eval.md](docs/memory-eval.md).

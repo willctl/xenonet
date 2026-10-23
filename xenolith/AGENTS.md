@@ -27,13 +27,17 @@ applies too: its commit conventions, and its rules for working beside other agen
   and the Rust unit tests. Run it before pushing Rust changes. On Windows without cargo, run it in
   WSL.
 - `npm test` (or `node --test test/<suite>.mjs`): the suites against the Rust programs in
-  `rust/target/release` (or `XENOLITH_RUST_BIN`). Build them first: `cargo build --release
-  --workspace` in `rust/` (the tray and installer suites need `xenolith-tray` too).
+  `rust/target/release`, else `rust/target/debug` (or `XENOLITH_RUST_BIN`). Build them first:
+  `cargo build --release --workspace` in `rust/` (the tray and installer suites need
+  `xenolith-tray` too).
 - To see a change end to end, run an isolated instance: `npm run ui:preview` (a snapshot copy of
   your wiki on port 47859), or `xenolith serve --http --port 0` with `XENOLITH_HOME` and
   `XENOLITH_DIR` set to temp folders.
-- Rust 1.85 builds the core and the CLI (`cargo build` in `rust/`). The tray needs Rust 1.90:
-  `cargo +1.90 build -p xenolith-tray`, or that toolchain's cargo with `RUSTC` set to its rustc.
+- `rust/rust-toolchain.toml` pins the Rust that builds everything, here and in CI. `cargo build`
+  in `rust/` builds the core and the CLI; `--workspace` adds the tray, which on Linux needs
+  `libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev`.
+- CI: `.github/workflows/xenolith.yml` runs rustfmt, clippy, the Rust tests and `npm test` on
+  Linux, macOS and Windows whenever `xenolith/` changes. It needs nothing from XenoNet.
 
 ## Rules and what enforces them
 
