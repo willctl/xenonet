@@ -532,11 +532,14 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
         row("about", node.description ? h(node.description) : null, "wrap");
     } else if (node.kind === "wiki") {
       const pages = (children.get(node.id) ?? []).map((id) => index.get(id)).filter(Boolean);
-      grid =
-        row("pages", h(node.pageCount ?? pages.length)) +
-        row("last write", node.lastActivity ? `${timeAgo(node.lastActivity)} <span class="dim">· ${stamp(node.lastActivity)}</span>` : "—") +
-        row("inbox", node.inbox?.length ? `<span class="pressure">${node.inbox.length} unfiled</span><br>${node.inbox.slice(0, 6).map((n) => `<span class="dim">· ${h(n.title)}</span>`).join("<br>")}` : `<span class="dim">empty</span>`) +
-        row("folder", mono(shortPath(node.path, 40)));
+      // A folder in a format XenoNet doesn't read: why, in place of what
+      // it would have shown.
+      grid = node.problem
+        ? row("not read", `<span class="pressure">${h(node.problem)}</span>`, "wrap") + row("folder", mono(shortPath(node.path, 40)))
+        : row("pages", h(node.pageCount ?? pages.length)) +
+          row("last write", node.lastActivity ? `${timeAgo(node.lastActivity)} <span class="dim">· ${stamp(node.lastActivity)}</span>` : "—") +
+          row("inbox", node.inbox?.length ? `<span class="pressure">${node.inbox.length} unfiled</span><br>${node.inbox.slice(0, 6).map((n) => `<span class="dim">· ${h(n.title)}</span>`).join("<br>")}` : `<span class="dim">empty</span>`) +
+          row("folder", mono(shortPath(node.path, 40)));
     } else if (node.kind === "page") {
       grid =
         row("type", `<span class="tag">${h(node.type)}</span>`) +
@@ -780,7 +783,9 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
           : node.kind === "page"
             ? `${h(node.type)} · updated ${timeAgo(node.updated)}`
             : node.kind === "wiki"
-              ? `${h(node.pageCount)} pages · ${h(node.inbox?.length ?? 0)} unfiled`
+              ? node.problem
+                ? "not read: a newer format"
+                : `${h(node.pageCount)} pages · ${h(node.inbox?.length ?? 0)} unfiled`
               : `${h(node.sessionCount ?? 0)} sessions${node.repo?.dirty ? ` · Δ${h(node.repo.dirty)} uncommitted` : ""}`
       }</div>`;
     tip.style.transform = `translate(${mouse.x + 16}px, ${mouse.y + 14}px)`;

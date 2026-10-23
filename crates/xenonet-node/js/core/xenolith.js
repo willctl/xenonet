@@ -10,6 +10,13 @@ export const isContextServer = (server) => CONTEXT_SERVERS.has(server);
 export const CONTEXT_TOOLS = new Set(native.contextTools());
 export const isContextCall = (server, tool, named = null) => native.contextIsCall(server, tool, named);
 
+export const CONTEXT_FORMAT = native.contextFormat();
+export const MARKER_FILE = native.contextMarkerFile();
+
+export const readMarker = (dir) => (dir ? native.contextReadMarker(String(dir)) : null);
+
+export const formatProblem = (marker) => (marker ? native.contextFormatProblem(Number(marker.format)) : null);
+
 export function findContextDir({ env = process.env, home = os.homedir(), platform = process.platform } = {}) {
   return native.findContextDir({ ...env }, String(home), String(platform));
 }

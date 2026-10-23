@@ -99,7 +99,7 @@ impl Finds for Found<'_> {
         xenonet_sources::xenolith::find_context_dir(&self.context_env(), self.home, self.platform).map_or(Value::Null, |(dir, server)| json!({ "dir": dir, "server": server }))
     }
     fn context_server(&mut self, dir: Option<&str>) -> Value {
-        dir.map_or(Value::Null, |d| Value::String(xenonet_sources::xenolith::context_server_of(d, &self.context_env(), self.home, self.platform).into()))
+        dir.map_or(Value::Null, |d| Value::String(xenonet_sources::xenolith::context_server_of(d, &self.context_env(), self.home, self.platform)))
     }
     fn claude_desktop_dir(&mut self) -> Option<String> {
         xenonet_base::dirs::find_claude_desktop_dir(&dirs_env(self.env), self.platform, self.home, &mut Disk)

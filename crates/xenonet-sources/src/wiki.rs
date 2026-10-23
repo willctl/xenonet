@@ -668,9 +668,23 @@ fn read_space(space: &SpaceDir, projects: Option<&Value>, root: Option<&Value>, 
 /// The shared context's folder, read: the pages of this machine's space
 /// and of every other space in it (with the projects they mention, paths
 /// under `root`, the projects folder), the last two days of their logs, as
-/// of `now`, and the inbox. `server` is the MCP server that owns it.
+/// of `now`, and the inbox. `server` is the MCP server that owns it. For a
+/// folder in a format XenoNet doesn't read, none of those, and the
+/// `problem` that says why.
 #[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the JS's endsWith is case-sensitive, and so is this")]
 pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now: f64, server: Out) -> Result<Out, TypeError> {
+    // A folder in a later format than XenoNet reads isn't parsed: the map
+    // keeps its node and says why it shows nothing in it.
+    if let Some(problem) = crate::xenolith::read_marker(dir).and_then(|m| crate::xenolith::format_problem(m.format)) {
+        return Ok(Out::obj(vec![
+            ("dir", Out::Str(dir.to_string())),
+            ("server", server),
+            ("pages", Out::Arr(Vec::new())),
+            ("inbox", Out::Arr(Vec::new())),
+            ("log", Out::Arr(Vec::new())),
+            ("problem", Out::Str(problem)),
+        ]));
+    }
     let local = SpaceDir { id: None, kind: "machine".into(), name: "local".into(), dir: dir.to_string() };
     let mut pages: Vec<Page> = Vec::new();
     let mut log: Vec<LogEntry> = Vec::new();
@@ -758,6 +772,36 @@ mod tests {
         assert_eq!(pages.len(), 1, "the linked page isn't the wiki's");
         assert_eq!(get("inbox"), Out::Arr(vec![]), "nor a linked inbox");
         std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn a_folder_in_a_later_format_is_not_parsed() {
+        let wiki = std::env::temp_dir().join(format!("xenonet-wiki-format-rs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&wiki);
+        std::fs::create_dir_all(wiki.join("pages")).unwrap();
+        std::fs::create_dir_all(wiki.join("inbox")).unwrap();
+        std::fs::write(wiki.join("pages/atlas.md"), "# Atlas\n").unwrap();
+        std::fs::write(wiki.join("inbox/note.md"), "# A note\n").unwrap();
+        let read = |marker: &str| {
+            std::fs::write(wiki.join("xenolith.json"), marker).unwrap();
+            let Out::Obj(fields) = read_wiki(wiki.to_str().unwrap(), Some(&json!([])), None, 0.0, Out::Str("xenolith".into())).unwrap() else { panic!("an object") };
+            fields
+        };
+        let field = |fields: &[(String, Out)], k: &str| fields.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
+        let len = |fields: &[(String, Out)], k: &str| match field(fields, k) {
+            Some(Out::Arr(a)) => Some(a.len()),
+            _ => None,
+        };
+        let now = read("{\"format\":1,\"server\":\"xenolith\"}");
+        assert_eq!((len(&now, "pages"), len(&now, "inbox"), field(&now, "problem")), (Some(1), Some(1), None), "the format it reads");
+        let later = read("{\"format\":2,\"server\":\"xenolith\"}");
+        assert_eq!(later.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["dir", "server", "pages", "inbox", "log", "problem"]);
+        assert_eq!((len(&later, "pages"), len(&later, "inbox"), len(&later, "log")), (Some(0), Some(0), Some(0)));
+        assert_eq!(field(&later, "server"), Some(Out::Str("xenolith".into())));
+        assert!(matches!(field(&later, "problem"), Some(Out::Str(p)) if p.contains("version 2")));
+        let broken = read("{\"format\":");
+        assert_eq!((len(&broken, "pages"), field(&broken, "problem")), (Some(1), None), "a marker it can't take: read as before");
+        std::fs::remove_dir_all(wiki).unwrap();
     }
 
     #[test]

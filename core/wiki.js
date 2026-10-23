@@ -4,7 +4,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { dayKey } from "./live.js";
-import { SPACE_KINDS, spaceOf } from "./xenolith.js";
+import { formatProblem, readMarker, SPACE_KINDS, spaceOf } from "./xenolith.js";
 
 export function parseFrontmatter(text) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
@@ -159,9 +159,14 @@ async function readSpace({ id: space, kind, name, dir }, projects, { root, now }
 // of this machine's space and of every other space in it (with the projects
 // they mention, paths under `root`, the projects folder), the last two days
 // of their logs, and the inbox. `server` is the MCP server that owns it.
-// Null without a folder.
+// For a folder in a format XenoNet doesn't read, none of those, and the
+// `problem` that says why. Null without a folder.
 export async function readWiki(dir, projects, { root = null, now = Date.now(), server = "agent-wiki" } = {}) {
   if (!dir) return null;
+  // A folder in a later format than XenoNet reads isn't parsed: the map
+  // keeps its node and says why it shows nothing in it.
+  const problem = formatProblem(readMarker(dir));
+  if (problem) return { dir, server, pages: [], inbox: [], log: [], problem };
   const pages = [];
   const log = [];
   for (const space of [{ id: null, kind: "machine", name: "local", dir }, ...(await spacesIn(dir))]) {

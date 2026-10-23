@@ -275,10 +275,15 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
         let root = format!("resource:{server}");
         let pages = items(get(w, "pages"));
         let last_log = items(get(w, "log")).last().and_then(|l| get(l, "ts")).filter(|v| !v.is_null()).cloned().unwrap_or(Value::Null);
-        g.set(
-            &root,
-            obj(json!({ "id": root, "kind": "wiki", "name": xenonet_sources::xenolith::context_name(Some(&server)), "server": server, "path": get(w, "dir").cloned().unwrap_or(Value::Null), "pageCount": pages.len(), "inbox": get(w, "inbox").cloned().unwrap_or(Value::Null), "lastActivity": last_log })),
+        let mut node = obj(
+            json!({ "id": root, "kind": "wiki", "name": xenonet_sources::xenolith::context_name(Some(&server)), "server": server, "path": get(w, "dir").cloned().unwrap_or(Value::Null), "pageCount": pages.len(), "inbox": get(w, "inbox").cloned().unwrap_or(Value::Null), "lastActivity": last_log }),
         );
+        // Its problem only when it has one (a format XenoNet doesn't read),
+        // so a folder it reads stays as it was.
+        if let Some(problem) = get(w, "problem").filter(|v| v.is_string()) {
+            node.insert("problem".into(), problem.clone());
+        }
+        g.set(&root, node);
         g.link("core", &root, "wiki");
         // A page of another space than this machine's (Xenolith's spaces)
         // is wiki:<space>/<slug>, and its [[links]] are to pages of its own

@@ -127,14 +127,20 @@ const ZoneNode = obj({
   ...remote,
 }).describe("A folder outside the projects folder where sessions ran: the home folder, scratch folders, temp, or one folder");
 
+// An MCP server's name, as the shared context's folder can give it
+// (core/xenolith.js): xenolith or agent-wiki, unless the folder's marker
+// names another.
+const SERVER = "[A-Za-z0-9][A-Za-z0-9._-]{0,63}";
+
 const WikiNode = obj({
-  id: z.string().regex(hosted("resource:(xenolith|agent-wiki)$")),
+  id: z.string().regex(hosted(`resource:${SERVER}$`)),
   kind: z.literal("wiki"),
   name: z.string(),
-  server: z.enum(["xenolith", "agent-wiki"]).optional().describe("The MCP server that writes to it"),
+  server: z.string().regex(new RegExp(`^${SERVER}$`)).optional().describe("The MCP server that writes to it: xenolith or agent-wiki, or the name the folder's marker (xenolith.json) gives"),
   path: z.string(),
   pageCount: count,
   inbox: z.array(obj({ id: z.string(), title: z.string(), app: nstr })),
+  problem: z.string().optional().describe("Why XenoNet shows none of its pages, log or inbox: the folder follows a later version of Xenolith's format than XenoNet reads"),
   ...placed,
   ...rolled,
   ...remote,

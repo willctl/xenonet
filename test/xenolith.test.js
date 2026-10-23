@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { CONTEXT_TOOLS, contextName, contextServerOf, findContextDir, isContextCall, isContextServer, SPACE_KINDS, spaceOf } from "../core/xenolith.js";
+import { CONTEXT_FORMAT, CONTEXT_TOOLS, contextName, contextServerOf, findContextDir, formatProblem, isContextCall, isContextServer, MARKER_FILE, readMarker, SPACE_KINDS, spaceOf } from "../core/xenolith.js";
 import { parseLog, readWiki, wikiLinks } from "../core/wiki.js";
 import { buildGraph } from "../core/graph.js";
 import { GRAPH_NODES } from "../core/schema/graph.js";
@@ -138,6 +138,103 @@ test("a wiki folder belongs to the server whose lookup found it, and to its prot
   }
 });
 
+test("the folder's marker names its server, before the lookup's and the protocol's", () => {
+  const home = tmp();
+  const wiki = wikiAt(path.join(home, "Xenolith"));
+  const mark = (text) => fs.writeFileSync(path.join(wiki, MARKER_FILE), text);
+  const find = () => findContextDir({ env: {}, home, platform: "linux" });
+  const of = (dir) => contextServerOf(dir, { env: {}, home, platform: "linux" });
+  assert.equal(MARKER_FILE, "xenolith.json");
+  assert.deepEqual([readMarker(wiki), find()], [null, { dir: wiki, server: "xenolith" }], "no marker: the lookup's");
+
+  mark('﻿{\n  "format": 1,\n  "server": "ctx"\n}\n');
+  assert.deepEqual(readMarker(wiki), { format: 1, server: "ctx" });
+  assert.deepEqual([find(), of(wiki)], [{ dir: wiki, server: "ctx" }, "ctx"], "the marker's, before the lookup's");
+  assert.equal(contextName("ctx"), "Xenolith");
+
+  // A folder no lookup names, its protocol Agent Wiki's: the marker
+  // decides, and without one the protocol does.
+  const aside = wikiAt(tmp(), "# Agent Wiki protocol\n");
+  assert.equal(of(aside), "agent-wiki");
+  fs.writeFileSync(path.join(aside, MARKER_FILE), '{"format":1,"server":"xenolith"}');
+  assert.equal(of(aside), "xenolith");
+
+  // A server that isn't a name: the lookup's. The format still counts.
+  mark('{"format":2,"server":"my context"}');
+  assert.deepEqual(readMarker(wiki), { format: 2, server: null });
+  assert.deepEqual(find(), { dir: wiki, server: "xenolith" });
+
+  // Markers XenoNet can't take: as if there were none.
+  for (const bad of ["{", "[]", "null", '{"server":"ctx"}', '{"format":"1","server":"ctx"}', '{"format":0,"server":"ctx"}', '{"format":1.5,"server":"ctx"}', '{"format":9007199254740992,"server":"ctx"}']) {
+    mark(bad);
+    assert.deepEqual([readMarker(wiki), of(wiki)], [null, "xenolith"], bad);
+  }
+  fs.rmSync(path.join(wiki, MARKER_FILE));
+  fs.mkdirSync(path.join(wiki, MARKER_FILE));
+  assert.equal(readMarker(wiki), null, "a folder");
+  fs.rmSync(path.join(wiki, MARKER_FILE), { recursive: true });
+  if (process.platform !== "win32") {
+    const elsewhere = path.join(tmp(), "elsewhere.json");
+    fs.writeFileSync(elsewhere, '{"format":1,"server":"ctx"}');
+    fs.symlinkSync(elsewhere, path.join(wiki, MARKER_FILE));
+    assert.equal(readMarker(wiki), null, "a link");
+  }
+});
+
+test("a folder in a later format keeps its node, shows nothing in it and says why", async () => {
+  assert.equal(CONTEXT_FORMAT, 1);
+  assert.equal(formatProblem(null), null);
+  assert.equal(formatProblem({ format: 1, server: null }), null);
+  assert.match(formatProblem({ format: 2, server: null }), /version 2 of Xenolith's format.*reads version 1/);
+  assert.deepEqual([contextName("xenolith"), contextName("agent-wiki"), contextName(""), contextName(null)], ["Xenolith", "Agent Wiki", "Agent Wiki", "Agent Wiki"]);
+
+  const dir = wikiAt(tmp(), "# Xenolith protocol\n");
+  fs.writeFileSync(path.join(dir, "pages", "atlas.md"), "# Atlas\n");
+  fs.mkdirSync(path.join(dir, "inbox"));
+  fs.writeFileSync(path.join(dir, "inbox", "note.md"), "# A note\n");
+  const graphOf = (wiki) => buildGraph({ projectsDir: "/p", projects: [], sessions: [], wiki, layout: {}, windows: { activeWindowMs: 1, recentWindowMs: 1 } });
+
+  fs.writeFileSync(path.join(dir, MARKER_FILE), '{"format":1,"server":"xenolith"}');
+  const now = await readWiki(dir, [], { server: "xenolith" });
+  assert.deepEqual([now.pages.length, now.inbox.length, "problem" in now], [1, 1, false], "the format it reads");
+  assert.equal("problem" in graphOf(now).nodes.find((n) => n.kind === "wiki"), false, "a node it reads is as it was");
+
+  fs.writeFileSync(path.join(dir, MARKER_FILE), '{"format":2,"server":"xenolith"}');
+  const later = await readWiki(dir, [], { server: "xenolith" });
+  assert.deepEqual(Object.keys(later), ["dir", "server", "pages", "inbox", "log", "problem"]);
+  assert.deepEqual([later.pages, later.inbox, later.log, later.server], [[], [], [], "xenolith"]);
+  assert.match(later.problem, /version 2/);
+  const g = graphOf(later);
+  const root = g.nodes.find((n) => n.kind === "wiki");
+  assert.deepEqual([root.id, root.pageCount, root.problem], ["resource:xenolith", 0, later.problem]);
+  assert.equal(g.nodes.filter((n) => n.kind === "page").length, 0);
+  const parsed = GRAPH_NODES.wiki.safeParse({ ...root, actions: [] });
+  assert.equal(parsed.success, true, JSON.stringify(parsed.error?.issues));
+
+  fs.writeFileSync(path.join(dir, MARKER_FILE), '{"format":');
+  const broken = await readWiki(dir, []);
+  assert.deepEqual([broken.pages.length, "problem" in broken], [1, false], "a marker it can't take: read as before");
+});
+
+test("the server a folder's marker names takes the map's node and its writes", async () => {
+  const dir = wikiAt(tmp());
+  fs.writeFileSync(path.join(dir, "pages", "refunds.md"), "# Refunds\n");
+  fs.writeFileSync(path.join(dir, MARKER_FILE), '{"format":1,"server":"team-ctx"}');
+  const server = contextServerOf(dir, { env: {}, home: tmp() });
+  assert.equal(server, "team-ctx");
+  const g = buildGraph({ projectsDir: "/p", projects: [], sessions: [], wiki: await readWiki(dir, [], { server }), resources: [{ server, ts: 1 }], layout: {}, windows: { activeWindowMs: 1, recentWindowMs: 1 } });
+  const root = g.nodes.find((n) => n.kind === "wiki");
+  assert.deepEqual([root.id, root.name, root.server], ["resource:team-ctx", "Xenolith", "team-ctx"]);
+  assert.equal(g.nodes.filter((n) => n.id === "resource:team-ctx").length, 1, "the server's calls don't make a second node");
+  const parsed = GRAPH_NODES.wiki.safeParse({ ...root, actions: [] });
+  assert.equal(parsed.success, true, JSON.stringify(parsed.error?.issues));
+
+  const live = new LiveTelemetry({ claudeRoot: "/nowhere", codexRoot: "/nowhere", claudeDesktopDir: null, contextServer: server });
+  assert.deepEqual(live.wikiPagesOf("team-ctx", { pages: ["refunds"] }, "context_log"), ["refunds"]);
+  assert.deepEqual(live.wikiPagesOf("xenolith", { pages: ["refunds"] }, "context_log"), ["refunds"], "the known names still count");
+  assert.equal(live.wikiPagesOf("other", { pages: ["refunds"] }, "context_log"), null);
+});
+
 test("the map's wiki takes its server's id and name, so beams to xenolith land on it", async () => {
   const dir = wikiAt(tmp(), "# Xenolith protocol\n");
   fs.writeFileSync(path.join(dir, "pages", "atlas.md"), "---\ntitle: Atlas\ntype: project\n---\nSee [[db]].");
@@ -149,7 +246,7 @@ test("the map's wiki takes its server's id and name, so beams to xenolith land o
   // (The state adds the node's actions before it goes out.)
   const parsed = GRAPH_NODES.wiki.safeParse({ ...root, actions: [] });
   assert.equal(parsed.success, true, JSON.stringify(parsed.error?.issues));
-  assert.equal(GRAPH_NODES.wiki.safeParse({ ...root, actions: [], id: "resource:github" }).success, false, "only the context servers' ids");
+  assert.equal(GRAPH_NODES.wiki.safeParse({ ...root, actions: [], id: "resource:not a name" }).success, false, "only a server's name in its id");
   const old = buildGraph({ projectsDir: "/p", projects: [], sessions: [], wiki: await readWiki(wikiAt(tmp()), []), layout: {}, windows: { activeWindowMs: 1, recentWindowMs: 1 } });
   assert.equal(old.nodes.find((n) => n.kind === "wiki").id, "resource:agent-wiki", "Agent Wiki's map is as it was");
 });

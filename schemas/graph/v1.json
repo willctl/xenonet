@@ -840,7 +840,7 @@
             "properties": {
               "id": {
                 "type": "string",
-                "pattern": "^(?:@[a-z][a-z0-9-]{1,31}:)?resource:(xenolith|agent-wiki)$"
+                "pattern": "^(?:@[a-z][a-z0-9-]{1,31}:)?resource:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
               },
               "kind": {
                 "type": "string",
@@ -850,12 +850,9 @@
                 "type": "string"
               },
               "server": {
-                "description": "The MCP server that writes to it",
+                "description": "The MCP server that writes to it: xenolith or agent-wiki, or the name the folder's marker (xenolith.json) gives",
                 "type": "string",
-                "enum": [
-                  "xenolith",
-                  "agent-wiki"
-                ]
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
               },
               "path": {
                 "type": "string"
@@ -890,6 +887,10 @@
                   ],
                   "additionalProperties": {}
                 }
+              },
+              "problem": {
+                "description": "Why XenoNet shows none of its pages, log or inbox: the folder follows a later version of Xenolith's format than XenoNet reads",
+                "type": "string"
               },
               "fx": {
                 "type": [
