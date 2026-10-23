@@ -87,10 +87,24 @@ final class MenuTests: XCTestCase {
         XCTAssertEqual(TrayMenu.icon(.stopped), .stopped)
         XCTAssertEqual(TrayMenu.entries(.stopped), [.info("XenoNet isn't running"), .separator, .action("Quit the tray", .quit)])
         XCTAssertEqual(TrayMenu.icon(.refused("x")), .stopped)
-        XCTAssertEqual(TrayMenu.entries(.refused("only XenoNet Tray.app's own executable can be XenoNet's tray")).prefix(2), [
-            .info("XenoNet didn't take this tray"),
-            .info("only XenoNet Tray.app's own executable can be XenoNet's tray"),
+        let why = "XenoNet didn't take this as its tray: only XenoNet Tray.app's own executable, in /Applications or your own Applications folder, can be XenoNet's tray"
+        XCTAssertEqual(TrayMenu.entries(.refused(why)), [
+            .info("XenoNet didn't take this tray:"),
+            .info("only XenoNet Tray.app's own executable, in /Applications or"),
+            .info("your own Applications folder, can be XenoNet's tray"),
+            .separator,
+            .action("Quit the tray", .quit),
         ])
+    }
+
+    func testTheMenuAsTextAndAnEntryByItsTitle() throws {
+        let s = try TrayStatus.decode(fixture("status.json"))
+        let entries = TrayMenu.entries(.live(s))
+        let text = TrayMenu.describe(TrayMenu.icon(.live(s)), entries)
+        XCTAssertTrue(text.hasPrefix("icon: needs you (4)\n[XenoNet 0.4.1 is running]\n-\n[Needs you (4)]\nWren needs permission\n"), text)
+        XCTAssertEqual(TrayMenu.action(titled: "Rate-limit the API asks", in: entries), .openConsole(id: "claude:0190d3e0-0000-7000-8000-000000000001"))
+        XCTAssertEqual(TrayMenu.action(titled: "Open console", in: entries), .openConsole(id: nil))
+        XCTAssertNil(TrayMenu.action(titled: "Needs you (4)", in: entries), "a line that does nothing")
     }
 
     func testALongQueueListsTheFirstAndSaysHowManyMore() throws {

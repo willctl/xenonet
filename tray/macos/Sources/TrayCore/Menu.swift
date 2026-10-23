@@ -89,8 +89,10 @@ public enum TrayMenu {
         case .stopped:
             out.append(.info("XenoNet isn't running"))
         case let .refused(why):
-            out.append(.info("XenoNet didn't take this tray"))
-            out.append(.info(clip(why, 80)))
+            out.append(.info("XenoNet didn't take this tray:"))
+            // The service's answer starts by saying what the header says.
+            let reason = why.replacingOccurrences(of: "XenoNet didn't take this as its tray: ", with: "")
+            for line in wrap(reason, 60).prefix(4) { out.append(.info(line)) }
         case let .live(status):
             out.append(.info("XenoNet \(status.version) is running"))
             out.append(.separator)
@@ -122,6 +124,50 @@ public enum TrayMenu {
         let what = [item.words.prefix(1).uppercased() + item.words.dropFirst(), item.text].compactMap { $0 }.filter { !$0.isEmpty }
         let host = item.host.map { " · on \($0)" } ?? ""
         return (clip(item.title + host, 120), clip(what.joined(separator: ": "), 240))
+    }
+
+    /// The menu as text, one entry a line: what a check by hand or a test
+    /// reads (XENONET_TRAY_SNAPSHOT). A line that does nothing is in
+    /// brackets, a separator is a dash.
+    public static func describe(_ icon: IconState, _ entries: [MenuEntry]) -> String {
+        let head: String
+        switch icon {
+        case .running: head = "icon: running"
+        case let .needsYou(n): head = "icon: needs you (\(n))"
+        case .stopped: head = "icon: stopped"
+        }
+        let lines = entries.map { e -> String in
+            switch e {
+            case let .info(t): return "[\(t)]"
+            case let .action(t, _): return t
+            case .separator: return "-"
+            }
+        }
+        return ([head] + lines).joined(separator: "\n") + "\n"
+    }
+
+    /// The action of the entry titled `title`, as a click on it.
+    public static func action(titled title: String, in entries: [MenuEntry]) -> MenuAction? {
+        for e in entries {
+            if case let .action(t, a) = e, t == title { return a }
+        }
+        return nil
+    }
+
+    /// Words in lines of at most `width` characters, since a menu item's
+    /// title doesn't wrap.
+    static func wrap(_ s: String, _ width: Int) -> [String] {
+        var lines: [String] = []
+        var line = ""
+        for word in s.split(separator: " ") {
+            if !line.isEmpty, line.count + 1 + word.count > width {
+                lines.append(line)
+                line = ""
+            }
+            line += line.isEmpty ? String(word) : " \(word)"
+        }
+        if !line.isEmpty { lines.append(line) }
+        return lines
     }
 
     static func clip(_ s: String, _ max: Int) -> String {

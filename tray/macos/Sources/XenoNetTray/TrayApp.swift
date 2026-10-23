@@ -17,11 +17,13 @@ final class TrayApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var api: TrayAPI?
     private var runner: Task<Void, Never>?
     private let notes = Notes()
+    private let snapshot: Snapshot?
 
     override init() {
         let env = ProcessInfo.processInfo.environment
         port = Locate.port(arguments: CommandLine.arguments, environment: env)
         descriptor = Locate.descriptorURL(port: port, environment: env, home: NSHomeDirectory())
+        snapshot = Snapshot(environment: env)
         super.init()
     }
 
@@ -31,6 +33,10 @@ final class TrayApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self.item = item
         show(.connecting)
         notes.start { [weak self] id in self?.open(id) }
+        snapshot?.watch { [weak self] title in
+            guard let self, let action = TrayMenu.action(titled: title, in: self.shown) else { return }
+            self.perform(action)
+        }
         runner = Task { [weak self] in await self?.run() }
     }
 
@@ -109,7 +115,8 @@ final class TrayApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func show(_ s: Standing) {
         standing = s
-        draw(TrayMenu.icon(s))
+        let icon = TrayMenu.icon(s)
+        draw(icon)
         let entries = TrayMenu.entries(s)
         guard entries != shown else { return }
         // An open menu isn't swapped out from under the pointer.
@@ -118,6 +125,7 @@ final class TrayApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         rebuild(entries)
+        snapshot?.write(icon, entries, button: item?.button)
     }
 
     private func draw(_ state: IconState) {
@@ -174,11 +182,16 @@ final class TrayApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let p = pending {
             pending = nil
             rebuild(p)
+            snapshot?.write(TrayMenu.icon(standing), p, button: item?.button)
         }
     }
 
     @objc private func choose(_ sender: NSMenuItem) {
         guard let action = sender.representedObject as? MenuAction else { return }
+        perform(action)
+    }
+
+    private func perform(_ action: MenuAction) {
         switch action {
         case .quit:
             NSApp.terminate(nil)
@@ -204,7 +217,10 @@ final class TrayApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let api {
                 do {
                     let answer = try await api.openConsole(id: id)
-                    if answer.opened == "desktop" { return }
+                    if answer.opened == "desktop" {
+                        log.info("open console: Desktop showed its window")
+                        return
+                    }
                     url = answer.url
                 } catch {
                     log.info("open-console: \(error.localizedDescription, privacy: .public)")
@@ -216,6 +232,7 @@ final class TrayApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
                let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Locate.desktopBundleId) {
                 do {
                     _ = try await NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration())
+                    log.info("open console: opened Desktop")
                 } catch {
                     log.error("Desktop didn't open: \(error.localizedDescription, privacy: .public)")
                 }
@@ -223,7 +240,8 @@ final class TrayApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             // Only this machine's console, whatever the answer said.
             if let u = URL(string: url), u.scheme == "http", u.host == "127.0.0.1", u.port == port {
-                NSWorkspace.shared.open(u)
+                let opened = NSWorkspace.shared.open(u)
+                log.info("open console: the browser at \(u.absoluteString, privacy: .public) (\(opened ? "opened" : "didn't open", privacy: .public))")
             }
         }
     }
