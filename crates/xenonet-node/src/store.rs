@@ -83,6 +83,7 @@ fn dispatch(s: &mut EngineStore, name: &str, v: &[Arg]) -> sql::Result<Out> {
         "actorToken" => row(s.actor_token(x(0))),
         "staleActorTokens" => rows(s.stale_actor_tokens(x(0))),
         "expiredActorTokens" => s.expired_actor_tokens().map(|r| Out::Json(Value::Array(r))),
+        "issuedTokenHashes" => s.issued_token_hashes().map(|r| Out::Json(Value::Array(r.into_iter().map(Value::String).collect()))),
         "addActorRequest" => unit(s.add_actor_request(&x(0))),
         "actorRequest" => row(s.actor_request(x(0))),
         "actorRequestByToken" => row(s.actor_request_by_token(x(0))),

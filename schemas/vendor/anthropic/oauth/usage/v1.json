@@ -28,7 +28,13 @@
           },
           "additionalProperties": {},
           "x-xenonet": {
-            "closed": true
+            "closed": true,
+            "known": [
+              "limit_dollars",
+              "used_dollars",
+              "remaining_dollars",
+              "locked_reason"
+            ]
           }
         },
         {
@@ -58,7 +64,13 @@
           },
           "additionalProperties": {},
           "x-xenonet": {
-            "closed": true
+            "closed": true,
+            "known": [
+              "limit_dollars",
+              "used_dollars",
+              "remaining_dollars",
+              "locked_reason"
+            ]
           }
         },
         {

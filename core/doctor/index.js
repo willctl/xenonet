@@ -44,8 +44,9 @@ const BLOCK_GRACE_MS = 60e3;
 // core/engine/verify.js), `byHand`, whether you asked for this run
 // yourself, and `actors`: the allowed actors whose tokens expired
 // (expired()), what each observer reads (observers()), and its look for
-// actors' tokens in repos (tokenFiles({ fresh }), createTokenScan in
-// core/actors/token-file.js), or else the repos XenoNet knows (repos()).
+// the tokens it issued in repos (tokenFiles({ fresh }), createTokenScan in
+// core/actors/token-file.js), or else the repos XenoNet knows (repos()),
+// where any token counts, as nothing here can tell which XenoNet issued.
 export function machine(overrides = {}) {
   const home = overrides.home ?? os.homedir();
   const env = overrides.env ?? process.env;
@@ -587,8 +588,13 @@ export const CHECKS = [
       if (!found.repos) return ok(`no repos to look in${when}`);
       if (found.files.length) {
         const shown = found.files.slice(0, 3).map((f) => tilde(f, ctx.home)).join(", ");
+        const one = found.files.length === 1;
+        // Only a token XenoNet issued counts. When it couldn't read its own
+        // tokens, every token-shaped string did, a made-up one too.
+        const what = found.unchecked ? "what looks like an actor's token" : "an actor's token";
+        const unchecked = found.unchecked ? `; XenoNet couldn't check ${one ? "it" : "them"} against the tokens it issued` : "";
         return warn(
-          `${plural(found.files.length, "file")} in a repo ${found.files.length === 1 ? "holds" : "hold"} an actor's token: ${shown}${found.files.length > 3 ? ` and ${found.files.length - 3} more` : ""}${when}`,
+          `${plural(found.files.length, "file")} in a repo ${one ? "holds" : "hold"} ${what}: ${shown}${found.files.length > 3 ? ` and ${found.files.length - 3} more` : ""}${when}${unchecked}`,
           "Move each token out of the repo, whether it's in a file of its own or a line of a .env. Keep it in a file only you can read, outside any repo (for example ~/.config/<name>/xenonet.token, named in XENONET_ACTOR_TOKEN_FILE). Give its actor a new token with New token in XenoNet's Actors panel, since a session may have read it. If it was committed, the old token has leaked.",
         );
       }

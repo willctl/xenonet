@@ -1864,8 +1864,10 @@ impl Telemetry {
                 self.note_tool(i, ToolCall { name: sv("apply_patch"), detail, files, ok: Value::Bool(done), ts, ..ToolCall::default() }, live, now, out);
             }
             // An empty query is no query: the action's says what was
-            // searched, as a thread shown from its rollout reads it.
-            Some("WebSearch") => {
+            // searched, as a thread shown from its rollout reads it. An
+            // extension's web search is a web search; its other kinds (an
+            // image made, a pause) aren't read.
+            Some(kind @ ("WebSearch" | "Extension")) if kind == "WebSearch" || is_str(get("kind"), "web.search") => {
                 let q = [get("query"), opt_prop(get("action"), "query")].into_iter().find(|v| truthy(*v)).flatten();
                 self.note_tool(i, ToolCall { name: sv("web_search"), detail: clip_value(q, 72), ts, ..ToolCall::default() }, live, now, out);
             }
@@ -2734,6 +2736,19 @@ mod tests {
         let full = t.snapshot(NOW);
         assert_eq!(full.as_object().unwrap().keys().take(2).collect::<Vec<_>>(), ["at", "sessions"]);
         assert_eq!(full["resources"][0]["server"], "s");
+    }
+
+    #[test]
+    fn a_codex_extensions_web_search_is_a_web_search() {
+        let mut t = Telemetry::new(None, Vec::new());
+        let done = |k: f64, item: Value| json!({ "type": "event_msg", "timestamp": at(NOW - 5000.0 + k), "payload": { "type": "item_completed", "item": item } });
+        let search = codex(&mut t, done(0.0, json!({ "type": "Extension", "kind": "web.search", "query": "", "action": { "type": "search", "query": "zod v4 coerce" } })));
+        assert_eq!(kinds(&search), ["tool"]);
+        for (k, other) in [(1.0, "image_gen.generation"), (2.0, "clock.sleep")] {
+            assert_eq!(kinds(&codex(&mut t, done(k, json!({ "type": "Extension", "kind": other })))), Vec::<String>::new(), "{other} isn't read");
+        }
+        let details: Vec<_> = t.history_since(0.0).iter().filter_map(|e| field(&e.fields, "detail").cloned()).collect();
+        assert_eq!(details, [json!("zod v4 coerce")]);
     }
 
     #[test]

@@ -307,3 +307,14 @@ test("a Codex web search's detail is its query, or with an empty one its action'
   search(2, { action: { type: "open_page", url: "https://example.com" } });
   assert.deepEqual(live.historySince(0).map((e) => e.detail), ["zod v4 coerce", "node test runner mocks", ""]);
 });
+
+test("a Codex extension's web search is a web search; its other kinds aren't read", () => {
+  const live = fresh();
+  const t = Date.now() - 30e3;
+  const extension = (i, item) => live.applyCodex(CX, { type: "event_msg", timestamp: iso(t + i * 1000), payload: { type: "item_completed", item: { type: "Extension", id: `x${i}`, ...item } } }, false);
+  extension(0, { kind: "web.search", query: "", action: { type: "search", query: "zod v4 coerce" }, results: [] });
+  extension(1, { kind: "image_gen.generation", status: "completed", revisedPrompt: "a ledger" });
+  extension(2, { kind: "clock.sleep" });
+  extension(3, { kind: "web.search", query: "node test runner mocks", action: { type: "search", query: null, queries: ["node test runner mocks"] } });
+  assert.deepEqual(live.historySince(0).map((e) => [e.tool ?? e.kind, e.detail]), [["web_search", "zod v4 coerce"], ["web_search", "node test runner mocks"]]);
+});
