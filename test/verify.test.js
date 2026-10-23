@@ -499,6 +499,37 @@ test("a service no app started takes the Desktop connected to it as XenoNet's ap
   assert.match((await verify.window(from(xenonet))).reason, /outside XenoNet/);
 });
 
+test("the tray is XenoNet Tray.app's own executable in an Applications folder, never under an agent, never unchecked", async () => {
+  const { m, verify, from } = onMachine(null);
+  const apps = ["/Applications", "/Users/me/Applications/"];
+  const TRAY = "/Applications/XenoNet Tray.app/Contents/MacOS/XenoNet Tray";
+  const tray = m.add({ ppid: 1, program: TRAY });
+  const mine = m.add({ ppid: 1, program: "/Users/me/Applications/XenoNet Tray.app/Contents/MacOS/XenoNet Tray" });
+  assert.deepEqual(await verify.tray(from(tray), apps), { ok: true, checked: true });
+  assert.deepEqual(await verify.tray(from(mine), apps), { ok: true, checked: true }, "the home folder's Applications");
+
+  const elsewhere = /only XenoNet Tray\.app's own executable, in \/Applications or your own Applications folder/;
+  const shell = m.add({ ppid: 1, program: "/bin/zsh" });
+  const claude = m.add({ ppid: shell, program: "/Users/me/Library/Application Support/Claude/claude.app/Contents/MacOS/claude" });
+  for (const [pid, why, what] of [
+    [m.add({ ppid: 1, program: "/Users/me/src/xenonet/tray/macos/.build/XenoNet Tray.app/Contents/MacOS/XenoNet Tray" }), elsewhere, "where it was built"],
+    [m.add({ ppid: 1, program: "/Applications/XenoNet Tray.app/Contents/MacOS/tools/helper" }), elsewhere, "a helper inside the bundle"],
+    [m.add({ ppid: 1, program: "/Applications/XenoNet.app/Contents/MacOS/XenoNet" }), elsewhere, "Desktop"],
+    [m.add({ ppid: shell, program: TRAY, exe: "/Users/me/bin/wren" }), elsewhere, "a program naming itself the tray"],
+    [m.add({ ppid: shell, program: TRAY, exe: null }), elsewhere, "one whose executable couldn't be read"],
+    [m.add({ ppid: claude, program: TRAY }), /can't run under a Claude Code process/, "the tray, started by an agent"],
+  ]) {
+    const r = await verify.tray(from(pid), apps);
+    assert.equal(r.ok, false, what);
+    assert.match(r.reason, why, what);
+  }
+  assert.match((await verify.tray(from(tray), [])).reason, elsewhere, "no Applications folder named");
+
+  // Where XenoNet can't look, nothing passes.
+  const blind = createVerifier({ procs: { supported: false }, store: makeStore(path.join(tmp(), "engine.sqlite")), home: null, now: () => 1 });
+  assert.deepEqual(await blind.tray({ remotePort: 1, localPort: 2 }, apps), { ok: false, checked: true, reason: "XenoNet can't see which program connects as its tray on this system" });
+});
+
 test("Hermes's actor works only from under a Hermes agent host by its real path, not one that names itself as one", async () => {
   const { m, verify, from } = onMachine(null);
   const HOST = "/Users/me/.hermes/tools/python-3.14.7/bin/python3.14";

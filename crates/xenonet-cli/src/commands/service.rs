@@ -115,6 +115,10 @@ fn install(env: &Value, flags: &Flags) -> Done {
     out["takeover"] = json!(takeover);
     let linger = supervisor::lingering(&place, &mut System);
     out["linger"] = json!(linger);
+    // On a Mac, the tray app starts at login beside it, when there's one
+    // installed. The service's registration stands if the tray's fails.
+    out["tray"] =
+        login::tray_place(&place).map_or(Value::Null, |tp| login::install_tray(&tp, &given, &job).unwrap_or_else(|e| json!({ "status": "failed", "error": e, "app": tp.app })));
     if flags.on("json") {
         print_json(&out);
         return Ok(0);
@@ -122,6 +126,7 @@ fn install(env: &Value, flags: &Flags) -> Done {
     let by = place.kind.name();
     if out["status"] == json!("already") {
         print(c::dim(format!("XenoNet's service already starts at login ({by}, {}).", sys::tilde(&place.file))));
+        say_tray(&out["tray"]);
         return Ok(0);
     }
     print(format!("{} XenoNet's service starts at login now, and starts again if it stops unexpectedly.", c::green("✓")));
@@ -135,7 +140,20 @@ fn install(env: &Value, flags: &Flags) -> Done {
     if linger == Some(false) {
         print(c::dim(format!("  It starts when you log in. To start it at boot, before anyone logs in, run: loginctl enable-linger {}", place.user)));
     }
+    say_tray(&out["tray"]);
     Ok(0)
+}
+
+/// What became of the tray app, after the service's lines.
+fn say_tray(tray: &Value) {
+    let app = tray["app"].as_str().map(sys::tilde).unwrap_or_default();
+    match tray["status"].as_str() {
+        Some("installed" | "updated") => print(format!("{} XenoNet's tray starts at login too, from {app}.", c::green("✓"))),
+        Some("already") => print(c::dim(format!("XenoNet's tray already starts at login, from {app}."))),
+        Some("removed") => print(format!("{} XenoNet's tray no longer starts at login, and {app} is gone.", c::green("✓"))),
+        Some("failed") => print(format!("{} XenoNet's tray, {app}: {}", c::yellow("!"), tray["error"].as_str().unwrap_or("it didn't change"))),
+        _ => {}
+    }
 }
 
 fn uninstall(env: &Value, flags: &Flags) -> Done {
@@ -164,17 +182,20 @@ fn uninstall(env: &Value, flags: &Flags) -> Done {
     }
     let mut out = supervisor::uninstall(&place, &mut Disk, &mut System).map_err(|e| Fail::new(e, 1))?;
     out["stopped"] = json!(stops);
+    out["tray"] = login::tray_place(&place).map_or(Value::Null, |tp| login::uninstall_tray(&tp).unwrap_or_else(|e| json!({ "status": "failed", "error": e, "app": tp.app })));
     if flags.on("json") {
         print_json(&out);
         return Ok(0);
     }
     if out["status"] == json!("absent") {
         print(c::dim("XenoNet's service wasn't set to start at login."));
+        say_tray(&out["tray"]);
         return Ok(0);
     }
     print(format!("{} XenoNet's service no longer starts at login.", c::green("✓")));
     if stops {
         print(c::dim("  It stopped. Opening Desktop, or xenonet service start, starts it until you log out."));
     }
+    say_tray(&out["tray"]);
     Ok(0)
 }

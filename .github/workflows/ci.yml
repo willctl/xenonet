@@ -29,6 +29,18 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      # The macOS tray (tray/macos): its build and its tests, which decode
+      # the fixtures the JS and Rust tests check against the tray's schemas.
+      # Only where there's a Swift toolchain; Linux and Windows have no tray.
+      - name: Tray
+        if: runner.os == 'macOS'
+        run: |
+          if xcrun --find swift > /dev/null 2>&1; then
+            swift build --package-path tray/macos
+            swift test --package-path tray/macos
+          else
+            echo "No Swift toolchain on this runner, so the tray isn't built."
+          fi
   # The Rust core (docs/design/rust-core.md) on each platform: clippy, which
   # sees each platform's own code only there, its own tests, the JS tests
   # with each twin loaded, and the JS tests that start the service, the

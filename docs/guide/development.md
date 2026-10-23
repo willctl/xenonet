@@ -82,8 +82,20 @@ What acts on the sessions' computer (opening a session in its app, handoffs, ter
 - macOS builds are ad-hoc signed, and the package is unsigned. The build stops if a certificate signs either one, because a certificate carries its owner's name. To sign on purpose, with a Developer ID, set `XENONET_SIGN=1`. The build also stops if a packaged file contains your home folder's path.
 - The terminal's native module ships one npm package per platform and CPU. The build fetches the one each app needs, so one Mac builds both the Apple silicon and the Intel app.
 - The icon is drawn in code, in `electron/icons.js`, at every size from 16 to 256 pixels, with a macOS cut on Apple's icon grid. `npm run icon` regenerates it, along with the installer art for both platforms.
+- The macOS tray (`tray/macos`) needs Swift (`xcrun --find swift`). `swift build` and `swift test` in `tray/macos` build and test it. `node scripts/tray-build.mjs [folder]` makes `XenoNet Tray.app` for both Mac CPUs, signed ad hoc. The Mac's release build makes its component archive (`scripts/component-build.mjs`).
 
 [Install](install.md) says how to install what you build.
+
+### Checking the tray
+
+The service gives the tray its key only when the tray runs from `/Applications` or `~/Applications`, and a demo's home is its made-up world's. So to check a build against a demo on a spare port:
+
+1. Start a demo service with its own runtime folder: `XENONET_PORT=48321 XENONET_STANDALONE=1 XENONET_INSTANCE=demo XENONET_RUNTIME_DIR=<folder> target/debug/xenonet serve --demo --dev`. Its first lines name the demo's home.
+2. Copy the built `XenoNet Tray.app` to that home's `Applications`.
+3. Open it with `open -n -a "<home>/Applications/XenoNet Tray.app" --env XENONET_PORT=48321 --env XENONET_RUNTIME_DIR=<folder> --env XENONET_TRAY_SNAPSHOT=<another folder>`. Opened that way, its parent is launchd, not your agent's shell.
+4. `<another folder>/menu.txt` has the menu as text, and `icon.png` the icon. Write a menu item's title to `<another folder>/choose` to click it. `POST /api/dev/simulate` with `{ "kind": "needs-you" }` or `"actor-needs-you"` gives it something to show.
+
+Opened from anywhere else, its menu says XenoNet didn't take it. macOS refuses notifications to an app in a temporary folder, so they're checked from a copy outside one. `XENONET_APPLICATIONS_DIR` points `xenonet service install` at another folder for the app, as `XENONET_SUPERVISOR_DIR` does the launch agents.
 
 ## Coverage
 
@@ -354,6 +366,10 @@ The console page imports only the core modules that have no Node in them, such a
 - `builder-hooks.mjs`, the build hooks
 - `lab/`, the VM lab
 - `demo/`, OpenCode sessions messaging each other through a XenoNet from the checkout, with the tools it gives them (see [OpenCode sessions messaging each other](opencode-messaging.md))
+
+### `tray/`
+
+`tray/macos/` is XenoNet Tray, the macOS menu bar app, a Swift package. `Sources/TrayCore` has what it knows without AppKit: the tray API's types, where the service is, the menu, and the event stream's format. `Sources/XenoNetTray` is the app. Its tests decode the fixtures in `test/fixtures/tray`, which the JS and Rust tests check against the tray's schemas.
 
 ### `test/`
 

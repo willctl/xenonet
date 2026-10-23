@@ -10,8 +10,10 @@ use crate::out::Fail;
 use crate::sys;
 use serde_json::{json, Value};
 use xenonet_base::nodepath::NATIVE;
+use xenonet_components::packages::{current_component, TRAY, TRAY_APP};
 use xenonet_components::runtime::{self, Env};
 use xenonet_components::supervisor::{self, Disk, Files, Job, Place, System};
+use xenonet_components::tray::{self, TrayPlace};
 
 /// Where this machine keeps the registration, or None where there's no
 /// supervisor XenoNet registers with. XENONET_SUPERVISOR_DIR and
@@ -47,6 +49,32 @@ fn this_binary() -> String {
 /// XenoNet keeps things, less those that only say the default.
 pub fn job(env: &Env) -> Job {
     supervisor::job(env, &machine(), &this_binary(), |p| std::path::Path::new(p).is_file())
+}
+
+/// Where the tray goes on this Mac: the home folder's Applications, and its
+/// launch agent beside the service's; None off a Mac.
+/// XENONET_APPLICATIONS_DIR puts the app in another folder, for tests, as
+/// XENONET_SUPERVISOR_DIR does the agents.
+pub fn tray_place(place: &Place) -> Option<TrayPlace> {
+    let dir = sys::var("XENONET_APPLICATIONS_DIR").filter(|d| !d.is_empty()).unwrap_or_else(|| NATIVE.join(&[&sys::home(), "Applications"]));
+    TrayPlace::of(place, &dir)
+}
+
+/// The installed tray component's XenoNet Tray.app, if there's one: none
+/// in a build of your own, which has no components.
+fn tray_source(env: &Env) -> Option<String> {
+    let current = current_component(TRAY, env, &machine()).ok().flatten()?;
+    Some(NATIVE.join(&[current.get("root")?.as_str()?, TRAY_APP]))
+}
+
+/// Puts the tray in Applications and starts it at login, as the service
+/// does (xenonet-components' tray.rs).
+pub fn install_tray(place: &TrayPlace, env: &Env, job: &Job) -> Result<Value, String> {
+    tray::install(place, tray_source(env).as_deref(), job, &mut Disk, &mut tray::Bundles, &mut System)
+}
+
+pub fn uninstall_tray(place: &TrayPlace) -> Result<Value, String> {
+    tray::uninstall(place, &mut Disk, &mut tray::Bundles, &mut System)
 }
 
 /// "a Claude Code process", as the service's own refusals name one.

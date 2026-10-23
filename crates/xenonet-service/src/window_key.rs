@@ -39,6 +39,43 @@ impl fmt::Debug for WindowKey {
     }
 }
 
+/// The tray's key: 32 random bytes, made at each start of the service, for
+/// the tray app's routes (routes/tray.rs). It goes only to the tray app the
+/// component socket can tell is XenoNet's (verify.tray), in its hello's
+/// answer, and nowhere else: never written to a file, logged or put in a
+/// URL. A file would be read by anything running as you, agents included.
+pub struct TrayKey {
+    value: String,
+}
+
+impl TrayKey {
+    pub fn new() -> TrayKey {
+        TrayKey { value: random_hex(32) }
+    }
+
+    /// For the tray's hello; nowhere else.
+    pub fn reveal(&self) -> &str {
+        &self.value
+    }
+
+    /// Whether a request's x-xenonet-tray is the key, in constant time.
+    pub fn matches(&self, given: Option<&str>) -> bool {
+        given.is_some_and(|g| same(g.as_bytes(), self.value.as_bytes()))
+    }
+}
+
+impl Default for TrayKey {
+    fn default() -> Self {
+        TrayKey::new()
+    }
+}
+
+impl fmt::Debug for TrayKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("[the tray's key]")
+    }
+}
+
 /// crypto.timingSafeEqual, with the lengths compared first as the JS does.
 pub fn same(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
@@ -63,5 +100,8 @@ mod tests {
         assert!(!k.matches(Some("nope")));
         assert!(!k.matches(None));
         assert_eq!(format!("{k:?}"), "[the window key]");
+        let t = TrayKey::new();
+        assert!(t.matches(Some(t.reveal())) && !t.matches(Some(k.reveal())) && !t.matches(None));
+        assert_eq!(format!("{t:?}"), "[the tray's key]");
     }
 }

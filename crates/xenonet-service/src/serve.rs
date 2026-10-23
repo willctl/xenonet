@@ -424,6 +424,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
         // one the window's requests come from (verify.desktop).
         let c = ctx.clone();
         let person = ctx.clone();
+        let tray = ctx.clone();
         let you = ctx.clone();
         let stop = stop_tx.clone();
         let hooks = Hooks {
@@ -451,6 +452,17 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
                 let c = person.clone();
                 Box::pin(async move { c.cores.verify.person(peer).await })
             }),
+            on_tray: Arc::new(move |peer| {
+                let c = tray.clone();
+                Box::pin(async move {
+                    let seen = c.cores.verify.tray(peer, &c.config.home).await;
+                    if !crate::cores::ok(&seen) {
+                        c.log("warn", "service.tray", &format!("a program asked to be XenoNet's tray and was refused: {}", crate::cores::reason(&seen)), None, None);
+                    }
+                    seen
+                })
+            }),
+            tray_key: ctx.tray_key.clone(),
             terminals: ctx.cores.terminals.clone(),
         };
         match component::start(config.descriptor_file(), hooks).await {

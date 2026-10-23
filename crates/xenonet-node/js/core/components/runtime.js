@@ -29,7 +29,8 @@ export function xenonetBin({ env = process.env, root, platform = process.platfor
 export async function connectService({ env = process.env, role = "tools", handle } = {}) {
   const descriptor = settle(native.compReadDescriptor(envOf(env), machine()));
   const socket = net.connect({ host: "127.0.0.1", port: descriptor.port });
-  const client = rpc(socket, handle, { incomingEvents: role === "desktop" ? ["notification"] : [] });
+  // A Desktop hears notifications, and the tray app coming and going.
+  const client = rpc(socket, handle, { incomingEvents: role === "desktop" ? ["notification", "tray"] : [] });
   try {
     client.info = await client.request("hello", native.compHello(descriptor.token, String(role)), 5000);
     negotiate(SERVICE_API, client.info.api);

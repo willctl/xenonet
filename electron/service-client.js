@@ -15,6 +15,8 @@ export async function desktopClient(options) {
     events.info = next.info;
     delay = 500;
     next.on("notification", (note) => events.emit("notification", note));
+    // XenoNet's tray app came or went (its hello said whether one's there).
+    next.on("tray", (value) => events.emit("tray", value?.connected === true));
     next.on("disconnect", () => {
       if (client !== next) return;
       client = null;

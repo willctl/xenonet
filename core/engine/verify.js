@@ -93,6 +93,8 @@ function uncheckable(agent, app) {
   return `requests in ${agent}'s name are refused: ${why}`;
 }
 const PRODUCT = { "hermes-agent": "Hermes Agent", "grok-bot": "Grok Bot", muse: "Muse", dots: "the ChatGPT app" };
+// The tray app's bundle, as it's installed.
+export const TRAY_APP = "XenoNet Tray.app";
 // The products whose apps their makers sign, by the maker's name (their
 // teams are in core/procs.js): their actors register and report only from
 // under the app as its maker built it, not a bundle that only calls itself
@@ -364,6 +366,31 @@ export function createVerifier({ procs, store, home = null, now = () => Date.now
     return verdict;
   }
 
+  // XenoNet's tray app, connecting to the component socket for the key its
+  // routes take. Only XenoNet Tray.app's own executable, by its real path,
+  // in one of the Applications folders `apps` names (/Applications and the
+  // home folder's), with no agent and no actor product anywhere above it.
+  // Never passed unchecked: the tray is a Mac's, and where XenoNet can't
+  // look there's no telling who asks.
+  async function tray(socket, apps = []) {
+    if (!procs.supported) return refuse(null, "XenoNet can't see which program connects as its tray on this system");
+    const { pid, chain } = await see(socket, { exe: true });
+    if (!pid || !chain.length) return unseen(null, "XenoNet couldn't see which program connected as its tray");
+    state.checked++;
+    const agent = chain.find((p) => p.agent);
+    if (agent) return refuse(null, `XenoNet's tray can't run under ${aApp(agent.agent)} process`);
+    const product = chain.find((p) => p.product);
+    if (product) return refuse(null, `XenoNet's tray can't run under ${PRODUCT[product.product.product]}`);
+    const file = typeof fileOf(chain[0]) === "string" ? fileOf(chain[0]) : "";
+    const own = apps.some((dir) => {
+      if (!dir) return false;
+      const inside = `${dir.replace(/\/+$/, "")}/${TRAY_APP}/Contents/MacOS/`;
+      return file.startsWith(inside) && file.length > inside.length && !file.slice(inside.length).includes("/");
+    });
+    if (!own) return refuse(null, `only ${TRAY_APP}'s own executable, in /Applications or your own Applications folder, can be XenoNet's tray`);
+    return { ok: true, checked: true };
+  }
+
   function pass() {
     state.unchecked++;
     return { ok: true, checked: false };
@@ -381,5 +408,5 @@ export function createVerifier({ procs, store, home = null, now = () => Date.now
     return { ...refuse(agent, reason), unseen: true };
   }
 
-  return { check, person, window, desktop, actor, register, asker, peer, lineage, state };
+  return { check, person, window, desktop, tray, actor, register, asker, peer, lineage, state };
 }

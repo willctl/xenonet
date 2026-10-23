@@ -127,6 +127,11 @@ pub trait Verify: Send + Sync {
     async fn desktop(&self, _peer: Option<Peer>) -> Value {
         refused(VERIFY)
     }
+    /// The tray app's own process, connecting to the component socket:
+    /// XenoNet Tray.app in /Applications or `home`'s Applications folder.
+    async fn tray(&self, _peer: Peer, _home: &str) -> Value {
+        refused(VERIFY)
+    }
     /// `verify.actor(socket, { slug, product }, { pid })`.
     async fn actor(&self, _peer: Peer, _slug: &str, _product: Value, _pid: Value) -> Value {
         refused(VERIFY)

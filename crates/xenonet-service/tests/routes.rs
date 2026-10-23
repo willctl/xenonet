@@ -212,6 +212,13 @@ impl cores::State for Fake {
         self.note("checkRoot", path.clone());
         Ok(json!({ "ok": true, "path": path }))
     }
+    fn summary(&self) -> R<Value> {
+        Ok(json!({
+            "working": 2,
+            "needsYou": [{ "id": S, "app": "claude", "title": "Rate-limit the API", "kind": "question", "text": "Per key?", "since": 2000 }],
+            "review": 0, "stuck": [], "collisions": 0, "tpm": null, "url": "http://127.0.0.1:47841",
+        }))
+    }
 }
 
 impl cores::Policy for Fake {
@@ -1027,4 +1034,61 @@ async fn claude_codes_hooks_are_checked_against_the_sessions_process() {
     let r = go(&ctx, "POST", "/api/hook/claude", &[], Some(json!({ "session_id": "11111111-2222-3333-4444-555555555555", "hook_event_name": "Stop" }))).await;
     assert_eq!(status_error(&r), (403, json!("that's another process's session")));
     assert_eq!(f.was("check")[0], json!([ME, true]));
+}
+
+// ---------- the tray app's routes (routes/tray.rs) ----------
+
+/// A service for the tray: the map's summary and the process checks.
+fn tray_service() -> (Arc<Ctx>, Arc<Fake>) {
+    let f = Arc::new(Fake::new());
+    let mut c = Cores::pending(false, false, false);
+    c.verify = f.clone();
+    c.state = f.clone();
+    (Ctx::for_tests(c), f)
+}
+
+#[tokio::test]
+async fn the_trays_routes_need_its_key_and_you_never_an_agent_or_an_actor() {
+    let (ctx, f) = tray_service();
+    let key = ctx.tray_key.reveal().to_string();
+    let tray = ("x-xenonet-tray", key.as_str());
+    let wrong = "0".repeat(64);
+    let code = |r: &Reply| (r.status, r.body_json()["code"].clone());
+    // No key, a wrong one, the window's, or an actor's token beside it:
+    // refused before the process is looked at, on any path, so none can be
+    // probed.
+    for headers in [vec![], vec![("x-xenonet-tray", wrong.as_str())], vec![tray, ("authorization", "Bearer x")], vec![("x-xenonet-window", ctx.window_key.reveal())]] {
+        for (method, path) in [("GET", "/api/tray/v1/status"), ("GET", "/api/tray/v1/events"), ("POST", "/api/tray/v1/open-console"), ("GET", "/api/tray/v1/nope")] {
+            let r = go(&ctx, method, path, &headers, None).await;
+            assert_eq!(code(&r), (403, json!("tray")), "{method} {path} {headers:?}");
+        }
+    }
+    assert_eq!(f.was("person"), Vec::<Value>::new());
+    // With the key, the request must still be yours.
+    *f.person.lock().unwrap() = json!({ "ok": false, "reason": "this is yours to do, and it came from under a Claude Code process" });
+    let r = go(&ctx, "GET", "/api/tray/v1/status", &[tray], None).await;
+    assert_eq!(
+        (r.status, r.body_json()["code"].clone(), r.body_json()["error"].clone()),
+        (403, json!("yours"), json!("this is yours to do, and it came from under a Claude Code process"))
+    );
+    *f.person.lock().unwrap() = json!({ "ok": true });
+    // The status: what waits in the console's words, checked against its schema.
+    let r = go(&ctx, "GET", "/api/tray/v1/status", &[tray], None).await;
+    assert_eq!(r.status, 200);
+    let s = r.body_json();
+    assert_eq!((s["schema"].clone(), s["running"].clone(), s["working"].clone(), s["needsYou"]["count"].clone()), (json!("tray/status/v1"), json!(true), json!(2), json!(1)));
+    assert_eq!((s["needsYou"]["items"][0]["title"].clone(), s["needsYou"]["items"][0]["words"].clone()), (json!("Rate-limit the API"), json!("asks")));
+    assert_eq!((s["gateway"]["state"].clone(), s["network"]["link"].clone(), s["desktop"].clone()), (json!("off"), json!("off"), json!(false)));
+    let doc = xenonet_base::json::parse(include_str!("../../../schemas/tray/status/v1.json")).unwrap();
+    let checker = xenonet_schema::check::compile(&[doc]).unwrap();
+    assert!(checker.check(checker.root(0), &xenonet_schema::check::Data::from(&s), true).ok(), "{s}");
+    // The events: a stream.
+    let r = go(&ctx, "GET", "/api/tray/v1/events", &[tray], None).await;
+    assert_eq!((r.status, r.header("content-type")), (200, Some("text/event-stream")));
+    // Opening the console: with no Desktop connected, the tray opens it itself.
+    let r = go(&ctx, "POST", "/api/tray/v1/open-console", &[tray], Some(json!({ "id": S }))).await;
+    assert_eq!(r.body_json(), json!({ "ok": true, "opened": null, "url": format!("http://127.0.0.1:{}/", ctx.config.port) }));
+    assert_eq!(go(&ctx, "POST", "/api/tray/v1/open-console", &[tray], None).await.status, 200, "no id: the console as it is");
+    assert_eq!(go(&ctx, "POST", "/api/tray/v1/open-console", &[tray], Some(json!({ "id": "https://example.com" }))).await.status, 400);
+    assert_eq!(go(&ctx, "GET", "/api/tray/v1/nope", &[tray], None).await.status, 404);
 }
