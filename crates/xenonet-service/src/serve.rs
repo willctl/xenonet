@@ -9,7 +9,7 @@ use crate::component::{self, Hooks};
 use crate::config::Config;
 use crate::cores::{CoreError, Cores};
 use crate::ctx::Ctx;
-use crate::http::{node_headers, parse_target, Body, Peer, Reply, ReplyBody, Req};
+use crate::http::{node_headers, parse_target, raw_query, Body, Peer, Reply, ReplyBody, Req};
 use crate::routes;
 use crate::wire::{Emitter, VendorReaders, WireEnv};
 use bytes::Bytes;
@@ -100,7 +100,7 @@ pub async fn handle(ctx: &Arc<Ctx>, req: hyper::Request<Incoming>, peer: Peer) -
         return up.pass(&method, &target, &headers).await;
     }
     let incoming = req.into_body();
-    let request = Req { method: method.clone(), path: path.clone(), query, headers, peer, body: Body::Incoming(incoming) };
+    let request = Req { method: method.clone(), path: path.clone(), query, raw_query: raw_query(&target), headers, peer, body: Body::Incoming(incoming) };
     if !path.starts_with("/api/") {
         return crate::static_files::serve(&ctx.config.root.join("dist"), &path);
     }

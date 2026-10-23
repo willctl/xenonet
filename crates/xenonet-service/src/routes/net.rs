@@ -14,6 +14,9 @@
 //!   id the state lists it under.
 //! - `POST gateway/take`, `POST gateway/set`: moving the gateway by hand.
 //! - `PUT settings`: titles only, and a LAN-only gateway's address.
+//! - `GET svc`, `POST svc/publish`, `POST svc/unpublish`: the services this
+//!   host publishes to the network (`xenonet svc`). Other hosts reach them
+//!   at `/api/svc/…` (routes/svc.rs).
 
 use crate::ctx::{Answer, Ctx};
 use crate::gateway::network::{parse_lan, NetService};
@@ -63,7 +66,9 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Option<Answer> {
 async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Reply {
     let known = matches!(
         (method, rest),
-        ("GET", "state") | ("POST", "create" | "join" | "leave" | "ticket" | "remove" | "replace" | "approve" | "gateway/take" | "gateway/set") | ("PUT", "settings")
+        ("GET", "state" | "svc")
+            | ("POST", "create" | "join" | "leave" | "ticket" | "remove" | "replace" | "approve" | "gateway/take" | "gateway/set" | "svc/publish" | "svc/unpublish")
+            | ("PUT", "settings")
     );
     if !known {
         return Reply::error(404, "not found");
@@ -109,6 +114,9 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
         "settings" => settings(&svc, &body).await,
         "approve" => node.approve(&text("id")).await,
         "gateway/take" => take(ctx, &svc, &body).await,
+        "svc" => Ok(node.shared().svc_list()),
+        "svc/publish" => publish(ctx, &svc, &body),
+        "svc/unpublish" => node.shared().svc_unpublish(&text("name")),
         _ => node.set_gateway(&text("address")).await,
     };
     match result {
@@ -160,6 +168,29 @@ async fn take(ctx: &Ctx, svc: &NetService, body: &Value) -> R<Value> {
         svc.unlisten();
     }
     took
+}
+
+/// `xenonet svc publish`: a service on this machine for the network's
+/// other hosts. Never XenoNet's own API or its doors, which would hand
+/// what's this machine's owner's to every allowed host.
+fn publish(ctx: &Ctx, svc: &NetService, body: &Value) -> R<Value> {
+    let text = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    let list = |k: &str| -> R<Vec<String>> {
+        match body.get(k) {
+            None | Some(Value::Null) => Ok(Vec::new()),
+            Some(Value::Array(a)) => a.iter().map(|v| v.as_str().map(str::to_string).ok_or_else(|| NetError::bad(format!("{k} is a list of words")))).collect(),
+            Some(_) => Err(NetError::bad(format!("{k} is a list of words"))),
+        }
+    };
+    let target = text("target");
+    if let Ok(t) = xenonet_net::svc::Target::parse(&target) {
+        let gateway = ctx.config.gateway_port.unwrap_or_else(|| crate::config::gateway_port_of(ctx.config.port));
+        let lan = svc.lan().map(|a| a.port());
+        if t.port == ctx.config.port || t.port == gateway || lan == Some(t.port) {
+            return Err(NetError::bad(format!("port {} is XenoNet's own: publishing it would let other hosts act as this machine's owner", t.port)));
+        }
+    }
+    svc.node().shared().svc_publish(&text("name"), &target, &list("paths")?, &list("hosts")?)
 }
 
 async fn settings(svc: &NetService, body: &Value) -> R<Value> {

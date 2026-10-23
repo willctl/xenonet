@@ -15,6 +15,7 @@ pub mod mcp;
 pub mod net;
 pub mod net_sim;
 pub mod refusals;
+pub mod svc;
 pub mod themes;
 pub mod tray;
 pub mod workspace;
@@ -58,6 +59,14 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     let req = &mut req;
     let method = req.method.clone();
     let m = method.as_str();
+    // Other hosts' services, for any program here (routes/svc.rs): what
+    // they're sent and answer is theirs, so XenoNet's own API version
+    // doesn't apply.
+    if route.starts_with("/api/svc/") {
+        if let Some(a) = svc::route(ctx, req).await {
+            return a;
+        }
+    }
     if let Some(v) = req.header("x-xenonet-api-version") {
         if !v.is_empty() && v != "1" {
             return Ok(Reply::json(426, json!({ "error": "This XenoNet Service does not support the requested API version.", "api": api_range(SERVICE_API) })));
