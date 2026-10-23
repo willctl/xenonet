@@ -25,7 +25,8 @@ orchestrator's OK and a note to every lane it touches.
   `actor/report`, `actor/me`,
   `actor/events`, `actor/console`, `actor/requests`, `actor/tokens`,
   `drift/record`, `drift/log`, for hosts `host/list` and
-  `host/hello`, and `app`, an entry of the app registry (`core/apps.js`).
+  `host/hello`, `app`, an entry of the app registry (`core/apps.js`),
+  and for the tray app `tray/status` and `tray/event` (section 14).
 - Vendor schemas, at `vendor/<vendor>/<product>/<source>`:
 
 | Path | What |
@@ -621,3 +622,34 @@ A network is one gateway and the hosts that joined it (design:
 - The engine reaches the network through `xenonet_base::network` (`Net`
   and `Sink`). With no network nothing is behind it, and local behaviour
   and the JS twins are unchanged.
+
+## 14. The tray app (2026-10-22)
+
+XenoNet's own menu bar app on macOS (design: `always-on.md`, "The tray
+app").
+
+- Schemas (§1): `tray/status/v1`, what `GET /api/tray/v1/status` answers:
+  that the service runs, its version, what needs you as the console's
+  Needs you queue has it (each item's title and the words after it, such
+  as "asks"), the actor gateway's state and this machine's link to its
+  network. `tray/event/v1` is an alert on `GET /api/tray/v1/events`: an
+  item that started (`needs-you`) or stopped (`resolved`) waiting on you.
+  The stream also sends the whole status, as `status`, when it changes.
+- `POST /api/tray/v1/open-console`, with an optional `id`, shows
+  Desktop's window at that session or actor when a Desktop is connected,
+  and says `{ "opened": null }` when none is, so the tray opens Desktop or
+  the browser itself.
+- The credential: the tray connects to the component socket
+  (`runtime/service-<port>.json`) as role `tray`. The hello's answer
+  carries `trayKey`, new at each start of the service, only when
+  `verify.tray` passes: the process on the other end is
+  `XenoNet Tray.app/Contents/MacOS/<executable>` by its real path, in
+  `/Applications` or the home folder's `Applications`, with no agent or
+  actor product above it. The routes take the key as `x-xenonet-tray`,
+  never with an `authorization` header, and check that the request is
+  yours (`verify.person`) on every request. Nothing is written to disk.
+- One tray at a time. The hello's answer and `status` say `tray: true`
+  while one is connected, and the Desktop hears a `tray` event,
+  `{ "connected": true | false }`, when it comes and goes.
+- Fixtures both sides read: `test/fixtures/tray/status.json` and
+  `event.json`. The JS, Rust and Swift tests check them.

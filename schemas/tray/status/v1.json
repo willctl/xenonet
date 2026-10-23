@@ -1,0 +1,303 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/tray/status/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "The tray's status",
+  "description": "What GET /api/tray/v1/status answers XenoNet's tray app: that the service runs, what waits on you in the console's words, the actor gateway's state and this machine's link to its network.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "tray/status/v1"
+    },
+    "running": {
+      "type": "boolean",
+      "const": true,
+      "description": "The service answered. A tray that gets no answer shows XenoNet as stopped"
+    },
+    "version": {
+      "type": "string",
+      "maxLength": 40,
+      "description": "The service's version"
+    },
+    "instance": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 40
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "installed, demo, dev, or the instance XenoNet Dev names"
+    },
+    "url": {
+      "type": "string",
+      "maxLength": 100,
+      "description": "The console in a browser: http://127.0.0.1:<port>/"
+    },
+    "desktop": {
+      "type": "boolean",
+      "description": "Whether XenoNet Desktop is connected to the service now"
+    },
+    "working": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "description": "Sessions that aren't idle"
+    },
+    "needsYou": {
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "How many wait on you, as the console's strip counts them"
+        },
+        "items": {
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300,
+                "description": "The item's key in the Needs you queue (core/needs-you.js): session:<id>, actor:<id>, requests…"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "question",
+                  "permission",
+                  "actor",
+                  "request",
+                  "gateway",
+                  "requests"
+                ]
+              },
+              "id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 300
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The session or actor it's about, which open-console selects; null for programs asking to be actors"
+              },
+              "title": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "words": {
+                "type": "string",
+                "maxLength": 60,
+                "description": "What it waits for, after its title, as the console says it: asks, needs permission, asks to join XenoNet…"
+              },
+              "app": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The session's app (claude, codex, grok, opencode), or null"
+              },
+              "host": {
+                "description": "The machine it's on, when it isn't this one",
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{1,31}$"
+              },
+              "text": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The question or what it asks, when XenoNet has it"
+              },
+              "since": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "description": "Epoch milliseconds"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "stale": {
+                "description": "A wait on another machine that isn't live, which may be over",
+                "type": "boolean"
+              },
+              "count": {
+                "description": "For requests: how many programs ask",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "key",
+              "kind",
+              "id",
+              "title",
+              "words",
+              "app",
+              "text",
+              "since"
+            ],
+            "additionalProperties": {}
+          },
+          "description": "The Needs you queue in its order, the longest wait first"
+        }
+      },
+      "required": [
+        "count",
+        "items"
+      ],
+      "additionalProperties": {}
+    },
+    "gateway": {
+      "type": "object",
+      "properties": {
+        "on": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "off",
+            "starting",
+            "online",
+            "problem"
+          ]
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 300
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Its public address, when it has one"
+        },
+        "problem": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 500
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "on",
+        "state",
+        "url",
+        "problem"
+      ],
+      "additionalProperties": {},
+      "description": "The actor gateway, which actors reach this machine through"
+    },
+    "network": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The network's name; null when this machine isn't in one"
+        },
+        "host": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,31}$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "This machine's id in it"
+        },
+        "link": {
+          "type": "string",
+          "enum": [
+            "off",
+            "connecting",
+            "live",
+            "offline",
+            "refused",
+            "removed"
+          ],
+          "description": "This machine's link to the network's gateway"
+        },
+        "hosts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "The other machines in it"
+        },
+        "online": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "How many of them are online"
+        }
+      },
+      "required": [
+        "name",
+        "host",
+        "link",
+        "hosts",
+        "online"
+      ],
+      "additionalProperties": {}
+    },
+    "at": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    }
+  },
+  "required": [
+    "schema",
+    "running",
+    "version",
+    "instance",
+    "url",
+    "desktop",
+    "working",
+    "needsYou",
+    "gateway",
+    "network",
+    "at"
+  ],
+  "additionalProperties": {}
+}
