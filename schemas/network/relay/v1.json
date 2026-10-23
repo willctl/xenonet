@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/network/relay/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "The map between hosts",
+  "description": "A console's subscription to another host's map, and that host's answers: the SSH relay's frames, sealed between the two hosts.",
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "network/relay/v1"
+        },
+        "op": {
+          "type": "string",
+          "enum": [
+            "open",
+            "get",
+            "time",
+            "renew",
+            "close"
+          ],
+          "description": "From the subscribing host. open: start, with a hello and a snapshot; get: one read from the relay's allowlist, as GET; time: the host's clock; renew: still watching (every 20 s; a subscription lapses after 60 s without one), with fresh for a new snapshot after a gap; close: stop"
+        },
+        "sub": {
+          "type": "string",
+          "pattern": "^sub_[0-9a-f]{32}$",
+          "description": "The subscription, made at random by the subscribing host"
+        },
+        "id": {
+          "description": "For get and time: the console's question, which the answer's res or time frame names",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "path": {
+          "description": "For get: the path and query to read",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "fresh": {
+          "description": "For renew: send a fresh snapshot, since frames were lost",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "schema",
+        "op",
+        "sub"
+      ],
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "network/relay/v1"
+        },
+        "sub": {
+          "type": "string",
+          "pattern": "^sub_[0-9a-f]{32}$",
+          "description": "The subscription, made at random by the subscribing host"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "description": "1, 2, 3… within the subscription: a hole means frames were lost, and the console asks for a fresh snapshot"
+        },
+        "frames": {
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "t": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16
+              }
+            },
+            "required": [
+              "t"
+            ],
+            "additionalProperties": {}
+          },
+          "description": "The relay's frames, in order"
+        }
+      },
+      "required": [
+        "schema",
+        "sub",
+        "seq",
+        "frames"
+      ],
+      "additionalProperties": {}
+    }
+  ]
+}

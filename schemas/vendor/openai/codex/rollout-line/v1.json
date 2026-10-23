@@ -570,7 +570,10 @@
                           "type": "object",
                           "properties": {
                             "query": {
-                              "type": "string"
+                              "type": [
+                                "string",
+                                "null"
+                              ]
                             }
                           },
                           "additionalProperties": {},
@@ -623,6 +626,80 @@
                       },
                       "required": [
                         "type"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "Plan"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "text": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "text"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "Extension"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "description": "web.search, image_gen.generation or clock.sleep; XenoNet reads a web search as WebSearch"
+                        },
+                        "query": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "action": {
+                          "type": "object",
+                          "properties": {
+                            "query": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            }
+                          },
+                          "additionalProperties": {},
+                          "x-xenonet": {
+                            "closed": true,
+                            "known": [
+                              "type",
+                              "queries",
+                              "url",
+                              "pattern"
+                            ]
+                          }
+                        },
+                        "status": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "kind"
                       ],
                       "additionalProperties": {}
                     },
@@ -850,6 +927,19 @@
                 "type": {
                   "type": "string",
                   "const": "mcp_tool_call_end"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "thread_goal_updated"
                 }
               },
               "required": [
@@ -1317,6 +1407,32 @@
         "type": {
           "type": "string",
           "const": "token_usage_record"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "inter_agent_communication_metadata"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "realtime_item"
         }
       },
       "required": [

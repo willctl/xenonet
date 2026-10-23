@@ -29,8 +29,13 @@ fn ctx_of(c: &Json) -> install::Ctx {
 #[napi(js_name = "compConstants")]
 pub fn comp_constants() -> Json {
     Json(
-        json!({ "serviceApi": protocol::api_value(protocol::SERVICE_API), "consoleApi": protocol::api_value(protocol::CONSOLE_API), "capabilities": protocol::CAPABILITIES, "components": packages::COMPONENTS, "maxLine": rpc::MAX_LINE }),
+        json!({ "serviceApi": protocol::api_value(protocol::SERVICE_API), "consoleApi": protocol::api_value(protocol::CONSOLE_API), "capabilities": protocol::CAPABILITIES, "components": packages::COMPONENTS, "tray": packages::TRAY, "trayApp": packages::TRAY_APP, "trayExe": packages::TRAY_EXE, "maxLine": rpc::MAX_LINE }),
     )
+}
+
+#[napi(js_name = "compFitsHere")]
+pub fn comp_fits_here(value: MaybeJson, platform: String, arch: String) -> bool {
+    value.0.as_ref().is_some_and(|v| packages::fits_here(v, &platform, &arch))
 }
 
 #[napi(js_name = "compNegotiate")]
@@ -204,6 +209,11 @@ fn settled(r: std::result::Result<Jv, xenonet_app::task::Failure>) -> Jv {
 #[napi(js_name = "compInstallLauncher")]
 pub fn comp_install_launcher(env: Json, ctx: Json) -> Jv {
     settled(install::install_launcher(&env_of(env), &ctx_of(&ctx)).map(|v| Jv::Json(v.unwrap_or(Value::Null))))
+}
+
+#[napi(js_name = "compHasBinary")]
+pub fn comp_has_binary(selected: Json, platform: String) -> bool {
+    install::has_binary(&selected.0, &platform)
 }
 
 #[napi(js_name = "compCheckRuntime")]

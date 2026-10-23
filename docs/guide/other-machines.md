@@ -1,6 +1,8 @@
-# Other machines
+# Other machines over SSH
 
-XenoNet can show other machines' XenoNets beside its own, read-only. This is a prototype, and it's off unless you start XenoNet with `XENONET_HOSTS=1`. You can read another machine's transcripts and stats. Nothing from it can be opened in its app, dismissed, handed off or messaged yet.
+The main way to use XenoNet on several machines is a [network](network.md): each machine links to one gateway, the sessions on every machine see and message each other, and you can act from any machine you use a XenoNet window on.
+
+This page covers the other way, a prototype: XenoNet can show other machines' XenoNets beside its own, read-only, over SSH, with no network. It's off unless you start XenoNet with `XENONET_HOSTS=1`. You can read another machine's transcripts and stats in XenoNet's window. Nothing from it can be opened in its app, dismissed, handed off or messaged. A machine that's both in your network and added here is shown once, from here.
 
 ## How XenoNet reaches a host
 
@@ -66,7 +68,7 @@ The doctor also warns when two hosts answer with the same key, since the two wou
 
 A host sends titles, states and counts. That covers projects, sessions and how they're doing, token counts, and who each session ran as.
 
-Prompts, messages, a waiting question's text, tool details and the files sessions touch stay on their machine, unless you add the host with `--detail`. A transcript, a session's stats or a collision's diffs cross only when you open one, and XenoNet doesn't keep them.
+Prompts, messages, a waiting question's text, tool details and the files sessions touch stay on their machine, unless you add the host with `--detail`. A transcript, a session's stats or a collision's diffs cross only when you open one in XenoNet's window, and XenoNet doesn't keep them. A browser tab, a session or an actor on this machine can't open them: XenoNet answers those reads only to its own window.
 
 A host writes paths under its home folder as `~` before they leave it, so no user name crosses machines.
 

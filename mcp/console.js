@@ -21,7 +21,7 @@ import { xenonet, INSTANCES, root } from "../core/control.js";
 
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
-const INSTRUCTIONS = pkg.xenonetComponent === "tools" ? `XenoNet maps the Claude Code and Codex sessions on this machine, through a background service, a CLI, MCP tools and a desktop console. These tools operate installed Desktop. They launch it, find sessions, inspect panels, control terminals and take screenshots. Each action waits for the view to settle and returns the new state. Use logs to read page errors. The service, terminals and coordination keep running when Desktop closes or restarts, and window actions report that Desktop is unavailable until it returns. Allowing actors, connecting Claude Code and Codex, and trusting hosts are the person's to do. This console has no simulation and no arbitrary page execution.` : `XenoNet maps the Claude Code and Codex sessions on this machine, through a background service, a CLI, MCP tools and a desktop console. These tools operate installed XenoNet and development instances. Use installed for the person's app, or demo for made-up data. The service and the coordination between sessions keep running when Desktop closes or restarts. Simulation and arbitrary page execution work only in development instances.
+const INSTRUCTIONS = pkg.xenonetComponent === "tools" ? `XenoNet maps the Claude Code, Codex and Grok Build sessions on this machine, through a background service, a CLI, MCP tools and a desktop console. These tools operate installed Desktop. They launch it, find sessions, inspect panels, control terminals and take screenshots. Each action waits for the view to settle and returns the new state. Use logs to read page errors. The service, terminals and coordination keep running when Desktop closes or restarts, and window actions report that Desktop is unavailable until it returns. Allowing actors, connecting agents, and trusting hosts are the person's to do. This console has no simulation and no arbitrary page execution.` : `XenoNet maps the Claude Code, Codex and Grok Build sessions on this machine, through a background service, a CLI, MCP tools and a desktop console. These tools operate installed XenoNet and development instances. Use installed for the person's app, or demo for made-up data. The service and the coordination between sessions keep running when Desktop closes or restarts. Simulation and arbitrary page execution work only in development instances.
 
 The loop: \`launch\` (the demo instance, with made-up data, unless you need the user's real sessions: instance "dev"), then act with \`find\`, \`select\`, \`navigate\`, \`command\` and \`input\`, then \`screenshot\` to look. Every action waits until the view has settled (the layout cooled, the camera and any gathering at rest) and returns the new state, so don't sleep between calls. \`simulate\` puts sessions into rare states (a question waiting, an edit collision, a stuck loop) and has actors act. \`actors\` lists the actors beside the map, and \`feed\` reads the activity feed. After a change, check \`logs\` for page errors.
 
@@ -120,7 +120,7 @@ function buildServer() {
     "find",
     {
       title: "Find nodes",
-      description: "Finds nodes on the map whose id, title or name contain every word of `query`: projects, sessions, Codex projects (native), folders outside the projects folder (zone), shared systems (resource), wiki pages, other machines' XenoNets (host, with XENONET_HOSTS=1; their nodes' ids start with @<host>: and say which host), and actors beside the map (kind actor, by id, name and product). Drawn nodes come first, then the most recent, then actors. Each has its id, for select and input, and where it is on screen.",
+      description: "Finds nodes on the map whose id, title or name contain every word of `query`: projects, sessions, Codex projects (native), folders outside the projects folder (zone), shared systems (resource), the shared context (wiki) and its pages (page), other machines (host: over SSH with XENONET_HOSTS=1, or in a network; their nodes' ids start with @<host>: and say which host), and actors beside the map (kind actor, by id, name and product). Drawn nodes come first, then the most recent, then actors. Each has its id, for select and input, and where it is on screen.",
       inputSchema: z.object({
         query: z.string().optional().describe("Words to match; empty lists everything."),
         kind: z.enum(["project", "session", "native", "zone", "resource", "wiki", "page", "core", "actor", "host"]).optional(),
@@ -314,6 +314,25 @@ function buildServer() {
   );
 
   tool(
+    "filters",
+    {
+      title: "Filters",
+      description: "The toggles under Filters: claude, codex and grok show or hide each app's sessions (Claude Code, Codex, Grok Build), archived shows or hides archived ones, and external the folders outside the projects folder. `set` turns some on or off, as a click on each toggle does ({ grok: false } hides Grok Build's sessions). Returns the toggles and how many sessions of each app the map has and draws, once the view has settled.",
+      inputSchema: z.object({
+        set: z.object({ claude: z.boolean().optional(), codex: z.boolean().optional(), grok: z.boolean().optional(), archived: z.boolean().optional(), external: z.boolean().optional() }).optional().describe("Toggles by name, on (true) or off (false)."),
+        settle: settleArg,
+        instance: instanceArg,
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ set, settle, instance }) => {
+      const s = target(instance);
+      const state = set ? await s.driver("filters", set, { settle }) : await s.driver("state");
+      return reply({ filters: state.filters, apps: state.counts?.apps, ...(set ? { state } : {}) });
+    },
+  );
+
+  tool(
     "identities",
     {
       title: "Identities",
@@ -339,7 +358,7 @@ function buildServer() {
     "hosts",
     {
       title: "Other machines",
-      description: 'Other machines\' XenoNets on the map, with XENONET_HOSTS=1 (a prototype: the console reads each over SSH with xenonet relay, read-only). Each host with how it stands (connecting, live, stale, offline or error), its host node (@<host>:core) and where that is on screen, and its constellation beside this machine\'s map; the bridges between checkouts of one repo; and the machines\' chips under Filters. `only` shows just those machines\' work: host ids, and "@here" for this machine ([] shows every machine). In XenoNet Dev, simulate host-add shows another XenoNet on this machine as a host. Returns the hosts, and the state once the view has settled when something changed.',
+      description: 'Other machines on the map: other XenoNets over SSH, with XENONET_HOSTS=1 (a prototype: the console reads each with xenonet relay, read-only), and the machines of a network this one is in, drawn from their presence (network: true; their sessions take a message from you). Each host with how it stands (connecting, live, stale, offline or error), its host node (@<host>:core) and where that is on screen, and its constellation beside this machine\'s map; the bridges between checkouts of one repo; and the machines\' chips under Filters. `only` shows just those machines\' work: host ids, and "@here" for this machine ([] shows every machine). In XenoNet Dev, simulate host-add shows another XenoNet on this machine as a host. Returns the hosts, and the state once the view has settled when something changed.',
       inputSchema: z.object({
         only: z.array(z.string()).optional().describe('Host ids, and "@here" for this machine; [] clears the filter.'),
         settle: settleArg,
@@ -351,6 +370,30 @@ function buildServer() {
       const s = target(instance);
       const state = only ? await s.driver("filterHosts", only, { settle }) : null;
       return reply({ hosts: await s.driver("hosts"), ...(state ? { state } : {}) });
+    },
+  );
+
+  tool(
+    "network",
+    {
+      title: "The network",
+      description: "This machine's network across machines, as Network settings in the palette shows it: whether it's in one, its name and this machine; the gateway (address, kind, link, since when, why it's down, clock skew); each machine (online or since when, its agents and what waits on you, founder, gateway, window, and where you're at), with its agents under it; the tickets waiting, what waits for approval (proposals: each with what it does and who signed it), the outbox, a roster mismatch and the titles-only setting. `open` shows the panel, `start` and `join` its forms, and `add` opens Add a machine with the new machine's id (host) and whether you'll use a XenoNet window on it (window) filled in. `message` opens the box that messages a session as you (to: its id, or @<host>:<id> for another machine's) with text in it. Making the join line, starting or joining a network, removing or replacing a machine, approving, the setting and Send are the person's: clicks in the window, at the answer's at and message.sendAt, which only the demo and test instances let this console make. The join line shows once, masked: join.masked says whether it is, never the ticket. In XenoNet Dev, simulate net-… makes up a network to look at. Returns the network, and the state once the view has settled when something opened.",
+      inputSchema: z.object({
+        action: z.enum(["read", "open", "start", "join", "add", "message", "close"]).optional().describe("read (the default) says how the network stands without opening anything."),
+        host: z.string().optional().describe("For add: the new machine's id."),
+        window: z.boolean().optional().describe("For add: whether you'll use a XenoNet window on it."),
+        to: z.string().optional().describe("For message: a session's id, @<host>:<id> for another machine's, or an actor's."),
+        text: z.string().optional().describe("For message: what goes in the box."),
+        settle: settleArg,
+        instance: instanceArg,
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ action = "read", host, window, to, text, settle, instance }) => {
+      const s = target(instance);
+      if (action === "message") return reply(await s.driver("messageAs", to, text, { settle }));
+      if (action === "add") return reply(await s.driver("network", "add", { host, window }, { settle }));
+      return reply(await s.driver("network", action, null, { settle }));
     },
   );
 
@@ -379,11 +422,11 @@ function buildServer() {
     "simulate",
     {
       title: "Simulate a session state, an actor acting, or another machine",
-      description: "Puts sessions into states that are otherwise rare, so you can check how they look. The kinds are needs-you (a question waiting), collision (two sessions editing the same file, which needs a and b), stuck (a failing loop), wiki-write, turn-end, doctor (the doctor finding a problem), and clear, which undoes them all. Without session ids it picks the most recently active sessions. The actor-… kinds have an actor act instead, as an event it reports would. They are actor-spawn (it starts a session), actor-edit (it edits files in a project), actor-message (it messages a session), actor-online and actor-offline. The actor reacts, and a beam runs to what it touched. actor-request makes up a program asking to be an actor (named a, Heron by default), which waits for an Allow in the window. Its card shows in the attention strip, and actors lists it under requests. actor-needs-you has an actor (a, the first by default) wait on you with a made-up question. Its card shows in the attention strip, and its glow beats in the attention color until clear. actor-tunnel gives an actor (a) a made-up remote connection through a tunnel with an adapter connected, so the map draws its gate open between it and what it reads. actor-tunnel-down does the same with no adapter connected, so the gate is shut. actor-read sends a read through it, of node b or what it acts on, with light down the conduit and out to what it read. clear takes the tunnel away. Only the demo and test instances, whose data is made up, answer actor-request, actor-needs-you and the tunnel kinds, and actor-request's token stays out of this answer. With XENONET_HOSTS=1, it covers other machines too. host-add shows another XenoNet on this machine as a host (a is the new host's id, b that XenoNet's port). host-offline and host-online take a host's id as a. host-skew sets a host's clock b ms off, three minutes if b is left out. Everything stays in memory, apart from actor-request. Returns what was used and the page's state after the update arrives.",
+      description: "Puts sessions into states that are otherwise rare, so you can check how they look. The kinds are needs-you (a question waiting), collision (two sessions editing the same file, which needs a and b), stuck (a failing loop), wiki-write (a session writing to the shared context), turn-end, doctor (the doctor finding a problem), and clear, which undoes them all. Without session ids it picks the most recently active sessions. The actor-… kinds have an actor act instead, as an event it reports would. They are actor-spawn (it starts a session), actor-edit (it edits files in a project), actor-message (it messages a session), actor-online and actor-offline. The actor reacts, and a beam runs to what it touched. actor-request makes up a program asking to be an actor (named a, Heron by default), which waits for an Allow in the window. Its card shows in the attention strip, and actors lists it under requests. actor-needs-you has an actor (a, the first by default) wait on you with a made-up question. Its card shows in the attention strip, and its glow beats in the attention color until clear. actor-tunnel gives an actor (a) a made-up remote connection through a tunnel with an adapter connected, so the map draws its gate open between it and what it reads. actor-tunnel-down does the same with no adapter connected, so the gate is shut. actor-read sends a read through it, of node b or what it acts on, with light down the conduit and out to what it read. clear takes the tunnel away. Only the demo and test instances, whose data is made up, answer actor-request, actor-needs-you and the tunnel kinds, and actor-request's token stays out of this answer. With XENONET_HOSTS=1, it covers other machines too. host-add shows another XenoNet on this machine as a host (a is the new host's id, b that XenoNet's port). host-offline and host-online take a host's id as a. host-skew sets a host's clock b ms off, three minutes if b is left out. The net-… kinds make up a network across machines, with other machines' agents, for the Network panel (network), the attention strip and the message box: net-none (this machine on its own), net-founder (this machine started it and is its gateway; two more machines, one offline; on laptop a session waits on you with a question and another seems stuck), net-member (this machine joined; the gateway is another), net-gateway-down (the gateway hasn't answered for 25 minutes, and what's for other machines waits in the outbox), net-ticket (a ticket waits), net-mismatch (a machine sees another list of the network's machines), net-remote-waiting (an agent on another machine waits on you) and net-approval (a window host that isn't the founder signed another in as a window host, which waits for an approval here). For net-founder and net-remote-waiting, a is the machine you're at, this one by default: what waits sounds only there, here or on another machine; and b titles-only has the other machines share titles only, so no question's text, last message or stuck reason comes from them. clear ends it. Everything stays in memory, apart from actor-request. Returns what was used and the page's state after the update arrives.",
       inputSchema: z.object({
-        kind: z.enum(["needs-you", "collision", "stuck", "wiki-write", "turn-end", "doctor", "clear", "actor-spawn", "actor-edit", "actor-message", "actor-online", "actor-offline", "actor-request", "actor-needs-you", "actor-tunnel", "actor-tunnel-down", "actor-read", "host-add", "host-offline", "host-online", "host-skew"]),
-        a: z.string().optional().describe("A session id (find with kind session); for the actor-… kinds, an actor id (actors lists them, and the first one that isn't you is the default); for actor-request, the name it asks with; for host-…, a host's id."),
-        b: z.string().optional().describe("The second session, for collision; for the actor-… kinds, the node it acts on (a session for actor-spawn and actor-message, a project for actor-edit; the session busy most lately when left out); for host-add, the port of the XenoNet to show; for host-skew, milliseconds."),
+        kind: z.enum(["needs-you", "collision", "stuck", "wiki-write", "turn-end", "doctor", "clear", "actor-spawn", "actor-edit", "actor-message", "actor-online", "actor-offline", "actor-request", "actor-needs-you", "actor-tunnel", "actor-tunnel-down", "actor-read", "host-add", "host-offline", "host-online", "host-skew", "net-none", "net-founder", "net-member", "net-gateway-down", "net-ticket", "net-mismatch", "net-remote-waiting", "net-approval"]),
+        a: z.string().optional().describe("A session id (find with kind session); for the actor-… kinds, an actor id (actors lists them, and the first one that isn't you is the default); for actor-request, the name it asks with; for host-…, a host's id; for net-founder and net-remote-waiting, the machine you're at."),
+        b: z.string().optional().describe("The second session, for collision; for the actor-… kinds, the node it acts on (a session for actor-spawn and actor-message, a project for actor-edit; the session busy most lately when left out); for host-add, the port of the XenoNet to show; for host-skew, milliseconds; for net-founder and net-remote-waiting, titles-only."),
         instance: instanceArg,
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
@@ -579,6 +622,16 @@ function buildServer() {
     if (["set", "preview"].includes(action) && !id) throw new Error("choose an environment from list");
     const method = { set: "environment", preview: "previewEnvironment", keep: "keepEnvironment", revert: "revertEnvironment", picker: "environmentPicker" }[action];
     return reply(await s.driver(method, ...(["set", "preview"].includes(action) ? [id] : []), { settle }));
+  });
+
+  server.registerTool("look", {
+    title: "How the console draws its panels",
+    description: "Read or change how the console draws its panels. plainPanels true draws them solid, without the glass blur behind them, a large share of a visible frame's GPU time; false brings the glass back. It's kept for this window, as the palette's \"Turn plain panels on or off\" keeps it. Returns the state once the view has settled: state.look says how the panels are drawn.",
+    inputSchema: z.object({ plainPanels: z.boolean().optional().describe("true: solid panels, without the glass blur; false: glass panels, the default. Leave it out to only read."), instance: instanceArg, settle: settleArg }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, async ({ plainPanels, instance, settle }) => {
+    const s = target(instance);
+    return reply(plainPanels === undefined ? await s.driver("state") : await s.driver("plainPanels", plainPanels, { settle }));
   });
 
   return server;

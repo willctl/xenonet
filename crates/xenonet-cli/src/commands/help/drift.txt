@@ -1,9 +1,10 @@
-What's changed in the data XenoNet reads from Claude Code, Codex, Claude
-desktop and gh since you last looked, by source: a field gone or of
-another type, a line that isn't JSON or a version XenoNet's schemas weren't
-made for (changes, which can break what XenoNet shows), and a field or a kind
-of record they don't list yet (additions). Then it marks them seen, which
-quiets the doctor until something new turns up.
+What's changed in the data XenoNet reads from other programs (Claude Code,
+Codex, Grok Build, Claude desktop, gh and the rest) since you last looked,
+by source: a field gone or of another type, a line that isn't JSON or a
+version XenoNet's schemas weren't made for (changes, which can break what
+XenoNet shows), and a field or a kind of record they don't list yet
+(additions). Then it marks them seen, which quiets the doctor until
+something new turns up.
 
   --all        every difference XenoNet keeps, not only the new ones
   --json       the report as JSON

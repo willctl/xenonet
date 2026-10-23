@@ -10,7 +10,6 @@
 //! never the endpoint, commands, prompts, previews, tool input or results.
 
 use crate::native::files::Files;
-use crate::native::node_path;
 use crate::native::{by_num, edits_out, fits_id, js_max, js_min, older, prune_edits, push_edit, titled, Edits, NativeReader, Out, Vendor, DAY_MS, SESSIONS_MAX};
 use crate::session::{RunSession, Via};
 use serde_json::Value;
@@ -19,6 +18,7 @@ use xenonet_base::fs::FsError;
 use xenonet_base::ids::{is_session_app, session_apps};
 use xenonet_base::json::{self, number_string};
 use xenonet_base::jsstr;
+use xenonet_base::nodepath::Style;
 use xenonet_base::ordered::OrderedMap;
 use xenonet_base::paths::path_style;
 use xenonet_base::text::{is_blank, js_string};
@@ -42,7 +42,16 @@ pub fn run_id(sid: &str) -> String {
     format!("n{}", &hex[..31])
 }
 
+/// A run's session id. OpenCode's runs take the id its own reader gives
+/// them (ses_… as ses-…, native/opencode.rs) when that fits, so a run both
+/// read is one session, and delivery finds it.
 pub fn session_id_of(app: &str, sid: &str) -> String {
+    if app == "opencode" {
+        let own = crate::native::opencode::local_id(sid);
+        if fits_id(&own, 128) {
+            return format!("opencode:{own}");
+        }
+    }
     format!("{app}:{}", run_id(sid))
 }
 
@@ -65,7 +74,7 @@ fn nonempty(v: Option<&Value>) -> Option<String> {
 }
 
 fn absolute(p: &str) -> bool {
-    !p.is_empty() && node_path::is_absolute(path_style(p), p)
+    !p.is_empty() && Style::from(path_style(p)).is_absolute(p)
 }
 
 /// One NDJSON line: the event, or why it's passed over (malformed,
@@ -91,9 +100,9 @@ pub fn read_record(line: &str) -> Result<Event, &'static str> {
     let project = nonempty(r.get("project_path"));
     let mut file = if EDITS.contains(&kind.as_str()) { nonempty(r.get("file_path")) } else { None };
     if let Some(f) = file.clone().filter(|f| !absolute(f)) {
-        file = project.as_deref().filter(|p| absolute(p)).map(|p| node_path::join(path_style(p), &[p, &f]));
+        file = project.as_deref().filter(|p| absolute(p)).map(|p| Style::from(path_style(p)).join(&[p, &f]));
     }
-    let file = file.map(|f| node_path::resolve(path_style(&f), &[&f]));
+    let file = file.map(|f| Style::from(path_style(&f)).resolve(&[&f]));
     Ok(Event {
         app,
         kind,
@@ -377,6 +386,19 @@ mod tests {
         let id = session_id_of("cursor", "has spaces/and slashes");
         assert!(id.starts_with("cursor:n") && id.len() == "cursor:n".len() + 31, "{id}");
         assert_eq!(run_id("g-0000001"), "g-0000001");
+    }
+
+    #[test]
+    fn an_opencode_run_has_the_id_its_reader_gives_it() {
+        for sid in ["ses_eb95b1836ffexD4vYDGuLeJDCy", "ses_ab_cd", "ses_ab-cd", "ses-abcdef"] {
+            assert_eq!(session_id_of("opencode", sid), crate::native::opencode::session_id_of(sid), "{sid}");
+        }
+        assert_eq!(session_id_of("opencode", "ses_eb95b1836ffexD4vYDGuLeJDCy"), "opencode:ses-eb95b1836ffexD4vYDGuLeJDCy");
+        assert_eq!(session_id_of("opencode", "abcdefg"), "opencode:abcdefg");
+        let long = session_id_of("opencode", &format!("{} ", "x".repeat(65)));
+        assert!(long.starts_with("opencode:n") && long.len() == "opencode:n".len() + 31, "{long}");
+        let other = session_id_of("cursor", "ses_ab");
+        assert!(other.starts_with("cursor:n") && other.len() == "cursor:n".len() + 31, "{other}");
     }
 
     #[test]

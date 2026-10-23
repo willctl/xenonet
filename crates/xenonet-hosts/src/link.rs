@@ -28,7 +28,7 @@ use std::sync::OnceLock;
 use xenonet_app::jstext::{slice16, utf16_len};
 use xenonet_app::jsv::truthy;
 use xenonet_base::ids::is_host_id;
-use xenonet_base::text::js_string;
+use xenonet_base::text::{js_string, JS_DOT};
 
 pub const HELLO_MS: f64 = 20e3;
 pub const STALE_MS: f64 = 45e3;
@@ -76,6 +76,26 @@ pub struct Options {
 
 /// A program to run: (file, args, env).
 pub type Command = (String, Vec<String>, Map<String, Value>);
+
+/// How a link reaches its host: a program that speaks the relay on its
+/// standard output (`ssh <host> xenonet relay`, or another XenoNet's relay
+/// on this machine), or the network, through its gateway, to a host in the
+/// roster (docs/design/network.md, section 7).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Start {
+    Process(Command),
+    Network { host: String },
+}
+
+/// What a link starts for its entry: a network host's own id, or the
+/// program `transport` makes.
+pub fn start_of(entry: &Value, o: &Options) -> Result<Start, String> {
+    if entry.get("transport").and_then(Value::as_str) == Some("network") {
+        let id = entry.get("id").and_then(Value::as_str).filter(|i| is_host_id(i)).ok_or_else(|| format!("not a host id: {}", show(entry.get("id"))))?;
+        return Ok(Start::Network { host: id.to_string() });
+    }
+    transport(entry, o).map(Start::Process)
+}
 
 /// What a link runs: (file, args, env). Fixed words, and values hostEntry
 /// checked, checked again here, since the host's shell parses the remote
@@ -171,7 +191,7 @@ fn why(state: &'static str, code: &'static str, message: String, fix: Option<Str
 fn res() -> &'static [Regex; 3] {
     static R: OnceLock<[Regex; 3]> = OnceLock::new();
     R.get_or_init(|| {
-        let any = r"[^\n\r\x{2028}\x{2029}]*";
+        let any = format!("{JS_DOT}*");
         [
             Regex::new(&format!(r"(?i)host key verification failed|remote host identification has changed|no \S+ host key is known|host key for {any} has changed"))
                 .expect("a fixed pattern"),
@@ -190,10 +210,49 @@ pub struct Ended<'a> {
     pub stderr: &'a str,
     pub bye: Option<&'a Value>,
     pub spawn_error: Option<&'a str>,
+    /// Why a network link ended: offline (the host is, in presence),
+    /// removed (from the roster), lapsed (no frame came in time), link
+    /// (this machine's own link to the gateway is down) or closed.
+    pub network: Option<&'a str>,
+}
+
+/// Why a network link ended, from the host's bye or what the network said.
+fn why_network(id: &str, e: &Ended<'_>) -> Why {
+    if let Some(err) = e.spawn_error {
+        return why("offline", "no-network", format!("this machine can't reach {id} over the network: {err}"), None);
+    }
+    let bye_code = e.bye.and_then(|b| b.get("code")).map(js_string).filter(|c| !c.is_empty());
+    let message = || e.bye.and_then(|b| b.get("message")).filter(|m| !m.is_null()).map_or_else(String::new, |m| slice16(&js_string(m), 200));
+    match bye_code.as_deref() {
+        Some("not-window") => {
+            return why(
+                "error",
+                "not-window",
+                format!("{id} shows its map only to a window host's console"),
+                Some("Use this machine's XenoNet window as a window host: from the founder's window, Replace this machine with I'll use a XenoNet window on it ticked.".into()),
+            )
+        }
+        Some("xenonet-gone") => return why("offline", "xenonet-gone", format!("the XenoNet on {id} stopped"), None),
+        Some(code) => {
+            let m = message();
+            return why("offline", "relay", format!("the relay on {id} stopped: {}", if m.is_empty() { code.to_string() } else { m }), None);
+        }
+        None => {}
+    }
+    match e.network {
+        Some("offline") => why("offline", "host-offline", format!("{id} is offline in the network"), None),
+        Some("removed") => why("error", "removed", format!("{id} was removed from the network"), None),
+        Some("lapsed") => why("offline", "lapsed", format!("{id} stopped sending its map"), None),
+        Some("link") => why("offline", "link-down", "this machine's link to the network's gateway is down".into(), None),
+        _ => why("offline", "ended", format!("the map from {id} stopped"), None),
+    }
 }
 
 pub fn why_ended(entry: &Value, e: &Ended<'_>, ssh_config: Option<&str>, tilde: &dyn Fn(&str) -> String) -> Why {
     let id = entry.get("id").map(js_string).unwrap_or_default();
+    if entry.get("transport") == Some(&json!("network")) {
+        return why_network(&id, e);
+    }
     let ssh = entry.get("transport") == Some(&json!("ssh"));
     let named = |text: &str| -> String {
         let mut out = text.to_string();
@@ -266,11 +325,10 @@ pub fn why_ended(entry: &Value, e: &Ended<'_>, ssh_config: Option<&str>, tilde: 
 /// What the twin is to do.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Effect {
-    Spawn {
+    /// Start run `run`: its program, or its subscription over the network.
+    Start {
         run: u64,
-        file: String,
-        args: Vec<String>,
-        env: Map<String, Value>,
+        start: Start,
     },
     Write {
         run: u64,
@@ -523,8 +581,8 @@ impl Link {
         if self.stopped {
             return;
         }
-        let cmd = match transport(&self.entry, &self.options) {
-            Ok(c) => c,
+        let start = match start_of(&self.entry, &self.options) {
+            Ok(s) => s,
             Err(err) => {
                 let id = self.id();
                 let w =
@@ -538,7 +596,7 @@ impl Link {
         let run = Run { id: self.runs, hello: false, snapshot: false, bye: None, stderr: String::new(), problem: None, ended: false, pending: Vec::new(), times: HashMap::new() };
         let run_id = run.id;
         self.run = Some(run);
-        self.fx.push(Effect::Spawn { run: run_id, file: cmd.0, args: cmd.1, env: cmd.2 });
+        self.fx.push(Effect::Start { run: run_id, start });
         self.fx.push(Effect::Timer { name: format!("hello:{run_id}"), ms: self.hello_ms });
     }
 
@@ -866,7 +924,7 @@ impl Link {
             Some(p) => p,
             None => {
                 let bye = r.bye.clone();
-                let ended = Ended { exit_code: e.exit_code, signal: e.signal.clone(), stderr: &r.stderr, bye: bye.as_ref(), spawn_error: e.spawn_error };
+                let ended = Ended { exit_code: e.exit_code, signal: e.signal.clone(), stderr: &r.stderr, bye: bye.as_ref(), spawn_error: e.spawn_error, network: e.network };
                 why_ended(&self.entry, &ended, self.options.ssh_config.as_deref(), &tilde)
             }
         };
@@ -941,15 +999,67 @@ mod tests {
     fn why_a_connection_ended() {
         let e = json!({ "id": "vm1", "transport": "ssh", "ssh": { "hostname": "nova-mac.local", "user": "nova" } });
         let t = |p: &str| p.to_string();
-        let w = why_ended(&e, &Ended { exit_code: Some(255.0), signal: None, stderr: "Host key verification failed.\n", bye: None, spawn_error: None }, Some("/x/c"), &t);
+        let w = why_ended(
+            &e,
+            &Ended { exit_code: Some(255.0), signal: None, stderr: "Host key verification failed.\n", bye: None, spawn_error: None, network: None },
+            Some("/x/c"),
+            &t,
+        );
         assert_eq!((w.state, w.code), ("error", "host-key"));
         let w = why_ended(
             &e,
-            &Ended { exit_code: Some(255.0), signal: None, stderr: "ssh: connect to host nova-mac.local port 22: Connection refused\n", bye: None, spawn_error: None },
+            &Ended {
+                exit_code: Some(255.0),
+                signal: None,
+                stderr: "ssh: connect to host nova-mac.local port 22: Connection refused\n",
+                bye: None,
+                spawn_error: None,
+                network: None,
+            },
             None,
             &t,
         );
         assert_eq!(w.message, "ssh couldn't reach vm1: connect to host vm1 port 22: Connection refused");
         assert_eq!(shell_path("~/Library/Application Support/x"), "~/'Library/Application Support/x'");
+    }
+
+    struct NoAsks;
+
+    impl Asks for NoAsks {
+        fn random(&mut self) -> f64 {
+            0.5
+        }
+        fn check_hello(&mut self, _frame: &Value) -> Option<String> {
+            None
+        }
+        fn tilde(&self, p: &str) -> String {
+            p.to_string()
+        }
+    }
+
+    #[test]
+    fn a_network_host_starts_a_subscription_and_says_why_it_ended() {
+        let e = json!({ "id": "laptop", "transport": "network" });
+        assert_eq!(start_of(&e, &opts()).unwrap(), Start::Network { host: "laptop".into() });
+        assert!(start_of(&json!({ "id": "Laptop!", "transport": "network" }), &opts()).is_err());
+        let ssh = json!({ "id": "vm1", "transport": "ssh", "port": 47840, "since": "7d", "command": "xenonet" });
+        assert!(matches!(start_of(&ssh, &opts()).unwrap(), Start::Process(_)));
+        let mut l = Link::new(e.clone(), opts(), 0.0, false, false, HELLO_MS, STALE_MS, (BACKOFF_MIN, BACKOFF_MAX), GET_MS);
+        let fx = l.start(0.0, &mut NoAsks);
+        assert!(fx.contains(&Effect::Start { run: 1, start: Start::Network { host: "laptop".into() } }), "{fx:?}");
+        let t = |p: &str| p.to_string();
+        let ended = |network: Option<&'static str>, bye: Option<&Value>| {
+            let w = why_ended(&e, &Ended { exit_code: None, signal: None, stderr: "", bye, spawn_error: None, network }, None, &t);
+            (w.state, w.code)
+        };
+        assert_eq!(ended(Some("offline"), None), ("offline", "host-offline"));
+        assert_eq!(ended(Some("removed"), None), ("error", "removed"));
+        assert_eq!(ended(Some("lapsed"), None), ("offline", "lapsed"));
+        assert_eq!(ended(Some("link"), None), ("offline", "link-down"));
+        assert_eq!(ended(Some("lapsed"), Some(&json!({ "code": "not-window" }))), ("error", "not-window"), "the host's bye says more");
+        // A network host's end retries, as an ssh host's does.
+        let fx = l.end(1, &Ended { exit_code: None, signal: None, stderr: "", bye: None, spawn_error: None, network: Some("offline") }, 10.0, &mut NoAsks);
+        assert_eq!(l.state, "offline");
+        assert!(fx.iter().any(|f| matches!(f, Effect::Timer { name, .. } if name == "retry")), "{fx:?}");
     }
 }

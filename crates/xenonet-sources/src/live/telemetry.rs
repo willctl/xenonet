@@ -15,11 +15,11 @@
 //! the record says), where JS's `+` would have joined strings.
 
 use super::{
-    categorize, claude_edits, clip, clip_value, codex_edits, command_text, day_key, file_key, files_of, looks_like_question, mcp_server_of, median, patch_files, slope, string_of,
-    tail, tool_detail, tool_key, wiki_pages_of,
+    categorize, claude_edits, clip, clip_value, codex_edits, command_text, day_key, file_key, files_of, looks_like_question, mcp_server_of, mcp_tool_of, median, patch_files,
+    slope, string_of, tail, tool_detail, tool_key, wiki_pages_of,
 };
-use crate::line_events::{self, broken_at, usage_of, user_text, End, Field, Kind, LineEvent, LineFile};
-use crate::lines::{opt_prop, prop, ClaudeLine, CodexLine, TypeError};
+use crate::line_events::{self, broken_at, usage_of, user_text, End, Field, Kind, LineEvent, LineFile, Run};
+use crate::lines::{opt_prop, prop, ClaudeLine, CodexLine, GrokLine, TypeError};
 use serde_json::{Map, Value};
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -44,6 +44,11 @@ pub const HISTORY_MAX: usize = 20000;
 // Claude plan usage is asked of Anthropic every 5 minutes (claude_usage);
 // a reading this old says nothing about the windows now.
 const CLAUDE_LIMITS_FRESH_MS: f64 = 45.0 * 60e3;
+// An app whose lines don't say when a turn ends (Grok Build's): its hooks
+// do, and without them a turn this quiet, with no tool call in flight, has
+// ended. A session whose hooks spoke this lately waits for them.
+const QUIET_TURN_MS: f64 = 60e3;
+const HOOKS_HEARD_MS: f64 = 3600e3;
 
 // ---------- JS's ways ----------
 
@@ -366,6 +371,10 @@ pub struct Session {
     turn_marks: f64,
     question: Value,
     hook_need: Value,
+    // When its hooks last spoke, and what its mapper keeps of its file
+    // (line_events.rs), for an app whose lines don't say when a turn ends.
+    hook_at: f64,
+    line_run: Run,
     recent_tools: Vec<ToolRec>,
     error_streak: f64,
     // Undefined (None) until the first reset.
@@ -417,6 +426,8 @@ impl Session {
             turn_marks: 0.0,
             question: Value::Null,
             hook_need: Value::Null,
+            hook_at: 0.0,
+            line_run: Run::None,
             recent_tools: Vec::new(),
             error_streak: 0.0,
             error_since: None,
@@ -662,6 +673,11 @@ impl Session {
         Value::Null
     }
 
+    /// What it said last, its last 280 characters, or null.
+    pub fn last_message(&self) -> Value {
+        self.messages.last().map_or(Value::Null, |m| Value::String(tail(&string_of(Some(&m.text)), 280)))
+    }
+
     /// Why it looks stuck ({ reasons }), or null.
     pub fn stuck(&self, now: f64) -> Value {
         if !self.turn_active || self.question_pending() || self.hook_waiting(now) {
@@ -755,7 +771,7 @@ impl Session {
         let files: Vec<Value> = files.into_iter().map(|(path, ts)| obj(vec![("path", path), ("ts", ts)])).collect();
         let mcp: Vec<Value> = self.mcp.iter().map(|(_, (k, ts))| obj(vec![("server", k.clone().unwrap_or(Value::Null)), ("ts", ts.clone())])).collect();
         let today = self.daily.get(&str_tag(&day_key(now))).map_or(0.0, |(_, v)| *v);
-        let last_message = self.messages.last().map_or(Value::Null, |m| Value::String(tail(&string_of(Some(&m.text)), 280)));
+        let last_message = self.last_message();
         let or_null = |v: f64| if v != 0.0 && !v.is_nan() { number(v) } else { Value::Null };
         obj(vec![
             ("id", Value::String(self.id.clone())),
@@ -822,6 +838,10 @@ pub struct Where {
 #[derive(Debug)]
 pub struct Telemetry {
     pub home: Option<String>,
+    /// The MCP server the config names for the shared context
+    /// (wikiServer, the one the folder's marker names when it has one):
+    /// Xenolith's tools under it write there, whatever it's called.
+    pub context_server: Option<String>,
     roots: Vec<(String, String)>,
     sessions: Vec<Session>,
     index: HashMap<String, usize>,
@@ -841,6 +861,7 @@ impl Telemetry {
     pub fn new(home: Option<String>, roots: Vec<(String, String)>) -> Self {
         Telemetry {
             home,
+            context_server: None,
             roots,
             sessions: Vec::new(),
             index: HashMap::new(),
@@ -894,6 +915,15 @@ impl Telemetry {
         if !norm.ends_with(".jsonl") {
             return None;
         }
+        // A Grok Build session's updates, in the session's folder, which is
+        // named for it: <root>/<encoded cwd>/<session id>/updates.jsonl. Its
+        // other files (chat history, rewind points) aren't read.
+        if let Some((dir, _)) = self.roots.iter().find(|(dir, app)| app == "grok" && norm.starts_with(&format!("{}/", dir.replace('\\', "/")))) {
+            let rest = &norm[dir.replace('\\', "/").len()..];
+            let parts: Vec<&str> = rest.split('/').collect();
+            return (parts.len() == 4 && parts[0].is_empty() && !parts[1].is_empty() && !parts[2].is_empty() && parts[3] == "updates.jsonl")
+                .then(|| obj(vec![("app", "grok".into()), ("sessionId", Value::String(format!("grok:{}", parts[2])))]));
+        }
         let codex_root = self.roots.iter().any(|(dir, app)| app == "codex" && norm.starts_with(&dir.replace('\\', "/")));
         if norm.contains("/.codex/") || codex_root {
             let id = uuid_before(&norm)?;
@@ -915,23 +945,40 @@ impl Telemetry {
     /// (line_events.rs): its refusal (kept whether read as history or live,
     /// told to you only when live) and what it says. What it emitted before
     /// an error is in `out`.
-    pub fn line(&mut self, codex: bool, f: &Where, raw: Value, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
-        if codex {
-            let o = CodexLine { raw };
-            let file = self.codex_file(self.find(&f.session_id));
-            let events = line_events::codex(&o, &file);
-            self.refusal(true, f, &o.raw, &events, live, out);
-            self.codex_line(f, &o, &events, live, now, out)
-        } else {
-            let o = ClaudeLine { raw };
-            let events = line_events::claude(&o, &LineFile::new(Some(f.agent_id.clone())));
-            self.refusal(false, f, &o.raw, &events, live, out);
-            self.claude_line(f, &o, &events, live, now, out)
+    /// `app` is the transcript's: any app that isn't tailed is read as
+    /// Claude Code, and an app's events other than Codex's have Claude
+    /// Code's shapes.
+    pub fn line(&mut self, app: &str, f: &Where, raw: Value, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
+        match apps::tailed_app(app, "claude") {
+            "codex" => {
+                let o = CodexLine { raw };
+                let file = self.codex_file(self.find(&f.session_id));
+                let events = line_events::codex(&o, &file);
+                self.refusal(app, f, &o.raw, &events, live, out);
+                self.codex_line(f, &o, &events, live, now, out)
+            }
+            "grok" => {
+                // What the mapper keeps of the session's file, as the lines
+                // come (its runs of chunks).
+                let i = self.session(&f.session_id, "grok");
+                let o = GrokLine::new(raw);
+                let file = LineFile { run: std::cell::Cell::new(self.sessions[i].line_run), ..LineFile::new(Some(f.agent_id.clone())) };
+                let events = line_events::grok(&o, &file);
+                self.sessions[i].line_run = file.run.get();
+                self.refusal(app, f, &o.raw, &events, live, out);
+                self.claude_line(f, "grok", o.ts(), &events, live, now, out)
+            }
+            _ => {
+                let o = ClaudeLine { raw };
+                let events = line_events::claude(&o, &LineFile::new(Some(f.agent_id.clone())));
+                self.refusal(app, f, &o.raw, &events, live, out);
+                self.claude_line(f, "claude", o.ts(), &events, live, now, out)
+            }
         }
     }
 
     // A provider's refusal, as its line marks it, read first.
-    fn refusal(&self, codex: bool, f: &Where, raw: &Value, events: &[LineEvent<'_>], live: bool, out: &mut Vec<Emit>) {
+    fn refusal(&self, app: &str, f: &Where, raw: &Value, events: &[LineEvent<'_>], live: bool, out: &mut Vec<Emit>) {
         for e in events {
             let Kind::Refusal(signal) = &e.kind else { continue };
             let model = self.find(&f.session_id).map_or(Value::Null, |i| self.sessions[i].model.clone());
@@ -939,7 +986,7 @@ impl Telemetry {
             out.push(Emit::Refusal(obj(vec![
                 ("signal", signal.clone()),
                 ("sessionId", Value::String(f.session_id.clone())),
-                ("app", if codex { "codex" } else { "claude" }.into()),
+                ("app", app.into()),
                 ("agentId", f.agent_id.clone()),
                 ("file", f.file.clone()),
                 ("cwd", cwd),
@@ -1097,7 +1144,7 @@ impl Telemetry {
     /// Claude Code's Notification hooks carry permission prompts the
     /// transcript doesn't.
     pub fn note_hook(&mut self, id: &str, body: Option<&Value>, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
-        let i = self.session(id, "claude");
+        let i = self.session(id, apps::tailed_app(id.split(':').next().unwrap_or_default(), "claude"));
         let name = prop(body, "hook_event_name")?.cloned();
         let s = &mut self.sessions[i];
         if is_str(name.as_ref(), "Notification") {
@@ -1106,9 +1153,39 @@ impl Telemetry {
         } else if name.as_ref().and_then(Value::as_str).is_some_and(|n| ["UserPromptSubmit", "Stop", "SessionEnd", "PostToolUse"].contains(&n)) {
             s.hook_need = Value::Null;
         }
+        // An app whose lines don't say when a turn ends (Grok Build's) says
+        // it in its hooks: Stop, and StopCancelled (you stopped it) and
+        // StopFailure, where Stop doesn't run. A subagent's end isn't the
+        // turn's.
+        if !line_events::lines_end_turns(&self.sessions[i].app) && !truthy(opt_prop(body, "subagentType")) {
+            self.sessions[i].hook_at = now;
+            let event = name.as_ref().and_then(Value::as_str).unwrap_or_default();
+            if ["Stop", "StopCancelled", "StopFailure"].contains(&event) && self.sessions[i].turn_active {
+                if event == "StopCancelled" && is_str(opt_prop(body, "reason"), "user_interrupt") {
+                    self.interrupted(i, now, true, now, out);
+                } else {
+                    let duration = self.duration(i, now);
+                    self.sessions[i].end_turn(now, false);
+                    self.activity(i, ev(vec![("kind", sv("turn-end")), ("duration", Some(duration)), ("ts", nv(now))]), true, now, out);
+                }
+            }
+        }
         let detail = nn(name.as_ref()).cloned().unwrap_or_else(|| "hook".into());
         self.activity(i, ev(vec![("kind", sv("hook")), ("detail", Some(detail)), ("ts", nv(now))]), true, now, out);
         Ok(())
+    }
+
+    /// Turns gone quiet in an app whose lines don't say when a turn ends,
+    /// where its hooks haven't spoken lately: with no tool call in flight,
+    /// each ended when its last line was written.
+    pub fn settle(&mut self, now: f64) {
+        for s in &mut self.sessions {
+            if line_events::lines_end_turns(&s.app) || !s.turn_active || !s.inflight.is_empty() || now - s.hook_at < HOOKS_HEARD_MS || now - s.last_event_at < QUIET_TURN_MS {
+                continue;
+            }
+            let at = s.last_event_at;
+            s.end_turn(at, false);
+        }
     }
 
     // ----- Claude Code transcript lines -----
@@ -1117,15 +1194,17 @@ impl Telemetry {
     pub fn apply_claude(&mut self, f: &Where, raw: Value, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
         let o = ClaudeLine { raw };
         let events = line_events::claude(&o, &LineFile::new(Some(f.agent_id.clone())));
-        self.claude_line(f, &o, &events, live, now, out)
+        self.claude_line(f, "claude", o.ts(), &events, live, now, out)
     }
 
-    // A Claude Code line's events.
-    fn claude_line(&mut self, f: &Where, o: &ClaudeLine, events: &[LineEvent<'_>], live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
-        let i = self.session(&f.session_id, "claude");
+    // A Claude Code line's events, or another app's with their shapes
+    // (`app`'s), with when the line was written.
+    #[expect(clippy::too_many_arguments, reason = "a line's events and its time, handed down as the JS's closures saw them")]
+    fn claude_line(&mut self, f: &Where, app: &str, ts: Result<f64, TypeError>, events: &[LineEvent<'_>], live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
+        let i = self.session(&f.session_id, app);
         // A line that doesn't say when it was written was written when it's
         // read.
-        let t = o.ts()?;
+        let t = ts?;
         let ts = if t != 0.0 && !t.is_nan() { t } else { now };
         let agent = f.agent_id.clone();
         let mut sub = None;
@@ -1153,6 +1232,23 @@ impl Telemetry {
             let last = js_max(js_number(a.get("lastAt")), ts);
             a.insert("lastAt".into(), number(last));
             sub = Some(tag);
+        }
+        // The context's fill, where a line says it (Grok Build's usage
+        // updates).
+        let context = events.iter().find_map(|e| match &e.kind {
+            Kind::Context { used, window } => Some((*used, *window)),
+            _ => None,
+        });
+        if let (Some((used, window)), false) = (context, truthy(Some(&agent))) {
+            let s = &mut self.sessions[i];
+            if let Some(u @ Value::Number(_)) = used {
+                s.context_used = u.clone();
+            }
+            if let Some(w @ Value::Number(n)) = window {
+                if n.as_f64().is_some_and(|n| n > 0.0) {
+                    s.context_window = w.clone();
+                }
+            }
         }
         // What the line is: a reply, or what you (or a tool) said.
         let kind = events.iter().find(|e| !matches!(e.kind, Kind::Refusal(_))).map(|e| &*e.origin);
@@ -1321,7 +1417,7 @@ impl Telemetry {
         }
         let name_s = string_of(name.as_ref());
         let server = mcp_server_of(&name_s);
-        let pages = wiki_pages_of(server.as_deref(), input.as_ref());
+        let pages = wiki_pages_of(server.as_deref(), mcp_tool_of(&name_s), self.context_server.as_deref(), input.as_ref());
         let full = match opt_prop(input.as_ref(), "command") {
             Some(c @ Value::String(_)) => c.clone(),
             _ => nn(input.as_ref()).cloned().unwrap_or_else(|| Value::Object(Map::new())),
@@ -1587,9 +1683,10 @@ impl Telemetry {
         Ok(())
     }
 
-    // A call's tokens: the growth of the total is what's new (output and
-    // reasoning output kept), and the call's own tokens, as stats read
-    // them, from the last one's.
+    // A call's tokens: the growth of the total is what's new, and the
+    // call's own tokens, as stats read them, from the last one's. The
+    // output is output_tokens alone: OpenAI counts reasoning inside it, as
+    // pricing prices it.
     fn codex_tokens(&mut self, i: usize, total_usage: Option<&Value>, last: Option<&Value>, ts: f64, live: bool, out: &mut Vec<Emit>) {
         let s = &mut self.sessions[i];
         if truthy(total_usage) {
@@ -1628,7 +1725,7 @@ impl Telemetry {
                     out.push(Emit::Tokens(obj(vec![("sessionId", Value::String(s.id.clone())), ("app", "codex".into()), ("n", number(delta)), ("ts", number(ts))])));
                 }
             }
-            s.tokens_output = or0(opt_prop(total_usage, "output_tokens")) + or0(opt_prop(total_usage, "reasoning_output_tokens"));
+            s.tokens_output = or0(opt_prop(total_usage, "output_tokens"));
         }
     }
 
@@ -1746,7 +1843,7 @@ impl Telemetry {
                 let ok = is_str(get("status"), "completed") && !truthy(get("error"));
                 self.sessions[i].note_tool_result(ok, ts, None);
                 let (server, tool) = (get("server"), get("tool"));
-                let pages = wiki_pages_of(server.and_then(Value::as_str), get("arguments"));
+                let pages = wiki_pages_of(server.and_then(Value::as_str), tool.and_then(Value::as_str), self.context_server.as_deref(), get("arguments"));
                 let call = ToolCall {
                     name: Some(Value::String(format!("mcp__{}__{}", tpl(server), tpl(tool)))),
                     server: server.cloned(),
@@ -1772,8 +1869,10 @@ impl Telemetry {
                 self.note_tool(i, ToolCall { name: sv("apply_patch"), detail, files, ok: Value::Bool(done), ts, ..ToolCall::default() }, live, now, out);
             }
             // An empty query is no query: the action's says what was
-            // searched, as a thread shown from its rollout reads it.
-            Some("WebSearch") => {
+            // searched, as a thread shown from its rollout reads it. An
+            // extension's web search is a web search; its other kinds (an
+            // image made, a pause) aren't read.
+            Some(kind @ ("WebSearch" | "Extension")) if kind == "WebSearch" || is_str(get("kind"), "web.search") => {
                 let q = [get("query"), opt_prop(get("action"), "query")].into_iter().find(|v| truthy(*v)).flatten();
                 self.note_tool(i, ToolCall { name: sv("web_search"), detail: clip_value(q, 72), ts, ..ToolCall::default() }, live, now, out);
             }
@@ -2086,7 +2185,9 @@ impl Telemetry {
     /// a price are named, not guessed.
     pub fn costs(&self, now: f64, sessions: &[Value]) -> Value {
         let day = str_tag(&day_key(now));
-        let mut by_app: Vec<(String, f64, f64)> = vec![("claude".into(), 0.0, 0.0), ("codex".into(), 0.0, 0.0)];
+        // The tailed apps, then any other a session is of.
+        let mut by_app: Vec<(String, f64, f64)> = apps::with("lines").map(|a| (a.id.clone(), 0.0, 0.0)).collect();
+        let tailed = by_app.len();
         let mut unpriced: Vec<String> = Vec::new();
         for s in &self.sessions {
             let Some((_, d)) = s.spend.get(&day) else { continue };
@@ -2105,7 +2206,7 @@ impl Telemetry {
             }
         }
         let mut per_hour = 0.0;
-        for (app, cost, tokens) in by_app.iter().take(2) {
+        for (app, cost, tokens) in by_app.iter().take(tailed) {
             let tpm = sessions.iter().filter(|x| is_str(opt_prop(Some(x), "app"), app)).fold(0.0, |a, x| a + num_of(Some(x), "tpm"));
             if *tokens > 0.0 {
                 per_hour += tpm * 60.0 * (cost / tokens);
@@ -2114,7 +2215,7 @@ impl Telemetry {
         unpriced.sort_by(|a, b| jsstr::cmp_units(a, b));
         let by_app_value: Map<String, Value> = by_app.iter().map(|(app, cost, _)| (app.clone(), number(*cost))).collect();
         obj(vec![
-            ("today", number(by_app[0].1 + by_app[1].1)),
+            ("today", number(by_app.iter().take(tailed).fold(0.0, |a, x| a + x.1))),
             ("byApp", Value::Object(by_app_value)),
             ("perHour", number(per_hour)),
             ("unpriced", Value::Array(unpriced.into_iter().map(Value::String).collect())),
@@ -2150,20 +2251,18 @@ impl Telemetry {
     /// forecast, costs, the sessions on the same files, the MCP servers in
     /// use. (The tailer's status is the caller's to add.)
     pub fn snapshot(&mut self, now: f64) -> Value {
+        self.settle(now);
         let mut sessions = Vec::new();
         for s in &mut self.sessions {
             if now - s.last_event_at < PRIME_WINDOW_MS {
                 sessions.push(s.snapshot(now));
             }
         }
-        let mut series = [vec![0.0; RATE_WINDOW_S as usize], vec![0.0; RATE_WINDOW_S as usize]];
+        let tailed: Vec<&str> = apps::with("lines").map(|a| a.id.as_str()).collect();
+        let mut series = vec![vec![0.0; RATE_WINDOW_S as usize]; tailed.len()];
         let now_s = (now / 1000.0).floor();
         for s in &self.sessions {
-            let which = match s.app.as_str() {
-                "claude" => 0,
-                "codex" => 1,
-                _ => continue,
-            };
+            let Some(which) = tailed.iter().position(|a| *a == s.app) else { continue };
             for (sec, n) in &s.rate {
                 let i = RATE_WINDOW_S - 1.0 - (now_s - sec);
                 if (0.0..RATE_WINDOW_S).contains(&i) {
@@ -2187,8 +2286,7 @@ impl Telemetry {
         resources.truncate(8);
         let sum = |key: &str| sessions.iter().fold(0.0, |a, s| a + num_of(Some(s), key));
         let total = sessions.iter().fold(0.0, |a, s| a + num_of(s.get("tokens"), "processed"));
-        let series_value =
-            obj(vec![("claude", Value::Array(series[0].iter().map(|x| number(*x)).collect())), ("codex", Value::Array(series[1].iter().map(|x| number(*x)).collect()))]);
+        let series_value = Value::Object(tailed.iter().zip(&series).map(|(app, xs)| ((*app).to_string(), Value::Array(xs.iter().map(|x| number(*x)).collect()))).collect());
         let (tpm, today) = (sum("tpm"), sum("tokensToday"));
         let limits = obj(vec![("codex", self.limits_codex.clone()), ("claude", self.claude_limits(now))]);
         let forecast = self.limit_forecast(now);
@@ -2643,6 +2741,19 @@ mod tests {
         let full = t.snapshot(NOW);
         assert_eq!(full.as_object().unwrap().keys().take(2).collect::<Vec<_>>(), ["at", "sessions"]);
         assert_eq!(full["resources"][0]["server"], "s");
+    }
+
+    #[test]
+    fn a_codex_extensions_web_search_is_a_web_search() {
+        let mut t = Telemetry::new(None, Vec::new());
+        let done = |k: f64, item: Value| json!({ "type": "event_msg", "timestamp": at(NOW - 5000.0 + k), "payload": { "type": "item_completed", "item": item } });
+        let search = codex(&mut t, done(0.0, json!({ "type": "Extension", "kind": "web.search", "query": "", "action": { "type": "search", "query": "zod v4 coerce" } })));
+        assert_eq!(kinds(&search), ["tool"]);
+        for (k, other) in [(1.0, "image_gen.generation"), (2.0, "clock.sleep")] {
+            assert_eq!(kinds(&codex(&mut t, done(k, json!({ "type": "Extension", "kind": other })))), Vec::<String>::new(), "{other} isn't read");
+        }
+        let details: Vec<_> = t.history_since(0.0).iter().filter_map(|e| field(&e.fields, "detail").cloned()).collect();
+        assert_eq!(details, [json!("zod v4 coerce")]);
     }
 
     #[test]

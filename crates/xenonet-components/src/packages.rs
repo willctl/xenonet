@@ -17,6 +17,24 @@ use xenonet_app::task::{now_ms, Failure, Io};
 use xenonet_base::text::js_string;
 
 pub const COMPONENTS: [&str; 2] = ["service", "tools"];
+/// The macOS tray (XenoNet Tray.app) is a component too, though not one
+/// `xenonet update` names: one package for both Mac CPUs, its arch
+/// "universal", which a XenoNet from before it passes by.
+pub const TRAY: &str = "tray";
+pub const TRAY_APP: &str = "XenoNet Tray.app";
+/// The tray's executable, inside its package.
+pub const TRAY_EXE: [&str; 4] = [TRAY_APP, "Contents", "MacOS", "XenoNet Tray"];
+
+fn known(component: &str) -> bool {
+    COMPONENTS.contains(&component) || component == TRAY
+}
+
+/// Whether a package is for this machine: its platform and CPU, or for the
+/// tray, any Mac.
+pub fn fits_here(v: &Value, platform: &str, arch: &str) -> bool {
+    let field = |k: &str| v.get(k).and_then(Value::as_str);
+    field("platform") == Some(platform) && if field("component") == Some(TRAY) { platform == "darwin" && field("arch") == Some("universal") } else { field("arch") == Some(arch) }
+}
 /// The largest package XenoNet takes: 512 MiB.
 pub const MAX_PACKAGE: usize = 512 << 20;
 
@@ -25,6 +43,7 @@ fn semver() -> &'static Regex {
     R.get_or_init(|| Regex::new(r"^[0-9]+\.[0-9]+\.[0-9]+$").expect("a fixed pattern"))
 }
 
+/// /^[a-f0-9]{64}$/: a SHA-256 in hex, or a runtime file's token.
 pub fn sha_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| Regex::new("^[a-f0-9]{64}$").expect("a fixed pattern"))
@@ -67,14 +86,8 @@ pub fn newer(a: Option<&Value>, b: Option<&Value>) -> Result<bool, String> {
 pub fn package_info(value: Option<&Value>, platform: &str, arch: &str) -> Result<Value, String> {
     let v = value.unwrap_or(&Value::Null);
     let is = |k: &str, want: &Value| v.get(k) == Some(want);
-    let component_ok = v.get("component").and_then(Value::as_str).is_some_and(|c| COMPONENTS.contains(&c));
-    if !is("format", &json!(1))
-        || !component_ok
-        || !is_semver(v.get("version"))
-        || v.get("platform").and_then(Value::as_str) != Some(platform)
-        || v.get("arch").and_then(Value::as_str) != Some(arch)
-        || !is("dataSchema", &json!(1))
-    {
+    let component_ok = v.get("component").and_then(Value::as_str).is_some_and(known);
+    if !is("format", &json!(1)) || !component_ok || !is_semver(v.get("version")) || !fits_here(v, platform, arch) || !is("dataSchema", &json!(1)) {
         return Err("This component package is not compatible with this XenoNet installation.".into());
     }
     crate::protocol::negotiate(Some(&crate::protocol::api_value(crate::protocol::SERVICE_API)), v.get("api"))?;
@@ -88,7 +101,7 @@ pub fn components_dir(env: &Env, m: &Machine) -> String {
 /// The version of a component that's selected, and where it is; None when
 /// there's none.
 pub fn current_component(component: &str, env: &Env, m: &Machine) -> Result<Option<Value>, FsError> {
-    if !COMPONENTS.contains(&component) {
+    if !known(component) {
         return Err(fsx::said("Choose service or tools."));
     }
     let dir = NATIVE.join(&[&components_dir(env, m), component]);
@@ -161,7 +174,7 @@ fn read_json(file: &str) -> Result<Value, Failure> {
 /// for a moment, the last rename is tried again for up to 30 s; nothing is
 /// unpacked again or changed.
 pub async fn stage_package(io: &Io, file: &str, expected: &Value, env: &Env, m: &Machine) -> Result<Value, Failure> {
-    let component = expected.get("component").and_then(Value::as_str).filter(|c| COMPONENTS.contains(c));
+    let component = expected.get("component").and_then(Value::as_str).filter(|c| known(c));
     let (Some(component), true, true) = (component, is_semver(expected.get("version")), is_sha(expected.get("sha256"))) else {
         return Err(Failure::msg("Invalid component release manifest."));
     };
@@ -196,9 +209,13 @@ pub async fn stage_package(io: &Io, file: &str, expected: &Value, env: &Env, m: 
     if manifest.get("component").and_then(Value::as_str) != Some(component) || manifest.get("version").map(js_string).as_deref() != Some(version.as_str()) {
         return Err(Failure::msg("Component archive differs from its release manifest."));
     }
-    // Service and Tools are each the xenonet binary, in bin/.
-    if !std::fs::metadata(NATIVE.join(&[&staging, "bin", bin_name(&m.platform)])).is_ok_and(|meta| meta.is_file()) {
-        return Err(Failure::msg(format!("Component is missing bin/{}.", bin_name(&m.platform))));
+    // Service and Tools are each the xenonet binary, in bin/; the tray is
+    // its app bundle.
+    let bin: Vec<&str> = if component == TRAY { TRAY_EXE.to_vec() } else { vec!["bin", bin_name(&m.platform)] };
+    let mut at: Vec<&str> = vec![staging.as_str()];
+    at.extend(&bin);
+    if !std::fs::metadata(NATIVE.join(&at)).is_ok_and(|meta| meta.is_file()) {
+        return Err(Failure::msg(format!("Component is missing {}.", bin.join("/"))));
     }
     let until = now_ms() + 30000.0;
     loop {

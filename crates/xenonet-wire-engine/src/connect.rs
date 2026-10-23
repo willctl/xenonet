@@ -1,29 +1,20 @@
 //! Connecting your agents (core/engine/connect.js over
 //! crates/xenonet-engine/src/connect.rs): what XenoNet adds to Claude
 //! Code's and Codex's own settings, shown first and taken out again. The
-//! files, the agents' CLIs (claude mcp, codex mcp) and the table of
-//! XenoNet's instances are here; the hooks and servers run the xenonet
-//! command the launcher names, as the JS service's do.
+//! files and the agents' CLIs (claude mcp, codex mcp) are here, with
+//! XenoNet's instances from the app's table; the hooks and servers run the
+//! xenonet command the launcher names, as the JS service's do.
 
 use crate::exec::Spec;
 use crate::js::{at, no_method, text};
 use async_trait::async_trait;
 use serde_json::Value;
+use xenonet_app::instances::INSTANCES;
 use xenonet_engine::connect::{Connect as Core, Instance, Options};
 use xenonet_engine::peer::{Calls, Result, Thrown};
 use xenonet_engine::sql::Arg;
 use xenonet_service::config::Config;
 use xenonet_service::cores::{Connect, CoreError, R};
-
-/// core/instances.js's table.
-const INSTANCES: [(&str, &str, f64); 6] = [
-    ("dev", "XenoNet Dev", 47842.0),
-    ("demo", "XenoNet Dev (demo)", 47841.0),
-    ("test", "XenoNet Dev (test)", 47843.0),
-    ("film", "XenoNet Dev (film)", 47844.0),
-    ("installed", "XenoNet", 47840.0),
-    ("showcase", "XenoNet Dev (showcase)", 47845.0),
-];
 
 struct ConnectCalls;
 
@@ -81,10 +72,11 @@ impl ConnectDriver {
             home: config.home.clone(),
             claude_config_dir: env("CLAUDE_CONFIG_DIR"),
             codex_home: env("CODEX_HOME"),
+            grok_home: env("GROK_HOME"),
             // Installed XenoNet's console operator, which Desktop registers.
             console_mcp: env("XENONET_LAUNCHER_BIN").is_some_and(|b| !b.is_empty()) || config.launcher_exec.is_some(),
             platform: crate::js::platform().into(),
-            instances: INSTANCES.iter().map(|(id, name, port)| Instance { id: (*id).into(), name: (*name).into(), port: Arg::Num(*port) }).collect(),
+            instances: INSTANCES.iter().map(|i| Instance { id: i.id.into(), name: i.name.into(), port: Arg::Num(f64::from(i.port)) }).collect(),
         };
         ConnectDriver(std::sync::Arc::new(Core::new(options)))
     }
@@ -104,14 +96,17 @@ impl Connect for ConnectDriver {
         self.run(|c, k| c.preview(k)).await
     }
     async fn apply(&self, apps: Value) -> R<Value> {
-        // apply(apps = every app connect goes through).
+        // apply(apps = every app connect goes through that's here).
         let apps: Option<Vec<Arg>> = match apps {
             Value::Null => None,
             Value::Array(a) => Some(a.iter().map(crate::js::arg).collect()),
             other => Some(vec![crate::js::arg(&other)]),
         };
         self.run(move |c, k| {
-            let apps = apps.unwrap_or_else(|| c.ids().into_iter().map(Arg::Text).collect());
+            let apps = match apps {
+                Some(a) => a,
+                None => c.installed_ids(k)?,
+            };
             c.apply(k, &apps)
         })
         .await

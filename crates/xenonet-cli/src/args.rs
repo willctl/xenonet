@@ -61,8 +61,13 @@ const TAKES_VALUE: &[&str] = &[
     "host",
     // xenonet actor listen
     "exec",
+    // xenonet net
+    "lan",
+    "op",
+    // xenonet svc
+    "hosts",
 ];
-const REPEATS: &[&str] = &["add", "remove", "paths"];
+const REPEATS: &[&str] = &["add", "remove", "paths", "hosts"];
 
 /// The flags given, by name: what JS's `flags` object holds.
 #[derive(Clone, Debug, Default, PartialEq)]

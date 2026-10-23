@@ -1,13 +1,13 @@
 //! xenonet-sources' lines for the twin of core/lines.js: the views of a
-//! Claude Code and a Codex line, the drift hooks' sorting, and the splitting
-//! of what a read gave into lines.
+//! Claude Code, a Codex and a Grok Build line, the drift hooks' sorting, and
+//! the splitting of what a read gave into lines.
 
 use crate::js::{Jv, MaybeJson};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde_json::Value;
 use xenonet_base::usage::Figure;
-use xenonet_sources::lines::{self, ClaudeLine, CodexLine, TypeError, Usage};
+use xenonet_sources::lines::{self, ClaudeLine, CodexLine, GrokLine, TypeError, Usage};
 
 // What JS would throw, thrown as JS throws it: a TypeError.
 fn thrown<T>(env: Env, e: TypeError) -> Result<T> {
@@ -159,6 +159,64 @@ impl JsCodexLine {
     pub fn user_event(&self, env: Env) -> Result<Option<String>> {
         self.l.user_event().or_else(|e| thrown(env, e))
     }
+}
+
+#[napi(js_name = "GrokLineCore")]
+pub struct JsGrokLine {
+    l: GrokLine,
+}
+
+// Each of a Grok Build line's views reads the update, which a line that
+// isn't an object can't give, as JS throws reading it.
+#[napi]
+impl JsGrokLine {
+    #[napi(constructor)]
+    pub fn new(raw: crate::js::Json) -> Self {
+        JsGrokLine { l: GrokLine::new(raw.0) }
+    }
+    fn read<T>(&self, env: Env, f: impl FnOnce(&GrokLine) -> T) -> Result<T> {
+        match self.l.kind() {
+            Ok(_) => Ok(f(&self.l)),
+            Err(e) => thrown(env, e),
+        }
+    }
+    #[napi(getter)]
+    pub fn update(&self, env: Env) -> Result<Jv> {
+        self.read(env, |l| Jv::Json(l.update().clone()))
+    }
+    #[napi(getter)]
+    pub fn kind(&self, env: Env) -> Result<Jv> {
+        self.l.kind().map(maybe).or_else(|e| thrown(env, e))
+    }
+    #[napi(getter)]
+    pub fn own(&self, env: Env) -> Result<bool> {
+        self.l.own().or_else(|e| thrown(env, e))
+    }
+    #[napi(getter)]
+    pub fn ts(&self, env: Env) -> Result<f64> {
+        self.l.ts().or_else(|e| thrown(env, e))
+    }
+    #[napi(getter)]
+    pub fn text(&self, env: Env) -> Result<String> {
+        self.read(env, GrokLine::text)
+    }
+    #[napi(getter, js_name = "notAsked")]
+    pub fn not_asked(&self, env: Env) -> Result<bool> {
+        self.read(env, GrokLine::not_asked)
+    }
+    #[napi(getter, js_name = "toolName")]
+    pub fn tool_name(&self, env: Env) -> Result<String> {
+        self.read(env, GrokLine::tool_name)
+    }
+    #[napi(getter, js_name = "toolInput")]
+    pub fn tool_input(&self, env: Env) -> Result<Jv> {
+        self.read(env, |l| Jv::Json(l.tool_input()))
+    }
+}
+
+#[napi(js_name = "grokLineKindOf")]
+pub fn grok_line_kind_of(raw: MaybeJson) -> String {
+    lines::grok_kind_of(raw.0.as_ref())
 }
 
 #[napi(js_name = "isCodexPrompt")]

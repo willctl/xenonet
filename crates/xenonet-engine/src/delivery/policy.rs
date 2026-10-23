@@ -23,6 +23,7 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use xenonet_base::json::stringify;
+use xenonet_base::nodepath::NATIVE;
 use xenonet_base::sync::Locked;
 
 pub const YOU: &str = xenonet_base::ids::YOU;
@@ -237,15 +238,6 @@ fn spread(v: &Value) -> Map<String, Value> {
     }
 }
 
-/// path.dirname on this machine.
-fn dirname(p: &str) -> String {
-    match p.rfind('/') {
-        Some(0) => "/".into(),
-        Some(i) => p[..i].to_string(),
-        None => ".".into(),
-    }
-}
-
 #[derive(Default)]
 pub struct Policy {
     /// { paused, grants, consent }, and whatever else the file had.
@@ -303,7 +295,7 @@ impl Policy {
             return Ok(());
         }
         let file = js_text(&file);
-        c.call("fs", "mkdirSync", vec![Arg::text(dirname(&file)), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])])?;
+        c.call("fs", "mkdirSync", vec![Arg::text(NATIVE.dirname(&file)), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])])?;
         let tmp = format!("{file}.tmp");
         let text = stringify(&Value::Object(self.data.clone()), 1);
         c.call("fs", "writeFileSync", vec![Arg::text(tmp.clone()), Arg::text(text), Arg::Obj(vec![("mode".into(), Arg::num(f64::from(0o600)))])])?;
@@ -644,7 +636,7 @@ impl Policy {
             let file = js_text(&file);
             let text = format!("{}\n", stringify(&json_of(&line).unwrap_or(Value::Null), 0));
             let _ = c
-                .call("fs", "mkdirSync", vec![Arg::text(dirname(&file)), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])])
+                .call("fs", "mkdirSync", vec![Arg::text(NATIVE.dirname(&file)), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])])
                 .and_then(|_| c.call("fs", "appendFileSync", vec![Arg::text(file), Arg::text(text), Arg::Obj(vec![("mode".into(), Arg::num(f64::from(0o600)))])]));
         } else {
             self.memory_audit.push(line.clone());

@@ -121,7 +121,7 @@ test("a made-up reader for a made-up app is on the map, through the registry and
   const line = () => state.sources.find((s) => s.name === "kite");
   assert.deepEqual(line(), { name: "kite", ok: false, count: 0, error: "Kite's log is missing" });
   const names = state.sources.map((s) => s.name);
-  assert.equal(names.indexOf("kite"), names.indexOf("claude") + 1, "after the session lists, as the native readers are");
+  assert.equal(names.indexOf("kite"), names.indexOf("grok") + 1, "after the session lists, as the native readers are");
 
   const cwd = path.join(config.projectsDir, "atlas-api");
   const now = Date.now();

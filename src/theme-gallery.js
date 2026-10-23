@@ -82,7 +82,7 @@ function actorSketch(t) {
 const skyOf = ({ sky, colors }) =>
   `linear-gradient(180deg, transparent 35%, ${colors.bg} 100%), linear-gradient(90deg, ${sky.night[1]}, ${sky.dawn[1]} 25%, ${sky.day[1]} 50%, ${sky.dusk[1]} 75%, ${sky.night[1]})`;
 
-const SWATCHES = ["bg", "surface", "text", "accent", "claude", "codex", "attention", "danger", "collision", "gold"];
+const SWATCHES = ["bg", "surface", "text", "accent", "claude", "codex", "grok", "attention", "danger", "collision", "gold"];
 
 // A theme's card. Its colors go into style attributes, so the theme is
 // completed first, as the map completes the one it draws (theme.js): a

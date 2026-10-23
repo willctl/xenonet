@@ -384,14 +384,23 @@ fn rollout_item(it: &Value, ts: F, n: usize) -> Result<Obj, TypeError> {
             let text: Vec<String> = entries.iter().map(|(p, c)| format!("{} {p}", nn(opt_prop(Some(c), "type")).map_or_else(String::new, js_string))).collect();
             with(b, vec![("role", F::s("tool")), ("title", F::s(format!("edit {} file(s)", entries.len()))), ("status", F::of(get("status")?)), ("text", F::s(text.join("\n")))])
         }
-        Some("WebSearch") => {
-            let q = get("query")?.filter(|q| truthy(Some(q))).or_else(|| opt_prop(get("action").ok().flatten(), "query").filter(|q| truthy(Some(q))));
-            let q = q.map_or_else(String::new, js_string);
-            with(b, vec![("role", F::s("tool")), ("title", F::s(format!("search: {q}"))), ("text", F::s(""))])
-        }
+        // An extension's web search is a web search; its other kinds (an
+        // image made, a pause) show as any other item.
+        Some("WebSearch") => web_search(b, it)?,
+        Some("Extension") if get("kind")?.and_then(Value::as_str) == Some("web.search") => web_search(b, it)?,
         Some("ContextCompaction") => with(b, vec![("role", F::s("system")), ("text", F::s("context compacted"))]),
+        // The plan, as the app-server's plan item shows it.
+        Some("Plan") => with(b, vec![("role", F::s("assistant")), ("title", F::s("plan")), ("text", F::V(nn(get("text")?).cloned().unwrap_or(Value::String(String::new()))))]),
         _ => with(b, vec![("role", F::s("system")), ("title", F::of(ty)), ("text", excerpt_json(it, 1500))]),
     })
+}
+
+/// A web search, as a thread shown from its rollout reads it: an empty
+/// query is no query, and the action's says what was searched.
+fn web_search(b: Obj, it: Js<'_>) -> Result<Obj, TypeError> {
+    let q = prop(it, "query")?.filter(|q| truthy(Some(q))).or_else(|| opt_prop(prop(it, "action").ok().flatten(), "query").filter(|q| truthy(Some(q))));
+    let q = q.map_or_else(String::new, js_string);
+    Ok(with(b, vec![("role", F::s("tool")), ("title", F::s(format!("search: {q}"))), ("text", F::s(""))]))
 }
 
 fn tool_call(t: &str, output: bool) -> bool {
@@ -799,6 +808,17 @@ mod tests {
         assert_eq!(get(&r.list()[0], "id"), &F::s("item-0"));
         assert_eq!(rollout_page(10, Some(&json!("rollout:4")), 4.0), (2, 6, Some("rollout:8".into())));
         assert_eq!(rollout_page(10, None, 120.0), (0, 10, None));
+    }
+
+    #[test]
+    fn a_rollouts_plan_and_an_extensions_web_search() {
+        let item = |it: Value| rollout_item(&it, F::null(), 0).unwrap();
+        let plan = item(json!({ "type": "Plan", "id": "p1", "text": "1. Read the Makefile" }));
+        assert_eq!([get(&plan, "role"), get(&plan, "title"), get(&plan, "text")], [&F::s("assistant"), &F::s("plan"), &F::s("1. Read the Makefile")]);
+        let search = item(json!({ "type": "Extension", "id": "x1", "kind": "web.search", "query": "", "action": { "type": "search", "query": "gnu make jobserver" } }));
+        assert_eq!([get(&search, "role"), get(&search, "title")], [&F::s("tool"), &F::s("search: gnu make jobserver")]);
+        let image = item(json!({ "type": "Extension", "id": "x2", "kind": "image_gen.generation", "status": "completed" }));
+        assert_eq!([get(&image, "role"), get(&image, "title")], [&F::s("system"), &F::s("Extension")]);
     }
 
     #[test]

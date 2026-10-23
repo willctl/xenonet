@@ -109,7 +109,7 @@ crates, `rusqlite`, `sha2`, `getrandom` and (in the MCP crate) `rmcp` and
 | `hyper`, `hyper-util` | The HTTP API and the actor gateway. XenoNet's own router on top, because the order in which `server/index.js` checks the Host, the origin, the version header and then each route is part of the contract, and a framework's router would reorder it. |
 | `rmcp` | The MCP servers, stdio and Streamable HTTP. |
 | `sha2`, `hmac`, `getrandom` | Tokens and their hashes, the assistant's page cursors and attention ids. |
-| `zstd`, `flate2` | Codex's archived rollouts (`.jsonl.zst`) and the refusals' gzip context. |
+| `ruzstd`, `flate2` | Codex's archived rollouts (`.jsonl.zst`), with a decoder in Rust alone so no build needs a C compiler for it, and the refusals' gzip context. |
 | `notify` | The recursive folder watches the tailer and the themes folder use. |
 | `regex` | Where the JS uses a regular expression without lookaround. Lookarounds are written out by hand. |
 
@@ -254,7 +254,7 @@ service with no Rust to use until all of it was ported.
 - The page's event stream, `GET /api/events`: `retry: 3000`, a ping every
   25 seconds, and the same event names and data. And an actor's
   `/api/actors/me/stream`.
-- The actor gateway on its own port (the API's plus 10) while it's on,
+- The actor gateway on its own port (the API's plus 1010) while it's on,
   with its own checks in their order, MCP over Streamable HTTP without
   sessions, and its six tools. Its tunnels are child processes, as now.
 - The assistant endpoint and the component service, local sockets with
@@ -573,10 +573,8 @@ Each step leaves `npm test` passing on JS, and adds to `parity.json`.
 - Signing on Windows.
 - A file watcher for the binary's readers. They poll for now, with no
   new crate: the tailer every 250 ms, a sweep for new and woken
-  transcripts every 2 seconds, the wiki's and themes' folders every
-  second or half second.
-- Codex's compressed archives (`.jsonl.zst`), which the binary's search,
-  stats and rollout pages skip, since reading them needs a zstd crate.
+  transcripts every 2 seconds, the shared context's and themes' folders
+  every second or half second.
 - Whether a release ships Rust subsystems inside the JS service (twins in
   place) before the binary replaces the service.
 
@@ -610,7 +608,7 @@ place. This table follows it.
 | `core/live.js` | `xenonet-sources/src/live/telemetry.rs`, with `live/mod.rs`'s helpers | `live`, `stall`, `signals`, `costs`, `golden`, `state`, `server` pass |
 | `core/claude-usage.js` | `xenonet-sources/src/claude_usage.rs` (the keychain, files, fetch and timers stay in the twin) | `claude-usage`, `live` pass |
 | `core/refusals/detect.js` | `xenonet-sources/src/refusals/detect.rs` | `refusals`, `refusal-browser`, `live` pass |
-| `core/native/copilot-cli.js`, `gemini-cli.js`, `cursor.js` | `xenonet-sources/src/native/{copilot_cli,gemini_cli,cursor}.rs`, with Node's path rules in `node_path.rs` (vendor.js's check called back) | `copilot-cli`, `gemini-cli`, `cursor` pass |
+| `core/native/copilot-cli.js`, `gemini-cli.js`, `cursor.js` | `xenonet-sources/src/native/{copilot_cli,gemini_cli,cursor}.rs`, with Node's path rules in `xenonet-base`'s `nodepath.rs` (vendor.js's check called back) | `copilot-cli`, `gemini-cli`, `cursor` pass |
 | `core/native/opencode.js` | `xenonet-sources/src/native/opencode.rs`, on rusqlite with SQLite bundled (a test's `open` handle runs its statements) | `opencode` passes |
 | `core/numbat.js` | `xenonet-sources/src/numbat.rs` | `numbat`, `gemini-cli` pass |
 | `core/reported-runs.js` | `xenonet-sources/src/reported_runs.rs` | `space-presence`, `actor-spend`, and `state`, `golden` through core/state.js pass |

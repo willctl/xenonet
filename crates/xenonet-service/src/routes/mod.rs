@@ -12,11 +12,15 @@ pub mod environments;
 pub mod hosts;
 pub mod integrations;
 pub mod mcp;
+pub mod net;
+pub mod net_sim;
 pub mod refusals;
+pub mod svc;
 pub mod themes;
+pub mod tray;
 pub mod workspace;
 
-use crate::borrowed::{attest, is_actor_agent, platform, Sender};
+use crate::borrowed::{attest, platform, Sender};
 use crate::cores::settings::{MAX_BRIEF, NEEDS_INPUT_URL};
 use crate::cores::{ok, CoreError, Kind};
 use crate::ctx::{pending_reply, Answer, Ctx};
@@ -30,6 +34,8 @@ use xenonet_base::ids::YOU;
 use xenonet_base::log::{log_dir, read_logs, summarize, LEVELS};
 use xenonet_base::sync::Locked;
 use xenonet_base::text::{js_number, js_string, truthy};
+use xenonet_engine::engine::{is_actor_agent, is_agent_id};
+use xenonet_engine::sql::Arg;
 
 pub const SERVICE_API: (u32, u32) = (1, 1);
 pub const CONSOLE_API: (u32, u32) = (1, 1);
@@ -53,6 +59,14 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     let req = &mut req;
     let method = req.method.clone();
     let m = method.as_str();
+    // Other hosts' services, for any program here (routes/svc.rs): what
+    // they're sent and answer is theirs, so XenoNet's own API version
+    // doesn't apply.
+    if route.starts_with("/api/svc/") {
+        if let Some(a) = svc::route(ctx, req).await {
+            return a;
+        }
+    }
     if let Some(v) = req.header("x-xenonet-api-version") {
         if !v.is_empty() && v != "1" {
             return Ok(Reply::json(426, json!({ "error": "This XenoNet Service does not support the requested API version.", "api": api_range(SERVICE_API) })));
@@ -60,9 +74,21 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     }
     let cores = &ctx.cores;
 
-    // You, writing to an actor from XenoNet's own window: only with the
-    // window's key, never with a token, and only to an actor that reads
-    // its inbox.
+    // XenoNet Dev's simulated network answers first while one runs
+    // (net_sim.rs); GET /api/net/state is the core's route, below, which
+    // asks for the simulated state first.
+    if let Some(r) = net_sim::route(ctx, req).await? {
+        return Ok(r);
+    }
+
+    // XenoNet's tray app, with its own key (routes/tray.rs).
+    if route.starts_with("/api/tray/") {
+        return tray::route(ctx, req).await;
+    }
+
+    // You, writing from XenoNet's own window to an actor that reads its
+    // inbox, or to a session, here or on another machine of your network
+    // (`@<host>:<id>`): only with the window's key, never with a token.
     if m == "POST" && route == "/api/actors/you/message" {
         if !ctx.window_only(req) {
             return Ok(Reply::coded(403, "yours", "this is for XenoNet's own window"));
@@ -73,8 +99,11 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         }
         let body = req.json(16 << 10).await.unwrap_or(Value::Null);
         let to = body.get("to").and_then(Value::as_str).unwrap_or("").to_string();
-        if !is_actor_agent(&to) {
-            return Ok(Reply::coded(400, "bad-request", "write to an actor here (actor:<slug>); sessions get messages from other sessions and actors"));
+        // Another host's session or actor, by its qualified id.
+        let local_id = |id: &str| is_agent_id(&Arg::text(id)) || is_actor_agent(&Arg::text(id));
+        let remote = xenonet_base::ids::parse_qualified(&to).is_some_and(|(h, local)| h.is_some() && local_id(local));
+        if !(local_id(&to) || remote) {
+            return Ok(Reply::coded(400, "bad-request", "write to a session or an actor by its id (claude:<session id>, actor:<slug>, or @<host>:<id> on another machine)"));
         }
         let envelope = attest(Sender { id: YOU, kind: "you", name: Some("you".into()), product: None }, "window", &Value::Null, &ctx.config.home, ctx.now(), platform());
         return Ok(match cores.engine.send(YOU, json!({ "to": to, "text": body.get("text") }), Some(json!({ "envelope": envelope }))).await {
@@ -100,6 +129,12 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         let r = delivery::DeliveryRoutes { policy: cores.policy.clone(), router: cores.router.clone(), engine: cores.engine.clone(), verify: cores.verify.clone() };
         return Ok(r.route(req).await);
     }
+    // A2A's switch and the agents that called, for the Actors panel: the
+    // owner's (a2a/routes.rs). Not under /api/actors/, where it would be a
+    // slug.
+    if route == "/api/a2a" {
+        return Ok(if m == "GET" || m == "POST" { crate::a2a::routes::route(ctx, req).await } else { Reply::error(404, "not found") });
+    }
     if route == "/api/actors" || route.starts_with("/api/actors/") {
         let taken = std::mem::replace(req, Req::fake("GET", "/", &[], None));
         return actors::ActorRoutes { ctx }.route(taken).await;
@@ -108,7 +143,14 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         let taken = std::mem::replace(req, Req::fake("GET", "/", &[], None));
         return assistant::AssistantRoutes { ctx }.route(taken).await;
     }
-    if let Some(r) = (hosts::HostRoutes { hosts: cores.hosts.clone(), hub: cores.hub.clone(), verify: cores.verify.clone(), home: &ctx.config.home }).route(req).await {
+    // The network across machines: Rust-only, with no JS twin.
+    if route.starts_with("/api/net/") {
+        if let Some(a) = net::route(ctx, req).await {
+            return a;
+        }
+    }
+    let window = ctx.window_only(req);
+    if let Some(r) = (hosts::HostRoutes { hosts: cores.hosts.clone(), hub: cores.hub.clone(), verify: cores.verify.clone(), home: &ctx.config.home, window }).route(req).await {
         return Ok(r);
     }
 
@@ -335,8 +377,10 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             return Ok(r);
         }
         let body = req.json(4096).await?;
-        // Codex, unless you ask for Claude Code.
-        let app = xenonet_base::apps::tailed_app(body.get("app").and_then(Value::as_str).unwrap_or_default(), "codex");
+        // Codex, unless you ask for Claude Code; another app is refused.
+        let Some(app) = xenonet_base::apps::asked_or(body.get("app"), Some("codex")) else {
+            return Ok(Reply::error(400, xenonet_base::apps::app_refusal_among("app", body.get("app").unwrap_or(&Value::Null), &xenonet_base::apps::ASKED)));
+        };
         let model = body.get("model").and_then(Value::as_str).filter(|s| model_ok(s)).map(str::to_string);
         let b = cores.diagnostics.bundle().await?;
         let dir = cores.diagnostics.write_look(&b)?;
@@ -420,8 +464,13 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     }
     if route == "/api/handoff" {
         if m == "GET" {
-            // Claude Code, unless you ask for Codex.
-            let target = xenonet_base::apps::tailed_app(req.param("target").unwrap_or_default(), "claude");
+            // Claude Code, unless you ask for Codex; another app is refused.
+            let Some(target) = xenonet_base::apps::asked_or_text(req.param("target"), Some("claude")) else {
+                return Ok(Reply::error(
+                    400,
+                    xenonet_base::apps::app_refusal_among("target", &Value::String(req.param("target").unwrap_or_default().to_string()), &xenonet_base::apps::ASKED),
+                ));
+            };
             let node = req.param("nodeId").map(str::to_string);
             return Ok(match cores.state.handoff(node.as_deref(), target).await {
                 Ok(v) => {
@@ -530,17 +579,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     // waiting on you and how many programs ask to be actors come with it, a
     // count, never who asked, since this route has no key.
     if m == "GET" && route == "/api/summary" {
-        let summary = cores.state.summary()?;
-        let mut out = match &cores.hub {
-            Some(h) => h.summary(summary),
-            None => summary,
-        };
-        if let Value::Object(waits) = waits_on_you(ctx)? {
-            for (k, v) in waits {
-                out[k] = v;
-            }
-        }
-        return Ok(Reply::json(200, out));
+        return Ok(Reply::json(200, summary(ctx)?));
     }
 
     if m == "GET" && route == "/api/events" {
@@ -589,7 +628,9 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             return Ok(match cores.state.read_transcript(&node, cursor.as_deref(), limit).await {
                 Ok(page) => Reply::json(200, page),
                 Err(e) if e.is_pending() => pending_reply(&e),
-                Err(e) => Reply::error(502, e.message),
+                // A session of an app XenoNet doesn't read the transcripts
+                // of is a 400.
+                Err(e) => Reply::error(e.status.unwrap_or(502), e.message),
             });
         }
     }
@@ -663,6 +704,52 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             // What the engine wants the agent to hear.
             let event = body.get("hook_event_name").and_then(Value::as_str).map(str::to_string);
             if let Ok(Some(out)) = cores.engine.hook("claude", event.as_deref(), &body).await {
+                if truthy(Some(&out)) {
+                    return Ok(Reply::json(200, out));
+                }
+            }
+        }
+        return Ok(Reply::empty(204));
+    }
+
+    // Grok Build's hooks (xenonet hook grok): its events in Claude Code's
+    // format, with its own names for the session and the tool (sessionId,
+    // toolName, toolInput, stopHookActive), read as Claude Code's. They
+    // tell the tailer when a turn ends, which its lines don't.
+    if m == "POST" && route == "/api/hook/grok" {
+        let raw = req.json_body().await.unwrap_or_else(|_| json!({}));
+        let mut body = match &raw {
+            Value::Object(o) => o.clone(),
+            _ => serde_json::Map::new(),
+        };
+        // Grok's keys are camelCase. An event inside a subagent's own run
+        // names its subagentType, which the engine reads as a subagent's
+        // agent_id: it hears edit warnings, never its session's messages.
+        for (ours, theirs) in
+            [("session_id", "sessionId"), ("tool_name", "toolName"), ("tool_input", "toolInput"), ("stop_hook_active", "stopHookActive"), ("agent_id", "subagentType")]
+        {
+            if !body.contains_key(ours) {
+                if let Some(v) = raw.get(theirs) {
+                    body.insert(ours.into(), v.clone());
+                }
+            }
+        }
+        let body = Value::Object(body);
+        if let Some(sid) = body.get("session_id").and_then(Value::as_str).filter(|s| is_uuid_like(s)) {
+            let id = format!("grok:{sid}");
+            let verdict = cores.verify.check(req.peer, &id, true).await;
+            if !ok(&verdict) {
+                return Ok(Reply::send(403, &json!({ "error": verdict.get("reason").cloned().unwrap_or(Value::Null) }), &[]));
+            }
+            cores.state.note_hook(&id, &body)?;
+            if body.get("hook_event_name").and_then(Value::as_str) == Some("SessionStart") {
+                let c = ctx.clone();
+                tokio::spawn(async move {
+                    let _ = c.cores.state.refresh().await;
+                });
+            }
+            let event = body.get("hook_event_name").and_then(Value::as_str).map(str::to_string);
+            if let Ok(Some(out)) = cores.engine.hook("grok", event.as_deref(), &body).await {
                 if truthy(Some(&out)) {
                     return Ok(Reply::json(200, out));
                 }
@@ -818,6 +905,24 @@ pub fn current_theme(ctx: &Ctx) -> Result<Value, CoreError> {
 
 /// What waits on you apart from sessions: the actors waiting on you, and
 /// how many programs ask to be actors.
+/// What /api/summary answers: the map's summary, with live hosts' alerts
+/// when hosts are on, the actors waiting on you, and how many programs
+/// ask to be actors. The tray's status is built from it too.
+pub(crate) fn summary(ctx: &Ctx) -> Result<Value, CoreError> {
+    let cores = &ctx.cores;
+    let summary = cores.state.summary()?;
+    let mut out = match &cores.hub {
+        Some(h) => h.summary(summary),
+        None => summary,
+    };
+    if let Value::Object(waits) = waits_on_you(ctx)? {
+        for (k, v) in waits {
+            out[k] = v;
+        }
+    }
+    Ok(out)
+}
+
 fn waits_on_you(ctx: &Ctx) -> Result<Value, CoreError> {
     let list = match &ctx.cores.actors {
         Some(a) => a.list()?["actors"].as_array().cloned().unwrap_or_default(),
@@ -1079,6 +1184,11 @@ fn simulate(ctx: &Arc<Ctx>, kind: &Value, body: &Value) -> Result<Option<Value>,
             None => Ok(None),
         };
     }
+    // A made-up network across machines; a is the host you're at, and b
+    // "titles-only" has the others share titles only.
+    if kind_s.starts_with("net-") {
+        return Ok(net_sim::simulate(ctx, &kind_s, a.as_deref(), b.as_deref()));
+    }
     if kind_s == "doctor" {
         // The doctor finding a problem, reported as a real run would be; the
         // next real run (or clear) puts back what's true.
@@ -1098,10 +1208,12 @@ fn simulate(ctx: &Arc<Ctx>, kind: &Value, body: &Value) -> Result<Option<Value>,
         tokio::spawn(async move {
             let _ = c.cores.doctor.check(true, false).await;
         });
-        // An actor waiting on you stops waiting too.
+        // An actor waiting on you stops waiting too, and a made-up network
+        // goes.
         if let Some(x) = &cores.actors {
             let _ = x.simulate("clear", None, None);
         }
+        net_sim::clear(ctx);
     }
     let Some(done) = cores.state.simulate(&kind_s, a, b)? else { return Ok(None) };
     ctx.events.broadcast("live", &cores.state.live_snapshot()?, Local::Same);

@@ -6,7 +6,9 @@
 //!
 //! It listens on 127.0.0.1 alone, on a port of its own, and a tunnel of the
 //! owner's choosing puts it on the internet, forwarding `https://<host>/mcp`
-//! to it. So: only POST, GET and DELETE on /mcp, for the host the owner
+//! to it. Its listener is the gateway's front door (front_door.rs), which
+//! also serves the network's routes and A2A by path; what reaches the
+//! actor gateway is the rest. So: only POST, GET and DELETE on /mcp, for the host the owner
 //! named or this machine on its own port; no browser (an Origin is
 //! refused); each request carries an actor's gateway token, and past 20
 //! unknown tokens in a minute it answers 429 for a minute; the tools are
@@ -20,22 +22,18 @@
 //! Mcp-Method and Mcp-Name headers), checked against its answers in
 //! tests/fixtures/gateway.json.
 
-use crate::actor_caller::retry_after;
-use crate::borrowed::{attest, platform, Sender};
-use crate::buckets::{now_ms, Buckets, Rate};
+use crate::actor_caller::{retry_after, Rate, BUCKETS};
+use crate::borrowed::{attest, now_ms, platform, Sender};
 use crate::cores::{Actors, Engine, Registration, Reports, Runs};
 use crate::http::{node_headers, parse_target, Reply};
 use bytes::Bytes;
 use http_body_util::BodyExt;
-use hyper::server::conn::http1;
-use hyper::service::service_fn;
-use hyper_util::rt::TokioIo;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::TcpListener;
+use xenonet_actors::limits::Buckets;
 use xenonet_actors::tokens::{bearer_of, token_in_url};
 use xenonet_base::json;
 use xenonet_base::sync::Locked;
@@ -46,7 +44,14 @@ const BODY_MAX: usize = 64 << 10;
 // An HTTP request waits at most this long in inbox: the proxies in front of
 // cloud agents cut off long requests.
 const INBOX_WAIT_MAX: f64 = 25.0;
+/// How long a connection to the front door lives: long enough for an inbox
+/// that waits, and no longer. A network link's stream is the exception.
+pub const CONNECTION_SECS: u64 = (INBOX_WAIT_MAX as u64) + 15 + 60;
 const BAD_TOKENS: Rate = Rate { rate: 20.0 / 60.0, burst: 20.0 };
+/// Unknown tokens from everywhere that hold the door shut for everyone.
+const BAD_TOKENS_ALL: Rate = Rate { rate: 200.0 / 60.0, burst: 200.0 };
+/// The key for everyone in `blocked_until`.
+const EVERYONE: &str = "*";
 const BLOCK_MS: f64 = 60e3;
 const MESSAGES: Rate = Rate { rate: 60.0 / 3600.0, burst: 60.0 };
 const WIDE: Rate = Rate { rate: 6.0 / 3600.0, burst: 6.0 };
@@ -145,11 +150,19 @@ struct Inner {
     version: String,
     host: Mutex<Option<String>>,
     probes: Mutex<HashMap<String, f64>>,
-    blocked_until: Mutex<f64>,
+    /// Until when unknown tokens hold the door shut: to a source (as
+    /// `source_of` says), or to everyone.
+    blocked_until: Mutex<HashMap<String, f64>>,
     buckets: Mutex<Buckets>,
     stats: Mutex<Stats>,
     server: Mutex<Option<tokio::task::JoinHandle<()>>>,
     now: Arc<dyn Fn() -> f64 + Send + Sync>,
+    /// The network's node, whose gateway routes the front door serves
+    /// while this host is the network's gateway.
+    net: std::sync::OnceLock<Arc<xenonet_net::node::Node>>,
+    /// A2A agents' side, whose card and JSON-RPC the front door serves
+    /// while the owner has it on.
+    a2a: std::sync::OnceLock<Arc<crate::a2a::A2a>>,
 }
 
 #[derive(Clone)]
@@ -179,17 +192,42 @@ impl ActorGateway {
                 version: version.to_string(),
                 host: Mutex::new(normal_host(host)),
                 probes: Mutex::new(HashMap::new()),
-                blocked_until: Mutex::new(0.0),
-                buckets: Mutex::new(Buckets::default()),
+                blocked_until: Mutex::new(HashMap::new()),
+                buckets: Mutex::new(Buckets::new(BUCKETS)),
                 stats: Mutex::new(Stats::default()),
                 server: Mutex::new(None),
                 now,
+                net: std::sync::OnceLock::new(),
+                a2a: std::sync::OnceLock::new(),
             }),
         }
     }
 
     pub fn port(&self) -> u16 {
         self.inner.port
+    }
+
+    /// The network's node, for the front door's `/net/v1/` routes.
+    pub fn set_net(&self, node: Arc<xenonet_net::node::Node>) {
+        let _ = self.inner.net.set(node);
+    }
+
+    pub fn net(&self) -> Option<Arc<xenonet_net::node::Node>> {
+        self.inner.net.get().cloned()
+    }
+
+    /// A2A's side, for the front door's `/a2a` and Agent Card.
+    pub fn set_a2a(&self, a2a: Arc<crate::a2a::A2a>) {
+        let _ = self.inner.a2a.set(a2a);
+    }
+
+    pub fn a2a(&self) -> Option<Arc<crate::a2a::A2a>> {
+        self.inner.a2a.get().cloned()
+    }
+
+    /// The public host the owner named, or None.
+    pub fn public_host(&self) -> Option<String> {
+        self.inner.host.locked().clone()
     }
 
     /// The word XenoNet's own reachability check will carry, answered once
@@ -218,27 +256,11 @@ impl ActorGateway {
         }
         // Its port taken: no server, so the next start tries again.
         let listener = TcpListener::bind(("127.0.0.1", self.inner.port)).await?;
-        let me = self.clone();
-        let task = tokio::spawn(async move {
-            // Its connections are this task's, so stopping the gateway closes
-            // them too, as the JS's closeAllConnections does: a client's
-            // kept-alive connection doesn't outlive the gateway turned off.
-            let mut conns = tokio::task::JoinSet::new();
-            loop {
-                let Ok((stream, _)) = listener.accept().await else { continue };
-                while conns.try_join_next().is_some() {}
-                let me = me.clone();
-                conns.spawn(async move {
-                    let svc = service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
-                        let me = me.clone();
-                        async move { Ok::<_, Infallible>(me.serve_hyper(req).await) }
-                    });
-                    // Long enough for an inbox that waits, and no longer.
-                    let conn = http1::Builder::new().serve_connection(TokioIo::new(stream), svc);
-                    let _ = tokio::time::timeout(Duration::from_secs((INBOX_WAIT_MAX as u64) + 15 + 60), conn).await;
-                });
-            }
-        });
+        let door = super::front_door::Door { kind: super::front_door::DoorKind::Tunnel { port: self.inner.port }, actor: Some(self.clone()), node: None };
+        // Its connections are the task's, so stopping the gateway closes
+        // them too, as the JS's closeAllConnections does: a client's
+        // kept-alive connection doesn't outlive the gateway turned off.
+        let task = tokio::spawn(door.listen(listener));
         *self.inner.server.locked() = Some(task);
         Ok(self.status())
     }
@@ -268,7 +290,118 @@ impl ActorGateway {
         })
     }
 
-    async fn serve_hyper(&self, req: hyper::Request<hyper::body::Incoming>) -> hyper::Response<crate::serve::OutBody> {
+    /// Whether `Host` names this gateway: the public host the owner named,
+    /// or this machine on the gateway's port.
+    fn host_ok(&self, host: &str) -> bool {
+        let port = self.inner.port;
+        self.inner.host.locked().as_deref() == Some(host) || host == format!("127.0.0.1:{port}") || host == format!("localhost:{port}")
+    }
+
+    /// The front door's first checks for a path beside `/mcp` (A2A's), as
+    /// `/mcp` makes them: the host, then no web pages. The answer that
+    /// refuses the request, or None.
+    pub fn door_host(&self, headers: &[(String, String)]) -> Option<Reply> {
+        let header = |k: &str| headers.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+        if !self.host_ok(&header("host").unwrap_or("").to_lowercase()) {
+            return Some(Self::reply(421, json!({ "error": "this gateway doesn't answer for that host" }), &[]));
+        }
+        if header("origin").is_some() {
+            return Some(Self::reply(403, json!({ "error": "the gateway takes no requests from web pages" }), &[]));
+        }
+        None
+    }
+
+    /// Where a request came from, for holding unknown tokens off: the
+    /// address a tunnel says it forwarded for (Cloudflare's own header, or
+    /// the last X-Forwarded-For entry, which the tunnel added), since the
+    /// gateway's peer is always the tunnel's client on this machine.
+    pub fn source_of(headers: &[(String, String)]) -> String {
+        let header = |k: &str| headers.iter().find(|(n, _)| n == k).map(|(_, v)| v.trim().to_string());
+        header("cf-connecting-ip")
+            .or_else(|| header("x-forwarded-for").and_then(|f| f.rsplit(',').next().map(|x| x.trim().to_string())))
+            .filter(|f| !f.is_empty() && f.len() <= 64)
+            .unwrap_or_else(|| "local".into())
+    }
+
+    /// Until when the door is shut to `source`, while it is.
+    fn blocked(&self, source: &str, t: f64) -> Option<f64> {
+        let b = self.inner.blocked_until.locked();
+        let until = b.get(source).copied().unwrap_or(0.0).max(b.get(EVERYONE).copied().unwrap_or(0.0));
+        (until > t).then_some(until)
+    }
+
+    /// The rest of `/mcp`'s checks before its token, for a request that
+    /// will carry one: no token in the URL, and unknown tokens held off.
+    pub fn door_open(&self, headers: &[(String, String)], target: &str) -> Option<Reply> {
+        if let Some(r) = self.door_host(headers) {
+            return Some(r);
+        }
+        let (path, query) = parse_target(target);
+        if token_in_url(query.iter().map(|(k, v)| (k.as_str(), v.as_str())), &path) {
+            return Some(Self::reply(400, json!({ "error": "a token goes in the Authorization header, never in the URL" }), &[]));
+        }
+        let t = (self.inner.now)();
+        if let Some(until) = self.blocked(&Self::source_of(headers), t) {
+            let (k, v) = retry_after(until - t);
+            return Some(Self::reply(429, json!({ "error": "too many tokens XenoNet doesn't know; wait a minute" }), &[(&k, &v)]));
+        }
+        None
+    }
+
+    /// A request's gateway token, as `/mcp` takes it: the actor it
+    /// authenticated, or 401 or 403 with WWW-Authenticate. Unknown tokens
+    /// count toward holding the door shut for a minute: 20 from a source to
+    /// that source, 200 from everywhere to everyone.
+    pub fn door_token(&self, headers: &[(String, String)]) -> Result<Value, Reply> {
+        let t = (self.inner.now)();
+        let token = headers.iter().find(|(n, _)| n == "authorization").map(|(_, v)| v.as_str()).and_then(bearer_of).map(str::to_string);
+        let auth = match &token {
+            Some(tok) => self.inner.cores.registration.authenticate_gateway(tok),
+            None => json!({ "ok": false, "status": 401, "code": "no-token", "error": "the gateway takes a gateway token, as Authorization: Bearer <token>" }),
+        };
+        if auth["ok"] == json!(true) {
+            return Ok(auth);
+        }
+        self.inner.stats.locked().refused += 1;
+        let code = auth["code"].as_str().unwrap_or("bad-token").to_string();
+        (self.inner.hooks.on_refused)(auth["actor"].as_str(), &code, auth["reason"].as_str(), t);
+        if code != "no-token" {
+            let source = Self::source_of(headers);
+            let mut buckets = self.inner.buckets.locked();
+            let one = buckets.take(&format!("bad-tokens|{source}"), BAD_TOKENS.rate, BAD_TOKENS.burst, 1.0, t) != 0.0;
+            let all = buckets.take("bad-tokens|*", BAD_TOKENS_ALL.rate, BAD_TOKENS_ALL.burst, 1.0, t) != 0.0;
+            drop(buckets);
+            let mut blocked = self.inner.blocked_until.locked();
+            blocked.retain(|_, until| *until > t);
+            if one {
+                blocked.insert(source, t + BLOCK_MS);
+            }
+            if all {
+                blocked.insert(EVERYONE.into(), t + BLOCK_MS);
+            }
+        }
+        let realm = if code == "no-token" { "Bearer realm=\"xenonet-gateway\"".to_string() } else { "Bearer realm=\"xenonet-gateway\", error=\"invalid_token\"".to_string() };
+        let status = auth["status"].as_u64().unwrap_or(401) as u16;
+        Err(Self::reply(status, json!({ "error": auth["error"], "code": code }), &[("www-authenticate", &realm)]))
+    }
+
+    /// A call an actor's token let in: counted, and the window told, with
+    /// the host it named when that's the public one.
+    pub fn door_called(&self, auth: &Value, host: &str) {
+        let t = (self.inner.now)();
+        {
+            let mut s = self.inner.stats.locked();
+            s.calls += 1;
+            s.last_at = Some(t);
+            s.last_actor = auth["id"].as_str().map(str::to_string);
+        }
+        let public = self.inner.host.locked().clone();
+        let id = auth["id"].as_str().unwrap_or("");
+        let slug = auth["slug"].as_str().unwrap_or("");
+        (self.inner.hooks.on_call)(id, slug, public.as_deref().filter(|p| *p == host), t);
+    }
+
+    pub(crate) async fn serve_hyper(&self, req: hyper::Request<hyper::body::Incoming>) -> hyper::Response<crate::serve::OutBody> {
         let method = req.method().as_str().to_string();
         let target = req.uri().to_string();
         let headers = node_headers(req.headers());
@@ -330,39 +463,18 @@ impl ActorGateway {
         if token_in_url(query.iter().map(|(k, v)| (k.as_str(), v.as_str())), &path) {
             return Self::reply(400, json!({ "error": "a token goes in the Authorization header, never in the URL" }), &[]);
         }
-        let blocked = *self.inner.blocked_until.locked();
-        if blocked > t {
-            let (k, v) = retry_after(blocked - t);
+        if let Some(until) = self.blocked(&Self::source_of(&req.headers), t) {
+            let (k, v) = retry_after(until - t);
             return Self::reply(429, json!({ "error": "too many tokens XenoNet doesn't know; wait a minute" }), &[(&k, &v)]);
         }
-        let token = header("authorization").and_then(bearer_of).map(str::to_string);
-        let auth = match &token {
-            Some(tok) => self.inner.cores.registration.authenticate_gateway(tok),
-            None => json!({ "ok": false, "status": 401, "code": "no-token", "error": "the gateway takes a gateway token, as Authorization: Bearer <token>" }),
+        let auth = match self.door_token(&req.headers) {
+            Ok(a) => a,
+            Err(refused) => return refused,
         };
-        if auth["ok"] != json!(true) {
-            self.inner.stats.locked().refused += 1;
-            let code = auth["code"].as_str().unwrap_or("bad-token").to_string();
-            (self.inner.hooks.on_refused)(auth["actor"].as_str(), &code, auth["reason"].as_str(), t);
-            if code != "no-token" && self.inner.buckets.locked().take("bad-tokens", BAD_TOKENS, 1.0, t) != 0.0 {
-                *self.inner.blocked_until.locked() = t + BLOCK_MS;
-            }
-            let realm = if code == "no-token" { "Bearer realm=\"xenonet-gateway\"".to_string() } else { "Bearer realm=\"xenonet-gateway\", error=\"invalid_token\"".to_string() };
-            let status = auth["status"].as_u64().unwrap_or(401) as u16;
-            return Self::reply(status, json!({ "error": auth["error"], "code": code }), &[("www-authenticate", &realm)]);
-        }
         if too_big {
             return Self::reply(413, json!({ "error": "that body is over 64 KiB" }), &[]);
         }
-        {
-            let mut s = self.inner.stats.locked();
-            s.calls += 1;
-            s.last_at = Some(t);
-            s.last_actor = auth["id"].as_str().map(str::to_string);
-        }
-        let id = auth["id"].as_str().unwrap_or("").to_string();
-        let slug = auth["slug"].as_str().unwrap_or("").to_string();
-        (self.inner.hooks.on_call)(&id, &slug, public.as_deref().filter(|p| *p == host), t);
+        self.door_called(&auth, &host);
         self.mcp(&req, &auth).await
     }
 
@@ -623,9 +735,9 @@ impl ActorGateway {
                 }
                 let to = a.get("to").and_then(Value::as_str);
                 let wide = matches!(to, Some("repo" | "project" | "all"));
-                let mut wait = if wide { self.inner.buckets.locked().take(&format!("{slug}|wide"), WIDE, 1.0, t) } else { 0.0 };
+                let mut wait = if wide { self.inner.buckets.locked().take(&format!("{slug}|wide"), WIDE.rate, WIDE.burst, 1.0, t) } else { 0.0 };
                 if wait == 0.0 {
-                    wait = self.inner.buckets.locked().take(&format!("{slug}|messages"), MESSAGES, 1.0, t);
+                    wait = self.inner.buckets.locked().take(&format!("{slug}|messages"), MESSAGES.rate, MESSAGES.burst, 1.0, t);
                 }
                 if wait != 0.0 {
                     let why = if wide { "an actor sends at most 6 messages an hour to a repo or to all" } else { "an actor sends at most 60 messages an hour" };
@@ -655,7 +767,7 @@ impl ActorGateway {
             }
             "report_run" => {
                 let Some(runs) = &c.runs else { return Err("Tool report_run not found".into()) };
-                if self.inner.buckets.locked().take(&format!("{slug}|run"), RUN_REPORTS, 1.0, t) != 0.0 {
+                if self.inner.buckets.locked().take(&format!("{slug}|run"), RUN_REPORTS.rate, RUN_REPORTS.burst, 1.0, t) != 0.0 {
                     return Err("too many run reports: one a second is the most the gateway takes".into());
                 }
                 let mut run = json!({ "run": a["run"], "app": a["app"], "presence": a.get("presence").cloned().unwrap_or(json!("working")) });
@@ -671,7 +783,7 @@ impl ActorGateway {
                 Ok(json!({ "session": session, "actor": id }))
             }
             "heartbeat" => {
-                if self.inner.buckets.locked().take(&format!("{slug}|beat"), BEATS, 1.0, t) != 0.0 {
+                if self.inner.buckets.locked().take(&format!("{slug}|beat"), BEATS.rate, BEATS.burst, 1.0, t) != 0.0 {
                     return Err("one heartbeat a second is the most the gateway takes".into());
                 }
                 let mut beat = json!({ "schema": "actor/report/v1" });

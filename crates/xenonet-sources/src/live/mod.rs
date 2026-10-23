@@ -15,11 +15,7 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::sync::LazyLock;
 use xenonet_base::jsstr;
-use xenonet_base::text::{is_js_space, js_string, js_trim, truthy};
-
-fn is_line_terminator(c: char) -> bool {
-    matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
-}
+use xenonet_base::text::{is_js_line_terminator, is_js_space, js_string, js_trim, truthy};
 
 /// `String(v ?? "")`.
 pub fn string_of(v: Option<&Value>) -> String {
@@ -33,13 +29,28 @@ pub fn string_of(v: Option<&Value>) -> String {
 /// a plugin's server without its `plugin_<plugin>_`; None for another
 /// tool.
 pub fn mcp_server_of(tool_name: &str) -> Option<String> {
-    // /^mcp__(.+?)__[^_].*$/: the server is the shortest run, without line
-    // breaks, that's followed by "__", a character other than "_", and the
-    // rest of the name without line breaks.
+    let (server, _) = mcp_parts(tool_name)?;
+    if let Some(r) = server.strip_prefix("plugin_") {
+        if let Some(k) = r.find('_').filter(|&k| k > 0) {
+            return Some(r[k + 1..].to_string());
+        }
+    }
+    Some(server.to_string())
+}
+
+/// The tool an MCP tool's name says it is, after its server's part.
+pub fn mcp_tool_of(tool_name: &str) -> Option<&str> {
+    mcp_parts(tool_name).map(|(_, tool)| tool)
+}
+
+// /^mcp__(.+?)__([^_].*)$/: the server's part is the shortest run, without
+// line breaks, that's followed by "__", a character other than "_", and
+// the rest of the name without line breaks, which is the tool.
+fn mcp_parts(tool_name: &str) -> Option<(&str, &str)> {
     let rest = tool_name.strip_prefix("mcp__")?;
     let chars: Vec<(usize, char)> = rest.char_indices().collect();
     for i in 1..chars.len() {
-        if is_line_terminator(chars[i - 1].1) {
+        if is_js_line_terminator(chars[i - 1].1) {
             return None;
         }
         let at = chars[i].0;
@@ -50,16 +61,10 @@ pub fn mcp_server_of(tool_name: &str) -> Option<String> {
         if next == '_' {
             continue;
         }
-        if chars[i + 3..].iter().any(|&(_, c)| is_line_terminator(c)) {
+        if chars[i + 3..].iter().any(|&(_, c)| is_js_line_terminator(c)) {
             continue;
         }
-        let server = &rest[..at];
-        if let Some(r) = server.strip_prefix("plugin_") {
-            if let Some(k) = r.find('_').filter(|&k| k > 0) {
-                return Some(r[k + 1..].to_string());
-            }
-        }
-        return Some(server.to_string());
+        return Some((&rest[..at], &rest[at + 2..]));
     }
     None
 }
@@ -224,10 +229,12 @@ pub fn files_of(input: Option<&Value>) -> Vec<String> {
     ["file_path", "notebook_path", "path"].iter().filter_map(|k| m.get(*k)?.as_str()).filter(|p| p.contains(['\\', '/'])).map(String::from).collect()
 }
 
-/// The files an apply_patch adds, updates and deletes. Live leaves out the
-/// names it moves files to (`*** Move to: …`).
+/// The files an apply_patch adds, updates and deletes, and the names it
+/// moves files to (`*** Move to: …`), as the engine and the native readers
+/// read it: a session that moves a file onto one another session works on
+/// shares it.
 pub fn patch_files(text: Option<&Value>) -> Vec<String> {
-    xenonet_base::patch::paths(&string_of(text), false)
+    xenonet_base::patch::paths(&string_of(text), true)
 }
 
 /// A text's lines, each after `prefix`, at most `max` of them, with how
@@ -366,11 +373,23 @@ pub fn tool_key(name: &str, input: Option<&Value>) -> String {
 }
 
 /// The pages a write to the shared context names, for the map to beam to.
-pub fn wiki_pages_of(server: Option<&str>, input: Option<&Value>) -> Option<Vec<String>> {
-    if !server.is_some_and(crate::xenolith::is_context_server) {
+/// A write to another space than this machine's (its `space`, such as
+/// project:atlas) names that space's pages, as `<space>/<slug>`, the end of
+/// their ids on the map; one to a space Xenolith refuses wrote nothing.
+/// `tool` is the call's tool and `named` the server the config names for
+/// the shared context (wikiServer, the one the folder's marker names when
+/// it has one), for a server known by that name only.
+pub fn wiki_pages_of(server: Option<&str>, tool: Option<&str>, named: Option<&str>, input: Option<&Value>) -> Option<Vec<String>> {
+    use crate::xenolith::{space_of, Space};
+    if !server.is_some_and(|s| crate::xenolith::is_context_call(s, tool, named)) {
         return None;
     }
     let Some(Value::Object(m)) = input else { return None };
+    let prefix = match space_of(m.get("space")) {
+        Space::Refused => return None,
+        Space::Local => String::new(),
+        Space::Other(id) => format!("{id}/"),
+    };
     let concat = |v: Option<&Value>| -> Vec<Value> {
         match v {
             None | Some(Value::Null) => Vec::new(),
@@ -382,13 +401,57 @@ pub fn wiki_pages_of(server: Option<&str>, input: Option<&Value>) -> Option<Vec<
     if pages.is_empty() {
         None
     } else {
-        Some(pages.into_iter().take(6).collect())
+        Some(pages.into_iter().take(6).map(|p| format!("{prefix}{p}")).collect())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wiki_writes_name_their_spaces_pages() {
+        let of = |input: Value| wiki_pages_of(Some("xenolith"), Some("context_log"), None, Some(&input));
+        assert_eq!(of(json!({ "pages": ["refunds"], "space": " Project:Atlas " })), Some(vec!["project:atlas/refunds".to_string()]));
+        assert_eq!(of(json!({ "slug": "guide", "space": "identity:adal" })), Some(vec!["identity:adal/guide".to_string()]));
+        for local in [json!("machine:local"), json!(""), json!(5), Value::Null] {
+            assert_eq!(of(json!({ "pages": ["refunds"], "space": local })), Some(vec!["refunds".to_string()]), "{local}");
+        }
+        for bad in ["atlas", "team:atlas", "project:../x", "project:a b", "project:.x", "project:a..b", "project:Ü"] {
+            assert_eq!(of(json!({ "pages": ["refunds"], "space": bad })), None, "{bad}");
+        }
+        assert_eq!(of(json!({ "pages": ["x"], "space": format!("project:{}", "a".repeat(65)) })), None, "a name of up to 64");
+    }
+
+    #[test]
+    fn xenoliths_tools_write_under_the_server_the_config_names() {
+        let pages = json!({ "pages": ["refunds"] });
+        let of = |name: &str, named: Option<&str>| wiki_pages_of(mcp_server_of(name).as_deref(), mcp_tool_of(name), named, Some(&pages));
+        let refunds = Some(vec!["refunds".to_string()]);
+        assert_eq!(of("mcp__ctx__context_log", Some("ctx")), refunds);
+        assert_eq!(of("mcp__plugin_xenolith_ctx__context_upsert_page", Some("ctx")), refunds, "a plugin's server");
+        assert_eq!(of("mcp__ctx__write_page", Some("ctx")), None, "another of its tools");
+        assert_eq!(of("mcp__ctx__context_log", None), None, "no name in the config");
+        assert_eq!(of("mcp__ctx__context_log", Some("xenolith")), None);
+        assert_eq!(of("mcp__xenolith__write_page", Some("ctx")), refunds, "the known names, whatever the tool");
+        assert_eq!(of("mcp__agent-wiki__wiki_log", None), refunds);
+    }
+
+    #[test]
+    fn the_server_a_folders_marker_names_gets_its_writes() {
+        let dir = std::env::temp_dir().join(format!("xenonet-live-marker-rs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(crate::xenolith::MARKER_FILE), "{\"format\":1,\"server\":\"team-ctx\"}").unwrap();
+        let named = crate::xenolith::context_server_of(dir.to_str().unwrap(), &crate::xenolith::Env::new(), "/nowhere", "linux");
+        std::fs::remove_dir_all(&dir).unwrap();
+        let pages = json!({ "pages": ["refunds"] });
+        let of = |name: &str| wiki_pages_of(mcp_server_of(name).as_deref(), mcp_tool_of(name), Some(&named), Some(&pages));
+        let refunds = Some(vec!["refunds".to_string()]);
+        assert_eq!(of("mcp__team-ctx__context_log"), refunds);
+        assert_eq!(of("mcp__xenolith__context_log"), refunds, "the known names still count");
+        assert_eq!(of("mcp__other__context_log"), None);
+    }
 
     #[test]
     fn tools_by_kind() {
@@ -398,6 +461,10 @@ mod tests {
         assert_eq!(mcp_server_of("mcp__a___b").as_deref(), Some("a_"));
         assert_eq!(mcp_server_of("mcp__x"), None);
         assert_eq!(mcp_server_of("Bash"), None);
+        assert_eq!(mcp_tool_of("mcp__plugin_xenolith_xenolith__context_log"), Some("context_log"));
+        assert_eq!(mcp_tool_of("mcp__a__b__c"), Some("b__c"));
+        assert_eq!(mcp_tool_of("mcp__a___b"), Some("b"));
+        assert_eq!(mcp_tool_of("mcp__x"), None);
         assert_eq!(categorize("mcp__srv__tool"), "mcp");
         assert_eq!(categorize("BASH"), "shell");
         assert_eq!(categorize("apply_patch"), "edit");
@@ -431,6 +498,7 @@ mod tests {
         assert_eq!(command_text(Some(&json!("ls -la"))), "ls -la");
         assert_eq!(command_text(Some(&json!([null, 1]))), "null 1");
         assert_eq!(patch_files(Some(&json!("*** Begin Patch\n*** Update File: a/b.js\n*** Add File:  c.js \n"))), ["a/b.js", "c.js"]);
+        assert_eq!(patch_files(Some(&json!("*** Update File: a/b.js\n*** Move to: a/c.js\n*** Delete File: d.js\n"))), ["a/b.js", "a/c.js", "d.js"]);
         assert_eq!(diff_lines("+ ", Some(&json!("a\r\nb\nc")), 2), "+ a\n+ b\n+ … (1 more lines)");
         let e = claude_edits("Edit", Some(&json!({ "file_path": "/x", "old_string": "a", "new_string": "b" }))).unwrap();
         assert_eq!(e, [json!({ "path": "/x", "kind": "edit", "diff": "- a\n+ b" })]);

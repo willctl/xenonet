@@ -72,6 +72,13 @@ pub trait Engine: Send + Sync {
     async fn listen(&self, _me: &str, _wait: Duration, _gone: watch::Receiver<bool>) -> R<Option<Value>> {
         pending(ENGINE)
     }
+    /// A handoff (docs/design/network.md, section 11): offered with
+    /// `{ to, host, goal, done, next, files, branch, commit }`, taken with
+    /// `{ accept }`, or with neither, the ones open to `me`. `extra` holds
+    /// the envelope, as send's does.
+    async fn handoff(&self, _me: &str, _args: Value, _extra: Option<Value>) -> R<Value> {
+        pending(ENGINE)
+    }
     /// `engine.store.markUnseen(me, ids)`.
     fn mark_unseen(&self, _me: &str, _ids: &Value) -> R<()> {
         pending(ENGINE)
@@ -118,6 +125,11 @@ pub trait Verify: Send + Sync {
     }
     /// The connected Desktop's own process (None when it went).
     async fn desktop(&self, _peer: Option<Peer>) -> Value {
+        refused(VERIFY)
+    }
+    /// The tray app's own process, connecting to the component socket:
+    /// XenoNet Tray.app in /Applications or `home`'s Applications folder.
+    async fn tray(&self, _peer: Peer, _home: &str) -> Value {
         refused(VERIFY)
     }
     /// `verify.actor(socket, { slug, product }, { pid })`.

@@ -32,10 +32,11 @@ export const AppEntry = define(
     limits: z.enum(["claude", "codex"]).optional().describe("Its plan limits, as live/snapshot/v1's limits name them"),
     team: z.string().regex(/^[A-Z0-9]{10}$/).optional().describe("The developer team that signs it, codesign's TeamIdentifier"),
     connect: obj({
-      format: z.enum(["claude-settings", "codex-hooks"]).describe("Where and how XenoNet adds its hooks: Claude Code's settings.json, or Codex's hooks.json"),
+      format: z.enum(["claude-settings", "codex-hooks", "grok-hooks"]).describe("Where and how XenoNet adds its hooks: Claude Code's settings.json, Codex's hooks.json, or Grok Build's hooks folder and config.toml"),
       events: z
         .array(z.union([z.tuple([z.string()]), z.tuple([z.string(), z.string()])]))
         .describe("The hook events XenoNet adds, in order, each with the matcher it takes, if any"),
+      unheard: z.array(z.string()).optional().describe("The hook events whose answers it passes over: XenoNet tells it nothing then, and keeps its messages for an event it hears"),
     }).optional(),
     editTools: z.array(z.string()).optional().describe("For a native reader, the tools whose calls are edits"),
     has: z.array(z.enum(CAPABILITIES)).optional().describe("What XenoNet can do with it at most; what it can do with a session is the session's own"),

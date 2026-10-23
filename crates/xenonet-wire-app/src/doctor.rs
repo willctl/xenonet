@@ -32,8 +32,18 @@ const EVERY_MS: u64 = 30 * 60 * 1000;
 const FIRST_AFTER_MS: u64 = 60 * 1000;
 
 /// The checks the demo runs: itself, never your machine.
-pub const DEMO_ONLY: [&str; 9] =
-    ["xenonet.server", "xenonet.sources", "xenonet.blocks", "contracts.drift", "claude.transcripts", "codex.sessions", "system.projects", "system.runtime", "hosts"];
+pub const DEMO_ONLY: [&str; 10] = [
+    "xenonet.server",
+    "xenonet.sources",
+    "xenonet.blocks",
+    "contracts.drift",
+    "claude.transcripts",
+    "codex.sessions",
+    "grok.sessions",
+    "system.projects",
+    "system.runtime",
+    "hosts",
+];
 
 const STATE_SCHEMAS: [&str; 2] = [include_str!("../../../schemas/state/v1.json"), include_str!("../../../schemas/state/v2.json")];
 const STATE_VERSION: f64 = 2.0;
@@ -352,6 +362,7 @@ impl Machine {
         let cores = &self.parts.cores;
         let value = match f.as_str() {
             "exists" => json!(!a(0).is_empty() && std::fs::metadata(a(0)).is_ok()),
+            "readText" => std::fs::read_to_string(a(0)).map_or(Value::Null, Value::String),
             "readdir" => {
                 let dir = a(0);
                 match xenonet_base::paths::read_dir_sorted(std::path::Path::new(&dir)) {
@@ -414,6 +425,10 @@ impl Machine {
             }
             "verify" => cores.verify.state(),
             "gitAvailable" => json!(git_available().await),
+            // How the service started at login stands (the supervisor's
+            // review): it asks launchctl, systemctl or schtasks, so off
+            // the runtime's threads.
+            "login" => tokio::task::spawn_blocking(xenonet_components::supervisor::review_here).await.unwrap_or(Value::Null),
             f if f.starts_with("actors.") => {
                 let Some(actors) = cores.actors.clone() else { return Ok(json!({ "missing": true })) };
                 match &f["actors.".len()..] {
@@ -496,6 +511,7 @@ async fn facts(parts: &Parts, by_hand: bool) -> Value {
         "byHand": by_hand,
         "stateLoad": state_load,
         "projectsDirSet": fx::env_set("XENONET_PROJECTS_DIR").is_some(),
+        "grokKeySet": fx::env_set("XAI_API_KEY").is_some(),
         "actors": if c.actors.is_some() { "on" } else { "off" },
     })
 }
@@ -523,7 +539,7 @@ pub async fn run_doctor(parts: Arc<Parts>, only: Option<&[String]>, by_hand: boo
     let started = now_ms();
     let hosts: Option<Vec<Value>> = parts.cores.hub.as_ref().and_then(|h| h.list().ok()).map(|l| l.as_array().cloned().unwrap_or_default());
     // Each check: its id, group, title, and the host's view for a host's.
-    let mut all: Vec<(String, String, String, Option<Value>)> = checks::CHECKS.iter().map(|(id, g, t)| (id.to_string(), g.to_string(), t.to_string(), None)).collect();
+    let mut all: Vec<(String, String, String, Option<Value>)> = checks::all().into_iter().map(|(id, g, t)| (id.to_string(), g.to_string(), t.to_string(), None)).collect();
     if let Some(hs) = &hosts {
         for h in hs {
             let id = text(h.get("id"));
@@ -536,6 +552,12 @@ pub async fn run_doctor(parts: Arc<Parts>, only: Option<&[String]>, by_hand: boo
             all.push(("hosts.keys.own".into(), "Hosts".into(), "Each host has a key of its own".into(), Some(json!({ "keyed": keyed }))));
         }
     }
+    // The network across machines, from its files, when this machine is in
+    // one: each verdict is ready, as a host's view is.
+    let network = std::path::Path::new(&parts.config.state_dir).join("network");
+    for (id, title, verdict) in xenonet_net::doctor::checks(&network, now_ms()) {
+        all.push((id.into(), "Network".into(), title.into(), Some(json!({ "network": verdict }))));
+    }
     let picked: Vec<_> = all.into_iter().filter(|(id, ..)| only.is_none_or(|o| run::kept(id, o))).collect();
     let facts = facts(&parts, by_hand).await;
     let m = Arc::new(Machine { paths: parts.paths.clone(), parts: parts.clone() });
@@ -546,6 +568,7 @@ pub async fn run_doctor(parts: Arc<Parts>, only: Option<&[String]>, by_hand: boo
             let check = async {
                 match (&host, id.as_str()) {
                     (Some(k), "hosts.keys.own") => xenonet_hosts::doctor::key_check(k["keyed"].as_array().map_or(&[][..], Vec::as_slice)),
+                    (Some(k), id) if id.starts_with("network.") => k["network"].clone(),
                     (Some(h), _) => run::host_check(h, now_ms()),
                     (None, _) => one(id.clone(), facts, m).await,
                 }

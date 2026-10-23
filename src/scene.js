@@ -1573,6 +1573,14 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
         applyLive(n, s);
         setAttention(n, { need: s?.stale ? null : (s?.needsYou ?? null), stuck: s?.stuck ?? null });
       }
+      // Another machine's sessions in a network have no live state here:
+      // their presence says what waits on you and why one seems stuck
+      // (network-map.js), as of when their machine was last heard.
+      for (const n of nodeIndex.values()) {
+        const p = n.network === true && n.kind === "session" ? n.presence : null;
+        if (!p || !(p.waits || p.stuck || n.__obs?.userData.rig)) continue;
+        setAttention(n, { need: p.waits && !n.stale ? { kind: p.kind ?? "question" } : null, stuck: p.stuck && !n.stale ? { reasons: p.stuck } : null });
+      }
       recomputeFlow();
       busy = new Set();
       for (const s of snap.sessions) if (s.status !== "idle") for (let up = parentOf.get(s.id); up; up = parentOf.get(up)) busy.add(up);
@@ -1619,7 +1627,7 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
           const res = nodeIndex.get(sameHost(node, `resource:${ev.server}`));
           const color2 = res?.kind === "wiki" ? COLORS.wiki : COLORS.resource;
           if (res) for (let i = 0; i < 3; i++) setTimeout(() => packet({ from: node, to: res, color: color2, size: 3, duration: 1.3, bow: 0.18 }), i * 140);
-          // Wiki writes continue on to the pages they touched.
+          // Writes to the shared context go on to the pages they touched.
           for (const slug of ev.pages ?? []) {
             const page = nodeIndex.get(sameHost(node, `wiki:${slug}`));
             if (res && page) {
@@ -1657,6 +1665,8 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
       for (let i = 0; i < n; i++) setTimeout(() => packet({ from: node, to: up, color: nodeColor(node), size: 2 + Math.log10(1 + ev.n) * 0.3, duration: 1.2 }), i * 70);
     },
 
+    // Whether a node shows, through the filters.
+    shown: (id) => !visible || visible.has(id),
     setVisible(set) {
       visible = set;
       graph.nodeVisibility((n) => !visible || visible.has(n.id));

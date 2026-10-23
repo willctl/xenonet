@@ -26,7 +26,7 @@ The log lives in XenoNet's state folder, in `logs/`: `service.ndjson`, `desktop.
 xenonet doctor
 ```
 
-This checks sign-ins, the folders XenoNet reads, its own parts, its launcher, whether Claude Code and Codex are connected and recent errors, with a fix for each problem. XenoNet runs the same checks every half hour. When a check finds a new problem, it goes in the log too, so you can see it later even after it clears.
+This checks sign-ins, the folders XenoNet reads, its own parts, its launcher, whether Claude Code, Codex and Grok Build are connected, recent errors and, when the service starts at login, its registration, with a fix for each problem. XenoNet runs the same checks every half hour. When a check finds a new problem, it goes in the log too, so you can see it later even after it clears.
 
 ## Get help from Codex or Claude Code
 
@@ -56,5 +56,9 @@ This prints the same summary as Markdown, ready to paste into an issue (`--json`
 **Port 47840 is already in use.** Another program holds XenoNet's port. The log names it when it's another XenoNet, such as XenoNet Dev started on the wrong port. Quit that one, or start XenoNet with another `XENONET_PORT`.
 
 **The doctor says "connected, but … is gone".** XenoNet's hooks run files that aren't there any more, often from a checkout that was moved or deleted. Run `xenonet connect`. Each XenoNet on the computer (the installed one, XenoNet Dev) keeps its own hooks and MCP server, so connecting one never removes the other's.
+
+**`xenonet update` on 0.3.0 stops with an error about `node`.** The 0.3.0 updater can't install 0.4.0's Service and Tools, which have no `node`. Update Desktop instead. Its first start installs them. See [Upgrading from 0.3.0](components.md#upgrading-from-030).
+
+**After an update from 0.3.0, Desktop says to close your terminals.** A terminal open in the 0.3.0 service keeps it from being replaced, so it keeps running. Close the terminals, then quit and reopen XenoNet. `xenonet logs --code desktop.components` shows what Desktop found.
 
 **The launcher can't find XenoNet's Tools.** The `xenonet` command and the MCP servers can't start, though hooks still reach XenoNet. Open XenoNet, which repairs them, or install XenoNet again.

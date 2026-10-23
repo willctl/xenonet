@@ -163,14 +163,18 @@ pub struct JsLiveCore {
 #[expect(clippy::too_many_arguments, reason = "line and apply take the twin's arguments one by one, as LiveCore's JS methods did")]
 #[expect(clippy::unused_self, reason = "collab is a method of LiveCore, as it was in the JS, though it needs none of its state")]
 impl JsLiveCore {
-    /// `roots`: [{ dir, app }], the folders it reads, as real paths.
+    /// `roots`: [{ dir, app }], the folders it reads, as real paths;
+    /// `context_server`: the MCP server the config names for the shared
+    /// context (wikiServer).
     #[napi(constructor)]
-    pub fn new(home: Option<String>, roots: Json) -> Self {
+    pub fn new(home: Option<String>, roots: Json, context_server: Option<String>) -> Self {
         let roots = match roots.0 {
             Value::Array(a) => a.iter().map(|r| (string_of(r.get("dir")), string_of(r.get("app")))).collect(),
             _ => Vec::new(),
         };
-        JsLiveCore { t: Telemetry::new(home, roots) }
+        let mut t = Telemetry::new(home, roots);
+        t.context_server = context_server;
+        JsLiveCore { t }
     }
 
     #[napi(getter)]
@@ -191,10 +195,10 @@ impl JsLiveCore {
     /// A line the tailer read (`raw`, as its normalizer gave it): its
     /// refusal, and what it says.
     #[napi]
-    pub fn line(&mut self, env: Env, codex: bool, session_id: String, agent_id: MaybeJson, file: MaybeJson, raw: MaybeJson, live: bool, now: f64) -> Result<Jv> {
+    pub fn line(&mut self, env: Env, app: String, session_id: String, agent_id: MaybeJson, file: MaybeJson, raw: MaybeJson, live: bool, now: f64) -> Result<Jv> {
         let f = Where { session_id, agent_id: or_null(agent_id), file: or_null(file) };
         let mut out = Vec::new();
-        let r = self.t.line(codex, &f, or_null(raw), live, now, &mut out);
+        let r = self.t.line(&app, &f, or_null(raw), live, now, &mut out);
         emits(&env, out, r.err())
     }
 
@@ -217,6 +221,11 @@ impl JsLiveCore {
         let mut out = Vec::new();
         self.t.note_activity(i, fields, live, now, &mut out);
         emits(env, out, None)
+    }
+
+    #[napi]
+    pub fn settle(&mut self, now: f64) {
+        self.t.settle(now);
     }
 
     #[napi(js_name = "noteHook")]
@@ -586,10 +595,12 @@ impl JsLiveCore {
     }
 }
 
-/// The pages a wiki write names (the telemetry's wikiPagesOf), or null.
+/// The pages a write to the shared context names (the telemetry's
+/// wikiPagesOf), or null. `named` is the server the config names for it.
 #[napi(js_name = "liveTelemetryPagesOf")]
-pub fn live_telemetry_pages_of(server: MaybeJson, input: MaybeJson) -> Option<Vec<String>> {
-    wiki_pages_of(server.0.as_ref().and_then(Value::as_str), input.0.as_ref())
+pub fn live_telemetry_pages_of(server: MaybeJson, input: MaybeJson, tool: MaybeJson, named: MaybeJson) -> Option<Vec<String>> {
+    let [server, tool, named] = [&server, &tool, &named].map(|v| v.0.as_ref().and_then(Value::as_str));
+    wiki_pages_of(server, tool, named, input.0.as_ref())
 }
 
 // ---------- claude-usage.js ----------

@@ -6,11 +6,11 @@
 //   XENOLITH_LIVE=1 npm run test:live                       (bash)
 //
 // It reads the curator settings (codexPath, codexHome, model, effort) from
-// the installed config.json (src/paths.mjs; %APPDATA%\Xenolith on Windows), so
+// the installed config.json (scripts/paths.mjs; %APPDATA%\Xenolith on Windows), so
 // run `npm run install-local` and sign the curator in (tray > Curator > Sign in) first.
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { appPaths } from '../src/paths.mjs';
+import { appPaths } from '../scripts/paths.mjs';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -19,11 +19,9 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { curatorCmd, srvT } from './impl.mjs';
 
 const live = process.env.XENOLITH_LIVE === '1';
-const repo = fileURLToPath(new URL('..', import.meta.url));
 
 test('live: the real model files two notes into pages and the log', { skip: !live && 'set XENOLITH_LIVE=1 to run', timeout: 15 * 60_000 }, async () => {
   const installed = JSON.parse(fs.readFileSync(appPaths({ env: Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^XENOLITH_/.test(k))) }).configFile, 'utf8'));
@@ -35,10 +33,9 @@ test('live: the real model files two notes into pages and the log', { skip: !liv
   fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ writeMode: 'curated', curator: { ...installed.curator } }));
   const env = { ...process.env, XENOLITH_DIR: wikiDir, XENOLITH_HOME: home };
   delete env.XENOLITH_WRITE_MODE;
-  const runtime = path.join(repo, 'dist', 'runtime');
 
   const client = new Client({ name: 'live-test', version: '1' });
-  await client.connect(new StdioClientTransport({ ...srvT(runtime), env, stderr: 'pipe' }));
+  await client.connect(new StdioClientTransport({ ...srvT(), env, stderr: 'pipe' }));
   try {
     for (const args of [
       { app: 'claude-code', title: 'Started Orchard, a recipe-scaling CLI', body: 'Repo C:/Projects/orchard, TypeScript, Node 24. Decided on SQLite (better-sqlite3) for the pantry list because it needs no server.', tags: ['orchard'] },
@@ -52,7 +49,7 @@ test('live: the real model files two notes into pages and the log', { skip: !liv
   }
 
   const t0 = Date.now();
-  const proc = spawn(...curatorCmd(runtime, '--once'), { env, stdio: ['ignore', 'inherit', 'inherit'] });
+  const proc = spawn(...curatorCmd('--once'), { env, stdio: ['ignore', 'inherit', 'inherit'] });
   const code = await new Promise((r) => proc.on('exit', r));
   assert.equal(code, 0);
   console.log(`curator finished in ${Math.round((Date.now() - t0) / 1000)} s`);

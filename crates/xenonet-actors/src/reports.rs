@@ -21,10 +21,10 @@
 
 use crate::detail::status_line;
 use crate::registration::{to_number, ActorError, Fail, Result};
-use crate::registry::{is_absolute, node_kind};
+use crate::registry::node_kind;
 use serde_json::json;
 use xenonet_base::ids::is_session_id;
-use xenonet_engine::js::resolve_style;
+use xenonet_base::nodepath::{style_of, NATIVE};
 use xenonet_engine::peer::{list, opt_call, Calls, Thrown};
 use xenonet_engine::sql::Arg;
 use xenonet_engine::store::js_text;
@@ -116,14 +116,15 @@ fn not_a_path(v: &Arg) -> Thrown {
 /// path.isAbsolute(p) on this machine.
 fn absolute(p: &Arg) -> Result<bool> {
     match p {
-        Arg::Text(s) => Ok(is_absolute(s)),
+        Arg::Text(s) => Ok(NATIVE.is_absolute(s)),
         other => Err(not_a_path(other).into()),
     }
 }
 
 /// `pathStyle(p).resolve(p)`, for a path already judged absolute.
 fn resolved(p: &Arg) -> Arg {
-    Arg::text(resolve_style(&js_text(p)))
+    let p = js_text(p);
+    Arg::text(style_of(&p).resolve(&[&p]))
 }
 
 /// Whether `<path>` is truthy, read without converting an object.
@@ -319,7 +320,7 @@ pub fn take_events(c: &mut dyn Calls, id: &Arg, events: &[Arg], now: &Arg) -> Re
         if kind == "edited" {
             if let Some(items) = paths_of(e)? {
                 if items.iter().any(|p| match p {
-                    Arg::Text(s) => !is_absolute(s),
+                    Arg::Text(s) => !NATIVE.is_absolute(s),
                     _ => true,
                 }) {
                     drop("an edited path is absolute".into());

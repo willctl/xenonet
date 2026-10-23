@@ -1,5 +1,8 @@
 import { createUpdatesPanel } from "./updates.js";
 import { createBackground } from "./background.js";
+import { createNetwork } from "./network.js";
+import { chimeHere } from "./network-model.js";
+import { networkPart, withNetwork, partKey } from "./network-map.js";
 import "@fontsource/chakra-petch/400.css";
 import "@fontsource/chakra-petch/500.css";
 import "@fontsource/chakra-petch/600.css";
@@ -31,7 +34,7 @@ import { filmPlaySeconds } from "../core/frames.js";
 import { createIdentities } from "./identities.js";
 import { keyLabel } from "./platform.js";
 import { WINDOWS, loadScope, saveScope, scopeGraph, scopeCounts } from "./scope.js";
-import { syncTheme, themeFonts } from "./theme.js";
+import { syncTheme, themeFonts, APP_LABEL } from "./theme.js";
 import { createThemes } from "./themes-ui.js";
 import { createMcpUi } from "./mcp-ui.js";
 import { createEnvironments } from "./environments-ui.js";
@@ -45,7 +48,7 @@ import { isActorId } from "./actors.js";
 import { youHere, createTargetWatch, createSaidEcho } from "./actors-model.js";
 import { createWindowCalls, createActorRequests, createActorTokens } from "./actor-requests.js";
 import { createRemoteConnections } from "./remote-panel.js";
-import { createHostFilters, decorate as decorateHosts } from "./hosts.js";
+import { createHostFilters, decorate as decorateHosts, hostOfId } from "./hosts.js";
 import { chimes } from "./live-words.js";
 import { renamable } from "../core/rename.js";
 import "./hosts.css";
@@ -139,7 +142,7 @@ const actorTokens = createActorTokens({ calls: windowCalls });
 // Remote actors' connections (remote-panel.js), read with the window's key,
 // for the Actors panel and, read-only, the driver.
 const remoteConnections = createRemoteConnections({ calls: windowCalls });
-const preview = createPreview({ onOpenApp: (node) => openInApp(node) });
+const preview = createPreview({ onOpenApp: (node) => openInApp(node), read: windowCalls.read });
 // A preview, wherever it's opened from, is reading the session.
 const showPreview = preview.open;
 preview.open = (node, ...rest) => (node?.kind === "session" && you.did("read", node.id), showPreview(node, ...rest));
@@ -194,6 +197,13 @@ function showGather(g) {
 async function openInApp(nodeOrId) {
   const node = typeof nodeOrId === "string" ? scene.getNode(nodeOrId) : nodeOrId;
   if (!node) return { ok: false, error: "it isn't on the map" };
+  // A session no desktop app opens (Grok Build's): XenoNet shows it itself.
+  if (node.kind === "session" && !node.host && !node.actions?.some((a) => a.id === "open-app")) {
+    select(node);
+    const said = `${APP_LABEL[node.app] ?? "This app"} has no desktop app to open it in`;
+    hud.toast(said);
+    return { ok: false, error: said };
+  }
   const res = await post("/api/open", { nodeId: node.id, action: "open-app" });
   if (res.ok) you.did("opened", node.id);
   sfx(res.ok ? "success" : "error");
@@ -244,7 +254,7 @@ identities.wire(document.getElementById("id-filters"));
 // host is on the map.
 const hostFilters = createHostFilters({ sfx, onFilter: () => hud.refreshFilters() });
 
-const modals = createModals({ sfx, toast: (m, b) => hud.toast(m, b), select, onPoster: () => exportPanel.open(), identities, onChangeRoot: () => rootPanel.open(), onHandoff: (node, target) => you.did("handed-off", node.id, { to: target }) });
+const modals = createModals({ sfx, toast: (m, b) => hud.toast(m, b), select, onPoster: () => exportPanel.open(), identities, onChangeRoot: () => rootPanel.open(), onHandoff: (node, target) => you.did("handed-off", node.id, { to: target }), read: windowCalls.read });
 const connectPanel = createConnectPanel({ modals, sfx, toast: (m, b) => hud.toast(m, b) });
 // XenoNet's doctor (core/doctor): its panel, and its problems in the strip.
 const doctorPanel = createDoctorPanel({
@@ -261,7 +271,7 @@ const doctorPanel = createDoctorPanel({
     : null,
 });
 // A session's models, tokens, costs and timing (core/stats.js).
-const statsPanel = createStatsPanel({ modals, sfx, toast: (m, b) => hud.toast(m, b) });
+const statsPanel = createStatsPanel({ modals, sfx, toast: (m, b) => hud.toast(m, b), read: windowCalls.read });
 const refusalsPanel = createRefusalsPanel({ modals });
 const integrationsPanel = createIntegrationsPanel({ modals, calls: windowCalls, savePatch: desktop?.savePatch });
 const openStats = (node) => (note("stats", node.id), you.did("read", node.id), statsPanel.open(node));
@@ -295,19 +305,38 @@ async function decisionKey() {
   });
 }
 
-// A message from you to an actor, from XenoNet's own window, which it reads
-// in its inbox marked as from you (core/engine/attest.js).
-function messageActor(id) {
-  const name = scene.actor(id)?.snapshot.name ?? id;
-  const panel = modals.open(`<header class="m-head"><div><div class="m-chip">✉ message</div><h2>To ${escapeHtml(name)}</h2><div class="m-sub">It reads it in its inbox, marked as from you at XenoNet's window</div></div><button class="act" data-mclose>Close ✕</button></header><div class="m-body"><textarea class="msg-text" data-msg-text data-yours maxlength="4000" rows="6" placeholder="What to tell ${escapeHtml(name)}"></textarea><p class="pj-note">An actor reads it as from you. It's still its own to act on: XenoNet passes it on and approves nothing.</p><div class="m-foot"><span class="grow"></span><button class="act primary" data-msg-send data-yours>Send</button></div></div>`, { accent: "var(--actor)" });
+// A message from you, from XenoNet's own window (core/engine/attest.js): to
+// an actor, which reads it in its inbox marked as from you, or to a session,
+// on this machine or another in your network, which gets it as from you at
+// this console. It approves nothing: a session's permission question is
+// still answered in its own app. The box and Send are yours (data-yours),
+// which the control channel presses only in the demo and test instances;
+// `text` fills the box, for the driver.
+let messaging = null;
+let lastMessage = null;
+function messageTo(id, { text = "" } = {}) {
+  const actor = isActorId(id);
+  const node = actor ? null : (fullIndex.get(id) ?? null);
+  const far = actor ? null : network.agent(id);
+  const host = node?.host ?? far?.host ?? hostOfId(id);
+  const app = node?.app ?? far?.app ?? null;
+  const name = actor ? (scene.actor(id)?.snapshot.name ?? id) : (node?.title ?? far?.title ?? id);
+  const here = network.state.self?.id;
+  const sub = actor ? "It reads it in its inbox, marked as from you at XenoNet's window" : `A session on ${host ?? "this machine"}. It gets it as from you, at ${here ? `${here}'s` : "this"} console`;
+  const note = actor ? "An actor reads it as from you. It's still its own to act on: XenoNet passes it on and approves nothing." : "It's information, as every message is, and approves nothing: a permission question is still answered in the session's own app.";
+  const accent = actor ? "var(--actor)" : app === "claude" || app === "codex" ? `var(--${app})` : "var(--cyan)";
+  const panel = modals.open(`<header class="m-head"><div><div class="m-chip">✉ message</div><h2>To ${escapeHtml(name)}</h2><div class="m-sub">${escapeHtml(sub)}</div></div><button class="act" data-mclose>Close ✕</button></header><div class="m-body"><textarea class="msg-text" data-msg-text data-yours maxlength="4000" rows="6" placeholder="What to tell ${escapeHtml(name)}"></textarea><p class="pj-note">${escapeHtml(note)}</p><div class="m-foot"><span class="grow"></span><button class="act primary" data-msg-send data-yours>Send</button></div></div>`, { accent, onClose: () => (messaging = null) });
+  messaging = { to: id, name, panel };
   const box = panel.querySelector("[data-msg-text]");
+  box.value = text;
   box.focus();
   const send = panel.querySelector("[data-msg-send]");
   send.addEventListener("click", async () => {
-    const text = box.value.trim();
-    if (!text) return box.focus();
+    const words = box.value.trim();
+    if (!words) return box.focus();
     send.disabled = true;
-    const r = await windowCalls.call("POST", "/api/actors/you/message", { to: id, text });
+    const r = await windowCalls.call("POST", "/api/actors/you/message", { to: id, text: words });
+    lastMessage = { to: id, ok: r.ok, status: r.status, error: r.ok ? null : (r.error ?? "It didn't go"), state: r.data?.state ?? null, at: Date.now() };
     if (!r.ok) {
       send.disabled = false;
       sfx("error");
@@ -315,8 +344,15 @@ function messageActor(id) {
     }
     sfx("success");
     modals.close();
-    hud.toast(`Sent to ${name}`);
+    hud.toast(r.data?.state === "queued" ? `It waits to go to ${host}, which is away` : `Sent to ${name}`);
   });
+}
+// The message box as it stands, for the driver: who it's to, where Send
+// is, and how the last one went. Never the words.
+function messageState() {
+  const open = !!messaging?.panel?.isConnected;
+  const r = open ? messaging.panel.querySelector("[data-msg-send]")?.getBoundingClientRect() : null;
+  return { open, to: open ? messaging.to : null, name: open ? messaging.name : null, sendAt: r?.width ? { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } : null, last: lastMessage };
 }
 // A terminal opened in a node's folder (`node`, or what's selected).
 const terminalAt = (node = scene.getNode(selectedId)) => (you.did("terminal", node?.id), terminal?.show({ cwd: folderOf(node), fresh: true }));
@@ -324,7 +360,7 @@ const terminalAt = (node = scene.getNode(selectedId)) => (you.did("terminal", no
 const rootPanel = createRootPanel({ modals, sfx, toast: (m, b) => hud.toast(m, b), desktop });
 
 const hud = createHud({
-  mcp: createMcpUi({ modals, toast: (m, b) => hud.toast(m, b) }),
+  mcp: createMcpUi({ modals, toast: (m, b) => hud.toast(m, b), read: windowCalls.read }),
   onSelect: select,
   onBack: back,
   onStep: step,
@@ -347,7 +383,9 @@ const hud = createHud({
   // Writing to an actor from here (its inspector): yours alone, so the
   // box and Send are marked data-yours, which XenoNet's control channel
   // never presses outside the demo.
-  onMessageActor: (id) => messageActor(id),
+  onMessageActor: (id) => messageTo(id),
+  // And to a session, from its own panel.
+  onMessageSession: (node) => messageTo(node.id),
   identities,
   actorOf: (id) => scene.actor(id),
   actorBeams: (id) => scene.actorLayer.targetsOf(id),
@@ -427,7 +465,29 @@ const alerts = createAlerts({
   },
   native: desktop ? { notify: (n) => desktop.notify(n), clear: (keys) => desktop.clearNotifications(keys) } : null,
   queue: { count: () => countOf(needsYouNow()), open: () => needsYou.open() },
+  remote: (id) => network.show(id),
 });
+
+// The network across machines (network.js): Network settings and Add a
+// machine, other machines' agents waiting on you in the strip, and the
+// other machines on the map, from their presence (network-map.js).
+const network = createNetwork({
+  modals,
+  calls: windowCalls,
+  sfx,
+  toast: (m, b) => hud.toast(m, b),
+  onChange: (v) => {
+    alerts.setRemote(v.waits);
+    mapNetwork(v);
+  },
+  message: (id) => messageTo(id),
+  // The gateway's tunnel or LAN address is set where the actor gateway's
+  // is, in the Actors panel.
+  gateway: () => openActors(),
+});
+// What waits on you sounds only where you are, in a network: one rule for
+// this machine's waits and the others'.
+alerts.setChime(() => chimeHere(network.state));
 
 // Everything waiting on you, the longest wait first (core/needs-you.js),
 // from what the strip shows: the map's sessions waiting on a question or a
@@ -450,7 +510,7 @@ const needsYou = createNeedsYou({
   select,
   openApp: openInApp,
   ack,
-  message: (id) => messageActor(id),
+  message: (id) => messageTo(id),
   decide: decideRequest,
   armed: (id) => actorRequests.armed(id),
 });
@@ -587,9 +647,11 @@ const commandList = [
   { id: "updates", label: "Check for XenoNet updates", keywords: "version release download install restart", run: () => updatesPanel.open() },
   { id: "background", label: "Background service: start XenoNet's service at login", keywords: "settings login startup boot always on keep running daemon launchd systemd launch agent", run: () => backgroundPanel.open() },
   { id: "doctor", label: "Check XenoNet's setup", keywords: "doctor health sign in login auth permissions problems diagnose", run: () => doctorPanel.open() },
-  { id: "connect-agents", label: "Connect Claude Code and Codex to XenoNet", keywords: "si super intelligence agents claude code codex mcp hooks engine coordinate messages work together", run: () => connectPanel.open() },
+  { id: "connect-agents", label: "Connect your agents to XenoNet", keywords: "si super intelligence agents claude code codex grok build mcp hooks engine coordinate messages work together", run: () => connectPanel.open() },
   // The kill switch for messages between sessions and actors, and every wake (core/delivery/policy.js).
   { id: "pause-messages", label: "Pause or resume messages between sessions", keywords: "si agents stop kill switch halt wake live delivery actors abuse", run: () => toggleDelivery() },
+  { id: "network", label: "Network settings: your other machines", keywords: "settings network machines computers hosts laptop server gateway start create join leave remove replace tunnel lan titles only share", run: () => network.open() },
+  { id: "add-machine", label: "Add a machine", keywords: "network another computer laptop server host join ticket second machine", run: () => network.addMachine() },
   { id: "actors", label: "Actors", keywords: "si agents hermes grok bot muse programs allow deny requests register tokens observers you show me on the map add remove", run: () => openActors() },
   { id: "install-command", label: "Install the xenonet command", keywords: "cli terminal shell path doctor", run: () => installCommand() },
   { id: "layout", label: "Reset layout and unpin dragged nodes", keywords: "positions", run: async () => (await fetch("/api/layout", { method: "DELETE" }), hud.toast("Layout reset")) },
@@ -648,6 +710,7 @@ const commandList = [
     run: () => setScope({ window: w.id }),
   })),
   { id: "focus-lighting", label: "Turn focus lighting on or off", keywords: "glare glow bloom dim zoom distance", run: () => setFocusLighting(!focusLighting) },
+  { id: "plain-panels", label: "Turn plain panels on or off", keywords: "glass blur transparent solid opaque panels gpu power battery energy performance laptop", run: () => setPlainPanels(!plainPanels) },
   // How often the map draws (render-budget.js), kept for this window.
   ...[
     ["balanced", "Frame rate: balanced (the default)"],
@@ -745,7 +808,9 @@ function identityCommands(n) {
   };
   const current = n.kind === "session" ? n.ranAs : n.identities?.find((l) => l.role === "owner");
   const github = identities.list.some((i) => i.kind === "github");
-  const kinds = n.kind === "project" ? [github ? "github" : "git"] : n.app === "codex" ? ["chatgpt", "openai"] : ["claude"];
+  // Grok Build records no account on its sessions, and XenoNet doesn't read
+  // its sign-in.
+  const kinds = n.kind === "project" ? [github ? "github" : "git"] : n.app === "codex" ? ["chatgpt", "openai"] : n.app === "grok" ? [] : ["claude"];
   for (const i of identities.list.filter((i) => kinds.includes(i.kind) && i.id !== current?.id)) {
     const who = identities.label(i.id);
     out.push({ id: `identity-pin:${i.id}`, label: n.kind === "session" ? `${what} ran as ${who}` : `${what} belongs to ${who}`, keywords: "identity account pin", run: pin(i.id, `${what} is pinned to ${who}`) });
@@ -784,7 +849,7 @@ const palette = createPalette({
   actions: (n) => {
     const acts = [{ key: "Enter", label: "go to", mod: null, run: () => select(n) }];
     if (n.kind === "session") {
-      if (!n.host) acts.push({ key: "Mod+O", label: "open in app", mod: "ctrl-o", run: () => openInApp(n) });
+      if (!n.host && n.actions?.some((a) => a.id === "open-app")) acts.push({ key: "Mod+O", label: "open in app", mod: "ctrl-o", run: () => openInApp(n) });
       acts.push({ key: "Mod+P", label: "preview", mod: "ctrl-p", run: () => (select(n), preview.open(n)) });
       acts.push({ key: "Mod+I", label: "stats", mod: "ctrl-i", run: () => (select(n), openStats(n)) });
       if (!n.host) acts.push({ key: "Mod+H", label: "hand off", mod: "ctrl-h", run: () => modals.handoff(n) });
@@ -869,10 +934,37 @@ function setFocusLighting(on) {
   hud.toast(`Focus lighting ${on ? "on" : "off"}`);
 }
 
+// ---------- plain panels (see style.css), remembered ----------
+//
+// The panels' glass blur (their backdrop-filter) is a large share of a
+// visible frame's GPU time. Plain panels draws them solid, without it. Off
+// unless you turn it on, and kept for this window, as the frame rate is.
+
+const PLAIN_KEY = "xenonet.plainPanels";
+let plainPanels = false;
+try {
+  plainPanels = localStorage.getItem(PLAIN_KEY) === "on";
+} catch {}
+document.body.classList.toggle("plain-panels", plainPanels);
+function setPlainPanels(on, { quiet = false } = {}) {
+  plainPanels = !!on;
+  document.body.classList.toggle("plain-panels", plainPanels);
+  scene.wake();
+  try {
+    localStorage.setItem(PLAIN_KEY, plainPanels ? "on" : "off");
+  } catch {}
+  if (!quiet) hud.toast(plainPanels ? "Panels are drawn solid, without the glass blur, which uses less GPU" : "Panels are drawn as glass again");
+}
+
 // ---------- session scope (see scope.js) ----------
 
 let fullGraph = null;
 let fullIndex = new Map();
+// The map as the server sent it, and the network's other machines drawn
+// from their presence (network-map.js), merged into it as it's drawn.
+let serverGraph = null;
+let netPart = null;
+let netKey = "";
 const scope = loadScope();
 const revealed = new Set();
 const scopeEl = document.getElementById("session-scope");
@@ -886,10 +978,15 @@ function keepIds() {
   if (selectedId) keep.add(selectedId);
   for (const s of lastLive?.sessions ?? []) if (s.status !== "idle" || s.needsYou || s.stuck) keep.add(s.id);
   for (const id of actorTargets()) keep.add(id);
+  // Another machine's sessions that wait on you or seem stuck, as their
+  // presence says.
+  for (const n of netPart?.nodes ?? []) if (n.presence?.waits || n.presence?.stuck) keep.add(n.id);
   return keep;
 }
 
-function applyGraph(graph = fullGraph) {
+function applyGraph(graph = serverGraph) {
+  serverGraph = graph;
+  graph = withNetwork(graph, netPart);
   fullGraph = graph;
   fullIndex = new Map(graph.nodes.map((n) => [n.id, n]));
   decorateHosts(graph);
@@ -901,6 +998,17 @@ function applyGraph(graph = fullGraph) {
   hud.setData(scene.setData(scoped));
   renderScope(scoped.scope, scopeCounts(graph, scope));
   if (!replay.active) hud.refreshFilters();
+}
+
+// The network's other machines changed (network.js's view): drawn again
+// only when what the map shows of them did.
+function mapNetwork(view) {
+  const part = networkPart(view.state, view.agents);
+  const key = partKey(part);
+  if (key === netKey) return;
+  netKey = key;
+  netPart = part;
+  if (serverGraph) applyGraph();
 }
 
 function reveal(id) {
@@ -1077,6 +1185,7 @@ applyGraph(graph);
 applyLive(live);
 fetch("/api/actors").then(async (r) => (r.status === 503 ? actorsAreOff() : applyActors(await r.json())), () => {});
 actorRequests.refresh();
+network.refresh().catch(() => {});
 document.getElementById("boot").classList.add("done");
 if (params.has("wallpaper")) setWallpaper(true);
 
@@ -1129,6 +1238,8 @@ events.addEventListener("pulse", (e) => !replay.active && scene.pulse(JSON.parse
 events.addEventListener("doctor", (e) => alerts.setDoctor(JSON.parse(e.data)));
 // How each other machine stands, between maps (hosts.js).
 events.addEventListener("hosts", (e) => hostFilters.setHosts(JSON.parse(e.data)));
+// The network across machines changed: read it again (network.js).
+events.addEventListener("net", () => network.heard());
 // The theme (core/themes.js): the server's choice wins, and a change to it
 // (from the palette, another window, xenonet theme or an edit to a theme of
 // your own) is drawn in place, without a reload.
@@ -1275,6 +1386,9 @@ if (import.meta.env.DEV || desktop) {
     actorTokens,
     remoteConnections,
     needsYou,
+    network,
+    messageTo,
+    message: messageState,
     sound: () => ({ state: ambient.state, mode: ambient.mode, heard: ambient.heard() }),
     spotify: () => spotifyChip.state,
     system: () => systemPanel.state,
@@ -1286,6 +1400,7 @@ if (import.meta.env.DEV || desktop) {
     live: () => lastLive,
     selectedId: () => selectedId,
     wallpaper: () => wallpaperOn,
+    look: { get: () => ({ plainPanels }), plainPanels: (on) => setPlainPanels(on, { quiet: true }) },
     terminal: () => terminal,
     errors: pageErrors,
   });

@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "xenolith": {
-      "command": "__NODE__",
-      "args": ["__RUNTIME__/server.mjs"]
+      "command": "xenolith",
+      "args": ["serve"]
     }
   }
 }

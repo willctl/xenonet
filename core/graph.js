@@ -130,19 +130,27 @@ export function buildGraph({ projectsDir, homeDir = null, projects, sessions, na
   if (wiki) {
     const server = wiki.server ?? "agent-wiki";
     const root = `resource:${server}`;
-    nodes.set(root, { id: root, kind: "wiki", name: contextName(server), server, path: wiki.dir, pageCount: wiki.pages.length, inbox: wiki.inbox, lastActivity: wiki.log[wiki.log.length - 1]?.ts ?? null });
+    // Its problem only when it has one (a format XenoNet doesn't read), so
+    // a folder it reads stays as it was.
+    nodes.set(root, { id: root, kind: "wiki", name: contextName(server), server, path: wiki.dir, pageCount: wiki.pages.length, inbox: wiki.inbox, lastActivity: wiki.log[wiki.log.length - 1]?.ts ?? null, ...(typeof wiki.problem === "string" ? { problem: wiki.problem } : {}) });
     link("core", root, "wiki");
-    const slugs = new Set(wiki.pages.map((p) => p.slug));
+    // A page of another space than this machine's (Xenolith's spaces) is
+    // wiki:<space>/<slug>, and its [[links]] are to pages of its own space.
+    const idOf = (space, slug) => `wiki:${space ? `${space}/` : ""}${slug}`;
+    const ids = new Set(wiki.pages.map((p) => idOf(p.space, p.slug)));
     const seen = new Set();
     for (const p of wiki.pages) {
-      const id = `wiki:${p.slug}`;
-      nodes.set(id, { id, kind: "page", name: p.title, slug: p.slug, type: p.type, summary: p.summary, tags: p.tags, updated: p.updated, updatedBy: p.updatedBy, path: p.path, writes: p.writes.slice(-6), lastActivity: p.updated });
+      const id = idOf(p.space, p.slug);
+      // Its aliases and space only when it has them, so a page without
+      // stays as it was.
+      nodes.set(id, { id, kind: "page", name: p.title, slug: p.slug, type: p.type, summary: p.summary, tags: p.tags, updated: p.updated, updatedBy: p.updatedBy, path: p.path, writes: p.writes.slice(-6), lastActivity: p.updated, ...(Array.isArray(p.aliases) && p.aliases.length ? { aliases: p.aliases } : {}), ...(p.space ? { space: String(p.space) } : {}) });
       link(root, id, "page");
       for (const l of p.links) {
-        const k = [p.slug, l].sort().join("|");
-        if (slugs.has(l) && !seen.has(k)) {
+        const to = idOf(p.space, l);
+        const k = [id, to].sort().join("|");
+        if (ids.has(to) && !seen.has(k)) {
           seen.add(k);
-          relations.push({ a: id, b: `wiki:${l}`, kind: "wikilink" });
+          relations.push({ a: id, b: to, kind: "wikilink" });
         }
       }
       for (const key of p.projects) relations.push({ a: id, b: `project:${key}`, kind: "mentions" });

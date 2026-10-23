@@ -54,15 +54,19 @@ pub fn backup_once(file: &Path) -> Result<Option<PathBuf>> {
     Ok(Some(bak))
 }
 
-/// Read-modify-write of a config file. `transform(text)` gets LF text (None: no file) and returns the
-/// new LF text, or None for no change. Existing files are backed up once and keep their line endings.
+/// Read-modify-write of a config file. `transform(text)` gets LF text without a byte-order mark
+/// (None: no file) and returns the new LF text, or None for no change. Existing files are backed up
+/// once and keep their line endings and their byte-order mark (a JSON parser refuses the mark, and
+/// some Windows editors write it).
 pub fn edit_file(file: &Path, transform: impl FnOnce(Option<&str>) -> Result<Option<String>>) -> Result<bool> {
     let cur = read_text(file)?;
-    let lf = cur.as_ref().map(|t| t.replace("\r\n", "\n"));
+    let bom = cur.as_ref().is_some_and(|t| t.starts_with('\u{feff}'));
+    let lf = cur.as_ref().map(|t| t.trim_start_matches('\u{feff}').replace("\r\n", "\n"));
     let Some(next) = transform(lf.as_deref())? else { return Ok(false) };
     let crlf = cur.as_ref().is_some_and(|t| t.contains("\r\n"));
     let next = next.replace("\r\n", "\n").replace('\r', "\n");
     let out = if crlf { next.replace('\n', "\r\n") } else { next };
+    let out = if bom { format!("\u{feff}{out}") } else { out };
     if cur.as_deref() == Some(out.as_str()) {
         return Ok(false);
     }
@@ -361,6 +365,18 @@ mod tests {
     }
 
     #[test]
+    fn an_edit_keeps_the_byte_order_mark_and_line_endings() {
+        let dir = std::env::temp_dir().join(format!("xenolith-bom-{}", std::process::id()));
+        let file = dir.join("settings.json");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&file, "\u{feff}{\r\n  \"permissions\": {}\r\n}\r\n").unwrap();
+        assert!(edit_file(&file, claude_allow_set).unwrap());
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.starts_with("\u{feff}{\r\n") && text.contains("\"mcp__xenolith\"\r\n"), "{text:?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn toml_approval_round_trips() {
         let id = "xenolith@personal";
         let base = "model = \"x\"\n\n[other]\na = 1\n";
@@ -393,14 +409,7 @@ mod tests {
     fn plugin_renders_twice_with_no_placeholders() {
         let dir = std::env::temp_dir().join(format!("xenolith-plugin-{}", std::process::id()));
         let dest = dir.join("plugins").join("xenolith");
-        let map = vec![
-            ("__VERSION__", "9.9.9".to_string()),
-            ("__HOOK_COMMAND__", "xenolith hook".to_string()),
-            ("__POINTER__", "pointer".to_string()),
-            ("__PROTOCOL__", "protocol".to_string()),
-            ("__NODE__", "unused".to_string()),
-            ("__RUNTIME__", "unused".to_string()),
-        ];
+        let map = vec![("__VERSION__", "9.9.9".to_string()), ("__HOOK_COMMAND__", "xenolith hook".to_string()), ("__POINTER__", "pointer".to_string()), ("__PROTOCOL__", "protocol".to_string())];
         let server = json!({ "command": "C:/x/xenolith.exe", "args": ["serve"] });
         let a = render_plugin(&dest, &map, &server).unwrap();
         let h1 = tree_hash(&dest);

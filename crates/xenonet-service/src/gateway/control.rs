@@ -41,7 +41,8 @@ fn bad(message: &str) -> CoreError {
     CoreError::of(Kind::Error, 400, "bad-request", message)
 }
 
-/// { on, host, tunnel: { kind, name, host } } as saved.
+/// { on, host, tunnel: { kind, name, host }, port } as saved: port is the
+/// one the gateway had when it was set up.
 #[derive(Clone, Debug, Default)]
 struct Saved {
     on: bool,
@@ -50,9 +51,29 @@ struct Saved {
 }
 
 impl Saved {
-    fn to_json(&self) -> Value {
-        json!({ "on": self.on, "host": self.host, "tunnel": self.tunnel.as_ref().map(|(k, n, h)| json!({ "kind": k, "name": n, "host": h })) })
+    fn to_json(&self, port: u16) -> Value {
+        json!({ "on": self.on, "host": self.host, "tunnel": self.tunnel.as_ref().map(|(k, n, h)| json!({ "kind": k, "name": n, "host": h })), "port": port })
     }
+}
+
+// The port a saved setting has, when it's a port.
+fn saved_port(store: &dyn EngineStore) -> Option<u16> {
+    let s = store.meta(KEY).ok().flatten().and_then(|t| json::parse(&t).ok())?;
+    s.get("port").and_then(Value::as_f64).filter(|p| p.fract() == 0.0 && (1.0..=65535.0).contains(p)).map(|p| p as u16)
+}
+
+// The setting as saved. One from before tunnels were picked here, a host
+// alone, is the owner's own tunnel.
+fn read_saved(store: &dyn EngineStore) -> Saved {
+    let s = store.meta(KEY).ok().flatten().and_then(|t| json::parse(&t).ok()).filter(Value::is_object).unwrap_or_else(|| json!({}));
+    let host = normal_host(s["host"].as_str());
+    let k = s["tunnel"]["kind"].as_str().filter(|k| kind(k).is_some()).map(str::to_string).or_else(|| host.as_ref().map(|_| "own".to_string()));
+    let tunnel = k.map(|k| {
+        let name = s["tunnel"]["name"].as_str().filter(|n| tunnel_name(n)).map(str::to_string);
+        let given = normal_host(s["tunnel"]["host"].as_str()).or_else(|| if k == "own" { host.clone() } else { None });
+        (k, name, given)
+    });
+    Saved { on: s["on"] == json!(true), host, tunnel }
 }
 
 pub struct ControlParts {
@@ -61,7 +82,11 @@ pub struct ControlParts {
     /// After a run an actor reported: the map refreshed, and the actor's
     /// beam to it.
     pub on_run: Arc<dyn Fn(&str, &str) + Send + Sync>,
-    pub port: u16,
+    /// The gateway's port when one is named (XENONET_GATEWAY_PORT);
+    /// otherwise it's the one its saved setting has, else the default for
+    /// `service_port`.
+    pub port: Option<u16>,
+    pub service_port: u16,
     pub version: String,
     pub dir: Option<String>,
     pub home: String,
@@ -95,10 +120,22 @@ pub struct GatewayControl {
 impl GatewayControl {
     pub fn new(parts: ControlParts) -> Arc<GatewayControl> {
         let seen = parts.store.meta(SEEN).ok().flatten().and_then(|s| json::parse(&s).ok()).and_then(|v| v.as_object().cloned()).unwrap_or_default();
+        // A gateway once set up keeps its port, so the tunnels and apps
+        // pointed at it keep working when the default moves or XenoNet's
+        // own port does. One set up before ports were saved (on, with a
+        // tunnel or a public host) was on the old default: it keeps that,
+        // saved now so it stays put. Only one never set up takes the
+        // default.
+        let before = read_saved(parts.store.as_ref());
+        let set_up = before.on || before.tunnel.is_some() || before.host.is_some();
+        let kept = saved_port(parts.store.as_ref());
+        let keep_old = parts.port.is_none() && kept.is_none() && set_up;
+        let port =
+            parts.port.or(kept).unwrap_or_else(|| if set_up { crate::config::old_gateway_port_of(parts.service_port) } else { crate::config::gateway_port_of(parts.service_port) });
         let me = Arc::new(GatewayControl {
             store: parts.store.clone(),
             actors: parts.cores.actors.clone(),
-            port: parts.port,
+            port,
             probe_local: parts.probe_local,
             log: parts.log.clone(),
             network: parts.network.clone(),
@@ -132,7 +169,7 @@ impl GatewayControl {
             log: Arc::new(move |code, detail| log(code, detail)),
         };
         let host = me.saved().host;
-        let _ = me.gateway.set(ActorGateway::with_clock(parts.cores, hooks, parts.port, host.as_deref(), &parts.version, parts.now.clone()));
+        let _ = me.gateway.set(ActorGateway::with_clock(parts.cores, hooks, port, host.as_deref(), &parts.version, parts.now.clone()));
         let tlog = parts.log.clone();
         let w4 = weak.clone();
         let thooks = TunnelHooks {
@@ -149,8 +186,11 @@ impl GatewayControl {
             on_change: Arc::new(|| {}),
             log: Arc::new(move |code, detail| tlog(code, detail)),
         };
-        let _ = me.tunnel.set(Tunnel::new(parts.port, parts.dir.as_deref(), &parts.home, parts.tunnel_host, thooks));
+        let _ = me.tunnel.set(Tunnel::new(port, parts.dir.as_deref(), &parts.home, parts.tunnel_host, thooks));
         let _ = weak;
+        if keep_old {
+            let _ = me.save(&before);
+        }
         me
     }
 
@@ -162,22 +202,12 @@ impl GatewayControl {
         self.tunnel.get().expect("made in new")
     }
 
-    // A setting from before tunnels were picked here, a host alone, is the
-    // owner's own tunnel.
     fn saved(&self) -> Saved {
-        let s = self.store.meta(KEY).ok().flatten().and_then(|t| json::parse(&t).ok()).filter(Value::is_object).unwrap_or_else(|| json!({}));
-        let host = normal_host(s["host"].as_str());
-        let k = s["tunnel"]["kind"].as_str().filter(|k| kind(k).is_some()).map(str::to_string).or_else(|| host.as_ref().map(|_| "own".to_string()));
-        let tunnel = k.map(|k| {
-            let name = s["tunnel"]["name"].as_str().filter(|n| tunnel_name(n)).map(str::to_string);
-            let given = normal_host(s["tunnel"]["host"].as_str()).or_else(|| if k == "own" { host.clone() } else { None });
-            (k, name, given)
-        });
-        Saved { on: s["on"] == json!(true), host, tunnel }
+        read_saved(self.store.as_ref())
     }
 
     fn save(&self, s: &Saved) -> R<()> {
-        self.store.set_meta(KEY, &json::stringify(&s.to_json(), 0))
+        self.store.set_meta(KEY, &json::stringify(&s.to_json(self.port), 0))
     }
 
     fn called(&self, slug: &str, id: &str, host: Option<&str>, at: f64) {
@@ -467,20 +497,46 @@ impl GatewayControl {
         self.status().await
     }
 
-    pub async fn status(&self) -> R<Value> {
-        let s = self.saved();
-        let g = self.gateway().status();
-        let tv = self.tunnel().view();
-        let reach = self.reach.locked().clone();
-        let why = self
-            .problem
+    // What's wrong with the gateway, as the panel says it, or null.
+    fn problem_of(&self, s: &Saved, tv: &Value, reach: &Value) -> Value {
+        self.problem
             .locked()
             .clone()
             .map(Value::String)
             .or_else(|| (s.on && s.tunnel.is_none()).then(|| json!("pick how the gateway reaches the internet")))
             .or_else(|| (s.on && tv["state"] == "failed").then(|| tv["why"].clone()))
             .or_else(|| (s.on && reach["state"] == "failing").then(|| reach["why"].clone()))
-            .unwrap_or(Value::Null);
+            .unwrap_or(Value::Null)
+    }
+
+    /// How the gateway stands for the tray (routes/tray.rs), without the
+    /// tool lookups status() makes: whether it's on, a word for its state
+    /// (off, starting, online, problem), its public address and what's
+    /// wrong.
+    pub fn brief(&self) -> Value {
+        let s = self.saved();
+        let tv = self.tunnel().view();
+        let reach = self.reach.locked().clone();
+        let problem = self.problem_of(&s, &tv, &reach);
+        let g = self.gateway().status();
+        let state = if !s.on {
+            "off"
+        } else if !problem.is_null() {
+            "problem"
+        } else if g["listening"] == json!(true) && reach["state"] == "ok" {
+            "online"
+        } else {
+            "starting"
+        };
+        json!({ "on": s.on, "state": state, "url": if s.on { g["url"].clone() } else { Value::Null }, "problem": problem })
+    }
+
+    pub async fn status(&self) -> R<Value> {
+        let s = self.saved();
+        let g = self.gateway().status();
+        let tv = self.tunnel().view();
+        let reach = self.reach.locked().clone();
+        let why = self.problem_of(&s, &tv, &reach);
         let mut tunnel = tv.clone();
         match &s.tunnel {
             Some((k, name, given)) => {

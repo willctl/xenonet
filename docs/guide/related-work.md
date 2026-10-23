@@ -12,14 +12,14 @@ In XenoNet, a **session** is the state around one run of a harness: a Claude Cod
 
 ## numbat: runs XenoNet doesn't read itself (experimental)
 
-XenoNet reads Claude Code's and Codex's sessions itself. With numbat, the runs of the other agents numbat records show as sessions too: one per numbat session id, with the agent as its app, such as `gemini-cli:<id>`. Each is marked as observed through numbat. Its edits count in the warnings another session gets before it edits the same file, marked as observed, since XenoNet inferred them from records rather than a transcript. An observed session has no hooks here, so it can't be sent messages, and it has no transcript to preview.
+XenoNet reads Claude Code's, Codex's and Grok Build's sessions itself. With numbat, the runs of the other agents numbat records show as sessions too: one per numbat session id, with the agent as its app, such as `gemini-cli:<id>`. Each is marked as observed through numbat. Its edits count in the warnings another session gets before it edits the same file, marked as observed, since XenoNet inferred them from records rather than a transcript. An observed session has no hooks here, so it can't be sent messages, and it has no transcript to preview.
 
 It's off unless you turn it on:
 
 1. Have numbat's hooks write events to a file, for example `numbat hook install --agent gemini --emit events --output file --output-file ~/.numbat/records.ndjson`. numbat's [live capture guide](https://github.com/perplexityai/numbat/blob/main/docs/live-capture.md) covers each agent.
 2. Start XenoNet with `XENONET_NUMBAT_FILE` set to that file.
 
-XenoNet reads the file and never writes to it. From each event it keeps the agent, the session id and its parent's, the kind of event, the edited file's path, the project folder, the branch, the model and the time. It never keeps the endpoint (host and user names), commands, prompts, previews, or tool input and output. Claude Code and Codex events are left out, since XenoNet reads those runs itself, and so are events that name no session. XenoNet reads numbat event schemas 0.2.0 to 0.5.0 and passes over other records, such as findings. A run drops off a day after its last event, and `session.end` ends it.
+XenoNet reads the file and never writes to it. From each event it keeps the agent, the session id and its parent's, the kind of event, the edited file's path, the project folder, the branch, the model and the time. It never keeps the endpoint (host and user names), commands, prompts, previews, or tool input and output. Claude Code, Codex and Grok Build events are left out, since XenoNet reads those runs itself, and so are events that name no session. XenoNet reads numbat event schemas 0.2.0 to 0.5.0 and passes over other records, such as findings. A run drops off a day after its last event, and `session.end` ends it.
 
 This is tested with made-up events that fit numbat's published schema, not yet against every agent numbat covers.
 
@@ -48,9 +48,9 @@ This is tested against XenoNet's real gateway and a stand-in SPACE API. It isn't
 
 ## Native readers: other harnesses' own records (experimental)
 
-XenoNet can read some other harnesses' sessions from their own records, without numbat. Each reader is off unless `XENONET_READERS` names it, as a comma-separated list. A session such a reader finds is read, not observed: its edits count in warnings like any session's. XenoNet has no hooks into these harnesses, so their sessions can't be sent messages yet, and have no transcript to preview.
+XenoNet can read some other harnesses' sessions from their own records, without numbat. Each reader is off unless `XENONET_READERS` names it, as a comma-separated list. A session such a reader finds is read, not observed: its edits count in warnings like any session's. XenoNet has no hooks into these harnesses, so they have no transcript to preview, and only OpenCode's sessions can be sent messages, through OpenCode's own server ([Live delivery](live-delivery.md#opencode)).
 
-**OpenCode** (`XENONET_READERS=opencode`). Each OpenCode session is a session, `opencode:<id>`, with a subagent's run under the session that started it. XenoNet opens OpenCode's database, `opencode.db`, read only for each look: `OPENCODE_DB`, or `$XDG_DATA_HOME/opencode/`, or `~/.local/share/opencode/` on every OS. It reads each session's id, parent, folder, title, version and times, and the files its `edit`, `write`, `multiedit` and `apply_patch` tools changed. It never reads prompts, replies, tool output or file contents. A session drops off a day after its last change. This is tested with a made-up database and against sessions OpenCode 1.19 wrote.
+**OpenCode** (`XENONET_READERS=opencode`). Each OpenCode session is a session, `opencode:<id>` with a dash for each underscore in OpenCode's id (`ses_4f…` is `opencode:ses-4f…`), with a subagent's run under the session that started it. An id that isn't letters and digits joined by single underscores is `opencode:x--` and the id's bytes in hex, so every id reads back to OpenCode's own. XenoNet opens OpenCode's database, `opencode.db`, read only for each look: `OPENCODE_DB`, or `$XDG_DATA_HOME/opencode/`, or `~/.local/share/opencode/` on every OS. It reads each session's id, parent, folder, title, version and times, and the files its `edit`, `write`, `multiedit` and `apply_patch` tools changed. It never reads prompts, replies, tool output or file contents. A session drops off a day after its last change. When numbat records the same run, it's one session, read here. This is tested with a made-up database and against sessions OpenCode 1.19 wrote.
 
 **Gemini CLI** (`XENONET_READERS=gemini-cli`). Each Gemini CLI session is a session, `gemini-cli:<session id>`, with a subagent's run under the session that started it. XenoNet reads its chat records, `~/.gemini/tmp/<project>/chats/session-*.jsonl` (or under `GEMINI_CLI_HOME`), and the project's folder from `.project_root` beside them. It reads each session's id, times and summary, and the files its `write_file` and `replace` calls changed. It never reads prompts, replies, thoughts or tool results. When numbat records the same run, it's one session, read here. This is tested with made-up records in the shape Gemini CLI 0.64's source writes, not yet against a real session.
 
@@ -79,10 +79,11 @@ Sessions are runs of a harness; actors last across runs.
 |---|---|---|---|---|
 | Claude Code (CLI, and its sessions in Claude desktop) | Sessions | Reads its transcripts; hooks once you connect it | Yes | Yes, once connected |
 | Codex (CLI and app) | Sessions | Reads its rollouts and app-server; hooks once you connect it | Yes | Yes, once connected |
+| Grok Build | Sessions | Reads its session folders; hooks once you connect it | Yes | Yes, once connected |
 | Gemini CLI (experimental) | Sessions | Reads its chat records, when you turn that on | Yes | No |
 | Cursor (experimental) | Sessions | XenoNet's hook in Cursor's hooks.json, when you turn that on | Yes | No |
 | GitHub Copilot CLI (experimental) | Sessions | Reads its event logs, when you turn that on | Yes | No |
-| OpenCode (experimental) | Sessions | Reads its database, when you turn that on | Yes | No |
+| OpenCode (experimental) | Sessions | Reads its database, when you turn that on | Yes | Through its own server, for sessions you allow |
 | Runs numbat records (experimental) | Sessions, observed | numbat's event file, when you name it | Yes, observed | No |
 | A run in a SPACE sandbox (experimental) | Session, under its actor | `report_run` through the actor gateway | No | No |
 | Pi | Runs in a records panel, not the map | Reads its session files, when you turn that on | No | No |

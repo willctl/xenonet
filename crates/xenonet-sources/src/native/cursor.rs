@@ -4,16 +4,17 @@
 //! afterFileEdit files as its edits, ended at its sessionEnd.
 
 use super::files::Files;
-use super::node_path;
 use super::{
     by_num, edits_out, fits_id, js_max, js_min, older, prune_edits, push_edit, str_of, titled, Check, Checked, Edits, NativeReader, Out, Threw, Vendor, DAY_MS, SESSIONS_MAX,
+    VENDOR_FAILED,
 };
 use crate::session::{RunSession, Via};
 use serde_json::Value;
 use xenonet_base::fs::FsError;
 use xenonet_base::json::{self, number_string};
+use xenonet_base::nodepath::{Style, NATIVE};
 use xenonet_base::ordered::OrderedMap;
-use xenonet_base::paths::{path_style, PathStyle};
+use xenonet_base::paths::path_style;
 use xenonet_base::text::{is_blank, js_string};
 use xenonet_schema::drift::clean_version;
 
@@ -42,8 +43,8 @@ fn date_of(v: Option<&Value>) -> Option<f64> {
 /// cursor-hooks.ndjson in XenoNet's state folder.
 pub fn cursor_events_file(named: Option<&str>, state_dir: &str) -> String {
     match named.filter(|n| !n.is_empty()) {
-        Some(n) => node_path::resolve(PathStyle::Native, &[n]),
-        None => node_path::join(PathStyle::Native, &[state_dir, "cursor-hooks.ndjson"]),
+        Some(n) => NATIVE.resolve(&[n]),
+        None => NATIVE.join(&[state_dir, "cursor-hooks.ndjson"]),
     }
 }
 
@@ -97,6 +98,13 @@ impl Cursor {
     /// went stale. Threw when the vendor check did: the runs stay as they
     /// were, and the stamp is taken.
     pub fn read(&mut self, file: Option<&str>, now: f64, files: &mut dyn Files, check: &mut Check<'_>) -> Result<(), Threw> {
+        self.read_with(file, now, files, &mut Only(check))
+    }
+
+    /// As `read`, the records checked by `vendor`, whose reader is got
+    /// before a changed file is parsed, as cursor.js's #parse gets it.
+    /// Threw when getting it did too.
+    pub fn read_with(&mut self, file: Option<&str>, now: f64, files: &mut dyn Files, vendor: &mut dyn Vendor) -> Result<(), Threw> {
         let got = match file {
             Some(f) => tail(f, files),
             None => Err(FsError { code: Some("ERR_INVALID_ARG_TYPE".into()), message: "no file".into() }),
@@ -113,7 +121,8 @@ impl Cursor {
         let stamp = format!("{}:{}", number_string(size), number_string(mtime_ms));
         if self.seen.as_deref() != Some(stamp.as_str()) {
             self.seen = Some(stamp);
-            self.parse(&lines, now, check)?;
+            vendor.ready()?;
+            self.parse(&lines, now, &mut |rec, version| vendor.check(rec, version))?;
         } else {
             self.prune(now);
         }
@@ -152,7 +161,7 @@ impl Cursor {
             run.created_at = js_min(run.created_at, at);
             run.updated_at = js_max(run.updated_at, at);
             let root = match field(&e, "workspace_roots") {
-                Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).find(|x| node_path::is_absolute(path_style(x), x)),
+                Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).find(|x| Style::from(path_style(x)).is_absolute(x)),
                 _ => None,
             };
             if let Some(root) = root {
@@ -167,8 +176,8 @@ impl Cursor {
                 run.ended_at = None;
             }
             if hook == Some("afterFileEdit") {
-                if let Some(p) = str_of(field(&e, "file_path")).filter(|p| node_path::is_absolute(path_style(p), p)) {
-                    let file = node_path::resolve(path_style(p), &[p]);
+                if let Some(p) = str_of(field(&e, "file_path")).filter(|p| Style::from(path_style(p)).is_absolute(p)) {
+                    let file = Style::from(path_style(p)).resolve(&[p]);
                     push_edit(&mut run.edits, &file, js_min(at, now));
                 }
             }
@@ -193,11 +202,24 @@ impl Cursor {
     }
 }
 
+/// A check alone, as a vendor reader that's always there to get.
+struct Only<'a, 'b>(&'a mut Check<'b>);
+
+impl Vendor for Only<'_, '_> {
+    fn missing(&mut self, _: &str, _: Option<&str>) -> Result<(), Threw> {
+        Ok(())
+    }
+    fn check(&mut self, record: &Value, version: Option<&str>) -> Result<Checked, Threw> {
+        (self.0)(record, version)
+    }
+}
+
 impl NativeReader for Cursor {
-    /// Reads the hook's file at `at`. A vendor check that threw is
-    /// reported.
+    /// Reads the hook's file at `at`. A vendor reader that couldn't be got,
+    /// or a check that threw, is reported, as cursor.js's read reports
+    /// both.
     fn read(&mut self, at: &str, now: f64, files: &mut dyn Files, vendor: &mut dyn Vendor) -> Result<(), String> {
-        Cursor::read(self, Some(at), now, files, &mut |rec, version| vendor.check(rec, version)).map_err(|Threw| "the vendor check failed".to_string())
+        self.read_with(Some(at), now, files, vendor).map_err(|Threw| VENDOR_FAILED.to_string())
     }
 
     fn source_state(&self) -> &'static str {

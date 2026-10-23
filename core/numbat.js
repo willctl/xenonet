@@ -32,6 +32,7 @@ import fs from "node:fs";
 import { pathStyle } from "./paths.js";
 import { SESSION_APPS } from "./schema/ids.js";
 import { NativeReader, DAY_MS, capRuns, pruneRuns, pushEdit, runSession, titled } from "./native/reader.js";
+import { localId as openCodeLocalId } from "./native/opencode.js";
 
 export const SCHEMA_VERSIONS = new Set(["0.2.0", "0.3.0", "0.4.0", "0.5.0"]);
 // Apps XenoNet reads itself, and numbat's names that aren't a run's app.
@@ -44,10 +45,17 @@ const LINE_MAX = 1 << 20;
 const str = (v) => (typeof v === "string" && v.length ? v : null);
 const abs = (p) => !!p && pathStyle(p).isAbsolute(p);
 const RUN_ID = /^[0-9A-Za-z][0-9A-Za-z-]{6,}$/;
+const fits = (id) => RUN_ID.test(id) && id.length <= 128;
 // A run's id as XenoNet's session ids take it: numbat's own when it fits,
 // else a stable digest of it.
-export const runId = (sid) => (RUN_ID.test(sid) && sid.length <= 128 ? sid : `n${crypto.createHash("sha256").update(sid).digest("hex").slice(0, 31)}`);
-export const sessionIdOf = (app, sid) => `${app}:${runId(sid)}`;
+export const runId = (sid) => (fits(sid) ? sid : `n${crypto.createHash("sha256").update(sid).digest("hex").slice(0, 31)}`);
+// A run's session id. OpenCode's runs take the id its own reader gives them
+// (ses_… as ses-…, core/native/opencode.js) when that fits, so a run both
+// read is one session, and delivery finds it.
+export const sessionIdOf = (app, sid) => {
+  if (app === "opencode" && fits(openCodeLocalId(sid))) return `opencode:${openCodeLocalId(sid)}`;
+  return `${app}:${runId(sid)}`;
+};
 
 // One NDJSON line as XenoNet reads it: { ok: true, event }, or { ok: false,
 // why } for a line it passes over.

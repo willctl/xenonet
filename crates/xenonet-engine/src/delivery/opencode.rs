@@ -17,23 +17,19 @@ use std::fmt::Write as _;
 use std::sync::Mutex;
 use xenonet_base::sync::Locked;
 
-/// XenoNet's ids take OpenCode's ses_… with "-" for "_".
+/// OpenCode's own id for XenoNet's (xenonet_base::opencode, as its reader
+/// wrote it).
 pub fn open_code_id(id: &Arg) -> String {
-    let s = js_text(id);
-    let s = s.strip_prefix("opencode:").unwrap_or(&s);
-    match s.strip_prefix("ses-") {
-        Some(rest) => format!("ses_{rest}"),
-        None => s.to_string(),
-    }
+    xenonet_base::opencode::open_code_id(&js_text(id))
 }
 
-/// And back: XenoNet's id for a session named the way OpenCode shows it.
-/// Any other id comes back as it was.
+/// And back: XenoNet's id for a session named the way OpenCode shows it
+/// (ses_…, or opencode:ses_…). Any other id comes back as it was.
 pub fn from_open_code_id(id: &Arg) -> String {
     let s = if id.is_nullish() { String::new() } else { js_text(id) };
     let s = xenonet_base::text::js_trim(&s);
-    match crate::re!(r"^(?:opencode:)?ses_([0-9A-Za-z]+)$").captures(s) {
-        Some(m) => format!("opencode:ses-{}", &m[1]),
+    match crate::re!(r"^(?:opencode:)?(ses(?:_[0-9A-Za-z]+)+)$").captures(s) {
+        Some(m) => format!("opencode:{}", xenonet_base::opencode::local_id(&m[1])),
         None => s.to_string(),
     }
 }
@@ -169,7 +165,7 @@ pub fn listening_ports(c: &mut dyn Calls, pid: f64, platform: &str) -> Result<Ve
 /// /^n.*:(\d+)$/gm, with \r a line's end as JS's m flag has it.
 fn regex_lsof() -> &'static regex::Regex {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    RE.get_or_init(|| regex::Regex::new(r"(?mR)^n[^\n\r\x{2028}\x{2029}]*:([0-9]+)$").expect("a fixed pattern"))
+    RE.get_or_init(|| regex::Regex::new(&format!(r"(?mR)^n{}*:([0-9]+)$", xenonet_base::text::JS_DOT)).expect("a fixed pattern"))
 }
 
 /// One folder, as OpenCode spells it in two places: the same once a

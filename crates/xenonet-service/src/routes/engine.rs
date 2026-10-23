@@ -10,21 +10,25 @@
 //!
 //! Registered actors call the same operations as `actor:<slug>`, with their
 //! token, checked as their own routes are, and held to what you allowed
-//! them: sending needs message-agents (60 messages an hour, 6 of them to a
-//! repo or to all), claiming needs edit-repos. An actor's focus is its
-//! status, an event on the feed, so each counts against its events.
+//! them: sending and handing off need message-agents (60 messages an
+//! hour, 6 of them to a repo or to all), claiming needs edit-repos. An
+//! actor's focus is its status, an event on the feed, so each counts
+//! against its events.
 
 use crate::actor_caller::{rates, retry_after, ActorCaller};
-use crate::borrowed::{attest, is_agent_id, parse_selector, platform, Sender};
+use crate::borrowed::{attest, platform, Sender};
 use crate::cores::{ok, reason, Actors, Channels, Connect, CoreError, Engine, Verify};
 use crate::ctx::{fail, pending_reply};
 use crate::http::{Reply, Req};
 use serde_json::{json, Value};
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use xenonet_actors::tokens::token_in_url;
+use xenonet_base::nodepath::NATIVE;
 use xenonet_base::text::{js_number, truthy};
+use xenonet_engine::delivery::selector::parse_selector;
+use xenonet_engine::engine::is_agent_id;
+use xenonet_engine::sql::Arg;
 
 const ACTOR_BODY: usize = 16 << 10;
 
@@ -44,17 +48,17 @@ pub struct EngineRoutes<'a> {
 fn scope_of(s: &Value) -> String {
     match s.as_str() {
         Some("machine") => "machine".into(),
-        Some(t) if parse_selector(t).is_some() => t.to_string(),
+        Some(t) if parse_selector(&Arg::text(t)).is_some() => t.to_string(),
         _ => "repo".into(),
     }
 }
 
-const OPS: [&str; 9] = ["whoami", "peers", "who-has", "send", "inbox", "claim", "release", "focus", "channel"];
+const OPS: [&str; 10] = ["whoami", "peers", "who-has", "send", "inbox", "claim", "release", "focus", "channel", "handoff"];
 
 /// The capability each operation needs from an actor.
 fn needs(op: &str) -> Option<&'static str> {
     match op {
-        "send" => Some("message-agents"),
+        "send" | "handoff" => Some("message-agents"),
         "claim" => Some("edit-repos"),
         _ => None,
     }
@@ -97,6 +101,20 @@ impl EngineRoutes<'_> {
                 e.release(me, paths).await
             }
             "focus" => e.set_focus(me, get(b, "text")).await,
+            "handoff" => {
+                let keys = [
+                    ("accept", "accept"),
+                    ("to", "to"),
+                    ("host", "host"),
+                    ("goal", "goal"),
+                    ("done", "done"),
+                    ("next", "next"),
+                    ("files", "files"),
+                    ("branch", "branch"),
+                    ("commit", "commit"),
+                ];
+                e.handoff(me, pick(b, &keys), extra).await
+            }
             // A Claude Code session's channel waiting for messages.
             "channel" => {
                 let Some(channels) = self.channels.as_ref().filter(|_| me.starts_with("claude:")) else {
@@ -135,7 +153,7 @@ impl EngineRoutes<'_> {
                 return fail(403, "not-allowed", format!("{name} needs the {need} capability, which this actor wasn't allowed"), &[], &json!({}));
             }
         }
-        if name == "send" {
+        if name == "send" || name == "handoff" {
             let wide = matches!(body.get("to").and_then(Value::as_str), Some("repo" | "project" | "all"));
             let mut wait = if wide { caller.take(&format!("a:{slug}|wide"), rates::WIDE, 1.0) } else { 0.0 };
             if wait == 0.0 {
@@ -158,7 +176,7 @@ impl EngineRoutes<'_> {
                 );
             }
         }
-        let extra = (name == "send").then(|| {
+        let extra = (name == "send" || name == "handoff").then(|| {
             let info = self.actors.as_ref().and_then(|a| a.info(&id));
             let name = info.as_ref().and_then(|i| i.get("name")).and_then(Value::as_str).map_or_else(|| slug.clone(), str::to_string);
             let product = info.as_ref().and_then(|i| i.get("product")).and_then(|p| p.get("id")).and_then(Value::as_str).map(str::to_string);
@@ -208,7 +226,7 @@ impl EngineRoutes<'_> {
         }
         if req.method == "GET" && route == "/api/engine/who" {
             let file = req.param("path").unwrap_or("").to_string();
-            if !is_absolute(&file) {
+            if !NATIVE.is_absolute(&file) {
                 return Ok(Reply::error(400, "give the file's absolute path"));
             }
             return Ok(Reply::json(200, self.engine.who_has(None, &file).await?));
@@ -241,7 +259,7 @@ impl EngineRoutes<'_> {
         if req.header("authorization").is_some() {
             return Ok(if name == "channel" { Reply::error(404, "not found") } else { self.as_actor(req, &name).await });
         }
-        let Some(me) = req.header("x-xenonet-agent").filter(|m| is_agent_id(Some(m))).map(str::to_string) else {
+        let Some(me) = req.header("x-xenonet-agent").filter(|m| is_agent_id(&Arg::text(*m))).map(str::to_string) else {
             return Ok(Reply::error(400, "say which session is calling, in x-xenonet-agent (claude:<session id> or codex:<thread id>)"));
         };
         let verdict = self.verify.check(req.peer, &me, false).await;
@@ -254,7 +272,7 @@ impl EngineRoutes<'_> {
         let pid = verdict.get("root").and_then(|r| r.get("pid")).filter(|p| !p.is_null()).cloned().unwrap_or_else(|| xenonet_base::json::number(js_number(body.get("pid"))));
         let cwd = body.get("cwd").filter(|c| c.is_string()).cloned().unwrap_or(Value::Null);
         self.engine.touch(&me, json!({ "app": me.split(':').next().unwrap_or(""), "cwd": cwd, "via": "mcp", "pid": pid }))?;
-        let extra = if name == "send" {
+        let extra = if name == "send" || name == "handoff" {
             let title = self.engine.view(&me).await.ok().flatten().and_then(|v| v.get("title").cloned()).and_then(|t| t.as_str().map(str::to_string));
             Some(json!({ "envelope": attest(Sender { id: &me, kind: "agent", name: title, product: None }, "session", &verdict, self.home, self.now, platform()) }))
         } else {
@@ -268,17 +286,5 @@ fn js_string_or_empty(v: &Value) -> String {
     match v {
         Value::Null => String::new(),
         v => xenonet_base::text::js_string(v),
-    }
-}
-
-/// path.isAbsolute, as Node has it on this platform.
-fn is_absolute(p: &str) -> bool {
-    if cfg!(windows) {
-        p.starts_with('/')
-            || p.starts_with('\\')
-            || Path::new(p).is_absolute()
-            || (p.len() >= 2 && p.as_bytes()[1] == b':' && (p.len() == 2 || matches!(p.as_bytes()[2], b'/' | b'\\')))
-    } else {
-        p.starts_with('/')
     }
 }

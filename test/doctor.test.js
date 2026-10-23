@@ -26,15 +26,16 @@ const OBSERVERS = () => [
 
 // A machine where everything is in place; each test breaks one thing.
 function ctxWith(overrides = {}) {
-  const bins = { claude: `${HOME}/.local/bin/claude`, codex: "/usr/local/bin/codex", git: "/usr/bin/git", codesign: "/usr/bin/codesign", ...overrides.bins };
+  const bins = { claude: `${HOME}/.local/bin/claude`, codex: "/usr/local/bin/codex", grok: `${HOME}/.grok/bin/grok`, git: "/usr/bin/git", codesign: "/usr/bin/codesign", ...overrides.bins };
   const answers = {
     "claude --version": { code: 0, stdout: "2.1.288 (Claude Code)\n", stderr: "" },
     "claude auth status": { code: 0, stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }), stderr: "" },
     "codex --version": { code: 0, stdout: "codex-cli 0.146.0\n", stderr: "" },
     "codex login status": { code: 0, stdout: "", stderr: "Logged in using ChatGPT\n" },
+    "grok --version": { code: 0, stdout: "grok 1.0.50 (c58f321264ba)\n", stderr: "" },
     ...overrides.answers,
   };
-  const dirs = { [`${HOME}/.claude/projects`]: ["-Users-ada-atlas"], [`${HOME}/.codex/sessions`]: ["2026"], [`${HOME}/Projects`]: ["atlas", "ledger"], [`${HOME}/state`]: [], ...overrides.dirs };
+  const dirs = { [`${HOME}/.claude/projects`]: ["-Users-ada-atlas"], [`${HOME}/.codex/sessions`]: ["2026"], [`${HOME}/.grok/sessions`]: ["%2FUsers%2Fada%2Fatlas"], [`${HOME}/.grok/auth.json`]: [], [`${HOME}/Projects`]: ["atlas", "ledger"], [`${HOME}/state`]: [], ...overrides.dirs };
   const denied = new Set(overrides.denied ?? []);
   return machine({
     home: HOME,
@@ -44,18 +45,20 @@ function ctxWith(overrides = {}) {
     env: { PATH: "/usr/bin" },
     which: (cmd) => bins[cmd] ?? null,
     run: async (file, args) => answers[`${file.split("/").pop()} ${args.join(" ")}`] ?? { code: 1, stdout: "", stderr: "unknown" },
-    exists: (p) => p in dirs || Object.values(bins).includes(p),
+    // A folder or file the test took away (set to undefined) isn't there.
+    exists: (p) => dirs[p] !== undefined || Object.values(bins).includes(p),
     readdir: async (p) => {
       if (denied.has(p)) throw Object.assign(new Error("denied"), { code: "EPERM" });
       return dirs[p];
     },
     access: async () => {},
     statfs: async () => ({ bavail: 50e6, bsize: 4096 }),
-    paths: { claudeProjectsDir: `${HOME}/.claude/projects`, codexHome: `${HOME}/.codex`, projectsDir: `${HOME}/Projects`, stateDir: `${HOME}/state` },
+    paths: { claudeProjectsDir: `${HOME}/.claude/projects`, codexHome: `${HOME}/.codex`, grokHome: `${HOME}/.grok`, projectsDir: `${HOME}/Projects`, stateDir: `${HOME}/state` },
+    readText: (p) => overrides.files?.[p] ?? null,
     self: { port: 47840, name: "XenoNet" },
-    health: { sources: [{ name: "projects", ok: true, count: 2 }, { name: "claude", ok: true, count: 9 }, { name: "codex", ok: true, count: 4 }, { name: "wiki", ok: false, error: "Agent Wiki folder not found" }], blocks: BLOCKS() },
+    health: { sources: [{ name: "projects", ok: true, count: 2 }, { name: "claude", ok: true, count: 9 }, { name: "codex", ok: true, count: 4 }, { name: "wiki", ok: false, error: "Xenolith folder not found" }], blocks: BLOCKS() },
     live: { limits: { claude: { source: "anthropic" } } },
-    connect: { port: 47840, apps: ["claude", "codex"].map((app) => ({ app, changes: [{ id: "mcp", state: "present" }, { id: "hooks", state: "present" }], broken: [] })) },
+    connect: { port: 47840, apps: ["claude", "codex", "grok"].map((app) => ({ app, installed: true, changes: [{ id: "mcp", state: "present" }, { id: "hooks", state: "present" }], broken: [] })) },
     gitAvailable: () => true,
     procs: async () => ({ supported: true, peer: true, chain: true }),
     launcher: async () => ({ dir: `${HOME}/state/runtime/launcher`, version: 2, ships: 2, said: { launcher: 2, protocol: 1, tools: "0.8.0", node: "v24.19.0" } }),
@@ -63,19 +66,102 @@ function ctxWith(overrides = {}) {
     drift: () => ({ file: `${HOME}/Library/Caches/XenoNet/drift.json`, lookedAt: null, records: [] }),
     command: () => ({ file: `${HOME}/.local/bin/xenonet`, installed: true, ours: true, runs: ["/usr/local/bin/node", `${HOME}/xenonet/cli/xenonet.js`], broken: false, onPath: true }),
     actors: { expired: () => [], observers: OBSERVERS, repos: () => [`${HOME}/Projects/atlas`, `${HOME}/Projects/ledger`], gateway: async () => ({ on: false }), wakes: async () => [] },
+    login: () => LOGIN(),
     ...overrides.ctx,
   });
 }
+
+// The service started at login, as the supervisor's review sees it: on,
+// current and running under launchd.
+const LOGIN = (over = {}) => ({
+  supported: true,
+  supervisor: "launchd",
+  file: `${HOME}/Library/LaunchAgents/dev.xenonet.service.plist`,
+  registered: true,
+  port: "47840",
+  loaded: true,
+  state: "running",
+  pid: 4242,
+  lastExit: "(never exited)",
+  user: "ada",
+  current: true,
+  program: `${HOME}/Library/Application Support/XenoNet/runtime/launcher/xenonet`,
+  programFound: true,
+  ...over,
+});
 
 const byId = (r) => Object.fromEntries(r.results.map((x) => [x.id, x]));
 
 test("everything in place: every check passes, and the optional wiki doesn't count", async () => {
   const r = await runDoctor(ctxWith());
   assert.deepEqual(r.results.map((x) => x.id), CHECKS.map((c) => c.id));
-  assert.deepEqual(r.results.filter((x) => x.status !== "ok").map((x) => [x.id, x.status, x.detail]), []);
+  // Lingering is Linux's, so on a Mac its check doesn't apply.
+  const elsewhere = ["service.boot"];
+  assert.deepEqual(r.results.filter((x) => x.status !== "ok" && !elsewhere.includes(x.id)).map((x) => [x.id, x.status, x.detail]), []);
+  assert.deepEqual(elsewhere.map((id) => byId(r)[id].status), ["skip"]);
   assert.equal(byId(r)["claude.cli"].detail, "version 2.1.288, ~/.local/bin/claude");
   assert.equal(byId(r)["codex.auth"].detail, "signed in using ChatGPT");
-  assert.equal(r.summary.ok, CHECKS.length);
+  assert.equal(r.summary.ok, CHECKS.length - elsewhere.length);
+});
+
+test("the service started at login: on and current, off, or what to fix, with how", async () => {
+  const run = async (login, ctx = {}) => byId(await runDoctor(ctxWith({ ctx: { login: () => login, ...ctx } }), { only: ["service"] }));
+  const on = await run(LOGIN());
+  assert.deepEqual(Object.keys(on), ["service.login", "service.file", "service.loaded", "service.boot"]);
+  assert.deepEqual([on["service.login"].status, on["service.login"].detail], ["ok", "on, through launchd: ~/Library/LaunchAgents/dev.xenonet.service.plist"]);
+  assert.equal(on["service.file"].detail, "~/Library/LaunchAgents/dev.xenonet.service.plist is what xenonet service install writes");
+  assert.equal(on["service.loaded"].detail, "launchd has it, running as process 4242");
+  assert.deepEqual([on["service.boot"].status, on["service.boot"].detail], ["skip", "for Linux, where lingering starts a user's services at boot"]);
+  // Registered for another XenoNet's port.
+  assert.match((await run(LOGIN({ port: "47850" })))["service.login"].detail, /, for the service on port 47850$/);
+
+  // Off, as it is until you turn it on: a note with how, and the rest
+  // don't apply.
+  const off = await run({ supported: true, supervisor: "launchd", file: LOGIN().file, registered: false, loaded: false });
+  assert.deepEqual([off["service.login"].status, off["service.login"].detail], ["info", "off: Desktop starts the service when it opens, and it runs until you log out"]);
+  assert.match(off["service.login"].fix, /Background service in XenoNet's palette, or run xenonet service install/);
+  for (const id of ["service.file", "service.loaded"]) assert.deepEqual([off[id].status, off[id].detail], ["skip", "the service doesn't start at login"]);
+  // No ctx.login (an older XenoNet, the JS's own machine), or no supervisor here.
+  const none = byId(await runDoctor(ctxWith({ ctx: { login: undefined } }), { only: ["service.login"] }));
+  assert.deepEqual([none["service.login"].status, none["service.login"].detail], ["skip", "XenoNet can't look at how its service starts from here"]);
+  assert.equal((await run({ supported: false, registered: false }))["service.login"].detail, "this system has no supervisor XenoNet registers with");
+
+  // The registration: a program that's gone, or not what install writes now.
+  const gone = await run(LOGIN({ programFound: false, program: `${HOME}/old/xenonet`, current: false }));
+  assert.deepEqual([gone["service.file"].status, gone["service.file"].detail], ["fail", "~/Library/LaunchAgents/dev.xenonet.service.plist runs ~/old/xenonet, which isn't there"]);
+  assert.equal(gone["service.file"].fix, "Run xenonet service install again, which points it at XenoNet's launcher.");
+  const stale = (await run(LOGIN({ current: false })))["service.file"];
+  assert.deepEqual([stale.status, stale.detail], ["warn", "~/Library/LaunchAgents/dev.xenonet.service.plist isn't what xenonet service install writes now, so the service may not start the way this XenoNet expects"]);
+  assert.match(stale.fix, /^Run xenonet service install again, which writes it afresh and reloads it\./);
+  const unsure = (await run(LOGIN({ current: null, expected: "no account to start it for" })))["service.file"];
+  assert.deepEqual([unsure.status, unsure.detail], ["info", "XenoNet couldn't tell whether ~/Library/LaunchAgents/dev.xenonet.service.plist is current: no account to start it for"]);
+
+  // What launchd, systemd or Task Scheduler says.
+  const unloaded = (await run(LOGIN({ loaded: false, state: null, pid: null })))["service.loaded"];
+  assert.deepEqual([unloaded.status, unloaded.detail], ["warn", "launchd doesn't have it, so it doesn't start at login"]);
+  assert.match(unloaded.fix, /Login Items & Extensions/);
+  const asked = (await run(LOGIN({ supervisor: "systemd", error: "Failed to connect to bus: No medium found" })))["service.loaded"];
+  assert.deepEqual([asked.status, asked.detail, asked.fix], ["warn", "XenoNet couldn't ask systemd about it: Failed to connect to bus: No medium found", "systemctl --user status xenonet says more."]);
+  const disabled = (await run(LOGIN({ supervisor: "Task Scheduler", loaded: false, state: "disabled", pid: null })))["service.loaded"];
+  assert.deepEqual([disabled.status, disabled.detail], ["warn", "it's turned off in Task Scheduler, so it doesn't start when you sign in"]);
+  const failed = (await run(LOGIN({ supervisor: "systemd", state: "failed", pid: null, lastExit: "1" })))["service.loaded"];
+  assert.deepEqual([failed.status, failed.detail], ["warn", "systemd gave up on it after it kept stopping (it last exited with 1)"]);
+  const stopped = (await run(LOGIN({ state: "not running", pid: null, lastExit: "0" })))["service.loaded"];
+  assert.deepEqual([stopped.status, stopped.detail], ["info", "launchd has it, but it isn't running now"]);
+
+  // Lingering, on Linux: wanted where there's no graphical session, as on
+  // a host reached over SSH.
+  const linux = (over) => run(LOGIN({ supervisor: "systemd", file: "/home/ada/.config/systemd/user/xenonet.service", ...over }), { platform: "linux" });
+  assert.deepEqual([(await linux({ linger: true }))["service.boot"].status, (await linux({ linger: true }))["service.boot"].detail], ["ok", "lingering is on, so it starts at boot and keeps running after you log out"]);
+  const desk = (await linux({ linger: false, graphical: true }))["service.boot"];
+  assert.deepEqual([desk.status, desk.detail], ["info", "lingering is off: it starts when you log in, and stops when you log out"]);
+  assert.match(desk.fix, /run loginctl enable-linger ada once/);
+  const host = (await linux({ linger: false, graphical: false }))["service.boot"];
+  assert.equal(host.status, "warn");
+  assert.match(host.detail, /no graphical session here, as on a host reached over SSH/);
+  assert.match(host.fix, /sudo loginctl enable-linger ada\.$/);
+  const unknown = (await linux({ linger: null, user: "" }))["service.boot"];
+  assert.deepEqual([unknown.status, unknown.fix], ["info", "loginctl show-user $USER --property=Linger says."]);
 });
 
 test("sign-ins: signed out is a failure with the fix; no Claude Code skips what needs it", async () => {
@@ -85,6 +171,31 @@ test("sign-ins: signed out is a failure with the fix; no Claude Code skips what 
   const none = byId(await runDoctor(ctxWith({ bins: { claude: undefined } })));
   assert.equal(none["claude.cli"].status, "warn");
   assert.equal(none["claude.auth"].status, "skip");
+});
+
+test("Grok Build: not installed is a note, and so is no sign-in; its sessions folder, and hooks your organization or you turned off", async () => {
+  const everything = byId(await runDoctor(ctxWith()));
+  assert.equal(everything["grok.cli"].detail, "version 1.0.50, ~/.grok/bin/grok");
+  assert.equal(everything["grok.sessions"].detail, "1 folder of sessions in ~/.grok/sessions");
+  // Off PATH, where its installer puts it.
+  const offPath = byId(await runDoctor(ctxWith({ bins: { grok: undefined }, dirs: { [`${HOME}/.grok/bin/grok`]: [] } })));
+  assert.deepEqual([offPath["grok.cli"].status, offPath["grok.cli"].detail], ["ok", "version 1.0.50, ~/.grok/bin/grok"]);
+  const none = byId(await runDoctor(ctxWith({ bins: { grok: undefined }, ctx: { connect: { port: 47840, apps: [{ app: "grok", installed: false, changes: [{ id: "mcp", state: "missing" }, { id: "hooks", state: "missing" }], broken: [] }] } } })));
+  assert.deepEqual([none["grok.cli"].status, none["grok.cli"].fix], ["info", "To use Grok Build, install it (x.ai/cli), then run grok login."]);
+  assert.deepEqual(["grok.auth", "grok.hooks", "agents.grok"].map((id) => none[id].status), ["skip", "skip", "skip"]);
+  const signedOut = byId(await runDoctor(ctxWith({ dirs: { [`${HOME}/.grok/auth.json`]: undefined } })));
+  assert.deepEqual([signedOut["grok.auth"].status, signedOut["grok.auth"].fix], ["info", "Run grok login."]);
+  const keyed = byId(await runDoctor(ctxWith({ dirs: { [`${HOME}/.grok/auth.json`]: undefined }, ctx: { env: { PATH: "/usr/bin", XAI_API_KEY: "made-up" } } })));
+  assert.equal(keyed["grok.auth"].detail, "with an API key (XAI_API_KEY)");
+  const noSessions = byId(await runDoctor(ctxWith({ dirs: { [`${HOME}/.grok/sessions`]: undefined } })));
+  assert.equal(noSessions["grok.sessions"].status, "info");
+  const denied = byId(await runDoctor(ctxWith({ denied: [`${HOME}/.grok/sessions`] })));
+  assert.match(denied["grok.sessions"].fix, /Privacy & Security/);
+  const managed = byId(await runDoctor(ctxWith({ files: { "/etc/grok/requirements.toml": "allow_managed_hooks_only = true\n" } })));
+  assert.equal(managed["grok.hooks"].status, "warn");
+  assert.match(managed["grok.hooks"].detail, /only the hooks your organization sets/);
+  const off = byId(await runDoctor(ctxWith({ files: { [`${HOME}/.grok/disabled-hooks`]: "global:xenonet.json:PostToolUse\n" } })));
+  assert.deepEqual([off["grok.hooks"].status, off["grok.hooks"].fix], ["warn", "Run /hooks in Grok Build, select XenoNet's hooks and press Space to turn them on."]);
 });
 
 test("folders: missing, or unreadable with the macOS privacy fix", async () => {
@@ -105,7 +216,7 @@ test("the runtime, XenoNet's own state and the agents' connection", async () => 
   const low = byId(await runDoctor(ctxWith({ ctx: { statfs: async () => ({ bavail: 100, bsize: 4096 }) } })));
   assert.equal(low["xenonet.state"].status, "warn");
 
-  const apps = (states, broken = []) => ({ connect: { port: 47840, apps: ["claude", "codex"].map((app) => ({ app, changes: states.map((state, i) => ({ id: ["mcp", "hooks"][i], state })), broken })) } });
+  const apps = (states, broken = []) => ({ connect: { port: 47840, apps: ["claude", "codex", "grok"].map((app) => ({ app, installed: true, changes: states.map((state, i) => ({ id: ["mcp", "hooks"][i], state })), broken })) } });
   assert.equal(byId(await runDoctor(ctxWith({ ctx: apps(["missing", "missing"]) })))["agents.claude"].status, "info");
   assert.match(byId(await runDoctor(ctxWith({ ctx: apps(["present", "missing"]) })))["agents.codex"].detail, /partly connected \(hooks missing\)/);
   const gone = byId(await runDoctor(ctxWith({ ctx: apps(["present", "present"], ["~/old/xenonet/cli/xenonet.js is gone"]) })));
@@ -457,15 +568,22 @@ test("vendor data: what's changed or been added since you last looked, and how t
 });
 
 // The command the doctor's look for token files runs in a repo, as ctxWith
-// keys its answers.
-const grep = (repo) => `git --no-optional-locks -C ${repo} -c core.fsmonitor=false grep -l -I --untracked -E -e xenonet_(actor|gateway)_[0-9a-f]{64}`;
+// keys its answers, and what it answers: each file's name, a NUL and a
+// token found in it, built here so no file of XenoNet's holds one.
+const grep = (repo) => `git --no-optional-locks -C ${repo} -c core.fsmonitor=false grep -o -z -I --untracked -E -e xenonet_(actor|gateway)_[0-9a-f]{64}`;
+const grepFound = (...names) => names.map((n) => `${n}\0xenonet_actor_${"0a".repeat(32)}\n`).join("");
 
 test("actors: a token file in a repo is a warning that names it; a repo that doesn't answer in time leaves a note; without XenoNet, skipped", async () => {
   const check = async (answers, ctx = {}) => byId(await runDoctor(ctxWith({ answers, ctx }), { only: ["actors.repos"] }))["actors.repos"];
   assert.deepEqual([(await check({})).status, (await check({})).detail], ["ok", "none in 2 repos"]);
-  const found = await check({ [grep(`${HOME}/Projects/atlas`)]: { code: 0, stdout: ".xenonet-token\nconfig/wren.token\n", stderr: "" } });
+  // With no look of XenoNet's own, the doctor can't tell which tokens
+  // XenoNet issued, and says so.
+  const found = await check({ [grep(`${HOME}/Projects/atlas`)]: { code: 0, stdout: grepFound(".xenonet-token", "config/wren.token"), stderr: "" } });
   assert.equal(found.status, "warn");
-  assert.equal(found.detail.replace(/\\/g, "/"), "2 files in a repo hold an actor's token: ~/Projects/atlas/.xenonet-token, ~/Projects/atlas/config/wren.token");
+  assert.equal(
+    found.detail.replace(/\\/g, "/"),
+    "2 files in a repo hold what looks like an actor's token: ~/Projects/atlas/.xenonet-token, ~/Projects/atlas/config/wren.token; XenoNet couldn't check them against the tokens it issued",
+  );
   assert.match(found.fix, /New token in XenoNet's Actors panel/);
   const slow = await check({ [grep(`${HOME}/Projects/ledger`)]: { code: 1, stdout: "", stderr: "", timedOut: true } });
   assert.deepEqual([slow.status, slow.detail], ["info", "none in the 1 repo looked in; the other 1 didn't answer in time"]);
@@ -493,6 +611,15 @@ test("actors: the server's look for token files is kept for a day, taken afresh 
   assert.equal(found.detail, "1 file in a repo holds an actor's token: ~/Projects/atlas/.env (XenoNet looked 3 h ago, as it does once a day and whenever you run the doctor)");
   assert.match(found.fix, /a line of a \.env/);
   assert.match(found.fix, /New token in XenoNet's Actors panel/);
+  // A look made while XenoNet couldn't read its own tokens counted every
+  // token, and the warning says it couldn't check them.
+  const blind = await check(look({ at: old, repos: 2, checked: 2, files: [`${HOME}/Projects/atlas/.env`], unchecked: true }));
+  assert.equal(blind.status, "warn");
+  assert.equal(
+    blind.detail,
+    "1 file in a repo holds what looks like an actor's token: ~/Projects/atlas/.env (XenoNet looked 3 h ago, as it does once a day and whenever you run the doctor); XenoNet couldn't check it against the tokens it issued",
+  );
+  assert.equal(blind.fix, found.fix);
   const slow = await check(look({ at: Date.now() + 1, repos: 3, checked: 1, files: [] }));
   assert.deepEqual([slow.status, slow.detail], ["info", "none in the 1 repo looked in; the other 2 didn't answer in time"]);
   assert.equal((await check(look({ at: old, repos: 0, checked: 0, files: [] }))).detail, "no repos to look in (XenoNet looked 3 h ago, as it does once a day and whenever you run the doctor)");

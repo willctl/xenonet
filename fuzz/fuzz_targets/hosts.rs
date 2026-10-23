@@ -88,7 +88,7 @@ fuzz_target!(|data: &[u8]| {
             }
             let _ = (link.time_tick(1, NOW + 5e4), link.check_stale(NOW + 1e5));
             let bye = lines.last().and_then(|l| frames::parse_frame(l, None).ok());
-            let _ = link.end(1, &Ended { exit_code: Some(1.0), signal: None, stderr: "", bye: bye.as_ref(), spawn_error: None }, NOW + 2e5, &mut a);
+            let _ = link.end(1, &Ended { exit_code: Some(1.0), signal: None, stderr: "", bye: bye.as_ref(), spawn_error: None, network: None }, NOW + 2e5, &mut a);
             let _ = link.info();
         } else {
             // The relay's side: what a console asks of it, and its folders

@@ -1,6 +1,7 @@
-// Real-time telemetry. Tails the transcript files both apps append to as they
+// Real-time telemetry. Tails the transcript files the apps append to as they
 // work (Claude Code: ~/.claude/projects/**/*.jsonl, Codex: ~/.codex/sessions/**
-// rollout-*.jsonl) and turns new lines into activity events: tool calls,
+// rollout-*.jsonl, Grok Build: ~/.grok/sessions/*/*/updates.jsonl) and turns
+// new lines into activity events: tool calls,
 // prompts, turns, subagents, token use and context fill. It also derives the
 // signals the UI acts on: sessions waiting for you, stuck sessions, edit
 // collisions, context and usage-limit forecasts.
@@ -16,10 +17,10 @@ import { tilde, baseName } from "./paths.js";
 import { Tailer } from "./blocks/tailer.js";
 import { claudeUsageGatherer, desktopUsageGatherer } from "./claude-usage.js";
 import { ClaudeLine, CodexLine, linesOf } from "./lines.js";
-import { claude, codex, brokenAt, fail, usageOf, userText } from "./events.js";
+import { claude, codex, mapperOf, brokenAt, fail, usageOf, userText } from "./events.js";
 import { costParts, plainModel, priorityTier, PRICES_CHECKED } from "./pricing.js";
-import { isContextServer } from "./xenolith.js";
-import { APP, tailedApp } from "./apps.js";
+import { isContextCall, spaceOf } from "./xenolith.js";
+import { APP, TAILED, tailedApp } from "./apps.js";
 import { patchPaths } from "./patch.js";
 
 const PRIME_WINDOW_MS = 24 * 3600e3;
@@ -37,6 +38,11 @@ const HISTORY_MAX = 20000;
 // Claude plan usage is asked of Anthropic every 5 minutes (see
 // claude-usage.js); a reading this old says nothing about the windows now.
 const CLAUDE_LIMITS_FRESH_MS = 45 * 60e3;
+// An app whose lines don't say when a turn ends (Grok Build's): its hooks
+// do, and without them a turn this quiet, with no tool call in flight, has
+// ended. A session whose hooks spoke this lately waits for them.
+const QUIET_TURN_MS = 60e3;
+const HOOKS_HEARD_MS = 3600e3;
 const UUID_TAIL = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
 const isTranscript = (name) => name.endsWith(".jsonl");
 
@@ -48,6 +54,9 @@ export function mcpServerOf(toolName) {
   // Plugin servers are named plugin_<plugin>_<server>.
   return m[1].replace(/^plugin_[^_]+_/, "");
 }
+
+// The tool an MCP tool's name says it is, after its server's part.
+const mcpToolOf = (toolName) => /^mcp__(?:.+?)__([^_].*)$/.exec(toolName ?? "")?.[1] ?? null;
 
 export function categorize(name) {
   const n = String(name ?? "");
@@ -125,10 +134,11 @@ function filesOf(input) {
   return [input.file_path, input.notebook_path, input.path].filter((p) => typeof p === "string" && /[\\/]/.test(p));
 }
 
-// The files an apply_patch adds, updates and deletes. Live leaves out the
-// names it moves files to (`*** Move to:`).
+// The files an apply_patch adds, updates and deletes, and the names it moves
+// files to (`*** Move to:`), as the engine and the native readers read it:
+// a session that moves a file onto one another session works on shares it.
 function patchFiles(text) {
-  return patchPaths(String(text ?? ""), { moves: false });
+  return patchPaths(String(text ?? ""));
 }
 
 function diffLines(prefix, text, max = 40) {
@@ -226,6 +236,10 @@ class LiveSession {
     this.turnMarks = 0;
     this.question = null; // pending AskUserQuestion / plan approval
     this.hookNeed = null; // from Claude Code Notification hooks
+    // When its hooks last spoke, and what its mapper keeps of its file
+    // (events.js), for an app whose lines don't say when a turn ends.
+    this.hookAt = 0;
+    this.lineFile = null;
     this.recentTools = [];
     this.errorStreak = 0;
   }
@@ -425,14 +439,19 @@ class LiveSession {
 // the tailer block's (core/blocks/tailer.js); this turns each line into
 // state and events.
 export class LiveTelemetry extends EventEmitter {
-  constructor({ claudeRoot, codexRoot, claudeDesktopDir, claudeUsage = null, home = null }) {
+  constructor({ claudeRoot, codexRoot, grokRoot = null, claudeDesktopDir, claudeUsage = null, home = null, contextServer = null }) {
     super();
     this.home = home;
+    // The MCP server the config names for the shared context (wikiServer,
+    // the one the folder's marker names when it has one): Xenolith's tools
+    // under it write there, whatever it's called.
+    this.contextServer = contextServer;
     // Watch canonical long paths: on Windows, libuv aborts the process when a
     // recursive watch root is an 8.3 short name (C:\Users\ABCDEF~1\...).
     this.roots = [
       { dir: claudeRoot, app: "claude" },
       { dir: codexRoot, app: "codex" },
+      { dir: grokRoot, app: "grok" },
     ]
       .filter((r) => r.dir && fs.existsSync(r.dir))
       .map((r) => ({ ...r, dir: fs.realpathSync.native(r.dir) }));
@@ -493,6 +512,14 @@ export class LiveTelemetry extends EventEmitter {
   classify(file) {
     const norm = file.replace(/\\/g, "/");
     if (!norm.endsWith(".jsonl")) return null;
+    // A Grok Build session's updates, in the session's folder, which is
+    // named for it: <root>/<encoded cwd>/<session id>/updates.jsonl. Its
+    // other files (chat history, rewind points) aren't read.
+    const grok = this.roots.find((r) => r.app === "grok" && norm.startsWith(`${r.dir.replace(/\\/g, "/")}/`));
+    if (grok) {
+      const m = /^\/[^/]+\/([^/]+)\/updates\.jsonl$/.exec(norm.slice(grok.dir.replace(/\\/g, "/").length));
+      return m ? { app: "grok", sessionId: `grok:${m[1]}` } : null;
+    }
     if (norm.includes("/.codex/") || this.roots.find((r) => r.app === "codex" && norm.startsWith(r.dir.replace(/\\/g, "/")))) {
       const m = UUID_TAIL.exec(norm);
       return m && /rollout-/.test(norm) ? { app: "codex", sessionId: `codex:${m[1]}` } : null;
@@ -541,10 +568,12 @@ export class LiveTelemetry extends EventEmitter {
       const rec = linesOf(f.app).line(line, f);
       if (!rec) return;
       this.status.lines++;
-      // Any app but Codex is read as Claude Code, as linesOf reads it.
-      const codexApp = tailedApp(f.app, "claude") === "codex";
-      const file = codexApp ? this.#codexFile(this.sessions.get(f.sessionId)) : claude.file({ agentId: f.agentId });
-      const events = (codexApp ? codex : claude).events(rec, file);
+      // Any app that isn't tailed is read as Claude Code, as linesOf reads
+      // it; an app's events other than Codex's have Claude Code's shapes.
+      const app = tailedApp(f.app, "claude");
+      const codexApp = app === "codex";
+      const file = codexApp ? this.#codexFile(this.sessions.get(f.sessionId)) : app === "claude" ? claude.file({ agentId: f.agentId }) : this.#lineFile(f, app);
+      const events = mapperOf(app).events(rec, file);
       // A provider's refusal, as its line marks it (core/refusals), read
       // first: kept whether read as history or live, told to you only when
       // live.
@@ -557,6 +586,13 @@ export class LiveTelemetry extends EventEmitter {
     } catch {
       this.status.errors++;
     }
+  }
+
+  // What the mapper keeps of a session's file, as the lines come, for an
+  // app that keeps something (Grok Build's runs of chunks).
+  #lineFile(f, app) {
+    const s = this.session(f.sessionId, app);
+    return (s.lineFile ??= mapperOf(app).file({ agentId: f.agentId ?? null }));
   }
 
   // What the mapper is told of a Codex session's rollout: whether its
@@ -618,20 +654,50 @@ export class LiveTelemetry extends EventEmitter {
     return tool;
   }
 
-  // Wiki writes name the pages they touch; the UI beams to them.
-  wikiPagesOf(server, input) {
-    if (!isContextServer(server) || !input || typeof input !== "object") return null;
+  // Writes to the shared context name the pages they touch; the UI beams to
+  // them. A write to another space than this machine's (its `space`, such
+  // as project:atlas) names that space's pages, as <space>/<slug>, the end
+  // of their ids on the map; one to a space Xenolith refuses wrote nothing.
+  // `tool` is the call's tool, for a server known by the config's name only.
+  wikiPagesOf(server, input, tool = null) {
+    if (!isContextCall(server, tool, this.contextServer) || !input || typeof input !== "object") return null;
+    const space = spaceOf(input.space);
+    if (space === undefined) return null;
     const pages = [].concat(input.pages ?? [], input.slug ?? []).filter((p) => typeof p === "string");
-    return pages.length ? pages.slice(0, 6) : null;
+    return pages.length ? pages.slice(0, 6).map((p) => (space ? `${space}/${p}` : p)) : null;
   }
 
-  // Claude Code Notification hooks carry permission prompts the transcript doesn't.
+  // Claude Code Notification hooks carry permission prompts the transcript
+  // doesn't. An app whose lines don't say when a turn ends (Grok Build's)
+  // says it in its hooks: Stop, and StopCancelled (you stopped it) and
+  // StopFailure, where Stop doesn't run. A subagent's (subagentType) end
+  // isn't the turn's.
   noteHook(sessionId, body) {
-    const s = this.session(sessionId, "claude");
+    const s = this.session(sessionId, tailedApp(sessionId.slice(0, sessionId.indexOf(":")), "claude"));
     const ts = Date.now();
-    if (body.hook_event_name === "Notification") s.hookNeed = { text: clip(body.message ?? "Claude needs your attention", 200), ts };
-    else if (["UserPromptSubmit", "Stop", "SessionEnd", "PostToolUse"].includes(body.hook_event_name)) s.hookNeed = null;
-    this.activity(s, { kind: "hook", detail: body.hook_event_name ?? "hook", ts }, true);
+    const event = body.hook_event_name;
+    if (event === "Notification") s.hookNeed = { text: clip(body.message ?? "Claude needs your attention", 200), ts };
+    else if (["UserPromptSubmit", "Stop", "SessionEnd", "PostToolUse"].includes(event)) s.hookNeed = null;
+    if (mapperOf(s.app).turnEnds === false && !body.subagentType) {
+      s.hookAt = ts;
+      if (["Stop", "StopCancelled", "StopFailure"].includes(event) && s.turn.active) {
+        const interrupted = event === "StopCancelled" && body.reason === "user_interrupt";
+        const duration = s.turn.startedAt && ts >= s.turn.startedAt ? ts - s.turn.startedAt : null;
+        s.endTurn(ts, { interrupted });
+        this.activity(s, { kind: "turn-end", duration, ...(interrupted ? { interrupted: true } : {}), ts }, true);
+      }
+    }
+    this.activity(s, { kind: "hook", detail: event ?? "hook", ts }, true);
+  }
+
+  // Turns gone quiet in an app whose lines don't say when a turn ends,
+  // where its hooks haven't spoken lately: with no tool call in flight,
+  // each ended when its last line was written.
+  settle(now = Date.now()) {
+    for (const s of this.sessions.values()) {
+      if (mapperOf(s.app).turnEnds !== false || !s.turn.active || s.inflight.size || now - s.hookAt < HOOKS_HEARD_MS || now - s.lastEventAt < QUIET_TURN_MS) continue;
+      s.endTurn(s.lastEventAt);
+    }
   }
 
   // ----- Claude Code transcript lines -----
@@ -643,9 +709,10 @@ export class LiveTelemetry extends EventEmitter {
     this.#claude(f, o, claude.events(o, claude.file({ agentId: f.agentId })), live);
   }
 
-  // A Claude Code line's events (events.js).
+  // A Claude Code line's events (events.js), or another app's with their
+  // shapes.
   #claude(f, o, events, live) {
-    const s = this.session(f.sessionId, "claude");
+    const s = this.session(f.sessionId, tailedApp(f.app, "claude"));
     // A line that doesn't say when it was written (see lines.js) was
     // written when it's read.
     const ts = o.ts || Date.now();
@@ -658,6 +725,13 @@ export class LiveTelemetry extends EventEmitter {
         s.subagents.set(agentId, sub);
       }
       sub.lastAt = Math.max(sub.lastAt, ts);
+    }
+    // The context's fill, where a line says it (Grok Build's usage
+    // updates).
+    const ctx = events.find((e) => e.kind === "context");
+    if (ctx && !agentId) {
+      if (typeof ctx.used === "number") s.context.used = ctx.used;
+      if (typeof ctx.window === "number" && ctx.window > 0) s.context.window = ctx.window;
     }
     // What the line is: a reply, or what you (or a tool) said.
     const type = events.find((e) => e.kind !== "refusal" && !(e.kind === "broken" && e.at === "refusal"))?.origin;
@@ -727,7 +801,7 @@ export class LiveTelemetry extends EventEmitter {
     s.inflight.set(b.id, { name: b.name, ts });
     if (sub) sub.tools++;
     const server = mcpServerOf(b.name);
-    const pages = this.wikiPagesOf(server, b.input);
+    const pages = this.wikiPagesOf(server, b.input, mcpToolOf(b.name));
     const full = typeof b.input?.command === "string" ? b.input.command : b.input ?? {};
     const tool = this.noteTool(s, { name: b.name, detail: toolDetail(b.name, b.input, this.home), full, files: filesOf(b.input), ts, agentId, extra: pages ? { pages } : undefined }, live);
     s.inflight.get(b.id).tool = tool;
@@ -846,8 +920,9 @@ export class LiveTelemetry extends EventEmitter {
           }
           break;
         case "call": {
-          // The growth of the total is what's new (output and reasoning
-          // output kept).
+          // The growth of the total is what's new, and the output is
+          // output_tokens alone: OpenAI counts reasoning inside it, as
+          // pricing.js prices it.
           if (!e.total) break;
           const total = e.total.total_tokens ?? 0;
           const delta = total - s.tokens.processed;
@@ -863,7 +938,7 @@ export class LiveTelemetry extends EventEmitter {
             s.addCall(s.provider && s.provider !== "openai" ? `${s.provider}/${model}` : model, { input: Math.max(0, input - cached - write), cacheRead: cached, cacheWrite5m: write, cacheWrite1h: 0, output: last.output_tokens ?? 0 }, ts, { priority: s.priority });
             if (live) this.emit("tokens", { sessionId: s.id, app: "codex", n: delta, ts });
           }
-          s.tokens.output = (e.total.output_tokens ?? 0) + (e.total.reasoning_output_tokens ?? 0);
+          s.tokens.output = e.total.output_tokens ?? 0;
           break;
         }
         // The context from the last call.
@@ -990,7 +1065,7 @@ export class LiveTelemetry extends EventEmitter {
       case "McpToolCall": {
         const ok = it.status === "completed" && !it.error;
         s.noteToolResult(ok, ts);
-        const pages = this.wikiPagesOf(it.server, it.arguments);
+        const pages = this.wikiPagesOf(it.server, it.arguments, it.tool);
         this.noteTool(s, { name: `mcp__${it.server}__${it.tool}`, server: it.server, detail: `${it.server}.${it.tool}`, full: it.arguments ?? {}, ok, ts, extra: pages ? { pages } : undefined }, live);
         if (!ok) this.activity(s, { kind: "tool-error", ts }, live);
         return;
@@ -1002,6 +1077,11 @@ export class LiveTelemetry extends EventEmitter {
         this.noteTool(s, { name: "apply_patch", detail: files.map((f) => baseName(f)).join(", "), files, ok: it.status !== "failed", ts }, live);
         return;
       }
+      // An extension's web search is a web search; its other kinds (an
+      // image made, a pause) aren't read.
+      case "Extension":
+        if (it.kind !== "web.search") return;
+      // falls through
       case "WebSearch":
         // An empty query is no query: the action's says what was searched,
         // as a thread shown from its rollout reads it.
@@ -1174,8 +1254,8 @@ export class LiveTelemetry extends EventEmitter {
   // cost on average today. Models without a price are named, not guessed.
   costs(now, sessions) {
     const day = dayKey(now);
-    const byApp = { claude: 0, codex: 0 };
-    const tokens = { claude: 0, codex: 0 };
+    const byApp = Object.fromEntries(TAILED.map((app) => [app, 0]));
+    const tokens = Object.fromEntries(TAILED.map((app) => [app, 0]));
     const unpriced = new Set();
     for (const s of this.sessions.values()) {
       const d = s.spend.get(day);
@@ -1185,11 +1265,11 @@ export class LiveTelemetry extends EventEmitter {
       for (const m of d.unpriced) unpriced.add(m);
     }
     let perHour = 0;
-    for (const app of ["claude", "codex"]) {
+    for (const app of TAILED) {
       const tpm = sessions.filter((s) => s.app === app).reduce((a, s) => a + s.tpm, 0);
       if (tokens[app] > 0) perHour += tpm * 60 * (byApp[app] / tokens[app]);
     }
-    return { today: byApp.claude + byApp.codex, byApp, perHour, unpriced: [...unpriced].sort(), checked: PRICES_CHECKED };
+    return { today: TAILED.reduce((a, app) => a + byApp[app], 0), byApp, perHour, unpriced: [...unpriced].sort(), checked: PRICES_CHECKED };
   }
 
   // What each session's calls today would cost at API prices, the same
@@ -1208,8 +1288,9 @@ export class LiveTelemetry extends EventEmitter {
 
   snapshot() {
     const now = Date.now();
+    this.settle(now);
     const sessions = [...this.sessions.values()].filter((s) => now - s.lastEventAt < PRIME_WINDOW_MS).map((s) => s.snapshot(now));
-    const series = { claude: new Array(RATE_WINDOW_S).fill(0), codex: new Array(RATE_WINDOW_S).fill(0) };
+    const series = Object.fromEntries(TAILED.map((app) => [app, new Array(RATE_WINDOW_S).fill(0)]));
     const nowS = Math.floor(now / 1000);
     for (const s of this.sessions.values())
       for (const [sec, n] of s.rate) {

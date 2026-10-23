@@ -102,10 +102,16 @@ fn alive(pid: f64) -> bool {
 /// process.kill(pid, signal), quietly.
 #[cfg_attr(unix, expect(unsafe_code, reason = "kill(2), which std doesn't wrap for a pid alone"))]
 fn kill(pid: f64, signal: &str) {
+    // A pid of 0 or less would signal a whole process group, the
+    // command's own among them.
+    if !(pid >= 1.0 && pid.fract() == 0.0) {
+        return;
+    }
     #[cfg(unix)]
     {
         // SAFETY: kill(2) only sends a signal; the pid is one the task
-        // found holding the instance's lock, or started itself.
+        // found holding the instance's lock, started itself, or found in
+        // a test instance's process tree as ps listed it.
         unsafe {
             libc::kill(pid as libc::pid_t, signal_of(signal));
         }
@@ -115,6 +121,20 @@ fn kill(pid: f64, signal: &str) {
         let _ = signal;
         let _ = super::native::run("taskkill", &["/PID".into(), pid.to_string(), "/T".into(), "/F".into()], 5000.0, None);
     }
+}
+
+/// The machine's processes, each { pid, ppid, start }, as ps lists them;
+/// null where ps can't (Windows) or fails.
+fn processes() -> Value {
+    if cfg!(windows) {
+        return Value::Null;
+    }
+    let env = [("LC_ALL".to_string(), "C".to_string()), ("TZ".to_string(), "UTC".to_string())];
+    let r = super::native::run_in("ps", &["-A".into(), "-o".into(), "pid=,ppid=,lstart=".into()], 5000.0, None, None, &env);
+    if r.code != Some(0) {
+        return Value::Null;
+    }
+    control::parse_processes(&r.stdout)
 }
 
 /// electronCommand(): XenoNet Dev.app for this checkout, or the Electron
@@ -192,6 +212,7 @@ impl Perform for Dev {
                 kill(pid(), q.get("signal").and_then(Value::as_str).unwrap_or("SIGTERM"));
                 Ok(Value::Null)
             }
+            Some("processes") => Ok(processes()),
             Some("env") => Ok(Value::Object(super::env_map())),
             Some("command") => electron_command(&self.root),
             Some("spawn") => {

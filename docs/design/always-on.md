@@ -3,9 +3,11 @@
 A design for running XenoNet's service all the time, with a small tray app
 of its own, and the console as a separate app that connects to it. It
 covers macOS first, then Linux and Windows. Step 1 of the build plan is
-built for macOS and Linux, off unless you turn it on (see "What step 1
-built" below, and the guide's [Keeping the service running](../guide/always-on.md)).
-The rest isn't built yet.
+built for macOS and Linux, and step 6 for Windows, off unless you turn it
+on. Steps 2 and 3, the tray API and the macOS tray app, are built too
+(see "What step 1 built", "What steps 2 and 3 built" and "What step 6
+built" below, and the guide's [Keeping the service
+running](../guide/always-on.md)). Steps 4 and 5 aren't built yet.
 
 **In short:**
 
@@ -125,11 +127,14 @@ doctor checks both.
 ### Windows
 
 The console's installer already writes a Run entry for Desktop. For the
-service, the options are a Run entry for the stable launcher, which starts
+service, the options were a Run entry for the stable launcher, which starts
 at sign-in but never restarts a crashed service, or a scheduled task
 triggered at logon with restart on failure, which is closer to launchd and
-systemd. Whether a standard user can create a logon task without an
-administrator needs checking on Windows 11 before choosing.
+systemd. XenoNet uses a scheduled task, for the account's own logon, which
+a standard user can create without an administrator (Xenolith's tray
+registers one the same way). Task Scheduler's restart covers only a task
+that fails to start, so `xenonet service run` restarts a crashed service
+itself (see "What step 6 built").
 
 ## The service under a supervisor
 
@@ -265,9 +270,6 @@ organization's certificate exists.
 ## Open questions
 
 - Swift or SwiftUI for the tray, given macOS 13 as the minimum.
-- On Windows, whether a standard user can create a logon task with
-  restart on failure, or whether the service needs a small watchdog in
-  the launcher.
 - Whether the tray should also ship for Linux desktops in the first
   version, using a StatusNotifierItem, or wait.
 - Whether to keep `service start` (detached) once every platform has a
@@ -290,7 +292,8 @@ organization's certificate exists.
    the update.
 5. **The move from 0.1.x.** The first-run question, moving Open at Login,
    and the guide's components page.
-6. **Windows.** After the open question is settled.
+6. **Windows.** A scheduled task at logon, with `service run` restarting
+   the service (built; see below).
 
 ## What step 1 built
 
@@ -334,11 +337,149 @@ of it from step 5. Where it departs from the plan above, and why:
   their port (`launchctl kickstart`, `systemctl --user start`) instead of
   starting one beside it. XenoNet Dev starts and stops its own, as before.
 
-Not built yet from step 1: the doctor's checks of the registration and of
-lingering, and the JS core's `ensureService` asking the supervisor (an
-update installed from Desktop's Updates panel still starts the new service
-itself, and the supervisor's copy takes over at the next login). Windows
-waits on the open question above, and the tray on steps 2 and 3.
+- **The doctor's checks.** Four checks under Background service
+  (`service.*`, in `crates/xenonet-doctor/src/login.rs` and
+  `core/doctor/index.js`) read the registration as the components crate's
+  `supervisor::review` sees it: whether it's there; whether its file is
+  what `install` would write now, worked out from the file's own settings
+  so the doctor's environment doesn't matter, and whether the program it
+  runs is there; whether the supervisor has it loaded and running; and on
+  Linux, lingering. Lingering is wanted where the account has no graphical
+  session (loginctl's `Display` is empty), as on a host reached over SSH,
+  so only there is its absence a warning.
+
+Not built yet from step 1: the JS core's `ensureService` asking the
+supervisor (an update installed from Desktop's Updates panel still starts
+the new service itself, and the supervisor's copy takes over at the next
+login).
+
+## What steps 2 and 3 built
+
+The tray API and the macOS tray app, XenoNet Tray (`tray/macos`). The
+contracts have the API's shapes and rules ([contracts.md](contracts.md),
+section 14). Where it departs from the plan above, and why:
+
+- **No token file.** The plan gave the tray a token in the state folder.
+  Anything running as you can read a file there, agents included, so
+  there isn't one. The tray reads `runtime/service-<port>.json` as the
+  Tools do, connects to the component socket as role `tray`, and the
+  hello's answer carries the tray's key, made new at each start of the
+  service, only when `verify.tray` passes: the process on the other end
+  is `XenoNet Tray.app/Contents/MacOS/<executable>` by its real path, in
+  `/Applications` or the home folder's `Applications`, with no agent or
+  actor product above it. A demo's home is its made-up world's, so a
+  demo's tray runs from that world's `Applications`. Where XenoNet can't
+  see processes the check refuses, never passes. The key is kept only in
+  the tray's memory.
+- **Key and yours, every time.** `GET /api/tray/v1/status`, the
+  `GET /api/tray/v1/events` stream and `POST /api/tray/v1/open-console`
+  need the key in `x-xenonet-tray`, never beside an `authorization`
+  header, and the request must be yours (`verify.person`) too. So the key
+  is no use from under an agent. Wrong or missing keys are refused before
+  the path is looked at.
+- **What it shows.** The status is built from what `/api/summary` and the
+  Needs you queue (`core/needs-you.js`, `crates/xenonet-state/src/needs_you.rs`)
+  already compute: each item's title and the words the console says after
+  it, the actor gateway's state in a word (off, starting, online,
+  problem) and this machine's link to its network. The stream sends the
+  status when it changes, looking every 2 seconds, and an alert when an
+  item starts or stops waiting.
+- **Hand-written types.** The plan generated the Swift types from the
+  schemas. They're written by hand in `tray/macos/Sources/TrayCore`, and
+  the shapes are held together by fixtures instead:
+  `test/fixtures/tray/` is checked against the schemas by the JS and Rust
+  tests and decoded by `swift test`.
+- **A component of its own.** The plan put the tray in the macOS Service
+  archive. A component's bytes must not change at a published version,
+  and Swift's output depends on the toolchain, so the tray is its own
+  component, `tray`, versioned on its own (`components/versions.json`). It
+  is one archive for both Mac CPUs (`lipo`), with the arch `universal`,
+  which XenoNet from before the tray passes by in `components.json`. The
+  build leaves out debug info (`-gnone`) and remaps the checkout's and
+  the home folder's paths; the archive fixes modes, times and order. Two
+  clean builds on one Mac give the same SHA-256. The linker's UUID stays:
+  `-no_uuid` would drop it, and dyld refuses to start an executable
+  without one. A new Swift toolchain on the release runner changes the
+  bytes, and the release check then asks for a new tray version, as it
+  would for any component.
+- **Installed by the bundle, put in place by `service install`.** The
+  disk image's bundle installs the tray component (a newer one replaces
+  it). `xenonet service install` on macOS copies its `XenoNet Tray.app`
+  to `~/Applications`, removes `com.apple.quarantine` from the copy, and
+  writes and loads `~/Library/LaunchAgents/dev.xenonet.tray.plist`
+  (`crates/xenonet-components/src/tray.rs`): started at login in your
+  graphical session, again after a crash, not after you quit it.
+  `uninstall` quits it and removes the agent and the app, and only an app
+  it set up. With no tray component (a build of your own) both skip it.
+  `SMAppService` waits for a signed bundle.
+- **Desktop steps aside.** The service tells a connected Desktop when a
+  tray comes and goes (a `tray` event, and `tray` in the hello's answer),
+  and Desktop on macOS hides its own tray while one is connected. One
+  tray at a time.
+- **Notifications.** The tray posts one per item that starts waiting, and
+  withdraws it when the item stops. macOS asks you once. Ad hoc signed and
+  run from a folder in a checkout, the tray got macOS's permission
+  request; run from a temporary folder, macOS refused it outright
+  ("Notifications are not allowed for this application").
+- **Checking it without the screen.** `XENONET_TRAY_SNAPSHOT=<folder>`
+  has the tray write its menu as text and its icon as a PNG whenever they
+  change, and take a file called `choose` as a click on the item it names.
+  It shows what `/api/summary` tells any program, and the key never goes
+  there.
+
+Not built yet: in the menu, Quit XenoNet, turning the gateway off, Pause
+notifications and Start at login (the gateway's state shows, read-only);
+updating the tray with `xenonet update` or Desktop's Updates panel (a
+newer bundle replaces it); and trays for Windows and Linux, where Desktop
+keeps its own.
+
+## What step 6 built
+
+The service under Task Scheduler on Windows, behind the same `Files` and
+`Runner` as launchd and systemd (`crates/xenonet-components/src/supervisor.rs`),
+so its tests run a made-up schtasks:
+
+- **A scheduled task.** `xenonet service install` writes the task's
+  definition to `%LOCALAPPDATA%\XenoNet\xenonet-service.xml` (UTF-16, which
+  `schtasks /xml` needs), registers it as **XenoNet Service** with
+  `schtasks /create /xml … /f`, and starts it with `schtasks /run`. The task
+  runs at the account's own logon, named by its SID (from `whoami /user`),
+  as that account with an interactive token and least privilege, so no
+  administrator is needed. It has no time limit and no battery conditions,
+  runs one copy at a time, and Task Scheduler starts it again a minute after
+  it fails to start, three times at most.
+- **No window.** The task's command is `conhost.exe --headless`, with the
+  launcher's `xenonet.exe service run` as its arguments. A console program
+  that Task Scheduler starts in your session would otherwise open a console
+  window at every sign-in, and closing it would stop the service.
+- **Settings as arguments.** A task has no environment of its own, so the
+  kept settings follow `service run` as `NAME=VALUE` arguments, and
+  `service run` takes only the names it keeps.
+- **`service run` stays as the parent.** Task Scheduler restarts a task
+  only when it fails to start, not when its program exits with an error.
+  So on Windows `service run` doesn't hand over to the service as it does
+  on Unix: it starts the service, appends its output to the service's log,
+  and starts it again 5 seconds after a failure, giving up after 10 starts
+  in 5 minutes, as the systemd unit does. A clean stop ends it too, until
+  the next sign-in.
+- **Which process.** Task Scheduler doesn't say which process a task runs.
+  `service run` keeps its own process and the service's in
+  `xenonet-service.pids.json` beside the definition, and `status` counts
+  them only while `tasklist` still lists them. So `supervised`, the hand
+  over at install and the doctor work as on the other systems.
+- **Turned off in Task Scheduler.** A task you disable there is reported
+  as `disabled`, isn't loaded, and `xenonet service start` leaves it off.
+  `install` turns it on again.
+- **Changing or removing it.** A changed definition ends the running copy
+  and starts the new one; the CLI first asks the supervised service to stop
+  cleanly, since ending the task ends `service run` and may leave the
+  service it started running. `uninstall` does the same, then
+  `schtasks /end` and `/delete`. Desktop's uninstaller runs `xenonet service
+  uninstall` too, as the Mac's does.
+
+Not built for Windows: the service starting before anyone signs in. A task
+that runs as you runs only while you're signed in, so a Windows host serves
+only then.
 
 ## Sources
 

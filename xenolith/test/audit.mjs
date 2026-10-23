@@ -13,9 +13,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { IMPL, rustBin, srvT } from './impl.mjs';
+import { rustBin, srvT } from './impl.mjs';
 
-const skip = IMPL !== 'rust' && 'the Rust programs only';
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const runtime = path.join(repo, 'dist', 'runtime');
 const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'xenolith-audit-'));
@@ -38,7 +37,7 @@ function cli(env, ...args) {
 
 async function session(env, fn) {
   const c = new Client({ name: 'audit-test', version: '1' });
-  await c.connect(new StdioClientTransport({ ...srvT(runtime), env, stderr: 'pipe' }));
+  await c.connect(new StdioClientTransport({ ...srvT(), env, stderr: 'pipe' }));
   try {
     return await fn(async (name, args) => {
       const r = await c.callTool({ name, arguments: args });
@@ -51,7 +50,7 @@ async function session(env, fn) {
 
 const entries = (file) => fs.readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
 
-describe('the audit chain', { skip, timeout: 60_000 }, () => {
+describe('the audit chain', { timeout: 60_000 }, () => {
   test('grants, tokens, writes, refusals and new spaces each leave one linked entry', async () => {
     const E = makeEnv();
     assert.equal(cli(E.env, 'grant', 'actor:hermes', 'ctx:append:by:hermes').code, 0);

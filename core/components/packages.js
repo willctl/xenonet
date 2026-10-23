@@ -6,6 +6,17 @@ import { runtimeDir, binName } from "./runtime.js";
 import { negotiate, SERVICE_API } from "./protocol.js";
 
 export const COMPONENTS = ["service", "tools"];
+// The macOS tray (XenoNet Tray.app) is a component too, though not one
+// `xenonet update` names: one package for both Mac CPUs, its arch
+// "universal", which a XenoNet from before it passes by.
+export const TRAY = "tray";
+export const TRAY_APP = "XenoNet Tray.app";
+export const TRAY_EXE = path.join(TRAY_APP, "Contents", "MacOS", "XenoNet Tray");
+const known = (component) => COMPONENTS.includes(component) || component === TRAY;
+// Whether a package is for this machine: its platform and CPU, or for the
+// tray, any Mac.
+export const fitsHere = (value, { platform = process.platform, arch = process.arch } = {}) =>
+  value?.platform === platform && (value.component === TRAY ? platform === "darwin" && value.arch === "universal" : value.arch === arch);
 export const digest = (data) => crypto.createHash("sha256").update(data).digest("hex");
 export function newer(a, b) {
   if (![a, b].every((v) => /^\d+\.\d+\.\d+$/.test(v))) throw new Error("Invalid component version.");
@@ -14,13 +25,13 @@ export function newer(a, b) {
   return false;
 }
 export function packageInfo(value, { platform = process.platform, arch = process.arch } = {}) {
-  if (value?.format !== 1 || !COMPONENTS.includes(value.component) || !/^\d+\.\d+\.\d+$/.test(value.version) || value.platform !== platform || value.arch !== arch || value.dataSchema !== 1) throw new Error("This component package is not compatible with this XenoNet installation.");
+  if (value?.format !== 1 || !known(value.component) || !/^\d+\.\d+\.\d+$/.test(value.version) || !fitsHere(value, { platform, arch }) || value.dataSchema !== 1) throw new Error("This component package is not compatible with this XenoNet installation.");
   negotiate(SERVICE_API, value.api);
   return value;
 }
 export const componentsDir = (env = process.env) => path.join(runtimeDir(env), "components");
 export function currentComponent(component, env = process.env) {
-  if (!COMPONENTS.includes(component)) throw new Error("Choose service or tools.");
+  if (!known(component)) throw new Error("Choose service or tools.");
   try {
     const dir = path.join(componentsDir(env), component);
     const current = JSON.parse(fs.readFileSync(path.join(dir, "current.json"), "utf8"));
@@ -38,7 +49,7 @@ export function selectComponent(component, value, env = process.env) {
 }
 
 export async function stagePackage(file, expected, { env = process.env, platform = process.platform, arch = process.arch } = {}) {
-  if (!COMPONENTS.includes(expected.component) || !/^\d+\.\d+\.\d+$/.test(expected.version) || !/^[a-f0-9]{64}$/.test(expected.sha256)) throw new Error("Invalid component release manifest.");
+  if (!known(expected.component) || !/^\d+\.\d+\.\d+$/.test(expected.version) || !/^[a-f0-9]{64}$/.test(expected.sha256)) throw new Error("Invalid component release manifest.");
   const bytes = fs.readFileSync(file);
   if (bytes.length > 512 << 20 || bytes.length !== expected.size || digest(bytes) !== expected.sha256) throw new Error("Component download failed its hash or size check.");
   const parent = path.join(componentsDir(env), expected.component);
@@ -59,8 +70,9 @@ export async function stagePackage(file, expected, { env = process.env, platform
   if (invalid) throw new Error(invalid);
   const manifest = packageInfo(JSON.parse(fs.readFileSync(path.join(staging, "component.json"), "utf8")), { platform, arch });
   if (manifest.component !== expected.component || manifest.version !== expected.version) throw new Error("Component archive differs from its release manifest.");
-  // Service and Tools are each the xenonet binary, in bin/.
-  const bin = `bin/${binName(platform)}`;
+  // Service and Tools are each the xenonet binary, in bin/; the tray is
+  // its app bundle.
+  const bin = expected.component === TRAY ? TRAY_EXE.split(path.sep).join("/") : `bin/${binName(platform)}`;
   if (!fs.statSync(path.join(staging, bin), { throwIfNoEntry: false })?.isFile()) throw new Error(`Component is missing ${bin}.`);
   // Windows scanners may briefly hold newly extracted executables open.
   // Retry only the final directory rename; never re-extract or change files

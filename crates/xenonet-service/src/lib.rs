@@ -11,15 +11,14 @@
 )]
 #![expect(clippy::type_complexity, reason = "hooks are closures shared between tasks, typed where they're kept")]
 
+pub mod a2a;
 pub mod actor_caller;
 pub mod assistant_endpoint;
 pub mod borrowed;
-pub mod buckets;
 pub mod component;
 pub mod config;
 pub mod cores;
 pub mod ctx;
-pub mod environments;
 pub mod events;
 pub mod gateway;
 pub mod glue;

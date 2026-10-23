@@ -22,9 +22,17 @@ export const VENDOR = {
       assistant([{ type: "thinking", thinking: "…", signature: "s" }, { type: "tool_use", id: "tu_1", name: "Bash", input: { command: "npm test" }, caller: { type: "direct" } }]),
       { type: "summary", summary: "An earlier session", leafUuid: "u-9" },
       { type: "system", subtype: "compact_boundary", timestamp: T },
+      // A Remote Control session's link, and the kinds newer versions write
+      // that XenoNet passes over: none says a time or a version.
+      { type: "bridge-session", sessionId: SESSION, bridgeSessionId: "bridge_01", lastSequenceNum: 3, ownerAccountUuid: "4f1c0000-0000-4000-8000-000000000001", ownerOrganizationUuid: "4f1c0000-0000-4000-8000-000000000002" },
+      { type: "worktree-state", sessionId: SESSION, worktreeSession: { worktreeName: "tokenizer", worktreePath: "/Users/ada/atlas/.claude/worktrees/tokenizer", originalCwd: "/Users/ada/atlas" } },
+      { type: "worktree-state", sessionId: SESSION, worktreeSession: null },
+      { type: "artifact-comment-monitor", v: 1, sessionId: SESSION, artifacts: { "a-1": {} } },
+      { type: "artifact-autoreact-ledger", v: 1, sessionId: SESSION, accountUuid: "4f1c0000-0000-4000-8000-000000000001", artifacts: {} },
     ],
     odd: [
       { record: { ...user("Hi"), timestamp: undefined }, drift: [["missing-field", "timestamp"]] },
+      { record: { type: "bridge-session", sessionId: SESSION, ownerAccountUuid: "4f1c0000-0000-4000-8000-000000000001" }, drift: [["missing-field", "ownerOrganizationUuid"]] },
       { record: user({ text: "an object" }), drift: [["type-change", "message.content"]], strip: [["message", "content"]] },
       { record: assistant([{ type: "text", text: 5 }]), drift: [["type-change", "message.content[].text"]], strip: [["message", "content", 0, "text"]] },
       { record: { type: "progress", timestamp: T, data: {} }, drift: [["new-variant", "type"]] },
@@ -49,8 +57,10 @@ export const VENDOR = {
     fits: [
       { sessionId: "local_0190d3e0-0000-7000-9000-000000000001", cliSessionId: SESSION, title: "Fix the tokenizer", originCwd: "/Users/ada/atlas", createdAt: 1791230000000, lastActivityAt: 1791234567000, isArchived: false, model: "claude-opus-5-5", effort: "high", permissionMode: "default", somethingElse: [1] },
       { sessionId: "local_2", cliSessionId: SESSION, createdAt: 1, lastActivityAt: 2, spawnedFrom: { sessionId: "local_1" }, worktreePath: "/Users/ada/atlas-wt", branch: "fix" },
+      // A record that names no Claude Code session, and says no times.
+      { sessionId: "local_4", cwd: "/Users/ada/atlas", model: "claude-opus-5-5", isArchived: false },
     ],
-    odd: [{ record: { sessionId: "local_3", createdAt: "yesterday", lastActivityAt: 2 }, drift: [["missing-field", "cliSessionId"], ["type-change", "createdAt"]], strip: [["createdAt"]] }],
+    odd: [{ record: { cliSessionId: SESSION, createdAt: "yesterday", lastActivityAt: 2 }, drift: [["missing-field", "sessionId"], ["type-change", "createdAt"]], strip: [["createdAt"]] }],
   },
   "anthropic/claude-desktop/plan-usage": {
     fits: [{ version: 2, samples: [{ t: 1791230000000, org: "o", u: { fh: 12, sd: 40 } }, { t: 1791230060000 }] }],
@@ -75,7 +85,11 @@ export const VENDOR = {
     ],
   },
   "anthropic/oauth/usage": {
-    fits: [{ five_hour: { utilization: 10, resets_at: "2026-10-05T14:00:00+00:00" }, seven_day: { utilization: 6.5, resets_at: null }, seven_day_opus: null }, { five_hour: null }],
+    fits: [
+      { five_hour: { utilization: 10, resets_at: "2026-10-05T14:00:00+00:00" }, seven_day: { utilization: 6.5, resets_at: null }, seven_day_opus: null },
+      { five_hour: null },
+      { five_hour: { utilization: 10, resets_at: null, limit_dollars: null, used_dollars: null, remaining_dollars: null, locked_reason: null }, seven_day: { utilization: null, resets_at: null, limit_dollars: 100, used_dollars: 25, remaining_dollars: 75, locked_reason: null } },
+    ],
     odd: [{ record: { five_hour: { utilization: "10%", resets_at: null } }, drift: [["type-change", "five_hour.utilization"]], strip: [["five_hour", "utilization"]] }],
   },
   "openai/codex/rollout-line": {
@@ -94,6 +108,12 @@ export const VENDOR = {
       { timestamp: T, type: "event_msg", payload: { type: "item_completed", item: { type: "FileChange", changes: { "/Users/ada/ledger/b.py": { type: "update", unified_diff: "@@", move_path: "/Users/ada/ledger/c.py" }, "/Users/ada/ledger/d.py": { type: "add", content: "x = 1\n" } } } } },
       { timestamp: T, type: "event_msg", payload: { type: "item_completed", item: { type: "WebSearch", id: "i7", query: "rounding", action: { type: "search", query: "rounding", queries: ["rounding", "banker's rounding"] } } } },
       { timestamp: T, type: "event_msg", payload: { type: "item_completed", item: { type: "SubAgentActivity", id: "i2", kind: "completed", agent_thread_id: "t2", agent_path: "explorer" } } },
+      { timestamp: T, type: "event_msg", payload: { type: "item_completed", thread_id: "t1", turn_id: "u1", completed_at_ms: 1791230001000, item: { type: "Plan", id: "i8", text: "1. Profile\n2. Fix" } } },
+      { timestamp: T, type: "event_msg", payload: { type: "item_completed", item: { type: "Extension", id: "i9", kind: "web.search", query: "", action: { type: "search", query: null, queries: ["rounding", "banker's rounding"] }, results: [] } } },
+      { timestamp: T, type: "event_msg", payload: { type: "item_completed", item: { type: "Extension", id: "i10", kind: "image_gen.generation", status: "completed", revisedPrompt: "a ledger", savedPath: "/Users/ada/ledger/ledger.png", failure: null, transparentBackground: null } } },
+      { timestamp: T, type: "event_msg", payload: { type: "thread_goal_updated", threadId: "t1", turnId: "u1", goal: { threadId: "t1", objective: "Make the build fast", status: "active", tokensUsed: 10, timeUsedSeconds: 5, createdAt: 1791230000, updatedAt: 1791230005 } } },
+      { timestamp: T, type: "inter_agent_communication_metadata", ordinal: 4, payload: { trigger_turn: true } },
+      { timestamp: T, type: "realtime_item", payload: {} },
       { timestamp: T, type: "event_msg", payload: { type: "user_message", message: "Why is it slow?" } },
       { timestamp: T, type: "event_msg", payload: { type: "thread_settings_applied", thread_id: "t1", thread_settings: { model: "gpt-5.6-sol", model_provider_id: "openai", service_tier: "priority", cwd: "/Users/ada/ledger", reasoning_effort: "high" } } },
       { timestamp: T, type: "event_msg", payload: { type: "thread_settings_applied", thread_id: "t1", thread_settings: { model: "gpt-5.6-sol", model_provider_id: "openai", cwd: "/Users/ada/ledger" } } },
@@ -272,6 +292,29 @@ export const VENDOR = {
     odd: [
       { record: { at: "2026-10-16T12:00:00.000Z", hook_event_name: "afterFileEdit", file_path: 5 }, drift: [["type-change", "file_path"]], strip: [["file_path"]] },
       { record: { at: "2026-10-16T12:00:00.000Z" }, drift: [["missing-field", "hook_event_name"]] },
+    ],
+  },
+  "spacexai/grok-build/session-summary": {
+    fits: [
+      { info: { id: "019a3b5c-0000-7000-8000-00000000000a", cwd: "/Users/ada/atlas" }, session_summary: "Partial refunds for the orders API", generated_title: "Add partial refunds", title_is_manual: false, created_at: "2026-10-16T12:00:00Z", updated_at: "2026-10-16T12:05:00Z", num_messages: 14, current_model_id: "grok-build", head_branch: "feat/refunds" },
+      { info: { id: "019a3b5c-0000-7000-8000-00000000000b", cwd: "/Users/ada/atlas" }, session_summary: "", created_at: "2026-10-16T12:01:00Z", updated_at: "2026-10-16T12:02:00Z", current_model_id: "grok-build", parent_session_id: "019a3b5c-0000-7000-8000-00000000000a", session_kind: "subagent" },
+    ],
+    odd: [
+      { record: { info: { id: 5 }, session_summary: "x" }, drift: [["type-change", "info.id"]], strip: [["info", "id"]] },
+      { record: { info: { id: "019a3b5c-0000-7000-8000-00000000000c" }, hidden: "yes" }, drift: [["type-change", "hidden"]], strip: [["hidden"]] },
+    ],
+  },
+  "spacexai/grok-build/update-line": {
+    fits: [
+      { timestamp: 1791201600, method: "session/update", params: { sessionId: "019a3b5c-0000-7000-8000-00000000000a", update: { sessionUpdate: "user_message_chunk", content: { type: "text", text: "Add partial refunds" } } } },
+      { timestamp: 1791201605, method: "session/update", params: { sessionId: "019a3b5c-0000-7000-8000-00000000000a", update: { sessionUpdate: "tool_call", toolCallId: "call-1", title: "npm test", kind: "execute", status: "pending", rawInput: { command: "npm test" }, locations: [{ path: "/Users/ada/atlas" }] } } },
+      { timestamp: 1791201609, method: "session/update", params: { sessionId: "019a3b5c-0000-7000-8000-00000000000a", update: { sessionUpdate: "tool_call_update", toolCallId: "call-1", status: "completed", content: [{ type: "content", content: { type: "text", text: "48 passing" } }] } } },
+      { timestamp: 1791201610, method: "_x.ai/session/update", params: { sessionId: "019a3b5c-0000-7000-8000-00000000000a", update: { sessionUpdate: "auto_compact_started", tokens_used: 1000, context_window: 2000 } } },
+      { sessionId: "019a3b5c-0000-7000-8000-00000000000a", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Done." } } },
+    ],
+    odd: [
+      { record: { timestamp: 1791201600, params: { update: { sessionUpdate: 5 } } }, drift: [["type-change", "params.update.sessionUpdate"]], strip: [["params", "update", "sessionUpdate"]] },
+      { record: { timestamp: 1791201600, params: { update: { content: { type: "text" } } } }, drift: [["missing-field", "params.update.sessionUpdate"]] },
     ],
   },
   "nous/hermes-agent/install-stamp": {

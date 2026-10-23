@@ -52,7 +52,15 @@ jobs:
         shell: bash
         run: |
           rustup toolchain install
-          if [ "${{ matrix.platform }}" = mac ]; then rustup target add aarch64-apple-darwin x86_64-apple-darwin; fi
+          if [ "${{ matrix.platform }}" = mac ]; then rustup target add aarch64-apple-darwin x86_64-apple-darwin; rustup component add llvm-tools; fi
+      # The Mac's tray (scripts/tray-build.mjs), a component of its own that
+      # the macOS build packages beside Service and Tools. Its bytes at a
+      # version follow the Swift toolchain, so the one used is in the log.
+      - name: Swift for the tray
+        if: matrix.platform == 'mac'
+        run: |
+          xcrun --find swift
+          swift --version
       - run: npm run release:build
         env:
           XENONET_SIGN: ${{ vars[matrix.sign] }}

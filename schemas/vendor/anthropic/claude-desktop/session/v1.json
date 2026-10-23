@@ -7,8 +7,8 @@
   "type": "object",
   "properties": {
     "cliSessionId": {
-      "type": "string",
-      "description": "Claude Code's session id, which the Agent SDK lists the session by"
+      "description": "Claude Code's session id, which the Agent SDK lists the session by; a record without one isn't merged",
+      "type": "string"
     },
     "sessionId": {
       "type": "string",
@@ -40,12 +40,12 @@
       ]
     },
     "createdAt": {
-      "type": "number",
-      "description": "Epoch milliseconds"
+      "description": "Epoch milliseconds",
+      "type": "number"
     },
     "lastActivityAt": {
-      "type": "number",
-      "description": "Epoch milliseconds"
+      "description": "Epoch milliseconds",
+      "type": "number"
     },
     "isArchived": {
       "type": "boolean"
@@ -86,10 +86,7 @@
     }
   },
   "required": [
-    "cliSessionId",
-    "sessionId",
-    "createdAt",
-    "lastActivityAt"
+    "sessionId"
   ],
   "additionalProperties": {},
   "x-xenonet": {

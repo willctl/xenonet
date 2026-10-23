@@ -23,9 +23,33 @@ const SESSION_COLUMNS = ["id", "parent_id", "directory", "title", "version", "ti
 const NEEDED = { session: ["id", "directory", "time_created", "time_updated"], part: ["session_id", "time_created", "data"] };
 const EDITS_MAX = 5000;
 
-// OpenCode's ids (ses_…) as XenoNet's session ids take them.
-export const localId = (id) => String(id).replace(/_/g, "-");
+// OpenCode's ids as XenoNet's session ids take them, and back. A session's
+// id here has letters, digits and dashes (core/schema/ids.js), and OpenCode
+// makes ses_ and letters and digits. So an id of letters and digits in runs
+// joined by single underscores takes a dash for each underscore (ses_4f… is
+// ses-4f…), and never has two dashes together. Any other id is x-- and its
+// UTF-8 bytes in hex, which always has. openCodeId reads either back, so
+// delivery reaches the session the id came from, and numbat's runs of
+// OpenCode take the same ids (core/numbat.js).
+const PLAIN = /^[0-9A-Za-z]+(?:_[0-9A-Za-z]+)*$/;
+export const localId = (id) => {
+  const s = String(id);
+  return PLAIN.test(s) ? s.replace(/_/g, "-") : `x--${Buffer.from(s, "utf8").toString("hex")}`;
+};
 export const sessionIdOf = (id) => `opencode:${localId(id)}`;
+
+// XenoNet's id for an OpenCode session (opencode:…, or what follows it) as
+// OpenCode's own. Hex that isn't UTF-8 reads as the plain form would.
+export function openCodeId(id) {
+  const s = String(id).replace(/^opencode:/, "");
+  const hex = /^x--((?:[0-9a-f]{2})*)$/.exec(s);
+  if (hex) {
+    try {
+      return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Buffer.from(hex[1], "hex"));
+    } catch {}
+  }
+  return s.replace(/-/g, "_");
+}
 
 // The files an apply_patch text names, from its headers only: those it
 // adds, updates, deletes and moves to, less a header with no path.

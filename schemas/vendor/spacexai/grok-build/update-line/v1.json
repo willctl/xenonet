@@ -1,0 +1,242 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/spacexai/grok-build/update-line/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A line of a Grok Build session's updates.jsonl",
+  "description": "One line of Grok Build's updates.jsonl: a session update (ACP's session/update notification's params, or one of Grok's own), in an envelope that says when it was written; older lines are the params alone. The live tailer, stats and search read it through core/lines.js's normalizer. The lines carry no version, so the newest schema reads them.",
+  "type": "object",
+  "properties": {
+    "timestamp": {
+      "description": "When it was written, in Unix seconds",
+      "type": [
+        "string",
+        "number",
+        "null"
+      ]
+    },
+    "method": {
+      "description": "session/update for ACP's updates, _x.ai/session/update for Grok's own",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "params": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "update": {
+          "type": "object",
+          "properties": {
+            "sessionUpdate": {
+              "type": "string",
+              "description": "user_message_chunk, agent_message_chunk, tool_call, tool_call_update, usage_update…"
+            },
+            "content": {
+              "description": "A chunk's content block, or a tool call's content",
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "array",
+                  "items": {}
+                }
+              ]
+            },
+            "toolCallId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "description": "A tool call's kind, as ACP has them: read, edit, delete, move, search, execute, think, fetch or other",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "description": "A tool call's: pending, in_progress, completed or failed",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rawInput": {},
+            "locations": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ],
+                    "additionalProperties": {}
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "used": {
+              "description": "A usage update's tokens in the context",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "size": {
+              "description": "A usage update's context window",
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "sessionUpdate"
+          ],
+          "additionalProperties": {}
+        }
+      },
+      "additionalProperties": {}
+    },
+    "sessionId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "update": {
+      "type": "object",
+      "properties": {
+        "sessionUpdate": {
+          "type": "string",
+          "description": "user_message_chunk, agent_message_chunk, tool_call, tool_call_update, usage_update…"
+        },
+        "content": {
+          "description": "A chunk's content block, or a tool call's content",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": {}
+            },
+            {
+              "type": "array",
+              "items": {}
+            }
+          ]
+        },
+        "toolCallId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "description": "A tool call's kind, as ACP has them: read, edit, delete, move, search, execute, think, fetch or other",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "description": "A tool call's: pending, in_progress, completed or failed",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawInput": {},
+        "locations": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": {}
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "used": {
+          "description": "A usage update's tokens in the context",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "size": {
+          "description": "A usage update's context window",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "sessionUpdate"
+      ],
+      "additionalProperties": {}
+    }
+  },
+  "additionalProperties": {},
+  "x-xenonet": {
+    "vendorVersions": "*",
+    "lenient": true
+  }
+}

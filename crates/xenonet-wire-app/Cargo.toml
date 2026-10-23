@@ -23,6 +23,8 @@ xenonet-components.workspace = true
 xenonet-doctor.workspace = true
 xenonet-hosts.workspace = true
 xenonet-integrations.workspace = true
+# The doctor's network checks, read from the network's files.
+xenonet-net.workspace = true
 # Refusals, OpenRouter's spend and Xenolith's folder are the sources'.
 xenonet-sources.workspace = true
 # The doctor's process self-test (core/procs.js), and its checks of
@@ -38,7 +40,8 @@ xenonet-state.workspace = true
 regex.workspace = true
 
 # os.cpus(), os.totalmem() and os.freemem(), as Node reads them: the mach
-# calls on macOS (and /proc on Linux, read as files).
+# calls on macOS (and /proc on Linux, read as files). Windows' few calls
+# are declared in src/system.rs.
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 

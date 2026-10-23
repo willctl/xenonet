@@ -17,7 +17,7 @@ XenoNet tries these in order and uses the first that works:
 | OpenCode's server | OpenCode TUI | Start OpenCode with `--hostname 127.0.0.1`, and allow the session: `xenonet live allow <session>`. |
 | Typing into tmux | any harness in a tmux pane | Allow the session. The sender must be you, or an actor with a token. |
 | Headless resume | a Claude Code or Codex session that has ended | Allow the session. XenoNet starts it again for one turn. |
-| Hooks (next turn) | Claude Code, Codex | Nothing: this is how messages always arrived. |
+| Hooks (next turn) | Claude Code, Codex, Grok Build | Nothing: this is how messages always arrived. |
 
 If nothing picks a message up within a minute, XenoNet notifies you. A
 message pushed through a channel or typed into a pane that nothing

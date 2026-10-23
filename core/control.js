@@ -11,7 +11,7 @@
 //   const { nodes } = await s.driver("find", { query: "atlas-api", kind: "project" });
 //   await s.driver("select", nodes[0].id);             // returns once the view has settled
 //   await s.screenshot({ name: "atlas" });             // .xenonet/atlas.png
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -49,8 +49,21 @@ export function userDataDir(name, { platform = process.platform, env = process.e
   return path.join(env.XDG_CONFIG_HOME || path.join(home, ".config"), name);
 }
 
+// The machine's processes from `ps -A -o pid=,ppid=,lstart=`, each as {
+// pid, ppid, start }: lstart, the time it started, tells a process from a
+// later one given the same pid.
+function parseProcesses(text) {
+  const out = [];
+  for (const line of String(text).split("\n")) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(\S.*?)\s*$/.exec(line);
+    if (m) out.push({ pid: Number(m[1]), ppid: Number(m[2]), start: m[3] });
+  }
+  return out;
+}
+
 // What launch and quit ask of the system, which tests stand in for: whether
-// a process is still there, a signal to one, and starting XenoNet Dev.
+// a process is still there, a signal to one, the machine's processes,
+// and starting XenoNet Dev.
 const system = {
   alive(pid) {
     try {
@@ -65,9 +78,41 @@ const system = {
       process.kill(pid, signal);
     } catch {}
   },
+  // Null where ps can't list them (Windows), or when it fails.
+  processes() {
+    if (process.platform === "win32") return null;
+    return new Promise((resolve) =>
+      execFile("ps", ["-A", "-o", "pid=,ppid=,lstart="], { env: { ...process.env, LC_ALL: "C", TZ: "UTC" }, timeout: 5000, maxBuffer: 16 << 20 }, (err, stdout) => resolve(err ? null : parseProcesses(stdout))),
+    );
+  },
   spawn,
   command: electronCommand,
 };
+
+// Whether a hard stop of an instance takes its whole process tree: a test
+// instance's only, and never on the ports of the installed XenoNet or of
+// XenoNet Dev's demo and dev instances (47840 to 47842), which are yours.
+const ownsTree = (id, port) => id === "test" && !(Number(port) >= 47840 && Number(port) <= 47842);
+
+// `pid`'s descendants in a process table: its children, theirs, and so on.
+function descendants(table, pid) {
+  const children = new Map();
+  for (const p of table ?? []) {
+    if (!children.has(p.ppid)) children.set(p.ppid, []);
+    children.get(p.ppid).push(p);
+  }
+  const out = [];
+  const seen = new Set([pid]);
+  for (let i = 0, next = [pid]; i < next.length; i++) {
+    for (const p of children.get(next[i]) ?? []) {
+      if (seen.has(p.pid)) continue;
+      seen.add(p.pid);
+      out.push(p);
+      next.push(p.pid);
+    }
+  }
+  return out;
+}
 
 // The process holding an instance's single-instance lock, or null. Chromium
 // keeps the lock in the data folder: a link, SingletonLock, naming the host
@@ -289,29 +334,63 @@ export function xenonet(id = "demo", { port = INSTANCES[id]?.port, userData, log
     if (!(await gone(pid, 5000))) throw new Error(`process ${pid} holds ${name}'s single-instance lock and is still there after kill -9`);
   }
 
+  // A test instance's process tree, but the app itself: its helpers (such
+  // as Chromium's GPU and network processes) and the service it started,
+  // with what they started. Null for any other instance, or where the
+  // machine can't list its processes.
+  async function treeOf(pid) {
+    if (pid === null || !ownsTree(id, port) || !sys.processes) return null;
+    const table = await sys.processes();
+    return table ? descendants(table, pid) : null;
+  }
+
+  // The pids of a tree taken earlier that are still there, each the same
+  // process (started when it was), with the app's descendants now while
+  // it's there.
+  async function leftOf(pid, before) {
+    const table = (await sys.processes()) ?? [];
+    const now = new Map(table.map((p) => [p.pid, p]));
+    const left = new Set();
+    for (const p of [...before, ...(sys.alive(pid) ? descendants(table, pid) : [])]) if (p.pid !== pid && now.get(p.pid)?.start === p.start) left.add(p.pid);
+    return [...left];
+  }
+
   // Quits the instance, and returns once its process has exited and its
   // server has let go of the port. Until then the process holds the
   // single-instance lock, so a copy launched meanwhile would hand off to it
   // and quit, or find the old server still answering. A process still there
   // `timeout` ms after its server went is stuck on its way out (a page that
   // won't close, say) and is killed: SIGTERM would only ask it to quit
-  // again, and with its server gone there's nothing left to save.
+  // again, and with its server gone there's nothing left to save. For a
+  // test instance, that takes its whole tree, as it stood before it was
+  // told to quit and as it stands then: killed alone, the app would leave
+  // its GPU and network processes and its service running (`ended`).
   async function quit({ timeout = 20000 } = {}) {
     const running = await ping();
     if (!running) return { quit: false, running: false };
     const pid = Number.isInteger(running.pid) ? running.pid : null;
+    const tree = await treeOf(pid);
     await call({ op: "quit" }, { wait: 0 }).catch(() => {});
     const until = Date.now() + timeout;
+    const killed = async (pids) => {
+      for (const p of pids) sys.kill(p, "SIGKILL");
+      return (await Promise.all(pids.map((p) => gone(p, 5000)))).every(Boolean);
+    };
     for (;;) {
       const state = await probe();
       const alive = pid !== null && sys.alive(pid);
       if (state === "down" && !alive) return { quit: true };
       if (Date.now() >= until) {
         if (state === "up") throw new Error(`${name} didn't quit in ${timeout / 1000}s`);
-        if (!alive) throw new Error(`${name} quit, but something on port ${port} still doesn't answer`);
-        sys.kill(pid, "SIGKILL");
-        if (await gone(pid, 5000)) return { quit: true, killed: pid };
-        throw new Error(`${name} didn't quit in ${timeout / 1000}s, and process ${pid} is still there after kill -9`);
+        const left = tree ? await leftOf(pid, tree) : [];
+        if (!alive) {
+          // The app has gone, and what still holds the port may be the
+          // service it started, stuck on its way out.
+          if (left.length && (await killed(left)) && (await probe()) === "down") return { quit: true, ended: left };
+          throw new Error(`${name} quit, but something on port ${port} still doesn't answer`);
+        }
+        if (await killed([pid, ...left])) return { quit: true, killed: pid, ...(left.length ? { ended: left } : {}) };
+        throw new Error(`${name} didn't quit in ${timeout / 1000}s, and process ${pid}${left.length ? ` or one of ${left.join(", ")}` : ""} is still there after kill -9`);
       }
       await sleep(300);
     }

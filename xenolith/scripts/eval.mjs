@@ -10,7 +10,7 @@
 //            as asked and for the words a good agent would search for? (deterministic: test/memory-eval.mjs)
 //   ask      the real Ask pipeline (server + curator --asks-only, as the window uses it) on a copy of the
 //            wiki: did it read the evidence, cite it, contain the expected facts, abstain when it should?
-//   curate   each note stream through context_log and `curator.mjs --once` on a fresh copy: do the pages
+//   curate   each note stream through context_log and `xenolith curator --once` on a fresh copy: do the pages
 //            say what they should afterwards (updates, history, poisoning, duplicates, secrets)?
 //
 // The categories follow LongMemEval (extraction, multi-session, temporal, knowledge update, abstention).
@@ -27,12 +27,11 @@ import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { appPaths } from '../src/paths.mjs';
+import { fileURLToPath } from 'node:url';
+import { appPaths } from './paths.mjs';
 import { curatorCmd, rustBin, srv, srvT } from '../test/impl.mjs';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
-const RUNTIME = path.join(REPO, 'dist', 'runtime');
 const FAKE_CODEX = path.join(REPO, 'test', 'fixtures', 'fake-codex.mjs');
 const fwd = (p) => String(p).replace(/\\/g, '/');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -196,7 +195,7 @@ export async function searchTier(set, { work, ms = null, review = false, embeddi
   }
   const routing = [];
   const client = new Client({ name: 'xenolith-eval', version: '1' });
-  await client.connect(new StdioClientTransport({ ...srvT(RUNTIME, '--read-only'), env: childEnv(wikiDir, searchHome), stderr: 'ignore' }));
+  await client.connect(new StdioClientTransport({ ...srvT('--read-only'), env: childEnv(wikiDir, searchHome), stderr: 'ignore' }));
   const rows = [];
   try {
     for (const q of set.questions.filter((x) => !x.abstain && !x.note)) {
@@ -338,6 +337,43 @@ ${a.answer || '(no answer)'}
 Pass only if the reply is correct as described. Be strict about wrong facts; ignore style.`;
 }
 
+/**
+ * One grade from the model: `codex exec` with the eval's own sign-in, read-only, nothing of the
+ * user's configuration, and JUDGE_SCHEMA for its answer. Live runs only.
+ */
+function gradeWithCodex(ms, prompt, runDir) {
+  const schemaFile = path.join(runDir, 'grade.schema.json');
+  const outFile = path.join(runDir, 'grade.json');
+  fs.writeFileSync(schemaFile, JSON.stringify(JUDGE_SCHEMA));
+  const c = (kv) => ['-c', kv];
+  const args = [
+    'exec', '--ephemeral', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '--sandbox', 'read-only', '-C', runDir, '-m', ms.model,
+    ...c('model_reasoning_effort="low"'), ...c('forced_login_method="chatgpt"'), ...c('web_search="disabled"'), ...c('project_doc_max_bytes=0'),
+    '--output-schema', schemaFile, '-o', outFile, '-',
+  ];
+  // An npm-installed codex is a JavaScript entry point: run it with this Node.
+  const [cmd, lead] = /\.[cm]?js$/i.test(ms.codexPath) ? [process.execPath, [ms.codexPath]] : [ms.codexPath, []];
+  const env = { ...process.env, CODEX_HOME: ms.codexHome };
+  delete env.OPENAI_API_KEY;
+  delete env.CODEX_API_KEY;
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, [...lead, ...args], { env, cwd: runDir, stdio: ['pipe', 'ignore', 'pipe'], windowsHide: true, shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(cmd) });
+    let stderr = '';
+    child.stderr.on('data', (d) => (stderr = (stderr + d).slice(-4000)));
+    const timer = setTimeout(() => child.kill(), 180_000);
+    child.on('error', reject);
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      try {
+        resolve(JSON.parse(fs.readFileSync(outFile, 'utf8')));
+      } catch {
+        reject(new Error(`codex exited ${code}: ${stderr.trim().split('\n').pop() || 'no answer'}`));
+      }
+    });
+    child.stdin.end(prompt);
+  });
+}
+
 export async function askTier(set, { work, ms, concurrency, only }) {
   const wikiDir = await copyWiki(set.wikiSrc, path.join(work, 'ask-wiki'), { inbox: true });
   const home = path.join(work, 'ask-home');
@@ -346,20 +382,17 @@ export async function askTier(set, { work, ms, concurrency, only }) {
   const env = childEnv(wikiDir, home);
   if (!ms.live) env.FAKE_CODEX_MODE = 'normal';
   const logs = [];
-  const server = startProc(srv(RUNTIME, '--http', '--port', String(port), '--parent-stdin'), env, 'server', logs);
-  const worker = startProc(curatorCmd(RUNTIME, '--asks-only', '--parent-stdin'), env, 'asks', logs);
+  const server = startProc(srv('--http', '--port', String(port), '--parent-stdin'), env, 'server', logs);
+  const worker = startProc(curatorCmd('--asks-only', '--parent-stdin'), env, 'asks', logs);
   const questions = set.questions.filter((q) => !q.note && (!only || only.includes(q.id)));
   const rows = [];
   let judge = null;
   if (ms.live) {
-    const { runModel, curatorConfig } = await import(pathToFileURL(path.join(RUNTIME, 'curator.mjs')).href);
-    const cfg = curatorConfig({ curator: { codexPath: ms.codexPath, codexHome: ms.codexHome, model: ms.model, reasoningEffort: 'low', timeoutSeconds: 180 } });
     judge = async (q, a) => {
       const runDir = path.join(work, 'judge', q.id);
       await fsp.mkdir(runDir, { recursive: true });
       try {
-        const r = await runModel(cfg, judgePrompt(q, a), { runDir, schema: JUDGE_SCHEMA, schemaName: 'grade' });
-        return r.output;
+        return await gradeWithCodex(ms, judgePrompt(q, a), runDir);
       } catch (e) {
         return { pass: null, reason: `judge failed: ${e.message}` };
       }
@@ -519,7 +552,7 @@ export async function runChecks(wikiDir, checks, { before, after, rejected }) {
 
 async function runCurator(env, timeoutMs, args = ['--once']) {
   return new Promise((resolve) => {
-    const child = spawn(...curatorCmd(RUNTIME, ...args), { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    const child = spawn(...curatorCmd(...args), { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let out = '';
     child.stdout.on('data', (d) => (out += d));
     child.stderr.on('data', (d) => (out += d));
@@ -565,7 +598,7 @@ export async function curateTier(set, { work, ms, concurrency, only }) {
         if (!ms.live) env.FAKE_CODEX_MODE = 'normal';
         // Start the server once so the index exists before anything is filed.
         const client = new Client({ name: 'xenolith-eval', version: '1' });
-        await client.connect(new StdioClientTransport({ ...srvT(RUNTIME), env, stderr: 'ignore' }));
+        await client.connect(new StdioClientTransport({ ...srvT(), env, stderr: 'ignore' }));
         const before = await pageHashes(wikiDir);
         let rejected = false;
         try {
@@ -579,7 +612,7 @@ export async function curateTier(set, { work, ms, concurrency, only }) {
         const t0 = Date.now();
         let run = s.notes.length ? await runCurator(env, ms.live ? 900_000 : 120_000) : { code: 0, out: '' };
         // A stream can ask for page reviews (the lint) after its notes are filed. Only the Rust curator has them.
-        if (s.lint?.length && run.code === 0 && process.env.XENOLITH_IMPL === 'rust') run = await runCurator(env, ms.live ? 900_000 : 120_000, ['--lint', ...s.lint]);
+        if (s.lint?.length && run.code === 0) run = await runCurator(env, ms.live ? 900_000 : 120_000, ['--lint', ...s.lint]);
         const after = await pageHashes(wikiDir);
         const checks = await runChecks(wikiDir, s.checks, { before, after, rejected });
         rows.push({

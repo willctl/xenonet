@@ -1,13 +1,13 @@
-# Xenolith's own workspace, so xenolith/ builds on its own. When XenoNet's root workspace takes
-# these crates in, this [workspace] goes and the root lists xenolith/rust/crates/* instead.
+# Xenolith's own workspace: xenolith/ builds on its own, with the toolchain rust-toolchain.toml pins.
 [workspace]
 resolver = "3"
 members = ["crates/core", "crates/cli", "crates/tray"]
-# The tray's GUI crates (tray-icon, muda) need Rust 1.90; the core and the CLI build on 1.85.
+# `cargo build` alone leaves the tray out, since on Linux it needs GTK and WebKitGTK; --workspace
+# builds it too.
 default-members = ["crates/core", "crates/cli"]
 
 [workspace.package]
-version = "1.8.0" # kept equal to package.json's version (scripts/build.mjs checks)
+version = "1.9.0" # kept equal to package.json's version (scripts/build.mjs checks)
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -34,3 +34,11 @@ opt-level = "s"
 lto = "fat"
 codegen-units = 1
 strip = true
+
+# What a release archive ships (scripts/package.mjs --target): the release build, with no debug info
+# and no symbol table, so nothing names the build machine's folders. Its own profile keeps those
+# programs apart from the local release build the suites run.
+[profile.dist]
+inherits = "release"
+debug = 0
+strip = "symbols"

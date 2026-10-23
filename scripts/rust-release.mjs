@@ -69,6 +69,12 @@ export function buildBinary({ platform = process.platform, arch = process.arch, 
     env: { ...env, RUSTFLAGS: rustflags },
   });
   const file = path.join(root, "target", target, "dist", binaryName(platform));
+  // The dist profile asks rustc to strip, which on macOS runs the
+  // toolchain's rust-objcopy; where that can't run (a toolchain without
+  // its LLVM library, as on GitHub's Mac runners) rustc only warns and
+  // leaves the symbol table, which names the build machine's folders.
+  // Xcode's strip takes it out whatever happened, before the signature.
+  if (platform === "darwin" && process.platform === "darwin") execFileSync("strip", [file], { stdio: "inherit" });
   // Ad hoc, as the app is: a certificate carries its owner's name.
   if (platform === "darwin" && process.platform === "darwin" && env.XENONET_SIGN !== "1") execFileSync("codesign", ["--sign", "-", "--force", file], { stdio: "inherit" });
   checkBinary(file);

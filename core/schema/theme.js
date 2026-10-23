@@ -26,20 +26,20 @@ export const Theme = define(
 
     colors: colors([
       "bg", "surface", "surfaceLow", "text", "muted", "dim", "bright", "accent",
-      "core", "project", "satellite", "native", "zone", "resource", "claude", "codex",
+      "core", "project", "satellite", "native", "zone", "resource", "claude", "codex", "grok",
       "lineage", "collab", "collision", "sync", "message", "wiki", "attention", "review",
       "stuck", "pressure", "danger", "gold", "archived", "label",
       "actor", "human",
     ])
       .optional()
-      .describe("By role. The page applies only #rrggbb values. actor and human are the actors layer's defaults"),
+      .describe("By role; wiki is the shared context's. The page applies only #rrggbb values. actor and human are the actors layer's defaults"),
     identities: z
       .array(hex)
       .length(5)
       .optional()
       .describe("The rings named identities' projects stand on: five colors that mean nothing else on the map. One a theme brings close to a color with a meaning is swapped for a spare"),
     categories: colors(["shell", "edit", "read", "web", "mcp", "agent", "code", "other"]).optional().describe("What an agent is doing, by tool family"),
-    pages: colors(["project", "preference", "reference", "howto", "decision", "person", "topic"]).optional().describe("Agent Wiki page types"),
+    pages: colors(["project", "preference", "reference", "howto", "decision", "person", "topic"]).optional().describe("Context page types"),
     fonts: obj({
       display: z.string().optional().describe("Titles, and the map's labels"),
       mono: z.string().optional(),

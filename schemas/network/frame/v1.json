@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/network/frame/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A network frame",
+  "description": "One line of a link's NDJSON: signed by the host that sent it and, between hosts, sealed for the host it's for. The gateway sees the head and never the body.",
+  "type": "object",
+  "properties": {
+    "v": {
+      "type": "number",
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^frm_[0-9a-f-]{36}$"
+    },
+    "seq": {
+      "description": "Set by the gateway, per recipient, within its epoch: what a host resumes after",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "hello",
+        "ping",
+        "gap",
+        "roster",
+        "removed",
+        "presence",
+        "claims",
+        "message",
+        "receipt",
+        "handoff",
+        "relay",
+        "operator",
+        "svc"
+      ]
+    },
+    "from": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,31}$",
+      "description": "The host that sent it, whose key signed it"
+    },
+    "to": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,31}$",
+          "description": "The host's id in the network, picked by the person: never the machine's own name"
+        },
+        {
+          "type": "string",
+          "const": "*"
+        }
+      ],
+      "description": "The host it's for, or * for every host (presence and claims, sealed once per host)"
+    },
+    "at": {
+      "type": "number",
+      "description": "When the sender made it, by its clock"
+    },
+    "sealed": {
+      "type": "boolean",
+      "description": "Whether body is sealed to the recipient's X25519 key; frames between hosts always are"
+    },
+    "body": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]*$",
+      "description": "The sealed bytes, or the JSON of an unsealed gateway frame"
+    },
+    "sig": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]*$",
+      "description": "Ed25519 over the head: xenonet-net/1, network id, id, kind, from, to, at, sealed (1 or 0) and the base64url SHA-256 of the body bytes, joined by newlines"
+    }
+  },
+  "required": [
+    "v",
+    "id",
+    "kind",
+    "from",
+    "to",
+    "at",
+    "sealed",
+    "body",
+    "sig"
+  ],
+  "additionalProperties": {}
+}

@@ -4,19 +4,18 @@
 //! its edit tools' files and its shutdown's changed files as its edits.
 
 use super::files::Files;
-use super::node_path;
 use super::{
     by_num, edit_file, edits_out, fits_id, js_max, js_min, ms_of, push_edit, str_of, titled, Check, Checked, Edits, FileCache, NativeReader, Out, Threw, Vendor, DAY_MS,
-    EDIT_KEEP_MS, SESSIONS_MAX,
+    EDIT_KEEP_MS, SESSIONS_MAX, VENDOR_FAILED,
 };
 use crate::session::{RunSession, Via};
 use serde_json::{Map, Value};
 use std::collections::HashSet;
 use xenonet_base::json::{self, number_string};
 use xenonet_base::jsstr::is_array_index;
+use xenonet_base::nodepath::NATIVE;
 use xenonet_base::ordered::OrderedMap;
 use xenonet_base::patch;
-use xenonet_base::paths::PathStyle;
 use xenonet_base::text::{is_blank, truthy};
 
 pub const SOURCE: &str = "github/copilot-cli/session-event";
@@ -178,7 +177,7 @@ pub fn read_events(text: &str, check: &mut dyn FnMut(&Value) -> Result<Checked, 
 
 /// ~/.copilot/session-state, as path.join makes it.
 pub fn copilot_root(home: &str) -> String {
-    node_path::join(PathStyle::Native, &[home, ".copilot", "session-state"])
+    NATIVE.join(&[home, ".copilot", "session-state"])
 }
 
 #[derive(Clone, Debug)]
@@ -237,9 +236,9 @@ impl CopilotCli {
         let mut out = Vec::new();
         for e in entries {
             let file = if e.is_dir {
-                node_path::join(PathStyle::Native, &[root, &e.name, "events.jsonl"])
+                NATIVE.join(&[root, &e.name, "events.jsonl"])
             } else if e.is_file && e.name.ends_with(".jsonl") {
-                node_path::join(PathStyle::Native, &[root, &e.name])
+                NATIVE.join(&[root, &e.name])
             } else {
                 continue;
             };
@@ -307,9 +306,12 @@ impl CopilotCli {
 }
 
 impl NativeReader for CopilotCli {
-    /// Reads the event logs in the folder at `at`. A log whose vendor check
-    /// threw is passed over, and no failure is reported.
+    /// Reads the event logs in the folder at `at`. A vendor reader that
+    /// couldn't be got is reported, before anything is read, as
+    /// copilot-cli.js's read reports it; a log whose check threw is passed
+    /// over.
     fn read(&mut self, at: &str, now: f64, files: &mut dyn Files, vendor: &mut dyn Vendor) -> Result<(), String> {
+        vendor.ready().map_err(|Threw| VENDOR_FAILED.to_string())?;
         CopilotCli::read(self, Some(at), now, files, &mut |rec, version| vendor.check(rec, version));
         Ok(())
     }

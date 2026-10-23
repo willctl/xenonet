@@ -1,6 +1,6 @@
-//! Connecting your agents: what XenoNet adds to Claude Code's and Codex's
-//! own settings so every session on this machine, in every project, can
-//! use the engine: core/engine/connect.js. Nothing changes until you
+//! Connecting your agents: what XenoNet adds to Claude Code's, Codex's and
+//! Grok Build's own settings so every session on this machine, in every
+//! project, can use the engine: core/engine/connect.js. Nothing changes until you
 //! confirm in XenoNet, which first shows exactly what will be added
 //! (preview), and it can all be taken out again (remove).
 //!
@@ -8,6 +8,9 @@
 //!                mcp`), and HTTP hooks in ~/.claude/settings.json
 //!   Codex        the xenonet MCP server (through `codex mcp`), and command
 //!                hooks in ~/.codex/hooks.json
+//!   Grok Build   the xenonet MCP server as tables in ~/.grok/config.toml,
+//!                which XenoNet writes itself (toml.rs), and command hooks
+//!                in a file of XenoNet's own, ~/.grok/hooks/xenonet.json
 //!
 //! Both run the xenonet binary (`xenonet mcp`, `xenonet hook <app>`): the
 //! launcher's for installed XenoNet, which never moves. Entries an earlier
@@ -30,7 +33,7 @@
 //!
 //! Which apps connect goes through are the app registry's: those that have
 //! `connect`, in its order, each through the config format its entry names
-//! (`format`: [`ClaudeSettings`], [`CodexHooks`]).
+//! (`format`: [`ClaudeSettings`], [`CodexHooks`], [`GrokHooks`]).
 //!
 //! The files and the CLIs are the twin's, called as the JS called them,
 //! through `Calls`: "fs" (node:fs), "run" (a CLI, its output) and "cli" (a
@@ -43,6 +46,7 @@ use crate::store::js_text;
 use serde_json::{json, Map, Value};
 use xenonet_base::apps::App;
 use xenonet_base::json::stringify;
+use xenonet_base::nodepath::{Style, NATIVE};
 use xenonet_base::paths::tilde;
 
 /// XenoNet's plugin for Claude Code, which Claude Code knows as
@@ -158,56 +162,9 @@ fn ps_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
-/// path.isAbsolute on this machine.
-fn is_absolute(p: &str) -> bool {
-    if cfg!(windows) {
-        win32_absolute(p)
-    } else {
-        p.starts_with('/')
-    }
-}
-
-fn win32_absolute(p: &str) -> bool {
-    let b = p.as_bytes();
-    p.starts_with('/') || p.starts_with('\\') || (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'/' || b[2] == b'\\'))
-}
-
 /// path.join on this machine: empty parts left out.
 fn join(dir: &str, name: &str) -> String {
-    xenonet_base::paths::join_all(&[dir, name])
-}
-
-/// path.dirname on this machine, as Node works it out.
-fn dirname(p: &str) -> String {
-    let sep = |c: u8| c == b'/' || (cfg!(windows) && c == b'\\');
-    let b = p.as_bytes();
-    if b.is_empty() {
-        return ".".into();
-    }
-    let root = sep(b[0]);
-    let mut end = None;
-    let mut matched_slash = true;
-    for i in (1..b.len()).rev() {
-        if sep(b[i]) {
-            if !matched_slash {
-                end = Some(i);
-                break;
-            }
-        } else {
-            matched_slash = false;
-        }
-    }
-    match end {
-        None => {
-            if root {
-                p[..1].to_string()
-            } else {
-                ".".into()
-            }
-        }
-        Some(1) if root => p[..2].to_string(),
-        Some(e) => p[..e].to_string(),
-    }
+    xenonet_base::nodepath::join(&[dir, name])
 }
 
 /// The names a XenoNet's MCP servers take: the installed XenoNet's xenonet
@@ -283,6 +240,7 @@ pub struct Options {
     pub home: String,
     pub claude_config_dir: Option<String>,
     pub codex_home: Option<String>,
+    pub grok_home: Option<String>,
     pub console_mcp: bool,
     pub platform: String,
     pub instances: Vec<Instance>,
@@ -399,7 +357,7 @@ impl Shared {
                 }
                 for m in crate::re!(r"'((?:[^']|'')+)'").captures_iter(&Self::hook_text(&h)) {
                     let f = m[1].replace("''", "'");
-                    if is_absolute(&f) || win32_absolute(&f) {
+                    if NATIVE.is_absolute(&f) || Style::Win32.is_absolute(&f) {
                         out.push(f);
                     }
                 }
@@ -499,7 +457,7 @@ impl Shared {
     }
 
     pub fn write_json(c: &mut dyn Calls, file: &str, data: &Value) -> Result<()> {
-        c.call("fs", "mkdirSync", vec![Arg::text(dirname(file)), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])])?;
+        c.call("fs", "mkdirSync", vec![Arg::text(NATIVE.dirname(file)), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])])?;
         let before = format!("{file}.before-xenonet");
         if Self::exists(c, file)? && !Self::exists(c, &before)? {
             c.call("fs", "copyFileSync", vec![Arg::text(file), Arg::text(before)])?;
@@ -603,7 +561,7 @@ impl Shared {
                 continue;
             }
             let f = text_of(Some(&f));
-            if is_absolute(&f) && !Self::exists(c, &f)? {
+            if NATIVE.is_absolute(&f) && !Self::exists(c, &f)? {
                 out.push(f);
             }
         }
@@ -713,6 +671,11 @@ pub trait Format: Send + Sync {
     fn hook_connected(&self, _k: &Shared, _c: &mut dyn Calls, _event: &str) -> Option<Result<bool>> {
         None
     }
+    /// For an app that may not be here (Grok Build): whether it is, so
+    /// connecting every app leaves it out until it is.
+    fn installed(&self, _k: &Shared, _c: &mut dyn Calls) -> Result<bool> {
+        Ok(true)
+    }
 }
 
 /// A format's connect for an app.
@@ -724,6 +687,7 @@ pub fn format(name: &str) -> Option<Maker> {
     match name {
         "claude-settings" => Some(ClaudeSettings::make),
         "codex-hooks" => Some(CodexHooks::make),
+        "grok-hooks" => Some(GrokHooks::make),
         _ => None,
     }
 }
@@ -1112,6 +1076,210 @@ impl Format for CodexHooks {
     }
 }
 
+/// A text file, or "" when there's none. One that can't be read is left
+/// alone, as a settings file is.
+fn read_text(k: &Shared, c: &mut dyn Calls, file: &str) -> Result<String> {
+    let home = &k.o.home;
+    match c.call("fs", "readFileSync", vec![Arg::text(file), Arg::text("utf8")]) {
+        Ok(t) => Ok(js_text(&t)),
+        Err(e) => {
+            let code = e.code.as_deref().filter(|v| !v.is_null());
+            if code.and_then(Value::as_str) == Some("ENOENT") {
+                return Ok(String::new());
+            }
+            let why = code.map_or_else(|| tilde(&e.message, home), |v| crate::js::template(Some(v)));
+            Err(Thrown::new(format!("XenoNet can't read {} ({why}), so it leaves it alone", tilde(file, home))))
+        }
+    }
+}
+
+/// Grok Build's settings (grok-hooks): the xenonet MCP server as tables in
+/// config.toml, which XenoNet writes itself (`grok mcp add` rewrites the
+/// file and drops its comments; see toml.rs), and command hooks in Claude
+/// Code's format in a file of XenoNet's own, hooks/xenonet.json, which Grok
+/// runs without asking, as it does every file in its hooks folder.
+/// GROK_HOME moves both. Grok gives a session's MCP servers its id
+/// (GROK_SESSION_ID), so the server knows whose it is.
+pub struct GrokHooks {
+    id: String,
+    name: String,
+    events: Vec<(String, Option<String>)>,
+    grok_home: String,
+    config_file: String,
+    hooks_file: String,
+    hooks: Value,
+}
+
+impl GrokHooks {
+    pub fn make(app: &App, k: &Shared) -> Box<dyn Format> {
+        Box::new(Self::new(app, k))
+    }
+
+    pub fn new(app: &App, k: &Shared) -> Self {
+        let o = &k.o;
+        let win = o.platform == "win32";
+        let events = events_of(app);
+        // Grok runs a hook's command with sh -c, and on Windows under the
+        // shell it finds there, so the Windows form is one command line. Its
+        // SessionEnd hooks get little time.
+        let hooks = hook_set(&events, |event| {
+            let command = if win { k.windows_hook(&app.id) } else { k.hook_command(&app.id) };
+            json!({ "type": "command", "command": command, "timeout": if event == "SessionEnd" { 3 } else { 10 } })
+        });
+        let grok_home = o.grok_home.clone().unwrap_or_else(|| join(&o.home, ".grok"));
+        GrokHooks {
+            id: app.id.clone(),
+            name: app.name.clone(),
+            events,
+            config_file: join(&grok_home, "config.toml"),
+            hooks_file: join(&join(&grok_home, "hooks"), "xenonet.json"),
+            grok_home,
+            hooks,
+        }
+    }
+
+    fn is_xenonet(&self, h: &Value) -> bool {
+        Shared::xenonet_command(&self.id, h)
+    }
+
+    fn foreign(&self, k: &Shared, name: &str) -> String {
+        format!(
+            "{} names mcp_servers.{name} in a form XenoNet doesn't edit. Take it out, or write it as a [mcp_servers.{name}] table, and connect again.",
+            tilde(&self.config_file, &k.o.home)
+        )
+    }
+
+    // Writes config.toml as `edit` makes it: through a copy of the file (so
+    // it keeps its mode), with a copy of it as it was the first time
+    // XenoNet changes it.
+    fn write_config(&self, k: &Shared, c: &mut dyn Calls, edit: &dyn Fn(&str) -> std::result::Result<String, String>) -> Result<()> {
+        let before = read_text(k, c, &self.config_file)?;
+        let after = edit(&before).map_err(Thrown::new)?;
+        if after == before {
+            return Ok(());
+        }
+        c.call("fs", "mkdirSync", vec![Arg::text(NATIVE.dirname(&self.config_file)), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])])?;
+        let tmp = format!("{}.tmp-xenonet", self.config_file);
+        if Shared::exists(c, &self.config_file)? {
+            let first = format!("{}.before-xenonet", self.config_file);
+            if !Shared::exists(c, &first)? {
+                c.call("fs", "copyFileSync", vec![Arg::text(&self.config_file), Arg::text(first)])?;
+            }
+            c.call("fs", "copyFileSync", vec![Arg::text(&self.config_file), Arg::text(&tmp)])?;
+        }
+        c.call("fs", "writeFileSync", vec![Arg::text(&tmp), Arg::text(after)])?;
+        c.call("fs", "renameSync", vec![Arg::text(tmp), Arg::text(&self.config_file)])?;
+        Ok(())
+    }
+
+    // XenoNet's hooks file: written as the settings files are, and taken
+    // out once no XenoNet's hooks are left in it.
+    fn write_hooks(&self, k: &Shared, c: &mut dyn Calls, add: Option<&Value>) -> Result<()> {
+        let hooks = k.read_json(c, &self.hooks_file)?;
+        let merged = k.merge(c, &hooks, &|h| self.is_xenonet(h), add)?;
+        if add.is_none() && merged.as_object().is_some_and(Map::is_empty) {
+            c.call("fs", "rmSync", vec![Arg::text(&self.hooks_file), Arg::Obj(vec![("force".into(), Arg::Bool(true))])])?;
+            return Ok(());
+        }
+        Shared::write_json(c, &self.hooks_file, &merged)
+    }
+
+    fn command_args(k: &Shared, extra: Option<&str>) -> (String, Vec<String>) {
+        let mut args = list_strings(&k.mcp["args"]);
+        if let Some(e) = extra {
+            args.push(e.into());
+        }
+        (k.o.bin.clone(), args)
+    }
+}
+
+impl Format for GrokHooks {
+    fn cli(&self) -> &'static str {
+        "grok"
+    }
+
+    fn installed(&self, _k: &Shared, c: &mut dyn Calls) -> Result<bool> {
+        Ok(Shared::cli(c, "grok")?.truthy() || Shared::exists(c, &self.grok_home)?)
+    }
+
+    fn server(&self, k: &Shared, c: &mut dyn Calls, _cli: &Arg, name: &str) -> Result<Option<Value>> {
+        Ok(crate::toml::read_server(&read_text(k, c, &self.config_file)?, name))
+    }
+
+    fn entry(&self, k: &Shared, c: &mut dyn Calls, found: Found<'_>) -> Result<Value> {
+        let is = |h: &Value| self.is_xenonet(h);
+        let (xenonet, _) = k.names();
+        let home = &k.o.home;
+        let command = k.command();
+        let text = read_text(k, c, &self.config_file)?;
+        let hooks = k.read_json(c, &self.hooks_file)?;
+        let installed = self.installed(k, c)?;
+        let foreign = crate::toml::foreign_server(&text, xenonet);
+        let mut changes = k.console_change(&self.id, found.console);
+        changes.push(json!({
+            "id": "mcp",
+            "what": format!("The {xenonet} MCP server, for every project"),
+            "where": tilde(&self.config_file, home),
+            "state": if foreign { "different" } else { k.server_state(found.server, None) },
+            "detail": format!("{command} mcp (XENONET_PORT={}), as [mcp_servers.{xenonet}]; the rest of the file stays as it is", k.port()),
+        }));
+        let state = k.hooks_state(c, &hooks, &is, &self.hooks)?;
+        changes.push(json!({ "id": "hooks", "what": format!("Hooks: {}", event_list(&self.events)), "where": tilde(&self.hooks_file, home), "state": state, "detail": format!("running {command} hook {}", self.id) }));
+        let mut notes: Vec<Value> = if found.cli.truthy() {
+            Vec::new()
+        } else {
+            vec![json!("XenoNet can't find the grok command. Connecting writes Grok Build's settings all the same, for when you install it.")]
+        };
+        if foreign {
+            notes.push(json!(self.foreign(k, xenonet)));
+        }
+        notes.push(json!("Grok Build runs the hooks in its hooks folder without asking."));
+        let others = k.others(c, hooks.get("hooks"), &is)?;
+        notes.extend(k.besides(&others));
+        let broken = k.broken(c, found.server, hooks.get("hooks"), &is)?;
+        Ok(json!({ "app": self.id, "name": self.name, "cli": Shared::arg_json(found.cli), "installed": installed, "changes": changes, "notes": notes, "broken": broken }))
+    }
+
+    fn apply(&self, k: &Shared, c: &mut dyn Calls) -> Result<()> {
+        self.write_hooks(k, c, Some(&self.hooks))?;
+        let (xenonet, console) = k.names().clone();
+        let console_mcp = k.o.console_mcp;
+        let env = k.server_env.clone();
+        let (bin, args) = Self::command_args(k, None);
+        let (_, console_args) = Self::command_args(k, Some("console"));
+        self.write_config(k, c, &|text| {
+            let out = crate::toml::with_server(text, &xenonet, &bin, &args, &env)?;
+            if console_mcp {
+                crate::toml::with_server(&out, &console, &bin, &console_args, &env)
+            } else {
+                Ok(out)
+            }
+        })
+    }
+
+    fn remove_hooks(&self, k: &Shared, c: &mut dyn Calls) -> Result<()> {
+        if Shared::exists(c, &self.hooks_file)? {
+            self.write_hooks(k, c, None)?;
+        }
+        Ok(())
+    }
+
+    // Only this XenoNet's servers, by their names: another's stay.
+    fn remove_server(&self, k: &Shared, c: &mut dyn Calls, _cli: &Arg, name: &str) {
+        if Shared::exists(c, &self.config_file).unwrap_or(false) {
+            let _ = self.write_config(k, c, &|text| Ok(crate::toml::without_server(text, name)));
+        }
+    }
+}
+
+/// Names as a sentence lists them: "A, B and C".
+fn and_list(names: &[&str]) -> String {
+    match names.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+        _ => names.join(""),
+    }
+}
+
 /// Connect: the apps of the registry that have `connect`, in its order,
 /// each through its format.
 pub struct Connect {
@@ -1142,9 +1310,20 @@ impl Connect {
         self.k.names()
     }
 
-    /// The ids of the apps connect goes through, as apply's default.
+    /// The ids of the apps connect goes through.
     pub fn ids(&self) -> Vec<String> {
         self.apps.iter().map(|(a, _)| a.id.clone()).collect()
+    }
+
+    /// The apps apply connects when it's given none: those that are here.
+    pub fn installed_ids(&self, c: &mut dyn Calls) -> Result<Vec<Arg>> {
+        let mut out = Vec::new();
+        for (app, f) in &self.apps {
+            if f.installed(&self.k, c)? {
+                out.push(Arg::text(app.id.clone()));
+            }
+        }
+        Ok(out)
     }
 
     fn clis(&self, c: &mut dyn Calls) -> Result<Vec<Arg>> {
@@ -1177,7 +1356,7 @@ impl Connect {
         // Agents connected to the demo would see only its made-up sessions.
         if self.k.o.demo.truthy() {
             let names: Vec<&str> = self.apps.iter().map(|(a, _)| a.name.as_str()).collect();
-            return Err(Thrown::new(format!("this is the demo, so connect {} from XenoNet, with your own sessions", names.join(" and "))));
+            return Err(Thrown::new(format!("this is the demo, so connect {} from XenoNet, with your own sessions", and_list(&names))));
         }
         for (app, f) in &self.apps {
             if apps.iter().any(|a| a.as_str() == Some(app.id.as_str())) {
@@ -1286,6 +1465,7 @@ mod tests {
             home: "/h".into(),
             claude_config_dir: None,
             codex_home: None,
+            grok_home: None,
             console_mcp: false,
             platform: "darwin".into(),
             instances: vec![
@@ -1353,13 +1533,6 @@ mod tests {
         assert!(c.hook_connected(&mut Files(m.clone()), "SessionStart").unwrap());
         m.insert(cf.settings_file.clone(), "{ not json".into());
         assert!(!c.hook_connected(&mut Files(m), "Stop").unwrap(), "settings that can't be read");
-    }
-
-    #[test]
-    fn dirname_works_as_nodes_does() {
-        for (p, d) in [("/a/b", "/a"), ("/a//b", "/a/"), ("/", "/"), ("a", "."), ("", "."), ("//a", "//"), ("/a/b/", "/a")] {
-            assert_eq!(dirname(p), d, "{p}");
-        }
     }
 
     #[test]
@@ -1542,15 +1715,23 @@ mod tests {
         let wren = App {
             id: "wren".into(),
             name: "Wren".into(),
-            connect: Some(xenonet_base::apps::Connect { format: "wren-hooks".into(), events: vec![("Start".into(), None), ("Edit".into(), Some("write".into()))] }),
+            connect: Some(xenonet_base::apps::Connect {
+                format: "wren-hooks".into(),
+                events: vec![("Start".into(), None), ("Edit".into(), Some("write".into()))],
+                unheard: vec![],
+            }),
             has: vec!["connect".into()],
             ..App::default()
         };
         // An app without connect, and one whose format no code reads, are
         // left out.
         let observed = App { id: "amp".into(), name: "Amp".into(), ..App::default() };
-        let unknown =
-            App { id: "kiro".into(), connect: Some(xenonet_base::apps::Connect { format: "kiro-toml".into(), events: vec![] }), has: vec!["connect".into()], ..App::default() };
+        let unknown = App {
+            id: "kiro".into(),
+            connect: Some(xenonet_base::apps::Connect { format: "kiro-toml".into(), events: vec![], unheard: vec![] }),
+            has: vec!["connect".into()],
+            ..App::default()
+        };
         let formats = |name: &str| (name == "wren-hooks").then_some(WrenHooks::make as Maker);
         let c = Connect::with(options(47840.0), &[observed, wren, unknown], &formats);
         assert_eq!(c.ids(), ["wren"]);
@@ -1585,9 +1766,10 @@ mod tests {
     }
 
     #[test]
-    fn the_registry_connects_claude_code_and_codex_through_their_formats() {
-        assert_eq!(at(47840.0).ids(), ["claude", "codex"]);
+    fn the_registry_connects_claude_code_codex_and_grok_build_through_their_formats() {
+        assert_eq!(at(47840.0).ids(), ["claude", "codex", "grok"]);
         let demo = Connect::new(Options { demo: Arg::Bool(true), ..options(47840.0) });
-        assert_eq!(demo.apply(&mut NoCalls, &[]).unwrap_err().message, "this is the demo, so connect Claude Code and Codex from XenoNet, with your own sessions");
+        assert_eq!(demo.apply(&mut NoCalls, &[]).unwrap_err().message, "this is the demo, so connect Claude Code, Codex and Grok Build from XenoNet, with your own sessions");
+        assert_eq!((and_list(&["A"]), and_list(&["A", "B"]), and_list(&[])), ("A".to_string(), "A and B".to_string(), String::new()));
     }
 }

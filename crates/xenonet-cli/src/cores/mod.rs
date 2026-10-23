@@ -144,6 +144,7 @@ pub fn checkup_here(flags: &crate::args::Flags, only: Option<&[String]>) -> Res<
         "homeDir": cfg.home_dir,
         "projectsDir": root["path"],
         "codexHome": cfg.codex_home,
+        "grokHome": cfg.grok_home,
         "claudeProjectsDir": cfg.claude_projects_dir,
         "stateDir": state_dir,
         "cacheDir": cache_dir,

@@ -1,8 +1,8 @@
 //! xenonet service (cli/commands/service.js): the background service,
 //! started, asked how it is, or stopped, through the component service's
 //! socket (core/components/runtime.js, install.js); and started at login
-//! under launchd or systemd (install, uninstall, run; cores/supervisor.rs,
-//! docs/design/always-on.md).
+//! under launchd, systemd or Task Scheduler (install, uninstall, run;
+//! cores/supervisor.rs, docs/design/always-on.md).
 
 use crate::args::Flags;
 use crate::cores;
@@ -33,7 +33,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         }
         "install" => install(&env, flags),
         "uninstall" => uninstall(&env, flags),
-        "run" => login::run(&env),
+        "run" => login::run(&env, args.get(1..).unwrap_or_default()),
         _ => Err(Fail::error(HELP)),
     }
 }
@@ -95,12 +95,18 @@ fn install(env: &Value, flags: &Flags) -> Done {
     let job = login::job(&given);
     // Reloading a changed registration restarts the service the supervisor
     // runs, and with it its terminals.
-    let changed = supervisor::contents(place.kind, &job).ok() != Disk.read(&place.file);
-    if changed && !flags.on("force") {
+    let changed = supervisor::contents(&place, &job).ok() != Disk.read(&place.file);
+    if changed {
         if let Some(s) = login::running(env) {
             let seen = supervisor::status(Some(&place), &Disk, &mut System);
-            if login::supervised(&s, &seen) && login::has_terminals(&s) {
+            let supervised = login::supervised(&s, &seen);
+            if supervised && login::has_terminals(&s) && !flags.on("force") {
                 return Err(Fail::new("XenoNet has running terminals, and changing how it starts at login restarts it. Close them first, or use --force.", 1));
+            }
+            // Task Scheduler's copy is stopped cleanly first, so `service
+            // run` ends with it and the new definition starts afresh.
+            if supervised && place.kind == supervisor::Kind::TaskScheduler {
+                let _ = cores::service_request(env, "stop", &json!({ "force": true }));
             }
         }
     }
@@ -109,6 +115,10 @@ fn install(env: &Value, flags: &Flags) -> Done {
     out["takeover"] = json!(takeover);
     let linger = supervisor::lingering(&place, &mut System);
     out["linger"] = json!(linger);
+    // On a Mac, the tray app starts at login beside it, when there's one
+    // installed. The service's registration stands if the tray's fails.
+    out["tray"] =
+        login::tray_place(&place).map_or(Value::Null, |tp| login::install_tray(&tp, &given, &job).unwrap_or_else(|e| json!({ "status": "failed", "error": e, "app": tp.app })));
     if flags.on("json") {
         print_json(&out);
         return Ok(0);
@@ -116,6 +126,7 @@ fn install(env: &Value, flags: &Flags) -> Done {
     let by = place.kind.name();
     if out["status"] == json!("already") {
         print(c::dim(format!("XenoNet's service already starts at login ({by}, {}).", sys::tilde(&place.file))));
+        say_tray(&out["tray"]);
         return Ok(0);
     }
     print(format!("{} XenoNet's service starts at login now, and starts again if it stops unexpectedly.", c::green("✓")));
@@ -129,7 +140,20 @@ fn install(env: &Value, flags: &Flags) -> Done {
     if linger == Some(false) {
         print(c::dim(format!("  It starts when you log in. To start it at boot, before anyone logs in, run: loginctl enable-linger {}", place.user)));
     }
+    say_tray(&out["tray"]);
     Ok(0)
+}
+
+/// What became of the tray app, after the service's lines.
+fn say_tray(tray: &Value) {
+    let app = tray["app"].as_str().map(sys::tilde).unwrap_or_default();
+    match tray["status"].as_str() {
+        Some("installed" | "updated") => print(format!("{} XenoNet's tray starts at login too, from {app}.", c::green("✓"))),
+        Some("already") => print(c::dim(format!("XenoNet's tray already starts at login, from {app}."))),
+        Some("removed") => print(format!("{} XenoNet's tray no longer starts at login, and {app} is gone.", c::green("✓"))),
+        Some("failed") => print(format!("{} XenoNet's tray, {app}: {}", c::yellow("!"), tray["error"].as_str().unwrap_or("it didn't change"))),
+        _ => {}
+    }
 }
 
 fn uninstall(env: &Value, flags: &Flags) -> Done {
@@ -150,20 +174,28 @@ fn uninstall(env: &Value, flags: &Flags) -> Done {
         if stops && login::has_terminals(&s) && !flags.on("force") {
             return Err(Fail::new("XenoNet has running terminals, and the service stops when it no longer starts at login. Close them first, or use --force.", 1));
         }
+        // Task Scheduler ends the task's own process, which may leave the
+        // service it started running: that one is asked to stop first.
+        if stops && place.kind == supervisor::Kind::TaskScheduler {
+            let _ = cores::service_request(env, "stop", &json!({ "force": true }));
+        }
     }
     let mut out = supervisor::uninstall(&place, &mut Disk, &mut System).map_err(|e| Fail::new(e, 1))?;
     out["stopped"] = json!(stops);
+    out["tray"] = login::tray_place(&place).map_or(Value::Null, |tp| login::uninstall_tray(&tp).unwrap_or_else(|e| json!({ "status": "failed", "error": e, "app": tp.app })));
     if flags.on("json") {
         print_json(&out);
         return Ok(0);
     }
     if out["status"] == json!("absent") {
         print(c::dim("XenoNet's service wasn't set to start at login."));
+        say_tray(&out["tray"]);
         return Ok(0);
     }
     print(format!("{} XenoNet's service no longer starts at login.", c::green("✓")));
     if stops {
         print(c::dim("  It stopped. Opening Desktop, or xenonet service start, starts it until you log out."));
     }
+    say_tray(&out["tray"]);
     Ok(0)
 }

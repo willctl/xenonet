@@ -109,10 +109,16 @@ pub fn which(name: &str) -> Option<PathBuf> {
 
 /// GET http://127.0.0.1:<port>/health: the JSON body, or None.
 pub fn health(port: u16) -> Option<Value> {
+    get_json(port, "/health")
+}
+
+/// GET http://127.0.0.1:<port><path> (/health, or /status for what only this machine sees, such as
+/// the wiki folder): the JSON body, or None.
+pub fn get_json(port: u16, path: &str) -> Option<Value> {
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     let mut s = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(2)).ok()?;
     let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
-    write!(s, "GET /health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n").ok()?;
+    write!(s, "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n").ok()?;
     let mut raw = String::new();
     s.read_to_string(&mut raw).ok()?;
     serde_json::from_str(raw.split_once("\r\n\r\n")?.1).ok()

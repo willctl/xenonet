@@ -212,6 +212,13 @@ impl cores::State for Fake {
         self.note("checkRoot", path.clone());
         Ok(json!({ "ok": true, "path": path }))
     }
+    fn summary(&self) -> R<Value> {
+        Ok(json!({
+            "working": 2,
+            "needsYou": [{ "id": S, "app": "claude", "title": "Rate-limit the API", "kind": "question", "text": "Per key?", "since": 2000 }],
+            "review": 0, "stuck": [], "collisions": 0, "tpm": null, "url": "http://127.0.0.1:47841",
+        }))
+    }
 }
 
 impl cores::Policy for Fake {
@@ -851,17 +858,34 @@ fn urlencode(s: &str) -> String {
 async fn a_remote_sessions_transcript_and_stats_come_through_its_relay() {
     let (ctx, f) = service(true);
     let id = format!("@vm1:{S}");
-    let t = go(&ctx, "GET", &format!("/api/session/{}/transcript?limit=50&cursor=abc_1", urlencode(&id)), &[], None).await;
+    // Only XenoNet's own window reads another machine's: never an agent
+    // here, an actor, or a page without the window's key.
+    let key = ctx.window_key.reveal().to_string();
+    let w = [("x-xenonet-window", key.as_str())];
+    let actor = [("x-xenonet-window", key.as_str()), ("authorization", "Bearer xnt_x")];
+    for (who, headers) in [("an agent", &[AGENT][..]), ("an actor", &actor[..]), ("a page without the key", &[][..])] {
+        for path in [
+            format!("/api/session/{}/transcript", urlencode(&id)),
+            format!("/api/session/{}/stats", urlencode(&id)),
+            format!("/api/collision?a={}&b={}", urlencode(&id), urlencode("@vm1:claude:2")),
+            "/api/mcp?server=agent-wiki&host=vm1".to_string(),
+        ] {
+            let r = go(&ctx, "GET", &path, headers, None).await;
+            assert_eq!((r.status, r.body_json()["code"].clone()), (403, json!("window")), "{who}: {path}");
+        }
+    }
+    assert!(f.was("get").is_empty(), "nothing reached a relay");
+    let t = go(&ctx, "GET", &format!("/api/session/{}/transcript?limit=50&cursor=abc_1", urlencode(&id)), &w, None).await;
     assert_eq!(t.status, 200);
     assert_eq!(f.was("get")[0], json!(["vm1", format!("/api/session/{S}/transcript?limit=50&cursor=abc_1")]));
     assert_eq!(t.body_json(), json!({ "id": id, "path": format!("/api/session/{S}/transcript?limit=50&cursor=abc_1"), "host": "vm1" }), "its ids as this XenoNet writes them");
-    go(&ctx, "GET", &format!("/api/session/{id}/stats?limit=9"), &[], None).await;
+    go(&ctx, "GET", &format!("/api/session/{id}/stats?limit=9"), &w, None).await;
     assert_eq!(f.was("get")[1], json!(["vm1", format!("/api/session/{S}/stats")]), "stats take no query");
     for bad in [format!("/api/session/{}/transcript?limit=all", urlencode(&id)), format!("/api/session/{}/transcript?cursor={}", urlencode(&id), urlencode("a b"))] {
-        assert_eq!(go(&ctx, "GET", &bad, &[], None).await.status, 400, "{bad}");
+        assert_eq!(go(&ctx, "GET", &bad, &w, None).await.status, 400, "{bad}");
     }
     for unknown in [format!("@vm9:{S}"), "@vm1:project:~/x".to_string(), "@vm1:@vm2:claude:x".to_string(), "@vm1:claude:../../x".to_string()] {
-        assert_eq!(go(&ctx, "GET", &format!("/api/session/{}/stats", urlencode(&unknown)), &[], None).await.status, 404, "{unknown}");
+        assert_eq!(go(&ctx, "GET", &format!("/api/session/{}/stats", urlencode(&unknown)), &w, None).await.status, 404, "{unknown}");
     }
     assert_eq!(f.was("get").len(), 2, "nothing else reached a relay");
 
@@ -869,9 +893,9 @@ async fn a_remote_sessions_transcript_and_stats_come_through_its_relay() {
         format!("/api/collision?a={S}&b=claude:2"),
         HubAnswer { status: 200, body: json!({ "a": { "id": S, "title": "A" }, "b": { "id": "claude:2", "title": "B" }, "files": [] }) },
     ));
-    let c = go(&ctx, "GET", &format!("/api/collision?a={}&b={}", urlencode(&id), urlencode("@vm1:claude:2")), &[], None).await;
+    let c = go(&ctx, "GET", &format!("/api/collision?a={}&b={}", urlencode(&id), urlencode("@vm1:claude:2")), &w, None).await;
     assert_eq!(c.body_json(), json!({ "a": { "id": id, "title": "A" }, "b": { "id": "@vm1:claude:2", "title": "B" }, "files": [], "host": "vm1" }));
-    assert_eq!(go(&ctx, "GET", &format!("/api/collision?a={}&b={S}", urlencode(&id)), &[], None).await.status, 400, "across machines comes later");
+    assert_eq!(go(&ctx, "GET", &format!("/api/collision?a={}&b={S}", urlencode(&id)), &w, None).await.status, 400, "across machines comes later");
 }
 
 // ---------- test/environments.test.js ----------
@@ -978,19 +1002,27 @@ async fn bodies_that_arent_json_or_are_too_big_are_the_clients_error() {
 }
 
 #[tokio::test]
-async fn the_windows_message_to_an_actor_needs_its_key_and_an_actor() {
+async fn the_windows_message_needs_its_key_and_a_session_or_an_actor() {
     let (ctx, f) = service(false);
     let r = go(&ctx, "POST", "/api/actors/you/message", &[], Some(json!({ "to": "actor:muse", "text": "hi" }))).await;
     assert_eq!((r.status, r.body_json()["code"].clone()), (403, json!("yours")));
     let key = ctx.window_key.reveal().to_string();
     let r = go(&ctx, "POST", "/api/actors/you/message", &[("x-xenonet-window", &key), ("authorization", "Bearer x")], Some(json!({ "to": "actor:muse" }))).await;
     assert_eq!(r.status, 403, "never with a token");
-    let r = go(&ctx, "POST", "/api/actors/you/message", &[("x-xenonet-window", &key)], Some(json!({ "to": ME, "text": "hi" }))).await;
-    assert_eq!((r.status, r.body_json()["code"].clone()), (400, json!("bad-request")), "sessions get messages from sessions");
+    for to in ["repo", "all", "@nohost", "actor:you", "@laptop:nothing"] {
+        let r = go(&ctx, "POST", "/api/actors/you/message", &[("x-xenonet-window", &key)], Some(json!({ "to": to, "text": "hi" }))).await;
+        assert_eq!((r.status, r.body_json()["code"].clone()), (400, json!("bad-request")), "one session or actor, by its id: {to}");
+    }
     let r = go(&ctx, "POST", "/api/actors/you/message", &[("x-xenonet-window", &key)], Some(json!({ "to": "actor:muse", "text": "hi" }))).await;
     assert_eq!(r.status, 200);
     assert_eq!(f.was("send")[0][0], json!("actor:you"));
     assert_eq!(f.was("send")[0][2], json!({ "method": "window", "process": "n/a", "strength": "strong" }));
+    // A session here, or one on another machine of the network, as you.
+    for to in [ME.to_string(), format!("@laptop:{ME}")] {
+        let r = go(&ctx, "POST", "/api/actors/you/message", &[("x-xenonet-window", &key)], Some(json!({ "to": to, "text": "hi" }))).await;
+        assert_eq!(r.status, 200, "{to}");
+    }
+    assert_eq!(f.was("send").len(), 3);
 }
 
 #[tokio::test]
@@ -1019,4 +1051,61 @@ async fn claude_codes_hooks_are_checked_against_the_sessions_process() {
     let r = go(&ctx, "POST", "/api/hook/claude", &[], Some(json!({ "session_id": "11111111-2222-3333-4444-555555555555", "hook_event_name": "Stop" }))).await;
     assert_eq!(status_error(&r), (403, json!("that's another process's session")));
     assert_eq!(f.was("check")[0], json!([ME, true]));
+}
+
+// ---------- the tray app's routes (routes/tray.rs) ----------
+
+/// A service for the tray: the map's summary and the process checks.
+fn tray_service() -> (Arc<Ctx>, Arc<Fake>) {
+    let f = Arc::new(Fake::new());
+    let mut c = Cores::pending(false, false, false);
+    c.verify = f.clone();
+    c.state = f.clone();
+    (Ctx::for_tests(c), f)
+}
+
+#[tokio::test]
+async fn the_trays_routes_need_its_key_and_you_never_an_agent_or_an_actor() {
+    let (ctx, f) = tray_service();
+    let key = ctx.tray_key.reveal().to_string();
+    let tray = ("x-xenonet-tray", key.as_str());
+    let wrong = "0".repeat(64);
+    let code = |r: &Reply| (r.status, r.body_json()["code"].clone());
+    // No key, a wrong one, the window's, or an actor's token beside it:
+    // refused before the process is looked at, on any path, so none can be
+    // probed.
+    for headers in [vec![], vec![("x-xenonet-tray", wrong.as_str())], vec![tray, ("authorization", "Bearer x")], vec![("x-xenonet-window", ctx.window_key.reveal())]] {
+        for (method, path) in [("GET", "/api/tray/v1/status"), ("GET", "/api/tray/v1/events"), ("POST", "/api/tray/v1/open-console"), ("GET", "/api/tray/v1/nope")] {
+            let r = go(&ctx, method, path, &headers, None).await;
+            assert_eq!(code(&r), (403, json!("tray")), "{method} {path} {headers:?}");
+        }
+    }
+    assert_eq!(f.was("person"), Vec::<Value>::new());
+    // With the key, the request must still be yours.
+    *f.person.lock().unwrap() = json!({ "ok": false, "reason": "this is yours to do, and it came from under a Claude Code process" });
+    let r = go(&ctx, "GET", "/api/tray/v1/status", &[tray], None).await;
+    assert_eq!(
+        (r.status, r.body_json()["code"].clone(), r.body_json()["error"].clone()),
+        (403, json!("yours"), json!("this is yours to do, and it came from under a Claude Code process"))
+    );
+    *f.person.lock().unwrap() = json!({ "ok": true });
+    // The status: what waits in the console's words, checked against its schema.
+    let r = go(&ctx, "GET", "/api/tray/v1/status", &[tray], None).await;
+    assert_eq!(r.status, 200);
+    let s = r.body_json();
+    assert_eq!((s["schema"].clone(), s["running"].clone(), s["working"].clone(), s["needsYou"]["count"].clone()), (json!("tray/status/v1"), json!(true), json!(2), json!(1)));
+    assert_eq!((s["needsYou"]["items"][0]["title"].clone(), s["needsYou"]["items"][0]["words"].clone()), (json!("Rate-limit the API"), json!("asks")));
+    assert_eq!((s["gateway"]["state"].clone(), s["network"]["link"].clone(), s["desktop"].clone()), (json!("off"), json!("off"), json!(false)));
+    let doc = xenonet_base::json::parse(include_str!("../../../schemas/tray/status/v1.json")).unwrap();
+    let checker = xenonet_schema::check::compile(&[doc]).unwrap();
+    assert!(checker.check(checker.root(0), &xenonet_schema::check::Data::from(&s), true).ok(), "{s}");
+    // The events: a stream.
+    let r = go(&ctx, "GET", "/api/tray/v1/events", &[tray], None).await;
+    assert_eq!((r.status, r.header("content-type")), (200, Some("text/event-stream")));
+    // Opening the console: with no Desktop connected, the tray opens it itself.
+    let r = go(&ctx, "POST", "/api/tray/v1/open-console", &[tray], Some(json!({ "id": S }))).await;
+    assert_eq!(r.body_json(), json!({ "ok": true, "opened": null, "url": format!("http://127.0.0.1:{}/", ctx.config.port) }));
+    assert_eq!(go(&ctx, "POST", "/api/tray/v1/open-console", &[tray], None).await.status, 200, "no id: the console as it is");
+    assert_eq!(go(&ctx, "POST", "/api/tray/v1/open-console", &[tray], Some(json!({ "id": "https://example.com" }))).await.status, 400);
+    assert_eq!(go(&ctx, "GET", "/api/tray/v1/nope", &[tray], None).await.status, 404);
 }

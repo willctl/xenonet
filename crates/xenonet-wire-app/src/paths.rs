@@ -37,12 +37,13 @@ impl Finds for Found<'_> {
     fn world(&mut self) -> Value {
         self.world.cloned().unwrap_or(Value::Null)
     }
-    fn context_dir(&mut self) -> Option<String> {
+    fn context(&mut self) -> Value {
         let env = xenonet_sources::xenolith::env_of(&Value::Object(self.env.clone()));
-        xenonet_sources::xenolith::find_context_dir(&env, self.home, crate::fx::platform()).map(|(d, _)| d)
+        xenonet_sources::xenolith::find_context_dir(&env, self.home, crate::fx::platform()).map_or(Value::Null, |(dir, server)| json!({ "dir": dir, "server": server }))
     }
     fn context_server(&mut self, dir: Option<&str>) -> Value {
-        dir.map_or(Value::Null, |d| json!(xenonet_sources::xenolith::context_server_of(d)))
+        let env = xenonet_sources::xenolith::env_of(&Value::Object(self.env.clone()));
+        dir.map_or(Value::Null, |d| json!(xenonet_sources::xenolith::context_server_of(d, &env, self.home, crate::fx::platform())))
     }
     fn claude_desktop_dir(&mut self) -> Option<String> {
         let env = xenonet_base::dirs::Env {

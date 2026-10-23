@@ -11,10 +11,14 @@
 //!   xenolith curator [...]             the curator and the Ask worker (see curator.rs)
 //!   xenolith service --config <ini>    the Windows service (see service.rs)
 //!   xenolith install | uninstall       set Xenolith up for the apps on this computer, or take it out (see install/)
+//!   xenolith migrate agent-wiki [...]  move an agent-wiki install to Xenolith, journaled (see migrate/)
 //!   xenolith forget "<text>" [--yes]   find every copy of a text in the wiki and logs; --yes redacts them
 //!   xenolith spaces | grant | revoke | access   spaces and who may use them (see access_cli.rs)
 //!   xenolith sync [...]                 copies of spaces another machine curates (see sync_cli.rs)
-//!   xenolith held [...]                 the changes waiting for your OK, in any space (see held_cli.rs)
+//!   xenolith note "<title>" [...]       a note from you to the curator (through the service, as yours)
+//!   xenolith held [...]                 the changes waiting for your OK, in any space; deciding one
+//!                                       uses the running service and its owner key (see held_cli.rs)
+//!   xenolith status [--port N] [--json]  the service's health and whether the audit chain is written
 //!   xenolith --version
 
 mod access_cli;
@@ -28,9 +32,13 @@ mod httpd;
 mod install;
 mod keypipe;
 mod mcp;
+mod migrate;
 mod models;
+mod note_cli;
+mod owner_client;
 mod resources;
 mod service;
+mod status_cli;
 mod stdio;
 mod sync_cli;
 mod uiapi;
@@ -46,7 +54,7 @@ fn set_if_unset(k: &str, v: &str) {
 
 fn usage() -> ! {
     eprintln!(
-        "usage: xenolith serve [--http [--port N] [--parent-stdin] | --read-only | --init] | xenolith hook | xenolith curator [--once | --parent-stdin | --asks-only | --retry-dead | --file-raw-dead | --login-status] | xenolith forget \"<text>\" [--ignore-case] [--yes] | xenolith embeddings status|sync | xenolith models [set curator|ask <model> [--effort <level>] | reset curator|ask] | xenolith spaces [add <space>] | xenolith grant <subject> <scope> | xenolith revoke <subject> [<scope>] | xenolith access | xenolith token create|revoke ... | xenolith audit [verify | tail] | xenolith sync [...] | xenolith held [...] | xenolith --version"
+        "usage: xenolith serve [--http [--port N] [--parent-stdin] | --read-only | --init] | xenolith hook | xenolith curator [--once | --parent-stdin | --asks-only | --retry-dead | --file-raw-dead | --login-status] | xenolith forget \"<text>\" [--ignore-case] [--yes] | xenolith embeddings status|sync | xenolith models [set curator|ask <model> [--effort <level>] | reset curator|ask] | xenolith spaces [add <space>] | xenolith grant <subject> <scope> | xenolith revoke <subject> [<scope>] | xenolith access | xenolith token create|revoke ... | xenolith audit [verify | tail] | xenolith sync [...] | xenolith held [...] | xenolith note \"<title>\" [--body <text>] | xenolith migrate agent-wiki [--dry-run | --run | --resume | --rollback | --finish [--move-wiki] | --update-protocol] [--json] | xenolith status [--port N] [--json] | xenolith --version"
     );
     std::process::exit(2)
 }
@@ -87,8 +95,11 @@ fn main() {
             curator::run(&args[1..])
         }
         Some("forget") => forget::run(&args[1..]),
+        Some("migrate") => migrate::main(&args[1..]),
         Some("sync") => sync_cli::run(&args[1..]),
         Some("held") => held_cli::run(&args[1..]),
+        Some("note") => note_cli::run(&args[1..]),
+        Some("status") => status_cli::run(&args[1..]),
         Some(cmd @ ("spaces" | "grant" | "revoke" | "access" | "token" | "audit")) => access_cli::run(cmd, &args[1..]),
         Some("embeddings") => embeddings::run(&args[1..]),
         Some("models") => models::run(&args[1..]),

@@ -56,7 +56,7 @@ export const RepoStatus = obj({
   checkedAt: ms,
 });
 
-// Agent Wiki pages take their fields from front matter as it's written: a
+// Context pages take their fields from front matter as it's written: a
 // value is text, or JSON when it starts with [ (so a list, or anything).
 const front = z.union([z.string(), z.array(z.unknown())]).describe("A front matter value: text, or a JSON list when it starts with [");
 
@@ -127,14 +127,20 @@ const ZoneNode = obj({
   ...remote,
 }).describe("A folder outside the projects folder where sessions ran: the home folder, scratch folders, temp, or one folder");
 
+// An MCP server's name, as the shared context's folder can give it
+// (core/xenolith.js): xenolith or agent-wiki, unless the folder's marker
+// names another.
+const SERVER = "[A-Za-z0-9][A-Za-z0-9._-]{0,63}";
+
 const WikiNode = obj({
-  id: z.string().regex(hosted("resource:(xenolith|agent-wiki)$")),
+  id: z.string().regex(hosted(`resource:${SERVER}$`)),
   kind: z.literal("wiki"),
   name: z.string(),
-  server: z.enum(["xenolith", "agent-wiki"]).optional().describe("The MCP server that writes to it"),
+  server: z.string().regex(new RegExp(`^${SERVER}$`)).optional().describe("The MCP server that writes to it: xenolith or agent-wiki, or the name the folder's marker (xenolith.json) gives"),
   path: z.string(),
   pageCount: count,
   inbox: z.array(obj({ id: z.string(), title: z.string(), app: nstr })),
+  problem: z.string().optional().describe("Why XenoNet shows none of its pages, log or inbox: the folder follows a later version of Xenolith's format than XenoNet reads"),
   ...placed,
   ...rolled,
   ...remote,
@@ -152,10 +158,12 @@ const PageNode = obj({
   updatedBy: front.nullable(),
   path: z.string(),
   writes: z.array(obj({ ts: ms, app: z.string(), title: z.string(), pages: z.array(z.string()) })).max(6),
+  aliases: z.array(z.string()).optional().describe("Other names it goes by, from its aliases, in lowercase; left out when it has none"),
+  space: z.string().optional().describe("The Xenolith space it's in, such as project:atlas, when that isn't this machine's own; its id is then wiki:<space>/<slug>"),
   ...placed,
   ...rolled,
   ...remote,
-}).describe("An Agent Wiki page");
+}).describe("A context page: a page of the shared context");
 
 const ResourceNode = obj({
   id: z.string().regex(hosted("resource:")),
@@ -214,10 +222,10 @@ export const Graph = define(
   obj({
     generatedAt: ms,
     nodes: z.array(z.union([SessionNode, ProjectNode, CoreNode, NativeNode, ZoneNode, WikiNode, PageNode, ResourceNode, HostNode])),
-    links: z.array(obj({ source: z.string(), target: z.string(), kind: z.enum(LINK_KINDS) })).describe("The tree, by node ids; lineage-cross ties a session to its parent in another place, and host ties another machine's node to this one's core"),
-    relations: z.array(obj({ a: z.string(), b: z.string(), kind: z.enum(["wikilink", "mentions", "same-repo"]) })).describe("Ties outside the tree: wiki pages that link, pages that mention a project, and checkouts of one repo on different machines"),
+    links: z.array(obj({ source: z.string(), target: z.string(), kind: z.enum(LINK_KINDS) })).describe("The tree, by node ids; lineage-cross ties a session to its parent in another place, host ties another machine's node to this one's core, wiki ties the shared context to the core, and page a context page to the shared context"),
+    relations: z.array(obj({ a: z.string(), b: z.string(), kind: z.enum(["wikilink", "mentions", "same-repo"]) })).describe("Ties outside the tree: context pages that link to each other (wikilink), pages that mention a project (mentions), and checkouts of one repo on different machines (same-repo)"),
     stats: obj({
-      wikiPages: count,
+      wikiPages: count.describe("Context pages on the map"),
       dirtyRepos: count,
       projects: count,
       groups: count,
@@ -235,7 +243,7 @@ export const Graph = define(
     sources: z
       .array(
         obj({
-          name: z.string().describe("projects, codex, codex-projects, claude, live, wiki, search, identities"),
+          name: z.string().describe("projects, codex, codex-projects, claude, live, wiki (the shared context), search, identities"),
           ok: z.boolean(),
           ms: z.number().nullable().optional(),
           count: z.number().nullable().optional(),
@@ -247,7 +255,7 @@ export const Graph = define(
   }),
   {
     title: "Graph",
-    description: "The map: the projects folder, its groups and projects, Codex desktop projects, the folders outside it where sessions ran, the sessions, Agent Wiki and the MCP servers sessions share, with the identities work ran as.",
+    description: "The map: the projects folder, its groups and projects, Codex desktop projects, the folders outside it where sessions ran, the sessions, Xenolith and the MCP servers sessions share, with the identities work ran as.",
   },
 );
 

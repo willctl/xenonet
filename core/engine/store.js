@@ -163,6 +163,32 @@ export const ENGINE_MIGRATIONS = [
     if (!hasColumn(db, "actors", "gateway_hash")) db.exec("ALTER TABLE actors ADD COLUMN gateway_hash TEXT");
     if (!hasColumn(db, "actors", "gateway_at")) db.exec("ALTER TABLE actors ADD COLUMN gateway_at INTEGER");
   },
+  // 8: a network across machines (docs/design/network.md): where a message
+  // came from (null: made here) and its id across the network, which host
+  // each delivery is on, its receipt and the frame that carries it, the
+  // latest presence of each other host, their claims, and handoffs.
+  (db) => {
+    for (const [table, column, type] of [["messages", "host", "TEXT"], ["messages", "mid", "TEXT"], ["deliveries", "host", "TEXT"], ["deliveries", "receipt", "TEXT"], ["deliveries", "receipt_at", "INTEGER"], ["deliveries", "frame", "TEXT"]]) {
+      if (!hasColumn(db, table, column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    }
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS messages_by_mid ON messages (mid) WHERE mid IS NOT NULL;
+      CREATE TABLE IF NOT EXISTS net_presence (
+        host TEXT PRIMARY KEY, counter INTEGER NOT NULL, at INTEGER NOT NULL,
+        you INTEGER NOT NULL DEFAULT 0, roster TEXT, agents TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS net_claims (
+        host TEXT NOT NULL, repo_key TEXT NOT NULL, path TEXT NOT NULL,
+        agent TEXT NOT NULL, branch TEXT, kind TEXT NOT NULL, until INTEGER,
+        at INTEGER NOT NULL, PRIMARY KEY (host, repo_key, path, agent, kind));
+      CREATE TABLE IF NOT EXISTS handoffs (
+        id TEXT PRIMARY KEY, host TEXT, maker TEXT NOT NULL,
+        to_agent TEXT, to_repo TEXT, to_scope TEXT, to_host TEXT,
+        goal TEXT, done TEXT, next TEXT, files TEXT NOT NULL,
+        branch TEXT, commit_sha TEXT,
+        state TEXT NOT NULL DEFAULT 'open', taken_by TEXT, taken_at INTEGER,
+        asked_by TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+    `);
+  },
 ];
 
 export const ENGINE_VERSION = ENGINE_MIGRATIONS.length;
@@ -207,6 +233,9 @@ export class EngineStore {
       this.db.prepare("DELETE FROM actor_requests WHERE created_at < ?").run(now - DAY_MS);
       this.db.prepare("DELETE FROM actor_revoked WHERE at < ?").run(now - WEEK_MS);
       this.db.prepare("UPDATE actors SET status = NULL, status_at = NULL WHERE slug = ? AND status_at < ?").run(YOU_SLUG, now - DAY_MS);
+      // Other hosts' claims until they lapse; handoffs a week past theirs.
+      this.db.prepare("DELETE FROM net_claims WHERE until < ?").run(now);
+      this.db.prepare("DELETE FROM handoffs WHERE expires_at < ?").run(now - WEEK_MS);
       this.pruneAudit(now);
     });
   }
@@ -427,6 +456,17 @@ export class EngineStore {
   // One that reports only through the gateway has no token of its own, and
   // isn't listed while its gateway token stands.
   expiredActorTokens = () => this.db.prepare("SELECT slug, name FROM actors WHERE allowed_at IS NOT NULL AND token_hash IS NULL AND gateway_hash IS NULL ORDER BY allowed_at, rowid").all().map((r) => ({ slug: r.slug, name: r.name }));
+  // The hashes of the tokens that work now: each actor's own, its gateway
+  // token, and those of the registrations still waiting. The doctor holds
+  // the token-shaped strings it finds in repos to these, so a made-up one
+  // in a test fixture isn't taken for a leak. Never shown.
+  issuedTokenHashes = () =>
+    this.db
+      .prepare(
+        "SELECT token_hash AS hash FROM actors WHERE token_hash IS NOT NULL UNION SELECT gateway_hash FROM actors WHERE gateway_hash IS NOT NULL UNION SELECT token_hash FROM actor_requests WHERE decision IS NULL",
+      )
+      .all()
+      .map((r) => r.hash);
 
   // A registration waiting for you: what it asked (ask, JSON), its token's
   // hash, who asked (asker, JSON), and when it lapses.

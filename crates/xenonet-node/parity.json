@@ -400,7 +400,7 @@
     "core/control.js": {
       "rust": "crates/xenonet-app/src/control.rs, on the task bridge in crates/xenonet-app/src/task.rs",
       "differences": [
-        "Each method is a Rust task (async Rust whose awaits the twin answers): fetch to the instance's server, the system's alive, kill, command and spawn, and the environment are still done by JS, with the system given.",
+        "Each method is a Rust task (async Rust whose awaits the twin answers): fetch to the instance's server, the system's alive, kill, processes, command and spawn, and the environment are still done by JS, with the system given. The twin's own processes runs ps and has Rust read its rows (appParseProcesses).",
         "lockHolder reads the lock's link and connects to its socket from Rust, synchronously (a Unix socket answers at once or not at all); JS gave the connection a second.",
         "electronCommand still finds npm's Electron with Node's module resolution; whether XenoNet Dev.app is this checkout's is the Rust's.",
         "A port given as null is taken as not given; JS used null."
@@ -482,7 +482,7 @@
     "core/digest.js": {
       "rust": "crates/xenonet-state/src/digest.rs",
       "differences": [
-        "askCodex still runs codex exec from the twin (a child process); Rust gives its arguments and narrate's prompt.",
+        "askCodex still runs codex exec from the twin (a child process); Rust gives its arguments, makes the run's own Codex home (codexRunHome) and gives narrate's prompt.",
         "dayLog's date is English as en-US writes it (\"Saturday, October 3\") whatever the system's locale, where Node used the system's.",
         "summarize writes since and until as null when they aren't numbers, where JS gave them back as they came."
       ]
@@ -506,7 +506,7 @@
       ]
     },
     "core/doctor/index.js": {
-      "rust": "crates/xenonet-doctor/src/checks.rs and run.rs",
+      "rust": "crates/xenonet-doctor/src/checks.rs, login.rs and run.rs",
       "differences": [
         "Each check is a task asking the twin's ctx for what it reads (calls through ctx and ctx.actors, the token files' look, and a local time, which Intl formats in JS); its verdict and words are the Rust's. machine(), the runner's parallel runs with their time limit, and the hosts' key checks' composition stay in the twin.",
         "Of the live state the checks get only its Claude plan reading, and of the health its sources and parts, so a run doesn't convert all of XenoNet's live state for each check.",
@@ -715,7 +715,7 @@
         "A view reads a copy of its record, made when it's built: a change to `raw` after that isn't seen (no reader changes one).",
         "Lines are parsed as in core/blocks/normalizer.js's entry.",
         "Through the twin, reading a transcript takes about 8 times as long as the JS (20,000 lines, 15 MB: 340 ms against 40 ms), since each record crosses between JS and Rust several times while vendor.js's checks are still JS. Don't put this twin in the module's place before the readers are Rust end to end.",
-        "readLines still reads the file, and unpacks a .zst archive, in JS: the Rust reader needs a zstd decoder first."
+        "readLines still reads the file, and unpacks a .zst archive, in JS. The binary's readers unpack one in Rust (crates/xenonet-wire-map/src/archive.rs), every frame of it, where Node's zlib.zstdDecompressSync stops after the first; Codex writes one."
       ]
     },
     "core/live.js": {
@@ -766,14 +766,14 @@
         "vendor.js's check stays JS: Rust calls the twin's guarded reader(SOURCE).check back for the first 16 session events and tool starts of each log, with the version session.start gives, so each of those records crosses to JS and back. A test's own `files` (readdirSync, statSync, readFileSync) is read through the same way; a Dirent without isDirectory makes the folder unreadable, where JS threw out of read() (a problem).",
         "Logs are parsed as in core/blocks/normalizer.js's entry (crates/xenonet-base/src/json.rs).",
         "Times are read by crates/xenonet-base/src/time.rs: ISO 8601 only, a time without a zone as UTC; V8's Date.parse fallback for other forms isn't kept.",
-        "Paths keep the writing machine's style through Node 22's path.win32 and path.posix rules, ported in crates/xenonet-sources/src/native/node_path.rs; a drive-relative Windows path (C:foo) resolves against the process's folder, not the drive's own (=C:).",
+        "Paths keep the writing machine's style through Node 22's path.win32 and path.posix rules, ported in crates/xenonet-base/src/nodepath.rs; a drive-relative Windows path (C:foo) resolves against the process's folder, not the drive's own (=C:).",
         "`runs` is a Map rebuilt from Rust after each read (the same Map until the next one); `cache` isn't exposed; EDIT_TOOLS is a copy, so changing either changes nothing in Rust."
       ]
     },
     "core/native/cursor.js": {
       "rust": "crates/xenonet-sources/src/native/cursor.rs",
       "differences": [
-        "vendor.js's check stays JS, called back for the first 32 records; the reader is got when the first record is checked, where JS got it as it began to parse (records or none). What the check throws is the block's problem, as in JS. A test's own `files` (statSync, openSync, readSync, closeSync) is read through.",
+        "vendor.js's check stays JS, called back for the first 32 records; the reader is got, called back too, as a changed file is parsed, as JS got it. What getting it or the check throws is the block's problem, as in JS. A test's own `files` (statSync, openSync, readSync, closeSync) is read through.",
         "Records, times and paths as in copilot-cli's entry; an `at` that isn't a string is read as String() writes it, ISO only.",
         "`runs` as in copilot-cli's entry; `seen` and `fileState` are read only."
       ]
@@ -1024,6 +1024,12 @@
         "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
       ]
     },
+    "core/schema/network.js": {
+      "rust": "crates/xenonet-schema/src/check.rs",
+      "differences": [
+        "Re-exports the zod definitions, which stay JS: npm run schemas writes schemas/ from them (docs/design/schemas.md, adr/0001). Their Rust is the JSON Schema each writes, which check.rs checks data against. Their constants (patterns, enums, error codes) stay theirs too: a copy in Rust would be a second source of truth beside schemas/, and the ids they build on already come from Rust through ids.js's twin."
+      ]
+    },
     "core/schema/project.js": {
       "rust": "crates/xenonet-schema/src/check.rs",
       "differences": [
@@ -1244,6 +1250,7 @@
       "rust": "crates/xenonet-sources/src/wiki.rs",
       "differences": [
         "Rust reads the folder (std::fs, in Node's order), and a page that isn't UTF-8 is read as Node reads it, with U+FFFD for what isn't.",
+        "On Windows Rust passes over any reparse point below the folder, as Xenolith does, where Node's lstat sees only symbolic links and junctions.",
         "updated is read as Date.parse reads ISO 8601, a date and time without a zone as local time; V8's fallback for other formats (\"Oct 3 2026\") gives null here. A local time at a daylight saving change can come out an hour from V8's.",
         "A page's writes are copies of the log's entries, not the same objects.",
         "Arguments are read as JSON values: a project's getters, and values JSON can't hold, aren't seen. A text that isn't a string is made one with String() (parseFrontmatter still gives back what it was given as the body when there's no frontmatter, and slices what it was given when there is)."
@@ -1264,6 +1271,7 @@
     }
   },
   "tests": [
+    "test/a2a.test.js",
     "test/actor-detail.test.js",
     "test/actor-gateway.test.js",
     "test/actor-limits.test.js",
@@ -1393,6 +1401,7 @@
     "test/scope.test.js",
     "test/script.test.js",
     "test/server.test.js",
+    "test/service-runtime.test.js",
     "test/signals.test.js",
     "test/space-presence.test.js",
     "test/spotify.test.js",

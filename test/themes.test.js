@@ -210,6 +210,16 @@ const BUDGET = [
   ["collision", ["surface"], 3],
 ];
 
+test("each app's sessions have a color of their own in every theme, readable on the page and the panels", () => {
+  const others = ["claude", "codex", "grok", "project", "satellite", "native", "resource", "actor", "gold", "attention", "danger", "collision", "stuck", "lineage", "pressure", "review", "collab"];
+  for (const t of Object.values(themes())) {
+    for (const app of ["claude", "codex", "grok"]) {
+      for (const bg of ["bg", "surface"]) assert.ok(contrast(t.colors[app], t.colors[bg]) >= 4.5, `${t.id}: ${app} (${t.colors[app]}) on ${bg} is ${contrast(t.colors[app], t.colors[bg]).toFixed(2)}:1`);
+    }
+    for (const k of others.filter((x) => x !== "grok")) assert.ok(colorDistance(t.colors.grok, t.colors[k]) >= 20, `${t.id}: grok ${t.colors.grok} is close to ${k} ${t.colors[k]}`);
+  }
+});
+
 test("contrast as WCAG measures it", () => {
   assert.equal(contrast("#000000", "#ffffff"), 21);
   assert.equal(contrast("#ffffff", "#000000"), 21, "either way round");
@@ -264,7 +274,7 @@ test("identity rings: each theme's own five, clear of every color with a meaning
   const all = themes();
   assert.deepEqual(ringColors(all.xenonet), ["#8fa8ff", "#ff8fb3", "#f2ead3", "#7ef0dd", "#b69bff"]);
   assert.equal(Math.round(colorDistance("#000000", "#ffffff")), 100);
-  const meaningful = ["project", "satellite", "claude", "codex", "gold", "pressure", "attention", "danger", "collision", "stuck", "lineage"];
+  const meaningful = ["project", "satellite", "claude", "codex", "grok", "gold", "pressure", "attention", "danger", "collision", "stuck", "lineage"];
   for (const t of Object.values(all)) {
     const rings = ringColors(t);
     assert.deepEqual(rings, t.identities, `${t.id}: its own five, none swapped`);

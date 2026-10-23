@@ -63,12 +63,20 @@ pub struct CodexClient {
 }
 
 // The rollout read last, kept while it's paged through, and read on from
-// where it ended as it grows.
+// where it ended as it grows; a compressed archive, by its size and time
+// when it was read whole (`stamp`).
 struct Rollout {
     file: String,
     offset: u64,
     rest: Vec<u8>,
+    stamp: Option<String>,
     entries: RolloutEntries,
+}
+
+impl Rollout {
+    fn new(file: &str, offset: u64) -> Rollout {
+        Rollout { file: file.into(), offset, rest: Vec::new(), stamp: None, entries: RolloutEntries::default() }
+    }
 }
 
 fn fail_all(pending: &Waiting, why: &str) {
@@ -320,45 +328,62 @@ impl CodexClient {
 
     /// A page of a thread from its rollout file: newest first, `cursor`
     /// (`"rollout:<n>"`) continuing further back.
-    #[expect(clippy::case_sensitive_file_extension_comparisons, reason = "as the JS's endsWith, which tells .zst from .ZST")]
     pub fn rollout_page(&self, file: &str, cursor: Option<&str>, limit: f64) -> Result<Value, String> {
         let mut slot = lock(&self.rollout);
         if slot.as_ref().is_none_or(|r| r.file != file) {
-            *slot = Some(Rollout { file: file.into(), offset: 0, rest: Vec::new(), entries: RolloutEntries::default() });
+            *slot = Some(Rollout::new(file, 0));
         }
         let Some(r) = slot.as_mut() else { return Err("no rollout".into()) };
-        if file.ends_with(".zst") {
-            return Err("XenoNet can't read a compressed archive here yet".into());
-        }
-        let data = std::fs::read(file).map_err(|e| e.to_string())?;
-        let (restarted, start) = xenonet_sources::lines::read_from(data.len() as u64, r.offset);
-        if restarted {
-            *r = Rollout { file: file.into(), offset: start, rest: Vec::new(), entries: RolloutEntries::default() };
-        }
-        if (data.len() as u64) > r.offset {
-            let mut chunk = std::mem::take(&mut r.rest);
-            chunk.extend_from_slice(&data[r.offset as usize..]);
-            r.offset = data.len() as u64;
-            let t = xenonet_sources::lines::take(&chunk);
-            let mut sampling = xenonet_schema::vendor::Sampling::default();
-            for l in &t.lines {
-                if let Some(raw) = self.vendor.line(true, l, &mut sampling) {
-                    let _ = r.entries.add(raw);
-                }
+        if crate::archive::is_archive(file) {
+            // A compressed archive is read whole, and again only when it
+            // changes.
+            let meta = std::fs::metadata(file).map_err(|e| e.to_string())?;
+            let stamp = format!("{}:{}", meta.len(), xenonet_base::fs::mtime_ms_of(&meta).unwrap_or(f64::NAN));
+            if r.stamp.as_deref() != Some(stamp.as_str()) {
+                let data = crate::archive::read(file).map_err(|e| e.to_string())?;
+                *r = Rollout::new(file, 0);
+                let _ = self.add_lines(&mut r.entries, &data);
+                r.stamp = Some(stamp);
             }
-            match t.last {
-                Some(last) => {
-                    if let Some(raw) = self.vendor.record(true, last, &mut sampling) {
-                        let _ = r.entries.add(raw);
-                    }
-                }
-                None => r.rest = t.rest,
+        } else {
+            let data = std::fs::read(file).map_err(|e| e.to_string())?;
+            let (restarted, start) = xenonet_sources::lines::read_from(data.len() as u64, r.offset);
+            if restarted {
+                *r = Rollout::new(file, start);
+            }
+            if (data.len() as u64) > r.offset {
+                let mut chunk = std::mem::take(&mut r.rest);
+                chunk.extend_from_slice(&data[r.offset as usize..]);
+                r.offset = data.len() as u64;
+                r.rest = self.add_lines(&mut r.entries, &chunk);
             }
         }
         let cursor = cursor.map(|c| Value::String(c.into()));
         let all = r.entries.list();
         let (a, b, next) = codex::rollout_page(all.len(), cursor.as_ref(), limit);
         Ok(json!({ "entries": all[a..b].iter().map(record_json).collect::<Vec<_>>(), "cursor": next, "total": all.len() }))
+    }
+
+    // Adds a rollout's lines to its entries, through the Codex normalizer,
+    // a last line without a newline too when it reads whole; what's left of
+    // a half-written one comes back, for the next read.
+    fn add_lines(&self, entries: &mut RolloutEntries, chunk: &[u8]) -> Vec<u8> {
+        let t = xenonet_sources::lines::take(chunk);
+        let mut sampling = xenonet_schema::vendor::Sampling::default();
+        for l in &t.lines {
+            if let Some(raw) = self.vendor.line(crate::vendor::Tailed::Codex, l, &mut sampling) {
+                let _ = entries.add(raw);
+            }
+        }
+        match t.last {
+            Some(last) => {
+                if let Some(raw) = self.vendor.record(crate::vendor::Tailed::Codex, last, &mut sampling) {
+                    let _ = entries.add(raw);
+                }
+                Vec::new()
+            }
+            None => t.rest,
+        }
     }
 
     pub fn stop(&self) {
@@ -466,6 +491,22 @@ mod tests {
         assert_eq!((page["entries"][0]["text"].as_str(), page["cursor"].as_str()), (Some("two"), Some("rollout:1")));
         let older = c.rollout_page(&f, Some("rollout:1"), 1.0).expect("a page");
         assert_eq!(older["entries"][0]["text"], "one");
+
+        // An archived rollout is read whole, decompressed, and again once it
+        // changes: here, archived again with a third line, which has no
+        // newline.
+        let packed = dir.join("rollout-x.jsonl.zst");
+        let pack = |text: &str| ruzstd::encoding::compress_to_vec(text.as_bytes(), ruzstd::encoding::CompressionLevel::Fastest);
+        std::fs::write(&packed, pack(&format!("{}{}", line("one"), line("two")))).expect("an archive");
+        let p = packed.to_string_lossy().into_owned();
+        let page = c.rollout_page(&p, None, 5.0).expect("a page of the archive");
+        assert_eq!((page["total"].as_u64(), page["entries"][1]["text"].as_str()), (Some(2), Some("two")));
+        assert_eq!(c.rollout_page(&p, None, 5.0).expect("the same page")["total"], 2, "read once while it's as it was");
+        std::fs::write(&packed, pack(&format!("{}{}{}", line("one"), line("two"), line("three").trim_end()))).expect("archived again");
+        let page = c.rollout_page(&p, None, 5.0).expect("a page of the new archive");
+        assert_eq!((page["total"].as_u64(), page["entries"][2]["text"].as_str()), (Some(3), Some("three")));
+        std::fs::write(&packed, b"not zstd").expect("a broken archive");
+        assert!(c.rollout_page(&p, None, 5.0).is_err(), "a broken archive is an error, not a panic");
         std::fs::remove_dir_all(&dir).expect("cleaned up");
     }
 }

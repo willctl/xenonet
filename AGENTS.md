@@ -1,9 +1,13 @@
 # Working on XenoNet
 
-XenoNet is a desktop console that maps the Claude Code and Codex sessions on
-this machine: Electron (`electron/`), a Node server (`server/`) and a
-three.js page (`src/`). The README's Development section has the commands,
-and `docs/guide/development.md` has the layout and how to drive XenoNet Dev.
+XenoNet maps the Claude Code, Codex and Grok Build sessions on this
+machine, and on the other machines of its network. It runs as one Rust
+binary, `xenonet` (`crates/`): the service, the command, the hooks and the
+MCP servers. Desktop is Electron (`electron/`) around a three.js page
+(`src/`). The JS in `core/`, `server/`, `cli/` and `mcp/` is the contract
+the binary is tested against. The README's Development section has the
+commands, and `docs/guide/development.md` has the layout and how to drive
+XenoNet Dev.
 
 ## Checking your work
 
@@ -21,11 +25,18 @@ and `docs/guide/development.md` has the layout and how to drive XenoNet Dev.
 - `simulate` puts sessions into rare states (a question waiting, an edit
   collision, a stuck loop), and actors and other machines too
   (`actor-request`, `actor-needs-you`, `actor-tunnel`, `host-add`,
-  `host-offline`…), so you can check how they look.
+  `host-offline`, `net-founder`, `net-remote-waiting`…), so you can check
+  how they look.
 - Changes for other machines can be checked in the VM lab (`npm run lab`,
   `scripts/lab/README.md`), Linux VMs that each run XenoNet. Adding them to
-  a console as hosts is the owner's to do, since XenoNet refuses it from
-  under an agent; `simulate` with `host-add` stands in for one.
+  a console as hosts, or joining machines into a network, is the owner's
+  to do, since XenoNet refuses it from under an agent; `simulate` with
+  `host-add` or the `net-*` kinds stands in. The network itself is tested
+  with three services in one process (`crates/xenonet-service/tests/net*.rs`).
+- Some paths are refused from under an agent (creating a network,
+  `xenonet service install`). Their tests take the refused branch here and
+  run in full only in CI, as does everything Windows-only, so wait for the
+  Linux and Windows jobs before merging.
 - After a change to the UI, check `logs` for page errors, and run
   `npm run test:e2e` before you finish.
 - XenoNet Dev reloads as you save: `src/` reloads the page and

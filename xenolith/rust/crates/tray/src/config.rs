@@ -108,7 +108,7 @@ fn default_service() -> &'static str {
     if cfg!(windows) {
         "Xenolith"
     } else if cfg!(target_os = "macos") {
-        "dev.xenonet.xenolith.server"
+        "dev.xenolith.server"
     } else {
         "xenolith.service"
     }

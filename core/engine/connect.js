@@ -1,6 +1,6 @@
-// Connecting your agents: what XenoNet adds to Claude Code's and Codex's own
-// settings so every session on this machine, in every project, can use the
-// engine. Nothing changes until you confirm in XenoNet, which first shows
+// Connecting your agents: what XenoNet adds to Claude Code's, Codex's and
+// Grok Build's own settings so every session on this machine, in every
+// project, can use the engine. Nothing changes until you confirm in XenoNet, which first shows
 // exactly what will be added (preview), and it can all be taken out again
 // (remove).
 //
@@ -9,6 +9,9 @@
 //   Codex        the xenonet MCP server (through `codex mcp`), and command
 //                hooks in ~/.codex/hooks.json, which Codex asks you to trust
 //                once (/hooks)
+//   Grok Build   the xenonet MCP server as tables in ~/.grok/config.toml,
+//                which XenoNet writes itself, and command hooks in a file of
+//                XenoNet's own, ~/.grok/hooks/xenonet.json
 //
 // Both run the xenonet binary (`xenonet mcp`, `xenonet hook <app>`): installed
 // XenoNet's launcher, which never moves (components/runtime.js's xenonetBin).
@@ -43,6 +46,7 @@ import { parseJson } from "../vendor.js";
 import { INSTANCES } from "../instances.js";
 import { xenonetBin } from "../components/runtime.js";
 import { APPS } from "../apps.js";
+import { readServer, withServer, withoutServer, foreignServer } from "./toml.js";
 
 // The names a XenoNet's MCP servers take: the installed XenoNet's xenonet and
 // xenonet-console, another's with its instance (xenonet-dev).
@@ -65,6 +69,8 @@ const NO_COMMAND = "XenoNet's plugin runs the xenonet command, which isn't on yo
 const EARLIER = "XenoNet's entries here run cli/xenonet.js with Node, as an earlier XenoNet wrote them. Connecting again has them run the xenonet binary.";
 
 const quote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+// Names as a sentence lists them: "A, B and C".
+const andList = (names) => (names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names.join(""));
 const psQuote = (s) => `'${String(s).replace(/'/g, "''")}'`;
 
 // A settings file, or {} when there's none. One that can't be read, or
@@ -315,6 +321,116 @@ function codexHooks(app, k) {
   };
 }
 
+// A text file, or "" when there's none. One that can't be read is left
+// alone, as a settings file is.
+function readText(file, home) {
+  try {
+    return fs.readFileSync(file, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return "";
+    throw new Error(`XenoNet can't read ${tilde(file, home)} (${err.code ?? tilde(err.message, home)}), so it leaves it alone`);
+  }
+}
+
+// Grok Build's settings (grok-hooks): the xenonet MCP server as tables in
+// config.toml, which XenoNet writes itself (`grok mcp add` rewrites the file
+// and drops its comments; see toml.js), and command hooks in Claude Code's
+// format in a file of XenoNet's own, hooks/xenonet.json, which Grok runs
+// without asking, as it does every file in its hooks folder. GROK_HOME
+// moves both. Grok gives a session's MCP servers its id (GROK_SESSION_ID),
+// so the server knows whose it is (mcp/xenonet.js).
+function grokHooks(app, k) {
+  const { env, home, port, platform, names, mcp } = k;
+  const grokHome = env.GROK_HOME ?? path.join(home, ".grok");
+  const configFile = path.join(grokHome, "config.toml");
+  const hooksFile = path.join(grokHome, "hooks", "xenonet.json");
+  const isXenoNet = k.xenonetCommand(app.id);
+  const ours = k.mine(isXenoNet);
+  // Grok runs a hook's command with sh -c, and on Windows under the shell
+  // it finds there, so the Windows form is one command line. Its
+  // SessionEnd hooks get little time.
+  const hookSet = k.hookSet(app, (event) => ({ type: "command", command: platform === "win32" ? k.windowsHook(app.id) : k.hookCommand(app.id), timeout: event === "SessionEnd" ? 3 : 10 }));
+  const config = () => readText(configFile, home);
+  const foreign = (name) => `${tilde(configFile, home)} names mcp_servers.${name} in a form XenoNet doesn't edit. Take it out, or write it as a [mcp_servers.${name}] table, and connect again.`;
+
+  // Writes config.toml as `edit` makes it: through a copy of the file (so
+  // it keeps its mode), with a copy of it as it was the first time XenoNet
+  // changes it.
+  function writeConfig(edit) {
+    const before = config();
+    const after = edit(before);
+    if (after === before) return;
+    fs.mkdirSync(path.dirname(configFile), { recursive: true });
+    const tmp = `${configFile}.tmp-xenonet`;
+    if (fs.existsSync(configFile)) {
+      if (!fs.existsSync(`${configFile}.before-xenonet`)) fs.copyFileSync(configFile, `${configFile}.before-xenonet`);
+      fs.copyFileSync(configFile, tmp);
+    }
+    fs.writeFileSync(tmp, after);
+    fs.renameSync(tmp, configFile);
+  }
+
+  // XenoNet's hooks file: written as the settings files are, and taken out
+  // once no XenoNet's hooks are left in it.
+  function writeHooks(add) {
+    const merged = mergeHooks(readJson(hooksFile, home), ours, add);
+    if (!add && !Object.keys(merged).length) return void fs.rmSync(hooksFile, { force: true });
+    writeJson(hooksFile, merged);
+  }
+
+  // Whether Grok Build is here: its command, or its folder.
+  const installed = () => !!k.cli("grok") || fs.existsSync(grokHome);
+
+  return {
+    cli: "grok",
+    installed,
+    // The server as config.toml has it, or null.
+    server: async (_cli, name) => readServer(config(), name),
+
+    async entry({ cli, server, console }) {
+      const text = config();
+      const hooks = readJson(hooksFile, home);
+      return {
+        app: app.id,
+        name: app.name,
+        cli,
+        // Connecting every app leaves it out until it's here.
+        installed: installed(),
+        changes: [
+          ...k.consoleChange(app.id, console),
+          { id: "mcp", what: `The ${names.xenonet} MCP server, for every project`, where: tilde(configFile, home), state: foreignServer(text, names.xenonet) ? "different" : k.serverState(server), detail: `${k.command} mcp (XENONET_PORT=${port}), as [mcp_servers.${names.xenonet}]; the rest of the file stays as it is` },
+          { id: "hooks", what: `Hooks: ${k.eventList(app)}`, where: tilde(hooksFile, home), state: k.hooksState(hooks, ours, hookSet, isXenoNet), detail: `running ${k.command} hook ${app.id}` },
+        ],
+        notes: [
+          ...(cli ? [] : ["XenoNet can't find the grok command. Connecting writes Grok Build's settings all the same, for when you install it."]),
+          ...(foreignServer(text, names.xenonet) ? [foreign(names.xenonet)] : []),
+          "Grok Build runs the hooks in its hooks folder without asking.",
+          ...k.besides(k.others(hooks.hooks, isXenoNet)),
+        ],
+        broken: k.broken(server, hooks.hooks, ours),
+      };
+    },
+
+    async apply() {
+      writeHooks(hookSet);
+      writeConfig((text) => {
+        let out = withServer(text, names.xenonet, mcp);
+        if (k.consoleMcp) out = withServer(out, names.console, { ...mcp, args: [...mcp.args, "console"] });
+        return out;
+      });
+    },
+
+    async removeHooks() {
+      if (fs.existsSync(hooksFile)) writeHooks(null);
+    },
+
+    // Only this XenoNet's servers, by their names: another's stay.
+    async removeServer(_cli, name) {
+      if (fs.existsSync(configFile)) writeConfig((text) => withoutServer(text, name));
+    },
+  };
+}
+
 // The config formats XenoNet connects an app through, by the name its
 // registry entry gives (connect.format). Each is made for one app, with
 // what every format shares (k, below), and has:
@@ -329,7 +445,10 @@ function codexHooks(app, k) {
 //   removeServer(cli, name)  takes the MCP server of that name out
 //   hookConnected(event)     for Claude Code's settings only, which
 //                            XenoNet's plugin carries too (see above)
-export const FORMATS = { "claude-settings": claudeSettings, "codex-hooks": codexHooks };
+//   installed()              for an app that may not be here (Grok
+//                            Build): whether it is, so connecting every
+//                            app leaves it out until it is
+export const FORMATS = { "claude-settings": claudeSettings, "codex-hooks": codexHooks, "grok-hooks": grokHooks };
 
 // `bin`: the xenonet binary the entries run, xenonetBin's by default.
 // `consoleMcp`: whether the console operator's entry is XenoNet's too, as
@@ -427,7 +546,6 @@ export function createConnect({ port, root, demo = false, home = os.homedir(), e
 
   // The apps connect goes through, each with its format's connect.
   const connected = registry.filter((a) => a.has?.includes("connect") && Object.hasOwn(formats, a.connect?.format ?? "")).map((app) => ({ app, f: formats[app.connect.format](app, k) }));
-  const ids = connected.map(({ app }) => app.id);
 
   // Each app's command first, then its xenonet server, then its console's,
   // then its part of the preview, in the registry's order.
@@ -441,10 +559,13 @@ export function createConnect({ port, root, demo = false, home = os.homedir(), e
     return { port, demo, apps };
   }
 
-  async function apply(apps = ids) {
+  // `apps`: the ids of the apps to connect; every app that's here when
+  // it's not given.
+  async function apply(apps = null) {
     // Agents connected to the demo would see only its made-up sessions.
-    if (demo) throw new Error(`this is the demo, so connect ${connected.map(({ app }) => app.name).join(" and ")} from XenoNet, with your own sessions`);
-    for (const { app, f } of connected) if (apps.includes(app.id)) await f.apply();
+    if (demo) throw new Error(`this is the demo, so connect ${andList(connected.map(({ app }) => app.name))} from XenoNet, with your own sessions`);
+    const chosen = apps ?? connected.filter(({ f }) => f.installed?.() ?? true).map(({ app }) => app.id);
+    for (const { app, f } of connected) if (chosen.includes(app.id)) await f.apply();
     return preview();
   }
 

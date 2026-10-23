@@ -94,9 +94,10 @@
           "type": "string",
           "enum": [
             "claude-settings",
-            "codex-hooks"
+            "codex-hooks",
+            "grok-hooks"
           ],
-          "description": "Where and how XenoNet adds its hooks: Claude Code's settings.json, or Codex's hooks.json"
+          "description": "Where and how XenoNet adds its hooks: Claude Code's settings.json, Codex's hooks.json, or Grok Build's hooks folder and config.toml"
         },
         "events": {
           "type": "array",
@@ -130,6 +131,13 @@
             ]
           },
           "description": "The hook events XenoNet adds, in order, each with the matcher it takes, if any"
+        },
+        "unheard": {
+          "description": "The hook events whose answers it passes over: XenoNet tells it nothing then, and keeps its messages for an event it hears",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [

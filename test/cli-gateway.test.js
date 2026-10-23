@@ -22,10 +22,10 @@ const KINDS = [
 const status = (over = {}) => ({
   on: true,
   listening: true,
-  port: 47850,
+  port: 48850,
   host: "xenonet-demo.ngrok-free.app",
   url: "https://xenonet-demo.ngrok-free.app/mcp",
-  local: "http://127.0.0.1:47850/mcp",
+  local: "http://127.0.0.1:48850/mcp",
   calls: 12,
   lastActor: "actor:muse",
   tunnel: { kind: "ngrok", label: "ngrok", through: "ngrok", state: "up", stable: true },

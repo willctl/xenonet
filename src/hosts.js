@@ -1,11 +1,14 @@
-// Other machines on the map (docs/design/hosts.md), with XENONET_HOSTS=1.
-// Each host is a constellation of its own beside this machine's: its host
-// node (@<host>:core) held on an outer orbit, and its projects and sessions
-// on rings of their own around it. A dashed bridge joins checkouts of one
+// Other machines on the map (docs/design/hosts.md): over SSH with
+// XENONET_HOSTS=1, and the machines of your network, drawn from their
+// presence (network-map.js makes their nodes). Each host is a
+// constellation of its own beside this machine's: its host node
+// (@<host>:core) held on an outer orbit, and its projects and sessions on
+// rings of their own around it. A dashed bridge joins checkouts of one
 // repo on different machines (hosts-draw.js draws those and the host node).
 // A host that isn't live keeps its constellation in place, dimmed and
-// still. Remote nodes are read-only: Preview and Stats, nothing that opens,
-// dismisses or messages anything on another machine.
+// still. A host over SSH is read-only: Preview and Stats, nothing that
+// opens, dismisses or messages anything on it. A network's sessions take a
+// message from you, and nothing else.
 //
 // This module holds what isn't three.js: the layout's forces, the words
 // for how a host stands, the chips under Filters, the cap on what's drawn
@@ -260,7 +263,9 @@ export function whereHtml(n, index, now = Date.now()) {
   const text = whereText(n, index, now);
   if (!text) return "";
   const state = hostOf(n, index)?.state ?? (n.stale ? "offline" : "live");
-  return `<div class="insp-where ${h(state)}"><i class="host-dot ${h(state)}"></i>${h(text)}<span class="dim"> · read-only</span></div>`;
+  // A machine in your network shows what its presence says, and takes a
+  // message from you; one over SSH is read-only.
+  return `<div class="insp-where ${h(state)}"><i class="host-dot ${h(state)}"></i>${h(text)}<span class="dim"> · ${n.network ? "in your network" : "read-only"}</span></div>`;
 }
 
 // A local id of a remote node's own host as this map has it: a project's
@@ -269,6 +274,16 @@ export const sameHost = (n, id) => (isRemote(n) && id && !id.startsWith("@") ? `
 
 // The inspector's details for a host node, as rows made by `row`.
 export function hostRows(n, { row, mono }, now = Date.now()) {
+  // A machine in your network, drawn from its presence (network-map.js).
+  if (n.network === true)
+    return (
+      row("state", `<span class="host-state ${h(n.state)}"><i class="host-dot ${h(n.state)}"></i>${h(standing(n, now))}</span>`) +
+      row("sessions", `${Number(n.sessionCount) || 0}${n.activeCount ? ` <span class="activity active">${Number(n.activeCount)} live</span>` : ""}`) +
+      row("last activity", n.lastActivity ? h(when(n.lastActivity, now)) : null) +
+      row("platform", mono(n.platform)) +
+      row("window", n.window ? "you use a XenoNet window on it" : "no window: a machine you reach in a terminal") +
+      row("shows", `<span class="dim">what its presence says: its sessions, their states and what waits on you. Message any of them as you.</span>`, "wrap")
+    );
   const offset = Number.isFinite(n.offsetMs) && Math.abs(n.offsetMs) >= 1000 ? `${n.offsetMs > 0 ? "+" : "−"}${Math.abs(n.offsetMs) >= 60e3 ? `${Math.round(Math.abs(n.offsetMs) / 60e3)} min` : `${Math.round(Math.abs(n.offsetMs) / 1000)} s`} against this clock` : null;
   return (
     row("state", `<span class="host-state ${h(n.state)}"><i class="host-dot ${h(n.state)}"></i>${h(standing(n, now))}</span>${n.cached ? ` <span class="tag">from its last visit</span>` : ""}${n.demo ? ` <span class="tag">made-up data</span>` : ""}`) +
@@ -281,7 +296,13 @@ export function hostRows(n, { row, mono }, now = Date.now()) {
     row("clock", offset ? h(offset) : null) +
     row("problem", n.error ? `<span class="pressure">${h(n.error)}</span>` : null, "wrap") +
     row("left out", n.truncated ? "its oldest sessions: a host shows at most 5,000 nodes" : null, "wrap") +
-    row("access", `<span class="dim">read-only: titles, states and counts; transcripts and stats when you open one</span>`, "wrap")
+    row(
+      "access",
+      n.network
+        ? `<span class="dim">in your network: its map, as it sends it; transcripts and stats open in this window, unless it shares titles only. Message any of its sessions as you.</span>`
+        : `<span class="dim">read-only: titles, states and counts; transcripts and stats when you open one</span>`,
+      "wrap",
+    )
   );
 }
 
@@ -444,7 +465,9 @@ export function createHostFilters({ sfx = () => {}, onFilter = () => {}, mount =
   function setHosts(list) {
     if (!Array.isArray(list)) return;
     const now = new Map(list.map((x) => [x.id, x]));
-    hosts = hosts.filter((x) => now.has(x.id)).map((x) => {
+    // A machine in a network is the network's (network-map.js), not the hub's.
+    hosts = hosts.filter((x) => x.network || now.has(x.id)).map((x) => {
+      if (!now.has(x.id)) return x;
       const y = now.get(x.id);
       return { ...x, ...y, error: typeof y.error === "string" ? y.error : (y.error?.message ?? null) };
     });

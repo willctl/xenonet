@@ -18,7 +18,7 @@ const KINDS = [
   ["cacheWrite", "written to cache"],
   ["output", "output"],
 ];
-const APP_NAME = { claude: "Claude Code", codex: "Codex" };
+const APP_NAME = { claude: "Claude Code", codex: "Codex", grok: "Grok Build" };
 const clockOf = (t) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 // Round ticks from 0 to at least `max`: steps of 1, 2, 2.5 or 5 × 10^n.
@@ -47,7 +47,9 @@ function bar(x, y, w, hgt, fill, round = true) {
   return `<path d="M${x},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + hgt - r}Q${x + w},${y + hgt} ${x + w - r},${y + hgt}H${x}Z" style="fill:${fill}"/>`;
 }
 
-export function createStatsPanel({ modals, sfx, toast }) {
+// read: GETs another machine's stats with the window's key, as
+// windowCalls.read does.
+export function createStatsPanel({ modals, sfx, toast, read = (url) => fetch(url) }) {
   let panel = null;
   let data = null;
   let node = null;
@@ -325,7 +327,8 @@ export function createStatsPanel({ modals, sfx, toast }) {
   }
 
   async function load() {
-    const res = await fetch(`/api/session/${encodeURIComponent(node.id)}/stats`);
+    const url = `/api/session/${encodeURIComponent(node.id)}/stats`;
+    const res = await (node.host ? read(url) : fetch(url));
     const body = await res.json();
     if (!res.ok) throw new Error(body.error ?? res.statusText);
     return body;
@@ -339,7 +342,7 @@ export function createStatsPanel({ modals, sfx, toast }) {
     clearInterval(timer);
     panel = modals.open(
       `<header class="m-head"><div><div class="m-chip">◫ stats · ${h(APP_NAME[n.app] ?? n.app)}</div><h2>${h(n.title ?? n.id)}</h2><div class="m-sub">Reading the transcript…</div></div><button class="act" data-mclose>Close ✕</button></header><div class="m-body st-body"><div class="m-empty">Adding up tokens and costs…</div></div><div class="st-tip" hidden></div>`,
-      { cls: "full st", accent: n.app === "codex" ? "var(--codex)" : "var(--claude)" },
+      { cls: "full st", accent: n.app === "codex" || n.app === "grok" ? `var(--${n.app})` : "var(--claude)" },
     );
     const me = panel;
     panel.addEventListener("click", (e) => {

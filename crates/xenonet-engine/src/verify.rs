@@ -37,10 +37,23 @@ use xenonet_base::sync::Locked;
 
 /// The apps whose sessions XenoNet checks, by their id in a session's name:
 /// those whose processes it tells apart (the registry's `processes`, by
-/// `processes`): Claude Code, Codex and OpenCode. A request in another
-/// app's session's name isn't checked.
+/// `processes`): Claude Code, Codex, Grok Build and OpenCode. A request in another
+/// app's session's name is refused, wherever XenoNet runs: no check could
+/// ever pass it, so it can't call as a session. Actors call with their
+/// tokens, and the runs an actor reports come through the gateway, so
+/// neither meets this rule.
 fn app_name(app: &str) -> Option<&'static str> {
     crate::processes::agent(app).map(|a| a.name.as_str())
+}
+
+/// Why a request in `agent`'s name, a session of `app`, which XenoNet
+/// doesn't check, is refused.
+fn uncheckable(agent: &str, app: &str) -> String {
+    let why = match xenonet_base::apps::app(app) {
+        Some(a) => format!("XenoNet can't tell {}'s processes apart, so it can't check that the request comes from that session", a.name),
+        None => format!("XenoNet doesn't know an app called \"{app}\""),
+    };
+    format!("requests in {agent}'s name are refused: {why}")
 }
 
 /// An app's own rules, for one XenoNet checks.
@@ -309,7 +322,10 @@ impl Verifier {
     pub fn check(&self, c: &mut dyn Calls, agent: &Arg, hook: bool) -> Result<Arg> {
         let name = js_text(agent);
         let app = name.split(':').next().unwrap_or("").to_string();
-        if app_lookup(&app).is_none() || !Self::supported(c)? {
+        if app_name(&app).is_none() {
+            return self.refuse(c, agent.clone(), &uncheckable(&name, &app));
+        }
+        if !Self::supported(c)? {
             return Ok(self.pass());
         }
         let (pid, chain) = Self::see(c, false);
@@ -640,7 +656,46 @@ impl Verifier {
         }
         Ok(verdict)
     }
+
+    /// XenoNet's tray app, connecting to the component socket for the key
+    /// its routes take. Only XenoNet Tray.app's own executable, by its real
+    /// path, in one of the Applications folders `apps` names (/Applications
+    /// and the home folder's), with no agent and no actor product anywhere
+    /// above it. A program an agent runs, or one copied elsewhere, never
+    /// gets the key. Never passed unchecked: the tray is a Mac's, and where
+    /// XenoNet can't look there's no telling who asks.
+    pub fn tray(&self, c: &mut dyn Calls, apps: &[String]) -> Result<Arg> {
+        if !Self::supported(c)? {
+            return self.refuse(c, Arg::Null, "XenoNet can't see which program connects as its tray on this system");
+        }
+        let (pid, chain) = Self::see(c, true);
+        if !pid.truthy() || chain.is_empty() {
+            return self.unseen(c, Arg::Null, "XenoNet couldn't see which program connected as its tray");
+        }
+        self.checked();
+        if let Some(p) = chain.iter().find(|p| p.field("agent").truthy()) {
+            return self.refuse(c, Arg::Null, &format!("XenoNet's tray can't run under {} process", a_app(&js_text(&p.field("agent")))));
+        }
+        if let Some(p) = chain.iter().find(|p| product_of(p).truthy()) {
+            return self.refuse(c, Arg::Null, &format!("XenoNet's tray can't run under {}", product_word(&product_of(p).field("product"))));
+        }
+        let file = match file_of(&chain[0]) {
+            Arg::Text(f) => f,
+            _ => String::new(),
+        };
+        let own = apps.iter().filter(|dir| !dir.is_empty()).any(|dir| {
+            let inside = format!("{}/{TRAY_APP}/Contents/MacOS/", dir.trim_end_matches('/'));
+            file.strip_prefix(&inside).is_some_and(|exe| !exe.is_empty() && !exe.contains('/'))
+        });
+        if !own {
+            return self.refuse(c, Arg::Null, &format!("only {TRAY_APP}'s own executable, in /Applications or your own Applications folder, can be XenoNet's tray"));
+        }
+        Ok(obj(vec![("ok", Arg::Bool(true)), ("checked", Arg::Bool(true))]))
+    }
 }
+
+/// The tray app's bundle, as it's installed.
+pub const TRAY_APP: &str = "XenoNet Tray.app";
 
 /// A row as JS reads it: whole numbers as numbers.
 fn row_arg(r: &crate::sql::Row) -> Arg {
@@ -790,13 +845,25 @@ mod tests {
         ]);
         let v = verifier(Arg::Null);
         let a = Arg::text("claude:a");
-        // Where XenoNet can't look, or the name isn't an app's it checks.
+        // Where XenoNet can't look, a checked app's session passes.
         t.supported = false;
         assert_eq!(said(&v.check(&mut t, &a, false)), passed());
+        // A session of an app XenoNet doesn't check is refused, there too:
+        // no check could ever pass it.
+        let cursor = "requests in cursor:a's name are refused: XenoNet can't tell Cursor's processes apart, so it can't check that the request comes from that session";
+        assert_eq!(said(&v.check(&mut t, &Arg::text("cursor:a"), false)), refused(cursor));
         t.supported = true;
-        assert_eq!(said(&v.check(&mut t, &Arg::text("cursor:a"), false)), passed());
+        assert_eq!(said(&v.check(&mut t, &Arg::text("cursor:a"), false)), refused(cursor));
+        assert_eq!(
+            said(&v.check(t.from(30.0), &Arg::text("gemini-cli:a"), true)),
+            refused(&cursor.replace("cursor", "gemini-cli").replace("Cursor", "Gemini CLI")),
+            "a hook's too"
+        );
+        assert_eq!(said(&v.check(&mut t, &Arg::text("nobody:a"), false)), refused("requests in nobody:a's name are refused: XenoNet doesn't know an app called \"nobody\""));
+        assert_eq!(said(&v.check(&mut t, &Arg::text("toString:a"), false)), refused("requests in toString:a's name are refused: XenoNet doesn't know an app called \"toString\""));
+        t.peer = Arg::Null;
         assert_eq!(said(&v.check(&mut t, &a, false)), passed(), "no peer to look at");
-        assert_eq!(v.counts().unchecked, 3.0);
+        assert_eq!((v.counts().unchecked, v.counts().refused), (2.0, 5.0));
         // A process that's gone, or isn't the app's.
         let gone = "requests in claude:a's name have to come from a Claude Code process, and this one had gone before XenoNet could look";
         assert_eq!(said(&v.check(t.from(99.0), &a, false)), refused(gone));
@@ -898,6 +965,48 @@ mod tests {
         assert_eq!(said(&v.window(t.from(101.0))), refused("this is for XenoNet's own window, and it came from outside XenoNet"));
         t.supported = false;
         assert_eq!(said(&v.window(&mut t)), passed());
+    }
+
+    #[test]
+    fn the_tray_is_only_xenonet_trays_own_executable_in_an_applications_folder() {
+        const TRAY: &str = "/Applications/XenoNet Tray.app/Contents/MacOS/XenoNet Tray";
+        const MINE: &str = "/Users/me/Applications/XenoNet Tray.app/Contents/MacOS/XenoNet Tray";
+        let launchd = proc(1.0, "/sbin/launchd", None, None);
+        let mut t = Table::new(vec![
+            vec![proc(120.0, TRAY, None, None), launchd.clone()],
+            vec![proc(121.0, MINE, None, None), launchd.clone()],
+            // Run from where it was built, or a copy elsewhere.
+            vec![proc(122.0, "/Users/me/src/xenonet/tray/macos/.build/XenoNet Tray.app/Contents/MacOS/XenoNet Tray", None, None), launchd.clone()],
+            vec![proc(123.0, "/Users/me/Downloads/Applications/XenoNet Tray.app/Contents/MacOS/XenoNet Tray", None, None), launchd.clone()],
+            // A helper inside the bundle, and another app's executable.
+            vec![proc(124.0, "/Applications/XenoNet Tray.app/Contents/MacOS/tools/helper", None, None), launchd.clone()],
+            vec![proc(125.0, XENONET, None, None), launchd.clone()],
+            // The tray itself, started from under an agent or an actor's app.
+            vec![proc(126.0, TRAY, None, None), proc(20.0, "/Users/me/.local/bin/claude", Some("claude"), None), launchd.clone()],
+            vec![proc(127.0, TRAY, None, None), proc(7.0, GROK, None, Some(("grok-bot", "app")))],
+            vec![proc(128.0, "/usr/bin/nc", None, None), proc(40.0, "/bin/zsh", None, None), proc(5.0, TERMINAL, None, None)],
+        ]);
+        let v = verifier(Arg::Null);
+        let apps = ["/Applications".to_string(), "/Users/me/Applications/".to_string()];
+        assert_eq!(said(&v.tray(t.from(120.0), &apps)), passed());
+        assert_eq!(said(&v.tray(t.from(121.0), &apps)), passed(), "in the home folder's Applications");
+        let elsewhere = "only XenoNet Tray.app's own executable, in /Applications or your own Applications folder, can be XenoNet's tray";
+        for pid in [122.0, 123.0, 124.0, 125.0, 128.0] {
+            assert_eq!(said(&v.tray(t.from(pid), &apps)), refused(elsewhere), "{pid}");
+        }
+        assert_eq!(said(&v.tray(t.from(126.0), &apps)), refused("XenoNet's tray can't run under a Claude Code process"));
+        assert_eq!(said(&v.tray(t.from(127.0), &apps)), refused("XenoNet's tray can't run under Grok Bot"));
+        assert_eq!(said(&v.tray(t.from(99.0), &apps)), refused("XenoNet couldn't see which program connected as its tray"));
+        assert_eq!(v.counts().unseen, 1.0);
+        // The real path decides: what ps names, argv[0], is the process's own to set.
+        t.chains[0][0] =
+            obj(vec![("pid", Arg::num(120.0)), ("start", Arg::num(1200.0)), ("program", Arg::text(TRAY)), ("exe", Arg::Null), ("agent", Arg::Null), ("product", Arg::Null)]);
+        assert_eq!(said(&v.tray(t.from(120.0), &apps)), refused(elsewhere), "an executable whose path couldn't be read");
+        assert_eq!(said(&v.tray(t.from(121.0), &[])), refused(elsewhere), "no Applications folder named");
+        // Where XenoNet can't look, nothing passes.
+        t.supported = false;
+        assert_eq!(said(&v.tray(t.from(121.0), &apps)), refused("XenoNet can't see which program connects as its tray on this system"));
+        assert_eq!(v.counts().unchecked, 0.0);
     }
 
     #[test]

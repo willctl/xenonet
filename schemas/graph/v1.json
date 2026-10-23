@@ -3,7 +3,7 @@
   "$id": "https://xenonet.dev/schemas/graph/v1.json",
   "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
   "title": "Graph",
-  "description": "The map: the projects folder, its groups and projects, Codex desktop projects, the folders outside it where sessions ran, the sessions, Agent Wiki and the MCP servers sessions share, with the identities work ran as.",
+  "description": "The map: the projects folder, its groups and projects, Codex desktop projects, the folders outside it where sessions ran, the sessions, Xenolith and the MCP servers sessions share, with the identities work ran as.",
   "type": "object",
   "properties": {
     "generatedAt": {
@@ -840,7 +840,7 @@
             "properties": {
               "id": {
                 "type": "string",
-                "pattern": "^(?:@[a-z][a-z0-9-]{1,31}:)?resource:(xenolith|agent-wiki)$"
+                "pattern": "^(?:@[a-z][a-z0-9-]{1,31}:)?resource:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
               },
               "kind": {
                 "type": "string",
@@ -850,12 +850,9 @@
                 "type": "string"
               },
               "server": {
-                "description": "The MCP server that writes to it",
+                "description": "The MCP server that writes to it: xenolith or agent-wiki, or the name the folder's marker (xenolith.json) gives",
                 "type": "string",
-                "enum": [
-                  "xenolith",
-                  "agent-wiki"
-                ]
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
               },
               "path": {
                 "type": "string"
@@ -890,6 +887,10 @@
                   ],
                   "additionalProperties": {}
                 }
+              },
+              "problem": {
+                "description": "Why XenoNet shows none of its pages, log or inbox: the folder follows a later version of Xenolith's format than XenoNet reads",
+                "type": "string"
               },
               "fx": {
                 "type": [
@@ -1126,6 +1127,17 @@
                   "additionalProperties": {}
                 }
               },
+              "aliases": {
+                "description": "Other names it goes by, from its aliases, in lowercase; left out when it has none",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "space": {
+                "description": "The Xenolith space it's in, such as project:atlas, when that isn't this machine's own; its id is then wiki:<space>/<slug>",
+                "type": "string"
+              },
               "fx": {
                 "type": [
                   "number",
@@ -1245,7 +1257,7 @@
               "lastSessionAt"
             ],
             "additionalProperties": {},
-            "description": "An Agent Wiki page"
+            "description": "A context page: a page of the shared context"
           },
           {
             "type": "object",
@@ -1636,7 +1648,7 @@
         ],
         "additionalProperties": {}
       },
-      "description": "The tree, by node ids; lineage-cross ties a session to its parent in another place, and host ties another machine's node to this one's core"
+      "description": "The tree, by node ids; lineage-cross ties a session to its parent in another place, host ties another machine's node to this one's core, wiki ties the shared context to the core, and page a context page to the shared context"
     },
     "relations": {
       "type": "array",
@@ -1665,7 +1677,7 @@
         ],
         "additionalProperties": {}
       },
-      "description": "Ties outside the tree: wiki pages that link, pages that mention a project, and checkouts of one repo on different machines"
+      "description": "Ties outside the tree: context pages that link to each other (wikilink), pages that mention a project (mentions), and checkouts of one repo on different machines (same-repo)"
     },
     "stats": {
       "type": "object",
@@ -1673,7 +1685,8 @@
         "wikiPages": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 9007199254740991
+          "maximum": 9007199254740991,
+          "description": "Context pages on the map"
         },
         "dirtyRepos": {
           "type": "integer",
@@ -1856,7 +1869,7 @@
         "properties": {
           "name": {
             "type": "string",
-            "description": "projects, codex, codex-projects, claude, live, wiki, search, identities"
+            "description": "projects, codex, codex-projects, claude, live, wiki (the shared context), search, identities"
           },
           "ok": {
             "type": "boolean"

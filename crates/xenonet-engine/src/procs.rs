@@ -27,6 +27,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 use xenonet_base::json::number_string;
+use xenonet_base::nodepath::Style;
 use xenonet_base::paths::normalize_posix;
 use xenonet_base::sync::Locked;
 use xenonet_base::text::{js_number, js_string, js_trim};
@@ -175,11 +176,6 @@ impl<V> PidMap<V> {
 
 pub type Table = PidMap<Row>;
 
-pub(crate) fn posix_basename(p: &str) -> &str {
-    let t = p.trim_end_matches('/');
-    t.rsplit('/').next().unwrap_or(t)
-}
-
 pub(crate) fn slashes(p: &str) -> String {
     p.replace('\\', "/")
 }
@@ -216,7 +212,7 @@ fn hermes_path(p: &str) -> bool {
 /// Bun (which agent, or Hermes's terminal UI), and the Pythons Hermes runs.
 pub fn wants_args(program: &str) -> bool {
     let p = slashes(program);
-    let base = posix_basename(&p);
+    let base = &Style::Posix.basename(&p, None);
     base == "node" || base == "bun" || (is_python(base) && hermes_path(&p))
 }
 
@@ -236,7 +232,7 @@ pub fn wants_args(program: &str) -> bool {
 /// this.
 pub fn product_of(program: &str, args: &str) -> Option<Product> {
     let p = slashes(program);
-    let base = posix_basename(&p);
+    let base = &Style::Posix.basename(&p, None);
     if is_python(base) && hermes_path(&p) && re!(r"\b(hermes_cli|tui_gateway|run_agent)\b").is_match(args) {
         return Some(Product { product: "hermes-agent", role: "host" });
     }

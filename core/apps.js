@@ -11,8 +11,9 @@
 //   identity   the kind of account it runs under (identity/v1)
 //   limits     its plan limits in live/snapshot/v1
 //   team       the developer team that signs it (codesign's TeamIdentifier)
-//   connect    how XenoNet connects it: its config format, and the hook
-//              events, each with a matcher when it takes one
+//   connect    how XenoNet connects it: its config format, the hook
+//              events, each with a matcher when it takes one, and the
+//              events whose answers it passes over (unheard)
 //   editTools  for a native reader, the tools whose calls are edits
 //   has        what XenoNet can do with it at most: lines (it tails its
 //              transcripts), sessions, native (an experimental reader),
@@ -57,6 +58,35 @@ export const APPS = [
       events: [["SessionStart"], ["UserPromptSubmit"], ["PreToolUse", "apply_patch|Edit|Write"], ["PostToolUse"], ["Stop"], ["SessionEnd"]],
     },
     has: ["lines", "sessions", "connect", "delivery", "processes", "caller", "open"],
+  },
+  {
+    id: "grok",
+    name: "Grok Build",
+    numbat: ["grok"],
+    products: ["spacexai/grok-build"],
+    roots: { env: "GROK_HOME", default: "~/.grok" },
+    context: 256000,
+    team: "5Y6N3AJ54S",
+    // Its matchers name tools exactly: Claude Code's edit tools stand for
+    // its own too, which it names as well. It passes over what
+    // SessionStart and UserPromptSubmit answer.
+    connect: {
+      format: "grok-hooks",
+      events: [
+        ["SessionStart"],
+        ["UserPromptSubmit"],
+        ["PreToolUse", "Edit|Write|MultiEdit|search_replace|write|edit|hashline_edit|apply_patch"],
+        ["PostToolUse"],
+        ["PostToolUseFailure"],
+        ["Stop"],
+        ["StopCancelled"],
+        ["StopFailure"],
+        ["Notification", "permission_prompt"],
+        ["SessionEnd"],
+      ],
+      unheard: ["SessionStart", "UserPromptSubmit"],
+    },
+    has: ["lines", "sessions", "connect", "processes", "caller"],
   },
   {
     id: "gemini-cli",
@@ -119,10 +149,38 @@ export const APP = Object.fromEntries(APPS.map((a) => [a.id, a]));
 // The apps that have a capability, in order.
 export const appsWith = (capability) => APPS.filter((a) => a.has?.includes(capability));
 
-// The apps whose transcripts XenoNet tails: Claude Code and Codex.
+// The apps whose transcripts XenoNet tails: Claude Code, Codex and Grok
+// Build.
 export const TAILED = appsWith("lines").map((a) => a.id);
 
-// The tailed app `app` names, or `fallback` for any other. The places that
-// pick between Claude Code and Codex read an app that's neither as one of
-// the two, and `fallback` says which, as each always has.
+// The tailed app `app` names, or `fallback` for any other. The live tailer
+// and the normalizers still read an app they don't tail as one they do,
+// and `fallback` says which.
 export const tailedApp = (app, fallback) => (TAILED.includes(app) ? app : fallback);
+
+// The tailed app `app` names; `fallback` when it names none (nothing, or
+// ""); or null for any other app. What a command, a route, another host or
+// a reader of transcripts is given is refused when it's an app XenoNet
+// doesn't tail, not read as one it does. Where there's no default,
+// `fallback` is null.
+export const tailedOr = (app, fallback) => (app == null || app === "" ? fallback : TAILED.includes(app) ? app : null);
+
+// The apps XenoNet asks a question of or hands a session to (xenonet
+// diagnose --ask, a handoff): Claude Code and Codex, whose commands and
+// links it knows.
+export const ASKED = ["claude", "codex"];
+
+// The asked app `app` names; `fallback` when it names none; or null for any
+// other app, which is refused, as tailedOr does for the tailed apps.
+export const askedOr = (app, fallback) => (app == null || app === "" ? fallback : ASKED.includes(app) ? app : null);
+
+// Apps as a person reads a list of them: "claude, codex or grok".
+const orList = (ids) => (ids.length < 2 ? ids.join("") : `${ids.slice(0, -1).join(", ")} or ${ids.at(-1)}`);
+
+// Why a command or a route refused `app` where `what` takes one of `apps`
+// (the tailed apps, unless it says): --app takes claude, codex or grok,
+// not "gemini-cli".
+export const appRefusal = (what, app, apps = TAILED) => `${what} takes ${orList(apps)}, not ${JSON.stringify(app)}`;
+
+// What a reader of transcripts says of an app XenoNet doesn't tail.
+export const untailed = (app) => `XenoNet doesn't read ${Object.hasOwn(APP, app) ? APP[app].name : JSON.stringify(String(app))}'s transcripts`;

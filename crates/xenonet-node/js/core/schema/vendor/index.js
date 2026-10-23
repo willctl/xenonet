@@ -11,3 +11,4 @@ import "./anomaly/opencode.js";
 import "./google/gemini-cli.js";
 import "./github/copilot-cli.js";
 import "./anysphere/cursor.js";
+import "./spacexai/grok-build.js";

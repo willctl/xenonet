@@ -1,4 +1,4 @@
-//! core/live.js's runtime: the tailer that reads the transcripts both apps
+//! core/live.js's runtime: the tailer that reads the transcripts the apps
 //! append to (core/blocks/tailer.js, whose decisions are xenonet-blocks'
 //! tailer.rs), each line through its app's normalizer into the telemetry
 //! (xenonet-sources' live/telemetry.rs), which holds every session's state
@@ -14,7 +14,7 @@
 use crate::blocks::{health_of, Block};
 use crate::gatherer::{Gather, Options};
 use crate::util::{fields, lock, now_ms, num, obj};
-use crate::vendor::Vendor;
+use crate::vendor::{Tailed, Vendor};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
@@ -66,7 +66,7 @@ pub struct TailStatus {
 // What a file the tailer follows is: what classify said, and how its
 // lines are sampled for the drift check.
 struct Entry {
-    codex: bool,
+    app: Tailed,
     session_id: String,
     agent_id: Value,
     sampling: Sampling,
@@ -115,12 +115,13 @@ fn transcript(name: &str) -> bool {
 }
 
 impl Live {
-    /// `claude_root` and `codex_root`: the folders the apps write
-    /// transcripts in; `usage`: whether to ask Anthropic for plan usage.
-    pub fn new(claude_root: &str, codex_root: &str, claude_desktop_dir: Option<&str>, usage: bool, home: &str, vendor: Arc<Vendor>) -> Arc<Live> {
+    /// `claude_root`, `codex_root` and `grok_root`: the folders the apps
+    /// write transcripts in; `usage`: whether to ask Anthropic for plan
+    /// usage.
+    pub fn new(claude_root: &str, codex_root: &str, grok_root: &str, claude_desktop_dir: Option<&str>, usage: bool, home: &str, vendor: Arc<Vendor>) -> Arc<Live> {
         // Watch canonical long paths: an 8.3 short name on Windows names
         // the same folder another way.
-        let roots: Vec<(String, String)> = [(claude_root, "claude"), (codex_root, "codex")]
+        let roots: Vec<(String, String)> = [(claude_root, "claude"), (codex_root, "codex"), (grok_root, "grok")]
             .into_iter()
             .filter(|(d, _)| !d.is_empty() && std::path::Path::new(d).exists())
             .map(|(d, app)| (xenonet_base::fs::realpath_native(d).unwrap_or_else(|_| d.to_string()), app.to_string()))
@@ -151,6 +152,12 @@ impl Live {
         let _ = self.listener.set(l);
     }
 
+    /// The MCP server the config names for the shared context
+    /// (wikiServer), under which Xenolith's tools write there.
+    pub fn context_server(&self, server: Option<&str>) {
+        lock(&self.telemetry).context_server = server.map(String::from);
+    }
+
     fn tell(&self, events: Vec<Event>) {
         if events.is_empty() {
             return;
@@ -166,11 +173,11 @@ impl Live {
     // aren't JSON are skipped, and one that breaks what the telemetry
     // makes of it is counted as an error, so the lines after it are read.
     fn line(&self, text: &str, file: &str, e: &mut Entry, prime: bool, out: &mut Vec<Event>) {
-        let Some(raw) = self.vendor.line(e.codex, text, &mut e.sampling) else { return };
+        let Some(raw) = self.vendor.line(e.app, text, &mut e.sampling) else { return };
         lock(&self.status).lines += 1;
         let f = Where { session_id: e.session_id.clone(), agent_id: e.agent_id.clone(), file: Value::String(file.into()) };
         let mut emitted = Vec::new();
-        let r = lock(&self.telemetry).line(e.codex, &f, raw, !prime, now_ms(), &mut emitted);
+        let r = lock(&self.telemetry).line(e.app.id(), &f, raw, !prime, now_ms(), &mut emitted);
         out.extend(emits(emitted));
         if r.is_err() {
             lock(&self.status).errors += 1;
@@ -225,8 +232,8 @@ impl Live {
         if !t.tailer.files.contains(file) {
             let Some(kind) = lock(&self.telemetry).classify(file) else { return Ok(()) };
             let entry = Entry {
-                // Any app but Codex is read as Claude Code.
-                codex: xenonet_base::apps::tailed_app(kind.get("app").and_then(Value::as_str).unwrap_or_default(), "claude") == "codex",
+                // Any app that isn't tailed is read as Claude Code.
+                app: Tailed::of(kind.get("app").and_then(Value::as_str).unwrap_or_default()),
                 session_id: kind.get("sessionId").and_then(Value::as_str).unwrap_or_default().to_string(),
                 agent_id: kind.get("agentId").cloned().unwrap_or(Value::Null),
                 sampling: Sampling::default(),
@@ -537,6 +544,19 @@ impl Live {
         if let Some(k) = needs.get("kind") {
             m.insert("needsYou".into(), k.clone());
         }
+        // What the other consoles in a network may show of it (network.md,
+        // section 7): the text of what waits on you, what it said last and
+        // why it seems stuck. Presence reads them; the engine's view of an
+        // agent, which agents read, never carries them.
+        if matches!(needs.get("kind").and_then(Value::as_str), Some("permission" | "question")) {
+            if let Some(t) = needs.get("text").filter(|t| t.is_string()) {
+                m.insert("question".into(), t.clone());
+            }
+        }
+        m.insert("lastMessage".into(), s.last_message());
+        if let Some(r) = s.stuck(now).get("reasons").filter(|r| r.is_array()) {
+            m.insert("stuck".into(), r.clone());
+        }
         m.insert("edits".into(), Value::Array(edits));
         Some(Value::Object(m))
     }
@@ -677,7 +697,7 @@ mod tests {
         let file = root.join(format!("{ID}.jsonl"));
         let ts = |ago: f64| xenonet_base::time::iso(now_ms() - ago);
         std::fs::write(&file, line(json!({ "type": "user", "timestamp": ts(60e3), "message": { "role": "user", "content": "Add a test" } }))).unwrap();
-        let live = Live::new(&home.join(".claude").join("projects").to_string_lossy(), "", None, false, &home.to_string_lossy(), vendor());
+        let live = Live::new(&home.join(".claude").join("projects").to_string_lossy(), "", "", None, false, &home.to_string_lossy(), vendor());
         let heard: Arc<Mutex<Vec<Event>>> = Arc::default();
         let h = heard.clone();
         live.listen(Arc::new(move |e| lock(&h).extend(e)));

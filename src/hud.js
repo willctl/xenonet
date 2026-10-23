@@ -9,7 +9,10 @@ import { cleanTitle, renamable, MAX_TITLE } from "../core/rename.js";
 
 const $ = (sel) => document.querySelector(sel);
 
-const KIND_LABEL = { core: "Root", host: "Host", project: "Project", native: "Codex project", session: "Session", resource: "Shared system", wiki: "Agent Wiki", page: "Wiki page" };
+const KIND_LABEL = { core: "Root", host: "Host", project: "Project", native: "Codex project", session: "Session", resource: "Shared system", wiki: "Shared context", page: "Context page" };
+// The sources the status panel lists go by their names in graph/v1, apart
+// from the shared context's, whose name there (wiki) the page doesn't use.
+const SOURCE_LABEL = { wiki: "shared context" };
 // The projects folder's name (see graph.js), which the page shows in a few
 // places; it changes with the folder.
 let rootName = "~/Projects";
@@ -17,6 +20,13 @@ const kindLabel = (n) => (n.kind === "project" && n.group ? "Group" : n.kind ===
 const ACTIVITY_LABEL = { active: "active", recent: "recent", idle: "idle" };
 // Why the scan made a folder a project or a group (see scanProjects).
 const VCS_NAME = { ".git": "git repo", ".hg": "Mercurial repo", ".jj": "Jujutsu repo", ".sl": "Sapling repo", ".svn": "Subversion checkout" };
+// Where a Grok Build session came from: a subagent's, or the kind of
+// session Grok says it is (a fork, a headless run), else Grok Build.
+function grokOrigin(n) {
+  if (n.parentKind === "subagent") return "Grok Build subagent";
+  return n.source ? `Grok Build · ${n.source}` : "Grok Build";
+}
+
 function foundAs(n) {
   if (n.rule?.by === "codex") return `Codex's pick: ${n.rule.reason || n.rule.as}`;
   if (n.rule?.by === "you") return { project: "your rule: one project", group: "your rule: a group" }[n.rule.as] ?? "your rule";
@@ -47,8 +57,8 @@ const SEED_MS = 6 * 3600e3;
 // `actorBeams(id)` the nodes it beams into (see actors.js).
 // `onRename(id, title)` saves a session's new name and answers { ok, title,
 // error }; without it, sessions can't be renamed here.
-export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPreview, onStats, onReset, onHandoff, onTerminal, onAck, onOpenApp, onOpened = null, onRename = null, onMessageActor = null, identities = null, actorOf = () => null, actorBeams = () => [], sfx = () => {}, mcp = null }) {
-  const filters = { claude: true, codex: true, archived: true, external: true };
+export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPreview, onStats, onReset, onHandoff, onTerminal, onAck, onOpenApp, onOpened = null, onRename = null, onMessageActor = null, onMessageSession = null, identities = null, actorOf = () => null, actorBeams = () => [], sfx = () => {}, mcp = null }) {
+  const filters = { claude: true, codex: true, grok: true, archived: true, external: true };
   let data = null;
   let index = new Map();
   let children = new Map();
@@ -113,9 +123,14 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     const counts = {
       claude: sessions.filter((n) => n.app === "claude").length,
       codex: sessions.filter((n) => n.app === "codex").length,
+      grok: sessions.filter((n) => n.app === "grok").length,
       archived: sessions.filter((n) => n.archived).length,
     };
     for (const el of document.querySelectorAll("[data-count]")) el.textContent = counts[el.dataset.count];
+    // Grok Build's toggle shows once there's a Grok Build session, or while
+    // it hides them.
+    const grok = document.querySelector('[data-filter="grok"]');
+    if (grok) grok.hidden = !counts.grok && filters.grok;
   }
 
   function renderSources() {
@@ -123,7 +138,10 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     const sub = $("#link-sub");
     if (sub) sub.textContent = sources.length ? `${sources.filter((src) => src.ok).length}/${sources.length} sources reading` : "";
     $("#sources").innerHTML = sources
-      .map((src) => `<span class="src ${src.ok ? "ok" : "bad"}" title="${h(src.ok ? `${src.name}: ${src.note ?? src.count ?? ""}${src.ms != null ? ` in ${src.ms}ms` : ""}` : `${src.name}: ${src.error}`)}">${h(src.name)}</span>`)
+      .map((src) => {
+        const name = SOURCE_LABEL[src.name] ?? src.name;
+        return `<span class="src ${src.ok ? "ok" : "bad"}" title="${h(src.ok ? `${name}: ${src.note ?? src.count ?? ""}${src.ms != null ? ` in ${src.ms}ms` : ""}` : `${name}: ${src.error}`)}">${h(name)}</span>`;
+      })
       .join("");
   }
 
@@ -327,7 +345,31 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     return out.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
   }
 
+  // Another machine's session in a network, as its presence says
+  // (network-map.js): its state and what it's doing, what waits on you or
+  // why it seems stuck, and what it said last, each escaped. Its transcript
+  // and stats stay on its machine.
+  function presenceHtml(node) {
+    const p = node.presence ?? {};
+    const as = node.stale ? ` · as of ${timeAgo(index.get(`@${node.host}:core`)?.lastHeard)}` : "";
+    const need = p.waits
+      ? `<div class="need-box ${h(p.kind ?? "question")}"><div class="need-k">${p.kind === "permission" ? "◉ needs permission" : "◉ waiting for you"}${p.since ? ` · ${timeAgo(p.since)}` : ""}</div><div class="need-text">${h(p.question ?? `The question shows in ${node.host}'s console.`)}</div></div>`
+      : "";
+    const stuck = p.stuck?.length ? `<div class="stuck-box">⟳ may be stuck · ${p.stuck.map(h).join(" · ")}</div>` : "";
+    const state = p.state === "working" ? "working" : p.state === "waiting" ? "waiting for you" : p.state === "ended" ? "ended" : "idle";
+    // Its state, unless the box above says it waits.
+    const head = p.waits && !as ? "" : `<div class="live-head"><span class="live-status ${p.state === "working" ? "thinking" : "idle"}">${h(state)}${h(as)}</span></div>`;
+    return `${need}${stuck}
+      ${head}
+      ${p.focus ? `<div class="sub-k">doing</div><div class="net-said">${h(p.focus)}</div>` : ""}
+      ${p.lastMessage ? `<div class="sub-k">said last</div><div class="net-said">${h(p.lastMessage)}</div>` : ""}
+      <div class="net-from">From ${h(node.host)}'s presence. Its transcript and stats stay on ${h(node.host)}.</div>`;
+  }
+
   function liveSectionHtml(node) {
+    // Drawn from presence (network-map.js); one drawn from its host's relay
+    // snapshot (network: "relay") has the live state, as an SSH host's does.
+    if (node.network === true) return presenceHtml(node);
     const s = liveById.get(node.id);
     if (!s) return `<div class="live-none">No activity in the last 24 hours</div>`;
     const pct = s.context.window ? Math.min(100, (s.context.used / s.context.window) * 100) : 0;
@@ -367,7 +409,7 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
         ? `<div class="forecast ${f.turnsLeft <= 3 ? "crit" : f.turnsLeft <= 8 ? "warn" : ""}">${f.turnsLeft <= 0 ? "compaction due next turn" : `≈ ${h(f.turnsLeft)} turn${f.turnsLeft === 1 ? "" : "s"} until compaction`} <span class="dim">· +${compact(f.growthPerTurn)}/turn</span></div>`
         : `<div class="forecast dim">context isn't growing</div>`;
     return `
-      ${need ? `<div class="need-box ${h(need.kind)}"><div class="need-k">${need.kind === "review" ? "▣ ready for review" : need.kind === "permission" ? "◉ needs permission" : "◉ waiting for you"} · ${timeAgo(need.since)}</div><div class="need-text">${h(alertText({ host: node.host, text: need.text }))}</div>${node.host ? "" : `<div class="need-actions"><button class="act primary ${h(node.app)}" data-need-open>Answer in ${h(APP_DESKTOP[node.app])}</button><button class="act" data-need-ack>Dismiss</button></div>`}</div>` : ""}
+      ${need ? `<div class="need-box ${h(need.kind)}"><div class="need-k">${need.kind === "review" ? "▣ ready for review" : need.kind === "permission" ? "◉ needs permission" : "◉ waiting for you"} · ${timeAgo(need.since)}</div><div class="need-text">${h(alertText({ host: node.host, text: need.text }))}</div>${node.host ? "" : `<div class="need-actions">${APP_DESKTOP[node.app] ? `<button class="act primary ${h(node.app)}" data-need-open>Answer in ${h(APP_DESKTOP[node.app])}</button>` : ""}<button class="act" data-need-ack>Dismiss</button></div>`}</div>` : ""}
       ${s.stuck ? `<div class="stuck-box">⟳ may be stuck · ${s.stuck.reasons.map(h).join(" · ")}</div>` : ""}
       <div class="live-head">
         <span class="live-status ${h(s.status)}">${LIVE_LABEL[s.status]}${s.status === "tool" && s.lastTool ? ` · ${h(s.lastTool.name.replace(/^mcp__/, "").replace(/__/g, "."))}` : ""}${stopped ? ` · ${h(stopped)}` : ""}</span>
@@ -441,7 +483,7 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     const isSession = node.kind === "session";
     const chip = isSession ? `${KIND_LABEL.session} · ${APP_LABEL[node.app] ?? node.app}` : kindLabel(node);
     const title = isSession ? node.title : node.name;
-    const sub = isSession ? shortPath(node.cwd, 56) : node.kind === "resource" ? "MCP shared system" : shortPath(node.path, 56);
+    const sub = isSession ? shortPath(node.cwd, 56) : node.kind === "resource" ? "MCP shared system" : node.kind === "host" && node.network ? "a machine in your network" : shortPath(node.path, 56);
 
     let grid = "";
     if (isSession) {
@@ -454,7 +496,7 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
         row("branch", mono(node.branch)) +
         row("folder", mono(shortPath(node.cwd, 40))) +
         row("worktree", mono(node.worktree && shortPath(node.worktree, 40))) +
-        row("origin", mono(node.originator ?? (node.observed || node.reader ? null : node.inDesktop ? "Claude desktop" : node.app === "claude" ? "CLI / SDK" : null))) +
+        row("origin", mono(node.originator ?? (node.observed || node.reader || node.network ? null : node.inDesktop ? "Claude desktop" : node.app === "claude" ? "CLI / SDK" : node.app === "grok" ? grokOrigin(node) : null))) +
         row("seen", node.reader === "experimental" ? `read from ${h(APP_LABEL[node.app] ?? node.app)}'s own records (experimental)` : node.observed === "numbat" ? "observed through numbat's records" : node.observed === "gateway" ? `reported through the gateway${node.reportedBy ? ` by ${h(node.reportedBy)}` : ""}` : null) +
         row("parent", p ? `<a href="#" data-goto="${h(p.id)}">${h(p.title)}</a> <span class="dim">${h(node.parentKind ?? "")}</span>` : null) +
         row("id", `<code class="copy" data-copy="${h(node.rawId)}" title="copy">${h(node.rawId)}</code>`);
@@ -492,18 +534,23 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
         row("about", node.description ? h(node.description) : null, "wrap");
     } else if (node.kind === "wiki") {
       const pages = (children.get(node.id) ?? []).map((id) => index.get(id)).filter(Boolean);
-      grid =
-        row("pages", h(node.pageCount ?? pages.length)) +
-        row("last write", node.lastActivity ? `${timeAgo(node.lastActivity)} <span class="dim">· ${stamp(node.lastActivity)}</span>` : "—") +
-        row("inbox", node.inbox?.length ? `<span class="pressure">${node.inbox.length} unfiled</span><br>${node.inbox.slice(0, 6).map((n) => `<span class="dim">· ${h(n.title)}</span>`).join("<br>")}` : `<span class="dim">empty</span>`) +
-        row("folder", mono(shortPath(node.path, 40)));
+      // A folder in a format XenoNet doesn't read: why, in place of what
+      // it would have shown.
+      grid = node.problem
+        ? row("not read", `<span class="pressure">${h(node.problem)}</span>`, "wrap") + row("folder", mono(shortPath(node.path, 40)))
+        : row("pages", h(node.pageCount ?? pages.length)) +
+          row("last write", node.lastActivity ? `${timeAgo(node.lastActivity)} <span class="dim">· ${stamp(node.lastActivity)}</span>` : "—") +
+          row("inbox", node.inbox?.length ? `<span class="pressure">${node.inbox.length} unfiled</span><br>${node.inbox.slice(0, 6).map((n) => `<span class="dim">· ${h(n.title)}</span>`).join("<br>")}` : `<span class="dim">empty</span>`) +
+          row("folder", mono(shortPath(node.path, 40)));
     } else if (node.kind === "page") {
       grid =
         row("type", `<span class="tag">${h(node.type)}</span>`) +
+        row("space", node.space ? h(node.space) : null) +
         row("about", node.summary ? h(node.summary) : null, "wrap") +
         row("updated", node.updated ? `${timeAgo(node.updated)} <span class="dim">by ${h(node.updatedBy ?? "?")}</span>` : "—") +
         row("recent writes", node.writes?.length ? node.writes.slice().reverse().map((w) => `<span class="dim">${new Date(w.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · ${h(w.app)}</span> ${h(w.title)}`).join("<br>") : null, "wrap") +
-        row("tags", node.tags?.length ? node.tags.map((t) => `<span class="tag">${h(t)}</span>`).join(" ") : null);
+        row("tags", node.tags?.length ? node.tags.map((t) => `<span class="tag">${h(t)}</span>`).join(" ") : null) +
+        row("also called", node.aliases?.length ? node.aliases.map((a) => h(a)).join(", ") : null, "wrap");
     } else if (node.kind === "resource") {
       const users = live ? live.sessions.filter((s) => (s.host ?? null) === (node.host ?? null) && s.mcp.some((m) => m.server === node.name)) : [];
       grid =
@@ -517,7 +564,10 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     }
 
     const canTerminal = onTerminal && !node.host && (node.kind === "project" || node.kind === "zone" || node.kind === "wiki" || (isSession && node.cwd));
-    const actions = [...(node.actions ?? []), ...(canTerminal ? [{ id: "terminal", label: "›_ Open terminal here", client: true }] : [])]
+    // A session of this machine's takes a message from you, from here, and
+    // so does one on another machine in your network.
+    const canMessage = onMessageSession && isSession && (!node.host || node.network);
+    const actions = [...(node.actions ?? []), ...(canMessage ? [{ id: "message", label: "✉ Message", client: true }] : []), ...(canTerminal ? [{ id: "terminal", label: "›_ Open terminal here", client: true }] : [])]
       .map((a, i) => `<button class="act ${i === 0 && isSession ? `primary ${h(node.app)}` : ""}" data-action="${h(a.id)}">${h(a.label)}</button>`)
       .join("");
 
@@ -548,7 +598,7 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
       <div class="insp-sub">${h(sub)}</div>
       ${whereHtml(node, index)}
       ${actions ? `<div class="actions">${actions}</div>` : ""}
-      ${isSession ? `<div class="panel-title sub"><span>Live</span><span class="tick live-tick">● live</span></div><div id="insp-live" class="insp-live">${liveSectionHtml(node)}</div>` : ""}
+      ${isSession ? `<div class="panel-title sub"><span>${node.network === true ? "Presence" : "Live"}</span><span class="tick live-tick">● live</span></div><div id="insp-live" class="insp-live">${liveSectionHtml(node)}</div>` : ""}
       <div class="panel-title sub"><span>Details</span></div>
       <div class="grid">${grid}</div>
       ${mcp && ["resource", "wiki"].includes(node.kind) ? '<div class="panel-title sub"><span>MCP server</span></div><div id="insp-mcp"></div>' : ""}
@@ -569,6 +619,7 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     if (action === "stats") return onStats?.(node);
     if (action === "handoff") return onHandoff?.(node);
     if (action === "terminal") return onTerminal?.(node);
+    if (action === "message") return onMessageSession?.(node);
     try {
       const res = await fetch("/api/open", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ nodeId: node.id, action }) });
       const body = await res.json();
@@ -734,7 +785,9 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
           : node.kind === "page"
             ? `${h(node.type)} · updated ${timeAgo(node.updated)}`
             : node.kind === "wiki"
-              ? `${h(node.pageCount)} pages · ${h(node.inbox?.length ?? 0)} unfiled`
+              ? node.problem
+                ? "not read: a newer format"
+                : `${h(node.pageCount)} pages · ${h(node.inbox?.length ?? 0)} unfiled`
               : `${h(node.sessionCount ?? 0)} sessions${node.repo?.dirty ? ` · Δ${h(node.repo.dirty)} uncommitted` : ""}`
       }</div>`;
     tip.style.transform = `translate(${mouse.x + 16}px, ${mouse.y + 14}px)`;
@@ -857,11 +910,8 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     }
     const toggle = e.target.closest("[data-filter]");
     if (toggle) {
-      const f = toggle.dataset.filter;
-      filters[f] = !filters[f];
-      toggle.classList.toggle("on", filters[f]);
+      setFilter(toggle.dataset.filter, !filters[toggle.dataset.filter]);
       sfx("toggle");
-      runSearch();
       return;
     }
     if (e.target.closest("[data-legend-toggle]")) {
@@ -880,6 +930,18 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
       onLayout(layout.dataset.layout);
     }
   });
+
+  // A toggle under Filters, on or off: an app's sessions (claude, codex,
+  // grok), archived ones, or the folders outside the projects folder.
+  function setFilter(name, on) {
+    if (!Object.hasOwn(filters, name)) throw new Error(`no filter called ${name}; there are ${Object.keys(filters).join(", ")}`);
+    filters[name] = !!on;
+    const toggle = document.querySelector(`[data-filter="${name}"]`);
+    toggle?.classList.toggle("on", filters[name]);
+    // Grok Build's toggle stays while it hides them, to bring them back.
+    if (name === "grok" && toggle && !on) toggle.hidden = false;
+    runSearch();
+  }
 
   addEventListener("keydown", (e) => {
     if (e.target.matches?.("input, textarea")) return;
@@ -934,6 +996,7 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
       tickClock();
     },
     filters,
+    setFilter,
     get current() {
       return current;
     },

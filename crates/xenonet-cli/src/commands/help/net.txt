@@ -1,0 +1,55 @@
+One XenoNet network across your machines. One machine is the network's
+gateway; the others link to it over HTTP(S), so no machine opens a port
+and nothing needs SSH keys. Frames between machines are signed by the one
+that sent them and sealed for the one they're for: the gateway passes them
+on and can't read them.
+
+  xenonet net create --name <name> --host <id> [--lan <ip:port>]
+                                   makes a network, with this machine as its
+                                   founder and gateway. Other machines reach
+                                   the gateway through the actor gateway's
+                                   tunnel (xenonet gateway on --tunnel …), or
+                                   on your LAN at --lan, an address this
+                                   machine has (never 0.0.0.0)
+  xenonet net join <address> <ticket>
+                                   joins the network, with the line Add a
+                                   machine showed: it works once, for ten
+                                   minutes. A ticket made on a machine that
+                                   isn't the gateway waits for that machine
+                                   to sign this one in
+  xenonet net status [--json]      the network, this machine, the gateway and
+                                   the link, and what waits to be sent
+  xenonet net hosts [--json]       the machines in the network
+  xenonet net add-machine <id> [--window]
+                                   a ticket for a new machine, and the line to
+                                   run there. --window when you'll use a
+                                   XenoNet window on it. From a terminal on
+                                   macOS only; elsewhere, Add a machine in
+                                   XenoNet's window
+  xenonet net remove <id>          takes a machine out of the network
+  xenonet net replace <id>         takes a reinstalled machine's old keys out,
+                                   and makes a ticket for it to join again
+  xenonet net leave [--force]      asks to be taken out, then forgets the
+                                   network here; this XenoNet carries on alone
+  xenonet net set [--titles-only | --no-titles-only] [--lan <ip:port>]
+                                   what this machine shares with the network,
+                                   and a LAN-only gateway's address
+  xenonet net gateway take [--lan <ip:port>]
+                                   makes this machine the network's gateway,
+                                   at that LAN address or through the actor
+                                   gateway's tunnel. On the founder's machine
+                                   it's done; elsewhere it waits for the
+                                   founder or another window host to approve
+  xenonet net approve <id> [--op <op>]
+                                   approves what waits for approval about a
+                                   machine, such as its move to gateway or
+                                   its add as a window host, and shows what
+                                   it approves. Several waiting: name one by
+                                   the entry id the answer lists
+  xenonet net gateway set <address>
+                                   follows the gateway to a new address, when
+                                   this machine missed the move
+
+Creating, joining and leaving are yours to do: XenoNet refuses them from
+under an agent. The founder's key is the network's root: a network whose
+founder is lost is made again.

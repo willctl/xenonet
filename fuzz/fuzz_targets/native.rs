@@ -9,8 +9,8 @@ use libfuzzer_sys::fuzz_target;
 use serde_json::{json, Value};
 use xenonet_base::fs::FsError;
 use xenonet_sources::native::files::{Entry, Files, Stat};
-use xenonet_sources::native::opencode::{self, Db, OpenCode, Vendor};
-use xenonet_sources::native::{copilot_cli, cursor, gemini_cli, no_check, Checked, Threw};
+use xenonet_sources::native::opencode::{self, Db, OpenCode};
+use xenonet_sources::native::{copilot_cli, cursor, gemini_cli, no_check, Checked, NativeReader, Threw, Vendor};
 use xenonet_sources::numbat::{self, Numbat};
 
 const NOW: f64 = 1_791_230_000_000.0;

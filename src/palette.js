@@ -42,7 +42,7 @@ export function createPalette({ sfx, nodes, commands, actions, onSearchResults }
 
   function nodeItem(n) {
     const label = n.title ?? n.name;
-    const sub = n.kind === "session" ? `${APP_LABEL[n.app]} · ${timeAgo(n.updatedAt)}${n.cwd ? ` · ${n.cwd.split(/[\\/]/).pop()}` : ""}` : n.kind === "page" ? `wiki page · ${n.type}` : n.kind === "project" ? `${n.group ? "group of projects" : "project"}${n.rel?.includes("/") ? ` · ${n.rel}` : ""}${n.repo?.dirty ? ` · Δ${n.repo.dirty} uncommitted` : ""}` : n.kind === "host" ? `another machine · ${n.state}` : n.kind;
+    const sub = n.kind === "session" ? `${APP_LABEL[n.app]} · ${timeAgo(n.updatedAt)}${n.cwd ? ` · ${n.cwd.split(/[\\/]/).pop()}` : ""}` : n.kind === "page" ? `context page · ${n.type}${n.space ? ` · ${n.space}` : ""}` : n.kind === "project" ? `${n.group ? "group of projects" : "project"}${n.rel?.includes("/") ? ` · ${n.rel}` : ""}${n.repo?.dirty ? ` · Δ${n.repo.dirty} uncommitted` : ""}` : n.kind === "host" ? `another machine · ${n.state}` : n.kind === "wiki" ? "shared context" : n.kind;
     // Another machine's (with XENONET_HOSTS=1) says which.
     const where = n.host && n.kind !== "host" ? `on ${n.host} · ` : "";
     return { type: "node", node: n, label, sub: where + sub, icon: n.group ? "▣" : KIND_ICON[n.kind] ?? "•", cls: n.app ?? n.kind };
@@ -60,17 +60,17 @@ export function createPalette({ sfx, nodes, commands, actions, onSearchResults }
       ? []
       : nodes()
           .filter((n) => n.kind !== "core")
-          .map((n) => ({ ...nodeItem(n), score: fuzzy(query, `${n.title ?? n.name} ${n.cwd ?? n.rel ?? ""} ${n.branch ?? ""}`) + (n.kind === "session" ? Math.max(0, 8 - (Date.now() - (n.updatedAt ?? 0)) / 3600e3) : 0) }))
+          .map((n) => ({ ...nodeItem(n), score: fuzzy(query, `${n.title ?? n.name} ${n.cwd ?? n.rel ?? ""} ${n.branch ?? ""} ${n.aliases?.join(" ") ?? ""}`) +(n.kind === "session" ? Math.max(0, 8 - (Date.now() - (n.updatedAt ?? 0)) / 3600e3) : 0) }))
           .filter((n) => n.score > 0);
     let out = query ? [...ns, ...cmds].sort((a, b) => b.score - a.score) : [...cmds.slice(0, 6), ...ns.sort((a, b) => (b.node.updatedAt ?? 0) - (a.node.updatedAt ?? 0))];
     out = out.slice(0, 40);
-    if (query && !cmdOnly) out.push({ type: "search", label: `Search transcripts for "${query}"`, sub: "full text in Claude Code and Codex", icon: "⌕", q: query });
+    if (query && !cmdOnly) out.push({ type: "search", label: `Search transcripts for "${query}"`, sub: "full text in Claude Code, Codex and Grok Build", icon: "⌕", q: query });
     return out;
   }
 
   async function searchTranscripts(q) {
     const seq = ++searchSeq;
-    if (!q) return [{ type: "hint", label: "Type words to search every Claude Code and Codex transcript", icon: "⌕" }];
+    if (!q) return [{ type: "hint", label: "Type words to search every Claude Code, Codex and Grok Build transcript", icon: "⌕" }];
     list.innerHTML = `<li class="pal-hint">Searching…</li>`;
     const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`).then((r) => r.json()).catch(() => ({ results: [] }));
     if (seq !== searchSeq) return null;

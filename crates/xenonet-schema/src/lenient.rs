@@ -283,12 +283,6 @@ pub enum Key {
     Index(usize),
 }
 
-fn is_ident(k: &str) -> bool {
-    // /^[A-Za-z_$][\w$-]*$/
-    let b = k.as_bytes();
-    !b.is_empty() && (b[0].is_ascii_alphabetic() || b[0] == b'_' || b[0] == b'$') && b[1..].iter().all(|&c| c.is_ascii_alphanumeric() || c == b'_' || c == b'$' || c == b'-')
-}
-
 /// Where, as a drift record says it: `message.content[].citations`,
 /// `changes.*.type`, `["https://api.openai.com/auth"].chatgpt_plan_type`.
 /// None for the record itself.
@@ -301,7 +295,7 @@ pub fn path_of(steps: &[Step]) -> Option<String> {
         match p {
             Step::Item(_) => s.push_str("[]"),
             Step::Entry(_) => s.push_str(if s.is_empty() { "*" } else { ".*" }),
-            Step::Prop(k) if is_ident(k) => {
+            Step::Prop(k) if crate::check::is_ident(k) => {
                 if !s.is_empty() {
                     s.push('.');
                 }

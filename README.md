@@ -2,7 +2,8 @@
 
 **The network for SI.**
 
-See every Claude Code and Codex session on your machine on one live map.
+See every Claude Code, Codex and Grok Build session on your machine on one
+live map.
 Sessions can message each other, claim files before editing, and wake
 agents running elsewhere.
 
@@ -17,9 +18,9 @@ map, a session that asks you a question turns amber and chimes. Two
 sessions that edit the same file get a red arc between them. A session that
 keeps failing the same command flickers orange.
 
-Connect Claude Code and Codex to XenoNet once. Then each session can see the
-others in its repo, and XenoNet warns it before it edits a file another
-session is changing. Agents that run elsewhere, such as Grok Bot, join
+Connect Claude Code, Codex and Grok Build to XenoNet once. Then each session
+can see the others in its repo, and XenoNet warns it before it edits a file
+another session is changing. Agents that run elsewhere, such as Grok Bot, join
 through a gateway, and XenoNet wakes them when a message arrives.
 
 [Download XenoNet](https://github.com/willctl/xenonet/releases/latest) · [Get started](#try-it) · [What it does](#what-it-does) · [Install](#install) · [Guide](docs/guide/README.md)
@@ -27,9 +28,9 @@ through a gateway, and XenoNet wakes them when a message arrives.
 ## Try it
 
 [Download and install XenoNet](https://github.com/willctl/xenonet/releases/latest),
-open it, and connect Claude Code and Codex from the console. You don't need
-a separate Node.js install. XenoNet looks for projects in `~/Projects`. If yours live
-elsewhere, choose another folder from the console.
+open it, and connect Claude Code, Codex and Grok Build from the console. You
+don't need a separate Node.js install. XenoNet looks for projects in
+`~/Projects`. If yours live elsewhere, choose another folder from the console.
 
 To run from source, use [Node.js](https://nodejs.org) 22.13 or later:
 
@@ -47,8 +48,11 @@ An installed service serves the console at http://127.0.0.1:47840, so a
 browser can stand in for Desktop. See [components](docs/guide/components.md#the-console-in-a-browser).
 
 XenoNet runs on Windows 11 and on macOS 13 or later. It's tested on Windows
-11 and on macOS 26 with Apple silicon. The browser version may work on Linux,
-but nobody has tested it there yet, so reports and fixes are welcome.
+11 and on macOS 26 with Apple silicon. Linux has no Desktop download yet.
+The Service and Tools run on Linux x64, and a browser shows the console the
+service serves. See [install without Desktop](docs/guide/components.md#install-without-desktop).
+CI runs XenoNet's tests on Ubuntu, but few people have used it there, so
+reports and fixes are welcome.
 
 On a Mac, use ⌘ wherever this page says Ctrl. The terminal's key stays
 ``⌃` ``, as in VS Code.
@@ -105,11 +109,12 @@ On a Mac, use ⌘ wherever this page says Ctrl. The terminal's key stays
   minimized, covered by other windows on a Mac, or the screen is locked, so
   it can stay open all day. `Frame rate: lower GPU use` in the palette
   halves that, and `Frame rate: every frame the screen shows` draws at the
-  screen's own rate.
+  screen's own rate. `Turn plain panels on or off` draws the panels solid,
+  without the blur of the map behind them, which uses less GPU.
 
 ### Lets sessions work together
 
-Run `Connect Claude Code and Codex to XenoNet` from the palette once.
+Run `Connect your agents to XenoNet` from the palette once.
 XenoNet shows what it will add to their settings and adds it when you
 confirm. From then on, each session hears when it starts which other
 sessions work in its repo and what each is doing. It gets a warning before
@@ -161,7 +166,7 @@ how to stop it.
 ### Lets you look back
 
 - `Ctrl+K` opens a palette with every command. Type `?` and a few words to
-  search every transcript of both apps.
+  search every Claude Code, Codex and Grok Build transcript.
 - After ten minutes away, XenoNet sums up the turns, tools, files and errors
   since you left. Codex can write that up as a short note.
 - Replay plays the last 24 hours in one minute. A poster of the day saves
@@ -206,25 +211,42 @@ input schemas, context resources and templates, and recent session usage.
 XenoNet labels missing metadata and never shows the credentials in a
 server's configuration.
 
-### Shows other machines, as a prototype
+### Joins your machines into one network
+
+A XenoNet network joins the machines you use. The sessions on each see the
+sessions on the others in `peers`, message them, and are warned when one is
+changing the same file in its clone. What waits on you on any machine shows
+in every console. On a machine where you use a XenoNet window, the map shows
+every other machine's beside its own, and their transcripts open in that
+window. One machine is the gateway, and the others link out to it,
+so no machine opens a port. Frames between machines are signed and sealed:
+the gateway passes them on and can't read them. **Add a machine** shows one
+line to run on the new machine, which works once, for ten minutes. You can
+also publish a local service to the network, such as Xenolith's sync, and
+programs on the other machines reach it through their own XenoNet.
+[A network across your machines](docs/guide/network.md) shows how.
+
+### Shows other machines over SSH, as a prototype
 
 Start XenoNet with `XENONET_HOSTS=1` and it can show other machines' XenoNets
-beside its own, read only. Each machine runs its own XenoNet, and your
-console reads it over SSH. XenoNet does not expose a service to your local network. A machine sends
-titles, states and counts, and a transcript crosses only when you open it.
-[Other machines](docs/guide/other-machines.md) shows how to set one up.
+beside its own, read only, without a network. Each machine runs its own
+XenoNet, and your console reads it over SSH. A machine sends titles, states
+and counts, and a transcript crosses only when you open it in XenoNet's
+window.
+[Other machines over SSH](docs/guide/other-machines.md) shows how to set one up.
 
 ## Privacy
 
-XenoNet runs on your machine and reads the files Claude Code and Codex
-already write.
+XenoNet runs on your machine and reads the files Claude Code, Codex and Grok
+Build already write.
 
 - XenoNet's server listens on `127.0.0.1` only. It refuses requests that name
   another host, which blocks DNS rebinding, and it refuses posts from other
   web pages.
-- XenoNet writes to Claude Code's, Claude desktop's and Codex's files only
-  when you ask it to. Renaming a session saves the new name where its app
-  keeps it. Connecting Claude Code and Codex changes their settings, and
+- XenoNet writes to Claude Code's, Claude desktop's, Codex's and Grok Build's
+  files only when you ask it to. Renaming a session saves the new name where
+  its app keeps it. Connecting Claude Code, Codex and Grok Build changes their
+  settings, and
   XenoNet shows each change first and keeps a copy of each file it
   changes.
 - XenoNet sends data off your machine in these cases only:
@@ -240,7 +262,10 @@ already write.
   - When you ask Codex which folders are projects, it gets an outline of
     the folder names in your projects folder, after XenoNet has shown you
     all of it.
-  - When you add another machine, XenoNet connects to it over SSH.
+  - When you join a network, this machine keeps one outbound link to the
+    network's gateway and sends what
+    [A network across your machines](docs/guide/network.md#what-crosses-and-what-doesnt)
+    lists. When you add an SSH host, XenoNet connects to it over SSH.
   - With an OpenRouter key, XenoNet asks OpenRouter what the key has spent,
     at most once a minute while a window is open.
   - When you pair a remote actor, it reads the statuses and counts of
@@ -251,8 +276,8 @@ already write.
   your user name. `Hide or show identities` in the palette masks your
   accounts as "GitHub A" or "Claude B" for screen sharing.
 - On macOS, XenoNet checks which process sent each coordination request.
-  Only you can allow actors, connect Claude Code and Codex, and trust
-  hosts.
+  Only you can allow actors, connect your agents, trust hosts, and start,
+  join or leave a network.
 
 [Privacy and security](docs/guide/privacy.md) has the full list.
 
@@ -272,8 +297,11 @@ by hand or turn off background checks.
 
 Desktop, the background service and the command-line tools update
 separately. Restarting Desktop keeps terminals running and sessions
-connected.
-See [components and updates](docs/guide/components.md).
+connected. See [components and updates](docs/guide/components.md).
+
+The service can start at login on Windows, macOS and Linux, and start again
+if it stops, so sessions keep coordinating while Desktop is closed. It's off
+until you turn it on. See [Keeping the service running](docs/guide/always-on.md).
 
 Neither build is signed yet. The first time you open XenoNet, Windows
 SmartScreen may ask you to confirm, and macOS asks you to allow it in
@@ -286,7 +314,7 @@ To build installers yourself, see [Releasing XenoNet](docs/guide/releases.md).
 ### Install as a Claude Code plugin
 
 Claude Code can get XenoNet's MCP server and hooks from a plugin instead of
-`Connect Claude Code and Codex to XenoNet`. Install XenoNet first, since the
+`Connect your agents to XenoNet`. Install XenoNet first, since the
 plugin runs the `xenonet` command from your PATH. Then, in Claude Code:
 
 ```text
@@ -321,8 +349,8 @@ $ xenonet
 | `xenonet agents` | Lists the sessions at work, where each is and what files it's editing |
 | `xenonet who <path>` | Says which sessions and actors have a hand in a file |
 | `xenonet session [words]` | Shows a session's models, tokens, estimated cost, turns and tools |
-| `xenonet search <words>` | Searches every Claude Code and Codex transcript |
-| `xenonet connect` | Connects Claude Code and Codex to XenoNet, after showing each change |
+| `xenonet search <words>` | Searches every Claude Code, Codex and Grok Build transcript |
+| `xenonet connect` | Connects Claude Code, Codex and Grok Build to XenoNet, after showing each change |
 | `xenonet theme [name]` | Lists the themes, or switches to one |
 | `xenonet actor` | Lists actors, and lets a program of yours register, report and listen for its messages |
 | `xenonet gateway` | Puts the actor gateway online for agents in other clouds, and says whether it's reachable |
@@ -355,9 +383,10 @@ A background service keeps the network running. Sessions use it through the
 `xenonet` command and its MCP tools, and you see it in the desktop console.
 Agents can operate the console too.
 
-XenoNet reads Claude Code's sessions through the Agent SDK, and Codex's
-through `codex app-server`. It reads both apps' transcript files as they
-grow, for live activity, tokens, context and edits. Every 20 seconds it
+XenoNet reads Claude Code's sessions from its transcript files, as the Agent
+SDK does, Codex's through `codex app-server`, and Grok Build's from its
+session folders. It reads the apps' transcript files as they grow, for live
+activity, tokens, context and edits. Every 20 seconds it
 runs `git status` in each repo, with the repo's own hooks and filters
 turned off, so a repo you download can't make XenoNet run its programs.
 
@@ -369,18 +398,19 @@ data. `xenonet drift` shows it, and the doctor warns about new drift.
 
 ## Where it's going
 
-Today XenoNet watches one machine, with other machines as a first prototype.
-Here is what's planned:
+Today XenoNet joins the machines you use into one network, through a
+gateway. Here is what's planned:
 
-- Many machines. Each machine runs XenoNet, the machines you trust connect
-  peer to peer, and one console shows them all.
+- Peer to peer. Machines that trust each other link directly, with no
+  machine as the gateway.
 - Intents. You say what you want across any number of projects, such as
   "move every service to Node 24". XenoNet hands the work to sessions
   and tracks it until it's done.
 - Cost. XenoNet will show usage and spend across Claude, OpenAI and other
   model APIs, by project, session and provider.
-- More sources. XenoNet will read other agent apps besides Claude Code and
-  Codex.
+- More sources. Besides Claude Code, Codex and Grok Build, XenoNet reads
+  OpenCode, Gemini CLI, Copilot CLI and Cursor sessions as an experiment,
+  and will read more agent apps.
 
 ## Related work
 

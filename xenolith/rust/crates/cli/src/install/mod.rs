@@ -7,17 +7,20 @@
 //!   xenolith install-service [--user-sid S-1-...] [--log <file>]   (Windows, elevated; install runs it)
 //!   xenolith uninstall-service                                    (Windows, elevated)
 //!
+//! --retire-agent-wiki-service [--retire-grant <folder>]... (Windows; `xenolith migrate agent-wiki`
+//! passes it): the elevated step also removes agent-wiki's service and its folder grants.
+//!
 //! --from: the folder with xenolith, xenolith-tray, ui/ and icons/ (default: next to this program;
 //! in the repository, rust/target/release with dist/ built). --sandbox: a fake home for tests: files
 //! and configs only, no service, no sign-in entries, no app CLIs.
 
-mod files;
-mod places;
+pub(crate) mod files;
+pub(crate) mod places;
 #[cfg(unix)]
-mod posix;
-mod sys;
+pub(crate) mod posix;
+pub(crate) mod sys;
 #[cfg(windows)]
-mod windows;
+pub(crate) mod windows;
 
 use files::{
     CLAUDE_ALLOW, POINTER, SERVER, backup_once, claude_allow_remove, claude_allow_set, edit_file, read_json, read_text, remove_block, render_plugin, to_json, toml_remove_approval, toml_set_approval,
@@ -54,10 +57,12 @@ struct Opts {
     no_approve: bool,
     from: Option<PathBuf>,
     sandbox: Option<PathBuf>,
+    /// The folders whose agent-wiki service grants go, when its service is retired (migrate/retire.rs).
+    retire: Option<Vec<PathBuf>>,
 }
 
 /// The environment the installer computes locations from: the real one, or a fake home (--sandbox).
-fn environment(sandbox: Option<&Path>) -> (xenolith_core::paths::Env, Vec<(String, String)>) {
+pub(crate) fn environment(sandbox: Option<&Path>) -> (xenolith_core::paths::Env, Vec<(String, String)>) {
     let mut env = xenolith_core::paths::process_env();
     let mut over: Vec<(String, String)> = vec![];
     if let Some(s) = sandbox {
@@ -212,12 +217,13 @@ pub fn main(cmd: &str, args: &[String]) -> ! {
         no_approve: has("--no-approve"),
         from: opt("--from").map(PathBuf::from),
         sandbox: opt("--sandbox").map(PathBuf::from),
+        retire: crate::migrate::retire::requested(args),
     };
     let r = match cmd {
         "install" => install(&opts),
         "uninstall" => uninstall(&opts),
         #[cfg(windows)]
-        "install-service" => service::install(opt("--user-sid"), opt("--log").map(PathBuf::from)),
+        "install-service" => service::install(opt("--user-sid"), opt("--log").map(PathBuf::from), crate::migrate::retire::requested(args)),
         #[cfg(windows)]
         "uninstall-service" => service::uninstall(),
         _ => Err(InstallError(format!("{cmd}: not available on this system"))),
@@ -338,7 +344,7 @@ fn install(o: &Opts) -> Result<(), InstallError> {
     if sandbox {
         info("sandbox: no service; apps start the server themselves (stdio)");
     } else {
-        transport = service_step(&p, &wiki_dir, port, write_mode == "curated")?;
+        transport = service_step(&p, &wiki_dir, port, write_mode == "curated", o.retire.as_deref())?;
     }
     res.note("Server transport", if transport == "http" { "ok" } else { "stdio" }, if transport == "http" { format!("service at {mcp_url}") } else { "per-app stdio (service not running)".into() });
 
@@ -399,8 +405,6 @@ fn install(o: &Opts) -> Result<(), InstallError> {
         ("__HOOK_COMMAND__", hook.clone()),
         ("__POINTER__", POINTER.trim().to_string()),
         ("__PROTOCOL__", xenolith_core::wiki::DEFAULT_PROTOCOL.replace("\r\n", "\n").trim().to_string()),
-        ("__NODE__", String::new()),
-        ("__RUNTIME__", String::new()),
     ];
     let server = if transport == "http" { json!({ "type": "http", "url": mcp_url }) } else { json!({ "command": fwd(&p.agent), "args": ["serve"] }) };
     let rendered = render_plugin(&p.rendered, &map, &server)?;
@@ -586,7 +590,7 @@ fn install(o: &Opts) -> Result<(), InstallError> {
 
 /// The service: registered (one UAC prompt on Windows the first time), running this build, healthy.
 #[cfg(windows)]
-fn service_step(p: &Places, wiki_dir: &Path, port: u16, _curated: bool) -> Result<&'static str, InstallError> {
+fn service_step(p: &Places, wiki_dir: &Path, port: u16, _curated: bool, retire: Option<&[PathBuf]>) -> Result<&'static str, InstallError> {
     let n = |x: &Path| x.to_string_lossy().replace('/', "\\");
     write_lf(
         &p.service_ini,
@@ -605,27 +609,33 @@ fn service_step(p: &Places, wiki_dir: &Path, port: u16, _curated: bool) -> Resul
         .join("\n"),
     )?;
     std::fs::create_dir_all(&p.app.log_dir).map_err(|e| InstallError(e.to_string()))?;
+    std::fs::create_dir_all(&p.app.state_dir).map_err(|e| InstallError(e.to_string()))?;
     let mut svc = windows::service_state();
     if svc.is_some() {
-        // The service's account reads config.json and the programs, and writes its logs. These are your own
-        // folders, so granting it access needs no admin rights.
-        for (target, perm) in [(wiki_dir, "M"), (p.app.config_dir.as_path(), "RX"), (p.app.data_dir.as_path(), "RX"), (p.app.log_dir.as_path(), "M")] {
+        // The service's account reads config.json and the programs, and writes its logs and its state (the
+        // audit chain, the owner key). These are your own folders, so granting it access needs no admin rights.
+        for (target, perm) in service_grants(p, wiki_dir) {
             if let Err(InstallError(e)) = windows::grant(target, perm) {
                 warn(&e);
             }
         }
-        info("service account access: Modify on the wiki and logs, Read on config and program files");
+        info("service account access: Modify on the wiki, logs and state, Read on config and program files");
     }
     let bin = windows::service_bin();
     let registered_here = bin.as_ref().is_some_and(|b| b.to_string_lossy().to_lowercase() == p.agent.to_string_lossy().to_lowercase());
-    if !registered_here {
+    // agent-wiki's service goes in the same elevated step (one UAC prompt), even when Xenolith's is in place.
+    let retire_args = retire.filter(|_| crate::migrate::retire::service_exists()).map(crate::migrate::retire::forward).unwrap_or_default();
+    if !registered_here || !retire_args.is_empty() {
         info(&match &bin {
+            Some(_) if registered_here => "removing agent-wiki's AgentWiki service (approve the UAC prompt)".to_string(),
             Some(b) => format!("the service starts {}; re-registering it at {} (approve the UAC prompt)", fwd(b), fwd(&p.agent)),
             None => format!("registering the service at {} (approve the UAC prompt)", fwd(&p.agent)),
         });
         let log = p.app.log_dir.join("install-service.log");
         let _ = std::fs::remove_file(&log);
-        let r = windows::run_elevated(&["install-service".into(), "--log".into(), log.to_string_lossy().into_owned()]);
+        let mut elevated = vec!["install-service".to_string(), "--log".into(), log.to_string_lossy().into_owned()];
+        elevated.extend(retire_args);
+        let r = windows::run_elevated(&elevated);
         for line in std::fs::read_to_string(&log).unwrap_or_default().lines() {
             info(&format!("  | {line}"));
         }
@@ -649,7 +659,8 @@ fn service_step(p: &Places, wiki_dir: &Path, port: u16, _curated: bool) -> Resul
     let build = sha12(&p.agent);
     let h = sys::wait_for_health(port, |x| x["ok"] == true && x["version"] == xenolith_core::VERSION && x["build"] == build.as_str(), Duration::from_secs(45));
     match h {
-        Some(h) if h["build"] == build.as_str() && h["wikiDir"].as_str().map(PathBuf::from).as_deref() == Some(wiki_dir) => {
+        // /health says nothing private; the wiki folder the service uses is in /status.
+        Some(h) if h["build"] == build.as_str() && sys::get_json(port, "/status").is_some_and(|s| s["wikiDir"].as_str().map(PathBuf::from).as_deref() == Some(wiki_dir)) => {
             info(&format!("service running: v{} (build {}), pid {}, http://127.0.0.1:{port}/mcp", h["version"].as_str().unwrap_or("?"), h["build"].as_str().unwrap_or("?"), h["pid"]));
             remove_node_runtime(p);
             Ok("http")
@@ -663,6 +674,13 @@ fn service_step(p: &Places, wiki_dir: &Path, port: u16, _curated: bool) -> Resul
             Ok("stdio")
         }
     }
+}
+
+/// The folders the service's account may use: Modify on the wiki, the logs and the state folder (the
+/// audit chain, the owner key), Read on the config and the programs.
+#[cfg(windows)]
+fn service_grants<'a>(p: &'a Places, wiki_dir: &'a Path) -> [(&'a Path, &'static str); 5] {
+    [(wiki_dir, "M"), (p.app.config_dir.as_path(), "RX"), (p.app.data_dir.as_path(), "RX"), (p.app.log_dir.as_path(), "M"), (p.app.state_dir.as_path(), "M")]
 }
 
 /// What the Node runtime installed and this one replaces: its bundles next to the programs and the C#
@@ -690,7 +708,7 @@ fn remove_node_runtime(p: &Places) {
 }
 
 #[cfg(unix)]
-fn service_step(p: &Places, _wiki_dir: &Path, port: u16, curated: bool) -> Result<&'static str, InstallError> {
+fn service_step(p: &Places, _wiki_dir: &Path, port: u16, curated: bool, _retire: Option<&[PathBuf]>) -> Result<&'static str, InstallError> {
     for line in posix::install_services(p, port, curated)? {
         info(&line);
     }
@@ -951,7 +969,7 @@ fn uninstall(o: &Opts) -> Result<(), InstallError> {
         }
         #[cfg(target_os = "macos")]
         {
-            let f = p.home.join("Library").join("LaunchAgents").join("dev.xenonet.xenolith.tray.plist");
+            let f = p.home.join("Library").join("LaunchAgents").join(format!("{}.plist", posix::TRAY_LABEL));
             if std::fs::remove_file(&f).is_ok() {
                 info("removed the login item (LaunchAgent)");
             }
@@ -1100,13 +1118,16 @@ mod service {
 
     /// Registers the Xenolith service: `xenolith service` serving HTTP on 127.0.0.1, starting at boot,
     /// restarted on failure (and on upgrade), as the low-privilege virtual account NT SERVICE\Xenolith
-    /// with Modify on the wiki and logs and Read on Xenolith's settings and program folders. It also
+    /// with Modify on the wiki, logs and state and Read on Xenolith's settings and program folders. It also
     /// lets your account start and stop this one service (the tray's "Restart service").
-    pub fn install(user_sid: Option<String>, log: Option<PathBuf>) -> Result<(), InstallError> {
+    pub fn install(user_sid: Option<String>, log: Option<PathBuf>, retire: Option<Vec<PathBuf>>) -> Result<(), InstallError> {
         let log = Log(log);
         let r = (|| -> Result<(), InstallError> {
             if !is_elevated() {
                 return Err(InstallError("This needs administrator rights: run it from a terminal opened with \"Run as administrator\".".into()));
+            }
+            for line in retire.as_deref().map(crate::migrate::retire::retire).unwrap_or_default() {
+                log.say(&line);
             }
             let p = Places::new(&xenolith_core::paths::process_env());
             let cfg = read_json(&p.config)?.ok_or_else(|| InstallError(format!("run `xenolith install` in a normal terminal first (missing {})", fwd(&p.config))))?;
@@ -1142,7 +1163,8 @@ mod service {
             log.say("start: automatic at boot; on failure or upgrade: restart after 2 s, 5 s, 30 s");
             std::fs::create_dir_all(&p.app.log_dir).map_err(|e| InstallError(e.to_string()))?;
             std::fs::create_dir_all(&p.app.config_dir).map_err(|e| InstallError(e.to_string()))?;
-            for (target, perm) in [(wiki_dir.as_path(), "M"), (p.app.config_dir.as_path(), "RX"), (p.app.data_dir.as_path(), "RX"), (p.app.log_dir.as_path(), "M")] {
+            std::fs::create_dir_all(&p.app.state_dir).map_err(|e| InstallError(e.to_string()))?;
+            for (target, perm) in super::service_grants(&p, &wiki_dir) {
                 log.say(&format!("granted {}", grant(target, perm)?));
             }
             let state = read_json(&p.state).ok().flatten().unwrap_or_default();
@@ -1165,7 +1187,7 @@ mod service {
             }
             match super::sys::wait_for_health(port, |h| h["ok"] == true, Duration::from_secs(20)) {
                 Some(h) if h["ok"] == true => {
-                    log.say(&format!("healthy: xenolith v{}, pid {}, wiki {}", h["version"].as_str().unwrap_or("?"), h["pid"], h["wikiDir"].as_str().unwrap_or("?")));
+                    log.say(&format!("healthy: xenolith v{}, pid {}", h["version"].as_str().unwrap_or("?"), h["pid"]));
                     Ok(())
                 }
                 other => {
@@ -1208,7 +1230,7 @@ mod service {
         }
         step("2", "Remove folder grants");
         let wiki = cfg.as_ref().and_then(|c| c["wikiDir"].as_str()).map(PathBuf::from);
-        for target in [wiki, Some(p.app.config_dir.clone()), Some(p.app.data_dir.clone()), Some(p.app.log_dir.clone())].into_iter().flatten().filter(|t| t.exists()) {
+        for target in [wiki, Some(p.app.config_dir.clone()), Some(p.app.data_dir.clone()), Some(p.app.log_dir.clone()), Some(p.app.state_dir.clone())].into_iter().flatten().filter(|t| t.exists()) {
             let r = ungrant(&target);
             if r.ok { info(&format!("removed {SERVICE_ACCOUNT} from {}", fwd(&target))) } else { warn(&format!("icacls {}: {}", fwd(&target), r.last_line())) }
         }

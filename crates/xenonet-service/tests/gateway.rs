@@ -210,6 +210,11 @@ async fn a_probe_xenonet_asked_for_is_answered_once_and_bad_tokens_are_held_off(
     assert_eq!((r.status, r.header("retry-after").is_some()), (429, true));
     assert_eq!(g.status()["refused"], json!(22), "the probe's, the 21 tokens; a call held off is refused before its token is read");
     assert_eq!(g.serve(bad(), true).await.status, 429);
+    // Held off is the source they came from, as the tunnel says it: not
+    // everyone.
+    let mut elsewhere = bad();
+    elsewhere.headers.push(("x-forwarded-for".into(), "198.51.100.5".into()));
+    assert_eq!(g.serve(elsewhere, false).await.status, 401);
 }
 
 #[tokio::test]

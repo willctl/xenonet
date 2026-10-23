@@ -6,11 +6,11 @@
 //! apply_patch's text, whose file headers are kept and the rest dropped.
 
 use super::files::Files;
-use super::node_path;
-use super::{edit_file, edits_out, js_max, js_min, push_edit, str_of, titled, Checked, Edits, NativeReader, Out, Threw, Vendor, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX};
+use super::{edit_file, edits_out, js_max, js_min, push_edit, str_of, titled, Checked, Edits, NativeReader, Out, Threw, Vendor, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX, VENDOR_FAILED};
 use crate::session::{RunSession, Via};
 use serde_json::{json, Map, Value};
 use xenonet_base::json;
+use xenonet_base::nodepath::Style;
 use xenonet_base::ordered::OrderedMap;
 use xenonet_base::patch;
 use xenonet_base::paths::path_style;
@@ -28,9 +28,11 @@ const NEEDED_SESSION: [&str; 4] = ["id", "directory", "time_created", "time_upda
 const NEEDED_PART: [&str; 3] = ["session_id", "time_created", "data"];
 const EDITS_MAX: usize = 5000;
 
-/// OpenCode's ids (ses_…) as XenoNet's session ids take them.
+/// OpenCode's ids (ses_…) as XenoNet's session ids take them: a dash for
+/// each underscore, or for an id OpenCode doesn't make, its bytes in hex
+/// (xenonet_base::opencode). Delivery reads either back.
 pub fn local_id(id: &str) -> String {
-    id.replace('_', "-")
+    xenonet_base::opencode::local_id(id)
 }
 
 pub fn session_id_of(id: &str) -> String {
@@ -267,16 +269,16 @@ fn read_open(db: &mut dyn Db, vendor: &mut dyn Vendor, since_ms: f64, edits_sinc
 /// its data folder), else $XDG_DATA_HOME/opencode/opencode.db, else
 /// ~/.local/share/opencode/opencode.db, on every OS.
 pub fn opencode_db_path(home: &str, xdg_data_home: Option<&str>, named: Option<&str>) -> String {
-    let st = path_style(home);
+    let st = Style::from(path_style(home));
     let data = match xdg_data_home.filter(|x| !x.is_empty()) {
         Some(x) => x.to_string(),
-        None => node_path::join(st, &[home, ".local", "share"]),
+        None => st.join(&[home, ".local", "share"]),
     };
-    let dir = node_path::join(st, &[&data, "opencode"]);
+    let dir = st.join(&[&data, "opencode"]);
     if let Some(n) = named.filter(|n| !n.is_empty() && *n != ":memory:") {
-        return if node_path::is_absolute(st, n) { n.to_string() } else { node_path::join(st, &[&dir, n]) };
+        return if st.is_absolute(n) { n.to_string() } else { st.join(&[&dir, n]) };
     }
-    node_path::join(st, &[&dir, "opencode.db"])
+    st.join(&[&dir, "opencode.db"])
 }
 
 /// A session's time as the database had it (missing when the vendor check
@@ -405,7 +407,7 @@ impl NativeReader for OpenCode {
         let mut open = || Sqlite::open(at).map(|db| Box::new(db) as Box<dyn Db>);
         match read_db(exists, &mut open, vendor, now - DAY_MS, now - EDIT_KEEP_MS) {
             Ok(got) => self.take(&got, now),
-            Err(Threw) => Err("the vendor check failed".into()),
+            Err(Threw) => Err(VENDOR_FAILED.into()),
         }
     }
 

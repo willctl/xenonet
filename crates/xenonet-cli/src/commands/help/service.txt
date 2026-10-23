@@ -5,12 +5,15 @@ Manage the background service.
   xenonet service stop       stop it; refused while terminals run, unless --force
   xenonet service install    start it at login, and again if it stops unexpectedly
   xenonet service uninstall  stop starting it at login, and stop the copy that started
-  xenonet service run        run it in the foreground, as launchd and systemd do
+  xenonet service run        run it in the foreground, as launchd, systemd and Task Scheduler do
 
-install uses a launch agent on macOS (~/Library/LaunchAgents) and a systemd
-user unit on Linux (~/.config/systemd/user). It isn't available on Windows
-yet. install and uninstall are yours to do: XenoNet refuses them from under
-an agent. uninstall stops a service it started, and is refused while that one
+install uses a launch agent on macOS (~/Library/LaunchAgents), a systemd
+user unit on Linux (~/.config/systemd/user) and a scheduled task on Windows
+(XenoNet Service, in Task Scheduler). On macOS, when XenoNet's tray is
+installed, install also copies it to ~/Applications/XenoNet Tray.app and
+starts it at login with a launch agent of its own; uninstall removes both.
+install and uninstall are yours to do: XenoNet refuses them from under an
+agent. uninstall stops a service it started, and is refused while that one
 has terminals running, unless --force.
 
   --json        install and uninstall's result as JSON

@@ -27,7 +27,7 @@ The desktop app run from source is XenoNet Dev. It has its own settings, port, l
 
 XenoNet's service is the `xenonet` binary, built from `crates/` with the Rust that `rust-toolchain.toml` pins (rustup installs it on the first build). XenoNet Dev runs the checkout's newer build of `target/debug/xenonet` and `target/release/xenonet`. `npm run app`, `npm run dev` and `npm run test:e2e` build it first; started any other way, XenoNet Dev says to run `npm run rust:bin` when there's none. The service runs on its own, as an installed one does, and keeps running when XenoNet Dev quits.
 
-Connecting Claude Code and Codex from XenoNet Dev adds its own entries beside the installed XenoNet's, with its MCP server named `xenonet-dev`, and leaves the installed XenoNet's entries alone. Disconnecting takes away only its own. Whichever XenoNet connects next clears entries that point at a checkout that's gone. Terminals XenoNet opens don't pass on its own `XENONET_*` settings, so `npm run app` started in one runs as XenoNet Dev, not on the installed XenoNet's port.
+Connecting your agents from XenoNet Dev adds its own entries beside the installed XenoNet's, with its MCP server named `xenonet-dev`, and leaves the installed XenoNet's entries alone. Disconnecting takes away only its own. Whichever XenoNet connects next clears entries that point at a checkout that's gone. Terminals XenoNet opens don't pass on its own `XENONET_*` settings, so `npm run app` started in one runs as XenoNet Dev, not on the installed XenoNet's port.
 
 XenoNet Dev picks up edits as you save them:
 
@@ -82,8 +82,20 @@ What acts on the sessions' computer (opening a session in its app, handoffs, ter
 - macOS builds are ad-hoc signed, and the package is unsigned. The build stops if a certificate signs either one, because a certificate carries its owner's name. To sign on purpose, with a Developer ID, set `XENONET_SIGN=1`. The build also stops if a packaged file contains your home folder's path.
 - The terminal's native module ships one npm package per platform and CPU. The build fetches the one each app needs, so one Mac builds both the Apple silicon and the Intel app.
 - The icon is drawn in code, in `electron/icons.js`, at every size from 16 to 256 pixels, with a macOS cut on Apple's icon grid. `npm run icon` regenerates it, along with the installer art for both platforms.
+- The macOS tray (`tray/macos`) needs Swift (`xcrun --find swift`). `swift build` and `swift test` in `tray/macos` build and test it. `node scripts/tray-build.mjs [folder]` makes `XenoNet Tray.app` for both Mac CPUs, signed ad hoc. The Mac's release build makes its component archive (`scripts/component-build.mjs`).
 
 [Install](install.md) says how to install what you build.
+
+### Checking the tray
+
+The service gives the tray its key only when the tray runs from `/Applications` or `~/Applications`, and a demo's home is its made-up world's. So to check a build against a demo on a spare port:
+
+1. Start a demo service with its own runtime folder: `XENONET_PORT=48321 XENONET_STANDALONE=1 XENONET_INSTANCE=demo XENONET_RUNTIME_DIR=<folder> target/debug/xenonet serve --demo --dev`. Its first lines name the demo's home.
+2. Copy the built `XenoNet Tray.app` to that home's `Applications`.
+3. Open it with `open -n -a "<home>/Applications/XenoNet Tray.app" --env XENONET_PORT=48321 --env XENONET_RUNTIME_DIR=<folder> --env XENONET_TRAY_SNAPSHOT=<another folder>`. Opened that way, its parent is launchd, not your agent's shell.
+4. `<another folder>/menu.txt` has the menu as text, and `icon.png` the icon. Write a menu item's title to `<another folder>/choose` to click it. `POST /api/dev/simulate` with `{ "kind": "needs-you" }` or `"actor-needs-you"` gives it something to show.
+
+Opened from anywhere else, its menu says XenoNet didn't take it. macOS refuses notifications to an app in a temporary folder, so they're checked from a copy outside one. `XENONET_APPLICATIONS_DIR` points `xenonet service install` at another folder for the app, as `XENONET_SUPERVISOR_DIR` does the launch agents.
 
 ## Coverage
 
@@ -146,13 +158,20 @@ fuzz/run.sh lines 1800      # one target for 30 minutes
 | --- | --- |
 | `json` | JSON as XenoNet parses and writes it |
 | `lines`, `telemetry` | Claude Code transcripts and Codex rollouts, line by line, into the live map |
-| `transcript_files` | Transcript files on disk: the session listing, the lenient normalizers, rollout pages, stats |
+| `transcript_files` | Transcript files on disk: the session listing, the lenient normalizers, rollout pages, archived rollouts' Zstandard, stats |
 | `schema`, `jsregex` | Records checked against the vendor schemas and XenoNet's own, and the schemas' patterns |
-| `native`, `sources`, `wiki` | The other apps' files (Gemini CLI, Copilot CLI, OpenCode, Cursor, numbat), Codex's app-server, git's output, plan usage, the shared context |
+| `native`, `sources`, `wiki` | The other apps' files (Gemini CLI, Copilot CLI, OpenCode, Cursor, numbat), Codex's app-server, git's output, plan usage, the shared context (`wiki`) |
 | `base` | Strings, times, paths, git remotes and model names |
 | `http`, `hooks` | The service's routes, hook payloads and the actor gateway |
 | `state`, `hosts`, `misc` | `state.json`, frames from other machines, component packages, tokens and the remote actors' requests |
 | `tools` | What other tools print or keep: gh's and ssh's config, git's, ps, lsof, netstat, tmux, Codex's picks |
+| `net_frame`, `net_roster` | The network's frames and roster entries, checked against a roster and opened |
+| `net_request`, `net_bodies` | The gateway's routes, the answers a host reads from it, and the bodies the engine takes from other machines |
+| `net_relay` | The map between machines: a console's asks at a host's relay, the paths it serves, and the relay's answers at the console's hub |
+| `net_svc` | Services through the network: the paths, requests, answers, addresses and headers a host checks before it passes a request to a service it published, and before a program gets the answer |
+| `a2a_rpc` | A2A's JSON-RPC requests and its event streams |
+
+The network's targets build well-formed frames, entries and requests from a made-up network with fixed keys, then change them, so a run reaches past the signature checks. They fail if a changed frame or request is ever taken.
 
 `fuzz/run.sh` keeps what a target learns in `fuzz/corpus/<target>` and reads the seeds in `fuzz/seeds/<target>` too. A crash is saved in `fuzz/artifacts/<target>`. Run the target on that file alone to see the crash again, and `cargo fuzz tmin --fuzz-dir fuzz <target> <file>` makes it smaller. The corpora and crashes stay out of git.
 
@@ -164,7 +183,7 @@ Installed XenoNet and XenoNet Dev both have a control channel, so an agent or a 
 
 The control channel operates the console. The engine that connects sessions to each other is a separate MCP server, `xenonet`, in `mcp/xenonet.js`. See [Sessions working together](agents.md).
 
-- Agents can use the control channel through the `xenonet-console` MCP server's tools, including navigation, search, screenshots, terminals, themes and updates. Installed Tools omit `eval` and `simulate`, which are only for development. `actors` includes the programs waiting for an Allow, and how each token stands. `needs_you` reads the Needs you queue and shows, opens or dismisses an item, but never allows or denies one. `feed` is the activity feed. `mcp_info` opens a shared system's metadata, tools and context catalog without executing tools. `environment` changes the surroundings independently of the theme.
+- Agents can use the control channel through the `xenonet-console` MCP server's tools, including navigation, search, screenshots, terminals, themes and updates. Installed Tools omit `eval` and `simulate`, which are only for development. `actors` includes the programs waiting for an Allow, and how each token stands. `needs_you` reads the Needs you queue and shows, opens or dismisses an item, but never allows or denies one. `feed` is the activity feed. `mcp_info` opens a shared system's metadata, tools and context catalog without executing tools. `environment` changes the surroundings independently of the theme. `look` draws the panels solid, without the glass blur behind them, or as glass again (`state.look`).
 - `.mcp.json` registers these tools for Claude Code, which asks you once to approve them. `.codex/config.toml` registers them for Codex, in a trusted project. Start Claude Code or Codex in the repo's root folder.
 - From a terminal, `xenonet console <steps>` runs the same actions one after another, for example `xenonet console launch select:atlas-api shot:atlas`. `npm run drive -- <steps>` does the same. `xenonet console --help` lists the steps.
 - XenoNet Dev keeps a log of what you do in it, as the same steps. Selecting a node, a palette command, a session's stats, a theme and a film all go in the log. `xenonet script record --instance dev > tour.json` saves it, and `xenonet script run tour.json` plays it back, in any instance, shown or hidden.
@@ -180,7 +199,7 @@ Every action waits until the view has settled, then returns the new state, so no
 
 A screenshot waits the same way. It also holds every ambient animation still, including the sky, the sonar, the sweep, sparks and CSS animations, so two shots of the same state match. Screenshots work while the window is covered, unfocused or hidden. They land in `.xenonet/`, which git ignores.
 
-The map draws at a pace, not at the display's rate (`src/render-budget.js`): 60 frames a second while something moves, 30 at rest, 20 at rest behind another app, and none while nobody can see the window, unless a recording needs every frame. While the control channel has a request in hand, and for two seconds after, the window counts as driven and draws even while hidden or covered, so the view settles and screenshots show it. `state` says how the map is drawing (`render`), and the driver's `render` counts the frames it draws over a second or more. `npm run bench:gpu` measures what that costs the machine in each window state.
+The map draws at a pace, not at the display's rate (`src/render-budget.js`): 60 frames a second while something moves, 30 at rest, 20 at rest behind another app, and none while nobody can see the window, unless a recording needs every frame. While the control channel has a request in hand, and for two seconds after, the window counts as driven and draws even while hidden or covered, so the view settles and screenshots show it. `state` says how the map is drawing (`render`), and the driver's `render` counts the frames it draws over a second or more. `npm run bench:gpu` measures what that costs the machine in each window state, and `npm run bench:gpu -- --plain` with plain panels, the palette's setting that draws the panels without their glass blur.
 
 ### Instances
 
@@ -205,7 +224,7 @@ A demo or test copy can get stuck, holding the instance's lock without answering
 
 `launch:restart`, or `restart` on the tool, quits a running copy first. It also ends a stuck copy of any instance, `dev` included.
 
-`quit` returns once XenoNet Dev has exited.
+`quit` returns once XenoNet Dev has exited. A copy still there 20 seconds after its server went is killed. For the `test` instance, that takes its whole process tree: the app, its GPU and network processes, and the service it started, with what they started. Left behind, these keep running, and the GPU process can keep a core busy. The answer lists them as `ended`. The tree is read with `ps`, so this is on macOS and Linux. Other instances, and anything on the ports 47840 to 47842, never get this: there `quit` kills the app's process alone, as before.
 
 ### How the control channel works
 
@@ -217,10 +236,11 @@ Requests reach it as `POST /api/dev/control` on the instance's server, which rel
 
 `POST /api/dev/simulate {kind, a, b}`, which the `simulate` tool calls, puts sessions into rare states so you can check the visuals. It works on the dev server only.
 
-- `needs-you`, `collision`, `stuck`, `wiki-write`, `turn-end` and `doctor` put sessions into those states. `doctor` is a problem the doctor found. `clear` undoes them. Without session ids, XenoNet picks the most recently active sessions.
+- `needs-you`, `collision`, `stuck`, `wiki-write`, `turn-end` and `doctor` put sessions into those states. `wiki-write` is a session writing to the shared context, and `doctor` is a problem the doctor found. `clear` undoes them. Without session ids, XenoNet picks the most recently active sessions.
 - `actor-spawn`, `actor-edit`, `actor-message`, `actor-online` and `actor-offline` have an actor act on a node, so you can see it react and beam there. `a` is the actor, by default the first one that isn't you, and `b` is the node.
 - In the demo and test instances, whose data is made up, `actor-request` has a made-up program ask to be an actor, so its card shows. `actor-needs-you` has an actor wait on you with a made-up question, until `clear`. `actor-tunnel` gives an actor a made-up connection through a tunnel, drawn as an open gate between it and the map, `actor-tunnel-down` shuts the gate, and `actor-read` sends a read through it.
 - With `XENONET_HOSTS=1`, `host-add` shows another XenoNet on this machine as a host, with `a` as its id and `b` as its port. `host-offline`, `host-online` and `host-skew` change how a host stands. For `host-skew`, `b` is how many milliseconds the host's clock is off.
+- The `net-…` kinds make up a [network across machines](../design/network.md), with other machines and their agents, for the Network panel, the attention strip and the message box. `net-none` is this machine on its own. `net-founder` has this machine start the network and be its gateway, with two more machines, one of them offline, and on laptop a session waiting on you with a question and another that seems stuck. `net-member` has this machine join one whose gateway is another. `net-gateway-down` has the gateway not answer, with what's for other machines waiting in the outbox. `net-ticket` has a ticket waiting, `net-mismatch` a machine that sees another list of the network's machines, and `net-remote-waiting` an agent on another machine waiting on you. For `net-founder` and `net-remote-waiting`, `a` is the machine you're at, and `b` `titles-only` has the other machines share titles only. For `net-founder`, `b` `relay` has laptop drawn from its own map's snapshot instead of its presence: this machine's own map, served as laptop's by a relay over a network inside the service, so its transcripts open through the window as another machine's do. While one runs, the made-up network answers the network's routes from the window, so Add a machine shows a line, and a message to one of its agents goes into its outbox while its machine is away. `clear` ends it. The `network` tool, and the driver's `network` and `messageAs`, read and drive the panel and the message box.
 
 ### Other ways in
 
@@ -229,18 +249,18 @@ Requests reach it as `POST /api/dev/control` on the instance's server, which rel
 
 ## Layout
 
-XenoNet is one core with several ways in: the console, the desktop app, the HTTP API, the `xenonet` command and the MCP servers. The core holds the logic. Each of the others is a thin layer over it, which imports from `core/` and from no other layer. The one exception is `xenonet mcp`, which starts the MCP server in `mcp/`.
+XenoNet is one core with several ways in: the console, the desktop app, the HTTP API, the `xenonet` command and the MCP servers. The service, the command, the hooks and the MCP servers that XenoNet runs are the `xenonet` binary, built from `crates/`. `core/`, `server/`, `cli/` and `mcp/` are the same in JS: the contract the Rust is tested against, and the modules Desktop and the page import. The core holds the logic. Each of the others is a thin layer over it, which imports from `core/` and from no other layer. The one exception is `xenonet mcp`, which starts the MCP server in `mcp/`.
 
 The console page imports only the core modules that have no Node in them, such as `themes.js`, `units.js`, `needs-you.js` and `apps.js`. The `xenonet` command and the MCP servers reach a running XenoNet through its HTTP API, with `core/client.js`. They reach XenoNet Dev through its control channel, with `core/control.js`.
 
 ### `core/`
 
-`core/` is XenoNet itself, in Node.
+`core/` is XenoNet's core in JS, which the Rust in `crates/` follows module by module.
 
 | Files | What they cover |
 | --- | --- |
 | `apps.js` | The app registry: the apps XenoNet knows sessions of, and what's fixed about each (its folder, hook events, signing team, edit tools and what XenoNet can do with it). The page uses it too, and `node scripts/apps.mjs` writes the Rust's copy, `crates/xenonet-base/src/apps.json` |
-| `claude.js`, `codex.js`, `git.js`, `wiki.js`, `demo.js` | The sources XenoNet reads |
+| `claude.js`, `codex.js`, `grok.js`, `git.js`, `wiki.js`, `demo.js` | The sources XenoNet reads (`wiki.js` reads the shared context) |
 | `native/`, `numbat.js`, `reported-runs.js` | Runs of other apps: the experimental native readers, one for each app the registry gives `native` (the table in `native/index.js`, the contract each keeps in `native/reader.js`), numbat's records, and the runs actors report |
 | `lines.js` | Transcript lines, as all three of XenoNet's readers take them |
 | `vendor.js`, `drift.js`, `schema/` | The apps' data, read leniently against XenoNet's schemas, and the drift kept from it. The schemas themselves are in `schema/`. |
@@ -257,7 +277,7 @@ The console page imports only the core modules that have no Node in them, such a
 | `statefile.js`, `migrate.js` | The versions of `state.json` |
 | `blocks/` | The building blocks XenoNet's subsystems are made of: scanners, gatherers, tailers, normalizers and stores |
 | `open.js` | Opening sessions in their apps |
-| `engine/` | The engine that connects sessions to each other |
+| `engine/` | The engine that connects sessions to each other, and connecting the apps to it (`connect.js`, with `toml.js` for Grok Build's `config.toml`) |
 | `procs.js` | Which process is on the other end of a connection to the engine |
 | `actors/` | Actors, with the registry, registering and tokens, you, the observers of Hermes Agent, Grok Bot and Muse, remote actors' connections, account links, provider adapters and presence, and what each actor's work costs (`spend.js`) |
 | `assistant/` | What remote actors read: the projection, the read service, the made-up fixture, page tokens, the log, credentials and tombstones, and the adapter's client (see [Remote actors](../design/cloud-assistants.md)) |
@@ -287,12 +307,13 @@ The console page imports only the core modules that have no Node in them, such a
 | `fx.js` | The textures, lines, sky and shaders the map uses |
 | `looks/` | Drawing the stars, the floor, the sweep, the sonar, the lines between nodes and the actors' forms, in each theme's styles |
 | `actors.js`, `actors-model.js` | The actors' layer |
-| `hosts.js`, `hosts-draw.js` | Other machines' constellations |
+| `hosts.js`, `hosts-draw.js`, `network-map.js` | Other machines' constellations: over SSH, and a network's machines, drawn from their presence |
 | `framing.js` | Where the camera stands to frame the map |
 | `hud.js`, `telemetry.js`, `actor-spend-view.js`, `alerts.js`, `needs-you.js`, `modals.js`, `palette.js`, `replay.js`, `terminal.js`, `identities.js` | The panels around the map. `actor-spend-view.js` has Token use's rows of spend by actor. |
 | `export-panel.js`, `poster.js`, `poster-draw.js`, `mark.js` | The export panel, and posters of the day: the preview, the sizes, what an export reveals, and the mark |
-| `connect.js` | The panel for connecting Claude Code and Codex |
+| `connect.js` | The panel for connecting Claude Code, Codex and Grok Build |
 | `background.js` | The Background service panel, and Desktop's offer of it during setup |
+| `network.js`, `network-model.js` | The Network panel (Network settings, Add a machine) for a network across machines, and the words for it, which the attention strip shares |
 | `doctor.js` | The panel for XenoNet's doctor |
 | `stats.js` | The panel for a session's stats |
 | `film.js`, `film-cards.js` | Films of the day, and their cards |
@@ -348,10 +369,14 @@ The console page imports only the core modules that have no Node in them, such a
 - `lab/`, the VM lab
 - `demo/`, OpenCode sessions messaging each other through a XenoNet from the checkout, with the tools it gives them (see [OpenCode sessions messaging each other](opencode-messaging.md))
 
+### `tray/`
+
+`tray/macos/` is XenoNet Tray, the macOS menu bar app, a Swift package. `Sources/TrayCore` has what it knows without AppKit: the tray API's types, where the service is, the menu, and the event stream's format. `Sources/XenoNetTray` is the app. Its tests decode the fixtures in `test/fixtures/tray`, which the JS and Rust tests check against the tray's schemas.
+
 ### `test/`
 
 `test/` has the unit tests, and `test/e2e/` has the end-to-end tests.
 
 ### `crates/`
 
-`crates/` is the Rust core that XenoNet is moving to, a crate per layer ([Rust core](../design/rust-core.md)). While the port runs, `xenonet-node` puts the Rust behind the JS modules. Each ported module has a twin in `crates/xenonet-node/js/core/`, with the module's exports, backed by Rust. `npm run rust:build` builds the addon. `npm run test:rust` runs the test files listed in `crates/xenonet-node/parity.json` with every twin loaded in place of its module, and `npm run test:rust -- --all` tries every test file that way. `npm test` still runs the JS.
+`crates/` is the Rust core, a crate per layer ([Rust core](../design/rust-core.md)), and builds the `xenonet` binary that XenoNet runs. `xenonet-node` puts the Rust behind the JS modules, so the JS tests check it too. Each ported module has a twin in `crates/xenonet-node/js/core/`, with the module's exports, backed by Rust. `npm run rust:build` builds the addon. `npm run test:rust` runs the test files listed in `crates/xenonet-node/parity.json` with every twin loaded in place of its module, and `npm run test:rust -- --all` tries every test file that way. `npm test` still runs the JS.

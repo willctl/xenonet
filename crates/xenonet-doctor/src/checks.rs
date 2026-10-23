@@ -17,7 +17,7 @@ const MIN_NODE: (f64, f64) = (22.0, 13.0);
 const BLOCK_GRACE_MS: f64 = 60e3;
 
 /// The checks, in order: id, group and title.
-pub const CHECKS: [(&str, &str, &str); 27] = [
+pub const CHECKS: [(&str, &str, &str); 32] = [
     ("xenonet.server", "XenoNet", "XenoNet is running"),
     ("xenonet.sources", "XenoNet", "XenoNet can read what it shows"),
     ("xenonet.blocks", "XenoNet", "XenoNet's parts are working"),
@@ -30,6 +30,10 @@ pub const CHECKS: [(&str, &str, &str); 27] = [
     ("codex.cli", "Codex", "Codex is installed"),
     ("codex.auth", "Codex", "Codex is signed in"),
     ("codex.sessions", "Codex", "XenoNet can read Codex's sessions"),
+    ("grok.cli", "Grok Build", "Grok Build is installed"),
+    ("grok.auth", "Grok Build", "Grok Build is signed in"),
+    ("grok.sessions", "Grok Build", "XenoNet can read Grok Build's sessions"),
+    ("grok.hooks", "Grok Build", "Grok Build runs XenoNet's hooks"),
     ("system.projects", "This computer", "XenoNet can read your projects folder"),
     ("system.git", "This computer", "git is available"),
     ("system.command", "This computer", "The xenonet command is installed"),
@@ -38,6 +42,7 @@ pub const CHECKS: [(&str, &str, &str); 27] = [
     ("xenonet.launcher", "XenoNet", "Hooks and MCP servers reach XenoNet through its launcher"),
     ("agents.claude", "Sessions", "Claude Code sessions are connected to XenoNet"),
     ("agents.codex", "Sessions", "Codex sessions are connected to XenoNet"),
+    ("agents.grok", "Sessions", "Grok Build sessions are connected to XenoNet"),
     ("agents.checked", "Sessions", "Sessions can't pass for each other"),
     ("actors.repos", "Actors", "No actor's token is in a repo"),
     ("actors.expired", "Actors", "Registered actors' tokens are current"),
@@ -46,6 +51,12 @@ pub const CHECKS: [(&str, &str, &str); 27] = [
     ("actors.observers", "Actors", "XenoNet can read what its observers look at"),
     ("actors.checked", "Actors", "Actors' tokens are held to their processes"),
 ];
+
+/// Every check, in the order they run and show: CHECKS, then the service
+/// started at login's (login.rs).
+pub fn all() -> Vec<(&'static str, &'static str, &'static str)> {
+    CHECKS.iter().chain(crate::login::CHECKS.iter()).copied().collect()
+}
 
 fn verdict(status: &str, detail: impl Into<String>, fix: Option<String>) -> Value {
     let mut m = Map::new();
@@ -56,19 +67,19 @@ fn verdict(status: &str, detail: impl Into<String>, fix: Option<String>) -> Valu
     }
     Value::Object(m)
 }
-fn ok(d: impl Into<String>) -> Value {
+pub(crate) fn ok(d: impl Into<String>) -> Value {
     verdict("ok", d, None)
 }
-fn info(d: impl Into<String>, fix: Option<&str>) -> Value {
+pub(crate) fn info(d: impl Into<String>, fix: Option<&str>) -> Value {
     verdict("info", d, fix.map(String::from))
 }
-fn warn(d: impl Into<String>, fix: Option<&str>) -> Value {
+pub(crate) fn warn(d: impl Into<String>, fix: Option<&str>) -> Value {
     verdict("warn", d, fix.map(String::from))
 }
-fn fail(d: impl Into<String>, fix: Option<&str>) -> Value {
+pub(crate) fn fail(d: impl Into<String>, fix: Option<&str>) -> Value {
     verdict("fail", d, fix.map(String::from))
 }
-fn skip(d: impl Into<String>) -> Value {
+pub(crate) fn skip(d: impl Into<String>) -> Value {
     verdict("skip", d, None)
 }
 
@@ -85,7 +96,7 @@ impl Facts {
     fn home(&self) -> String {
         self.get("home").map(js_string).unwrap_or_default()
     }
-    fn platform(&self) -> String {
+    pub(crate) fn platform(&self) -> String {
         self.get("platform").map(js_string).unwrap_or_default()
     }
     fn path(&self, k: &str) -> Option<String> {
@@ -99,13 +110,13 @@ impl Facts {
 
 /// How a check asks the machine: ctx[fn](...args), or None when ctx has no
 /// such function (as `?.()` reads it).
-struct Ctx<'a> {
-    io: &'a Io,
-    f: &'a Facts,
+pub(crate) struct Ctx<'a> {
+    pub(crate) io: &'a Io,
+    pub(crate) f: &'a Facts,
 }
 
 impl Ctx<'_> {
-    async fn call(&self, f: &str, args: Value) -> Result<Option<Value>, Value> {
+    pub(crate) async fn call(&self, f: &str, args: Value) -> Result<Option<Value>, Value> {
         let r = self.io.ask(json!({ "op": "call", "fn": f, "args": args })).await?;
         Ok(if r.get("missing") == Some(&json!(true)) { None } else { Some(r.get("value").cloned().unwrap_or(Value::Null)) })
     }
@@ -126,7 +137,14 @@ impl Ctx<'_> {
     async fn run(&self, file: &str, args: &[&str], ms: f64) -> Result<Value, Failure> {
         self.must("run", json!([file, args, ms])).await
     }
-    fn tilde(&self, p: &str) -> String {
+    // ctx.readText?.(p) ?? "": a small settings file's text.
+    async fn read_text(&self, p: &str) -> String {
+        match self.call("readText", json!([p])).await {
+            Ok(Some(v)) if !v.is_null() => js_string(&v),
+            _ => String::new(),
+        }
+    }
+    pub(crate) fn tilde(&self, p: &str) -> String {
         xenonet_base::paths::tilde(p, &self.f.home())
     }
     async fn now(&self) -> Result<f64, Failure> {
@@ -170,6 +188,40 @@ fn privacy_fix(f: &Facts, what: &str) -> String {
     } else {
         format!("Check the permissions on {what}.")
     }
+}
+
+/// Grok Build's folder (GROK_HOME's, or ~/.grok) and a path in it.
+fn grok_home(f: &Facts) -> String {
+    f.get("paths").and_then(|p| p.get("grokHome")).filter(|v| !v.is_null()).map_or_else(
+        || {
+            let home = f.home();
+            style_of(&home).join(&[&home, ".grok"])
+        },
+        js_string,
+    )
+}
+fn in_grok(f: &Facts, parts: &[&str]) -> String {
+    let home = grok_home(f);
+    let mut all = vec![home.as_str()];
+    all.extend_from_slice(parts);
+    style_of(&home).join(&all)
+}
+
+/// Grok Build's command: grok on PATH, or where its installer puts it,
+/// which a shell's PATH may not have yet.
+async fn grok_bin(c: &Ctx<'_>) -> Result<Option<String>, Failure> {
+    if let Some(b) = c.which("grok").await? {
+        return Ok(Some(b));
+    }
+    let own = in_grok(c.f, &["bin", if c.f.platform() == "win32" { "grok.exe" } else { "grok" }]);
+    Ok(c.exists(&own).await?.then_some(own))
+}
+
+/// Whether a settings file lets Grok Build run only the hooks an
+/// organization sets.
+fn managed_hooks_only(text: &str) -> bool {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r"(?m)^\s*(allow_managed_hooks_only|allowManagedHooksOnly)\s*=\s*true\b").expect("a fixed pattern")).is_match(text)
 }
 
 fn list(v: Option<&Value>) -> Vec<Value> {
@@ -225,7 +277,8 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
                 counts.insert(s(x.get("name")), x.get("count").cloned().unwrap_or(Value::Null));
             }
             let part = |k: &str, word: &str| counts.get(k).filter(|v| !v.is_null()).map(|v| plural(n(Some(v)), word, None));
-            let parts: Vec<String> = [part("projects", "project"), part("claude", "Claude session"), part("codex", "Codex thread")].into_iter().flatten().collect();
+            let grok = counts.get("grok").filter(|v| truthy(Some(v))).map(|v| plural(n(Some(v)), "Grok Build session", None));
+            let parts: Vec<String> = [part("projects", "project"), part("claude", "Claude session"), part("codex", "Codex thread"), grok].into_iter().flatten().collect();
             Ok(ok(format!("reading {}", parts.join(", "))))
         }
         "xenonet.blocks" => {
@@ -414,6 +467,69 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
                 Folder::Ok(_) => ok(shown),
             })
         }
+        "grok.cli" => {
+            let Some(bin) = grok_bin(&c).await? else {
+                return Ok(info("not installed; XenoNet shows Grok Build's sessions once it is", Some("To use Grok Build, install it (x.ai/cli), then run grok login.")));
+            };
+            let v = c.run(&bin, &["--version"], 4000.0).await?;
+            static R: OnceLock<Regex> = OnceLock::new();
+            let version = version_in(&s(v.get("stdout")), &R, r"\d+\.\d+\.\d+[A-Za-z0-9_.-]*");
+            Ok(ok(format!("{}{}", version.map_or(String::new(), |v| format!("version {v}, ")), c.tilde(&bin))))
+        }
+        "grok.auth" => {
+            if grok_bin(&c).await?.is_none() {
+                return Ok(skip("Grok Build isn't installed"));
+            }
+            // Whether its sign-in is there, never what's in it: auth.json
+            // holds the tokens.
+            if c.exists(&in_grok(f, &["auth.json"])).await? {
+                return Ok(ok("signed in"));
+            }
+            if truthy(f.data.get("grokKeySet")) {
+                return Ok(ok("with an API key (XAI_API_KEY)"));
+            }
+            Ok(info("not signed in yet", Some("Run grok login.")))
+        }
+        "grok.sessions" => {
+            let dir = in_grok(f, &["sessions"]);
+            let shown = c.tilde(&dir);
+            Ok(match folder(&c, Some(&dir)).await? {
+                Folder::Missing => info(format!("no {shown} yet: no Grok Build sessions on this machine"), None),
+                Folder::Denied(code) => fail(format!("can't read {shown} ({code})"), Some(&privacy_fix(f, &shown))),
+                Folder::Ok(count) => ok(format!("{} of sessions in {shown}", plural(count as f64, "folder", None))),
+            })
+        }
+        "grok.hooks" => {
+            let a = f
+                .get("connect")
+                .filter(|v| truthy(Some(v)))
+                .and_then(|cn| cn.get("apps"))
+                .and_then(Value::as_array)
+                .and_then(|apps| apps.iter().find(|x| x.get("app").and_then(Value::as_str) == Some("grok")));
+            let Some(a) = a else { return Ok(skip("needs XenoNet running")) };
+            let hooks = list(a.get("changes")).into_iter().find(|x| x.get("id").and_then(Value::as_str) == Some("hooks"));
+            if hooks.and_then(|h| h.get("state").and_then(Value::as_str).map(String::from)).as_deref() != Some("present") {
+                return Ok(skip("XenoNet's hooks aren't in Grok Build's settings"));
+            }
+            // An organization can let Grok run only the hooks it sets
+            // (allow_managed_hooks_only), in its own files or the ones it
+            // syncs.
+            for file in
+                ["/etc/grok/requirements.toml".to_string(), "/etc/grok/managed_config.toml".to_string(), in_grok(f, &["requirements.toml"]), in_grok(f, &["managed_config.toml"])]
+            {
+                if managed_hooks_only(&c.read_text(&file).await) {
+                    return Ok(warn(
+                        format!("Grok Build runs only the hooks your organization sets ({}), so XenoNet's don't run", c.tilde(&file)),
+                        Some("Ask whoever manages Grok Build here to allow them. XenoNet's tools still work without them."),
+                    ));
+                }
+            }
+            // Hooks you turned off in Grok's /hooks.
+            if c.read_text(&in_grok(f, &["disabled-hooks"])).await.to_ascii_lowercase().contains("xenonet") {
+                return Ok(warn("XenoNet's hooks are turned off in Grok Build", Some("Run /hooks in Grok Build, select XenoNet's hooks and press Space to turn them on.")));
+            }
+            Ok(ok(format!("in {}, which Grok Build runs without asking", c.tilde(&in_grok(f, &["hooks"])))))
+        }
         "system.projects" => {
             let dir = f.path("projectsDir");
             let shown = c.tilde(&dir.clone().unwrap_or_else(|| "undefined".into()));
@@ -497,16 +613,25 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
             let node = if truthy(said.get("node")) { format!(" on Node {}", s(said.get("node")).trim_start_matches('v')) } else { String::new() };
             Ok(ok(format!("launcher {}, running Tools {}{node}", s(l.get("version")), s(said.get("tools")))))
         }
-        "agents.claude" | "agents.codex" => {
+        "agents.claude" | "agents.codex" | "agents.grok" => {
             let app = &id["agents.".len()..];
+            let name = match app {
+                "claude" => "Claude Code",
+                "codex" => "Codex",
+                _ => "Grok Build",
+            };
             let connect = f.get("connect").filter(|v| truthy(Some(v)));
             let a = connect.and_then(|cn| cn.get("apps")).and_then(Value::as_array).and_then(|apps| apps.iter().find(|x| x.get("app").and_then(Value::as_str) == Some(app)));
             let Some(a) = a else { return Ok(skip("needs XenoNet running")) };
             let changes = list(a.get("changes"));
-            if changes.iter().all(|x| x.get("state").and_then(Value::as_str) == Some("missing")) {
+            let unconnected = changes.iter().all(|x| x.get("state").and_then(Value::as_str) == Some("missing"));
+            if unconnected && a.get("installed") == Some(&json!(false)) {
+                return Ok(skip(format!("{name} isn't installed")));
+            }
+            if unconnected {
                 return Ok(info(
                     "not connected, so these sessions can't see or message each other through XenoNet",
-                    Some("Connect them from XenoNet's palette (Connect Claude Code and Codex to XenoNet), or run xenonet connect."),
+                    Some("Connect them from XenoNet's palette (Connect your agents to XenoNet), or run xenonet connect."),
                 ));
             }
             // XenoNet's plugin for Claude Code carries what connect would
@@ -650,16 +775,13 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
             }
             Ok(ok(said))
         }
+        id if crate::login::CHECKS.iter().any(|(c, ..)| *c == id) => crate::login::run(&c, id).await,
         _ => Err(Failure::msg(format!("no such check: {id}"))),
     }
 }
 
 fn style_of(p: &str) -> Style {
-    match xenonet_base::paths::path_style(p) {
-        xenonet_base::paths::PathStyle::Windows => Style::Win32,
-        xenonet_base::paths::PathStyle::Posix => Style::Posix,
-        xenonet_base::paths::PathStyle::Native => NATIVE,
-    }
+    Style::from(xenonet_base::paths::path_style(p))
 }
 
 async fn state(c: &Ctx<'_>) -> Result<Value, Failure> {
@@ -797,8 +919,14 @@ async fn repos(c: &Ctx<'_>) -> Result<Value, Failure> {
     if !files.is_empty() {
         let shown: Vec<String> = files.iter().take(3).map(|x| c.tilde(&js_string(x))).collect();
         let more = if files.len() > 3 { format!(" and {} more", files.len() - 3) } else { String::new() };
+        let one = files.len() == 1;
+        // Only a token XenoNet issued counts. When it couldn't read its own
+        // tokens, every token-shaped string did, a made-up one too.
+        let unchecked = truthy(found.get("unchecked"));
+        let what = if unchecked { "what looks like an actor's token" } else { "an actor's token" };
+        let note = if unchecked { format!("; XenoNet couldn't check {} against the tokens it issued", if one { "it" } else { "them" }) } else { String::new() };
         return Ok(warn(
-            format!("{} in a repo {} an actor's token: {}{more}{when}", plural(files.len() as f64, "file", None), if files.len() == 1 { "holds" } else { "hold" }, shown.join(", ")),
+            format!("{} in a repo {} {what}: {}{more}{when}{note}", plural(files.len() as f64, "file", None), if one { "holds" } else { "hold" }, shown.join(", ")),
             Some("Move each token out of the repo, whether it's in a file of its own or a line of a .env. Keep it in a file only you can read, outside any repo (for example ~/.config/<name>/xenonet.token, named in XENONET_ACTOR_TOKEN_FILE). Give its actor a new token with New token in XenoNet's Actors panel, since a session may have read it. If it was committed, the old token has leaked."),
         ));
     }

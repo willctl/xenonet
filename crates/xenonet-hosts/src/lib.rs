@@ -6,7 +6,9 @@
 //! sends only titles, states and counts unless asked for detail, with the
 //! home folder (and any folder named for a person) written as ~, and
 //! answers only an allowlist of reads. ssh runs with XenoNet's own config,
-//! never a prompt, and a host key that must be known and unchanged.
+//! never a prompt, and a host key that must be known and unchanged. Inside
+//! a XenoNet network the same frames cross through its gateway, sealed
+//! between the two hosts (network.rs).
 
 pub mod aliases;
 pub mod cache;
@@ -17,4 +19,5 @@ pub mod frames;
 pub mod hub;
 pub mod link;
 pub mod merge;
+pub mod network;
 pub mod relay;

@@ -1,25 +1,25 @@
 {
   "name": "xenolith",
   "version": "__VERSION__",
-  "description": "Shared long-term memory for every app and agent on this computer: a plain-Markdown wiki you own, served by one local MCP server.",
+  "description": "Shared long-term memory for every app and agent on this computer: plain Markdown files you own, served by one local MCP server.",
   "author": {
     "name": "willctl"
   },
-  "keywords": ["memory", "wiki", "mcp", "markdown", "shared-memory", "agents"],
+  "keywords": ["memory", "shared-context", "mcp", "markdown", "shared-memory", "agents"],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "Xenolith",
     "shortDescription": "Shared memory for every app and agent on this computer",
-    "longDescription": "One plain-Markdown wiki that every session on this computer reads and writes, whatever app or model it runs on. Sessions load the index and recent activity at the start, search before asking you for context, and log decisions, outcomes, preferences and follow-ups. The files live in a folder you own and can open in any editor.",
+    "longDescription": "One plain-Markdown shared context that every session on this computer reads and writes, whatever app or model it runs on. Sessions load the index and recent activity at the start, search before asking you for context, and log decisions, outcomes, preferences and follow-ups. The files live in a folder you own and can open in any editor.",
     "developerName": "willctl",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],
     "defaultPrompt": [
       "What's in my xenolith?",
-      "Search my wiki for what we decided last week",
-      "Log what we just decided to the wiki"
+      "Search my shared context for what we decided last week",
+      "Log what we just decided to my shared context"
     ]
   }
 }

@@ -12,7 +12,7 @@ use crate::live::day_key;
 use regex::Regex;
 use serde_json::{Map, Value};
 use std::sync::LazyLock;
-use xenonet_base::text::{is_js_space, js_number, js_trim};
+use xenonet_base::text::{is_js_line_terminator, is_js_space, js_number, js_trim, JS_DOT, JS_SPACE};
 use xenonet_base::{json, jsstr, paths, time};
 
 /// A JS value as an answer is built: what JSON can't hold too (undefined,
@@ -86,22 +86,6 @@ fn truthy(v: Option<&Value>) -> bool {
     xenonet_base::text::truthy(v)
 }
 
-fn is_line_terminator(c: char) -> bool {
-    matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
-}
-
-/// `text.split(/\r?\n/)`.
-fn split_lines(text: &str) -> Vec<&str> {
-    let mut out: Vec<&str> = text.split('\n').collect();
-    let n = out.len();
-    for (i, part) in out.iter_mut().enumerate() {
-        if i + 1 < n {
-            *part = part.strip_suffix('\r').unwrap_or(part);
-        }
-    }
-    out
-}
-
 // ---------- frontmatter ----------
 
 // /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/: where the block's lines start and
@@ -149,7 +133,7 @@ fn key_value(line: &str) -> Option<(&str, &str)> {
         return None;
     }
     let rest = line[i + 1..].trim_start_matches(is_js_space);
-    if rest.chars().any(is_line_terminator) {
+    if rest.chars().any(is_js_line_terminator) {
         return None;
     }
     Some((&line[..i], rest))
@@ -166,7 +150,7 @@ fn key_value(line: &str) -> Option<(&str, &str)> {
 pub fn frontmatter_at(text: &str) -> (Map<String, Value>, Option<usize>) {
     let mut meta = Map::new();
     let Some((start, end, after)) = frontmatter(text) else { return (meta, None) };
-    for line in split_lines(&text[start..end]) {
+    for line in crate::git::split_lines(&text[start..end]) {
         let Some((key, raw)) = key_value(line) else { continue };
         let v = js_trim(raw);
         let value = if v.starts_with('[') {
@@ -203,7 +187,9 @@ fn date_parse(s: &str) -> Option<f64> {
     (utc.abs() <= 8.64e15).then_some(utc)
 }
 
-/// The pages a text links to as `[[slug]]`, each once, in lowercase.
+/// The pages a text links to, as `[[slug]]` or `[[slug|text]]` (Xenolith's
+/// links_in, xenolith/rust/crates/core/src/activity.rs), each once, in
+/// lowercase.
 pub fn wiki_links(text: &str) -> Vec<String> {
     let b = text.as_bytes();
     let mut out: Vec<String> = Vec::new();
@@ -214,8 +200,16 @@ pub fn wiki_links(text: &str) -> Vec<String> {
             while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'-') {
                 j += 1;
             }
+            let slug_end = j;
+            // (?:\|[^\]]*)?: the text after a bar, up to the first "]".
+            if b.get(j) == Some(&b'|') {
+                j += 1;
+                while j < b.len() && b[j] != b']' {
+                    j += 1;
+                }
+            }
             if b[j..].starts_with(b"]]") {
-                let slug = text[i + 2..j].to_ascii_lowercase();
+                let slug = text[i + 2..slug_end].to_ascii_lowercase();
                 if !out.contains(&slug) {
                     out.push(slug);
                 }
@@ -226,6 +220,74 @@ pub fn wiki_links(text: &str) -> Vec<String> {
         i += 1;
     }
     out
+}
+
+fn is_line_start(text: &str, i: usize) -> bool {
+    i == 0 || text[..i].chars().next_back().is_some_and(is_js_line_terminator)
+}
+
+/// A page's first "# " heading, its title when the frontmatter gives none
+/// (page_from_text in xenolith/rust/crates/core/src/wiki.rs), as
+/// `/^#\s+(.+)$/m` finds it: a "#" that starts a line, white space (line
+/// breaks too), then the rest of that line. Empty when there's none.
+fn first_heading(body: &str) -> String {
+    for (i, _) in body.match_indices('#').filter(|(i, _)| is_line_start(body, *i)) {
+        let rest = &body[i + 1..];
+        let after = rest.trim_start_matches(is_js_space);
+        if after.len() == rest.len() {
+            continue;
+        }
+        // White space to the very end leaves a match of white space alone,
+        // which comes to nothing once trimmed.
+        let line = after.split(is_js_line_terminator).next().unwrap_or("");
+        return js_trim(line).to_string();
+    }
+    String::new()
+}
+
+/// Each run of white space with a line break in it made one space, as
+/// Xenolith's one_line does (`s.replace(/\s*[\r\n]\s*/g, " ")`).
+fn one_line(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut run = String::new();
+    let flush = |run: &mut String, out: &mut String| {
+        if run.contains(['\r', '\n']) {
+            out.push(' ');
+        } else {
+            out.push_str(run);
+        }
+        run.clear();
+    };
+    for c in s.chars() {
+        if is_js_space(c) {
+            run.push(c);
+        } else {
+            flush(&mut run, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut run, &mut out);
+    out
+}
+
+/// Other names a page goes by, as Xenolith reads its aliases (norm_tags in
+/// xenolith/rust/crates/core/src/wiki.rs): a list, or words split at
+/// commas, each on one line, lowercase, without a leading #, once.
+fn aliases_of(v: Option<&Value>) -> Result<Vec<String>, TypeError> {
+    let list: Vec<String> = match v {
+        Some(Value::Array(a)) => a.iter().map(|x| to_str(Some(x))).collect::<Result<_, _>>()?,
+        v if truthy(v) => to_str(v)?.split(',').map(String::from).collect(),
+        _ => Vec::new(),
+    };
+    let mut out: Vec<String> = Vec::new();
+    for a in list {
+        let one = one_line(&a);
+        let name = js_trim(js_trim(&one).trim_start_matches('#')).to_lowercase();
+        if !name.is_empty() && !out.contains(&name) {
+            out.push(name);
+        }
+    }
+    Ok(out)
 }
 
 // ---------- projects ----------
@@ -353,17 +415,14 @@ impl LogEntry {
     }
 }
 
-// JS's \s, and . (anything but a line terminator), as classes.
-const S: &str = r"[\t\n\x0B\x0C\r \x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}]";
-const DOT: &str = r"[^\n\r\x{2028}\x{2029}]";
-
 fn entry(lead: &str) -> Regex {
-    Regex::new(&format!(r"\A{lead}{S}+([0-9]{{1,2}}):([0-9]{{2}}){S}+·{S}+([^·]+?){S}+·{S}+({DOT}+)\z")).expect("a pattern of fixed parts")
+    let s = format!("[{JS_SPACE}]");
+    Regex::new(&format!(r"\A{lead}{s}+([0-9]{{1,2}}):([0-9]{{2}}){s}+·{s}+([^·]+?){s}+·{s}+({JS_DOT}+)\z")).expect("a pattern of fixed parts")
 }
 
 static HEADING: LazyLock<Regex> = LazyLock::new(|| entry("##"));
 static BULLET: LazyLock<Regex> = LazyLock::new(|| entry("-"));
-static LINK_AT_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"{S}*\[\[[^\]]+\]\]{S}*\z")).expect("a pattern of fixed parts"));
+static LINK_AT_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"[{JS_SPACE}]*\[\[[^\]]+\]\][{JS_SPACE}]*\z")).expect("a pattern of fixed parts"));
 
 // new Date(y, m, d, h, min).getTime(): a local time, as JS works it out
 // from its parts.
@@ -407,7 +466,7 @@ fn date_parts(date: Option<&Value>) -> Result<[f64; 3], TypeError> {
 pub fn parse_log(text: &str, date: Option<&Value>) -> Result<Vec<LogEntry>, TypeError> {
     let mut out: Vec<LogEntry> = Vec::new();
     let mut cur: Option<usize> = None;
-    for line in split_lines(text) {
+    for line in crate::git::split_lines(text) {
         let h = HEADING.captures(line);
         let b = BULLET.captures(line);
         let bullet = b.is_some();
@@ -435,8 +494,31 @@ pub fn parse_log(text: &str, date: Option<&Value>) -> Result<Vec<LogEntry>, Type
 
 // ---------- the folder ----------
 
-// A folder's names in Node's order, or none when it can't be read.
+/// Whether a path is a link. Xenolith refuses a link anywhere below the
+/// wiki's folder (confined_path in xenolith/rust/crates/core/src/wiki.rs),
+/// so a page or log linked in from elsewhere isn't the wiki's, and XenoNet
+/// passes it over too. On Windows that's any reparse point, as Xenolith
+/// has it. The folder itself may be a link.
+fn linked(p: &str) -> bool {
+    std::fs::symlink_metadata(p).is_ok_and(|m| {
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            m.file_attributes() & 0x400 != 0
+        }
+        #[cfg(not(windows))]
+        {
+            m.file_type().is_symlink()
+        }
+    })
+}
+
+// A folder's names in Node's order, or none when it's a link or can't be
+// read.
 fn names(dir: &str) -> Vec<String> {
+    if linked(dir) {
+        return Vec::new();
+    }
     paths::read_dir_sorted(std::path::Path::new(dir)).map(|es| es.into_iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default()
 }
 
@@ -454,56 +536,172 @@ fn or(v: Option<&Value>, fallback: Out) -> Out {
     }
 }
 
-/// The shared context's folder, read: its pages (with the projects they
-/// mention, paths under `root`, the projects folder), the last two days'
-/// log, as of `now`, and the inbox. `server` is the MCP server that owns
-/// it.
-#[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the JS's endsWith is case-sensitive, and so is this")]
-pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now: f64, server: Out) -> Result<Out, TypeError> {
-    struct Page {
-        slug: String,
-        fields: Vec<(String, Out)>,
-        writes: Vec<Out>,
+/// A page as read, with the writes its space's log names it in.
+struct Page {
+    slug: String,
+    fields: Vec<(String, Out)>,
+    writes: Vec<Out>,
+}
+
+/// A space of the wiki: its id (None for this machine's own, the wiki's
+/// folder), kind, name and folder.
+struct SpaceDir {
+    id: Option<String>,
+    kind: String,
+    name: String,
+    dir: String,
+}
+
+// A folder that's really there: not a link to one.
+fn is_dir(p: &str) -> bool {
+    std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir())
+}
+
+/// The spaces besides this machine's own, as Xenolith lists them (list in
+/// xenolith/rust/crates/core/src/spaces.rs): each a wiki laid out as the
+/// folder is, in `spaces/<kind>/<name>/`, by kind and then name. A folder
+/// that isn't a space's name, or is a link, isn't one.
+fn spaces_in(dir: &str) -> Vec<SpaceDir> {
+    use crate::xenolith::{space_of, Space, SPACE_KINDS};
+    let base = paths::join(dir, "spaces");
+    if !is_dir(&base) {
+        return Vec::new();
     }
+    let mut out = Vec::new();
+    for kind in SPACE_KINDS {
+        let kind_dir = paths::join(&base, kind);
+        if !is_dir(&kind_dir) {
+            continue;
+        }
+        let names: Vec<String> =
+            std::fs::read_dir(&kind_dir).map(|es| es.filter_map(Result::ok).map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
+        for name in names {
+            let id = format!("{kind}:{name}");
+            let space_dir = paths::join(&kind_dir, &name);
+            if space_of(Some(&Value::String(id.clone()))) == Space::Other(id.clone()) && is_dir(&space_dir) {
+                out.push(SpaceDir { id: Some(id), kind: kind.to_string(), name, dir: space_dir });
+            }
+        }
+    }
+    out.sort_by(|a, b| a.kind.cmp(&b.kind).then_with(|| a.name.cmp(&b.name)));
+    out
+}
+
+/// One space's pages and the last two days of its log, as of `now`, each
+/// page with the writes the log names it in. A project's space is that
+/// project's context, so its pages are tied to the projects of its name.
+#[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the JS's endsWith is case-sensitive, and so is this")]
+fn read_space(space: &SpaceDir, projects: Option<&Value>, root: Option<&Value>, now: f64) -> Result<(Vec<Page>, Vec<LogEntry>), TypeError> {
+    let dir = space.dir.as_str();
     let pages_dir = paths::join(dir, "pages");
     let mut pages: Vec<Page> = Vec::new();
     for f in names(&pages_dir).into_iter().filter(|f| f.ends_with(".md")) {
         let file = paths::join(&pages_dir, &f);
+        if linked(&file) {
+            continue;
+        }
         let text = read_text(&file).unwrap_or_default();
         let (meta, body) = parse_frontmatter(&text);
         let slug = f[..f.len() - 3].to_lowercase();
         let tags = meta.get("tags");
+        // The title, then the first heading, then the slug; the type in
+        // lowercase: as Xenolith reads a page. (In the order JS reads them,
+        // so a value that can't be made text fails as it did there.)
+        let heading = first_heading(&body);
+        let title = or(meta.get("title"), Out::Str(if heading.is_empty() { slug.clone() } else { heading }));
+        let kind = to_str_or_empty(meta.get("type"))?;
+        let kind = if kind.is_empty() { "topic".to_string() } else { kind.to_lowercase() };
+        let aliases = aliases_of(meta.get("aliases"))?;
         let updated = date_parse(&to_str(meta.get("updated"))?).filter(|t| *t != 0.0);
         let links: Vec<String> = wiki_links(&body).into_iter().filter(|l| *l != slug).collect();
-        let projects = mentioned_projects(&body, tags, projects, root)?;
+        let mut named = mentioned_projects(&body, tags, projects, root)?;
+        if space.kind == "project" && space.id.is_some() {
+            for p in items(projects, "filter")? {
+                if lower(prop(Some(p), "name")?, "p.name")? == space.name {
+                    let key = prop(Some(p), "key")?.cloned();
+                    if !named.contains(&key) {
+                        named.push(key);
+                    }
+                }
+            }
+        }
+        let projects = named;
         let fields = vec![
             ("slug", Out::Str(slug.clone())),
-            ("title", or(meta.get("title"), Out::Str(slug.clone()))),
-            ("type", or(meta.get("type"), Out::Str("topic".into()))),
+            ("title", title),
+            ("type", Out::Str(kind)),
             ("summary", or(meta.get("summary"), Out::Str(String::new()))),
             ("tags", if matches!(tags, Some(Value::Array(_))) { Out::of(tags) } else { Out::Arr(vec![]) }),
+            ("aliases", Out::strs(&aliases)),
             ("updated", updated.map_or(Out::Null, Out::Num)),
             ("updatedBy", or(meta.get("updated_by"), Out::Null)),
             ("links", Out::strs(&links)),
             ("projects", Out::Arr(projects.into_iter().map(|k| Out::of(k.as_ref())).collect())),
             ("path", Out::Str(file)),
+            ("space", space.id.clone().map_or(Out::Null, Out::Str)),
         ];
         pages.push(Page { slug, fields: fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect(), writes: Vec::new() });
     }
     let mut log: Vec<LogEntry> = Vec::new();
     for offset in [1.0, 0.0] {
         let date = day_key(now - offset * 86_400e3);
-        let file = paths::join_all(&[dir, "log", &jsstr::slice(&date, 0, Some(4)), &format!("{date}.md")]);
+        let year = paths::join_all(&[dir, "log", &jsstr::slice(&date, 0, Some(4))]);
+        let file = paths::join(&year, &format!("{date}.md"));
+        if linked(&paths::join(dir, "log")) || linked(&year) || linked(&file) {
+            continue;
+        }
         if let Some(text) = read_text(&file).filter(|t| !t.is_empty()) {
             log.extend(parse_log(&text, Some(&Value::String(date.clone())))?);
         }
     }
+    // A slug two files share is the later file's.
+    for e in &log {
+        for slug in &e.pages {
+            if let Some(p) = pages.iter_mut().rev().find(|p| p.slug == *slug) {
+                p.writes.push(e.out());
+            }
+        }
+    }
+    Ok((pages, log))
+}
+
+/// The shared context's folder, read: the pages of this machine's space
+/// and of every other space in it (with the projects they mention, paths
+/// under `root`, the projects folder), the last two days of their logs, as
+/// of `now`, and the inbox. `server` is the MCP server that owns it. For a
+/// folder in a format XenoNet doesn't read, none of those, and the
+/// `problem` that says why.
+#[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the JS's endsWith is case-sensitive, and so is this")]
+pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now: f64, server: Out) -> Result<Out, TypeError> {
+    // A folder in a later format than XenoNet reads isn't parsed: the map
+    // keeps its node and says why it shows nothing in it.
+    if let Some(problem) = crate::xenolith::read_marker(dir).and_then(|m| crate::xenolith::format_problem(m.format)) {
+        return Ok(Out::obj(vec![
+            ("dir", Out::Str(dir.to_string())),
+            ("server", server),
+            ("pages", Out::Arr(Vec::new())),
+            ("inbox", Out::Arr(Vec::new())),
+            ("log", Out::Arr(Vec::new())),
+            ("problem", Out::Str(problem)),
+        ]));
+    }
+    let local = SpaceDir { id: None, kind: "machine".into(), name: "local".into(), dir: dir.to_string() };
+    let mut pages: Vec<Page> = Vec::new();
+    let mut log: Vec<LogEntry> = Vec::new();
+    for space in std::iter::once(local).chain(spaces_in(dir)) {
+        let (p, l) = read_space(&space, projects, root, now)?;
+        pages.extend(p);
+        log.extend(l);
+    }
     let inbox_dir = paths::join(dir, "inbox");
     let mut inbox = Vec::new();
     for f in names(&inbox_dir).into_iter().filter(|f| f.ends_with(".md")) {
+        if linked(&paths::join(&inbox_dir, &f)) {
+            continue;
+        }
         let text = read_text(&paths::join(&inbox_dir, &f)).unwrap_or_default();
         let (meta, body) = parse_frontmatter(&text);
-        let first = split_lines(&body).into_iter().find(|l| !js_trim(l).is_empty()).map(|l| {
+        let first = crate::git::split_lines(&body).into_iter().find(|l| !js_trim(l).is_empty()).map(|l| {
             let rest = l.trim_start_matches('#');
             if rest.len() < l.len() {
                 rest.trim_start_matches(is_js_space).to_string()
@@ -513,14 +711,6 @@ pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now:
         });
         let title = if truthy(meta.get("title")) { Out::of(meta.get("title")) } else { Out::Str(first.filter(|t| !t.is_empty()).unwrap_or_else(|| f.clone())) };
         inbox.push(Out::obj(vec![("id", Out::Str(f[..f.len() - 3].to_string())), ("title", title), ("app", or(meta.get("app"), Out::Null))]));
-    }
-    // A slug two files share is the later file's.
-    for e in &log {
-        for slug in &e.pages {
-            if let Some(p) = pages.iter_mut().rev().find(|p| p.slug == *slug) {
-                p.writes.push(e.out());
-            }
-        }
     }
     xenonet_base::sort::sort_by(&mut log, |a, b| (a.ts - b.ts).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
     let pages = pages
@@ -563,9 +753,75 @@ mod tests {
         assert_eq!(parse_frontmatter("no front").0.len(), 0);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn links_below_the_folder_are_passed_over() {
+        let base = std::env::temp_dir().join(format!("xenonet-wiki-links-rs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (wiki, outside) = (base.join("wiki"), base.join("outside"));
+        std::fs::create_dir_all(wiki.join("pages")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(wiki.join("pages/atlas.md"), "# Atlas\n").unwrap();
+        std::fs::write(outside.join("secret.md"), "# Secret\n").unwrap();
+        std::os::unix::fs::symlink(outside.join("secret.md"), wiki.join("pages/linked.md")).unwrap();
+        std::os::unix::fs::symlink(&outside, wiki.join("inbox")).unwrap();
+        let read = read_wiki(wiki.to_str().unwrap(), Some(&json!([])), None, 0.0, Out::Null).unwrap();
+        let Out::Obj(fields) = read else { panic!("an object") };
+        let get = |k: &str| fields.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone()).unwrap();
+        let Out::Arr(pages) = get("pages") else { panic!("a list") };
+        assert_eq!(pages.len(), 1, "the linked page isn't the wiki's");
+        assert_eq!(get("inbox"), Out::Arr(vec![]), "nor a linked inbox");
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn a_folder_in_a_later_format_is_not_parsed() {
+        let wiki = std::env::temp_dir().join(format!("xenonet-wiki-format-rs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&wiki);
+        std::fs::create_dir_all(wiki.join("pages")).unwrap();
+        std::fs::create_dir_all(wiki.join("inbox")).unwrap();
+        std::fs::write(wiki.join("pages/atlas.md"), "# Atlas\n").unwrap();
+        std::fs::write(wiki.join("inbox/note.md"), "# A note\n").unwrap();
+        let read = |marker: &str| {
+            std::fs::write(wiki.join("xenolith.json"), marker).unwrap();
+            let Out::Obj(fields) = read_wiki(wiki.to_str().unwrap(), Some(&json!([])), None, 0.0, Out::Str("xenolith".into())).unwrap() else { panic!("an object") };
+            fields
+        };
+        let field = |fields: &[(String, Out)], k: &str| fields.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
+        let len = |fields: &[(String, Out)], k: &str| match field(fields, k) {
+            Some(Out::Arr(a)) => Some(a.len()),
+            _ => None,
+        };
+        let now = read("{\"format\":1,\"server\":\"xenolith\"}");
+        assert_eq!((len(&now, "pages"), len(&now, "inbox"), field(&now, "problem")), (Some(1), Some(1), None), "the format it reads");
+        let later = read("{\"format\":2,\"server\":\"xenolith\"}");
+        assert_eq!(later.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["dir", "server", "pages", "inbox", "log", "problem"]);
+        assert_eq!((len(&later, "pages"), len(&later, "inbox"), len(&later, "log")), (Some(0), Some(0), Some(0)));
+        assert_eq!(field(&later, "server"), Some(Out::Str("xenolith".into())));
+        assert!(matches!(field(&later, "problem"), Some(Out::Str(p)) if p.contains("version 2")));
+        let broken = read("{\"format\":");
+        assert_eq!((len(&broken, "pages"), field(&broken, "problem")), (Some(1), None), "a marker it can't take: read as before");
+        std::fs::remove_dir_all(wiki).unwrap();
+    }
+
     #[test]
     fn links_once_in_lowercase() {
         assert_eq!(wiki_links("[[A-b]] [[[c]] [[a-B]] [[-x]] [[d e]] [[Ü]] [[f]"), ["a-b", "c"]);
+        assert_eq!(wiki_links("[[atlas|The Atlas, ü]] [[x|a]b]] [[y|z] [[db|]]"), ["atlas", "db"], "with the text after a bar");
+    }
+
+    #[test]
+    fn pages_as_xenolith_reads_them() {
+        assert_eq!(first_heading("text\n#tag\n#  Title  \n# Later"), "Title");
+        assert_eq!(first_heading("#\n\nNext line"), "Next line", "white space includes line breaks, as in JS");
+        assert_eq!(first_heading("x\r#\tCR\rmore"), "CR", "any line terminator starts a line");
+        assert_eq!(first_heading("#   "), "");
+        assert_eq!(first_heading("no # heading"), "");
+        assert_eq!(aliases_of(Some(&json!(["Atlas API", "#Orders", "atlas api", null]))).unwrap(), ["atlas api", "orders", "null"]);
+        assert_eq!(aliases_of(Some(&json!("Postgres, #pg ,\u{2028}"))).unwrap(), ["postgres", "pg"]);
+        assert_eq!(aliases_of(Some(&json!(["a \n\t b"]))).unwrap(), ["a b"], "on one line");
+        assert!(aliases_of(Some(&json!([{ "toString": 1 }]))).is_err());
+        assert_eq!(aliases_of(None).unwrap(), Vec::<String>::new());
     }
 
     #[test]

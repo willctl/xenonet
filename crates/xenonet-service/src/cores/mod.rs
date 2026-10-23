@@ -44,7 +44,7 @@ pub use actors::{Actors, Registration, Reports, Runs, Spend, Wakes};
 pub use assistant::{AssistantService, AssistantSource, Audit, Connections, Tunnels};
 pub use delivery::{Policy, Router};
 pub use engine::{Channels, Connect, Engine, EngineStore, Verify};
-pub use hosts::{HostsConfig, Hub};
+pub use hosts::{HostsConfig, HttpApi, Hub, HubNet, SelfApi};
 pub use services::{Decider, Diagnostics, Doctor, DriftReport, Integrations, McpInfo, OpenRouter, Refusals, Spotify, SystemStats, Terminals};
 pub use settings::{Command, Demo, Opener, Schemas, Store, Themes};
 pub use state::State;
@@ -192,7 +192,16 @@ pub struct Cores {
     pub mcp_info: Arc<dyn McpInfo>,
     pub terminals: Arc<dyn Terminals>,
     pub demo: Arc<dyn Demo>,
+    /// What plugs the engine into the network's link once the service has
+    /// made it (gateway/network.rs): the engine's driver sets it, and the
+    /// service calls it once, before the link starts. The link reads the
+    /// network as it stands, so a network created or joined later reaches
+    /// the engine through the same plug.
+    pub on_net: Option<NetPlug>,
 }
+
+/// See `Cores::on_net`.
+pub type NetPlug = Arc<dyn Fn(&crate::gateway::network::NetService) + Send + Sync>;
 
 /// The stand-in for every core that isn't in Rust yet.
 #[derive(Clone, Copy, Default)]
@@ -242,6 +251,7 @@ impl Cores {
             mcp_info: p.clone(),
             terminals: p.clone(),
             demo: p,
+            on_net: None,
         }
     }
 }

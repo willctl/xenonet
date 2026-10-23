@@ -241,6 +241,18 @@ test("a handoff brief, from what the tailer saw or else the transcript", async (
   assert.match(old.brief, /Where it left off:\nStaging runs on the new cluster/);
 });
 
+test("a transcript of a session of an app XenoNet doesn't tail is refused, a 400, not read as Claude Code's", () => {
+  const was = config.demo;
+  config.demo = false;
+  try {
+    for (const [app, shown] of [["gemini-cli", "Gemini CLI"], ["opencode", "OpenCode"]]) {
+      assert.throws(() => state.readTranscript({ id: `${app}:x0000001`, app, rawId: "x0000001", kind: "session" }, {}), { message: `XenoNet doesn't read ${shown}'s transcripts`, status: 400 });
+    }
+  } finally {
+    config.demo = was;
+  }
+});
+
 test("the tray's summary", () => {
   const s = state.summary();
   assert.ok(s.working >= 0 && s.tpm >= 0);

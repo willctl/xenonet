@@ -1,5 +1,5 @@
-//! `xenolith curator`: files queued notes into the wiki, and answers the window's questions (Ask),
-//! as src/curator.mjs. It runs as the user (the tray hosts it), because it uses the user's ChatGPT
+//! `xenolith curator`: files queued notes into the wiki, and answers the window's questions (Ask).
+//! It runs as the user (the tray hosts it), because it uses the user's ChatGPT
 //! sign-in through the Codex CLI.
 //!
 //!   xenolith curator [--parent-stdin]   run until stopped; --parent-stdin: stop when stdin closes
@@ -251,7 +251,7 @@ fn stop_others(stopping: &std::sync::atomic::AtomicBool, others: &Others, watche
     }
 }
 
-/// SIGINT and SIGTERM stop gracefully (heartbeat "stopped", locks released), as the Node curator does.
+/// SIGINT and SIGTERM stop gracefully (heartbeat "stopped", locks released).
 mod signals {
     #[cfg(unix)]
     pub fn on_stop(stop: impl Fn() + Send + 'static) {

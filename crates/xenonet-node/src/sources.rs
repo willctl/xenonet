@@ -80,8 +80,9 @@ pub fn live_tool_key(name: String, input: MaybeJson) -> String {
 }
 
 #[napi(js_name = "liveWikiPagesOf")]
-pub fn live_wiki_pages_of(server: MaybeJson, input: MaybeJson) -> Option<Vec<String>> {
-    live::wiki_pages_of(server.0.as_ref().and_then(Value::as_str), input.0.as_ref())
+pub fn live_wiki_pages_of(server: MaybeJson, input: MaybeJson, tool: MaybeJson, named: MaybeJson) -> Option<Vec<String>> {
+    let [server, tool, named] = [&server, &tool, &named].map(|v| v.0.as_ref().and_then(Value::as_str));
+    live::wiki_pages_of(server, tool, named, input.0.as_ref())
 }
 
 #[napi(js_name = "liveFileKey")]
@@ -96,23 +97,78 @@ pub fn context_servers() -> Vec<&'static str> {
     xenolith::CONTEXT_SERVERS.to_vec()
 }
 
+#[napi(js_name = "contextTools")]
+pub fn context_tools() -> Vec<&'static str> {
+    xenolith::CONTEXT_TOOLS.to_vec()
+}
+
+#[napi(js_name = "contextIsCall")]
+pub fn context_is_call(server: MaybeJson, tool: MaybeJson, named: MaybeJson) -> bool {
+    let [server, tool, named] = [&server, &tool, &named].map(|v| v.0.as_ref().and_then(Value::as_str));
+    server.is_some_and(|s| xenolith::is_context_call(s, tool, named))
+}
+
 /// { dir, server }, or null.
 #[napi(js_name = "findContextDir")]
 pub fn find_context_dir(env: Json, home: String, platform: String) -> Jv {
     match xenolith::find_context_dir(&xenolith::env_of(&env.0), &home, &platform) {
-        Some((dir, server)) => Jv::Obj(vec![("dir", Jv::Json(Value::String(dir))), ("server", Jv::Json(Value::String(server.into())))]),
+        Some((dir, server)) => Jv::Obj(vec![("dir", Jv::Json(Value::String(dir))), ("server", Jv::Json(Value::String(server)))]),
         None => Jv::Json(Value::Null),
     }
 }
 
 #[napi(js_name = "contextServerOf")]
-pub fn context_server_of(dir: String) -> &'static str {
-    xenolith::context_server_of(&dir)
+pub fn context_server_of(dir: String, env: Json, home: String, platform: String) -> String {
+    xenolith::context_server_of(&dir, &xenolith::env_of(&env.0), &home, &platform)
+}
+
+#[napi(js_name = "contextFormat")]
+pub fn context_format() -> u32 {
+    u32::try_from(xenolith::CONTEXT_FORMAT).unwrap_or(u32::MAX)
+}
+
+#[napi(js_name = "contextMarkerFile")]
+pub fn context_marker_file() -> &'static str {
+    xenolith::MARKER_FILE
+}
+
+/// { format, server } from a folder's marker, or null.
+#[napi(js_name = "contextReadMarker")]
+pub fn context_read_marker(dir: String) -> Json {
+    Json(match xenolith::read_marker(&dir) {
+        Some(m) => serde_json::json!({ "format": m.format, "server": m.server }),
+        None => Value::Null,
+    })
+}
+
+/// Why XenoNet can't read a folder in this format, or null.
+#[napi(js_name = "contextFormatProblem")]
+pub fn context_format_problem(format: f64) -> Option<String> {
+    // A whole number from 1, as a marker's format is; anything else isn't
+    // a later one.
+    let format = (format.fract() == 0.0 && (1.0..=9_007_199_254_740_991.0).contains(&format)).then_some(format as u64)?;
+    xenolith::format_problem(format)
 }
 
 #[napi(js_name = "contextName")]
 pub fn context_name(server: Option<String>) -> &'static str {
     xenolith::context_name(server.as_deref())
+}
+
+#[napi(js_name = "contextSpaceKinds")]
+pub fn context_space_kinds() -> Vec<&'static str> {
+    xenolith::SPACE_KINDS.to_vec()
+}
+
+/// { space, refused }: the space a context_* call works in (null for this
+/// machine's own), and whether Xenolith refuses it.
+#[napi(js_name = "contextSpaceOf")]
+pub fn context_space_of(v: MaybeJson) -> Json {
+    Json(match xenolith::space_of(v.0.as_ref()) {
+        xenolith::Space::Local => serde_json::json!({ "space": null, "refused": false }),
+        xenolith::Space::Other(id) => serde_json::json!({ "space": id, "refused": false }),
+        xenolith::Space::Refused => serde_json::json!({ "space": null, "refused": true }),
+    })
 }
 
 // ---------- refusals/ ----------

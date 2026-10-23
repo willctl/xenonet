@@ -332,6 +332,7 @@ pub fn hosts_why_ended(args: Json, tilde: Option<Function<'_, String, String>>) 
         stderr: &stderr,
         bye: a.get("bye").filter(|b| !b.is_null()),
         spawn_error: spawn_error.as_deref(),
+        network: a.get("network").and_then(Value::as_str),
     };
     why_jv(link::why_ended(a.get("entry").unwrap_or(&Value::Null), &e, a.get("sshConfig").and_then(Value::as_str), &t))
 }
@@ -371,9 +372,11 @@ fn effects(fx: Vec<link::Effect>) -> Jv {
     Jv::Arr(
         fx.into_iter()
             .map(|e| match e {
-                link::Effect::Spawn { run, file, args, env } => {
+                link::Effect::Start { run, start: link::Start::Process((file, args, env)) } => {
                     Jv::Obj(vec![("do", s("spawn")), ("run", Jv::Num(run as f64)), ("file", s(file)), ("args", Jv::Json(json!(args))), ("env", Jv::Json(Value::Object(env)))])
                 }
+                // The JS hub has no network: its entries never ask for one.
+                link::Effect::Start { run, start: link::Start::Network { host } } => Jv::Obj(vec![("do", s("network")), ("run", Jv::Num(run as f64)), ("host", s(host))]),
                 link::Effect::Write { run, text } => Jv::Obj(vec![("do", s("write")), ("run", Jv::Num(run as f64)), ("text", s(text))]),
                 link::Effect::Fail { run } => Jv::Obj(vec![("do", s("fail")), ("run", Jv::Num(run as f64))]),
                 link::Effect::Kill { run } => Jv::Obj(vec![("do", s("kill")), ("run", Jv::Num(run as f64))]),
@@ -579,6 +582,7 @@ impl HostsLink {
             stderr: "",
             bye: None,
             spawn_error: spawn_error.as_deref(),
+            network: None,
         };
         with_asks!(random, check, tilde, |a| self.inner.end(run as u64, &e, now, &mut a))
     }
@@ -816,6 +820,11 @@ pub fn hosts_qualify_event(
 ) -> Result<Json> {
     let d = data.0.unwrap_or(Value::Null);
     with_schemas!(clean, activity, |sc| Json(merge::qualify_event(&name, &d, &host.0, &mut sc).unwrap_or(Value::Null)))
+}
+
+#[napi(js_name = "hostsEventNote")]
+pub fn hosts_event_note(name: String, data: MaybeJson, host: Json) -> Option<String> {
+    merge::event_note(&name, &data.0.unwrap_or(Value::Null), &host.0)
 }
 
 #[napi(js_name = "hostsQualifyEngine")]

@@ -1,5 +1,5 @@
 //! The inbox: notes the apps send, accepted once fsync'd to inbox/<id>.md; the curator files them
-//! later (src/inbox.mjs): submit, list, queue statistics and the pause flag (the server's side); queue
+//! later: submit, list, queue statistics and the pause flag (the server's side); queue
 //! state, archiving and the curator's heartbeat (the curator's side).
 
 use crate::frontmatter::{self, Meta};
@@ -64,16 +64,24 @@ fn read_json(file: &Path) -> Option<Value> {
     read_if_exists(file).ok().flatten().and_then(|t| serde_json::from_str(&t).ok())
 }
 
-/// Where a note id lives now: "inbox", "done" or None.
+/// Where a note id lives now: "inbox", "done" (filed here), "sent" (sent to the space's curator by
+/// sync), "dead" (refused for good by that curator) or None.
 pub fn note_location(wiki_dir: &Path, id: &str) -> Option<&'static str> {
+    note_file(wiki_dir, id).map(|(w, _)| w)
+}
+
+/// Where a note id lives now, and its file there.
+fn note_file(wiki_dir: &Path, id: &str) -> Option<(&'static str, PathBuf)> {
     let p = curator_paths(wiki_dir);
-    if crate::wiki::confined_path(wiki_dir, &p.inbox.join(format!("{id}.md"))).is_ok_and(|p| p.exists()) {
-        return Some("inbox");
-    }
-    if crate::wiki::confined_path(wiki_dir, &p.done.join(month_dir(id)).join(format!("{id}.md"))).is_ok_and(|p| p.exists()) {
-        return Some("done");
-    }
-    None
+    let file = format!("{id}.md");
+    [
+        ("inbox", p.inbox.join(&file)),
+        ("done", p.done.join(month_dir(id)).join(&file)),
+        ("sent", p.cur.join("sent").join(month_dir(id)).join(&file)),
+        ("dead", p.cur.join("sync").join("dead").join(&file)),
+    ]
+    .into_iter()
+    .find_map(|(w, f)| crate::wiki::confined_path(wiki_dir, &f).ok().filter(|f| f.exists()).map(|f| (w, f)))
 }
 
 /// Where a note's content came from (M2): user (the person said it), observed (the app checked it),
@@ -84,6 +92,41 @@ pub const SOURCES: [&str; 4] = ["user", "observed", "external", "agent"];
 pub fn norm_source(s: &str) -> &'static str {
     let s = s.trim().to_lowercase();
     SOURCES.iter().find(|x| **x == s).copied().unwrap_or("agent")
+}
+
+/// Who submitted a note, as the server knows it from the caller, never from what the caller says.
+/// It is stamped on the note as `by`, and only the owner's notes may have the source "user": the
+/// curator's holds and forget requests trust "user" (curator.rs), so an app can't claim it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum By<'a> {
+    /// The person, with the owner key (owner.rs): "owner" (the window) or "cli" (the terminal).
+    Owner(&'a str),
+    /// A process on this machine without a token: its MCP client name.
+    Local(&'a str),
+    /// A token's holder: its subject (actor:hermes, machine:laptop).
+    Token(&'a str),
+}
+
+impl By<'_> {
+    pub fn stamp(&self) -> String {
+        match self {
+            By::Owner(b) => (*b).to_string(),
+            By::Local(c) => format!("local:{}", Some(take_chars(&one_line(c), 80)).filter(|c| !c.is_empty()).unwrap_or_else(|| "unknown".into())),
+            By::Token(subject) => (*subject).to_string(),
+        }
+    }
+}
+
+/// The stamps the person's own notes carry (By::Owner).
+pub const OWNER_STAMPS: [&str; 2] = ["owner", "cli"];
+
+/// A note's source as the curator may trust it: "user" only on a note the person submitted
+/// (stamped by: owner or cli); any other note claiming it counts as "agent".
+pub fn trusted_source(source: &str, by: &str) -> &'static str {
+    match norm_source(source) {
+        "user" if !OWNER_STAMPS.contains(&by) => "agent",
+        s => s,
+    }
 }
 
 #[derive(Default)]
@@ -97,6 +140,16 @@ pub struct NoteInput {
     pub pages: Value,
     pub page: Option<PageInput>,
     pub idempotency_key: Option<String>,
+}
+
+/// A page note's mode: "replace" (the whole page), "delete" (a page removed in a followed space's
+/// copy, which sync sends to the space's curator), or "append" (anything else).
+pub fn page_mode(m: &str) -> &'static str {
+    match m {
+        "replace" => "replace",
+        "delete" => "delete",
+        _ => "append",
+    }
 }
 
 #[derive(Default)]
@@ -118,8 +171,9 @@ pub struct Submitted {
     pub status: &'static str,
 }
 
-/// Validates, refuses secrets, deduplicates and durably queues a note.
-pub fn submit_note(wiki_dir: &Path, input: &NoteInput, transport: &str, client: &str) -> Result<Submitted> {
+/// Validates, refuses secrets, deduplicates and durably queues a note, stamped with who submitted it
+/// (`by`) and a source only the owner may make "user".
+pub fn submit_note(wiki_dir: &Path, input: &NoteInput, transport: &str, client: &str, by: &By) -> Result<Submitted> {
     let kind = if input.kind == "page" { "page" } else { "log" };
     let app = normalize_app(&input.app);
     let title = one_line(&input.title);
@@ -140,9 +194,9 @@ pub fn submit_note(wiki_dir: &Path, input: &NoteInput, transport: &str, client: 
             "title": one_line(&p.and_then(|p| p.title.clone()).unwrap_or_else(|| title.clone())),
             "type": get(|p| p.kind.clone()).trim().to_lowercase(),
             "summary": one_line(&get(|p| p.summary.clone())),
-            "mode": if get(|p| p.mode.clone()) == "replace" { "replace" } else { "append" },
+            "mode": page_mode(&get(|p| p.mode.clone())),
         });
-        if let Some(b) = p.and_then(|p| p.base.clone()).filter(|b| is_base(b)).filter(|_| page["mode"] == "replace") {
+        if let Some(b) = p.and_then(|p| p.base.clone()).filter(|b| is_base(b)).filter(|_| page["mode"] != "append") {
             page["base"] = json!(b);
         }
         page
@@ -202,7 +256,7 @@ pub fn submit_note(wiki_dir: &Path, input: &NoteInput, transport: &str, client: 
                 // Same note sent again. Wait briefly in case the first submit is still writing.
                 for _ in 0..20 {
                     if let Some(where_) = note_location(wiki_dir, &prev_id) {
-                        return Ok(Submitted { rel: format!("inbox/{prev_id}.md"), id: prev_id, duplicate: true, status: if where_ == "done" { "filed" } else { "pending" } });
+                        return Ok(Submitted { rel: format!("inbox/{prev_id}.md"), id: prev_id, duplicate: true, status: if where_ == "inbox" { "pending" } else { "filed" } });
                     }
                     std::thread::sleep(std::time::Duration::from_millis(100));
                 }
@@ -222,7 +276,9 @@ pub fn submit_note(wiki_dir: &Path, input: &NoteInput, transport: &str, client: 
     meta.set("id", id.clone());
     meta.set("kind", kind);
     meta.set("app", app.clone());
-    meta.set("source", norm_source(&input.source));
+    let stamp = by.stamp();
+    meta.set("source", trusted_source(&input.source, if matches!(by, By::Owner(_)) { &stamp } else { "" }));
+    meta.set("by", stamp.clone());
     meta.set("title", title.clone());
     meta.set("tags", tags);
     meta.set("pages", pages);
@@ -269,8 +325,12 @@ pub struct Note {
     pub rel: String,
     pub kind: String,
     pub app: String,
-    /// user | observed | external | agent (see SOURCES).
+    /// user | observed | external | agent (see SOURCES), as the curator may trust it: "user" only
+    /// on the owner's own notes (trusted_source).
     pub source: String,
+    /// Who submitted it (By::stamp): "owner", "cli", "local:<client>" or a token's subject; empty
+    /// on a note written by hand or before stamps.
+    pub by: String,
     pub title: String,
     pub body: String,
     pub tags: Vec<String>,
@@ -302,7 +362,7 @@ fn note_from_text(id: &str, text: &str, mtime: i64) -> Note {
     let page = (meta.str("kind") == "page").then(|| {
         let mut p = json!({
             "slug": meta.str("page_slug"), "title": meta.str("page_title"), "type": meta.str("page_type"),
-            "summary": meta.str("page_summary"), "mode": if meta.str("page_mode") == "replace" { "replace" } else { "append" },
+            "summary": meta.str("page_summary"), "mode": page_mode(&meta.str("page_mode")),
         });
         let base = meta.str("page_base");
         if is_base(&base) {
@@ -317,7 +377,8 @@ fn note_from_text(id: &str, text: &str, mtime: i64) -> Note {
         rel: format!("inbox/{id}.md"),
         kind: if meta.str("kind") == "page" { "page".into() } else { "log".into() },
         app: normalize_app(if app.is_empty() { "human" } else { &app }),
-        source: norm_source(&meta.str("source")).to_string(),
+        source: trusted_source(&meta.str("source"), &meta.str("by")).to_string(),
+        by: meta.str("by"),
         title: one_line(&title),
         body: body.trim().to_string(),
         tags: norm_tags_val(meta.get("tags")),
@@ -416,9 +477,12 @@ pub fn read_note(wiki_dir: &Path, id: &str) -> Result<(String, String)> {
     }
     let p = curator_paths(wiki_dir);
     let month = month_dir(id);
-    let (rel, file, status) = match note_location(wiki_dir, id) {
-        Some("inbox") => (format!("inbox/{id}.md"), p.inbox.join(format!("{id}.md")), "Pending: the curator has not filed this note yet.".to_string()),
-        Some(_) => {
+    let rel_month = month.to_string_lossy().replace('\\', "/");
+    let (rel, file, status) = match note_file(wiki_dir, id) {
+        Some(("inbox", f)) => (format!("inbox/{id}.md"), f, "Pending: the curator has not filed this note yet.".to_string()),
+        Some(("sent", f)) => (format!(".curator/sent/{rel_month}/{id}.md"), f, "Sent to the space's curator on another machine, which files it there.".to_string()),
+        Some(("dead", f)) => (format!(".curator/sync/dead/{id}.md"), f, "Refused for good by the space's curator on another machine; the first line says why.".to_string()),
+        Some((_, f)) => {
             let audit_file = crate::wiki::confined_path(wiki_dir, &p.audit.join(&month).join(format!("{id}.json")))?;
             let audit = read_json(&audit_file).unwrap_or(Value::Null);
             let mut s = format!("Filed by the curator{}", audit["at"].as_str().map(|at| format!(" at {at}")).unwrap_or_default());
@@ -433,8 +497,7 @@ pub fn read_note(wiki_dir: &Path, id: &str) -> Result<(String, String)> {
                 s.push_str(&format!("; pages changed: {}", pages.join(", ")));
             }
             s.push('.');
-            let rel_month = month.to_string_lossy().replace('\\', "/");
-            (format!(".curator/done/{rel_month}/{id}.md"), p.done.join(&month).join(format!("{id}.md")), s)
+            (format!(".curator/done/{rel_month}/{id}.md"), f, s)
         }
         None => return wiki_err(format!("No note {id}: it is not in the inbox or among the filed notes.")),
     };
@@ -595,7 +658,7 @@ mod tests {
         fs::write(&key, json!({ "id": "../../escaped" }).to_string()).unwrap();
         fs::File::options().write(true).open(&key).unwrap().set_modified(std::time::UNIX_EPOCH).unwrap();
         let input = NoteInput { app: "audit".into(), title: "Synthetic note".into(), body: "Harmless test content".into(), idempotency_key: Some("retry".into()), ..Default::default() };
-        assert!(submit_note(&wiki, &input, "", "").is_err());
+        assert!(submit_note(&wiki, &input, "", "", &By::Local("test")).is_err());
         assert!(!root.join("escaped.md").exists());
         fs::remove_dir_all(root).unwrap();
     }
@@ -620,15 +683,40 @@ mod tests {
         assert!(filed_notes(&wiki).is_empty());
         std::os::unix::fs::symlink(&outside, &p.keys).unwrap();
         let input = NoteInput { app: "audit".into(), title: "Synthetic note".into(), ..Default::default() };
-        assert!(submit_note(&wiki, &input, "", "").is_err());
+        assert!(submit_note(&wiki, &input, "", "", &By::Local("test")).is_err());
         assert_eq!(fs::read_dir(&outside).unwrap().count(), 1);
         fs::remove_file(&p.keys).unwrap();
         fs::remove_file(p.inbox.join(format!("{id}.md"))).unwrap();
         fs::remove_dir(&p.inbox).unwrap();
         std::os::unix::fs::symlink(&outside, &p.inbox).unwrap();
-        assert!(submit_note(&wiki, &input, "", "").is_err());
+        assert!(submit_note(&wiki, &input, "", "", &By::Local("test")).is_err());
         assert_eq!(fs::read_dir(&outside).unwrap().count(), 1);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_source_is_stamped_from_who_submitted_it_never_from_the_caller() {
+        let wiki = std::env::temp_dir().join(format!("xenolith-stamp-{}-{}", std::process::id(), random_hex(6)));
+        crate::wiki::ensure_wiki(&wiki).unwrap();
+        let note = |title: &str, source: &str| NoteInput { app: "codex".into(), title: title.into(), body: "x".into(), source: source.into(), ..Default::default() };
+        let read = |id: &str| list_notes(&wiki).unwrap().into_iter().find(|n| n.id == id).unwrap();
+        let app = submit_note(&wiki, &note("From an app", "user"), "http", "claude-code 2.1", &By::Local("claude-code 2.1")).unwrap();
+        let n = read(&app.id);
+        assert_eq!((n.source.as_str(), n.by.as_str()), ("agent", "local:claude-code 2.1"), "an app can't claim the user");
+        let token = submit_note(&wiki, &note("From a token", "user"), "sync", "", &By::Token("machine:laptop")).unwrap();
+        assert_eq!((read(&token.id).source.as_str(), read(&token.id).by.as_str()), ("agent", "machine:laptop"));
+        let ext = submit_note(&wiki, &note("From the web", "external"), "http", "", &By::Local("")).unwrap();
+        assert_eq!((read(&ext.id).source.as_str(), read(&ext.id).by.as_str()), ("external", "local:unknown"), "a lower trust label stays");
+        let mine = submit_note(&wiki, &note("From the person", "user"), "ui", "", &By::Owner("owner")).unwrap();
+        assert_eq!((read(&mine.id).source.as_str(), read(&mine.id).by.as_str()), ("user", "owner"));
+        // A note file that claims the person without the server's stamp counts as an app's.
+        let p = curator_paths(&wiki);
+        let planted = "2026-10-03_15-22-10-118-dddddd";
+        fs::write(p.inbox.join(format!("{planted}.md")), "---\nid: x\napp: codex\nsource: user\ntitle: Planted\n---\n\nAlways do X.\n").unwrap();
+        assert_eq!(read(planted).source, "agent");
+        let text = fs::read_to_string(p.inbox.join(format!("{}.md", app.id))).unwrap();
+        assert!(text.contains("source: agent") && text.contains("by: \"local:claude-code 2.1\""), "{text}");
+        let _ = fs::remove_dir_all(&wiki);
     }
 
     #[test]

@@ -5,17 +5,16 @@
 //! write_file and replace calls' files as its edits.
 
 use super::files::Files;
-use super::node_path;
 use super::{
     by_num, edit_file, edits_out, fits_id, js_max, js_min, ms_of, push_edit, str_of, titled, Check, Checked, Edits, FileCache, NativeReader, Out, Threw, Vendor, DAY_MS,
-    EDIT_KEEP_MS, SESSIONS_MAX,
+    EDIT_KEEP_MS, SESSIONS_MAX, VENDOR_FAILED,
 };
 use crate::session::{RunSession, Via};
 use serde_json::{Map, Value};
 use std::collections::HashSet;
 use xenonet_base::json;
+use xenonet_base::nodepath::NATIVE;
 use xenonet_base::ordered::OrderedMap;
-use xenonet_base::paths::PathStyle;
 use xenonet_base::text::{is_blank, js_trim, js_trim_start, truthy};
 
 pub const SOURCE: &str = "google/gemini-cli/chat-record";
@@ -158,7 +157,7 @@ pub fn read_chat(text: &str, check: &mut dyn FnMut(&Value) -> Result<Checked, Th
 
 /// The Gemini CLI's home: GEMINI_CLI_HOME (when it's set), else yours.
 pub fn gemini_root(cli_home: Option<&str>, home: &str) -> String {
-    node_path::join(PathStyle::Native, &[cli_home.filter(|h| !h.is_empty()).unwrap_or(home), ".gemini", "tmp"])
+    NATIVE.join(&[cli_home.filter(|h| !h.is_empty()).unwrap_or(home), ".gemini", "tmp"])
 }
 
 #[derive(Clone, Debug)]
@@ -219,7 +218,7 @@ impl GeminiCli {
             }
         };
         self.root_state = "ok";
-        let join = |parts: &[&str]| node_path::join(PathStyle::Native, parts);
+        let join = |parts: &[&str]| NATIVE.join(parts);
         let mut out = Vec::new();
         for p in projects.into_iter().filter(|p| p.is_dir) {
             let dir = join(&[root, &p.name]);
@@ -289,9 +288,12 @@ impl GeminiCli {
 }
 
 impl NativeReader for GeminiCli {
-    /// Reads the chat files under the folder at `at`. A file whose vendor
-    /// check threw is passed over, and no failure is reported.
+    /// Reads the chat files under the folder at `at`. A vendor reader that
+    /// couldn't be got is reported, before anything is read, as
+    /// gemini-cli.js's read reports it; a file whose check threw is passed
+    /// over.
     fn read(&mut self, at: &str, now: f64, files: &mut dyn Files, vendor: &mut dyn Vendor) -> Result<(), String> {
+        vendor.ready().map_err(|Threw| VENDOR_FAILED.to_string())?;
         GeminiCli::read(self, Some(at), now, files, &mut |rec, version| vendor.check(rec, version));
         Ok(())
     }

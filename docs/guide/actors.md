@@ -94,7 +94,9 @@ Muse can't run commands on your Mac yet, so it takes the gateway instead (below)
 
 The actor gateway is an MCP server for actors that work in their makers' clouds, such as Muse or a Grok Bot. Through it they can message the sessions and actors here, and read their own messages, with the tools `send`, `inbox`, `peers`, `whoami` and `heartbeat`. With `report_run`, an actor that drives a harness somewhere else, such as Claude Code in a sandbox, shows each run as a session under it (see [Related work](related-work.md#space-a-run-in-a-sandbox-shown-as-a-session-experimental)). They can reach nothing else of XenoNet through it.
 
-It listens on this computer alone, on XenoNet's port plus 10 (47850). A tunnel puts it on the internet. XenoNet doesn't assume you have any particular one: you pick it, and XenoNet runs it with the sign-in that tool already has.
+It listens on this computer alone, on XenoNet's port plus 1010 (48850), or the port `XENONET_GATEWAY_PORT` names. Once you set it up, it keeps that port, even if XenoNet's own port changes. A tunnel puts it on the internet. XenoNet doesn't assume you have any particular one: you pick it, and XenoNet runs it with the sign-in that tool already has.
+
+XenoNet used to put the gateway on its port plus 10 (47850), which is Xenolith's port. A gateway you set up then keeps that port, so its tunnel and the apps that use it go on working: XenoNet saves the port with the gateway's settings the first time it starts. To move it off Xenolith's port, start XenoNet with `XENONET_GATEWAY_PORT` set to the port you want, then point the tunnel there: XenoNet sets up again the tunnels it runs itself, and the window offers Repair for Tailscale Funnel.
 
 | Tunnel | What you need | Its address |
 |---|---|---|
@@ -124,6 +126,39 @@ Once an app calls, its row in the panel says when it last did.
 - **A gateway token unused for 30 days** stops working. The panel warns you a week before. If an app calls with a token that was replaced or taken away, its row says so, and **Reconnect** gives it a new one.
 
 When a message through the gateway reaches a session or actor here, XenoNet marks it as sent with a gateway token from outside this machine. That proof is weaker than a process XenoNet checked here. Like any message, it approves nothing. `xenonet gateway` shows the same from your own terminal, `xenonet gateway tunnels` lists the tunnels and which ones this computer has, and `xenonet gateway off` closes the gateway and stops the tunnel XenoNet runs.
+
+### Agents that speak A2A
+
+Agents built on frameworks that speak A2A, the Linux Foundation's agent-to-agent protocol, can reach the sessions here through the gateway. CrewAI, LangGraph's agent server, Microsoft Agent Framework, Google's ADK and Bedrock AgentCore speak it. XenoNet speaks version 1.0, over its JSON-RPC binding.
+
+It's off until you turn it on. Set the gateway up first, then in the Actors panel, under **actor gateway**, turn on **Let A2A agents reach XenoNet**. The gateway then also answers at:
+
+- `https://<the gateway's address>/.well-known/agent-card.json`, XenoNet's Agent Card, which tells an agent how to call;
+- `https://<the gateway's address>/a2a`, where it calls.
+
+Each A2A agent is an actor with its own token and scopes. To connect one:
+
+1. Add it with **Add an actor…**, unless XenoNet knows it already.
+2. On its row, choose **Connect…**, then **As an A2A agent**. XenoNet makes a gateway token, and shows it masked beside the card's address, each with its Copy.
+3. Give the agent the card's address, and the token to send as `Authorization: Bearer <token>`.
+
+What an A2A agent can do:
+
+- **Message a session.** Each message is a task. The agent names the session in the message's metadata as `target`: its id (`claude:…`, `codex:…`), or `repo:<name>` for the sessions in that repo. A message with no target goes to the agent's default target, which you set under its name in the panel once it has called. As for any actor, it reaches only what its scope allows, and without a grant it reaches nothing (see [scopes](live-delivery.md#what-actors-may-see-scopes)).
+- **Reach your other machines.** In a [network](network.md), a session on another machine is named `@laptop:claude:…`, and a grant such as `machine:laptop` lets the agent reach it. That session's reply completes the task, as here.
+- **Get the reply as the task's result.** A task is working once its message is in the session's inbox, and completed when the session replies. The reply is the task's status message and its artifact. A session that writes to the agent without saying which message it answers is answering the agent's oldest open task with it.
+- **Go on in a thread.** A2A's context is one XenoNet thread: the next message in it answers the last one, and goes to whoever answered. Like any thread, it stops six replies deep.
+- **Follow its tasks**, with `GetTask`, `ListTasks`, `SubscribeToTask` and `SendStreamingMessage`, whose updates come as server-sent events. `SendMessage` waits up to 25 seconds for the reply, then answers with the task as it stands.
+- **Cancel a task** with `CancelTask`. The session is told no answer is needed.
+
+What it can't do:
+
+- Send files or data. It sends text.
+- Get push notifications. XenoNet makes no calls out to it.
+- Send more than 60 messages an hour, or more than 6 an hour to a repo, a selector or all, as for any actor at the gateway. A request body is 64 KiB at most.
+- See another agent's tasks.
+
+Its messages reach sessions marked as an actor's, through the gateway, and approve nothing, like any message. XenoNet keeps the tasks in `a2a.sqlite` in its state folder, readable only by you, for a week after they end, as it keeps messages, and at most an agent's latest 1000.
 
 ### Waking an actor when a message arrives
 
@@ -199,7 +234,7 @@ A program that speaks MCP gets the same calls as tools from the `xenonet` MCP se
 
 A token is `xenonet_actor_` followed by 64 hex digits. XenoNet shows it once, and keeps only a hash of it. The window masks it as `xenonet_actor_••••`, and leaves it out of the page until you choose **Show**, which shows it for ten seconds. **Copy** copies it without showing it. XenoNet masks a shown token again when you switch to another app, while identities are hidden, and in screenshots an agent takes of the window. The token travels in the `Authorization: Bearer` header, from a file only you can read, never as an argument or in a URL.
 
-The `xenonet` command won't write a token into a git working tree or the projects folder unless you add `--force`. The doctor looks for tokens left in the repos it knows, ignored files such as a `.env` included. It looks once a day, and whenever you run it yourself.
+The `xenonet` command won't write a token into a git working tree or the projects folder unless you add `--force`. The doctor looks for tokens left in the repos it knows, ignored files such as a `.env` included. It looks once a day, and whenever you run it yourself. It warns only about tokens XenoNet issued, so a made-up one in a test fixture doesn't count.
 
 On macOS, a token is also held to processes. It never works from under Claude Code or Codex, or from an actor app's own process. A product's token works only from under that product.
 

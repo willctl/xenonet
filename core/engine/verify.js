@@ -58,8 +58,9 @@
 // ChatGPT app runs many in one), and a session no running process has been
 // seen to hold yet. Codex, and Claude Code built from source or run by
 // Node, never pin for sure, so theirs go to whoever names them first. Where
-// XenoNet can't look (not macOS, for now), requests go through as before, and
-// an actor's token alone decides.
+// XenoNet can't look (not macOS, for now), requests in the checked apps'
+// sessions' names (below) go through as before, and an actor's token alone
+// decides.
 //
 // Where XenoNet can look, a request whose process it can't see is refused:
 // one netstat has no line for, or one gone before the process table was
@@ -72,16 +73,28 @@
 // refusals.
 //
 // The apps checked are those whose processes XenoNet tells apart (the
-// registry's `processes`, by core/processes.js): Claude Code, Codex and
-// OpenCode. A request in another app's session's name isn't checked.
+// registry's `processes`, by core/processes.js): Claude Code, Codex, Grok
+// Build and OpenCode. A request in another app's session's name is refused,
+// wherever XenoNet runs: no check could ever pass it, so it can't call as a
+// session. Actors call with their tokens, and the runs an actor reports
+// come through the gateway, so neither meets this rule.
 import { agentApps } from "../processes.js";
+import { APP as REGISTRY } from "../apps.js";
 
 const AGENTS = Object.fromEntries(agentApps().map((a) => [a.id, a]));
 const APP = Object.fromEntries(Object.values(AGENTS).map((a) => [a.id, a.name]));
 const aApp = (app) => `${/^[AEIOU]/i.test(Object.hasOwn(APP, app) ? APP[app] : "") ? "an" : "a"} ${APP[app]}`;
 // An app's own rules, or none.
 const rules = (app) => (Object.hasOwn(AGENTS, app) ? AGENTS[app] : {});
+// Why a request in `agent`'s name, a session of `app`, which XenoNet doesn't
+// check, is refused.
+function uncheckable(agent, app) {
+  const why = Object.hasOwn(REGISTRY, app) ? `XenoNet can't tell ${REGISTRY[app].name}'s processes apart, so it can't check that the request comes from that session` : `XenoNet doesn't know an app called "${app}"`;
+  return `requests in ${agent}'s name are refused: ${why}`;
+}
 const PRODUCT = { "hermes-agent": "Hermes Agent", "grok-bot": "Grok Bot", muse: "Muse", dots: "the ChatGPT app" };
+// The tray app's bundle, as it's installed.
+export const TRAY_APP = "XenoNet Tray.app";
 // The products whose apps their makers sign, by the maker's name (their
 // teams are in core/procs.js): their actors register and report only from
 // under the app as its maker built it, not a bundle that only calls itself
@@ -170,7 +183,8 @@ export function createVerifier({ procs, store, home = null, now = () => Date.now
   // come from Claude Code itself. Returns { ok, checked, root?, reason? }.
   async function check(socket, agent, { hook = false } = {}) {
     const app = String(agent).split(":")[0];
-    if (!APP[app] || !procs.supported) return pass();
+    if (!Object.hasOwn(APP, app)) return refuse(agent, uncheckable(agent, app));
+    if (!procs.supported) return pass();
     const { pid, chain } = await see(socket);
     if (!pid) return pass();
     if (!chain.length) return unseen(agent, `requests in ${agent}'s name have to come from ${aApp(app)} process, and this one had gone before XenoNet could look`);
@@ -352,6 +366,31 @@ export function createVerifier({ procs, store, home = null, now = () => Date.now
     return verdict;
   }
 
+  // XenoNet's tray app, connecting to the component socket for the key its
+  // routes take. Only XenoNet Tray.app's own executable, by its real path,
+  // in one of the Applications folders `apps` names (/Applications and the
+  // home folder's), with no agent and no actor product anywhere above it.
+  // Never passed unchecked: the tray is a Mac's, and where XenoNet can't
+  // look there's no telling who asks.
+  async function tray(socket, apps = []) {
+    if (!procs.supported) return refuse(null, "XenoNet can't see which program connects as its tray on this system");
+    const { pid, chain } = await see(socket, { exe: true });
+    if (!pid || !chain.length) return unseen(null, "XenoNet couldn't see which program connected as its tray");
+    state.checked++;
+    const agent = chain.find((p) => p.agent);
+    if (agent) return refuse(null, `XenoNet's tray can't run under ${aApp(agent.agent)} process`);
+    const product = chain.find((p) => p.product);
+    if (product) return refuse(null, `XenoNet's tray can't run under ${PRODUCT[product.product.product]}`);
+    const file = typeof fileOf(chain[0]) === "string" ? fileOf(chain[0]) : "";
+    const own = apps.some((dir) => {
+      if (!dir) return false;
+      const inside = `${dir.replace(/\/+$/, "")}/${TRAY_APP}/Contents/MacOS/`;
+      return file.startsWith(inside) && file.length > inside.length && !file.slice(inside.length).includes("/");
+    });
+    if (!own) return refuse(null, `only ${TRAY_APP}'s own executable, in /Applications or your own Applications folder, can be XenoNet's tray`);
+    return { ok: true, checked: true };
+  }
+
   function pass() {
     state.unchecked++;
     return { ok: true, checked: false };
@@ -369,5 +408,5 @@ export function createVerifier({ procs, store, home = null, now = () => Date.now
     return { ...refuse(agent, reason), unseen: true };
   }
 
-  return { check, person, window, desktop, actor, register, asker, peer, lineage, state };
+  return { check, person, window, desktop, tray, actor, register, asker, peer, lineage, state };
 }

@@ -71,8 +71,9 @@ export function createDriver(app) {
       out.active = !!n.active;
       if (n.repo?.dirty) out.uncommitted = n.repo.dirty;
     } else if (n.kind === "host") out.state = n.state;
-    // From another machine (hosts.js): which, and whether it's live.
-    if (n.host) Object.assign(out, { host: n.host, ...(n.stale ? { stale: true } : {}) });
+    // From another machine (hosts.js): which, and whether it's live; one in
+    // your network says so, and for a session whether it waits on you.
+    if (n.host) Object.assign(out, { host: n.host, ...(n.stale ? { stale: true } : {}), ...(n.network ? { network: n.network } : {}), ...(n.presence ? { waits: !!n.presence.waits } : {}) });
     return out;
   }
 
@@ -83,7 +84,14 @@ export function createDriver(app) {
     // many ask, in a window without the key; an actor waiting on you.
     if (it.kind === "request") return { kind: "request", request: it.id, actor: it.request.actor, name: it.request.name, ...(it.request.gateway ? { gatewayToken: true } : {}) };
     if (it.kind === "requests") return { kind: "requests", count: it.count };
-    if (it.kind === "actor-need") return { kind: "actor-need", actor: it.id, waits: it.sub, text: it.text };
+    // What waits on you says whether it sounds here: only where you are,
+    // in a network.
+    if (it.kind === "actor-need") return { kind: "actor-need", actor: it.id, waits: it.sub, text: it.text, chime: it.chime !== false };
+    // Another machine's agent waiting on you or stuck, in a network: which
+    // machine, and for a wait whether it sounds here.
+    if (it.kind === "remote-need") return { kind: "remote-need", agent: it.id, host: it.host, waits: it.sub, text: it.text, chime: !!it.chime, ...(it.stale ? { stale: true } : {}) };
+    if (it.kind === "remote-stuck") return { kind: "remote-stuck", agent: it.id, host: it.host, text: it.text, ...(it.stale ? { stale: true } : {}) };
+    if (it.kind === "need") return { kind: "need", session: it.id, text: it.text, chime: it.chime !== false };
     return { kind: it.kind, session: it.id, text: it.text };
   }
 
@@ -97,13 +105,18 @@ export function createDriver(app) {
       selection: selected ? brief(nodeOf(selected)) : null,
       gathered: scene.gathering(),
       identities: { filter: app.identities?.selected ?? [], masked: !!app.identities?.masked },
-      overlays: { palette: palette.isOpen, modal: modals.isOpen, needsYou: !!app.needsYou?.isOpen, preview: preview.isOpen, rename: !!app.hud?.renaming, terminal: !!app.terminal()?.isOpen, wallpaper: app.wallpaper(), replay: replay.active, film: app.film && app.film.state !== "idle" ? app.film.state : false, export: !!app.exportPanel?.isOpen, switcher: !!app.themes?.switcher.isOpen, gallery: !!app.themes?.gallery.isOpen },
+      // The toggles under Filters: each app's sessions, archived ones, and
+      // the folders outside the projects folder.
+      filters: app.hud?.filters ? { ...app.hud.filters } : null,
+      overlays: { palette: palette.isOpen, modal: modals.isOpen, needsYou: !!app.needsYou?.isOpen, network: !!app.network?.isOpen, preview: preview.isOpen, rename: !!app.hud?.renaming, terminal: !!app.terminal()?.isOpen, wallpaper: app.wallpaper(), replay: replay.active, film: app.film && app.film.state !== "idle" ? app.film.state : false, export: !!app.exportPanel?.isOpen, switcher: !!app.themes?.switcher.isOpen, gallery: !!app.themes?.gallery.isOpen },
       alerts: alerts.items.map(alertBrief),
       counts: {
         nodes: graph?.nodes.length ?? 0,
         drawn: scene.nodes().length,
         projects: count(["project", "native", "zone"]),
         sessions: count(["session"]),
+        // Sessions by app, on the map and drawn now, through the filters.
+        apps: Object.fromEntries(["claude", "codex", "grok"].map((a) => [a, { sessions: graph?.nodes.filter((n) => n.kind === "session" && n.app === a).length ?? 0, drawn: scene.nodes().filter((n) => n.kind === "session" && n.app === a && scene.shown(n.id)).length }])),
         working: live?.sessions.filter((s) => s.status !== "idle").length ?? 0,
         actors: scene.actors().length,
         beams: scene.actorLayer.beams().length,
@@ -118,6 +131,9 @@ export function createDriver(app) {
       // it keeps (null for every frame the display offers) and the frames
       // drawn so far.
       render: renderState(),
+      // How the console draws its panels: plainPanels, solid without the
+      // glass blur behind them (the palette's plain panels).
+      look: app.look?.get() ?? null,
       view: scene.view(),
       viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
       // The narrow screen's sheet of panels: which is open, if the screen is narrow.
@@ -229,8 +245,9 @@ export function createDriver(app) {
     // Nodes whose id, title or name contain every word of `query`, drawn
     // ones first, then the most recent. `kind` narrows it: session, project,
     // native (a Codex project), zone (a folder outside the projects folder),
-    // resource, wiki, page, core, host (another machine's XenoNet, with
-    // XENONET_HOSTS=1) or actor (actors beside the map, by id, name and
+    // resource (a shared system), wiki (the shared context), page (a context
+    // page), core, host (another machine's XenoNet: over SSH
+    // with XENONET_HOSTS=1, or in your network) or actor (actors beside the map, by id, name and
     // product, after the nodes when not narrowed, so words that found a node
     // still find it first). A node from another machine has an id that
     // starts with @<host>: and says which host it's on.
@@ -459,6 +476,47 @@ export function createDriver(app) {
       }
       throw new Error(`background takes status, offer or dismiss, not ${action}`);
     },
+    // The network across machines (network.js): Network settings and Add
+    // a machine. "read" (the default) says how it stands without opening
+    // anything: whether this machine is in a network, the gateway and its
+    // link, each machine with its agents, what waits on you, the tickets,
+    // the outbox, a roster mismatch and the titles-only setting, and, while
+    // the panel shows the join line, whether it shows masked (never the
+    // ticket). "open" shows the panel, "start" and "join" its forms, "add"
+    // Add a machine with { host, window } filled in, and "close" closes it;
+    // "refresh" reads it again, and "served" gives GET /api/net/state as
+    // the window reads it. Making the line, starting, joining,
+    // removing, replacing, approving and the setting are yours: clicks where the
+    // answer's `at` points, which only the demo and test instances let the
+    // control channel make.
+    async network(action = "read", arg = null, opts) {
+      const n = app.network;
+      if (!n) throw new Error("This page has no Network panel.");
+      if (action === "read") return n.driverState();
+      if (action === "refresh") return (await n.refresh(), n.driverState());
+      // The state as the service serves it to this window, which is the
+      // owner's: the window's key goes with it.
+      if (action === "served") return n.served();
+      let st;
+      if (action === "open") st = await act(() => n.open(), opts);
+      else if (action === "start" || action === "join") st = await act(() => n.open(action), opts);
+      else if (action === "add") st = await act(() => n.addMachine({ host: arg?.host ?? "", window: !!arg?.window }), opts);
+      else if (action === "close") st = await act(() => n.close(), opts);
+      else throw new Error("Use read, refresh, served, open, start, join, add or close.");
+      return { ...st, network: n.driverState() };
+    },
+    // The box that messages a session as you (one of this machine's, or
+    // @<host>:<id> on another in the network) or an actor, opened with
+    // `text` in it. Send is yours: a click at the answer's message.sendAt,
+    // which only the demo and test instances let the control channel make.
+    // message() reads how the box and the last message stand, never their
+    // words.
+    async messageAs(to, text = "", opts) {
+      if (typeof to !== "string" || !to) throw new Error("say who to message: a session's id, or @<host>:<id> for another machine's");
+      const st = await act(() => app.messageTo(to, { text: String(text ?? "") }), opts);
+      return { ...st, message: app.message() };
+    },
+    message: () => app.message?.() ?? null,
     commands: () => app.commands.map(({ id, label, key }) => ({ id, label, ...(key ? { key } : {}) })),
     async refusals(action = "open", value, opts) {
       const st = await act(() => app.refusals.action(action, value), opts);
@@ -539,6 +597,9 @@ export function createDriver(app) {
     filterIdentities: (keys = [], opts) => act(() => app.identities.setSelected(Array.isArray(keys) ? keys : [keys]), opts),
     // Hides identities ("GitHub A", "Claude B"…) or shows them.
     maskIdentities: (on = true, opts) => act(() => app.identities.setMasked(!!on), opts),
+    // The toggles under Filters, on or off by name ({ grok: false }), as a
+    // click on each would set them.
+    filters: (set = {}, opts) => act(() => Object.entries(set ?? {}).forEach(([name, on]) => app.hud.setFilter(name, on)), opts),
 
     // The projects folder XenoNet reads (core/workspace.js): its path, where
     // that comes from (source: env for XENONET_PROJECTS_DIR, chosen or
@@ -577,6 +638,13 @@ export function createDriver(app) {
       return { ...renderState(), drawn, forcedDrawn: now.forced - before.forced, rates: [...rates].map((r) => (Number.isFinite(r) ? r : null)), perSecond: Math.round((drawn / ((performance.now() - t0) / 1000)) * 10) / 10 };
     },
 
+    // How the console draws its panels, as state().look says; and plain
+    // panels on or off (solid, without the glass blur behind them, a large
+    // share of a visible frame's GPU time), as the palette's switch does,
+    // kept for this window. Returns the state once the view has settled.
+    look: () => app.look.get(),
+    plainPanels: (on = true, opts) => act(() => app.look.plainPanels(yes(on)), opts),
+
     // Holds every ambient animation still, CSS included, for screenshots.
     async still(on = true) {
       scene.setStill(on);
@@ -594,7 +662,7 @@ export function createDriver(app) {
     },
     async mcp(id, opts) {
       const node = nodeOf(known(id));
-      if (!node || !["resource", "wiki"].includes(node.kind)) throw new Error("choose an MCP shared system or Agent Wiki");
+      if (!node || !["resource", "wiki"].includes(node.kind)) throw new Error("choose an MCP shared system or the shared context");
       return act(async () => { await app.select(node.id); await app.hud.mcp.open(node); }, opts);
     },
     mcpTab: (tab, opts) => act(() => app.hud.mcp.tab(tab), opts),
@@ -643,8 +711,8 @@ export function createDriver(app) {
       return { ...st, made };
     },
 
-    // Other machines on the map (hosts.js, with XENONET_HOSTS=1): each host
-    // with how it stands, its node and where that is on screen, its
+    // Other machines on the map (hosts.js: over SSH with XENONET_HOSTS=1,
+    // and your network's, from their presence): each host with how it stands, its node and where that is on screen, its
     // constellation, and the machines' chips under Filters with the ones
     // picked; the bridges between checkouts of one repo, drawn or not.
     hosts() {

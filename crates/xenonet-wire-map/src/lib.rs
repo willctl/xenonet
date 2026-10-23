@@ -6,6 +6,7 @@
 // A core's failure is the service's CoreError, as its traits return it.
 #![expect(clippy::result_large_err, reason = "the cores' traits return the service's CoreError")]
 
+pub mod archive;
 pub mod blocks;
 pub mod claude;
 pub mod codex;
@@ -69,7 +70,9 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
     let vendor = vendor::Vendor::with_readers(readers);
     let store = store::StateStore::new(&cfg.state_dir, &cfg.projects_dir);
     let codex_sessions = std::path::Path::new(&cfg.codex_home).join("sessions").to_string_lossy().into_owned();
-    let live = live::Live::new(&cfg.claude_projects_dir, &codex_sessions, cfg.claude_desktop_dir.as_deref(), cfg.claude_usage, &cfg.home_dir, vendor.clone());
+    let grok_sessions = std::path::Path::new(&cfg.grok_home).join("sessions").to_string_lossy().into_owned();
+    let live = live::Live::new(&cfg.claude_projects_dir, &codex_sessions, &grok_sessions, cfg.claude_desktop_dir.as_deref(), cfg.claude_usage, &cfg.home_dir, vendor.clone());
+    live.context_server(cfg.wiki_server.as_str());
     let codex = codex::CodexClient::new(cfg.codex_binary(), env.version.clone(), vendor.clone());
     let readers = match &demo {
         Some(d) => state::Readers::Demo(d.clone()),

@@ -22,6 +22,10 @@ async fn inner(ctx: &Ctx, req: &mut Req) -> Result<Reply, CoreError> {
     }
     if let Some(host) = req.param("host").filter(|h| !h.is_empty()) {
         let Some(hub) = &ctx.cores.hub else { return Ok(Reply::error(404, "that host isn't on this map")) };
+        // Another machine's reads are the window's alone.
+        if !ctx.window_only(req) {
+            return Ok(crate::routes::hosts::window_only_reply());
+        }
         return Ok(match hub.get(host, &format!("/api/mcp?{}", url_search(&[("server", &server)]))).await {
             Ok(r) => Reply::json(r.status, r.body),
             Err(e) if e.is_pending() => pending_reply(&e),

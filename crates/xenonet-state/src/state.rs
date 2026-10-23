@@ -58,19 +58,20 @@ pub fn automated(n: Option<&Value>) -> bool {
     s(n, "source") == Some("exec") || source.starts_with("subAgent") || s(n, "originator") == Some("codex_exec") || s(n, "parentKind") == Some("subagent")
 }
 
-/// The sessions a refresh maps: each app's fresh list, or for an app whose
-/// listing failed, the sessions it had; then the runs XenoNet observes,
-/// unless it reads the same run itself; with the demo's own names.
-pub fn merge_sessions(prev: &[Value], codex: (bool, &[Value]), claude: (bool, &[Value]), observed: &[Value], demo_titles: &HashMap<String, Value>) -> Vec<Value> {
-    let keep = |(ok, fresh): (bool, &[Value]), app: &str| -> Vec<Value> {
-        if ok {
-            fresh.to_vec()
+/// The sessions a refresh maps: each app's fresh list (`lists`: the app,
+/// whether its listing went well, and what it found, in the order they go
+/// in), or for an app whose listing failed, the sessions it had; then the
+/// runs XenoNet observes, unless it reads the same run itself; with the
+/// demo's own names.
+pub fn merge_sessions(prev: &[Value], lists: &[(&str, bool, &[Value])], observed: &[Value], demo_titles: &HashMap<String, Value>) -> Vec<Value> {
+    let mut sessions = Vec::new();
+    for (app, ok, fresh) in lists {
+        if *ok {
+            sessions.extend_from_slice(fresh);
         } else {
-            prev.iter().filter(|n| s(n, "app") == Some(app)).cloned().collect()
+            sessions.extend(prev.iter().filter(|n| s(n, "app") == Some(app)).cloned());
         }
-    };
-    let mut sessions = keep(codex, "codex");
-    sessions.extend(keep(claude, "claude"));
+    }
     let id = |v: &Value| get(v, "id").map_or_else(|| "\u{0}undefined".into(), js_string);
     let read: HashSet<String> = sessions.iter().map(id).collect();
     for o in observed {
@@ -589,7 +590,7 @@ mod tests {
         let observed = vec![json!({ "id": "codex:b", "app": "codex", "observed": "numbat" }), json!({ "id": "gemini-cli:z" })];
         let mut titles = HashMap::new();
         titles.insert("claude:a".to_string(), json!("Mine"));
-        let merged = merge_sessions(&prev, (true, &fresh), (false, &[]), &observed, &titles);
+        let merged = merge_sessions(&prev, &[("codex", true, &fresh), ("claude", false, &[])], &observed, &titles);
         assert_eq!(merged.iter().map(|s| s["id"].as_str().unwrap()).collect::<Vec<_>>(), ["codex:b", "claude:a", "gemini-cli:z"]);
         assert_eq!(merged[1]["title"], "Mine");
 

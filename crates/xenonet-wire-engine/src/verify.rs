@@ -53,6 +53,30 @@ impl Calls for VerifyCalls<'_> {
     }
 }
 
+/// The Applications folders the tray app may run from: the machine's, and
+/// the home folder's, as written and under the home folder's real path,
+/// since lsof names an executable by its real path. A demo's home is its
+/// made-up world's, so a demo's tray runs from that world's Applications.
+pub fn tray_apps(home: &str) -> Vec<String> {
+    let mut out = vec!["/Applications".to_string()];
+    if home.is_empty() {
+        return out;
+    }
+    // The tray is a macOS app, so these are macOS paths, joined with `/`
+    // whatever system the check runs on.
+    let mut homes = vec![home.to_string()];
+    if let Ok(real) = std::fs::canonicalize(home) {
+        homes.push(real.to_string_lossy().into_owned());
+    }
+    for h in homes {
+        let apps = format!("{}/Applications", h.trim_end_matches('/'));
+        if !out.contains(&apps) {
+            out.push(apps);
+        }
+    }
+    out
+}
+
 /// The checks, as the routes call them.
 pub struct Checks {
     pub verifier: Arc<Verifier>,
@@ -103,6 +127,10 @@ impl Verify for Checks {
     async fn desktop(&self, peer: Option<Peer>) -> Value {
         let connected = peer.is_some();
         self.run(peer, move |v, c| v.desktop(c, connected)).await
+    }
+    async fn tray(&self, peer: Peer, home: &str) -> Value {
+        let apps = tray_apps(home);
+        self.run(Some(peer), move |v, c| v.tray(c, &apps)).await
     }
     async fn actor(&self, peer: Peer, slug: &str, product: Value, pid: Value) -> Value {
         let who = crate::js::obj(vec![("slug", Arg::text(slug)), ("product", crate::js::arg(&product))]);
@@ -157,8 +185,15 @@ mod tests {
         }
         assert_eq!(c.peer(peer).await, "?");
         assert_eq!(c.state()["unchecked"], json!(if c.sys.procs.supported { 1 } else { 2 }));
-        // An app XenoNet doesn't check passes.
-        assert_eq!(c.check(peer, "nobody:x", false).await["ok"], true);
+        // A session of an app XenoNet doesn't check is refused, never let
+        // through unchecked.
+        let other = c.check(peer, "gemini-cli:x", false).await;
+        assert_eq!(other["ok"], false, "{other}");
+        assert_eq!(
+            other["reason"],
+            "requests in gemini-cli:x's name are refused: XenoNet can't tell Gemini CLI's processes apart, so it can't check that the request comes from that session"
+        );
+        assert_eq!(c.state()["unchecked"], json!(if c.sys.procs.supported { 1 } else { 2 }));
     }
 
     // A made-up Mac, answering the commands procs asks for: the Claude app
@@ -191,6 +226,49 @@ mod tests {
 
     fn from(port: u16) -> Peer {
         Peer { remote: format!("127.0.0.1:{port}").parse().unwrap(), local: "127.0.0.1:47842".parse().unwrap() }
+    }
+
+    // The tray app in the home folder's Applications, started by launchd at
+    // login (500), and the same executable started from a shell under
+    // Claude Code (510); lsof names each executable by its real path.
+    #[tokio::test]
+    async fn the_tray_passes_from_its_bundle_in_an_applications_folder_and_never_under_an_agent() {
+        const TRAY: &str = "/Users/me/Applications/XenoNet Tray.app/Contents/MacOS/XenoNet Tray";
+        let rows = [
+            (1, 0, "/sbin/launchd"),
+            (100, 1, "/Applications/Claude.app/Contents/MacOS/Claude"),
+            (200, 100, "/Users/me/.local/share/claude/versions/2.1.288"),
+            (220, 200, "/bin/zsh"),
+            (500, 1, TRAY),
+            (510, 220, TRAY),
+        ];
+        let ps = rows.iter().map(|(pid, ppid, p)| format!("{pid:>5} {ppid:>5} Fri Oct  3 16:34:29 2026 {p}\n")).collect::<Vec<_>>().concat();
+        let netstat = [(51010, 500), (51011, 510)]
+            .iter()
+            .map(|(port, pid)| format!("tcp4       0      0  127.0.0.1.{port}        127.0.0.1.47842        ESTABLISHED    111   2970  406912  146988 proc:{pid}            00102 00000104 0000000003bca9cb\n"))
+            .collect::<Vec<_>>()
+            .concat();
+        let exes: Vec<(String, String)> = rows.iter().map(|(pid, _, p)| (pid.to_string(), (*p).to_string())).collect();
+        let sys = System::with(
+            "darwin",
+            Box::new(move |c| match c.file.as_str() {
+                "ps" if c.args.first().map(String::as_str) == Some("-axo") => Ok(ps.clone()),
+                "netstat" => Ok(netstat.clone()),
+                "lsof" if c.args.iter().any(|a| a == "txt") => {
+                    let asked: Vec<&str> = c.args.get(2).map(|l| l.split(',').collect()).unwrap_or_default();
+                    let lines: Vec<String> = exes.iter().filter(|(pid, _)| asked.contains(&pid.as_str())).map(|(pid, exe)| format!("p{pid}\nftxt\nn{exe}\n")).collect();
+                    Ok(lines.concat())
+                }
+                _ => Err(xenonet_engine::procs::Failure { message: format!("Command failed: {}", c.file), stdout: None }),
+            }),
+        );
+        let c = Checks::new(Shared::new(xenonet_engine::store::EngineStore::open(":memory:", 0.0).unwrap()), sys);
+        assert_eq!(tray_apps("/Users/me"), ["/Applications", "/Users/me/Applications"]);
+        assert_eq!(c.tray(from(51010), "/Users/me").await, json!({ "ok": true, "checked": true }));
+        let under = c.tray(from(51011), "/Users/me").await;
+        assert_eq!(under["reason"], "XenoNet's tray can't run under a Claude Code process", "{under}");
+        let other = c.tray(from(51010), "/Users/you").await;
+        assert_eq!(other["ok"], false, "another home's Applications: {other}");
     }
 
     #[tokio::test]

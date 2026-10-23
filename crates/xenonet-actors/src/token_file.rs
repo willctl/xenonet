@@ -94,10 +94,6 @@ pub fn git_tree_of(dir: &str) -> Option<String> {
     }
 }
 
-fn parent_of(full: &str) -> String {
-    Path::new(full).parent().map_or_else(|| full.to_string(), |p| p.to_string_lossy().into_owned())
-}
-
 /// Why a token shouldn't be written to `file`, or None when it may: a file
 /// that's there already, or one inside a git working tree or the projects
 /// folder. `force` says to go ahead anyway.
@@ -106,7 +102,7 @@ pub fn token_file_refusal(file: &str, force: bool, projects_dir: Option<&str>) -
         return None;
     }
     let full = resolve(file);
-    if let Some(tree) = git_tree_of(&parent_of(&full)) {
+    if let Some(tree) = git_tree_of(&xenonet_base::nodepath::dirname(&full)) {
         return Some(format!("{full} is inside a git working tree ({tree}), where agents read freely and tokens get committed. Pick a file elsewhere, such as ~/.config/<name>/xenonet.token, or pass --force"));
     }
     let projects = projects_dir.filter(|p| !p.is_empty()).and_then(path_key);
@@ -143,7 +139,7 @@ pub fn write_token_file(file: &str, token: &str, windows: bool, run: &mut Run<'_
         return Err(said(why));
     }
     let full = resolve(file);
-    let dir = parent_of(&full);
+    let dir = xenonet_base::nodepath::dirname(&full);
     let mut b = std::fs::DirBuilder::new();
     b.recursive(true);
     #[cfg(unix)]

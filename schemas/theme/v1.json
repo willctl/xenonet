@@ -29,7 +29,7 @@
       "type": "string"
     },
     "colors": {
-      "description": "By role. The page applies only #rrggbb values. actor and human are the actors layer's defaults",
+      "description": "By role; wiki is the shared context's. The page applies only #rrggbb values. actor and human are the actors layer's defaults",
       "type": "object",
       "properties": {
         "bg": {
@@ -108,6 +108,11 @@
           "description": "A color, #rrggbb"
         },
         "codex": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "A color, #rrggbb"
+        },
+        "grok": {
           "type": "string",
           "pattern": "^#[0-9a-fA-F]{6}$",
           "description": "A color, #rrggbb"
@@ -254,7 +259,7 @@
       "additionalProperties": {}
     },
     "pages": {
-      "description": "Agent Wiki page types",
+      "description": "Context page types",
       "type": "object",
       "properties": {
         "project": {

@@ -1,4 +1,6 @@
 //! The service's read-only GET /status on 127.0.0.1: the only way the tray talks to the service.
+//! With "local": "none" in access.json, /status leaves out what the wiki says unless the owner key
+//! (owner.rs) comes with the request.
 
 use crate::config::Config;
 use serde_json::Value;
@@ -13,14 +15,16 @@ pub struct Status {
     pub error: Option<String>,
 }
 
-/// GET http://127.0.0.1:<port><path>: (status code, body). Plain HTTP/1.1, 4 s timeouts, no proxy.
-pub fn http_get(port: u16, path: &str) -> Result<(u16, String), String> {
+/// GET http://127.0.0.1:<port><path>, with the owner key when given: (status code, body). Plain
+/// HTTP/1.1, 4 s timeouts, no proxy.
+fn http_get_as(port: u16, path: &str, key: Option<&str>) -> Result<(u16, String), String> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let t = Duration::from_secs(4);
     let mut s = TcpStream::connect_timeout(&addr, t).map_err(|e| e.to_string())?;
     let _ = s.set_read_timeout(Some(t));
     let _ = s.set_write_timeout(Some(t));
-    write!(s, "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nConnection: close\r\n\r\n").map_err(|e| e.to_string())?;
+    let owner = key.map(|k| format!("{}: {k}\r\n", xenolith_core::owner::HEADER)).unwrap_or_default();
+    write!(s, "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\n{owner}Connection: close\r\n\r\n").map_err(|e| e.to_string())?;
     let mut raw = Vec::new();
     s.read_to_end(&mut raw).map_err(|e| e.to_string())?;
     let text = String::from_utf8_lossy(&raw);
@@ -31,7 +35,23 @@ pub fn http_get(port: u16, path: &str) -> Result<(u16, String), String> {
 
 impl Status {
     pub fn fetch(cfg: &Config) -> Status {
-        match http_get(cfg.port, cfg.status_url_path()) {
+        let s = Status::fetch_as(cfg, None);
+        // Without recent activity, /status may be holding it back ("local": "none"): ask again
+        // with the owner key, once /status has shown it is the service that wrote the key.
+        if s.reachable()
+            && s.get(&["recent"]).is_none()
+            && let Some(key) = crate::owner::key(cfg, &s)
+        {
+            let full = Status::fetch_as(cfg, Some(&key));
+            if full.reachable() {
+                return full;
+            }
+        }
+        s
+    }
+
+    fn fetch_as(cfg: &Config, key: Option<&str>) -> Status {
+        match http_get_as(cfg.port, cfg.status_url_path(), key) {
             Ok((_, body)) => match serde_json::from_str::<Value>(&body) {
                 Ok(v @ Value::Object(_)) => Status { data: Some(v), error: None },
                 _ => Status { data: None, error: Some("not JSON".into()) },

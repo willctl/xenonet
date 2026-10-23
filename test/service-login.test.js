@@ -48,17 +48,23 @@ test("status: what the command says, with the file under ~ and the offer due onc
   assert.equal((await b.status()).offer, false, "asked once");
 });
 
-test("status: no service running still says how it starts, and Windows says it can't", async () => {
+test("status: no service running still says how it starts, Windows has Task Scheduler, and a system with no supervisor says it can't", async () => {
   const { b } = make({ "service status --json": { code: 1, out: JSON.stringify({ running: false, error: "ECONNREFUSED", login: login({ registered: true, port: "47840", loaded: true }) }), err: "" } });
   const s = await b.status();
   assert.equal(s.running, false);
   assert.equal(s.registered, true);
   assert.equal(s.offer, false, "already on");
-  const reason = "Starting the service at login isn't available on Windows yet. Desktop starts the service when it opens.";
-  const win = make({ "service status --json": ok({ running: true, login: { supported: false, supervisor: null, registered: false, reason } }) }, { platform: "win32" }).b;
+  const task = login({ supervisor: "Task Scheduler", file: "C:\\Users\\will\\AppData\\Local\\XenoNet\\xenonet-service.xml" });
+  const win = make({ "service status --json": ok({ running: true, login: task }) }, { platform: "win32", home: "C:\\Users\\will" }).b;
   const w = await win.status();
-  assert.deepEqual([w.supported, w.offer, w.reason], [false, false, reason]);
-  assert.equal(backgroundWords(w), reason);
+  assert.deepEqual([w.supported, w.offer, w.supervisor], [true, true, "Task Scheduler"]);
+  assert.match(backgroundWords({ ...w, registered: true, running: true, supervised: true }), /^On\. The service is running under Task Scheduler/);
+  assert.equal((await make({}, { live: false, platform: "win32" }).b.status()).supported, true, "XenoNet Dev on Windows says it could");
+  const reason = "Starting the service at login isn't available on this system. Desktop starts the service when it opens.";
+  const other = make({ "service status --json": ok({ running: true, login: { supported: false, supervisor: null, registered: false, reason } }) }, { platform: "freebsd" }).b;
+  const o = await other.status();
+  assert.deepEqual([o.supported, o.offer, o.reason], [false, false, reason]);
+  assert.equal(backgroundWords(o), reason);
   // Tools from before this setting.
   const old = make({ "service status --json": ok({ running: true, pid: 3, version: "0.2.0", terminals: [] }) }).b;
   assert.match((await old.status()).reason, /older than Desktop/);

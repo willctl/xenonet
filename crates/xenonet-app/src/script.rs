@@ -24,7 +24,8 @@ pub const STEPS: &str = r#"  launch[:inactive|front|hidden]  start it unless it'
   deselect, back, next, prev, reset
   command:<id>                    a palette command; commands lists them
   stats:<id or words>             a session's stats panel
-  simulate:<kind>[,a[,b]]         needs-you, collision, stuck, wiki-write, turn-end, doctor, clear;
+  simulate:<kind>[,a[,b]]         needs-you, collision, stuck, wiki-write (a session writing to
+                                  the shared context), turn-end, doctor, clear;
                                   or an actor acting: actor-spawn, actor-edit, actor-message,
                                   actor-online, actor-offline (a: the actor, b: what it acts on);
                                   or actor-request[,name]: a made-up program asking to be an
@@ -36,15 +37,23 @@ pub const STEPS: &str = r#"  launch[:inactive|front|hidden]  start it unless it'
                                   through it (all demo and test instances only);
                                   with XENONET_HOSTS=1 also host-add,<id>,<port> (another XenoNet
                                   here, shown as a host), host-offline and host-online (a: the
-                                  host, the first if left out) and host-skew[,host[,ms]]
+                                  host, the first if left out) and host-skew[,host[,ms]];
+                                  and a made-up network across machines: net-none,
+                                  net-founder, net-member, net-gateway-down, net-ticket,
+                                  net-mismatch and net-remote-waiting (a: the machine you're at;
+                                  b: titles-only, the others share titles only)
   actors                          the actors beside the map: presence, status, beams; and the
                                   programs waiting for an Allow
   feed[:<n>]                      the activity feed's last lines, sessions' and actors'
   identities[:<keys>|all]         the identity chips; with chip keys (comma-separated), only their work
   mask:on|off                     hide identities (GitHub A, Claude B…) or show them
-  hosts[:<ids>|all]               other machines on the map (XENONET_HOSTS=1) and how each
+  hosts[:<ids>|all]               other machines on the map (over SSH with XENONET_HOSTS=1,
+                                  or in a network) and how each
                                   stands; with host ids (comma-separated, @here for this
                                   machine), only their work
+  network[:open|start|join|add]   the network across machines (Network settings): this
+                                  machine's, its gateway and the other machines; add opens
+                                  Add a machine
   root[:<folder>|reset]           the projects folder; with a folder (~/… or a full path), read
                                   that one instead, or reset to go back to ~/Projects
   key:<combo>                     Mod+K, Escape, ArrowDown, W… (Mod is ⌘ on a Mac, Ctrl elsewhere)

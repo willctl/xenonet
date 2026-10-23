@@ -297,9 +297,10 @@ Each move kept its module's API, one commit each, with the golden tests
 | state.json (`core/store.js`, `statefile.js`) | JsonStore | `state` |
 | engine.sqlite (`core/engine/store.js`) | SqliteStore | `engine` |
 | The transcript tailer (`core/live.js`) | Tailer, with a Scanner per root | `transcripts` |
-| Transcript lines (`core/lines.js`, for live, stats and search) | Normalizer per app | `claude-lines`, `codex-lines` |
+| Transcript lines (`core/lines.js`, for live, stats and search) | Normalizer per app | `claude-lines`, `codex-lines`, `grok-lines` |
 | Claude Code's sessions (`core/claude.js`) | Gatherer | `claude-sessions` |
 | Codex's threads and desktop projects (`core/codex.js`) | Gatherers | `codex-threads`, `codex-projects` |
+| Grok Build's sessions (`core/grok.js`) | Gatherer | `grok-sessions` |
 | The Codex app-server client (`core/codex.js`) | Block | `codex-app-server` |
 | Identities' sources (`core/identities.js`) | A block with a Gatherer per account file and per repo | `identities` |
 | Claude plan usage (`core/claude-usage.js`, read by live.js) | Gatherers | `claude-usage`, `claude-desktop-usage` |
@@ -434,7 +435,7 @@ since nothing in it can be read, and keep it as drift.
 | Agent messages | `item_completed` AgentMessage (spaces), task_complete's last message | None | AgentMessage (newlines), agent_message, `response_item` message (role assistant) |
 | Tool calls | function_call, custom_tool_call and local_shell_call start one, and their outputs end it (by call_id, else id) | The same; a local_shell_call, which has no name, is a shell call | None |
 | Commands, MCP calls, file changes, web searches, images, subagents | From `item_completed`; a web search with an empty query shows its action's; a subagent is done once its activity says it completed or was interrupted, until it's given more (`interacted`) | None | None |
-| Tokens | The growth of total_token_usage (output and reasoning output kept); the context from last_token_usage | A call each time total_token_usage grows, priced from last_token_usage's parts | None |
+| Tokens | The growth of total_token_usage, with its output_tokens as the output: OpenAI counts reasoning inside output_tokens, and pricing takes it so (the owner changed this on 2026-10-21; live used to add reasoning_output_tokens on top). The context from last_token_usage | A call each time total_token_usage grows, priced from last_token_usage's parts | None |
 | Model | turn_context's model | turn_context's model and effort; the service tier from the thread's settings (`thread_settings_applied`, where a tier not said is the default), or from turn_context in older rollouts; session_meta's provider (a provider other than OpenAI names the model) | None |
 | Rate limits | token_count's rate_limits, in XenoNet's shape (`limits.codex`: each window's `pct`, `windowMinutes` and `resetsAt` in ms) | None | None |
 | Archived and compressed rollouts | Not read | Read | Read |

@@ -25,6 +25,8 @@ tokio.workspace = true
 url.workspace = true
 xenonet-actors.workspace = true
 xenonet-base.workspace = true
+# The doctor's groups of checks, which xenonet doctor --help lists.
+xenonet-doctor.workspace = true
 xenonet-mcp.workspace = true
 xenonet-schema.workspace = true
 xenonet-service.workspace = true

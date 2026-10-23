@@ -1,4 +1,4 @@
-//! The secret guard: what the wiki refuses to store and what the logs redact (src/secrets.mjs).
+//! The secret guard: what the wiki refuses to store and what the logs redact.
 //! The patterns use look-around, so they run on fancy-regex; the texts are short.
 
 use fancy_regex::{Captures, Regex};

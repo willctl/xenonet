@@ -16,6 +16,21 @@ pub fn is_js_space(c: char) -> bool {
     )
 }
 
+/// JS's `\s` for the regex crate, as the inside of a class: `[{JS_SPACE}]`
+/// is `\s` and `[^{JS_SPACE}]` is `\S`. The characters is_js_space takes
+/// (the crate's own `\s` is Unicode's).
+pub const JS_SPACE: &str = r"\t\n\x0B\x0C\r \x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}";
+
+/// JS's `.` without the s flag, for the regex crate: anything but a line
+/// terminator (the crate's own stops at `\n` alone).
+pub const JS_DOT: &str = r"[^\n\r\x{2028}\x{2029}]";
+
+/// A JS line terminator: where `.` stops, and `^` and `$` match with the m
+/// flag.
+pub fn is_js_line_terminator(c: char) -> bool {
+    matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
+}
+
 pub fn js_trim(s: &str) -> &str {
     s.trim_matches(is_js_space)
 }

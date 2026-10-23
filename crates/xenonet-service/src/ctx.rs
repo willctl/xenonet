@@ -3,17 +3,18 @@
 //! keeps at its top level (the component service, the actor gateway, the
 //! assistant's endpoint, Spotify's poll).
 
-use crate::actor_caller::ActorCaller;
-use crate::buckets::{now_ms, Bucket, Rate};
+use crate::actor_caller::{ActorCaller, Rate};
+use crate::borrowed::now_ms;
 use crate::component::Components;
 use crate::config::Config;
 use crate::cores::{ok, reason, CoreError, Cores};
 use crate::events::Events;
 use crate::gateway::control::GatewayControl;
 use crate::http::{BodyError, Reply, Req};
-use crate::window_key::WindowKey;
+use crate::window_key::{TrayKey, WindowKey};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
+use xenonet_actors::limits::Bucket;
 use xenonet_base::log::{ErrInfo, Log};
 use xenonet_base::sync::Locked;
 use xenonet_schema::drift::DriftLog;
@@ -24,12 +25,16 @@ pub struct Ctx {
     pub cores: Cores,
     pub events: Arc<Events>,
     pub window_key: Arc<WindowKey>,
+    /// The tray app's key, for its routes (routes/tray.rs).
+    pub tray_key: Arc<TrayKey>,
     pub log: Mutex<Log>,
     pub drift: Arc<Mutex<DriftLog>>,
     pub caller: Option<ActorCaller>,
     pub components: Mutex<Option<Arc<Components>>>,
     /// The actor gateway's switch, made once the service is (it logs to it).
     pub gateway: std::sync::OnceLock<Arc<GatewayControl>>,
+    /// A2A agents' side of the gateway (a2a/), made with it.
+    pub a2a: std::sync::OnceLock<Arc<crate::a2a::A2a>>,
     pub endpoint: Mutex<Option<Arc<crate::assistant_endpoint::Endpoint>>>,
     pub themes_dir: String,
     pub music: Mutex<Music>,
@@ -38,6 +43,9 @@ pub struct Ctx {
     pub refusal_notes: Mutex<RefusalNotes>,
     /// XenoNet Dev reading another XenoNet (XENONET_UPSTREAM).
     pub upstream: Option<crate::upstream::Upstream>,
+    /// The network across machines (gateway/network.rs), made once the
+    /// service is: its node, link and LAN listener.
+    pub net: std::sync::OnceLock<Arc<crate::gateway::network::NetService>>,
 }
 
 /// What Spotify's poll keeps between looks (server/index.js's `music`).
@@ -80,17 +88,20 @@ impl Ctx {
             cores,
             events: Arc::new(Events::new()),
             window_key: Arc::new(WindowKey::new()),
+            tray_key: Arc::new(TrayKey::new()),
             log: Mutex::new(log),
             drift: Arc::new(Mutex::new(DriftLog::default())),
             caller,
             components: Mutex::new(None),
             gateway: std::sync::OnceLock::new(),
+            a2a: std::sync::OnceLock::new(),
             endpoint: Mutex::new(None),
             themes_dir,
             music: Mutex::new(Music::default()),
-            you_reports: Mutex::new(Bucket::new(YOU_REPORTS, now_ms())),
+            you_reports: Mutex::new(Bucket::new(YOU_REPORTS.rate, YOU_REPORTS.burst, now_ms())),
             refusal_notes: Mutex::new(RefusalNotes::default()),
             upstream: None,
+            net: std::sync::OnceLock::new(),
         }
     }
 

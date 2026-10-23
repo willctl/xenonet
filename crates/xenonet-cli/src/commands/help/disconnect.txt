@@ -1,4 +1,4 @@
-Takes XenoNet's MCP server and hooks out of Claude Code's and Codex's
+Takes XenoNet's MCP server and hooks out of {apps connect's}
 settings, and leaves your own entries alone. It asks first. With no XenoNet
 running on that port, it takes them out itself.
 

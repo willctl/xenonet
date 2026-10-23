@@ -162,6 +162,8 @@ fn misfits(from: u64) -> Vec<Value> {
         ("who_has", json!({ "path": null })),
         ("peers", json!({ "scope": ["repo"] })),
         ("focus", json!({ "text": "x", "extra": true })),
+        ("handoff", json!({ "files": "src/" })),
+        ("handoff", json!({ "accept": 5 })),
         ("nope", json!({})),
     ]
     .into_iter()
@@ -177,6 +179,7 @@ fn sessions_case(case: &str, env: &[(&str, String)], extra: Vec<Value>) {
     messages.extend(misfits(10));
     messages.extend([call(30, "whoami", json!({})), call(31, "peers", json!({ "scope": "machine" })), call(32, "ask_gateway_token", json!({ "actor": "actor:muse" }))]);
     messages.push(request(33, "tools/call", json!({ "name": "whoami", "arguments": {}, "_meta": { "threadId": THREAD } })));
+    messages.extend([call(34, "handoff", json!({ "goal": "Finish the refunds", "files": ["src/refunds.ts"] })), call(35, "handoff", json!({ "accept": "hof_x" }))]);
     messages.extend(extra);
     let mut env = env.to_vec();
     env.push(("XENONET_PORT", "1".into()));

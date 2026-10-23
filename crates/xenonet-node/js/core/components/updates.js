@@ -43,9 +43,9 @@ export async function downloadComponent(item, { env = process.env, fetcher = fet
 }
 
 export async function updateComponent(item, options = {}) {
-  const { env = process.env } = options;
+  const { env = process.env, operations } = options;
   const current = native.compUpdateSkip(item);
   if (current) return current;
   const file = await downloadComponent(item, options);
-  return activatePackage(file, item, { env });
+  return activatePackage(file, item, { env, operations });
 }

@@ -4,12 +4,12 @@
 //! when it runs standalone, and the background work, and stops on SIGINT,
 //! SIGTERM or the component service's stop.
 
-use crate::buckets::now_ms;
+use crate::borrowed::now_ms;
 use crate::component::{self, Hooks};
 use crate::config::Config;
 use crate::cores::{CoreError, Cores};
 use crate::ctx::Ctx;
-use crate::http::{node_headers, parse_target, Body, Peer, Reply, ReplyBody, Req};
+use crate::http::{node_headers, parse_target, raw_query, Body, Peer, Reply, ReplyBody, Req};
 use crate::routes;
 use crate::wire::{Emitter, VendorReaders, WireEnv};
 use bytes::Bytes;
@@ -100,7 +100,7 @@ pub async fn handle(ctx: &Arc<Ctx>, req: hyper::Request<Incoming>, peer: Peer) -
         return up.pass(&method, &target, &headers).await;
     }
     let incoming = req.into_body();
-    let request = Req { method: method.clone(), path: path.clone(), query, headers, peer, body: Body::Incoming(incoming) };
+    let request = Req { method: method.clone(), path: path.clone(), query, raw_query: raw_query(&target), headers, peer, body: Body::Incoming(incoming) };
     if !path.starts_with("/api/") {
         return crate::static_files::serve(&ctx.config.root.join("dist"), &path);
     }
@@ -330,6 +330,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
                 });
             }),
             port: config.gateway_port,
+            service_port: config.port,
             version: version.clone(),
             dir: (!config.demo).then(|| config.state_dir.clone()),
             home: config.home.clone(),
@@ -340,6 +341,63 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
             now: Arc::new(now_ms),
         };
         let _ = ctx.gateway.set(crate::gateway::control::GatewayControl::new(parts));
+    }
+    // A2A agents, which reach the sessions as actors through the gateway
+    // (a2a/): off until you turn it on in the Actors panel.
+    if let Some(actors) = ctx.cores.actors.clone() {
+        let state_dir = config.state_dir.clone();
+        let parts = crate::a2a::A2aParts {
+            cores: crate::a2a::A2aCores { engine: ctx.cores.engine.clone(), actors: actors.clone() },
+            file: (!config.demo).then(|| Path::new(&config.state_dir).join("a2a.sqlite")),
+            version: version.clone(),
+            home: config.home.clone(),
+            name: Arc::new(move || crate::a2a::network_name(&state_dir)),
+            now: Arc::new(now_ms),
+            limits: crate::a2a::Limits::default(),
+        };
+        match crate::a2a::A2a::new(parts) {
+            Ok(a) => {
+                // A removed actor's tasks go with its record.
+                let weak = Arc::downgrade(&a);
+                actors.before_remove(Arc::new(move |slug: &str| {
+                    if let Some(a) = weak.upgrade() {
+                        a.forget(&format!("actor:{slug}"));
+                    }
+                }));
+                // The gateway's front door answers /a2a and the card with it.
+                if let Some(g) = ctx.gateway.get() {
+                    g.gateway().set_a2a(a.clone());
+                }
+                let _ = ctx.a2a.set(a);
+            }
+            Err(e) => ctx.log("warn", "a2a.error", &e, None, None),
+        }
+    }
+    // The network across machines (docs/design/network.md): this machine's
+    // node, whose gateway routes the actor gateway's front door serves
+    // while this host is the network's gateway.
+    {
+        let c = ctx.clone();
+        let log: xenonet_net::sink::LogFn = Arc::new(move |code: &str, words: &str| c.log("info", code, words, None, None));
+        match crate::gateway::network::NetService::open(crate::gateway::network::NetService::options(&config.state_dir, &config.home, &version, log)) {
+            Ok(svc) => {
+                if let Some(g) = ctx.gateway.get() {
+                    g.gateway().set_net(svc.node().clone());
+                }
+                // The engine takes what arrives, and sends through it.
+                if let Some(plug) = &ctx.cores.on_net {
+                    plug(&svc);
+                }
+                let _ = ctx.net.set(svc);
+            }
+            Err(e) => ctx.log(
+                "warn",
+                "net.open",
+                &format!("the network's files couldn't be read: {}", e.message),
+                None,
+                Some("xenonet doctor says more; xenonet net leave forgets the network"),
+            ),
+        }
     }
 
     let listener = match TcpListener::bind((config.host.as_str(), config.port)).await {
@@ -360,20 +418,29 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
     };
     let port = listener.local_addr().map_or(config.port, |a| a.port());
     let (stop_tx, mut stop_rx) = mpsc::unbounded_channel::<()>();
+    // Desktop's window, as it last said: shown, hidden or closed.
+    let window: Arc<Mutex<Option<String>>> = Arc::default();
+    plug_hub(&ctx, port, &window);
 
     if config.standalone {
         // No app started this service, so the Desktop that connects is the
         // one the window's requests come from (verify.desktop).
         let c = ctx.clone();
         let person = ctx.clone();
+        let tray = ctx.clone();
         let you = ctx.clone();
         let stop = stop_tx.clone();
+        let shown = window.clone();
         let hooks = Hooks {
             version: version.clone(),
             window_key: ctx.window_key.clone(),
             window_state: Arc::new(move |v: &Value| {
                 if let Some(a) = &you.cores.actors {
                     a.you_window(v);
+                }
+                *shown.locked() = v.as_str().map(str::to_string);
+                if let Some(h) = &you.cores.hub {
+                    h.console(v.as_str(), you.events.pages());
                 }
             }),
             shutdown: Arc::new(move || {
@@ -393,6 +460,17 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
                 let c = person.clone();
                 Box::pin(async move { c.cores.verify.person(peer).await })
             }),
+            on_tray: Arc::new(move |peer| {
+                let c = tray.clone();
+                Box::pin(async move {
+                    let seen = c.cores.verify.tray(peer, &c.config.home).await;
+                    if !crate::cores::ok(&seen) {
+                        c.log("warn", "service.tray", &format!("a program asked to be XenoNet's tray and was refused: {}", crate::cores::reason(&seen)), None, None);
+                    }
+                    seen
+                })
+            }),
+            tray_key: ctx.tray_key.clone(),
             terminals: ctx.cores.terminals.clone(),
         };
         match component::start(config.descriptor_file(), hooks).await {
@@ -448,6 +526,14 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
     if let Some(t) = ctx.cores.tunnels.clone() {
         tokio::spawn(async move {
             let _ = t.autostart().await;
+        });
+    }
+    if let Some(n) = ctx.net.get().cloned() {
+        let c = ctx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = n.start().await {
+                c.log("warn", "net.start", &format!("the network's link didn't start: {}", e.message), None, None);
+            }
         });
     }
     tokio::spawn(poll_spotify(ctx.clone(), again_rx));
@@ -507,6 +593,40 @@ async fn signal() {
     }
 }
 
+/// The hub and the network, once both are there and the service listens:
+/// the hub hears the map's relay frames, and serves this host's own map to
+/// the window hosts that subscribe, reading this service's API on `port` as
+/// any local program reads it, with no key. Every two seconds it's told
+/// whether a console is open here, from Desktop's window as it last said
+/// and the pages reading the event stream.
+fn plug_hub(ctx: &Arc<Ctx>, port: u16, window: &Arc<Mutex<Option<String>>>) {
+    let Some(hub) = ctx.cores.hub.clone() else { return };
+    if let Some(svc) = ctx.net.get() {
+        hub.plug_net(crate::cores::HubNet {
+            net: svc.net(),
+            sinks: svc.sinks().clone(),
+            events: ctx.events.clone(),
+            api: Arc::new(crate::cores::HttpApi { port, timeout: Duration::from_secs(20), max_bytes: 16 << 20 }),
+            home: ctx.config.home.clone(),
+            version: ctx.version.clone(),
+            platform: crate::borrowed::platform().to_string(),
+            demo: ctx.config.demo,
+        });
+    }
+    let (c, w) = (Arc::downgrade(ctx), window.clone());
+    tokio::spawn(async move {
+        let mut every = tokio::time::interval(Duration::from_secs(2));
+        loop {
+            every.tick().await;
+            let Some(ctx) = c.upgrade() else { return };
+            let shown = w.locked().clone();
+            if let Some(h) = &ctx.cores.hub {
+                h.console(shown.as_deref(), ctx.events.pages());
+            }
+        }
+    });
+}
+
 fn shutdown(ctx: &Arc<Ctx>) {
     let c = &ctx.cores;
     c.system.stop();
@@ -520,6 +640,9 @@ fn shutdown(ctx: &Arc<Ctx>) {
     if let Some(g) = ctx.gateway.get() {
         g.tunnel().stop();
         g.gateway().stop();
+    }
+    if let Some(n) = ctx.net.get() {
+        n.stop();
     }
     if let Some(comp) = ctx.components.locked().take() {
         comp.close();
