@@ -1269,7 +1269,7 @@ fn config_custom_port_credentials_and_an_outside_codex_home() {
     let x: Value = serde_json::from_str(&read(&f.lay().xen.config_file())).unwrap();
     assert_eq!(x["httpPort"], 47850);
     assert_eq!(x["search"]["embeddings"]["credential"], "Mine/OpenRouter", "a credential you named stays");
-    assert_eq!(x["curator"]["codexHome"], json!(outside.to_string_lossy()));
+    assert_eq!(x["curator"]["codexHome"], json!(super::edits::fwd(&outside)), "kept, written with / as wikiDir is");
     assert!(outside.join("auth.json").exists() && x.get("somethingElse").is_none());
     // Embeddings off: no credential is added.
     let (c, _) = detect::carry(&json!({ "search": { "embeddings": { "enabled": false } } }), &json!({}), Path::new("/w"), "/h");
@@ -1406,7 +1406,7 @@ fn arguments() {
     assert!(a("something-else").is_err());
     assert!(a("agent-wiki --bogus").is_err());
     let f = a("agent-wiki --finish --move-wiki --wiki-dir /w --port 47900").unwrap();
-    assert!(f.move_wiki && f.opts.port == Some(47900) && f.opts.wiki_dir == Some(PathBuf::from("/w")));
+    assert!(f.move_wiki && f.opts.port == Some(47900) && f.opts.wiki_dir == Some(xenolith_core::wiki::absolute(Path::new("/w"))));
 }
 
 // ---------------------------------------------------------------- size
