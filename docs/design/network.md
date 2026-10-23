@@ -73,9 +73,11 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
     sinks beside the engine's sink (`RelaySink`, set by role on the
     `SinkSlot`), never to the engine. They go up in relay batches of their
     own (`frames?relay=1`), with a bucket of 120 a minute at the gateway
-    apart from the engine's 600, and aren't queued for a host that's
-    away. A relay body is at most 8 MiB before sealing, so a sealed,
-    base64 frame fits the gateway's 16 MiB relay batch.
+    apart from the engine's 600. The gateway never writes them to its
+    store: it holds them in memory for the host's link, two minutes and
+    32 MiB at most, and drops them when the host isn't linked. A relay
+    body is at most 8 MiB before sealing, so a sealed, base64 frame fits
+    the gateway's 16 MiB relay batch.
   - The subscribing host asks `{ op, sub, … }` (open, get, time, renew,
     close); the host answers `{ sub, seq, frames }`, at most one body
     every half second for each subscription (slower when several share
@@ -147,8 +149,12 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
   made-up HTTP service published on one host and reached from another: an
   allowlisted path passes and others are refused, the service is sent the
   caller's id in `Forwarded` and the caller's bearer untouched, the size
-  caps and `--hosts` hold, a slow service is a 504, and an offline host a
-  503 at once. With Xenolith built, a real follower pulls a page from a real
+  caps and `--hosts` hold, a program that goes away stops the wait, a slow
+  service is a 504, and an offline host a 503 at once.
+  `crates/xenonet-net/tests/svc_replay.rs` sends a svc request dated ahead
+  again after its arrival is two minutes old, and after the gateway sets
+  the host's clock back, and the service is called once. `tests/net.rs`
+  checks that relay and svc frames never reach the gateway's store. With Xenolith built, a real follower pulls a page from a real
   curator through `/api/svc/<host>/xenolith`. The `net_svc` fuzz target
   reads paths, requests, answers, addresses and headers.
 
@@ -767,7 +773,9 @@ twins, are unchanged.
   `<state>/network/gateway.sqlite`. It waits a week, up to 10,000 frames
   or 50 MB per host.
 - Presence, claims, relay and svc frames for a host that's away are dropped:
-  it gets a full set when it's back.
+  it gets a full set when it's back. Relay and svc frames never reach the
+  gateway's store even for a host that's linked: they wait in memory for
+  its link.
 - When a queue is full, the oldest frame goes. The gateway sends a `gap`
   to the host that lost it and a `gap` notice to each sender whose frame
   went, and senders send again what has no receipt.
@@ -915,8 +923,8 @@ message, a handoff or Xenolith. That keeps context selective, which the
 | Prompt injection across machines | Messages are framed as information. Bypassed sessions hold them. Hop and fan-out caps, and per-link limits: 600 frames and 60 messages a minute, and the map's relay frames, 120 a minute, apart |
 | An agent reading other machines' transcripts | Another machine's transcript, stats and diffs are read only for the window: its key, and no token. A host serves its map only to a window host's console, and a host that shares titles only keeps its transcripts. The relay reads its own API as a local program, with no key, through its allowlist of GETs |
 | A weak "from you" | Operator frames say how they were checked; only window-key and macOS process checks count |
-| Replay | Frame ids for a week, and the map's relay frames and services' svc frames for two minutes, relay frames with their seq within a subscription; request nonces for 2 minutes; times within 60 s |
-| Keys and tokens leaking | Private keys stay in an owner-only file. Tickets are kept hashed. Nothing secret is queued, and on a LAN-only gateway `/mcp` isn't served |
+| Replay | Frame ids for a week. Relay and svc frame ids until their own date is two minutes old, against a floor that only rises, so a gateway that sets a host's clock back can't replay one; relay frames with their seq within a subscription too. Request nonces for 2 minutes; times within 60 s |
+| Keys and tokens leaking | Private keys stay in an owner-only file. Tickets are kept hashed. Nothing secret is queued, svc frames, which may carry a service's bearer, never reach the gateway's disk, and on a LAN-only gateway `/mcp` isn't served |
 | A2A misuse | A2A clients are actors: tokens, default-deny scopes, rate limits. No outbound calls in the first step |
 | A service published to the network | Nothing is published until the owner does it, from the window or their own terminal. Targets are loopback IPs over plain http, never XenoNet's own ports; no redirects, proxy or name lookups. Only the paths named, checked once decoded; roster hosts, or the ones named; 300 requests a minute for each caller; the caller in `Forwarded` from the frame's signature; four headers in and no cookies out. A service with no auth of its own is open to every program on every allowed host |
 
@@ -975,10 +983,19 @@ id the caller makes (`svq_` and 32 hex digits):
 They're sealed and signed like every host frame, so the gateway sees the
 head only. Each goes up alone in a relay batch (`frames?relay=1`), since
 other frames are held to 64 KiB, with a bucket of 600 a minute at the
-gateway apart from the engine's and the map's. They're live only: never
-queued for a host that's away, since a request may carry the service's
-bearer, and a host drops one older than two minutes and remembers their
-ids that long, as it does relay frames.
+gateway apart from the engine's and the map's. They're live only, since a
+request may carry the service's bearer:
+
+- The gateway never writes one to its store. It holds it in memory for
+  the host's link, as it does relay frames, and drops it when the host
+  isn't linked.
+- A host takes each relay or svc frame once. It drops one dated more than
+  two minutes before now by the gateway's clock, and keeps each id it took
+  until that's true of the frame's own date, so one dated ahead isn't
+  taken again later. The gateway sets each host's clock offset, so that
+  floor only rises: setting a host's clock back can't make a frame fresh
+  again. A host whose own clock jumps ahead takes no relay or svc frames
+  dated before the jump, less two minutes, until real time catches up.
 
 **The caller's host:**
 
@@ -990,7 +1007,8 @@ ids that long, as it does relay frames.
 - What waits is answered 503 as soon as the target goes unlinked or this
   host's link drops, and at once when the gateway refuses the frame (429
   for its rate, 413, else 502) or the batch doesn't reach it.
-- It waits on 256 requests at most.
+- It waits on 256 requests at most, and 64 to one host, so a host that
+  never answers holds a quarter of the places, for 90 s each.
 
 **The publishing host** checks, in order: the name is published (404),
 the caller may call (403), its rate (300 a minute for each caller host
@@ -1007,7 +1025,10 @@ and the path, the body, and only the four headers above, then
 caller being the frame's signature-checked sender. A `Forwarded`,
 `X-Forwarded-*` or `Via` from the caller never crosses. `Authorization`
 is never stripped or logged on either side. It forwards 32 requests at
-once at most (503), and waits 75 s on the service.
+once at most, and 8 from one caller host, so no one host holds every
+place (503), and waits 75 s on the service. Roster hosts are trusted this
+far and no further: each was let in by the person, and these caps keep a
+misbehaving one from shutting the others out.
 
 **On the way back,** `Set-Cookie`, hop-by-hop headers and what
 `Connection` names are dropped, on both hosts. An answer over 4 MiB is a
@@ -1091,7 +1112,8 @@ any method a service takes: another host's published service (section
 - `<state>/network/link.json`: how the link last stood, for the doctor.
 - `<state>/network/services.json`: the services this host publishes.
 - `<state>/network/gateway.sqlite`, on the gateway only: tickets (hashed),
-  queues, frame ids, the epoch, and the last presence of each host.
+  queues, frame ids, the epoch, and the last presence of each host. Never
+  relay or svc frames, which the gateway holds in memory only.
 - `engine.sqlite` gains:
   - `net_presence` (the latest per host);
   - `net_claims`;

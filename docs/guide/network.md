@@ -124,7 +124,7 @@ The service gets:
 
 Its answer goes back with its status, headers and body, without `Set-Cookie` and the headers that only concern one connection.
 
-A request's body is at most 1 MiB and an answer's 4 MiB, or the caller gets 413. Each machine may call each service 300 times a minute, then 429. A caller waits 90 seconds at most for the answer, then gets 504. When either machine isn't linked to the gateway, the caller gets 503 at once: a request is never kept for later, since it may carry the service's credential. XenoNet's own refusals have an `X-XenoNet-Refused` header with a code, such as `offline`, `not-published`, `not-allowed`, `path-refused` or `rate`, and a JSON body that says why, so a program can tell them from the service's own answers.
+A request's body is at most 1 MiB and an answer's 4 MiB, or the caller gets 413. Each machine may call each service 300 times a minute, then 429. A caller waits 90 seconds at most for the answer, then gets 504. When either machine isn't linked to the gateway, the caller gets 503 at once: a request is never kept for later, or written to disk on the way, since it may carry the service's credential. A machine passes on 8 requests from one other machine at once, and waits on 64 answers from one, so no single machine holds them all. XenoNet's own refusals have an `X-XenoNet-Refused` header with a code, such as `offline`, `not-published`, `not-allowed`, `path-refused` or `rate`, and a JSON body that says why, so a program can tell them from the service's own answers.
 
 **A published service with no sign-in of its own is open to every program on every machine allowed to call it.** Give it tokens of its own, or name the machines that may call it with `--hosts`.
 
