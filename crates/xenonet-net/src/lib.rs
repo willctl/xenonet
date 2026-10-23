@@ -15,6 +15,8 @@
 //!   offset, epochs and the long-poll fallback.
 //! - `node`: this machine in its network, behind
 //!   `xenonet_base::network::Net`, calling a `Sink`.
+//! - `svc`: services a host publishes to the network, and requests to
+//!   other hosts' services, in `svc` frames.
 //! - `doctor`: what the doctor says about the network, from its files.
 
 pub mod codec;
@@ -30,6 +32,7 @@ pub mod node;
 pub mod request;
 pub mod roster;
 pub mod sink;
+pub mod svc;
 pub mod ticket;
 
 use std::fmt;

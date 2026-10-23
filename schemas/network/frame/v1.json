@@ -34,7 +34,8 @@
         "receipt",
         "handoff",
         "relay",
-        "operator"
+        "operator",
+        "svc"
       ]
     },
     "from": {

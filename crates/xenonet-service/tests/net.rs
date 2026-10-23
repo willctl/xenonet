@@ -720,3 +720,45 @@ async fn the_maps_relay_frames_cross_in_batches_and_a_bucket_of_their_own() {
     assert_eq!(s, 200, "{v}");
     until("laptop's relay hears desk went", 10, || heard.removed.lock().unwrap().contains(&"desk".to_string())).await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn relay_and_svc_frames_never_touch_the_gateways_store() {
+    // A svc frame may carry a service's own credential, sealed: the
+    // gateway hands relay and svc frames to the host's link in memory, and
+    // drops them when the host isn't linked, rather than writing them to
+    // its store, where a stream that ended before its ack would leave them
+    // for a week.
+    let (a, b, c) = network("held", 48123, Caps::default(), [0.0; 3]).await;
+    let heard = Arc::new(Relays::default());
+    b.svc.sinks().set_relay("hear", heard.clone());
+    let gw = a.svc.node().gateway().unwrap();
+    let desk = c.svc.node().shared();
+    let net = desk.network().unwrap();
+    let key = desk.key().unwrap();
+    let laptop_keys = desk.roster().view().member("laptop").unwrap().keys;
+    let frame = |kind: &'static str, seq: u64| {
+        let d = xenonet_net::frame::Draft { network: &net.id, id: xenonet_net::codec::frame_id().unwrap(), kind, from: "desk", to: "laptop", at: desk.gateway_now() as i64 };
+        xenonet_net::frame::host_frame(&d, &key, &laptop_keys, &json!({ "sub": "s1", "seq": seq, "frames": [] }), None).unwrap()
+    };
+    let post = |frames: &[xenonet_net::frame::Frame]| {
+        let lines: Vec<String> = frames.iter().map(|f| f.line().trim_end().to_string()).collect();
+        let batch = format!("{{\"frames\":[{}],\"ack\":null}}", lines.join(","));
+        desk.signed_request("POST", "/net/v1/frames?relay=1", batch.into_bytes()).unwrap().0
+    };
+    let stored = || {
+        let db = rusqlite::Connection::open_with_flags(a.dir.join("state").join("network").join("gateway.sqlite"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        db.query_row("SELECT count(*) FROM queue WHERE kind IN ('relay', 'svc')", [], |r| r.get::<_, i64>(0)).unwrap()
+    };
+    let answer = gw.handle(post(&[frame("relay", 1), frame("svc", 0), frame("relay", 2)])).await.body_json();
+    assert_eq!(answer["accepted"].as_array().unwrap().len(), 3, "{answer}");
+    assert_eq!(stored(), 0, "nothing in the store");
+    until("laptop's link read what was held for it", 10, || heard.got.lock().unwrap().len() == 2).await;
+    assert_eq!(gw.held("laptop"), 0);
+
+    // laptop's link goes: what comes for it is dropped, never kept.
+    b.svc.stop();
+    until("laptop unlinked at the gateway", 10, || !gw.linked(now_ms()).contains(&"laptop".to_string())).await;
+    let answer = gw.handle(post(&[frame("svc", 0), frame("relay", 3)])).await.body_json();
+    assert_eq!(answer["accepted"].as_array().unwrap().len(), 2, "taken, as live frames are: {answer}");
+    assert_eq!((gw.held("laptop"), stored()), (0, 0), "and dropped");
+}

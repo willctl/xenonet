@@ -1,9 +1,11 @@
-// xenonet net, against the binary: a service of its own on 127.0.0.1:48111
-// (its actor gateway on 48112) with a temporary home and state folder, and
-// the command talking to it. Making a network is the person's, so where
-// these tests run under an agent on macOS the refusal is what's checked;
-// where process checks can't tell (Linux, Windows) or the person runs them,
-// the network is made, its LAN door checked, and left.
+// xenonet net and xenonet svc, against the binary: a service of its own on
+// 127.0.0.1:48111 (its actor gateway on 48112) with a temporary home and
+// state folder, and the command talking to it. Making a network and
+// publishing a service are the person's, so where these tests run under an
+// agent on macOS the refusal is what's checked; where process checks can't
+// tell (Linux, Windows) or the person runs them, the network is made, its
+// LAN door checked, a service published and taken off, and the network
+// left.
 
 #![cfg(unix)]
 #![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
@@ -97,10 +99,18 @@ fn net_makes_a_network_or_is_refused_from_under_an_agent() {
     let (code, out, _) = s.run(&["net", "--help"]);
     assert_eq!(code, 0);
     assert!(out.contains("xenonet net join <address> <ticket>"), "{out}");
+    let (code, out, _) = s.run(&["svc", "--help"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("xenonet svc publish <name> http://127.0.0.1:<port> --paths"), "{out}");
+    let (code, _, err) = s.run(&["svc", "publish", "files", "http://127.0.0.1:9"]);
+    assert_eq!(code, 2, "no paths: {err}");
     let (code, out, err) = s.run(&["net", "create", "--name", "home", "--host", "studio", "--lan", LAN, "--json"]);
     if code != 0 {
         assert!(err.contains("yours") || err.contains("agent") || err.contains("Claude Code") || err.contains("Codex"), "refused for what it is: {err}");
         assert_eq!(status(LAN, "GET", "/net/v1/roster", &[]), 0, "nothing listens");
+        let (code, _, err) = s.run(&["svc", "publish", "files", "http://127.0.0.1:9", "--paths", "/sync/v1/"]);
+        assert_eq!(code, 1);
+        assert!(err.contains("yours") || err.contains("agent") || err.contains("Claude Code") || err.contains("Codex"), "refused for what it is: {err}");
         return;
     }
     let st: Value = serde_json::from_str(&out).unwrap();
@@ -122,6 +132,30 @@ fn net_makes_a_network_or_is_refused_from_under_an_agent() {
     let (code, _, err) = s.run(&["net", "create", "--name", "again", "--host", "studio"]);
     assert_eq!(code, 1);
     assert!(err.contains("already"), "{err}");
+    // A service, published, listed and taken off. Programs on other hosts
+    // would reach it at /api/svc/studio/files/…; this one alone has no
+    // one to call it.
+    let (code, out, err) = s.run(&["svc", "publish", "files", "http://127.0.0.1:9", "--paths", "/sync/v1/", "--paths", "/files/"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("/api/svc/studio/files/"), "{out}");
+    let (code, _, err) = s.run(&["svc", "publish", "own", &format!("http://127.0.0.1:{PORT}"), "--paths", "/api/"]);
+    assert_eq!(code, 1, "never XenoNet's own API");
+    assert!(err.contains("XenoNet's own"), "{err}");
+    let (code, _, err) = s.run(&["svc", "publish", "far", "http://192.168.1.5:9", "--paths", "/"]);
+    assert_eq!(code, 1);
+    assert!(err.contains("loopback"), "{err}");
+    let (code, out, _) = s.run(&["svc", "list", "--json"]);
+    assert_eq!(code, 0);
+    let list: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(list["services"][0]["paths"], serde_json::json!(["/files/", "/sync/v1/"]), "{list}");
+    let (code, out, _) = s.run(&["svc"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("files") && out.contains("http://127.0.0.1:9") && out.contains("every host"), "{out}");
+    let (code, _, err) = s.run(&["svc", "unpublish", "files"]);
+    assert_eq!(code, 0, "{err}");
+    let (code, _, err) = s.run(&["svc", "unpublish", "files"]);
+    assert_eq!(code, 1);
+    assert!(err.contains("no service named files"), "{err}");
     if !cfg!(target_os = "macos") {
         let (code, _, err) = s.run(&["net", "add-machine", "laptop"]);
         assert_eq!(code, 1);

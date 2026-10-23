@@ -168,6 +168,7 @@ fuzz/run.sh lines 1800      # one target for 30 minutes
 | `net_frame`, `net_roster` | The network's frames and roster entries, checked against a roster and opened |
 | `net_request`, `net_bodies` | The gateway's routes, the answers a host reads from it, and the bodies the engine takes from other machines |
 | `net_relay` | The map between machines: a console's asks at a host's relay, the paths it serves, and the relay's answers at the console's hub |
+| `net_svc` | Services through the network: the paths, requests, answers, addresses and headers a host checks before it passes a request to a service it published, and before a program gets the answer |
 | `a2a_rpc` | A2A's JSON-RPC requests and its event streams |
 
 The network's targets build well-formed frames, entries and requests from a made-up network with fixed keys, then change them, so a run reaches past the signature checks. They fail if a changed frame or request is ever taken.

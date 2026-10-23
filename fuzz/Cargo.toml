@@ -190,6 +190,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "net_svc"
+path = "fuzz_targets/net_svc.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "a2a_rpc"
 path = "fuzz_targets/a2a_rpc.rs"
 test = false

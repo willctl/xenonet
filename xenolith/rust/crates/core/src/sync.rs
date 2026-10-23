@@ -1266,7 +1266,7 @@ mod tests {
     fn a_base_with_a_path_keeps_it() {
         let atlas = SpaceId::parse("project:atlas").unwrap();
         assert_eq!(space_url("https://box.example/xenolith/", &atlas), "https://box.example/xenolith/sync/v1/spaces/project/atlas");
-        assert_eq!(space_url("http://127.0.0.1:48850/net/v1/svc/studio/xenolith", &atlas), "http://127.0.0.1:48850/net/v1/svc/studio/xenolith/sync/v1/spaces/project/atlas");
+        assert_eq!(space_url("http://127.0.0.1:47840/api/svc/studio/xenolith", &atlas), "http://127.0.0.1:47840/api/svc/studio/xenolith/sync/v1/spaces/project/atlas");
         assert_eq!(space_url("http://127.0.0.1:47850", &atlas), "http://127.0.0.1:47850/sync/v1/spaces/project/atlas");
     }
 

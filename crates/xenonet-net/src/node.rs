@@ -9,7 +9,7 @@
 //! returns, and the link sends them when it can.
 
 use crate::codec::{frame_id, is_b64};
-use crate::files::{address_kind, Dir, NetFile, Pin, GATEWAY_DB, HOST_DB, KEY};
+use crate::files::{address_kind, Dir, NetFile, Pin, GATEWAY_DB, HOST_DB, KEY, SERVICES};
 use crate::frame::{host_frame, open_frame, Draft, Frame};
 use crate::gateway::{join_body, Gateway, NetRequest};
 use crate::gwstore::{Caps, GwStore, TicketRow};
@@ -18,11 +18,12 @@ use crate::keys::{HostKey, PublicKeys};
 use crate::link::{self, Transport};
 use crate::roster::{Entry, HostRef, Offered, Op, Removal, Roster};
 use crate::sink::{LogFn, SinkSlot};
+use crate::svc::{self, Answer, Services};
 use crate::{request, ticket, NetError, R};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard};
+use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, Weak};
 use std::time::Duration;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
@@ -66,6 +67,8 @@ pub struct Options {
     pub outbox: Caps,
     pub timing: Timing,
     pub log: LogFn,
+    /// How long a request to another host's service waits for its answer.
+    pub svc_ms: u64,
 }
 
 impl Options {
@@ -80,6 +83,7 @@ impl Options {
             outbox: Caps::default(),
             timing: Timing::default(),
             log,
+            svc_ms: svc::TIMEOUT_MS,
         }
     }
 }
@@ -137,15 +141,19 @@ pub struct PendingTicket {
     pub expires: i64,
 }
 
-/// A batch on its way up. A relay batch carries only the map's frames, and
-/// goes as `POST frames?relay=1`.
+/// A batch on its way up. A relay batch carries only the map's frames, or
+/// one service's request or answer, and goes as `POST frames?relay=1`.
 pub struct Batch {
     pub ids: Vec<String>,
     pub body: String,
     pub relay: bool,
+    /// The svc frame it carries, alone.
+    pub svc: Option<Frame>,
 }
 
 pub struct Shared {
+    /// This node itself, for the tasks a frame starts.
+    this: Weak<Shared>,
     opts: Options,
     pub dir: Dir,
     key: RwLock<Option<Arc<HostKey>>>,
@@ -159,8 +167,14 @@ pub struct Shared {
     volatile: Mutex<Vec<Frame>>,
     /// The map's frames waiting to go, in relay batches of their own.
     relay_out: Mutex<Vec<Frame>>,
-    /// The relay frames that came lately, by id, and when.
-    relay_ids: Mutex<HashMap<String, f64>>,
+    /// The relay and svc frames that came lately, and the oldest time a
+    /// new one may have.
+    relay_ids: Mutex<Recent>,
+    /// Services' requests and answers waiting to go, each in a relay batch
+    /// of its own.
+    svc_out: Mutex<VecDeque<Frame>>,
+    /// The services this host published, and the requests it waits on.
+    svc: Services,
     gateway: RwLock<Option<Arc<Gateway>>>,
     operator_nonces: Mutex<HashMap<String, f64>>,
     link_written: Mutex<f64>,
@@ -194,9 +208,53 @@ const BATCH_FRAMES: u64 = 500;
 pub const RELAY_BODY: usize = 8 << 20;
 /// A relay batch's frames, at most this many bytes of lines, past the first.
 const RELAY_BATCH_BYTES: usize = 12 << 20;
-/// How long a relay frame is the map's news, and its id remembered.
+/// How long a relay or svc frame is news: one older, by the gateway's
+/// clock, is dropped.
 const RELAY_MS: f64 = 120e3;
-const RELAY_IDS: usize = 4096;
+/// Relay and svc frame ids remembered at most.
+const RELAY_IDS: usize = 16384;
+
+/// The relay and svc frames that came lately, each id with its time, and
+/// the floor: the oldest time a new one may have. Each id is kept until
+/// the floor passes its time, so a frame is taken once however far ahead
+/// it was dated. The floor only rises, to now less RELAY_MS by the
+/// gateway's clock: the gateway sets this host's offset, and setting it
+/// back mustn't make a frame it already passed on fresh again.
+#[derive(Default)]
+struct Recent {
+    ids: HashMap<String, f64>,
+    floor: f64,
+}
+
+impl Recent {
+    /// Whether a frame with `id`, dated `at`, is new and fresh by the
+    /// gateway's clock `gw_now`; it's noted when it is.
+    fn take(&mut self, id: &str, at: f64, gw_now: f64) -> bool {
+        self.floor = self.floor.max(gw_now - RELAY_MS);
+        if at < self.floor || self.ids.contains_key(id) {
+            return false;
+        }
+        if self.ids.len() >= RELAY_IDS {
+            let floor = self.floor;
+            self.ids.retain(|_, t| *t >= floor);
+        }
+        if self.ids.len() >= RELAY_IDS {
+            // Still full of fresh ones: the older half go, and the floor
+            // rises past them, so one of them is refused rather than taken
+            // twice.
+            let mut times: Vec<f64> = self.ids.values().copied().collect();
+            let mid = times.len() / 2;
+            let cut = *times.select_nth_unstable_by(mid, f64::total_cmp).1;
+            self.ids.retain(|_, t| *t > cut);
+            self.floor = self.floor.max(cut + 1.0);
+            if at < self.floor {
+                return false;
+            }
+        }
+        self.ids.insert(id.to_string(), at);
+        true
+    }
+}
 
 fn not_in() -> NetError {
     NetError::new(409, "no-network", "this machine isn't in a XenoNet network")
@@ -317,8 +375,11 @@ impl Shared {
                 p.online = false;
             }
             // The map's frames that waited are old news by the time the
-            // link is back: a console asks for a fresh snapshot.
+            // link is back: a console asks for a fresh snapshot. No answer
+            // comes to a service's request either.
             self.relay_out.locked().clear();
+            self.svc_out.locked().clear();
+            self.svc.fail_all(&Answer::refused(503, "offline", "this machine's link to the network's gateway dropped before the answer came"));
             self.sink.linked(false);
         }
         if changed {
@@ -646,15 +707,22 @@ impl Shared {
                 let linked: Vec<&str> = body.get("linked").and_then(Value::as_array).map(|l| l.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
                 let members: Vec<String> = self.roster().view().members.keys().filter(|h| **h != net.host).cloned().collect();
                 let mut peers = self.peers.locked();
+                let mut away = Vec::new();
                 for h in members {
                     let p = peers.entry(h.clone()).or_default();
                     p.online = linked.contains(&h.as_str());
                     if p.online {
                         p.seen = Some(now);
+                    } else {
+                        away.push(h);
                     }
                 }
                 self.status.locked().last_ok = Some(now);
                 drop(peers);
+                // A host that isn't linked won't answer what it was asked.
+                for h in away {
+                    self.svc.fail_host(&h, &Answer::refused(503, "offline", format!("{h} went offline before it answered")));
+                }
                 self.write_link(false);
                 false
             }
@@ -778,9 +846,10 @@ impl Shared {
             return false;
         }
         let now = self.now();
-        // The map's frames are live: one older than RELAY_MS is dropped, and
-        // their ids are kept in memory that long rather than for the week.
-        let seen = if f.kind == "relay" { at < gw_now - RELAY_MS || self.relay_seen(&f.id, now) } else { self.with_store(|s| s.seen(&f.id, now as i64)).unwrap_or(true) };
+        // The map's frames and services' are live: one older than RELAY_MS
+        // is dropped, and their ids are kept in memory until then rather
+        // than for the week.
+        let seen = if f.in_relay_batch() { !self.relay_ids.locked().take(&f.id, at, gw_now) } else { self.with_store(|s| s.seen(&f.id, now as i64)).unwrap_or(true) };
         if seen {
             return false;
         }
@@ -804,6 +873,11 @@ impl Shared {
             self.sink.relay(Incoming { from: f.from.clone(), kind, body, at: at.min(now), from_window_host: window });
             return false;
         }
+        // Services' requests and answers are this node's own.
+        if kind == Kind::Svc {
+            self.svc_in(&f.from, body);
+            return false;
+        }
         if kind == Kind::Operator {
             if let Err(why) = self.check_operator(&f.from, window, &body) {
                 self.log("net.operator", &format!("an action from {} was refused: {why}", f.from));
@@ -815,16 +889,6 @@ impl Shared {
         }
         self.sink.receive(Incoming { from: f.from.clone(), kind, body, at: at.min(now), from_window_host: window });
         false
-    }
-
-    /// Whether a relay frame's id came in the last RELAY_MS, and it's
-    /// noted if not.
-    fn relay_seen(&self, id: &str, now: f64) -> bool {
-        let mut ids = self.relay_ids.locked();
-        if ids.len() > RELAY_IDS {
-            ids.retain(|_, t| now - *t < RELAY_MS);
-        }
-        ids.insert(id.to_string(), now).is_some_and(|t| now - t < RELAY_MS)
     }
 
     /// Whether the person's action from another host may be acted on: its
@@ -907,20 +971,27 @@ impl Shared {
     // ---------- the up batch ----------
 
     /// The next batch: what waits in memory, then the outbox's oldest; once
-    /// they've gone, the map's frames, in a relay batch of their own, which
-    /// the gateway takes only as one.
+    /// they've gone, a service's request or answer, alone, and then the
+    /// map's frames, each in a relay batch of their own, which the gateway
+    /// takes only as one.
     pub fn next_batch(&self) -> Option<Batch> {
         let volatile: Vec<Frame> = std::mem::take(&mut *self.volatile.locked());
         let queued = self.with_store(|s| s.batch(BATCH_BYTES, BATCH_FRAMES)).unwrap_or_default();
         let (epoch, seq) = self.cursor();
         let ack = epoch.map_or(Value::Null, |e| json!({ "epoch": e, "seq": seq }));
         if volatile.is_empty() && queued.is_empty() {
+            // A service's request or answer goes before the map's frames:
+            // someone waits on it.
+            if let Some(f) = self.svc_out.locked().pop_front() {
+                let body = format!("{{\"frames\":[{}],\"ack\":{ack}}}", f.line().trim_end());
+                return Some(Batch { ids: Vec::new(), body, relay: true, svc: Some(f) });
+            }
             return self.relay_batch(&ack);
         }
         let mut lines: Vec<String> = volatile.iter().map(|f| f.line().trim_end().to_string()).collect();
         let ids: Vec<String> = queued.iter().map(|(id, _)| id.clone()).collect();
         lines.extend(queued.into_iter().map(|(_, l)| l));
-        Some(Batch { ids, body: format!("{{\"frames\":[{}],\"ack\":{ack}}}", lines.join(",")), relay: false })
+        Some(Batch { ids, body: format!("{{\"frames\":[{}],\"ack\":{ack}}}", lines.join(",")), relay: false, svc: None })
     }
 
     /// The map's frames that wait, oldest first, as many as fit
@@ -943,12 +1014,26 @@ impl Shared {
             taken += 1;
         }
         waiting.drain(..taken);
-        Some(Batch { ids: Vec::new(), body: format!("{{\"frames\":[{}],\"ack\":{ack}}}", lines.join(",")), relay: true })
+        Some(Batch { ids: Vec::new(), body: format!("{{\"frames\":[{}],\"ack\":{ack}}}", lines.join(",")), relay: true, svc: None })
     }
 
     /// The gateway's answer to a batch: what it took, and what it refused
     /// for good, leave the outbox; what it held back for its rate waits.
     pub fn batch_done(&self, b: &Batch, answer: &Value) {
+        if let Some(f) = &b.svc {
+            let refused = answer.get("refused").and_then(Value::as_array).into_iter().flatten().find(|r| r.get("id").and_then(Value::as_str) == Some(f.id.as_str()));
+            if let Some(r) = refused {
+                let why = r.get("reason").and_then(Value::as_str).unwrap_or("").to_string();
+                let a = match r.get("code").and_then(Value::as_str) {
+                    Some("rate") => Answer::refused(429, "rate", format!("the network's gateway refused the request: {why}")),
+                    Some("too-big") => Answer::refused(413, "too-big", format!("the network's gateway refused the request: {why}")),
+                    _ => Answer::refused(502, "refused", format!("the network's gateway refused the request: {why}")),
+                };
+                self.log("net.svc", &format!("the gateway refused a service's frame: {why}"));
+                self.svc.fail_frame(&f.id, &a);
+            }
+            return;
+        }
         let mut done: Vec<String> = answer.get("accepted").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
         for r in answer.get("refused").and_then(Value::as_array).into_iter().flatten() {
             if r.get("code").and_then(Value::as_str) == Some("rate") {
@@ -962,6 +1047,192 @@ impl Shared {
         done.retain(|id| b.ids.contains(id));
         let _ = self.with_store(|s| s.done(&done));
         self.write_link(false);
+    }
+
+    /// A batch the gateway didn't take. With `again`, after the gateway
+    /// refused this host's time, a service's frame in it goes again in a
+    /// new request signed with the gateway's time, but only while its own
+    /// date, which can't change without sealing it again, is within a
+    /// minute of that time, so the host it's for takes it. Otherwise its
+    /// caller hears why now rather than at its timeout.
+    pub fn batch_failed(&self, b: &Batch, why: &str, again: bool) {
+        let Some(f) = &b.svc else { return };
+        if again && (f.at as f64 - self.gateway_now()).abs() <= 60e3 {
+            self.svc_out.locked().push_front(f.clone());
+        } else if again {
+            self.svc.fail_frame(&f.id, &Answer::refused(503, "clock", "this machine's clock was off the gateway's, and the request was dated by it: try again"));
+        } else {
+            self.svc.fail_frame(&f.id, &Answer::refused(502, "unreachable", format!("the request didn't reach the network's gateway: {why}")));
+        }
+    }
+
+    // ---------- services ----------
+
+    /// The services this host published, and the requests it waits on.
+    pub fn services(&self) -> &Services {
+        &self.svc
+    }
+
+    /// `xenonet svc publish`: the owner publishes a service on this machine
+    /// to the network, in place of one by its name.
+    pub fn svc_publish(&self, name: &str, target: &str, paths: &[String], hosts: &[String]) -> R<Value> {
+        let net = self.network().ok_or_else(not_in)?;
+        let p = svc::Published::new(name, target, paths, hosts, self.now() as i64).map_err(NetError::bad)?;
+        {
+            let r = self.roster();
+            let v = r.view_ref().ok_or_else(not_in)?;
+            for h in &p.hosts {
+                if *h == net.host {
+                    return Err(NetError::bad(format!("{h} is this machine: --hosts names the other hosts that may call")));
+                }
+                if v.member(h).is_none() {
+                    return Err(NetError::bad(format!("{h} isn't in the network")));
+                }
+            }
+        }
+        let words =
+            format!("this machine published {} at {} to {}", p.name, p.target.url(), if p.hosts.is_empty() { "every host in the network".to_string() } else { p.hosts.join(", ") });
+        self.svc.publish(p)?;
+        self.log("net.svc", &words);
+        Ok(self.svc_list())
+    }
+
+    /// `xenonet svc unpublish`.
+    pub fn svc_unpublish(&self, name: &str) -> R<Value> {
+        self.network().ok_or_else(not_in)?;
+        if !self.svc.unpublish(name)? {
+            return Err(NetError::new(404, "not-published", format!("this machine publishes no service named {name}")));
+        }
+        self.log("net.svc", &format!("this machine took {name} off the network"));
+        Ok(self.svc_list())
+    }
+
+    /// `xenonet svc list`: this host and what it published.
+    pub fn svc_list(&self) -> Value {
+        let host = self.network().map(|n| n.host);
+        json!({ "host": host, "services": self.svc.list().iter().map(svc::Published::to_json).collect::<Vec<_>>() })
+    }
+
+    /// A svc frame for `to`, sealed and signed, to go up alone. Live only:
+    /// refused while the link is down, and never kept in the outbox, since
+    /// it may carry the service's own credential.
+    fn send_svc(&self, to: &str, body: &Value, id: String) -> Result<(), String> {
+        let net = self.network().ok_or("this machine isn't in a XenoNet network")?;
+        if self.is_removed() {
+            return Err("this machine was removed from its network".into());
+        }
+        if !self.is_live() {
+            return Err("this machine's link to the network's gateway is down".into());
+        }
+        if body.to_string().len() > RELAY_BODY {
+            return Err(format!("a service's request or answer is at most {} MiB in a frame", RELAY_BODY >> 20));
+        }
+        let key = self.key().ok_or("this machine has no network key")?;
+        let keys = self.roster().view_ref().and_then(|v| v.member(to).map(|m| m.keys)).ok_or_else(|| format!("{to} isn't in the network"))?;
+        let d = Draft { network: &net.id, id, kind: "svc", from: &net.host, to, at: self.gateway_now() as i64 };
+        let f = host_frame(&d, &key, &keys, body, None).map_err(|e| e.message)?;
+        self.svc_out.locked().push_back(f);
+        self.wake.notify_one();
+        Ok(())
+    }
+
+    /// A program here asks for `name` on `host`: the answer, or why there's
+    /// none. 503 when this host or `host` isn't linked, by what the
+    /// gateway's pings last said, since the gateway takes a live frame for
+    /// a host that's away and drops it; 504 when no answer comes in time.
+    pub async fn svc_call(&self, host: &str, name: &str, call: svc::Call) -> Answer {
+        let Some(net) = self.network() else { return Answer::refused(503, "no-network", "this machine isn't in a XenoNet network") };
+        if self.is_removed() {
+            return Answer::refused(503, "removed", "this machine was removed from its network");
+        }
+        if !is_host_id(host) || !svc::is_name(name) {
+            return Answer::refused(400, "bad-request", "reach a service at /api/svc/<host>/<name>/<path>");
+        }
+        if host == net.host {
+            return Answer::refused(400, "this-host", "that's this machine: reach the service at its own address");
+        }
+        if self.roster().view_ref().is_none_or(|v| v.member(host).is_none()) {
+            return Answer::refused(404, "no-host", format!("{host} isn't in the network"));
+        }
+        if !svc::METHODS.contains(&call.method.as_str()) {
+            return Answer::refused(405, "method", format!("{} isn't passed on: a service is reached with {}", call.method, svc::METHODS.join(", ")));
+        }
+        if call.body.len() > svc::REQUEST_BODY {
+            return Answer::refused(413, "too-big", "a request's body is at most 1 MiB");
+        }
+        if !self.is_live() {
+            return Answer::refused(503, "offline", "this machine's link to the network's gateway is down");
+        }
+        if !self.peers.locked().get(host).is_some_and(|p| p.online) {
+            return Answer::refused(503, "offline", format!("{host} is offline: it isn't linked to the network's gateway"));
+        }
+        let (Ok(id), Ok(frame)) = (svc::request_id(), frame_id()) else { return Answer::refused(500, "internal", "no randomness for a request's id") };
+        // This host stops waiting when `wait` goes: with the answer, at
+        // the timeout, or when the program that asked goes away, which
+        // drops this call.
+        let mut wait = match self.svc.wait(&id, host, &frame) {
+            Ok(w) => w,
+            Err(a) => return a,
+        };
+        let req = svc::Request { id, name: name.to_string(), method: call.method, path: call.path, headers: svc::passed(&call.headers), body: call.body };
+        if let Err(why) = self.send_svc(host, &req.to_json(), frame) {
+            return Answer::refused(503, "offline", why);
+        }
+        match tokio::time::timeout(Duration::from_millis(self.opts.svc_ms), &mut wait.answer).await {
+            Ok(Ok(a)) => a,
+            Ok(Err(_)) => Answer::refused(502, "dropped", "the request was dropped before its answer came"),
+            Err(_) => Answer::refused(504, "timeout", format!("{host} didn't answer within {} s", self.opts.svc_ms / 1000)),
+        }
+    }
+
+    /// A svc frame from `from`, whose signature checked: an answer to a
+    /// request made here, or a request for a service published here.
+    fn svc_in(&self, from: &str, body: Value) {
+        match body.get("op").and_then(Value::as_str) {
+            Some("answer") => match Answer::parse(&body) {
+                Ok((id, a)) => {
+                    if !self.svc.answered(from, &id, a) {
+                        self.log("net.svc", &format!("an answer from {from} that nothing here waits on was dropped"));
+                    }
+                }
+                Err(why) => self.log("net.svc", &format!("an answer from {from} was dropped: {why}")),
+            },
+            Some("request") => self.svc_serve(from, body),
+            _ => self.log("net.svc", &format!("a svc frame from {from} that's neither a request nor an answer was dropped")),
+        }
+    }
+
+    /// A request from `from` for a service here: checked, passed to the
+    /// service, and answered, in a task of its own so the link reads on.
+    fn svc_serve(&self, from: &str, body: Value) {
+        let Some(id) = svc::id_of(&body) else {
+            self.log("net.svc", &format!("a request from {from} with no id to answer was dropped"));
+            return;
+        };
+        let (Some(this), Ok(rt)) = (self.this.upgrade(), tokio::runtime::Handle::try_current()) else { return };
+        let from = from.to_string();
+        rt.spawn(async move {
+            let now = this.now();
+            let (name, answer) = match svc::Request::parse(&body) {
+                Ok(req) => (req.name.clone(), this.svc.serve(&from, req, now).await),
+                Err(why) => (String::new(), Answer::refused(400, "bad-request", why)),
+            };
+            if let Some(code) = answer.code.as_deref() {
+                if this.svc.say(&format!("{from}|{name}|{code}"), now) {
+                    this.log(
+                        "net.svc",
+                        &format!("a request from {from} to {} was answered {}: {}", if name.is_empty() { "a service" } else { &name }, answer.status, answer.message()),
+                    );
+                }
+            }
+            let frame = match frame_id() {
+                Ok(f) => f,
+                Err(e) => return this.log("net.svc", &e.message),
+            };
+            if let Err(why) = this.send_svc(&from, &answer.to_json(&id), frame) {
+                this.log("net.svc", &format!("the answer to {from} didn't go: {why}"));
+            }
+        });
     }
 }
 
@@ -1006,6 +1277,9 @@ impl Net for Shared {
         let mut body = out.body;
         if out.kind == Kind::Presence {
             body = self.own_presence(body);
+        }
+        if out.kind == Kind::Svc {
+            return Err("a service's requests and answers go through the network's services".into());
         }
         if out.kind == Kind::Relay && body.to_string().len() > RELAY_BODY {
             return Err(format!("a relay body is at most {} MiB", RELAY_BODY >> 20));
@@ -1061,7 +1335,9 @@ impl Node {
             }
             None => (None, Roster::new(), None),
         };
-        let shared = Arc::new(Shared {
+        let services = Services::open(dir.file(SERVICES));
+        let shared = Arc::new_cyclic(|this| Shared {
+            this: this.clone(),
             opts,
             dir,
             key: RwLock::new(key),
@@ -1074,7 +1350,9 @@ impl Node {
             wake: Notify::new(),
             volatile: Mutex::new(Vec::new()),
             relay_out: Mutex::new(Vec::new()),
-            relay_ids: Mutex::new(HashMap::new()),
+            relay_ids: Mutex::new(Recent::default()),
+            svc_out: Mutex::new(VecDeque::new()),
+            svc: services,
             gateway: RwLock::new(None),
             operator_nonces: Mutex::new(HashMap::new()),
             link_written: Mutex::new(0.0),
@@ -1180,6 +1458,7 @@ impl Node {
         *n.net.writing() = Some(net);
         *n.status.locked() = Status::default();
         n.peers.locked().clear();
+        n.svc.load();
         Ok(())
     }
 
@@ -1325,6 +1604,7 @@ impl Node {
         *n.net.writing() = None;
         *n.status.locked() = Status::default();
         n.peers.locked().clear();
+        n.svc.forget();
         n.log("net.leave", &format!("this machine left the network {}", net.name));
         Ok(json!({ "left": net.name, "removed": asked, "founder": founder }))
     }
@@ -1726,5 +2006,53 @@ impl Drop for Node {
         for t in self.tasks.locked().drain(..) {
             t.abort();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const T: f64 = 1_792_512_345_678.0;
+    const MIN: f64 = 60e3;
+
+    #[test]
+    fn a_relay_or_svc_frame_dated_ahead_is_taken_once() {
+        let mut r = Recent::default();
+        // Dated four minutes ahead: taken, and refused for as long as its
+        // time is fresh, well past two minutes after it came.
+        assert!(r.take("a", T + 4.0 * MIN, T));
+        for later in [0.0, 2.5, 3.0, 5.9] {
+            assert!(!r.take("a", T + 4.0 * MIN, T + later * MIN), "{later} min later");
+        }
+        // Once its time is past, it's stale.
+        assert!(!r.take("a", T + 4.0 * MIN, T + 6.5 * MIN));
+        assert!(r.take("b", T + 6.0 * MIN, T + 6.5 * MIN), "a fresh one is taken");
+    }
+
+    #[test]
+    fn setting_the_clock_back_makes_nothing_fresh_again() {
+        let mut r = Recent::default();
+        assert!(r.take("a", T, T));
+        // Ten minutes on, "a" is stale, and its id may be let go.
+        assert!(r.take("b", T + 10.0 * MIN, T + 10.0 * MIN));
+        r.ids.remove("a");
+        // The gateway sets this host's clock back to when "a" came: still
+        // refused, as is anything else older than the floor.
+        assert!(!r.take("a", T, T));
+        assert!(!r.take("c", T + MIN, T));
+    }
+
+    #[test]
+    fn a_full_memory_raises_the_floor_rather_than_forget() {
+        let mut r = Recent::default();
+        for i in 0..RELAY_IDS {
+            assert!(r.take(&format!("f{i}"), T + i as f64, T));
+        }
+        // All fresh, and full: the older half go, and so does their time.
+        assert!(r.take("next", T + RELAY_IDS as f64, T));
+        assert!(r.ids.len() <= RELAY_IDS / 2 + 1, "{}", r.ids.len());
+        assert!(!r.take("f0", T, T), "an id it let go is refused, not taken again");
+        assert!(!r.take(&format!("f{}", RELAY_IDS - 1), T + (RELAY_IDS - 1) as f64, T), "and one it kept is seen");
     }
 }

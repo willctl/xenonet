@@ -38,11 +38,15 @@ use x25519_dalek::{PublicKey as SealPublic, StaticSecret};
 use xenonet_base::ids::is_host_id;
 
 /// Every kind a frame can be.
-pub const FRAME_KINDS: [&str; 12] = ["hello", "ping", "gap", "roster", "removed", "presence", "claims", "message", "receipt", "handoff", "relay", "operator"];
+pub const FRAME_KINDS: [&str; 13] = ["hello", "ping", "gap", "roster", "removed", "presence", "claims", "message", "receipt", "handoff", "relay", "operator", "svc"];
 /// The gateway's own frames: unsealed, signed by the gateway's host key.
 pub const GATEWAY_KINDS: [&str; 5] = ["hello", "ping", "gap", "roster", "removed"];
 /// Frames between hosts: sealed, and signed by the host that sent them.
-pub const HOST_KINDS: [&str; 7] = ["presence", "claims", "message", "receipt", "handoff", "relay", "operator"];
+pub const HOST_KINDS: [&str; 8] = ["presence", "claims", "message", "receipt", "handoff", "relay", "operator", "svc"];
+/// Frames that go up in relay batches of their own (`frames?relay=1`): the
+/// map's, and services' requests and answers. They may be large, and
+/// they're live: never kept for a host that's away.
+pub const RELAY_BATCH_KINDS: [&str; 2] = ["relay", "svc"];
 /// What the gateway keeps for a host that's away (core/schema/network.js's
 /// QUEUED_KINDS); the rest are dropped for it, since a full set goes when
 /// it's back.
@@ -94,6 +98,11 @@ impl Frame {
 
     pub fn queued(&self) -> bool {
         QUEUED_KINDS.contains(&self.kind.as_str())
+    }
+
+    /// Whether it goes up in a relay batch of its own.
+    pub fn in_relay_batch(&self) -> bool {
+        RELAY_BATCH_KINDS.contains(&self.kind.as_str())
     }
 
     pub fn to_json(&self) -> Value {

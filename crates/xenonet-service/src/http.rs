@@ -43,6 +43,9 @@ pub struct Req {
     pub path: String,
     /// `url.searchParams`, decoded, in order.
     pub query: Vec<(String, String)>,
+    /// The query as it came, undecoded, for what passes it on as it is
+    /// (a service on another host, routes/svc.rs).
+    pub raw_query: Option<String>,
     /// The headers, names lowercased, each value as Node joins or keeps it.
     pub headers: Vec<(String, String)>,
     pub peer: Peer,
@@ -118,6 +121,7 @@ impl Req {
             method: method.to_string(),
             path,
             query,
+            raw_query: raw_query(target),
             headers: headers.iter().map(|(k, v)| (k.to_ascii_lowercase(), v.to_string())).collect(),
             peer: Peer { remote: addr, local: addr },
             body: body.map_or(Body::Taken, |b| Body::Bytes(b.as_bytes().to_vec())),
@@ -348,6 +352,12 @@ fn normalize_path(raw: &str) -> String {
         }
     }
     format!("/{}", segments.join("/"))
+}
+
+/// A request target's query as it came: what's after the first ?, before
+/// any #.
+pub fn raw_query(target: &str) -> Option<String> {
+    target.split('#').next().unwrap_or("").split_once('?').map(|(_, q)| q.to_string())
 }
 
 /// The pathname and the search params of a request's target, resolved

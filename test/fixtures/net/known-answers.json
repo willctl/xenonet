@@ -40,6 +40,36 @@
       "sig": "Pc1W7JMZTCnRAL8ja_RlKxyZKsyXSa_59-BITrOw51ud8qWHh3iyMELT2GR8TX15FFCBuv4o-XPNbtZKbV6JAg"
     }
   },
+  "svcFrame": {
+    "ephemeralSecret": "SgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgo",
+    "body": {
+      "schema": "network/svc/v1",
+      "op": "request",
+      "id": "svq_000102030405060708090a0b0c0d0e0f",
+      "name": "xenolith",
+      "method": "GET",
+      "path": "/sync/v1/spaces/project/atlas/pages",
+      "headers": [
+        [
+          "authorization",
+          "Bearer xenolith_test"
+        ]
+      ],
+      "body": ""
+    },
+    "head": "xenonet-net/1\nnet_00112233445566778899aabbccddeeff\nfrm_00000000-0000-4000-8000-0000000000cc\nsvc\nlaptop\nstudio\n1792512345678\n1\nOfC0jLvngUOYEl990T1VtiDVWYEn0KC3lUNQMb96Os4",
+    "frame": {
+      "v": 1,
+      "id": "frm_00000000-0000-4000-8000-0000000000cc",
+      "kind": "svc",
+      "from": "laptop",
+      "to": "studio",
+      "at": 1792512345678,
+      "sealed": true,
+      "body": "v4H8Uv8NSQlkcy4sRxu1wigTH0GQJ6gqmFrYmC3noUwz1F_53Uu_G4wOh20VsgboDYxpArq6P2Uo8kyTv2zNqsnUMtCgB42_z5hJCChkGMEf3X_Rt-6tCX3YzQ0I_zuSoHlOsNCfipm0QRbXu4_M5UCCZb-o7R-YPzplW-GbNL3_4hNzQ1bnlYYCsYAUE6_m6e9fknPCNS27JdJVklneJYOKQYcSWCrimBD37L4u_drKAEEcM3EgGpYXbTuqrrYs5DJvwh_zCiry35Toi-AOgfJTBCTrmOGeZMOp2qOO-Pmn6voJY9XLO12xS0yffZ8qowbq3ksNFxQORE8Ir-St-AGBpAqgRqmVlCm5G8OlmoubvgQ",
+      "sig": "L7oMN8x1UuwHu2mtU-mVFnBQhtC5jHeDtuEvZ8QXnBgrRemcOBF7ZCgdjCQvm2uXaY4HRGyZGeBK82X31Q6OCQ"
+    }
+  },
   "gatewayFrame": {
     "head": "xenonet-net/1\nnet_00112233445566778899aabbccddeeff\nfrm_00000000-0000-4000-8000-0000000000bb\nping\nstudio\nlaptop\n1792512345678\n0\nShaixQzN0GbHLiAAAb0xCBtasFCpC2QHu4nzYXwknBQ",
     "frame": {
