@@ -361,7 +361,9 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
   }
 
   function liveSectionHtml(node) {
-    if (node.network) return presenceHtml(node);
+    // Drawn from presence (network-map.js); one drawn from its host's relay
+    // snapshot (network: "relay") has the live state, as an SSH host's does.
+    if (node.network === true) return presenceHtml(node);
     const s = liveById.get(node.id);
     if (!s) return `<div class="live-none">No activity in the last 24 hours</div>`;
     const pct = s.context.window ? Math.min(100, (s.context.used / s.context.window) * 100) : 0;
@@ -587,7 +589,7 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
       <div class="insp-sub">${h(sub)}</div>
       ${whereHtml(node, index)}
       ${actions ? `<div class="actions">${actions}</div>` : ""}
-      ${isSession ? `<div class="panel-title sub"><span>${node.network ? "Presence" : "Live"}</span><span class="tick live-tick">● live</span></div><div id="insp-live" class="insp-live">${liveSectionHtml(node)}</div>` : ""}
+      ${isSession ? `<div class="panel-title sub"><span>${node.network === true ? "Presence" : "Live"}</span><span class="tick live-tick">● live</span></div><div id="insp-live" class="insp-live">${liveSectionHtml(node)}</div>` : ""}
       <div class="panel-title sub"><span>Details</span></div>
       <div class="grid">${grid}</div>
       ${mcp && ["resource", "wiki"].includes(node.kind) ? '<div class="panel-title sub"><span>MCP server</span></div><div id="insp-mcp"></div>' : ""}

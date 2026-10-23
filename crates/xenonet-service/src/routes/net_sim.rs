@@ -94,10 +94,14 @@ pub fn simulated_remote_agents(ctx: &Ctx) -> Option<Vec<Value>> {
 /// that isn't one. `you_at` is the host the person is at (this one by
 /// default), for net-founder and net-remote-waiting; `variant`
 /// "titles-only" has the other machines share titles only, so their
-/// agents carry no question's text, last message or stuck reason.
+/// agents carry no question's text, last message or stuck reason, and
+/// "relay", for net-founder, has laptop drawn from a relay snapshot: this
+/// machine's own map, served as laptop's by a relay over a network inside
+/// this process (the hub's net-relay), whose transcripts open through the
+/// window as another machine's do.
 pub fn simulate(ctx: &Ctx, kind: &str, you_at: Option<&str>, variant: Option<&str>) -> Option<Value> {
     let (state, agents) = made_up_with(kind, you_at, variant == Some("titles-only"), ctx.now())?;
-    let out = json!({
+    let mut out = json!({
         "ok": true,
         "kind": kind,
         "network": state["network"]["name"],
@@ -106,12 +110,23 @@ pub fn simulate(ctx: &Ctx, kind: &str, you_at: Option<&str>, variant: Option<&st
         "agents": agents.len(),
     });
     sims().locked().insert(key(ctx), Sim { state: state.clone(), agents });
+    let relay = kind == "net-founder" && variant == Some("relay");
+    if let Some(h) = &ctx.cores.hub {
+        if let Ok(Some(r)) = h.simulate("net-relay", &json!({ "id": "laptop", "off": !relay })) {
+            if relay {
+                out["relay"] = r;
+            }
+        }
+    }
     ctx.broadcast("net", &state);
     Some(out)
 }
 
 /// Ends the simulation; whether one ran.
 pub fn clear(ctx: &Ctx) -> bool {
+    if let Some(h) = &ctx.cores.hub {
+        let _ = h.simulate("net-relay", &json!({ "id": "laptop", "off": true }));
+    }
     let had = sims().locked().remove(&key(ctx)).is_some();
     if had {
         ctx.broadcast("net", &alone());

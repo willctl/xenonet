@@ -73,7 +73,7 @@ export function createDriver(app) {
     } else if (n.kind === "host") out.state = n.state;
     // From another machine (hosts.js): which, and whether it's live; one in
     // your network says so, and for a session whether it waits on you.
-    if (n.host) Object.assign(out, { host: n.host, ...(n.stale ? { stale: true } : {}), ...(n.network ? { network: true } : {}), ...(n.presence ? { waits: !!n.presence.waits } : {}) });
+    if (n.host) Object.assign(out, { host: n.host, ...(n.stale ? { stale: true } : {}), ...(n.network ? { network: n.network } : {}), ...(n.presence ? { waits: !!n.presence.waits } : {}) });
     return out;
   }
 
