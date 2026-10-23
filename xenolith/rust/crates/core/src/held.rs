@@ -185,6 +185,11 @@ pub fn pending_count(wiki_dir: &Path) -> usize {
     pending_files(wiki_dir).iter().map(|f| f.changes.iter().filter(|c| c.status == "pending").count()).sum()
 }
 
+/// A change that removes its page: a removal another machine made from an older version (sync).
+fn removal(e: &Entry) -> bool {
+    e.held.op["action"] == "delete"
+}
+
 fn body_of(text: &str) -> String {
     frontmatter::parse(text).1.trim().to_string()
 }
@@ -206,7 +211,7 @@ fn view(f: &File, index: usize, e: &Entry, wiki_dir: &Path) -> Value {
     };
     let (old_body, new_body) = (body_of(base), body_of(&w.text));
     let diff: Vec<Value> = line_diff(&old_body, &new_body).into_iter().map(|(k, l)| json!([k.to_string(), l])).collect();
-    let (old_head, new_head) = (if base.is_empty() { vec![] } else { header_lines(base) }, header_lines(&w.text));
+    let (old_head, new_head) = (if base.is_empty() { vec![] } else { header_lines(base) }, if removal(e) { vec![] } else { header_lines(&w.text) });
     let header: Vec<Value> = new_head.iter().filter(|l| !old_head.contains(l)).map(|l| json!(l)).collect();
     json!({
         "batch": f.batch, "index": index, "at": f.at, "slug": w.slug, "title": w.title, "action": w.action, "kind": e.held.kind,
@@ -272,6 +277,8 @@ fn check_fits(wiki_dir: &Path, e: &Entry) -> Result<Option<String>, Error> {
     let op = &e.held.op;
     let moved_on = "The page changed since this was proposed. Send it back to the curator to propose it again on the current page, or reject it.";
     match (&cur, op["action"].as_str()) {
+        // A removal approves only the version it was proposed on; a page gone already is nothing to do.
+        (Some(c), Some("delete")) if Some(hash_text(c, 16)) != w.base_hash => Err(Error::Conflict("The page changed since this removal was proposed. Reject it, or remove the page yourself.".into())),
         (Some(_), Some("create")) => Err(Error::Conflict("A page with this name was created since. Reject this change, or send it back to the curator.".into())),
         (None, Some("patch" | "replace")) => Err(Error::Conflict("The page no longer exists. Reject this change, or send it back to the curator.".into())),
         // A patch applies wherever its exact-match edits still do; a replace only to the page it was planned on.
@@ -368,7 +375,8 @@ fn undo_problem(wiki_dir: &Path, e: &Entry) -> Option<String> {
         return Some(format!("This change is {}, so there is nothing to undo.", e.status));
     };
     let cur = page_file(wiki_dir, &e.held.write.slug).and_then(|p| read_if_exists(&p)).ok().flatten();
-    if cur.as_deref().map(|c| hash_text(c, 16)).as_deref() != Some(applied) {
+    // "none" for an approved removal: the page must still be absent.
+    if cur.as_deref().map(|c| hash_text(c, 16)).unwrap_or_else(|| "none".into()) != applied {
         return Some("The page changed after this change, so it cannot simply be undone. Edit the page, or ask the curator.".into());
     }
     let earlier = match e.replaced.as_deref().map(|rel| read_history(wiki_dir, &e.held.write.slug, rel)).transpose() {
@@ -412,8 +420,15 @@ pub fn auto_summary(wiki_dir: &Path) -> Value {
 /// Puts a page back: the current text goes to .history/, then the earlier text replaces it (only if
 /// the page is still `cur_hash`), or the page is removed when it did not exist before.
 fn restore_page(wiki_dir: &Path, slug: &str, cur: &str, cur_hash: &str, earlier: Option<&str>, suffix: &str) -> Result<(), Error> {
-    keep_history(wiki_dir, slug, cur, suffix)?;
     let file = page_file(wiki_dir, slug)?;
+    if cur_hash == "none" {
+        // The change removed the page: it comes back, unless another took its place meanwhile.
+        if let Some(text) = earlier {
+            atomic_write(&file, text, None, Some(None))?;
+        }
+        return Ok(());
+    }
+    keep_history(wiki_dir, slug, cur, suffix)?;
     match earlier {
         Some(text) => atomic_write(&file, text, None, Some(Some(cur_hash)))?,
         None => fs::remove_file(&file)?,
@@ -484,6 +499,23 @@ fn decide_locked(wiki_dir: &Path, batch: &str, index: usize, action: &str, by: O
     let title = one_line(&w.title);
     let (mut applied_hash, mut replaced, mut replaced_hash) = (None, None, None);
     let outcome = match action {
+        "approve" if removal(&e) => {
+            let file = page_file(wiki_dir, &w.slug)?;
+            match check_fits(wiki_dir, &e)? {
+                None => "approved (the page was gone already)".to_string(),
+                Some(c) => {
+                    replaced = Some(keep_history(wiki_dir, &w.slug, &c, batch.get(batch.len().saturating_sub(6)..).unwrap_or("held"))?);
+                    replaced_hash = Some(hash_text(&c, 16));
+                    fs::remove_file(&file)?;
+                    crate::readcache::forget(&file);
+                    wiki::refresh_index(wiki_dir, None)?;
+                    log_line(wiki_dir, "curator", &format!("Removal approved: {title} [[{}]]", w.slug))?;
+                    // "none": what Undo expects to find, the page absent.
+                    applied_hash = Some("none".into());
+                    "approved; the page is removed".to_string()
+                }
+            }
+        }
         "approve" => {
             let file = page_file(wiki_dir, &w.slug)?;
             let cur = check_fits(wiki_dir, &e)?;

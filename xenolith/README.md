@@ -6,17 +6,17 @@
 
 **Shared context for SI.**
 
-Xenolith is one plain-Markdown wiki that every session on your computer reads
-and writes, whatever app or model it runs on. It is XenoNet's shared context,
-and it also runs on its own. Any MCP client can reach it through one local
-server (`xenolith`). The installer connects Claude Code, Claude desktop, Codex
-and ChatGPT desktop, and packages one plugin folder for the apps that take
-plugins.
+Xenolith is shared context in plain Markdown: one folder that every session on
+your computer reads and writes, whatever app or model it runs on. Any MCP client
+can reach it through one local server (`xenolith`). The installer connects
+Claude Code, Claude desktop, Codex and ChatGPT desktop, and packages one plugin
+folder for the apps that take plugins. It needs nothing else to run; other
+programs that read the folder follow [FORMAT.md](FORMAT.md).
 
 For trusted local machines. The HTTP service does not isolate OS accounts. Read
 [Security](SECURITY.md) before installing on a shared machine or enabling external model calls.
 
-Sessions **tell the wiki what happened**, and a **curator** agent organizes it.
+Sessions **tell the shared context what happened**, and a **curator** agent organizes it.
 The server accepts each write at once into a durable inbox. The curator then
 files the notes into pages, links, summaries and the activity log. It runs a
 model through a command-line agent with your own sign-in. Today that agent is
@@ -27,8 +27,8 @@ no model runs on the read path.
 Everything users run is two small Rust programs: `xenolith` (the MCP server,
 the session hook, the curator, the Windows service and the installer) and
 `xenolith-tray` (the tray or menu bar icon and the Xenolith window). You need
-Node only to build the window. [docs/rust-plan.md](docs/rust-plan.md) covers the
-rewrite and its measurements.
+Node only to build the window. [docs/rust-plan.md](docs/rust-plan.md) covers how
+the programs are built and checked.
 
 ## Install, upgrade, uninstall
 
@@ -46,11 +46,11 @@ from `dist/package`. A release ships that folder, and `xenolith install` in it
 installs the same way.
 
 The install is idempotent. Running it again upgrades in place and never touches
-wiki content. Options pass through: `-- --wiki-dir <path>`, `-- --port N` and
+what the shared context holds. Options pass through: `-- --wiki-dir <path>`, `-- --port N` and
 `-- --no-approve`. With `--no-approve`, Codex, ChatGPT and Claude Code ask before
 each Xenolith tool call.
 
-By default the wiki tools run without asking. The installer sets
+By default the `xenolith` tools run without asking. The installer sets
 `default_tools_approval_mode = "approve"` in `~/.codex/config.toml`, and adds the
 `permissions.allow` entries `mcp__plugin_xenolith_xenolith` and
 `mcp__xenolith` to `~/.claude/settings.json`. Without those entries, Claude
@@ -68,16 +68,12 @@ and stops before changing anything.
 
 `uninstall-local` (`xenolith uninstall`) stops the tray and removes its
 start-at-sign-in entries, the plugin and marketplaces, the Claude desktop entry,
-the instruction blocks and the approval settings. It leaves the wiki, the
+the instruction blocks and the approval settings. It leaves the shared context folder, the
 programs, `config.json` and the curator's Codex sign-in in place.
 
 After installing, sign the curator in once: tray icon > **Curator** > **Sign in
 to ChatGPT for the curator...** (see [The curator](#the-curator)). Until then,
 notes wait in the inbox, where you can see them.
-
-The earlier Node runtime and C# tray are retired. The installer refuses `--node`
-and a missing Rust build. Legacy source remains for comparison tests and is not
-a supported installation target.
 
 ## The service
 
@@ -88,7 +84,7 @@ Claude Code connect to it. Otherwise each app starts its own stdio server.
 - **Windows:** the service `Xenolith` runs `xenolith service`, which hosts the
   HTTP server in that one process. It starts at boot and runs as the virtual
   account `NT SERVICE\Xenolith`. That account's only rights are Modify on the
-  wiki folder, the logs and the state folder (the audit chain and the [owner
+  shared context folder, the logs and the state folder (the audit chain and the [owner
   key](#the-owner-key)), and Read on `%APPDATA%\Xenolith` and
   `%LOCALAPPDATA%\Xenolith`. Registering the service takes one UAC prompt the
   first time, because the installer starts `xenolith install-service`
@@ -103,8 +99,11 @@ Claude Code connect to it. Otherwise each app starts its own stdio server.
   alone: `(A;;RPWPLC;;;<your SID>)`. It lets your account, and only yours, start
   and stop the service and query its status, so the tray can restart it. The service logs to
   `%LOCALAPPDATA%\Xenolith\logs\service.log`.
-- **macOS:** LaunchAgents `dev.xenonet.xenolith.server` and `dev.xenonet.xenolith.curator` in
-  `~/Library/LaunchAgents`, running as you.
+- **macOS:** LaunchAgents `dev.xenolith.server` and `dev.xenolith.curator` in
+  `~/Library/LaunchAgents`, running as you, and the tray's login item
+  `dev.xenolith.tray`. An install over one that used the earlier
+  `dev.xenonet.xenolith.*` labels stops and removes those first, the tray's
+  before any other, so two trays or two servers never run at once.
 - **Linux:** systemd user units `xenolith.service` and
   `xenolith-curator.service`, running as you (`loginctl enable-linger` keeps
   them up while you are signed out).
@@ -121,7 +120,7 @@ cannot reach them, even through DNS rebinding.
 | `context_start` | protocol, page index, recent activity, pending notes, related pages |
 | `context_search` | BM25 search over sections: each page's intro and its `##` and `###` sections, each log entry, and each note, plus the page's `aliases`. Results cite the section that matched. Filters: `scope` (`all`, `pages`, `log`, `notes`), `since` and `until` dates, and `app`. `queries` takes up to 5 other wordings, searched together and fused by reciprocal rank. With hybrid search on, results also rank by meaning (see Search) |
 | `context_read` | a page, a log day, a note (`note:<id>`, pending or filed, with what the curator did with it), or a file under `pages/`, `log/` or `inbox/`, or `index.md`, `PROTOCOL.md` or `README.md`. Never `.curator/`, `.history/`, `.locks/` or `spaces/`. `slug#section` (or `section`) returns one section with the page's header line |
-| `context_log` | tell the wiki what happened. The server queues it as a note for the curator, with its `source` |
+| `context_log` | tell the shared context what happened. The server queues it as a note for the curator, with its `source` |
 | `context_upsert_page` | hand over content for one page (`append` or `replace`). The server queues it for the curator |
 
 These names replace agent-wiki's `wiki_start`, `wiki_search`, `wiki_read`,
@@ -147,7 +146,7 @@ leave with `xenolith note "<title>" [--body <text>] [--page <slug>]`
 claims `user` without that stamp counts as `agent`.
 
 Read results turn remote images into plain links, so no app fetches a URL from
-the wiki without someone clicking it. `writeMode: "direct"` in `config.json`
+the shared context without someone clicking it. `writeMode: "direct"` in `config.json`
 restores the v1.1 behavior: immediate deterministic page and log writes, and no
 curator.
 
@@ -169,9 +168,9 @@ place of the tool call. The read-only server that Ask uses offers tools only.
 
 ## Spaces and access
 
-A space is one wiki. The wiki folder is this machine's space, `machine:local`.
-Every other space is a wiki of the same layout in `spaces/<kind>/<name>/` inside
-it:
+Shared context is kept in spaces. The folder itself is this machine's space,
+`machine:local`. Every other space has the same layout, in
+`spaces/<kind>/<name>/` inside it ([FORMAT.md](FORMAT.md#spaces)):
 
 | Space | Holds |
 | --- | --- |
@@ -208,19 +207,19 @@ xenolith access
 xenolith spaces add project:atlas --identity adal
 ```
 
-A scope is `ctx:<level>` or `ctx:<level>:<selector>`. Selectors are XenoNet's:
+A scope is `ctx:<level>` or `ctx:<level>:<selector>`. A selector is
 `key:value` terms that must all hold, joined with `+` inside a scope. `all`
 covers every space, and a value may end in `*`. The keys are `project`,
 `identity` (an identity's own space and the projects that belong to it),
-`machine` and `by` (an actor's own space, as `by:<slug>` names the actor in a
-XenoNet grant). A subject is `actor:<slug>`, `client:<id>` or `machine:<name>`.
+`machine` and `by` (an actor's own space: `by:<slug>` names the actor). A
+subject is `actor:<slug>`, `client:<id>` or `machine:<name>`.
 A grant expires (after 30 days unless you say otherwise), `revoke` takes effect
 at once, and a grant that names one space exactly starts it. A token reaches
 this machine's own space, `machine:local`, only when its grant and its scopes
 both name it exactly (`ctx:read:machine:local`): `all` and `machine:*` don't
 reach it, since it holds your own notes and the questions you ask in the
 window. The policy is `access.json` in Xenolith's config folder, never in the
-wiki.
+shared context folder.
 
 Reads return content only: pages, the log, notes not yet filed, and the
 top-level `index.md`, `PROTOCOL.md` and `README.md`. The curator's state
@@ -321,14 +320,14 @@ either one takes effect on connections already open.
   as the token's holder, for an actor started on this machine with its own
   token. A token Xenolith doesn't know stops the server from starting.
 
-The secret guard refuses Xenolith and XenoNet tokens in notes and pages.
+The secret guard refuses tokens in notes and pages.
 
 ### The audit chain
 
 Grants, revocations, tokens, refusals, writes and new spaces each add one JSON
 line to `audit/chain.jsonl` in Xenolith's state folder: when, what, who (`you`,
 or a token's subject and id), and the space. A write records the note's id and
-a hash of what was written, never the text, as XenoNet's delivery audit does.
+a hash of what was written, never the text.
 Each line carries the SHA-256 of the line before it, so a line changed, removed
 or put in between breaks the chain at that point:
 
@@ -358,7 +357,8 @@ pages. A space you start is curated where you start it. Another machine can
 **follow** it: it keeps a copy, where its sessions read pages and leave notes
 as usual, and its own curator leaves that space alone. Once a minute (or on
 `xenolith sync`) it pushes the notes waiting there to the curator, as entries,
-and pulls the curator's pages back.
+and pulls the curator's pages, its removals and the last 7 days of its log
+back, so `context_start` on the copy shows recent activity.
 
 On the curator, grant the other machine and make it a token:
 
@@ -379,29 +379,66 @@ xenolith sync
 
 A peer's URL is the base of its Xenolith service: `https://` anywhere, or
 `http://` only to this machine, since a token never crosses a network in the
-clear. Put the service behind something that forwards an address to it, such
-as XenoNet's gateway or a tunnel of your own. The token is kept in
+clear. The base may carry a path (`https://box.example/xenolith`): the sync
+routes go under it, at `<base>/sync/v1/...`. Xenolith serves them at the root of
+its own port, so whatever forwards an address to it (a reverse proxy, a tunnel)
+must strip its own path prefix before passing a request on, and send it to
+`127.0.0.1:<port>` with that as its Host. The token is kept in
 `peers/<name>.token` in the config folder, readable by you alone from the
 moment it exists: mode 0600, or on Windows a protected ACL for you and SYSTEM.
 `sync.json` and `access.json` are written the same way, also readable by the
-Windows service, which checks tokens and curators with them.
+Windows service, which checks tokens and curators with them. One request to a
+peer may take 90 seconds; a peer behind a slow forwarder may need longer:
+`xenolith sync timeout <seconds>` (`timeoutSeconds` in `sync.json`).
 
-The curator takes entries at `/sync/v1/spaces/<kind>/<name>/entries`: a note
-needs append, a replaced page needs write. Each entry is taken once, however
-often it is sent, and is stamped as the pushing token's subject's
-(`by: machine:laptop`), so a `user` source from the other machine counts as
-`agent` here. A page replaced on the other machine carries the version it
-was written against. When the curator's page has changed since, the push gets
-**409** and the write becomes a **proposal**: a change that waits for your OK
-even when approvals are automatic, listed by `xenolith held --space <space>`
-and decided there with `xenolith held approve|deny <batch>:<index> --space
-<space>` (or through the window's API with `space` and the [owner
-key](#the-owner-key)). Approving it applies it only if the page hasn't changed again.
+**Who the curator is.** Each curated space has a random curator id, made the
+first time a follower asks (`.curator/sync/curator.json` in the space). A
+follower pins it in `sync.json` at its first pull. If the peer's address later
+answers as another curator (two machines curating one space, or the curator set
+up again), the follower refuses to push or pull and says so in `xenolith sync`,
+`xenolith sync status` and `/status`. When the new curator is the right one,
+`xenolith sync follow <space> <peer>` again accepts it.
+
+**What travels.** The curator takes entries at
+`/sync/v1/spaces/<kind>/<name>/entries`: a note needs append, a replaced or
+removed page needs write. Each entry is taken once, however often it is sent,
+and is stamped as the pushing token's subject's (`by: machine:laptop`), so a
+`user` source from the other machine counts as `agent` here. A page replaced on
+the other machine carries the version it was written against. When the
+curator's page has changed since, the push gets **409** and the write becomes a
+**proposal**: a change that waits for your OK even when approvals are
+automatic, listed by `xenolith held --space <space>` and decided there with
+`xenolith held approve|deny <batch>:<index> --space <space>` (or through the
+window's API with `space` and the [owner key](#the-owner-key)). Approving it
+applies it only if the page hasn't changed again.
+
+- **Edits in a copy.** A page changed in the follower's copy since the last
+  pull (by hand, or by a session writing directly) becomes an entry: a replace
+  against the version last pulled. The copy then shows the curator's page again
+  until the curator files the change; the edit stays in `.history/`.
+- **Removals.** A page removed in a copy is sent as a removal against the
+  version last pulled. The curator removes it too when that is still its
+  version (keeping it in `.history/`), and makes it a proposal otherwise; until
+  then the next pull brings the page back. A page removed on the curator, by
+  any means, is listed as removed for 30 days, and each follower removes its
+  copy, keeping it in `.history/`.
+- **Batches.** Entries go 100 at a time, one batch a pass. A backlog over 1,000
+  is pushed batch after batch until it is drained.
+- **Failures.** An entry the curator refuses for good, because the token may not
+  do it (403) or the entry is invalid (400), moves to the copy's
+  `.curator/sync/dead/` with the reason on its first line and is never sent
+  again. `xenolith sync status` and `/status` count them. A push that fails for
+  any other reason leaves its entries to the next pass, and the pull still
+  runs. Only a refused token (401, or 403 for the whole request) stops both. A
+  page that disappears between the list and its fetch is skipped.
+
 Nothing written on either machine is lost: each pushed note moves to
 `.curator/sent/` with what the curator said, and each pull keeps the page it
-replaces in `.history/`. A machine that only follows a space sends anyone who
-pushes to it on to the curator (421). Both machines record each sync in their
-audit chains.
+replaces or removes in `.history/`. Log lines written directly in a copy stay
+after the curator's when its log is pulled. A machine that only follows a
+space sends anyone who asks it for that space on to the curator (421, with the
+curator's URL when it is an `https://` one). Both machines record each sync in
+their audit chains.
 
 ## The curator
 
@@ -416,7 +453,7 @@ unit runs it. It never reads Codex's credential files.
   `--ephemeral` and `--sandbox read-only`. It disables plugins, hooks, apps,
   memories, shell and multi-agent tools, and turns web search off. It needs a
   separate home because Codex always loads `~/.codex/AGENTS.md` (our pointer) and
-  has no switch to stop that. A run with that file loaded tried to reach the wiki
+  has no switch to stop that. A run with that file loaded tried to reach the `xenolith`
   tools. The separate home needs its own one-time `codex login` (tray > Curator >
   Sign in).
 - **Structured output.** The model returns an edit plan (`--output-schema`) with
@@ -473,9 +510,9 @@ unit runs it. It never reads Codex's credential files.
   note it submitted itself.
 
   The setting is `approvals` (`auto` or `manual`) in
-  `.curator/settings.json`, so it travels with the wiki. A file that cannot be
+  `.curator/settings.json`, so it travels with the folder. A file that cannot be
   read or understood counts as Ask me first, and `/status` names the problem.
-  Forget requests always wait for your OK. If an installed wiki's `PROTOCOL.md` was never edited, an
+  Forget requests always wait for your OK. If an installed folder's `PROTOCOL.md` was never edited, an
   install replaces it with this release's copy.
 - **Cleanup schedule.** On a schedule, daily at 03:00 by default, the curator
   reviews each page that changed since its last review, one page at a time when
@@ -505,7 +542,7 @@ unit runs it. It never reads Codex's credential files.
   six hours), `@daily`-style shortcuts, `daily`, `weekly` (Mondays at 03:00)
   or `off`. A schedule that cannot be read runs the default, and `/status`
   names the problem. `curator.lint: "off"` in one computer's `config.json`
-  turns cleanups off there, whatever the wiki's schedule says.
+  turns cleanups off there, whatever the folder's schedule says.
 - **Revert.** Each curator page change in the window's Activity has a **Revert**
   button. It restores the `.history/` copy if the page is still exactly what
   that batch wrote, which it checks against the audit record's hashes.
@@ -516,11 +553,11 @@ unit runs it. It never reads Codex's credential files.
   audit records, held changes, Ask, the log, the inbox and the request logs.
   Then it redacts every copy and leaves a tombstone in `.curator/forgotten/` that
   records how much it redacted, never the text. `xenolith forget "<text>"
-  [--yes]` does the same from a terminal. When your own note asks the wiki to
+  [--yes]` does the same from a terminal. When your own note asks Xenolith to
   forget something (`xenolith note "FORGET ..."`, a note with source `user`),
   the curator records a forget request instead of copying the text anywhere,
   and the Inbox asks for your OK. An app's request to forget is not recorded,
-  even when it says you asked. Forget does not rewrite a git history of the wiki.
+  even when it says you asked. Forget does not rewrite a git history of the folder.
 - **Nudge before stopping (opt-in).** The plugin also registers a Stop hook
   (`xenolith hook stop`, for Claude Code and Codex). With `"hooks": {"nudge":
   true}` in `config.json`, the hook asks the model to log what is worth keeping
@@ -532,7 +569,7 @@ unit runs it. It never reads Codex's credential files.
   it is, in the inbox or in `.curator/done/`, with the curator's disposition and
   the pages it changed. Search covers filed notes and ranks them below pages and
   the log. The window opens a filed note from search or from an activity entry.
-- **Concurrency.** Commits take the wiki write lock and re-check every base
+- **Concurrency.** Commits take the folder's write lock and re-check every base
   hash. If someone edits a page in the meantime, the curator plans again on the
   new content, up to 5 times, and never loses the edit. Commits go through a
   write-ahead journal, so after a crash at any point the curator completes the
@@ -575,7 +612,7 @@ unit runs it. It never reads Codex's credential files.
   `--lint [slug...]` (review pages now), `--retry-dead`, `--file-raw-dead`,
   `--login-status`, `--asks-only`.
 
-v1.2 added two parts to the wiki layout. `inbox/<id>.md` holds pending notes as
+Two parts of the folder are the curator's. `inbox/<id>.md` holds pending notes as
 plain Markdown, and you can drop notes there by hand too. `.curator/` holds
 keys, state, journal, done, audit, status, and `asks/` for
 [Ask](#ask-agentic-search).
@@ -608,7 +645,7 @@ from Windows Credential Manager (a generic credential), the macOS keychain (a
 generic password) or the Linux secret service. Xenolith never stores it.
 `model` defaults to `google/gemini-embedding-2`; `weight`, `keywordWeight`
 and `queryTimeoutMs` adjust the rest. Requests ask OpenRouter for providers
-that neither collect nor retain the text, so the wiki's sections and the
+that neither collect nor retain the text, so the pages' sections and the
 queries go to OpenRouter and the model's provider under that policy. The
 curator embeds new and changed sections when idle;
 `xenolith embeddings status` and `xenolith embeddings sync` do it by
@@ -629,7 +666,7 @@ McNemar p < 0.001), and notes routed to their page went from 4 of 12 first to
 ## Ask (agentic search)
 
 The window's **Ask** tab (and the first row of every search) hands a question
-to an agent that searches and reads the wiki for you, then answers with the
+to an agent that searches and reads the shared context for you, then answers with the
 files it relied on. It runs in the curator process, as you, for the same reason
 the curator does: the service account must not have your model sign-in.
 
@@ -669,7 +706,7 @@ Xenolith window (below). **Right click** shows the menu:
 
 - Open Xenolith;
 - status (version, uptime, queue, last write, reasons);
-- open the wiki folder, `index.md` or the logs;
+- open the folder, `index.md` or the logs;
 - recent activity;
 - pause or resume the curator;
 - Curator (sign in, retry or file failed notes, restart, its log);
@@ -679,7 +716,7 @@ Xenolith window (below). **Right click** shows the menu:
 - quit.
 
 Starting the tray again while it runs opens the window. The icon is a dog-eared
-page with a speech-bubble tail, because what the apps say becomes wiki pages. It
+page with a speech-bubble tail, because what the apps say becomes pages. It
 is indigo when healthy, has an amber dot when it needs attention, and is grey
 with a red dot when the service is down. `assets/icon/xenolith-16.svg` is
 fitted to the 16 px grid that the tray uses at 100% scaling, and
@@ -699,9 +736,9 @@ not recorded). The window has a search box and five tabs:
 
 - **Search** (`/` or Ctrl+K, then arrow keys and Enter) covers pages, notes
   waiting for the curator and the activity log, with highlighted snippets. The
-  first row asks the wiki instead. The window selects it when the query reads
+  first row asks the shared context instead. The window selects it when the query reads
   like a question, and Ctrl+Enter picks it from anywhere in the box.
-- **Ask** sends a question to an agent that searches and reads the wiki (see
+- **Ask** sends a question to an agent that searches and reads the shared context (see
   [Ask](#ask-agentic-search)). Each search and read appears as it happens, then
   the answer with numbered sources. Follow-ups keep the conversation, and the tab
   lists recent conversations.
@@ -734,9 +771,9 @@ which another site's page cannot send.
 The API takes local requests only ([who is local](#who-is-local)), refuses the
 same Hosts and Origins as `/mcp`, and any request a browser marks as sent by
 another site (`Sec-Fetch-Site` other than `same-origin` or `none`). The window's pages get a strict CSP, and nothing in a
-wiki page runs: raw HTML shows as text, and only `http`, `https` and `mailto`
+page runs: raw HTML shows as text, and only `http`, `https` and `mailto`
 links work. To work on the window, run `npm run ui:preview`. It serves a
-snapshot copy of your wiki on port 47859 (`http://127.0.0.1:47859/ui/`) and does
+snapshot copy of your shared context folder on port 47859 (`http://127.0.0.1:47859/ui/`) and does
 not touch the real one.
 
 **Start at sign-in.** On Windows the tray has two independent per-user entries,
@@ -799,7 +836,7 @@ folder in your home. On Windows:
 | `%LOCALAPPDATA%\Xenolith\state\` | `install-state.json` (what the installer created, for uninstall), `audit\chain.jsonl`, `runtime\owner.key` (the [owner key](#the-owner-key), new at each service start) |
 | `%LOCALAPPDATA%\Xenolith\marketplace\` | local marketplace (Claude and Codex formats) and the rendered plugin |
 | `%LOCALAPPDATA%\Xenolith\paste-into-app-settings.md` | the pointer text, for app personal-instruction settings |
-| `~/Xenolith/` | the wiki (a folder of your documents, not app data) |
+| `~/Xenolith/` | the shared context (a folder of your documents, not app data) |
 | `~/.agents/plugins/marketplace.json` | ChatGPT and Codex personal marketplace entry (Codex's folder) |
 | `~/.codex/config.toml` | `[plugins."xenolith@personal".mcp_servers.xenolith]` auto-approval |
 | `~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md` | managed `XENOLITH` instruction block |
@@ -807,22 +844,40 @@ folder in your home. On Windows:
 
 On Linux the same files go to the XDG folders (`~/.config/xenolith`,
 `~/.local/share/xenolith`, `~/.local/state/xenolith` with `logs/`,
-`~/.cache/xenolith`). On macOS they go to `~/Library/Application Support/Agent
-Wiki`, `~/Library/Logs/Xenolith` and `~/Library/Caches/Xenolith`. On both, a
+`~/.cache/xenolith`). On macOS they go to `~/Library/Application Support/Xenolith`,
+`~/Library/Logs/Xenolith` and `~/Library/Caches/Xenolith`. On both, a
 set `XDG_*` variable wins. `XENOLITH_HOME=<dir>` puts everything in one folder
 instead. The tests and `ui:preview` use it. Each of
 `XENOLITH_{CONFIG,DATA,STATE,LOG,CACHE}_DIR` sets one kind of folder. The
 service gets these variables from its ini, because its own profile is not yours.
 
-Xenolith looks for the wiki folder in this order: the `XENOLITH_DIR`
+Xenolith looks for the shared context folder in this order: the `XENOLITH_DIR`
 environment variable, then `wikiDir` in `config.json`, then `~/Xenolith`. The
-installer seeds `PROTOCOL.md` into a new wiki. In an existing wiki it replaces
+installer seeds `PROTOCOL.md` into a new folder. In an existing one it replaces
 the file only when it is an unedited earlier default, so it never overwrites
 your edits.
 
 Before it changes an existing config file, the installer copies it once to
 `<file>.bak-xenolith` and never overwrites that first backup. Then it merges
 its changes in and keeps the file's line endings.
+
+## With XenoNet (optional)
+
+Xenolith runs on its own, and nothing in it depends on XenoNet. If you use
+XenoNet too, it does two things with Xenolith:
+
+- **It shows the shared context.** XenoNet's map reads the folder (pages, the
+  log and the inbox, as [FORMAT.md](FORMAT.md) describes them) and shows each
+  session's writes next to the pages they touch. It only reads; Xenolith's
+  server does all the writing.
+- **It can carry sync between machines.** A XenoNet network can pass one
+  host's Xenolith sync routes (`/sync/v1/`) to another host, which then follows
+  the curator at a loopback address XenoNet gives it, with a path prefix
+  XenoNet strips before it passes a request on. To Xenolith that is an ordinary
+  [peer](#sync-between-machines): the request carries Xenolith's own token, a
+  forwarded request is never this machine's own, and the curator's grants
+  decide what the other machine may do. XenoNet's own docs say how to publish
+  the service. A tunnel or reverse proxy of your own works the same way.
 
 ## Repo layout
 
@@ -834,32 +889,31 @@ rust/crates/cli/       xenolith: serve (MCP over stdio and HTTP, /health, /statu
                        hook, curator, service (Windows), install and uninstall, spaces, grants,
                        tokens, audit, sync and held changes
 rust/crates/tray/      xenolith-tray: the tray or menu bar icon, its menu, and the window
-protocol/PROTOCOL.md   rules every session follows (seeded into a new wiki; you own the wiki copy)
+protocol/PROTOCOL.md   rules every session follows (seeded into a new folder; you own its copy)
 protocol/POINTER.md    short global-instruction block
+FORMAT.md              the folder's format (version 1), for programs that read it
 ui/                    the Xenolith window (React): index.html, src/main.jsx, app.css, markdown.js, api.js
 assets/icon/           icon sources (SVG)
 plugin/                plugin source; __PLACEHOLDERS__ are filled at install time
 scripts/               build (the window), icons, package, install-local, ui-preview, eval, bench
-src/, service/, tray/  the earlier Node runtime and C# service wrapper and tray (install-local --node)
 eval/synthetic/        the memory eval's synthetic wiki, questions and curator note streams
 eval/local/            your own real-wiki questions (gitignored)
 test/                  the suites: e2e (two real MCP clients, both transports), curator (fake model),
                        tray, installer, the window (ui), Ask (the fake model drives the real read-only
-                       server), migrate, portable (Linux/macOS differences), memory-eval, spaces,
-                       tokens, audit, resources, sync, opt-in live and stress tests
+                       server), portable (Linux/macOS differences), memory-eval, spaces, tokens,
+                       audit, resources, sync, opt-in live and stress tests
 ```
 
-The suites talk to the programs over MCP, `/api` and their files, so they are
-the contract for both implementations: `XENOLITH_IMPL=rust node --test ...`
-runs them against the Rust programs (`rust/target/release`, or
-`XENOLITH_RUST_BIN`). Spaces, access, tokens, the audit chain, resources and
-sync exist in the Rust programs only, so their suites skip under the Node
-runtime. `scripts/check-rust.sh` formats, lints (`cargo clippy -D warnings`)
-and tests the Rust programs; XenoNet's CI doesn't run Xenolith's suites yet.
-`npm run bench` measures the footprint and speed of the Node runtime against the
-Rust program. It alternates 5 runs per side, reports each metric's median and
-range, checks every answer, and exits 1 on any error. Use
-`XENOLITH_IMPL=node|rust` to measure one side. The memory eval is described in
+The suites talk to the programs over MCP, `/api` and their files: `npm test`
+runs them against the programs in `rust/target/release` or `rust/target/debug`
+(or `XENOLITH_RUST_BIN`). `scripts/check-rust.sh` formats, lints
+(`cargo clippy -D warnings`) and tests the Rust programs on the toolchain
+`rust/rust-toolchain.toml` pins. Xenolith's own CI
+(`.github/workflows/xenolith.yml`) runs all of it on Linux, macOS and Windows
+whenever `xenolith/` changes. Its own version tags and a release workflow can
+come later. `npm run bench` measures the program's footprint and
+speed: 5 runs, each metric's median and range, every answer checked, exit 1 on
+any error. The memory eval is described in
 [docs/memory-eval.md](docs/memory-eval.md).
 
 ## Design notes

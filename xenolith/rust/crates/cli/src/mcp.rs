@@ -1,4 +1,4 @@
-//! The MCP side of the server (src/server.mjs): state, the five tools, JSON-RPC message handling.
+//! The MCP side of the server: state, the five tools, JSON-RPC message handling.
 //! The tools are defined once, in mcp/tools.json (curated writes, the default). With writes "direct"
 //! two of them do something else, so they read differently: mcp/tools-direct-text.json replaces
 //! only their title and description.
@@ -77,7 +77,7 @@ pub fn setup_read_only() -> State {
     match wiki::resolve_wiki_dir(&env) {
         Ok((d, _)) if d.exists() => st.wiki_dir = Some(d),
         Ok((d, _)) => {
-            let m = format!("There is no wiki at {}.", wiki::disp(&d));
+            let m = format!("There is no shared context folder at {}.", wiki::disp(&d));
             log(&format!("setup failed: {m}"));
             st.setup_error = Some(m);
         }
@@ -101,7 +101,7 @@ fn lead_in(wiki_dir: &str, curated: bool) -> String {
         "Record decisions, outcomes, preferences, facts and follow-ups worth keeping with context_log, and keep topic pages current with context_upsert_page."
     };
     format!(
-        "Shared long-term memory for this user, for every app and agent they use (wiki folder: {wiki_dir}). Call context_start once at the beginning of EVERY conversation, before your first substantive reply, and follow the protocol it returns. Search the wiki (context_search) before asking the user for context they may have given before. {writes} Never store secrets."
+        "Shared long-term memory for this user, for every app and agent they use (folder: {wiki_dir}). Call context_start once at the beginning of EVERY conversation, before your first substantive reply, and follow the protocol it returns. Search it (context_search) before asking the user for context they may have given before. {writes} Never store secrets."
     )
 }
 
@@ -113,7 +113,7 @@ pub fn instructions_for(st: &State, who: &Principal) -> String {
         Principal::Token { .. } => "shared through Xenolith".into(),
     };
     if st.read_only {
-        return format!("Read-only access to this user's shared wiki ({dir}): context_search finds pages, log entries and notes not yet filed; context_read opens one.");
+        return format!("Read-only access to this user's shared context ({dir}): context_search finds pages, log entries and notes not yet filed; context_read opens one.");
     }
     let protocol = st.wiki_dir.as_ref().map(|d| wiki::read_protocol(d)).unwrap_or_else(|| wiki::DEFAULT_PROTOCOL.to_string());
     format!("{}\n\n{}", lead_in(&dir, st.curated), protocol.trim())
@@ -357,7 +357,7 @@ fn queued(r: &inbox::Submitted) -> String {
         format!("Already saved as note {} ({}); nothing new was queued.", r.id, r.status)
     } else {
         format!(
-            "Saved note {} ({}). The curator will file it into the wiki shortly; until then it is listed under \"Pending notes\" in context_start and found by context_search. No need to check on it.",
+            "Saved note {} ({}). The curator will file it into pages shortly; until then it is listed under \"Pending notes\" in context_start and found by context_search. No need to check on it.",
             r.id, r.rel
         )
     }
@@ -389,7 +389,7 @@ pub fn call_tool(st: &State, ctx: &Ctx, called: &str, args: &Value) -> Value {
     let mut used_space: Option<String> = None;
     let outcome: Result<String, Error> = (|| {
         let Some(root) = st.wiki_dir.as_ref().filter(|_| st.setup_error.is_none()) else {
-            return Err(Error::Wiki(st.setup_error.clone().unwrap_or_else(|| "The wiki folder could not be resolved.".into())));
+            return Err(Error::Wiki(st.setup_error.clone().unwrap_or_else(|| "The shared context folder could not be found.".into())));
         };
         let (space, dir) = open_space(st, ctx, root, args, needed_level(name, args))?;
         used_space = Some(space.to_string());
@@ -400,7 +400,7 @@ pub fn call_tool(st: &State, ctx: &Ctx, called: &str, args: &Value) -> Value {
                 let mut text = wiki::start_context(dir, &s(args, "app"), &s(args, "topic"))?;
                 if let Principal::Token { .. } = ctx.principal {
                     // No folder of this machine's for a token's holder, who may be elsewhere.
-                    text = text.replacen(&format!(" Wiki folder: {}.", wiki::disp(dir)), "", 1);
+                    text = text.replacen(&format!(" Folder: {}.", wiki::disp(dir)), "", 1);
                 }
                 if let (Some(line), Some(i)) = (spaces_line(root, &ctx.principal, &space), text.find("\n\n---")) {
                     text.insert_str(i, &format!("\n{line}"));
@@ -422,7 +422,7 @@ pub fn call_tool(st: &State, ctx: &Ctx, called: &str, args: &Value) -> Value {
                 let hits = xenolith_core::search::search_many(dir, &queries, &scope, limit, &filters)?;
                 let what = if queries.len() > 1 { format!("\"{query}\" and {} other wording(s)", queries.len() - 1) } else { format!("\"{query}\"") };
                 if hits.is_empty() {
-                    return Ok(format!("No results for {what}. The wiki has nothing on this yet, or it uses other words: try names, the broader topic, or what the answer would say."));
+                    return Ok(format!("No results for {what}. The shared context has nothing on this yet, or it uses other words: try names, the broader topic, or what the answer would say."));
                 }
                 Ok(defang_remote_images(&format!("{} result(s) for {what}:\n\n{}", hits.len(), wiki::format_search_results(&hits))).into_owned())
             }
@@ -470,7 +470,8 @@ pub fn call_tool(st: &State, ctx: &Ctx, called: &str, args: &Value) -> Value {
                             title: opt_s(args, "title"),
                             kind: opt_s(args, "type"),
                             summary: opt_s(args, "summary"),
-                            mode: opt_s(args, "mode"),
+                            // A session appends or replaces; only sync removes a page.
+                            mode: opt_s(args, "mode").filter(|m| m == "replace"),
                         }),
                         idempotency_key: opt_s(args, "idempotency_key"),
                     };

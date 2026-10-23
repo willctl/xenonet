@@ -1,0 +1,81 @@
+name: Xenolith
+# Xenolith's own checks (xenolith/), apart from XenoNet's: it builds and tests on its own, with
+# the toolchain xenolith/rust/rust-toolchain.toml pins. Runs only when Xenolith or this file
+# changes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "xenolith/**"
+      - ".github/workflows/xenolith.yml"
+  pull_request:
+    paths:
+      - "xenolith/**"
+      - ".github/workflows/xenolith.yml"
+permissions:
+  contents: read
+# One run per branch at a time; a new push to a pull request cancels the run its last push started.
+concurrency:
+  group: xenolith-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+defaults:
+  run:
+    working-directory: xenolith
+jobs:
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: xenolith/package-lock.json
+      # The tray's GUI crates link GTK, WebKitGTK and the app indicator on Linux.
+      - name: Tray libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev
+      # The registry and the build, keyed on the toolchain and the lock file.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            xenolith/rust/target/
+          key: xenolith-${{ runner.os }}-cargo-${{ hashFiles('xenolith/rust/rust-toolchain.toml', 'xenolith/rust/Cargo.lock') }}
+          restore-keys: xenolith-${{ runner.os }}-cargo-
+      - name: Toolchain (rust-toolchain.toml)
+        working-directory: xenolith/rust
+        run: rustup toolchain install
+      - name: rustfmt
+        working-directory: xenolith/rust
+        run: cargo fmt --all --check
+      # Each OS's own code (#[cfg(windows)], macOS, Linux) is linted on that OS.
+      - name: clippy
+        working-directory: xenolith/rust
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Rust tests
+        working-directory: xenolith/rust
+        run: cargo test --workspace --locked --no-fail-fast
+      # Debug builds of xenolith and xenolith-tray, which reuse what the tests compiled; the
+      # suites find them in rust/target/debug.
+      - name: Build the programs
+        working-directory: xenolith/rust
+        run: cargo build --workspace --locked
+      - run: npm ci
+      # Builds the window and the icons, then runs every behaviour suite against the programs.
+      - name: Behaviour suites
+        run: npm test
+        env:
+          XENOLITH_IMPL: rust

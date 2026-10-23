@@ -5,7 +5,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { loadSet, missingFacts, relOf, runEval, sectionText } from '../scripts/eval.mjs';
-import { IMPL } from './impl.mjs';
 
 describe('memory eval', { timeout: 600_000 }, () => {
   test('the synthetic set is consistent: every evidence file exists, every category is covered', async () => {
@@ -37,14 +36,12 @@ describe('memory eval', { timeout: 600_000 }, () => {
   test('search floors, and the Ask and curator pipelines with the fake model', async () => {
     const r = await runEval({ set: 'synthetic', tiers: ['search', 'ask', 'curate'], live: false, concurrency: 4 });
     const s = r.tiers.search.summary;
-    // Floors a little under the values with 77 questions. Before M5 (2026-10-03): question 78.8/97/100,
-    // keywords 89.4/100/100. With M5's section-level BM25 and dates: question 83.3/98.5/100, keywords
-    // 90.9/100/100. The Node runtime keeps the old scoring until it is retired.
-    const m5 = IMPL === 'rust';
-    assert.ok(s.question['recall@1'] >= (m5 ? 80 : 75), `question recall@1 ${s.question['recall@1']}`);
-    assert.ok(s.question['recall@3'] >= (m5 ? 95 : 90), `question recall@3 ${s.question['recall@3']}`);
+    // Floors a little under the values with 77 questions, with section-level BM25 and dates:
+    // question 83.3/98.5/100, keywords 90.9/100/100.
+    assert.ok(s.question['recall@1'] >= 80, `question recall@1 ${s.question['recall@1']}`);
+    assert.ok(s.question['recall@3'] >= 95, `question recall@3 ${s.question['recall@3']}`);
     assert.ok(s.question['recall@8'] >= 95, `question recall@8 ${s.question['recall@8']}`);
-    assert.ok(s.keywords['recall@1'] >= (m5 ? 88 : 85), `keywords recall@1 ${s.keywords['recall@1']}`);
+    assert.ok(s.keywords['recall@1'] >= 88, `keywords recall@1 ${s.keywords['recall@1']}`);
     assert.ok(s.keywords['recall@3'] >= 95, `keywords recall@3 ${s.keywords['recall@3']}`);
 
     const a = r.tiers.ask.summary;

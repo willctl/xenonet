@@ -12,9 +12,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { IMPL, curatorCmd, rustBin, srvT } from './impl.mjs';
+import { curatorCmd, rustBin, srvT } from './impl.mjs';
 
-const skip = IMPL !== 'rust' && 'the Rust programs only';
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const runtime = path.join(repo, 'dist', 'runtime');
 const fakeCodex = path.join(repo, 'test', 'fixtures', 'fake-codex.mjs');
@@ -38,7 +37,7 @@ export function makeEnv({ access, config = {} } = {}) {
 
 async function connect(env) {
   const client = new Client({ name: 'spaces-test', version: '1.0.0' });
-  await client.connect(new StdioClientTransport({ ...srvT(runtime), env, stderr: 'pipe' }));
+  await client.connect(new StdioClientTransport({ ...srvT(), env, stderr: 'pipe' }));
   return client;
 }
 
@@ -67,7 +66,7 @@ function cli(env, ...args) {
 
 const files = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.md')) : []);
 
-describe('spaces', { skip, timeout: 60_000 }, () => {
+describe('spaces', { timeout: 60_000 }, () => {
   test("a note logged to project:atlas starts that space and stays out of this machine's", async () => {
     const E = makeEnv();
     const c = await connect(E.env);
@@ -153,7 +152,7 @@ describe('spaces', { skip, timeout: 60_000 }, () => {
     } finally {
       await c.close();
     }
-    const run = spawn(...curatorCmd(runtime, '--once'), { env: E.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const run = spawn(...curatorCmd('--once'), { env: E.env, stdio: ['ignore', 'pipe', 'pipe'] });
     let err = '';
     run.stderr.on('data', (d) => (err += d));
     const code = await new Promise((r) => run.on('exit', r));
@@ -165,7 +164,7 @@ describe('spaces', { skip, timeout: 60_000 }, () => {
   });
 });
 
-describe('spaces and grants from the command line', { skip, timeout: 60_000 }, () => {
+describe('spaces and grants from the command line', { timeout: 60_000 }, () => {
   test('spaces add, with the identities a project belongs to', () => {
     const E = makeEnv();
     assert.equal(cli(E.env, 'serve', '--init').code, 0);

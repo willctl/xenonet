@@ -2,7 +2,7 @@
 //! Xenolith's state folder (audit/chain.jsonl). Each line carries the SHA-256 of the line before
 //! it (`prev`) and its own (`hash`, over `prev` and the line without `hash`), so a line changed,
 //! removed or put in between breaks the chain at that point, and `xenolith audit verify` says
-//! where. Like XenoNet's delivery audit it holds no text a session wrote, only its hash.
+//! where. It holds no text a session wrote, only its hash.
 //!
 //! The chain shows tampering; it can't prevent it: whoever can write the file can rewrite the
 //! whole chain. Keep a copy of the last hash elsewhere to pin it.
@@ -227,7 +227,7 @@ mod tests {
         let v = verify(&f).unwrap();
         assert_eq!(v, Verified { lines: 2, head: b["hash"].as_str().unwrap().into(), broken: None });
         assert!(!fs::read_to_string(&f).unwrap().contains("hello"), "text is kept only as a hash");
-        fs::remove_dir_all(f.parent().unwrap()).unwrap();
+        crate::lock::remove_test_dir(f.parent().unwrap());
     }
 
     #[test]
@@ -252,7 +252,7 @@ mod tests {
         fs::OpenOptions::new().append(true).open(&f).unwrap().write_all(b"{\"torn\":").unwrap();
         append_to(&f, "write", "you", vec![]).unwrap();
         assert_eq!(verify(&f).unwrap().broken.unwrap().0, 5, "a torn line stays visible");
-        fs::remove_dir_all(f.parent().unwrap()).unwrap();
+        crate::lock::remove_test_dir(f.parent().unwrap());
     }
 
     #[test]
@@ -273,7 +273,7 @@ mod tests {
         let (h, problem) = health(&paths);
         assert_eq!(h["writable"].as_bool(), Some(false));
         assert!(problem.unwrap().starts_with("the audit chain can't be written"));
-        fs::remove_dir_all(home).unwrap();
+        crate::lock::remove_test_dir(&home);
     }
 
     #[test]
@@ -295,6 +295,6 @@ mod tests {
         let v = verify(&f).unwrap();
         assert_eq!((v.lines, v.broken), (40, None));
         assert_eq!(tail(&f, 3).len(), 3);
-        fs::remove_dir_all(f.parent().unwrap()).unwrap();
+        crate::lock::remove_test_dir(f.parent().unwrap());
     }
 }

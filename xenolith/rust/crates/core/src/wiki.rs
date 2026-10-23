@@ -1,6 +1,6 @@
 //! The wiki: config resolution, the skeleton, atomic writes, pages and the generated index, the
-//! daily log, full-text search, reads and context_start (src/wiki.mjs). Formats are byte-for-byte the
-//! Node runtime's, so both can work on one wiki.
+//! daily log, full-text search, reads and context_start. FORMAT.md documents the files, for other
+//! programs that read them.
 
 use crate::frontmatter::{self, Meta, Val};
 use crate::inbox;
@@ -207,7 +207,7 @@ pub fn assert_no_secrets(fields: &[(&str, &str)]) -> Result<()> {
     for (name, value) in fields {
         if let Some(kind) = find_secret(value) {
             return wiki_err(format!(
-                "Refused: `{name}` looks like it contains {kind}. Never store secrets in the wiki. Record WHERE the secret lives instead (for example \"API key is in the 1Password vault 'Work'\"), then try again."
+                "Refused: `{name}` looks like it contains {kind}. Never store secrets in the shared context. Record WHERE the secret lives instead (for example \"API key is in the 1Password vault 'Work'\"), then try again."
             ));
         }
     }
@@ -226,7 +226,7 @@ pub fn confined_path(wiki_dir: &Path, path: &Path) -> Result<PathBuf> {
     let root = absolute(wiki_dir);
     let real_root = fs::canonicalize(&root)?;
     let abs = absolute(path);
-    let rel = abs.strip_prefix(&root).or_else(|_| abs.strip_prefix(&real_root)).map_err(|_| Error::Wiki("Refused a path outside the wiki folder.".into()))?;
+    let rel = abs.strip_prefix(&root).or_else(|_| abs.strip_prefix(&real_root)).map_err(|_| Error::Wiki("Refused a path outside the shared context folder.".into()))?;
     let mut checked = real_root;
     for part in rel.components() {
         if !matches!(part, Component::Normal(_)) {
@@ -243,7 +243,7 @@ pub fn confined_path(wiki_dir: &Path, path: &Path) -> Result<PathBuf> {
                 #[cfg(not(windows))]
                 let linked = m.file_type().is_symlink();
                 if linked {
-                    return wiki_err("Refused a link or reparse point inside the wiki folder.");
+                    return wiki_err("Refused a link or reparse point inside the shared context folder.");
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -281,6 +281,21 @@ pub fn write_synced(file: &Path, content: &str, create_new: bool) -> std::io::Re
 /// A rename Windows refused for a moment (a reader or an antivirus scan holds the file): try again.
 pub(crate) fn retryable(e: &std::io::Error) -> bool {
     e.kind() == std::io::ErrorKind::PermissionDenied || matches!(e.raw_os_error(), Some(5) | Some(32) | Some(33))
+}
+
+/// Runs a rename or a removal, and again for up to about four seconds while it fails as
+/// `retryable` says.
+pub(crate) fn retrying<T>(mut op: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    let mut i = 0u64;
+    loop {
+        match op() {
+            Err(e) if i < 20 && retryable(&e) => {
+                std::thread::sleep(std::time::Duration::from_millis(20 + i * 20));
+                i += 1;
+            }
+            r => return r,
+        }
+    }
 }
 
 /// Temp file + fsync + rename, LF only: readers see the old or the new file, never a partial one.
@@ -341,7 +356,7 @@ pub fn write_if_missing(file: &Path, content: &str) -> Result<bool> {
 pub fn with_lock<T>(wiki_dir: &Path, f: impl FnOnce() -> Result<T>) -> Result<T> {
     let mut guard = match lock::acquire(wiki_dir, "write", &LockOpts::default()) {
         Ok(g) => g,
-        Err(AcquireError::Busy(b)) => return wiki_err(format!("The wiki is busy ({}). Try again shortly.", b.0)),
+        Err(AcquireError::Busy(b)) => return wiki_err(format!("The shared context is busy ({}). Try again shortly.", b.0)),
         Err(AcquireError::Io(e)) => return Err(e.into()),
     };
     let r = f();
@@ -353,8 +368,9 @@ pub fn with_lock<T>(wiki_dir: &Path, f: impl FnOnce() -> Result<T>) -> Result<T>
 
 const README: &str = "# Xenolith
 
-This folder is a shared, plain-Markdown memory that the apps and agents on
-this computer read and write through the local `xenolith` MCP server. You own it: open it in any editor or in Obsidian.
+This folder is shared context in plain Markdown: the apps and agents on this
+computer read and write it through the local `xenolith` MCP server. You own it:
+open it in any editor or in Obsidian.
 
 - `PROTOCOL.md`: the rules every session follows. Edit it freely; servers
   read it at startup and `context_start` returns the current text.
@@ -362,14 +378,42 @@ this computer read and write through the local `xenolith` MCP server. You own it
 - `pages/<slug>.md`: one page per project, person, preference, decision,
   how-to, reference or topic.
 - `log/YYYY/YYYY-MM-DD.md`: the daily, append-only activity log.
+- `inbox/`: notes the apps sent that the curator has not organized yet.
+- `spaces/<kind>/<name>/`: other spaces (a project, an identity, an agent,
+  another machine), each laid out like this folder.
+- `xenolith.json`: says this folder is Xenolith's, and which version of its
+  format the files follow. The server writes it at every start.
 - `.history/`: earlier versions of pages that were rewritten.
 - `.locks/`: transient write locks. Safe to delete when no app is running.
-- `inbox/`: notes the apps sent that the curator has not organized yet.
 - `.curator/`: the curator's queue state, journal, archive and audit trail.
 ";
 
-/// Creates any missing part of the skeleton; never overwrites user content.
+/// The file at the folder's root that says whose it is and which version of FORMAT.md its files
+/// follow, for other programs that read the folder.
+pub const MARKER_FILE: &str = "xenolith.json";
+/// The version of the folder's format (FORMAT.md): a reader that knows an older one stops.
+pub const FORMAT_VERSION: u32 = 1;
+
+/// The marker's text.
+pub fn marker_text() -> String {
+    format!("{}\n", serde_json::to_string_pretty(&serde_json::json!({ "format": FORMAT_VERSION, "server": "xenolith" })).unwrap_or_default())
+}
+
+/// Creates any missing part of the skeleton of the folder's root (this machine's space), and
+/// writes its marker (xenolith.json) when it is missing or says something else. It runs at every
+/// start; it never overwrites user content.
 pub fn ensure_wiki(wiki_dir: &Path) -> Result<()> {
+    ensure_skeleton(wiki_dir)?;
+    let marker = confined_path(wiki_dir, &wiki_dir.join(MARKER_FILE))?;
+    if read_if_exists(&marker)?.as_deref() != Some(marker_text().as_str()) {
+        atomic_write(&marker, &marker_text(), None, None)?;
+    }
+    Ok(())
+}
+
+/// Creates any missing part of a space's skeleton (the root's, or one under spaces/); never
+/// overwrites user content.
+pub fn ensure_skeleton(wiki_dir: &Path) -> Result<()> {
     fs::create_dir_all(wiki_dir)?;
     for d in ["pages", "log", ".history", ".locks", "inbox"] {
         fs::create_dir_all(confined_path(wiki_dir, &wiki_dir.join(d))?)?;
@@ -387,10 +431,10 @@ pub fn ensure_wiki(wiki_dir: &Path) -> Result<()> {
 /// The bundled PROTOCOL.md of earlier releases (hash_text, 16 characters). A wiki whose copy is one of
 /// these never edited it, so an install may bring it up to date. The test below fails when
 /// protocol/PROTOCOL.md changes and says which hash to move here.
-const OLD_PROTOCOLS: [&str; 7] = ["18164903345112d0", "192abaacb1b60064", "09a27d24ebee04ca", "2323d98efcb27d61", "654998a3f71913a9", "958d048836748db0", "a7de848ecc7f2d3e"];
+const OLD_PROTOCOLS: [&str; 8] = ["18164903345112d0", "192abaacb1b60064", "09a27d24ebee04ca", "2323d98efcb27d61", "654998a3f71913a9", "958d048836748db0", "a7de848ecc7f2d3e", "434666d6a975c8f4"];
 /// The hash of this release's protocol/PROTOCOL.md (the test below pins it).
 #[cfg(test)]
-const CURRENT_PROTOCOL: &str = "434666d6a975c8f4";
+const CURRENT_PROTOCOL: &str = "b2ff51c4e6c5b87b";
 
 /// Replaces an unedited PROTOCOL.md of an earlier release with this release's, keeping the old copy
 /// in .history/. An edited one is the user's and stays. Returns whether it replaced it.
@@ -994,7 +1038,7 @@ fn read_whole(wiki_dir: &Path, target: &str) -> Result<(String, String)> {
     };
     let mut abs = normalize(&root.join(&rel));
     if !is_inside(&root, &abs) {
-        return wiki_err(format!("Refused: \"{target}\" is outside the wiki folder."));
+        return wiki_err(format!("Refused: \"{target}\" is outside the shared context folder."));
     }
     if !abs.exists() && !abs.to_string_lossy().to_lowercase().ends_with(".md") {
         let with_md = PathBuf::from(format!("{}.md", abs.display()));
@@ -1013,7 +1057,7 @@ fn read_whole(wiki_dir: &Path, target: &str) -> Result<(String, String)> {
     let real_root = canonical_root(&root)?;
     let real = fs::canonicalize(&abs)?;
     if !is_inside(&real_root, &real) {
-        return wiki_err(format!("Refused: \"{target}\" resolves outside the wiki folder."));
+        return wiki_err(format!("Refused: \"{target}\" resolves outside the shared context folder."));
     }
     // Other spaces live in the machine space's spaces/ folder: each is read as its own space, with
     // its own access, never as files of this one (spaces.rs). And a read returns content only (the
@@ -1057,7 +1101,7 @@ pub fn start_context(wiki_dir: &Path, app: &str, topic: &str) -> Result<String> 
     let mut out = vec![
         "# Xenolith: session start".to_string(),
         String::new(),
-        format!("Now: {} ({}). Wiki folder: {}. You are: {}.", local_iso(&now), now.format("%A"), disp(wiki_dir), normalize_app(app)),
+        format!("Now: {} ({}). Folder: {}. You are: {}.", local_iso(&now), now.format("%A"), disp(wiki_dir), normalize_app(app)),
         String::new(),
         "---".into(),
         String::new(),
@@ -1135,6 +1179,21 @@ mod tests {
         assert!(confined_path(&root, &root.join("pages/new.md")).is_ok());
         assert!(confined_path(&root, &root.join("../outside.md")).is_err());
         assert!(confined_path(&root, &root.with_extension("outside")).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_root_says_whose_it_is_and_its_format_and_a_space_does_not() {
+        let root = std::env::temp_dir().join(format!("xenolith-marker-{}", random_hex(8)));
+        ensure_wiki(&root).unwrap();
+        let marker: serde_json::Value = serde_json::from_str(&fs::read_to_string(root.join(MARKER_FILE)).unwrap()).unwrap();
+        assert_eq!(marker, serde_json::json!({ "format": 1, "server": "xenolith" }));
+        fs::write(root.join(MARKER_FILE), "{ \"format\": 0 }").unwrap();
+        ensure_wiki(&root).unwrap();
+        assert_eq!(fs::read_to_string(root.join(MARKER_FILE)).unwrap(), marker_text(), "every start puts it right");
+        let space = crate::spaces::create(&root, &crate::spaces::SpaceId::parse("project:atlas").unwrap()).unwrap();
+        assert!(space.join("PROTOCOL.md").exists() && !space.join(MARKER_FILE).exists(), "the marker is the folder's, not each space's");
+        assert!(!readable_rel(MARKER_FILE), "and it is no page to read");
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1223,6 +1282,23 @@ mod tests {
         assert!(!DATE_RE.is_match(date));
         assert!(!crate::inbox::is_note_id(&format!("{date}_10-00-00-000-abcdef")));
         assert!(DATE_RE.is_match("2026-10-06") && crate::inbox::is_note_id("2026-10-06_10-00-00-000-abcdef"));
+    }
+
+    #[test]
+    fn a_rename_windows_refuses_for_a_moment_is_tried_again() {
+        // What Windows says while another handle holds the file: a sharing violation (32).
+        let mut calls = 0;
+        let r = retrying(|| {
+            calls += 1;
+            if calls < 3 { Err(std::io::Error::from_raw_os_error(32)) } else { Ok(calls) }
+        });
+        assert_eq!(r.unwrap(), 3);
+        let mut calls = 0;
+        let r: std::io::Result<()> = retrying(|| {
+            calls += 1;
+            Err(std::io::ErrorKind::NotFound.into())
+        });
+        assert_eq!((r.unwrap_err().kind(), calls), (std::io::ErrorKind::NotFound, 1), "other errors are final");
     }
 
     #[test]

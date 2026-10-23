@@ -1,4 +1,4 @@
-// Ask (agentic search), end to end against the BUNDLED runtime and the fake model
+// Ask (agentic search), end to end against the xenolith program and the fake model
 // (test/fixtures/fake-codex.mjs, which drives the real read-only MCP server the way Codex does):
 // the read-only server, the worker inside the curator process, the window's /api/ask endpoints,
 // live steps, sources, follow-ups, stopping, failures, expiry and the request log.
@@ -17,18 +17,13 @@ import { fileURLToPath } from 'node:url';
 import { curatorCmd, srv, srvT } from './impl.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
-const dist = path.join(repo, 'dist', 'runtime');
-if (!fs.existsSync(path.join(dist, 'curator.mjs'))) throw new Error('Run `npm run build` first.');
 const fakeCodex = path.join(repo, 'test', 'fixtures', 'fake-codex.mjs');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SECRET = ['AKIA', 'IOSFODNN7EXAMPLE'].join('');
 
 let tmp;
-let runtime;
 before(async () => {
   tmp = fs.realpathSync.native(await fsp.mkdtemp(path.join(os.tmpdir(), 'xenolith-ask-')));
-  runtime = path.join(tmp, 'runtime');
-  await fsp.cp(dist, runtime, { recursive: true });
 });
 if (!process.env.XENOLITH_KEEP_TEST_TMP) after(() => fsp.rm(tmp, { recursive: true, force: true, maxRetries: 5 }).catch(() => {}));
 
@@ -64,7 +59,7 @@ function makeWiki(name) {
 
 function startHttp(env) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(...srv(runtime, '--http', '--port', '0', '--parent-stdin'), { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    const proc = spawn(...srv('--http', '--port', '0', '--parent-stdin'), { env, stdio: ['pipe', 'pipe', 'pipe'] });
     let err = '';
     const timer = setTimeout(() => reject(new Error(`server did not start:\n${err}`)), 10_000);
     proc.stderr.setEncoding('utf8');
@@ -80,7 +75,7 @@ function startHttp(env) {
 }
 
 function startCurator(env) {
-  const proc = spawn(...curatorCmd(runtime, '--parent-stdin'), { env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const proc = spawn(...curatorCmd('--parent-stdin'), { env, stdio: ['pipe', 'pipe', 'pipe'] });
   proc.stderr.setEncoding('utf8');
   let err = '';
   proc.stderr.on('data', (d) => (err += d));
@@ -159,7 +154,7 @@ describe('the read-only server (the agent’s only tools)', { timeout: 30_000 },
     const W = makeWiki('readonly');
     const before = snapshot(W.wikiDir);
     const c = new Client({ name: 'codex-mcp-client', version: 'test' });
-    await c.connect(new StdioClientTransport({ ...srvT(runtime, '--read-only'), env: { ...W.env, XENOLITH_PROCESS: 'ask', XENOLITH_ASK: 'test-ask' }, stderr: 'pipe' }));
+    await c.connect(new StdioClientTransport({ ...srvT('--read-only'), env: { ...W.env, XENOLITH_PROCESS: 'ask', XENOLITH_ASK: 'test-ask' }, stderr: 'pipe' }));
     try {
       assert.deepEqual((await c.listTools()).tools.map((t) => t.name).sort(), ['context_read', 'context_search']);
       const s = await c.callTool({ name: 'context_search', arguments: { query: 'logon task' } });
@@ -317,7 +312,7 @@ describe('Ask end to end: the window, the service and the curator', { timeout: 1
     assert.equal((await api.get('../etc')).status, 400);
   });
 
-  test('concurrent Rust questions never rewrite a schema another child is reading', { skip: process.env.XENOLITH_IMPL !== 'rust' }, async () => {
+  test('concurrent Rust questions never rewrite a schema another child is reading', async () => {
     const calls = () => fs.readFileSync(W.env.FAKE_CODEX_LOG, 'utf8').split('\n').filter(Boolean).map(JSON.parse).filter(c => c.args[0] === 'exec');
     const before = calls().length;
     W.setMode('normal,delay=200');

@@ -2,7 +2,7 @@
  {
   "name": "context_start",
   "title": "Start: load shared memory",
-  "description": "ALWAYS call this once at the start of every conversation, before your first substantive reply, in every app. Loads the user's shared long-term memory (shared by every app and agent they use): the wiki protocol to follow, the page index, the last 7 days of activity, notes not yet filed, and pages related to `topic`. Cheap and read-only. Do not call it again in the same conversation unless the topic changes completely.",
+  "description": "ALWAYS call this once at the start of every conversation, before your first substantive reply, in every app. Loads the user's shared long-term memory (shared by every app and agent they use): the protocol to follow, the page index, the last 7 days of activity, notes not yet filed, and pages related to `topic`. Cheap and read-only. Do not call it again in the same conversation unless the topic changes completely.",
   "inputSchema": {
    "$schema": "http://json-schema.org/draft-07/schema#",
    "type": "object",
@@ -37,7 +37,7 @@
  {
   "name": "context_search",
   "title": "Search shared memory",
-  "description": "Full-text search of the user's shared wiki (topic pages, the daily activity log, and the notes apps sent, filed or not). Use it BEFORE asking the user for context they may have given before: project details, people, preferences, earlier decisions, where something lives. Returns ranked files with the section that matched and its lines; open one with context_read (the \"read\" target opens just that section).",
+  "description": "Full-text search of the user's shared context (topic pages, the daily activity log, and the notes apps sent, filed or not). Use it BEFORE asking the user for context they may have given before: project details, people, preferences, earlier decisions, where something lives. Returns ranked files with the section that matched and its lines; open one with context_read (the \"read\" target opens just that section).",
   "inputSchema": {
    "$schema": "http://json-schema.org/draft-07/schema#",
    "type": "object",
@@ -47,7 +47,7 @@
      "description": "Words to search for, e.g. \"atlas docker networking\"."
     },
     "queries": {
-     "description": "Up to 5 other wordings to search at the same time, fused with query into one ranking: other words for the same thing, the broader topic, names, or a one-line guess at what the answer says. Use them when the wiki may use different words than the question.",
+     "description": "Up to 5 other wordings to search at the same time, fused with query into one ranking: other words for the same thing, the broader topic, names, or a one-line guess at what the answer says. Use them when the pages may use different words than the question.",
      "type": "array",
      "items": {
       "type": "string"
@@ -104,15 +104,15 @@
  },
  {
   "name": "context_read",
-  "title": "Read a wiki page or log day",
-  "description": "Read one file from the shared wiki: a page slug (e.g. \"atlas\"), a log date (\"YYYY-MM-DD\"), or a path under pages/, log/ or inbox/, or index.md, PROTOCOL.md or README.md (e.g. \"index.md\", \"pages/atlas.md\"), or a note the apps sent (\"note:<id>\", as search results and log entries name them: the exact original, with what the curator did with it).",
+  "title": "Read a page or log day",
+  "description": "Read one file from the shared context: a page slug (e.g. \"atlas\"), a log date (\"YYYY-MM-DD\"), or a path under pages/, log/ or inbox/, or index.md, PROTOCOL.md or README.md (e.g. \"index.md\", \"pages/atlas.md\"), or a note the apps sent (\"note:<id>\", as search results and log entries name them: the exact original, with what the curator did with it).",
   "inputSchema": {
    "$schema": "http://json-schema.org/draft-07/schema#",
    "type": "object",
    "properties": {
     "target": {
      "type": "string",
-     "description": "Page slug, log date YYYY-MM-DD, or relative path inside the wiki."
+     "description": "Page slug, log date YYYY-MM-DD, or relative path inside the shared context folder."
     },
     "section": {
      "description": "Optional: one section of a page or log day, by the anchor search results give (e.g. \"where-things-live\"); also accepted as \"slug#section\" in target.",
@@ -139,8 +139,8 @@
  },
  {
   "name": "context_log",
-  "title": "Tell the wiki what happened",
-  "description": "Tell the user's shared wiki what happened. Hand over the facts quickly: a curator agent files them into the right pages, links them and writes the activity log, so do not spend effort on structure or prose, and do not read pages first. Use when an exchange produced something a future session would want: a decision and why, an outcome (what was built, fixed, configured or learned, and where it lives), a stated preference or standing instruction, a fact about a project/person/system, or an open follow-up. Include names, paths, URLs and versions. One note per meaningful unit of work, usually at the end of the exchange. The note is saved durably at once. Never include secrets; say where a secret lives instead.",
+  "title": "Tell the shared context what happened",
+  "description": "Tell the user's shared context what happened. Hand over the facts quickly: a curator agent files them into the right pages, links them and writes the activity log, so do not spend effort on structure or prose, and do not read pages first. Use when an exchange produced something a future session would want: a decision and why, an outcome (what was built, fixed, configured or learned, and where it lives), a stated preference or standing instruction, a fact about a project/person/system, or an open follow-up. Include names, paths, URLs and versions. One note per meaningful unit of work, usually at the end of the exchange. The note is saved durably at once. Never include secrets; say where a secret lives instead.",
   "inputSchema": {
    "$schema": "http://json-schema.org/draft-07/schema#",
    "type": "object",
@@ -207,8 +207,8 @@
  },
  {
   "name": "context_upsert_page",
-  "title": "Suggest content for a wiki page",
-  "description": "Hand the shared wiki content for a page: one page per project, person, system, set of preferences, decision, how-to or reference. The curator merges it into the existing page (or creates it), keeping structure, links, history and superseded facts, so plain notes are fine. mode \"replace\" means your content is meant as the whole new page; \"append\" (default) means it adds to the page. Saved durably at once. Never include secrets.",
+  "title": "Suggest content for a page",
+  "description": "Hand the shared context content for a page: one page per project, person, system, set of preferences, decision, how-to or reference. The curator merges it into the existing page (or creates it), keeping structure, links, history and superseded facts, so plain notes are fine. mode \"replace\" means your content is meant as the whole new page; \"append\" (default) means it adds to the page. Saved durably at once. Never include secrets.",
   "inputSchema": {
    "$schema": "http://json-schema.org/draft-07/schema#",
    "type": "object",

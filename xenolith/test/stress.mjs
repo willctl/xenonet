@@ -1,5 +1,5 @@
 // Opt-in stress test: XENOLITH_STRESS=1 npm run test:stress
-// (XENOLITH_RUNTIME=<dir> runs it against another build, e.g. the installed %LOCALAPPDATA%\Xenolith\runtime.)
+// (XENOLITH_RUST_BIN=<file> runs it against another build of the program, e.g. an installed one.)
 //
 // A throwaway wiki under heavy concurrent use, the way several apps use the real one at once: two
 // HTTP servers (the service and a second one) and eight stdio servers (one per app session), sixteen
@@ -23,7 +23,6 @@ import { fileURLToPath } from 'node:url';
 import { curatorCmd, srv, srvT } from './impl.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
-const runtime = process.env.XENOLITH_RUNTIME || path.join(repo, 'dist', 'runtime');
 const fakeCodex = path.join(repo, 'test', 'fixtures', 'fake-codex.mjs');
 const skip = !process.env.XENOLITH_STRESS && 'set XENOLITH_STRESS=1 to run';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -44,7 +43,7 @@ function walk(dir) {
 
 function startHttp(env) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(...srv(runtime, '--http', '--port', '0', '--parent-stdin'), { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    const proc = spawn(...srv('--http', '--port', '0', '--parent-stdin'), { env, stdio: ['pipe', 'pipe', 'pipe'] });
     let err = '';
     const timer = setTimeout(() => reject(new Error(`server did not start:\n${err}`)), 15_000);
     proc.stderr.setEncoding('utf8');
@@ -82,12 +81,12 @@ test('stress: 16 clients on 10 server processes and the curator, one server kill
     clients.push({ c, name: `http-${i}` });
   }
   for (let i = 0; i < STDIO_CLIENTS; i++) {
-    const t = new StdioClientTransport({ ...srvT(runtime), env, stderr: 'pipe' });
+    const t = new StdioClientTransport({ ...srvT(), env, stderr: 'pipe' });
     const c = new Client({ name: `stress-stdio-${i}`, version: '1.0.0' });
     await c.connect(t);
     clients.push({ c, t, name: `stdio-${i}` });
   }
-  const curator = spawn(...curatorCmd(runtime, '--parent-stdin'), { env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const curator = spawn(...curatorCmd('--parent-stdin'), { env, stdio: ['pipe', 'pipe', 'pipe'] });
   let curatorErr = '';
   curator.stderr.setEncoding('utf8');
   curator.stderr.on('data', (d) => (curatorErr += d));

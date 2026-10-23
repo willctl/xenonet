@@ -1,5 +1,5 @@
-//! `xenolith service`: the Windows service that serves Streamable HTTP on 127.0.0.1 for every app
-//! (replaces the C# wrapper and its Node child). It runs the server in this process, logs to
+//! `xenolith service`: the Windows service that serves Streamable HTTP on 127.0.0.1 for every app.
+//! It runs the server in this process, logs to
 //! logs\service.log, and when an install replaces this program it stops with an error code, so the
 //! Service Control Manager's recovery action starts the new build (no admin rights needed to upgrade).
 //!

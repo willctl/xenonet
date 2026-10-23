@@ -15,9 +15,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { IMPL, rustBin, srv, srvT } from './impl.mjs';
+import { rustBin, srv, srvT } from './impl.mjs';
 
-const skip = IMPL !== 'rust' && 'the Rust programs only';
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const runtime = path.join(repo, 'dist', 'runtime');
 const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'xenolith-tokens-'));
@@ -44,7 +43,7 @@ function cli(env, ...args) {
 
 function startHttp(env) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(...srv(runtime, '--http', '--port', '0', '--parent-stdin'), { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    const proc = spawn(...srv('--http', '--port', '0', '--parent-stdin'), { env, stdio: ['pipe', 'pipe', 'pipe'] });
     let err = '';
     const timer = setTimeout(() => reject(new Error(`server did not start:\n${err}`)), 10_000);
     proc.stderr.setEncoding('utf8');
@@ -99,7 +98,7 @@ async function call(client, name, args) {
   return { text: r.content.map((c) => c.text).join('\n'), isError: Boolean(r.isError) };
 }
 
-describe('tokens over HTTP', { skip, timeout: 60_000 }, () => {
+describe('tokens over HTTP', { timeout: 60_000 }, () => {
   let E;
   let server;
   let reader; // ctx:read on project:atlas, granted read there
@@ -108,7 +107,7 @@ describe('tokens over HTTP', { skip, timeout: 60_000 }, () => {
     E = makeEnv();
     for (const [space, title] of [['project:atlas', 'Atlas runs on Postgres 17'], [null, 'This machine has a home lab']]) {
       const c = new Client({ name: 'setup', version: '1' });
-      await c.connect(new StdioClientTransport({ ...srvT(runtime), env: E.env, stderr: 'pipe' }));
+      await c.connect(new StdioClientTransport({ ...srvT(), env: E.env, stderr: 'pipe' }));
       await c.callTool({ name: 'context_log', arguments: { app: 'setup', title, body: 'x', ...(space ? { space } : {}) } });
       await c.close();
     }
@@ -137,7 +136,7 @@ describe('tokens over HTTP', { skip, timeout: 60_000 }, () => {
       const start = await call(c, 'context_start', { app: 'phone' });
       assert.equal(start.isError, false, start.text);
       assert.match(start.text, /^Space: project:atlas\. No other space is open to you\.$/m, 'its only space is the default');
-      assert.doesNotMatch(start.text, /Wiki folder:/);
+      assert.doesNotMatch(start.text, /Folder:/);
       assert.match((await call(c, 'context_search', { space: 'project:atlas', query: 'postgres' })).text, /Atlas runs on Postgres 17/);
       for (const space of ['machine:local', 'project:nope', 'actor:hermes']) {
         const r = await call(c, 'context_search', { space, query: 'home lab' });
@@ -389,13 +388,13 @@ describe('tokens over HTTP', { skip, timeout: 60_000 }, () => {
   });
 });
 
-describe('XENOLITH_TOKEN for a stdio server, and the token commands', { skip, timeout: 60_000 }, () => {
+describe('XENOLITH_TOKEN for a stdio server, and the token commands', { timeout: 60_000 }, () => {
   test('a stdio server started with a token works as its holder; an unknown one does not start', async () => {
     const E = makeEnv();
     assert.equal(cli(E.env, 'grant', 'actor:hermes', 'ctx:append:by:hermes').code, 0);
     const { token } = JSON.parse(cli(E.env, 'token', 'create', 'actor:hermes', '--json').out);
     const c = new Client({ name: 'hermes', version: '1' });
-    await c.connect(new StdioClientTransport({ ...srvT(runtime), env: { ...E.env, XENOLITH_TOKEN: token }, stderr: 'pipe' }));
+    await c.connect(new StdioClientTransport({ ...srvT(), env: { ...E.env, XENOLITH_TOKEN: token }, stderr: 'pipe' }));
     try {
       assert.match((await call(c, 'context_log', { app: 'hermes', title: 'Night run done' })).text, /^Saved note/);
       assert.match((await call(c, 'context_search', { space: 'machine:local', query: 'x' })).text, /^Refused: no space "machine:local" that you can read\.$/);
@@ -433,7 +432,7 @@ describe('XENOLITH_TOKEN for a stdio server, and the token commands', { skip, ti
   test('a token is a secret: the wiki refuses to store one', async () => {
     const E = makeEnv();
     const c = new Client({ name: 'x', version: '1' });
-    await c.connect(new StdioClientTransport({ ...srvT(runtime), env: E.env, stderr: 'pipe' }));
+    await c.connect(new StdioClientTransport({ ...srvT(), env: E.env, stderr: 'pipe' }));
     try {
       const token = `xenolith_${'ab'.repeat(32)}`;
       const r = await call(c, 'context_log', { app: 'x', title: 'Token for hermes', body: `It is ${token}` });

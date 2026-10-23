@@ -1,6 +1,6 @@
 //! `serve --http`: Streamable HTTP on 127.0.0.1 (stateless, JSON responses), /health, /status, the
 //! window (/ui, /api) and sync (/sync/v1). Never a web page: other Hosts and cross-origin requests
-//! are refused (DNS rebinding). Same behavior as src/server.mjs + the MCP SDK's transport.
+//! are refused (DNS rebinding).
 //!
 //! Who a request is: a request is this machine's own (Local) only when it reaches the loopback
 //! listener directly, names a loopback Host and carries no Forwarded, X-Forwarded-* or Via header.
@@ -345,6 +345,22 @@ pub fn status_report(app: &App, st: &State) -> Value {
             reasons.push(format!("curator: {} page(s) did not fit in the last batch's context: {}", skipped.len(), skipped.join(", ")));
         }
     }
+    // Followed spaces: notes their curators refused for good, and a curator that refuses this
+    // machine's token or answers as another curator. A curator that is just out of reach is normal
+    // for a laptop away from home, so that is shown but is not a problem.
+    let sync = xenolith_core::sync::status(&AppPaths::current(), dir);
+    if sync["spaces"].as_array().is_some_and(|a| !a.is_empty()) {
+        let dead = sync["dead"].as_u64().unwrap_or(0);
+        if dead > 0 {
+            reasons.push(format!("{dead} note(s) refused by a curator for good (xenolith sync status)"));
+        }
+        for sp in sync["spaces"].as_array().into_iter().flatten() {
+            if matches!(sp["last"]["errorKind"].as_str(), Some("auth" | "curator")) {
+                reasons.push(format!("sync of {}: {}", sp["space"].as_str().unwrap_or("?"), sp["last"]["error"].as_str().unwrap_or("")));
+            }
+        }
+        s.insert("sync".into(), sync);
+    }
     let last15 = errors["last15m"].as_i64().unwrap_or(0);
     if last15 > 0 {
         reasons.push(format!("{last15} server error(s) in the last 15 min"));
@@ -462,9 +478,9 @@ fn sdk_error(status: u16, code: i64, message: &str) -> Reply {
 
 // ---------------------------------------------------------------- sync (xenolith_core::sync)
 
-/// /sync/v1/spaces/<kind>/<name>/pages[/<slug>] (GET, read) and /entries (POST, append or write
-/// per entry). A space the caller may not read is "not found", like one that doesn't exist; a
-/// space this machine only follows sends the caller to its curator (421).
+/// /sync/v1/spaces/<kind>/<name>/pages[/<slug>] and /log/<date> (GET, read), and /entries (POST,
+/// append or write per entry). A space the caller may not read is "not found", like one that
+/// doesn't exist; a space this machine only follows sends the caller to its curator (421).
 fn sync_route(app: &App, req: &Request, method: &str, path: &str, who: Principal, resource: &Resource, entry: &mut Entry) -> Reply {
     use xenolith_core::access::Level;
     use xenolith_core::spaces::{self, SpaceId};
@@ -500,16 +516,31 @@ fn sync_route(app: &App, req: &Request, method: &str, path: &str, who: Principal
     }
     entry.client = Some(who.name());
     let dir = spaces::space_dir(&root, &space);
+    // A copy is not the curator: its pages lag, it has no curator id, and entries go to the curator.
+    let cfg = sync::Config::load(&paths);
+    if let Some(curator) = cfg.curator_of(&space) {
+        // Its URL when another machine could use it; a loopback address means nothing there.
+        let url = cfg.peers.get(curator).filter(|u| u.starts_with("https://"));
+        let at = url.map(|u| format!(", at {u}")).unwrap_or_default();
+        return Reply::json(
+            421,
+            &json!({ "error": "not_curator", "error_description": format!("This machine follows {space}; its curator is {curator}{at}."), "curator": curator, "curatorUrl": url }),
+        );
+    }
     match (method, tail.as_slice()) {
-        ("GET", ["pages"]) => Reply::json(200, &sync::page_list(&dir)),
+        ("GET", ["pages"]) => match sync::page_list(&dir) {
+            Ok(v) => Reply::json(200, &v),
+            Err(e) => Reply::json(500, &json!({ "error": "server_error", "error_description": format!("Could not list the pages: {e}") })),
+        },
         ("GET", ["pages", slug]) => match sync::page_get(&dir, slug) {
             Some(v) => Reply::json(200, &v),
             None => not_found(),
         },
+        ("GET", ["log", date]) => match sync::log_get(&dir, date) {
+            Some(v) => Reply::json(200, &v),
+            None => not_found(),
+        },
         ("POST", ["entries"]) => {
-            if let Some(curator) = sync::Config::load(&paths).curator_of(&space) {
-                return Reply::json(421, &json!({ "error": "not_curator", "error_description": format!("This machine follows {space}; its curator is {curator}."), "curator": curator }));
-            }
             let body: Value = match read_body(req).ok().and_then(|b| serde_json::from_str(&b).ok()) {
                 Some(v) => v,
                 None => return Reply::json(400, &json!({ "error": "invalid_request", "error_description": "Send {\"entries\": [...]} as JSON." })),
@@ -538,7 +569,7 @@ fn sync_route(app: &App, req: &Request, method: &str, path: &str, who: Principal
             Reply::json(if conflict { 409 } else { 200 }, &json!({ "results": results }))
         }
         (_, ["entries"]) => Reply::json(405, &json!({ "error": "Use POST" })).with("Allow", "POST"),
-        (_, ["pages", ..]) => Reply::json(405, &json!({ "error": "Use GET" })).with("Allow", "GET"),
+        (_, ["pages" | "log", ..]) => Reply::json(405, &json!({ "error": "Use GET" })).with("Allow", "GET"),
         _ => not_found(),
     }
 }

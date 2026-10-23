@@ -5,11 +5,18 @@
 
 use super::InstallError;
 use super::places::Places;
-use super::sys::run;
+use super::sys::{Ran, run};
 use std::path::{Path, PathBuf};
 
-pub const SERVER_LABEL: &str = "dev.xenonet.xenolith.server";
-pub const CURATOR_LABEL: &str = "dev.xenonet.xenolith.curator";
+pub const SERVER_LABEL: &str = "dev.xenolith.server";
+pub const CURATOR_LABEL: &str = "dev.xenolith.curator";
+/// The tray's login item on macOS, which the tray writes itself (`--do repair-autostart`). Linux
+/// starts the tray from an autostart file instead.
+#[cfg(target_os = "macos")]
+pub const TRAY_LABEL: &str = "dev.xenolith.tray";
+/// The labels Xenolith used before it had its own, tray first: retiring the tray's before anything
+/// new is loaded means two trays never start.
+pub const LEGACY_LABELS: [&str; 3] = ["dev.xenonet.xenolith.tray", "dev.xenonet.xenolith.server", "dev.xenonet.xenolith.curator"];
 pub const SERVER_UNIT: &str = "xenolith.service";
 pub const CURATOR_UNIT: &str = "xenolith-curator.service";
 
@@ -83,14 +90,7 @@ pub fn install_services(p: &Places, port: u16, curator: bool) -> Result<Vec<Stri
         if curator {
             jobs.push((CURATOR_LABEL, curator_args, p.app.log_dir.join("curator.log")));
         }
-        for (label, args, log) in jobs {
-            let file = dir.join(format!("{label}.plist"));
-            std::fs::write(&file, plist(label, &args, &log, &path)).map_err(err)?;
-            let domain = format!("gui/{}", uid());
-            let _ = run(Path::new("launchctl"), &["bootout", &domain, &file.to_string_lossy()]);
-            let r = run(Path::new("launchctl"), &["bootstrap", &domain, &file.to_string_lossy()]);
-            done.push(format!("{label}: {}", if r.ok { "loaded".to_string() } else { format!("launchctl bootstrap: {}", r.last_line()) }));
-        }
+        done.extend(load_launch_agents(&dir, &format!("gui/{}", uid()), &jobs, &path, &mut |args| run(Path::new("launchctl"), args))?);
     } else {
         let dir = p.app.config_dir.parent().map(|d| d.join("systemd").join("user")).unwrap_or_else(|| p.home.join(".config").join("systemd").join("user"));
         std::fs::create_dir_all(&dir).map_err(err)?;
@@ -111,13 +111,51 @@ pub fn install_services(p: &Places, port: u16, curator: bool) -> Result<Vec<Stri
     Ok(done)
 }
 
+/// What launchctl is to these functions: the real one, or a fake in the tests.
+type Launchctl<'a> = &'a mut dyn FnMut(&[&str]) -> Ran;
+
+/// Boots out and removes the LaunchAgents under the old labels, the tray's first. A job is booted
+/// out by its label as well, in case its plist was deleted while it stayed loaded. Returns what it
+/// found, for the log.
+pub fn retire_legacy(dir: &Path, domain: &str, launchctl: Launchctl) -> Vec<String> {
+    let mut done = vec![];
+    for label in LEGACY_LABELS {
+        let file = dir.join(format!("{label}.plist"));
+        let loaded = launchctl(&["bootout", &format!("{domain}/{label}")]).ok;
+        let had = file.exists();
+        if had {
+            let _ = launchctl(&["bootout", domain, &file.to_string_lossy()]);
+            let _ = std::fs::remove_file(&file);
+        }
+        if loaded || had {
+            done.push(format!("{label}: stopped and removed (now {})", label.replacen("dev.xenonet.xenolith.", "dev.xenolith.", 1)));
+        }
+    }
+    done
+}
+
+/// Writes and (re)loads the LaunchAgents in `dir`, after the old labels are gone.
+fn load_launch_agents(dir: &Path, domain: &str, jobs: &[(&str, Vec<String>, PathBuf)], path: &str, launchctl: Launchctl) -> Result<Vec<String>, InstallError> {
+    let mut done = retire_legacy(dir, domain, launchctl);
+    for (label, args, log) in jobs {
+        let file = dir.join(format!("{label}.plist"));
+        std::fs::write(&file, plist(label, args, log, path)).map_err(|e| InstallError(e.to_string()))?;
+        let _ = launchctl(&["bootout", domain, &file.to_string_lossy()]);
+        let r = launchctl(&["bootstrap", domain, &file.to_string_lossy()]);
+        done.push(format!("{label}: {}", if r.ok { "loaded".to_string() } else { format!("launchctl bootstrap: {}", r.last_line()) }));
+    }
+    Ok(done)
+}
+
 pub fn uninstall_services(p: &Places) -> Vec<String> {
     let mut done = vec![];
     if cfg!(target_os = "macos") {
+        let domain = format!("gui/{}", uid());
+        done.extend(retire_legacy(&launch_agents(p), &domain, &mut |args| run(Path::new("launchctl"), args)));
         for label in [SERVER_LABEL, CURATOR_LABEL] {
             let file = launch_agents(p).join(format!("{label}.plist"));
             if file.exists() {
-                let _ = run(Path::new("launchctl"), &["bootout", &format!("gui/{}", uid()), &file.to_string_lossy()]);
+                let _ = run(Path::new("launchctl"), &["bootout", &domain, &file.to_string_lossy()]);
                 let _ = std::fs::remove_file(&file);
                 done.push(format!("removed {label}"));
             }
@@ -139,4 +177,60 @@ pub fn uninstall_services(p: &Places) -> Vec<String> {
 /// Whether a graphical session is there to show a tray icon.
 pub fn has_display() -> bool {
     cfg!(target_os = "macos") || std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A launchctl that records each call and answers as `loaded` says: a job bootout by label
+    /// succeeds only for the labels that are loaded.
+    fn fake<'a>(calls: &'a mut Vec<String>, loaded: &'static [&'static str]) -> impl FnMut(&[&str]) -> Ran + 'a {
+        move |args: &[&str]| {
+            calls.push(args.join(" "));
+            let ok = match args {
+                ["bootout", target] => loaded.iter().any(|l| target.ends_with(&format!("/{l}"))),
+                _ => true,
+            };
+            Ran { ok, code: Some(if ok { 0 } else { 3 }), stdout: String::new(), stderr: String::new() }
+        }
+    }
+
+    #[test]
+    fn the_old_labels_go_tray_first_before_anything_new_is_loaded() {
+        let dir = std::env::temp_dir().join(format!("xenolith-launchagents-{}", xenolith_core::text::random_hex(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        for l in LEGACY_LABELS {
+            std::fs::write(dir.join(format!("{l}.plist")), "old").unwrap();
+        }
+        std::fs::write(dir.join("com.example.other.plist"), "someone else's").unwrap();
+        let mut calls = vec![];
+        let jobs =
+            vec![(SERVER_LABEL, vec!["xenolith".to_string(), "serve".into()], dir.join("service.log")), (CURATOR_LABEL, vec!["xenolith".to_string(), "curator".into()], dir.join("curator.log"))];
+        let done = load_launch_agents(&dir, "gui/501", &jobs, "/usr/bin", &mut fake(&mut calls, &["dev.xenonet.xenolith.tray", "dev.xenonet.xenolith.server"])).unwrap();
+
+        let first_bootstrap = calls.iter().position(|c| c.starts_with("bootstrap")).expect("the new jobs are loaded");
+        let last_old = calls.iter().rposition(|c| c.contains("dev.xenonet.")).unwrap();
+        assert!(last_old < first_bootstrap, "every old label is gone before a new one loads: {calls:?}");
+        let old: Vec<&String> = calls.iter().filter(|c| c.contains("dev.xenonet.")).collect();
+        assert!(old[0].contains("dev.xenonet.xenolith.tray") && old[1].contains("dev.xenonet.xenolith.tray"), "the tray first: {calls:?}");
+        assert!(calls.contains(&"bootout gui/501/dev.xenonet.xenolith.curator".to_string()), "a loaded job without its plist is booted out by label too");
+        for l in LEGACY_LABELS {
+            assert!(!dir.join(format!("{l}.plist")).exists(), "{l} removed");
+        }
+        assert!(dir.join("com.example.other.plist").exists(), "other agents are left alone");
+        for l in [SERVER_LABEL, CURATOR_LABEL] {
+            let text = std::fs::read_to_string(dir.join(format!("{l}.plist"))).unwrap();
+            assert!(text.contains(&format!("<key>Label</key><string>{l}</string>")));
+            assert!(calls.contains(&format!("bootstrap gui/501 {}", dir.join(format!("{l}.plist")).display())));
+        }
+        assert_eq!(done[0], "dev.xenonet.xenolith.tray: stopped and removed (now dev.xenolith.tray)");
+        assert_eq!(done.iter().filter(|d| d.ends_with(": loaded")).count(), 2);
+
+        // Run again (a re-install): nothing old is left, so nothing is retired.
+        let mut calls = vec![];
+        let done = load_launch_agents(&dir, "gui/501", &jobs, "/usr/bin", &mut fake(&mut calls, &[])).unwrap();
+        assert!(done.iter().all(|d| d.ends_with(": loaded")), "{done:?}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
