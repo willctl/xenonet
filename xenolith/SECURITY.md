@@ -31,6 +31,6 @@ Automatic approval applies flagged curator changes. Choose manual approval when 
 
 Use synthetic data and an isolated server for verification. Never test against an installed service or a private wiki. Keep generated artifacts, machine reports, credentials and local evaluation questions out of Git.
 
-The public Git identity is `willctl <will@willctl.com>`. Configure it locally, and run `node scripts/check-public.mjs` in this folder before publishing. Local private blocked terms may be stored in `.git/privacy-blocked.json`; never commit that file. The checks reduce accidental disclosure but do not prove anonymity.
+The public Git identity is `Will <will@willctl.com>` (the check also takes the name `willctl` with that address). Configure it locally, and run `node scripts/check-public.mjs` in this folder before publishing. Local private blocked terms may be stored in `.git/privacy-blocked.json`; never commit that file. The checks reduce accidental disclosure but do not prove anonymity.
 
 See [the audit](docs/security-audit.md) for verified fixes, dependency warnings and remaining work. Report a suspected vulnerability through GitHub private vulnerability reporting when available; do not put secrets in a public issue.
