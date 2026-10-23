@@ -275,7 +275,7 @@ export const sameHost = (n, id) => (isRemote(n) && id && !id.startsWith("@") ? `
 // The inspector's details for a host node, as rows made by `row`.
 export function hostRows(n, { row, mono }, now = Date.now()) {
   // A machine in your network, drawn from its presence (network-map.js).
-  if (n.network)
+  if (n.network === true)
     return (
       row("state", `<span class="host-state ${h(n.state)}"><i class="host-dot ${h(n.state)}"></i>${h(standing(n, now))}</span>`) +
       row("sessions", `${Number(n.sessionCount) || 0}${n.activeCount ? ` <span class="activity active">${Number(n.activeCount)} live</span>` : ""}`) +
@@ -296,7 +296,13 @@ export function hostRows(n, { row, mono }, now = Date.now()) {
     row("clock", offset ? h(offset) : null) +
     row("problem", n.error ? `<span class="pressure">${h(n.error)}</span>` : null, "wrap") +
     row("left out", n.truncated ? "its oldest sessions: a host shows at most 5,000 nodes" : null, "wrap") +
-    row("access", `<span class="dim">read-only: titles, states and counts; transcripts and stats when you open one</span>`, "wrap")
+    row(
+      "access",
+      n.network
+        ? `<span class="dim">in your network: its map, as it sends it; transcripts and stats open in this window, unless it shares titles only. Message any of its sessions as you.</span>`
+        : `<span class="dim">read-only: titles, states and counts; transcripts and stats when you open one</span>`,
+      "wrap",
+    )
   );
 }
 

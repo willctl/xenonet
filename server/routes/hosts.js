@@ -24,7 +24,9 @@
 //
 // and a remote session's transcript and stats, and a collision on one
 // host, read through its relay (GET /api/session/@<host>:…/transcript,
-// /stats, GET /api/collision?a=@<host>:…&b=@<host>:…). Every other route
+// /stats, GET /api/collision?a=@<host>:…&b=@<host>:…), only by XenoNet's
+// own window (`windowOnly`: its key, and no token), so a session here can't
+// read another machine's transcripts. Every other route
 // that takes an id refuses remote ones, since it only knows this
 // machine's: hosts are read-only. Returns whether it answered.
 import { parseQualified, isHostId } from "../../core/schema/ids.js";
@@ -39,7 +41,9 @@ const remoteSession = (id) => {
   return q?.host && SESSION.test(q.local) ? q : null;
 };
 
-export function hostRoutes({ hosts, hub = null, verify, readJson, send, home }) {
+export const WINDOW_ONLY = { error: "another machine's transcripts, stats and diffs open only in XenoNet's own window", code: "window" };
+
+export function hostRoutes({ hosts, hub = null, verify, readJson, send, home, windowOnly = () => false }) {
   const answer = (res, status, body) => (send(res, status, body), true);
   const yours = async (req, res) => {
     const you = await verify.person(req.socket);
@@ -71,6 +75,7 @@ export function hostRoutes({ hosts, hub = null, verify, readJson, send, home }) 
           return false;
         }
         if (!id.startsWith("@") || !hub) return false;
+        if (!windowOnly(req)) return answer(res, 403, WINDOW_ONLY);
         const q = remoteSession(id);
         if (!q || !hub.has(q.host)) return answer(res, 404, { error: "XenoNet doesn't know that session" });
         const params = new URLSearchParams();
@@ -88,6 +93,7 @@ export function hostRoutes({ hosts, hub = null, verify, readJson, send, home }) 
 
       // A collision on one host, with both sides' diffs, through its relay.
       if (p === "/api/collision" && req.method === "GET" && hub && [url.searchParams.get("a"), url.searchParams.get("b")].some((x) => x?.startsWith("@"))) {
+        if (!windowOnly(req)) return answer(res, 403, WINDOW_ONLY);
         const a = remoteSession(url.searchParams.get("a"));
         const b = remoteSession(url.searchParams.get("b"));
         if (!a || !b || a.host !== b.host) return answer(res, 400, { error: "collisions across machines come later: both sessions have to be on one host" });

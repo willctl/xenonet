@@ -389,7 +389,8 @@ async fn up(n: Arc<Shared>, t: Transport) {
                 break;
             }
             let Some(batch) = n.next_batch() else { break };
-            let Ok((req, nonce)) = n.signed_request("POST", "/net/v1/frames", batch.body.clone().into_bytes()) else { break };
+            let target = if batch.relay { "/net/v1/frames?relay=1" } else { "/net/v1/frames" };
+            let Ok((req, nonce)) = n.signed_request("POST", target, batch.body.clone().into_bytes()) else { break };
             match t.request(req, Some(Duration::from_millis(POST_MS))).await {
                 Ok(reply) if reply.status == 200 => {
                     attempt = 0;

@@ -183,6 +183,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "net_relay"
+path = "fuzz_targets/net_relay.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "a2a_rpc"
 path = "fuzz_targets/a2a_rpc.rs"
 test = false

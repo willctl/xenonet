@@ -14,6 +14,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { xenonet } from "../../core/control.js";
+import { LABELLED_KINDS } from "../../core/export-labels.js";
 import { POSTER_SIZES } from "../../core/frames.js";
 import { MARK_BAND, MARK_URL } from "../../src/mark.js";
 import { limit } from "../harness/software.js";
@@ -136,10 +137,20 @@ test("each size renders at its own pixels, with the mark, star names and no cloc
     assert.deepEqual(r.revealed, { names: false, tokens: false });
     assert.equal(r.saved, false);
   }
-  // The same star names from one render to the next, all day.
+  // The same star names from one render to the next, all day: each project
+  // keeps its star. A poster lists its stars busiest first, and the demo's
+  // live sessions make tool calls every few seconds, so two renders a
+  // moment apart may rank them differently (drawn in software, a render
+  // takes seconds). So the names are compared by node, through the map's
+  // labels drawn with each render, and each poster's stars are among them.
   const a = await s.driver("poster", { size: "card" });
   const b = await s.driver("poster", { size: "wide" });
-  assert.deepEqual(a.lines.stars.names, b.lines.stars.names);
+  const starOf = (r) => new Map(r.labels.filter((l) => LABELLED_KINDS.has(l.kind)).map((l) => [l.id, l.text.replace(/ \/$/, "")]));
+  assert.deepEqual(starOf(a), starOf(b), "each node keeps its star name");
+  for (const r of [a, b]) {
+    const stars = new Set(starOf(r).values());
+    for (const n of r.lines.stars.names) assert.ok(stars.has(n.toUpperCase()), `${r.size}: ${n} is a star on the map`);
+  }
   // Revealed, for this one export: the projects' names, and the tokens.
   const shown = await s.driver("poster", { size: "card", reveal: { names: true, tokens: true } });
   assert.ok(shown.lines.stars.names.some((n) => projects.includes(n)), `${shown.lines.stars.names} has a project`);

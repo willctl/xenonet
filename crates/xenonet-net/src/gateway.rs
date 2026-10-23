@@ -12,7 +12,9 @@
 //! - `POST frames`: the up batch; each frame's signature is checked
 //!   against the roster before it's queued, a frame id seen in the last
 //!   week is accepted again without being queued again, and each link may
-//!   send 600 frames and 60 messages a minute.
+//!   send 600 frames and 60 messages a minute. The map's relay frames go
+//!   in batches of their own (`?relay=1`), 120 a minute in a bucket of
+//!   their own, and aren't kept for a host that's away.
 //! - `GET roster?from=n`, and `POST roster`, an entry from a host, which
 //!   the roster's own rules decide.
 //!
@@ -49,6 +51,11 @@ const WRONG_PROOFS: u32 = 5;
 const HOUR_MS: f64 = 3600e3;
 const FRAMES_A_MINUTE: f64 = 600.0;
 const MESSAGES_A_MINUTE: f64 = 60.0;
+/// The map's relay frames a link sends, in a bucket of their own.
+const RELAY_A_MINUTE: f64 = 120.0;
+/// A relay frame on the wire, at most: a body of `node::RELAY_BODY`, sealed
+/// and in base64url, with its head.
+pub const RELAY_FRAME_LIMIT: usize = 12 << 20;
 const BATCH_ROWS: u64 = 500;
 /// A host that long-polls counts as linked this long after its last poll.
 const POLLED_MS: f64 = 40e3;
@@ -175,6 +182,20 @@ impl Bucket {
     }
 }
 
+/// A link's rates: its frames, its messages among them, and the map's relay
+/// frames apart.
+struct Rates {
+    frames: Bucket,
+    messages: Bucket,
+    relay: Bucket,
+}
+
+impl Rates {
+    fn full(now: f64) -> Rates {
+        Rates { frames: Bucket::full(FRAMES_A_MINUTE, now), messages: Bucket::full(MESSAGES_A_MINUTE, now), relay: Bucket::full(RELAY_A_MINUTE, now) }
+    }
+}
+
 #[derive(Default)]
 struct BadTickets {
     at: Vec<f64>,
@@ -212,7 +233,7 @@ pub struct Gateway {
     live: Mutex<HashMap<String, Live>>,
     nonces: Mutex<HashMap<String, f64>>,
     bad: Mutex<Bad>,
-    rates: Mutex<HashMap<String, (Bucket, Bucket)>>,
+    rates: Mutex<HashMap<String, Rates>>,
     stopped: Notify,
     /// Entries signed by too few, waiting for approval, and when they came.
     proposals: Mutex<Vec<(Entry, f64)>>,
@@ -630,6 +651,10 @@ impl Gateway {
                 refuse("too-big", "a frame is at most 64 KiB, but a relay frame");
                 continue;
             }
+            if relay_ok && v.to_string().len() > RELAY_FRAME_LIMIT {
+                refuse("too-big", "a relay frame is at most 12 MiB");
+                continue;
+            }
             if f.to == host || view.member(&f.to).is_none() {
                 refuse("no-host", "that host isn't in the network");
                 continue;
@@ -646,15 +671,22 @@ impl Gateway {
                 continue;
             }
             {
+                // The map's frames have a bucket of their own, so a console
+                // watching a busy host can't spend what the engine sends.
                 let mut rates = self.rates.locked();
-                let (frames, messages) = rates.entry(host.clone()).or_insert_with(|| (Bucket::full(FRAMES_A_MINUTE, now), Bucket::full(MESSAGES_A_MINUTE, now)));
-                let mut over = frames.take(FRAMES_A_MINUTE, now).err();
-                if over.is_none() && f.kind == "message" {
-                    over = messages.take(MESSAGES_A_MINUTE, now).err();
-                }
+                let r = rates.entry(host.clone()).or_insert_with(|| Rates::full(now));
+                let over = if relay_ok {
+                    r.relay.take(RELAY_A_MINUTE, now).err()
+                } else {
+                    let mut over = r.frames.take(FRAMES_A_MINUTE, now).err();
+                    if over.is_none() && f.kind == "message" {
+                        over = r.messages.take(MESSAGES_A_MINUTE, now).err();
+                    }
+                    over
+                };
                 if let Some(wait) = over {
                     retry_ms = retry_ms.max(wait);
-                    refuse("rate", "a link sends at most 600 frames and 60 messages a minute");
+                    refuse("rate", if relay_ok { "a link sends at most 120 relay frames a minute" } else { "a link sends at most 600 frames and 60 messages a minute" });
                     continue;
                 }
             }

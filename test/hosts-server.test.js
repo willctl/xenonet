@@ -143,16 +143,15 @@ test("the console shows the other XenoNet's map: its host node, its projects and
   assert.ok(merged.sessions.filter((s) => s.host === "demo-b").every((s) => s.lastMessage === null), "titles, states and counts only, by default");
 });
 
-test("a remote transcript and stats come through the relay; nothing opens, dismisses or hands off a remote session", async () => {
+test("a remote transcript and stats are the window's alone; nothing opens, dismisses or hands off a remote session", async () => {
   const id = REMOTE(SESSION(1));
-  const transcript = await get(`/api/session/${encodeURIComponent(id)}/transcript?limit=5`);
-  assert.equal(transcript.status, 200);
-  assert.ok(transcript.data.entries.length > 0);
-  assert.equal(transcript.data.host, "demo-b");
-  const stats = await get(`/api/session/${encodeURIComponent(id)}/stats`);
-  assert.equal(stats.status, 200);
-  assert.deepEqual([stats.data.id, stats.data.host], [id, "demo-b"]);
-  assert.ok(stats.data.totals.calls > 0);
+  // A program here, without the window's key, is refused another
+  // machine's transcript and stats (the window reads them through the
+  // relay: test/hosts-routes.test.js and the e2e tests).
+  for (const what of ["transcript?limit=5", "stats"]) {
+    const r = await get(`/api/session/${encodeURIComponent(id)}/${what}`);
+    assert.deepEqual([r.status, r.data.code], [403, "window"], what);
+  }
 
   assert.equal((await post("/api/open", { nodeId: id, action: "open-app" })).status, 400);
   assert.equal((await post("/api/open", { nodeId: "@demo-b:project:~/projects/atlas-api", action: "open-folder" })).status, 400);
@@ -162,7 +161,6 @@ test("a remote transcript and stats come through the relay; nothing opens, dismi
   // often run, it's refused before the remote id is.
   const pin = await post("/api/identities/pin", { nodeId: id, identity: "claude:x" });
   assert.ok(pin.status === 400 || (pin.status === 403 && pin.data.code === "yours"), JSON.stringify(pin));
-  assert.equal((await get(`/api/session/${encodeURIComponent("@demo-b:claude:nope")}/stats`)).status, 404);
   const detail = (await get("/api/hosts/demo-b")).data;
   assert.equal(detail.id, "demo-b");
   assert.ok(Array.isArray(detail.engine?.agents));
@@ -266,7 +264,6 @@ test("when the other XenoNet stops, the host goes offline with its nodes kept an
   assert.ok(theirs.length > 5 && theirs.every((n) => n.stale === true), "kept, and marked stale");
   const live = (await get("/api/live")).data;
   assert.ok(live.sessions.filter((s) => s.host === "demo-b").every((s) => s.status === "idle" && s.stale));
-  assert.equal((await get(`/api/session/${encodeURIComponent(REMOTE(SESSION(1)))}/stats`)).status, 503, "a transcript needs the host there");
   const doctor = await until("the doctor finds demo-b offline", async () => {
     const d = (await post("/api/doctor")).data.results.find((r) => r.id === "hosts.demo-b");
     return /^offline/.test(d?.detail ?? "") ? d : null;

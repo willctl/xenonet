@@ -73,29 +73,33 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
     cores.system = if demo { Arc::new(system::DemoSystem) } else { Arc::new(system::SystemPanel(system::System::new())) };
     cores.mcp_info = Arc::new(mcp::Catalog::new(&js, &env.version, cores.state.clone()));
 
-    // Hosts: this XenoNet as one, which needs no flag, and with
-    // XENONET_HOSTS=1 the hub, whose hosts' file is one of the map's
+    // Hosts: this XenoNet as one, which needs no flag, and the hub, always:
+    // the network's hosts come from its roster, and with XENONET_HOSTS=1
+    // hosts over SSH from hosts.json, which is then one of the map's
     // building blocks.
     let schemas = Arc::new(hosts::schemas::HostSchemas::new());
     let host_store = Arc::new(hosts::config::HostsStore::new(&state_dir, schemas.clone()));
     cores.hosts = Arc::new(hosts::config::Hosts(host_store.clone()));
-    if cores.hub.is_some() {
-        let windows = serde_json::json!({ "activeWindowMs": js["activeWindowMs"], "recentWindowMs": js["recentWindowMs"], "projectActiveMs": js["projectActiveMs"] });
-        let parts = hosts::hub::HubParts {
-            hosts: host_store.clone(),
-            schemas,
-            state: cores.state.clone(),
-            store: cores.store.clone(),
-            cache_dir: config.cache_dir.clone(),
-            root: config.root.to_string_lossy().into_owned(),
-            home: config.home.clone(),
-            demo,
-            windows,
-            emitter: env.emitter.clone(),
-            bin: fx::xenonet_bin(&config.home),
-            ssh_bin: vec!["ssh".into()],
-        };
-        cores.hub = Some(Arc::new(hosts::hub::HubCore(hosts::hub::HostHub::new(parts))));
+    let ssh = config.hosts;
+    let windows = serde_json::json!({ "activeWindowMs": js["activeWindowMs"], "recentWindowMs": js["recentWindowMs"], "projectActiveMs": js["projectActiveMs"] });
+    let parts = hosts::hub::HubParts {
+        hosts: host_store.clone(),
+        schemas,
+        state: cores.state.clone(),
+        store: cores.store.clone(),
+        cache_dir: config.cache_dir.clone(),
+        root: config.root.to_string_lossy().into_owned(),
+        home: config.home.clone(),
+        demo,
+        windows,
+        emitter: env.emitter.clone(),
+        bin: fx::xenonet_bin(&config.home),
+        ssh_bin: vec!["ssh".into()],
+        ssh,
+        relay: hosts::relay::Timing::default(),
+    };
+    cores.hub = Some(Arc::new(hosts::hub::HubCore(hosts::hub::HostHub::new(parts))));
+    if ssh {
         let block = host_store.clone();
         let _ = cores.state.add_block(Arc::new(move || block.health()), None);
     }

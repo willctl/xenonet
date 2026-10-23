@@ -71,7 +71,9 @@ A message from another machine reaches a session framed as "Message from an agen
 
 ## You, at any machine
 
-Every console shows every machine. On the map, each other machine is a constellation of its own beside this one's: its projects, one for each repo (or each folder that isn't a repo), and its sessions with their state, drawn from what that machine says of them. A machine that's offline dims. Select one of its sessions to see its state, what waits on you there and what it said last, and to message it.
+Every console shows every machine. On the map, each other machine is a constellation of its own beside this one's. While a window host's console is open, it's drawn from that machine's own map: its projects, sessions and wiki pages, and bridges between clones of one repo on two machines. A machine that goes offline dims and keeps what it showed last. Until a machine's map arrives, the console draws it from what that machine says of its sessions: a project for each repo (or each folder that isn't a repo), and its sessions with their state.
+
+Select one of another machine's sessions to see its state and what waits on you there, to open its transcript and stats, and to message it. Its transcript and stats open only in XenoNet's window, never in a browser tab or for a session or actor on this machine.
 
 The Network panel lists every machine: whether it's online, its sessions, how many wait on you, and which machine you're at. A session on another machine that waits on you shows in the attention strip with its machine's name and its question's text, and one that seems stuck shows with why.
 
@@ -127,11 +129,13 @@ Crosses, signed and sealed:
 - unless the machine shares titles only, each session's detail: the text of what waits on you (a question, or the permission it asks for), its last message (up to 280 characters) and why it seems stuck, with the home folder as `~`;
 - when you last worked at each machine's console, so the chime plays where you are;
 - claims and the files sessions are changing, as the repo's remote and the path inside the repo;
-- messages, their receipts and handoffs.
+- messages, their receipts and handoffs;
+- while a console is open on a window host, each other machine's map for it: its places and its sessions of the last 7 days (at most 5,000), with the home folder as `~`, and their live state, as the [SSH hosts prototype](other-machines.md) sends them with detail on. Only a window host is sent maps, and only while its console asks again every 20 seconds;
+- a session's transcript or stats, only when you open one in a window host's XenoNet window. Nothing keeps them.
 
-Doesn't cross: transcripts, prompts, tool calls, file contents and the map's own data. With **Share with the network: titles only** on in a machine's Network panel, its sessions' detail stays on it too: the other consoles show that something waits there, and say the question is in that machine's console.
+Doesn't cross: file contents, any transcript you didn't open, and collisions' diffs and MCP servers' details, which you open on their own machine for now. With **Share with the network: titles only** on in a machine's Network panel, its sessions' detail stays on it too, and so do its transcripts: its map goes with titles, states and counts only, and its stats still open. The other consoles show that something waits there, and say the question is in that machine's console.
 
-What crosses is for the consoles. It never reaches an agent: `peers` and the other tools show other machines' sessions without their questions, messages or stuck reasons. Only messages and handoffs reach agents.
+What crosses is for the consoles. It never reaches an agent: `peers` and the other tools show other machines' sessions without their questions, messages or stuck reasons, and XenoNet answers another machine's transcript or stats only to its own window. Only messages and handoffs reach agents.
 
 The gateway sees, for each frame, which machine sent it, which it's for, its kind, its size and when.
 

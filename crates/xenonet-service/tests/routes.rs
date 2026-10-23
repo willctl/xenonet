@@ -858,17 +858,34 @@ fn urlencode(s: &str) -> String {
 async fn a_remote_sessions_transcript_and_stats_come_through_its_relay() {
     let (ctx, f) = service(true);
     let id = format!("@vm1:{S}");
-    let t = go(&ctx, "GET", &format!("/api/session/{}/transcript?limit=50&cursor=abc_1", urlencode(&id)), &[], None).await;
+    // Only XenoNet's own window reads another machine's: never an agent
+    // here, an actor, or a page without the window's key.
+    let key = ctx.window_key.reveal().to_string();
+    let w = [("x-xenonet-window", key.as_str())];
+    let actor = [("x-xenonet-window", key.as_str()), ("authorization", "Bearer xnt_x")];
+    for (who, headers) in [("an agent", &[AGENT][..]), ("an actor", &actor[..]), ("a page without the key", &[][..])] {
+        for path in [
+            format!("/api/session/{}/transcript", urlencode(&id)),
+            format!("/api/session/{}/stats", urlencode(&id)),
+            format!("/api/collision?a={}&b={}", urlencode(&id), urlencode("@vm1:claude:2")),
+            "/api/mcp?server=agent-wiki&host=vm1".to_string(),
+        ] {
+            let r = go(&ctx, "GET", &path, headers, None).await;
+            assert_eq!((r.status, r.body_json()["code"].clone()), (403, json!("window")), "{who}: {path}");
+        }
+    }
+    assert!(f.was("get").is_empty(), "nothing reached a relay");
+    let t = go(&ctx, "GET", &format!("/api/session/{}/transcript?limit=50&cursor=abc_1", urlencode(&id)), &w, None).await;
     assert_eq!(t.status, 200);
     assert_eq!(f.was("get")[0], json!(["vm1", format!("/api/session/{S}/transcript?limit=50&cursor=abc_1")]));
     assert_eq!(t.body_json(), json!({ "id": id, "path": format!("/api/session/{S}/transcript?limit=50&cursor=abc_1"), "host": "vm1" }), "its ids as this XenoNet writes them");
-    go(&ctx, "GET", &format!("/api/session/{id}/stats?limit=9"), &[], None).await;
+    go(&ctx, "GET", &format!("/api/session/{id}/stats?limit=9"), &w, None).await;
     assert_eq!(f.was("get")[1], json!(["vm1", format!("/api/session/{S}/stats")]), "stats take no query");
     for bad in [format!("/api/session/{}/transcript?limit=all", urlencode(&id)), format!("/api/session/{}/transcript?cursor={}", urlencode(&id), urlencode("a b"))] {
-        assert_eq!(go(&ctx, "GET", &bad, &[], None).await.status, 400, "{bad}");
+        assert_eq!(go(&ctx, "GET", &bad, &w, None).await.status, 400, "{bad}");
     }
     for unknown in [format!("@vm9:{S}"), "@vm1:project:~/x".to_string(), "@vm1:@vm2:claude:x".to_string(), "@vm1:claude:../../x".to_string()] {
-        assert_eq!(go(&ctx, "GET", &format!("/api/session/{}/stats", urlencode(&unknown)), &[], None).await.status, 404, "{unknown}");
+        assert_eq!(go(&ctx, "GET", &format!("/api/session/{}/stats", urlencode(&unknown)), &w, None).await.status, 404, "{unknown}");
     }
     assert_eq!(f.was("get").len(), 2, "nothing else reached a relay");
 
@@ -876,9 +893,9 @@ async fn a_remote_sessions_transcript_and_stats_come_through_its_relay() {
         format!("/api/collision?a={S}&b=claude:2"),
         HubAnswer { status: 200, body: json!({ "a": { "id": S, "title": "A" }, "b": { "id": "claude:2", "title": "B" }, "files": [] }) },
     ));
-    let c = go(&ctx, "GET", &format!("/api/collision?a={}&b={}", urlencode(&id), urlencode("@vm1:claude:2")), &[], None).await;
+    let c = go(&ctx, "GET", &format!("/api/collision?a={}&b={}", urlencode(&id), urlencode("@vm1:claude:2")), &w, None).await;
     assert_eq!(c.body_json(), json!({ "a": { "id": id, "title": "A" }, "b": { "id": "@vm1:claude:2", "title": "B" }, "files": [], "host": "vm1" }));
-    assert_eq!(go(&ctx, "GET", &format!("/api/collision?a={}&b={S}", urlencode(&id)), &[], None).await.status, 400, "across machines comes later");
+    assert_eq!(go(&ctx, "GET", &format!("/api/collision?a={}&b={S}", urlencode(&id)), &w, None).await.status, 400, "across machines comes later");
 }
 
 // ---------- test/environments.test.js ----------

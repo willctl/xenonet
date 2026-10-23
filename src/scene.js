@@ -1577,7 +1577,7 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
       // their presence says what waits on you and why one seems stuck
       // (network-map.js), as of when their machine was last heard.
       for (const n of nodeIndex.values()) {
-        const p = n.network && n.kind === "session" ? n.presence : null;
+        const p = n.network === true && n.kind === "session" ? n.presence : null;
         if (!p || !(p.waits || p.stuck || n.__obs?.userData.rig)) continue;
         setAttention(n, { need: p.waits && !n.stale ? { kind: p.kind ?? "question" } : null, stuck: p.stuck && !n.stale ? { reasons: p.stuck } : null });
       }

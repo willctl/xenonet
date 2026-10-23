@@ -46,8 +46,27 @@ export function createWindowCalls({ desktop = null, request = (...a) => globalTh
     }
   }
 
+  // A read only XenoNet's own window may make: another machine's
+  // transcript, stats or diffs. The Response, with the key when this window
+  // has one; without, the server refuses it and says why. A refusal with a
+  // key may mean the server started again with a new one: asked once more.
+  async function read(path) {
+    for (let tries = 0; ; tries++) {
+      if (desktop?.windowKey) key ??= (await desktop.windowKey().catch(() => null)) ?? null;
+      const res = await request(path, key ? { headers: { "x-xenonet-window": key } } : undefined);
+      if (res.status !== 403 || !key || tries) return res;
+      const body = await res
+        .clone()
+        .json()
+        .catch(() => ({}));
+      if (body.code !== "window") return res;
+      key = null;
+    }
+  }
+
   return {
     call,
+    read,
     // Whether this window holds a key: the desktop app gives one only to
     // XenoNet's own page, and only when it started the server.
     async ready() {

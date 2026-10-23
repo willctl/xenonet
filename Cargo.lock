@@ -2521,6 +2521,7 @@ dependencies = [
  "xenonet-net",
  "xenonet-schema",
  "xenonet-state",
+ "xenonet-wire-app",
  "xenonet-wire-engine",
 ]
 

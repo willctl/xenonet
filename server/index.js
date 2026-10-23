@@ -450,8 +450,10 @@ const hub =
       })
     : null;
 if (hub) state.blocks.add(hostsConfig.store);
-const hostRoute = hostRoutes({ hosts: hostsConfig, hub, verify, readJson, send, home: config.homeDir });
-const mcpRoute = mcpRoutes({ state, demo: config.demo, hub, send });
+// Another machine's transcripts, stats and diffs: the window's key, and no token.
+const windowOnly = (req) => bearerHeader(req.headers) === undefined && windowKey.matches(req.headers["x-xenonet-window"]);
+const hostRoute = hostRoutes({ hosts: hostsConfig, hub, verify, readJson, send, home: config.homeDir, windowOnly });
+const mcpRoute = mcpRoutes({ state, demo: config.demo, hub, send, windowOnly });
 // The map and the live state go out with other hosts' in them, with hosts
 // on; the hub sends them again when a host's map or live state changes.
 state.on("graph", (g) => broadcast("graph", hub ? hub.graph(g) : g, g));

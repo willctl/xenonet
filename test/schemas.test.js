@@ -28,7 +28,7 @@ const CONTRACT = [
   "drift/record/v1",
   "host/list/v1", "host/hello/v1",
   "network/frame/v1", "network/presence/v1", "network/message/v1", "network/receipt/v1", "network/claims/v1",
-  "network/handoff/v1", "network/operator/v1", "network/roster-entry/v1", "network/state/v1",
+  "network/handoff/v1", "network/operator/v1", "network/relay/v1", "network/roster-entry/v1", "network/state/v1",
   "app/v1",
   "tray/status/v1", "tray/event/v1",
 ];

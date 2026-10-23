@@ -1,19 +1,23 @@
 // Other machines in a network on the map, from presence (docs/design/
-// network.md, section 7). Until the map's own frames cross the network,
-// each machine is drawn from what its presence says, as a constellation the
-// way the SSH hosts prototype draws one (hosts.js, hosts-draw.js): its host
-// node, a project for each repo (or each folder that isn't one), named by
-// the repo's last part, and its sessions under them with their app, title,
-// state and what waits on you. A machine that's away dims, as a host that
-// isn't live does.
+// network.md, section 7). While a console is open, the service subscribes
+// to each machine's own map and draws it from that snapshot, live or kept
+// (network: "relay" on its nodes), with its projects, sessions, wiki and
+// bridges between clones. Until a machine's first snapshot comes, it's
+// drawn here from what its presence says, as a constellation the way the
+// SSH hosts prototype draws one (hosts.js, hosts-draw.js): its host node, a
+// project for each repo (or each folder that isn't one), named by the
+// repo's last part, and its sessions under them with their app, title,
+// state and what waits on you (network: true). A machine that's away dims,
+// as a host that isn't live does.
 //
 // Every id is qualified @<host>:… as the hosts merge qualifies a host's,
 // and every node is made here field by field from the network panel's
 // agents (network-model.js's remoteAgents): nothing another machine sent
 // is put on the map as it came. Its text is shown escaped where the map
-// shows text, and never reaches an agent. A machine that's on the map over
-// SSH already (XENONET_HOSTS) keeps that view, which has more in it. No DOM
-// here; main.js merges the part into the map before it's drawn.
+// shows text, and never reaches an agent. A machine that's on the map
+// already, from its snapshot or over SSH (XENONET_HOSTS), keeps that view,
+// which has more in it. No DOM here; main.js merges the part into the map
+// before it's drawn.
 import { HOST_ID } from "./network-model.js";
 import { hostNodeId } from "./hosts.js";
 

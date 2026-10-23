@@ -11,7 +11,9 @@ const ROLE = {
 
 // Full-screen holographic transcript reader. Pages load newest-first; "earlier"
 // pulls the previous page and prepends it.
-export function createPreview({ onOpenApp }) {
+// read: GETs another machine's transcript with the window's key, as
+// windowCalls.read does.
+export function createPreview({ onOpenApp, read = (url) => fetch(url) }) {
   const root = document.getElementById("preview");
   let node = null;
   let entries = [];
@@ -55,7 +57,8 @@ export function createPreview({ onOpenApp }) {
     try {
       const params = new URLSearchParams({ limit: "120" });
       if (more && cursor) params.set("cursor", cursor);
-      const res = await fetch(`/api/session/${encodeURIComponent(node.id)}/transcript?${params}`);
+      const url = `/api/session/${encodeURIComponent(node.id)}/transcript?${params}`;
+      const res = await (node.host ? read(url) : fetch(url));
       const page = await res.json();
       if (!res.ok) throw new Error(page.error);
       entries = more ? [...page.entries, ...entries] : page.entries;

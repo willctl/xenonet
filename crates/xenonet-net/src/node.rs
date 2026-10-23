@@ -137,10 +137,12 @@ pub struct PendingTicket {
     pub expires: i64,
 }
 
-/// A batch on its way up.
+/// A batch on its way up. A relay batch carries only the map's frames, and
+/// goes as `POST frames?relay=1`.
 pub struct Batch {
     pub ids: Vec<String>,
     pub body: String,
+    pub relay: bool,
 }
 
 pub struct Shared {
@@ -155,6 +157,10 @@ pub struct Shared {
     peers: Mutex<BTreeMap<String, Peer>>,
     wake: Notify,
     volatile: Mutex<Vec<Frame>>,
+    /// The map's frames waiting to go, in relay batches of their own.
+    relay_out: Mutex<Vec<Frame>>,
+    /// The relay frames that came lately, by id, and when.
+    relay_ids: Mutex<HashMap<String, f64>>,
     gateway: RwLock<Option<Arc<Gateway>>>,
     operator_nonces: Mutex<HashMap<String, f64>>,
     link_written: Mutex<f64>,
@@ -183,6 +189,14 @@ const AHEAD_MS: f64 = 5.0 * 60e3;
 const OPERATOR_MS: f64 = 60e3;
 const BATCH_BYTES: u64 = 900 << 10;
 const BATCH_FRAMES: u64 = 500;
+/// A relay body's JSON, at most: sealed and in base64url, a frame of it
+/// fits the gateway's relay batch (`gateway::RELAY_LIMIT`).
+pub const RELAY_BODY: usize = 8 << 20;
+/// A relay batch's frames, at most this many bytes of lines, past the first.
+const RELAY_BATCH_BYTES: usize = 12 << 20;
+/// How long a relay frame is the map's news, and its id remembered.
+const RELAY_MS: f64 = 120e3;
+const RELAY_IDS: usize = 4096;
 
 fn not_in() -> NetError {
     NetError::new(409, "no-network", "this machine isn't in a XenoNet network")
@@ -302,6 +316,9 @@ impl Shared {
             for p in self.peers.locked().values_mut() {
                 p.online = false;
             }
+            // The map's frames that waited are old news by the time the
+            // link is back: a console asks for a fresh snapshot.
+            self.relay_out.locked().clear();
             self.sink.linked(false);
         }
         if changed {
@@ -761,7 +778,10 @@ impl Shared {
             return false;
         }
         let now = self.now();
-        if self.with_store(|s| s.seen(&f.id, now as i64)).unwrap_or(true) {
+        // The map's frames are live: one older than RELAY_MS is dropped, and
+        // their ids are kept in memory that long rather than for the week.
+        let seen = if f.kind == "relay" { at < gw_now - RELAY_MS || self.relay_seen(&f.id, now) } else { self.with_store(|s| s.seen(&f.id, now as i64)).unwrap_or(true) };
+        if seen {
             return false;
         }
         let body = match open_frame(&net.id, key, f) {
@@ -777,10 +797,13 @@ impl Shared {
             p.seen = Some(now);
             p.online = true;
         }
-        let Some(kind) = Kind::parse(&f.kind) else {
-            // relay frames are the map's, which comes later.
+        let Some(kind) = Kind::parse(&f.kind) else { return false };
+        let at = f.at as f64 - self.status.locked().offset_ms;
+        // The map's frames go to the relay and the hub, never the engine.
+        if kind == Kind::Relay {
+            self.sink.relay(Incoming { from: f.from.clone(), kind, body, at: at.min(now), from_window_host: window });
             return false;
-        };
+        }
         if kind == Kind::Operator {
             if let Err(why) = self.check_operator(&f.from, window, &body) {
                 self.log("net.operator", &format!("an action from {} was refused: {why}", f.from));
@@ -790,9 +813,18 @@ impl Shared {
         if kind == Kind::Presence && !self.note_presence(&f.from, &body) {
             return false;
         }
-        let at = f.at as f64 - self.status.locked().offset_ms;
         self.sink.receive(Incoming { from: f.from.clone(), kind, body, at: at.min(now), from_window_host: window });
         false
+    }
+
+    /// Whether a relay frame's id came in the last RELAY_MS, and it's
+    /// noted if not.
+    fn relay_seen(&self, id: &str, now: f64) -> bool {
+        let mut ids = self.relay_ids.locked();
+        if ids.len() > RELAY_IDS {
+            ids.retain(|_, t| now - *t < RELAY_MS);
+        }
+        ids.insert(id.to_string(), now).is_some_and(|t| now - t < RELAY_MS)
     }
 
     /// Whether the person's action from another host may be acted on: its
@@ -874,19 +906,44 @@ impl Shared {
 
     // ---------- the up batch ----------
 
-    /// The next batch: what waits in memory, then the outbox's oldest.
+    /// The next batch: what waits in memory, then the outbox's oldest; once
+    /// they've gone, the map's frames, in a relay batch of their own, which
+    /// the gateway takes only as one.
     pub fn next_batch(&self) -> Option<Batch> {
         let volatile: Vec<Frame> = std::mem::take(&mut *self.volatile.locked());
         let queued = self.with_store(|s| s.batch(BATCH_BYTES, BATCH_FRAMES)).unwrap_or_default();
+        let (epoch, seq) = self.cursor();
+        let ack = epoch.map_or(Value::Null, |e| json!({ "epoch": e, "seq": seq }));
         if volatile.is_empty() && queued.is_empty() {
-            return None;
+            return self.relay_batch(&ack);
         }
         let mut lines: Vec<String> = volatile.iter().map(|f| f.line().trim_end().to_string()).collect();
         let ids: Vec<String> = queued.iter().map(|(id, _)| id.clone()).collect();
         lines.extend(queued.into_iter().map(|(_, l)| l));
-        let (epoch, seq) = self.cursor();
-        let ack = epoch.map_or(Value::Null, |e| json!({ "epoch": e, "seq": seq }));
-        Some(Batch { ids, body: format!("{{\"frames\":[{}],\"ack\":{ack}}}", lines.join(",")) })
+        Some(Batch { ids, body: format!("{{\"frames\":[{}],\"ack\":{ack}}}", lines.join(",")), relay: false })
+    }
+
+    /// The map's frames that wait, oldest first, as many as fit
+    /// RELAY_BATCH_BYTES (one at least); the rest wait for the next.
+    fn relay_batch(&self, ack: &Value) -> Option<Batch> {
+        let mut waiting = self.relay_out.locked();
+        if waiting.is_empty() {
+            return None;
+        }
+        let mut lines = Vec::new();
+        let mut bytes = 0;
+        let mut taken = 0;
+        for f in waiting.iter() {
+            let line = f.line().trim_end().to_string();
+            if taken > 0 && bytes + line.len() > RELAY_BATCH_BYTES {
+                break;
+            }
+            bytes += line.len();
+            lines.push(line);
+            taken += 1;
+        }
+        waiting.drain(..taken);
+        Some(Batch { ids: Vec::new(), body: format!("{{\"frames\":[{}],\"ack\":{ack}}}", lines.join(",")), relay: true })
     }
 
     /// The gateway's answer to a batch: what it took, and what it refused
@@ -922,6 +979,10 @@ impl Net for Shared {
         self.network().is_some_and(|n| n.titles_only)
     }
 
+    fn is_window_host(&self) -> bool {
+        self.network().is_some_and(|n| self.roster().view_ref().is_some_and(|v| v.is_window(&n.host)))
+    }
+
     fn hosts(&self) -> Vec<Host> {
         let Some(net) = self.network() else { return Vec::new() };
         let view = self.roster().view();
@@ -946,6 +1007,9 @@ impl Net for Shared {
         if out.kind == Kind::Presence {
             body = self.own_presence(body);
         }
+        if out.kind == Kind::Relay && body.to_string().len() > RELAY_BODY {
+            return Err(format!("a relay body is at most {} MiB", RELAY_BODY >> 20));
+        }
         let targets: Vec<(String, PublicKeys)> = {
             let r = self.roster();
             let v = r.view_ref().ok_or("this machine's roster is empty")?;
@@ -965,7 +1029,13 @@ impl Net for Shared {
                 let line = f.line();
                 self.with_store(|s| s.push(&f.id, &to, &f.kind, line.trim_end(), now, &self.opts.outbox)).map_err(|e| e.message)?;
             } else if self.is_live() {
-                self.volatile.locked().push(f);
+                // Not kept while the link is down: a full set goes, or a
+                // console asks again, once it's back.
+                if out.kind == Kind::Relay {
+                    self.relay_out.locked().push(f);
+                } else {
+                    self.volatile.locked().push(f);
+                }
             }
         }
         self.wake.notify_one();
@@ -1003,6 +1073,8 @@ impl Node {
             peers: Mutex::new(BTreeMap::new()),
             wake: Notify::new(),
             volatile: Mutex::new(Vec::new()),
+            relay_out: Mutex::new(Vec::new()),
+            relay_ids: Mutex::new(HashMap::new()),
             gateway: RwLock::new(None),
             operator_nonces: Mutex::new(HashMap::new()),
             link_written: Mutex::new(0.0),
