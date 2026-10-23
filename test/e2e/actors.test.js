@@ -189,7 +189,13 @@ test("a click on an actor selects it, over whatever glows behind it", { timeout:
     let found = false, st = null;
     for (let tries = 0; tries < 3 && st?.selection?.id !== "actor:wren"; tries++) {
       if (st?.selection) await s.driver("select", null);
-      const at = await s.driver("screenPos", "actor:wren");
+      // A move can take Wren off screen for a moment: wait for it to come
+      // back rather than fail on the first look.
+      let at = await s.driver("screenPos", "actor:wren");
+      for (const end = Date.now() + 15000; !at?.onScreen && Date.now() < end; ) {
+        await sleep(500);
+        at = await s.driver("screenPos", "actor:wren");
+      }
       assert.ok(at?.onScreen, "Wren is on screen");
       let spot = null;
       for (const [dx, dy] of [[0, 0], [0, -8], [8, 0], [-8, 0], [0, 8], [6, -6], [-6, -6], [6, 6], [-6, 6], [0, -14], [14, 0], [-14, 0], [0, 14]]) {
