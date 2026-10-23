@@ -573,8 +573,8 @@ Each step leaves `npm test` passing on JS, and adds to `parity.json`.
 - Signing on Windows.
 - A file watcher for the binary's readers. They poll for now, with no
   new crate: the tailer every 250 ms, a sweep for new and woken
-  transcripts every 2 seconds, the wiki's and themes' folders every
-  second or half second.
+  transcripts every 2 seconds, the shared context's and themes' folders
+  every second or half second.
 - Whether a release ships Rust subsystems inside the JS service (twins in
   place) before the binary replaces the service.
 

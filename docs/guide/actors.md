@@ -234,7 +234,7 @@ A program that speaks MCP gets the same calls as tools from the `xenonet` MCP se
 
 A token is `xenonet_actor_` followed by 64 hex digits. XenoNet shows it once, and keeps only a hash of it. The window masks it as `xenonet_actor_••••`, and leaves it out of the page until you choose **Show**, which shows it for ten seconds. **Copy** copies it without showing it. XenoNet masks a shown token again when you switch to another app, while identities are hidden, and in screenshots an agent takes of the window. The token travels in the `Authorization: Bearer` header, from a file only you can read, never as an argument or in a URL.
 
-The `xenonet` command won't write a token into a git working tree or the projects folder unless you add `--force`. The doctor looks for tokens left in the repos it knows, ignored files such as a `.env` included. It looks once a day, and whenever you run it yourself.
+The `xenonet` command won't write a token into a git working tree or the projects folder unless you add `--force`. The doctor looks for tokens left in the repos it knows, ignored files such as a `.env` included. It looks once a day, and whenever you run it yourself. It warns only about tokens XenoNet issued, so a made-up one in a test fixture doesn't count.
 
 On macOS, a token is also held to processes. It never works from under Claude Code or Codex, or from an actor app's own process. A product's token works only from under that product.
 

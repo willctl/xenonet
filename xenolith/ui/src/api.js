@@ -1,7 +1,30 @@
 // The window's calls to the local service (same origin), and small formatting helpers.
 
+/**
+ * The owner key the tray opened the window with (#owner=<key>). The fragment never reaches the
+ * server; the key is kept for this window only and leaves the address bar at once. Approving
+ * changes, the approvals setting and Forget need it; without it the window can read, not decide.
+ */
+const OWNER = (() => {
+  let key = null;
+  const m = /(?:^#|&)owner=([0-9a-f]{64})(?:&|$)/.exec(location.hash);
+  try {
+    if (m) sessionStorage.setItem('xenolith-owner', m[1]);
+    key = m ? m[1] : sessionStorage.getItem('xenolith-owner');
+  } catch {
+    key = m ? m[1] : null;
+  }
+  if (m) history.replaceState(null, '', `${location.pathname}${location.search}#/pages`);
+  return key;
+})();
+
+/** Whether this window may decide (the tray opened it with the owner key). */
+export const hasOwnerKey = () => Boolean(OWNER);
+
+const auth = () => (OWNER ? { 'X-Xenolith-Owner': OWNER } : {});
+
 async function get(path) {
-  const r = await fetch(path, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+  const r = await fetch(path, { headers: { Accept: 'application/json', ...auth() }, cache: 'no-store' });
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw Object.assign(new Error(body.error || `HTTP ${r.status}`), { status: r.status });
   return body;
@@ -11,7 +34,7 @@ async function get(path) {
 async function post(path, data) {
   const r = await fetch(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Xenolith': 'ui' },
+    headers: { 'Content-Type': 'application/json', 'X-Xenolith': 'ui', ...auth() },
     body: JSON.stringify(data),
   });
   const body = await r.json().catch(() => ({}));

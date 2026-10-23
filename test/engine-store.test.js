@@ -163,6 +163,21 @@ test("version 7 gives each actor a gateway token of its own, beside its token, w
   store.close();
 });
 
+test("the issued tokens are the ones that work now: actors' own, their gateway tokens and waiting registrations'", () => {
+  const store = new EngineStore(tmp());
+  assert.deepEqual(store.issuedTokenHashes(), []);
+  const actor = store.db.prepare("INSERT INTO actors (slug, kind, name, via, capabilities, created_at, token_hash, gateway_hash) VALUES (?, 'agent', ?, '[]', '[]', ?, ?, ?)");
+  actor.run("muse", "Muse", T, "h-muse", "g-muse");
+  actor.run("wren", "Wren", T, "h-wren", null);
+  actor.run("moth", "Moth", T, null, null);
+  store.addActorRequest({ id: "r1", slug: "heron", ask: "{}", token_hash: "h-waiting", created_at: T, expires_at: T + HOUR });
+  store.addActorRequest({ id: "r2", slug: "heron", ask: "{}", token_hash: "h-denied", created_at: T, expires_at: T + HOUR });
+  store.decideActorRequest("r2", "deny", T + 1);
+  store.revokeActorToken({ token_hash: "h-old", actor: "actor:muse", reason: "rotated", at: T });
+  assert.deepEqual(store.issuedTokenHashes().sort(), ["g-muse", "h-muse", "h-waiting", "h-wren"], "a revoked token, or a refused registration's, no longer works");
+  store.close();
+});
+
 test("version 5 adds remote connections beside the actors, and leaves every actor, token and event as it was", () => {
   const file = tmp();
   const db = new DatabaseSync(file);

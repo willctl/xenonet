@@ -402,6 +402,30 @@
       "properties": {
         "type": {
           "type": "string",
+          "const": "bridge-session"
+        },
+        "ownerAccountUuid": {
+          "type": "string",
+          "description": "The Claude account the session runs as, which the identities read (core/identities.js)"
+        },
+        "ownerOrganizationUuid": {
+          "type": "string",
+          "description": "Its organization"
+        }
+      },
+      "required": [
+        "type",
+        "ownerAccountUuid",
+        "ownerOrganizationUuid"
+      ],
+      "additionalProperties": {},
+      "description": "A Remote Control session's link, which names the account it runs as"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
           "const": "system"
         }
       },
@@ -650,6 +674,45 @@
         "type": {
           "type": "string",
           "const": "api-request-blob"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "worktree-state"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "artifact-comment-monitor"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "artifact-autoreact-ledger"
         }
       },
       "required": [

@@ -245,7 +245,8 @@ export function createDriver(app) {
     // Nodes whose id, title or name contain every word of `query`, drawn
     // ones first, then the most recent. `kind` narrows it: session, project,
     // native (a Codex project), zone (a folder outside the projects folder),
-    // resource, wiki, page, core, host (another machine's XenoNet: over SSH
+    // resource (a shared system), wiki (the shared context), page (a context
+    // page), core, host (another machine's XenoNet: over SSH
     // with XENONET_HOSTS=1, or in your network) or actor (actors beside the map, by id, name and
     // product, after the nodes when not narrowed, so words that found a node
     // still find it first). A node from another machine has an id that
@@ -661,7 +662,7 @@ export function createDriver(app) {
     },
     async mcp(id, opts) {
       const node = nodeOf(known(id));
-      if (!node || !["resource", "wiki"].includes(node.kind)) throw new Error("choose an MCP shared system or Xenolith");
+      if (!node || !["resource", "wiki"].includes(node.kind)) throw new Error("choose an MCP shared system or the shared context");
       return act(async () => { await app.select(node.id); await app.hud.mcp.open(node); }, opts);
     },
     mcpTab: (tab, opts) => act(() => app.hud.mcp.tab(tab), opts),

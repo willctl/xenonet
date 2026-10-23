@@ -49,7 +49,7 @@ pub fn items(cfg: &Config, s: &Status, a: Option<&Autostart>) -> Vec<Item> {
         }
     }
     m.push(item("", "-", ""));
-    m.push(item("", "Open wiki folder", "open-wiki"));
+    m.push(item("", "Open folder", "open-wiki"));
     m.push(item("", "Open index.md", "open-index"));
     m.push(item("", "Open logs", "open-logs"));
     let recent = s.recent();

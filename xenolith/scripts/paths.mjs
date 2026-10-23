@@ -1,5 +1,7 @@
-// Where Xenolith keeps its own files (not the wiki): the platform's standard
-// locations, never a dot folder in the home directory.
+// Where Xenolith keeps its own files (not the shared context folder): the platform's standard
+// locations, never a dot folder in the home directory. The programs decide this in
+// xenolith_core::paths; this copy of the rules is for the scripts that look at an installed
+// Xenolith (the memory eval, ui:preview).
 //
 //                Windows                        Linux (XDG)                       macOS
 //   config       %APPDATA%\Xenolith            $XDG_CONFIG_HOME/xenolith       ~/Library/Application Support/Xenolith

@@ -6,16 +6,22 @@ const git = (...args) => execFileSync('git', args, { encoding: 'utf8', maxBuffer
 const staged = process.argv.includes('--staged');
 const history = process.argv.includes('--history');
 const failures = [];
-const identity = 'willctl <will@willctl.com>';
+// The public identity: the address will@willctl.com, under the name Will (as the project's commits
+// are made) or willctl.
+const PUBLIC_EMAIL = 'will@willctl.com';
+const PUBLIC_NAMES = ['Will', 'willctl'];
+const isPublic = (ident) => {
+  const m = ident.match(/^(.*) <([^>]*)>/);
+  return Boolean(m) && m[2] === PUBLIC_EMAIL && PUBLIC_NAMES.includes(m[1]);
+};
 if (!process.argv.includes('--files-only')) {
   for (const kind of ['AUTHOR', 'COMMITTER']) {
-    const actual = git('var', `GIT_${kind}_IDENT`).replace(/>.*$/, '>');
-    if (actual !== identity) failures.push(`${kind.toLowerCase()} identity: use the repository's public identity`);
+    if (!isPublic(git('var', `GIT_${kind}_IDENT`))) failures.push(`${kind.toLowerCase()} identity: use the repository's public identity (Will <${PUBLIC_EMAIL}>)`);
   }
 }
 if (history) {
   for (const row of git('log', '--all', '--format=%an <%ae>%x09%cn <%ce>').split('\n')) {
-    if (row.split('\t').some(x => x !== identity)) failures.push('history contains a non-public commit identity');
+    if (row.split('\t').some(x => !isPublic(x))) failures.push('history contains a non-public commit identity');
   }
 }
 let blocked = [];

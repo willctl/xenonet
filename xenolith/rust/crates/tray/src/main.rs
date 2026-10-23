@@ -7,8 +7,9 @@
 //!  - hosts the curator (`xenolith curator --parent-stdin`) as the user, where configured (Windows;
 //!    on macOS and Linux a launchd or systemd user unit runs it);
 //!  - opens the Xenolith window on a left click: the web app the service serves at /ui/, in an
-//!    embedded webview (WebView2, WKWebView, WebKitGTK);
-//!  - offers a menu on a right click: open the window, status, open wiki/index/logs, recent activity,
+//!    embedded webview (WebView2, WKWebView, WebKitGTK), with the service's owner key (owner.rs)
+//!    so the window can approve changes;
+//!  - offers a menu on a right click: open the window, status, open the folder/index/logs, recent activity,
 //!    pause/resume the curator, curator sign-in and failed notes, start at sign-in, copy the MCP URL,
 //!    restart the service, quit;
 //!  - watches its own start-at-sign-in entries and logs (logs/tray.log) when one disappears.
@@ -29,6 +30,7 @@ mod curator_host;
 mod keyhandoff;
 mod log;
 mod menu;
+mod owner;
 mod platform;
 mod status;
 #[cfg(windows)]
@@ -92,6 +94,7 @@ fn selftest(cfg: &Config) -> i32 {
         format!("icons={}", platform::icons_loaded(cfg)),
         format!("autostart={}", a.as_ref().map(|a| a.to_string()).unwrap_or_else(|| "unknown".into())),
         format!("ui={}", cfg.ui_url()),
+        format!("owner={}", owner::describe(cfg, &s)),
         format!("window={}", platform::window_line(cfg)),
         format!("curator={}", if cfg.host_curator { cfg.agent.display().to_string() } else { "not hosted".into() }),
     ];

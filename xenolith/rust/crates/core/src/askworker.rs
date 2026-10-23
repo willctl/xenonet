@@ -1,4 +1,4 @@
-//! Ask, the curator's side (src/ask.mjs): answers the window's questions with an agent that searches
+//! Ask, the curator's side: answers the window's questions with an agent that searches
 //! and reads the wiki. The agent is the curator's isolated `codex exec` (codex.rs) with no shell and
 //! exactly one MCP server: this program's `serve --read-only`, which offers context_search and context_read
 //! and nothing that writes. Questions, claims, events and results are files (see asks.rs).

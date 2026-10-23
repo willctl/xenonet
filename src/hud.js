@@ -9,7 +9,10 @@ import { cleanTitle, renamable, MAX_TITLE } from "../core/rename.js";
 
 const $ = (sel) => document.querySelector(sel);
 
-const KIND_LABEL = { core: "Root", host: "Host", project: "Project", native: "Codex project", session: "Session", resource: "Shared system", wiki: "Xenolith", page: "Wiki page" };
+const KIND_LABEL = { core: "Root", host: "Host", project: "Project", native: "Codex project", session: "Session", resource: "Shared system", wiki: "Shared context", page: "Context page" };
+// The sources the status panel lists go by their names in graph/v1, apart
+// from the shared context's, whose name there (wiki) the page doesn't use.
+const SOURCE_LABEL = { wiki: "shared context" };
 // The projects folder's name (see graph.js), which the page shows in a few
 // places; it changes with the folder.
 let rootName = "~/Projects";
@@ -135,7 +138,10 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     const sub = $("#link-sub");
     if (sub) sub.textContent = sources.length ? `${sources.filter((src) => src.ok).length}/${sources.length} sources reading` : "";
     $("#sources").innerHTML = sources
-      .map((src) => `<span class="src ${src.ok ? "ok" : "bad"}" title="${h(src.ok ? `${src.name}: ${src.note ?? src.count ?? ""}${src.ms != null ? ` in ${src.ms}ms` : ""}` : `${src.name}: ${src.error}`)}">${h(src.name)}</span>`)
+      .map((src) => {
+        const name = SOURCE_LABEL[src.name] ?? src.name;
+        return `<span class="src ${src.ok ? "ok" : "bad"}" title="${h(src.ok ? `${name}: ${src.note ?? src.count ?? ""}${src.ms != null ? ` in ${src.ms}ms` : ""}` : `${name}: ${src.error}`)}">${h(name)}</span>`;
+      })
       .join("");
   }
 

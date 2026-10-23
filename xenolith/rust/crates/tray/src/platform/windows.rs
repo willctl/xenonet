@@ -408,7 +408,9 @@ impl HasWindowHandle for Hwnd {
 
 struct UiWindow {
     hwnd: HWND,
-    _webview: wry::WebView,
+    webview: wry::WebView,
+    /// The owner key it was opened with: a service restart makes a new one.
+    key: Option<String>,
     _context: Box<wry::WebContext>,
 }
 
@@ -475,7 +477,7 @@ fn register_window_class(icon_big: HICON, icon_small: HICON) {
     });
 }
 
-fn create_window(cfg: &Config) -> Result<UiWindow, String> {
+fn create_window(cfg: &Config, key: Option<String>) -> Result<UiWindow, String> {
     register_window_class(load_icon(cfg, "healthy", 32), load_icon(cfg, "healthy", 16));
     let (x, y, w, h) = placement();
     let (class, title) = (wide("XenolithWindow"), wide("Xenolith"));
@@ -497,7 +499,7 @@ fn create_window(cfg: &Config) -> Result<UiWindow, String> {
     let webview = {
         use wry::WebViewBuilderExtWindows;
         wry::WebViewBuilder::new_with_web_context(&mut context)
-            .with_url(cfg.ui_url())
+            .with_url(crate::owner::ui_url(cfg, key.as_deref()))
             .with_focused(true)
             .with_navigation_handler(move |url| {
                 // The window shows Xenolith only; links elsewhere open in the default browser.
@@ -535,7 +537,7 @@ fn create_window(cfg: &Config) -> Result<UiWindow, String> {
         ShowWindow(hwnd, SW_SHOW);
         SetForegroundWindow(hwnd);
     }
-    Ok(UiWindow { hwnd, _webview: webview, _context: context })
+    Ok(UiWindow { hwnd, webview, key, _context: context })
 }
 
 fn focus(hwnd: HWND) {
@@ -552,19 +554,28 @@ fn focus(hwnd: HWND) {
 
 /// Opens the window, or brings the open (or hidden) one back.
 fn open_ui() {
-    let Some((cfg, existing, tray)) = with_app(|a| (a.cfg.clone(), a.window.as_ref().map(|w| w.hwnd), a.hwnd)) else { return };
+    let Some((cfg, existing, tray, key)) = with_app(|a| (a.cfg.clone(), a.window.as_ref().map(|w| w.hwnd), a.hwnd, crate::owner::key(&a.cfg, &a.status))) else { return };
     if !cfg.window {
         crate::log::tray(&cfg, "open-ui requested (window=0)");
         return;
     }
     if let Some(h) = existing {
+        // The service restarted since the window opened: reload it with the new key.
+        if key.is_some() {
+            with_app(|a| {
+                if let Some(w) = a.window.as_mut().filter(|w| w.key != key) {
+                    let _ = w.webview.load_url(&crate::owner::ui_url(&a.cfg, key.as_deref()));
+                    w.key = key.clone();
+                }
+            });
+        }
         // SAFETY: our own timer.
         unsafe { KillTimer(tray, TIMER_FREE_WINDOW) };
         focus(h);
         return;
     }
     // Not under a borrow: creating WebView2 pumps messages, which re-enter the window procedures.
-    match create_window(&cfg) {
+    match create_window(&cfg, key) {
         Ok(w) => {
             with_app(|a| a.window = Some(w));
         }
@@ -850,7 +861,8 @@ pub fn request_open(cfg: &Config) -> Result<(), String> {
 /// `--window`: only the window, in this process, until it is closed.
 pub fn run_window(cfg: Config) -> i32 {
     dpi_aware();
-    match create_window(&cfg) {
+    let key = crate::owner::key(&cfg, &Status::fetch(&cfg));
+    match create_window(&cfg, key) {
         Ok(w) => {
             STANDALONE.with(|s| *s.borrow_mut() = Some((cfg, Some(w))));
             message_loop();

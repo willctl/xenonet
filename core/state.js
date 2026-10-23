@@ -131,6 +131,7 @@ export class XenoNetState extends EventEmitter {
       claudeDesktopDir: config.claudeDesktopDir,
       claudeUsage: config.claudeUsage ? () => fetchClaudeUsage() : null,
       home: config.homeDir,
+      contextServer: config.wikiServer,
     });
     this.blocks.add(this.live.tailer, { source: "live" });
     this.blocks.add(claudeLines);

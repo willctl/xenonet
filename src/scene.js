@@ -1627,7 +1627,7 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
           const res = nodeIndex.get(sameHost(node, `resource:${ev.server}`));
           const color2 = res?.kind === "wiki" ? COLORS.wiki : COLORS.resource;
           if (res) for (let i = 0; i < 3; i++) setTimeout(() => packet({ from: node, to: res, color: color2, size: 3, duration: 1.3, bow: 0.18 }), i * 140);
-          // Wiki writes continue on to the pages they touched.
+          // Writes to the shared context go on to the pages they touched.
           for (const slug of ev.pages ?? []) {
             const page = nodeIndex.get(sameHost(node, `wiki:${slug}`));
             if (res && page) {

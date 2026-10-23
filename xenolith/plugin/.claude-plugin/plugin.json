@@ -1,9 +1,9 @@
 {
   "name": "xenolith",
   "version": "__VERSION__",
-  "description": "Shared long-term memory for every app and agent on this computer: a plain-Markdown wiki you own, served by one local MCP server.",
+  "description": "Shared long-term memory for every app and agent on this computer: plain Markdown files you own, served by one local MCP server.",
   "author": {
     "name": "willctl"
   },
-  "keywords": ["memory", "wiki", "mcp", "markdown", "shared-memory", "agents"]
+  "keywords": ["memory", "shared-context", "mcp", "markdown", "shared-memory", "agents"]
 }

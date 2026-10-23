@@ -1,10 +1,10 @@
-// The Xenolith tray window: search, ask the wiki (an agent answers from it), read pages, follow
+// The Xenolith window: search, ask the shared context (an agent answers from it), read pages, follow
 // the activity log and the curator's inbox, and check the service. Served by the local service at
 // /ui/; the tray opens it as an Edge app window.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ago, api, appColor, dayLabel, duration } from './api.js';
+import { ago, api, appColor, dayLabel, duration, hasOwnerKey } from './api.js';
 import { createRenderer, highlight, plainText, snippetAround } from './markdown.js';
 import './app.css';
 
@@ -212,7 +212,7 @@ function SearchBox({ value, onChange, inputRef, onKeyDown }) {
         placeholder="Search pages, notes and the log"
         spellCheck="false"
         autoComplete="off"
-        aria-label="Search the wiki"
+        aria-label="Search shared context"
       />
       {value ? (
         <button className="icon-btn" onClick={() => onChange('')} title="Clear (Esc)">
@@ -273,12 +273,12 @@ function AskRow({ query, selected, setSelected, onAsk, canAsk }) {
         e.preventDefault();
         onAsk();
       }}
-      title={canAsk ? 'An agent searches and reads the wiki, then answers with sources' : 'Asking needs the curator (tray app)'}
+      title={canAsk ? 'An agent searches and reads the shared context, then answers with sources' : 'Asking needs the curator (tray app)'}
     >
       <span className="result-icon k-ask"><Icon name="spark" /></span>
       <span className="result-body">
         <span className="result-title">
-          <span>Ask the wiki</span>
+          <span>Ask shared context</span>
           <kbd>Ctrl ↵</kbd>
         </span>
         <span className="snippet">“{query.trim()}”: an agent searches and reads for you, then answers with sources</span>
@@ -315,7 +315,7 @@ function SearchResults({ query, selected, setSelected, onOpen, results, setResul
     return (
       <div className="results">
         {askRow}
-        <Empty icon="search" title={`Nothing found for “${query.trim()}”`}>Try fewer or different words, or ask the wiki: the agent tries other words too.</Empty>
+        <Empty icon="search" title={`Nothing found for “${query.trim()}”`}>Try fewer or different words, or ask: the agent tries other words too.</Empty>
       </div>
     );
   }
@@ -718,7 +718,7 @@ function CuratorBar({ status }) {
 
 const NOTE_STATUS = { pending: 'Waiting', retrying: 'Retrying', dead: 'Failed' };
 
-const ACTION_LABEL = { created: 'new page', patched: 'update', replaced: 'rewrite' };
+const ACTION_LABEL = { created: 'new page', patched: 'update', replaced: 'rewrite', removed: 'removal' };
 
 /** Ends a reason with exactly one full stop (a model's reason may bring its own). */
 const sentence = (s) => s.replace(/[.\s]+$/, '') + '.';
@@ -1020,7 +1020,7 @@ function NeedsOk({ mode, changes, forgets, busy, onDecide, onForget, onApproveAl
             <span className="chip">forget</span>
           </div>
           <div className="held-why">
-            You asked the wiki to forget this. It is in {f.matches} place{f.matches === 1 ? '' : 's'}:
+            You asked to forget this. It is in {f.matches} place{f.matches === 1 ? '' : 's'}:
           </div>
           <div className="card-meta">
             {f.files.slice(0, 12).map((x) => (
@@ -1137,6 +1137,11 @@ function HeldChanges({ refreshKey }) {
   };
   return (
     <>
+      {!hasOwnerKey() && (
+        <p className="muted small">
+          This window can show changes but not decide them. Open it from the Xenolith tray, or use <code>xenolith held</code> in a terminal.
+        </p>
+      )}
       <ApprovalsBar mode={mode} problem={approvalsProblem} busy={busy} onChange={setMode} />
       <CleanupSchedule refreshKey={refreshKey} />
       <NeedsOk mode={mode} changes={changes} forgets={forgets} busy={busy} onDecide={decide} onForget={forget} onApproveAll={approveAll} />
@@ -1157,7 +1162,7 @@ function InboxView({ status, render, refreshKey }) {
       ) : !box.data ? (
         <Skeleton rows={2} />
       ) : !box.data.notes.length ? (
-        held ? null : <Empty title="Inbox zero">Every note has been filed into the wiki.</Empty>
+        held ? null : <Empty title="Inbox zero">Every note has been filed into pages.</Empty>
       ) : (
         <div className="list">
           {box.data.notes.map((n) => (
@@ -1287,7 +1292,7 @@ function suggestions(pages) {
   const list = pages?.pages || [];
   const project = list.filter((p) => p.type === 'project').sort((a, b) => b.time - a.time)[0];
   const pref = list.find((p) => p.type === 'preference');
-  const out = ['What changed in the wiki today?'];
+  const out = ['What changed today?'];
   if (project) out.push(`What is still open for ${project.title}?`);
   if (pref) out.push(`What are my standing preferences?`);
   else if (list[0]) out.push(`What do I know about ${list[0].title}?`);
@@ -1304,7 +1309,7 @@ const ASK_STATUS = {
 };
 
 function AskStatusChip({ status, found }) {
-  if (status === 'done' && found === false) return <span className="chip st-retrying">Not in the wiki</span>;
+  if (status === 'done' && found === false) return <span className="chip st-retrying">Not in shared context</span>;
   const [label, cls] = ASK_STATUS[status] || [status, ''];
   return (
     <span className={`chip ${cls}`}>
@@ -1324,7 +1329,7 @@ function AskView({ status, offline, pages }) {
       <div className="ask-hero">
         <div className="ask-hero-mark"><Icon name="spark" size={22} /></div>
         <div>
-          <h2>Ask the wiki</h2>
+          <h2>Ask shared context</h2>
           <p>An agent searches and reads your pages, the activity log and notes not yet filed, then answers with its sources.</p>
         </div>
       </div>
@@ -1505,7 +1510,7 @@ function Answer({ r, render }) {
     <div className={`answer${r.found === false ? ' not-found' : ''}`}>
       {r.found === false && (
         <div className="answer-flag">
-          <Icon name="search" size={13} /> The wiki does not say
+          <Icon name="search" size={13} /> Shared context does not say
         </div>
       )}
       <div className="md" dangerouslySetInnerHTML={{ __html: render(r.answer) }} />
@@ -1688,8 +1693,8 @@ function StatusView({ status, offline }) {
         <Row k="MCP URL">
           <button className="linkish" onClick={() => copy(status.mcpUrl, 'the MCP URL')}>{status.mcpUrl} <Icon name="copy" size={12} /></button>
         </Row>
-        <Row k="Wiki folder">
-          <button className="linkish" onClick={() => copy(status.wikiDir, 'the wiki folder')}>{status.wikiDir} <Icon name="copy" size={12} /></button>
+        <Row k="Folder">
+          <button className="linkish" onClick={() => copy(status.wikiDir, 'the folder')}>{status.wikiDir} <Icon name="copy" size={12} /></button>
         </Row>
         <Row k="Requests">{status.requests?.last15m ?? 0} in the last 15 min{status.requests?.last ? ` · last ${ago(status.requests.last)}` : ''}</Row>
         {status.lock && <Row k="Write lock">{status.lock.state} by {status.lock.label || `pid ${status.lock.pid}`} ({status.lock.ageSec} s)</Row>}
@@ -1887,7 +1892,7 @@ function ForgetCard() {
   return (
     <div className="card">
       <h3 className="section-label">Forget</h3>
-      <p className="muted small">Finds every copy of a piece of text (pages and their history, notes, audit records, Ask, the log, the request logs) and redacts it. A git history of the wiki is not changed.</p>
+      <p className="muted small">Finds every copy of a piece of text (pages and their history, notes, audit records, Ask, the log, the request logs) and redacts it. A git history of the folder is not changed.</p>
       <div className="forget-row">
         <input
           className="forget-input"
@@ -1985,7 +1990,7 @@ function App() {
       (e) => Toast.show(e.message),
     );
   };
-  // Row 0 is "Ask the wiki"; search results follow from 1.
+  // Row 0 is "Ask shared context"; search results follow from 1.
   const onSearchKey = (e) => {
     if (e.key === 'Escape') {
       if (query) setQuery('');

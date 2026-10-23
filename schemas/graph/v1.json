@@ -1256,7 +1256,7 @@
               "lastSessionAt"
             ],
             "additionalProperties": {},
-            "description": "A page of the shared context's wiki"
+            "description": "A context page: a page of the shared context"
           },
           {
             "type": "object",
@@ -1647,7 +1647,7 @@
         ],
         "additionalProperties": {}
       },
-      "description": "The tree, by node ids; lineage-cross ties a session to its parent in another place, and host ties another machine's node to this one's core"
+      "description": "The tree, by node ids; lineage-cross ties a session to its parent in another place, host ties another machine's node to this one's core, wiki ties the shared context to the core, and page a context page to the shared context"
     },
     "relations": {
       "type": "array",
@@ -1676,7 +1676,7 @@
         ],
         "additionalProperties": {}
       },
-      "description": "Ties outside the tree: wiki pages that link, pages that mention a project, and checkouts of one repo on different machines"
+      "description": "Ties outside the tree: context pages that link to each other (wikilink), pages that mention a project (mentions), and checkouts of one repo on different machines (same-repo)"
     },
     "stats": {
       "type": "object",
@@ -1684,7 +1684,8 @@
         "wikiPages": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 9007199254740991
+          "maximum": 9007199254740991,
+          "description": "Context pages on the map"
         },
         "dirtyRepos": {
           "type": "integer",
@@ -1867,7 +1868,7 @@
         "properties": {
           "name": {
             "type": "string",
-            "description": "projects, codex, codex-projects, claude, live, wiki, search, identities"
+            "description": "projects, codex, codex-projects, claude, live, wiki (the shared context), search, identities"
           },
           "ok": {
             "type": "boolean"

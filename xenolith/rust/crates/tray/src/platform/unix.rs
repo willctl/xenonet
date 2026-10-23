@@ -80,12 +80,14 @@ fn notify(title: &str, text: &str) {
 
 struct UiWindow {
     window: Window,
-    _webview: wry::WebView,
+    webview: wry::WebView,
     _context: Box<wry::WebContext>,
     hidden_at: Option<Instant>,
+    /// The owner key it was opened with: a service restart makes a new one.
+    key: Option<String>,
 }
 
-fn create_window(target: &tao::event_loop::EventLoopWindowTarget<User>, cfg: &Config) -> Result<UiWindow, String> {
+fn create_window(target: &tao::event_loop::EventLoopWindowTarget<User>, cfg: &Config, key: Option<String>) -> Result<UiWindow, String> {
     let window = WindowBuilder::new()
         .with_title("Xenolith")
         .with_inner_size(tao::dpi::LogicalSize::new(WIDTH, HEIGHT))
@@ -108,7 +110,7 @@ fn create_window(target: &tao::event_loop::EventLoopWindowTarget<User>, cfg: &Co
         let _ = std::process::Command::new(if cfg!(target_os = "macos") { "open" } else { "xdg-open" }).arg(url).spawn();
     };
     let builder = wry::WebViewBuilder::new_with_web_context(&mut context)
-        .with_url(cfg.ui_url())
+        .with_url(crate::owner::ui_url(cfg, key.as_deref()))
         .with_navigation_handler(move |url| {
             if url.starts_with(&origin) || url == "about:blank" {
                 return true;
@@ -131,7 +133,7 @@ fn create_window(target: &tao::event_loop::EventLoopWindowTarget<User>, cfg: &Co
         builder.build_gtk(window.default_vbox().ok_or("no GTK container")?)
     };
     let webview = webview.map_err(|e| e.to_string())?;
-    Ok(UiWindow { window, _webview: webview, _context: context, hidden_at: None })
+    Ok(UiWindow { window, webview, _context: context, hidden_at: None, key })
 }
 
 fn build_menu(items: &[menu::Item]) -> (Menu, Vec<(tray_icon::menu::MenuId, String)>) {
@@ -300,11 +302,17 @@ pub fn run(cfg: Config, from: &str) -> i32 {
                 if !cfg.window {
                     crate::log::tray(&cfg, "open-ui requested (window=0)");
                 } else if let Some(w) = &mut window {
+                    // The service restarted since the window opened: reload it with the new key.
+                    let key = crate::owner::key(&cfg, &status);
+                    if key.is_some() && key != w.key {
+                        let _ = w.webview.load_url(&crate::owner::ui_url(&cfg, key.as_deref()));
+                        w.key = key;
+                    }
                     w.window.set_visible(true);
                     w.window.set_focus();
                     w.hidden_at = None;
                 } else {
-                    match create_window(target, &cfg) {
+                    match create_window(target, &cfg, crate::owner::key(&cfg, &status)) {
                         Ok(w) => window = Some(w),
                         Err(e) => {
                             crate::log::tray(&cfg, &format!("window: {e}; opening the default browser"));
@@ -416,10 +424,11 @@ pub fn request_open(cfg: &Config) -> Result<(), String> {
 pub fn run_window(cfg: Config) -> i32 {
     let event_loop = EventLoopBuilder::<User>::with_user_event().build();
     let mut window: Option<UiWindow> = None;
+    let key = crate::owner::key(&cfg, &Status::fetch(&cfg));
     event_loop.run(move |event, target, flow| {
         *flow = ControlFlow::Wait;
         match event {
-            Event::NewEvents(StartCause::Init) => match create_window(target, &cfg) {
+            Event::NewEvents(StartCause::Init) => match create_window(target, &cfg, key.clone()) {
                 Ok(w) => window = Some(w),
                 Err(e) => {
                     crate::log::tray(&cfg, &format!("window: {e}"));

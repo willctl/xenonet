@@ -15,8 +15,8 @@
 //! the record says), where JS's `+` would have joined strings.
 
 use super::{
-    categorize, claude_edits, clip, clip_value, codex_edits, command_text, day_key, file_key, files_of, looks_like_question, mcp_server_of, median, patch_files, slope, string_of,
-    tail, tool_detail, tool_key, wiki_pages_of,
+    categorize, claude_edits, clip, clip_value, codex_edits, command_text, day_key, file_key, files_of, looks_like_question, mcp_server_of, mcp_tool_of, median, patch_files,
+    slope, string_of, tail, tool_detail, tool_key, wiki_pages_of,
 };
 use crate::line_events::{self, broken_at, usage_of, user_text, End, Field, Kind, LineEvent, LineFile, Run};
 use crate::lines::{opt_prop, prop, ClaudeLine, CodexLine, GrokLine, TypeError};
@@ -838,6 +838,10 @@ pub struct Where {
 #[derive(Debug)]
 pub struct Telemetry {
     pub home: Option<String>,
+    /// The MCP server the config names for the shared context
+    /// (wikiServer): Xenolith's tools under it write there, whatever it's
+    /// called.
+    pub context_server: Option<String>,
     roots: Vec<(String, String)>,
     sessions: Vec<Session>,
     index: HashMap<String, usize>,
@@ -857,6 +861,7 @@ impl Telemetry {
     pub fn new(home: Option<String>, roots: Vec<(String, String)>) -> Self {
         Telemetry {
             home,
+            context_server: None,
             roots,
             sessions: Vec::new(),
             index: HashMap::new(),
@@ -1412,7 +1417,7 @@ impl Telemetry {
         }
         let name_s = string_of(name.as_ref());
         let server = mcp_server_of(&name_s);
-        let pages = wiki_pages_of(server.as_deref(), input.as_ref());
+        let pages = wiki_pages_of(server.as_deref(), mcp_tool_of(&name_s), self.context_server.as_deref(), input.as_ref());
         let full = match opt_prop(input.as_ref(), "command") {
             Some(c @ Value::String(_)) => c.clone(),
             _ => nn(input.as_ref()).cloned().unwrap_or_else(|| Value::Object(Map::new())),
@@ -1838,7 +1843,7 @@ impl Telemetry {
                 let ok = is_str(get("status"), "completed") && !truthy(get("error"));
                 self.sessions[i].note_tool_result(ok, ts, None);
                 let (server, tool) = (get("server"), get("tool"));
-                let pages = wiki_pages_of(server.and_then(Value::as_str), get("arguments"));
+                let pages = wiki_pages_of(server.and_then(Value::as_str), tool.and_then(Value::as_str), self.context_server.as_deref(), get("arguments"));
                 let call = ToolCall {
                     name: Some(Value::String(format!("mcp__{}__{}", tpl(server), tpl(tool)))),
                     server: server.cloned(),
@@ -1864,8 +1869,10 @@ impl Telemetry {
                 self.note_tool(i, ToolCall { name: sv("apply_patch"), detail, files, ok: Value::Bool(done), ts, ..ToolCall::default() }, live, now, out);
             }
             // An empty query is no query: the action's says what was
-            // searched, as a thread shown from its rollout reads it.
-            Some("WebSearch") => {
+            // searched, as a thread shown from its rollout reads it. An
+            // extension's web search is a web search; its other kinds (an
+            // image made, a pause) aren't read.
+            Some(kind @ ("WebSearch" | "Extension")) if kind == "WebSearch" || is_str(get("kind"), "web.search") => {
                 let q = [get("query"), opt_prop(get("action"), "query")].into_iter().find(|v| truthy(*v)).flatten();
                 self.note_tool(i, ToolCall { name: sv("web_search"), detail: clip_value(q, 72), ts, ..ToolCall::default() }, live, now, out);
             }
@@ -2734,6 +2741,19 @@ mod tests {
         let full = t.snapshot(NOW);
         assert_eq!(full.as_object().unwrap().keys().take(2).collect::<Vec<_>>(), ["at", "sessions"]);
         assert_eq!(full["resources"][0]["server"], "s");
+    }
+
+    #[test]
+    fn a_codex_extensions_web_search_is_a_web_search() {
+        let mut t = Telemetry::new(None, Vec::new());
+        let done = |k: f64, item: Value| json!({ "type": "event_msg", "timestamp": at(NOW - 5000.0 + k), "payload": { "type": "item_completed", "item": item } });
+        let search = codex(&mut t, done(0.0, json!({ "type": "Extension", "kind": "web.search", "query": "", "action": { "type": "search", "query": "zod v4 coerce" } })));
+        assert_eq!(kinds(&search), ["tool"]);
+        for (k, other) in [(1.0, "image_gen.generation"), (2.0, "clock.sleep")] {
+            assert_eq!(kinds(&codex(&mut t, done(k, json!({ "type": "Extension", "kind": other })))), Vec::<String>::new(), "{other} isn't read");
+        }
+        let details: Vec<_> = t.history_since(0.0).iter().filter_map(|e| field(&e.fields, "detail").cloned()).collect();
+        assert_eq!(details, [json!("zod v4 coerce")]);
     }
 
     #[test]

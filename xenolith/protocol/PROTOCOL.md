@@ -19,19 +19,19 @@ and pages related to the topic. It is cheap; do not skip it because a request
 looks small. Do not call it again in the same conversation unless the topic
 changes completely.
 
-## 2. Check the wiki before asking
+## 2. Check the shared context before asking
 
 Before asking the user for context they may have given before (a project's
 details, a person, a preference, an earlier decision, where something lives),
-call `context_search` and read what it finds with `context_read`. The wiki may use
+call `context_search` and read what it finds with `context_read`. The pages may use
 other words than the question: if a search misses, search again with names,
 the broader topic or what the answer would say, or pass such wordings in
-`queries` with the first search. Only ask if the wiki does not have it.
+`queries` with the first search. Only ask if the shared context does not have it.
 
-## 3. Tell the wiki what happened with `context_log`
+## 3. Tell the shared context what happened with `context_log`
 
-When an exchange produces something a future session would want, tell the
-wiki: call `context_log` with a one-line `title` and the facts in `body`. Plain
+When an exchange produces something a future session would want, tell the shared
+context: call `context_log` with a one-line `title` and the facts in `body`. Plain
 notes are fine. A curator agent files every note into the right pages, links
 them, keeps superseded facts and writes the activity log, so do not spend
 effort on structure, formatting or prose, and do not read pages first.
@@ -49,12 +49,14 @@ not after every message. Include what a reader without this conversation
 needs: the project, the outcome, file paths, URLs, versions, and names. If you
 know which pages it concerns, pass their slugs in `pages`. Do not send small
 talk, one-off lookups the user won't need again, your own unadopted
-suggestions, or anything already in the wiki.
+suggestions, or anything already in the shared context.
 
 Pass `source`: `user` when the user said it, `observed` when you checked it,
 `external` when it came from a web page, email, document or another tool's
-output, `agent` (the default) for your own conclusion. Preferences and
-instructions need `user`; changes from `external` content are flagged for the user to check.
+output, `agent` (the default) for your own conclusion. Xenolith records which
+app sent each note, and from an app `user` counts as `agent`, so a new
+preference or instruction may wait for the user's OK. Changes from `external`
+content are flagged for the user to check.
 
 The note is saved at once. Until the curator has filed it, it is listed under
 "Pending notes" in `context_start` and found by `context_search`; do not send it again.
@@ -86,14 +88,14 @@ only when the user asks.
 
 - If the user says "don't log this", "off the record", or similar, do not write
   anything from that exchange.
-- If the user asks you to correct or forget something, tell the wiki what is
+- If the user asks you to correct or forget something, tell the shared context what is
   wrong and what is right (or send the corrected page with `context_upsert_page`);
   the curator updates the page and keeps a dated note of the change.
-- If the wiki contradicts what the user says now, the user wins; tell the wiki.
-- If the wiki contradicts an app's built-in memory, prefer the wiki's newer entry.
+- If the shared context contradicts what the user says now, the user wins; tell it.
+- If the shared context contradicts an app's built-in memory, prefer its newer entry.
 
 ## 7. Be quiet about it
 
-Don't narrate reading the wiki. When you send it a note, end your reply with one
-short line, for example: `Wiki: noted "Chose Markdown + MCP for shared memory"`.
-If a wiki tool fails, say so in one line and carry on with the user's request.
+Don't narrate reading the shared context. When you send it a note, end your reply with one
+short line, for example: `Noted: "Chose Markdown + MCP for shared memory"`.
+If a `xenolith` tool fails, say so in one line and carry on with the user's request.

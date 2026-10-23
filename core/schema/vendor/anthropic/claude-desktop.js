@@ -7,15 +7,18 @@ import { vendor, open, closed, maybe, num, str, z } from "../common.js";
 export const DesktopSession = vendor(
   "anthropic/claude-desktop/session",
   1,
+  // A record may leave out cliSessionId, createdAt and lastActivityAt:
+  // XenoNet merges only the records that name a Claude Code session, and
+  // takes the times from the Agent SDK's listing when a record has none.
   open({
-    cliSessionId: str.describe("Claude Code's session id, which the Agent SDK lists the session by"),
+    cliSessionId: str.optional().describe("Claude Code's session id, which the Agent SDK lists the session by; a record without one isn't merged"),
     sessionId: str.describe("Claude desktop's own id for it (local_…)"),
     title: maybe(str),
     originCwd: maybe(str).describe("The folder it started in; a worktree session's repo"),
     worktreePath: maybe(str),
     branch: maybe(str),
-    createdAt: num.describe("Epoch milliseconds"),
-    lastActivityAt: num.describe("Epoch milliseconds"),
+    createdAt: num.optional().describe("Epoch milliseconds"),
+    lastActivityAt: num.optional().describe("Epoch milliseconds"),
     isArchived: z.boolean().optional(),
     isStarred: z.boolean().optional(),
     model: maybe(str),

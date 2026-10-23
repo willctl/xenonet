@@ -1,8 +1,7 @@
 // End-to-end tests: two real MCP clients (standing in for Claude and ChatGPT)
-// talk to the BUNDLED server at the same time, against a temp wiki, once over
-// stdio (each app launches its own server) and once over Streamable HTTP (the
-// Windows service). The runtime is copied out of the repo first, which proves
-// it needs no node_modules.
+// talk to the server at the same time, against a temp wiki, once over stdio
+// (each app launches its own server) and once over Streamable HTTP (the
+// service).
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -17,15 +16,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { hookCmd, IMPL, rustBin, srv, srvT } from './impl.mjs';
+import { hookCmd, rustBin, srv, srvT } from './impl.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
-const dist = path.join(repo, 'dist', 'runtime');
-if (!fs.existsSync(path.join(dist, 'server.mjs'))) throw new Error('Run `npm run build` first.');
-
 const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'xenolith-e2e-'));
-const runtime = path.join(tmp, 'runtime');
-await fsp.cp(dist, runtime, { recursive: true });
 const bundledProtocol = fs.readFileSync(path.join(repo, 'protocol', 'PROTOCOL.md'), 'utf8');
 const today = (() => {
   const d = new Date();
@@ -51,7 +45,7 @@ async function ok(client, name, args) {
 /** Starts `server.mjs --http --port 0 --parent-stdin`; resolves with {proc, url, port}. */
 function startHttpServer(env) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(...srv(runtime, '--http', '--port', '0', '--parent-stdin'), {
+    const proc = spawn(...srv('--http', '--port', '0', '--parent-stdin'), {
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -97,7 +91,7 @@ for (const mode of ['stdio', 'http']) {
     async function connect(name) {
       const transport =
         mode === 'stdio'
-          ? new StdioClientTransport({ ...srvT(runtime), env, cwd: tmp, stderr: 'pipe' })
+          ? new StdioClientTransport({ ...srvT(), env, cwd: tmp, stderr: 'pipe' })
           : new StreamableHTTPClientTransport(new URL(httpServer.url));
       const client = new Client({ name, version: '1.0.0' });
       await client.connect(transport);
@@ -133,7 +127,7 @@ for (const mode of ['stdio', 'http']) {
       assert.match(byName.context_start.description, /^ALWAYS call this once at the start of every conversation/);
     });
 
-    test('the agent-wiki names (wiki_*) still answer for one release, unlisted', { skip: IMPL !== 'rust' && 'the Rust programs only' }, async () => {
+    test('the agent-wiki names (wiki_*) still answer for one release, unlisted', async () => {
       const { tools } = await claude.listTools();
       assert.ok(!tools.some((t) => t.name.startsWith('wiki_')), 'old names are not listed');
       assert.match(await ok(claude, 'wiki_start', { app: 'claude-desktop', topic: 'anything' }), /# Xenolith protocol/);
@@ -149,6 +143,8 @@ for (const mode of ['stdio', 'http']) {
       assert.equal(fs.readFileSync(path.join(wikiDir, '.gitattributes'), 'utf8'), '* text=auto eol=lf\n');
       assert.match(fs.readFileSync(path.join(wikiDir, '.gitignore'), 'utf8'), /^\.locks\/$/m);
       assert.match(fs.readFileSync(path.join(wikiDir, 'index.md'), 'utf8'), /GENERATED.*Do not edit/);
+      // FORMAT.md's marker: whose folder this is, and the version of its format.
+      assert.deepEqual(JSON.parse(fs.readFileSync(path.join(wikiDir, 'xenolith.json'), 'utf8')), { format: 1, server: 'xenolith' });
     });
 
     test('context_start works on an empty wiki', async () => {
@@ -207,7 +203,7 @@ for (const mode of ['stdio', 'http']) {
       assert.match(await ok(claude, 'context_search', { query: 'zebra unicorn' }), /No results/);
     });
 
-    test('search cites the section that matched; context_read opens just that section; date and app filters', { skip: IMPL !== 'rust' && 'the Rust programs only' }, async () => {
+    test('search cites the section that matched; context_read opens just that section; date and app filters', async () => {
       // M5: a log entry is a section of its day, read as "<date>#<anchor>".
       const hits = await ok(claude, 'context_search', { query: 'atlas_net bridge' });
       const m = hits.match(new RegExp(`\\(read: "(${today}#[a-z0-9-]+)"`));
@@ -277,7 +273,7 @@ for (const mode of ['stdio', 'http']) {
       for (const bad of ['../../etc/passwd', '..\\..\\Windows\\win.ini', path.join(os.homedir(), '.ssh', 'config')]) {
         const r = await call(claude, 'context_read', { target: bad });
         assert.equal(r.isError, true, bad);
-        assert.match(r.text, /outside the wiki/, bad);
+        assert.match(r.text, /outside the shared context folder/, bad);
       }
       const missing = await call(claude, 'context_read', { target: '1999-01-01' });
       assert.equal(missing.isError, true);
@@ -340,13 +336,14 @@ for (const mode of ['stdio', 'http']) {
     });
 
     if (mode === 'http') {
-      test('HTTP: /health reports version and wiki; bad Host, Origin, method and path are refused', async () => {
+      test('HTTP: /health reports the version; bad Host, Origin, method and path are refused', async () => {
         const h = await rawRequest(httpServer.port);
         assert.equal(h.status, 200);
         const health = JSON.parse(h.body);
         assert.equal(health.ok, true);
         assert.equal(health.name, 'xenolith');
-        assert.equal(health.wikiDir, wikiDir.replace(/\\/g, '/'));
+        // /health is open to anything that reaches the port, so it names no folder.
+        assert.equal(health.wikiDir, undefined);
         const init = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'x', version: '1' } } });
         const mcpHeaders = { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' };
         const rebinding = await rawRequest(httpServer.port, { method: 'POST', path: '/mcp', body: init, headers: { ...mcpHeaders, Host: `evil.example:${httpServer.port}` } });
@@ -381,7 +378,7 @@ for (const mode of ['stdio', 'http']) {
 function runHook(hookEnv, { payload } = {}) {
   return new Promise((resolve) => {
     const t0 = Date.now();
-    const p = spawn(...hookCmd(runtime), { env: hookEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+    const p = spawn(...hookCmd(), { env: hookEnv, stdio: ['pipe', 'pipe', 'pipe'] });
     let out = '';
     p.stdout.on('data', (d) => (out += d));
     // stdin is deliberately left open, as some hosts do.
@@ -396,7 +393,7 @@ function runHook(hookEnv, { payload } = {}) {
 
 const FALLBACK_RE = /installed but could not be read just now; call context_start if the tools are available/;
 
-describe('the Stop hook nudge (M7, opt-in)', { skip: IMPL !== 'rust' && 'the Rust programs only' }, () => {
+describe('the Stop hook nudge (M7, opt-in)', () => {
   test('once per session, when the transcript is long and has no context_log call', async () => {
     const home = path.join(tmp, 'nudge-home');
     fs.mkdirSync(home, { recursive: true });
@@ -497,7 +494,7 @@ function describeHookTests({ env, getClient }) {
   });
 }
 
-describe('the command line', { skip: IMPL !== 'rust' && 'the Rust programs only' }, () => {
+describe('the command line', () => {
   test('serve with --help or an argument it does not know prints usage and starts nothing', async () => {
     const dir = await fsp.mkdtemp(path.join(tmp, 'cli-'));
     const env = { ...process.env, XENOLITH_HOME: path.join(dir, 'home'), XENOLITH_DIR: path.join(dir, 'wiki') };
