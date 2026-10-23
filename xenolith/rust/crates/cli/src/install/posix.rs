@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 
 pub const SERVER_LABEL: &str = "dev.xenolith.server";
 pub const CURATOR_LABEL: &str = "dev.xenolith.curator";
-/// The tray's login item, which the tray writes itself (`--do repair-autostart`).
+/// The tray's login item on macOS, which the tray writes itself (`--do repair-autostart`). Linux
+/// starts the tray from an autostart file instead.
+#[cfg(target_os = "macos")]
 pub const TRAY_LABEL: &str = "dev.xenolith.tray";
 /// The labels Xenolith used before it had its own, tray first: retiring the tray's before anything
 /// new is loaded means two trays never start.
