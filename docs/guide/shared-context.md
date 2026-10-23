@@ -30,22 +30,51 @@ page without a `title` takes its first top-level heading, and without one its
 file name. Its `type` is read in lowercase. Its `aliases` show in its panel, and
 the palette finds the page by them.
 
-XenoNet finds the folder the way Xenolith does: `XENOLITH_DIR`, even before
-Xenolith has made that folder, then `wikiDir` in Xenolith's `config.json`,
-then `~/Xenolith`. That `config.json` is in `XENOLITH_CONFIG_DIR` when it's
-set, else in `XENOLITH_HOME`, else in `~/Library/Application Support/Xenolith`
-on macOS, `%APPDATA%\Xenolith` on Windows and `~/.config/xenolith` on Linux.
-Until Xenolith's installer moves it there, the older `~/.xenolith/config.json`
-counts, unless `XENOLITH_HOME` or `XENOLITH_CONFIG_DIR` is set. Without
-Xenolith it looks for Agent Wiki, which Xenolith came from, the same way.
-`XENONET_WIKI_DIR` overrides both.
+## Finding and reading the folder
 
-The folder belongs to the server whose lookup found it, so a folder you
+XenoNet reads the folder by the format Xenolith documents in
+[`FORMAT.md`](../../xenolith/FORMAT.md), and finds it as that file says:
+`XENOLITH_DIR`, then `wikiDir` in Xenolith's `config.json`, then
+`~/Xenolith`. Xenolith makes the folder either of the first two names when
+it next starts, so XenoNet takes that folder even before it's there. The
+`config.json` is in `XENOLITH_CONFIG_DIR` when it's set, else in
+`XENOLITH_HOME`, else in the platform's place:
+
+- macOS: `$XDG_CONFIG_HOME/xenolith` when `XDG_CONFIG_HOME` is an absolute
+  path, else `~/Library/Application Support/Xenolith`
+- Linux and other Unix: `$XDG_CONFIG_HOME/xenolith` when `XDG_CONFIG_HOME`
+  is an absolute path, else `~/.config/xenolith`
+- Windows: `%APPDATA%\Xenolith`
+
+When neither `XENOLITH_HOME` nor `XENOLITH_CONFIG_DIR` is set and that
+`config.json` isn't there, an older install's `~/.xenolith/config.json`
+counts. Without Xenolith, XenoNet looks for Agent Wiki, which Xenolith came
+from, the same way, taking only a folder that's there. `XENONET_WIKI_DIR`
+overrides both.
+
+Xenolith writes a marker, `xenolith.json`, at the folder's root each time it
+starts. The marker names the MCP server that writes the folder and the
+version of the format the folder follows. When XenoNet starts, the shared
+context takes the server the marker names, so if you registered Xenolith
+under another name, sessions' calls to it still beam to the Xenolith node
+and the pages they name. Calls to `xenolith` and `agent-wiki` always count.
+
+A folder without a marker (Agent Wiki's, or one only an older Xenolith has
+opened) belongs to the server whose lookup found it, so a folder you
 moved keeps its server and the beams to it. For a folder `XENONET_WIKI_DIR`
 names, XenoNet checks whether Xenolith's lookup or Agent Wiki's names that
 folder. Only when neither does it read the folder's `PROTOCOL.md`, which you
 can edit: one that starts as Xenolith's shows as Xenolith, and any other as
-Agent Wiki.
+Agent Wiki. A marker XenoNet can't read, such as one that isn't JSON or has
+no `format`, counts as no marker.
+
+XenoNet reads version 1 of the format, and checks the marker each time it
+reads the folder. When the marker gives a later version, the folder may have
+changed in ways XenoNet would misread, so XenoNet doesn't guess at it. The
+Xenolith node stays on the map, but XenoNet shows none of its pages, log or
+inbox. The node's panel says why, and the status panel's list of sources
+shows the shared context as not read. A XenoNet that reads that version
+shows them again.
 
 XenoNet only reads the folder. Writing goes through Xenolith's own server,
 under its access rules, so XenoNet never changes your shared context. Like
