@@ -11,6 +11,8 @@ build/*
 /target/
 /crates/xenonet-node/*.node
 /crates/xenonet-mcp/target/
+# The tray app's SwiftPM build (scripts/tray-build.mjs).
+/tray/macos/.build/
 # The fuzzers' build, what they learn and what they find (fuzz/seeds is kept).
 /fuzz/target/
 /fuzz/corpus/
