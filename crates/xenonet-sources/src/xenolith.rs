@@ -92,8 +92,9 @@ struct Product {
     xdg: &'static str,
     folder: &'static str,
     legacy: &'static str,
-    /// It makes the folder `<ENV>_DIR` names when it starts, so XenoNet takes
-    /// that folder before it's there.
+    /// It makes the folder `<ENV>_DIR` or its config's wikiDir names when it
+    /// starts, so XenoNet takes that folder before it's there
+    /// (xenolith/FORMAT.md, "Finding the folder").
     makes_dir: bool,
 }
 
@@ -176,7 +177,7 @@ pub fn find_context_dir(env: &Env, home: &str, platform: &str) -> Option<(String
         if let Some(dir) = var(env, &format!("{}_DIR", p.env)).filter(|d| p.makes_dir || exists(d)) {
             return found(paths::resolve(dir), p.server);
         }
-        if let Some(dir) = named_in(&config_file(p, env, home, platform)).filter(|d| exists(d)) {
+        if let Some(dir) = named_in(&config_file(p, env, home, platform)).filter(|d| p.makes_dir || exists(d)) {
             return found(dir, p.server);
         }
         let fallback = paths::join(home, p.folder);
@@ -343,6 +344,9 @@ mod tests {
             Some(at(&cfg_wiki, "xenolith")),
             "the config folder wins"
         );
+        let not_yet = format!("{home}/not-yet-from-config");
+        config(&h.0.join(".config/xenolith"), &not_yet);
+        assert_eq!(find(&[]), Some(at(&not_yet, "xenolith")), "its config's wikiDir, before Xenolith made it");
     }
 
     #[test]

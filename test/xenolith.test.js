@@ -98,6 +98,12 @@ test("Xenolith's config is found where Xenolith's own programs look", () => {
   const newWiki = wikiAt(path.join(home, "new"));
   config(path.join(home, ".config", "xenolith"), newWiki);
   assert.deepEqual(find(), { dir: newWiki, server: "xenolith" });
+  // Its config's wikiDir counts before Xenolith has made that folder too,
+  // as XENOLITH_DIR does. (Agent Wiki's must be there.)
+  const notYet = path.join(home, "not-yet-from-config");
+  config(path.join(home, ".config", "xenolith"), notYet);
+  assert.deepEqual(find(), { dir: notYet, server: "xenolith" });
+  config(path.join(home, ".config", "xenolith"), newWiki);
 
   // XENOLITH_CONFIG_DIR wins over XENOLITH_HOME, as a folder of its own
   // does over portable mode.

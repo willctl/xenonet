@@ -94,8 +94,9 @@ function configFile(p, opts) {
   return file;
 }
 
-// `makesDir`: Xenolith makes the folder XENOLITH_DIR names when it starts,
-// so XenoNet takes that folder before it's there.
+// `makesDir`: Xenolith makes the folder XENOLITH_DIR or its config's
+// wikiDir names when it starts, so XenoNet takes that folder before it's
+// there (xenolith/FORMAT.md, "Finding the folder").
 const PRODUCTS = [
   { server: "xenolith", env: "XENOLITH", windows: "Xenolith", mac: "Xenolith", xdg: "xenolith", folder: "Xenolith", legacy: ".xenolith", makesDir: true },
   { server: "agent-wiki", env: "AGENT_WIKI", windows: "AgentWiki", mac: "Agent Wiki", xdg: "agent-wiki", folder: "AgentWiki", legacy: ".agent-wiki", makesDir: false },
@@ -126,7 +127,7 @@ export function findContextDir(options) {
     const fromEnv = o.env[`${p.env}_DIR`];
     if (fromEnv && (p.makesDir || fs.existsSync(fromEnv))) return found(path.resolve(fromEnv), p.server);
     const fromConfig = namedIn(configFile(p, o));
-    if (fromConfig && fs.existsSync(fromConfig)) return found(fromConfig, p.server);
+    if (fromConfig && (p.makesDir || fs.existsSync(fromConfig))) return found(fromConfig, p.server);
     const fallback = path.join(o.home, p.folder);
     if (fs.existsSync(fallback)) return found(fallback, p.server);
   }
