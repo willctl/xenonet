@@ -62,12 +62,14 @@ pub fn tray_apps(home: &str) -> Vec<String> {
     if home.is_empty() {
         return out;
     }
-    let mut homes = vec![std::path::PathBuf::from(home)];
+    // The tray is a macOS app, so these are macOS paths, joined with `/`
+    // whatever system the check runs on.
+    let mut homes = vec![home.to_string()];
     if let Ok(real) = std::fs::canonicalize(home) {
-        homes.push(real);
+        homes.push(real.to_string_lossy().into_owned());
     }
     for h in homes {
-        let apps = h.join("Applications").to_string_lossy().into_owned();
+        let apps = format!("{}/Applications", h.trim_end_matches('/'));
         if !out.contains(&apps) {
             out.push(apps);
         }
