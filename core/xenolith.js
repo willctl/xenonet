@@ -1,15 +1,17 @@
 // Xenolith (xenolith/ in this repo), XenoNet's shared context: where its
 // folder is, and which MCP server writes to it, so the map can show it as
 // its own constellation and beam a session's writes to the pages they
-// name. XenoNet only reads the folder; Xenolith's own server does the
-// writing. Agent Wiki, which Xenolith came from, is found the same way when
-// Xenolith isn't there.
+// name. XenoNet only reads the folder, by the format Xenolith documents
+// (xenolith/FORMAT.md); Xenolith's own server does the writing. Agent Wiki,
+// which Xenolith came from, is found the same way when Xenolith isn't
+// there.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 // The MCP servers whose calls write to the shared context, by the names
-// Xenolith and Agent Wiki install them under.
+// Xenolith and Agent Wiki install them under. A folder's marker can name
+// another (see readMarker), which the config then names (wikiServer).
 export const CONTEXT_SERVERS = new Set(["xenolith", "agent-wiki"]);
 export const isContextServer = (server) => CONTEXT_SERVERS.has(server);
 
@@ -17,6 +19,47 @@ export const isContextServer = (server) => CONTEXT_SERVERS.has(server);
 // context (wikiServer), a call to one of them goes to the shared context
 // whatever that server is called.
 export const CONTEXT_TOOLS = new Set(["context_start", "context_search", "context_read", "context_log", "context_upsert_page"]);
+
+// The version of Xenolith's folder format XenoNet reads, and the marker at
+// the folder's root that says which version a folder follows and which MCP
+// server writes it. Agent Wiki's folders, and Xenolith's from before the
+// marker, have none.
+export const CONTEXT_FORMAT = 1;
+export const MARKER_FILE = "xenolith.json";
+
+// A name an MCP server goes by in a session's tool names
+// (mcp__<server>__<tool>) and on the map (resource:<server>).
+const SERVER_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+// The marker is a line of JSON; anything much bigger isn't one.
+const MARKER_MAX = 64 * 1024;
+
+// What a folder's marker says: { format, server }. Null when there's no
+// marker, or one XenoNet can't take: not a file, not a JSON object, or
+// without a format that's a whole number from 1. Its server is null when
+// it isn't a server's name, and the folder's server is then found as if
+// it had no marker.
+export function readMarker(dir) {
+  if (!dir) return null;
+  try {
+    const file = path.join(dir, MARKER_FILE);
+    const st = fs.lstatSync(file);
+    if (!st.isFile() || st.size > MARKER_MAX) return null;
+    const v = JSON.parse(fs.readFileSync(file, "utf8").replace(/^﻿/, ""));
+    if (!v || typeof v !== "object" || Array.isArray(v) || !Number.isSafeInteger(v.format) || v.format < 1) return null;
+    return { format: v.format, server: typeof v.server === "string" && SERVER_NAME.test(v.server) ? v.server : null };
+  } catch {
+    return null;
+  }
+}
+
+// Why XenoNet can't read a folder whose marker this is, in a sentence for
+// the map, or null when it can. A folder in a later format than XenoNet
+// knows may have changed in ways it would misread, so XenoNet doesn't
+// guess at it.
+export function formatProblem(marker) {
+  if (!marker || marker.format <= CONTEXT_FORMAT) return null;
+  return `This folder follows version ${marker.format} of Xenolith's format, and this XenoNet reads version ${CONTEXT_FORMAT}, so it doesn't show its pages, log or inbox. Update XenoNet to see them.`;
+}
 
 // Whether an MCP call goes to the shared context: any call to a server of
 // a known name, or a call to one of Xenolith's tools under `named`.
@@ -51,8 +94,9 @@ function configFile(p, opts) {
   return file;
 }
 
-// `makesDir`: Xenolith makes the folder XENOLITH_DIR names when it starts,
-// so XenoNet takes that folder before it's there.
+// `makesDir`: Xenolith makes the folder XENOLITH_DIR or its config's
+// wikiDir names when it starts, so XenoNet takes that folder before it's
+// there (xenolith/FORMAT.md, "Finding the folder").
 const PRODUCTS = [
   { server: "xenolith", env: "XENOLITH", windows: "Xenolith", mac: "Xenolith", xdg: "xenolith", folder: "Xenolith", legacy: ".xenolith", makesDir: true },
   { server: "agent-wiki", env: "AGENT_WIKI", windows: "AgentWiki", mac: "Agent Wiki", xdg: "agent-wiki", folder: "AgentWiki", legacy: ".agent-wiki", makesDir: false },
@@ -73,17 +117,19 @@ const optsOf = ({ env = process.env, home = os.homedir(), platform = process.pla
 // The shared context's folder and the server that owns it: Xenolith's
 // (XENOLITH_DIR, its config.json's wikiDir, ~/Xenolith), else Agent Wiki's
 // the same way. Each product's old config in home (~/.xenolith,
-// ~/.agent-wiki) counts while its new one isn't there. Null when neither is
-// there.
+// ~/.agent-wiki) counts while its new one isn't there. The server is the
+// one the folder's marker names, else the one whose lookup found it. Null
+// when neither is there.
 export function findContextDir(options) {
   const o = optsOf(options);
+  const found = (dir, server) => ({ dir, server: readMarker(dir)?.server ?? server });
   for (const p of PRODUCTS) {
     const fromEnv = o.env[`${p.env}_DIR`];
-    if (fromEnv && (p.makesDir || fs.existsSync(fromEnv))) return { dir: path.resolve(fromEnv), server: p.server };
+    if (fromEnv && (p.makesDir || fs.existsSync(fromEnv))) return found(path.resolve(fromEnv), p.server);
     const fromConfig = namedIn(configFile(p, o));
-    if (fromConfig && fs.existsSync(fromConfig)) return { dir: fromConfig, server: p.server };
+    if (fromConfig && (p.makesDir || fs.existsSync(fromConfig))) return found(fromConfig, p.server);
     const fallback = path.join(o.home, p.folder);
-    if (fs.existsSync(fallback)) return { dir: fallback, server: p.server };
+    if (fs.existsSync(fallback)) return found(fallback, p.server);
   }
   return null;
 }
@@ -105,13 +151,16 @@ function sameDir(a, b) {
 }
 
 // Which server a wiki folder belongs to (one XENONET_WIKI_DIR names, say):
-// the product whose own lookup names that folder (its <ENV>_DIR, its
-// config's wikiDir or its folder in home), so a wiki that moved keeps its
-// server. Only for a folder neither names does the protocol it was seeded
-// with decide, since people edit it: Xenolith's starts "# Xenolith
-// protocol". Anything else is read as Agent Wiki's, as XenoNet always has.
+// the one its marker names. Without a marker, the product whose own lookup
+// names that folder (its <ENV>_DIR, its config's wikiDir or its folder in
+// home), so a wiki that moved keeps its server. Only for a folder neither
+// names does the protocol it was seeded with decide, since people edit it:
+// Xenolith's starts "# Xenolith protocol". Anything else is read as Agent
+// Wiki's, as XenoNet always has.
 export function contextServerOf(dir, options) {
   if (!dir) return null;
+  const marked = readMarker(dir)?.server;
+  if (marked) return marked;
   const o = optsOf(options);
   for (const p of PRODUCTS) {
     const named = [o.env[`${p.env}_DIR`], namedIn(configFile(p, o)), path.join(o.home, p.folder)];
@@ -124,7 +173,10 @@ export function contextServerOf(dir, options) {
   return "agent-wiki";
 }
 
-export const contextName = (server) => (server === "xenolith" ? "Xenolith" : "Agent Wiki");
+// The shared context's name on the map. Agent Wiki's server is Agent
+// Wiki's; any other is Xenolith's, under the name it installs itself as or
+// the one its folder's marker gives.
+export const contextName = (server) => (typeof server === "string" && server !== "" && server !== "agent-wiki" ? "Xenolith" : "Agent Wiki");
 
 // Xenolith's spaces (xenolith/rust/crates/core/src/spaces.rs): one wiki
 // each, for a project, an identity, an actor or a machine. The wiki's own

@@ -244,7 +244,8 @@ export class XenoNetState extends EventEmitter {
       ...this.nativeReaders.map((n) => readerStatus(n.source, n.reader, n.what)),
       ...(this.numbat ? [readerStatus("numbat", this.numbat, "numbat's file")] : []),
       { name: "live", ok: this.live.status.watching, count: this.live.status.files },
-      { name: "wiki", ok: !!wiki, count: wiki?.pages.length ?? 0, error: wiki ? undefined : "Xenolith folder not found" },
+      // A folder in a format XenoNet doesn't read is there, but not read.
+      { name: "wiki", ok: !!wiki && !wiki.problem, count: wiki?.pages.length ?? 0, error: wiki ? wiki.problem : "Xenolith folder not found" },
       { name: "search", ok: !this.search.status.errors, count: this.search.status.docs, ms: this.search.status.ms },
       ...(this.identities ? [identities.status] : []),
     ];

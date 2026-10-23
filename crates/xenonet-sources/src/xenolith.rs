@@ -1,6 +1,7 @@
 //! core/xenolith.js: where the shared context's folder is (Xenolith's,
 //! else Agent Wiki's), and which MCP server writes to it. XenoNet only
-//! reads the folder.
+//! reads the folder, by the format Xenolith documents
+//! (xenolith/FORMAT.md).
 
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -8,7 +9,8 @@ use std::path::Path;
 use xenonet_base::paths;
 
 /// The MCP servers whose calls write to the shared context, by the names
-/// Xenolith and Agent Wiki install them under.
+/// Xenolith and Agent Wiki install them under. A folder's marker can name
+/// another (see `read_marker`), which the config then names (wikiServer).
 pub const CONTEXT_SERVERS: [&str; 2] = ["xenolith", "agent-wiki"];
 
 pub fn is_context_server(server: &str) -> bool {
@@ -26,6 +28,59 @@ pub fn is_context_call(server: &str, tool: Option<&str>, named: Option<&str>) ->
     is_context_server(server) || (named.is_some_and(|n| !n.is_empty() && n == server) && tool.is_some_and(|t| CONTEXT_TOOLS.contains(&t)))
 }
 
+/// The version of Xenolith's folder format XenoNet reads.
+pub const CONTEXT_FORMAT: u64 = 1;
+/// The marker at the folder's root that says which version a folder
+/// follows and which MCP server writes it. Agent Wiki's folders, and
+/// Xenolith's from before the marker, have none.
+pub const MARKER_FILE: &str = "xenolith.json";
+// The marker is a line of JSON; anything much bigger isn't one.
+const MARKER_MAX: u64 = 64 * 1024;
+
+/// What a folder's marker says.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Marker {
+    pub format: u64,
+    /// None when it isn't a server's name: the folder's server is then
+    /// found as if it had no marker.
+    pub server: Option<String>,
+}
+
+// /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/: a name an MCP server goes by in a
+// session's tool names (mcp__<server>__<tool>) and on the map
+// (resource:<server>).
+fn server_name(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.first().is_some_and(u8::is_ascii_alphanumeric) && b.len() <= 64 && b.iter().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
+}
+
+/// What a folder's marker says. None when there's no marker, or one
+/// XenoNet can't take: not a file, not a JSON object, or without a format
+/// that's a whole number from 1 (Number.isSafeInteger in JS).
+pub fn read_marker(dir: &str) -> Option<Marker> {
+    let file = paths::join(dir, MARKER_FILE);
+    let meta = std::fs::symlink_metadata(&file).ok()?;
+    if !meta.is_file() || meta.len() > MARKER_MAX {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&std::fs::read(&file).ok()?).into_owned();
+    let v = xenonet_base::json::parse(text.strip_prefix('\u{feff}').unwrap_or(&text)).ok()?;
+    let m = v.as_object()?;
+    let format = m.get("format").and_then(Value::as_i64).filter(|n| (1..=9_007_199_254_740_991).contains(n))?;
+    let server = m.get("server").and_then(Value::as_str).filter(|s| server_name(s)).map(String::from);
+    Some(Marker { format: format.unsigned_abs(), server })
+}
+
+/// Why XenoNet can't read a folder whose marker gives this format, in a
+/// sentence for the map, or None when it can. A folder in a later format
+/// than XenoNet knows may have changed in ways it would misread, so
+/// XenoNet doesn't guess at it.
+pub fn format_problem(format: u64) -> Option<String> {
+    (format > CONTEXT_FORMAT).then(|| {
+        format!("This folder follows version {format} of Xenolith's format, and this XenoNet reads version {CONTEXT_FORMAT}, so it doesn't show its pages, log or inbox. Update XenoNet to see them.")
+    })
+}
+
 /// The environment, as a test or the process gives it.
 pub type Env = BTreeMap<String, String>;
 
@@ -37,8 +92,9 @@ struct Product {
     xdg: &'static str,
     folder: &'static str,
     legacy: &'static str,
-    /// It makes the folder `<ENV>_DIR` names when it starts, so XenoNet takes
-    /// that folder before it's there.
+    /// It makes the folder `<ENV>_DIR` or its config's wikiDir names when it
+    /// starts, so XenoNet takes that folder before it's there
+    /// (xenolith/FORMAT.md, "Finding the folder").
     makes_dir: bool,
 }
 
@@ -110,18 +166,23 @@ fn named_in(file: &str) -> Option<String> {
 /// The shared context's folder and the server that owns it: Xenolith's
 /// (XENOLITH_DIR, its config.json's wikiDir, ~/Xenolith), else Agent
 /// Wiki's the same way. Each product's old config in home (~/.xenolith,
-/// ~/.agent-wiki) counts while its new one isn't there.
-pub fn find_context_dir(env: &Env, home: &str, platform: &str) -> Option<(String, &'static str)> {
+/// ~/.agent-wiki) counts while its new one isn't there. The server is the
+/// one the folder's marker names, else the one whose lookup found it.
+pub fn find_context_dir(env: &Env, home: &str, platform: &str) -> Option<(String, String)> {
+    let found = |dir: String, server: &str| {
+        let server = read_marker(&dir).and_then(|m| m.server).unwrap_or_else(|| server.to_string());
+        Some((dir, server))
+    };
     for p in &PRODUCTS {
         if let Some(dir) = var(env, &format!("{}_DIR", p.env)).filter(|d| p.makes_dir || exists(d)) {
-            return Some((paths::resolve(dir), p.server));
+            return found(paths::resolve(dir), p.server);
         }
-        if let Some(dir) = named_in(&config_file(p, env, home, platform)).filter(|d| exists(d)) {
-            return Some((dir, p.server));
+        if let Some(dir) = named_in(&config_file(p, env, home, platform)).filter(|d| p.makes_dir || exists(d)) {
+            return found(dir, p.server);
         }
         let fallback = paths::join(home, p.folder);
         if exists(&fallback) {
-            return Some((fallback, p.server));
+            return found(fallback, p.server);
         }
     }
     None
@@ -137,13 +198,21 @@ fn same_dir(a: &str, b: &str) -> bool {
 }
 
 /// Which server a wiki folder belongs to (one XENONET_WIKI_DIR names,
-/// say): the product whose own lookup names that folder (its `<ENV>_DIR`,
-/// its config's wikiDir or its folder in home), so a wiki that moved keeps
-/// its server. Only for a folder neither names does the protocol it was
-/// seeded with decide, since people edit it: Xenolith's says "# Xenolith
-/// protocol" near its top. Anything else is Agent Wiki's, as XenoNet
-/// always read it.
-pub fn context_server_of(dir: &str, env: &Env, home: &str, platform: &str) -> &'static str {
+/// say): the one its marker names. Without a marker, the product whose
+/// own lookup names that folder (its `<ENV>_DIR`, its config's wikiDir or
+/// its folder in home), so a wiki that moved keeps its server. Only for a
+/// folder neither names does the protocol it was seeded with decide, since
+/// people edit it: Xenolith's says "# Xenolith protocol" near its top.
+/// Anything else is Agent Wiki's, as XenoNet always read it.
+pub fn context_server_of(dir: &str, env: &Env, home: &str, platform: &str) -> String {
+    if let Some(server) = read_marker(dir).and_then(|m| m.server) {
+        return server;
+    }
+    guessed_server_of(dir, env, home, platform).to_string()
+}
+
+// The server of a folder without a marker that names one.
+fn guessed_server_of(dir: &str, env: &Env, home: &str, platform: &str) -> &'static str {
     for p in &PRODUCTS {
         let named = [var(env, &format!("{}_DIR", p.env)).map(String::from), named_in(&config_file(p, env, home, platform)), Some(paths::join(home, p.folder))];
         if named.iter().flatten().any(|d| same_dir(d, dir)) {
@@ -164,11 +233,13 @@ pub fn context_server_of(dir: &str, env: &Env, home: &str, platform: &str) -> &'
     "agent-wiki"
 }
 
+/// The shared context's name on the map. Agent Wiki's server is Agent
+/// Wiki's; any other is Xenolith's, under the name it installs itself as
+/// or the one its folder's marker gives.
 pub fn context_name(server: Option<&str>) -> &'static str {
-    if server == Some("xenolith") {
-        "Xenolith"
-    } else {
-        "Agent Wiki"
+    match server {
+        Some(s) if !s.is_empty() && s != "agent-wiki" => "Xenolith",
+        _ => "Agent Wiki",
     }
 }
 
@@ -245,6 +316,9 @@ mod tests {
         fs::create_dir_all(dir).unwrap();
         fs::write(dir.join("config.json"), format!("{{\"wikiDir\":{}}}", serde_json::to_string(wiki).unwrap())).unwrap();
     }
+    fn at(dir: &str, server: &str) -> (String, String) {
+        (dir.to_string(), server.to_string())
+    }
 
     #[test]
     fn xenoliths_config_where_xenolith_looks() {
@@ -252,12 +326,12 @@ mod tests {
         let home = h.0.to_str().unwrap();
         let find = |e: &[(&str, &str)]| find_context_dir(&env(e), home, "linux");
         let later = format!("{home}/not-yet");
-        assert_eq!(find(&[("XENOLITH_DIR", &later)]), Some((later.clone(), "xenolith")), "before Xenolith made it");
+        assert_eq!(find(&[("XENOLITH_DIR", &later)]), Some(at(&later, "xenolith")), "before Xenolith made it");
         assert_eq!(find(&[("AGENT_WIKI_DIR", &later)]), None, "Agent Wiki's must be there");
         let legacy = format!("{home}/legacy");
         fs::create_dir_all(&legacy).unwrap();
         config(&h.0.join(".xenolith"), &legacy);
-        assert_eq!(find(&[]), Some((legacy.clone(), "xenolith")), "the old config in home");
+        assert_eq!(find(&[]), Some(at(&legacy, "xenolith")), "the old config in home");
         assert_eq!(find(&[("XENOLITH_CONFIG_DIR", "")]), None, "not with XENOLITH_CONFIG_DIR set");
         let cfg = h.0.join("cfg");
         let cfg_wiki = format!("{home}/cfg-wiki");
@@ -265,7 +339,14 @@ mod tests {
         config(&cfg, &cfg_wiki);
         let portable = h.0.join("portable");
         config(&portable, &legacy);
-        assert_eq!(find(&[("XENOLITH_HOME", portable.to_str().unwrap()), ("XENOLITH_CONFIG_DIR", cfg.to_str().unwrap())]), Some((cfg_wiki, "xenolith")), "the config folder wins");
+        assert_eq!(
+            find(&[("XENOLITH_HOME", portable.to_str().unwrap()), ("XENOLITH_CONFIG_DIR", cfg.to_str().unwrap())]),
+            Some(at(&cfg_wiki, "xenolith")),
+            "the config folder wins"
+        );
+        let not_yet = format!("{home}/not-yet-from-config");
+        config(&h.0.join(".config/xenolith"), &not_yet);
+        assert_eq!(find(&[]), Some(at(&not_yet, "xenolith")), "its config's wikiDir, before Xenolith made it");
     }
 
     #[test]
@@ -287,6 +368,73 @@ mod tests {
         let link = h.0.join("link");
         std::os::unix::fs::symlink(moved, &link).unwrap();
         assert_eq!(of(link.to_str().unwrap(), &[]), "xenolith", "a link to it");
+    }
+
+    #[test]
+    fn the_marker_names_the_folders_server_and_format() {
+        let h = home("marker");
+        let home = h.0.to_str().unwrap();
+        let wiki = h.0.join("Xenolith");
+        fs::create_dir_all(&wiki).unwrap();
+        let dir = wiki.to_str().unwrap();
+        let mark = |text: &str| fs::write(wiki.join(MARKER_FILE), text).unwrap();
+        let find = || find_context_dir(&env(&[]), home, "linux");
+        let of = |d: &str| context_server_of(d, &env(&[]), home, "linux");
+        assert_eq!((read_marker(dir), find()), (None, Some(at(dir, "xenolith"))), "no marker: the lookup's");
+
+        mark("\u{feff}{\n  \"format\": 1,\n  \"server\": \"ctx\"\n}\n");
+        assert_eq!(read_marker(dir), Some(Marker { format: 1, server: Some("ctx".into()) }));
+        assert_eq!((find(), of(dir)), (Some(at(dir, "ctx")), "ctx".to_string()), "the marker's, before the lookup's");
+        assert_eq!(context_name(Some("ctx")), "Xenolith");
+
+        // A folder no lookup names, its protocol Agent Wiki's: the marker
+        // decides, and without one the protocol does.
+        let aside = h.0.join("aside");
+        fs::create_dir_all(&aside).unwrap();
+        fs::write(aside.join("PROTOCOL.md"), "# Agent Wiki protocol\n").unwrap();
+        let aside_dir = aside.to_str().unwrap();
+        assert_eq!(of(aside_dir), "agent-wiki");
+        fs::write(aside.join(MARKER_FILE), "{\"format\":1,\"server\":\"xenolith\"}").unwrap();
+        assert_eq!(of(aside_dir), "xenolith");
+
+        // A server that isn't a name: the lookup's. The format still counts.
+        mark("{\"format\":2,\"server\":\"my context\"}");
+        assert_eq!(read_marker(dir), Some(Marker { format: 2, server: None }));
+        assert_eq!(find(), Some(at(dir, "xenolith")));
+
+        // Markers XenoNet can't take: as if there were none.
+        for bad in [
+            "{",
+            "[]",
+            "null",
+            "{\"server\":\"ctx\"}",
+            "{\"format\":\"1\",\"server\":\"ctx\"}",
+            "{\"format\":0,\"server\":\"ctx\"}",
+            "{\"format\":1.5,\"server\":\"ctx\"}",
+            "{\"format\":9007199254740992,\"server\":\"ctx\"}",
+        ] {
+            mark(bad);
+            assert_eq!((read_marker(dir), of(dir)), (None, "xenolith".to_string()), "{bad}");
+        }
+        fs::remove_file(wiki.join(MARKER_FILE)).unwrap();
+        fs::create_dir(wiki.join(MARKER_FILE)).unwrap();
+        assert_eq!(read_marker(dir), None, "a folder");
+        fs::remove_dir(wiki.join(MARKER_FILE)).unwrap();
+        let elsewhere = h.0.join("elsewhere.json");
+        fs::write(&elsewhere, "{\"format\":1,\"server\":\"ctx\"}").unwrap();
+        std::os::unix::fs::symlink(&elsewhere, wiki.join(MARKER_FILE)).unwrap();
+        assert_eq!(read_marker(dir), None, "a link");
+    }
+
+    #[test]
+    fn a_later_format_is_not_read() {
+        assert_eq!(format_problem(CONTEXT_FORMAT), None);
+        let problem = format_problem(2).unwrap();
+        assert!(problem.contains("version 2") && problem.contains("reads version 1"), "{problem}");
+        assert_eq!(
+            [context_name(Some("xenolith")), context_name(Some("agent-wiki")), context_name(Some("")), context_name(None)],
+            ["Xenolith", "Agent Wiki", "Agent Wiki", "Agent Wiki"]
+        );
     }
 
     #[test]

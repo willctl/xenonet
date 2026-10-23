@@ -377,7 +377,8 @@ pub fn tool_key(name: &str, input: Option<&Value>) -> String {
 /// project:atlas) names that space's pages, as `<space>/<slug>`, the end of
 /// their ids on the map; one to a space Xenolith refuses wrote nothing.
 /// `tool` is the call's tool and `named` the server the config names for
-/// the shared context (wikiServer), for a server known by that name only.
+/// the shared context (wikiServer, the one the folder's marker names when
+/// it has one), for a server known by that name only.
 pub fn wiki_pages_of(server: Option<&str>, tool: Option<&str>, named: Option<&str>, input: Option<&Value>) -> Option<Vec<String>> {
     use crate::xenolith::{space_of, Space};
     if !server.is_some_and(|s| crate::xenolith::is_context_call(s, tool, named)) {
@@ -434,6 +435,22 @@ mod tests {
         assert_eq!(of("mcp__ctx__context_log", Some("xenolith")), None);
         assert_eq!(of("mcp__xenolith__write_page", Some("ctx")), refunds, "the known names, whatever the tool");
         assert_eq!(of("mcp__agent-wiki__wiki_log", None), refunds);
+    }
+
+    #[test]
+    fn the_server_a_folders_marker_names_gets_its_writes() {
+        let dir = std::env::temp_dir().join(format!("xenonet-live-marker-rs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(crate::xenolith::MARKER_FILE), "{\"format\":1,\"server\":\"team-ctx\"}").unwrap();
+        let named = crate::xenolith::context_server_of(dir.to_str().unwrap(), &crate::xenolith::Env::new(), "/nowhere", "linux");
+        std::fs::remove_dir_all(&dir).unwrap();
+        let pages = json!({ "pages": ["refunds"] });
+        let of = |name: &str| wiki_pages_of(mcp_server_of(name).as_deref(), mcp_tool_of(name), Some(&named), Some(&pages));
+        let refunds = Some(vec!["refunds".to_string()]);
+        assert_eq!(of("mcp__team-ctx__context_log"), refunds);
+        assert_eq!(of("mcp__xenolith__context_log"), refunds, "the known names still count");
+        assert_eq!(of("mcp__other__context_log"), None);
     }
 
     #[test]

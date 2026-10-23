@@ -112,14 +112,42 @@ pub fn context_is_call(server: MaybeJson, tool: MaybeJson, named: MaybeJson) -> 
 #[napi(js_name = "findContextDir")]
 pub fn find_context_dir(env: Json, home: String, platform: String) -> Jv {
     match xenolith::find_context_dir(&xenolith::env_of(&env.0), &home, &platform) {
-        Some((dir, server)) => Jv::Obj(vec![("dir", Jv::Json(Value::String(dir))), ("server", Jv::Json(Value::String(server.into())))]),
+        Some((dir, server)) => Jv::Obj(vec![("dir", Jv::Json(Value::String(dir))), ("server", Jv::Json(Value::String(server)))]),
         None => Jv::Json(Value::Null),
     }
 }
 
 #[napi(js_name = "contextServerOf")]
-pub fn context_server_of(dir: String, env: Json, home: String, platform: String) -> &'static str {
+pub fn context_server_of(dir: String, env: Json, home: String, platform: String) -> String {
     xenolith::context_server_of(&dir, &xenolith::env_of(&env.0), &home, &platform)
+}
+
+#[napi(js_name = "contextFormat")]
+pub fn context_format() -> u32 {
+    u32::try_from(xenolith::CONTEXT_FORMAT).unwrap_or(u32::MAX)
+}
+
+#[napi(js_name = "contextMarkerFile")]
+pub fn context_marker_file() -> &'static str {
+    xenolith::MARKER_FILE
+}
+
+/// { format, server } from a folder's marker, or null.
+#[napi(js_name = "contextReadMarker")]
+pub fn context_read_marker(dir: String) -> Json {
+    Json(match xenolith::read_marker(&dir) {
+        Some(m) => serde_json::json!({ "format": m.format, "server": m.server }),
+        None => Value::Null,
+    })
+}
+
+/// Why XenoNet can't read a folder in this format, or null.
+#[napi(js_name = "contextFormatProblem")]
+pub fn context_format_problem(format: f64) -> Option<String> {
+    // A whole number from 1, as a marker's format is; anything else isn't
+    // a later one.
+    let format = (format.fract() == 0.0 && (1.0..=9_007_199_254_740_991.0).contains(&format)).then_some(format as u64)?;
+    xenolith::format_problem(format)
 }
 
 #[napi(js_name = "contextName")]

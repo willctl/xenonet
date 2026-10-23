@@ -442,8 +442,9 @@ export class LiveTelemetry extends EventEmitter {
   constructor({ claudeRoot, codexRoot, grokRoot = null, claudeDesktopDir, claudeUsage = null, home = null, contextServer = null }) {
     super();
     this.home = home;
-    // The MCP server the config names for the shared context (wikiServer):
-    // Xenolith's tools under it write there, whatever it's called.
+    // The MCP server the config names for the shared context (wikiServer,
+    // the one the folder's marker names when it has one): Xenolith's tools
+    // under it write there, whatever it's called.
     this.contextServer = contextServer;
     // Watch canonical long paths: on Windows, libuv aborts the process when a
     // recursive watch root is an 8.3 short name (C:\Users\ABCDEF~1\...).

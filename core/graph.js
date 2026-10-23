@@ -130,7 +130,9 @@ export function buildGraph({ projectsDir, homeDir = null, projects, sessions, na
   if (wiki) {
     const server = wiki.server ?? "agent-wiki";
     const root = `resource:${server}`;
-    nodes.set(root, { id: root, kind: "wiki", name: contextName(server), server, path: wiki.dir, pageCount: wiki.pages.length, inbox: wiki.inbox, lastActivity: wiki.log[wiki.log.length - 1]?.ts ?? null });
+    // Its problem only when it has one (a format XenoNet doesn't read), so
+    // a folder it reads stays as it was.
+    nodes.set(root, { id: root, kind: "wiki", name: contextName(server), server, path: wiki.dir, pageCount: wiki.pages.length, inbox: wiki.inbox, lastActivity: wiki.log[wiki.log.length - 1]?.ts ?? null, ...(typeof wiki.problem === "string" ? { problem: wiki.problem } : {}) });
     link("core", root, "wiki");
     // A page of another space than this machine's (Xenolith's spaces) is
     // wiki:<space>/<slug>, and its [[links]] are to pages of its own space.

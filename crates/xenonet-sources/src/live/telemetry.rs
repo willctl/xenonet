@@ -839,8 +839,8 @@ pub struct Where {
 pub struct Telemetry {
     pub home: Option<String>,
     /// The MCP server the config names for the shared context
-    /// (wikiServer): Xenolith's tools under it write there, whatever it's
-    /// called.
+    /// (wikiServer, the one the folder's marker names when it has one):
+    /// Xenolith's tools under it write there, whatever it's called.
     pub context_server: Option<String>,
     roots: Vec<(String, String)>,
     sessions: Vec<Session>,

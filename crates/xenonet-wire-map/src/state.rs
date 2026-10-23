@@ -519,9 +519,13 @@ impl MapState {
         let mut sources = vec![projects_st, codex_st, native_st, claude_st, grok_st];
         sources.extend(self.observed.iter().map(|o| o.status()));
         sources.push(json!({ "name": "live", "ok": live.watching, "count": live.files }));
-        let mut wiki_st = json!({ "name": "wiki", "ok": wiki.is_some(), "count": wiki.as_ref().map_or(0, |w| items(w.get("pages")).len()) });
+        // A folder in a format XenoNet doesn't read is there, but not read.
+        let problem = wiki.as_ref().and_then(|w| w.get("problem")).filter(|p| p.is_string());
+        let mut wiki_st = json!({ "name": "wiki", "ok": wiki.is_some() && problem.is_none(), "count": wiki.as_ref().map_or(0, |w| items(w.get("pages")).len()) });
         if wiki.is_none() {
             wiki_st["error"] = json!("Xenolith folder not found");
+        } else if let Some(p) = problem {
+            wiki_st["error"] = p.clone();
         }
         sources.push(wiki_st);
         sources.push(json!({ "name": "search", "ok": !truthy(search.get("errors")), "count": search.get("docs").cloned().unwrap_or(Value::Null), "ms": search.get("ms").cloned().unwrap_or(Value::Null) }));
