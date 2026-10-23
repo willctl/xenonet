@@ -12,9 +12,10 @@
 //! - `POST frames`: the up batch; each frame's signature is checked
 //!   against the roster before it's queued, a frame id seen in the last
 //!   week is accepted again without being queued again, and each link may
-//!   send 600 frames and 60 messages a minute. The map's relay frames go
-//!   in batches of their own (`?relay=1`), 120 a minute in a bucket of
-//!   their own, and aren't kept for a host that's away.
+//!   send 600 frames and 60 messages a minute. The map's relay frames and
+//!   services' svc frames go in batches of their own (`?relay=1`), each
+//!   kind in a bucket of its own (120 relay and 600 svc frames a minute),
+//!   and aren't kept for a host that's away.
 //! - `GET roster?from=n`, and `POST roster`, an entry from a host, which
 //!   the roster's own rules decide.
 //!
@@ -53,6 +54,9 @@ const FRAMES_A_MINUTE: f64 = 600.0;
 const MESSAGES_A_MINUTE: f64 = 60.0;
 /// The map's relay frames a link sends, in a bucket of their own.
 const RELAY_A_MINUTE: f64 = 120.0;
+/// Services' requests and answers a link sends, in a bucket of their own:
+/// a host lets each caller make 300 requests a minute to each service.
+const SVC_A_MINUTE: f64 = 600.0;
 /// A relay frame on the wire, at most: a body of `node::RELAY_BODY`, sealed
 /// and in base64url, with its head.
 pub const RELAY_FRAME_LIMIT: usize = 12 << 20;
@@ -158,18 +162,18 @@ struct Live {
 const STREAMS_PER_HOST: usize = 2;
 
 #[derive(Clone, Copy)]
-struct Bucket {
+pub(crate) struct Bucket {
     tokens: f64,
     at: f64,
 }
 
 impl Bucket {
-    fn full(burst: f64, now: f64) -> Bucket {
+    pub(crate) fn full(burst: f64, now: f64) -> Bucket {
         Bucket { tokens: burst, at: now }
     }
 
     /// Takes one, or says how long until there's one.
-    fn take(&mut self, per_minute: f64, now: f64) -> Result<(), f64> {
+    pub(crate) fn take(&mut self, per_minute: f64, now: f64) -> Result<(), f64> {
         let rate = per_minute / 60e3;
         self.tokens = (self.tokens + (now - self.at) * rate).min(per_minute);
         self.at = now;
@@ -183,16 +187,22 @@ impl Bucket {
 }
 
 /// A link's rates: its frames, its messages among them, and the map's relay
-/// frames apart.
+/// frames and services' svc frames apart.
 struct Rates {
     frames: Bucket,
     messages: Bucket,
     relay: Bucket,
+    svc: Bucket,
 }
 
 impl Rates {
     fn full(now: f64) -> Rates {
-        Rates { frames: Bucket::full(FRAMES_A_MINUTE, now), messages: Bucket::full(MESSAGES_A_MINUTE, now), relay: Bucket::full(RELAY_A_MINUTE, now) }
+        Rates {
+            frames: Bucket::full(FRAMES_A_MINUTE, now),
+            messages: Bucket::full(MESSAGES_A_MINUTE, now),
+            relay: Bucket::full(RELAY_A_MINUTE, now),
+            svc: Bucket::full(SVC_A_MINUTE, now),
+        }
     }
 }
 
@@ -642,17 +652,18 @@ impl Gateway {
                 refuse("bad-kind", "hosts send sealed frames of their own kinds");
                 continue;
             }
-            if (f.kind == "relay") != relay_ok {
-                refuse("bad-kind", "relay frames go in a relay batch of their own");
+            if f.in_relay_batch() != relay_ok {
+                refuse("bad-kind", "relay and svc frames go in a relay batch of their own, and only they do");
                 continue;
             }
-            // A frame but a relay one is small: presence, a message, a claim.
+            // A frame but a relay or svc one is small: presence, a message,
+            // a claim.
             if !relay_ok && v.to_string().len() > SMALL_LIMIT {
-                refuse("too-big", "a frame is at most 64 KiB, but a relay frame");
+                refuse("too-big", "a frame is at most 64 KiB, but a relay or svc frame");
                 continue;
             }
             if relay_ok && v.to_string().len() > RELAY_FRAME_LIMIT {
-                refuse("too-big", "a relay frame is at most 12 MiB");
+                refuse("too-big", "a relay or svc frame is at most 12 MiB");
                 continue;
             }
             if f.to == host || view.member(&f.to).is_none() {
@@ -675,7 +686,9 @@ impl Gateway {
                 // watching a busy host can't spend what the engine sends.
                 let mut rates = self.rates.locked();
                 let r = rates.entry(host.clone()).or_insert_with(|| Rates::full(now));
-                let over = if relay_ok {
+                let over = if f.kind == "svc" {
+                    r.svc.take(SVC_A_MINUTE, now).err()
+                } else if relay_ok {
                     r.relay.take(RELAY_A_MINUTE, now).err()
                 } else {
                     let mut over = r.frames.take(FRAMES_A_MINUTE, now).err();
@@ -686,7 +699,12 @@ impl Gateway {
                 };
                 if let Some(wait) = over {
                     retry_ms = retry_ms.max(wait);
-                    refuse("rate", if relay_ok { "a link sends at most 120 relay frames a minute" } else { "a link sends at most 600 frames and 60 messages a minute" });
+                    let why = match f.kind.as_str() {
+                        "svc" => "a link sends at most 600 svc frames a minute",
+                        "relay" => "a link sends at most 120 relay frames a minute",
+                        _ => "a link sends at most 600 frames and 60 messages a minute",
+                    };
+                    refuse("rate", why);
                     continue;
                 }
             }

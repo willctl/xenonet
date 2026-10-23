@@ -22,7 +22,7 @@ const B64 = z.string().regex(B64URL).describe("base64url, no padding");
 const Mid = z.string().regex(/^msg_[0-9a-f-]{36}$/).describe("The message's id across the network (its envelope's mid)");
 const Strength = z.enum(["strong", "weak"]).describe("strong: checked by the window key, or by process checks on macOS; weak: claimed, not checked");
 
-export const FRAME_KINDS = ["hello", "ping", "gap", "roster", "removed", "presence", "claims", "message", "receipt", "handoff", "relay", "operator"];
+export const FRAME_KINDS = ["hello", "ping", "gap", "roster", "removed", "presence", "claims", "message", "receipt", "handoff", "relay", "operator", "svc"];
 // Frames the gateway keeps for a host that's away; the rest are dropped for
 // it, since a full set goes when it's back.
 export const QUEUED_KINDS = ["message", "receipt", "handoff", "operator", "roster"];
@@ -203,6 +203,43 @@ export const NetworkRelay = define(
     }),
   ]),
   { title: "The map between hosts", description: "A console's subscription to another host's map, and that host's answers: the SSH relay's frames, sealed between the two hosts." },
+);
+
+// Services through the network (docs/design/network.md, "Services through
+// the network"): a program on one host calls /api/svc/<host>/<name>/<path>
+// on its own XenoNet, which sends the request to <host> in a svc frame;
+// that host checks it, passes it to the service it published, and sends
+// the answer back the same way. Live only: never kept for a host that's
+// away, since a request may carry the service's own credential.
+export const SVC_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
+const SvcId = z.string().regex(/^svq_[0-9a-f]{32}$/).describe("The request, made at random by the calling host; its answer names it");
+const Headers = z.array(z.tuple([z.string().min(1).max(64), z.string().max(8192)])).max(64);
+
+export const NetworkSvc = define(
+  "network/svc",
+  1,
+  z.union([
+    obj({
+      schema: z.literal("network/svc/v1"),
+      op: z.literal("request").describe("From the calling host"),
+      id: SvcId,
+      name: z.string().regex(HOST_ID).describe("The service, as its host published it"),
+      method: z.string().regex(/^[A-Z]{1,16}$/).describe(`A host passes on ${SVC_METHODS.join(", ")}`),
+      path: z.string().max(4096).describe("The path after /api/svc/<host>/<name>, with its query: the publishing host normalizes it and checks it against the paths it publishes"),
+      headers: Headers.describe("Only the caller's Authorization, Content-Type, Accept and User-Agent cross; the publishing host adds Host and Forwarded itself"),
+      body: B64.describe("The request's body, at most 1 MiB"),
+    }),
+    obj({
+      schema: z.literal("network/svc/v1"),
+      op: z.literal("answer").describe("From the publishing host"),
+      id: SvcId,
+      status: z.int().min(200).max(599),
+      headers: Headers.describe("The service's answer's headers, without Set-Cookie and hop-by-hop headers"),
+      body: B64.describe("The answer's body, at most 4 MiB"),
+      code: z.string().regex(/^[a-z-]{1,32}$/).optional().describe("Set when XenoNet answered rather than the service: not-published, not-allowed, rate, path-refused, too-big, timeout…"),
+    }),
+  ]),
+  { title: "A service between hosts", description: "A request to a service another host published to the network, and its answer, sealed between the two hosts." },
 );
 
 export const ROSTER_OPS = ["found", "add", "remove", "window", "gateway"];

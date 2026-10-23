@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/network/svc/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A service between hosts",
+  "description": "A request to a service another host published to the network, and its answer, sealed between the two hosts.",
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "network/svc/v1"
+        },
+        "op": {
+          "type": "string",
+          "const": "request",
+          "description": "From the calling host"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^svq_[0-9a-f]{32}$",
+          "description": "The request, made at random by the calling host; its answer names it"
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,31}$",
+          "description": "The service, as its host published it"
+        },
+        "method": {
+          "type": "string",
+          "pattern": "^[A-Z]{1,16}$",
+          "description": "A host passes on GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS"
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 4096,
+          "description": "The path after /api/svc/<host>/<name>, with its query: the publishing host normalizes it and checks it against the paths it publishes"
+        },
+        "headers": {
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              {
+                "type": "string",
+                "maxLength": 8192
+              }
+            ],
+            "items": false,
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "description": "Only the caller's Authorization, Content-Type, Accept and User-Agent cross; the publishing host adds Host and Forwarded itself"
+        },
+        "body": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]*$",
+          "description": "The request's body, at most 1 MiB"
+        }
+      },
+      "required": [
+        "schema",
+        "op",
+        "id",
+        "name",
+        "method",
+        "path",
+        "headers",
+        "body"
+      ],
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "network/svc/v1"
+        },
+        "op": {
+          "type": "string",
+          "const": "answer",
+          "description": "From the publishing host"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^svq_[0-9a-f]{32}$",
+          "description": "The request, made at random by the calling host; its answer names it"
+        },
+        "status": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 599
+        },
+        "headers": {
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              {
+                "type": "string",
+                "maxLength": 8192
+              }
+            ],
+            "items": false,
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "description": "The service's answer's headers, without Set-Cookie and hop-by-hop headers"
+        },
+        "body": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]*$",
+          "description": "The answer's body, at most 4 MiB"
+        },
+        "code": {
+          "description": "Set when XenoNet answered rather than the service: not-published, not-allowed, rate, path-refused, too-big, timeout…",
+          "type": "string",
+          "pattern": "^[a-z-]{1,32}$"
+        }
+      },
+      "required": [
+        "schema",
+        "op",
+        "id",
+        "status",
+        "headers",
+        "body"
+      ],
+      "additionalProperties": {}
+    }
+  ]
+}

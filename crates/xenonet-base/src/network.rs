@@ -7,7 +7,9 @@
 //!
 //! The map's relay bodies (section 7) cross the same seam but never reach
 //! the engine: they go to a `RelaySink`, the service's relay for a console
-//! on another host, and the hub that draws other hosts' maps here.
+//! on another host, and the hub that draws other hosts' maps here. Nor do
+//! services' requests and answers (`svc`), which xenonet-net forwards to
+//! and from a host's published services itself.
 //!
 //! When the service isn't in a network nothing is behind the seam, so
 //! every local path, and the JS twins, are unchanged.
@@ -25,10 +27,13 @@ pub enum Kind {
     Operator,
     /// The map, between a console and the host it shows: never the engine's.
     Relay,
+    /// A request to a service another host published, or its answer:
+    /// never the engine's either.
+    Svc,
 }
 
 impl Kind {
-    pub const ALL: [Self; 7] = [Self::Presence, Self::Claims, Self::Message, Self::Receipt, Self::Handoff, Self::Operator, Self::Relay];
+    pub const ALL: [Self; 8] = [Self::Presence, Self::Claims, Self::Message, Self::Receipt, Self::Handoff, Self::Operator, Self::Relay, Self::Svc];
 
     /// The frame kind on the wire, and the schema's folder.
     pub fn as_str(self) -> &'static str {
@@ -40,6 +45,7 @@ impl Kind {
             Self::Handoff => "handoff",
             Self::Operator => "operator",
             Self::Relay => "relay",
+            Self::Svc => "svc",
         }
     }
 
@@ -49,9 +55,11 @@ impl Kind {
 
     /// Whether the gateway keeps it for a host that's away. Presence and
     /// claims aren't kept: a full set goes when the host is back. Nor is
-    /// the map: a console asks for a fresh snapshot.
+    /// the map: a console asks for a fresh snapshot. Nor is a service's
+    /// request, which may carry the service's own credential and is
+    /// answered now or not at all.
     pub fn queued(self) -> bool {
-        !matches!(self, Self::Presence | Self::Claims | Self::Relay)
+        !matches!(self, Self::Presence | Self::Claims | Self::Relay | Self::Svc)
     }
 }
 
@@ -203,6 +211,7 @@ mod tests {
         assert_eq!(Kind::parse("hello"), None);
         assert!(!Kind::Presence.queued());
         assert!(!Kind::Relay.queued(), "the map isn't kept for a host that's away");
+        assert!(!Kind::Svc.queued(), "nor is a service's request, which may carry its credential");
         assert!(!Kind::Claims.queued());
         assert!(Kind::Message.queued());
         assert!(Kind::Receipt.queued());
