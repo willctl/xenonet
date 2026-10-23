@@ -401,10 +401,14 @@ async fn up(n: Arc<Shared>, t: Transport) {
                     }
                 }
                 Ok(reply) => match refusal(&n, &reply, &nonce) {
-                    Refusal::Clock(now) => n.learn_offset(now),
+                    Refusal::Clock(now) => {
+                        n.learn_offset(now);
+                        n.batch_failed(&batch, "", true);
+                    }
                     Refusal::Removed => return,
                     Refusal::Other(why) => {
                         n.log("net.up", &format!("the gateway refused a batch: {why}"));
+                        n.batch_failed(&batch, &why, false);
                         tokio::time::sleep(backoff(attempt, n.timing().backoff_min_ms, n.timing().backoff_max_ms)).await;
                         attempt += 1;
                         break;
@@ -412,6 +416,7 @@ async fn up(n: Arc<Shared>, t: Transport) {
                 },
                 Err(why) => {
                     n.log("net.up", &format!("a batch didn't reach the gateway: {why}"));
+                    n.batch_failed(&batch, &why, false);
                     tokio::time::sleep(backoff(attempt, n.timing().backoff_min_ms, n.timing().backoff_max_ms)).await;
                     attempt += 1;
                     break;

@@ -1,7 +1,8 @@
 //! A host's network files in `<state>/network/` (docs/design/network.md,
 //! "The wire"): `network.json` (the network, this host's id, and the
-//! gateway's address and pinned key), `roster.json` (the chain), and
-//! `link.json`, how the link last stood, which the doctor reads.
+//! gateway's address and pinned key), `roster.json` (the chain),
+//! `link.json`, how the link last stood, which the doctor reads, and
+//! `services.json`, the services this host published to the network.
 
 use crate::roster::Roster;
 use crate::{NetError, R};
@@ -14,6 +15,7 @@ pub const LINK: &str = "link.json";
 pub const KEY: &str = "host.key";
 pub const HOST_DB: &str = "net.sqlite";
 pub const GATEWAY_DB: &str = "gateway.sqlite";
+pub const SERVICES: &str = "services.json";
 
 /// The gateway as this host pinned it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,7 +175,7 @@ impl Dir {
 
     /// Forgets the network: every file here goes, the key with it.
     pub fn forget(&self) -> R<()> {
-        for name in [NETWORK, ROSTER, LINK, KEY, HOST_DB, GATEWAY_DB] {
+        for name in [NETWORK, ROSTER, LINK, KEY, HOST_DB, GATEWAY_DB, SERVICES] {
             for f in [name.to_string(), format!("{name}-wal"), format!("{name}-shm")] {
                 match std::fs::remove_file(self.file(&f)) {
                     Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
