@@ -143,6 +143,8 @@ for (const mode of ['stdio', 'http']) {
       assert.equal(fs.readFileSync(path.join(wikiDir, '.gitattributes'), 'utf8'), '* text=auto eol=lf\n');
       assert.match(fs.readFileSync(path.join(wikiDir, '.gitignore'), 'utf8'), /^\.locks\/$/m);
       assert.match(fs.readFileSync(path.join(wikiDir, 'index.md'), 'utf8'), /GENERATED.*Do not edit/);
+      // FORMAT.md's marker: whose folder this is, and the version of its format.
+      assert.deepEqual(JSON.parse(fs.readFileSync(path.join(wikiDir, 'xenolith.json'), 'utf8')), { format: 1, server: 'xenolith' });
     });
 
     test('context_start works on an empty wiki', async () => {

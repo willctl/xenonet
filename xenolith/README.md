@@ -873,6 +873,7 @@ rust/crates/cli/       xenolith: serve (MCP over stdio and HTTP, /health, /statu
 rust/crates/tray/      xenolith-tray: the tray or menu bar icon, its menu, and the window
 protocol/PROTOCOL.md   rules every session follows (seeded into a new wiki; you own the wiki copy)
 protocol/POINTER.md    short global-instruction block
+FORMAT.md              the folder's format (version 1), for programs that read it
 ui/                    the Xenolith window (React): index.html, src/main.jsx, app.css, markdown.js, api.js
 assets/icon/           icon sources (SVG)
 plugin/                plugin source; __PLACEHOLDERS__ are filled at install time

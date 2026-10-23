@@ -14,7 +14,8 @@ applies too: its commit conventions, and its rules for working beside other agen
   (`xenolith-tray`).
 - `ui/`: the window (React), built by `npm run build` into `dist/runtime/ui`.
 - `test/*.mjs`: the behaviour suites, run against the Rust programs. `eval/` and `scripts/eval.mjs`:
-  the memory eval. `protocol/PROTOCOL.md`: what every connected app is told to do.
+  the memory eval. `protocol/PROTOCOL.md`: what every connected app is told to do. `FORMAT.md`:
+  the folder's format, for programs that read it (XenoNet among them).
 - `scripts/`: the window's build, the icons, the release payload (`package.mjs`), `install-local`,
   `ui:preview`, the eval and the bench. `scripts/lib.mjs` and `scripts/paths.mjs` hold what the
   scripts and tests need of an installed Xenolith.
@@ -47,6 +48,7 @@ applies too: its commit conventions, and its rules for working beside other agen
 | Lint every OS target before pushing Rust code | `scripts/check-rust.sh` (local) |
 | `package.json` and `rust/Cargo.toml` carry the same version | `scripts/build.mjs` fails |
 | A change to `protocol/PROTOCOL.md` records the old version's hash | `wiki::tests::an_edited_protocol_keeps_the_old_hash_for_upgrades` |
+| A change to a file `FORMAT.md` describes updates it, and raises `wiki::FORMAT_VERSION` when an older reader would misread the file | `wiki::tests::the_root_says_whose_it_is_and_its_format_and_a_space_does_not` (the marker); judgment |
 | Regexes match ASCII digits (`[0-9]`, never `\d`) | `wiki::tests::no_regex_in_the_crates_uses_unicode_digit_classes` |
 | Tools are defined once; the `source` enum is `inbox::SOURCES` | `mcp::tool_tests::one_tool_list_with_the_direct_texts_and_the_core_sources` |
 | Who may use which space lives in the config folder (access.json), never in the wiki; deny by default | `access::policy_file`, `access::tests` |

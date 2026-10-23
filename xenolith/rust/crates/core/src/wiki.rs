@@ -353,8 +353,9 @@ pub fn with_lock<T>(wiki_dir: &Path, f: impl FnOnce() -> Result<T>) -> Result<T>
 
 const README: &str = "# Xenolith
 
-This folder is a shared, plain-Markdown memory that the apps and agents on
-this computer read and write through the local `xenolith` MCP server. You own it: open it in any editor or in Obsidian.
+This folder is shared context in plain Markdown: the apps and agents on this
+computer read and write it through the local `xenolith` MCP server. You own it:
+open it in any editor or in Obsidian.
 
 - `PROTOCOL.md`: the rules every session follows. Edit it freely; servers
   read it at startup and `context_start` returns the current text.
@@ -362,14 +363,42 @@ this computer read and write through the local `xenolith` MCP server. You own it
 - `pages/<slug>.md`: one page per project, person, preference, decision,
   how-to, reference or topic.
 - `log/YYYY/YYYY-MM-DD.md`: the daily, append-only activity log.
+- `inbox/`: notes the apps sent that the curator has not organized yet.
+- `spaces/<kind>/<name>/`: other spaces (a project, an identity, an agent,
+  another machine), each laid out like this folder.
+- `xenolith.json`: says this folder is Xenolith's, and which version of its
+  format the files follow. The server writes it at every start.
 - `.history/`: earlier versions of pages that were rewritten.
 - `.locks/`: transient write locks. Safe to delete when no app is running.
-- `inbox/`: notes the apps sent that the curator has not organized yet.
 - `.curator/`: the curator's queue state, journal, archive and audit trail.
 ";
 
-/// Creates any missing part of the skeleton; never overwrites user content.
+/// The file at the folder's root that says whose it is and which version of FORMAT.md its files
+/// follow, for other programs that read the folder.
+pub const MARKER_FILE: &str = "xenolith.json";
+/// The version of the folder's format (FORMAT.md): a reader that knows an older one stops.
+pub const FORMAT_VERSION: u32 = 1;
+
+/// The marker's text.
+pub fn marker_text() -> String {
+    format!("{}\n", serde_json::to_string_pretty(&serde_json::json!({ "format": FORMAT_VERSION, "server": "xenolith" })).unwrap_or_default())
+}
+
+/// Creates any missing part of the skeleton of the folder's root (this machine's space), and
+/// writes its marker (xenolith.json) when it is missing or says something else. It runs at every
+/// start; it never overwrites user content.
 pub fn ensure_wiki(wiki_dir: &Path) -> Result<()> {
+    ensure_skeleton(wiki_dir)?;
+    let marker = confined_path(wiki_dir, &wiki_dir.join(MARKER_FILE))?;
+    if read_if_exists(&marker)?.as_deref() != Some(marker_text().as_str()) {
+        atomic_write(&marker, &marker_text(), None, None)?;
+    }
+    Ok(())
+}
+
+/// Creates any missing part of a space's skeleton (the root's, or one under spaces/); never
+/// overwrites user content.
+pub fn ensure_skeleton(wiki_dir: &Path) -> Result<()> {
     fs::create_dir_all(wiki_dir)?;
     for d in ["pages", "log", ".history", ".locks", "inbox"] {
         fs::create_dir_all(confined_path(wiki_dir, &wiki_dir.join(d))?)?;
@@ -1135,6 +1164,21 @@ mod tests {
         assert!(confined_path(&root, &root.join("pages/new.md")).is_ok());
         assert!(confined_path(&root, &root.join("../outside.md")).is_err());
         assert!(confined_path(&root, &root.with_extension("outside")).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_root_says_whose_it_is_and_its_format_and_a_space_does_not() {
+        let root = std::env::temp_dir().join(format!("xenolith-marker-{}", random_hex(8)));
+        ensure_wiki(&root).unwrap();
+        let marker: serde_json::Value = serde_json::from_str(&fs::read_to_string(root.join(MARKER_FILE)).unwrap()).unwrap();
+        assert_eq!(marker, serde_json::json!({ "format": 1, "server": "xenolith" }));
+        fs::write(root.join(MARKER_FILE), "{ \"format\": 0 }").unwrap();
+        ensure_wiki(&root).unwrap();
+        assert_eq!(fs::read_to_string(root.join(MARKER_FILE)).unwrap(), marker_text(), "every start puts it right");
+        let space = crate::spaces::create(&root, &crate::spaces::SpaceId::parse("project:atlas").unwrap()).unwrap();
+        assert!(space.join("PROTOCOL.md").exists() && !space.join(MARKER_FILE).exists(), "the marker is the folder's, not each space's");
+        assert!(!readable_rel(MARKER_FILE), "and it is no page to read");
         fs::remove_dir_all(root).unwrap();
     }
 

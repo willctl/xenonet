@@ -121,7 +121,7 @@ pub fn create(root: &Path, id: &SpaceId) -> Result<PathBuf> {
         return wiki_err(format!("Refused: {} is not a folder.", wiki::disp(&dir)));
     }
     fs::create_dir_all(&dir)?;
-    wiki::ensure_wiki(&dir)?;
+    wiki::ensure_skeleton(&dir)?;
     Ok(dir)
 }
 
