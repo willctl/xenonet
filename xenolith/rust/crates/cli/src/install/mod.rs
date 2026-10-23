@@ -7,17 +7,20 @@
 //!   xenolith install-service [--user-sid S-1-...] [--log <file>]   (Windows, elevated; install runs it)
 //!   xenolith uninstall-service                                    (Windows, elevated)
 //!
+//! --retire-agent-wiki-service [--retire-grant <folder>]... (Windows; `xenolith migrate agent-wiki`
+//! passes it): the elevated step also removes agent-wiki's service and its folder grants.
+//!
 //! --from: the folder with xenolith, xenolith-tray, ui/ and icons/ (default: next to this program;
 //! in the repository, rust/target/release with dist/ built). --sandbox: a fake home for tests: files
 //! and configs only, no service, no sign-in entries, no app CLIs.
 
-mod files;
-mod places;
+pub(crate) mod files;
+pub(crate) mod places;
 #[cfg(unix)]
-mod posix;
-mod sys;
+pub(crate) mod posix;
+pub(crate) mod sys;
 #[cfg(windows)]
-mod windows;
+pub(crate) mod windows;
 
 use files::{
     CLAUDE_ALLOW, POINTER, SERVER, backup_once, claude_allow_remove, claude_allow_set, edit_file, read_json, read_text, remove_block, render_plugin, to_json, toml_remove_approval, toml_set_approval,
@@ -54,10 +57,12 @@ struct Opts {
     no_approve: bool,
     from: Option<PathBuf>,
     sandbox: Option<PathBuf>,
+    /// The folders whose agent-wiki service grants go, when its service is retired (migrate/retire.rs).
+    retire: Option<Vec<PathBuf>>,
 }
 
 /// The environment the installer computes locations from: the real one, or a fake home (--sandbox).
-fn environment(sandbox: Option<&Path>) -> (xenolith_core::paths::Env, Vec<(String, String)>) {
+pub(crate) fn environment(sandbox: Option<&Path>) -> (xenolith_core::paths::Env, Vec<(String, String)>) {
     let mut env = xenolith_core::paths::process_env();
     let mut over: Vec<(String, String)> = vec![];
     if let Some(s) = sandbox {
@@ -212,12 +217,13 @@ pub fn main(cmd: &str, args: &[String]) -> ! {
         no_approve: has("--no-approve"),
         from: opt("--from").map(PathBuf::from),
         sandbox: opt("--sandbox").map(PathBuf::from),
+        retire: crate::migrate::retire::requested(args),
     };
     let r = match cmd {
         "install" => install(&opts),
         "uninstall" => uninstall(&opts),
         #[cfg(windows)]
-        "install-service" => service::install(opt("--user-sid"), opt("--log").map(PathBuf::from)),
+        "install-service" => service::install(opt("--user-sid"), opt("--log").map(PathBuf::from), crate::migrate::retire::requested(args)),
         #[cfg(windows)]
         "uninstall-service" => service::uninstall(),
         _ => Err(InstallError(format!("{cmd}: not available on this system"))),
@@ -338,7 +344,7 @@ fn install(o: &Opts) -> Result<(), InstallError> {
     if sandbox {
         info("sandbox: no service; apps start the server themselves (stdio)");
     } else {
-        transport = service_step(&p, &wiki_dir, port, write_mode == "curated")?;
+        transport = service_step(&p, &wiki_dir, port, write_mode == "curated", o.retire.as_deref())?;
     }
     res.note("Server transport", if transport == "http" { "ok" } else { "stdio" }, if transport == "http" { format!("service at {mcp_url}") } else { "per-app stdio (service not running)".into() });
 
@@ -586,7 +592,7 @@ fn install(o: &Opts) -> Result<(), InstallError> {
 
 /// The service: registered (one UAC prompt on Windows the first time), running this build, healthy.
 #[cfg(windows)]
-fn service_step(p: &Places, wiki_dir: &Path, port: u16, _curated: bool) -> Result<&'static str, InstallError> {
+fn service_step(p: &Places, wiki_dir: &Path, port: u16, _curated: bool, retire: Option<&[PathBuf]>) -> Result<&'static str, InstallError> {
     let n = |x: &Path| x.to_string_lossy().replace('/', "\\");
     write_lf(
         &p.service_ini,
@@ -619,14 +625,19 @@ fn service_step(p: &Places, wiki_dir: &Path, port: u16, _curated: bool) -> Resul
     }
     let bin = windows::service_bin();
     let registered_here = bin.as_ref().is_some_and(|b| b.to_string_lossy().to_lowercase() == p.agent.to_string_lossy().to_lowercase());
-    if !registered_here {
+    // agent-wiki's service goes in the same elevated step (one UAC prompt), even when Xenolith's is in place.
+    let retire_args = retire.filter(|_| crate::migrate::retire::service_exists()).map(crate::migrate::retire::forward).unwrap_or_default();
+    if !registered_here || !retire_args.is_empty() {
         info(&match &bin {
+            Some(_) if registered_here => "removing agent-wiki's AgentWiki service (approve the UAC prompt)".to_string(),
             Some(b) => format!("the service starts {}; re-registering it at {} (approve the UAC prompt)", fwd(b), fwd(&p.agent)),
             None => format!("registering the service at {} (approve the UAC prompt)", fwd(&p.agent)),
         });
         let log = p.app.log_dir.join("install-service.log");
         let _ = std::fs::remove_file(&log);
-        let r = windows::run_elevated(&["install-service".into(), "--log".into(), log.to_string_lossy().into_owned()]);
+        let mut elevated = vec!["install-service".to_string(), "--log".into(), log.to_string_lossy().into_owned()];
+        elevated.extend(retire_args);
+        let r = windows::run_elevated(&elevated);
         for line in std::fs::read_to_string(&log).unwrap_or_default().lines() {
             info(&format!("  | {line}"));
         }
@@ -699,7 +710,7 @@ fn remove_node_runtime(p: &Places) {
 }
 
 #[cfg(unix)]
-fn service_step(p: &Places, _wiki_dir: &Path, port: u16, curated: bool) -> Result<&'static str, InstallError> {
+fn service_step(p: &Places, _wiki_dir: &Path, port: u16, curated: bool, _retire: Option<&[PathBuf]>) -> Result<&'static str, InstallError> {
     for line in posix::install_services(p, port, curated)? {
         info(&line);
     }
@@ -1111,11 +1122,14 @@ mod service {
     /// restarted on failure (and on upgrade), as the low-privilege virtual account NT SERVICE\Xenolith
     /// with Modify on the wiki, logs and state and Read on Xenolith's settings and program folders. It also
     /// lets your account start and stop this one service (the tray's "Restart service").
-    pub fn install(user_sid: Option<String>, log: Option<PathBuf>) -> Result<(), InstallError> {
+    pub fn install(user_sid: Option<String>, log: Option<PathBuf>, retire: Option<Vec<PathBuf>>) -> Result<(), InstallError> {
         let log = Log(log);
         let r = (|| -> Result<(), InstallError> {
             if !is_elevated() {
                 return Err(InstallError("This needs administrator rights: run it from a terminal opened with \"Run as administrator\".".into()));
+            }
+            for line in retire.as_deref().map(crate::migrate::retire::retire).unwrap_or_default() {
+                log.say(&line);
             }
             let p = Places::new(&xenolith_core::paths::process_env());
             let cfg = read_json(&p.config)?.ok_or_else(|| InstallError(format!("run `xenolith install` in a normal terminal first (missing {})", fwd(&p.config))))?;
