@@ -190,10 +190,17 @@ test("a click on an actor selects it, over whatever glows behind it", { timeout:
     for (let tries = 0; tries < 3 && st?.selection?.id !== "actor:wren"; tries++) {
       if (st?.selection) await s.driver("select", null);
       // A move can take Wren off screen for a moment: wait for it to come
-      // back rather than fail on the first look.
+      // back rather than fail on the first look. Drawn in software, the
+      // camera's slow turn can keep it out of the frame for longer, so then
+      // select it and let go, as a person would, which frames it.
       let at = await s.driver("screenPos", "actor:wren");
       for (const end = Date.now() + 15000; !at?.onScreen && Date.now() < end; ) {
         await sleep(500);
+        at = await s.driver("screenPos", "actor:wren");
+      }
+      if (!at?.onScreen) {
+        await s.driver("select", "actor:wren");
+        await s.driver("select", null);
         at = await s.driver("screenPos", "actor:wren");
       }
       assert.ok(at?.onScreen, "Wren is on screen");
