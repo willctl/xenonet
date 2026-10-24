@@ -66,7 +66,7 @@ address and port during the pilot. Do not open a broad inbound rule or
 enable a public tunnel as part of basic installation.
 
 XenoNet has command, terminal, messaging, provider and network features.
-This candidate does not enforce an observation-only policy. Review those
+XenoNet does not enforce an observation-only policy. Review those
 capabilities even when the pilot uses only collection. Keep optional cloud
 providers and public tunnels unconfigured for the initial test. An
 existing installation may already hold provider settings, so inspect the

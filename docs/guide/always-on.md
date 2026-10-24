@@ -64,7 +64,7 @@ Start at sign-in, in the tray menu and the installer, is a separate setting: it 
 
 XenoNet Tray is a small menu bar app that shows how XenoNet is doing while Desktop is closed. It has no Dock icon.
 
-- **How it starts.** The disk image installs it with the service and tools. `xenonet service install` copies it to `~/Applications/XenoNet Tray.app` and starts it at login. launchd starts it again if it crashes, but not after you quit it. A build of your own, with no tray component, skips it.
+- **How it starts.** The disk image brings it with the service and tools, into XenoNet's runtime folder. `xenonet service install` copies it to `~/Applications/XenoNet Tray.app` and starts it at login. launchd starts it again if it crashes, but not after you quit it. A build of your own, with no tray component, skips it.
 - **The icon.** A ring with a dot while XenoNet runs, an amber disc and a count while something needs you, and a dimmed ring while the service isn't running.
 - **The menu.** What needs you, in the console's words ("Rate-limit the API asks", "Wren needs permission"); clicking one opens the console at it. Then Open console, the gateway's state, the network's link when this Mac is in one, and Quit the tray.
 - **Open console.** Desktop's window when Desktop is running. Otherwise Desktop itself, for the installed XenoNet on port 47840, or the console in your browser for any other port.
