@@ -49,6 +49,7 @@ pub struct Ran {
 /// git with `args`, within `timeout`, in `env` added to this one's.
 pub async fn run_git(args: &[String], env: &[(String, String)], clear: bool, timeout: Duration) -> Ran {
     let mut cmd = Command::new("git");
+    xenonet_base::process::Background::no_window(cmd.as_std_mut());
     cmd.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).kill_on_drop(true);
     if clear {
         cmd.env_clear();

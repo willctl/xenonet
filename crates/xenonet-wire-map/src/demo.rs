@@ -115,7 +115,9 @@ impl DemoWorld {
                         let steps = steps.clone();
                         tokio::spawn(async move {
                             for args in &steps {
-                                let ok = tokio::process::Command::new("git")
+                                let mut git = tokio::process::Command::new("git");
+                                xenonet_base::process::Background::no_window(git.as_std_mut());
+                                let ok = git
                                     .args(args)
                                     .current_dir(&r.dir)
                                     .stdin(std::process::Stdio::null())

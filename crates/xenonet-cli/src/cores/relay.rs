@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt};
 use tokio::sync::{mpsc, Notify};
+use xenonet_base::process::Background as _;
 use xenonet_hosts::frames::{encode, parse_frame, LineSplitter, FROM_CONSOLE, MAX_FRAME, MAX_REQUEST, PROTOCOL};
 use xenonet_hosts::relay::{self as core, Outbox, Producer, Shape, EXIT_DONE, EXIT_NO_XENONET, EXIT_XENONET_GONE};
 
@@ -182,6 +183,7 @@ fn start_xenonet(port: u16, demo: bool) -> Option<std::process::Child> {
         args.push("--demo".into());
     }
     std::process::Command::new(std::env::current_exe().ok()?)
+        .no_window()
         .args(args)
         .env("XENONET_PORT", port.to_string())
         .stdin(std::process::Stdio::null())

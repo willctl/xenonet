@@ -717,6 +717,7 @@ const EXEC_MS: u64 = 10 * 60 * 1000;
 fn run_for(exec: &str, m: &Value, note: &dyn Fn(&str)) {
     let name = sys::base_name(exec);
     let mut cmd = std::process::Command::new(exec);
+    xenonet_base::process::Background::no_window(&mut cmd);
     cmd.env_remove("XENONET_ACTOR_TOKEN").env_remove("XENONET_ACTOR_TOKEN_FILE");
     cmd.env("XENONET_MESSAGE_ID", t(m, "id")).env("XENONET_MESSAGE_FROM", m.get("from").and_then(|f| have(f, "id")).map_or(String::new(), |id| crate::js::text(Some(id))));
     cmd.stdin(std::process::Stdio::piped());

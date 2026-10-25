@@ -56,6 +56,7 @@ fn var(name: &str) -> Option<String> {
 /// stderr, timedOut }, never an error.
 fn run_program(file: &str, args: &[String], ms: f64, env: &[(&str, &str)], drop: &[&str]) -> Value {
     let mut cmd = Command::new(file);
+    xenonet_base::process::Background::no_window(&mut cmd);
     cmd.args(args).env_remove("ELECTRON_RUN_AS_NODE").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     for k in drop {
         cmd.env_remove(k);

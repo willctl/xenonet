@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use xenonet_app::control::{self, Instance, Opts};
 use xenonet_app::script::{self, Answer, Arg, Then};
 use xenonet_app::task::{Reply, Task};
+use xenonet_base::process::Background as _;
 use xenonet_components::console::Console;
 
 /// Who a command drives: an instance of XenoNet Dev from this checkout,
@@ -547,6 +548,7 @@ try {
 }
 "#;
     let status = std::process::Command::new(node)
+        .no_window()
         .args(["--input-type=module", "-e", code, &root, full, file, instance, if quiet { "1" } else { "0" }, if plain { "1" } else { "0" }, &said.to_string_lossy()])
         .status()
         .map_err(|e| Fail::error(format!("couldn't start node: {e}")))?;
