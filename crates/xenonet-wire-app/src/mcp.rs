@@ -253,6 +253,7 @@ fn open(how: &Value) -> Result<Box<dyn Channel>, Why> {
             let command = how["command"].as_str().filter(|c| !c.is_empty()).ok_or_else(|| why("Error", None))?;
             let args: Vec<String> = how["args"].as_array().map(|a| a.iter().map(xenonet_base::text::js_string).collect()).unwrap_or_default();
             let mut cmd = tokio::process::Command::new(command);
+            xenonet_base::process::Background::no_window(cmd.as_std_mut());
             cmd.args(&args)
                 .env_clear()
                 .envs(default_env())

@@ -312,6 +312,7 @@ impl Runner {
             self.changed();
         }
         let mut cmd = tokio::process::Command::new(file);
+        xenonet_base::process::Background::no_window(cmd.as_std_mut());
         cmd.args(["run", "--profile-file", &profile, "--health.url-file", &url_file])
             .env_clear()
             .envs(fx::env_pairs(&env))

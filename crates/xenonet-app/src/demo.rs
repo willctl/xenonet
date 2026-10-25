@@ -14,6 +14,7 @@ use crate::nodepath::NATIVE;
 use crate::spotify::b64url;
 use serde_json::{json, Map, Value};
 use xenonet_base::json::stringify;
+use xenonet_base::process::Background as _;
 use xenonet_base::time::iso;
 
 const MIN: f64 = 60e3;
@@ -160,6 +161,7 @@ pub const GIT: [&str; 6] = ["-c", "user.name=XenoNet Demo", "-c", "user.email=de
 
 fn git(dir: &str, args: &[&str]) -> bool {
     std::process::Command::new("git")
+        .no_window()
         .args(GIT)
         .args(args)
         .current_dir(dir)

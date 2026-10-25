@@ -470,6 +470,7 @@ impl HostHub {
 
     fn spawn(&self, l: &mut LinkRt, r: &LinkRef, run: u64, file: &str, args: &[String], env: &serde_json::Map<String, Value>) -> Vec<link::Effect> {
         let mut cmd = tokio::process::Command::new(file);
+        xenonet_base::process::Background::no_window(cmd.as_std_mut());
         cmd.args(args)
             .env_clear()
             .envs(crate::fx::env_pairs(env))
