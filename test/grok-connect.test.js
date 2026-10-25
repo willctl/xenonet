@@ -9,7 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createConnect } from "../core/engine/connect.js";
-import { keyParts, tomlLines, readServer, withServer, withoutServer, foreignServer } from "../core/engine/toml.js";
+import { keyParts, tomlLines, readServer, withServer, withoutServer, foreignServer, mcpServers } from "../core/engine/toml.js";
 
 const MINE = `# Grok's settings, as you keep them
 [cli]
@@ -47,7 +47,15 @@ test("TOML: headers, keys and values as XenoNet reads and writes them", () => {
   for (const other of ['[mcp_servers]\nxenonet = { command = "x" }', 'mcp_servers.xenonet.command = "x"']) {
     assert.ok(foreignServer(other, "xenonet"), other);
     assert.throws(() => withServer(other, "xenonet", { command: "x" }), /in a form XenoNet doesn't edit/);
+    assert.deepEqual(mcpServers(other), { mcp_servers: {} }, "one written another way isn't read");
   }
+  // Every server in tables of its own, as JSON has them: what isn't in a
+  // form XenoNet reads is left out.
+  assert.deepEqual(mcpServers(`${text}\n[mcp_servers.remote]\nurl = "https://example.com/mcp"\nenabled = false\ntimeout = 30\n\n[mcp_servers.remote.env]\nTOKEN = 5\n`).mcp_servers, {
+    linear: { command: "npx", args: ["-y", "linear-mcp"] },
+    xenonet: { command: "/bin/xenonet", args: ["mcp"], env },
+    remote: { url: "https://example.com/mcp", enabled: false },
+  });
 });
 
 test("Grok Build connects through config.toml and its hooks folder, and disconnects again, each XenoNet its own", async (t) => {

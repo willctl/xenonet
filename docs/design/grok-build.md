@@ -227,6 +227,18 @@ program (`core/processes.js`): `grok`, the `grok-<os>-<arch>` binaries in
 also puts an `agent` command that only counts there, since Cursor's CLI is
 called `agent` too.
 
+### MCP servers
+
+An MCP server's panel lists the Grok Build settings that name it: the
+user's `config.toml`, and `.grok/config.toml` in the folder of each Grok
+session that called it (`core/mcp-info.js`, `xenonet-app`'s `mcp_info.rs`).
+XenoNet reads servers written as tables of their own
+(`[mcp_servers.<name>]`, the form `grok mcp add` writes), with their
+command, args, url, `enabled` and the names of their `env` keys, never
+the values (`mcpServers` in `core/engine/toml.js`, `toml.rs`). Grok also
+reads `.grok/config.toml` in the folders between the repo's root and the
+session's; XenoNet reads only the session's own.
+
 ## The doctor
 
 `xenonet doctor` says whether Grok Build is installed (on PATH or in

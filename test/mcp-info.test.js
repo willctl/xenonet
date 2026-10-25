@@ -57,6 +57,55 @@ test("Codex reports auth and capabilities; observed use alone stays unknown", as
   assert.equal(observed.lastCall, 50);
 });
 
+test("Grok Build's MCP servers, from its config.toml and a folder's, without their secrets", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-mcp-grok-"));
+  try {
+    const grokHome = path.join(dir, ".grok");
+    const repo = path.join(dir, "atlas");
+    fs.mkdirSync(grokHome, { recursive: true });
+    fs.mkdirSync(path.join(repo, ".grok"), { recursive: true });
+    fs.writeFileSync(
+      path.join(grokHome, "config.toml"),
+      [
+        "# Grok Build's own settings",
+        "[cli]",
+        'installer = "brew"',
+        "",
+        "[mcp_servers.library]",
+        'command = "node"',
+        'args = ["/workspace/library/index.js"]',
+        "enabled = true",
+        "",
+        "[mcp_servers.library.env]",
+        'LIBRARY_TOKEN = "private-value"',
+        "",
+        "[mcp_servers.remote]",
+        'url = "https://example.com/mcp?key=private-value"',
+        "enabled = false",
+      ].join("\n"),
+    );
+    fs.writeFileSync(path.join(repo, ".grok", "config.toml"), '[mcp_servers.library]\ncommand = "npx"\nargs = ["library-mcp"]\n');
+    const settings = { homeDir: dir, claudeConfigFile: path.join(dir, "missing.json"), grokHome };
+    const using = [{ id: "grok:019a3b5c-0000-7000-8000-00000000000a", app: "grok", title: "Look up references", cwd: repo, mcp: [{ server: "library", ts: 40 }] }];
+    const service = createMcpInfo({ settings, request: async () => ({ config: {} }), discover: async (selected) => {
+      assert.deepEqual([selected.command, selected.args], ["node", ["/workspace/library/index.js"]], "the user's settings first");
+      return { serverInfo: { name: "library", version: "1" }, runtimeStatus: "connected", authStatus: "unsupported", tools: [], resources: [], resourceTemplates: [] };
+    } });
+    const info = await service.get("library", using);
+    assert.deepEqual(info.connections.map((c) => [c.app, c.scope, c.transport, c.enabled, c.credentials]), [
+      ["Grok Build", "user", "stdio", true, ["LIBRARY_TOKEN"]],
+      ["Grok Build", "project", "stdio", true, []],
+    ]);
+    assert.deepEqual(info.sessions.map((s) => s.app), ["grok"]);
+    assert.ok(!JSON.stringify(info).includes("private-value"));
+    const remote = await service.get("remote", []);
+    assert.deepEqual(remote.connections.map((c) => [c.app, c.transport, c.endpoint, c.enabled]), [["Grok Build", "HTTP", "https://example.com", false]]);
+    assert.equal(remote.status, "disabled");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("stdio discovery initializes and lists, without executing a tool or reading content", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-mcp-discovery-"));
   const file = path.join(dir, "server.cjs");

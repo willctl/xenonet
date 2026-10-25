@@ -137,6 +137,34 @@ function value(text) {
   }
 }
 
+// Every MCP server a file names in tables of its own ([mcp_servers.<name>]
+// and [mcp_servers.<name>.env]), as JSON has them: { mcp_servers: {
+// <name>: { command, args, url, enabled, env } } }, each part only when
+// it's written in a form XenoNet reads (a string, or a list of strings, as
+// JSON writes them; true or false). What the MCP-info catalog reads of
+// Grok Build's settings (mcp-info.js).
+export function mcpServers(text) {
+  const servers = new Map();
+  for (const l of tomlLines(text)) {
+    if (l.path[0] !== "mcp_servers" || l.path.length < 2) continue;
+    if (!servers.has(l.path[1])) servers.set(l.path[1], {});
+    const server = servers.get(l.path[1]);
+    if (l.header || !l.key) continue;
+    const key = [...l.path.slice(2), ...l.key];
+    if (key.length === 1 && ["command", "args", "url"].includes(key[0])) {
+      const v = value(l.value);
+      if (v !== undefined) server[key[0]] = v;
+    } else if (key.length === 1 && key[0] === "enabled") {
+      const t = l.value.trim();
+      if (t === "true" || t === "false") server.enabled = t === "true";
+    } else if (key.length === 2 && key[0] === "env") {
+      const v = value(l.value);
+      if (typeof v === "string") (server.env ??= {})[key[1]] = v;
+    }
+  }
+  return { mcp_servers: Object.fromEntries(servers) };
+}
+
 // Server `name` as the file has it: { command, args, env } from its tables
 // (a part it doesn't have is null; one it has in a form XenoNet doesn't
 // write is undefined), or null when it has none.

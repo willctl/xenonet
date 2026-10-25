@@ -32,16 +32,17 @@ pub struct Catalog {
 
 // What collecting reads of the settings, and of each session.
 fn settings_of(c: &Value) -> Value {
-    json!({ "claudeConfigFile": c.get("claudeConfigFile"), "claudeDesktopDir": c.get("claudeDesktopDir"), "homeDir": c.get("homeDir") })
+    json!({ "claudeConfigFile": c.get("claudeConfigFile"), "claudeDesktopDir": c.get("claudeDesktopDir"), "homeDir": c.get("homeDir"), "grokHome": c.get("grokHome") })
 }
 
 fn session_of(s: &Value) -> Value {
     json!({ "id": s.get("id"), "app": s.get("app"), "title": s.get("title"), "status": s.get("status"), "cwd": s.get("cwd"), "mcp": s.get("mcp") })
 }
 
-// The Rust reads the files itself.
+// The Rust reads the files itself: Grok Build's config.toml as the MCP
+// servers it names, the rest JSON.
 fn read_file(f: Option<&str>) -> Value {
-    f.and_then(|f| std::fs::read(f).ok()).and_then(|b| xenonet_base::json::parse(&String::from_utf8_lossy(&b)).ok()).unwrap_or_else(|| json!({}))
+    xenonet_engine::toml::read_settings(f)
 }
 
 impl Catalog {
