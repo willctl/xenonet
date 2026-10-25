@@ -127,7 +127,7 @@ format, which Grok reads, but Grok doesn't hear an answer at every event:
 | `UserPromptSubmit` | Throws away `additionalContext` | Nothing, and the session's messages stay unread |
 | `PreToolUse` (edits) | Gives `additionalContext` with the call's result | A warning when another session has a hand in the file |
 | `PostToolUse`, `PostToolUseFailure` | Gives `additionalContext` with the result | The session's messages |
-| `Stop` | Keeps the turn going with `decision: block` and the reason | The session's messages, unless the stop hook already ran this turn |
+| `Stop` | Keeps the turn going with `decision: block` and the reason. It also fires once as the session closes (`reason` `channel_closed` or `shutdown`), and reads no answer to that one | The session's messages, when `reason` is `end_turn` and the stop hook didn't already run this turn. At the session's close, nothing, so its messages wait for its next turn |
 | `StopCancelled`, `StopFailure`, `Notification`, `SessionEnd` | Nothing | Nothing. They tell the tailer when a turn ended or a permission prompt waits, and the engine when a session ended. |
 
 So a Grok Build session doesn't hear who else works in its repo when it

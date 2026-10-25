@@ -699,6 +699,11 @@ export class Engine extends EventEmitter {
     if (event === "UserPromptSubmit" || event === "PostToolUse" || event === "PostToolUseFailure") return say(this.#mail(await this.#take(me)));
     if (event === "Stop") {
       if (input.stop_hook_active) return null;
+      // Grok Build fires one more Stop as its session closes (reason
+      // channel_closed or shutdown) and reads no answer to it, so mail
+      // taken then would be lost: only a turn that ended (end_turn) takes
+      // it. Claude Code's and Codex's Stops carry no reason.
+      if (typeof input.reason === "string" && input.reason !== "end_turn") return null;
       const text = this.#mail(await this.#take(me));
       if (text) this.stopMail.set(me, this.now());
       return text ? { decision: "block", reason: text } : null;

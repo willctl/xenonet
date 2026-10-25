@@ -1793,6 +1793,14 @@ impl Engine {
                 if input.field("stop_hook_active").truthy() {
                     return Ok(Arg::Null);
                 }
+                // Grok Build fires one more Stop as its session closes
+                // (reason channel_closed or shutdown) and reads no answer
+                // to it, so mail taken then would be lost: only a turn that
+                // ended (end_turn) takes it. Claude Code's and Codex's
+                // Stops carry no reason.
+                if input.field("reason").as_str().is_some_and(|r| r != "end_turn") {
+                    return Ok(Arg::Null);
+                }
                 let taken = self.take(c, &me, false)?;
                 let text = Self::mail(c, &taken)?;
                 if !text.is_empty() {
