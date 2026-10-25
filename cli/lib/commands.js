@@ -22,7 +22,7 @@ export const COMMANDS = {
   messages: { about: "What sessions and actors said to each other today" },
   root: { about: "The projects folder XenoNet reads, or read another", args: "[folder]" },
   hosts: { about: "Other machines' XenoNets on this map, over SSH (a prototype, with XENONET_HOSTS=1)", args: "[self|add|remove|test]" },
-  search: { about: "Search every Claude Code and Codex transcript", args: "<words>" },
+  search: { about: "Search every Claude Code, Codex and Grok Build transcript", args: "<words>" },
   theme: { about: "The console's look and sound: list, switch, or make your own", args: "[id]" },
   film: { about: "Render a film of today to an MP4, in a hidden window" },
   script: { about: "Save what you did in XenoNet Dev as a script, and run scripts", args: "<record|run> [file]" },
