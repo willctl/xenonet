@@ -40,7 +40,9 @@ pub async fn ask_codex(bin: &str, prompt: &str, schema: Option<Value>, codex_hom
     };
     let args = xenonet_state::digest::codex_exec_args(&dir.to_string_lossy(), &out.to_string_lossy(), schema_file.as_deref());
     let ran = async {
-        let mut child = Command::new(bin)
+        let mut cmd = Command::new(bin);
+        xenonet_base::process::Background::no_window(cmd.as_std_mut());
+        let mut child = cmd
             .args(&args)
             .env("CODEX_HOME", &home)
             .stdin(std::process::Stdio::piped())

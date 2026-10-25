@@ -304,6 +304,7 @@ pub fn run(given: &Value, settings: &[String]) -> Result<i32, Fail> {
     shell_env(&mut env);
     let port: u16 = runtime::port_of(&env).parse().unwrap_or(47840);
     let mut cmd = std::process::Command::new(&bin);
+    xenonet_base::process::Background::no_window(&mut cmd);
     cmd.arg("serve").env_clear();
     for (k, v) in &env {
         cmd.env(k, xenonet_base::text::js_string(v));

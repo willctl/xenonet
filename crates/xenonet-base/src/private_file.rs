@@ -47,12 +47,7 @@ pub const PRIVATE_COMMAND_MS: u64 = 60000;
 pub fn run_command(file: &str, args: &[&str], timeout: Duration) -> Result<String, String> {
     let mut cmd = Command::new(file);
     cmd.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
+    crate::process::Background::no_window(&mut cmd);
     let mut child = cmd.spawn().map_err(|e| format!("spawnSync {file} {}", crate::fs::code_of(&e).map_or_else(|| e.to_string(), str::to_string)))?;
     let read = |mut r: Box<dyn Read + Send>| {
         std::thread::spawn(move || {

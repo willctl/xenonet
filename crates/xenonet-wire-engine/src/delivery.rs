@@ -360,6 +360,7 @@ impl RouterCalls<'_> {
         };
         let env = resume::resume_env(std::env::vars().map(|(k, v)| (k, Arg::Text(v))).collect());
         let mut cmd = std::process::Command::new(&command);
+        xenonet_base::process::Background::no_window(&mut cmd);
         cmd.args(args.iter().map(text))
             .current_dir(text(&cwd))
             .env_clear()

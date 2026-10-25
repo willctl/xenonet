@@ -255,6 +255,7 @@ fn procs_self_test() -> Value {
     impl xenonet_engine::procs::Io for Run {
         fn exec(&mut self, call: xenonet_engine::procs::Call) -> Result<String, xenonet_engine::procs::Failure> {
             let mut cmd = std::process::Command::new(&call.file);
+            xenonet_base::process::Background::no_window(&mut cmd);
             // Start times in English and UTC, and text as UTF-8.
             cmd.args(&call.args)
                 .env("LC_TIME", "C")

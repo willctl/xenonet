@@ -432,6 +432,7 @@ impl Gpu {
         let Gpu::Stream { file, args, st, .. } = self else { return };
         let Some(generation) = st.locked().proc.start(now_ms()) else { return };
         let mut cmd = tokio::process::Command::new(file);
+        xenonet_base::process::Background::no_window(cmd.as_std_mut());
         cmd.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).kill_on_drop(true);
         let Ok(mut child) = cmd.spawn() else {
             st.locked().proc.spawn_failed(now_ms());

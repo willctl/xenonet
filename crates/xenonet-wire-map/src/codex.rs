@@ -105,13 +105,10 @@ impl CodexClient {
         // Each start counts, and so does the initialize it was for, which a
         // start that fails fails too (as the JS's spawn's error event does).
         lock(&self.inner).life.count("starts", 1.0);
-        let spawned = Command::new(&self.bin)
-            .arg("app-server")
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
-            .spawn();
+        let mut cmd = Command::new(&self.bin);
+        xenonet_base::process::Background::no_window(cmd.as_std_mut());
+        let spawned =
+            cmd.arg("app-server").stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true).spawn();
         let mut child = match spawned {
             Ok(c) => c,
             Err(e) => {

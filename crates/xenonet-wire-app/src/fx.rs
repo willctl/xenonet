@@ -258,6 +258,7 @@ pub async fn exec_file(file: &str, args: &[String], timeout_ms: u64, opts: RunOp
 /// output ignored, its exit code too (explorer.exe exits 1 when it worked).
 pub fn start_detached(file: &str, args: &[String]) {
     let mut cmd = std::process::Command::new(file);
+    xenonet_base::process::Background::no_window(&mut cmd);
     cmd.args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     #[cfg(unix)]
     {

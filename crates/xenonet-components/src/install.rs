@@ -149,6 +149,7 @@ pub fn install_launcher(env: &Env, ctx: &Ctx) -> Result<Option<Value>, Failure> 
 fn run_sync(file: &str, args: &[String], cwd: &str, timeout: Duration) -> (Option<i32>, String) {
     use std::io::Read;
     let mut command = std::process::Command::new(file);
+    xenonet_base::process::Background::no_window(&mut command);
     command
         .args(args)
         .current_dir(cwd)

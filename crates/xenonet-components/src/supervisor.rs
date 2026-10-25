@@ -695,12 +695,7 @@ pub fn run_program(program: &str, args: &[&str], env: &[(&str, &str)], ms: u64) 
     use std::time::{Duration, Instant};
     let mut cmd = std::process::Command::new(program);
     cmd.args(args).envs(env.iter().copied()).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW: schtasks, tasklist and whoami flash no console.
-        cmd.creation_flags(0x0800_0000);
-    }
+    xenonet_base::process::Background::no_window(&mut cmd);
     let Ok(mut child) = cmd.spawn() else { return Ran { code: None, out: String::new(), err: format!("{program} couldn't start") } };
     let reader = |pipe: Option<Box<dyn Read + Send>>| {
         std::thread::spawn(move || {

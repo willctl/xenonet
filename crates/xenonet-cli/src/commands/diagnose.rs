@@ -84,10 +84,12 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
     let mut child = if lower.ends_with(".cmd") || lower.ends_with(".bat") {
         let line = std::iter::once(format!("\"{bin}\"")).chain(args.iter().map(|a| format!("\"{a}\""))).collect::<Vec<_>>().join(" ");
         let mut c = std::process::Command::new("cmd.exe");
+        xenonet_base::process::Background::no_window(&mut c);
         c.args(["/d", "/s", "/c", &format!("\"{line}\"")]);
         c
     } else {
         let mut c = std::process::Command::new(&bin);
+        xenonet_base::process::Background::no_window(&mut c);
         c.args(&args);
         c
     };

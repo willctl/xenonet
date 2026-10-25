@@ -1,4 +1,31 @@
-//! Whether a process is running, on every platform the binary is built for.
+//! Whether a process is running, on every platform the binary is built for,
+//! and the commands XenoNet starts in the background, which show no window.
+
+/// Windows gives each console program a window of its own when the program
+/// starting it has no console to share, as XenoNet's service, its
+/// supervisor and Desktop don't: git, PowerShell and the apps' commands
+/// they run in the background would each flash one on the screen.
+/// CREATE_NO_WINDOW keeps them hidden.
+pub const NO_WINDOW: u32 = 0x0800_0000;
+
+/// A command XenoNet runs in the background, which shows no window of its
+/// own on Windows (`NO_WINDOW`), and is unchanged elsewhere. Every command
+/// XenoNet starts takes it, but one meant to open a window for you; a
+/// tokio command takes it through `as_std_mut`.
+pub trait Background {
+    fn no_window(&mut self) -> &mut Self;
+}
+
+impl Background for std::process::Command {
+    fn no_window(&mut self) -> &mut Self {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            self.creation_flags(NO_WINDOW);
+        }
+        self
+    }
+}
 
 /// Whether `pid` is a running process. On unix that's kill(pid, 0), which
 /// sends nothing; on Windows, a process it can open that hasn't exited, as

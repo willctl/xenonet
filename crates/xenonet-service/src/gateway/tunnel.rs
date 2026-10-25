@@ -341,8 +341,7 @@ impl TunnelHost for SystemHost {
     async fn run(&self, file: &str, args: &[String], timeout: Duration) -> RunOut {
         let mut cmd = tokio::process::Command::new(file);
         cmd.args(args).stdin(std::process::Stdio::null()).kill_on_drop(true);
-        #[cfg(windows)]
-        cmd.creation_flags(0x0800_0000);
+        xenonet_base::process::Background::no_window(cmd.as_std_mut());
         match tokio::time::timeout(timeout, cmd.output()).await {
             Err(_) => RunOut { ok: false, stdout: String::new(), stderr: String::new(), timed_out: true },
             Ok(Err(e)) => RunOut { ok: false, stdout: String::new(), stderr: e.to_string(), timed_out: false },
@@ -357,8 +356,7 @@ impl TunnelHost for SystemHost {
     fn spawn(&self, file: &str, args: &[String]) -> Result<Spawned, String> {
         let mut cmd = tokio::process::Command::new(file);
         cmd.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
-        #[cfg(windows)]
-        cmd.creation_flags(0x0800_0000);
+        xenonet_base::process::Background::no_window(cmd.as_std_mut());
         let mut child = cmd.spawn().map_err(|e| xenonet_base::fs::code_of(&e).map_or_else(|| e.to_string(), str::to_string))?;
         let pid = child.id();
         let (tx, lines) = mpsc::unbounded_channel();

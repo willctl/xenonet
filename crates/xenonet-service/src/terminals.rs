@@ -71,8 +71,8 @@ pub fn posix_profiles(login_shell: Option<&str>, exists: &dyn Fn(&str) -> bool) 
 
 #[cfg(windows)]
 fn windows_profiles() -> Vec<Profile> {
-    use std::os::windows::process::CommandExt;
-    let run = |cmd: &str, args: &[&str]| std::process::Command::new(cmd).args(args).creation_flags(0x0800_0000).output().ok().filter(|o| o.status.success());
+    use xenonet_base::process::Background as _;
+    let run = |cmd: &str, args: &[&str]| std::process::Command::new(cmd).no_window().args(args).output().ok().filter(|o| o.status.success());
     let which = |cmd: &str| run("where.exe", &[cmd]).and_then(|o| String::from_utf8_lossy(&o.stdout).lines().find(|l| !l.is_empty()).map(str::to_string));
     let sys = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into());
     let exists = |f: &str| Path::new(f).exists();
