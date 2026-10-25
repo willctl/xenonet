@@ -1013,6 +1013,8 @@ mod tests {
         assert_eq!(index(&s), 0.0, "no new document");
         assert_eq!(texts(&s), [Out::Str("Add refunds to the API.".into()), Out::Str("Refunds work now.".into())]);
         assert_eq!(s.search("work", 30.0).unwrap().len(), 1);
+        // Windows won't remove a database that's still open.
+        s.close();
         std::fs::remove_dir_all(&d).unwrap();
     }
 }
