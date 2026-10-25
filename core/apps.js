@@ -14,7 +14,8 @@
 //   connect    how XenoNet connects it: its config format, the hook
 //              events, each with a matcher when it takes one, and the
 //              events whose answers it passes over (unheard)
-//   editTools  for a native reader, the tools whose calls are edits
+//   editTools  the tools whose calls are edits, where they aren't Claude
+//              Code's: a native reader's, and Grok Build's own
 //   has        what XenoNet can do with it at most: lines (it tails its
 //              transcripts), sessions, native (an experimental reader),
 //              connect, delivery, processes, caller and open. What it can
@@ -86,6 +87,7 @@ export const APPS = [
       ],
       unheard: ["SessionStart", "UserPromptSubmit"],
     },
+    editTools: ["search_replace", "write", "edit", "hashline_edit", "apply_patch"],
     has: ["lines", "sessions", "connect", "processes", "caller"],
   },
   {

@@ -254,12 +254,26 @@ fn edit(path: &Value, kind: &str, diff: String) -> Value {
 }
 
 /// A Claude Code tool call's edits as small diffs: [{ path, kind, diff }].
-pub fn claude_edits(name: &str, input: Option<&Value>) -> Result<Vec<Value>, TypeError> {
+/// An app whose edit tools aren't Claude Code's (Grok Build's
+/// search_replace, write…) names them in the registry (editTools): one
+/// that's given content is read as a Write, another as an Edit.
+pub fn claude_edits(name: &str, input: Option<&Value>, app: &str) -> Result<Vec<Value>, TypeError> {
     let field = |k: &str| opt_prop(input, k);
     if !truthy(field("file_path")) && !truthy(field("notebook_path")) {
         return Ok(Vec::new());
     }
     let file = field("file_path").filter(|v| !v.is_null()).or(field("notebook_path")).cloned().unwrap_or(Value::Null);
+    if xenonet_base::apps::app(app).is_some_and(|a| a.edits_with(name)) {
+        if field("content").is_some() {
+            return Ok(vec![edit(&file, "write", diff_lines("+ ", field("content"), 30))]);
+        }
+        let diff = if field("old_string").is_some() || field("new_string").is_some() {
+            format!("{}\n{}", diff_lines("- ", field("old_string"), 40), diff_lines("+ ", field("new_string"), 40))
+        } else {
+            String::new()
+        };
+        return Ok(vec![edit(&file, "edit", diff)]);
+    }
     Ok(match name {
         "Edit" => vec![edit(&file, "edit", format!("{}\n{}", diff_lines("- ", field("old_string"), 40), diff_lines("+ ", field("new_string"), 40)))],
         "MultiEdit" => {
@@ -500,9 +514,18 @@ mod tests {
         assert_eq!(patch_files(Some(&json!("*** Begin Patch\n*** Update File: a/b.js\n*** Add File:  c.js \n"))), ["a/b.js", "c.js"]);
         assert_eq!(patch_files(Some(&json!("*** Update File: a/b.js\n*** Move to: a/c.js\n*** Delete File: d.js\n"))), ["a/b.js", "a/c.js", "d.js"]);
         assert_eq!(diff_lines("+ ", Some(&json!("a\r\nb\nc")), 2), "+ a\n+ b\n+ … (1 more lines)");
-        let e = claude_edits("Edit", Some(&json!({ "file_path": "/x", "old_string": "a", "new_string": "b" }))).unwrap();
+        let e = claude_edits("Edit", Some(&json!({ "file_path": "/x", "old_string": "a", "new_string": "b" })), "claude").unwrap();
         assert_eq!(e, [json!({ "path": "/x", "kind": "edit", "diff": "- a\n+ b" })]);
-        assert!(claude_edits("MultiEdit", Some(&json!({ "file_path": "/x", "edits": 3 }))).is_err());
+        assert!(claude_edits("MultiEdit", Some(&json!({ "file_path": "/x", "edits": 3 })), "claude").is_err());
+        // Grok Build's own edit tools, from the registry: content is a
+        // write, another call an edit; Claude Code's names mean nothing to
+        // another app that doesn't name them.
+        let g = claude_edits("search_replace", Some(&json!({ "file_path": "/x", "old_string": "a", "new_string": "b" })), "grok").unwrap();
+        assert_eq!(g, vec![json!({ "path": "/x", "kind": "edit", "diff": "- a\n+ b" })]);
+        let w = claude_edits("write", Some(&json!({ "file_path": "/x", "content": "c" })), "grok").unwrap();
+        assert_eq!(w, vec![json!({ "path": "/x", "kind": "write", "diff": "+ c" })]);
+        assert_eq!(claude_edits("hashline_edit", Some(&json!({ "file_path": "/x" })), "grok").unwrap(), vec![json!({ "path": "/x", "kind": "edit", "diff": "" })]);
+        assert_eq!(claude_edits("search_replace", Some(&json!({ "file_path": "/x", "old_string": "a" })), "claude").unwrap(), Vec::<Value>::new());
         assert_eq!(codex_edits(Some(&json!({ "/a": { "type": "delete" }, "/b": { "type": "add", "content": "x" } })))[1]["diff"], "+ x");
         assert_eq!(tool_key("Bash", Some(&json!({ "b": 1, "a": 2 }))), tool_key("Bash", Some(&json!({ "a": 2, "b": 1 }))));
         assert_eq!(median(&[3.0, 1.0, 2.0, 4.0]), 3.0);

@@ -148,10 +148,18 @@ function diffLines(prefix, text, max = 40) {
   return out.join("\n");
 }
 
-// Edits as small diffs, from either app's tool input.
-function claudeEdits(name, input) {
+// Edits as small diffs, from either app's tool input. An app whose edit
+// tools aren't Claude Code's (Grok Build's search_replace, write…) names
+// them in the registry (editTools): one that's given content is read as a
+// Write, another as an Edit.
+function claudeEdits(name, input, app) {
   if (!input?.file_path && !input?.notebook_path) return [];
   const file = input.file_path ?? input.notebook_path;
+  if (APP[app]?.editTools?.includes(name)) {
+    if (input.content !== undefined) return [{ path: file, kind: "write", diff: diffLines("+ ", input.content, 30) }];
+    const diff = input.old_string !== undefined || input.new_string !== undefined ? `${diffLines("- ", input.old_string)}\n${diffLines("+ ", input.new_string)}` : "";
+    return [{ path: file, kind: "edit", diff }];
+  }
   if (name === "Edit") return [{ path: file, kind: "edit", diff: `${diffLines("- ", input.old_string)}\n${diffLines("+ ", input.new_string)}` }];
   if (name === "MultiEdit")
     return [{ path: file, kind: "edit", diff: (input.edits ?? []).slice(0, 4).map((e) => `${diffLines("- ", e.old_string, 12)}\n${diffLines("+ ", e.new_string, 12)}`).join("\n···\n") }];
@@ -805,7 +813,7 @@ export class LiveTelemetry extends EventEmitter {
     const full = typeof b.input?.command === "string" ? b.input.command : b.input ?? {};
     const tool = this.noteTool(s, { name: b.name, detail: toolDetail(b.name, b.input, this.home), full, files: filesOf(b.input), ts, agentId, extra: pages ? { pages } : undefined }, live);
     s.inflight.get(b.id).tool = tool;
-    const edits = claudeEdits(b.name, b.input);
+    const edits = claudeEdits(b.name, b.input, s.app);
     if (edits.length) s.addEdits(edits, ts);
     if (categorize(b.name) === "agent" && b.input?.description) this.pendingLabel = { session: s.id, label: clip(b.input.description, 40), ts };
     if (!agentId && (b.name === "AskUserQuestion" || b.name === "ExitPlanMode")) {
