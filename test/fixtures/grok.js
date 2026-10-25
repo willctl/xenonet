@@ -52,6 +52,42 @@ const write = (file, body) => {
 const json = (file, value) => write(file, JSON.stringify(value, null, 2) + "\n");
 export const jsonl = (list) => list.map((o) => JSON.stringify(o)).join("\n") + "\n";
 
+// A turn's or a session's usage, as usage.json sums it: the prompt's
+// tokens include what was read from the cache.
+export const usage = ({ input, output, cached = 0, created = 0, reasoning = 0, calls = 1, ticks, partial } = {}) => ({
+  inputTokens: input,
+  outputTokens: output,
+  cachedReadTokens: cached,
+  cacheCreationTokens: created,
+  reasoningTokens: reasoning,
+  totalTokens: input + output,
+  modelCalls: calls,
+  ...(ticks === undefined ? {} : { costUsdTicks: ticks }),
+  ...(partial ? { costIsPartial: true } : {}),
+});
+// A turn of usage.json: its usage, by model, added up.
+export const turn = (n, endedAt, byModel) => {
+  const models = Object.entries(byModel);
+  const sum = (k) => models.reduce((a, [, u]) => a + (u[k] ?? 0), 0);
+  const ticks = models.some(([, u]) => u.costUsdTicks !== undefined) ? sum("costUsdTicks") : undefined;
+  return { turnNumber: n, endedAt: iso(endedAt), turnId: `turn-${n}`, ...usage({ input: sum("inputTokens"), output: sum("outputTokens"), cached: sum("cachedReadTokens"), created: sum("cacheCreationTokens"), calls: sum("modelCalls"), ticks }), turnCount: 1, primaryModelId: models[0]?.[0], modelUsage: byModel };
+};
+// The ledger: a session's totals, and its turns.
+export const ledger = (session, turns) => ({ sessionId: session, updatedAt: turns.at(-1)?.endedAt ?? "", session: { inputTokens: turns.reduce((a, t) => a + t.inputTokens, 0), outputTokens: turns.reduce((a, t) => a + t.outputTokens, 0), turnCount: turns.length }, turns });
+
+// The main session's turn, on a SuperGrok sign-in, which records no cost;
+// the fork's, on an API key, which does, after the turn it copied from
+// the main session's ledger; and the subagent's own, which its parent's
+// turn counts too.
+export const USAGE = {
+  main: ledger(IDS.main, [turn(1, T + 14500, { "grok-build": usage({ input: 52000, output: 1800, cached: 40000, reasoning: 600, calls: 4 }) })]),
+  fork: ledger(IDS.fork, [
+    turn(1, T - 1200e3, { "grok-build": usage({ input: 20000, output: 500, cached: 15000, calls: 2 }) }),
+    turn(2, T - 60e3, { "grok-build": usage({ input: 30000, output: 900, cached: 25000, calls: 3, ticks: 120000000 }), "grok-build-mini": usage({ input: 4000, output: 100, calls: 1, ticks: 2000000 }) }),
+  ]),
+  sub: ledger(IDS.sub, [turn(1, T + 8000, { "grok-build": usage({ input: 9000, output: 300, cached: 6000, calls: 2 }) })]),
+};
+
 // Writes the home into `dir` (made if it isn't there) and gives it back.
 export function grokHome(dir) {
   const sessions = path.join(dir, "sessions");
@@ -71,14 +107,17 @@ export function grokHome(dir) {
     last_turn_summary: "Asked whether to open a PR",
   });
   write(path.join(at(atlas, IDS.main), "updates.jsonl"), jsonl(MAIN_UPDATES));
+  json(path.join(at(atlas, IDS.main), "usage.json"), USAGE.main);
   // Its other files, which XenoNet doesn't read.
   write(path.join(at(atlas, IDS.main), "chat_history.jsonl"), jsonl([{ role: "user", content: "Add partial refunds to the orders API." }]));
 
   // A subagent's own session, and a fork you renamed, in the same folder.
   json(path.join(at(atlas, IDS.sub), "summary.json"), { info: { id: IDS.sub, cwd: ATLAS }, session_summary: "", generated_title: "Map the refund code", created_at: iso(T + 4000), updated_at: iso(T + 8000), current_model_id: "grok-build", parent_session_id: IDS.main, session_kind: "subagent" });
   write(path.join(at(atlas, IDS.sub), "updates.jsonl"), jsonl([up(T + 4000, text("user_message_chunk", "Map the refund code"), { session: IDS.sub })]));
+  json(path.join(at(atlas, IDS.sub), "usage.json"), USAGE.sub);
   json(path.join(at(atlas, IDS.fork), "summary.json"), { info: { id: IDS.fork, cwd: ATLAS }, session_summary: "", generated_title: "Refunds, the careful version", title_is_manual: true, created_at: iso(T - 600e3), updated_at: iso(T - 60e3), current_model_id: "grok-build", parent_session_id: IDS.main, session_kind: "fork" });
   write(path.join(at(atlas, IDS.fork), "updates.jsonl"), jsonl([up(T - 600e3, text("user_message_chunk", "Try it with a feature flag."), { session: IDS.fork })]));
+  json(path.join(at(atlas, IDS.fork), "usage.json"), USAGE.fork);
 
   // A headless run (grok -p), which is background work.
   json(path.join(at(atlas, IDS.headless), "summary.json"), { info: { id: IDS.headless, cwd: ATLAS }, session_summary: "Explain this codebase", session_kind: "headless", created_at: iso(T - 300e3), updated_at: iso(T - 290e3), current_model_id: "grok-build" });

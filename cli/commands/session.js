@@ -33,8 +33,13 @@ export async function run(words, flags) {
   print(c.dim([st.app, st.cwd && tilde(st.cwd, home), st.branch, span, plural(st.turns.length, "turn")].filter(Boolean).join(" · ")));
   if (found.length > 1 && q) print(c.dim(`(${plural(found.length - 1, "other session")} also match; xenonet session <id> picks one)`));
   print();
+  // Grok Build's cost is what Grok recorded, which it does with an API key.
+  const cost =
+    st.app === "grok"
+      ? `${c.bold(t.cost == null ? "unknown" : money(t.cost))} ${c.dim(t.cost == null ? "Grok Build recorded no cost; it records one with an API key" : "as Grok Build recorded it")}`
+      : `${c.bold(money(t.cost))} ${c.dim(`at API prices on the day, standard tier${st.pricing.unpriced.length ? `; no price for ${st.pricing.unpriced.join(", ")}` : ""}`)}`;
   print(table([
-    [c.dim("Estimated cost"), `${c.bold(money(t.cost))} ${c.dim(`at API prices on the day, standard tier${st.pricing.unpriced.length ? `; no price for ${st.pricing.unpriced.join(", ")}` : ""}`)}`],
+    [c.dim("Estimated cost"), cost],
     [c.dim("Tokens"), `${c.bold(tokens(t.tokens))} ${c.dim(`in ${plural(t.calls, "call")}; ${share(t.cacheRead, t.tokens)} read from cache`)}`],
   ], { indent: 2, wrap: true }));
 

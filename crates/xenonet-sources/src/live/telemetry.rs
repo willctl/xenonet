@@ -267,11 +267,25 @@ fn drop_first<V>(m: &mut KMap<V>) {
     }
 }
 
+/// A day's calls: what they'd cost, their priced tokens, the models without
+/// a price, and whether any call had one.
 #[derive(Clone, Debug, Default)]
 struct Spend {
     cost: f64,
     tokens: f64,
     unpriced: Vec<String>,
+    priced: bool,
+}
+
+/// What a Grok Build turn's call counted so far (tokens by kind, and cost),
+/// so a turn written again adds only what's new.
+#[derive(Clone, Copy, Debug, Default)]
+struct Counted {
+    input: f64,
+    cache_read: f64,
+    cache_write: f64,
+    output: f64,
+    cost: f64,
 }
 
 /// A call in flight: its fields (name, ts) and the tool record of it the
@@ -384,6 +398,10 @@ pub struct Session {
     hook_at: f64,
     line_run: Option<OpenRun>,
     run_entry: Option<RunEntry>,
+    // Grok Build's usage.json as last read (its stamp), and what each of
+    // its turns' calls counted so far, by turn and model.
+    usage_stamp: Option<String>,
+    usage_counted: HashMap<String, Counted>,
     recent_tools: Vec<ToolRec>,
     error_streak: f64,
     // Undefined (None) until the first reset.
@@ -438,6 +456,8 @@ impl Session {
             hook_at: 0.0,
             line_run: None,
             run_entry: None,
+            usage_stamp: None,
+            usage_counted: HashMap::new(),
             recent_tools: Vec::new(),
             error_streak: 0.0,
             error_since: None,
@@ -472,6 +492,17 @@ impl Session {
     /// One call at API prices on its day, as the stats panel prices it.
     /// Two days are kept.
     pub fn add_call(&mut self, model: &Value, call: &Call, ts: f64) {
+        let parts = pricing::cost_parts(&string_of(Some(model)), Some(ts), &call.tokens);
+        self.priced(model, call, ts, parts.map(|c| c.total));
+    }
+
+    /// A call at what its app said it cost (Grok Build's turns), or, when
+    /// it didn't say (`cost` None), one without a price.
+    pub fn add_reported(&mut self, model: &Value, call: &Call, ts: f64, cost: Option<f64>) {
+        self.priced(model, call, ts, cost);
+    }
+
+    fn priced(&mut self, model: &Value, call: &Call, ts: f64, cost: Option<f64>) {
         let day = day_key(ts);
         let tag = str_tag(&day);
         if !self.spend.contains(&tag) {
@@ -481,9 +512,8 @@ impl Session {
             }
         }
         let name = string_of(Some(model));
-        let parts = pricing::cost_parts(&name, Some(ts), &call.tokens);
         let d = &mut self.spend.get_mut(&tag).expect("added above when missing, and the newest stays").1;
-        match parts {
+        match cost {
             None => {
                 let plain = pricing::plain_model(&name);
                 let unpriced = if !plain.is_empty() {
@@ -498,7 +528,8 @@ impl Session {
                 }
             }
             Some(c) => {
-                d.cost += c.total;
+                d.cost += c;
+                d.priced = true;
                 d.tokens += call.tokens.total();
             }
         }
@@ -1021,6 +1052,64 @@ impl Telemetry {
                 ("model", model),
                 ("live", Value::Bool(live)),
             ])));
+        }
+    }
+
+    /// Whether a Grok Build session's usage.json was written since it was
+    /// last read (`stamp`, its size and time, as the reader makes it),
+    /// noting that it's read now. Grok writes it as each turn ends, before
+    /// the update that ends the turn, so whoever reads the lines asks after
+    /// each of a session's lines.
+    pub fn grok_usage_due(&mut self, id: &str, stamp: &str) -> bool {
+        let Some(i) = self.find(id) else { return false };
+        let s = &mut self.sessions[i];
+        if s.usage_stamp.as_deref() == Some(stamp) {
+            return false;
+        }
+        s.usage_stamp = Some(stamp.to_string());
+        true
+    }
+
+    /// A Grok Build session's usage.json and summary.json, as read (live.js's
+    /// applyGrokUsage): each of its turns' calls counted once, when the turn
+    /// ended, as Claude Code's calls are, at what Grok said it cost, or
+    /// without a price when it didn't say; and what a turn written again
+    /// adds (Grok folds what you send during a turn into it). A subagent's
+    /// are its parent's, whose turns count them, and a fork's turns from
+    /// before it are the session's it came from (grok.rs's usage_turns).
+    pub fn grok_usage(&mut self, id: &str, usage: Option<&Value>, summary: Option<&Value>, live: bool, out: &mut Vec<Emit>) {
+        let Some(i) = self.find(id) else { return };
+        if crate::grok::usage_subagent(summary) {
+            return;
+        }
+        for c in crate::grok::usage_turns(usage, summary) {
+            let s = &mut self.sessions[i];
+            let was = s.usage_counted.get(&c.key).copied().unwrap_or_default();
+            s.usage_counted.insert(c.key.clone(), Counted { input: c.input, cache_read: c.cache_read, cache_write: c.cache_write, output: c.output, cost: c.cost.unwrap_or(0.0) });
+            let (input, cache_read, cache_write, output) =
+                ((c.input - was.input).max(0.0), (c.cache_read - was.cache_read).max(0.0), (c.cache_write - was.cache_write).max(0.0), (c.output - was.output).max(0.0));
+            let n = input + cache_read + cache_write + output;
+            if n.is_nan() || n <= 0.0 {
+                continue;
+            }
+            let model = Value::String(c.model.clone());
+            s.model = model.clone();
+            s.tokens_output += output;
+            s.add_tokens(n, c.t, live);
+            let call = Call {
+                tokens: TokenUsage {
+                    input: Some(input),
+                    cache_read: Some(cache_read),
+                    cache_write_5m: Some(cache_write),
+                    cache_write_1h: Some(0.0),
+                    output: Some(output),
+                    speed: Speed::default(),
+                },
+            };
+            s.add_reported(&model, &call, c.t, c.cost.map(|cost| (cost - was.cost).max(0.0)));
+            if live {
+                out.push(Emit::Tokens(obj(vec![("sessionId", Value::String(s.id.clone())), ("app", "grok".into()), ("n", number(n)), ("ts", number(c.t))])));
+            }
         }
     }
 
@@ -2278,8 +2367,18 @@ impl Telemetry {
         let mut by_app: Vec<(String, f64, f64)> = apps::with("lines").map(|a| (a.id.clone(), 0.0, 0.0)).collect();
         let tailed = by_app.len();
         let mut unpriced: Vec<String> = Vec::new();
+        // The apps with a call today, and those with a price for one: an app
+        // with calls and no price costs what isn't known (null, never 0), and
+        // so does the day when no call today has one.
+        let (mut called, mut priced): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
         for s in &self.sessions {
             let Some((_, d)) = s.spend.get(&day) else { continue };
+            if !called.contains(&s.app.as_str()) {
+                called.push(&s.app);
+            }
+            if d.priced && !priced.contains(&s.app.as_str()) {
+                priced.push(&s.app);
+            }
             match by_app.iter_mut().find(|(app, _, _)| *app == s.app) {
                 Some(slot) => {
                     slot.1 += d.cost;
@@ -2302,9 +2401,16 @@ impl Telemetry {
             }
         }
         unpriced.sort_by(|a, b| jsstr::cmp_units(a, b));
-        let by_app_value: Map<String, Value> = by_app.iter().map(|(app, cost, _)| (app.clone(), number(*cost))).collect();
+        let unknown = |i: usize, app: &str| i < tailed && called.contains(&app) && !priced.contains(&app);
+        let by_app_value: Map<String, Value> =
+            by_app.iter().enumerate().map(|(i, (app, cost, _))| (app.clone(), if unknown(i, app) { Value::Null } else { number(*cost) })).collect();
+        let today = if !called.is_empty() && priced.is_empty() {
+            Value::Null
+        } else {
+            number(by_app.iter().enumerate().take(tailed).fold(0.0, |a, (i, x)| a + if unknown(i, &x.0) { 0.0 } else { x.1 }))
+        };
         obj(vec![
-            ("today", number(by_app.iter().take(tailed).fold(0.0, |a, x| a + x.1))),
+            ("today", today),
             ("byApp", Value::Object(by_app_value)),
             ("perHour", number(per_hour)),
             ("unpriced", Value::Array(unpriced.into_iter().map(Value::String).collect())),
@@ -2705,12 +2811,19 @@ impl Session {
             Some(Value::Object(m)) => m,
             _ => Map::new(),
         };
-        let spend =
-            |d: &Spend| obj(vec![("cost", number(d.cost)), ("tokens", number(d.tokens)), ("unpriced", Value::Array(d.unpriced.iter().cloned().map(Value::String).collect()))]);
+        let spend = |d: &Spend| {
+            obj(vec![
+                ("cost", number(d.cost)),
+                ("tokens", number(d.tokens)),
+                ("unpriced", Value::Array(d.unpriced.iter().cloned().map(Value::String).collect())),
+                ("priced", Value::Bool(d.priced)),
+            ])
+        };
         let spend_of = |v: Option<Value>| Spend {
             cost: num_of(v.as_ref(), "cost"),
             tokens: num_of(v.as_ref(), "tokens"),
             unpriced: list_of(opt_prop(v.as_ref(), "unpriced")).iter().map(js_string).collect(),
+            priced: truthy(opt_prop(v.as_ref(), "priced")),
         };
         let seen = |(): &()| Value::Bool(true);
         let seen_of = |_: Option<Value>| ();

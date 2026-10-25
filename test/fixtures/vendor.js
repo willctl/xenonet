@@ -317,6 +317,21 @@ export const VENDOR = {
       { record: { timestamp: 1791201600, params: { update: { content: { type: "text" } } } }, drift: [["missing-field", "params.update.sessionUpdate"]] },
     ],
   },
+  "spacexai/grok-build/usage": {
+    fits: [
+      {
+        sessionId: "019a3b5c-0000-7000-8000-00000000000a",
+        updatedAt: "2026-10-16T12:05:00Z",
+        session: { inputTokens: 52000, outputTokens: 1800, cachedReadTokens: 40000, cacheCreationTokens: 0, reasoningTokens: 600, totalTokens: 53800, modelCalls: 4, turnCount: 1, primaryModelId: "grok-build", modelUsage: { "grok-build": { inputTokens: 52000, outputTokens: 1800, cachedReadTokens: 40000, cacheCreationTokens: 0, reasoningTokens: 600, totalTokens: 53800, modelCalls: 4 } } },
+        turns: [{ turnNumber: 1, endedAt: "2026-10-16T12:05:00Z", turnId: "t-1", inputTokens: 52000, outputTokens: 1800, cachedReadTokens: 40000, cacheCreationTokens: 0, reasoningTokens: 600, totalTokens: 53800, modelCalls: 4, turnCount: 1, primaryModelId: "grok-build", modelUsage: { "grok-build": { inputTokens: 52000, outputTokens: 1800, cachedReadTokens: 40000, cacheCreationTokens: 0, reasoningTokens: 600, totalTokens: 53800, modelCalls: 4 } } }],
+      },
+      { sessionId: "019a3b5c-0000-7000-8000-00000000000b", session: { inputTokens: 900, outputTokens: 80, totalTokens: 980, modelCalls: 1, costUsdTicks: 12000000, costIsPartial: false }, turns: [] },
+    ],
+    odd: [
+      { record: { turns: [{ turnNumber: 1, endedAt: "2026-10-16T12:05:00Z", inputTokens: "52000" }] }, drift: [["type-change", "turns[].inputTokens"]], strip: [["turns", 0, "inputTokens"]] },
+      { record: { session: { costUsdTicks: "12" } }, drift: [["type-change", "session.costUsdTicks"]], strip: [["session", "costUsdTicks"]] },
+    ],
+  },
   "nous/hermes-agent/install-stamp": {
     fits: [{ schemaVersion: 2, commit: "0a1b2c3d4e", commitDate: 1791200000, branch: "main", builtAt: "2026-10-05T12:00:00+00:00", dirty: false, source: "git", distribution: null, updateMechanism: "self", baseVersion: "0.21.5", displayVersion: "0.21.5+12.g0a1b2c3", distance: 12, payload: "bootstrap", tag: null }],
     odd: [

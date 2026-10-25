@@ -274,6 +274,9 @@ pub enum Kind {
     Call,
     Tool,
     Result,
+    /// How full the context is, where a line says (Grok Build's usage
+    /// updates).
+    Context,
     Other,
 }
 
@@ -316,6 +319,16 @@ pub struct Event {
     pub name: Val,
     pub text: Option<Value>,
     pub error: Option<Value>,
+    /// A call's cost as its app said it (Grok Build's turns): None where it
+    /// says nothing, `Some(None)` where it says it doesn't know.
+    pub cost: Option<Option<f64>>,
+    /// A call's model calls (a Grok Build turn's), where it isn't one.
+    pub calls: Option<f64>,
+    /// Whether a call is a whole turn's (Grok Build's), whose tokens are
+    /// its calls' added up, not how full the context was.
+    pub turn: bool,
+    /// How full the context was (a context event's).
+    pub used: Option<Value>,
 }
 
 impl Event {
@@ -332,11 +345,16 @@ impl Event {
             name: Val::default(),
             text: None,
             error: None,
+            cost: None,
+            calls: None,
+            turn: false,
+            used: None,
         }
     }
 
     /// An event as JS hands one to summarize: { kind, t, agentId, model,
-    /// effort, tokens, fast, priority, window, id, name, text, error }.
+    /// effort, tokens, fast, priority, window, id, name, text, error, cost,
+    /// calls, turn, used }.
     pub fn from_js(e: &Value, ids: &mut EventIds) -> Result<Event, TypeError> {
         let e = Some(e);
         let kind = match prop(e, "kind")?.and_then(Value::as_str) {
@@ -348,6 +366,7 @@ impl Event {
             Some("call") => Kind::Call,
             Some("tool") => Kind::Tool,
             Some("result") => Kind::Result,
+            Some("context") => Kind::Context,
             _ => Kind::Other,
         };
         let mut ev = Event::new(kind, js_number(prop(e, "t")?));
@@ -371,6 +390,10 @@ impl Event {
         ev.name = ids.val(prop(e, "name")?);
         ev.text = prop(e, "text")?.cloned();
         ev.error = prop(e, "error")?.cloned();
+        ev.cost = prop(e, "cost")?.map(|c| nn(Some(c)).map(|c| js_number(Some(c))));
+        ev.calls = nn(prop(e, "calls")?).map(|c| js_number(Some(c)));
+        ev.turn = truthy(prop(e, "turn")?);
+        ev.used = prop(e, "used")?.cloned();
         Ok(ev)
     }
 }
@@ -593,6 +616,14 @@ fn line_events(evs: &[LineEvent<'_>], agent: &Val, seen: &mut HashSet<Key>, said
             // A subagent's end isn't the turn's; an interruption or a
             // refusal isn't counted.
             le::Kind::TurnEnd(End::EndTurn | End::TaskComplete { .. }) if !sub => events.push(Event::new(Kind::End, t)),
+            // How full the context is, where a line says it (Grok Build's
+            // usage updates; its calls are a turn's).
+            le::Kind::Context { used: Some(used @ Value::Number(n)), window } if &*e.origin == "usage_update" && !sub && n.as_f64().is_some_and(f64::is_finite) => {
+                let mut ev = Event::new(Kind::Context, t);
+                ev.used = Some((*used).clone());
+                ev.window = Some(nn(*window).cloned().unwrap_or(Value::Null));
+                events.push(ev);
+            }
             // A compacted context carries on the turn it interrupted.
             le::Kind::Compact { meta, sidechain } if !sub && !truthy(*meta) && !truthy(*sidechain) => events.push(Event::new(Kind::Compact, t)),
             le::Kind::Prompt(p) => {
@@ -659,6 +690,10 @@ struct Turn {
     tools: f64,
     errors: f64,
     ended: bool,
+    // Its calls, and whether one of them had a price: a turn whose calls
+    // had none costs what isn't known.
+    calls: f64,
+    priced: bool,
 }
 
 struct ModelSum {
@@ -723,12 +758,28 @@ pub fn summarize(events: &[Event], app: Js<'_>) -> Result<Out, TypeError> {
     let mut labels: HashMap<Key, String> = HashMap::new();
     let mut spawns: Vec<&Event> = Vec::new();
     let mut unpriced: Ordered<Val> = Ordered::new();
+    // Whether a call was priced at a cost its app said, which isn't split
+    // by kind of token (Grok Build's turns).
+    let mut unsplit = false;
     let start_turn = |turns: &mut Vec<Turn>, t: f64, prompt: Js<'_>| -> Result<(), TypeError> {
         let prompt = match prompt {
             None | Some(Value::Null) => None,
             p => Some(clipped(p, 140)?),
         };
-        turns.push(Turn { n: (turns.len() + 1) as f64, start: t, end: t, prompt, tokens: Prim::Num(0.0), cost: 0.0, by_model: Vec::new(), tools: 0.0, errors: 0.0, ended: false });
+        turns.push(Turn {
+            n: (turns.len() + 1) as f64,
+            start: t,
+            end: t,
+            prompt,
+            tokens: Prim::Num(0.0),
+            cost: 0.0,
+            by_model: Vec::new(),
+            tools: 0.0,
+            errors: 0.0,
+            ended: false,
+            calls: 0.0,
+            priced: false,
+        });
         Ok(())
     };
 
@@ -746,6 +797,11 @@ pub fn summarize(events: &[Event], app: Js<'_>) -> Result<Out, TypeError> {
             }
             Kind::Spawn => {
                 spawns.push(e);
+                continue;
+            }
+            // How full the context got, where a line says (Grok Build's).
+            Kind::Context => {
+                context.push(Point { t: e.t, used: Prim::of(e.used.as_ref())?, window: e.window.clone().map_or(Out::Undef, Out::Json) });
                 continue;
             }
             _ => {}
@@ -769,28 +825,46 @@ pub fn summarize(events: &[Event], app: Js<'_>) -> Result<Out, TypeError> {
                 turn.end = max(turn.end, e.t);
                 let model = to_str_or_empty(e.model.js())?;
                 let figures = e.tokens.as_ref().try_map(Tok::for_price)?;
-                let parts = pricing::cost_parts(&model, Some(e.t), &figures);
+                // A call its app said the cost of (Grok Build's turns) is
+                // that, or without a price when it didn't say; the rest at
+                // API prices, by kind of token.
+                let (paid_at, split) = match e.cost {
+                    Some(said) => (said, None),
+                    None => {
+                        let parts = pricing::cost_parts(&model, Some(e.t), &figures);
+                        (parts.map(|c| c.total), parts)
+                    }
+                };
                 let k = e.tokens.as_ref().try_map(Tok::prim)?;
                 let [input, cache_read, write5m, write1h, output] = [k.input, k.cache_read, k.cache_write_5m, k.cache_write_1h, k.output];
                 let tokens = [input.clone(), cache_read.clone(), write5m.add(&write1h), output.clone()];
                 let sum = tokens.iter().fold(Prim::Num(0.0), |a, x| a.add(x));
-                let paid = parts.map_or(0.0, |c| c.total);
-                calls += 1.0;
+                let paid = paid_at.unwrap_or(0.0);
+                // A turn of Grok Build's is its model calls, all at once.
+                let n = e.calls.unwrap_or(1.0);
+                calls += n;
                 total_tokens = total_tokens.add(&sum);
                 for (i, x) in tokens.iter().enumerate() {
                     kind_tokens[i] = kind_tokens[i].add(x);
                 }
+                turn.calls += n;
                 let plain = pricing::plain_model(&model);
                 let name = if plain.is_empty() { e.model.clone() } else { Val { v: Some(Value::String(plain.clone())), id: 0 } };
-                match parts {
-                    Some(c) => {
-                        cost += c.total;
-                        for (i, x) in [c.input, c.cache_read, c.cache_write, c.output].into_iter().enumerate() {
-                            kind_cost[i] += x;
+                match paid_at {
+                    Some(total) => {
+                        cost += total;
+                        turn.priced = true;
+                        match split {
+                            Some(c) => {
+                                for (i, x) in [c.input, c.cache_read, c.cache_write, c.output].into_iter().enumerate() {
+                                    kind_cost[i] += x;
+                                }
+                            }
+                            None => unsplit = true,
                         }
                     }
                     None => {
-                        unpriced_calls += 1.0;
+                        unpriced_calls += n;
                         unpriced.set(name.key(), name.clone());
                     }
                 }
@@ -799,12 +873,12 @@ pub fn summarize(events: &[Event], app: Js<'_>) -> Result<Out, TypeError> {
                     calls: 0.0,
                     tokens: Prim::Num(0.0),
                     cost: 0.0,
-                    priced: parts.is_some(),
+                    priced: paid_at.is_some(),
                     from: e.t,
                     to: e.t,
                     efforts: Ordered::new(),
                 });
-                m.calls += 1.0;
+                m.calls += n;
                 m.tokens = m.tokens.add(&sum);
                 m.cost += paid;
                 m.to = e.t;
@@ -836,11 +910,13 @@ pub fn summarize(events: &[Event], app: Js<'_>) -> Result<Out, TypeError> {
                         from: e.t,
                         to: e.t,
                     });
-                    a.calls += 1.0;
+                    a.calls += n;
                     a.tokens = a.tokens.add(&sum);
                     a.cost += paid;
                     a.to = e.t;
-                } else {
+                } else if !e.turn {
+                    // A turn's tokens are its calls', added up: not how full
+                    // the context was.
                     let used = input.add(&cache_read).add(&write5m).add(&write1h).add(if claude { &output } else { &Prim::Num(0.0) });
                     let window = match nn(e.window.as_ref()) {
                         Some(w) => Out::Json(w.clone()),
@@ -895,7 +971,7 @@ pub fn summarize(events: &[Event], app: Js<'_>) -> Result<Out, TypeError> {
         ["input", "cacheRead", "cacheWrite", "output"]
             .iter()
             .enumerate()
-            .map(|(i, x)| (x.to_string(), Out::obj(vec![("tokens", kind_tokens[i].out()), ("cost", priced_or_null(kind_cost[i]))])))
+            .map(|(i, x)| (x.to_string(), Out::obj(vec![("tokens", kind_tokens[i].out()), ("cost", if unsplit { Out::Null } else { priced_or_null(kind_cost[i]) })])))
             .collect(),
     );
 
@@ -930,7 +1006,7 @@ pub fn summarize(events: &[Event], app: Js<'_>) -> Result<Out, TypeError> {
                 ("end", Out::Num(t.end)),
                 ("prompt", t.prompt.clone().map_or(Out::Null, Out::Str)),
                 ("tokens", t.tokens.out()),
-                ("cost", Out::Num(t.cost)),
+                ("cost", if t.calls != 0.0 && !t.calls.is_nan() && !t.priced { Out::Null } else { Out::Num(t.cost) }),
                 ("byModel", Out::Obj(t.by_model.iter().map(|(k, tokens, cost)| (k.clone(), Out::obj(vec![("tokens", tokens.out()), ("cost", Out::Num(*cost))]))).collect())),
                 ("tools", Out::Num(t.tools)),
                 ("errors", Out::Num(t.errors)),
@@ -1158,15 +1234,71 @@ impl Kept {
     }
 }
 
+/// A Grok Build session's usage.json and summary.json, as read, which its
+/// stats count its tokens and cost from.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GrokFiles<'a> {
+    pub usage: Option<&'a Value>,
+    pub summary: Option<&'a Value>,
+}
+
+/// The files beside a Grok Build session's updates that its stats read.
+pub fn grok_files(updates: &str) -> [String; 2] {
+    let dir = xenonet_base::nodepath::dirname(updates);
+    ["usage.json", "summary.json"].map(|name| paths::join(&dir, name))
+}
+
+/// A session's events with its turns' calls among them (Grok Build's, from
+/// its usage.json: grok.rs's usage_turns), each when its turn ended, after
+/// the lines written by then (stats.js's withTurns).
+pub fn with_turns(events: Vec<Event>, turns: &[xenonet_sources::grok::UsageTurn], ids: &mut EventIds) -> Vec<Event> {
+    let ids = &mut ids.0;
+    let mut calls: Vec<Event> = turns
+        .iter()
+        .map(|c| {
+            let mut ev = Event::new(Kind::Call, c.t);
+            ev.agent = ids.val(Some(&Value::Null));
+            ev.model = ids.val(Some(&Value::String(c.model.clone())));
+            ev.effort = ids.val(Some(&Value::Null));
+            ev.tokens = TokenUsage {
+                input: Figure::Worked(c.input),
+                cache_read: Figure::Worked(c.cache_read),
+                cache_write_5m: Figure::Worked(c.cache_write),
+                cache_write_1h: Figure::Worked(0.0),
+                output: Figure::Worked(c.output),
+                speed: Speed::default(),
+            };
+            ev.cost = Some(c.cost);
+            ev.calls = Some(c.calls);
+            ev.turn = true;
+            ev
+        })
+        .collect();
+    xenonet_base::sort::sort_by(&mut calls, |a, b| order(a.t - b.t));
+    let mut out = Vec::with_capacity(events.len() + calls.len());
+    let mut calls = calls.into_iter().peekable();
+    for e in events {
+        while calls.peek().is_some_and(|c| c.t < e.t) {
+            out.extend(calls.next());
+        }
+        out.push(e);
+    }
+    out.extend(calls);
+    out
+}
+
 /// A session's stats from its files, read: { id, ...summarize }.
-pub fn session_stats(session_id: &str, files: Vec<File>) -> Result<Out, TypeError> {
+pub fn session_stats(session_id: &str, files: Vec<File>, grok: GrokFiles<'_>) -> Result<Out, TypeError> {
     let app = session_id.split(':').next().unwrap_or_default();
     let mut ids = EventIds::default();
     // An app XenoNet doesn't tail is refused, not read as Claude Code.
     let Some(tailed) = xenonet_base::apps::tailed_or_text(Some(app), None) else {
         return Err(TypeError(xenonet_base::apps::untailed(app)));
     };
-    let events = session_events(tailed, files, &mut ids)?;
+    let mut events = session_events(tailed, files, &mut ids)?;
+    if app == "grok" {
+        events = with_turns(events, &xenonet_sources::grok::usage_turns(grok.usage, grok.summary), &mut ids);
+    }
     let Out::Obj(mut fields) = summarize(&events, Some(&Value::String(app.to_string())))? else { unreachable!() };
     fields.insert(0, ("id".into(), Out::Str(session_id.to_string())));
     Ok(Out::Obj(fields))
@@ -1184,8 +1316,8 @@ mod tests {
 
     #[test]
     fn a_session_of_an_app_xenonet_doesnt_tail_is_refused() {
-        assert_eq!(session_stats("gemini-cli:x0000001", Vec::new()).map(|_| ()), Err(TypeError("XenoNet doesn't read Gemini CLI's transcripts".into())));
-        assert!(session_stats("claude:x0000001", Vec::new()).is_ok());
+        assert_eq!(session_stats("gemini-cli:x0000001", Vec::new(), GrokFiles::default()).map(|_| ()), Err(TypeError("XenoNet doesn't read Gemini CLI's transcripts".into())));
+        assert!(session_stats("claude:x0000001", Vec::new(), GrokFiles::default()).is_ok());
     }
 
     #[test]
@@ -1231,7 +1363,7 @@ mod tests {
             json!({ "type": "user", "timestamp": at(3.0), "isSidechain": true, "message": { "content": "Find every refund test" } }),
             json!({ "type": "assistant", "timestamp": at(4.0), "isSidechain": true, "message": { "id": "s1", "model": "claude-haiku-4-5", "usage": usage(5, 100, 0, 20), "content": [] } }),
         ];
-        let s = session_stats("claude:x", vec![File { agent: None, lines: main }, File { agent: Some(json!("a1")), lines: sub }]).unwrap();
+        let s = session_stats("claude:x", vec![File { agent: None, lines: main }, File { agent: Some(json!("a1")), lines: sub }], GrokFiles::default()).unwrap();
         assert_eq!(field(field(&s, "totals"), "calls"), &Out::Num(3.0));
         let Out::Arr(tools) = field(&s, "tools") else { panic!() };
         assert_eq!(field(&tools[0], "ms"), &Out::Num(60e3));
@@ -1252,7 +1384,7 @@ mod tests {
             count(2.0, 12000),
             json!({ "type": "event_msg", "timestamp": at(3.0), "payload": { "type": "task_complete" } }),
         ];
-        let s = session_stats("codex:x", vec![File { agent: None, lines }]).unwrap();
+        let s = session_stats("codex:x", vec![File { agent: None, lines }], GrokFiles::default()).unwrap();
         assert_eq!(field(field(&s, "totals"), "calls"), &Out::Num(1.0));
         assert_eq!(field(field(field(&s, "kinds"), "input"), "tokens"), &Out::Num(3000.0));
         let Out::Arr(turns) = field(&s, "turns") else { panic!() };

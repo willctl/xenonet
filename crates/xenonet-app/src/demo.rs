@@ -319,9 +319,11 @@ struct Writer {
     id: String,
     cwd: String,
     file: String,
-    // A Grok Build session's folder, and when its summary says it started.
+    // A Grok Build session's folder, when its summary says it started, and
+    // its ledger's turns.
     dir: String,
     started: Option<f64>,
+    ledger: Vec<Value>,
     ctx: f64,
     tokens: f64,
     turn: usize,
@@ -349,7 +351,21 @@ impl Writer {
             NATIVE.join(&[&day, &format!("rollout-{}-{id}.jsonl", iso(now)[..19].replace(':', "-"))])
         };
         fsx::mkdir_p(&NATIVE.dirname(&file), None)?;
-        Ok(Writer { s: s.clone(), app, id, cwd, file, dir, started: None, ctx: 18000.0 + i as f64 * 2100.0, tokens: 0.0, turn: 0, step: -1, entries: Vec::new() })
+        Ok(Writer {
+            s: s.clone(),
+            app,
+            id,
+            cwd,
+            file,
+            dir,
+            started: None,
+            ledger: Vec::new(),
+            ctx: 18000.0 + i as f64 * 2100.0,
+            tokens: 0.0,
+            turn: 0,
+            step: -1,
+            entries: Vec::new(),
+        })
     }
 
     fn write(&self, objs: &[Value]) {
@@ -447,8 +463,9 @@ impl Writer {
             for piece in sentences(text) {
                 self.grok(ts, json!({ "sessionUpdate": "agent_message_chunk", "content": { "type": "text", "text": piece } }));
             }
-            self.usage(a);
+            let u = self.usage(a);
             self.grok(ts, json!({ "sessionUpdate": "usage_update", "used": n(self.ctx), "size": GROK_WINDOW }));
+            self.grok_usage(ts, &u);
             return self.grok_summary(ts);
         }
         self.codex_tokens(ts, a);
@@ -582,6 +599,54 @@ impl Writer {
             json!([{ "type": "content", "content": { "type": "text", "text": if ok { "ok" } else { "1 failed" } } }])
         };
         self.grok(ts + 3000.0, json!({ "sessionUpdate": "tool_call_update", "toolCallId": id, "status": if ok { "completed" } else { "failed" }, "content": content }));
+    }
+
+    /// Its ledger beside the updates, as Grok writes it at each turn's end:
+    /// the turn's tokens (a model call for each step and the reply, each
+    /// with the context so far, most of it read from the cache), and no
+    /// cost, as on a SuperGrok sign-in.
+    fn grok_usage(&mut self, ts: f64, u: &Value) {
+        let turns = self.turns();
+        let steps = turns.get(self.turn % turns.len().max(1)).and_then(|t| t.get("steps")).and_then(Value::as_array).map_or(0, Vec::len);
+        let calls = steps as f64 + 1.0;
+        let out = u.get("output_tokens").and_then(Value::as_f64).unwrap_or(0.0);
+        let row = json!({
+            "inputTokens": n(self.ctx * calls),
+            "outputTokens": n(out),
+            "cachedReadTokens": n((self.ctx - 1200.0) * calls),
+            "cacheCreationTokens": 0,
+            "reasoningTokens": n((out * 0.3 + 0.5).floor()),
+            "totalTokens": n(self.ctx * calls + out),
+            "modelCalls": n(calls),
+        });
+        let k = self.ledger.len() + 1;
+        let mut turn = Map::new();
+        turn.insert("turnNumber".into(), json!(k));
+        turn.insert("endedAt".into(), json!(iso(ts)));
+        turn.insert("turnId".into(), json!(format!("turn-{k}")));
+        if let Value::Object(fields) = &row {
+            turn.extend(fields.clone());
+        }
+        turn.insert("turnCount".into(), json!(1));
+        turn.insert("primaryModelId".into(), json!(MODEL_GROK));
+        let mut by_model = Map::new();
+        by_model.insert(MODEL_GROK.into(), row);
+        turn.insert("modelUsage".into(), Value::Object(by_model));
+        self.ledger.push(Value::Object(turn));
+        let sum = |key: &str| n(self.ledger.iter().fold(0.0, |a, t| a + t.get(key).and_then(Value::as_f64).unwrap_or(0.0)));
+        let session = json!({
+            "inputTokens": sum("inputTokens"),
+            "outputTokens": sum("outputTokens"),
+            "cachedReadTokens": sum("cachedReadTokens"),
+            "cacheCreationTokens": 0,
+            "reasoningTokens": sum("reasoningTokens"),
+            "totalTokens": sum("totalTokens"),
+            "modelCalls": sum("modelCalls"),
+            "turnCount": self.ledger.len(),
+            "primaryModelId": MODEL_GROK,
+        });
+        let ledger = json!({ "sessionId": self.id, "updatedAt": iso(ts), "session": session, "turns": self.ledger });
+        let _ = fsx::write_file(&NATIVE.join(&[&self.dir, "usage.json"]), format!("{}\n", stringify(&ledger, 2)).as_bytes(), None);
     }
 
     /// Its summary beside the updates, written when the session starts and

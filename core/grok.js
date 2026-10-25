@@ -10,7 +10,7 @@
 //
 // A session is grok:<session id> to the rest of XenoNet. The Rust has a twin
 // of the listing (crates/xenonet-sources/src/grok.rs), which the binary
-// runs.
+// runs. Its tokens and cost, in its usage.json, are grok-usage.js's.
 import fs from "node:fs";
 import path from "node:path";
 import { config } from "./config.js";
@@ -19,15 +19,11 @@ import { Gatherer } from "./blocks/gatherer.js";
 import { reader } from "./vendor.js";
 import { readNewLines } from "./lines.js";
 import { grok } from "./events.js";
+import { grokTime } from "./grok-usage.js";
+
+export { grokTime };
 
 const summaries = reader("spacexai/grok-build/session-summary");
-
-// A time as summary.json writes it (RFC 3339), or in Unix seconds or
-// milliseconds; null when it isn't one.
-export function grokTime(t) {
-  const ms = typeof t === "string" ? Date.parse(t) : typeof t === "number" && t > 0 ? (t < 1e12 ? t * 1000 : t) : NaN;
-  return Number.isFinite(ms) ? ms : null;
-}
 
 // Text's first line, trimmed, at most n characters.
 function firstLine(s, n = 80) {

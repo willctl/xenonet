@@ -251,9 +251,10 @@ pub fn stats_app_of(session_id: String) -> String {
     session_id.split(':').next().unwrap_or_default().to_string()
 }
 
-/// A session's stats from its files read: [{ agentId, lines: [record] }].
+/// A session's stats from its files read: [{ agentId, lines: [record] }],
+/// and a Grok Build session's usage.json and summary.json.
 #[napi(js_name = "sessionStats")]
-pub fn session_stats(env: Env, session_id: String, files: Json) -> Result<OutJs> {
+pub fn session_stats(env: Env, session_id: String, files: Json, usage: MaybeJson, summary: MaybeJson) -> Result<OutJs> {
     let files = values(files)
         .into_iter()
         .map(|f| {
@@ -264,7 +265,7 @@ pub fn session_stats(env: Env, session_id: String, files: Json) -> Result<OutJs>
             File { agent: f.remove("agentId"), lines: f.remove("lines").map(|l| values(Json(l))).unwrap_or_default() }
         })
         .collect();
-    answer(env, stats::session_stats(&session_id, files))
+    answer(env, stats::session_stats(&session_id, files, stats::GrokFiles { usage: usage.0.as_ref(), summary: summary.0.as_ref() }))
 }
 
 #[napi(js_name = "statsSummarize")]

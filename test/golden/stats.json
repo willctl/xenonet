@@ -1626,25 +1626,25 @@
   "id": "grok:0190d3e0-0000-7000-8000-000000000015",
   "app": "grok",
   "from": 1791028240000,
-  "to": 1791028643000,
-  "activeMs": 306000,
+  "to": 1791028690000,
+  "activeMs": 400000,
   "totals": {
-   "calls": 0,
-   "input": 0,
-   "cacheRead": 0,
+   "calls": 8,
+   "input": 9600,
+   "cacheRead": 416444,
    "cacheWrite": 0,
-   "output": 0,
-   "tokens": 0,
+   "output": 1125,
+   "tokens": 427169,
    "cost": null,
-   "unpricedCalls": 0
+   "unpricedCalls": 8
   },
   "kinds": {
    "input": {
-    "tokens": 0,
+    "tokens": 9600,
     "cost": null
    },
    "cacheRead": {
-    "tokens": 0,
+    "tokens": 416444,
     "cost": null
    },
    "cacheWrite": {
@@ -1652,31 +1652,52 @@
     "cost": null
    },
    "output": {
-    "tokens": 0,
+    "tokens": 1125,
     "cost": null
    }
   },
-  "models": [],
+  "models": [
+   {
+    "model": "grok-build",
+    "calls": 8,
+    "tokens": 427169,
+    "cost": null,
+    "priced": false,
+    "from": 1791028440000,
+    "to": 1791028690000,
+    "efforts": []
+   }
+  ],
   "turns": [
    {
     "n": 1,
     "start": 1791028240000,
-    "end": 1791028393000,
+    "end": 1791028440000,
     "prompt": "Add a dark mode to the storefront. Follow the system setting, with a toggle in the header.",
-    "tokens": 0,
-    "cost": 0,
-    "byModel": {},
+    "tokens": 207679,
+    "cost": null,
+    "byModel": {
+     "grok-build": {
+      "tokens": 207679,
+      "cost": 0
+     }
+    },
     "tools": 3,
     "errors": 0
    },
    {
     "n": 2,
     "start": 1791028490000,
-    "end": 1791028643000,
+    "end": 1791028690000,
     "prompt": "Add a dark mode to the storefront. Follow the system setting, with a toggle in the header.",
-    "tokens": 0,
-    "cost": 0,
-    "byModel": {},
+    "tokens": 219490,
+    "cost": null,
+    "byModel": {
+     "grok-build": {
+      "tokens": 219490,
+      "cost": 0
+     }
+    },
     "tools": 3,
     "errors": 0
    }
@@ -1708,36 +1729,49 @@
    }
   ],
   "subagents": [],
-  "context": [],
+  "context": [
+   {
+    "t": 1791028440000,
+    "used": 51771,
+    "window": 256000
+   },
+   {
+    "t": 1791028690000,
+    "used": 54740,
+    "window": 256000
+   }
+  ],
   "compactions": [],
   "pricing": {
    "checked": "2026-10-03",
-   "unpriced": []
+   "unpriced": [
+    "grok-build"
+   ]
   }
  },
  "grok:0190d3e0-0000-7000-8000-000000000016": {
   "id": "grok:0190d3e0-0000-7000-8000-000000000016",
   "app": "grok",
   "from": 1791028470000,
-  "to": 1791028523000,
-  "activeMs": 53000,
+  "to": 1791028570000,
+  "activeMs": 100000,
   "totals": {
-   "calls": 0,
-   "input": 0,
-   "cacheRead": 0,
+   "calls": 2,
+   "input": 2400,
+   "cacheRead": 102538,
    "cacheWrite": 0,
-   "output": 0,
-   "tokens": 0,
+   "output": 905,
+   "tokens": 105843,
    "cost": null,
-   "unpricedCalls": 0
+   "unpricedCalls": 2
   },
   "kinds": {
    "input": {
-    "tokens": 0,
+    "tokens": 2400,
     "cost": null
    },
    "cacheRead": {
-    "tokens": 0,
+    "tokens": 102538,
     "cost": null
    },
    "cacheWrite": {
@@ -1745,20 +1779,36 @@
     "cost": null
    },
    "output": {
-    "tokens": 0,
+    "tokens": 905,
     "cost": null
    }
   },
-  "models": [],
+  "models": [
+   {
+    "model": "grok-build",
+    "calls": 2,
+    "tokens": 105843,
+    "cost": null,
+    "priced": false,
+    "from": 1791028570000,
+    "to": 1791028570000,
+    "efforts": []
+   }
+  ],
   "turns": [
    {
     "n": 1,
     "start": 1791028470000,
-    "end": 1791028523000,
+    "end": 1791028570000,
     "prompt": "Check contrast on every page in dark mode.",
-    "tokens": 0,
-    "cost": 0,
-    "byModel": {},
+    "tokens": 105843,
+    "cost": null,
+    "byModel": {
+     "grok-build": {
+      "tokens": 105843,
+      "cost": 0
+     }
+    },
     "tools": 1,
     "errors": 0
    }
@@ -1774,36 +1824,44 @@
    }
   ],
   "subagents": [],
-  "context": [],
+  "context": [
+   {
+    "t": 1791028570000,
+    "used": 52469,
+    "window": 256000
+   }
+  ],
   "compactions": [],
   "pricing": {
    "checked": "2026-10-03",
-   "unpriced": []
+   "unpriced": [
+    "grok-build"
+   ]
   }
  },
  "grok:0190d3e0-0000-7000-8000-000000000017": {
   "id": "grok:0190d3e0-0000-7000-8000-000000000017",
   "app": "grok",
   "from": 1791024100000,
-  "to": 1791024203000,
-  "activeMs": 103000,
+  "to": 1791024250000,
+  "activeMs": 150000,
   "totals": {
-   "calls": 0,
-   "input": 0,
-   "cacheRead": 0,
+   "calls": 3,
+   "input": 3600,
+   "cacheRead": 163596,
    "cacheWrite": 0,
-   "output": 0,
-   "tokens": 0,
+   "output": 330,
+   "tokens": 167526,
    "cost": null,
-   "unpricedCalls": 0
+   "unpricedCalls": 3
   },
   "kinds": {
    "input": {
-    "tokens": 0,
+    "tokens": 3600,
     "cost": null
    },
    "cacheRead": {
-    "tokens": 0,
+    "tokens": 163596,
     "cost": null
    },
    "cacheWrite": {
@@ -1811,20 +1869,36 @@
     "cost": null
    },
    "output": {
-    "tokens": 0,
+    "tokens": 330,
     "cost": null
    }
   },
-  "models": [],
+  "models": [
+   {
+    "model": "grok-build",
+    "calls": 3,
+    "tokens": 167526,
+    "cost": null,
+    "priced": false,
+    "from": 1791024250000,
+    "to": 1791024250000,
+    "efforts": []
+   }
+  ],
   "turns": [
    {
     "n": 1,
     "start": 1791024100000,
-    "end": 1791024203000,
+    "end": 1791024250000,
     "prompt": "Write down the depot's loading rules as constraints the solver can use.",
-    "tokens": 0,
-    "cost": 0,
-    "byModel": {},
+    "tokens": 167526,
+    "cost": null,
+    "byModel": {
+     "grok-build": {
+      "tokens": 167526,
+      "cost": 0
+     }
+    },
     "tools": 2,
     "errors": 0
    }
@@ -1848,11 +1922,19 @@
    }
   ],
   "subagents": [],
-  "context": [],
+  "context": [
+   {
+    "t": 1791024250000,
+    "used": 55732,
+    "window": 256000
+   }
+  ],
   "compactions": [],
   "pricing": {
    "checked": "2026-10-03",
-   "unpriced": []
+   "unpriced": [
+    "grok-build"
+   ]
   }
  },
  "claude:0190d3e0-0000-7000-8000-0000000000e1": {
@@ -2153,7 +2235,7 @@
     "end": 1791028806000,
     "prompt": "Why is the build slow?",
     "tokens": 15000,
-    "cost": 0,
+    "cost": null,
     "byModel": {
      "ollama/gpt-oss-20b": {
       "tokens": 15000,

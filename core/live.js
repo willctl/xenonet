@@ -22,6 +22,7 @@ import { costParts, plainModel, priorityTier, PRICES_CHECKED } from "./pricing.j
 import { isContextCall, spaceOf } from "./xenolith.js";
 import { APP, TAILED, tailedApp } from "./apps.js";
 import { patchPaths } from "./patch.js";
+import { grokSubagent, grokUsageStamp, grokUsageTurns, readGrokUsage } from "./grok-usage.js";
 
 const PRIME_WINDOW_MS = 24 * 3600e3;
 const SWEEP_MS = 2000;
@@ -204,7 +205,8 @@ class LiveSession {
     this.tokens = { processed: 0, output: 0 };
     this.daily = new Map(); // YYYY-MM-DD → tokens processed
     // YYYY-MM-DD → what its calls would cost at API prices, their tokens,
-    // and the models without a price, for Token use's estimate.
+    // the models without a price, and whether any call had one (`priced`),
+    // for Token use's estimate.
     this.spend = new Map();
     // Codex's model provider and whether it runs on OpenAI's priority tier,
     // which prices its calls.
@@ -252,6 +254,10 @@ class LiveSession {
     // chunks carry on: the last "prompt" or "message", or null for nothing
     // kept yet.
     this.runEntry = null;
+    // Grok Build's usage.json as last read (its stamp), and what each of
+    // its turns' calls counted so far, by turn and model.
+    this.usageStamp = null;
+    this.usageCounted = new Map();
     this.recentTools = [];
     this.errorStreak = 0;
   }
@@ -274,18 +280,28 @@ class LiveSession {
   // One call at API prices on its day, as the stats panel prices it
   // (pricing.js, stats.js). Two days are kept.
   addCall(model, k, ts, opts) {
+    this.#priced(model, k, ts, costParts(model, ts, k, opts)?.total ?? null);
+  }
+
+  // A call at what its app said it cost (Grok Build's turns), or, when it
+  // didn't say (`cost` null), one without a price.
+  addReported(model, k, ts, cost) {
+    this.#priced(model, k, ts, cost);
+  }
+
+  #priced(model, k, ts, cost) {
     const day = dayKey(ts);
     let d = this.spend.get(day);
     if (!d) {
-      this.spend.set(day, (d = { cost: 0, tokens: 0, unpriced: new Set() }));
+      this.spend.set(day, (d = { cost: 0, tokens: 0, unpriced: new Set(), priced: false }));
       while (this.spend.size > 2) this.spend.delete(this.spend.keys().next().value);
     }
-    const parts = costParts(model, ts, k, opts);
-    if (!parts) {
+    if (cost == null) {
       d.unpriced.add(plainModel(model) || model || "unknown");
       return;
     }
-    d.cost += parts.total;
+    d.cost += cost;
+    d.priced = true;
     d.tokens += (k.input ?? 0) + (k.cacheRead ?? 0) + (k.cacheWrite5m ?? 0) + (k.cacheWrite1h ?? 0) + (k.output ?? 0);
   }
 
@@ -587,9 +603,11 @@ export class LiveTelemetry extends EventEmitter {
   // that breaks the normalizer or a handler is counted as an error, so the
   // lines after it are read.
   #line(line, f, prime) {
+    let read = false;
     try {
       const rec = linesOf(f.app).line(line, f);
       if (!rec) return;
+      read = true;
       this.status.lines++;
       // Any app that isn't tailed is read as Claude Code, as linesOf reads
       // it; an app's events other than Codex's have Claude Code's shapes.
@@ -608,6 +626,49 @@ export class LiveTelemetry extends EventEmitter {
       else this.#claude(f, rec, events, !prime);
     } catch {
       this.status.errors++;
+    } finally {
+      if (read && tailedApp(f.app, "claude") === "grok") this.#grokUsage(f, !prime);
+    }
+  }
+
+  // Grok Build's tokens and cost, from the usage.json beside a session's
+  // updates (grok-usage.js), read again when it was written since. Grok
+  // writes it as each turn ends, before the update that ends the turn.
+  #grokUsage(f, live) {
+    const s = this.sessions.get(f.sessionId);
+    if (!s || !f.file) return;
+    const dir = path.dirname(f.file);
+    const stamp = grokUsageStamp(dir);
+    if (stamp == null || stamp === s.usageStamp) return;
+    s.usageStamp = stamp;
+    try {
+      const { usage, summary } = readGrokUsage(dir);
+      this.applyGrokUsage(s, usage, summary, live);
+    } catch {
+      this.status.errors++;
+    }
+  }
+
+  // A Grok Build session's usage.json and summary.json, as read: each of
+  // its turns' calls counted once, when the turn ended, as Claude Code's
+  // calls are, at what Grok said it cost, or without a price when it didn't
+  // say; and what a turn written again adds (Grok folds what you send
+  // during a turn into it). A subagent's are its parent's, whose turns
+  // count them, and a fork's turns from before it are the session's it
+  // came from (grokUsageTurns).
+  applyGrokUsage(s, usage, summary, live) {
+    if (grokSubagent(summary)) return;
+    for (const c of grokUsageTurns(usage, summary)) {
+      const was = s.usageCounted.get(c.key) ?? { input: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0, output: 0, cost: 0 };
+      s.usageCounted.set(c.key, { ...c.tokens, cost: c.cost ?? 0 });
+      const k = { input: Math.max(0, c.tokens.input - was.input), cacheRead: Math.max(0, c.tokens.cacheRead - was.cacheRead), cacheWrite5m: Math.max(0, c.tokens.cacheWrite5m - was.cacheWrite5m), cacheWrite1h: 0, output: Math.max(0, c.tokens.output - was.output) };
+      const n = k.input + k.cacheRead + k.cacheWrite5m + k.output;
+      if (!(n > 0)) continue;
+      s.model = c.model;
+      s.tokens.output += k.output;
+      s.addTokens(n, c.t, live);
+      s.addReported(c.model, k, c.t, c.cost == null ? null : Math.max(0, c.cost - was.cost));
+      if (live) this.emit("tokens", { sessionId: s.id, app: "grok", n, ts: c.t });
     }
   }
 
@@ -1305,27 +1366,35 @@ export class LiveTelemetry extends EventEmitter {
     return this.history.slice(this.#index(since));
   }
 
-  // What today's calls would cost at API prices (pricing.js), by app, and
-  // at this minute's pace: each app's tokens a minute at what its tokens
-  // cost on average today. Models without a price are named, not guessed.
+  // What today's calls would cost at API prices (pricing.js), or what their
+  // app said they cost (Grok Build's), by app, and at this minute's pace:
+  // each app's tokens a minute at what its tokens cost on average today.
+  // Models without a price are named, not guessed, and an app whose calls
+  // today have none costs what isn't known: null, never 0. So does the day,
+  // when no call today has one.
   costs(now, sessions) {
     const day = dayKey(now);
     const byApp = Object.fromEntries(TAILED.map((app) => [app, 0]));
     const tokens = Object.fromEntries(TAILED.map((app) => [app, 0]));
     const unpriced = new Set();
+    const called = new Set(), priced = new Set();
     for (const s of this.sessions.values()) {
       const d = s.spend.get(day);
       if (!d) continue;
+      called.add(s.app);
+      if (d.priced) priced.add(s.app);
       byApp[s.app] += d.cost;
       tokens[s.app] += d.tokens;
       for (const m of d.unpriced) unpriced.add(m);
     }
+    for (const app of TAILED) if (called.has(app) && !priced.has(app)) byApp[app] = null;
     let perHour = 0;
     for (const app of TAILED) {
       const tpm = sessions.filter((s) => s.app === app).reduce((a, s) => a + s.tpm, 0);
       if (tokens[app] > 0) perHour += tpm * 60 * (byApp[app] / tokens[app]);
     }
-    return { today: TAILED.reduce((a, app) => a + byApp[app], 0), byApp, perHour, unpriced: [...unpriced].sort(), checked: PRICES_CHECKED };
+    const today = called.size && !priced.size ? null : TAILED.reduce((a, app) => a + (byApp[app] ?? 0), 0);
+    return { today, byApp, perHour, unpriced: [...unpriced].sort(), checked: PRICES_CHECKED };
   }
 
   // What each session's calls today would cost at API prices, the same

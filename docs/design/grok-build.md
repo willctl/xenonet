@@ -36,6 +36,7 @@ Everything lives under `~/.grok`, or the folder `GROK_HOME` names.
 | `sessions/<group>/<session id>/` | One folder per session. The group is the working directory, URL-encoded. When that's over 255 bytes, the group is a slug and a hash, with the folder in a `.cwd` file inside it. |
 | `…/summary.json` | The session's index entry: `info` (its id and folder), `generated_title`, `title_is_manual`, `session_summary`, `created_at`, `updated_at`, `last_active_at`, `current_model_id`, `parent_session_id`, `session_kind`, `hidden`, `source_workspace_dir`, `head_branch` and more |
 | `…/updates.jsonl` | The conversation, one ACP session update a line, each in an envelope: `{ timestamp, method, params: { sessionId, update } }`, with the time in Unix seconds |
+| `…/usage.json` | The session's tokens and cost, written as each turn ends: `{ sessionId, updatedAt, session, turns: [{ turnNumber, endedAt, turnId, …usage }] }`, each usage with `inputTokens`, `outputTokens`, `cachedReadTokens`, `cacheCreationTokens`, `reasoningTokens`, `modelCalls`, `costUsdTicks` and the same by model (`modelUsage`) |
 | `hooks/*.json` | Your own hooks, which Grok runs without asking |
 | `config.toml` | Settings and MCP servers (`[mcp_servers.<name>]`) |
 | `auth.json` | Grok's sign-in, tokens included |
@@ -65,8 +66,9 @@ list` prints one folder's sessions, for people.
 - A folder with `updates.jsonl` and no `summary.json` yet is a session being
   made. It shows untitled, at the time its updates were written.
 
-Both files go through lenient schemas (`spacexai/grok-build/session-summary`
-and `spacexai/grok-build/update-line`, in
+Both files, and `usage.json`, go through lenient schemas
+(`spacexai/grok-build/session-summary`, `spacexai/grok-build/update-line`
+and `spacexai/grok-build/usage`, in
 `core/schema/vendor/spacexai/grok-build.js`), so a change in Grok's
 formats shows as drift instead of quietly emptying the map. The daily
 provider drift check watches Grok Build's releases too.
@@ -101,6 +103,57 @@ The updates don't say when a turn ends. Grok's hooks do. `Stop`,
 `StopCancelled` and `StopFailure` end it. A session XenoNet hasn't heard a
 hook from in the last hour ends a turn after a minute with no new line and
 no tool call open.
+
+### Tokens and cost
+
+The updates say how full the context is (`usage_update`), not what a call
+took. Grok keeps that in the session's `usage.json`, which it writes as
+each turn ends, before the update that ends the turn
+(`session/usage_file.rs` in its source). XenoNet reads it with
+`grokUsageTurns` (`core/grok-usage.js`, `usage_turns` in `grok.rs`), through
+its lenient schema (`spacexai/grok-build/usage`), and counts it as it
+counts Claude Code's calls:
+
+- A turn is a call on each model it used (`modelUsage`, else the turn's
+  own figures on `primaryModelId`), at the time it ended (`endedAt`), with
+  its model calls (`modelCalls`). A turn with no end time is left out, as
+  a line with no time is.
+- `inputTokens` is the whole prompt. Grok's ledger sums the API's
+  `prompt_tokens`, which hold the cache reads, and adds cache reads and
+  writes into it for a model on Anthropic's API. So XenoNet's input is
+  `inputTokens` less `cachedReadTokens` and `cacheCreationTokens`, with
+  those two apart. The output is `outputTokens`, reasoning included, as
+  the Responses API counts it; `reasoningTokens` isn't added again.
+- The cost is `costUsdTicks / 1e10` dollars, as Grok recorded it. XenoNet
+  has no xAI prices and doesn't guess one. Grok records a cost only when a
+  call says it, which an API key's calls do and a SuperGrok or X Premium
+  sign-in's often don't. With none, or with only some (`costIsPartial`),
+  the cost isn't known: it's null, never 0, wherever XenoNet shows a cost.
+- The session totals (`session`) include history a session took over, so
+  XenoNet counts turns, not totals. A fork, and a session resumed into a
+  new one, starts with a copy of its parent's ledger, so in a session that
+  came from another (`parent_session_id`), the turns that ended before it
+  was made (`forked_at`, else `created_at`) are the parent's and aren't
+  counted again.
+- Grok adds a subagent's usage into the turn of its parent's that ran it,
+  and the subagent's own session writes its own ledger too. So the live
+  tailer, Token use and `xenonet spend` count a subagent's tokens once,
+  through its parent, and the subagent's own stats show its own turns.
+
+The live tailer reads `usage.json` again after each of the session's lines
+when it was written since (its size and time), and counts what each turn
+adds: Grok folds a message you send during a turn into that turn, which
+writes it again with more. Token use's line for Grok Build, the session's
+tokens and the day's tokens come from it. Today's cost for Grok Build is
+what Grok recorded; when none of its calls today has a cost, it's null
+(`costs.byApp.grok`), and so is the day's (`costs.today`) when no call of
+any app has a price. The model has no price either way, so it's named
+under "not counted". `xenonet spend` shows it as unknown.
+
+A session's stats (`core/stats.js`) put each turn's calls among its lines'
+events, when the turn ended. Their cost isn't split by kind of token, so
+the kinds' costs are null; a turn whose calls have no cost has a null
+cost; and the context's fill comes from the usage updates.
 
 ## What XenoNet writes
 
@@ -179,7 +232,8 @@ Grok Build's sessions have a color in every theme (`colors.grok`, `--grok`),
 a toggle under Filters that shows once there are any, a place in the legend,
 and a line in Token use while they use tokens. The demo has three made-up
 Grok Build sessions, written as Grok keeps them, so they go through the real
-readers.
+readers: their replies come in a chunk a sentence after a thought, and
+their ledgers record tokens and no cost, as on a SuperGrok sign-in.
 
 No desktop app hosts Grok Build's sessions, so they have no "open in app",
 and XenoNet shows the session instead. If one does, it fits in beside `grok.js`
@@ -189,8 +243,6 @@ SpaceXAI's always-on agent, stays an actor.
 
 ## Still to do
 
-- Tokens and cost. Grok Build keeps a `usage.json` ledger per session, which
-  XenoNet doesn't read yet, so its sessions show no tokens or cost.
 - Renaming a session, by its `summary.json`'s title.
 - Questions waiting on you read from the updates, as they are from Claude
   Code's transcripts.

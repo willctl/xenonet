@@ -27,7 +27,7 @@ $ xenonet
 | `xenonet agents` | Lists the sessions at work in the last two hours, with where each is, what it says it's doing, and the files it's editing or has claimed. The actors at work come after them, in a list of their own. `--repo` keeps only those in the current repo. |
 | `xenonet who <path>` | Says which sessions and actors have a hand in a file. |
 | `xenonet session [words]` | Shows a session's models, tokens, estimated cost, turns and tools. Without words, it shows the latest session in the current folder. With words, it shows the newest session whose title has them. |
-| `xenonet spend` | Says about what today's work would cost at API prices, for Claude Code and for Codex, and by actor. See [What each actor's work costs](actors.md#what-each-actors-work-costs). |
+| `xenonet spend` | Says about what today's work would cost: Claude Code's and Codex's at API prices, Grok Build's at what Grok recorded, and by actor. See [What each actor's work costs](actors.md#what-each-actors-work-costs). |
 | `xenonet messages` | Shows what sessions and actors said to each other in the last day. |
 | `xenonet live` | Messages that reach sessions as they're sent: what's paused, granted and allowed, who's listening and the last deliveries. `pause` and `resume` stop every message and wake at once, or start them again. `allow` and `disallow` let XenoNet wake, type into or resume one session. `grant` and `revoke` set what an actor's token may see and message. `audit` lists the audit log's last entries. See [Live delivery and scopes](live-delivery.md). |
 | `xenonet search <words>` | Searches every Claude Code, Codex and Grok Build transcript. |

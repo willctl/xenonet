@@ -63,7 +63,9 @@ impl Stats {
         if files.is_empty() {
             return Ok(None);
         }
-        let key = Kept::stamp(&files.iter().map(|(f, _)| f.clone()).collect::<Vec<_>>());
+        // A Grok Build session's usage.json and summary.json count too.
+        let grok = if session_id.starts_with("grok:") { stats::grok_files(&files[0].0).to_vec() } else { Vec::new() };
+        let key = Kept::stamp(&files.iter().map(|(f, _)| f.clone()).chain(grok.iter().cloned()).collect::<Vec<_>>());
         {
             let k = lock(&self.kept);
             if k.0.hit(session_id, &key) {
@@ -77,7 +79,12 @@ impl Stats {
             .iter()
             .map(|(f, agent)| File { agent: Some(agent.clone().map_or(Value::Null, Value::String)), lines: read_lines(&self.vendor, f, app).unwrap_or_default() })
             .collect();
-        let out = stats::session_stats(session_id, read).map_err(|e| e.0)?;
+        // Its usage.json through its own schema, leniently, so a change in
+        // Grok's format shows as drift.
+        let json = |file: &String| std::fs::read_to_string(file).ok().and_then(|t| xenonet_base::json::parse(&t).ok());
+        let usage = grok.first().and_then(json).and_then(|raw| self.vendor.sample("spacexai/grok-build/usage", raw, None, None, 16));
+        let summary = grok.get(1).and_then(json);
+        let out = stats::session_stats(session_id, read, stats::GrokFiles { usage: usage.as_ref(), summary: summary.as_ref() }).map_err(|e| e.0)?;
         let value = wiki_out(&out).unwrap_or(Value::Null);
         let mut k = lock(&self.kept);
         let gone = k.0.keep(session_id, &key);

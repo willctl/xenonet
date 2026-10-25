@@ -851,10 +851,10 @@
      "app": "grok",
      "status": "idle",
      "tokens": {
-      "processed": 0,
-      "output": 0
+      "processed": 427169,
+      "output": 1125
      },
-     "tokensToday": 0,
+     "tokensToday": 427169,
      "tpm": 0,
      "context": {
       "used": 54740,
@@ -865,7 +865,7 @@
       "growthPerTurn": null,
       "turnsLeft": null
      },
-     "model": null,
+     "model": "grok-build",
      "turnStartedAt": null,
      "lastTool": {
       "name": "run_terminal_cmd",
@@ -948,10 +948,10 @@
      "app": "grok",
      "status": "idle",
      "tokens": {
-      "processed": 0,
-      "output": 0
+      "processed": 167526,
+      "output": 330
      },
-     "tokensToday": 0,
+     "tokensToday": 167526,
      "tpm": 0,
      "context": {
       "used": 55732,
@@ -962,7 +962,7 @@
       "growthPerTurn": null,
       "turnsLeft": null
      },
-     "model": null,
+     "model": "grok-build",
      "turnStartedAt": null,
      "lastTool": {
       "name": "mcp__xenolith__context_log",
@@ -1899,8 +1899,8 @@
     ]
    },
    "tpm": 0,
-   "total24h": 2857541,
-   "today": 2857541,
+   "total24h": 3452236,
+   "today": 3452236,
    "limits": {
     "codex": {
      "primary": {
@@ -1955,10 +1955,11 @@
     "byApp": {
      "claude": 1.003642,
      "codex": 0.332413875,
-     "grok": 0
+     "grok": null
     },
     "perHour": 0,
     "unpriced": [
+     "grok-build",
      "ollama/gpt-oss-20b"
     ],
     "checked": "2026-10-03"
@@ -5212,10 +5213,10 @@
     "app": "grok",
     "status": "idle",
     "tokens": {
-     "processed": 0,
-     "output": 0
+     "processed": 427169,
+     "output": 1125
     },
-    "tokensToday": 0,
+    "tokensToday": 427169,
     "tpm": 0,
     "context": {
      "used": 54740,
@@ -5226,7 +5227,7 @@
      "growthPerTurn": null,
      "turnsLeft": null
     },
-    "model": null,
+    "model": "grok-build",
     "turnStartedAt": null,
     "lastTool": {
      "name": "run_terminal_cmd",
@@ -5309,10 +5310,10 @@
     "app": "grok",
     "status": "idle",
     "tokens": {
-     "processed": 0,
-     "output": 0
+     "processed": 167526,
+     "output": 330
     },
-    "tokensToday": 0,
+    "tokensToday": 167526,
     "tpm": 0,
     "context": {
      "used": 55732,
@@ -5323,7 +5324,7 @@
      "growthPerTurn": null,
      "turnsLeft": null
     },
-    "model": null,
+    "model": "grok-build",
     "turnStartedAt": null,
     "lastTool": {
      "name": "mcp__xenolith__context_log",
@@ -6293,8 +6294,8 @@
    ]
   },
   "tpm": 108500,
-  "total24h": 2966041,
-  "today": 2966041,
+  "total24h": 3560736,
+  "today": 3560736,
   "limits": {
    "codex": {
     "primary": {
@@ -6345,10 +6346,11 @@
    "byApp": {
     "claude": 1.041682,
     "codex": 0.332413875,
-    "grok": 0
+    "grok": null
    },
    "perHour": 3.7111468425562038,
    "unpriced": [
+    "grok-build",
     "ollama/gpt-oss-20b"
    ],
    "checked": "2026-10-03"

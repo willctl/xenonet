@@ -125,14 +125,14 @@ export const LiveSnapshot = define(
       claudeSevenDay: Forecast.nullable().optional(),
     }),
     costs: obj({
-      today: z.number().describe("Dollars"),
-      byApp: byApp(z.number()),
+      today: z.number().nullable().describe("Dollars; null when no call today has a price, so what it cost isn't known"),
+      byApp: byApp(z.number().nullable().describe("Dollars; null when the app's calls today have no price")),
       perHour: z.number().describe("Dollars an hour at this minute's pace"),
-      unpriced: z.array(z.string()).describe("Models used today that XenoNet has no price for"),
+      unpriced: z.array(z.string()).describe("Models used today with no price: none in XenoNet's table, and none their app said"),
       checked: z.string().describe("When the prices were last checked against the providers' (YYYY-MM-DD)"),
     })
       .optional()
-      .describe("What today's calls would cost at API prices (core/pricing.js), in dollars"),
+      .describe("What today's calls would cost at API prices (core/pricing.js), or at what their app said they cost (Grok Build's), in dollars"),
     collab: z.array(obj({ a: z.string(), b: z.string(), kind: z.literal("file"), files: z.array(z.string()) })).describe("Sessions that touched the same files lately"),
     collisions: z
       .array(

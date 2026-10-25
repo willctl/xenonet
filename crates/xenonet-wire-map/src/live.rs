@@ -182,6 +182,29 @@ impl Live {
         if r.is_err() {
             lock(&self.status).errors += 1;
         }
+        if e.app == Tailed::Grok {
+            self.grok_usage(file, &e.session_id, prime, out);
+        }
+    }
+
+    // A Grok Build session's tokens and cost, from the usage.json beside its
+    // updates, read again when it was written since: its own schema reads it
+    // leniently, so a change in Grok's format shows as drift (live.js's
+    // #grokUsage).
+    fn grok_usage(&self, file: &str, session_id: &str, prime: bool, out: &mut Vec<Event>) {
+        let Some(dir) = std::path::Path::new(file).parent() else { return };
+        let usage_file = dir.join("usage.json");
+        let Ok(m) = std::fs::metadata(&usage_file) else { return };
+        let stamp = format!("{}:{}", m.len(), xenonet_base::fs::mtime_ms_of(&m).unwrap_or(f64::NAN));
+        if !lock(&self.telemetry).grok_usage_due(session_id, &stamp) {
+            return;
+        }
+        let json = |name: &str| std::fs::read_to_string(dir.join(name)).ok().and_then(|t| xenonet_base::json::parse(&t).ok());
+        let usage = json("usage.json").and_then(|raw| self.vendor.sample("spacexai/grok-build/usage", raw, None, None, 16));
+        let summary = json("summary.json");
+        let mut emitted = Vec::new();
+        lock(&self.telemetry).grok_usage(session_id, usage.as_ref(), summary.as_ref(), !prime, &mut emitted);
+        out.extend(emits(emitted));
     }
 
     // Reads what's new in a file, up to `until`, as history (`prime`) or
@@ -731,6 +754,41 @@ mod tests {
         std::fs::write(&old, line(json!({ "type": "user", "timestamp": ts(0.0), "message": { "role": "user", "content": "Back again" } }))).unwrap();
         live.sweep(false).await;
         assert!(live.snapshot()["sessions"].as_array().unwrap().iter().any(|s| s["id"] == "claude:0190d3e0-0000-7000-8000-000000000003"), "followed once it's written to");
+        live.stop();
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_grok_sessions_tokens_from_its_usage() {
+        let home = std::env::temp_dir().join(format!("xenonet-wire-live-grok-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let sessions = home.join(".grok").join("sessions");
+        let dir = sessions.join("%2Fa").join(ID);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ts = |ago: f64| (now_ms() - ago) / 1000.0;
+        let chunk = json!({ "timestamp": ts(60e3).floor(), "method": "session/update", "params": { "update": { "sessionUpdate": "user_message_chunk", "content": { "type": "text", "text": "Add a test" } } } });
+        std::fs::write(dir.join("updates.jsonl"), line(chunk)).unwrap();
+        std::fs::write(dir.join("summary.json"), json!({ "info": { "id": ID }, "current_model_id": "grok-build" }).to_string()).unwrap();
+        let turn = |n: u64, ended: f64, input: u64, ticks: Option<u64>| {
+            let mut row = json!({ "inputTokens": input, "outputTokens": 100, "cachedReadTokens": 1000, "modelCalls": 2 });
+            if let Some(t) = ticks {
+                row["costUsdTicks"] = json!(t);
+            }
+            json!({ "turnNumber": n, "endedAt": xenonet_base::time::iso(ended), "modelUsage": { "grok-build": row } })
+        };
+        std::fs::write(dir.join("usage.json"), json!({ "turns": [turn(1, now_ms() - 50e3, 3000, None)] }).to_string()).unwrap();
+        let live = Live::new("", "", &sessions.to_string_lossy(), None, false, &home.to_string_lossy(), vendor());
+        live.start().await;
+        let grok = |live: &Arc<Live>| live.snapshot()["sessions"].as_array().unwrap().iter().find(|s| s["app"] == "grok").cloned().unwrap();
+        assert_eq!((grok(&live)["tokens"]["processed"].as_f64(), grok(&live)["model"].as_str()), (Some(3100.0), Some("grok-build")));
+        assert_eq!((live.snapshot()["costs"]["byApp"]["grok"].clone(), live.snapshot()["costs"]["today"].clone()), (Value::Null, Value::Null), "no cost recorded isn't $0");
+        // A turn with a cost, read once the updates say something new.
+        std::fs::write(dir.join("usage.json"), json!({ "turns": [turn(1, now_ms() - 50e3, 3000, None), turn(2, now_ms(), 2000, Some(50_000_000))] }).to_string()).unwrap();
+        let end = json!({ "timestamp": ts(0.0).floor(), "method": "_x.ai/session/update", "params": { "update": { "sessionUpdate": "turn_completed" } } });
+        std::fs::OpenOptions::new().append(true).open(dir.join("updates.jsonl")).unwrap().write_all(line(end).as_bytes()).unwrap();
+        live.sweep(false).await;
+        assert_eq!(grok(&live)["tokens"]["processed"].as_f64(), Some(5200.0));
+        assert_eq!(live.snapshot()["costs"]["byApp"]["grok"].as_f64(), Some(0.005));
         live.stop();
         std::fs::remove_dir_all(&home).unwrap();
     }

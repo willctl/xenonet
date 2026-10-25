@@ -9,7 +9,10 @@
 // their own. Codex writes a token_count event after each call, with that
 // call's tokens in last_token_usage (cached and written tokens are part of
 // input_tokens), the model in the turn_context before it, and the service
-// tier (the priority tier costs more) in the thread's settings.
+// tier (the priority tier costs more) in the thread's settings. Grok Build's
+// lines say no tokens: its usage.json beside them has each turn's, by
+// model, with what Grok said they cost (grok-usage.js), and its usage updates say
+// how full its context got.
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -19,6 +22,7 @@ import { listFiles } from "./paths.js";
 import { readLines, hasUserMessages } from "./lines.js";
 import { mapperOf, fail, usageOf } from "./events.js";
 import { untailed } from "./apps.js";
+import { readGrokUsage, grokUsageTurns } from "./grok-usage.js";
 
 const UUID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
 const CONTEXT_POINTS = 400;
@@ -162,6 +166,11 @@ function lineEvents(evs, seen, set, events) {
         // isn't counted.
         if ((e.reason === "end_turn" || e.reason === "task_complete") && !agentId) events.push({ kind: "end", t });
         break;
+      // How full the context is, where a line says it (Grok Build's usage
+      // updates; its calls are a turn's).
+      case "context":
+        if (e.origin === "usage_update" && !agentId && Number.isFinite(e.used)) events.push({ kind: "context", t, used: e.used, window: e.window ?? null });
+        break;
       // A compacted context carries on the turn it interrupted.
       case "compact":
         if (!agentId && !e.meta && !e.sidechain) events.push({ kind: "compact", t });
@@ -206,6 +215,23 @@ function reaches(e) {
 
 const tokensOf = (u) => ({ input: u.input, cacheRead: u.cacheRead, cacheWrite5m: u.cacheWrite5m, cacheWrite1h: u.cacheWrite1h, output: u.output });
 
+// A session's events with its turns' calls among them (Grok Build's, from
+// its usage.json: grokUsageTurns), each when its turn ended, after the
+// lines written by then: { kind: "call", ..., cost, calls, turn }, `cost`
+// what Grok said it cost (null when it didn't), `calls` its model calls.
+function withTurns(events, turns) {
+  const calls = turns
+    .map((c) => ({ kind: "call", t: c.t, agentId: null, model: c.model, effort: null, tokens: c.tokens, cost: c.cost, calls: c.calls, turn: true }))
+    .sort((a, b) => a.t - b.t);
+  const out = [];
+  let i = 0;
+  for (const e of events) {
+    while (i < calls.length && calls[i].t < e.t) out.push(calls[i++]);
+    out.push(e);
+  }
+  return out.concat(calls.slice(i));
+}
+
 // What someone typed in Claude Code: a slash command as /name and its
 // arguments; nothing for Claude Code's own notes (command output and the
 // like).
@@ -233,9 +259,12 @@ export function summarize(events, { app }) {
   const labels = new Map(); // subagent → its task
   const spawns = []; // Agent calls, whose descriptions name the subagents they start
   const unpriced = new Set();
+  // Whether a call was priced at a cost its app said, which isn't split by
+  // kind of token (Grok Build's turns).
+  let unsplit = false;
   let turn = null;
   const startTurn = (t, prompt) => {
-    turn = { n: turns.length + 1, start: t, end: t, prompt: prompt == null ? null : clip(prompt, 140), tokens: 0, cost: 0, byModel: {}, tools: 0, errors: 0, ended: false };
+    turn = { n: turns.length + 1, start: t, end: t, prompt: prompt == null ? null : clip(prompt, 140), tokens: 0, cost: 0, byModel: {}, tools: 0, errors: 0, ended: false, calls: 0, priced: false };
     turns.push(turn);
   };
 
@@ -252,6 +281,11 @@ export function summarize(events, { app }) {
       spawns.push(e);
       continue;
     }
+    // How full the context got, where a line says (Grok Build's).
+    if (e.kind === "context") {
+      context.push({ t: e.t, used: e.used, window: e.window });
+      continue;
+    }
     if (!turn) startTurn(e.t, null);
     if (!turn.ended || e.kind === "end") turn.end = Math.max(turn.end, e.t);
     if (e.kind === "end") turn.ended = true;
@@ -263,22 +297,30 @@ export function summarize(events, { app }) {
       // A call after the turn ended (a subagent finishing, a hook) still counts towards it.
       turn.end = Math.max(turn.end, e.t);
       const k = e.tokens;
-      const parts = costParts(e.model, e.t, k, { fast: e.fast, priority: e.priority });
+      // A call its app said the cost of (Grok Build's turns) is that, or
+      // without a price when it didn't say; the rest at API prices.
+      const said = "cost" in e;
+      const parts = said ? (e.cost == null ? null : { total: e.cost }) : costParts(e.model, e.t, k, { fast: e.fast, priority: e.priority });
       const tokens = { input: k.input, cacheRead: k.cacheRead, cacheWrite: k.cacheWrite5m + k.cacheWrite1h, output: k.output };
       const sum = KINDS.reduce((a, x) => a + tokens[x], 0);
-      totals.calls++;
+      // A turn of Grok Build's is its model calls, all at once.
+      const n = e.calls ?? 1;
+      totals.calls += n;
       totals.tokens += sum;
       for (const x of KINDS) totals[x] += tokens[x];
+      turn.calls += n;
       if (parts) {
         totals.cost += parts.total;
-        for (const x of KINDS) kindCost[x] += parts[x];
+        turn.priced = true;
+        if (said) unsplit = true;
+        else for (const x of KINDS) kindCost[x] += parts[x];
       } else {
-        totals.unpricedCalls++;
+        totals.unpricedCalls += n;
         unpriced.add(plainModel(e.model) || e.model);
       }
       const name = plainModel(e.model) || e.model;
       const m = models.get(name) ?? models.set(name, { model: name, calls: 0, tokens: 0, cost: 0, priced: !!parts, from: e.t, to: e.t, efforts: new Set() }).get(name);
-      m.calls++;
+      m.calls += n;
       m.tokens += sum;
       m.cost += parts?.total ?? 0;
       m.to = e.t;
@@ -290,11 +332,13 @@ export function summarize(events, { app }) {
       tm.cost += parts?.total ?? 0;
       if (e.agentId) {
         const a = subagents.get(e.agentId) ?? subagents.set(e.agentId, { id: e.agentId, calls: 0, tokens: 0, cost: 0, model: name, from: e.t, to: e.t }).get(e.agentId);
-        a.calls++;
+        a.calls += n;
         a.tokens += sum;
         a.cost += parts?.total ?? 0;
         a.to = e.t;
-      } else {
+      } else if (!e.turn) {
+        // A turn's tokens are its calls', added up: not how full the
+        // context was.
         const used = k.input + k.cacheRead + k.cacheWrite5m + k.cacheWrite1h + (app === "claude" ? k.output : 0);
         const window = e.window ?? (used > 200000 || /\[1m\]/i.test(e.model) ? 1000000 : 200000);
         context.push({ t: e.t, used, window });
@@ -318,7 +362,13 @@ export function summarize(events, { app }) {
     }
   }
 
-  for (const t of turns) delete t.ended;
+  // A turn whose calls had no price cost what isn't known: null, never 0.
+  for (const t of turns) {
+    if (t.calls && !t.priced) t.cost = null;
+    delete t.ended;
+    delete t.calls;
+    delete t.priced;
+  }
   const first = events[0]?.t ?? null, last = events.at(-1)?.t ?? null;
   const priced = totals.calls > totals.unpricedCalls;
   return {
@@ -327,7 +377,8 @@ export function summarize(events, { app }) {
     to: last,
     activeMs: turns.reduce((a, t) => a + (t.end - t.start), 0),
     totals: { ...totals, cost: priced ? totals.cost : null },
-    kinds: Object.fromEntries(KINDS.map((x) => [x, { tokens: totals[x], cost: priced ? kindCost[x] : null }])),
+    // A cost an app said for a call isn't split by kind of token.
+    kinds: Object.fromEntries(KINDS.map((x) => [x, { tokens: totals[x], cost: priced && !unsplit ? kindCost[x] : null }])),
     models: [...models.values()].map(({ efforts, ...m }) => ({ ...m, cost: m.priced ? m.cost : null, efforts: [...efforts] })).sort((a, b) => (b.cost ?? -1) - (a.cost ?? -1) || b.tokens - a.tokens),
     turns,
     tools: [...tools.values()].map(({ timed, ...t }) => ({ ...t, ms: timed ? t.ms : null })).sort((a, b) => b.calls - a.calls),
@@ -364,13 +415,18 @@ function thin(points, n) {
 
 // ---------- the whole thing, cached ----------
 
+// The files beside a Grok Build session's updates that its stats read.
+const grokFiles = (updates) => ["usage.json", "summary.json"].map((name) => path.join(path.dirname(updates), name));
+
 export function createStats({ transcripts }) {
   const cache = new Map(); // session id → { key, stats }
 
   return async function stats(sessionId) {
     const files = await transcripts.files(sessionId);
     if (!files.length) return null;
-    const stamps = await Promise.all(files.map((f) => fsp.stat(f.file).then((s) => `${f.file}:${s.size}:${s.mtimeMs}`, () => f.file)));
+    // A Grok Build session's usage.json and summary.json count too.
+    const watched = [...files.map((f) => f.file), ...(sessionId.startsWith("grok:") ? grokFiles(files[0].file) : [])];
+    const stamps = await Promise.all(watched.map((f) => fsp.stat(f).then((s) => `${f}:${s.size}:${s.mtimeMs}`, () => f)));
     const key = stamps.join("|");
     const hit = cache.get(sessionId);
     if (hit?.key === key) return hit.stats;
@@ -379,7 +435,11 @@ export function createStats({ transcripts }) {
     const mapper = mapperOf(app, null);
     if (!mapper) throw new Error(untailed(app));
     const read = await Promise.all(files.map(async (f) => ({ ...f, lines: await readLines(f.file, app, mapper.lines).catch(() => []) })));
-    const events = sessionEvents(read, mapper);
+    let events = sessionEvents(read, mapper);
+    if (app === "grok") {
+      const { usage, summary } = readGrokUsage(path.dirname(files[0].file));
+      events = withTurns(events, grokUsageTurns(usage, summary));
+    }
     const stats = { id: sessionId, ...summarize(events, { app }) };
     cache.set(sessionId, { key, stats });
     if (cache.size > 40) cache.delete(cache.keys().next().value);

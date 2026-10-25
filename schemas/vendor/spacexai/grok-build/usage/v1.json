@@ -1,0 +1,398 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/spacexai/grok-build/usage/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A Grok Build session's usage",
+  "description": "Grok Build's ~/.grok/sessions/<encoded cwd>/<session id>/usage.json, the session's token and cost ledger, written at the end of each turn: the session's totals and each turn's, each by model. A fork starts with a copy of its parent's. The file carries no version, so the newest schema reads it.",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "updatedAt": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "session": {
+      "description": "The whole session's, history it was resumed or forked from included",
+      "type": "object",
+      "properties": {
+        "inputTokens": {
+          "description": "The prompts' tokens, cache reads and writes included",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "outputTokens": {
+          "description": "The replies' tokens, reasoning included",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cachedReadTokens": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cacheCreationTokens": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "reasoningTokens": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "totalTokens": {
+          "description": "inputTokens and outputTokens",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "modelCalls": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "costUsdTicks": {
+          "description": "What it cost, in ticks of 1e10 to the dollar; not there when no call said (a SuperGrok or X Premium sign-in)",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "costIsPartial": {
+          "description": "Some calls said what they cost, and some didn't",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "usageIsIncomplete": {
+          "description": "Some of it may not be counted, such as a subagent's",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "turnCount": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "primaryModelId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "modelUsage": {
+          "description": "The same, by model",
+          "anyOf": [
+            {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "inputTokens": {
+                    "description": "The prompts' tokens, cache reads and writes included",
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "outputTokens": {
+                    "description": "The replies' tokens, reasoning included",
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "cachedReadTokens": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "cacheCreationTokens": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "reasoningTokens": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "totalTokens": {
+                    "description": "inputTokens and outputTokens",
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "modelCalls": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "costUsdTicks": {
+                    "description": "What it cost, in ticks of 1e10 to the dollar; not there when no call said (a SuperGrok or X Premium sign-in)",
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "costIsPartial": {
+                    "description": "Some calls said what they cost, and some didn't",
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "usageIsIncomplete": {
+                    "description": "Some of it may not be counted, such as a subagent's",
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": {}
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": {}
+    },
+    "turns": {
+      "description": "Each turn's, when it ended",
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "turnNumber": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "endedAt": {
+                "description": "When the turn ended, RFC 3339",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "turnId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "inputTokens": {
+                "description": "The prompts' tokens, cache reads and writes included",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "outputTokens": {
+                "description": "The replies' tokens, reasoning included",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "cachedReadTokens": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "cacheCreationTokens": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "reasoningTokens": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "totalTokens": {
+                "description": "inputTokens and outputTokens",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "modelCalls": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "costUsdTicks": {
+                "description": "What it cost, in ticks of 1e10 to the dollar; not there when no call said (a SuperGrok or X Premium sign-in)",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "costIsPartial": {
+                "description": "Some calls said what they cost, and some didn't",
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "usageIsIncomplete": {
+                "description": "Some of it may not be counted, such as a subagent's",
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "turnCount": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "primaryModelId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "modelUsage": {
+                "description": "The same, by model",
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "inputTokens": {
+                          "description": "The prompts' tokens, cache reads and writes included",
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "outputTokens": {
+                          "description": "The replies' tokens, reasoning included",
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "cachedReadTokens": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "cacheCreationTokens": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "reasoningTokens": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "totalTokens": {
+                          "description": "inputTokens and outputTokens",
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "modelCalls": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "costUsdTicks": {
+                          "description": "What it cost, in ticks of 1e10 to the dollar; not there when no call said (a SuperGrok or X Premium sign-in)",
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "costIsPartial": {
+                          "description": "Some calls said what they cost, and some didn't",
+                          "type": [
+                            "boolean",
+                            "null"
+                          ]
+                        },
+                        "usageIsIncomplete": {
+                          "description": "Some of it may not be counted, such as a subagent's",
+                          "type": [
+                            "boolean",
+                            "null"
+                          ]
+                        }
+                      },
+                      "additionalProperties": {}
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": {}
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "additionalProperties": {},
+  "x-xenonet": {
+    "vendorVersions": "*",
+    "lenient": true
+  }
+}

@@ -12,12 +12,14 @@
 // is a Map of views onto each session's state in Rust, whose fields and
 // Maps read and write through, and `limits` and `limitSamples` set Rust's.
 import fs from "node:fs";
+import path from "node:path";
 import { EventEmitter } from "node:events";
 import { native } from "../index.js";
 import { Tailer } from "./blocks/tailer.js";
 import { claudeUsageGatherer, desktopUsageGatherer } from "./claude-usage.js";
 import { ClaudeLine, CodexLine, linesOf } from "./lines.js";
 import { tailedApp } from "../../../../core/apps.js";
+import { grokUsageStamp, readGrokUsage } from "../../../../core/grok-usage.js";
 
 const PRIME_WINDOW_MS = 24 * 3600e3;
 const SWEEP_MS = 2000;
@@ -475,9 +477,11 @@ export class LiveTelemetry extends EventEmitter {
   // or what Rust makes of it is counted as an error, so the lines after it
   // are read.
   #line(line, f, prime) {
+    let read = false;
     try {
       const rec = linesOf(f.app).line(line, f);
       if (!rec) return;
+      read = true;
       this.status.lines++;
       const id = String(f.sessionId);
       // Any app that isn't tailed is read as Claude Code, as linesOf reads
@@ -486,7 +490,31 @@ export class LiveTelemetry extends EventEmitter {
       if (this.#run(res, id) != null) this.status.errors++;
     } catch {
       this.status.errors++;
+    } finally {
+      if (read && tailedApp(f.app, "claude") === "grok") this.#grokUsage(f, !prime);
     }
+  }
+
+  // Grok Build's tokens and cost, from the usage.json beside a session's
+  // updates, read here and again when it was written since; Rust counts
+  // them.
+  #grokUsage(f, live) {
+    if (!f.file) return;
+    const id = String(f.sessionId);
+    const dir = path.dirname(f.file);
+    const stamp = grokUsageStamp(dir);
+    if (stamp == null || !this.#core.grokUsageDue(id, stamp)) return;
+    try {
+      const { usage, summary } = readGrokUsage(dir);
+      this.#run(this.#core.grokUsage(id, usage, summary, !!live), id);
+    } catch {
+      this.status.errors++;
+    }
+  }
+
+  // A Grok Build session's usage.json and summary.json, as read.
+  applyGrokUsage(s, usage, summary, live) {
+    this.#run(this.#core.grokUsage(String(s.id), usage ?? null, summary ?? null, !!live), String(s.id));
   }
 
   trimHistory() {

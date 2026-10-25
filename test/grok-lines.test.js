@@ -11,7 +11,7 @@ import { GrokLine, grokLines, linesOf } from "../core/lines.js";
 import { Transcripts, createStats } from "../core/stats.js";
 import { TranscriptSearch, docsFromLine } from "../core/search.js";
 import { LiveTelemetry } from "../core/live.js";
-import { grokHome, IDS, MAIN_UPDATES, T, up, text, jsonl } from "./fixtures/grok.js";
+import { grokHome, IDS, MAIN_UPDATES, T, up, text, jsonl, usage, turn, ledger } from "./fixtures/grok.js";
 
 const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-grok-lines-")));
 after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -96,7 +96,23 @@ test("a Grok Build session's stats and search, through the readers Claude Code's
   assert.equal(stats.app, "grok");
   assert.deepEqual(stats.turns.map((t) => t.prompt), ["Add partial refunds to the orders API."], "the whole prompt");
   assert.deepEqual(stats.tools.map((t) => [t.name, t.calls, t.errors]).sort(), [["mcp__linear__save_issue", 1, 1], ["run_terminal_cmd", 1, 0], ["search_replace", 1, 0]]);
-  assert.equal(stats.totals.calls, 0, "Grok's lines don't say what a call took");
+  // Its tokens are its usage.json's: the turn's model calls, when it
+  // ended, with no cost recorded, so the cost isn't known, never 0.
+  assert.deepEqual([stats.totals.calls, stats.totals.input, stats.totals.cacheRead, stats.totals.output, stats.totals.tokens, stats.totals.cost], [4, 12000, 40000, 1800, 53800, null]);
+  assert.deepEqual(stats.turns.map((t) => [t.tokens, t.cost, t.end]), [[53800, null, T + 14500]]);
+  assert.deepEqual(stats.models.map((m) => [m.model, m.calls, m.cost, m.priced]), [["grok-build", 4, null, false]]);
+  assert.deepEqual(stats.pricing.unpriced, ["grok-build"]);
+  assert.deepEqual(stats.context, [{ t: Math.floor((T + 12600) / 1000) * 1000, used: 41000, window: 500000 }], "how full the context got, from its usage updates");
+  // A fork's own turns, at the cost Grok recorded, not split by kind; the
+  // turn it copied from its parent's ledger isn't its own.
+  const fork = await createStats({ transcripts })(`grok:${IDS.fork}`);
+  assert.deepEqual([fork.totals.calls, fork.totals.input, fork.totals.cost, fork.totals.unpricedCalls], [4, 9000, 0.0122, 0]);
+  assert.deepEqual(Object.values(fork.kinds).map((k) => k.cost), [null, null, null, null]);
+  assert.deepEqual(fork.models.map((m) => [m.model, m.cost]), [["grok-build", 0.012], ["grok-build-mini", 0.0002]]);
+  assert.deepEqual(fork.turns.map((t) => t.cost), [0.0122]);
+  // A subagent's own.
+  const sub = await createStats({ transcripts })(`grok:${IDS.sub}`);
+  assert.deepEqual([sub.totals.calls, sub.totals.tokens], [2, 9300]);
 
   const search = new TranscriptSearch({ dbFile: path.join(dir, "search.sqlite"), grokRoot: root });
   await search.index();
@@ -180,6 +196,52 @@ test("the live tailer keeps a streamed prompt and reply whole, as their chunks c
   assert.deepEqual(notes().messages.map((m) => m.text), ["Done: the button is red."]);
   assert.equal(s.lastEventAt, Math.floor((now - 4000) / 1000) * 1000, "each chunk is a line of the turn");
   assert.deepEqual(events.filter((e) => e.kind === "message").map((e) => e.detail), ["Done:"], "the feed names the message once, as it begins");
+});
+
+test("the live tailer counts a Grok Build session's tokens from its usage.json, a turn at a time, and a cost it didn't record as unknown", async () => {
+  const live = new LiveTelemetry({ claudeRoot: null, codexRoot: null, grokRoot: root, claudeDesktopDir: null });
+  const now = Date.now();
+  const [main, fork, sub] = ["019a3b5c-0000-7000-8000-0000000000d1", "019a3b5c-0000-7000-8000-0000000000d2", "019a3b5c-0000-7000-8000-0000000000d3"];
+  const folder = (id) => path.join(root, "usage-live", id);
+  const write = (id, name, value) => fs.writeFileSync(path.join(folder(id), name), name.endsWith(".jsonl") ? jsonl(value) : JSON.stringify(value));
+  for (const id of [main, fork, sub]) fs.mkdirSync(folder(id), { recursive: true });
+  const summary = (more = {}) => ({ info: {}, created_at: new Date(now - 60e3).toISOString(), current_model_id: "grok-build", ...more });
+  const prompt = (id) => [up(now - 50e3, text("user_message_chunk", "Add refunds"), { session: id })];
+  write(main, "summary.json", summary());
+  write(main, "updates.jsonl", prompt(main));
+  write(main, "usage.json", ledger(main, [turn(1, now - 40e3, { "grok-build": usage({ input: 5000, output: 200, cached: 3000, calls: 2 }) })]));
+  // A fork, whose first turn is its parent's, and a subagent, whose turns
+  // its parent's count.
+  write(fork, "summary.json", summary({ parent_session_id: main, session_kind: "fork", forked_at: new Date(now - 45e3).toISOString() }));
+  write(fork, "updates.jsonl", prompt(fork));
+  write(fork, "usage.json", ledger(fork, [turn(1, now - 50e3, { "grok-build": usage({ input: 1000, output: 100 }) }), turn(2, now - 30e3, { "grok-build": usage({ input: 700, output: 70 }) })]));
+  write(sub, "summary.json", summary({ parent_session_id: main, session_kind: "subagent" }));
+  write(sub, "updates.jsonl", prompt(sub));
+  write(sub, "usage.json", ledger(sub, [turn(1, now - 35e3, { "grok-build": usage({ input: 9000, output: 900 }) })]));
+  const tokens = [];
+  live.on("tokens", (e) => tokens.push(e));
+  await live.start();
+  live.stop();
+  const of = (id) => live.snapshot().sessions.find((x) => x.id === `grok:${id}`);
+  assert.deepEqual([of(main).tokens, of(main).model], [{ processed: 5200, output: 200 }, "grok-build"]);
+  assert.deepEqual(of(fork).tokens, { processed: 770, output: 70 }, "its own turn alone");
+  assert.deepEqual(of(sub).tokens, { processed: 0, output: 0 }, "counted in its parent's turns");
+  assert.deepEqual(tokens, [], "history isn't told as it's read");
+  // No cost recorded: the day's cost isn't known, never 0.
+  let costs = live.costs(now, []);
+  assert.deepEqual([costs.today, costs.byApp.grok, costs.unpriced], [null, null, ["grok-build"]]);
+  // The turn written again (a message folded into it) adds what's new, and
+  // a turn on an API key brings its cost.
+  write(main, "usage.json", ledger(main, [turn(1, now - 20e3, { "grok-build": usage({ input: 6000, output: 300, cached: 3000, calls: 3 }) }), turn(2, now - 10e3, { "grok-build": usage({ input: 2000, output: 100, ticks: 30000000 }) })]));
+  fs.appendFileSync(path.join(folder(main), "updates.jsonl"), jsonl([up(now - 10e3, { sessionUpdate: "turn_completed" }, { session: main, method: "_x.ai/session/update" })]));
+  await live.track(path.join(folder(main), "updates.jsonl"), { prime: false });
+  assert.deepEqual(of(main).tokens, { processed: 8400, output: 400 });
+  assert.deepEqual(tokens.map((e) => [e.app, e.n]), [["grok", 1100], ["grok", 2100]]);
+  costs = live.costs(now, []);
+  assert.deepEqual([costs.byApp.grok, costs.today, costs.unpriced], [0.003, 0.003, ["grok-build"]]);
+  // Read again only once it's written again.
+  await live.track(path.join(folder(main), "updates.jsonl"), { prime: false });
+  assert.equal(tokens.length, 2);
 });
 
 test("a Grok Build session's edits count, in its own tools' names, so two sessions on one file collide", async () => {

@@ -202,6 +202,21 @@ impl JsLiveCore {
         emits(&env, out, r.err())
     }
 
+    /// Whether a Grok Build session's usage.json was written since it was
+    /// last read, noting it's read now.
+    #[napi(js_name = "grokUsageDue")]
+    pub fn grok_usage_due(&mut self, id: String, stamp: String) -> bool {
+        self.t.grok_usage_due(&id, &stamp)
+    }
+
+    /// A Grok Build session's usage.json and summary.json, as read.
+    #[napi(js_name = "grokUsage")]
+    pub fn grok_usage(&mut self, env: Env, id: String, usage: MaybeJson, summary: MaybeJson, live: bool) -> Result<Jv> {
+        let mut out = Vec::new();
+        self.t.grok_usage(&id, usage.0.as_ref(), summary.0.as_ref(), live, &mut out);
+        emits(&env, out, None)
+    }
+
     /// A line given straight to applyClaude or applyCodex.
     #[napi]
     pub fn apply(&mut self, env: Env, codex: bool, session_id: String, agent_id: MaybeJson, raw: MaybeJson, live: bool, now: f64) -> Result<Jv> {
